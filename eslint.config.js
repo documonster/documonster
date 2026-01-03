@@ -24,6 +24,8 @@ export const commonLintConfig = defineConfig(
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
+      "docs/.vitepress/cache/**",
+      "docs/.vitepress/dist/**",
       "**/*.graphql",
       "**/*.mustache",
       "**/*.md",
@@ -46,8 +48,12 @@ export const getLintModuleConfiguration = ({ files, tsConfigPath, extraRules }) 
       sourceType: "module",
       parserOptions: {
         ecmaVersion: "latest",
-        projectService: true,
-        tsconfigRootDir: tsConfigPath,
+        projectService: {
+          allowDefaultProject: ["docs/.vitepress/config.ts", "docs/.vitepress/theme/index.ts"]
+        },
+        // Use a stable repo root for the TS project service.
+        // Some TS files (e.g. VitePress config) are intentionally not part of the main tsconfig.
+        tsconfigRootDir: tsConfigPath ?? process.cwd(),
         warnOnUnsupportedTypeScriptVersion: false
       }
     },

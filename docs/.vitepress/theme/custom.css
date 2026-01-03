@@ -1,0 +1,14 @@
+/*
+ * Keep custom styling minimal.
+ * VitePress uses CSS variables; override them to stay theme-friendly.
+ */
+
+:root {
+  /* Slightly tighten the default reading width */
+  --vp-layout-max-width: 1400px;
+}
+
+/* Make code blocks a bit more readable without changing colors */
+.vp-doc pre {
+  border-radius: 10px;
+}

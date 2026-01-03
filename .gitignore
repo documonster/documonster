@@ -22,3 +22,7 @@ __screenshots__
 
 # Temporary local smoke-test projects
 tmp/
+
+# VitePress generated files
+docs/.vitepress/cache/
+docs/.vitepress/dist/

@@ -56,6 +56,10 @@
   "sideEffects": false,
   "scripts": {
     "example": "node scripts/run-examples.ts",
+    "docs:sync": "node scripts/docs-sync.mjs",
+    "docs:dev": "pnpm run docs:sync && DOCS_BASE=/ vitepress dev docs --port 5177",
+    "docs:build": "pnpm run docs:sync && DOCS_BASE=/ vitepress build docs",
+    "docs:preview": "DOCS_BASE=/ vitepress preview docs --port 5178",
     "check": "concurrently --raw \"npm run type\" \"npm run lint\"",
     "test": "vitest run && npm run test:browser",
     "test:browser": "rimraf dist && npm run build:browser:bundle && vitest run --config vitest.browser.config.ts",
@@ -134,6 +138,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.51.0",
     "vite-tsconfig-paths": "^6.0.3",
+    "vitepress": "^1.6.4",
     "vitest": "^4.0.16"
   }
 }
