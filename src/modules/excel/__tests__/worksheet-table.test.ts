@@ -204,5 +204,21 @@ describe("Worksheet", () => {
 
       checkTable("A1", ws, newValues);
     });
+
+    it("qualifies implicit structured references", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("blort");
+
+      ws.addTable({
+        name: "TestTable",
+        ref: "A1",
+        headerRow: true,
+        columns: [{ name: "A" }, { name: "B" }],
+        rows: [["a1", { formula: "[@A]" }]]
+      });
+
+      const cellValue = ws.getRow(2).getCell(2).value;
+      expect(cellValue).toEqual({ formula: "TestTable[[#This Row],[A]]" });
+    });
   });
 });

@@ -240,7 +240,17 @@ class Table {
       const r = worksheet.getRow(row + count++);
       data.forEach((value, j) => {
         const cell = r.getCell(col + j);
-        cell.value = value;
+        const formula = (value as any)?.formula;
+        cell.value =
+          typeof formula === "string"
+            ? {
+                ...(value as CellFormulaValue),
+                formula: formula.replace(
+                  /(^|[^A-Za-z0-9_])\[@\[?([^\[\]]+?)\]?\]/g,
+                  `$1${table.name}[[#This Row],[$2]]`
+                )
+              }
+            : value;
 
         assignStyle(cell, table.columns[j].style);
       });
