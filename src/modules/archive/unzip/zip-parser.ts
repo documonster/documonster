@@ -352,6 +352,31 @@ export class ZipParser {
   }
 
   /**
+   * Get the number of child entries in a directory.
+   *
+   * Returns the count of entries whose paths start with the directory prefix,
+   * excluding the directory entry itself. For non-directory entries, returns 0.
+   *
+   * @param path - Directory path (with or without trailing slash)
+   * @returns Number of child entries
+   */
+  getChildCount(path: string): number {
+    const entry = this.entryMap.get(path);
+    if (!entry?.isDirectory) {
+      return 0;
+    }
+    // Ensure prefix ends with "/" for correct matching
+    const prefix = entry.path.endsWith("/") ? entry.path : entry.path + "/";
+    let count = 0;
+    for (const e of this.entries) {
+      if (e.path.startsWith(prefix) && e !== entry) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
    * List all file paths
    */
   listFiles(): string[] {

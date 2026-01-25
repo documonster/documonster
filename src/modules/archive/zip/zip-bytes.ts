@@ -178,26 +178,25 @@ function buildProcessedEntry(
   };
 }
 
-function appendProcessedEntry(
-  processedEntries: ProcessedEntry[],
-  entry: ZipEntry,
-  compressedData: Uint8Array,
-  deflate: boolean,
-  currentOffset: number,
-  settings: ZipBuildSettings
-): { processedEntry: ProcessedEntry; nextOffset: number } {
-  const processedEntry = buildProcessedEntry(
+/**
+ * Sort entries alphabetically by name (case-insensitive).
+ * Uses Schwartzian transform to avoid repeated decoding during sort.
+ */
+function sortEntriesByName(entries: ProcessedEntry[]): void {
+  if (entries.length <= 1) {
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  const decorated = entries.map(entry => ({
     entry,
-    currentOffset,
-    settings,
-    compressedData,
-    deflate
-  );
-  processedEntries.push(processedEntry);
-  return {
-    processedEntry,
-    nextOffset: currentOffset + computeLocalRecordSize(processedEntry)
-  };
+    sortKey: decoder.decode(entry.name).toLowerCase()
+  }));
+  decorated.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  for (let i = 0; i < decorated.length; i++) {
+    entries[i] = decorated[i].entry;
+  }
 }
 
 /**
@@ -220,6 +219,12 @@ export interface ZipOptions extends CompressOptions {
    * - default `timestamps` becomes "dos" (no UTC extra field)
    */
   reproducible?: boolean;
+
+  /**
+   * If true, entries are written in their original input order.
+   * If false (default), entries are sorted alphabetically by name.
+   */
+  noSort?: boolean;
 
   /**
    * Max number of entries to compress concurrently in `createZip()`.
@@ -316,6 +321,7 @@ export async function createZip(
   options: ZipOptions = {}
 ): Promise<Uint8Array> {
   const reproducible = options.reproducible ?? false;
+  const noSort = options.noSort ?? false;
   const level = options.level ?? DEFAULT_ZIP_LEVEL;
   const smartStore = options.smartStore ?? true;
   const concurrency = options.concurrency ?? 4;
@@ -364,7 +370,11 @@ export async function createZip(
     await Promise.all(workers);
   }
 
-  // Compute offsets in original order.
+  if (!noSort) {
+    sortEntriesByName(processedEntries);
+  }
+
+  // Compute offsets after sorting.
   let currentOffset = 0;
   for (let i = 0; i < processedEntries.length; i++) {
     const processedEntry = processedEntries[i]!;
@@ -381,6 +391,7 @@ export async function createZip(
  */
 export function createZipSync(entries: ZipEntry[], options: ZipOptions = {}): Uint8Array {
   const reproducible = options.reproducible ?? false;
+  const noSort = options.noSort ?? false;
   const level = options.level ?? DEFAULT_ZIP_LEVEL;
   const smartStore = options.smartStore ?? true;
   const timestamps: ZipTimestampMode =
@@ -397,7 +408,6 @@ export function createZipSync(entries: ZipEntry[], options: ZipOptions = {}): Ui
   const thresholdBytes = options.thresholdBytes;
 
   const processedEntries: ProcessedEntry[] = [];
-  let currentOffset = 0;
 
   for (const entry of entries) {
     const entryLevel = entry.level ?? level;
@@ -412,15 +422,18 @@ export function createZipSync(entries: ZipEntry[], options: ZipOptions = {}): Ui
       smartStore
     );
 
-    const result = appendProcessedEntry(
-      processedEntries,
-      entry,
-      compressedData,
-      deflate,
-      currentOffset,
-      settings
-    );
-    currentOffset = result.nextOffset;
+    processedEntries.push(buildProcessedEntry(entry, 0, settings, compressedData, deflate));
+  }
+
+  if (!noSort) {
+    sortEntriesByName(processedEntries);
+  }
+
+  // Compute offsets after sorting.
+  let currentOffset = 0;
+  for (const processedEntry of processedEntries) {
+    processedEntry.offset = currentOffset;
+    currentOffset += computeLocalRecordSize(processedEntry);
   }
   return finalizeZip(processedEntries, zipComment);
 }

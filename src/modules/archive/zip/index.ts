@@ -36,6 +36,11 @@ export interface ZipOptions {
    * If false, always follow `level` (DEFLATE when level > 0).
    */
   smartStore?: boolean;
+  /**
+   * If true, entries are written in their original input order.
+   * If false (default), entries are sorted alphabetically by name.
+   */
+  noSort?: boolean;
 }
 
 export interface ZipEntryOptions {
@@ -55,6 +60,7 @@ export class ZipArchive {
     comment?: string;
     modTime: Date;
     smartStore: boolean;
+    noSort: boolean;
   };
   private readonly _entries: ZipInput[] = [];
   private _sealed = false;
@@ -66,7 +72,8 @@ export class ZipArchive {
       timestamps: options.timestamps ?? (reproducible ? "dos" : DEFAULT_ZIP_TIMESTAMPS),
       comment: options.comment,
       modTime: options.modTime ?? (reproducible ? REPRODUCIBLE_ZIP_MOD_TIME : new Date()),
-      smartStore: options.smartStore ?? true
+      smartStore: options.smartStore ?? true,
+      noSort: options.noSort ?? false
     };
   }
 
@@ -178,7 +185,8 @@ export class ZipArchive {
           timestamps: this._options.timestamps,
           modTime: this._options.modTime,
           comment: this._options.comment,
-          smartStore: this._options.smartStore
+          smartStore: this._options.smartStore,
+          noSort: this._options.noSort
         });
       }
 
@@ -197,7 +205,8 @@ export class ZipArchive {
         timestamps: this._options.timestamps,
         modTime: this._options.modTime,
         comment: this._options.comment,
-        smartStore: this._options.smartStore
+        smartStore: this._options.smartStore,
+        noSort: this._options.noSort
       });
     }
 
@@ -228,7 +237,8 @@ export class ZipArchive {
       timestamps: this._options.timestamps,
       modTime: this._options.modTime,
       comment: this._options.comment,
-      smartStore: this._options.smartStore
+      smartStore: this._options.smartStore,
+      noSort: this._options.noSort
     });
   }
 

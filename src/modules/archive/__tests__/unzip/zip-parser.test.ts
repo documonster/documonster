@@ -186,5 +186,31 @@ describe("ZipParser", () => {
       expect(entry!.path).toBe("file.txt");
       expect(entry!.isDirectory).toBe(false);
     });
+
+    it("should count children in a directory", async () => {
+      const testFiles: Record<string, Uint8Array> = {
+        "root.txt": new TextEncoder().encode("root"),
+        "folder/": new Uint8Array(0),
+        "folder/a.txt": new TextEncoder().encode("a"),
+        "folder/b.txt": new TextEncoder().encode("b"),
+        "folder/sub/": new Uint8Array(0),
+        "folder/sub/c.txt": new TextEncoder().encode("c")
+      };
+
+      const zipData = await createZip(toEntries(testFiles));
+      const parser = new ZipParser(zipData);
+
+      // folder/ has 4 children: a.txt, b.txt, sub/, sub/c.txt
+      expect(parser.getChildCount("folder/")).toBe(4);
+
+      // folder/sub/ has 1 child: c.txt
+      expect(parser.getChildCount("folder/sub/")).toBe(1);
+
+      // Non-directory returns 0
+      expect(parser.getChildCount("root.txt")).toBe(0);
+
+      // Non-existent returns 0
+      expect(parser.getChildCount("nonexistent/")).toBe(0);
+    });
   });
 });
