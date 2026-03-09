@@ -211,11 +211,12 @@ class WorkbookXform extends BaseXform {
       model.definedNames.forEach((definedName: any) => {
         if (definedName.name === "_xlnm.Print_Area") {
           worksheet = worksheets[definedName.localSheetId];
-          if (worksheet) {
+          const [firstRange] = definedName.ranges ?? [];
+          if (worksheet && firstRange) {
             if (!worksheet.pageSetup) {
               worksheet.pageSetup = {};
             }
-            const range: any = colCache.decodeEx(definedName.ranges[0]);
+            const range: any = colCache.decodeEx(firstRange);
             worksheet.pageSetup.printArea = worksheet.pageSetup.printArea
               ? `${worksheet.pageSetup.printArea}&&${range.dimensions}`
               : range.dimensions;

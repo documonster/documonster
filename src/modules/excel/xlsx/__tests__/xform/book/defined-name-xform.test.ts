@@ -32,6 +32,24 @@ const expectations = [
     tests: ["render", "renderIn", "parse"]
   },
   {
+    title: "Empty Print Area",
+    create() {
+      return new DefinedNamesXform();
+    },
+    preparedModel: {
+      name: "_xlnm.Print_Area",
+      localSheetId: 0,
+      ranges: []
+    },
+    xml: '<definedName name="_xlnm.Print_Area" localSheetId="0"></definedName>',
+    parsedModel: {
+      name: "_xlnm.Print_Area",
+      localSheetId: 0,
+      ranges: []
+    },
+    tests: ["parse"]
+  },
+  {
     title: "String with something that looks like a range",
     create() {
       return new DefinedNamesXform();

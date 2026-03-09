@@ -465,6 +465,32 @@ describe("Workbook", () => {
         expect(wb.worksheets.length).toBeGreaterThan(0);
       });
 
+      it("ignores empty _xlnm.Print_Area ranges", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("Sheet1");
+        ws.getCell("A1").value = "ok";
+
+        const workbookModel: any = wb.model;
+        workbookModel.definedNames = [
+          {
+            name: "_xlnm.Print_Area",
+            localSheetId: 0,
+            ranges: []
+          }
+        ];
+
+        wb.model = workbookModel;
+
+        const buffer = await wb.xlsx.writeBuffer();
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+
+        const ws2 = wb2.getWorksheet("Sheet1");
+        expect(ws2).toBeDefined();
+        expect(ws2.pageSetup?.printArea).toBeUndefined();
+      });
+
       it("lastColumn with an empty column", async () => {
         const wb = new Workbook();
         const ws = wb.addWorksheet("Sheet1");
