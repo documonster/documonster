@@ -138,7 +138,7 @@
     "benchmark:compress": "rimraf dist && npm run build && node --expose-gc scripts/benchmark-compress.ts",
     "build:esm": "tsc --project tsconfig.esm.json && node scripts/fix-esm-imports.ts",
     "build:cjs": "tsc --project tsconfig.cjs.json && node scripts/fix-cjs-imports.ts",
-    "build:browser": "tsc --project tsconfig.browser.json && node scripts/fix-esm-imports.ts --dist dist/browser && node scripts/fix-browser-imports.ts --dir dist/browser",
+    "build:browser": "tsc --project tsconfig.browser.json && node scripts/fix-esm-imports.ts --dist dist/browser --types dist/browser && node scripts/fix-browser-imports.ts --dir dist/browser",
     "build:browser:bundle": "rolldown -c rolldown.config.ts",
     "prepublishOnly": "npm run build",
     "preversion": "npm run lint && npm run type && npm run build && npm run test",
