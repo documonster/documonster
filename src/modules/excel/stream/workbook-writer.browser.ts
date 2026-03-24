@@ -177,7 +177,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     this.views = [];
 
     this.zipOptions = options.zip;
-    const level = options.zip?.zlib?.level ?? options.zip?.compressionOptions?.level ?? 1;
+    const level = options.zip?.zlib?.level ?? options.zip?.compressionOptions?.level ?? 6;
     this.compressionLevel = Math.max(0, Math.min(9, level)) as
       | 0
       | 1
