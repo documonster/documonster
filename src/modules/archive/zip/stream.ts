@@ -628,7 +628,7 @@ export class ZipDeflateFile {
       // Stateful synchronous compression — maintains LZ77 window and bit position
       // across chunks so the output is a single valid DEFLATE stream.
       if (!this._syncDeflater) {
-        this._syncDeflater = new SyncDeflater();
+        this._syncDeflater = new SyncDeflater(this.level);
       }
       if (data.length > 0) {
         const compressed = this._syncDeflater.write(data);

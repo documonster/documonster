@@ -399,14 +399,43 @@ export function deflateRawStore(data: Uint8Array): Uint8Array {
 }
 
 // ============================================================================
-// LZ77 + Huffman Compression (Basic implementation)
+// LZ77 + Huffman Compression
 // ============================================================================
 
+// Hash table size must be a power of 2. 32768 entries keeps memory reasonable
+// while providing a good distribution for the 3-byte hash.
+const HASH_SIZE = 32768;
+const HASH_MASK = HASH_SIZE - 1;
+
+// Maximum hash chain length to walk per position. Longer chains find better
+// matches at the cost of speed. 64 is a good balance (~zlib level 5-6).
+const MAX_CHAIN_LEN = 64;
+
+// Minimum match length for LZ77 (RFC 1951 minimum).
+const MIN_MATCH = 3;
+
+// Maximum match length (RFC 1951 maximum).
+const MAX_MATCH = 258;
+
+// Maximum back-reference distance (RFC 1951 / 32 KB sliding window).
+const MAX_DIST = 32768;
+
 /**
- * Compress data using DEFLATE with fixed Huffman codes
+ * Hash function for 3-byte sequences.
+ * Uses a multiplicative hash for better distribution than the naive
+ * shift-or approach. The constant 0x1e35a7bd is chosen for good avalanche
+ * properties in the lower bits.
+ */
+function hash3(a: number, b: number, c: number): number {
+  return ((((a << 16) | (b << 8) | c) * 0x1e35a7bd) >>> 17) & HASH_MASK;
+}
+
+/**
+ * Compress data using DEFLATE with fixed Huffman codes.
  *
- * This provides real compression using LZ77 + fixed Huffman codes.
- * Not as efficient as full DEFLATE but much better than STORE mode.
+ * Uses LZ77 with hash chains and lazy matching for significantly better
+ * compression than a single-entry hash table. The algorithm is modelled
+ * after zlib's "fast" and "slow" deflate strategies.
  *
  * @param data - Data to compress
  * @returns Compressed data in deflate-raw format
@@ -428,48 +457,115 @@ export function deflateRawCompressed(data: Uint8Array): Uint8Array {
   output.writeBits(1, 1); // BFINAL
   output.writeBits(1, 2); // BTYPE = 01 (fixed Huffman)
 
-  // LZ77 compression with hash table
-  const hashTable = new Map<number, number>();
+  // --- Hash chain tables (typed arrays for performance) ---
+  // head[h]: most recent position with hash h (0 = unused, positions are 1-based internally)
+  // prev[pos & (MAX_DIST-1)]: previous position in the chain for the same hash
+  const head = new Int32Array(HASH_SIZE); // filled with 0 (no match)
+  const prev = new Int32Array(MAX_DIST);
+
   let pos = 0;
 
+  // State for lazy matching:
+  // When we find a match at position N, we check position N+1 too.
+  // If N+1 has a longer match we emit a literal for N and use the N+1 match.
+  let prevMatchLen = 0;
+  let prevMatchDist = 0;
+  let prevLiteral = 0;
+  let hasPrevMatch = false;
+
   while (pos < data.length) {
-    // Try to find a match
     let bestLen = 0;
     let bestDist = 0;
 
     if (pos + 2 < data.length) {
-      const hash = (data[pos] << 16) | (data[pos + 1] << 8) | data[pos + 2];
-      const matchPos = hashTable.get(hash);
+      const h = hash3(data[pos], data[pos + 1], data[pos + 2]);
 
-      if (matchPos !== undefined && pos - matchPos <= 32768) {
-        const dist = pos - matchPos;
+      // Walk the hash chain to find the best (longest) match
+      let chainLen = MAX_CHAIN_LEN;
+      let matchHead = head[h];
+
+      while (matchHead > 0 && chainLen-- > 0) {
+        const mPos = matchHead - 1; // convert from 1-based to 0-based
+        const dist = pos - mPos;
+        if (dist > MAX_DIST || dist <= 0) {
+          break;
+        }
+
+        // Quick check: compare the byte just beyond current best length first
+        // to skip obviously shorter matches early.
+        if (bestLen >= MIN_MATCH && data[mPos + bestLen] !== data[pos + bestLen]) {
+          matchHead = prev[mPos & (MAX_DIST - 1)];
+          continue;
+        }
+
+        // Full scan
         let len = 0;
-        const maxLen = Math.min(258, data.length - pos);
-
-        while (len < maxLen && data[matchPos + len] === data[pos + len]) {
+        const maxLen = Math.min(MAX_MATCH, data.length - pos);
+        while (len < maxLen && data[mPos + len] === data[pos + len]) {
           len++;
         }
 
-        if (len >= 3) {
+        if (len > bestLen) {
           bestLen = len;
           bestDist = dist;
+          if (len >= MAX_MATCH) {
+            break; // can't do better
+          }
         }
+
+        matchHead = prev[mPos & (MAX_DIST - 1)];
       }
 
-      // Update hash table
-      hashTable.set(hash, pos);
+      // Insert current position into the hash chain
+      prev[pos & (MAX_DIST - 1)] = head[h];
+      head[h] = pos + 1; // 1-based
     }
 
-    if (bestLen >= 3) {
-      // Write length/distance pair
-      writeLengthCode(output, bestLen);
-      writeDistanceCode(output, bestDist);
-      pos += bestLen;
+    // --- Lazy matching logic ---
+    if (hasPrevMatch) {
+      if (bestLen > prevMatchLen) {
+        // Current position has a better match; emit previous as literal
+        writeLiteralCode(output, prevLiteral);
+        // Now adopt current match as the pending one
+        prevMatchLen = bestLen;
+        prevMatchDist = bestDist;
+        prevLiteral = data[pos];
+        pos++;
+      } else {
+        // Previous match is at least as good; emit it
+        writeLengthCode(output, prevMatchLen);
+        writeDistanceCode(output, prevMatchDist);
+        // Insert hash entries for the skipped bytes (positions inside the match)
+        // so future matches can find them. We already inserted pos-1 (the match
+        // start); now insert pos through pos + prevMatchLen - 2.
+        const matchEnd = pos - 1 + prevMatchLen;
+        for (let i = pos; i < matchEnd && i + 2 < data.length; i++) {
+          const h = hash3(data[i], data[i + 1], data[i + 2]);
+          prev[i & (MAX_DIST - 1)] = head[h];
+          head[h] = i + 1;
+        }
+        pos = matchEnd;
+        hasPrevMatch = false;
+        prevMatchLen = 0;
+      }
+    } else if (bestLen >= MIN_MATCH) {
+      // We have a match; hold it and try the next position (lazy evaluation)
+      hasPrevMatch = true;
+      prevMatchLen = bestLen;
+      prevMatchDist = bestDist;
+      prevLiteral = data[pos];
+      pos++;
     } else {
-      // Write literal
+      // No match — emit literal
       writeLiteralCode(output, data[pos]);
       pos++;
     }
+  }
+
+  // Flush any pending lazy match
+  if (hasPrevMatch) {
+    writeLengthCode(output, prevMatchLen);
+    writeDistanceCode(output, prevMatchDist);
   }
 
   // Write end-of-block symbol (256)
@@ -681,7 +777,10 @@ const WINDOW_SIZE = 32768;
  * maintains state across multiple `write()` calls:
  *
  *  - **LZ77 sliding window**: back-references can span across chunks.
- *  - **Hash table**: match positions persist across chunks.
+ *  - **Hash chains**: match positions persist across chunks with typed-array
+ *    hash tables for fast lookup.
+ *  - **Lazy matching**: each match is compared with the next position's match
+ *    to pick the longer one.
  *  - **Bit writer**: bit position is preserved, so consecutive blocks form
  *    a single valid DEFLATE bit-stream without alignment issues.
  *
@@ -694,7 +793,10 @@ const WINDOW_SIZE = 32768;
  */
 export class SyncDeflater {
   private _output = new BitWriter();
-  private _hashTable = new Map<number, number>();
+
+  // Hash chain tables — shared across chunks for cross-chunk matching.
+  private _head = new Int32Array(HASH_SIZE);
+  private _prev = new Int32Array(MAX_DIST);
 
   /** Sliding window: the last WINDOW_SIZE bytes of uncompressed data. */
   private _window = new Uint8Array(WINDOW_SIZE);
@@ -702,6 +804,12 @@ export class SyncDeflater {
   private _windowLen = 0;
   /** Total bytes written so far (monotonically increasing; used for hash offsets). */
   private _totalIn = 0;
+
+  // Lazy matching state that may span across chunks.
+  private _hasPrevMatch = false;
+  private _prevMatchLen = 0;
+  private _prevMatchDist = 0;
+  private _prevLiteral = 0;
 
   /**
    * Compress a chunk and return the compressed bytes produced so far.
@@ -720,56 +828,164 @@ export class SyncDeflater {
 
     const window = this._window;
     let wLen = this._windowLen;
-    const hashTable = this._hashTable;
+    const head = this._head;
+    const prevArr = this._prev;
     const totalIn = this._totalIn;
 
-    for (let pos = 0; pos < data.length; ) {
+    let hasPrevMatch = this._hasPrevMatch;
+    let prevMatchLen = this._prevMatchLen;
+    let prevMatchDist = this._prevMatchDist;
+    let prevLiteral = this._prevLiteral;
+
+    /**
+     * Insert a global position into the hash chain and the sliding window.
+     */
+    const insertHash = (localPos: number): void => {
+      if (localPos + 2 >= data.length) {
+        return;
+      }
+      const h = hash3(data[localPos], data[localPos + 1], data[localPos + 2]);
+      const globalPos = totalIn + localPos;
+      prevArr[globalPos & (MAX_DIST - 1)] = head[h];
+      head[h] = globalPos + 1; // 1-based
+    };
+
+    const insertWindow = (localPos: number, count: number): void => {
+      for (let i = 0; i < count; i++) {
+        window[(wLen + i) & (WINDOW_SIZE - 1)] = data[localPos + i];
+      }
+      wLen += count;
+    };
+
+    let pos = 0;
+    for (; pos < data.length; ) {
       let bestLen = 0;
       let bestDist = 0;
 
       if (pos + 2 < data.length) {
-        const h = (data[pos] << 16) | (data[pos + 1] << 8) | data[pos + 2];
-        const matchGlobalPos = hashTable.get(h);
+        const h = hash3(data[pos], data[pos + 1], data[pos + 2]);
+        const globalPos = totalIn + pos;
 
-        if (matchGlobalPos !== undefined) {
-          const dist = totalIn + pos - matchGlobalPos;
-          if (dist > 0 && dist <= WINDOW_SIZE) {
-            // Match candidate — scan in the sliding window
-            const wStart = (((wLen - dist) % WINDOW_SIZE) + WINDOW_SIZE) % WINDOW_SIZE;
-            const maxLen = Math.min(258, data.length - pos);
-            let len = 0;
-            while (len < maxLen) {
-              const wByte = window[(wStart + len) % WINDOW_SIZE];
-              if (wByte !== data[pos + len]) {
-                break;
-              }
-              len++;
+        // Walk the hash chain
+        let chainLen = MAX_CHAIN_LEN;
+        let matchHead = head[h];
+
+        while (matchHead > 0 && chainLen-- > 0) {
+          const mGlobalPos = matchHead - 1;
+          const dist = globalPos - mGlobalPos;
+          if (dist > MAX_DIST || dist <= 0) {
+            break;
+          }
+
+          // Compare bytes through the sliding window + current chunk
+          const maxLen = Math.min(MAX_MATCH, data.length - pos);
+          let len = 0;
+
+          // Quick reject on the byte beyond current bestLen
+          if (bestLen >= MIN_MATCH) {
+            const checkOffset = mGlobalPos + bestLen;
+            // Determine the byte at checkOffset
+            let checkByte: number;
+            const checkLocal = checkOffset - totalIn;
+            if (checkLocal >= 0 && checkLocal < data.length) {
+              checkByte = data[checkLocal];
+            } else {
+              checkByte = window[checkOffset & (WINDOW_SIZE - 1)];
             }
-            if (len >= 3) {
-              bestLen = len;
-              bestDist = dist;
+            if (checkByte !== data[pos + bestLen]) {
+              matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
+              continue;
             }
           }
+
+          while (len < maxLen) {
+            const matchOffset = mGlobalPos + len;
+            // Get byte from window or current data
+            let matchByte: number;
+            const matchLocal = matchOffset - totalIn;
+            if (matchLocal >= 0 && matchLocal < data.length) {
+              matchByte = data[matchLocal];
+            } else {
+              matchByte = window[matchOffset & (WINDOW_SIZE - 1)];
+            }
+            if (matchByte !== data[pos + len]) {
+              break;
+            }
+            len++;
+          }
+
+          if (len > bestLen) {
+            bestLen = len;
+            bestDist = dist;
+            if (len >= MAX_MATCH) {
+              break;
+            }
+          }
+
+          matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
         }
 
-        hashTable.set(h, totalIn + pos);
+        // Insert current position into hash chain
+        prevArr[globalPos & (MAX_DIST - 1)] = head[h];
+        head[h] = globalPos + 1;
       }
 
-      if (bestLen >= 3) {
-        writeLengthCode(out, bestLen);
-        writeDistanceCode(out, bestDist);
-        // Advance window
-        for (let i = 0; i < bestLen; i++) {
-          window[wLen % WINDOW_SIZE] = data[pos + i];
-          wLen++;
+      // --- Lazy matching logic ---
+      if (hasPrevMatch) {
+        if (bestLen > prevMatchLen) {
+          // Current position wins — emit previous as literal
+          writeLiteralCode(out, prevLiteral);
+          prevMatchLen = bestLen;
+          prevMatchDist = bestDist;
+          prevLiteral = data[pos];
+          insertWindow(pos, 1);
+          pos++;
+        } else {
+          // Previous match wins — emit it
+          writeLengthCode(out, prevMatchLen);
+          writeDistanceCode(out, prevMatchDist);
+          // Insert hash entries for skipped positions inside the match
+          const matchEnd = pos - 1 + prevMatchLen;
+          const insertEnd = Math.min(matchEnd, data.length);
+          for (let i = pos; i < insertEnd; i++) {
+            insertHash(i);
+          }
+          insertWindow(pos, insertEnd - pos);
+          pos = insertEnd;
+          hasPrevMatch = false;
+          prevMatchLen = 0;
         }
-        pos += bestLen;
+      } else if (bestLen >= MIN_MATCH) {
+        hasPrevMatch = true;
+        prevMatchLen = bestLen;
+        prevMatchDist = bestDist;
+        prevLiteral = data[pos];
+        insertWindow(pos, 1);
+        pos++;
       } else {
         writeLiteralCode(out, data[pos]);
-        window[wLen % WINDOW_SIZE] = data[pos];
-        wLen++;
+        insertWindow(pos, 1);
         pos++;
       }
+    }
+
+    // If there's a pending lazy match and we're at chunk boundary,
+    // flush it now (the next chunk will start fresh for lazy matching).
+    if (hasPrevMatch) {
+      writeLengthCode(out, prevMatchLen);
+      writeDistanceCode(out, prevMatchDist);
+      // The pending match started at pos-1 and covers prevMatchLen bytes.
+      // pos-1 was already hashed/windowed when it was first encountered;
+      // now insert the remaining positions (pos .. pos-1+prevMatchLen-1)
+      // into hash chains and the sliding window so the next chunk can
+      // reference them.
+      const matchEnd = Math.min(pos - 1 + prevMatchLen, data.length);
+      for (let i = pos; i < matchEnd; i++) {
+        insertHash(i);
+      }
+      insertWindow(pos, matchEnd - pos);
+      hasPrevMatch = false;
+      prevMatchLen = 0;
     }
 
     // End-of-block symbol
@@ -777,6 +993,10 @@ export class SyncDeflater {
 
     this._windowLen = wLen;
     this._totalIn = totalIn + data.length;
+    this._hasPrevMatch = hasPrevMatch;
+    this._prevMatchLen = prevMatchLen;
+    this._prevMatchDist = prevMatchDist;
+    this._prevLiteral = prevLiteral;
 
     // Flush completed bytes from the bit writer
     return out.flushBytes();
