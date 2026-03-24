@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.3](https://github.com/cjnoname/excelts/compare/v6.1.2...v6.1.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* **excel:** Change WorkbookWriter default compression level from 1 to 6 ([d30313a](https://github.com/cjnoname/excelts/commit/d30313a05ab401072df094dbd02881bb96330c1e))
+
 ## [6.1.2](https://github.com/cjnoname/excelts/compare/v6.1.1...v6.1.2) (2026-03-24)
 
 
