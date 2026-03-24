@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.2](https://github.com/cjnoname/excelts/compare/v6.1.1...v6.1.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* **archive:** Drastically improve compression ratio for streaming writes ([78f9f22](https://github.com/cjnoname/excelts/commit/78f9f22cbe75be144b7fae53a66c5c706ae35762))
+* **build:** Prevent race condition on dist/types during parallel builds ([d0db0dc](https://github.com/cjnoname/excelts/commit/d0db0dc36dd950df8e7281ca0200c5387837aadb))
+
 ## [6.1.1](https://github.com/cjnoname/excelts/compare/v6.1.0...v6.1.1) (2026-03-23)
 
 
