@@ -102,7 +102,7 @@ export { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 export type { CheckboxState } from "@excel/form-control";
 export type { ColumnDefn, ColumnHeaderValue } from "@excel/column";
 export type { RangeInput } from "@excel/range";
-export type { WorkbookModel, WorkbookMedia } from "@excel/workbook";
+export type { WorkbookModel, WorkbookMedia, ToPdfOptions } from "@excel/workbook";
 export type { NodeInput } from "@excel/stream/workbook-reader";
 
 // =============================================================================
@@ -176,5 +176,6 @@ export {
   PivotTableError,
   TableError,
   ImageError,
-  MaxItemsExceededError
+  MaxItemsExceededError,
+  PdfConversionError
 } from "@excel/errors";

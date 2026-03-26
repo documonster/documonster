@@ -22,6 +22,7 @@ import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
+import { worksheetsToPdf, type ToPdfOptions } from "@pdf/pdf-converter";
 import { pipeline } from "@stream";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
 import type { Readable } from "@stream";
@@ -1078,6 +1079,31 @@ class Workbook {
   }
 
   // ===========================================================================
+  // PDF Conversion
+  // ===========================================================================
+
+  /**
+   * Convert this workbook to a PDF Uint8Array.
+   *
+   * Preserves styles (fonts, fills, borders, alignment), merged cells, and images.
+   *
+   * @example
+   * ```ts
+   * const pdfBuffer = workbook.toPdf();
+   * // Node.js: write to file
+   * fs.writeFileSync("output.pdf", pdfBuffer);
+   * // Browser: create download link
+   * const blob = new Blob([pdfBuffer], { type: "application/pdf" });
+   * ```
+   *
+   * @param options - PDF generation options
+   * @returns PDF file contents as Uint8Array
+   */
+  toPdf(options?: ToPdfOptions): Uint8Array {
+    return worksheetsToPdf(this.worksheets, this.media, options);
+  }
+
+  // ===========================================================================
   // Model (Serialization)
   // ===========================================================================
 
@@ -1165,3 +1191,4 @@ class Workbook {
 }
 
 export { Workbook };
+export type { ToPdfOptions } from "@pdf/pdf-converter";

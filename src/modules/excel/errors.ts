@@ -229,3 +229,10 @@ export class MaxItemsExceededError extends ExcelError {
     super(`Max ${itemType} count (${maxItems}) exceeded`, options);
   }
 }
+
+/**
+ * Error thrown when PDF conversion fails.
+ */
+export class PdfConversionError extends ExcelError {
+  override name = "PdfConversionError";
+}

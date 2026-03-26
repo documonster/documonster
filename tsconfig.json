@@ -8,7 +8,8 @@
       "@stream/*": ["./src/modules/stream/*"],
       "@csv/*": ["./src/modules/csv/*"],
       "@utils/*": ["./src/utils/*"],
-      "@test/*": ["./src/test/*"]
+      "@test/*": ["./src/test/*"],
+      "@pdf/*": ["./src/modules/pdf/*"]
     },
     "module": "ESNext",
     "moduleResolution": "bundler",
