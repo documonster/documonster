@@ -94,7 +94,9 @@ class CellXform extends BaseXform {
         break;
 
       case Enums.ValueType.Merge:
-        options.merges.add(model);
+        if (typeof options.merges.add === 'function') { // avoid erro instreaming mode
+          options.merges.add(model);
+        }
         break;
 
       case Enums.ValueType.Formula:

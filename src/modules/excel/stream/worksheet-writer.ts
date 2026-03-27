@@ -1,7 +1,7 @@
 import { RelType } from "@excel/xlsx/rel-type";
 import { colCache } from "@excel/utils/col-cache";
 import { Encryptor } from "@excel/utils/encryptor";
-import { ExcelStreamStateError, MergeConflictError, RowOutOfBoundsError } from "@excel/errors";
+import { ExcelStreamStateError, RowOutOfBoundsError } from "@excel/errors";
 import { uint8ArrayToBase64 } from "@utils/utils";
 import { Dimensions } from "@excel/range";
 import { StringBuf } from "@excel/utils/string-buf";
@@ -12,7 +12,6 @@ import { Anchor } from "@excel/anchor";
 import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
 import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
 import { DataValidations } from "@excel/data-validations";
-import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
 import type { StreamBuf } from "@excel/utils/stream-buf";
 import {
   drawingRelTargetFromWorksheet,
@@ -56,6 +55,7 @@ import type {
   ConditionalFormattingOptions,
   AddImageRange
 } from "@excel/types";
+import { AbstractWorksheet } from "@excel/abstract/worksheet";
 
 // since prepare and render are functional, we can use singletons
 const xform = {
@@ -115,18 +115,13 @@ interface WriterImageModel {
   hyperlinks?: { hyperlink?: string; tooltip?: string };
 }
 
-class WorksheetWriter {
+class WorksheetWriter extends AbstractWorksheet {
   id: number;
   name: string;
   state: WorksheetState;
-  /** Rows stored while being worked on. Set to null after commit. */
-  private _rows: Row[] | null;
-  /** Column definitions */
-  private _columns: Column[];
   /** Column keys mapping: key => Column */
   private _keys: { [key: string]: Column };
   /** Merged cell ranges */
-  private _merges: Dimensions[];
   private _sheetRelsWriter: SheetRelsWriter;
   private _sheetCommentsWriter: SheetCommentsWriter;
   private _dimensions: Dimensions;
@@ -140,12 +135,6 @@ class WorksheetWriter {
   conditionalFormatting: ConditionalFormattingOptions[];
   rowBreaks: RowBreak[];
   colBreaks: ColBreak[];
-  properties: Partial<WorksheetProperties> & {
-    defaultRowHeight: number;
-    dyDescent?: number;
-    outlineLevelCol: number;
-    outlineLevelRow: number;
-  };
   headerFooter: Partial<HeaderFooter>;
   pageSetup: Partial<PageSetup> & { margins: PageSetup["margins"] };
   useSharedStrings: boolean;
@@ -153,7 +142,6 @@ class WorksheetWriter {
   private _workbook: any;
   hasComments: boolean;
   private _views: Partial<WorksheetView>[];
-  autoFilter: AutoFilter | null;
   private _media: WriterImageModel[];
   sheetProtection: {
     sheet?: boolean;
@@ -173,6 +161,8 @@ class WorksheetWriter {
   rId?: string;
 
   constructor(options: WorksheetWriterOptions) {
+    super();
+
     // in a workbook, each sheet will have a number
     this.id = options.id;
 
@@ -193,8 +183,8 @@ class WorksheetWriter {
     this._keys = {};
 
     // keep a record of all row and column pageBreaks
-    this._merges = [];
-    (this._merges as any).add = function () {}; // ignore cell instruction
+    this._merges = {};
+    // (this._merges as any).add = function () {}; // ignore cell instruction
 
     // keep record of all hyperlinks
     this._sheetRelsWriter = new SheetRelsWriter(options);
@@ -343,7 +333,7 @@ class WorksheetWriter {
     }
 
     // we _cannot_ accept new rows from now on
-    this._rows = null;
+    this._rows = [];
 
     if (!this.startedData) {
       this._writeOpenSheetData();
@@ -569,41 +559,6 @@ class WorksheetWriter {
     const address = colCache.getAddress(r, c);
     const row = this.getRow(address.row);
     return row.getCellEx(address);
-  }
-
-  mergeCells(...cells: (string | number)[]): void {
-    // may fail if rows have been comitted
-    const dimensions = new Dimensions(cells);
-
-    // check cells aren't already merged
-    this._merges.forEach(merge => {
-      if (merge.intersects(dimensions)) {
-        throw new MergeConflictError();
-      }
-    });
-
-    const { top, left, bottom, right } = dimensions;
-
-    // Collect perimeter borders BEFORE merge overwrites slave styles
-    const collected = collectMergeBorders(top, left, bottom, right, (r, c) => this.findCell(r, c));
-
-    // Apply merge
-    const master = this.getCell(top, left);
-    for (let i = top; i <= bottom; i++) {
-      for (let j = left; j <= right; j++) {
-        if (i > top || j > left) {
-          this.getCell(i, j).merge(master);
-        }
-      }
-    }
-
-    // Reconstruct position-aware borders (like Excel)
-    if (collected) {
-      applyMergeBorders(top, left, bottom, right, collected, (r, c) => this.getCell(r, c));
-    }
-
-    // index merge
-    this._merges.push(dimensions);
   }
 
   // ===========================================================================
@@ -841,10 +796,12 @@ class WorksheetWriter {
   }
 
   private _writeMergeCells(): void {
-    if (this._merges.length) {
+    const merges = Object.values(this._merges);
+
+    if (merges.length) {
       xmlBuffer.reset();
-      xmlBuffer.addText(`<mergeCells count="${this._merges.length}">`);
-      this._merges.forEach(merge => {
+      xmlBuffer.addText(`<mergeCells count="${merges.length}">`);
+      merges.forEach(merge => {
         xmlBuffer.addText(`<mergeCell ref="${merge}"/>`);
       });
       xmlBuffer.addText("</mergeCells>");

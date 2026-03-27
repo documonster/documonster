@@ -1,7 +1,7 @@
 import { colCache, type DecodedRange } from "@excel/utils/col-cache";
 import { Range, type RangeInput } from "@excel/range";
 import { Row, type RowModel } from "@excel/row";
-import { WorksheetNameError, MergeConflictError } from "@excel/errors";
+import { WorksheetNameError } from "@excel/errors";
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
 import { Enums } from "@excel/enums";
@@ -18,17 +18,7 @@ import { Encryptor } from "@excel/utils/encryptor";
 import { uint8ArrayToBase64 } from "@utils/utils";
 import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
 import { copyStyle } from "@excel/utils/copy-style";
-import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import { formatCellValue } from "@excel/utils/cell-format";
-import {
-  measureTextWidthPx,
-  measureRichTextWidthPx,
-  calculateAutoFitWidth,
-  calculateAutoFitHeight,
-  calculateRichTextAutoFitHeight,
-  getMaxDigitWidth,
-  getColumnContentWidthPx
-} from "@excel/utils/text-metrics";
+
 import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/address";
 import type { Workbook } from "@excel/workbook";
 import type {
@@ -46,6 +36,8 @@ import type {
   WorksheetState,
   WorksheetView
 } from "@excel/types";
+import { AbstractWorksheet } from "./abstract/worksheet";
+import { calculateAutoFitWidth, getMaxDigitWidth } from "./utils/text-metrics";
 
 // Type for data validation model - maps address to validation
 type DataValidationModel = { [address: string]: DataValidation | undefined };
@@ -164,25 +156,20 @@ interface WorksheetModel {
 //  Access/Add/Delete individual cells
 //  Manage column widths and row heights
 
-class Worksheet {
+class Worksheet extends AbstractWorksheet {
   // Type declarations only - no runtime overhead
   declare private _workbook: Workbook;
   declare public id: number;
   declare public orderNo: number;
   declare private _name: string;
   declare public state: WorksheetState;
-  declare private _rows: Row[];
-  declare private _columns: Column[];
   declare private _keys: { [key: string]: Column };
-  declare private _merges: { [key: string]: Range };
   declare public rowBreaks: RowBreak[];
   declare public colBreaks: ColBreak[];
-  declare public properties: Partial<WorksheetProperties>;
   declare public pageSetup: PageSetup;
   declare public headerFooter: HeaderFooter;
   declare public dataValidations: DataValidations;
   declare public views: Partial<WorksheetView>[];
-  declare public autoFilter: AutoFilter | null;
   declare private _media: Image[];
   declare public sheetProtection: SheetProtection | null;
   declare public tables: { [key: string]: Table };
@@ -194,6 +181,8 @@ class Worksheet {
   declare private _drawing: unknown;
 
   constructor(options: WorksheetOptions) {
+    super();
+
     this._workbook = options.workbook!;
 
     // in a workbook, each sheet will have a number
@@ -708,6 +697,117 @@ class Worksheet {
     return this.getRows(pos, values.length);
   }
 
+  // ===========================================================================
+  // Auto-Fit Column Width
+
+  /**
+   * Auto-fit a single column's width to its content.
+   *
+   * Calculates the optimal column width by measuring the display text of every
+   * cell in the column, considering font, number format, bold/italic, and CJK
+   * characters. Sets `column.width` and `column.bestFit = true`.
+   *
+   * @param col - Column number (1-based) or column letter (e.g. "A")
+   * @returns The worksheet (for chaining)
+   */
+  autoFitColumn(col: number | string): this {
+    const colNum = typeof col === "string" ? colCache.l2n(col) : col;
+    this._autoFitColumnImpl(colNum);
+    return this;
+  }
+
+  /**
+   * Auto-fit all columns (or a range of columns) to their content.
+   *
+   * @param startCol - Start column (1-based number or letter). Defaults to first column.
+   * @param endCol - End column (1-based number or letter). Defaults to last column.
+   * @returns The worksheet (for chaining)
+   */
+  autoFitColumns(startCol?: number | string, endCol?: number | string): this {
+    const dims = this.dimensions;
+    if (!dims || dims.left === undefined) {
+      return this;
+    }
+    const start =
+      startCol != null
+        ? typeof startCol === "string"
+          ? colCache.l2n(startCol)
+          : startCol
+        : dims.left;
+    const end =
+      endCol != null ? (typeof endCol === "string" ? colCache.l2n(endCol) : endCol) : dims.right;
+
+    for (let c = start; c <= end; c++) {
+      this._autoFitColumnImpl(c);
+    }
+    return this;
+  }
+
+  /** @internal Implementation of column auto-fit */
+  private _autoFitColumnImpl(colNum: number): void {
+    const mdw = getMaxDigitWidth(); // default font MDW
+
+    // Check if this column is under an autofilter
+    const hasAutoFilter = this._isColumnInAutoFilter(colNum);
+
+    let maxWidthPx = 0;
+
+    // Iterate all rows
+    this._rows.forEach(row => {
+      if (!row) {
+        return;
+      }
+      // Skip hidden rows — Excel excludes them from auto-fit
+      if (row.hidden) {
+        return;
+      }
+      const cell = row.findCell(colNum);
+      if (!cell) {
+        return;
+      }
+
+      // Skip merged cell slaves — the content belongs to the master cell.
+      // For the master cell of a multi-column merge, skip too (the width
+      // should not be attributed to a single column).
+      if (cell.type === Enums.ValueType.Merge) {
+        return;
+      }
+      if (cell.isMerged) {
+        // This is a master cell with merges spanning multiple columns
+        const mergeRange = this._merges[cell.address];
+        if (mergeRange && mergeRange.left !== mergeRange.right) {
+          return; // multi-column merge — skip
+        }
+      }
+
+      // Skip shrinkToFit cells — they adapt to the column, not vice versa
+      if (cell.alignment?.shrinkToFit) {
+        return;
+      }
+
+      let textWidthPx = this._getCellTextWidthPx(cell);
+
+      // Account for indent: each level adds approximately 3 character widths
+      const indent = cell.alignment?.indent;
+      if (indent && indent > 0) {
+        textWidthPx += indent * 3 * mdw;
+      }
+
+      if (textWidthPx > maxWidthPx) {
+        maxWidthPx = textWidthPx;
+      }
+    });
+
+    if (maxWidthPx > 0) {
+      const charWidth = calculateAutoFitWidth(maxWidthPx, mdw, hasAutoFilter);
+      if (charWidth > 0) {
+        const column = this.getColumn(colNum);
+        column.width = charWidth;
+        column.bestFit = true;
+      }
+    }
+  }
+
   // set row at position to same style as of either pervious row (option 'i') or next row (option 'o')
   private _setStyleOption(pos: number, style: string = "n"): void {
     if (style[0] === "o" && this.findRow(pos + 1) !== undefined) {
@@ -989,61 +1089,6 @@ class Worksheet {
 
   // =========================================================================
   // Merge
-
-  /**
-   * Merge cells, either:
-   *
-   * tlbr string, e.g. `'A4:B5'`
-   *
-   * tl string, br string, e.g. `'G10', 'H11'`
-   *
-   * t, l, b, r numbers, e.g. `10,11,12,13`
-   */
-  mergeCells(...cells: RangeInput[]): void {
-    const dimensions = new Range(cells);
-    this._mergeCellsInternal(dimensions);
-  }
-
-  mergeCellsWithoutStyle(...cells: RangeInput[]): void {
-    const dimensions = new Range(cells);
-    this._mergeCellsInternal(dimensions, true);
-  }
-
-  private _mergeCellsInternal(dimensions: Range, ignoreStyle?: boolean): void {
-    // check cells aren't already merged
-    Object.values(this._merges).forEach((merge: Range) => {
-      if (merge.intersects(dimensions)) {
-        throw new MergeConflictError();
-      }
-    });
-
-    const { top, left, bottom, right } = dimensions;
-
-    // Collect perimeter borders BEFORE merge overwrites slave styles
-    const collected = ignoreStyle
-      ? undefined
-      : collectMergeBorders(top, left, bottom, right, (r, c) => this.findCell(r, c) as any);
-
-    // Apply merge — slave cells inherit the master's full style
-    const master = this.getCell(dimensions.top, dimensions.left);
-    for (let i = top; i <= bottom; i++) {
-      for (let j = left; j <= right; j++) {
-        if (i > top || j > left) {
-          this.getCell(i, j).merge(master, ignoreStyle);
-        }
-      }
-    }
-
-    // Reconstruct position-aware borders (like Excel):
-    // outer borders survive, inner borders are cleared.
-    if (collected) {
-      applyMergeBorders(top, left, bottom, right, collected, (r, c) => this.getCell(r, c) as any);
-    }
-
-    // index merge
-    this._merges[master.address] = dimensions;
-  }
-
   private _unMergeMaster(master: Cell): void {
     // master is always top left of a rectangle
     const merge = this._merges[master.address];
@@ -1229,9 +1274,9 @@ class Worksheet {
         } else {
           this.getCell(r, c).value = isShared
             ? {
-                sharedFormula: masterAddress,
-                result: getResult(r, c)
-              }
+              sharedFormula: masterAddress,
+              result: getResult(r, c)
+            }
             : getResult(r, c);
         }
       }
@@ -1416,10 +1461,10 @@ class Worksheet {
     filter:
       | number
       | ((
-          value: ConditionalFormattingOptions,
-          index: number,
-          array: ConditionalFormattingOptions[]
-        ) => boolean)
+        value: ConditionalFormattingOptions,
+        index: number,
+        array: ConditionalFormattingOptions[]
+      ) => boolean)
   ): void {
     if (typeof filter === "number") {
       this.conditionalFormattings.splice(filter, 1);
@@ -1428,276 +1473,6 @@ class Worksheet {
     } else {
       this.conditionalFormattings = [];
     }
-  }
-
-  // ===========================================================================
-  // Auto-Fit Column Width & Row Height
-
-  /**
-   * Auto-fit a single column's width to its content.
-   *
-   * Calculates the optimal column width by measuring the display text of every
-   * cell in the column, considering font, number format, bold/italic, and CJK
-   * characters. Sets `column.width` and `column.bestFit = true`.
-   *
-   * @param col - Column number (1-based) or column letter (e.g. "A")
-   * @returns The worksheet (for chaining)
-   */
-  autoFitColumn(col: number | string): this {
-    const colNum = typeof col === "string" ? colCache.l2n(col) : col;
-    this._autoFitColumnImpl(colNum);
-    return this;
-  }
-
-  /**
-   * Auto-fit all columns (or a range of columns) to their content.
-   *
-   * @param startCol - Start column (1-based number or letter). Defaults to first column.
-   * @param endCol - End column (1-based number or letter). Defaults to last column.
-   * @returns The worksheet (for chaining)
-   */
-  autoFitColumns(startCol?: number | string, endCol?: number | string): this {
-    const dims = this.dimensions;
-    if (!dims || dims.left === undefined) {
-      return this;
-    }
-    const start =
-      startCol != null
-        ? typeof startCol === "string"
-          ? colCache.l2n(startCol)
-          : startCol
-        : dims.left;
-    const end =
-      endCol != null ? (typeof endCol === "string" ? colCache.l2n(endCol) : endCol) : dims.right;
-
-    for (let c = start; c <= end; c++) {
-      this._autoFitColumnImpl(c);
-    }
-    return this;
-  }
-
-  /**
-   * Auto-fit a single row's height to its content.
-   *
-   * @param rowNumber - Row number (1-based)
-   * @returns The worksheet (for chaining)
-   */
-  autoFitRow(rowNumber: number): this {
-    this._autoFitRowImpl(rowNumber);
-    return this;
-  }
-
-  /**
-   * Auto-fit all rows (or a range of rows) to their content.
-   *
-   * @param startRow - Start row (1-based). Defaults to first row.
-   * @param endRow - End row (1-based). Defaults to last row.
-   * @returns The worksheet (for chaining)
-   */
-  autoFitRows(startRow?: number, endRow?: number): this {
-    const dims = this.dimensions;
-    if (!dims || dims.top === undefined) {
-      return this;
-    }
-    const start = startRow ?? dims.top;
-    const end = endRow ?? dims.bottom;
-
-    for (let r = start; r <= end; r++) {
-      this._autoFitRowImpl(r);
-    }
-    return this;
-  }
-
-  /** @internal Implementation of column auto-fit */
-  private _autoFitColumnImpl(colNum: number): void {
-    const mdw = getMaxDigitWidth(); // default font MDW
-
-    // Check if this column is under an autofilter
-    const hasAutoFilter = this._isColumnInAutoFilter(colNum);
-
-    let maxWidthPx = 0;
-
-    // Iterate all rows
-    this._rows.forEach(row => {
-      if (!row) {
-        return;
-      }
-      // Skip hidden rows — Excel excludes them from auto-fit
-      if (row.hidden) {
-        return;
-      }
-      const cell = row.findCell(colNum);
-      if (!cell) {
-        return;
-      }
-
-      // Skip merged cell slaves — the content belongs to the master cell.
-      // For the master cell of a multi-column merge, skip too (the width
-      // should not be attributed to a single column).
-      if (cell.type === Enums.ValueType.Merge) {
-        return;
-      }
-      if (cell.isMerged) {
-        // This is a master cell with merges spanning multiple columns
-        const mergeRange = this._merges[cell.address];
-        if (mergeRange && mergeRange.left !== mergeRange.right) {
-          return; // multi-column merge — skip
-        }
-      }
-
-      // Skip shrinkToFit cells — they adapt to the column, not vice versa
-      if (cell.alignment?.shrinkToFit) {
-        return;
-      }
-
-      let textWidthPx = this._getCellTextWidthPx(cell);
-
-      // Account for indent: each level adds approximately 3 character widths
-      const indent = cell.alignment?.indent;
-      if (indent && indent > 0) {
-        textWidthPx += indent * 3 * mdw;
-      }
-
-      if (textWidthPx > maxWidthPx) {
-        maxWidthPx = textWidthPx;
-      }
-    });
-
-    if (maxWidthPx > 0) {
-      const charWidth = calculateAutoFitWidth(maxWidthPx, mdw, hasAutoFilter);
-      if (charWidth > 0) {
-        const column = this.getColumn(colNum);
-        column.width = charWidth;
-        column.bestFit = true;
-      }
-    }
-  }
-
-  /** @internal Implementation of row auto-fit */
-  private _autoFitRowImpl(rowNumber: number): void {
-    const row = this._rows[rowNumber - 1];
-    if (!row) {
-      return;
-    }
-
-    const mdw = getMaxDigitWidth();
-    let maxHeightPt = 0;
-
-    row.eachCell(cell => {
-      // Skip merged cell slaves
-      if (cell.type === Enums.ValueType.Merge) {
-        return;
-      }
-      // Skip multi-row merged masters
-      if (cell.isMerged) {
-        const mergeRange = this._merges[cell.address];
-        if (mergeRange && mergeRange.top !== mergeRange.bottom) {
-          return;
-        }
-      }
-      // Skip cells in hidden columns
-      const col = this._columns[cell.col - 1];
-      if (col?.hidden) {
-        return;
-      }
-
-      const heightPt = this._getCellHeightPt(cell, mdw);
-      if (heightPt > maxHeightPt) {
-        maxHeightPt = heightPt;
-      }
-    });
-
-    if (maxHeightPt > 0) {
-      row.height = Math.ceil(maxHeightPt * 4) / 4; // Round to nearest 0.25pt (Excel precision)
-      row.customHeight = true;
-    }
-  }
-
-  /**
-   * @internal Get the pixel width of a cell's display text.
-   * Handles all cell value types: string, number (formatted), date (formatted),
-   * boolean, formula result, rich text, hyperlink, error.
-   */
-  private _getCellTextWidthPx(cell: Cell): number {
-    const cellType = cell.effectiveType;
-    const font = cell.font;
-
-    // Rich text: measure per-run with individual fonts
-    if (cellType === Enums.ValueType.RichText) {
-      const value = cell.value;
-      if (value && typeof value === "object" && "richText" in value) {
-        return measureRichTextWidthPx(value.richText, font);
-      }
-    }
-
-    // Get the display text (applies number formatting)
-    const displayText = _getCellDisplayText(cell);
-    if (!displayText) {
-      return 0;
-    }
-
-    return measureTextWidthPx(displayText, font);
-  }
-
-  /**
-   * @internal Get the height in points a cell needs.
-   * Considers wrapText alignment, indent, and explicit newlines.
-   */
-  private _getCellHeightPt(cell: Cell, mdw: number): number {
-    const font = cell.font;
-    const alignment = cell.alignment;
-    const cellType = cell.effectiveType;
-
-    // Rich text
-    if (cellType === Enums.ValueType.RichText) {
-      const value = cell.value;
-      if (value && typeof value === "object" && "richText" in value) {
-        const columnWidthPx = this._getColumnContentWidthForCell(cell, mdw);
-        return calculateRichTextAutoFitHeight(value.richText, font, alignment, columnWidthPx);
-      }
-    }
-
-    const displayText = _getCellDisplayText(cell);
-    if (!displayText) {
-      return 0;
-    }
-
-    const columnWidthPx = alignment?.wrapText
-      ? this._getColumnContentWidthForCell(cell, mdw)
-      : undefined;
-
-    return calculateAutoFitHeight(displayText, font, alignment, columnWidthPx);
-  }
-
-  /**
-   * @internal Get the content width of the column a cell belongs to, in pixels.
-   * Uses the explicit column width if set, otherwise falls back to the worksheet
-   * default or the Excel default (9 character units ≈ 64px).
-   */
-  private _getColumnContentWidthForCell(cell: Cell, mdw: number): number | undefined {
-    if (!cell.alignment?.wrapText) {
-      return undefined;
-    }
-    // Try to get explicit column width; avoid creating a column as side effect
-    const col = this._columns[cell.col - 1];
-    const colWidth = col?.width ?? this.properties.defaultColWidth ?? 9;
-    return getColumnContentWidthPx(colWidth, mdw);
-  }
-
-  /** @internal Check if a column falls within the autoFilter range */
-  private _isColumnInAutoFilter(colNum: number): boolean {
-    if (!this.autoFilter) {
-      return false;
-    }
-    if (typeof this.autoFilter === "string") {
-      const range = colCache.decode(this.autoFilter) as DecodedRange;
-      return colNum >= range.left && colNum <= range.right;
-    }
-    const { from, to } = this.autoFilter;
-    const fromCol =
-      typeof from === "string" ? (colCache.decode(from) as { col: number }).col : from.col;
-    const toCol = typeof to === "string" ? (colCache.decode(to) as { col: number }).col : to.col;
-    return colNum >= fromCol && colNum <= toCol;
   }
 
   // ===========================================================================
@@ -1862,7 +1637,7 @@ class Worksheet {
 
         for (let col = startCol; col <= endCol; col++) {
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? this._getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
 
           if (val != null && val !== "") {
             rowData[col - startCol] = val;
@@ -1893,7 +1668,7 @@ class Worksheet {
 
         for (let col = startCol; col <= endCol; col++) {
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? this._getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
           const key = encodeCol(col - 1);
 
           if (val != null && val !== "") {
@@ -1925,7 +1700,7 @@ class Worksheet {
           const colIdx = col - startCol;
           const key = headerOpt[colIdx] ?? `__EMPTY_${colIdx}`;
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? this._getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
 
           if (val != null && val !== "") {
             rowData[key] = val;
@@ -1972,7 +1747,7 @@ class Worksheet {
 
       for (let col = startCol; col <= endCol; col++) {
         const cell = this.getCell(row, col);
-        const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+        const val = o.raw === false ? this._getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
         const key = headers[col - startCol];
 
         if (val != null && val !== "") {
@@ -2178,45 +1953,6 @@ function _resolveOrigin(origin: Origin, rowCount: number): { row: number; col: n
     return { row: origin + 1, col: 1 };
   }
   return { row: origin.r + 1, col: origin.c + 1 };
-}
-
-/** Get formatted display text for a cell value */
-function _getCellDisplayText(cell: Cell, dateFormat?: string): string {
-  const value = cell.value;
-  const numFmt = cell.numFmt;
-  const fmt = typeof numFmt === "string" ? numFmt : (numFmt?.formatCode ?? "General");
-
-  if (value == null) {
-    return "";
-  }
-
-  if (
-    value instanceof Date ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "string"
-  ) {
-    return formatCellValue(value, fmt, dateFormat);
-  }
-
-  // Formula type — use the result value
-  if (typeof value === "object" && "formula" in value) {
-    const result = value.result;
-    if (result == null) {
-      return "";
-    }
-    if (
-      result instanceof Date ||
-      typeof result === "number" ||
-      typeof result === "boolean" ||
-      typeof result === "string"
-    ) {
-      return formatCellValue(result, fmt, dateFormat);
-    }
-  }
-
-  // Fallback to cell.text for other types (rich text, hyperlink, error, etc.)
-  return cell.text;
 }
 
 export { Worksheet, type WorksheetModel };
