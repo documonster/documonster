@@ -34,6 +34,22 @@ import type { AesKeyStrength } from "@archive/crypto/aes";
 // Constants
 // -----------------------------------------------------------------------------
 
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * Convert a BigInt to Number, throwing if the value exceeds Number.MAX_SAFE_INTEGER.
+ * This prevents silent precision loss when parsing ZIP64 fields.
+ */
+function safeBigIntToNumber(value: bigint, fieldName: string): number {
+  if (value > MAX_SAFE) {
+    throw new Error(
+      `ZIP64 ${fieldName} value ${value} exceeds Number.MAX_SAFE_INTEGER. ` +
+        "The archive may be corrupted or malicious."
+    );
+  }
+  return Number(value);
+}
+
 /** Minimum EOCD size (22 bytes fixed + 0-byte comment) */
 export const EOCD_MIN_SIZE = 22;
 
@@ -221,7 +237,7 @@ export function parseZIP64EOCDLocator(data: Uint8Array, offset: number): number 
   }
 
   reader.skip(4); // disk number with ZIP64 EOCD
-  return Number(reader.readBigUint64());
+  return safeBigIntToNumber(reader.readBigUint64(), "EOCD locator offset");
 }
 
 /**
@@ -265,16 +281,16 @@ export function parseZIP64EOCD(data: Uint8Array, offset: number): ZIP64EOCDInfo 
  */
 export function applyZIP64ToEOCD(eocd: EOCDInfo, zip64: ZIP64EOCDInfo): void {
   if (eocd.totalEntries === UINT16_MAX) {
-    eocd.totalEntries = Number(zip64.totalEntries);
+    eocd.totalEntries = safeBigIntToNumber(zip64.totalEntries, "totalEntries");
   }
   if (eocd.entriesOnDisk === UINT16_MAX) {
-    eocd.entriesOnDisk = Number(zip64.entriesOnDisk);
+    eocd.entriesOnDisk = safeBigIntToNumber(zip64.entriesOnDisk, "entriesOnDisk");
   }
   if (eocd.centralDirSize === UINT32_MAX) {
-    eocd.centralDirSize = Number(zip64.centralDirSize);
+    eocd.centralDirSize = safeBigIntToNumber(zip64.centralDirSize, "centralDirSize");
   }
   if (eocd.centralDirOffset === UINT32_MAX) {
-    eocd.centralDirOffset = Number(zip64.centralDirOffset);
+    eocd.centralDirOffset = safeBigIntToNumber(zip64.centralDirOffset, "centralDirOffset");
   }
 }
 

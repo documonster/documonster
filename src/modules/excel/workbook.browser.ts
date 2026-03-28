@@ -365,7 +365,9 @@ function buildFormatterOptions(options?: CsvOptions) {
     quoteColumns: options?.quoteColumns,
     quoteHeaders: options?.quoteHeaders,
     decimalSeparator: options?.decimalSeparator ?? ".",
-    escapeFormulae: options?.escapeFormulae,
+    // Default to true for CSV injection protection when writing through Workbook.csv.
+    // The low-level formatCsv() keeps its own default (false) for backward compatibility.
+    escapeFormulae: options?.escapeFormulae ?? true,
     writeHeaders: options?.writeHeaders
   };
 }

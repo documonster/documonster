@@ -62,6 +62,14 @@ export interface ExtractCoreOptions {
 }
 
 /**
+ * Maximum allowed uncompressed entry size for non-streaming extraction (512 MB).
+ * This is a pre-decompression check based on the declared size in the ZIP metadata.
+ * It prevents memory exhaustion from archives that declare very large output sizes.
+ * The streaming extraction path (processEntryDataStream) has its own byte-level checks.
+ */
+const DEFAULT_MAX_ENTRY_SIZE = 512 * 1024 * 1024;
+
+/**
  * Process compressed (and possibly encrypted) entry data to get the final content.
  *
  * This is the core extraction logic used by both ZipParser and RemoteZipReader.
@@ -81,6 +89,18 @@ export async function processEntryData(
   validateEntrySizes = true
 ): Promise<Uint8Array> {
   let result: Uint8Array;
+
+  // Pre-decompression size check: reject entries whose *declared* uncompressed size
+  // exceeds the limit. This catches archives that honestly declare very large entries
+  // but does NOT protect against ZIP bombs that lie about their size (for that, use
+  // the streaming path processEntryDataStream which validates actual output bytes).
+  if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
+    throw new Error(
+      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+        `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
+        "Use the streaming API for large entries."
+    );
+  }
 
   // Handle encrypted entries
   if (entry.isEncrypted) {
@@ -159,6 +179,15 @@ export function processEntryDataSync(
   validateEntrySizes = true
 ): Uint8Array {
   let result: Uint8Array;
+
+  // Pre-decompression size check (same as async version)
+  if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
+    throw new Error(
+      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+        `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
+        "Use the streaming API for large entries."
+    );
+  }
 
   // Handle encrypted entries
   if (entry.isEncrypted) {

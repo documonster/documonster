@@ -572,7 +572,10 @@ export function parseCsv(
     const objResult: Record<
       string,
       Record<string, unknown> | RecordWithInfo<Record<string, unknown>>
-    > = {};
+    > = Object.create(null) as Record<
+      string,
+      Record<string, unknown> | RecordWithInfo<Record<string, unknown>>
+    >;
     for (const item of objectRows) {
       const rec = config.infoOption
         ? (item as RecordWithInfo<Record<string, unknown>>).record
@@ -580,6 +583,11 @@ export function parseCsv(
       const key = (rec as Record<string, unknown>)[objname];
       // Convert undefined/null to empty string, otherwise convert to string
       const keyStr = key === undefined || key === null ? "" : String(key);
+      // Skip __proto__ to prevent prototype pollution via JSON.
+      // Note: constructor/prototype are safe on Object.create(null) objects.
+      if (keyStr === "__proto__") {
+        continue;
+      }
       objResult[keyStr] = item;
     }
     return {

@@ -114,6 +114,14 @@ export interface WorkbookReaderOptions {
   hyperlinks?: "cache" | "emit" | "ignore";
   styles?: "cache" | "ignore";
   entries?: "emit" | "ignore";
+  /**
+   * Maximum total bytes to buffer for worksheets that arrive before
+   * workbook metadata / shared strings are ready.
+   * Prevents memory exhaustion from malicious XLSX files with
+   * adversarial ZIP entry ordering.
+   * @default 256MB (268435456)
+   */
+  maxBufferedWorksheetBytes?: number;
 }
 
 /** Constructor type for WorksheetReader/HyperlinkReader */
@@ -155,6 +163,11 @@ export abstract class WorkbookReaderBase<
   properties?: WorkbookPropertiesXform;
   model?: WorkbookModel;
 
+  /** Maximum bytes to buffer for worksheets waiting on prerequisites. Default: 256 MB. */
+  protected _maxBufferedBytes: number;
+  /** Running total of bytes buffered for waiting worksheets. */
+  protected _totalBufferedBytes = 0;
+
   protected _hyperlinkReadersBySheetNo?: Record<string, THyperlinkReader>;
 
   protected _workbookRelIdByTarget?: Record<string, string>;
@@ -186,6 +199,7 @@ export abstract class WorkbookReaderBase<
     this.input = input;
     this.WorksheetReaderClass = WorksheetReaderClass;
     this.HyperlinkReaderClass = HyperlinkReaderClass;
+    this._maxBufferedBytes = options.maxBufferedWorksheetBytes ?? 256 * 1024 * 1024;
 
     this.options = {
       worksheets: "emit",
@@ -655,11 +669,23 @@ class WorkbookReader extends WorkbookReaderBase<
     const chunks: Uint8Array[] = [];
     const encoder = new TextEncoder();
     for await (const chunk of iterateStream(entry)) {
+      let bytes: Uint8Array;
       if (chunk instanceof Uint8Array) {
-        chunks.push(chunk);
+        bytes = chunk;
       } else if (typeof chunk === "string") {
-        chunks.push(encoder.encode(chunk));
+        bytes = encoder.encode(chunk);
+      } else {
+        continue;
       }
+      this._totalBufferedBytes += bytes.length;
+      if (this._totalBufferedBytes > this._maxBufferedBytes) {
+        throw new Error(
+          `Buffered worksheet data exceeds limit of ${this._maxBufferedBytes} bytes. ` +
+            "The XLSX file may be malicious (adversarial ZIP entry ordering) or too large " +
+            "for streaming. Increase maxBufferedWorksheetBytes if this is expected."
+        );
+      }
+      chunks.push(bytes);
     }
     return { sheetNo, data: chunks };
   }

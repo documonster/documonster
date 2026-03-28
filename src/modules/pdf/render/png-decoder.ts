@@ -14,6 +14,18 @@ import { decompressSync } from "@archive/compression/compress";
 import { concatUint8Arrays } from "@utils/binary";
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * Maximum allowed pixel count for PNG decoding (default: 100 million pixels).
+ * A 10000x10000 RGBA image at 100M pixels would need ~400MB for raw data alone.
+ * This limit prevents memory exhaustion from malicious PNG files with
+ * excessively large declared dimensions.
+ */
+const MAX_PNG_PIXELS = 100_000_000;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -85,6 +97,17 @@ export function decodePng(data: Uint8Array): DecodedPng {
         }
         if (bitDepth !== 8) {
           throw new Error(`Unsupported PNG bit depth: ${bitDepth}. Only 8-bit PNGs are supported.`);
+        }
+        // Guard against malicious dimensions that would cause memory exhaustion
+        if (width === 0 || height === 0) {
+          throw new Error(`Invalid PNG dimensions: ${width}x${height}`);
+        }
+        const totalPixels = width * height;
+        if (totalPixels > MAX_PNG_PIXELS) {
+          throw new Error(
+            `PNG dimensions too large: ${width}x${height} (${totalPixels} pixels). ` +
+              `Maximum allowed: ${MAX_PNG_PIXELS} pixels.`
+          );
         }
         break;
       }

@@ -179,7 +179,14 @@ export function formatField(
   // Escape formulae to prevent CSV injection (OWASP recommendation)
   // Prefix dangerous characters with single quote to neutralize them in spreadsheet apps
   // Using single quote (') as recommended by OWASP, which Excel interprets as a text prefix
-  if (escapeFormulae && transformQuoteHint !== false && startsWithFormulaChar(str)) {
+  // Skip numeric types: negative numbers like -5.55 are not formula injection vectors
+  if (
+    escapeFormulae &&
+    transformQuoteHint !== false &&
+    typeof value !== "number" &&
+    typeof value !== "bigint" &&
+    startsWithFormulaChar(str)
+  ) {
     str = "'" + str;
   }
 

@@ -69,10 +69,33 @@ class WorkbookReader extends WorkbookReaderBase<
       remove(tmpDir).catch(() => {});
     };
 
+    const maxBytes = this._maxBufferedBytes;
+
     const writePromise = new Promise<void>((resolve, reject) => {
       const tempStream = createWriteStream(filePath);
       tempStream.on("error", reject);
       tempStream.on("finish", resolve);
+
+      // Track bytes written to detect oversized waiting worksheets.
+      // Use an arrow function to capture `this` for cross-sheet accumulation.
+      const originalWrite = tempStream.write.bind(tempStream);
+      const trackWrite = (chunk: any, ...args: any[]): boolean => {
+        const size = chunk instanceof Uint8Array ? chunk.length : Buffer.byteLength(chunk);
+        this._totalBufferedBytes += size;
+        if (this._totalBufferedBytes > maxBytes) {
+          const err = new Error(
+            `Buffered worksheet temp data exceeds limit of ${maxBytes} bytes. ` +
+              "The XLSX file may be malicious (adversarial ZIP entry ordering) or too large " +
+              "for streaming. Increase maxBufferedWorksheetBytes if this is expected."
+          );
+          tempStream.destroy(err);
+          reject(err);
+          return false;
+        }
+        return originalWrite(chunk, ...args);
+      };
+      tempStream.write = trackWrite as typeof tempStream.write;
+
       entry.pipe(tempStream);
     });
 

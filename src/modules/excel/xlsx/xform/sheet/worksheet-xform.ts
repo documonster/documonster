@@ -665,13 +665,19 @@ class WorkSheetXform extends BaseXform {
     const rels = (model.relationships ?? []).reduce((h, rel) => {
       h[rel.Id] = rel;
       if (rel.Type === RelType.Comments) {
-        model.comments = options.comments[rel.Target].comments;
+        const commentEntry = options.comments?.[rel.Target];
+        if (commentEntry) {
+          model.comments = commentEntry.comments;
+        }
       }
       if (rel.Type === RelType.VmlDrawing && model.comments && model.comments.length) {
-        const vmlComment = options.vmlDrawings[rel.Target].comments;
-        model.comments.forEach((comment, index) => {
-          comment.note = Object.assign({}, comment.note, vmlComment[index]);
-        });
+        const vmlEntry = options.vmlDrawings?.[rel.Target];
+        if (vmlEntry) {
+          const vmlComment = vmlEntry.comments;
+          model.comments.forEach((comment, index) => {
+            comment.note = Object.assign({}, comment.note, vmlComment[index]);
+          });
+        }
       }
       return h;
     }, {});
@@ -684,7 +690,10 @@ class WorkSheetXform extends BaseXform {
     options.hyperlinkMap = (model.hyperlinks ?? []).reduce((h, hyperlink) => {
       if (hyperlink.rId) {
         // External link: resolve target from relationship
-        h[hyperlink.address] = rels[hyperlink.rId].Target;
+        const rel = rels[hyperlink.rId];
+        if (rel) {
+          h[hyperlink.address] = rel.Target;
+        }
       } else if (hyperlink.target) {
         // Internal link: target was restored from location attribute (with "#" prefix)
         h[hyperlink.address] = hyperlink.target;
@@ -706,32 +715,43 @@ class WorkSheetXform extends BaseXform {
     model.media = [];
     if (model.drawing) {
       const drawingRel = rels[model.drawing.rId];
-      const match = drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
-      if (match) {
-        const drawingName = match[1];
-        const drawing = options.drawings[drawingName];
-        if (drawing) {
-          // Preserve the drawing object for round-trip (charts, etc.)
-          // This includes the name, anchors, and rels
-          model.drawing = {
-            ...drawing,
-            name: drawingName,
-            rels: options.drawingRels?.[drawingName] ?? drawing.rels ?? []
-          };
+      if (drawingRel) {
+        const match = drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
+        if (match) {
+          const drawingName = match[1];
+          const drawing = options.drawings[drawingName];
+          if (drawing) {
+            // Preserve the drawing object for round-trip (charts, etc.)
+            // This includes the name, anchors, and rels
+            model.drawing = {
+              ...drawing,
+              name: drawingName,
+              rels: options.drawingRels?.[drawingName] ?? drawing.rels ?? []
+            };
 
-          // Also extract images to model.media for backward compatibility
-          drawing.anchors.forEach(anchor => {
-            if (anchor.medium) {
-              const image = {
-                type: "image",
-                imageId: anchor.medium.index,
-                range: anchor.range,
-                hyperlinks: anchor.picture.hyperlinks
-              };
-              model.media.push(image);
-            }
-          });
+            // Also extract images to model.media for backward compatibility
+            drawing.anchors.forEach(anchor => {
+              if (anchor.medium) {
+                const image = {
+                  type: "image",
+                  imageId: anchor.medium.index,
+                  range: anchor.range,
+                  hyperlinks: anchor.picture.hyperlinks
+                };
+                model.media.push(image);
+              }
+            });
+          } else {
+            // Drawing data not found - clear the stale reference
+            model.drawing = undefined;
+          }
+        } else {
+          // Target path doesn't match expected drawing pattern
+          model.drawing = undefined;
         }
+      } else {
+        // Relationship missing (corrupted/malicious file) - clear stale reference
+        model.drawing = undefined;
       }
     }
 
@@ -745,12 +765,21 @@ class WorkSheetXform extends BaseXform {
           imageId
         });
       }
+    } else if (model.background) {
+      // Relationship missing - clear stale reference
+      model.background = undefined;
     }
 
-    model.tables = (model.tables ?? []).map(tablePart => {
+    model.tables = (model.tables ?? []).reduce((acc, tablePart) => {
       const rel = rels[tablePart.rId];
-      return options.tables[rel.Target];
-    });
+      if (rel) {
+        const table = options.tables[rel.Target];
+        if (table) {
+          acc.push(table);
+        }
+      }
+      return acc;
+    }, []);
 
     // Link pivot tables from relationships to worksheet
     // This is needed so that when writing, the worksheet knows which pivot tables it contains

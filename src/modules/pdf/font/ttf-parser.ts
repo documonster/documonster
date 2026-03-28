@@ -22,6 +22,26 @@
 import { PdfFontError } from "../errors";
 
 // =============================================================================
+// Security Limits
+// =============================================================================
+
+/**
+ * Maximum number of groups allowed in a cmap format 12 table.
+ * The cmap format 12 numGroups field is u32 (max ~4 billion).
+ * A malicious font could declare billions of groups to cause CPU exhaustion.
+ * 65536 groups is more than sufficient for any legitimate font.
+ */
+const MAX_CMAP12_GROUPS = 65_536;
+
+/**
+ * Maximum number of total codepoints expanded from cmap format 12 groups.
+ * Unicode has 1,114,112 valid codepoints (U+0000 to U+10FFFF).
+ * Legitimate fonts map a subset of these. We cap at 2M to allow
+ * generous coverage while preventing memory exhaustion.
+ */
+const MAX_CMAP12_TOTAL_CODEPOINTS = 2_000_000;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -602,12 +622,31 @@ function readCmapFormat12(r: BEReader, offset: number): Map<number, number> {
   tr.skip(4); // language
   const numGroups = tr.u32();
 
+  // Guard against malicious fonts with excessive group counts
+  if (numGroups > MAX_CMAP12_GROUPS) {
+    throw new PdfFontError(
+      `cmap format 12 has ${numGroups} groups, exceeding limit of ${MAX_CMAP12_GROUPS}. ` +
+        "The font file may be malicious or corrupted."
+    );
+  }
+
   const map = new Map<number, number>();
+  let totalCodepoints = 0;
 
   for (let i = 0; i < numGroups; i++) {
     const startCharCode = tr.u32();
     const endCharCode = tr.u32();
     const startGlyphID = tr.u32();
+
+    // Validate range is not excessively large
+    const rangeSize = endCharCode >= startCharCode ? endCharCode - startCharCode + 1 : 0;
+    totalCodepoints += rangeSize;
+    if (totalCodepoints > MAX_CMAP12_TOTAL_CODEPOINTS) {
+      throw new PdfFontError(
+        `cmap format 12 maps too many codepoints (>${MAX_CMAP12_TOTAL_CODEPOINTS}). ` +
+          "The font file may be malicious or corrupted."
+      );
+    }
 
     for (let cp = startCharCode; cp <= endCharCode; cp++) {
       map.set(cp, startGlyphID + (cp - startCharCode));
