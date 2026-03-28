@@ -156,6 +156,29 @@ export {
 } from "@utils/binary";
 
 // =============================================================================
+// PDF Export
+// =============================================================================
+
+export {
+  PdfExporter,
+  exportPdf,
+  PageSizes,
+  PdfError,
+  PdfRenderError,
+  PdfFontError,
+  PdfStructureError,
+  isPdfError
+} from "@pdf/index";
+export type {
+  PdfExportOptions,
+  PdfPageSize,
+  PdfOrientation,
+  PdfMargins,
+  PageSizeName,
+  PdfColor
+} from "@pdf/index";
+
+// =============================================================================
 // Errors
 // =============================================================================
 

@@ -143,6 +143,29 @@ export {
 } from "@utils/binary";
 
 // =============================================================================
+// PDF Export (Browser-compatible, zero external dependencies)
+// =============================================================================
+
+export {
+  PdfExporter,
+  exportPdf,
+  PageSizes,
+  PdfError,
+  PdfRenderError,
+  PdfFontError,
+  PdfStructureError,
+  isPdfError
+} from "@pdf/index";
+export type {
+  PdfExportOptions,
+  PdfPageSize,
+  PdfOrientation,
+  PdfMargins,
+  PageSizeName,
+  PdfColor
+} from "@pdf/index";
+
+// =============================================================================
 // Errors
 // =============================================================================
 

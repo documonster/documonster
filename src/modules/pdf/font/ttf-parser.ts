@@ -1,0 +1,710 @@
+/**
+ * TrueType font file parser.
+ *
+ * Reads a TrueType (.ttf) or TrueType-flavored OpenType (.otf) font file
+ * and extracts the tables needed for PDF font embedding:
+ * - head: font header (units per em, index format)
+ * - hhea: horizontal header (ascent, descent, line gap, number of hmetrics)
+ * - maxp: maximum profile (number of glyphs)
+ * - OS/2: OS/2 and Windows metrics (weights, widths, unicode ranges)
+ * - cmap: character-to-glyph mapping (we use format 4 for BMP or format 12 for full Unicode)
+ * - hmtx: horizontal metrics (advance widths per glyph)
+ * - post: PostScript name mapping
+ * - loca: glyph location index (offsets into glyf table)
+ * - glyf: glyph outlines (needed for subsetting)
+ * - name: naming table (font family name, style, etc.)
+ *
+ * TrueType is Big Endian throughout.
+ *
+ * @see https://docs.microsoft.com/en-us/typography/opentype/spec/
+ */
+
+import { PdfFontError } from "../errors";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Parsed TrueType font data needed for PDF embedding.
+ */
+export interface TtfFont {
+  /** Raw font file bytes */
+  readonly data: Uint8Array;
+
+  /** Font family name (from name table, nameID 1) */
+  readonly familyName: string;
+
+  /** PostScript name (from name table, nameID 6) */
+  readonly postScriptName: string;
+
+  /** Units per em (from head table) */
+  readonly unitsPerEm: number;
+
+  /** Ascent in font units (from OS/2 sTypoAscender or hhea ascent) */
+  readonly ascent: number;
+
+  /** Descent in font units (negative, from OS/2 sTypoDescender or hhea descent) */
+  readonly descent: number;
+
+  /** Cap height in font units (from OS/2 sCapHeight, or estimated) */
+  readonly capHeight: number;
+
+  /** Italic angle in degrees (from post table) */
+  readonly italicAngle: number;
+
+  /** Font flags for PDF font descriptor */
+  readonly flags: number;
+
+  /** Font bounding box [xMin, yMin, xMax, yMax] in font units */
+  readonly bbox: [number, number, number, number];
+
+  /** StemV approximation for PDF font descriptor */
+  readonly stemV: number;
+
+  /** Number of glyphs in the font */
+  readonly numGlyphs: number;
+
+  /** Index-to-location format (0 = short offsets, 1 = long offsets) */
+  readonly indexToLocFormat: number;
+
+  /** Number of horizontal metrics entries (from hhea) */
+  readonly numHMetrics: number;
+
+  /** Table directory: tag → { offset, length } */
+  readonly tables: Map<string, TableEntry>;
+
+  /** Character-to-glyph ID mapping (Unicode code point → glyph ID) */
+  readonly cmap: Map<number, number>;
+
+  /** Advance widths per glyph ID (in font units) */
+  readonly advanceWidths: Uint16Array;
+
+  /** Glyph offsets (from loca table), used for subsetting */
+  readonly glyphOffsets: Uint32Array;
+}
+
+export interface TableEntry {
+  readonly offset: number;
+  readonly length: number;
+}
+
+// =============================================================================
+// Big Endian Reader
+// =============================================================================
+
+class BEReader {
+  private view: DataView;
+  private data: Uint8Array;
+  offset: number;
+
+  constructor(data: Uint8Array, offset = 0) {
+    this.data = data;
+    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    this.offset = offset;
+  }
+
+  u8(): number {
+    const v = this.view.getUint8(this.offset);
+    this.offset += 1;
+    return v;
+  }
+
+  u16(): number {
+    const v = this.view.getUint16(this.offset, false);
+    this.offset += 2;
+    return v;
+  }
+
+  i16(): number {
+    const v = this.view.getInt16(this.offset, false);
+    this.offset += 2;
+    return v;
+  }
+
+  u32(): number {
+    const v = this.view.getUint32(this.offset, false);
+    this.offset += 4;
+    return v;
+  }
+
+  i32(): number {
+    const v = this.view.getInt32(this.offset, false);
+    this.offset += 4;
+    return v;
+  }
+
+  /** Read a Fixed 16.16 number */
+  fixed(): number {
+    const v = this.i32();
+    return v / 65536;
+  }
+
+  bytes(len: number): Uint8Array {
+    const b = this.data.subarray(this.offset, this.offset + len);
+    this.offset += len;
+    return b;
+  }
+
+  tag(): string {
+    return String.fromCharCode(this.u8(), this.u8(), this.u8(), this.u8());
+  }
+
+  skip(n: number): void {
+    this.offset += n;
+  }
+
+  at(offset: number): BEReader {
+    return new BEReader(this.data, offset);
+  }
+
+  u16At(offset: number): number {
+    return this.view.getUint16(offset, false);
+  }
+
+  u32At(offset: number): number {
+    return this.view.getUint32(offset, false);
+  }
+
+  i16At(offset: number): number {
+    return this.view.getInt16(offset, false);
+  }
+}
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+/**
+ * Parse a TrueType font file.
+ *
+ * @param data - Raw .ttf or .otf file bytes
+ * @returns Parsed font data
+ * @throws {PdfFontError} If the font is invalid or unsupported
+ */
+export function parseTtf(data: Uint8Array): TtfFont {
+  const r = new BEReader(data);
+
+  // --- Offset table ---
+  const sfVersion = r.u32();
+  // TrueType: 0x00010000 or 'true' (0x74727565)
+  // OpenType with CFF: 'OTTO' (0x4F54544F) — not supported for subsetting
+  if (sfVersion !== 0x00010000 && sfVersion !== 0x74727565) {
+    if (sfVersion === 0x4f54544f) {
+      throw new PdfFontError(
+        "CFF-flavored OpenType (.otf) is not supported. Use a TrueType (.ttf) font."
+      );
+    }
+    throw new PdfFontError(`Invalid TrueType font: bad sfVersion 0x${sfVersion.toString(16)}`);
+  }
+
+  const numTables = r.u16();
+  r.skip(6); // searchRange, entrySelector, rangeShift
+
+  // --- Table directory ---
+  const tables = new Map<string, TableEntry>();
+  for (let i = 0; i < numTables; i++) {
+    const tag = r.tag();
+    r.skip(4); // checksum
+    const offset = r.u32();
+    const length = r.u32();
+    tables.set(tag, { offset, length });
+  }
+
+  // --- Validate required tables ---
+  const required = ["head", "hhea", "maxp", "cmap", "hmtx"];
+  for (const t of required) {
+    if (!tables.has(t)) {
+      throw new PdfFontError(`Missing required table '${t}' in TrueType font`);
+    }
+  }
+
+  // --- head table ---
+  const head = readHead(r, tables.get("head")!);
+
+  // --- hhea table ---
+  const hhea = readHhea(r, tables.get("hhea")!);
+
+  // --- maxp table ---
+  const maxp = readMaxp(r, tables.get("maxp")!);
+
+  // --- OS/2 table (optional but common) ---
+  const os2 = tables.has("OS/2") ? readOs2(r, tables.get("OS/2")!) : null;
+
+  // --- post table ---
+  const post = tables.has("post") ? readPost(r, tables.get("post")!) : null;
+
+  // --- name table ---
+  const names = tables.has("name") ? readName(r, tables.get("name")!) : null;
+
+  // --- cmap table ---
+  const cmap = readCmap(r, tables.get("cmap")!);
+
+  // --- hmtx table ---
+  const advanceWidths = readHmtx(r, tables.get("hmtx")!, hhea.numHMetrics, maxp.numGlyphs);
+
+  // --- loca table ---
+  const glyphOffsets =
+    tables.has("loca") && tables.has("glyf")
+      ? readLoca(r, tables.get("loca")!, maxp.numGlyphs, head.indexToLocFormat)
+      : new Uint32Array(maxp.numGlyphs + 1);
+
+  // --- Compute font descriptor values ---
+  const ascent = os2?.sTypoAscender ?? hhea.ascent;
+  const descent = os2?.sTypoDescender ?? hhea.descent;
+  const capHeight = os2?.sCapHeight ?? Math.round(ascent * 0.7);
+
+  let flags = 0;
+  // Bit 1 (FixedPitch): check post.isFixedPitch
+  if (post?.isFixedPitch) {
+    flags |= 1;
+  }
+  // Bit 3 (Symbolic): we mark non-symbolic since we use Unicode
+  // Bit 6 (Italic): check head.macStyle bit 1 or post.italicAngle != 0
+  if (head.macStyle & 0x02) {
+    flags |= 1 << 6;
+  }
+  // Bit 2 (Serif): approximate from OS/2 sFamilyClass
+  // Bit 5 (Nonsymbolic): we always set this for Unicode fonts
+  flags |= 1 << 5; // Nonsymbolic
+
+  // StemV approximation from weight class
+  const weight = os2?.usWeightClass ?? 400;
+  const stemV = Math.round(50 + (weight / 65) ** 2);
+
+  const familyName = names?.familyName ?? "Unknown";
+  const postScriptName = names?.postScriptName ?? familyName.replace(/\s+/g, "");
+
+  return {
+    data,
+    familyName,
+    postScriptName,
+    unitsPerEm: head.unitsPerEm,
+    ascent,
+    descent,
+    capHeight,
+    italicAngle: post?.italicAngle ?? 0,
+    flags,
+    bbox: [head.xMin, head.yMin, head.xMax, head.yMax],
+    stemV,
+    numGlyphs: maxp.numGlyphs,
+    indexToLocFormat: head.indexToLocFormat,
+    numHMetrics: hhea.numHMetrics,
+    tables,
+    cmap,
+    advanceWidths,
+    glyphOffsets
+  };
+}
+
+// =============================================================================
+// Table Readers
+// =============================================================================
+
+interface HeadData {
+  unitsPerEm: number;
+  xMin: number;
+  yMin: number;
+  xMax: number;
+  yMax: number;
+  macStyle: number;
+  indexToLocFormat: number;
+}
+
+function readHead(r: BEReader, entry: TableEntry): HeadData {
+  const tr = r.at(entry.offset);
+  tr.skip(4); // majorVersion, minorVersion
+  tr.skip(4); // fontRevision (Fixed)
+  tr.skip(4); // checksumAdjustment
+  tr.skip(4); // magicNumber
+  tr.skip(2); // flags
+  const unitsPerEm = tr.u16();
+  tr.skip(16); // created, modified (LONGDATETIME × 2)
+  const xMin = tr.i16();
+  const yMin = tr.i16();
+  const xMax = tr.i16();
+  const yMax = tr.i16();
+  const macStyle = tr.u16();
+  tr.skip(2); // lowestRecPPEM
+  tr.skip(2); // fontDirectionHint
+  const indexToLocFormat = tr.i16();
+  return { unitsPerEm, xMin, yMin, xMax, yMax, macStyle, indexToLocFormat };
+}
+
+interface HheaData {
+  ascent: number;
+  descent: number;
+  lineGap: number;
+  numHMetrics: number;
+}
+
+function readHhea(r: BEReader, entry: TableEntry): HheaData {
+  const tr = r.at(entry.offset);
+  tr.skip(4); // majorVersion, minorVersion
+  const ascent = tr.i16();
+  const descent = tr.i16();
+  const lineGap = tr.i16();
+  tr.skip(2); // advanceWidthMax
+  tr.skip(2 * 11); // 11 more int16/uint16 fields
+  const numHMetrics = tr.u16();
+  return { ascent, descent, lineGap, numHMetrics };
+}
+
+interface MaxpData {
+  numGlyphs: number;
+}
+
+function readMaxp(r: BEReader, entry: TableEntry): MaxpData {
+  const tr = r.at(entry.offset);
+  tr.skip(4); // version
+  const numGlyphs = tr.u16();
+  return { numGlyphs };
+}
+
+interface Os2Data {
+  usWeightClass: number;
+  sTypoAscender: number;
+  sTypoDescender: number;
+  sCapHeight: number;
+}
+
+function readOs2(r: BEReader, entry: TableEntry): Os2Data {
+  const tr = r.at(entry.offset);
+  const version = tr.u16();
+  tr.skip(2); // xAvgCharWidth
+  const usWeightClass = tr.u16();
+  tr.skip(2); // usWidthClass
+  tr.skip(2); // fsType
+  tr.skip(2 * 11); // ySubscript*, ySuperscript*, yStrikeout*, sFamilyClass
+  tr.skip(10); // panose[10]
+  tr.skip(4 * 4); // ulUnicodeRange 1-4
+  tr.skip(4); // achVendID
+  tr.skip(2); // fsSelection
+  tr.skip(2); // usFirstCharIndex
+  tr.skip(2); // usLastCharIndex
+  const sTypoAscender = tr.i16();
+  const sTypoDescender = tr.i16();
+  tr.skip(2); // sTypoLineGap
+  tr.skip(2); // usWinAscent
+  tr.skip(2); // usWinDescent
+
+  let sCapHeight: number;
+  if (version >= 2) {
+    tr.skip(4 * 2); // ulCodePageRange 1-2
+    tr.skip(2); // sxHeight
+    sCapHeight = tr.i16();
+  } else {
+    sCapHeight = Math.round(sTypoAscender * 0.7);
+  }
+
+  return { usWeightClass, sTypoAscender, sTypoDescender, sCapHeight };
+}
+
+interface PostData {
+  italicAngle: number;
+  isFixedPitch: boolean;
+}
+
+function readPost(r: BEReader, entry: TableEntry): PostData {
+  const tr = r.at(entry.offset);
+  tr.skip(4); // version (Fixed)
+  const italicAngle = tr.fixed();
+  tr.skip(2); // underlinePosition
+  tr.skip(2); // underlineThickness
+  const isFixedPitch = tr.u32() !== 0;
+  return { italicAngle, isFixedPitch };
+}
+
+interface NameData {
+  familyName: string;
+  postScriptName: string;
+}
+
+function readName(r: BEReader, entry: TableEntry): NameData {
+  const base = entry.offset;
+  const tr = r.at(base);
+  tr.skip(2); // format
+  const count = tr.u16();
+  const storageOffset = tr.u16();
+  const stringStorageBase = base + storageOffset;
+
+  let familyName = "";
+  let postScriptName = "";
+
+  for (let i = 0; i < count; i++) {
+    const platformID = tr.u16();
+    const encodingID = tr.u16();
+    tr.skip(2); // languageID
+    const nameID = tr.u16();
+    const length = tr.u16();
+    const offset = tr.u16();
+
+    // We want nameID 1 (family) and nameID 6 (PostScript name)
+    if (nameID !== 1 && nameID !== 6) {
+      continue;
+    }
+
+    const strBytes = r.at(stringStorageBase + offset).bytes(length);
+    let str: string;
+
+    if (platformID === 3 || platformID === 0) {
+      // Windows (platformID=3) or Unicode (platformID=0): UTF-16BE
+      str = decodeUtf16BE(strBytes);
+    } else if (platformID === 1 && encodingID === 0) {
+      // Macintosh Roman
+      str = decodeMacRoman(strBytes);
+    } else {
+      continue;
+    }
+
+    if (nameID === 1 && !familyName) {
+      familyName = str;
+    }
+    if (nameID === 6 && !postScriptName) {
+      postScriptName = str;
+    }
+  }
+
+  return {
+    familyName: familyName || "Unknown",
+    postScriptName: postScriptName || familyName || "Unknown"
+  };
+}
+
+// =============================================================================
+// cmap Table
+// =============================================================================
+
+/**
+ * Read the cmap table and extract a Unicode code point → glyph ID mapping.
+ * Prefers format 12 (full Unicode) over format 4 (BMP only).
+ */
+function readCmap(r: BEReader, entry: TableEntry): Map<number, number> {
+  const base = entry.offset;
+  const tr = r.at(base);
+  tr.skip(2); // version
+  const numSubtables = tr.u16();
+
+  let format4Offset = -1;
+  let format12Offset = -1;
+
+  for (let i = 0; i < numSubtables; i++) {
+    const platformID = tr.u16();
+    const encodingID = tr.u16();
+    const subtableOffset = tr.u32();
+
+    // Look for Unicode or Windows Unicode subtables
+    const isUnicode =
+      platformID === 0 || // Unicode platform
+      (platformID === 3 && (encodingID === 1 || encodingID === 10)); // Windows Unicode BMP or full
+
+    if (!isUnicode) {
+      continue;
+    }
+
+    const format = r.u16At(base + subtableOffset);
+    if (format === 12 && format12Offset < 0) {
+      format12Offset = base + subtableOffset;
+    }
+    if (format === 4 && format4Offset < 0) {
+      format4Offset = base + subtableOffset;
+    }
+  }
+
+  // Prefer format 12 (full Unicode support)
+  if (format12Offset >= 0) {
+    return readCmapFormat12(r, format12Offset);
+  }
+  if (format4Offset >= 0) {
+    return readCmapFormat4(r, format4Offset);
+  }
+
+  throw new PdfFontError("No usable Unicode cmap subtable found in font");
+}
+
+/**
+ * Read cmap format 4 (Segment mapping to delta values).
+ * Handles BMP code points (U+0000 to U+FFFF).
+ */
+function readCmapFormat4(r: BEReader, offset: number): Map<number, number> {
+  const tr = r.at(offset);
+  tr.skip(2); // format (4)
+  tr.skip(2); // length
+  tr.skip(2); // language
+  const segCountX2 = tr.u16();
+  const segCount = segCountX2 / 2;
+  tr.skip(6); // searchRange, entrySelector, rangeShift
+
+  const endCodes: number[] = [];
+  for (let i = 0; i < segCount; i++) {
+    endCodes.push(tr.u16());
+  }
+  tr.skip(2); // reservedPad
+
+  const startCodes: number[] = [];
+  for (let i = 0; i < segCount; i++) {
+    startCodes.push(tr.u16());
+  }
+
+  const idDeltas: number[] = [];
+  for (let i = 0; i < segCount; i++) {
+    idDeltas.push(tr.i16());
+  }
+
+  const idRangeOffsetPos = tr.offset;
+  const idRangeOffsets: number[] = [];
+  for (let i = 0; i < segCount; i++) {
+    idRangeOffsets.push(tr.u16());
+  }
+
+  const map = new Map<number, number>();
+
+  for (let i = 0; i < segCount; i++) {
+    const start = startCodes[i];
+    const end = endCodes[i];
+    const delta = idDeltas[i];
+    const rangeOffset = idRangeOffsets[i];
+
+    if (start === 0xffff) {
+      break;
+    }
+
+    for (let cp = start; cp <= end; cp++) {
+      let glyphId: number;
+      if (rangeOffset === 0) {
+        glyphId = (cp + delta) & 0xffff;
+      } else {
+        // Read from the glyph ID array
+        const glyphOffset = idRangeOffsetPos + i * 2 + rangeOffset + (cp - start) * 2;
+        glyphId = r.u16At(glyphOffset);
+        if (glyphId !== 0) {
+          glyphId = (glyphId + delta) & 0xffff;
+        }
+      }
+      if (glyphId !== 0) {
+        map.set(cp, glyphId);
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Read cmap format 12 (Segmented coverage).
+ * Handles the full Unicode range (U+0000 to U+10FFFF).
+ */
+function readCmapFormat12(r: BEReader, offset: number): Map<number, number> {
+  const tr = r.at(offset);
+  tr.skip(2); // format (12)
+  tr.skip(2); // reserved
+  tr.skip(4); // length
+  tr.skip(4); // language
+  const numGroups = tr.u32();
+
+  const map = new Map<number, number>();
+
+  for (let i = 0; i < numGroups; i++) {
+    const startCharCode = tr.u32();
+    const endCharCode = tr.u32();
+    const startGlyphID = tr.u32();
+
+    for (let cp = startCharCode; cp <= endCharCode; cp++) {
+      map.set(cp, startGlyphID + (cp - startCharCode));
+    }
+  }
+
+  return map;
+}
+
+// =============================================================================
+// hmtx Table
+// =============================================================================
+
+/**
+ * Read horizontal metrics. Returns advance widths for all glyphs.
+ */
+function readHmtx(
+  r: BEReader,
+  entry: TableEntry,
+  numHMetrics: number,
+  numGlyphs: number
+): Uint16Array {
+  const tr = r.at(entry.offset);
+  const widths = new Uint16Array(numGlyphs);
+
+  let lastWidth = 0;
+  for (let i = 0; i < numHMetrics; i++) {
+    lastWidth = tr.u16();
+    tr.skip(2); // lsb (left side bearing)
+    widths[i] = lastWidth;
+  }
+  // Remaining glyphs share the last advanceWidth
+  for (let i = numHMetrics; i < numGlyphs; i++) {
+    widths[i] = lastWidth;
+  }
+
+  return widths;
+}
+
+// =============================================================================
+// loca Table
+// =============================================================================
+
+/**
+ * Read glyph offsets from loca table.
+ * Returns numGlyphs+1 offsets (the extra one marks the end of the last glyph).
+ */
+function readLoca(
+  r: BEReader,
+  entry: TableEntry,
+  numGlyphs: number,
+  indexToLocFormat: number
+): Uint32Array {
+  const tr = r.at(entry.offset);
+  const offsets = new Uint32Array(numGlyphs + 1);
+
+  if (indexToLocFormat === 0) {
+    // Short format: offsets are uint16, multiply by 2
+    for (let i = 0; i <= numGlyphs; i++) {
+      offsets[i] = tr.u16() * 2;
+    }
+  } else {
+    // Long format: offsets are uint32
+    for (let i = 0; i <= numGlyphs; i++) {
+      offsets[i] = tr.u32();
+    }
+  }
+
+  return offsets;
+}
+
+// =============================================================================
+// String Decoders
+// =============================================================================
+
+function decodeUtf16BE(bytes: Uint8Array): string {
+  const chars: string[] = [];
+  for (let i = 0; i + 1 < bytes.length; i += 2) {
+    const code = (bytes[i] << 8) | bytes[i + 1];
+    if (code >= 0xd800 && code <= 0xdbff && i + 3 < bytes.length) {
+      const low = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        chars.push(String.fromCodePoint(((code - 0xd800) << 10) + (low - 0xdc00) + 0x10000));
+        i += 2;
+        continue;
+      }
+    }
+    chars.push(String.fromCharCode(code));
+  }
+  return chars.join("");
+}
+
+function decodeMacRoman(bytes: Uint8Array): string {
+  // Mac Roman is close to ASCII for 0-127; for simplicity treat as Latin1
+  const chars: string[] = [];
+  for (let i = 0; i < bytes.length; i++) {
+    chars.push(String.fromCharCode(bytes[i]));
+  }
+  return chars.join("");
+}

@@ -1,0 +1,228 @@
+/**
+ * Tests for PDF content stream builder.
+ */
+import { describe, it, expect } from "vitest";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
+
+describe("PdfContentStream", () => {
+  describe("Graphics State", () => {
+    it("should generate save/restore operators", () => {
+      const stream = new PdfContentStream();
+      stream.save().restore();
+      expect(stream.toString()).toBe("q\nQ");
+    });
+  });
+
+  describe("Color Operators", () => {
+    it("should set stroke color", () => {
+      const stream = new PdfContentStream();
+      stream.setStrokeColor({ r: 1, g: 0, b: 0 });
+      expect(stream.toString()).toBe("1 0 0 RG");
+    });
+
+    it("should set fill color", () => {
+      const stream = new PdfContentStream();
+      stream.setFillColor({ r: 0, g: 0.5, b: 1 });
+      expect(stream.toString()).toBe("0 0.5 1 rg");
+    });
+  });
+
+  describe("Line Style", () => {
+    it("should set line width", () => {
+      const stream = new PdfContentStream();
+      stream.setLineWidth(2);
+      expect(stream.toString()).toBe("2 w");
+    });
+
+    it("should set dash pattern", () => {
+      const stream = new PdfContentStream();
+      stream.setDashPattern([3, 2], 0);
+      expect(stream.toString()).toBe("[3 2] 0 d");
+    });
+
+    it("should set solid line (empty dash)", () => {
+      const stream = new PdfContentStream();
+      stream.setDashPattern([]);
+      expect(stream.toString()).toBe("[] 0 d");
+    });
+  });
+
+  describe("Path Construction", () => {
+    it("should move to a point", () => {
+      const stream = new PdfContentStream();
+      stream.moveTo(100, 200);
+      expect(stream.toString()).toBe("100 200 m");
+    });
+
+    it("should draw a line", () => {
+      const stream = new PdfContentStream();
+      stream.moveTo(0, 0).lineTo(100, 200);
+      expect(stream.toString()).toBe("0 0 m\n100 200 l");
+    });
+
+    it("should draw a rectangle", () => {
+      const stream = new PdfContentStream();
+      stream.rect(10, 20, 100, 50);
+      expect(stream.toString()).toBe("10 20 100 50 re");
+    });
+  });
+
+  describe("Path Painting", () => {
+    it("should stroke", () => {
+      const stream = new PdfContentStream();
+      stream.stroke();
+      expect(stream.toString()).toBe("S");
+    });
+
+    it("should fill", () => {
+      const stream = new PdfContentStream();
+      stream.fill();
+      expect(stream.toString()).toBe("f");
+    });
+
+    it("should fill and stroke", () => {
+      const stream = new PdfContentStream();
+      stream.fillAndStroke();
+      expect(stream.toString()).toBe("B");
+    });
+  });
+
+  describe("Text Operations", () => {
+    it("should begin and end text", () => {
+      const stream = new PdfContentStream();
+      stream.beginText().endText();
+      expect(stream.toString()).toBe("BT\nET");
+    });
+
+    it("should set font", () => {
+      const stream = new PdfContentStream();
+      stream.setFont("F1", 12);
+      expect(stream.toString()).toBe("/F1 12 Tf");
+    });
+
+    it("should show text", () => {
+      const stream = new PdfContentStream();
+      stream.showText("Hello World");
+      expect(stream.toString()).toBe("(Hello World) Tj");
+    });
+
+    it("should escape text content", () => {
+      const stream = new PdfContentStream();
+      stream.showText("Hello (world)");
+      expect(stream.toString()).toBe("(Hello \\(world\\)) Tj");
+    });
+
+    it("should set text matrix for positioning", () => {
+      const stream = new PdfContentStream();
+      stream.setTextMatrix(1, 0, 0, 1, 72, 720);
+      expect(stream.toString()).toBe("1 0 0 1 72 720 Tm");
+    });
+
+    it("should move text position", () => {
+      const stream = new PdfContentStream();
+      stream.moveText(10, -15);
+      expect(stream.toString()).toBe("10 -15 Td");
+    });
+  });
+
+  describe("Convenience Methods", () => {
+    it("should draw a filled rectangle", () => {
+      const stream = new PdfContentStream();
+      stream.fillRect(10, 20, 100, 50, { r: 0.9, g: 0.9, b: 0.9 });
+      const result = stream.toString();
+      expect(result).toContain("q");
+      expect(result).toContain("0.9 0.9 0.9 rg");
+      expect(result).toContain("10 20 100 50 re");
+      expect(result).toContain("f");
+      expect(result).toContain("Q");
+    });
+
+    it("should draw a line with color and width", () => {
+      const stream = new PdfContentStream();
+      stream.drawLine(0, 0, 100, 100, { r: 0, g: 0, b: 0 }, 1);
+      const result = stream.toString();
+      expect(result).toContain("q");
+      expect(result).toContain("0 0 0 RG");
+      expect(result).toContain("1 w");
+      expect(result).toContain("0 0 m");
+      expect(result).toContain("100 100 l");
+      expect(result).toContain("S");
+      expect(result).toContain("Q");
+    });
+
+    it("should draw a dashed line", () => {
+      const stream = new PdfContentStream();
+      stream.drawLine(0, 0, 100, 0, { r: 0.5, g: 0.5, b: 0.5 }, 0.5, [3, 2]);
+      const result = stream.toString();
+      expect(result).toContain("[3 2] 0 d");
+    });
+  });
+
+  describe("Serialization", () => {
+    it("should convert to Uint8Array", () => {
+      const stream = new PdfContentStream();
+      stream.moveTo(0, 0).lineTo(100, 100).stroke();
+      const bytes = stream.toUint8Array();
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      expect(bytes.length).toBeGreaterThan(0);
+    });
+
+    it("should produce valid UTF-8", () => {
+      const stream = new PdfContentStream();
+      stream.showText("Hello");
+      const bytes = stream.toUint8Array();
+      const text = new TextDecoder().decode(bytes);
+      expect(text).toBe("(Hello) Tj");
+    });
+  });
+
+  describe("WinAnsi Encoding", () => {
+    it("should encode non-ASCII Latin chars as WinAnsi hex string", () => {
+      const stream = new PdfContentStream();
+      stream.showText("café");
+      // c=0x63, a=0x61, f=0x66, é=0xE9 in WinAnsi
+      expect(stream.toString()).toBe("<636166e9> Tj");
+    });
+
+    it("should keep pure ASCII as parenthesized string", () => {
+      const stream = new PdfContentStream();
+      stream.showText("Hello");
+      expect(stream.toString()).toBe("(Hello) Tj");
+    });
+
+    it("should encode € as WinAnsi 0x80", () => {
+      const stream = new PdfContentStream();
+      stream.showText("€10");
+      // €=0x80, 1=0x31, 0=0x30
+      expect(stream.toString()).toBe("<803130> Tj");
+    });
+
+    it("should replace unmappable chars with ?", () => {
+      const stream = new PdfContentStream();
+      // Chinese char not in WinAnsi → should become 0x3F (?)
+      stream.showText("A\u4e2dB");
+      expect(stream.toString()).toBe("<413f42> Tj");
+    });
+
+    it("should handle ü ñ ö correctly", () => {
+      const stream = new PdfContentStream();
+      stream.showText("üñö");
+      // ü=0xFC, ñ=0xF1, ö=0xF6
+      expect(stream.toString()).toBe("<fcf1f6> Tj");
+    });
+  });
+
+  describe("nextLineShowText WinAnsi", () => {
+    it("should encode non-ASCII via WinAnsi for next-line-show", () => {
+      const stream = new PdfContentStream();
+      stream.nextLineShowText("café");
+      expect(stream.toString()).toBe("<636166e9> '");
+    });
+
+    it("should keep ASCII as parenthesized string for next-line-show", () => {
+      const stream = new PdfContentStream();
+      stream.nextLineShowText("Hello");
+      expect(stream.toString()).toBe("(Hello) '");
+    });
+  });
+});

@@ -7,6 +7,8 @@
       "@stream": ["./src/modules/stream/index.ts"],
       "@stream/*": ["./src/modules/stream/*"],
       "@csv/*": ["./src/modules/csv/*"],
+      "@pdf": ["./src/modules/pdf/index.ts"],
+      "@pdf/*": ["./src/modules/pdf/*"],
       "@utils/*": ["./src/utils/*"],
       "@test/*": ["./src/test/*"]
     },
