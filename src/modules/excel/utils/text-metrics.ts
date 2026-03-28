@@ -24,7 +24,9 @@
  * - rust_xlsxwriter utility.rs (Calibri 11pt pixel table)
  * - excelize col.go (factor-based calculation)
  */
-import type { Font, Alignment, RichText } from "@excel/types";
+import type { Font, Alignment, NumFmt, RichText } from "@excel/types";
+import { ValueType } from "@excel/enums";
+import { getCellDisplayText } from "@excel/utils/cell-format";
 import {
   getCalibri11PtPixelWidth,
   getFontMetrics,
@@ -674,4 +676,85 @@ export function getColumnContentWidthPx(charWidth: number, mdw: number): number 
   const totalPx = charWidthToPixel(charWidth, mdw);
   const pp = getPixelPadding(mdw);
   return Math.max(0, totalPx - pp);
+}
+
+// =============================================================================
+// Cell-Level Measurement Helpers
+// =============================================================================
+
+/**
+ * Minimal cell shape used by cell-level measurement helpers.
+ * Avoids importing the full `Cell` class to prevent circular dependencies.
+ */
+export interface MeasurableCell {
+  readonly value: unknown;
+  readonly numFmt: string | NumFmt | undefined;
+  readonly text: string;
+  readonly effectiveType: ValueType;
+  readonly font: Partial<Font> | undefined;
+  readonly alignment: Partial<Alignment> | undefined;
+}
+
+/**
+ * Get the pixel width of a cell's display text.
+ *
+ * Handles all cell value types: string, number (formatted), date (formatted),
+ * boolean, formula result, rich text, hyperlink, error.
+ */
+export function getCellTextWidthPx(cell: MeasurableCell): number {
+  const cellType = cell.effectiveType;
+  const font = cell.font;
+
+  // Rich text: measure per-run with individual fonts
+  if (cellType === ValueType.RichText) {
+    const value = cell.value;
+    if (value && typeof value === "object" && "richText" in value) {
+      return measureRichTextWidthPx((value as { richText: RichText[] }).richText, font);
+    }
+  }
+
+  // Get the display text (applies number formatting)
+  const displayText = getCellDisplayText(cell);
+  if (!displayText) {
+    return 0;
+  }
+
+  return measureTextWidthPx(displayText, font);
+}
+
+/**
+ * Get the height in points a cell needs.
+ *
+ * Considers wrapText alignment, indent, and explicit newlines.
+ *
+ * @param cell           - The cell to measure
+ * @param mdw            - Max digit width in pixels
+ * @param columnWidthPx  - Column content width in pixels (needed for wrapText cells)
+ */
+export function getCellHeightPt(cell: MeasurableCell, mdw: number, columnWidthPx?: number): number {
+  const font = cell.font;
+  const alignment = cell.alignment;
+  const cellType = cell.effectiveType;
+
+  // Rich text
+  if (cellType === ValueType.RichText) {
+    const value = cell.value;
+    if (value && typeof value === "object" && "richText" in value) {
+      return calculateRichTextAutoFitHeight(
+        (value as { richText: RichText[] }).richText,
+        font,
+        alignment,
+        columnWidthPx
+      );
+    }
+  }
+
+  const displayText = getCellDisplayText(cell);
+  if (!displayText) {
+    return 0;
+  }
+
+  const effectiveColWidthPx = alignment?.wrapText ? columnWidthPx : undefined;
+
+  return calculateAutoFitHeight(displayText, font, alignment, effectiveColWidthPx);
 }

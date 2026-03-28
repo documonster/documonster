@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "rootDir": "./src",
     "paths": {
       "@archive": ["./src/modules/archive/index.ts"],
       "@excel/*": ["./src/modules/excel/*"],
@@ -16,8 +17,6 @@
     "moduleResolution": "bundler",
     "target": "es2020",
     "lib": ["ESNext", "DOM"],
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "useUnknownInCatchVariables": false,
     "noImplicitAny": false,

@@ -127,7 +127,7 @@
     "test:browser": "npm run generate:csv-worker && rimraf dist && npm run build:browser:bundle && vitest run --config vitest.browser.config.ts",
     "test:watch": "vitest",
     "build": "npm run generate:csv-worker && rimraf dist && concurrently \"npm run build:esm\" \"npm run build:cjs\" \"npm run build:browser\" \"npm run build:browser:bundle\" && npm run build:verify",
-    "build:verify": "tsc --noEmit --module NodeNext --moduleResolution NodeNext dist/types/index.d.ts dist/types/modules/archive/index.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/stream/index.d.ts",
+    "build:verify": "tsc --noEmit --ignoreConfig --module NodeNext --moduleResolution NodeNext --lib ESNext,DOM --types node dist/types/index.d.ts dist/types/modules/archive/index.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/stream/index.d.ts",
     "verify:treeshake": "node scripts/treeshake-verify/verify.ts",
     "analyze:browser": "rimraf dist && node --input-type=module -e \"import { execSync } from 'node:child_process'; process.env.ANALYZE='true'; execSync('rolldown -c rolldown.config.ts', { stdio: 'inherit' });\"",
     "clean": "pnpm dlx --reporter=silent rimraf \"**/node_modules\" pnpm-lock.yaml \"**/dist\" -g && pnpm i",

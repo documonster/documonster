@@ -6,6 +6,7 @@
  * scientific notation, fractions, elapsed time, and more
  */
 
+import type { NumFmt } from "@excel/types";
 import { excelToDate, splitFormatSections, dateToExcel } from "@utils/utils";
 
 // =============================================================================
@@ -981,4 +982,62 @@ export function formatCellValue(
     return format(actualFmt, serial);
   }
   return format(fmt, value);
+}
+
+// =============================================================================
+// Cell Display Text
+// =============================================================================
+
+/** Minimal cell shape needed by {@link getCellDisplayText} — avoids importing Cell. */
+interface CellLike {
+  value: unknown;
+  numFmt: string | NumFmt | undefined;
+  text: string;
+}
+
+/**
+ * Get the formatted display text for a cell value.
+ *
+ * Handles primitive values, Date objects, formula results, and falls back to
+ * `cell.text` for complex types (rich text, hyperlinks, errors, etc.).
+ *
+ * @param cell       - A cell (or cell-like object) with `.value`, `.numFmt`, and `.text`
+ * @param dateFormat - Optional custom date format override
+ */
+export function getCellDisplayText(cell: CellLike, dateFormat?: string): string {
+  const value = cell.value;
+  const numFmt = cell.numFmt;
+  const fmt = typeof numFmt === "string" ? numFmt : (numFmt?.formatCode ?? "General");
+
+  if (value == null) {
+    return "";
+  }
+
+  if (
+    value instanceof Date ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
+    return formatCellValue(value, fmt, dateFormat);
+  }
+
+  // Formula type — use the result value
+  if (typeof value === "object" && "formula" in value) {
+    const result = (value as { formula: string; result?: unknown }).result;
+    if (result == null) {
+      return "";
+    }
+    if (
+      result instanceof Date ||
+      typeof result === "number" ||
+      typeof result === "boolean" ||
+      typeof result === "string"
+    ) {
+      return formatCellValue(result, fmt, dateFormat);
+    }
+  }
+
+  // Fallback to cell.text for other types (rich text, hyperlink, error, etc.)
+  return cell.text;
 }

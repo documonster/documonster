@@ -14,20 +14,17 @@ import {
   type FormCheckboxOptions,
   type FormControlRange
 } from "@excel/form-control";
-import { Encryptor } from "@excel/utils/encryptor";
-import { uint8ArrayToBase64 } from "@utils/utils";
 import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
 import { copyStyle } from "@excel/utils/copy-style";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import { formatCellValue } from "@excel/utils/cell-format";
+import { getCellDisplayText } from "@excel/utils/cell-format";
+import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import {
-  measureTextWidthPx,
-  measureRichTextWidthPx,
   calculateAutoFitWidth,
-  calculateAutoFitHeight,
-  calculateRichTextAutoFitHeight,
   getMaxDigitWidth,
-  getColumnContentWidthPx
+  getColumnContentWidthPx,
+  getCellTextWidthPx,
+  getCellHeightPt
 } from "@excel/utils/text-metrics";
 import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/address";
 import type { Workbook } from "@excel/workbook";
@@ -1321,33 +1318,7 @@ class Worksheet {
    * Protect the worksheet with optional password and options
    */
   async protect(password?: string, options?: Partial<SheetProtection>): Promise<void> {
-    this.sheetProtection = {
-      sheet: true
-    };
-    if (options && "spinCount" in options) {
-      // force spinCount to be integer >= 0
-      options.spinCount = Number.isFinite(options.spinCount)
-        ? Math.round(Math.max(0, options.spinCount!))
-        : 100000;
-    }
-    if (password) {
-      this.sheetProtection.algorithmName = "SHA-512";
-      this.sheetProtection.saltValue = uint8ArrayToBase64(Encryptor.randomBytes(16));
-      this.sheetProtection.spinCount =
-        options && "spinCount" in options ? options.spinCount : 100000; // allow user specified spinCount
-      this.sheetProtection.hashValue = await Encryptor.convertPasswordToHash(
-        password,
-        "SHA-512",
-        this.sheetProtection.saltValue!,
-        this.sheetProtection.spinCount!
-      );
-    }
-    if (options) {
-      this.sheetProtection = Object.assign(this.sheetProtection, options);
-      if (!password && "spinCount" in options) {
-        delete this.sheetProtection.spinCount;
-      }
-    }
+    this.sheetProtection = await buildSheetProtection(password, options);
   }
 
   unprotect(): void {
@@ -1550,7 +1521,7 @@ class Worksheet {
         return;
       }
 
-      let textWidthPx = this._getCellTextWidthPx(cell);
+      let textWidthPx = getCellTextWidthPx(cell);
 
       // Account for indent: each level adds approximately 3 character widths
       const indent = cell.alignment?.indent;
@@ -1601,7 +1572,8 @@ class Worksheet {
         return;
       }
 
-      const heightPt = this._getCellHeightPt(cell, mdw);
+      const columnWidthPx = this._getColumnContentWidthForCell(cell, mdw);
+      const heightPt = getCellHeightPt(cell, mdw, columnWidthPx);
       if (heightPt > maxHeightPt) {
         maxHeightPt = heightPt;
       }
@@ -1611,62 +1583,6 @@ class Worksheet {
       row.height = Math.ceil(maxHeightPt * 4) / 4; // Round to nearest 0.25pt (Excel precision)
       row.customHeight = true;
     }
-  }
-
-  /**
-   * @internal Get the pixel width of a cell's display text.
-   * Handles all cell value types: string, number (formatted), date (formatted),
-   * boolean, formula result, rich text, hyperlink, error.
-   */
-  private _getCellTextWidthPx(cell: Cell): number {
-    const cellType = cell.effectiveType;
-    const font = cell.font;
-
-    // Rich text: measure per-run with individual fonts
-    if (cellType === Enums.ValueType.RichText) {
-      const value = cell.value;
-      if (value && typeof value === "object" && "richText" in value) {
-        return measureRichTextWidthPx(value.richText, font);
-      }
-    }
-
-    // Get the display text (applies number formatting)
-    const displayText = _getCellDisplayText(cell);
-    if (!displayText) {
-      return 0;
-    }
-
-    return measureTextWidthPx(displayText, font);
-  }
-
-  /**
-   * @internal Get the height in points a cell needs.
-   * Considers wrapText alignment, indent, and explicit newlines.
-   */
-  private _getCellHeightPt(cell: Cell, mdw: number): number {
-    const font = cell.font;
-    const alignment = cell.alignment;
-    const cellType = cell.effectiveType;
-
-    // Rich text
-    if (cellType === Enums.ValueType.RichText) {
-      const value = cell.value;
-      if (value && typeof value === "object" && "richText" in value) {
-        const columnWidthPx = this._getColumnContentWidthForCell(cell, mdw);
-        return calculateRichTextAutoFitHeight(value.richText, font, alignment, columnWidthPx);
-      }
-    }
-
-    const displayText = _getCellDisplayText(cell);
-    if (!displayText) {
-      return 0;
-    }
-
-    const columnWidthPx = alignment?.wrapText
-      ? this._getColumnContentWidthForCell(cell, mdw)
-      : undefined;
-
-    return calculateAutoFitHeight(displayText, font, alignment, columnWidthPx);
   }
 
   /**
@@ -1862,7 +1778,7 @@ class Worksheet {
 
         for (let col = startCol; col <= endCol; col++) {
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
 
           if (val != null && val !== "") {
             rowData[col - startCol] = val;
@@ -1893,7 +1809,7 @@ class Worksheet {
 
         for (let col = startCol; col <= endCol; col++) {
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
           const key = encodeCol(col - 1);
 
           if (val != null && val !== "") {
@@ -1925,7 +1841,7 @@ class Worksheet {
           const colIdx = col - startCol;
           const key = headerOpt[colIdx] ?? `__EMPTY_${colIdx}`;
           const cell = this.getCell(row, col);
-          const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+          const val = o.raw === false ? getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
 
           if (val != null && val !== "") {
             rowData[key] = val;
@@ -1972,7 +1888,7 @@ class Worksheet {
 
       for (let col = startCol; col <= endCol; col++) {
         const cell = this.getCell(row, col);
-        const val = o.raw === false ? _getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
+        const val = o.raw === false ? getCellDisplayText(cell, o.dateFormat).trim() : cell.value;
         const key = headers[col - startCol];
 
         if (val != null && val !== "") {
@@ -2178,45 +2094,6 @@ function _resolveOrigin(origin: Origin, rowCount: number): { row: number; col: n
     return { row: origin + 1, col: 1 };
   }
   return { row: origin.r + 1, col: origin.c + 1 };
-}
-
-/** Get formatted display text for a cell value */
-function _getCellDisplayText(cell: Cell, dateFormat?: string): string {
-  const value = cell.value;
-  const numFmt = cell.numFmt;
-  const fmt = typeof numFmt === "string" ? numFmt : (numFmt?.formatCode ?? "General");
-
-  if (value == null) {
-    return "";
-  }
-
-  if (
-    value instanceof Date ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "string"
-  ) {
-    return formatCellValue(value, fmt, dateFormat);
-  }
-
-  // Formula type — use the result value
-  if (typeof value === "object" && "formula" in value) {
-    const result = value.result;
-    if (result == null) {
-      return "";
-    }
-    if (
-      result instanceof Date ||
-      typeof result === "number" ||
-      typeof result === "boolean" ||
-      typeof result === "string"
-    ) {
-      return formatCellValue(result, fmt, dateFormat);
-    }
-  }
-
-  // Fallback to cell.text for other types (rich text, hyperlink, error, etc.)
-  return cell.text;
 }
 
 export { Worksheet, type WorksheetModel };

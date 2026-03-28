@@ -1,13 +1,12 @@
 import { RelType } from "@excel/xlsx/rel-type";
 import { colCache } from "@excel/utils/col-cache";
-import { Encryptor } from "@excel/utils/encryptor";
 import { ExcelStreamStateError, MergeConflictError, RowOutOfBoundsError } from "@excel/errors";
-import { uint8ArrayToBase64 } from "@utils/utils";
 import { Dimensions } from "@excel/range";
 import { StringBuf } from "@excel/utils/string-buf";
 import { Row } from "@excel/row";
 import type { Cell } from "@excel/cell";
 import { Column } from "@excel/column";
+import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import { Anchor } from "@excel/anchor";
 import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
 import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
@@ -696,33 +695,10 @@ class WorksheetWriter {
   // =========================================================================
   // Worksheet Protection
   async protect(password?: string, options?: Partial<WorksheetProtection>): Promise<void> {
-    this.sheetProtection = {
-      sheet: true
-    };
-    if (options && "spinCount" in options) {
-      // force spinCount to be integer >= 0
-      options.spinCount = Number.isFinite(options.spinCount)
-        ? Math.round(Math.max(0, options.spinCount!))
-        : 100000;
-    }
-    if (password) {
-      this.sheetProtection.algorithmName = "SHA-512";
-      this.sheetProtection.saltValue = uint8ArrayToBase64(Encryptor.randomBytes(16));
-      this.sheetProtection.spinCount =
-        options && "spinCount" in options ? options.spinCount : 100000; // allow user specified spinCount
-      this.sheetProtection.hashValue = await Encryptor.convertPasswordToHash(
-        password,
-        "SHA-512",
-        this.sheetProtection.saltValue,
-        this.sheetProtection.spinCount!
-      );
-    }
-    if (options) {
-      this.sheetProtection = Object.assign(this.sheetProtection, options);
-      if (!password && "spinCount" in options) {
-        delete this.sheetProtection.spinCount;
-      }
-    }
+    // Synchronous pre-set so callers that don't await still see sheetProtection
+    // before commit() (the original code was synchronous on the no-password path).
+    this.sheetProtection = { sheet: true };
+    this.sheetProtection = await buildSheetProtection(password, options);
   }
 
   unprotect(): void {
