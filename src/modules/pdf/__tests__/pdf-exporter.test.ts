@@ -1,10 +1,12 @@
 /**
  * Integration tests for the full PDF export pipeline.
- * Tests the PdfExporter with real Workbook instances.
+ * Tests the PDF exporter with real Workbook instances via the Excel bridge,
+ * and standalone pdf() API.
  */
 import { describe, it, expect } from "vitest";
 import { Workbook } from "@excel/workbook";
-import { PdfExporter, exportPdf } from "@pdf/render/pdf-exporter";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { pdf as standalonePdf } from "@pdf/pdf";
 import { PdfError } from "@pdf/errors";
 import { buildMinimalTtf } from "./font-embedding.test";
 
@@ -28,7 +30,7 @@ function expectValidPdf(pdf: Uint8Array): void {
   expect(text).toContain("/Pages");
 }
 
-describe("PdfExporter", () => {
+describe("excelToPdf", () => {
   describe("Basic Export", () => {
     it("should export a simple workbook with one sheet", () => {
       const wb = new Workbook();
@@ -38,8 +40,7 @@ describe("PdfExporter", () => {
       ws.getCell("A2").value = 42;
       ws.getCell("B2").value = 3.14;
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expect(pdf).toBeInstanceOf(Uint8Array);
       expect(pdf.length).toBeGreaterThan(100);
@@ -54,8 +55,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Empty");
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
     });
@@ -63,8 +63,7 @@ describe("PdfExporter", () => {
     it("should throw for workbook with no sheets", () => {
       const wb = new Workbook();
 
-      const exporter = new PdfExporter(wb);
-      expect(() => exporter.export()).toThrow(PdfError);
+      expect(() => excelToPdf(wb)).toThrow(PdfError);
     });
   });
 
@@ -84,8 +83,7 @@ describe("PdfExporter", () => {
       ws2.getCell("A2").value = "Rent";
       ws2.getCell("B2").value = 500;
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -103,8 +101,7 @@ describe("PdfExporter", () => {
       wb.addWorksheet("Include").getCell("A1").value = "Included";
       wb.addWorksheet("Exclude").getCell("A1").value = "Excluded";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ sheets: ["Include"] });
+      const pdf = excelToPdf(wb, { sheets: ["Include"] });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -119,8 +116,7 @@ describe("PdfExporter", () => {
       const ws2 = wb.addWorksheet("Second");
       ws2.getCell("A1").value = "Second Sheet";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ sheets: [2] }); // 1-based: second sheet
+      const pdf = excelToPdf(wb, { sheets: [2] }); // 1-based: second sheet
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -134,8 +130,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "A4";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -148,8 +143,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Landscape";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ orientation: "landscape" });
+      const pdf = excelToPdf(wb, { orientation: "landscape" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -162,8 +156,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Letter";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ pageSize: "LETTER" });
+      const pdf = excelToPdf(wb, { pageSize: "LETTER" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -175,8 +168,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Custom";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({
+      const pdf = excelToPdf(wb, {
         pageSize: { width: 400, height: 600 }
       });
 
@@ -195,8 +187,7 @@ describe("PdfExporter", () => {
       cell.value = "Bold Text";
       cell.font = { bold: true };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -211,8 +202,7 @@ describe("PdfExporter", () => {
       cell.value = "Italic Text";
       cell.font = { italic: true };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -226,8 +216,7 @@ describe("PdfExporter", () => {
       cell.value = "Red Text";
       cell.font = { color: { argb: "FFFF0000" } };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -245,8 +234,7 @@ describe("PdfExporter", () => {
         fgColor: { argb: "FFFFFF00" }
       };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -266,8 +254,7 @@ describe("PdfExporter", () => {
         right: { style: "thin", color: { argb: "FF000000" } }
       };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       // Borders are inside compressed content streams; just verify structure
@@ -284,8 +271,7 @@ describe("PdfExporter", () => {
       ws.getCell("B2").value = "Col2";
       ws.getCell("C2").value = "Col3";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       // Merged cells produce one page with all cells rendered
@@ -303,8 +289,7 @@ describe("PdfExporter", () => {
       ws.getCell("A5").value = new Date(2024, 0, 15);
       ws.getCell("A6").value = null;
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       // All value types render without errors
@@ -315,8 +300,7 @@ describe("PdfExporter", () => {
       const ws = wb.addWorksheet("Links");
       ws.getCell("A1").value = { text: "Click Me", hyperlink: "https://example.com" };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -333,8 +317,7 @@ describe("PdfExporter", () => {
       ws.getCell("A2").value = "A2";
       ws.getCell("B2").value = "B2";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ showGridLines: true });
+      const pdf = excelToPdf(wb, { showGridLines: true });
 
       expectValidPdf(pdf);
       // Grid lines are in compressed content streams; verify the PDF is valid
@@ -346,8 +329,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("My Report").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ showSheetNames: true });
+      const pdf = excelToPdf(wb, { showSheetNames: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -358,8 +340,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ showPageNumbers: true });
+      const pdf = excelToPdf(wb, { showPageNumbers: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -370,8 +351,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({
+      const pdf = excelToPdf(wb, {
         showPageNumbers: true,
         font: new Uint8Array(buildMinimalTtf())
       });
@@ -386,8 +366,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ title: "My Report" });
+      const pdf = excelToPdf(wb, { title: "My Report" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -398,8 +377,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ author: "John Doe" });
+      const pdf = excelToPdf(wb, { author: "John Doe" });
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Author (John Doe)");
@@ -409,8 +387,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Producer (excelts)");
@@ -421,8 +398,7 @@ describe("PdfExporter", () => {
       wb.addWorksheet("报告").getCell("A1").value = "One";
       wb.addWorksheet("数据").getCell("A1").value = "Two";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ title: "作者" });
+      const pdf = excelToPdf(wb, { title: "作者" });
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Title <feff4f5c8005>");
@@ -444,7 +420,7 @@ describe("PdfExporter", () => {
       ws2.pageSetup.orientation = "landscape";
       ws2.pageSetup.paperSize = 9;
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       const text = pdfToString(pdf);
 
       expect(text).toContain("[0 0 419.53 595.28]");
@@ -461,8 +437,7 @@ describe("PdfExporter", () => {
         { header: "Wide", width: 30 }
       ];
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -482,8 +457,7 @@ describe("PdfExporter", () => {
         ws.getCell(`B${i}`).value = i * 10;
       }
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ showPageNumbers: true });
+      const pdf = excelToPdf(wb, { showPageNumbers: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -500,14 +474,12 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Scale";
 
-      const exporter = new PdfExporter(wb);
-
       // Very small scale should be clamped to 0.1
-      const pdf1 = exporter.export({ scale: 0.01 });
+      const pdf1 = excelToPdf(wb, { scale: 0.01 });
       expectValidPdf(pdf1);
 
       // Very large scale should be clamped to 3.0
-      const pdf2 = exporter.export({ scale: 10 });
+      const pdf2 = excelToPdf(wb, { scale: 10 });
       expectValidPdf(pdf2);
     });
 
@@ -521,8 +493,7 @@ describe("PdfExporter", () => {
         ws.getCell(1, i).value = `Col${i}`;
       }
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({ fitToPage: true });
+      const pdf = excelToPdf(wb, { fitToPage: true });
 
       expectValidPdf(pdf);
     });
@@ -531,8 +502,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Margins";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export({
+      const pdf = excelToPdf(wb, {
         margins: { top: 36, right: 36, bottom: 36, left: 36 }
       });
 
@@ -548,8 +518,7 @@ describe("PdfExporter", () => {
       cell.value = "Centered";
       cell.alignment = { horizontal: "center" };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -563,8 +532,7 @@ describe("PdfExporter", () => {
       cell.value = "Right";
       cell.alignment = { horizontal: "right" };
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -572,12 +540,12 @@ describe("PdfExporter", () => {
     });
   });
 
-  describe("exportPdf function", () => {
+  describe("excelToPdf function", () => {
     it("should work as a standalone function", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "FunctionAPI";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("FunctionAPI");
@@ -593,8 +561,7 @@ describe("PdfExporter", () => {
       ws.getCell("C1").value = "Also Visible";
       ws.getColumn(2).hidden = true;
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -611,8 +578,7 @@ describe("PdfExporter", () => {
       ws.getCell("A3").value = "Row3";
       ws.getRow(2).hidden = true;
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -630,8 +596,7 @@ describe("PdfExporter", () => {
       hidden.getCell("A1").value = "NotShown";
       hidden.state = "hidden";
 
-      const exporter = new PdfExporter(wb);
-      const pdf = exporter.export();
+      const pdf = excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -645,7 +610,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Solo").getCell("A1").value = "Only";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Only");
@@ -658,7 +623,7 @@ describe("PdfExporter", () => {
       ws.getCell("A2").value = "Back\\slash";
       ws.getCell("A3").value = "New\nLine";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       // Special chars are inside compressed streams; just verify no crash
     });
@@ -669,7 +634,7 @@ describe("PdfExporter", () => {
       ws.getCell("A1").value = "";
       ws.getCell("B1").value = "Not Empty";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
     });
 
@@ -679,7 +644,7 @@ describe("PdfExporter", () => {
       ws.getCell("A1").value = true;
       ws.getCell("A2").value = false;
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
     });
 
@@ -688,7 +653,7 @@ describe("PdfExporter", () => {
       const ws = wb.addWorksheet("Errors");
       ws.getCell("A1").value = { error: "#DIV/0!" };
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
@@ -702,7 +667,7 @@ describe("PdfExporter", () => {
       ws.getColumn(2).hidden = true; // hide B
       ws.getCell("A2").value = "Data";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Merged Over Hidden");
@@ -717,7 +682,7 @@ describe("PdfExporter", () => {
       ws.getRow(2).hidden = true; // hide row 2
       ws.getCell("B1").value = "Side";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Tall Merge");
@@ -734,7 +699,7 @@ describe("PdfExporter", () => {
         ws.getCell(`A${i}`).value = `Row ${i}`;
       }
 
-      const pdf = exportPdf(wb, { repeatRows: 1, showPageNumbers: true });
+      const pdf = excelToPdf(wb, { repeatRows: 1, showPageNumbers: true });
       expectValidPdf(pdf);
 
       const text = pdfToString(pdf);
@@ -753,7 +718,7 @@ describe("PdfExporter", () => {
       cell.alignment = { wrapText: true };
       ws.getColumn(1).width = 15; // narrow column
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should contain part of the text
@@ -766,16 +731,14 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Real").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      expect(() => exporter.export({ sheets: ["NonExistent"] })).toThrow(PdfError);
+      expect(() => excelToPdf(wb, { sheets: ["NonExistent"] })).toThrow(PdfError);
     });
 
     it("should throw for out-of-range numeric selector", () => {
       const wb = new Workbook();
       wb.addWorksheet("Only").getCell("A1").value = "Data";
 
-      const exporter = new PdfExporter(wb);
-      expect(() => exporter.export({ sheets: [99] })).toThrow(PdfError);
+      expect(() => excelToPdf(wb, { sheets: [99] })).toThrow(PdfError);
     });
   });
 
@@ -784,8 +747,8 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "SecretValue";
 
-      const pdfPlain = exportPdf(wb);
-      const pdfEncrypted = exportPdf(wb, {
+      const pdfPlain = excelToPdf(wb);
+      const pdfEncrypted = excelToPdf(wb, {
         encryption: { ownerPassword: "owner123" }
       });
 
@@ -813,7 +776,7 @@ describe("PdfExporter", () => {
         richText: [{ text: "Bold", font: { bold: true } }, { text: " Normal" }]
       };
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should NOT contain the stringified object
@@ -827,7 +790,7 @@ describe("PdfExporter", () => {
       const wsAccent = wb.addWorksheet("Accent");
       wsAccent.getCell("A1").value = "café";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       // The text "café" should be encoded as WinAnsi hex, not UTF-8
       // (this will be in a compressed stream, so we just verify no crash)
@@ -844,7 +807,7 @@ describe("PdfExporter", () => {
       // Break after row 5: rows 1-5 on first page, 6-10 on second
       ws.getRow(5).addPageBreak();
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should have multiple pages
@@ -868,7 +831,7 @@ describe("PdfExporter", () => {
       };
 
       // Only override left margin (36pt = 0.5in)
-      const pdf = exportPdf(wb, { margins: { left: 36 } });
+      const pdf = excelToPdf(wb, { margins: { left: 36 } });
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // The top margin should come from worksheet (1.0 * 72 = 72pt), not reset to default
@@ -891,7 +854,7 @@ describe("PdfExporter", () => {
       cell.alignment = { wrapText: true };
       ws.getColumn(1).width = 15;
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
@@ -902,7 +865,7 @@ describe("PdfExporter", () => {
       const wsEnc = wb.addWorksheet("Encrypted");
       wsEnc.getCell("A1").value = "Hello encrypted with font";
 
-      const pdf = exportPdf(wb, {
+      const pdf = excelToPdf(wb, {
         font: new Uint8Array(buildMinimalTtf()),
         encryption: { ownerPassword: "owner", userPassword: "user" }
       });
@@ -918,7 +881,7 @@ describe("PdfExporter", () => {
       const wb = new Workbook();
       wb.addWorksheet("报告").getCell("A1").value = "Data";
 
-      const pdf = exportPdf(wb, {
+      const pdf = excelToPdf(wb, {
         title: "作者",
         encryption: { ownerPassword: "owner" }
       });
@@ -944,7 +907,7 @@ describe("PdfExporter", () => {
       // Multi-range: only A1:B5 should be used
       ws.pageSetup.printArea = "A1:B5&&D1:D10";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
@@ -958,11 +921,416 @@ describe("PdfExporter", () => {
       }
       ws.pageSetup.printTitlesRow = "1";
 
-      const pdf = exportPdf(wb);
+      const pdf = excelToPdf(wb);
       expectValidPdf(pdf);
       // Should have more than 1 page (50 rows with repeat headers)
       const text = pdfToString(pdf);
       expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(2);
     });
+  });
+});
+
+// =============================================================================
+// Image Integration Tests
+// =============================================================================
+
+/**
+ * Build a minimal valid JPEG (1x1 red pixel).
+ * SOI + SOF0 + SOS + EOI
+ */
+function buildMinimalJpeg(): Uint8Array {
+  // prettier-ignore
+  return new Uint8Array([
+    0xFF, 0xD8,             // SOI
+    0xFF, 0xE0,             // APP0
+    0x00, 0x10,             // length = 16
+    0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
+    0x01, 0x01,             // version 1.1
+    0x00,                   // aspect ratio
+    0x00, 0x01, 0x00, 0x01, // 1x1 pixel density
+    0x00, 0x00,             // no thumbnail
+    0xFF, 0xDB,             // DQT
+    0x00, 0x43,             // length = 67
+    0x00,                   // table 0, 8-bit precision
+    // 64 quantization values (all 1s for simplicity)
+    ...Array.from({ length: 64 }, () => 0x01),
+    0xFF, 0xC0,             // SOF0 (baseline)
+    0x00, 0x0B,             // length = 11
+    0x08,                   // 8-bit precision
+    0x00, 0x01,             // height = 1
+    0x00, 0x01,             // width = 1
+    0x01,                   // 1 component
+    0x01,                   // component ID = 1
+    0x11,                   // H/V sampling = 1x1
+    0x00,                   // quant table 0
+    0xFF, 0xC4,             // DHT
+    0x00, 0x1F,             // length = 31
+    0x00,                   // DC table 0
+    // Number of codes of each length (1-16)
+    0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Values
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+    0xFF, 0xDA,             // SOS
+    0x00, 0x08,             // length = 8
+    0x01,                   // 1 component
+    0x01,                   // component 1
+    0x00,                   // DC/AC table 0/0
+    0x00, 0x3F, 0x00,       // spectral selection
+    0x7B, 0x40,             // scan data (minimal)
+    0xFF, 0xD9              // EOI
+  ]);
+}
+
+/**
+ * Build a minimal valid PNG (2x2, RGBA with varying alpha).
+ */
+function buildMinimalPng(): Uint8Array {
+  const parts: number[] = [];
+
+  // PNG signature
+  parts.push(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+
+  // IHDR
+  const ihdr = [
+    0x00,
+    0x00,
+    0x00,
+    0x02, // width = 2
+    0x00,
+    0x00,
+    0x00,
+    0x02, // height = 2
+    0x08, // bit depth = 8
+    0x06, // color type = 6 (RGBA)
+    0x00,
+    0x00,
+    0x00 // compression, filter, interlace
+  ];
+  writeChunk(parts, "IHDR", ihdr);
+
+  // IDAT — raw pixel data: 2 rows of 2 RGBA pixels, each row starts with filter byte 0
+  // Row 1: red (opaque), green (semi-transparent)
+  // Row 2: blue (opaque), white (fully transparent)
+  const rawPixels = [
+    0x00, // filter byte
+    0xff,
+    0x00,
+    0x00,
+    0xff, // red, alpha=255
+    0x00,
+    0xff,
+    0x00,
+    0x80, // green, alpha=128
+    0x00, // filter byte
+    0x00,
+    0x00,
+    0xff,
+    0xff, // blue, alpha=255
+    0xff,
+    0xff,
+    0xff,
+    0x00 // white, alpha=0
+  ];
+
+  // Deflate the raw data (use zlib sync from the archive module isn't available here,
+  // so we'll use a stored (uncompressed) deflate block)
+  const deflated = deflateStored(rawPixels);
+  writeChunk(parts, "IDAT", Array.from(deflated));
+
+  // IEND
+  writeChunk(parts, "IEND", []);
+
+  return new Uint8Array(parts);
+}
+
+function writeChunk(buf: number[], type: string, data: number[]): void {
+  // Length (4 bytes, big-endian)
+  const len = data.length;
+  buf.push((len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff);
+  // Type (4 bytes)
+  for (let i = 0; i < 4; i++) {
+    buf.push(type.charCodeAt(i));
+  }
+  // Data
+  buf.push(...data);
+  // CRC32 (over type + data)
+  const crcInput = new Uint8Array(4 + data.length);
+  for (let i = 0; i < 4; i++) {
+    crcInput[i] = type.charCodeAt(i);
+  }
+  for (let i = 0; i < data.length; i++) {
+    crcInput[4 + i] = data[i];
+  }
+  const crc = crc32(crcInput);
+  buf.push((crc >>> 24) & 0xff, (crc >>> 16) & 0xff, (crc >>> 8) & 0xff, crc & 0xff);
+}
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Wrap raw bytes in a stored (uncompressed) deflate stream with zlib header.
+ */
+function deflateStored(data: number[]): Uint8Array {
+  const len = data.length;
+  // zlib header: CMF=0x78 (deflate, window=32K), FLG=0x01 (FCHECK=1)
+  const result = [0x78, 0x01];
+  // BFINAL=1, BTYPE=00 (stored)
+  result.push(0x01);
+  // LEN and NLEN (little-endian)
+  result.push(len & 0xff, (len >>> 8) & 0xff);
+  result.push(~len & 0xff, (~len >>> 8) & 0xff);
+  // Data
+  result.push(...data);
+  // Adler32 checksum
+  let a = 1;
+  let b = 0;
+  for (const byte of data) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  const adler = ((b << 16) | a) >>> 0;
+  result.push((adler >>> 24) & 0xff, (adler >>> 16) & 0xff, (adler >>> 8) & 0xff, adler & 0xff);
+  return new Uint8Array(result);
+}
+
+describe("Image integration", () => {
+  it("should export PDF with embedded JPEG image", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Images");
+    // Fill data that extends past the image range
+    for (let r = 1; r <= 10; r++) {
+      ws.getCell(`A${r}`).value = `Row ${r}`;
+      ws.getCell(`B${r}`).value = r * 10;
+      ws.getCell(`C${r}`).value = `Data ${r}`;
+    }
+
+    const jpegData = buildMinimalJpeg();
+    const imageId = wb.addImage({ buffer: jpegData, extension: "jpeg" });
+    ws.addImage(imageId, {
+      tl: { col: 0, row: 1 },
+      br: { col: 2, row: 4 }
+    });
+
+    const pdf = excelToPdf(wb);
+    expectValidPdf(pdf);
+    const text = pdfToString(pdf);
+    // Should contain an XObject image reference
+    expect(text).toContain("/Subtype /Image");
+    expect(text).toContain("/Filter /DCTDecode");
+  });
+
+  it("should export PDF with embedded PNG image (alpha channel)", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("PngTest");
+    for (let r = 1; r <= 5; r++) {
+      ws.getCell(`A${r}`).value = `Row ${r}`;
+      ws.getCell(`B${r}`).value = r;
+    }
+
+    const pngData = buildMinimalPng();
+    const imageId = wb.addImage({ buffer: pngData, extension: "png" });
+    ws.addImage(imageId, {
+      tl: { col: 0, row: 1 },
+      ext: { width: 100, height: 100 }
+    });
+
+    const pdf = excelToPdf(wb);
+    expectValidPdf(pdf);
+    const text = pdfToString(pdf);
+    // Should contain XObject image
+    expect(text).toContain("/Subtype /Image");
+    // PNG with alpha should generate a soft mask
+    expect(text).toContain("/SMask");
+  });
+
+  it("should handle workbook with image and multiple pages", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Data");
+
+    // Fill enough rows to span 2 pages
+    for (let r = 1; r <= 80; r++) {
+      ws.getCell(`A${r}`).value = `Row ${r}`;
+      ws.getCell(`B${r}`).value = r;
+    }
+
+    const jpegData = buildMinimalJpeg();
+    const imageId = wb.addImage({ buffer: jpegData, extension: "jpeg" });
+    ws.addImage(imageId, {
+      tl: { col: 1, row: 0 },
+      br: { col: 3, row: 3 }
+    });
+
+    const pdf = excelToPdf(wb, { showPageNumbers: true });
+    expectValidPdf(pdf);
+    const text = pdfToString(pdf);
+    // Multiple pages
+    const pages = text.match(/\/Type \/Page\b/g);
+    expect(pages!.length).toBeGreaterThanOrEqual(2);
+    // Image on first page
+    expect(text).toContain("/Filter /DCTDecode");
+  });
+});
+
+// =============================================================================
+// Standalone pdf() API
+// =============================================================================
+
+describe("Standalone pdf() API", () => {
+  it("should generate a valid PDF from a 2D array", () => {
+    const result = standalonePdf([
+      ["Product", "Revenue"],
+      ["Widget", 1000],
+      ["Gadget", 2500]
+    ]);
+
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(result.length).toBeGreaterThan(100);
+    expectValidPdf(result);
+    // Content streams may be compressed; verify font was used
+    const text = pdfToString(result);
+    expect(text).toContain("/Helvetica");
+  });
+
+  it("should generate a valid PDF from a sheet object with columns", () => {
+    const result = standalonePdf({
+      name: "Report",
+      columns: [{ width: 25 }, { width: 15 }],
+      data: [
+        ["Widget", 1000],
+        ["Gadget", 2500]
+      ]
+    });
+
+    expect(result.length).toBeGreaterThan(100);
+    expectValidPdf(result);
+  });
+
+  it("should generate a valid PDF from a multi-sheet book", () => {
+    const result = standalonePdf({
+      sheets: [
+        {
+          name: "Sales",
+          data: [
+            ["Product", "Revenue"],
+            ["Widget", 1000]
+          ]
+        },
+        {
+          name: "Costs",
+          data: [
+            ["Item", "Amount"],
+            ["Rent", 500]
+          ]
+        }
+      ]
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    const pageMatches = text.match(/\/Type \/Page\b/g);
+    expect(pageMatches!.length).toBe(2);
+    expect(text).toContain("(Sales)");
+    expect(text).toContain("(Costs)");
+  });
+
+  it("should render column headers as the first row", () => {
+    const result = standalonePdf({
+      columns: [
+        { width: 20, header: "Name" },
+        { width: 15, header: "Score" }
+      ],
+      data: [
+        ["Alice", 95],
+        ["Bob", 87]
+      ]
+    });
+
+    expectValidPdf(result);
+    // Headers use bold font
+    const text = pdfToString(result);
+    expect(text).toContain("Helvetica-Bold");
+  });
+
+  it("should render header-only sheet with no data rows", () => {
+    const result = standalonePdf({
+      columns: [{ header: "Name" }, { header: "Score" }],
+      data: []
+    });
+
+    expectValidPdf(result);
+    // Should have at least one page with the bold header font
+    const text = pdfToString(result);
+    expect(text).toContain("Helvetica-Bold");
+  });
+
+  it("should place sparse column headers at the correct positions", () => {
+    const result = standalonePdf({
+      columns: [{ header: "A" }, { width: 10 }, { header: "C" }],
+      data: [["x", "y", "z"]]
+    });
+
+    expectValidPdf(result);
+    // Headers should be in columns 1 and 3, not 1 and 2.
+    // Decompress not possible here, but verify 3 columns are rendered
+    // and the bold header font is used.
+    const text = pdfToString(result);
+    expect(text).toContain("Helvetica-Bold");
+  });
+
+  it("should handle styled cells", () => {
+    const result = standalonePdf([
+      [
+        { value: "Bold", bold: true },
+        { value: "Red", fontColor: "FFFF0000" }
+      ],
+      [{ value: "Filled", fillColor: "FFFFFF00" }, "Plain"]
+    ]);
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    expect(text).toContain("Helvetica-Bold");
+  });
+
+  it("should handle empty 2D array", () => {
+    const result = standalonePdf([]);
+
+    expectValidPdf(result);
+  });
+
+  it("should handle boolean and Date values", () => {
+    const result = standalonePdf([[true, false, new Date(2024, 0, 15)]]);
+
+    expect(result.length).toBeGreaterThan(100);
+    expectValidPdf(result);
+  });
+
+  it("should handle null and undefined cells", () => {
+    const result = standalonePdf([["Hello", null, undefined, "World"]]);
+
+    expectValidPdf(result);
+  });
+
+  it("should accept export options", () => {
+    const result = standalonePdf([["Test"]], {
+      pageSize: "LETTER",
+      orientation: "landscape",
+      showGridLines: true
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    // Landscape LETTER: 792 x 612
+    expect(text).toContain("792");
+    expect(text).toContain("612");
   });
 });

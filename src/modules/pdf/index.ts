@@ -1,48 +1,48 @@
 /**
  * PDF module for excelts.
  *
- * Provides Excel-to-PDF conversion with zero external dependencies.
- * Supports cell values, fonts, colors, borders, fills, alignment,
- * merged cells, pagination, and customizable page layout.
+ * A full-featured, zero-dependency PDF engine.
  *
- * @example
+ * @example Standalone:
  * ```typescript
- * import { Workbook, PdfExporter } from "excelts";
+ * import { pdf } from "excelts/pdf";
+ *
+ * const bytes = pdf([
+ *   ["Product", "Revenue"],
+ *   ["Widget", 1000],
+ *   ["Gadget", 2500]
+ * ]);
+ * ```
+ *
+ * @example From Excel Workbook:
+ * ```typescript
+ * import { Workbook } from "excelts";
+ * import { excelToPdf } from "excelts/pdf";
  *
  * const workbook = new Workbook();
  * const sheet = workbook.addWorksheet("Sales");
- * sheet.columns = [
- *   { header: "Product", key: "product", width: 20 },
- *   { header: "Revenue", key: "revenue", width: 15 }
- * ];
- * sheet.addRow({ product: "Widget", revenue: 1000 });
- *
- * const exporter = new PdfExporter(workbook);
- * const pdfBuffer = exporter.export({
- *   pageSize: "A4",
- *   orientation: "portrait",
- *   fitToPage: true,
- *   showGridLines: true,
- *   showPageNumbers: true
- * });
- *
- * // Write to file (Node.js)
- * import { writeFileSync } from "fs";
- * writeFileSync("output.pdf", pdfBuffer);
+ * sheet.addRow(["Product", "Revenue"]);
+ * const bytes = excelToPdf(workbook);
  * ```
  *
  * @module pdf
  */
 
 // =============================================================================
-// Core Export
+// Public API
 // =============================================================================
 
-export { PdfExporter, exportPdf } from "./render/pdf-exporter";
+/** Standalone PDF generation — accepts plain arrays, sheet objects, or workbooks. */
+export { pdf } from "./pdf";
+
+/** Excel-to-PDF conversion — accepts an Excel Workbook instance. */
+export { excelToPdf } from "./excel-bridge";
 
 // =============================================================================
 // Types
 // =============================================================================
+
+export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook } from "./pdf";
 
 export type {
   PdfExportOptions,

@@ -1,12 +1,15 @@
 /**
- * Layout engine for Excel-to-PDF conversion.
+ * Layout engine for PDF generation.
  *
- * Takes a worksheet and produces LayoutPage objects that describe exactly
+ * Takes a PdfSheetData and produces LayoutPage objects that describe exactly
  * where each cell, border, and piece of text should be drawn on each PDF page.
  *
+ * This module is fully independent of the Excel module — it works with
+ * the PDF module's own data model (PdfSheetData, PdfCellData, etc.).
+ *
  * Key responsibilities:
- * - Convert Excel column widths (character units) to PDF points
- * - Convert Excel row heights (points already, but may need scaling)
+ * - Convert column widths (character units) to PDF points
+ * - Convert row heights (points already, but may need scaling)
  * - Handle merged cells spanning multiple rows/columns
  * - Paginate content across multiple pages
  * - Handle fitToPage scaling
@@ -14,14 +17,18 @@
  * - Skip hidden rows and columns
  */
 
-import type { Worksheet } from "@excel/worksheet";
-import type { Cell } from "@excel/cell";
-import type { Style, CellErrorValue, CellRichTextValue } from "@excel/types";
-import { ValueType } from "@excel/enums";
-import { decodeRange } from "@excel/utils/address";
-import { formatCellValue } from "@excel/utils/cell-format";
-import { base64ToUint8Array } from "@utils/utils.base";
-import type { ResolvedPdfOptions, LayoutPage, LayoutCell, LayoutRichTextRun } from "../types";
+import type {
+  PdfSheetData,
+  PdfCellData,
+  PdfCellStyle,
+  PdfRichTextRunData,
+  PdfSheetImage,
+  ResolvedPdfOptions,
+  LayoutPage,
+  LayoutCell,
+  LayoutRichTextRun
+} from "../types";
+import { PdfCellType } from "../types";
 import type { FontManager } from "../font/font-manager";
 import { resolvePdfFontName } from "../font/font-manager";
 import {
@@ -46,10 +53,10 @@ const MIN_COLUMN_WIDTH = 5;
 // =============================================================================
 
 /**
- * Compute the layout for a worksheet across one or more PDF pages.
+ * Compute the layout for a sheet across one or more PDF pages.
  */
-export function layoutWorksheet(
-  worksheet: Worksheet,
+export function layoutSheet(
+  sheet: PdfSheetData,
   options: ResolvedPdfOptions,
   fontManager: FontManager
 ): LayoutPage[] {
@@ -68,18 +75,18 @@ export function layoutWorksheet(
   const availableHeight = contentHeight - headerHeight - footerHeight;
 
   // Determine print area bounds (if set)
-  const printRange = getPrintRange(worksheet);
+  const printRange = getPrintRange(sheet);
 
   // --- Step 1: Visible columns and widths ---
-  const { columnWidths, visibleCols } = computeColumnWidths(worksheet, printRange);
+  const { columnWidths, visibleCols } = computeColumnWidths(sheet, printRange);
   const columnCount = visibleCols.length;
 
   if (columnCount === 0) {
-    return [emptyPage(pageWidth, pageHeight, worksheet.name, options)];
+    return [emptyPage(pageWidth, pageHeight, sheet.name, options)];
   }
 
   // --- Step 2: Scale ---
-  let totalTableWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+  const totalTableWidth = columnWidths.reduce((sum, w) => sum + w, 0);
   let scaleFactor = options.scale;
   if (options.fitToPage && totalTableWidth > 0) {
     const fitScale = contentWidth / totalTableWidth;
@@ -89,30 +96,18 @@ export function layoutWorksheet(
   }
 
   const scaledColumnWidths = columnWidths.map(w => w * scaleFactor);
-  totalTableWidth = scaledColumnWidths.reduce((sum, w) => sum + w, 0);
-
-  // Column x-offsets
-  const columnOffsets: number[] = [];
-  let xOffset = margins.left;
-  if (totalTableWidth < contentWidth) {
-    xOffset = margins.left + (contentWidth - totalTableWidth) / 2;
-  }
-  for (let i = 0; i < scaledColumnWidths.length; i++) {
-    columnOffsets.push(xOffset);
-    xOffset += scaledColumnWidths[i];
-  }
 
   // --- Step 3: Visible rows and heights ---
-  const { rowHeights, visibleRows } = computeRowHeights(worksheet, scaleFactor, printRange);
+  const { rowHeights, visibleRows } = computeRowHeights(sheet, scaleFactor, printRange);
 
   // --- Step 4: Merge map ---
-  const mergeMap = buildMergeMap(worksheet);
+  const mergeMap = buildMergeMap(sheet);
 
   // --- Step 5: Paginate vertically (rows) and horizontally (columns) ---
   const repeatRowCount = typeof options.repeatRows === "number" ? options.repeatRows : 0;
-  const rowBreakSet = buildRowBreakSet(worksheet, visibleRows);
+  const rowBreakSet = buildRowBreakSet(sheet, visibleRows);
   const rowPages = paginateRows(rowHeights, availableHeight, repeatRowCount, rowBreakSet);
-  const colGroups = paginateColumns(scaledColumnWidths, contentWidth, worksheet, visibleCols);
+  const colGroups = paginateColumns(scaledColumnWidths, contentWidth, sheet, visibleCols);
 
   // --- Step 6: Layout cells per page (row page × column page) ---
   const layoutPages: LayoutPage[] = [];
@@ -160,8 +155,8 @@ export function layoutWorksheet(
             continue;
           }
 
-          const row = worksheet.findRow(wsRowNumber);
-          const cell = row ? row.findCell(wsColNumber) : undefined;
+          const row = sheet.rows.get(wsRowNumber);
+          const cell = row?.cells.get(wsColNumber);
 
           let colSpan = 1;
           let rowSpan = 1;
@@ -203,8 +198,6 @@ export function layoutWorksheet(
           cells.push(
             buildLayoutCell(
               cell,
-              ci,
-              visibleRowIdx,
               cellX,
               rectY,
               cellWidth,
@@ -225,11 +218,11 @@ export function layoutWorksheet(
         cells,
         width: pageWidth,
         height: pageHeight,
-        sheetName: worksheet.name,
-        worksheetCols: colGroup.map(ci => visibleCols[ci]),
+        sheetName: sheet.name,
+        sheetCols: colGroup.map(ci => visibleCols[ci]),
         columnOffsets: groupColOffsets,
         columnWidths: groupColWidths,
-        worksheetRows: rowPage.map(ri => visibleRows[ri]),
+        sheetRows: rowPage.map(ri => visibleRows[ri]),
         rowYPositions,
         rowHeights: pageRowHeights,
         images: []
@@ -237,9 +230,9 @@ export function layoutWorksheet(
     }
   }
 
-  // --- Step 7: Collect images and place them on the correct pages ---
-  if (layoutPages.length > 0) {
-    assignImagesToPages(worksheet, layoutPages);
+  // --- Step 7: Place images on the correct pages ---
+  if (layoutPages.length > 0 && sheet.images) {
+    assignImagesToPages(sheet.images, layoutPages);
   }
 
   return layoutPages;
@@ -262,13 +255,59 @@ function emptyPage(
     width,
     height,
     sheetName,
-    worksheetCols: [],
+    sheetCols: [],
     columnOffsets: [],
     columnWidths: [],
-    worksheetRows: [],
+    sheetRows: [],
     rowYPositions: [],
     rowHeights: [],
     images: []
+  };
+}
+
+// =============================================================================
+// Range Parsing (standalone — no @excel dependency)
+// =============================================================================
+
+interface CellRef {
+  /** 0-indexed column */
+  c: number;
+  /** 0-indexed row */
+  r: number;
+}
+
+interface RangeRef {
+  s: CellRef;
+  e: CellRef;
+}
+
+/**
+ * Parse a cell reference like "A1" into 0-indexed { c, r }.
+ */
+function parseCellRef(ref: string): CellRef {
+  const upper = ref.replace(/\$/g, "").toUpperCase();
+  let col = 0;
+  let i = 0;
+  while (i < upper.length && upper.charCodeAt(i) >= 65 && upper.charCodeAt(i) <= 90) {
+    col = col * 26 + (upper.charCodeAt(i) - 64);
+    i++;
+  }
+  const row = parseInt(upper.substring(i), 10);
+  return { c: col - 1, r: row - 1 };
+}
+
+/**
+ * Parse a range string like "A1:B2" into 0-indexed start/end.
+ */
+function parseRangeRef(range: string): RangeRef {
+  const idx = range.indexOf(":");
+  if (idx === -1) {
+    const cell = parseCellRef(range);
+    return { s: cell, e: { ...cell } };
+  }
+  return {
+    s: parseCellRef(range.slice(0, idx)),
+    e: parseCellRef(range.slice(idx + 1))
   };
 }
 
@@ -284,11 +323,11 @@ interface PrintRange {
 }
 
 /**
- * Get the print area range from the worksheet's pageSetup.
+ * Get the print area range from the sheet's pageSetup.
  * Returns null if no print area is set.
  */
-function getPrintRange(worksheet: Worksheet): PrintRange | null {
-  const printArea = (worksheet as any).pageSetup?.printArea;
+function getPrintRange(sheet: PdfSheetData): PrintRange | null {
+  const printArea = sheet.pageSetup?.printArea;
   if (!printArea || typeof printArea !== "string") {
     return null;
   }
@@ -299,7 +338,7 @@ function getPrintRange(worksheet: Worksheet): PrintRange | null {
     return null;
   }
   try {
-    const range = decodeRange(firstRange);
+    const range = parseRangeRef(firstRange);
     return {
       startRow: range.s.r + 1,
       endRow: range.e.r + 1,
@@ -316,30 +355,30 @@ function getPrintRange(worksheet: Worksheet): PrintRange | null {
 // =============================================================================
 
 function computeColumnWidths(
-  worksheet: Worksheet,
+  sheet: PdfSheetData,
   printRange: PrintRange | null
 ): {
   columnWidths: number[];
   visibleCols: number[];
 } {
-  const dimensions = worksheet.dimensions;
-  const hasData = dimensions && dimensions.model.top > 0 && dimensions.model.left > 0;
+  const bounds = sheet.bounds;
+  const hasData = bounds.top > 0 && bounds.left > 0;
 
   if (!hasData) {
     return { columnWidths: [], visibleCols: [] };
   }
 
-  const startCol = printRange?.startCol ?? dimensions.model.left;
-  const endCol = printRange?.endCol ?? dimensions.model.right;
+  const startCol = printRange?.startCol ?? bounds.left;
+  const endCol = printRange?.endCol ?? bounds.right;
   const columnWidths: number[] = [];
   const visibleCols: number[] = [];
 
   for (let c = startCol; c <= endCol; c++) {
-    const col = worksheet.getColumn(c);
-    if (col.hidden) {
+    const col = sheet.columns.get(c);
+    if (col?.hidden) {
       continue;
     }
-    const excelWidth = col.width ?? DEFAULT_COLUMN_WIDTH;
+    const excelWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
     const pointWidth = Math.max(excelWidth * EXCEL_CHAR_WIDTH_TO_POINTS, MIN_COLUMN_WIDTH);
     columnWidths.push(pointWidth);
     visibleCols.push(c);
@@ -353,22 +392,22 @@ function computeColumnWidths(
 // =============================================================================
 
 function computeRowHeights(
-  worksheet: Worksheet,
+  sheet: PdfSheetData,
   scaleFactor: number,
   printRange: PrintRange | null
 ): { rowHeights: number[]; visibleRows: number[] } {
-  const dimensions = worksheet.dimensions;
-  if (!dimensions || dimensions.model.top <= 0) {
+  const bounds = sheet.bounds;
+  if (bounds.top <= 0) {
     return { rowHeights: [], visibleRows: [] };
   }
 
-  const startRow = printRange?.startRow ?? dimensions.model.top;
-  const endRow = printRange?.endRow ?? dimensions.model.bottom;
+  const startRow = printRange?.startRow ?? bounds.top;
+  const endRow = printRange?.endRow ?? bounds.bottom;
   const rowHeights: number[] = [];
   const visibleRows: number[] = [];
 
   for (let r = startRow; r <= endRow; r++) {
-    const row = worksheet.findRow(r);
+    const row = sheet.rows.get(r);
     if (row && row.hidden) {
       continue;
     }
@@ -379,10 +418,9 @@ function computeRowHeights(
       height = row.height;
     } else {
       // Auto-size: scan cells in this row to find the largest needed height.
-      // Account for font size and multi-line content (explicit newlines or wrapText).
       height = DEFAULT_ROW_HEIGHT;
       if (row) {
-        row.eachCell({ includeEmpty: false }, cell => {
+        for (const cell of row.cells.values()) {
           let fontSize = cell.style?.font?.size ?? 11;
 
           // For rich text cells, find the largest font size across all runs
@@ -404,8 +442,9 @@ function computeRowHeights(
 
           // For wrapText cells, estimate how many lines word-wrapping produces
           let wrapLineCount = lineCount;
-          if (cell.alignment?.wrapText && lineCount === 1 && text.length > 0) {
-            const colWidth = worksheet.getColumn(cell.col).width ?? DEFAULT_COLUMN_WIDTH;
+          if (cell.style?.alignment?.wrapText && lineCount === 1 && text.length > 0) {
+            const col = sheet.columns.get(cell.col);
+            const colWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
             const colPts = colWidth * EXCEL_CHAR_WIDTH_TO_POINTS * scaleFactor;
             const avgCharWidth = fontSize * 0.55; // rough average char width
             const charsPerLine = Math.max(1, Math.floor(colPts / avgCharWidth));
@@ -417,7 +456,7 @@ function computeRowHeights(
           if (neededHeight > height) {
             height = neededHeight;
           }
-        });
+        }
       }
     }
 
@@ -435,19 +474,19 @@ function computeRowHeights(
 /**
  * Build a set of visible-row indices where manual page breaks occur.
  */
-function buildRowBreakSet(worksheet: Worksheet, visibleRows: number[]): Set<number> {
+function buildRowBreakSet(sheet: PdfSheetData, visibleRows: number[]): Set<number> {
   const breaks = new Set<number>();
-  const rowBreaks: Array<{ id: number }> = (worksheet as any).rowBreaks ?? [];
+  const rowBreaks = sheet.rowBreaks ?? [];
   if (rowBreaks.length === 0) {
     return breaks;
   }
-  // Map worksheet row numbers to visible-row indices
+  // Map row numbers to visible-row indices
   const rowToIndex = new Map<number, number>();
   for (let i = 0; i < visibleRows.length; i++) {
     rowToIndex.set(visibleRows[i], i);
   }
   for (const brk of rowBreaks) {
-    const idx = rowToIndex.get(brk.id);
+    const idx = rowToIndex.get(brk);
     if (idx !== undefined) {
       // Break AFTER this row, so the next row starts a new page
       breaks.add(idx + 1);
@@ -467,24 +506,19 @@ interface MergeInfo {
 }
 
 /**
- * Build a map of all merged cell regions in the worksheet.
- * Uses the worksheet model's public mergeCells property.
+ * Build a map of all merged cell regions.
  * Key: "row:col" (1-based), Value: merge info
  */
-function buildMergeMap(worksheet: Worksheet): Map<string, MergeInfo> {
+function buildMergeMap(sheet: PdfSheetData): Map<string, MergeInfo> {
   const map = new Map<string, MergeInfo>();
 
-  if (!worksheet.hasMerges) {
+  const merges = sheet.merges;
+  if (!merges || merges.length === 0) {
     return map;
   }
 
-  const mergeCells = worksheet.model.mergeCells;
-  if (!mergeCells) {
-    return map;
-  }
-
-  for (const rangeStr of mergeCells) {
-    const range = decodeRange(rangeStr);
+  for (const rangeStr of merges) {
+    const range = parseRangeRef(rangeStr);
     const top = range.s.r + 1;
     const left = range.s.c + 1;
     const bottom = range.e.r + 1;
@@ -555,9 +589,6 @@ export function paginateRows(
           currentPage.length === repeatedPrefixCount;
 
         if (pageHasOnlyRepeatRows) {
-          // If repeated header rows consume too much space to allow any body row,
-          // fall back to placing body rows without repeated headers rather than
-          // emitting a header-only page or overflowing the page.
           currentPage = [];
           currentPageHeight = 0;
           repeatedPrefixCount = 0;
@@ -597,13 +628,11 @@ export function paginateRows(
 
 /**
  * Split columns into groups for horizontal pagination.
- * Each group is an array of column indices (into the visibleCols/scaledColumnWidths arrays).
- * If the total width fits in contentWidth and there are no colBreaks, returns a single group.
  */
 function paginateColumns(
   columnWidths: number[],
   contentWidth: number,
-  worksheet: Worksheet,
+  sheet: PdfSheetData,
   visibleCols: number[]
 ): number[][] {
   if (columnWidths.length === 0) {
@@ -612,16 +641,15 @@ function paginateColumns(
 
   // Build col break set (indices into visibleCols)
   const colBreaks = new Set<number>();
-  const wsColBreaks: Array<{ id: number }> = (worksheet as any).colBreaks ?? [];
+  const wsColBreaks = sheet.colBreaks ?? [];
   if (wsColBreaks.length > 0) {
     const colToIndex = new Map<number, number>();
     for (let i = 0; i < visibleCols.length; i++) {
       colToIndex.set(visibleCols[i], i);
     }
     for (const brk of wsColBreaks) {
-      const idx = colToIndex.get(brk.id);
+      const idx = colToIndex.get(brk);
       if (idx !== undefined) {
-        // Break AFTER this column, so the next column starts a new group
         colBreaks.add(idx + 1);
       }
     }
@@ -634,9 +662,6 @@ function paginateColumns(
   for (let i = 0; i < columnWidths.length; i++) {
     const colWidth = columnWidths[i];
 
-    // Force break at column break positions or when exceeding page width
-    // Use a small epsilon (0.01pt) to avoid floating-point precision issues
-    // when fitToPage scales columns to exactly match content width
     const forceBreak = colBreaks.has(i) && currentGroup.length > 0;
     if ((forceBreak || currentWidth + colWidth > contentWidth + 0.01) && currentGroup.length > 0) {
       groups.push(currentGroup);
@@ -660,9 +685,7 @@ function paginateColumns(
 // =============================================================================
 
 function buildLayoutCell(
-  cell: Cell | undefined,
-  _colIndex: number,
-  _rowIndex: number,
+  cell: PdfCellData | undefined,
   x: number,
   y: number,
   width: number,
@@ -673,8 +696,8 @@ function buildLayoutCell(
   fontManager: FontManager,
   scaleFactor: number
 ): LayoutCell {
-  const text = getCellText(cell);
-  const style: Partial<Style> = cell?.style ?? {};
+  const text = cell?.text ?? "";
+  const style: Partial<PdfCellStyle> = cell?.style ?? {};
 
   const fontProps = extractFontProperties(
     style.font,
@@ -693,7 +716,7 @@ function buildLayoutCell(
     fontManager.ensureFont(pdfFontName);
   }
 
-  // Rich text runs (buildRichTextRuns handles font tracking internally)
+  // Rich text runs
   const richText = buildRichTextRuns(cell, options, fontManager, scaleFactor);
 
   return {
@@ -721,67 +744,27 @@ function buildLayoutCell(
 }
 
 // =============================================================================
-// Image Collection
+// Image Placement
 // =============================================================================
 
 /**
- * Collect images from a worksheet and assign them to the page that contains
- * their top-left anchor.
+ * Assign pre-collected images to the pages that contain their top-left anchor.
  */
-function assignImagesToPages(worksheet: Worksheet, layoutPages: LayoutPage[]): void {
-  // Access worksheet images via getImages()
-  const wsImages = (worksheet as any).getImages?.();
-  if (!wsImages || !Array.isArray(wsImages)) {
-    return;
-  }
-
-  // Access the workbook for image data
-  const workbook = (worksheet as any).workbook;
-  if (!workbook) {
-    return;
-  }
-
-  for (const wsImage of wsImages) {
-    if (!wsImage.range?.tl) {
-      continue;
-    }
-
-    const imageId = wsImage.imageId;
-    const mediaItem = workbook.getImage?.(Number(imageId));
-    if (!mediaItem) {
-      continue;
-    }
-
-    // Get image data
-    let data: Uint8Array | undefined;
-    if (mediaItem.buffer instanceof Uint8Array) {
-      data = mediaItem.buffer;
-    } else if (mediaItem.base64) {
-      data = base64ToUint8Array(mediaItem.base64);
-    }
-    if (!data || data.length === 0) {
-      continue;
-    }
-
-    const format = mediaItem.extension as string;
-    if (format !== "jpeg" && format !== "png") {
-      continue; // Only JPEG and PNG are supported
-    }
-
-    // Calculate position from anchor
-    const tl = wsImage.range.tl;
+function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[]): void {
+  for (const img of images) {
+    const tl = img.range.tl;
     const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // convert 0-indexed to 1-indexed
     const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
 
     const targetPage = layoutPages.find(
-      page => page.worksheetCols.includes(tlCol) && page.worksheetRows.includes(tlRow)
+      page => page.sheetCols.includes(tlCol) && page.sheetRows.includes(tlRow)
     );
     if (!targetPage) {
       continue;
     }
 
-    const pageColIndex = targetPage.worksheetCols.indexOf(tlCol);
-    const pageRowIndex = targetPage.worksheetRows.indexOf(tlRow);
+    const pageColIndex = targetPage.sheetCols.indexOf(tlCol);
+    const pageRowIndex = targetPage.sheetRows.indexOf(tlRow);
     const baseX = targetPage.columnOffsets[pageColIndex] ?? targetPage.options.margins.left;
     const baseY =
       targetPage.rowYPositions[pageRowIndex] ??
@@ -793,22 +776,20 @@ function assignImagesToPages(worksheet: Worksheet, layoutPages: LayoutPage[]): v
     const tlColOff = (tl.nativeColOff ?? 0) / 12700 || 0;
     const tlRowOff = (tl.nativeRowOff ?? 0) / 12700 || 0;
     const imgX = baseX + tlColOff;
-    const imgY = baseY - tlRowOff; // PDF y-axis is bottom-up, offset moves down
+    const imgY = baseY - tlRowOff;
 
     // Determine image size
     let imgWidth = 100;
     let imgHeight = 100;
-    if (wsImage.range.ext) {
-      // ext.width and ext.height are in pixels; convert to points (1px ≈ 0.75pt)
-      imgWidth = (wsImage.range.ext.width ?? 100) * 0.75;
-      imgHeight = (wsImage.range.ext.height ?? 100) * 0.75;
-    } else if (wsImage.range.br) {
-      // Calculate from bottom-right anchor
-      const br = wsImage.range.br;
+    if (img.range.ext) {
+      imgWidth = (img.range.ext.width ?? 100) * 0.75;
+      imgHeight = (img.range.ext.height ?? 100) * 0.75;
+    } else if (img.range.br) {
+      const br = img.range.br;
       const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
       const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
-      const brPageColIndex = targetPage.worksheetCols.indexOf(brCol);
-      const brPageRowIndex = targetPage.worksheetRows.indexOf(brRow);
+      const brPageColIndex = targetPage.sheetCols.indexOf(brCol);
+      const brPageRowIndex = targetPage.sheetRows.indexOf(brRow);
       const brBaseX =
         brPageColIndex >= 0
           ? targetPage.columnOffsets[brPageColIndex]
@@ -825,10 +806,9 @@ function assignImagesToPages(worksheet: Worksheet, layoutPages: LayoutPage[]): v
       imgHeight = imgY - brY;
     }
 
-    // PDF coordinates: y is bottom of image
     targetPage.images.push({
-      data,
-      format,
+      data: img.data,
+      format: img.format,
       rect: {
         x: imgX,
         y: imgY - imgHeight,
@@ -837,71 +817,6 @@ function assignImagesToPages(worksheet: Worksheet, layoutPages: LayoutPage[]): v
       }
     });
   }
-}
-
-/**
- * Extract display text from a cell, applying numFmt formatting.
- */
-function getCellText(cell: Cell | undefined): string {
-  if (!cell) {
-    return "";
-  }
-
-  switch (cell.type) {
-    case ValueType.Null:
-    case ValueType.Merge:
-      return "";
-    case ValueType.RichText: {
-      // RichText cell.value is a CellRichTextValue object; cell.text joins the run texts
-      return cell.text;
-    }
-    case ValueType.Hyperlink:
-      return cell.text;
-    case ValueType.Error: {
-      // Error cells have value = { error: "#N/A" } etc.
-      const errValue = cell.value as CellErrorValue | null;
-      return errValue?.error ?? cell.text;
-    }
-    case ValueType.Formula: {
-      const result = cell.result;
-      if (result !== undefined && result !== null) {
-        if (typeof result === "object" && "error" in result) {
-          return (result as CellErrorValue).error;
-        }
-        return formatCellValueSafe(result, cell.style?.numFmt);
-      }
-      return cell.text;
-    }
-    default: {
-      const value = cell.value;
-      if (value === null || value === undefined) {
-        return "";
-      }
-      return formatCellValueSafe(value, cell.style?.numFmt);
-    }
-  }
-}
-
-/**
- * Safely format a cell value using its numFmt.
- * Falls back to toString if formatting fails or no format is specified.
- */
-function formatCellValueSafe(
-  value: unknown,
-  numFmt: string | { formatCode: string } | undefined
-): string {
-  const fmt = typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
-  if (fmt && (typeof value === "number" || value instanceof Date || typeof value === "boolean")) {
-    try {
-      return formatCellValue(value, fmt);
-    } catch {
-      // Fall through to default
-    }
-  }
-  if (value instanceof Date) {
-    return value.toLocaleDateString();
-  }
-  return String(value);
 }
 
 // =============================================================================
@@ -913,16 +828,16 @@ function formatCellValueSafe(
  * Returns null for non-RichText cells.
  */
 function buildRichTextRuns(
-  cell: Cell | undefined,
+  cell: PdfCellData | undefined,
   options: ResolvedPdfOptions,
   fontManager: FontManager,
   scaleFactor: number
 ): LayoutRichTextRun[] | null {
-  if (!cell || cell.type !== ValueType.RichText) {
+  if (!cell || cell.type !== PdfCellType.RichText) {
     return null;
   }
 
-  const rtValue = cell.value as CellRichTextValue;
+  const rtValue = cell.value as { richText?: PdfRichTextRunData[] };
   if (!rtValue?.richText || rtValue.richText.length === 0) {
     return null;
   }

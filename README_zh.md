@@ -6,15 +6,12 @@
 
 ## 关于本项目
 
-ExcelTS 是现代化的 TypeScript Excel 工作簿管理器，具有以下特性:
+ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 
-- 🚀 **零运行时依赖** - 纯 TypeScript 实现，无任何外部包依赖
-- ✅ **广泛运行时支持** - 支持 LTS Node.js、Bun 及主流最新浏览器（Chrome、Firefox、Safari、Edge）
-- ✅ **完整的 TypeScript 支持** - 完整的类型定义和现代 TypeScript 模式
-- ✅ **现代构建系统** - 使用 Rolldown 进行更快的构建
-- ✅ **增强的测试** - 迁移到 Vitest 并支持浏览器测试
-- ✅ **ESM 优先** - 原生 ES Module 支持，兼容 CommonJS
-- ✅ **命名导出** - 所有导出都是命名导出，更好的 tree-shaking
+- 🚀 **零运行时依赖** — 纯 TypeScript 实现，无任何外部包依赖
+- 📦 **五大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、Archive（ZIP/TAR）、Stream（跨平台）
+- ✅ **跨平台** — Node.js 22+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
+- ✅ **ESM 优先** — 原生 ES Modules，兼容 CommonJS，完整 tree-shaking 支持
 
 ## 翻译
 
@@ -151,7 +148,7 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 零依赖将任意工作簿导出为 PDF：
 
 ```javascript
-import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("报告");
@@ -163,7 +160,7 @@ sheet.addRow({ product: "组件A", revenue: 1000 });
 sheet.getColumn("revenue").numFmt = "¥#,##0.00";
 
 // 一行导出
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "销售报告"
@@ -184,13 +181,13 @@ window.open(url);
 ```javascript
 const workbook = new Workbook();
 await workbook.xlsx.readFile("input.xlsx");
-const pdf = exportPdf(workbook);
+const pdf = excelToPdf(workbook);
 ```
 
 ### 加密
 
 ```javascript
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -204,9 +201,40 @@ const pdf = exportPdf(workbook, {
 ```javascript
 import { readFileSync } from "fs";
 
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf") // 嵌入 TrueType 字体以支持中文
 });
+```
+
+### 独立 PDF 生成（无需 Excel）
+
+无需工作簿，直接从数组数据生成 PDF：
+
+```javascript
+import { pdf } from "@cj-tech-master/excelts/pdf";
+
+// 最简方式 — 传入二维数组
+const bytes = pdf([
+  ["产品", "收入"],
+  ["组件A", 1000],
+  ["组件B", 2500]
+]);
+
+// 带列宽和样式
+const bytes = pdf(
+  {
+    name: "报告",
+    columns: [
+      { width: 25, header: "产品" },
+      { width: 15, header: "收入" }
+    ],
+    data: [
+      ["组件A", 1000],
+      ["组件B", 2500]
+    ]
+  },
+  { showGridLines: true }
+);
 ```
 
 完整 API 参考和所有选项请查看 [PDF 模块文档](src/modules/pdf/README.md)。
@@ -504,8 +532,8 @@ import {
   xmlDecode,
 
   // PDF 导出
-  exportPdf, // Workbook -> Uint8Array (PDF)
-  PdfExporter, // 基于类的 PDF 导出
+  pdf, // 最简单：pdf([["A", 1], ["B", 2]]) → Uint8Array
+  excelToPdf, // Workbook -> Uint8Array（Excel 转 PDF）
   PageSizes, // 内置页面尺寸定义
   PdfError, // PDF 基础错误
   PdfRenderError, // 布局/渲染错误

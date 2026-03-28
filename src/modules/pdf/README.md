@@ -1,32 +1,40 @@
 # PDF Module
 
-Zero-dependency Excel-to-PDF export with full styling, pagination, and encryption support.
+A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. Can be used **standalone** with the `pdf()` function, or as an **Excel-to-PDF converter** via the `excelToPdf()` bridge API.
 
 ```typescript
-import { exportPdf, PdfExporter } from "@cj-tech-master/excelts";
+// Standalone PDF (simplest)
+import { pdf } from "@cj-tech-master/excelts/pdf";
+
+// Excel-to-PDF
+import { excelToPdf } from "@cj-tech-master/excelts/pdf";
 ```
 
 ## Features
 
-- **Zero Dependencies** - Pure TypeScript PDF generation, no external libraries
-- **Cross-Platform** - Same API in Node.js and browsers
-- **Full Styling** - Fonts, colors, borders, fills, alignment, merged cells
-- **Rich Text** - Mixed formatting within a single cell, with word-wrap support
-- **Pagination** - Automatic vertical/horizontal page splitting with repeat headers
-- **Images** - JPEG and PNG embedding with alpha transparency
-- **Encryption** - Password protection with 128-bit RC4 and permission controls
-- **Font Embedding** - TrueType font subsetting for Unicode/CJK text
-- **Page Setup** - Per-worksheet paper size, orientation, margins, print area
-- **Tree-Shakeable** - Not imported? Not in your bundle
+- **Zero Dependencies** — Pure TypeScript PDF generation, no external libraries
+- **Standalone Engine** — Use `pdf()` with plain arrays and objects, no Excel dependency
+- **Excel Bridge** — One-line `excelToPdf(workbook)` for Excel-to-PDF conversion
+- **Cross-Platform** — Same API in Node.js and browsers
+- **Full Styling** — Fonts, colors, borders, fills, alignment, merged cells
+- **Rich Text** — Mixed formatting within a single cell, with word-wrap support
+- **Pagination** — Automatic vertical/horizontal page splitting with repeat headers
+- **Images** — JPEG and PNG embedding with alpha transparency
+- **Encryption** — Password protection with 128-bit RC4 and permission controls
+- **Font Embedding** — TrueType font subsetting for Unicode/CJK text
+- **Page Setup** — Per-sheet paper size, orientation, margins, print area
+- **Tree-Shakeable** — Not imported? Not in your bundle
 
 ---
 
 ## Quick Start
 
-### One-Line Export
+### Excel-to-PDF (Bridge API)
+
+The simplest way to generate PDFs from Excel workbooks:
 
 ```typescript
-import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("Sales");
@@ -38,7 +46,7 @@ sheet.addRow({ product: "Widget", revenue: 1000 });
 sheet.addRow({ product: "Gadget", revenue: 2500 });
 sheet.getColumn("revenue").numFmt = "$#,##0.00";
 
-const pdf = exportPdf(workbook);
+const pdf = excelToPdf(workbook);
 
 // Node.js
 import { writeFileSync } from "fs";
@@ -53,35 +61,98 @@ window.open(url);
 ### Read XLSX, Export PDF
 
 ```typescript
-import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 await workbook.xlsx.readFile("report.xlsx");
 
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Monthly Report"
 });
 ```
 
-### PdfExporter Class
+### Standalone PDF (No Excel)
+
+Generate PDFs from plain data — no Excel module, no Map objects, no boilerplate:
 
 ```typescript
-import { Workbook, PdfExporter } from "@cj-tech-master/excelts";
+import { pdf } from "@cj-tech-master/excelts/pdf";
 
-const workbook = new Workbook();
-// ... populate workbook ...
+// Simplest — pass a 2D array
+const bytes = pdf([
+  ["Product", "Revenue"],
+  ["Widget", 1000],
+  ["Gadget", 2500]
+]);
 
-const exporter = new PdfExporter(workbook);
-const pdf = exporter.export({
-  pageSize: "A4",
-  orientation: "landscape",
-  showGridLines: true,
-  showSheetNames: true,
-  showPageNumbers: true
+// With options
+const bytes = pdf(
+  [
+    ["Name", "Score"],
+    ["Alice", 95],
+    ["Bob", 87]
+  ],
+  { showGridLines: true, title: "Scores" }
+);
+
+// Multiple sheets
+const bytes = pdf({
+  sheets: [
+    {
+      name: "Sales",
+      data: [
+        ["Product", "Revenue"],
+        ["Widget", 1000]
+      ]
+    },
+    {
+      name: "Costs",
+      data: [
+        ["Item", "Amount"],
+        ["Rent", 500]
+      ]
+    }
+  ]
+});
+
+// Column widths + styled cells
+const bytes = pdf({
+  name: "Report",
+  columns: [{ width: 25 }, { width: 15 }],
+  data: [
+    [
+      { value: "Product", bold: true },
+      { value: "Revenue", bold: true }
+    ],
+    ["Widget", 1000],
+    ["Gadget", 2500]
+  ]
 });
 ```
+
+---
+
+## Architecture
+
+The PDF module is split into three layers:
+
+```
+src/modules/pdf/
+├── core/               # PDF primitives (objects, streams, writer, encryption)
+├── font/               # TTF parsing, glyph metrics, font subsetting, embedding
+├── render/             # Layout engine, page renderer, style converter
+│   ├── layout-engine   — PdfSheetData → LayoutPage[] (zero @excel imports)
+│   ├── page-renderer   — LayoutPage → PDF content stream (zero @excel imports)
+│   ├── style-converter — PdfCellStyle → PDF rendering params (zero @excel imports)
+│   └── pdf-exporter    — PdfWorkbook → Uint8Array (zero @excel imports)
+├── types.ts            # PdfWorkbook, PdfSheetData, PdfCellData, etc.
+├── excel-bridge.ts     # Excel Workbook → PdfWorkbook conversion (ONLY @excel dependency)
+└── index.ts
+```
+
+The entire PDF engine (core, font, render) has **zero imports from the Excel module**. The `excel-bridge.ts` is the only file that knows about Excel — it converts `Workbook` to `PdfWorkbook`.
 
 ---
 
@@ -154,7 +225,7 @@ Custom sizes: `{ width: 396, height: 612 }` (in points, 72pt = 1 inch).
 
 ## Styling Support
 
-The PDF exporter renders all standard Excel cell styles:
+The PDF engine renders all standard cell styles:
 
 ### Text
 
@@ -192,7 +263,7 @@ The PDF exporter renders all standard Excel cell styles:
 ### Repeat Header Rows
 
 ```typescript
-exportPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
+excelToPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
 ```
 
 Or via worksheet page setup:
@@ -213,11 +284,13 @@ worksheet.getRow(20).addPageBreak(); // Break after row 20
 worksheet.pageSetup.printArea = "A1:F50"; // Export only this range
 ```
 
+> **Note:** If a multi-range print area is set (e.g. `"A1:B5&&D1:E10"`), only the first range is used for PDF export.
+
 ---
 
 ## Images
 
-JPEG and PNG images are embedded when worksheets contain images:
+JPEG and PNG images are embedded when sheets contain images:
 
 ```typescript
 const imageId = workbook.addImage({
@@ -230,7 +303,7 @@ worksheet.addImage(imageId, {
   ext: { width: 200, height: 150 }
 });
 
-const pdf = exportPdf(workbook);
+const pdf = excelToPdf(workbook);
 // Image appears in the PDF at the specified position
 ```
 
@@ -243,7 +316,7 @@ PNG transparency (RGBA and tRNS) is preserved via PDF soft masks.
 ### Owner-Only (No Open Password)
 
 ```typescript
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     permissions: { print: true, copy: false, modify: false }
@@ -255,7 +328,7 @@ const pdf = exportPdf(workbook, {
 ### Open Password Required
 
 ```typescript
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader"
@@ -273,7 +346,7 @@ Standard Type1 fonts (Helvetica, Times, Courier) only support Latin characters. 
 ```typescript
 import { readFileSync } from "fs";
 
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -282,9 +355,9 @@ The font is automatically subsetted (only used glyphs are embedded) to minimize 
 
 ---
 
-## Per-Worksheet Page Setup
+## Per-Sheet Page Setup
 
-Each worksheet's `pageSetup` is respected:
+Each sheet's `pageSetup` is respected when using the Excel bridge:
 
 ```typescript
 const ws1 = workbook.addWorksheet("Summary");
@@ -296,7 +369,7 @@ ws2.pageSetup.paperSize = 1; // Letter
 ws2.pageSetup.orientation = "landscape";
 
 // Each sheet renders with its own page size/orientation
-const pdf = exportPdf(workbook);
+const pdf = excelToPdf(workbook);
 ```
 
 Worksheet margins are also inherited:
@@ -322,8 +395,8 @@ The PDF module is fully tree-shakeable. If you don't import any PDF exports, the
 // Only imports Excel core — PDF module is NOT included
 import { Workbook } from "@cj-tech-master/excelts";
 
-// Imports Excel + PDF module (~136 KB additional)
-import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+// Imports Excel + PDF bridge
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 ```
 
 ---
@@ -350,23 +423,34 @@ npx tsx src/modules/pdf/examples/pdf-basic.ts
 
 ## API Reference
 
-### `exportPdf(workbook, options?)`
+### `pdf(input, options?)`
 
-Convenience function. Returns `Uint8Array` containing the PDF file.
+Generate a PDF from plain data. Returns `Uint8Array`.
 
 ```typescript
-function exportPdf(workbook: Workbook, options?: PdfExportOptions): Uint8Array;
+// 2D array
+pdf([["Name", "Age"], ["Alice", 30]]);
+
+// Single sheet with column widths
+pdf({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
+
+// Multiple sheets
+pdf({ sheets: [{ name: "S1", data: [...] }, { name: "S2", data: [...] }] });
+
+// With options
+pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
 ```
 
-### `PdfExporter`
+### `excelToPdf(workbook, options?)`
 
-Class-based API for advanced usage.
+Convert an Excel `Workbook` to PDF. Returns `Uint8Array`.
 
 ```typescript
-class PdfExporter {
-  constructor(workbook: Workbook);
-  export(options?: PdfExportOptions): Uint8Array;
-}
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+// ... build workbook ...
+const bytes = excelToPdf(workbook, { showGridLines: true });
 ```
 
 ### Error Types
@@ -385,7 +469,7 @@ All errors extend `BaseError` with `cause` chain support:
 
 ```typescript
 try {
-  exportPdf(workbook);
+  excelToPdf(workbook);
 } catch (err) {
   if (isPdfError(err)) {
     console.error(err.message, err.cause);

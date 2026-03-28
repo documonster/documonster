@@ -165,8 +165,6 @@ describe("Style Converter", () => {
     it("should handle gradient fills (use first stop)", () => {
       const color = excelFillToPdfColor({
         type: "gradient",
-        gradient: "angle",
-        degree: 0,
         stops: [
           { position: 0, color: { argb: "FFFF0000" } },
           { position: 1, color: { argb: "FF0000FF" } }

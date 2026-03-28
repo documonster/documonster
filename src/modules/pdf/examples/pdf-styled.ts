@@ -20,7 +20,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Workbook, exportPdf } from "../../../index";
+import { Workbook, excelToPdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -282,7 +282,7 @@ wsData.getCell("B12").alignment = { wrapText: true };
 // Export
 // =============================================================================
 
-const pdf = exportPdf(wb, {
+const pdf = excelToPdf(wb, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,

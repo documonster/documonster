@@ -6,15 +6,12 @@ Modern TypeScript Excel Workbook Manager - Read, manipulate and write spreadshee
 
 ## About This Project
 
-ExcelTS is a modern TypeScript Excel workbook manager with:
+ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
-- 🚀 **Zero Runtime Dependencies** - Pure TypeScript implementation with no external packages
-- ✅ **Broad Runtime Support** - LTS Node.js, Bun, and modern browsers (Chrome, Firefox, Safari, Edge)
-- ✅ **Full TypeScript Support** - Complete type definitions and modern TypeScript patterns
-- ✅ **Modern Build System** - Using Rolldown for faster builds
-- ✅ **Enhanced Testing** - Migrated to Vitest with browser testing support
-- ✅ **ESM First** - Native ES Module support with CommonJS compatibility
-- ✅ **Named Exports** - All exports are named for better tree-shaking
+- 🚀 **Zero Runtime Dependencies** — Pure TypeScript, no external packages
+- 📦 **Five Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Archive (ZIP/TAR), Stream (cross-platform)
+- ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
+- ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
 ## Translations
 
@@ -104,7 +101,7 @@ cell.fill = {
   - Pivot tables
 
 - **PDF Export**
-  - Zero-dependency Excel-to-PDF conversion
+  - Full-featured, zero-dependency PDF engine (standalone or with Excel)
   - Full cell styling (fonts, colors, borders, fills, alignment)
   - Automatic pagination with repeat header rows
   - TrueType font embedding for Unicode/CJK text
@@ -141,7 +138,7 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 
 Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions. See the module READMEs for details:
 
-- [PDF Module](src/modules/pdf/README.md) - Zero-dependency Excel-to-PDF export with encryption and font embedding
+- [PDF Module](src/modules/pdf/README.md) - Full-featured zero-dependency PDF engine with encryption and font embedding
 - [CSV Module](src/modules/csv/README.md) - RFC 4180 parser/formatter, streaming, data generation
 - [Archive Module](src/modules/archive/README.md) - ZIP/TAR create/read/edit, compression, encryption
 - [Stream Module](src/modules/stream/README.md) - Cross-platform Readable/Writable/Transform/Duplex
@@ -151,7 +148,7 @@ Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions.
 Export any workbook to PDF with zero external dependencies:
 
 ```javascript
-import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("Report");
@@ -163,7 +160,7 @@ sheet.addRow({ product: "Widget", revenue: 1000 });
 sheet.getColumn("revenue").numFmt = "$#,##0.00";
 
 // One-line export
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Sales Report"
@@ -184,13 +181,13 @@ window.open(url);
 ```javascript
 const workbook = new Workbook();
 await workbook.xlsx.readFile("input.xlsx");
-const pdf = exportPdf(workbook);
+const pdf = excelToPdf(workbook);
 ```
 
 ### Encryption
 
 ```javascript
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -204,9 +201,40 @@ const pdf = exportPdf(workbook, {
 ```javascript
 import { readFileSync } from "fs";
 
-const pdf = exportPdf(workbook, {
+const pdf = excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf") // TrueType font for CJK text
 });
+```
+
+### Standalone PDF (No Excel)
+
+Generate PDFs from plain data — no workbook, no Map objects, no boilerplate:
+
+```javascript
+import { pdf } from "@cj-tech-master/excelts/pdf";
+
+// Simplest — pass a 2D array
+const bytes = pdf([
+  ["Product", "Revenue"],
+  ["Widget", 1000],
+  ["Gadget", 2500]
+]);
+
+// With column widths and styled cells
+const bytes = pdf(
+  {
+    name: "Report",
+    columns: [
+      { width: 25, header: "Product" },
+      { width: 15, header: "Revenue" }
+    ],
+    data: [
+      ["Widget", 1000],
+      ["Gadget", 2500]
+    ]
+  },
+  { showGridLines: true }
+);
 ```
 
 For the full API reference and all options, see the [PDF Module documentation](src/modules/pdf/README.md).
@@ -506,8 +534,8 @@ import {
   xmlDecode,
 
   // PDF export
-  exportPdf, // Workbook -> Uint8Array (PDF)
-  PdfExporter, // Class-based PDF export
+  pdf, // Simplest: pdf([["A", 1], ["B", 2]]) → Uint8Array
+  excelToPdf, // Workbook -> Uint8Array (Excel-to-PDF)
   PageSizes, // Built-in page size definitions
   PdfError, // Base PDF error
   PdfRenderError, // Layout/rendering failures

@@ -145,8 +145,8 @@ export {
 // =============================================================================
 
 export {
-  PdfExporter,
-  exportPdf,
+  pdf,
+  excelToPdf,
   PageSizes,
   PdfError,
   PdfRenderError,

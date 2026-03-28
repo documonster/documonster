@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Workbook, exportPdf, PdfExporter } from "../../../index";
+import { Workbook, excelToPdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,11 +32,11 @@ const testDataDir = path.resolve(
 async function convertFile(
   xlsxPath: string,
   pdfName: string,
-  options?: Parameters<typeof exportPdf>[1]
+  options?: Parameters<typeof excelToPdf>[1]
 ): Promise<void> {
   const wb = new Workbook();
   await wb.xlsx.readFile(xlsxPath);
-  const pdf = exportPdf(wb, options);
+  const pdf = excelToPdf(wb, options);
   fs.writeFileSync(path.join(outDir, pdfName), pdf);
   const sheets = wb.worksheets.length;
   console.log(`  ${pdfName} — ${sheets} sheet(s), ${pdf.length} bytes`);
@@ -150,7 +150,7 @@ const wb10 = new Workbook();
 await wb10.xlsx.readFile(path.join(excelDataDir, "test.xlsx"));
 
 // Variant A: Landscape, no grid
-const pdfA = exportPdf(wb10, { orientation: "landscape" });
+const pdfA = excelToPdf(wb10, { orientation: "landscape" });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-landscape.pdf"), pdfA);
 console.log("  excel-to-pdf-landscape.pdf — landscape, no grid");
 
@@ -168,21 +168,20 @@ wsA5.addRows([
   { item: "Oranges", qty: 8, price: 2.8 }
 ]);
 wsA5.getColumn("price").numFmt = "$#,##0.00";
-const pdfB = exportPdf(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
+const pdfB = excelToPdf(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-a5.pdf"), pdfB);
 console.log("  excel-to-pdf-a5.pdf — A5, fit to page");
 
 // Variant C: Encrypted
-const pdfC = exportPdf(wb10, {
+const pdfC = excelToPdf(wb10, {
   showGridLines: true,
   encryption: { ownerPassword: "secret" }
 });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-encrypted.pdf"), pdfC);
 console.log("  excel-to-pdf-encrypted.pdf — encrypted");
 
-// Variant D: Using PdfExporter class, select first sheet only
-const exporter = new PdfExporter(wb10);
-const pdfD = exporter.export({
+// Variant D: Select first sheet only
+const pdfD = excelToPdf(wb10, {
   sheets: [1],
   showGridLines: true,
   showPageNumbers: true

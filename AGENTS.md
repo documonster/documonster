@@ -44,11 +44,12 @@ src/
 │   │   └── xlsx/         # XLSX format parsing/writing
 │   ├── archive/          # ZIP/compression (zero-dependency)
 │   ├── csv/              # CSV parsing/formatting
-│   ├── pdf/              # PDF export (zero-dependency)
+│   ├── pdf/              # PDF engine (zero-dependency, standalone)
 │   │   ├── __tests__/    # Tests
 │   │   ├── core/         # PDF objects, streams, writer, encryption
 │   │   ├── font/         # Font metrics, TTF parsing, embedding
-│   │   ├── render/       # Layout engine, page renderer, exporter
+│   │   ├── render/       # Layout engine, page renderer, exporter (zero @excel imports)
+│   │   ├── excel-bridge  # Excel Workbook → PdfWorkbook conversion (only @excel dependency)
 │   │   └── examples/     # Runnable examples
 │   └── stream/           # Cross-platform streaming
 ├── utils/                # Shared utilities (errors, datetime, fs)

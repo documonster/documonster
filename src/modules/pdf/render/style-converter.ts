@@ -1,29 +1,32 @@
 /**
- * Converts Excel styles to PDF rendering parameters.
+ * Converts input styles to PDF rendering parameters.
  *
- * Maps Excel font, color, border, fill, and alignment properties
+ * Maps font, color, border, fill, and alignment properties
  * to their PDF equivalents for the layout engine and page renderer.
+ *
+ * This module is fully independent of the Excel module — it works with
+ * the PDF module's own style interfaces (PdfFontStyle, PdfFillData, etc.).
  */
 
-import type { PdfColor, LayoutBorder, LayoutBorders } from "../types";
 import type {
-  Font,
-  Color,
-  Fill,
-  FillPattern,
-  Border,
-  Borders,
-  BorderStyle,
-  Alignment
-} from "@excel/types";
+  PdfColor,
+  LayoutBorder,
+  LayoutBorders,
+  PdfColorData,
+  PdfFontStyle,
+  PdfFillData,
+  PdfBorderSideData,
+  PdfBordersData,
+  PdfAlignmentData
+} from "../types";
 
 // =============================================================================
 // Color Conversion
 // =============================================================================
 
 /**
- * Convert an Excel ARGB color string to PDF RGB color.
- * Excel uses "AARRGGBB" format (e.g., "FF000000" for black).
+ * Convert an ARGB color string to PDF RGB color.
+ * Handles "AARRGGBB" (8-char) and "RRGGBB" (6-char) formats.
  * PDF uses 0-1 floats for each component.
  */
 export function argbToPdfColor(argb: string | undefined): PdfColor | null {
@@ -64,10 +67,10 @@ export function argbToPdfColor(argb: string | undefined): PdfColor | null {
 }
 
 /**
- * Convert an Excel Color object to PDF color.
+ * Convert a color data object to PDF color.
  * Handles both ARGB and theme-based colors.
  */
-export function excelColorToPdf(color: Partial<Color> | undefined): PdfColor | null {
+export function excelColorToPdf(color: Partial<PdfColorData> | undefined): PdfColor | null {
   if (!color) {
     return null;
   }
@@ -83,8 +86,7 @@ export function excelColorToPdf(color: Partial<Color> | undefined): PdfColor | n
     if (!base) {
       return null;
     }
-    // Apply tint if present (tint field exists at runtime from XLSX layer)
-    const tint = (color as { tint?: number }).tint;
+    const tint = color.tint;
     if (tint !== undefined && tint !== 0) {
       return applyTint(base, tint);
     }
@@ -95,7 +97,7 @@ export function excelColorToPdf(color: Partial<Color> | undefined): PdfColor | n
 }
 
 /**
- * Map Excel theme color indices to PDF colors.
+ * Map theme color indices to PDF colors.
  * These are the default Office theme colors.
  */
 function themeColorToPdf(themeIndex: number): PdfColor | null {
@@ -154,10 +156,10 @@ export const DEFAULT_COLORS = {
 // =============================================================================
 
 /**
- * Extract font properties from an Excel font for PDF rendering.
+ * Extract font properties for PDF rendering.
  */
 export function extractFontProperties(
-  font: Partial<Font> | undefined,
+  font: Partial<PdfFontStyle> | undefined,
   defaultFamily: string,
   defaultSize: number
 ): {
@@ -185,32 +187,31 @@ export function extractFontProperties(
 // =============================================================================
 
 /**
- * Convert an Excel fill to a PDF background color.
+ * Convert a fill to a PDF background color.
  * Only pattern fills with "solid" pattern are supported as PDF backgrounds.
  * Other patterns are approximated or ignored.
  */
-export function excelFillToPdfColor(fill: Fill | undefined): PdfColor | null {
+export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | null {
   if (!fill) {
     return null;
   }
 
   if (fill.type === "pattern") {
-    const patternFill = fill as FillPattern;
-    if (patternFill.pattern === "solid" && patternFill.fgColor) {
-      return excelColorToPdf(patternFill.fgColor);
+    if (fill.pattern === "solid" && fill.fgColor) {
+      return excelColorToPdf(fill.fgColor);
     }
-    if (patternFill.pattern === "none") {
+    if (fill.pattern === "none") {
       return null;
     }
     // For other patterns, use fgColor as approximation
-    if (patternFill.fgColor) {
-      return excelColorToPdf(patternFill.fgColor);
+    if (fill.fgColor) {
+      return excelColorToPdf(fill.fgColor);
     }
   }
 
   if (fill.type === "gradient") {
     // For gradient fills, use the first stop color as approximation
-    if ("stops" in fill && fill.stops.length > 0) {
+    if (fill.stops && fill.stops.length > 0) {
       return excelColorToPdf(fill.stops[0].color);
     }
   }
@@ -223,9 +224,9 @@ export function excelFillToPdfColor(fill: Fill | undefined): PdfColor | null {
 // =============================================================================
 
 /**
- * Map Excel border styles to PDF line widths and dash patterns.
+ * Map border styles to PDF line widths.
  */
-function borderStyleToLineWidth(style: BorderStyle): number {
+function borderStyleToLineWidth(style: string): number {
   switch (style) {
     case "thin":
       return 0.5;
@@ -259,10 +260,10 @@ function borderStyleToLineWidth(style: BorderStyle): number {
 }
 
 /**
- * Map Excel border styles to PDF dash patterns.
+ * Map border styles to PDF dash patterns.
  * An empty array means a solid line.
  */
-function borderStyleToDashPattern(style: BorderStyle): number[] {
+function borderStyleToDashPattern(style: string): number[] {
   switch (style) {
     case "dotted":
       return [1, 1];
@@ -285,9 +286,9 @@ function borderStyleToDashPattern(style: BorderStyle): number[] {
 }
 
 /**
- * Convert a single Excel border to a PDF LayoutBorder.
+ * Convert a single border side to a PDF LayoutBorder.
  */
-function convertBorder(border: Partial<Border> | undefined): LayoutBorder | null {
+function convertBorder(border: Partial<PdfBorderSideData> | undefined): LayoutBorder | null {
   if (!border || !border.style) {
     return null;
   }
@@ -300,9 +301,9 @@ function convertBorder(border: Partial<Border> | undefined): LayoutBorder | null
 }
 
 /**
- * Convert Excel Borders to PDF LayoutBorders.
+ * Convert border data to PDF LayoutBorders.
  */
-export function excelBordersToPdf(borders: Partial<Borders> | undefined): LayoutBorders {
+export function excelBordersToPdf(borders: Partial<PdfBordersData> | undefined): LayoutBorders {
   if (!borders) {
     return { top: null, right: null, bottom: null, left: null };
   }
@@ -320,10 +321,10 @@ export function excelBordersToPdf(borders: Partial<Borders> | undefined): Layout
 // =============================================================================
 
 /**
- * Convert Excel horizontal alignment to PDF alignment.
+ * Convert horizontal alignment to PDF alignment.
  */
 export function excelHAlignToPdf(
-  alignment: Partial<Alignment> | undefined
+  alignment: Partial<PdfAlignmentData> | undefined
 ): "left" | "center" | "right" {
   if (!alignment?.horizontal) {
     return "left";
@@ -345,13 +346,13 @@ export function excelHAlignToPdf(
 }
 
 /**
- * Convert Excel vertical alignment to PDF alignment.
+ * Convert vertical alignment to PDF alignment.
  */
 export function excelVAlignToPdf(
-  alignment: Partial<Alignment> | undefined
+  alignment: Partial<PdfAlignmentData> | undefined
 ): "top" | "middle" | "bottom" {
   if (!alignment?.vertical) {
-    return "bottom"; // Excel default is bottom
+    return "bottom"; // Default is bottom
   }
 
   switch (alignment.vertical) {

@@ -416,10 +416,10 @@ describe("Font Embedding Utilities", () => {
   });
 });
 
-describe("Font Integration with PdfExporter", () => {
+describe("Font Integration with excelToPdf", () => {
   it("should export PDF with embedded font", async () => {
     const { Workbook } = await import("@excel/workbook");
-    const { exportPdf } = await import("@pdf/render/pdf-exporter");
+    const { excelToPdf } = await import("@pdf/excel-bridge");
 
     const ttfData = buildMinimalTtf();
 
@@ -427,7 +427,7 @@ describe("Font Integration with PdfExporter", () => {
     const ws = wb.addWorksheet("Test");
     ws.getCell("A1").value = "AB";
 
-    const pdf = exportPdf(wb, { font: ttfData });
+    const pdf = excelToPdf(wb, { font: ttfData });
 
     expect(pdf).toBeInstanceOf(Uint8Array);
     expect(pdf.length).toBeGreaterThan(100);
@@ -450,7 +450,7 @@ describe("Font Integration with PdfExporter", () => {
     // to [.notdef, A, B], the new GIDs should be [0, 1, 2].
     // Content stream must contain <00010002>, NOT <00050008>.
     const { Workbook } = await import("@excel/workbook");
-    const { exportPdf } = await import("@pdf/render/pdf-exporter");
+    const { excelToPdf } = await import("@pdf/excel-bridge");
 
     const ttfData = buildSparseGidTtf();
 
@@ -458,7 +458,7 @@ describe("Font Integration with PdfExporter", () => {
     const ws = wb.addWorksheet("Test");
     ws.getCell("A1").value = "AB";
 
-    const pdf = exportPdf(wb, { font: ttfData });
+    const pdf = excelToPdf(wb, { font: ttfData });
     const text = new TextDecoder().decode(pdf);
 
     expect(text).toContain("%PDF-1.4");

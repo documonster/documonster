@@ -3,8 +3,7 @@
  *
  * Covers:
  * - Simple workbook creation with data
- * - exportPdf() convenience function
- * - PdfExporter class usage
+ * - excelToPdf() function
  * - Page size, orientation, margins
  * - Grid lines
  * - Sheet name headers and page number footers
@@ -15,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Workbook, exportPdf, PdfExporter } from "../../../index";
+import { Workbook, excelToPdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,7 +43,7 @@ ws1.addRows([
 ]);
 
 // Simplest possible export
-const pdf1 = exportPdf(wb1);
+const pdf1 = excelToPdf(wb1);
 fs.writeFileSync(path.join(outDir, "basic-minimal.pdf"), pdf1);
 console.log("1. basic-minimal.pdf — default settings");
 
@@ -52,7 +51,7 @@ console.log("1. basic-minimal.pdf — default settings");
 // 2. With grid lines, headers, footers, and metadata
 // =============================================================================
 
-const pdf2 = exportPdf(wb1, {
+const pdf2 = excelToPdf(wb1, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,
@@ -67,7 +66,7 @@ console.log("2. basic-gridlines.pdf — grid lines + headers + footers + metadat
 // 3. Landscape A3 with custom margins
 // =============================================================================
 
-const pdf3 = exportPdf(wb1, {
+const pdf3 = excelToPdf(wb1, {
   pageSize: "A3",
   orientation: "landscape",
   margins: { top: 36, right: 36, bottom: 36, left: 36 },
@@ -80,7 +79,7 @@ console.log("3. basic-landscape-a3.pdf — landscape A3, tight margins");
 // 4. Custom page size (US Half Letter)
 // =============================================================================
 
-const pdf4 = exportPdf(wb1, {
+const pdf4 = excelToPdf(wb1, {
   pageSize: { width: 396, height: 612 }, // 5.5" × 8.5" in points
   fitToPage: true,
   scale: 0.9
@@ -107,25 +106,24 @@ wsSum.getColumn(1).width = 20;
 wsSum.getCell("A1").value = "Q1 Summary";
 
 // Export only January and Summary by name
-const pdf5a = exportPdf(wb5, { sheets: ["January", "Summary"] });
+const pdf5a = excelToPdf(wb5, { sheets: ["January", "Summary"] });
 fs.writeFileSync(path.join(outDir, "basic-select-by-name.pdf"), pdf5a);
 
 // Export by 1-based position (sheets 2 and 4)
-const pdf5b = exportPdf(wb5, { sheets: [2, 4] });
+const pdf5b = excelToPdf(wb5, { sheets: [2, 4] });
 fs.writeFileSync(path.join(outDir, "basic-select-by-index.pdf"), pdf5b);
 console.log("5. basic-select-by-name.pdf + basic-select-by-index.pdf — sheet selection");
 
 // =============================================================================
-// 6. Using PdfExporter class
+// 6. excelToPdf with options
 // =============================================================================
 
-const exporter = new PdfExporter(wb1);
-const pdf6 = exporter.export({
+const pdf6 = excelToPdf(wb1, {
   showGridLines: true,
   showPageNumbers: true,
-  title: "Via PdfExporter class"
+  title: "Via excelToPdf"
 });
-fs.writeFileSync(path.join(outDir, "basic-class.pdf"), pdf6);
-console.log("6. basic-class.pdf — PdfExporter class API");
+fs.writeFileSync(path.join(outDir, "basic-with-options.pdf"), pdf6);
+console.log("6. basic-with-options.pdf — excelToPdf with options");
 
 console.log("\nAll basic examples generated.");

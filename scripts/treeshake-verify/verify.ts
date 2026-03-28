@@ -74,7 +74,7 @@ const scenarios: Scenario[] = [
     [...allModulesExcept("excel"), "modules/excel/workbook", "modules/excel/worksheet"]
   ),
   s("root: Workbook (no pdf leak)", PKG_NAME, ["Workbook"], ["modules/pdf/"]),
-  s("root: PdfExporter (no csv leak)", PKG_NAME, ["PdfExporter"], ["modules/csv/"]),
+  s("root: excelToPdf (no csv leak)", PKG_NAME, ["excelToPdf"], ["modules/csv/"]),
   s(
     "root: CsvParserStream (no pdf/archive leak)",
     PKG_NAME,

@@ -1,34 +1,26 @@
 /**
- * PDF Exporter - Main orchestrator for Excel-to-PDF conversion.
+ * PDF Exporter - Main orchestrator for PDF document generation.
  *
  * Coordinates the layout engine, page renderer, font manager, and PDF writer
- * to produce a complete PDF document from an Excel workbook.
+ * to produce a complete PDF document from a PdfWorkbook data structure.
  *
- * @example
- * ```typescript
- * import { Workbook, PdfExporter } from "excelts";
- *
- * const workbook = new Workbook();
- * // ... populate workbook ...
- *
- * const exporter = new PdfExporter(workbook);
- * const pdfBuffer = exporter.export({ fitToPage: true });
- * ```
+ * This module is fully independent of the Excel module.
+ * It is used internally by the public `pdf()` and `excelToPdf()` APIs.
  */
 
-import type { Worksheet } from "@excel/worksheet";
-import type { WorksheetState } from "@excel/types";
 import { PdfWriter } from "../core/pdf-writer";
 import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "../core/pdf-object";
 import { FontManager, resolvePdfFontName } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
 import { initEncryption } from "../core/encryption";
-import { layoutWorksheet } from "./layout-engine";
+import { layoutSheet } from "./layout-engine";
 import { renderPage, alphaGsName } from "./page-renderer";
 import { decodePng } from "./png-decoder";
 import { PdfError, PdfRenderError } from "../errors";
 import {
   PageSizes,
+  type PdfWorkbook,
+  type PdfSheetData,
   type PdfExportOptions,
   type ResolvedPdfOptions,
   type PdfPageSize,
@@ -40,49 +32,22 @@ import {
 import { argbToPdfColor } from "./style-converter";
 
 // =============================================================================
-// Workbook Interface
-// =============================================================================
-
-/**
- * Minimal interface for a workbook to avoid tight coupling.
- * The actual Workbook class satisfies this interface.
- */
-interface WorkbookLike {
-  worksheets: WorksheetLike[];
-  title: string;
-  creator?: string;
-  subject: string;
-}
-
-/**
- * Minimal interface for a worksheet within the WorkbookLike.
- */
-type WorksheetLike = Worksheet & {
-  state: WorksheetState;
-};
-
-// =============================================================================
 // Public API
 // =============================================================================
 
 /**
- * Export a workbook to PDF format.
+ * Export a PdfWorkbook to PDF format.
  *
- * @param workbook - The workbook to export
+ * @param workbook - The workbook data to export
  * @param options - Export options controlling layout, pagination, and appearance
  * @returns PDF file as a Uint8Array
- * @throws {PdfError} If the workbook has no worksheets or export fails
- *
- * @example
- * ```typescript
- * const pdf = exportPdf(workbook, { fitToPage: true, showGridLines: true });
- * ```
+ * @throws {PdfError} If the workbook has no sheets or export fails
  */
-export function exportPdf(workbook: WorkbookLike, options?: PdfExportOptions): Uint8Array {
-  const worksheets = selectWorksheets(workbook, options?.sheets);
+export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Uint8Array {
+  const sheets = selectSheets(workbook, options?.sheets);
 
-  if (worksheets.length === 0) {
-    throw new PdfError("No worksheets to export. The workbook is empty or no sheets matched.");
+  if (sheets.length === 0) {
+    throw new PdfError("No sheets to export. The workbook is empty or no sheets matched.");
   }
 
   const fontManager = new FontManager();
@@ -98,19 +63,19 @@ export function exportPdf(workbook: WorkbookLike, options?: PdfExportOptions): U
     }
   }
 
-  // --- Step 1: Layout all worksheets ---
+  // --- Step 1: Layout all sheets ---
   const allPages: LayoutPage[] = [];
-  for (const worksheet of worksheets) {
+  for (const sheet of sheets) {
     try {
-      const resolved = resolveOptions(options, worksheet);
-      const pages = layoutWorksheet(worksheet, resolved, fontManager);
+      const resolved = resolveOptions(options, sheet);
+      const pages = layoutSheet(sheet, resolved, fontManager);
       allPages.push(...pages);
     } catch (err) {
-      throw new PdfRenderError(`Failed to layout worksheet "${worksheet.name}"`, { cause: err });
+      throw new PdfRenderError(`Failed to layout sheet "${sheet.name}"`, { cause: err });
     }
   }
 
-  const documentOptions = resolveOptions(options, worksheets[0]);
+  const documentOptions = resolveOptions(options, sheets[0]);
 
   if (allPages.length === 0) {
     // Create at least one empty page
@@ -120,18 +85,18 @@ export function exportPdf(workbook: WorkbookLike, options?: PdfExportOptions): U
       cells: [],
       width: documentOptions.pageSize.width,
       height: documentOptions.pageSize.height,
-      sheetName: worksheets[0]?.name ?? "Sheet1",
-      worksheetCols: [],
+      sheetName: sheets[0]?.name ?? "Sheet1",
+      sheetCols: [],
       columnOffsets: [],
       columnWidths: [],
-      worksheetRows: [],
+      sheetRows: [],
       rowYPositions: [],
       rowHeights: [],
       images: []
     });
   }
 
-  // Fix page numbers (they may be off after combining multiple worksheets)
+  // Fix page numbers (they may be off after combining multiple sheets)
   for (let i = 0; i < allPages.length; i++) {
     allPages[i].pageNumber = i + 1;
   }
@@ -289,7 +254,7 @@ export function exportPdf(workbook: WorkbookLike, options?: PdfExportOptions): U
   // --- Step 6: Build catalog ---
   writer.addCatalog(pagesTreeObjNum, outlinesRef);
 
-  // --- Step 6: Add document info ---
+  // --- Step 7: Add document info ---
   writer.addInfoDict({
     title: documentOptions.title || workbook.title || undefined,
     author: documentOptions.author || workbook.creator || undefined,
@@ -307,50 +272,22 @@ export function exportPdf(workbook: WorkbookLike, options?: PdfExportOptions): U
   return writer.build();
 }
 
-/**
- * Class-based API for PDF export (wraps {@link exportPdf}).
- *
- * @example
- * ```typescript
- * const exporter = new PdfExporter(workbook);
- * const pdfBuffer = exporter.export({ fitToPage: true });
- * ```
- */
-export class PdfExporter {
-  declare private workbook: WorkbookLike;
-
-  constructor(workbook: WorkbookLike) {
-    this.workbook = workbook;
-  }
-
-  /**
-   * Export the workbook as a PDF document.
-   *
-   * @param options - Export options controlling layout, pagination, and appearance
-   * @returns PDF file as a Uint8Array
-   * @throws {PdfError} If the workbook has no worksheets or export fails
-   */
-  export(options?: PdfExportOptions): Uint8Array {
-    return exportPdf(this.workbook, options);
-  }
-}
-
 // =============================================================================
-// Worksheet Selection
+// Sheet Selection
 // =============================================================================
 
 /**
- * Select which worksheets to export based on the options.
+ * Select which sheets to export based on the options.
  */
-function selectWorksheets(workbook: WorkbookLike, sheets?: (string | number)[]): WorksheetLike[] {
-  const allSheets = workbook.worksheets;
+function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfSheetData[] {
+  const allSheets = workbook.sheets;
 
   if (!sheets || sheets.length === 0) {
-    // Export all visible worksheets
+    // Export all visible sheets
     return allSheets.filter(ws => ws.state !== "hidden" && ws.state !== "veryHidden");
   }
 
-  const result: WorksheetLike[] = [];
+  const result: PdfSheetData[] = [];
   for (const selector of sheets) {
     if (typeof selector === "string") {
       const ws = allSheets.find(s => s.name.toLowerCase() === selector.toLowerCase());
@@ -358,7 +295,7 @@ function selectWorksheets(workbook: WorkbookLike, sheets?: (string | number)[]):
         result.push(ws);
       }
     } else if (typeof selector === "number") {
-      // 1-based position in the worksheets array
+      // 1-based position in the sheets array
       const ws = allSheets[selector - 1];
       if (ws) {
         result.push(ws);
@@ -378,10 +315,10 @@ function selectWorksheets(workbook: WorkbookLike, sheets?: (string | number)[]):
  */
 function resolveOptions(
   options: PdfExportOptions | undefined,
-  worksheet?: WorksheetLike
+  sheet?: PdfSheetData
 ): ResolvedPdfOptions {
-  // Use worksheet's pageSetup as fallback for unspecified options
-  const ps = worksheet?.pageSetup;
+  // Use sheet's pageSetup as fallback for unspecified options
+  const ps = sheet?.pageSetup;
 
   const pageSize = resolvePageSize(options?.pageSize, ps?.paperSize);
   const orientation: PdfOrientation =
@@ -395,7 +332,7 @@ function resolveOptions(
     b: 0.816
   };
 
-  // Use worksheet's printTitlesRow as fallback for repeatRows
+  // Use sheet's printTitlesRow as fallback for repeatRows
   let repeatRows: number | false = options?.repeatRows ?? false;
   if (repeatRows === false && ps?.printTitlesRow) {
     // printTitlesRow format: "1:3" (repeat rows 1-3) or "1" (repeat row 1)
@@ -425,10 +362,7 @@ function resolveOptions(
   };
 }
 
-/**
- * Resolve the page size from options.
- */
-/** Map Excel PaperSize enum values to PDF page sizes. */
+/** Map PaperSize enum values to PDF page sizes. */
 const PAPER_SIZE_MAP: Record<number, PdfPageSize> = {
   1: PageSizes.LETTER,
   5: PageSizes.LEGAL,
@@ -448,7 +382,7 @@ function resolvePageSize(
     }
     return size;
   }
-  // Fallback to worksheet paperSize
+  // Fallback to sheet paperSize
   if (paperSize !== undefined) {
     return PAPER_SIZE_MAP[paperSize] ?? PageSizes.A4;
   }
@@ -456,15 +390,15 @@ function resolvePageSize(
 }
 
 /**
- * Resolve margins with defaults. Worksheet margins are in inches, convert to points (×72).
- * When partial PDF margins are specified, unset sides fall back to worksheet margins,
+ * Resolve margins with defaults. Sheet margins are in inches, convert to points (×72).
+ * When partial PDF margins are specified, unset sides fall back to sheet margins,
  * then to the default 72pt (1 inch).
  */
 function resolveMargins(
   margins?: Partial<PdfMargins>,
   wsMargins?: { left: number; right: number; top: number; bottom: number }
 ): PdfMargins {
-  // Build a base from worksheet pageSetup margins (inches → points), or default 72pt
+  // Build a base from sheet pageSetup margins (inches → points), or default 72pt
   const base: PdfMargins = wsMargins
     ? {
         top: wsMargins.top * 72,
@@ -492,7 +426,7 @@ function resolveMargins(
 
 /**
  * Build a PDF outlines tree for sheet-level navigation.
- * Creates one bookmark entry per worksheet, pointing to the first page.
+ * Creates one bookmark entry per sheet, pointing to the first page.
  */
 function buildOutlines(
   writer: PdfWriter,

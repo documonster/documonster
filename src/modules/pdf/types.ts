@@ -1,7 +1,192 @@
 /**
  * Type definitions for the PDF module.
- * Covers export options, page layout, and internal rendering models.
+ * Covers input data models, export options, page layout, and internal rendering models.
+ *
+ * The input data models (PdfWorkbook, PdfSheetData, etc.) are fully independent of
+ * the Excel module, allowing the PDF engine to be used standalone.
  */
+
+// =============================================================================
+// PDF Input Data Model (Excel-independent)
+// =============================================================================
+
+/**
+ * Cell value type discriminator for the PDF engine.
+ */
+export const PdfCellType = {
+  Empty: 0,
+  String: 1,
+  Number: 2,
+  Boolean: 3,
+  Date: 4,
+  RichText: 5,
+  Error: 6,
+  Formula: 7,
+  Hyperlink: 8,
+  Merge: 9
+} as const;
+
+export type PdfCellTypeValue = (typeof PdfCellType)[keyof typeof PdfCellType];
+
+/** Color data used across the PDF input model. */
+export interface PdfColorData {
+  argb?: string;
+  theme?: number;
+  tint?: number;
+}
+
+/** Font style in the PDF input model. */
+export interface PdfFontStyle {
+  name?: string;
+  size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  underline?: boolean | string;
+  color?: PdfColorData;
+}
+
+/** Fill data in the PDF input model. */
+export interface PdfFillData {
+  type: "pattern" | "gradient";
+  pattern?: string;
+  fgColor?: PdfColorData;
+  stops?: Array<{ position?: number; color: PdfColorData }>;
+}
+
+/** A single border edge in the PDF input model. */
+export interface PdfBorderSideData {
+  style?: string;
+  color?: PdfColorData;
+}
+
+/** Border data in the PDF input model. */
+export interface PdfBordersData {
+  top?: Partial<PdfBorderSideData>;
+  right?: Partial<PdfBorderSideData>;
+  bottom?: Partial<PdfBorderSideData>;
+  left?: Partial<PdfBorderSideData>;
+}
+
+/** Alignment data in the PDF input model. */
+export interface PdfAlignmentData {
+  horizontal?: string;
+  vertical?: string;
+  wrapText?: boolean;
+  indent?: number;
+  textRotation?: number;
+}
+
+/** Cell style in the PDF input model. */
+export interface PdfCellStyle {
+  font?: Partial<PdfFontStyle>;
+  numFmt?: string | { formatCode: string };
+  fill?: PdfFillData;
+  border?: Partial<PdfBordersData>;
+  alignment?: Partial<PdfAlignmentData>;
+}
+
+/** A single run of rich text. */
+export interface PdfRichTextRunData {
+  text: string;
+  font?: Partial<PdfFontStyle>;
+}
+
+/** A cell in the PDF input model. */
+export interface PdfCellData {
+  type: PdfCellTypeValue;
+  value: unknown;
+  /** Pre-computed display text */
+  text: string;
+  style?: Partial<PdfCellStyle>;
+  hyperlink?: string;
+  /** Formula result (for formula cells) */
+  result?: unknown;
+  /** Column number (1-based) */
+  col: number;
+}
+
+/** A row in the PDF input model. */
+export interface PdfRowData {
+  hidden?: boolean;
+  height?: number;
+  /** Cells keyed by 1-based column number */
+  cells: Map<number, PdfCellData>;
+}
+
+/** A column in the PDF input model. */
+export interface PdfColumnData {
+  hidden?: boolean;
+  width?: number;
+}
+
+/** Page setup configuration. */
+export interface PdfPageSetupData {
+  orientation?: string;
+  paperSize?: number;
+  margins?: { left: number; right: number; top: number; bottom: number };
+  scale?: number;
+  printTitlesRow?: string;
+  showGridLines?: boolean;
+  printArea?: string;
+}
+
+/** An image embedded in a sheet. */
+export interface PdfSheetImage {
+  data: Uint8Array;
+  format: "jpeg" | "png";
+  range: {
+    tl: {
+      col: number;
+      row: number;
+      nativeCol?: number;
+      nativeRow?: number;
+      nativeColOff?: number;
+      nativeRowOff?: number;
+    };
+    br?: {
+      col: number;
+      row: number;
+      nativeCol?: number;
+      nativeRow?: number;
+      nativeColOff?: number;
+      nativeRowOff?: number;
+    };
+    ext?: { width: number; height: number };
+  };
+}
+
+/** A single sheet in the PDF input model. */
+export interface PdfSheetData {
+  name: string;
+  state?: "visible" | "hidden" | "veryHidden";
+  /** Data bounds (1-based) */
+  bounds: { top: number; left: number; bottom: number; right: number };
+  /** Columns keyed by 1-based column number */
+  columns: Map<number, PdfColumnData>;
+  /** Rows keyed by 1-based row number */
+  rows: Map<number, PdfRowData>;
+  /** Merge ranges in "A1:B2" format */
+  merges?: string[];
+  pageSetup?: PdfPageSetupData;
+  /** Row numbers where manual page breaks occur */
+  rowBreaks?: number[];
+  /** Column numbers where manual page breaks occur */
+  colBreaks?: number[];
+  /** Embedded images */
+  images?: PdfSheetImage[];
+}
+
+/**
+ * A workbook data structure for PDF generation.
+ * This is a plain data object — not tied to the Excel module.
+ */
+export interface PdfWorkbook {
+  title?: string;
+  creator?: string;
+  subject?: string;
+  sheets: PdfSheetData[];
+}
 
 // =============================================================================
 // Page Size Definitions
@@ -54,7 +239,7 @@ export interface PdfExportOptions {
   pageSize?: PageSizeName | PdfPageSize;
 
   /**
-   * Page orientation. If not set, uses the worksheet's pageSetup.orientation.
+   * Page orientation. If not set, uses the sheet's pageSetup.orientation.
    * @default "portrait"
    */
   orientation?: PdfOrientation;
@@ -66,8 +251,8 @@ export interface PdfExportOptions {
   margins?: Partial<PdfMargins>;
 
   /**
-   * Which worksheets to include. Accepts sheet names or 1-based positions.
-   * If omitted, all visible worksheets are included.
+   * Which sheets to include. Accepts sheet names or 1-based positions.
+   * If omitted, all visible sheets are included.
    */
   sheets?: (string | number)[];
 
@@ -157,7 +342,7 @@ export interface PdfExportOptions {
    * ```typescript
    * import { readFileSync } from "fs";
    * const font = readFileSync("NotoSansSC-Regular.ttf");
-   * exporter.export({ font });
+   * excelToPdf(workbook, { font });
    * ```
    */
   font?: Uint8Array;
@@ -167,7 +352,7 @@ export interface PdfExportOptions {
    *
    * @example
    * ```typescript
-   * exporter.export({
+   * excelToPdf(workbook, {
    *   encryption: {
    *     ownerPassword: "secret",
    *     userPassword: "open",
@@ -345,7 +530,7 @@ export interface LayoutBorder {
 export interface LayoutPage {
   /** Page number (1-based) */
   pageNumber: number;
-  /** Resolved rendering options for the worksheet that produced this page */
+  /** Resolved rendering options for the sheet that produced this page */
   options: ResolvedPdfOptions;
   /** Cells to render on this page */
   cells: LayoutCell[];
@@ -355,14 +540,14 @@ export interface LayoutPage {
   height: number;
   /** Sheet name for this page */
   sheetName: string;
-  /** Worksheet column numbers included on this page */
-  worksheetCols: number[];
+  /** Sheet column numbers included on this page */
+  sheetCols: number[];
   /** Column x-offsets (left edges) relative to page content area */
   columnOffsets: number[];
   /** Column widths in points */
   columnWidths: number[];
-  /** Worksheet row numbers included on this page */
-  worksheetRows: number[];
+  /** Sheet row numbers included on this page */
+  sheetRows: number[];
   /** Row y-offsets (top edges) in page coordinates (PDF bottom-left origin) */
   rowYPositions: number[];
   /** Row heights in points */
