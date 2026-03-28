@@ -154,6 +154,54 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
   // Convert images
   const images = collectImages(ws, workbook);
 
+  // Extend bounds to cover image anchors (so layout engine includes them)
+  if (images) {
+    for (const img of images) {
+      const tl = img.range.tl;
+      const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // 0-indexed → 1-indexed
+      const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
+      if (bounds.top === 0 && bounds.left === 0) {
+        bounds.top = 1;
+        bounds.left = 1;
+      }
+      if (tlCol > bounds.right) {
+        bounds.right = tlCol;
+      }
+      if (tlRow > bounds.bottom) {
+        bounds.bottom = tlRow;
+      }
+
+      // Also extend to bottom-right anchor if present
+      if (img.range.br) {
+        const br = img.range.br;
+        const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
+        const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
+        if (brCol > bounds.right) {
+          bounds.right = brCol;
+        }
+        if (brRow > bounds.bottom) {
+          bounds.bottom = brRow;
+        }
+      }
+    }
+
+    // Ensure columns/rows exist for extended bounds
+    for (let c = bounds.left; c <= bounds.right; c++) {
+      if (!columns.has(c)) {
+        const col = ws.getColumn(c);
+        columns.set(c, {
+          hidden: col.hidden || undefined,
+          width: col.width ?? undefined
+        });
+      }
+    }
+    for (let r = bounds.top; r <= bounds.bottom; r++) {
+      if (!rows.has(r)) {
+        rows.set(r, { cells: new Map() });
+      }
+    }
+  }
+
   return {
     name: ws.name,
     state: (ws as any).state ?? "visible",

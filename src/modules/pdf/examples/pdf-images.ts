@@ -1,8 +1,9 @@
 /**
  * Example: PDF Export with Images
  *
- * Demonstrates embedding JPEG and PNG images in PDF output,
- * including PNG alpha transparency support.
+ * Demonstrates embedding JPEG and PNG images via:
+ * 1. excelToPdf() — Excel workbook with images → PDF
+ * 2. pdf() — Standalone PDF with images (no Excel)
  *
  * Run: npx tsx src/modules/pdf/examples/pdf-images.ts
  */
@@ -11,10 +12,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Workbook, excelToPdf } from "../../../index";
+import { pdf } from "../pdf";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../output/pdf-examples"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -23,114 +25,181 @@ const excelDataDir = path.resolve(
   "../../excel/examples/data"
 );
 
-console.log("=== PDF Image Examples ===\n");
-
-// =============================================================================
-// 1. JPEG image embedded in PDF
-// =============================================================================
-
-const wb1 = new Workbook();
-const ws1 = wb1.addWorksheet("JPEG Example");
-
-ws1.columns = [
-  { header: "Product", key: "product", width: 25 },
-  { header: "Status", key: "status", width: 15 },
-  { header: "Notes", key: "notes", width: 30 }
-];
-
-ws1.addRows([
-  { product: "Widget A", status: "Active", notes: "Best seller" },
-  { product: "Widget B", status: "Pending", notes: "New launch" },
-  { product: "Widget C", status: "Active", notes: "Updated design" }
-]);
-
-// Add a JPEG image
 const jpegPath = path.join(excelDataDir, "bubbles.jpg");
-if (fs.existsSync(jpegPath)) {
-  const jpegId = wb1.addImage({ filename: jpegPath, extension: "jpeg" });
-  ws1.addImage(jpegId, {
-    tl: { col: 0, row: 4 },
-    ext: { width: 300, height: 200 }
-  });
-
-  const pdf1 = excelToPdf(wb1, { showGridLines: true });
-  fs.writeFileSync(path.join(outDir, "images-jpeg.pdf"), pdf1);
-  console.log("1. images-jpeg.pdf — table with embedded JPEG");
-} else {
-  console.log("1. SKIPPED — bubbles.jpg not found");
-}
-
-// =============================================================================
-// 2. PNG image with alpha transparency
-// =============================================================================
-
-const wb2 = new Workbook();
-const ws2 = wb2.addWorksheet("PNG Alpha");
-
-ws2.getCell("A1").value = "PNG with transparency";
-ws2.getCell("A1").font = { bold: true, size: 14 };
-ws2.getCell("A2").value = "The image below has an alpha channel.";
-
-for (let r = 3; r <= 12; r++) {
-  ws2.getCell(`A${r}`).value = `Background row ${r}`;
-  ws2.getCell(`B${r}`).value = r * 100;
-  ws2.getCell(`C${r}`).value = "filler";
-}
-
 const pngPath = path.join(excelDataDir, "image2.png");
-if (fs.existsSync(pngPath)) {
-  const pngId = wb2.addImage({ filename: pngPath, extension: "png" });
-  ws2.addImage(pngId, {
-    tl: { col: 1, row: 2 },
-    ext: { width: 150, height: 150 }
-  });
+const hasJpeg = fs.existsSync(jpegPath);
+const hasPng = fs.existsSync(pngPath);
 
-  const pdf2 = excelToPdf(wb2, { showGridLines: true });
-  fs.writeFileSync(path.join(outDir, "images-png-alpha.pdf"), pdf2);
-  console.log("2. images-png-alpha.pdf — PNG image with alpha transparency");
+console.log("=== PDF Image Examples ===\n");
+console.log("--- Part A: excelToPdf (Excel workbook with images) ---\n");
+
+// =============================================================================
+// A1. Excel → PDF: JPEG image
+// =============================================================================
+
+if (hasJpeg) {
+  const wb = new Workbook();
+  const ws = wb.addWorksheet("JPEG Example");
+
+  ws.columns = [
+    { header: "Product", key: "product", width: 25 },
+    { header: "Status", key: "status", width: 15 },
+    { header: "Notes", key: "notes", width: 30 }
+  ];
+  ws.addRows([
+    { product: "Widget A", status: "Active", notes: "Best seller" },
+    { product: "Widget B", status: "Pending", notes: "New launch" },
+    { product: "Widget C", status: "Active", notes: "Updated design" }
+  ]);
+
+  const jpegId = wb.addImage({ buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
+  ws.addImage(jpegId, { tl: { col: 0, row: 4 }, ext: { width: 300, height: 200 } });
+
+  fs.writeFileSync(
+    path.join(outDir, "excel-images-jpeg.pdf"),
+    excelToPdf(wb, { showGridLines: true })
+  );
+  console.log("A1. excel-images-jpeg.pdf — table with embedded JPEG");
 } else {
-  console.log("2. SKIPPED — image2.png not found");
+  console.log("A1. SKIPPED — bubbles.jpg not found");
 }
 
 // =============================================================================
-// 3. Multiple images on the same sheet
+// A2. Excel → PDF: PNG with alpha
 // =============================================================================
 
-const wb3 = new Workbook();
-const ws3 = wb3.addWorksheet("Multi-Image");
+if (hasPng) {
+  const wb = new Workbook();
+  const ws = wb.addWorksheet("PNG Alpha");
 
-ws3.getCell("A1").value = "Multiple Images";
-ws3.getCell("A1").font = { bold: true, size: 14 };
-for (let r = 2; r <= 20; r++) {
-  ws3.getCell(`A${r}`).value = `Data row ${r}`;
-  ws3.getCell(`B${r}`).value = r;
-  ws3.getCell(`C${r}`).value = `Item ${r}`;
-  ws3.getCell(`D${r}`).value = r * 1.5;
+  ws.getCell("A1").value = "PNG with transparency";
+  ws.getCell("A1").font = { bold: true, size: 14 };
+  for (let r = 2; r <= 12; r++) {
+    ws.getCell(`A${r}`).value = `Row ${r}`;
+    ws.getCell(`B${r}`).value = r * 100;
+    ws.getCell(`C${r}`).value = "filler";
+  }
+
+  const pngId = wb.addImage({ buffer: fs.readFileSync(pngPath), extension: "png" });
+  ws.addImage(pngId, { tl: { col: 1, row: 2 }, ext: { width: 150, height: 150 } });
+
+  fs.writeFileSync(
+    path.join(outDir, "excel-images-png.pdf"),
+    excelToPdf(wb, { showGridLines: true })
+  );
+  console.log("A2. excel-images-png.pdf — PNG with alpha transparency");
+} else {
+  console.log("A2. SKIPPED — image2.png not found");
 }
 
-if (fs.existsSync(jpegPath) && fs.existsSync(pngPath)) {
-  const img1 = wb3.addImage({ filename: jpegPath, extension: "jpeg" });
-  const img2 = wb3.addImage({ filename: pngPath, extension: "png" });
+// =============================================================================
+// A3. Excel → PDF: Multiple images
+// =============================================================================
 
-  // Place images at different positions
-  ws3.addImage(img1, {
-    tl: { col: 4, row: 1 },
-    ext: { width: 200, height: 150 }
-  });
-  ws3.addImage(img2, {
-    tl: { col: 4, row: 10 },
-    ext: { width: 150, height: 150 }
-  });
+if (hasJpeg && hasPng) {
+  const wb = new Workbook();
+  const ws = wb.addWorksheet("Multi-Image");
 
-  const pdf3 = excelToPdf(wb3, {
-    showGridLines: true,
-    showPageNumbers: true,
-    title: "Multi-Image Report"
-  });
-  fs.writeFileSync(path.join(outDir, "images-multi.pdf"), pdf3);
-  console.log("3. images-multi.pdf — multiple images on one sheet");
+  ws.getCell("A1").value = "Multiple Images";
+  ws.getCell("A1").font = { bold: true, size: 14 };
+  for (let r = 2; r <= 20; r++) {
+    ws.getCell(`A${r}`).value = `Data ${r}`;
+    ws.getCell(`B${r}`).value = r;
+    ws.getCell(`C${r}`).value = `Item ${r}`;
+    ws.getCell(`D${r}`).value = r * 1.5;
+    ws.getCell(`E${r}`).value = " ";
+    ws.getCell(`F${r}`).value = " ";
+    ws.getCell(`G${r}`).value = " ";
+  }
+
+  const img1 = wb.addImage({ buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
+  const img2 = wb.addImage({ buffer: fs.readFileSync(pngPath), extension: "png" });
+  ws.addImage(img1, { tl: { col: 4, row: 1 }, ext: { width: 200, height: 150 } });
+  ws.addImage(img2, { tl: { col: 4, row: 10 }, ext: { width: 150, height: 150 } });
+
+  fs.writeFileSync(
+    path.join(outDir, "excel-images-multi.pdf"),
+    excelToPdf(wb, { showGridLines: true, showPageNumbers: true, title: "Multi-Image Report" })
+  );
+  console.log("A3. excel-images-multi.pdf — multiple images on one sheet");
 } else {
-  console.log("3. SKIPPED — image files not found");
+  console.log("A3. SKIPPED — image files not found");
+}
+
+// =============================================================================
+// Part B: Standalone pdf() with images
+// =============================================================================
+
+console.log("\n--- Part B: Standalone pdf() with images ---\n");
+
+// =============================================================================
+// B1. Standalone: JPEG image
+// =============================================================================
+
+if (hasJpeg) {
+  const result = pdf(
+    {
+      columns: [
+        { width: 20, header: "Product" },
+        { width: 15, header: "Price" }
+      ],
+      data: [
+        ["Widget A", "$10"],
+        ["Widget B", "$25"],
+        ["Widget C", "$15"]
+      ],
+      images: [
+        {
+          data: fs.readFileSync(jpegPath),
+          format: "jpeg",
+          col: 0,
+          row: 4,
+          width: 300,
+          height: 200
+        }
+      ]
+    },
+    { showGridLines: true }
+  );
+
+  fs.writeFileSync(path.join(outDir, "standalone-images-jpeg.pdf"), result);
+  console.log("B1. standalone-images-jpeg.pdf — standalone PDF with JPEG");
+} else {
+  console.log("B1. SKIPPED — bubbles.jpg not found");
+}
+
+// =============================================================================
+// B2. Standalone: PNG with alpha
+// =============================================================================
+
+if (hasPng) {
+  const rows: (string | number)[][] = [];
+  for (let r = 1; r <= 10; r++) {
+    rows.push([`Row ${r}`, r * 100, "filler"]);
+  }
+
+  const result = pdf(
+    {
+      name: "PNG Test",
+      data: rows,
+      images: [
+        {
+          data: fs.readFileSync(pngPath),
+          format: "png",
+          col: 1,
+          row: 2,
+          width: 150,
+          height: 150
+        }
+      ]
+    },
+    { showGridLines: true }
+  );
+
+  fs.writeFileSync(path.join(outDir, "standalone-images-png.pdf"), result);
+  console.log("B2. standalone-images-png.pdf — standalone PDF with PNG alpha");
+} else {
+  console.log("B2. SKIPPED — image2.png not found");
 }
 
 console.log("\nAll image examples generated.");

@@ -1179,6 +1179,27 @@ describe("Image integration", () => {
     // Image on first page
     expect(text).toContain("/Filter /DCTDecode");
   });
+
+  it("should render tl/br image anchored beyond data bounds", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("BrBounds");
+    // Only one cell of data
+    ws.getCell("A1").value = "Hello";
+
+    const jpegData = buildMinimalJpeg();
+    const imageId = wb.addImage({ buffer: jpegData, extension: "jpeg" });
+    // Image br extends well beyond the single data cell
+    ws.addImage(imageId, {
+      tl: { col: 1, row: 1 },
+      br: { col: 5, row: 8 }
+    });
+
+    const pdf = excelToPdf(wb);
+    expectValidPdf(pdf);
+    const text = pdfToString(pdf);
+    expect(text).toContain("/Subtype /Image");
+    expect(text).toContain("/Filter /DCTDecode");
+  });
 });
 
 // =============================================================================
@@ -1332,5 +1353,62 @@ describe("Standalone pdf() API", () => {
     // Landscape LETTER: 792 x 612
     expect(text).toContain("792");
     expect(text).toContain("612");
+  });
+
+  it("should embed a JPEG image via standalone pdf()", () => {
+    const jpegData = buildMinimalJpeg();
+    const result = standalonePdf({
+      data: [
+        ["Product", "Price"],
+        ["Widget", "$10"]
+      ],
+      images: [{ data: jpegData, format: "jpeg", col: 0, row: 2, width: 100, height: 80 }]
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    expect(text).toContain("/Subtype /Image");
+    expect(text).toContain("/Filter /DCTDecode");
+  });
+
+  it("should embed a PNG image with alpha via standalone pdf()", () => {
+    const pngData = buildMinimalPng();
+    const result = standalonePdf({
+      data: [
+        ["Row 1", 100],
+        ["Row 2", 200]
+      ],
+      images: [{ data: pngData, format: "png", col: 0, row: 2, width: 80, height: 80 }]
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    expect(text).toContain("/Subtype /Image");
+    expect(text).toContain("/SMask");
+  });
+
+  it("should render image-only sheet with no data rows", () => {
+    const jpegData = buildMinimalJpeg();
+    const result = standalonePdf({
+      data: [],
+      images: [{ data: jpegData, format: "jpeg", col: 0, row: 0, width: 200, height: 150 }]
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    expect(text).toContain("/Subtype /Image");
+    expect(text).toContain("/Filter /DCTDecode");
+  });
+
+  it("should extend bounds for image anchored beyond data columns", () => {
+    const jpegData = buildMinimalJpeg();
+    const result = standalonePdf({
+      data: [["A only"]],
+      images: [{ data: jpegData, format: "jpeg", col: 3, row: 0, width: 100, height: 80 }]
+    });
+
+    expectValidPdf(result);
+    const text = pdfToString(result);
+    expect(text).toContain("/Subtype /Image");
   });
 });

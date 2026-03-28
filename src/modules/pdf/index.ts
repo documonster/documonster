@@ -42,7 +42,7 @@ export { excelToPdf } from "./excel-bridge";
 // Types
 // =============================================================================
 
-export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook } from "./pdf";
+export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "./pdf";
 
 export type {
   PdfExportOptions,

@@ -5,172 +5,172 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [6.2.0](https://github.com/cjnoname/excelts/compare/v6.1.3...v6.2.0) (2026-03-28)
-
+## [6.3.0] (Unreleased)
 
 ### Features
 
-* **excel:** Add autoFitColumns() and autoFitRows() for auto-sizing ([c209bdf](https://github.com/cjnoname/excelts/commit/c209bdfff0a7a6e947368fe9e2adaabc2687eec8)), closes [#114](https://github.com/cjnoname/excelts/issues/114)
-* **pdf:** Add zero-dependency Excel-to-PDF export module ([fdc568b](https://github.com/cjnoname/excelts/commit/fdc568be0a2d14d5d3df5a7d00d2124c5273c421))
-
+- **pdf:** Add standalone `pdf()` API for generating PDFs from plain data without Excel
+- **pdf:** Add `PdfImage` support for embedding JPEG/PNG images in standalone `pdf()` API
+- **pdf:** Add image embedding examples (`pdf-images.ts`) for both `excelToPdf()` and `pdf()` paths
 
 ### Bug Fixes
 
-* **security:** Harden input parsing against DoS, prototype pollution, and crash vectors ([2eca761](https://github.com/cjnoname/excelts/commit/2eca761765f3bc5a42f56e6b79852967d50394a5))
-* **treeshake:** Improve tree-shaking for rspack/webpack and add verification script ([012493c](https://github.com/cjnoname/excelts/commit/012493c1ebb95550ff30c02e5bea70b38a24ecb9))
-* **worksheet:** Remove unnecessary null check for worksheet name length ([b804e9c](https://github.com/cjnoname/excelts/commit/b804e9ce2dfb59d2c4b28a1c9b66564fa13993d8))
-
+- **pdf:** Fix header-only empty data sheets producing blank pages
+- **pdf:** Fix sparse column headers rendering at wrong positions
+- **pdf:** Fix image-only standalone sheets being dropped (empty bounds early return)
+- **pdf:** Fix `excelToPdf()` dropping images anchored outside cell data bounds
+- **pdf:** Fix `excelToPdf()` not extending bounds to image `br` (bottom-right) anchor
 
 ### Code Refactoring
 
-* **excel:** Extract shared worksheet utils and fix TS6 build compatibility ([2ac2885](https://github.com/cjnoname/excelts/commit/2ac2885a1452efef3233adcaa479fe5b1e395ff2))
+- **pdf:** Decouple PDF engine from Excel module via `excel-bridge.ts`
+- **pdf:** Replace `PdfExporter` class and `exportPdf()` with `pdf()` + `excelToPdf()` public API
+- **pdf:** Remove `numFmt` from standalone `PdfCell` (Excel-specific concept)
+
+## [6.2.0](https://github.com/cjnoname/excelts/compare/v6.1.3...v6.2.0) (2026-03-28)
+
+### Features
+
+- **excel:** Add autoFitColumns() and autoFitRows() for auto-sizing ([c209bdf](https://github.com/cjnoname/excelts/commit/c209bdfff0a7a6e947368fe9e2adaabc2687eec8)), closes [#114](https://github.com/cjnoname/excelts/issues/114)
+- **pdf:** Add zero-dependency Excel-to-PDF export module ([fdc568b](https://github.com/cjnoname/excelts/commit/fdc568be0a2d14d5d3df5a7d00d2124c5273c421))
+
+### Bug Fixes
+
+- **security:** Harden input parsing against DoS, prototype pollution, and crash vectors ([2eca761](https://github.com/cjnoname/excelts/commit/2eca761765f3bc5a42f56e6b79852967d50394a5))
+- **treeshake:** Improve tree-shaking for rspack/webpack and add verification script ([012493c](https://github.com/cjnoname/excelts/commit/012493c1ebb95550ff30c02e5bea70b38a24ecb9))
+- **worksheet:** Remove unnecessary null check for worksheet name length ([b804e9c](https://github.com/cjnoname/excelts/commit/b804e9ce2dfb59d2c4b28a1c9b66564fa13993d8))
+
+### Code Refactoring
+
+- **excel:** Extract shared worksheet utils and fix TS6 build compatibility ([2ac2885](https://github.com/cjnoname/excelts/commit/2ac2885a1452efef3233adcaa479fe5b1e395ff2))
 
 ## [6.1.3](https://github.com/cjnoname/excelts/compare/v6.1.2...v6.1.3) (2026-03-24)
 
-
 ### Bug Fixes
 
-* **excel:** Change WorkbookWriter default compression level from 1 to 6 ([d30313a](https://github.com/cjnoname/excelts/commit/d30313a05ab401072df094dbd02881bb96330c1e))
+- **excel:** Change WorkbookWriter default compression level from 1 to 6 ([d30313a](https://github.com/cjnoname/excelts/commit/d30313a05ab401072df094dbd02881bb96330c1e))
 
 ## [6.1.2](https://github.com/cjnoname/excelts/compare/v6.1.1...v6.1.2) (2026-03-24)
 
-
 ### Bug Fixes
 
-* **archive:** Drastically improve compression ratio for streaming writes ([78f9f22](https://github.com/cjnoname/excelts/commit/78f9f22cbe75be144b7fae53a66c5c706ae35762))
-* **build:** Prevent race condition on dist/types during parallel builds ([d0db0dc](https://github.com/cjnoname/excelts/commit/d0db0dc36dd950df8e7281ca0200c5387837aadb))
+- **archive:** Drastically improve compression ratio for streaming writes ([78f9f22](https://github.com/cjnoname/excelts/commit/78f9f22cbe75be144b7fae53a66c5c706ae35762))
+- **build:** Prevent race condition on dist/types during parallel builds ([d0db0dc](https://github.com/cjnoname/excelts/commit/d0db0dc36dd950df8e7281ca0200c5387837aadb))
 
 ## [6.1.1](https://github.com/cjnoname/excelts/compare/v6.1.0...v6.1.1) (2026-03-23)
 
-
 ### Bug Fixes
 
-* **excel:** Case-insensitive worksheet name lookup and correct internal hyperlink OOXML output ([2e5f0dc](https://github.com/cjnoname/excelts/commit/2e5f0dc1641e7aee3af7ae916432d2bb202cd58a))
-* **excel:** Make worksheet name lookup case-insensitive to match Excel semantics ([f735884](https://github.com/cjnoname/excelts/commit/f73588411a102b913d9fdc971124b835b17a69ea))
+- **excel:** Case-insensitive worksheet name lookup and correct internal hyperlink OOXML output ([2e5f0dc](https://github.com/cjnoname/excelts/commit/2e5f0dc1641e7aee3af7ae916432d2bb202cd58a))
+- **excel:** Make worksheet name lookup case-insensitive to match Excel semantics ([f735884](https://github.com/cjnoname/excelts/commit/f73588411a102b913d9fdc971124b835b17a69ea))
 
 ## [6.1.0](https://github.com/cjnoname/excelts/compare/v6.0.0...v6.1.0) (2026-03-16)
 
-
 ### Features
 
-* **stream:** Add WorksheetWriter.addImage support ([#108](https://github.com/cjnoname/excelts/issues/108)) ([a91d9e1](https://github.com/cjnoname/excelts/commit/a91d9e11b8304037658b9bbfc169bde497fd2521))
-
+- **stream:** Add WorksheetWriter.addImage support ([#108](https://github.com/cjnoname/excelts/issues/108)) ([a91d9e1](https://github.com/cjnoname/excelts/commit/a91d9e11b8304037658b9bbfc169bde497fd2521))
 
 ### Bug Fixes
 
-* **ci:** Remove stale release-as pinning to unblock version bumps ([1da5585](https://github.com/cjnoname/excelts/commit/1da558575de7a1e79de16f48e07e6bf1b6bf6961))
-* **test:** Pin TAR modTime in byte-for-byte consistency test ([c163e49](https://github.com/cjnoname/excelts/commit/c163e49568ef7ef58c705dc4ce35b88eb59e86e8))
+- **ci:** Remove stale release-as pinning to unblock version bumps ([1da5585](https://github.com/cjnoname/excelts/commit/1da558575de7a1e79de16f48e07e6bf1b6bf6961))
+- **test:** Pin TAR modTime in byte-for-byte consistency test ([c163e49](https://github.com/cjnoname/excelts/commit/c163e49568ef7ef58c705dc4ce35b88eb59e86e8))
 
 ## [6.0.0](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.10...v6.0.0) (2026-03-16)
 
-
 ### Bug Fixes
 
-* Promote to 6.0.0 stable release ([083e0e0](https://github.com/cjnoname/excelts/commit/083e0e0be35f49ff866223b569e30d8ca288f115))
+- Promote to 6.0.0 stable release ([083e0e0](https://github.com/cjnoname/excelts/commit/083e0e0be35f49ff866223b569e30d8ca288f115))
 
 ## [6.0.0-beta.10](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.9...v6.0.0-beta.10) (2026-03-16)
 
-
 ### Bug Fixes
 
-* Widen RowValues object type from Record&lt;string, unknown&gt; to Record&lt;string, any&gt; ([9d29be6](https://github.com/cjnoname/excelts/commit/9d29be6dceecc92f76176316e01212a82d568399))
+- Widen RowValues object type from Record&lt;string, unknown&gt; to Record&lt;string, any&gt; ([9d29be6](https://github.com/cjnoname/excelts/commit/9d29be6dceecc92f76176316e01212a82d568399))
 
 ## [6.0.0-beta.9](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.8...v6.0.0-beta.9) (2026-03-16)
 
-
 ### Bug Fixes
 
-* **ci:** Avoid npm preversion hook in canary version bump ([3bcf30f](https://github.com/cjnoname/excelts/commit/3bcf30f7eb1eed7c8e8e63331d689c2101aa2113))
-* Consume data descriptor after known-size pump in streaming parser ([f7be681](https://github.com/cjnoname/excelts/commit/f7be68135e55fc62d82240166fe18f53673d86dd))
+- **ci:** Avoid npm preversion hook in canary version bump ([3bcf30f](https://github.com/cjnoname/excelts/commit/3bcf30f7eb1eed7c8e8e63331d689c2101aa2113))
+- Consume data descriptor after known-size pump in streaming parser ([f7be681](https://github.com/cjnoname/excelts/commit/f7be68135e55fc62d82240166fe18f53673d86dd))
 
 ## [6.0.0-beta.8](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.7...v6.0.0-beta.8) (2026-03-15)
 
-
 ### Bug Fixes
 
-* Correct dishonest type tightenings and remove unsafe toJSON generic ([d974843](https://github.com/cjnoname/excelts/commit/d9748433666b2b0870098fe2900901aa8cde7245))
-* Restore package.json and manifest to current released version ([5111e60](https://github.com/cjnoname/excelts/commit/5111e60d4fd1d7cee301b61e11190c67c66ece00))
+- Correct dishonest type tightenings and remove unsafe toJSON generic ([d974843](https://github.com/cjnoname/excelts/commit/d9748433666b2b0870098fe2900901aa8cde7245))
+- Restore package.json and manifest to current released version ([5111e60](https://github.com/cjnoname/excelts/commit/5111e60d4fd1d7cee301b61e11190c67c66ece00))
 
 ## [6.0.0-beta.7](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.6...v6.0.0-beta.7) (2026-03-15)
 
-
 ### Features
 
-* Integrate sheet-utils into native Worksheet/Workbook API ([34148b1](https://github.com/cjnoname/excelts/commit/34148b1d85d21d2a1d08f428669c6fe3842c2c1a))
-
+- Integrate sheet-utils into native Worksheet/Workbook API ([34148b1](https://github.com/cjnoname/excelts/commit/34148b1d85d21d2a1d08f428669c6fe3842c2c1a))
 
 ### Bug Fixes
 
-* Chai assertion syntax, anchor copy-paste bug, duplicate test, and 8 weak assertions ([4919a36](https://github.com/cjnoname/excelts/commit/4919a3613317709cfafbcacdce184aafec80008c))
-* Unify model field naming, strengthen types, and rewrite importSheet as deep copy ([cb381c7](https://github.com/cjnoname/excelts/commit/cb381c7acc54d341102f90b1e12b97638a705e69))
-* WorkbookReader emits wrong worksheet name when workbook.xml is parsed after worksheets ([206e424](https://github.com/cjnoname/excelts/commit/206e4246201e74998038b07c7ede327ad6596956))
-* WorksheetWriter.findCell used wrong property name (address.column → address.col) ([72ee159](https://github.com/cjnoname/excelts/commit/72ee159541536be85c7f893de3614b1b79f35cb1))
-
+- Chai assertion syntax, anchor copy-paste bug, duplicate test, and 8 weak assertions ([4919a36](https://github.com/cjnoname/excelts/commit/4919a3613317709cfafbcacdce184aafec80008c))
+- Unify model field naming, strengthen types, and rewrite importSheet as deep copy ([cb381c7](https://github.com/cjnoname/excelts/commit/cb381c7acc54d341102f90b1e12b97638a705e69))
+- WorkbookReader emits wrong worksheet name when workbook.xml is parsed after worksheets ([206e424](https://github.com/cjnoname/excelts/commit/206e4246201e74998038b07c7ede327ad6596956))
+- WorksheetWriter.findCell used wrong property name (address.column → address.col) ([72ee159](https://github.com/cjnoname/excelts/commit/72ee159541536be85c7f893de3614b1b79f35cb1))
 
 ### Code Refactoring
 
-* Convert all .then() chains to async/await in integration tests ([6ba5dcc](https://github.com/cjnoname/excelts/commit/6ba5dcc11f87f6a4be52a21ba92a0a4781ec8dcc))
-* Modernize excel module types and patterns ([07e3b89](https://github.com/cjnoname/excelts/commit/07e3b890e107b056bd8f521619b0ceed6b084b38))
+- Convert all .then() chains to async/await in integration tests ([6ba5dcc](https://github.com/cjnoname/excelts/commit/6ba5dcc11f87f6a4be52a21ba92a0a4781ec8dcc))
+- Modernize excel module types and patterns ([07e3b89](https://github.com/cjnoname/excelts/commit/07e3b890e107b056bd8f521619b0ceed6b084b38))
 
 ## [6.0.0-beta.6](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.5...v6.0.0-beta.6) (2026-03-13)
 
-
 ### Bug Fixes
 
-* Revert bad release and fix release-please tag format ([79bb0be](https://github.com/cjnoname/excelts/commit/79bb0be3b2792d4e87efbd43f623c466113d724f))
+- Revert bad release and fix release-please tag format ([79bb0be](https://github.com/cjnoname/excelts/commit/79bb0be3b2792d4e87efbd43f623c466113d724f))
 
 ## [6.0.0-beta.4](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.3...v6.0.0-beta.4) (2026-03-13)
 
-
 ### Features
 
-* **archive:** export binary/encoding utilities for standalone usage ([9d31a75](https://github.com/cjnoname/excelts/commit/9d31a75f9901438f526abf5e62b7166081ea1016))
-
+- **archive:** export binary/encoding utilities for standalone usage ([9d31a75](https://github.com/cjnoname/excelts/commit/9d31a75f9901438f526abf5e62b7166081ea1016))
 
 ### Bug Fixes
 
-* resolve all 19 CodeQL security alerts ([8e7a79a](https://github.com/cjnoname/excelts/commit/8e7a79a96e220775ecb2e4b7497fc9d761b03be2))
-* resolve last 4 CodeQL alerts with inline barriers ([fa727e4](https://github.com/cjnoname/excelts/commit/fa727e4aa68d4346d42bb420a7f45a2fb35445af))
-* resolve remaining 13 CodeQL security alerts ([91e6628](https://github.com/cjnoname/excelts/commit/91e6628b6f2286abcc3144cd56768705842cb2b7))
-* resolve Windows ENOENT when running rolldown via execFileSync ([d804282](https://github.com/cjnoname/excelts/commit/d804282d60e95521a84716366e5219218b690465))
-* support encrypted entries in streaming ZIP parse mode ([32a6c33](https://github.com/cjnoname/excelts/commit/32a6c330b53cf175a0f7ea8ee66e0548e153b89b))
+- resolve all 19 CodeQL security alerts ([8e7a79a](https://github.com/cjnoname/excelts/commit/8e7a79a96e220775ecb2e4b7497fc9d761b03be2))
+- resolve last 4 CodeQL alerts with inline barriers ([fa727e4](https://github.com/cjnoname/excelts/commit/fa727e4aa68d4346d42bb420a7f45a2fb35445af))
+- resolve remaining 13 CodeQL security alerts ([91e6628](https://github.com/cjnoname/excelts/commit/91e6628b6f2286abcc3144cd56768705842cb2b7))
+- resolve Windows ENOENT when running rolldown via execFileSync ([d804282](https://github.com/cjnoname/excelts/commit/d804282d60e95521a84716366e5219218b690465))
+- support encrypted entries in streaming ZIP parse mode ([32a6c33](https://github.com/cjnoname/excelts/commit/32a6c330b53cf175a0f7ea8ee66e0548e153b89b))
 
 ## [6.0.0-beta.3](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.2...v6.0.0-beta.3) (2026-03-12)
 
-
 ### Bug Fixes
 
-* change Worksheet.columns return type from Column[] | null to Column[] ([ab3f3fe](https://github.com/cjnoname/excelts/commit/ab3f3fef022d8f6d081fdc064bf3a1a38a0ef121))
+- change Worksheet.columns return type from Column[] | null to Column[] ([ab3f3fe](https://github.com/cjnoname/excelts/commit/ab3f3fef022d8f6d081fdc064bf3a1a38a0ef121))
 
 ## [6.0.0-beta.2](https://github.com/cjnoname/excelts/compare/v6.0.0-beta.1...v6.0.0-beta.2) (2026-03-12)
 
-
 ### Bug Fixes
 
-* decode OOXML _xHHHH_ escapes in table column name attributes ([#94](https://github.com/cjnoname/excelts/issues/94)) ([bbfe148](https://github.com/cjnoname/excelts/commit/bbfe1484799d21ed477cdaad3d7d23e4a1404e50))
-* stabilize flaky ZipCrypto checkPassword test ([b54eb15](https://github.com/cjnoname/excelts/commit/b54eb1544ce9f2e6e8f31c4006306a139e1f0c1d))
+- decode OOXML _xHHHH_ escapes in table column name attributes ([#94](https://github.com/cjnoname/excelts/issues/94)) ([bbfe148](https://github.com/cjnoname/excelts/commit/bbfe1484799d21ed477cdaad3d7d23e4a1404e50))
+- stabilize flaky ZipCrypto checkPassword test ([b54eb15](https://github.com/cjnoname/excelts/commit/b54eb1544ce9f2e6e8f31c4006306a139e1f0c1d))
 
 ## [6.0.0-beta.1](https://github.com/cjnoname/excelts/compare/v5.1.18...v6.0.0-beta.1) (2026-03-12)
 
-
 ### ⚠ BREAKING CHANGES
 
-* Module structure and entry points have been reorganized. The archive, CSV, and stream submodules are now first-class exports. See MIGRATION.md for details.
+- Module structure and entry points have been reorganized. The archive, CSV, and stream submodules are now first-class exports. See MIGRATION.md for details.
 
 ### Features
 
-* excelts v6 — cross-platform streaming, archive, and CSV ([28d4f5a](https://github.com/cjnoname/excelts/commit/28d4f5ab129f57977d3d9fe6b0bfa90e6dcce560))
-* expose isEncrypted on UnzipEntry in streaming mode ([bd03cf5](https://github.com/cjnoname/excelts/commit/bd03cf56b48e121629e69b8ee8aeff83f2dfe1ae))
-
+- excelts v6 — cross-platform streaming, archive, and CSV ([28d4f5a](https://github.com/cjnoname/excelts/commit/28d4f5ab129f57977d3d9fe6b0bfa90e6dcce560))
+- expose isEncrypted on UnzipEntry in streaming mode ([bd03cf5](https://github.com/cjnoname/excelts/commit/bd03cf56b48e121629e69b8ee8aeff83f2dfe1ae))
 
 ### Bug Fixes
 
-* decode OOXML _xHHHH_ escapes with lowercase hex digits ([#94](https://github.com/cjnoname/excelts/issues/94)) ([9c3163f](https://github.com/cjnoname/excelts/commit/9c3163fef636f6b600f133fdb1a9f94aa35617cc))
-* merge main fixes, resolve lint errors, and improve code quality ([8a33545](https://github.com/cjnoname/excelts/commit/8a335459b5acde8e4a8a25b3fcdfb2f382f3228e))
-* rename zip export to archive in package.json ([f5b3efb](https://github.com/cjnoname/excelts/commit/f5b3efbbe9cc57f2999fe9aff5eab8db6f1d5359))
-* resolve CI failures on Node.js 22 and Windows ([83bd891](https://github.com/cjnoname/excelts/commit/83bd891d4e85d77adfd9bed9f6b2efd222956b38))
-* **stream:** align browser stream behavior with Node.js parity ([34f69c4](https://github.com/cjnoname/excelts/commit/34f69c4c4f9a4284efa504fbf491a79d1a45e462))
-* **stream:** constant-memory streaming for ZIP and Excel writers ([#88](https://github.com/cjnoname/excelts/issues/88)) ([532d7bb](https://github.com/cjnoname/excelts/commit/532d7bb7261893b2d13c54ced27e8db7c85c8a37))
+- decode OOXML _xHHHH_ escapes with lowercase hex digits ([#94](https://github.com/cjnoname/excelts/issues/94)) ([9c3163f](https://github.com/cjnoname/excelts/commit/9c3163fef636f6b600f133fdb1a9f94aa35617cc))
+- merge main fixes, resolve lint errors, and improve code quality ([8a33545](https://github.com/cjnoname/excelts/commit/8a335459b5acde8e4a8a25b3fcdfb2f382f3228e))
+- rename zip export to archive in package.json ([f5b3efb](https://github.com/cjnoname/excelts/commit/f5b3efbbe9cc57f2999fe9aff5eab8db6f1d5359))
+- resolve CI failures on Node.js 22 and Windows ([83bd891](https://github.com/cjnoname/excelts/commit/83bd891d4e85d77adfd9bed9f6b2efd222956b38))
+- **stream:** align browser stream behavior with Node.js parity ([34f69c4](https://github.com/cjnoname/excelts/commit/34f69c4c4f9a4284efa504fbf491a79d1a45e462))
+- **stream:** constant-memory streaming for ZIP and Excel writers ([#88](https://github.com/cjnoname/excelts/issues/88)) ([532d7bb](https://github.com/cjnoname/excelts/commit/532d7bb7261893b2d13c54ced27e8db7c85c8a37))
 
 ## [5.1.18](https://github.com/cjnoname/excelts/compare/v5.1.17...v5.1.18) (2026-03-10)
 

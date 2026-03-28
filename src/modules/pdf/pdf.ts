@@ -55,6 +55,7 @@ import {
   type PdfCellData,
   type PdfColumnData,
   type PdfCellStyle,
+  type PdfSheetImage,
   type PdfExportOptions
 } from "./types";
 import { exportPdf } from "./render/pdf-exporter";
@@ -86,11 +87,36 @@ export interface PdfColumn {
   header?: string;
 }
 
+/** An image to embed in a sheet. */
+export interface PdfImage {
+  /** Raw image bytes (JPEG or PNG). */
+  data: Uint8Array;
+  /** Image format. */
+  format: "jpeg" | "png";
+  /**
+   * Top-left column position (0-indexed).
+   * This is relative to the final sheet grid — if column headers are used,
+   * they occupy the first row, so data starts at row 1.
+   */
+  col: number;
+  /**
+   * Top-left row position (0-indexed).
+   * This is relative to the final sheet grid — if column headers are used,
+   * row 0 is the header row, and data rows start at row 1.
+   */
+  row: number;
+  /** Image width in pixels. */
+  width: number;
+  /** Image height in pixels. */
+  height: number;
+}
+
 /** A single sheet definition. */
 export interface PdfSheet {
   name?: string;
   columns?: (PdfColumn | number)[];
   data: PdfRow[];
+  images?: PdfImage[];
 }
 
 /** A multi-sheet document definition. */
@@ -103,7 +129,7 @@ export interface PdfBook {
 /**
  * The input to {@link pdf} — can be:
  * - A 2D array (single sheet)
- * - A sheet object `{ name?, columns?, data }`
+ * - A sheet object `{ name?, columns?, data, images? }`
  * - A workbook object `{ sheets: [...] }`
  */
 export type PdfInput = PdfRow[] | PdfSheet | PdfBook;
@@ -161,14 +187,29 @@ function normalizeSheet(sheet: PdfSheet, index?: number): PdfSheetData {
   const columnHeaders = sheet.columns?.map(c => (typeof c === "number" ? undefined : c.header));
   const hasHeaders = columnHeaders?.some(h => h !== undefined) ?? false;
 
-  // Determine dimensions — consider both data rows and column definitions
+  // Determine dimensions — consider data rows, column definitions, and images
   let maxCols = 0;
   for (const row of data) {
     if (row.length > maxCols) {
       maxCols = row.length;
     }
   }
-  const colCount = Math.max(maxCols, sheet.columns?.length ?? 0);
+  let colCount = Math.max(maxCols, sheet.columns?.length ?? 0);
+  let totalRows = data.length + (hasHeaders ? 1 : 0);
+
+  // Pre-scan images to extend bounds before the empty check
+  if (sheet.images) {
+    for (const img of sheet.images) {
+      const imgCol = img.col + 1; // 0-indexed → 1-indexed
+      const imgRow = img.row + 1;
+      if (imgCol > colCount) {
+        colCount = imgCol;
+      }
+      if (imgRow > totalRows) {
+        totalRows = imgRow;
+      }
+    }
+  }
 
   if (colCount === 0) {
     return {
@@ -235,13 +276,38 @@ function normalizeSheet(sheet: PdfSheet, index?: number): PdfSheetData {
     rows.set(rowNum, { cells });
   }
 
-  const totalRows = data.length + (hasHeaders ? 1 : 0);
+  // Normalize images
+  let images: PdfSheetImage[] | undefined;
+
+  if (sheet.images && sheet.images.length > 0) {
+    images = sheet.images.map(img => ({
+      data: img.data,
+      format: img.format,
+      range: {
+        tl: { col: img.col, row: img.row },
+        ext: { width: img.width, height: img.height }
+      }
+    }));
+
+    // Ensure columns and rows exist for the image-extended bounds
+    for (let c = 1; c <= colCount; c++) {
+      if (!columns.has(c)) {
+        columns.set(c, { width: 12 });
+      }
+    }
+    for (let r = 1; r <= totalRows; r++) {
+      if (!rows.has(r)) {
+        rows.set(r, { cells: new Map() });
+      }
+    }
+  }
 
   return {
     name: sheetName,
     bounds: { top: 1, left: 1, bottom: totalRows, right: colCount },
     columns,
-    rows
+    rows,
+    images
   };
 }
 
