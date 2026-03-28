@@ -24,8 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Code Refactoring
 
 - **pdf:** Decouple PDF engine from Excel module via `excel-bridge.ts`
-- **pdf:** Replace `PdfExporter` class and `exportPdf()` with `pdf()` + `excelToPdf()` public API
 - **pdf:** Remove `numFmt` from standalone `PdfCell` (Excel-specific concept)
+
+### BREAKING CHANGES
+
+- **pdf:** `PdfExporter` class has been removed. Use `excelToPdf(workbook, options?)` instead of `new PdfExporter(workbook).export(options)`.
+- **pdf:** `exportPdf()` is no longer a public export. Use `excelToPdf()` for Excel workbooks or `pdf()` for standalone PDF generation.
+- **pdf:** `ExcelPdfExporter` class has been removed. Use `excelToPdf()` instead.
 
 ## [6.2.0](https://github.com/cjnoname/excelts/compare/v6.1.3...v6.2.0) (2026-03-28)
 
