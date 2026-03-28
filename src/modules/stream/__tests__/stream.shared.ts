@@ -3701,7 +3701,6 @@ export function runStreamTests(imports: StreamModuleImports): void {
         });
 
         it("should propagate async errors from transform", async () => {
-          const errors: Error[] = [];
           const transform = createTransform<number, number>(
             async n => {
               await new Promise(resolve => setTimeout(resolve, 1));
@@ -3713,16 +3712,14 @@ export function runStreamTests(imports: StreamModuleImports): void {
             { objectMode: true }
           );
 
-          transform.on("error", (err: Error) => errors.push(err));
+          const error = await new Promise<Error>(resolve => {
+            transform.on("error", resolve);
+            transform.write(1);
+            transform.write(2);
+            transform.write(3);
+          });
 
-          transform.write(1);
-          transform.write(2);
-          transform.write(3);
-
-          await new Promise(resolve => setTimeout(resolve, 50));
-
-          expect(errors.length).toBeGreaterThan(0);
-          expect(errors[0].message).toBe("Async transform error");
+          expect(error.message).toBe("Async transform error");
         });
       });
 
