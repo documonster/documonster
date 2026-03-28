@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0](https://github.com/cjnoname/excelts/compare/v6.2.0...v7.0.0) (2026-03-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **excel:** Deprecated type alias `ZipOptions` removed — use `WorkbookZipOptions` instead.
+
+### Features
+
+* **pdf:** Add image embedding support for standalone pdf() and excelToPdf() ([9d0f2b2](https://github.com/cjnoname/excelts/commit/9d0f2b2c0c472684b5a40d8817931b7e8d6c11a4))
+
+
+### Bug Fixes
+
+* **ci:** Resolve merge conflict, keep quoted if expression ([f909a62](https://github.com/cjnoname/excelts/commit/f909a6210703fb7573add9f5a45e14b6e4864134))
+
+
+### Code Refactoring
+
+* **excel:** Remove deprecated Image and ZipOptions type aliases ([ab499d5](https://github.com/cjnoname/excelts/commit/ab499d5566bff2ee5a530571c849de3a3a9d0168))
+* **pdf:** Decouple PDF engine from Excel, add standalone pdf() API ([a426eb4](https://github.com/cjnoname/excelts/commit/a426eb46ce71c594878c6fd4abeee1d5b7cba7ab))
+
 ## [6.3.0] (Unreleased)
 
 ### Features
