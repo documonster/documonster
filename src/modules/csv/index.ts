@@ -74,11 +74,11 @@ export { isFormattedValue, quoted, unquoted } from "./types";
 // Core Functions
 // =============================================================================
 
-// Synchronous parser
-export { parseCsv } from "./parse/index";
+// Synchronous parser (direct import to avoid barrel pulling in async -> stream)
+export { parseCsv } from "./parse/sync";
 
 // Async parser
-export { parseCsvAsync, parseCsvRows, parseCsvWithProgress } from "./parse/index";
+export { parseCsvAsync, parseCsvRows, parseCsvWithProgress } from "./parse/async";
 
 // Formatter
 export { formatCsv } from "./format/index";

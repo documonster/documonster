@@ -58,12 +58,10 @@ export type {
 // Uses cross-platform base implementation without Node.js fs
 // =============================================================================
 
-import { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
-import { WorkbookReader } from "@excel/stream/workbook-reader.browser";
-import { WorksheetWriter } from "@excel/stream/worksheet-writer";
-import { WorksheetReader } from "@excel/stream/worksheet-reader";
-
-export { WorkbookWriter, WorkbookReader, WorksheetWriter, WorksheetReader };
+export { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
+export { WorkbookReader } from "@excel/stream/workbook-reader.browser";
+export { WorksheetWriter } from "@excel/stream/worksheet-writer";
+export { WorksheetReader } from "@excel/stream/worksheet-reader";
 
 // =============================================================================
 // NOTE: Node.js-only features not available in browser:
