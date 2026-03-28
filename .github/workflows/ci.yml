@@ -9,7 +9,15 @@ on:
     - cron: "0 0 * * 1"
 
 jobs:
+  # Gate: skip all CI jobs when release-please merges (already tested in PR)
+  should-run:
+    runs-on: ubuntu-latest
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(main): release') }}"
+    steps:
+      - run: echo "CI should run"
+
   test:
+    needs: should-run
     timeout-minutes: 15
     name: Node v${{ matrix.node-version }} on ${{ matrix.os }}
     strategy:
@@ -52,6 +60,7 @@ jobs:
           CI: true
 
   test-bun:
+    needs: should-run
     timeout-minutes: 15
     name: Bun v${{ matrix.bun-version }} on ${{ matrix.os }}
     strategy:
@@ -96,6 +105,7 @@ jobs:
           CI: true
 
   lint:
+    needs: should-run
     timeout-minutes: 10
     name: Lint and Type Check
     runs-on: ubuntu-latest
@@ -124,6 +134,7 @@ jobs:
         run: pnpm run type
 
   benchmark:
+    needs: should-run
     timeout-minutes: 15
     name: Measure performance impact
     runs-on: ubuntu-latest
@@ -151,6 +162,7 @@ jobs:
           CI: true
 
   codeql:
+    needs: should-run
     timeout-minutes: 10
     name: CodeQL Security Scan
     runs-on: ubuntu-latest
