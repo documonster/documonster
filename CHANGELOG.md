@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0](https://github.com/cjnoname/excelts/compare/v6.1.3...v6.2.0) (2026-03-28)
+
+
+### Features
+
+* **excel:** Add autoFitColumns() and autoFitRows() for auto-sizing ([c209bdf](https://github.com/cjnoname/excelts/commit/c209bdfff0a7a6e947368fe9e2adaabc2687eec8)), closes [#114](https://github.com/cjnoname/excelts/issues/114)
+* **pdf:** Add zero-dependency Excel-to-PDF export module ([fdc568b](https://github.com/cjnoname/excelts/commit/fdc568be0a2d14d5d3df5a7d00d2124c5273c421))
+
+
+### Bug Fixes
+
+* **security:** Harden input parsing against DoS, prototype pollution, and crash vectors ([2eca761](https://github.com/cjnoname/excelts/commit/2eca761765f3bc5a42f56e6b79852967d50394a5))
+* **treeshake:** Improve tree-shaking for rspack/webpack and add verification script ([012493c](https://github.com/cjnoname/excelts/commit/012493c1ebb95550ff30c02e5bea70b38a24ecb9))
+* **worksheet:** Remove unnecessary null check for worksheet name length ([b804e9c](https://github.com/cjnoname/excelts/commit/b804e9ce2dfb59d2c4b28a1c9b66564fa13993d8))
+
+
+### Code Refactoring
+
+* **excel:** Extract shared worksheet utils and fix TS6 build compatibility ([2ac2885](https://github.com/cjnoname/excelts/commit/2ac2885a1452efef3233adcaa479fe5b1e395ff2))
+
 ## [6.1.3](https://github.com/cjnoname/excelts/compare/v6.1.2...v6.1.3) (2026-03-24)
 
 
