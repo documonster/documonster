@@ -103,6 +103,16 @@ cell.fill = {
   - Hyperlinks
   - Pivot tables
 
+- **PDF Export**
+  - Zero-dependency Excel-to-PDF conversion
+  - Full cell styling (fonts, colors, borders, fills, alignment)
+  - Automatic pagination with repeat header rows
+  - TrueType font embedding for Unicode/CJK text
+  - JPEG and PNG image embedding with transparency
+  - Password protection and encryption
+  - Per-worksheet page setup (size, orientation, margins)
+  - Tree-shakeable (not imported = not bundled)
+
 - **Advanced Features**
   - Streaming for large files
   - CSV import/export
@@ -131,9 +141,75 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 
 Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions. See the module READMEs for details:
 
+- [PDF Module](src/modules/pdf/README.md) - Zero-dependency Excel-to-PDF export with encryption and font embedding
 - [CSV Module](src/modules/csv/README.md) - RFC 4180 parser/formatter, streaming, data generation
 - [Archive Module](src/modules/archive/README.md) - ZIP/TAR create/read/edit, compression, encryption
 - [Stream Module](src/modules/stream/README.md) - Cross-platform Readable/Writable/Transform/Duplex
+
+## PDF Export
+
+Export any workbook to PDF with zero external dependencies:
+
+```javascript
+import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+const sheet = workbook.addWorksheet("Report");
+sheet.columns = [
+  { header: "Product", key: "product", width: 20 },
+  { header: "Revenue", key: "revenue", width: 15 }
+];
+sheet.addRow({ product: "Widget", revenue: 1000 });
+sheet.getColumn("revenue").numFmt = "$#,##0.00";
+
+// One-line export
+const pdf = exportPdf(workbook, {
+  showGridLines: true,
+  showPageNumbers: true,
+  title: "Sales Report"
+});
+
+// Node.js: write to file
+import { writeFileSync } from "fs";
+writeFileSync("report.pdf", pdf);
+
+// Browser: download
+const blob = new Blob([pdf], { type: "application/pdf" });
+const url = URL.createObjectURL(blob);
+window.open(url);
+```
+
+### Convert Existing XLSX to PDF
+
+```javascript
+const workbook = new Workbook();
+await workbook.xlsx.readFile("input.xlsx");
+const pdf = exportPdf(workbook);
+```
+
+### Encryption
+
+```javascript
+const pdf = exportPdf(workbook, {
+  encryption: {
+    ownerPassword: "admin",
+    userPassword: "reader",
+    permissions: { print: true, copy: false }
+  }
+});
+```
+
+### Unicode / CJK
+
+```javascript
+import { readFileSync } from "fs";
+
+const pdf = exportPdf(workbook, {
+  font: readFileSync("NotoSansSC-Regular.ttf") // TrueType font for CJK text
+});
+```
+
+For the full API reference and all options, see the [PDF Module documentation](src/modules/pdf/README.md).
 
 ## Archive Utilities (ZIP/TAR)
 
@@ -395,6 +471,7 @@ Then open `http://localhost:3000/src/modules/excel/examples/browser-smoke.html`.
 
 ### Browser-Specific Notes
 
+- **PDF export is fully supported** in browsers with zero configuration
 - **CSV operations are supported** using native RFC 4180 implementation
   - Use `await workbook.readCsv(input)` to read CSV
   - Use `workbook.writeCsv()` or `await workbook.writeCsvBuffer()` to write CSV
@@ -427,6 +504,16 @@ import {
   // XML utilities
   xmlEncode,
   xmlDecode,
+
+  // PDF export
+  exportPdf, // Workbook -> Uint8Array (PDF)
+  PdfExporter, // Class-based PDF export
+  PageSizes, // Built-in page size definitions
+  PdfError, // Base PDF error
+  PdfRenderError, // Layout/rendering failures
+  PdfFontError, // Font parsing/embedding failures
+  PdfStructureError, // PDF structure assembly failures
+  isPdfError, // Type guard for PDF errors
 
   // Error infrastructure
   BaseError, // Base class for all library errors
@@ -490,6 +577,7 @@ For detailed API documentation, please refer to the comprehensive documentation 
 - Data Validation
 - Conditional Formatting
 - File I/O
+- [PDF Export](src/modules/pdf/README.md)
 
 ## Contributing Guidelines
 

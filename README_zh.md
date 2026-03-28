@@ -103,6 +103,16 @@ cell.fill = {
   - 超链接
   - 数据透视表
 
+- **PDF 导出**
+  - 零依赖 Excel 转 PDF
+  - 完整的单元格样式支持（字体、颜色、边框、填充、对齐）
+  - 自动分页与重复表头行
+  - TrueType 字体嵌入，支持 Unicode/CJK 中文文本
+  - JPEG 和 PNG 图片嵌入，支持透明度
+  - 密码保护和加密
+  - 每个工作表独立的页面设置（纸张大小、方向、页边距）
+  - 支持 Tree-shaking（不导入 = 不打包）
+
 - **高级功能**
   - 大文件流式处理
   - CSV 导入/导出
@@ -131,9 +141,75 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 
 每个子路径支持 `browser`、`import`（ESM）和 `require`（CJS）条件。详见各模块文档：
 
+- [PDF 模块](src/modules/pdf/README.md) - 零依赖 Excel 转 PDF，支持加密和字体嵌入
 - [CSV 模块](src/modules/csv/README.md) - RFC 4180 解析/格式化、流式处理、数据生成
 - [归档模块](src/modules/archive/README.md) - ZIP/TAR 创建/读取/编辑、压缩、加密
 - [流模块](src/modules/stream/README.md) - 跨平台 Readable/Writable/Transform/Duplex
+
+## PDF 导出
+
+零依赖将任意工作簿导出为 PDF：
+
+```javascript
+import { Workbook, exportPdf } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+const sheet = workbook.addWorksheet("报告");
+sheet.columns = [
+  { header: "产品", key: "product", width: 20 },
+  { header: "收入", key: "revenue", width: 15 }
+];
+sheet.addRow({ product: "组件A", revenue: 1000 });
+sheet.getColumn("revenue").numFmt = "¥#,##0.00";
+
+// 一行导出
+const pdf = exportPdf(workbook, {
+  showGridLines: true,
+  showPageNumbers: true,
+  title: "销售报告"
+});
+
+// Node.js：写入文件
+import { writeFileSync } from "fs";
+writeFileSync("report.pdf", pdf);
+
+// 浏览器：下载
+const blob = new Blob([pdf], { type: "application/pdf" });
+const url = URL.createObjectURL(blob);
+window.open(url);
+```
+
+### 将现有 XLSX 转换为 PDF
+
+```javascript
+const workbook = new Workbook();
+await workbook.xlsx.readFile("input.xlsx");
+const pdf = exportPdf(workbook);
+```
+
+### 加密
+
+```javascript
+const pdf = exportPdf(workbook, {
+  encryption: {
+    ownerPassword: "admin",
+    userPassword: "reader",
+    permissions: { print: true, copy: false }
+  }
+});
+```
+
+### Unicode / CJK 中文支持
+
+```javascript
+import { readFileSync } from "fs";
+
+const pdf = exportPdf(workbook, {
+  font: readFileSync("NotoSansSC-Regular.ttf") // 嵌入 TrueType 字体以支持中文
+});
+```
+
+完整 API 参考和所有选项请查看 [PDF 模块文档](src/modules/pdf/README.md)。
 
 ## 归档工具（ZIP/TAR）
 
@@ -393,6 +469,7 @@ npx serve .
 
 ### 浏览器版本注意事项
 
+- **完全支持 PDF 导出**（浏览器端零配置即可使用）
 - **支持 CSV 操作**（使用原生 RFC 4180 标准实现）
   - 使用 `await workbook.readCsv(input)` 读取 CSV
   - 使用 `workbook.writeCsv()` 或 `await workbook.writeCsvBuffer()` 写入 CSV
@@ -425,6 +502,16 @@ import {
   // XML 工具
   xmlEncode,
   xmlDecode,
+
+  // PDF 导出
+  exportPdf, // Workbook -> Uint8Array (PDF)
+  PdfExporter, // 基于类的 PDF 导出
+  PageSizes, // 内置页面尺寸定义
+  PdfError, // PDF 基础错误
+  PdfRenderError, // 布局/渲染错误
+  PdfFontError, // 字体解析/嵌入错误
+  PdfStructureError, // PDF 结构组装错误
+  isPdfError, // PDF 错误类型守卫
 
   // 错误基础设施
   BaseError, // 所有库错误的基类
@@ -488,6 +575,7 @@ import {
 - 数据验证
 - 条件格式
 - 文件输入输出
+- [PDF 导出](src/modules/pdf/README.md)
 
 ## 贡献指南
 

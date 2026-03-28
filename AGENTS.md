@@ -4,7 +4,7 @@ This document provides guidelines for AI coding agents working in the excelts co
 
 ## Project Overview
 
-**excelts** is a TypeScript Excel workbook manager for reading/writing XLSX and CSV files.
+**excelts** is a TypeScript Excel workbook manager for reading/writing XLSX and CSV files, with built-in PDF export.
 
 - Zero runtime dependencies
 - Cross-platform: Node.js (22+) and browsers (Chrome 89+, Firefox 102+, Safari 14.1+)
@@ -44,6 +44,12 @@ src/
 │   │   └── xlsx/         # XLSX format parsing/writing
 │   ├── archive/          # ZIP/compression (zero-dependency)
 │   ├── csv/              # CSV parsing/formatting
+│   ├── pdf/              # PDF export (zero-dependency)
+│   │   ├── __tests__/    # Tests
+│   │   ├── core/         # PDF objects, streams, writer, encryption
+│   │   ├── font/         # Font metrics, TTF parsing, embedding
+│   │   ├── render/       # Layout engine, page renderer, exporter
+│   │   └── examples/     # Runnable examples
 │   └── stream/           # Cross-platform streaming
 ├── utils/                # Shared utilities (errors, datetime, fs)
 └── test/                 # Test utilities and fixtures
@@ -54,6 +60,7 @@ src/
 - `@excel/*` → `./src/modules/excel/*`
 - `@archive/*` → `./src/modules/archive/*`
 - `@csv/*` → `./src/modules/csv/*`
+- `@pdf/*` → `./src/modules/pdf/*`
 - `@stream/*` → `./src/modules/stream/*`
 - `@utils/*` → `./src/utils/*`
 - `@test/*` → `./src/test/*`

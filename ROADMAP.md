@@ -12,7 +12,7 @@
 
 - [x] Zero runtime dependencies
 - [x] Pure JS DEFLATE fallback for browser
-- [ ] Web Streams API support (ReadableStream/WritableStream)
+- [x] Web Streams API support (ReadableStream/WritableStream)
 - [ ] Streaming shared strings
 - [ ] Memory optimization for large files
 
@@ -29,6 +29,24 @@
 - [ ] Fix image position for non-integer coordinates
 - [ ] SVG image support
 
+### PDF Export
+
+- [x] Zero-dependency Excel-to-PDF conversion
+- [x] Full cell styling (fonts, colors, borders, fills, alignment)
+- [x] Automatic pagination with repeat header rows
+- [x] Manual row/column page breaks
+- [x] Print area support
+- [x] TrueType font embedding with subsetting (Unicode/CJK)
+- [x] JPEG and PNG image embedding with transparency
+- [x] Password protection / 128-bit RC4 encryption
+- [x] Per-worksheet page setup (paper size, orientation, margins)
+- [x] Rich text rendering with word-wrap
+- [x] Sheet bookmarks / outlines
+- [x] Tree-shakeable (zero cost if not imported)
+- [ ] PDF/A compliance
+- [ ] Table of contents generation
+- [ ] Watermark support
+
 ---
 
 ## 🟡 P2: Medium Priority
@@ -43,6 +61,7 @@
 
 - [x] Row page breaks (rowBreaks)
 - [x] Column page breaks (colBreaks)
+- [x] PDF export with page setup integration
 - [ ] Fix header/footer options
 - [ ] Print area improvements
 
