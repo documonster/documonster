@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pdf:** `PdfExporter` class has been removed. Use `excelToPdf(workbook, options?)` instead of `new PdfExporter(workbook).export(options)`.
 - **pdf:** `exportPdf()` is no longer a public export. Use `excelToPdf()` for Excel workbooks or `pdf()` for standalone PDF generation.
 - **pdf:** `ExcelPdfExporter` class has been removed. Use `excelToPdf()` instead.
+- **excel:** Deprecated type alias `Image` has been removed. Use `ImageData` instead.
+- **excel:** Deprecated type alias `ZipOptions` has been removed. Use `WorkbookZipOptions` instead.
 
 ## [6.2.0](https://github.com/cjnoname/excelts/compare/v6.1.3...v6.2.0) (2026-03-28)
 

@@ -81,7 +81,6 @@ export type {
 export type {
   WorkbookWriterOptions,
   WorkbookZipOptions,
-  ZipOptions,
   ZlibOptions
 } from "@excel/stream/workbook-writer";
 

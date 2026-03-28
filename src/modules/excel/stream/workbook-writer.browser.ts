@@ -77,9 +77,6 @@ export interface WorkbookZipOptions {
   compressionOptions?: { level?: number };
 }
 
-/** @deprecated Use {@link WorkbookZipOptions} instead */
-export type ZipOptions = WorkbookZipOptions;
-
 export interface WorkbookWriterOptions {
   created?: Date;
   modified?: Date;

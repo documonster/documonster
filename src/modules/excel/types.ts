@@ -494,9 +494,6 @@ export interface ImageData {
   buffer?: Buffer;
 }
 
-/** @deprecated Use {@link ImageData} instead */
-export type Image = ImageData;
-
 export interface ImagePosition {
   tl: { col: number; row: number };
   ext: { width: number; height: number };

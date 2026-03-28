@@ -11,12 +11,11 @@ import {
   WorkbookWriterBase,
   type WorkbookWriterOptions as BaseOptions,
   type WorkbookZipOptions,
-  type ZipOptions,
   type ZlibOptions
 } from "@excel/stream/workbook-writer.browser";
 import { mediaPath } from "@excel/utils/ooxml-paths";
 
-export type { WorkbookZipOptions, ZipOptions, ZlibOptions };
+export type { WorkbookZipOptions, ZlibOptions };
 
 // Node.js version also supports filename option for output
 export interface WorkbookWriterOptions extends BaseOptions {
