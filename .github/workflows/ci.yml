@@ -12,7 +12,7 @@ jobs:
   # Gate: skip all CI jobs when release-please merges (already tested in PR)
   should-run:
     runs-on: ubuntu-latest
-    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(main): release') }}"
+    if: "${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, 'release-please--branches--main') && !startsWith(github.event.head_commit.message, 'chore(main): release')) }}"
     steps:
       - run: echo "CI should run"
 
