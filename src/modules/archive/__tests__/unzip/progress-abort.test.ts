@@ -1,17 +1,13 @@
+/**
+ * Tests for unzip progress tracking and abort/cancel functionality.
+ *
+ * Stream lifecycle, premature close prevention, data descriptor, and
+ * stress tests are in stream-lifecycle.test.ts and stream-robustness.test.ts.
+ */
+
 import { describe, expect, it } from "vitest";
-
 import { unzip, zip, isAbortError } from "@archive";
-
-function delay(ms = 0): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function* chunkBytes(bytes: Uint8Array, chunkSize: number): AsyncIterable<Uint8Array> {
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    await delay(0);
-    yield bytes.subarray(i, Math.min(bytes.length, i + chunkSize));
-  }
-}
+import { delay, chunkBytes } from "./test-helpers";
 
 describe("unzip progress + abort", () => {
   it("should report bytesIn while parsing a streaming source", async () => {
@@ -55,7 +51,6 @@ describe("unzip progress + abort", () => {
     const consume = (async () => {
       let count = 0;
       for await (const entry of op.iterable) {
-        // Touch the stream to trigger decompression work.
         for await (const _ of entry.stream()) {
           count++;
           break;
@@ -91,7 +86,6 @@ describe("unzip progress + abort", () => {
 
     let seen = 0;
     for await (const entry of op.iterable) {
-      // Touch the entry to ensure work starts.
       for await (const _ of entry.stream()) {
         break;
       }
@@ -107,7 +101,7 @@ describe("unzip progress + abort", () => {
   });
 
   it(
-    "stopping an entry stream early should not hang and should allow parsing next entries (streaming)",
+    "stopping an entry stream early should not hang and should allow parsing next entries",
     { timeout: 10_000 },
     async () => {
       const z = zip({ level: 0 })

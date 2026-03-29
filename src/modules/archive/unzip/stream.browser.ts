@@ -569,6 +569,28 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     crxHeader?: CrxHeader;
     __emittedError?: Error;
 
+    // ---------------------------------------------------------------
+    // Parser completion — explicit deferred, independent of stream
+    // lifecycle events. Mirrors the Node.js Parse implementation.
+    // ---------------------------------------------------------------
+    private _parserDoneFlag = false;
+    private _parserError: Error | null = null;
+    private _parserDeferred: {
+      resolve: () => void;
+      reject: (err: Error) => void;
+    } | null = null;
+    private _parserDonePromise: Promise<void> | null = null;
+
+    // ---------------------------------------------------------------
+    // Entry queue — custom [Symbol.asyncIterator] reads from here.
+    // ---------------------------------------------------------------
+    private _entryQueue: ZipEntry[] = [];
+    private _entryWaiter: {
+      resolve: (result: IteratorResult<ZipEntry>) => void;
+      reject: (err: unknown) => void;
+    } | null = null;
+    private _entriesDone = false;
+
     constructor(opts: ParseOptions = {}) {
       super({
         objectMode: true,
@@ -586,6 +608,12 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       });
 
       this._opts = opts;
+
+      // Route error events to the parser deferred.
+      this.on("error", (err: Error) => {
+        this._rejectParserDeferred(err);
+        this._closeEntryQueue(err);
+      });
 
       // Default values are intentionally conservative to avoid memory spikes
       // when parsing large archives under slow consumers.
@@ -611,10 +639,13 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         },
         pushEntry: (entry: ZipEntry) => {
           this.push(entry as any);
+          this._enqueueEntry(entry);
         },
         // Browser version historically only pushed entries when forceStream=true.
         // Keep this behavior to avoid changing stream piping semantics.
         pushEntryIfPiped: (_entry: ZipEntry) => {
+          // Always feed the entry queue regardless of pipe state.
+          this._enqueueEntry(_entry);
           return;
         },
         emitCrxHeader: (header: CrxHeader) => {
@@ -623,12 +654,6 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         },
         emitError: (err: Error) => {
           this.__emittedError = err;
-          // Ensure upstream writers don't hang waiting for a deferred write callback.
-          if (this._writeCb) {
-            const cb = this._writeCb;
-            this._writeCb = undefined;
-            cb(err);
-          }
           this.emit("error", err);
         },
         emitClose: () => {
@@ -663,13 +688,26 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           this._driverState
           // No inflateRawSync - always use streaming DecompressionStream in browser
         );
-        this._parsingDone.catch((e: Error) => {
-          if (!this.__emittedError || this.__emittedError !== e) {
-            this.__emittedError = e;
-            this.emit("error", e);
+        this._parsingDone.then(
+          () => {
+            if (this.__emittedError) {
+              this._rejectParserDeferred(this.__emittedError);
+              this._closeEntryQueue(this.__emittedError);
+            } else {
+              this._resolveParserDeferred();
+              this._closeEntryQueue();
+            }
+          },
+          (e: Error) => {
+            if (!this.__emittedError || this.__emittedError !== e) {
+              this.__emittedError = e;
+              this.emit("error", e);
+            }
+            this._rejectParserDeferred(e);
+            this._closeEntryQueue(e);
+            this.emit("close");
           }
-          this.emit("close");
-        });
+        );
       });
     }
 
@@ -1027,11 +1065,113 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     }
 
     promise(): Promise<void> {
-      return new Promise<void>((resolve, reject) => {
-        this.on("finish", resolve);
-        this.on("end", resolve);
-        this.on("error", reject);
+      if (this._parserDoneFlag) {
+        return this._parserError ? Promise.reject(this._parserError) : Promise.resolve();
+      }
+
+      if (this._parserDonePromise) {
+        return this._parserDonePromise;
+      }
+
+      this._parserDonePromise = new Promise<void>((resolve, reject) => {
+        this._parserDeferred = { resolve, reject };
       });
+      return this._parserDonePromise;
+    }
+
+    // ---------------------------------------------------------------
+    // Parser completion deferred
+    // ---------------------------------------------------------------
+
+    private _resolveParserDeferred(): void {
+      if (this._parserDoneFlag) {
+        return;
+      }
+      this._parserDoneFlag = true;
+      if (this._parserDeferred) {
+        const { resolve } = this._parserDeferred;
+        this._parserDeferred = null;
+        resolve();
+      }
+    }
+
+    private _rejectParserDeferred(err: Error): void {
+      if (this._parserDoneFlag) {
+        return;
+      }
+      this._parserDoneFlag = true;
+      this._parserError = err;
+      if (this._parserDeferred) {
+        const { reject } = this._parserDeferred;
+        this._parserDeferred = null;
+        reject(err);
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // Entry queue management
+    // ---------------------------------------------------------------
+
+    private _enqueueEntry(entry: ZipEntry): void {
+      if (this._entryWaiter) {
+        const { resolve } = this._entryWaiter;
+        this._entryWaiter = null;
+        resolve({ value: entry, done: false });
+      } else {
+        this._entryQueue.push(entry);
+      }
+    }
+
+    private _closeEntryQueue(err?: Error): void {
+      this._entriesDone = true;
+
+      if (this._entryWaiter) {
+        const waiter = this._entryWaiter;
+        this._entryWaiter = null;
+        if (err) {
+          waiter.reject(err);
+        } else {
+          waiter.resolve({ value: undefined as any, done: true });
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // Custom async iterator
+    // ---------------------------------------------------------------
+
+    override [Symbol.asyncIterator](): any {
+      const iterator = {
+        next: (): Promise<IteratorResult<ZipEntry>> => {
+          if (this._entryQueue.length > 0) {
+            return Promise.resolve({ value: this._entryQueue.shift()!, done: false });
+          }
+
+          if (this._entriesDone) {
+            if (this._parserError) {
+              return Promise.reject(this._parserError);
+            }
+            return Promise.resolve({ value: undefined as any, done: true });
+          }
+
+          return new Promise<IteratorResult<ZipEntry>>((resolve, reject) => {
+            this._entryWaiter = { resolve, reject };
+          });
+        },
+
+        return: (): Promise<IteratorResult<ZipEntry>> => {
+          this._entriesDone = true;
+          this._entryQueue.length = 0;
+          this._entryWaiter = null;
+          return Promise.resolve({ value: undefined as any, done: true });
+        },
+
+        [Symbol.asyncIterator]() {
+          return iterator;
+        }
+      };
+
+      return iterator;
     }
   };
 }

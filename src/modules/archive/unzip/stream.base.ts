@@ -5,6 +5,47 @@ import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 import { decodeZipPath, resolveZipStringCodec } from "@archive/shared/text";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
 
+/**
+ * Returns true when `err` is the Node.js ERR_STREAM_PREMATURE_CLOSE error.
+ *
+ * This error is emitted by `finished()` / `pipeline()` when a stream is
+ * destroyed before it has properly ended (e.g. a consumer breaks out of a
+ * `for await` loop, or the entry PassThrough is destroyed by an external
+ * consumer). In the context of ZIP parsing, a premature close on an *entry*
+ * stream is not a fatal error — the parse loop only needs to advance the ZIP
+ * cursor past the entry's compressed data.
+ */
+function isPrematureCloseError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+  return (err as any).code === "ERR_STREAM_PREMATURE_CLOSE" || err.message === "Premature close";
+}
+
+/**
+ * Wait for an entry's writable side to finish, tolerating premature close.
+ *
+ * The parse loop calls this after pumping all compressed data into an entry.
+ * It ensures the decompressed data has been flushed through the inflater →
+ * entry pipeline before advancing the ZIP cursor.
+ *
+ * If the consumer has already destroyed / autodraining the entry (e.g. early
+ * break, external destroy, Readable.from() wrapper), `finished()` rejects
+ * with ERR_STREAM_PREMATURE_CLOSE. This is not an error for the parse loop
+ * — the compressed data has been fully read from the ZIP cursor, so we
+ * can safely continue.
+ */
+async function awaitEntryCompletion(entry: PassThrough): Promise<void> {
+  try {
+    await finished(entry, { readable: false });
+  } catch (err) {
+    if (!isPrematureCloseError(err)) {
+      throw err;
+    }
+    // Entry was destroyed/autodraining — treat as normal completion.
+  }
+}
+
 import {
   DEFAULT_PARSE_THRESHOLD_BYTES,
   buildZipEntryProps,
@@ -582,6 +623,7 @@ export function streamUntilValidatedDataDescriptor(
     }
     while (available > 0) {
       // Try to find and validate a descriptor candidate.
+      let pendingCandidate = false;
       while (true) {
         const idx = scanner.find(source);
         if (idx === -1) {
@@ -646,17 +688,74 @@ export function streamUntilValidatedDataDescriptor(
           continue;
         }
 
-        // Not enough bytes to validate yet. Re-check this candidate once more bytes arrive.
+        // Not enough bytes to validate yet. Re-check this candidate once
+        // more bytes arrive. Mark as pending so we don't accidentally
+        // advance searchFrom past it via onNoMatch().
         scanner.searchFrom = idx;
+        pendingCandidate = true;
+
+        // If the source is finished (no more bytes will arrive), attempt a
+        // relaxed validation: accept the descriptor without checking the
+        // next-record signature. This handles the case where the descriptor
+        // is at the very end of the available data (e.g. the last entry in
+        // the ZIP, or the next-record header hasn't been fully buffered yet
+        // due to extreme input fragmentation).
+        if (source.isFinished() && idx + 16 <= available) {
+          const descriptorCompressedSize = source.peekUint32LE(idx + 8);
+          const expectedCompressedSize = (bytesEmitted + idx) >>> 0;
+
+          if (
+            descriptorCompressedSize !== null &&
+            descriptorCompressedSize === expectedCompressedSize
+          ) {
+            // Descriptor compressed size matches — accept it.
+            if (idx > 0) {
+              if (source.peekChunks && source.discard) {
+                const parts = source.peekChunks(idx);
+                let written = 0;
+                for (const part of parts) {
+                  output.write(part);
+                  written += part.length;
+                }
+                if (written > 0) {
+                  source.discard(written);
+                  bytesEmitted += written;
+                  scanner.onConsume(written);
+                }
+              } else {
+                output.write(source.read(idx));
+                bytesEmitted += idx;
+                scanner.onConsume(idx);
+              }
+            }
+
+            done = true;
+            source.maybeReleaseWriteCallback?.();
+            cleanup();
+            output.end();
+            return;
+          }
+        }
+
         break;
       }
 
-      // No validated match yet.
-      scanner.onNoMatch(available);
+      // Only advance the scanner's search cursor when there is no pending
+      // candidate waiting for more bytes. Without this guard, onNoMatch()
+      // would move searchFrom past the candidate, causing it to be skipped
+      // and the entry data to be flushed — leading to FILE_ENDED.
+      if (!pendingCandidate) {
+        scanner.onNoMatch(available);
+      }
 
       // Flush most of the buffered data but keep a tail so a potential signature
       // split across chunks can still be detected/validated.
-      const flushLen = Math.max(0, available - keepTailBytes);
+      // When a pending candidate exists, do NOT flush past it.
+      let maxFlush = available - keepTailBytes;
+      if (pendingCandidate) {
+        maxFlush = Math.min(maxFlush, scanner.searchFrom);
+      }
+      const flushLen = Math.max(0, maxFlush);
       if (flushLen > 0) {
         if (source.peekChunks && source.discard) {
           const parts = source.peekChunks(flushLen);
@@ -936,7 +1035,7 @@ async function pumpKnownCompressedSizeToEntry(
     }
 
     // Wait for all writes to complete (not for consumption).
-    await finished(entry, { readable: false });
+    await awaitEntryCompletion(entry);
   } finally {
     inflater.removeListener("error", onError);
     entry.removeListener("error", onError);
@@ -1083,8 +1182,8 @@ async function readFileRecord(
     const compressedData = await io.pull(compressedSize);
     const decompressedData = inflateRawSync!(compressedData);
     entry.end(decompressedData);
-    // Wait for entry stream write to complete (not for read/consume)
-    await finished(entry, { readable: false });
+    // Wait for entry stream write to complete (not for read/consume).
+    await awaitEntryCompletion(entry);
     return;
   }
 
@@ -1106,7 +1205,28 @@ async function readFileRecord(
     return;
   }
 
-  await pipeline(io.streamUntilDataDescriptor() as any, inflater as any, entry as any);
+  // pipeline() destroys all streams if any stream errors or closes early.
+  // If the entry was destroyed by the consumer, pipeline rejects with
+  // ERR_STREAM_PREMATURE_CLOSE. This typically happens when the entry's
+  // writable side is force-destroyed and the entire parse operation is
+  // being torn down (abort/error).
+  try {
+    await pipeline(io.streamUntilDataDescriptor() as any, inflater as any, entry as any);
+  } catch (pipelineErr) {
+    if (!isPrematureCloseError(pipelineErr)) {
+      throw pipelineErr;
+    }
+    // Entry was destroyed — attempt to read the data descriptor; if it
+    // fails (cursor misaligned), swallow the error since the entry was
+    // abandoned and the operation is ending.
+    try {
+      const dd = await readDataDescriptor(async l => io.pull(l));
+      entry.size = dd.uncompressedSize ?? 0;
+    } catch {
+      // Cursor misaligned — not recoverable but not worth surfacing.
+    }
+    return;
+  }
   const dd = await readDataDescriptor(async l => io.pull(l));
   entry.size = dd.uncompressedSize ?? 0;
 }
