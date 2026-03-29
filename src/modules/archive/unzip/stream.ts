@@ -42,13 +42,33 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
   return class Parse extends PullStream<ZipEntry> {
     private _opts: ParseOptions;
     private _driverState: ParseDriverState = {};
-    private _done = false;
-    private _doneError: Error | null = null;
-    private _donePromise: Promise<void> | null = null;
-    private _doneDeferred: {
+
+    // ---------------------------------------------------------------
+    // Parser completion — explicit deferred, independent of stream
+    // lifecycle events (close / end). This avoids races between
+    // push(null) and close that cause ERR_STREAM_PREMATURE_CLOSE in
+    // Node.js's default Readable async iterator.
+    // ---------------------------------------------------------------
+    private _parserDone = false;
+    private _parserError: Error | null = null;
+    private _parserDeferred: {
       resolve: () => void;
       reject: (err: Error) => void;
     } | null = null;
+    private _parserDonePromise: Promise<void> | null = null;
+
+    // ---------------------------------------------------------------
+    // Entry queue — custom [Symbol.asyncIterator] reads from here
+    // instead of relying on Readable's default objectMode iterator
+    // (which uses finished() internally and races with close).
+    // ---------------------------------------------------------------
+    private _entryQueue: ZipEntry[] = [];
+    private _entryWaiter: {
+      resolve: (result: IteratorResult<ZipEntry>) => void;
+      reject: (err: unknown) => void;
+    } | null = null;
+    /** True once the parser has finished producing entries. */
+    private _entriesDone = false;
 
     crxHeader?: CrxHeader;
 
@@ -56,14 +76,12 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       super(opts);
       this._opts = opts;
 
-      // Latch completion early to avoid missing terminal events, but do NOT
-      // create a Promise eagerly (it can reject unhandled in tests/consumers
-      // that never call `promise()`).
-      const onDone = (): void => this._latchDone();
-      const onError = (err: Error): void => this._latchError(err);
-      this.on("close", onDone);
-      this.on("end", onDone);
-      this.on("error", onError);
+      // Always listen for error events to prevent Node.js from treating
+      // them as uncaught exceptions. Route them to the parser deferred.
+      this.on("error", (err: Error) => {
+        this._rejectParser(err);
+        this._closeEntryQueue(err);
+      });
 
       const io: ParseIO = {
         pull: async (length: number) => this.pull(length),
@@ -72,10 +90,6 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         stream: (length: number) => this.stream(length),
         streamUntilDataDescriptor: () => this._streamUntilValidatedDataDescriptor(),
         setDone: () => {
-          // If the parser reaches EOF without consuming all buffered bytes,
-          // there may still be an in-flight writable callback waiting on
-          // `_maybeReleaseWriteCallback()`. Release it to avoid deadlocks in
-          // callers that await `write(..., cb)`.
           this._maybeReleaseWriteCallback();
           this.end();
           this.push(null);
@@ -87,19 +101,25 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           this.emit("entry", entry);
         },
         pushEntry: (entry: ZipEntry) => {
+          // Feed the legacy Readable objectMode side (for pipe / data consumers).
           this.push(entry);
+          // Also feed the custom entry queue (for our async iterator).
+          this._enqueueEntry(entry);
         },
         pushEntryIfPiped: (entry: ZipEntry) => {
           const state = (this as any)._readableState;
           if (state.pipesCount || (state.pipes && state.pipes.length)) {
             this.push(entry);
           }
+          // Always feed the entry queue regardless of pipe state.
+          this._enqueueEntry(entry);
         },
         emitCrxHeader: header => {
           (this as any).crxHeader = header;
           this.emit("crx-header", header);
         },
         emitError: err => {
+          this.__emittedError = err;
           this.emit("error", err);
         },
         emitClose: () => {
@@ -107,7 +127,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         }
       };
 
-      // Parse records as data arrives. Only emit `close` when parsing is complete.
+      // Parse records as data arrives.
       runParseLoop(
         this._opts,
         io,
@@ -115,15 +135,103 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         createInflateRawFn,
         this._driverState,
         (data: Uint8Array) => zlib.inflateRawSync(data)
-      ).catch((e: Error) => {
-        if (!this.__emittedError || this.__emittedError !== e) {
-          this.emit("error", e);
+      ).then(
+        () => {
+          // If an error was emitted during parsing (e.g. invalid signature),
+          // the parse loop returns normally but we should reject.
+          if (this.__emittedError) {
+            this._rejectParser(this.__emittedError);
+            this._closeEntryQueue(this.__emittedError);
+          } else {
+            this._resolveParser();
+            this._closeEntryQueue();
+          }
+        },
+        (e: Error) => {
+          if (!this.__emittedError || this.__emittedError !== e) {
+            this.emit("error", e);
+          }
+          this._maybeReleaseWriteCallback();
+          this._rejectParser(e);
+          this._closeEntryQueue(e);
+          this.emit("close");
         }
-        // Best-effort: ensure upstream writers don't hang waiting for a
-        // deferred write callback if parsing terminates early.
-        this._maybeReleaseWriteCallback();
-        this.emit("close");
-      });
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Entry queue management
+    // ---------------------------------------------------------------
+
+    private _enqueueEntry(entry: ZipEntry): void {
+      if (this._entryWaiter) {
+        // A consumer is already waiting — deliver immediately.
+        const { resolve } = this._entryWaiter;
+        this._entryWaiter = null;
+        resolve({ value: entry, done: false });
+      } else {
+        this._entryQueue.push(entry);
+      }
+    }
+
+    private _closeEntryQueue(err?: Error): void {
+      this._entriesDone = true;
+
+      if (this._entryWaiter) {
+        const waiter = this._entryWaiter;
+        this._entryWaiter = null;
+        if (err) {
+          waiter.reject(err);
+        } else {
+          waiter.resolve({ value: undefined as any, done: true });
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // Custom async iterator — bypasses Node Readable's default
+    // iterator which uses finished() and races with close.
+    // ---------------------------------------------------------------
+
+    // Override the default Readable async iterator with our custom entry-queue
+    // based iterator. This avoids Node.js's Readable default iterator which uses
+    // finished() internally and races with the close event.
+    //
+    // We cast through `any` because ES2024+ AsyncIterator requires
+    // [Symbol.asyncDispose] which AsyncIterableIterator doesn't include,
+    // and we don't need disposal semantics here.
+    override [Symbol.asyncIterator](): any {
+      const iterator = {
+        next: (): Promise<IteratorResult<ZipEntry>> => {
+          if (this._entryQueue.length > 0) {
+            return Promise.resolve({ value: this._entryQueue.shift()!, done: false });
+          }
+
+          if (this._entriesDone) {
+            if (this._parserError) {
+              return Promise.reject(this._parserError);
+            }
+            return Promise.resolve({ value: undefined as any, done: true });
+          }
+
+          return new Promise<IteratorResult<ZipEntry>>((resolve, reject) => {
+            this._entryWaiter = { resolve, reject };
+          });
+        },
+
+        return: (): Promise<IteratorResult<ZipEntry>> => {
+          this._entriesDone = true;
+          this._entryQueue.length = 0;
+          this._entryWaiter = null;
+          return Promise.resolve({ value: undefined as any, done: true });
+        },
+
+        [Symbol.asyncIterator]() {
+          return iterator;
+        }
+      };
+
+      return iterator;
     }
 
     /**
@@ -150,56 +258,57 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       });
     }
 
+    // ---------------------------------------------------------------
+    // Parser completion deferred
+    // ---------------------------------------------------------------
+
+    private _resolveParser(): void {
+      if (this._parserDone) {
+        return;
+      }
+      this._parserDone = true;
+      if (this._parserDeferred) {
+        const { resolve } = this._parserDeferred;
+        this._parserDeferred = null;
+        resolve();
+      }
+    }
+
+    private _rejectParser(err: Error): void {
+      if (this._parserDone) {
+        return;
+      }
+      this._parserDone = true;
+      this._parserError = err;
+      if (this._parserDeferred) {
+        const { reject } = this._parserDeferred;
+        this._parserDeferred = null;
+        reject(err);
+      }
+    }
+
+    /**
+     * Returns a promise that resolves when the parser has finished
+     * processing all ZIP records, or rejects on parse error.
+     *
+     * This is driven by an internal deferred that is resolved/rejected
+     * directly by the parse loop — it does NOT depend on stream
+     * lifecycle events (close / end), avoiding the
+     * ERR_STREAM_PREMATURE_CLOSE race.
+     */
     promise(): Promise<void> {
-      if (this._done) {
-        return this._doneError ? Promise.reject(this._doneError) : Promise.resolve();
+      if (this._parserDone) {
+        return this._parserError ? Promise.reject(this._parserError) : Promise.resolve();
       }
 
-      if (this._donePromise) {
-        return this._donePromise;
+      if (this._parserDonePromise) {
+        return this._parserDonePromise;
       }
 
-      this._donePromise = new Promise<void>((resolve, reject) => {
-        this._doneDeferred = { resolve, reject };
+      this._parserDonePromise = new Promise<void>((resolve, reject) => {
+        this._parserDeferred = { resolve, reject };
       });
-      return this._donePromise;
-    }
-
-    private _latchDone(): void {
-      if (this._done) {
-        return;
-      }
-      this._done = true;
-
-      const deferred = this._doneDeferred;
-      this._doneDeferred = null;
-      if (!deferred) {
-        return;
-      }
-      try {
-        deferred.resolve();
-      } catch {
-        // ignore
-      }
-    }
-
-    private _latchError(err: Error): void {
-      if (this._done) {
-        return;
-      }
-      this._done = true;
-      this._doneError = err;
-
-      const deferred = this._doneDeferred;
-      this._doneDeferred = null;
-      if (!deferred) {
-        return;
-      }
-      try {
-        deferred.reject(err);
-      } catch {
-        // ignore
-      }
+      return this._parserDonePromise;
     }
   };
 }

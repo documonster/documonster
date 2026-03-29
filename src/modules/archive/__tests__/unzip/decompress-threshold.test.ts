@@ -9,7 +9,7 @@ import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.
 const testFilePath = join(__dirname, "./data/formulas.xlsx");
 
 describe("parse threshold optimization", () => {
-  it("should have default threshold of 5MB", () => {
+  it("should have default threshold of 8MB", () => {
     expect(DEFAULT_COMPRESS_THRESHOLD_BYTES).toBe(8 * 1024 * 1024);
   });
 
