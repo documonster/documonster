@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.1](https://github.com/cjnoname/excelts/compare/v7.0.0...v7.0.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* **ci:** Match release-please merge commit message pattern ([4fedfd8](https://github.com/cjnoname/excelts/commit/4fedfd8d1d261c755fbd70d0084bc51709d6ec7e))
+* **stream:** Increase async transform error test timeout to prevent flaky failure ([a91642e](https://github.com/cjnoname/excelts/commit/a91642ec8fc3dfdfb6bc65977a71e0dd9882afff))
+
 ## [7.0.0](https://github.com/cjnoname/excelts/compare/v6.2.0...v7.0.0) (2026-03-28)
 
 
