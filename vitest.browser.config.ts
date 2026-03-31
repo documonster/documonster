@@ -1,10 +1,12 @@
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { preferBrowserFilesPlugin } from "./src/utils/browser";
 
 export default defineConfig({
-  plugins: [preferBrowserFilesPlugin(), tsconfigPaths()],
+  plugins: [preferBrowserFilesPlugin()],
+  resolve: {
+    tsconfigPaths: true
+  },
   define: {
     global: "globalThis"
   },

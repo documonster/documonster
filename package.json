@@ -179,9 +179,9 @@
     "@eslint/js": "^10.0.1",
     "@rspack/core": "^1.7.10",
     "@types/node": "^25.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.57.2",
-    "@typescript-eslint/parser": "^8.57.2",
-    "@typescript/native-preview": "^7.0.0-dev.20260327.2",
+    "@typescript-eslint/eslint-plugin": "^8.58.0",
+    "@typescript-eslint/parser": "^8.58.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260331.1",
     "@vitest/browser": "^4.1.2",
     "@vitest/browser-playwright": "^4.1.2",
     "@vitest/ui": "^4.1.2",
@@ -202,8 +202,7 @@
     "rolldown": "^1.0.0-rc.12",
     "rollup-plugin-visualizer": "^7.0.1",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.57.2",
-    "vite-tsconfig-paths": "^6.1.1",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^4.1.2"
   }
 }
