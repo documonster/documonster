@@ -63,7 +63,7 @@ export { XmlStreamWriter } from "./stream-writer";
 // Parsers
 // =============================================================================
 
-export { SaxParser, parseSax } from "./sax";
+export { SaxParser, parseSax, saxStream } from "./sax";
 export { parseXml, findChild, findChildren, textContent, attr, walk } from "./dom";
 export { query, queryAll } from "./query";
 

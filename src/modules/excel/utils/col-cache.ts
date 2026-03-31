@@ -170,48 +170,54 @@ const colCache: ColCache = {
     if (addr) {
       return addr;
     }
+
+    // Fast path: parse column letters and row digits directly from char codes.
+    // Avoids intermediate string concatenation for the common case.
+    let colNumber = 0;
+    let rowNumber = 0;
     let hasCol = false;
-    let col = "";
-    let colNumber: number | undefined = 0;
     let hasRow = false;
-    let row = "";
-    let rowNumber: number | undefined = 0;
-    for (let i = 0, char; i < value.length; i++) {
-      char = value.charCodeAt(i);
-      // col should before row
+    let colEnd = 0; // index where col letters end
+    let colStart = 0; // index where col letters start (after any $)
+
+    for (let i = 0; i < value.length; i++) {
+      const char = value.charCodeAt(i);
+      if (char === 36) {
+        // '$' — skip it
+        if (!hasCol && !hasRow) {
+          colStart = i + 1;
+        }
+        continue;
+      }
       if (!hasRow && char >= 65 && char <= 90) {
-        // 65 = 'A'.charCodeAt(0)
-        // 90 = 'Z'.charCodeAt(0)
         hasCol = true;
-        col += value[i];
-        // colNumber starts from 1
         colNumber = colNumber * 26 + char - 64;
+        colEnd = i + 1;
       } else if (char >= 48 && char <= 57) {
-        // 48 = '0'.charCodeAt(0)
-        // 57 = '9'.charCodeAt(0)
         hasRow = true;
-        row += value[i];
-        // rowNumber starts from 0
         rowNumber = rowNumber * 10 + char - 48;
-      } else if (hasRow && hasCol && char !== 36) {
-        // 36 = '$'.charCodeAt(0)
+      } else if (hasRow && hasCol) {
         break;
       }
     }
+
     if (!hasCol) {
-      colNumber = undefined;
-    } else if (colNumber! > 16384) {
+      colNumber = undefined as any;
+    } else if (colNumber > 16384) {
+      const col = value.slice(0, colEnd);
       throw new ColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
     }
     if (!hasRow) {
-      rowNumber = undefined;
+      rowNumber = undefined as any;
     }
 
-    // in case $row$col
-    value = col + row;
+    // Build canonical address string only when needed
+    const col = hasCol ? value.slice(colStart, colEnd) : "";
+    const row = hasRow ? String(rowNumber) : "";
+    const canonical = col + row;
 
     const address: CachedAddress = {
-      address: value,
+      address: canonical,
       col: colNumber!,
       row: rowNumber!,
       $col$row: `$${col}$${row}`
@@ -219,7 +225,7 @@ const colCache: ColCache = {
 
     // mem fix - cache only the tl 100x100 square
     if (colNumber! <= 100 && rowNumber! <= 100) {
-      this._hash[value] = address;
+      this._hash[canonical] = address;
       this._hash[address.$col$row] = address;
     }
 

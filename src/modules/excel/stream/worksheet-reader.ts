@@ -5,7 +5,8 @@
  */
 
 import { EventEmitter } from "@utils/event-emitter";
-import { parseSax } from "@xml/sax";
+import { SaxParser } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
 import { ExcelStreamStateError } from "@excel/errors";
 import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { colCache } from "@excel/utils/col-cache";
@@ -232,245 +233,264 @@ class WorksheetReader extends EventEmitter {
     let row: Row | null = null;
     let c: CellParseState | null = null;
     let current: { text: string } | null = null;
-    for await (const events of parseSax(iterator)) {
-      let worksheetEvents: WorksheetEvent[] | null = null;
-      for (let i = 0; i < events.length; i++) {
-        const evt = events[i];
-        const eventType = evt.eventType;
-        const value = evt.value;
-        if (eventType === "opentag") {
-          const node = value;
-          if (emitSheet) {
-            switch (node.name) {
-              case "cols":
-                inCols = true;
-                cols = [];
-                break;
-              case "sheetData":
-                inRows = true;
-                break;
 
-              case "col":
-                if (inCols) {
-                  cols!.push({
-                    min: parseInt(node.attributes.min, 10),
-                    max: parseInt(node.attributes.max, 10),
-                    width: parseFloat(node.attributes.width),
-                    styleId: parseInt(node.attributes.style ?? "0", 10)
-                  });
-                }
-                break;
+    // Direct SAX callback mode — zero intermediate event objects.
+    // We collect worksheet events per-chunk and yield them.
+    let worksheetEvents: WorksheetEvent[] | null = null;
 
-              case "row":
-                if (inRows) {
-                  const r = parseInt(node.attributes.r, 10);
-                  row = new Row(this as any, r);
-                  if (node.attributes.ht) {
-                    row.height = parseFloat(node.attributes.ht);
-                  }
-                  if (node.attributes.customHeight === "1") {
-                    row.customHeight = true;
-                  }
-                  if (node.attributes.s !== undefined) {
-                    const styleId = parseInt(node.attributes.s, 10);
-                    const style = styles.getStyleModel(styleId);
-                    if (style) {
-                      row.style = style;
-                    }
-                  }
-                }
-                break;
-              case "c":
-                if (row) {
-                  const styleAttr = node.attributes.s;
-                  c = {
-                    ref: node.attributes.r,
-                    s: styleAttr !== undefined ? parseInt(styleAttr, 10) : undefined,
-                    t: node.attributes.t
-                  };
-                }
-                break;
-              case "f":
-                if (c) {
-                  current = c.f = { text: "" };
-                }
-                break;
-              case "v":
-                if (c) {
-                  current = c.v = { text: "" };
-                }
-                break;
-              case "is":
-              case "t":
-                if (c) {
-                  current = c.v = { text: "" };
-                }
-                break;
-              case "mergeCell":
-                break;
-              default:
-                break;
+    const parser = new SaxParser();
+
+    parser.on("opentag", (node: SaxTag) => {
+      if (emitSheet) {
+        switch (node.name) {
+          case "cols":
+            inCols = true;
+            cols = [];
+            break;
+          case "sheetData":
+            inRows = true;
+            break;
+
+          case "col":
+            if (inCols) {
+              cols!.push({
+                min: parseInt(node.attributes.min, 10),
+                max: parseInt(node.attributes.max, 10),
+                width: parseFloat(node.attributes.width),
+                styleId: parseInt(node.attributes.style ?? "0", 10)
+              });
             }
-          }
+            break;
 
-          // =================================================================
-          //
-          if (shouldHandleHyperlinks) {
-            switch (node.name) {
-              case "hyperlinks":
-                inHyperlinks = true;
-                break;
-              case "hyperlink":
-                if (inHyperlinks) {
-                  const loc = node.attributes.location;
-                  const hyperlink = {
-                    ref: node.attributes.ref,
-                    rId: node.attributes["r:id"],
-                    // Internal links: resolve target from location attribute
-                    target: loc ? (loc.startsWith("#") ? loc : `#${loc}`) : undefined
-                  };
-                  if (emitHyperlinks) {
-                    (worksheetEvents ||= []).push({ eventType: "hyperlink", value: hyperlink });
-                  } else {
-                    hyperlinks![hyperlink.ref] = hyperlink;
-                  }
+          case "row":
+            if (inRows) {
+              const r = parseInt(node.attributes.r, 10);
+              row = new Row(this as any, r);
+              if (node.attributes.ht) {
+                row.height = parseFloat(node.attributes.ht);
+              }
+              if (node.attributes.customHeight === "1") {
+                row.customHeight = true;
+              }
+              if (node.attributes.s !== undefined) {
+                const styleId = parseInt(node.attributes.s, 10);
+                const style = styles.getStyleModel(styleId);
+                if (style) {
+                  row.style = style;
                 }
-                break;
-              default:
-                break;
+              }
             }
-          }
-        } else if (eventType === "text") {
-          // only text data is for sheet values
-          if (emitSheet) {
-            if (current) {
-              current.text += value;
+            break;
+          case "c":
+            if (row) {
+              const styleAttr = node.attributes.s;
+              c = {
+                ref: node.attributes.r,
+                s: styleAttr !== undefined ? parseInt(styleAttr, 10) : undefined,
+                t: node.attributes.t
+              };
             }
-          }
-        } else if (eventType === "closetag") {
-          const node = value;
-          if (emitSheet) {
-            switch (node.name) {
-              case "cols":
-                inCols = false;
-                this._columns = Column.fromModel(cols!);
-                break;
-              case "sheetData":
-                inRows = false;
-                break;
-
-              case "row":
-                if (row) {
-                  this._dimensions.expandRow({
-                    number: row.number,
-                    dimensions: row.dimensions ?? undefined
-                  });
-                  (worksheetEvents ||= []).push({ eventType: "row", value: row });
-                }
-                row = null;
-                break;
-
-              case "c":
-                if (row && c) {
-                  const address = colCache.decodeAddress(c.ref);
-                  const cell = row.getCell(address.col);
-                  if (c.s !== undefined) {
-                    const style = styles.getStyleModel(c.s);
-                    if (style) {
-                      cell.style = style;
-                    }
-                  }
-
-                  if (c.f) {
-                    const cellValue: any = {
-                      formula: c.f.text
-                    };
-                    if (c.v) {
-                      if (c.t === "str") {
-                        cellValue.result = c.v.text;
-                      } else {
-                        cellValue.result = parseFloat(c.v.text);
-                      }
-                    }
-                    cell.value = cellValue;
-                  } else if (c.v) {
-                    switch (c.t) {
-                      case "s": {
-                        const index = parseInt(c.v.text, 10);
-                        if (sharedStrings) {
-                          cell.value = sharedStrings[index];
-                        } else {
-                          // Streaming format - unresolved shared string reference
-                          (cell as { value: unknown }).value = {
-                            sharedString: index
-                          };
-                        }
-                        break;
-                      }
-
-                      case "inlineStr":
-                        // Inline strings come from <is><t>...</t></is> which uses
-                        // OOXML _xHHHH_ escaping in addition to XML entities.
-                        cell.value = decodeOoxmlEscape(c.v.text);
-                        break;
-                      case "str":
-                        cell.value = c.v.text;
-                        break;
-
-                      case "e":
-                        cell.value = { error: c.v.text as CellErrorValue["error"] };
-                        break;
-
-                      case "b":
-                        cell.value = parseInt(c.v.text, 10) !== 0;
-                        break;
-
-                      default: {
-                        const numFmtStr =
-                          typeof cell.numFmt === "string" ? cell.numFmt : cell.numFmt?.formatCode;
-                        if (numFmtStr && isDateFmt(numFmtStr)) {
-                          cell.value = excelToDate(
-                            parseFloat(c.v.text),
-                            properties?.model?.date1904
-                          );
-                        } else {
-                          cell.value = parseFloat(c.v.text);
-                        }
-                        break;
-                      }
-                    }
-                  }
-                  if (hyperlinks) {
-                    const hyperlink = hyperlinks[c.ref];
-                    if (hyperlink) {
-                      // Streaming-specific: assign text and hyperlink for further processing
-                      (cell as { text: unknown }).text = cell.value;
-                      cell.value = undefined;
-                      (cell as { hyperlink: unknown }).hyperlink = hyperlink;
-                    }
-                  }
-                  c = null;
-                  current = null;
-                }
-                break;
-              default:
-                break;
+            break;
+          case "f":
+            if (c) {
+              current = c.f = { text: "" };
             }
-          }
-          if (shouldHandleHyperlinks) {
-            switch (node.name) {
-              case "hyperlinks":
-                inHyperlinks = false;
-                break;
-              default:
-                break;
+            break;
+          case "v":
+            if (c) {
+              current = c.v = { text: "" };
             }
-          }
+            break;
+          case "is":
+          case "t":
+            if (c) {
+              current = c.v = { text: "" };
+            }
+            break;
+          case "mergeCell":
+            break;
+          default:
+            break;
         }
       }
-      if (worksheetEvents && worksheetEvents.length > 0) {
-        yield worksheetEvents;
+
+      // =================================================================
+      //
+      if (shouldHandleHyperlinks) {
+        switch (node.name) {
+          case "hyperlinks":
+            inHyperlinks = true;
+            break;
+          case "hyperlink":
+            if (inHyperlinks) {
+              const loc = node.attributes.location;
+              const hyperlink = {
+                ref: node.attributes.ref,
+                rId: node.attributes["r:id"],
+                // Internal links: resolve target from location attribute
+                target: loc ? (loc.startsWith("#") ? loc : `#${loc}`) : undefined
+              };
+              if (emitHyperlinks) {
+                (worksheetEvents ||= []).push({ eventType: "hyperlink", value: hyperlink });
+              } else {
+                hyperlinks![hyperlink.ref] = hyperlink;
+              }
+            }
+            break;
+          default:
+            break;
+        }
       }
+    });
+
+    parser.on("text", (text: string) => {
+      // only text data is for sheet values
+      if (emitSheet) {
+        if (current) {
+          current.text += text;
+        }
+      }
+    });
+
+    parser.on("closetag", (tag: SaxTag) => {
+      if (emitSheet) {
+        switch (tag.name) {
+          case "cols":
+            inCols = false;
+            this._columns = Column.fromModel(cols!);
+            break;
+          case "sheetData":
+            inRows = false;
+            break;
+
+          case "row":
+            if (row) {
+              this._dimensions.expandRow({
+                number: row.number,
+                dimensions: row.dimensions ?? undefined
+              });
+              (worksheetEvents ||= []).push({ eventType: "row", value: row });
+            }
+            row = null;
+            break;
+
+          case "c":
+            if (row && c) {
+              const address = colCache.decodeAddress(c.ref);
+              const cell = row.getCell(address.col);
+              if (c.s !== undefined) {
+                const style = styles.getStyleModel(c.s);
+                if (style) {
+                  cell.style = style;
+                }
+              }
+
+              if (c.f) {
+                const cellValue: any = {
+                  formula: c.f.text
+                };
+                if (c.v) {
+                  if (c.t === "str") {
+                    cellValue.result = c.v.text;
+                  } else {
+                    cellValue.result = parseFloat(c.v.text);
+                  }
+                }
+                cell.value = cellValue;
+              } else if (c.v) {
+                switch (c.t) {
+                  case "s": {
+                    const index = parseInt(c.v.text, 10);
+                    if (sharedStrings) {
+                      cell.value = sharedStrings[index];
+                    } else {
+                      // Streaming format - unresolved shared string reference
+                      (cell as { value: unknown }).value = {
+                        sharedString: index
+                      };
+                    }
+                    break;
+                  }
+
+                  case "inlineStr":
+                    // Inline strings come from <is><t>...</t></is> which uses
+                    // OOXML _xHHHH_ escaping in addition to XML entities.
+                    cell.value = decodeOoxmlEscape(c.v.text);
+                    break;
+                  case "str":
+                    cell.value = c.v.text;
+                    break;
+
+                  case "e":
+                    cell.value = { error: c.v.text as CellErrorValue["error"] };
+                    break;
+
+                  case "b":
+                    cell.value = parseInt(c.v.text, 10) !== 0;
+                    break;
+
+                  default: {
+                    const numFmtStr =
+                      typeof cell.numFmt === "string" ? cell.numFmt : cell.numFmt?.formatCode;
+                    if (numFmtStr && isDateFmt(numFmtStr)) {
+                      cell.value = excelToDate(parseFloat(c.v.text), properties?.model?.date1904);
+                    } else {
+                      cell.value = parseFloat(c.v.text);
+                    }
+                    break;
+                  }
+                }
+              }
+              if (hyperlinks) {
+                const hyperlink = hyperlinks[c.ref];
+                if (hyperlink) {
+                  // Streaming-specific: assign text and hyperlink for further processing
+                  (cell as { text: unknown }).text = cell.value;
+                  cell.value = undefined;
+                  (cell as { hyperlink: unknown }).hyperlink = hyperlink;
+                }
+              }
+              c = null;
+              current = null;
+            }
+            break;
+          default:
+            break;
+        }
+      }
+      if (shouldHandleHyperlinks) {
+        switch (tag.name) {
+          case "hyperlinks":
+            inHyperlinks = false;
+            break;
+          default:
+            break;
+        }
+      }
+    });
+
+    // Drive the SAX parser synchronously per chunk, yield events after each chunk.
+    // SAX parser.write() is synchronous: all callbacks fire within the write() call.
+    // This eliminates async queue overhead entirely.
+    const decoder = new TextDecoder();
+
+    for await (const chunk of iterator) {
+      const chunkStr =
+        typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
+      parser.write(chunkStr);
+      // After each chunk, flush accumulated events (callbacks set worksheetEvents synchronously)
+      const batch = worksheetEvents as WorksheetEvent[] | null;
+      if (batch && batch.length > 0) {
+        worksheetEvents = null;
+        yield batch;
+      }
+    }
+
+    parser.close();
+    // Flush any remaining events
+    const finalBatch = worksheetEvents as WorksheetEvent[] | null;
+    if (finalBatch && finalBatch.length > 0) {
+      yield finalBatch;
     }
   }
 }

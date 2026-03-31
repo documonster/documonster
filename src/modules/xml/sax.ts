@@ -91,22 +91,6 @@ const NAME_CHAR_ASCII = /* @__PURE__ */ (() => {
 // Character Classification
 // =============================================================================
 
-/**
- * Lookup table for valid XML 1.0 characters in the ASCII range (0-127).
- * Invalid: 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F
- * Valid:   0x09 (TAB), 0x0A (LF), 0x0D (CR), 0x20-0x7E
- */
-const VALID_CHAR_ASCII = /* @__PURE__ */ (() => {
-  const t = new Uint8Array(128);
-  t[0x09] = 1; // TAB
-  t[0x0a] = 1; // LF
-  t[0x0d] = 1; // CR
-  for (let i = 0x20; i <= 0x7e; i++) {
-    t[i] = 1;
-  }
-  return t;
-})();
-
 function isS(c: number): boolean {
   return c === SPACE || c === NL || c === CR || c === TAB;
 }
@@ -435,16 +419,44 @@ class SaxParser {
 
     const code = chunk.charCodeAt(i);
 
-    if (code < 0x0a || (code > 0x0d && code < 0xd800)) {
+    // Ultra-fast path: printable ASCII (0x20-0x7E) — the vast majority of XML content.
+    // No validation needed; these are always valid XML 1.0 characters.
+    if (code >= 0x20 && code <= 0x7e) {
       if (this.trackPosition) {
         this.column++;
       }
-      // Reject invalid XML 1.0 characters: 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F
-      if (code < 128 && VALID_CHAR_ASCII[code] === 0) {
-        this.fail("invalid XML character: 0x" + code.toString(16));
-        return code; // return the char but error is reported
+      return code;
+    }
+
+    // Secondary fast path: TAB (0x09) — common in attribute values
+    if (code === TAB) {
+      if (this.trackPosition) {
+        this.column++;
       }
       return code;
+    }
+
+    // Handle CR (normalize CR and CR+LF to LF per XML 1.0 §2.11)
+    if (code === CR) {
+      if (chunk.charCodeAt(i + 1) === NL) {
+        this.i = i + 2;
+      }
+      if (this.trackPosition) {
+        this.line++;
+        this.column = 0;
+        this.positionAtNewLine = this.position;
+      }
+      return NL;
+    }
+
+    // Handle LF
+    if (code === NL) {
+      if (this.trackPosition) {
+        this.line++;
+        this.column = 0;
+        this.positionAtNewLine = this.position;
+      }
+      return NL;
     }
 
     // Handle surrogates
@@ -466,34 +478,24 @@ class SaxParser {
       this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
     }
 
-    // Handle CR
-    if (code === CR) {
-      if (chunk.charCodeAt(i + 1) === NL) {
-        this.i = i + 2;
-      }
+    // Non-ASCII above surrogate range (0x80-0xD7FF, 0xE000-0xFFFD) — all valid XML
+    if (code >= 0x80) {
       if (this.trackPosition) {
-        this.line++;
-        this.column = 0;
-        this.positionAtNewLine = this.position;
+        this.column++;
       }
-      return NL;
+      // Reject 0xFFFE and 0xFFFF
+      if (code === 0xfffe || code === 0xffff) {
+        this.fail("invalid XML character: 0x" + code.toString(16));
+      }
+      return code;
     }
 
-    // Handle LF
-    if (code === NL && this.trackPosition) {
-      this.line++;
-      this.column = 0;
-      this.positionAtNewLine = this.position;
-    } else if (this.trackPosition) {
+    // Remaining: ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)
+    // All invalid in XML 1.0
+    if (this.trackPosition) {
       this.column++;
     }
-
-    // Reject invalid XML 1.0 characters that reach here:
-    // 0x0B (VT), 0x0C (FF), 0xFFFE, 0xFFFF
-    if (code === 0x0b || code === 0x0c || code === 0xfffe || code === 0xffff) {
-      this.fail("invalid XML character: 0x" + code.toString(16));
-    }
-
+    this.fail("invalid XML character: 0x" + code.toString(16));
     return code;
   }
 
@@ -607,18 +609,37 @@ class SaxParser {
     const { chunk } = this;
     let { i: start } = this;
     const handler = this._handlers.text;
+    const len = chunk.length;
 
-    while (true) {
-      const c = this.getCode();
+    // Fast inner loop: scan for special characters directly without getCode() overhead
+    while (this.i < len) {
+      const code = chunk.charCodeAt(this.i);
 
-      if (c === -1) {
-        if (handler && start < this.i) {
-          this.text += chunk.slice(start, this.i);
+      // Ultra-fast path: printable ASCII (0x20-0x7E, excluding < = 0x3C and & = 0x26)
+      if (code >= 0x20 && code <= 0x7e && code !== LESS && code !== AMP) {
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
         }
-        return;
+        continue;
       }
 
-      if (c === LESS) {
+      // TAB — valid in text
+      if (code === TAB) {
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
+        continue;
+      }
+
+      // '<' — end of text, transition to tag parsing
+      if (code === LESS) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
         if (handler) {
           const slice = chunk.slice(start, this.prevI);
           if (this.text.length > 0) {
@@ -632,7 +653,13 @@ class SaxParser {
         return;
       }
 
-      if (c === AMP) {
+      // '&' — entity reference
+      if (code === AMP) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
         if (handler) {
           this.text += chunk.slice(start, this.prevI);
         }
@@ -642,12 +669,80 @@ class SaxParser {
         return;
       }
 
-      if (c === NL) {
+      // LF — normalize and continue
+      if (code === NL) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        }
         if (handler) {
           this.text += chunk.slice(start, this.prevI) + "\n";
         }
         start = this.i;
+        continue;
       }
+
+      // CR — normalize CR / CR+LF to LF
+      if (code === CR) {
+        this.prevI = this.i;
+        this.i++;
+        if (chunk.charCodeAt(this.i) === NL) {
+          this.i++;
+        }
+        if (this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        }
+        if (handler) {
+          this.text += chunk.slice(start, this.prevI) + "\n";
+        }
+        start = this.i;
+        continue;
+      }
+
+      // Non-ASCII (>= 0x80) — valid XML, just advance
+      if (code >= 0x80) {
+        this.prevI = this.i;
+        // Handle surrogates
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = chunk.charCodeAt(this.i + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            this.i += 2;
+          } else {
+            this.i++;
+            this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
+          }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          this.i++;
+          this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
+        } else if (code === 0xfffe || code === 0xffff) {
+          this.i++;
+          this.fail("invalid XML character: 0x" + code.toString(16));
+        } else {
+          this.i++;
+        }
+        if (this.trackPosition) {
+          this.column++;
+        }
+        continue;
+      }
+
+      // Invalid ASCII control character (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F)
+      this.prevI = this.i;
+      this.i++;
+      if (this.trackPosition) {
+        this.column++;
+      }
+      this.fail("invalid XML character: 0x" + code.toString(16));
+    }
+
+    // End of chunk
+    if (handler && start < this.i) {
+      this.text += chunk.slice(start, this.i);
     }
   }
 
@@ -960,16 +1055,28 @@ class SaxParser {
   private sAttribValueQuoted(): void {
     const { q, chunk } = this;
     let { i: start } = this;
+    const len = chunk.length;
 
-    while (true) {
-      const c = this.getCode();
+    // Fast inner loop: most attribute values are short printable ASCII
+    while (this.i < len) {
+      const code = chunk.charCodeAt(this.i);
 
-      if (c === -1) {
-        this.text += chunk.slice(start, this.i);
-        return;
+      // Ultra-fast path: printable ASCII excluding quote, <, &
+      if (code >= 0x20 && code <= 0x7e && code !== q && code !== AMP && code !== LESS) {
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
+        continue;
       }
 
-      if (c === q) {
+      // Closing quote
+      if (code === q) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
         this.attribList.push({
           name: this.name,
           value: this.text + chunk.slice(start, this.prevI)
@@ -981,7 +1088,13 @@ class SaxParser {
         return;
       }
 
-      if (c === AMP) {
+      // Entity reference
+      if (code === AMP) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
         this.text += chunk.slice(start, this.prevI);
         this.state = S_ENTITY;
         this.entityReturnState = S_ATTRIB_VALUE_QUOTED;
@@ -989,15 +1102,15 @@ class SaxParser {
         return;
       }
 
-      if (c === NL || c === TAB) {
-        this.text += chunk.slice(start, this.prevI) + " ";
-        start = this.i;
-      }
-
-      if (c === LESS) {
+      // < not allowed in attribute value
+      if (code === LESS) {
+        this.prevI = this.i;
+        this.i++;
+        if (this.trackPosition) {
+          this.column++;
+        }
         this.text += chunk.slice(start, this.prevI);
         this.fail("< not allowed in attribute value");
-        // Recover: save what we have as attribute, re-process '<' as tag start
         this.attribList.push({ name: this.name, value: this.text });
         this.name = "";
         this.text = "";
@@ -1006,7 +1119,51 @@ class SaxParser {
         this.state = S_TEXT;
         return;
       }
+
+      // TAB or LF in attribute value — normalize to space per XML 1.0
+      if (code === TAB || code === NL) {
+        this.prevI = this.i;
+        this.i++;
+        if (code === NL && this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        } else if (this.trackPosition) {
+          this.column++;
+        }
+        this.text += chunk.slice(start, this.prevI) + " ";
+        start = this.i;
+        continue;
+      }
+
+      // CR — normalize to space (attribute normalization)
+      if (code === CR) {
+        this.prevI = this.i;
+        this.i++;
+        if (chunk.charCodeAt(this.i) === NL) {
+          this.i++;
+        }
+        if (this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        }
+        this.text += chunk.slice(start, this.prevI) + " ";
+        start = this.i;
+        continue;
+      }
+
+      // All other chars — fall back to getCode() for validation
+      const c = this.getCode();
+      if (c === -1) {
+        this.text += chunk.slice(start, this.i);
+        return;
+      }
+      // Just continue — char is already consumed by getCode()
     }
+
+    // End of chunk
+    this.text += chunk.slice(start, this.i);
   }
 
   private sAttribValueClosed(): void {
@@ -1650,4 +1807,56 @@ async function* parseSax(
   }
 }
 
-export { SaxParser, parseSax };
+// =============================================================================
+// Direct SAX Stream - saxStream
+// =============================================================================
+
+/**
+ * High-performance direct SAX streaming: feed an async-iterable to a
+ * pre-configured SaxParser **without** creating intermediate event objects.
+ *
+ * The caller registers callbacks on the parser before calling this function.
+ * This eliminates per-event `{ eventType, value }` object allocation and the
+ * overhead of the async generator protocol, making it significantly faster
+ * for hot inner loops like worksheet/shared-string parsing.
+ *
+ * @param parser - A SaxParser with handlers already registered via `.on()`.
+ * @param iterable - Async iterable of string or Uint8Array chunks.
+ *
+ * @example
+ * ```ts
+ * const parser = new SaxParser();
+ * parser.on("opentag", tag => handleOpen(tag));
+ * parser.on("text", text => handleText(text));
+ * parser.on("closetag", tag => handleClose(tag));
+ * await saxStream(parser, stream);
+ * ```
+ */
+async function saxStream(
+  parser: SaxParser,
+  iterable: AsyncIterable<any> | Iterable<any>
+): Promise<void> {
+  const decoder = new TextDecoder();
+
+  let error: Error | undefined;
+  const prevErrorHandler = (parser as any)._handlers?.error;
+  parser.on("error", (err: Error) => {
+    error = err;
+    prevErrorHandler?.(err);
+  });
+
+  for await (const chunk of iterable) {
+    const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+    parser.write(chunkStr);
+    if (error) {
+      throw error;
+    }
+  }
+
+  parser.close();
+  if (error) {
+    throw error;
+  }
+}
+
+export { SaxParser, parseSax, saxStream };

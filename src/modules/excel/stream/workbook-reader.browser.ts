@@ -21,7 +21,8 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { parseSax } from "@xml/sax";
+import { parseSax, SaxParser, saxStream } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
@@ -406,6 +407,114 @@ export abstract class WorkbookReaderBase<
     let font: Partial<Font> | null = null;
     let inRichText = false;
 
+    // For "cache" mode, use direct SAX callbacks (no event objects, no async generator overhead)
+    if (this.options.sharedStrings === "cache") {
+      const sharedStrings = this.sharedStrings!;
+      const parser = new SaxParser();
+
+      parser.on("opentag", (node: SaxTag) => {
+        switch (node.name) {
+          case "b":
+            font = font || {};
+            font.bold = true;
+            break;
+          case "charset":
+            font = font || {};
+            font.charset = parseInt(node.attributes.charset, 10);
+            break;
+          case "color":
+            font = font || {};
+            font.color = {};
+            if (node.attributes.rgb) {
+              font.color.argb = node.attributes.rgb;
+            }
+            if (node.attributes.val) {
+              font.color.argb = node.attributes.val;
+            }
+            if (node.attributes.theme) {
+              font.color.theme = node.attributes.theme as any;
+            }
+            break;
+          case "family":
+            font = font || {};
+            font.family = parseInt(node.attributes.val, 10);
+            break;
+          case "i":
+            font = font || {};
+            font.italic = true;
+            break;
+          case "outline":
+            font = font || {};
+            font.outline = true;
+            break;
+          case "rFont":
+            font = font || {};
+            font.name = node.attributes.val;
+            break;
+          case "r":
+            inRichText = true;
+            break;
+          case "si":
+            font = null;
+            richText = [];
+            text = null;
+            inRichText = false;
+            break;
+          case "sz":
+            font = font || {};
+            font.size = parseInt(node.attributes.val, 10);
+            break;
+          case "strike":
+            font = font || {};
+            font.strike = true;
+            break;
+          case "t":
+            text = null;
+            break;
+          case "u":
+            font = font || {};
+            font.underline = true;
+            break;
+          case "vertAlign":
+            font = font || {};
+            font.vertAlign = node.attributes.val as any;
+            break;
+        }
+      });
+
+      parser.on("text", (value: string) => {
+        text = text ? text + value : value;
+      });
+
+      parser.on("closetag", (tag: SaxTag) => {
+        switch (tag.name) {
+          case "t":
+            if (text != null) {
+              text = decodeOoxmlEscape(text);
+            }
+            break;
+          case "r":
+            if (inRichText) {
+              richText.push({ font, text });
+              font = null;
+              text = null;
+            }
+            break;
+          case "si":
+            sharedStrings.push(richText.length ? { richText } : (text ?? ""));
+            richText = [];
+            font = null;
+            text = null;
+            inRichText = false;
+            break;
+        }
+      });
+
+      await saxStream(parser, iterateStream(entry));
+      return;
+    }
+
+    // "emit" mode — must yield, so use parseSax async generator
     for await (const events of parseSax(iterateStream(entry))) {
       for (const { eventType, value } of events) {
         if (eventType === "opentag") {
@@ -483,9 +592,6 @@ export abstract class WorkbookReaderBase<
           const node = value;
           switch (node.name) {
             case "t":
-              // Decode OOXML _xHHHH_ escapes when closing <t> elements.
-              // This covers both plain text (<si><t>...</t></si>) and
-              // rich text runs (<si><r>...<t>...</t></r></si>).
               if (text != null) {
                 text = decodeOoxmlEscape(text);
               }
@@ -498,9 +604,7 @@ export abstract class WorkbookReaderBase<
               }
               break;
             case "si":
-              if (this.options.sharedStrings === "cache") {
-                this.sharedStrings!.push(richText.length ? { richText } : (text ?? ""));
-              } else if (this.options.sharedStrings === "emit") {
+              if (this.options.sharedStrings === "emit") {
                 yield { index: index++, text: richText.length ? { richText } : (text ?? "") };
               }
               richText = [];

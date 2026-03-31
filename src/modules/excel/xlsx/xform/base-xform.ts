@@ -1,6 +1,6 @@
-import { parseSax } from "@xml/sax";
+import { SaxParser } from "@xml/sax";
 import { XmlWriter } from "@xml/writer";
-import type { XmlSink } from "@xml/types";
+import type { XmlSink, SaxTag } from "@xml/types";
 
 /* 'virtual' methods used as a form of documentation */
 
@@ -167,8 +167,113 @@ class BaseXform<TModel = any> {
     return done ? finalModel : this.model;
   }
 
+  /**
+   * High-performance stream parsing using direct SAX callbacks.
+   * Eliminates per-event object allocation and async generator overhead.
+   * Use this instead of parse(parseSax(stream)) for hot paths.
+   */
+  async parseStreamDirect(stream: AsyncIterable<any>): Promise<TModel | undefined> {
+    const parser = new SaxParser();
+    const decoder = new TextDecoder();
+
+    let done = false;
+    let finalModel: TModel | undefined;
+
+    // HAN CELL compatibility: 0 = not checked, 1 = normal file, 2 = HAN CELL file
+    let nsMode = 0;
+    let nsPrefix: string | null = null;
+
+    // Suppress errors that occur after we're done parsing (the SAX parser will
+    // encounter unmatched tags when we stop processing close tags).
+    // IMPORTANT: We set error handler FIRST, before any write() calls, to ensure
+    // it's always present when fail() is called from within callbacks.
+    let parseError: Error | undefined;
+    parser.on("error", (err: Error) => {
+      if (!done) {
+        parseError = err;
+      }
+      // When done, silently swallow all SAX errors
+    });
+
+    parser.on("opentag", (tag: SaxTag) => {
+      if (done) {
+        return;
+      }
+      // Fast path for normal Excel files (majority case)
+      if (nsMode === 1) {
+        this.parseOpen(tag);
+        return;
+      }
+      // First tag - detect mode
+      if (nsMode === 0) {
+        const prefix = detectHanCellPrefix(tag.name, tag.attributes);
+        if (prefix === undefined) {
+          nsMode = 1;
+          this.parseOpen(tag);
+          return;
+        }
+        nsMode = 2;
+        nsPrefix = prefix;
+      }
+      // HAN CELL mode - strip prefix without mutating the SAX tag object
+      // (the SAX parser reuses the tag on its internal stack for close-tag matching)
+      const strippedName = stripPrefix(tag.name, nsPrefix);
+      if (strippedName !== tag.name) {
+        this.parseOpen({
+          name: strippedName,
+          attributes: tag.attributes,
+          isSelfClosing: tag.isSelfClosing
+        });
+      } else {
+        this.parseOpen(tag);
+      }
+    });
+
+    parser.on("text", (text: string) => {
+      if (!done) {
+        this.parseText(text);
+      }
+    });
+
+    parser.on("closetag", (tag: SaxTag) => {
+      if (done) {
+        return;
+      }
+      const name = nsMode === 2 ? stripPrefix(tag.name, nsPrefix) : tag.name;
+      if (!this.parseClose(name)) {
+        done = true;
+        finalModel = this.model;
+      }
+    });
+
+    // IMPORTANT: Do not return early from the async iterator.
+    // In true streaming scenarios the iterator is backed by a Node.js Readable.
+    // Returning early would close/destroy the stream (AbortError).
+    // We must consume all chunks, but once done we skip writing to the parser.
+    for await (const chunk of stream) {
+      if (done) {
+        continue;
+      }
+      const chunkStr =
+        typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
+      parser.write(chunkStr);
+      if (parseError) {
+        throw parseError;
+      }
+    }
+
+    if (!done) {
+      parser.close();
+      if (parseError) {
+        throw parseError;
+      }
+    }
+
+    return done ? finalModel : this.model;
+  }
+
   async parseStream(stream: any): Promise<TModel | undefined> {
-    return this.parse(parseSax(stream));
+    return this.parseStreamDirect(stream);
   }
 
   get xml(): string {
