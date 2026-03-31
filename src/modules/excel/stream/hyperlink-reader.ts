@@ -5,7 +5,8 @@
  */
 
 import { EventEmitter } from "@utils/event-emitter";
-import { parseSax } from "@xml/sax";
+import { SaxParser } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
 import { Enums } from "@excel/enums";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
@@ -76,42 +77,46 @@ class HyperlinkReader extends EventEmitter {
     }
 
     try {
-      for await (const events of parseSax(iterator)) {
-        for (const { eventType, value } of events) {
-          if (eventType !== "opentag") {
-            continue;
-          }
+      const parser = new SaxParser();
+      const decoder = new TextDecoder();
 
-          const node = value;
-          if (node.name !== "Relationship") {
-            continue;
-          }
-
-          const attributes = node.attributes;
-          if (attributes.Type !== RelType.Hyperlink) {
-            continue;
-          }
-
-          const relationship: Hyperlink = {
-            type: Enums.RelationshipType.Hyperlink,
-            rId: attributes.Id,
-            target: attributes.Target,
-            targetMode: attributes.TargetMode
-          };
-
-          if (emitHyperlinks) {
-            this.emit("hyperlink", relationship);
-            continue;
-          }
-
-          // cache mode
-          const rId = relationship.rId;
-          if (cachedHyperlinks && cachedHyperlinks[rId] === undefined) {
-            this._hyperlinkCount += 1;
-          }
-          cachedHyperlinks![rId] = relationship;
+      parser.on("opentag", (node: SaxTag) => {
+        if (node.name !== "Relationship") {
+          return;
         }
+
+        const attributes = node.attributes;
+        if (attributes.Type !== RelType.Hyperlink) {
+          return;
+        }
+
+        const relationship: Hyperlink = {
+          type: Enums.RelationshipType.Hyperlink,
+          rId: attributes.Id,
+          target: attributes.Target,
+          targetMode: attributes.TargetMode
+        };
+
+        if (emitHyperlinks) {
+          this.emit("hyperlink", relationship);
+          return;
+        }
+
+        // cache mode
+        const rId = relationship.rId;
+        if (cachedHyperlinks && cachedHyperlinks[rId] === undefined) {
+          this._hyperlinkCount += 1;
+        }
+        cachedHyperlinks![rId] = relationship;
+      });
+
+      for await (const chunk of iterator) {
+        const chunkStr =
+          typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
+        parser.write(chunkStr);
       }
+      parser.close();
+
       this.emit("finished");
     } catch (error) {
       this.emit("error", error);

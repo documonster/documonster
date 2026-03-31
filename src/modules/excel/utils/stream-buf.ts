@@ -22,6 +22,9 @@ import { getTextDecoder, uint8ArrayToNodeBufferView } from "@utils/binary";
 // Encoding type - simplified from Node.js BufferEncoding (TextEncoder only supports UTF-8)
 type TextEncoding = "utf-8" | "utf8" | BufferEncoding;
 
+// Shared TextEncoder instance — avoid allocating a new one per StringChunk.toBuffer()
+const sharedTextEncoder = new TextEncoder();
+
 class StringChunk {
   private _data: string;
   private _buffer?: Uint8Array;
@@ -43,7 +46,7 @@ class StringChunk {
 
   toBuffer(): Uint8Array {
     if (!this._buffer) {
-      this._buffer = new TextEncoder().encode(this._data);
+      this._buffer = sharedTextEncoder.encode(this._data);
     }
     return this._buffer;
   }

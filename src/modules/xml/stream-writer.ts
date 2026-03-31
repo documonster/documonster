@@ -43,6 +43,8 @@ class XmlStreamWriter implements XmlSink {
   private _stack: string[] = [];
   private _leaf = false;
   private _open = false;
+  // Pending start-tag buffer: accumulates tag name + attributes until flushed
+  private _pending = "";
 
   constructor(target: WritableTarget) {
     this._target = target;
@@ -63,20 +65,40 @@ class XmlStreamWriter implements XmlSink {
   }
 
   // ===========================================================================
+  // Internal: flush pending start tag
+  // ===========================================================================
+
+  /** Flush the pending start-tag buffer with a closing character. */
+  private _flushOpen(suffix: string): void {
+    this._target.write(this._pending + suffix);
+    this._pending = "";
+    this._open = false;
+  }
+
+  // ===========================================================================
   // XmlSink Implementation
   // ===========================================================================
 
   openXml(attributes?: XmlAttributes): void {
     const defaults: XmlAttributes = { version: "1.0", encoding: "UTF-8", standalone: "yes" };
     const merged = attributes ? { ...defaults, ...attributes } : defaults;
-    this._target.write("<?xml");
-    this._writeAttributes(merged);
-    this._target.write("?>\n");
+    let s = "<?xml";
+    for (const key in merged) {
+      const value = (merged as any)[key];
+      if (value !== undefined) {
+        s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+      }
+    }
+    this._target.write(s + "?>\n");
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
-    // Merge open-close-previous + open-new + attributes into fewer writes
-    let s = this._open ? `><${name}` : `<${name}`;
+    // Flush any pending open tag first
+    if (this._open) {
+      this._flushOpen(">");
+    }
+    // Start building pending tag
+    let s = `<${name}`;
     if (attributes) {
       for (const key in attributes) {
         const value = attributes[key];
@@ -85,7 +107,7 @@ class XmlStreamWriter implements XmlSink {
         }
       }
     }
-    this._target.write(s);
+    this._pending = s;
     this._stack.push(name);
     this._leaf = true;
     this._open = true;
@@ -95,20 +117,28 @@ class XmlStreamWriter implements XmlSink {
     if (!this._open) {
       throw new XmlWriteError("add attribute", "no element is open");
     }
-    this._target.write(` ${name}="${xmlEncodeAttr(String(value))}"`);
+    // Append to pending buffer — no write call
+    this._pending += ` ${name}="${xmlEncodeAttr(String(value))}"`;
   }
 
   addAttributes(attributes: XmlAttributes): void {
     if (!this._open) {
       throw new XmlWriteError("add attributes", "no element is open");
     }
-    this._writeAttributes(attributes);
+    if (!attributes) {
+      return;
+    }
+    for (const key in attributes) {
+      const value = attributes[key];
+      if (value !== undefined) {
+        this._pending += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+      }
+    }
   }
 
   writeText(text: string | number): void {
     if (this._open) {
-      this._target.write(">");
-      this._open = false;
+      this._flushOpen(">");
     }
     this._leaf = false;
     this._target.write(xmlEncode(String(text)));
@@ -116,8 +146,7 @@ class XmlStreamWriter implements XmlSink {
 
   writeRaw(xml: string): void {
     if (this._open) {
-      this._target.write(">");
-      this._open = false;
+      this._flushOpen(">");
     }
     this._leaf = false;
     this._target.write(xml);
@@ -125,8 +154,7 @@ class XmlStreamWriter implements XmlSink {
 
   writeCData(text: string): void {
     if (this._open) {
-      this._target.write(">");
-      this._open = false;
+      this._flushOpen(">");
     }
     this._leaf = false;
     // Split on ]]> to produce valid CDATA — the sequence ]]> cannot appear inside CDATA.
@@ -135,8 +163,7 @@ class XmlStreamWriter implements XmlSink {
 
   writeComment(text: string): void {
     if (this._open) {
-      this._target.write(">");
-      this._open = false;
+      this._flushOpen(">");
     }
     this._leaf = false;
     // XML spec: comments must not contain "--" and must not end with "-".
@@ -154,8 +181,12 @@ class XmlStreamWriter implements XmlSink {
     if (name === undefined) {
       throw new XmlWriteError("close node", "no element is open");
     }
-    if (this._leaf) {
-      this._target.write("/>");
+    if (this._leaf && this._open) {
+      // Self-closing: flush pending tag with "/>", single write
+      this._flushOpen("/>");
+    } else if (this._open) {
+      this._flushOpen(">");
+      this._target.write(`</${name}>`);
     } else {
       this._target.write(`</${name}>`);
     }
@@ -164,11 +195,13 @@ class XmlStreamWriter implements XmlSink {
   }
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
-    // Optimized: build complete leaf element as a single string, single write call
-    let s = this._open ? ">" : "";
-    this._open = false;
+    // Flush any pending open tag
+    if (this._open) {
+      this._flushOpen(">");
+    }
 
-    s += `<${name}`;
+    // Build complete leaf element as a single string, single write call
+    let s = `<${name}`;
     if (attributes) {
       for (const key in attributes) {
         const value = attributes[key];
@@ -194,22 +227,6 @@ class XmlStreamWriter implements XmlSink {
   closeAll(): void {
     while (this._stack.length > 0) {
       this.closeNode();
-    }
-  }
-
-  // ===========================================================================
-  // Internal Helpers
-  // ===========================================================================
-
-  private _writeAttributes(attributes?: XmlAttributes): void {
-    if (!attributes) {
-      return;
-    }
-    for (const key in attributes) {
-      const value = attributes[key];
-      if (value !== undefined) {
-        this._target.write(` ${key}="${xmlEncodeAttr(String(value))}"`);
-      }
     }
   }
 }

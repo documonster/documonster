@@ -30,11 +30,16 @@ class TextXform extends BaseXform {
 
   parseText(text: string): void {
     this._text.push(text);
-    // Update model immediately after receiving text
-    this.model = decodeOoxmlEscape(this._text.join(""));
+    // Keep model up-to-date with raw (undecoded) text for consumers that read
+    // model before parseClose is called (e.g. RichTextXform).
+    // OOXML _xHHHH_ decoding happens in parseClose for efficiency.
+    this.model = this._text.length === 1 ? text : this._text.join("");
   }
 
   parseClose(): boolean {
+    // Decode OOXML escapes once, only if needed
+    const raw = this._text.length === 1 ? this._text[0] : this._text.join("");
+    this.model = raw.includes("_x") ? decodeOoxmlEscape(raw) : raw;
     return false;
   }
 }

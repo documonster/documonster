@@ -21,7 +21,7 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { parseSax, SaxParser, saxStream } from "@xml/sax";
+import { SaxParser, saxStream } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
@@ -489,7 +489,7 @@ export abstract class WorkbookReaderBase<
       parser.on("closetag", (tag: SaxTag) => {
         switch (tag.name) {
           case "t":
-            if (text != null) {
+            if (text != null && text.includes("_x")) {
               text = decodeOoxmlEscape(text);
             }
             break;
@@ -514,106 +514,129 @@ export abstract class WorkbookReaderBase<
       return;
     }
 
-    // "emit" mode — must yield, so use parseSax async generator
-    for await (const events of parseSax(iterateStream(entry))) {
-      for (const { eventType, value } of events) {
-        if (eventType === "opentag") {
-          const node = value;
-          switch (node.name) {
-            case "b":
-              font = font || {};
-              font.bold = true;
-              break;
-            case "charset":
-              font = font || {};
-              font.charset = parseInt(node.attributes.charset, 10);
-              break;
-            case "color":
-              font = font || {};
-              font.color = {};
-              if (node.attributes.rgb) {
-                font.color.argb = node.attributes.rgb;
-              }
-              if (node.attributes.val) {
-                font.color.argb = node.attributes.val;
-              }
-              if (node.attributes.theme) {
-                font.color.theme = node.attributes.theme;
-              }
-              break;
-            case "family":
-              font = font || {};
-              font.family = parseInt(node.attributes.val, 10);
-              break;
-            case "i":
-              font = font || {};
-              font.italic = true;
-              break;
-            case "outline":
-              font = font || {};
-              font.outline = true;
-              break;
-            case "rFont":
-              font = font || {};
-              font.name = node.attributes.val;
-              break;
-            case "r":
-              inRichText = true;
-              break;
-            case "si":
-              font = null;
-              richText = [];
-              text = null;
-              inRichText = false;
-              break;
-            case "sz":
-              font = font || {};
-              font.size = parseInt(node.attributes.val, 10);
-              break;
-            case "strike":
-              font = font || {};
-              font.strike = true;
-              break;
-            case "t":
-              text = null;
-              break;
-            case "u":
-              font = font || {};
-              font.underline = true;
-              break;
-            case "vertAlign":
-              font = font || {};
-              font.vertAlign = node.attributes.val;
-              break;
+    // "emit" mode — must yield, so use direct SAX with per-chunk yield
+    const emitParser = new SaxParser();
+    const emitDecoder = new TextDecoder();
+    let pendingEmits: Array<{ index: number; text: SharedStringValue }> = [];
+
+    emitParser.on("opentag", (node: SaxTag) => {
+      switch (node.name) {
+        case "b":
+          font = font || {};
+          font.bold = true;
+          break;
+        case "charset":
+          font = font || {};
+          font.charset = parseInt(node.attributes.charset, 10);
+          break;
+        case "color":
+          font = font || {};
+          font.color = {};
+          if (node.attributes.rgb) {
+            font.color.argb = node.attributes.rgb;
           }
-        } else if (eventType === "text") {
-          text = text ? text + value : value;
-        } else if (eventType === "closetag") {
-          const node = value;
-          switch (node.name) {
-            case "t":
-              if (text != null) {
-                text = decodeOoxmlEscape(text);
-              }
-              break;
-            case "r":
-              if (inRichText) {
-                richText.push({ font, text });
-                font = null;
-                text = null;
-              }
-              break;
-            case "si":
-              if (this.options.sharedStrings === "emit") {
-                yield { index: index++, text: richText.length ? { richText } : (text ?? "") };
-              }
-              richText = [];
-              font = null;
-              text = null;
-              inRichText = false;
-              break;
+          if (node.attributes.val) {
+            font.color.argb = node.attributes.val;
           }
+          if (node.attributes.theme) {
+            font.color.theme = node.attributes.theme as any;
+          }
+          break;
+        case "family":
+          font = font || {};
+          font.family = parseInt(node.attributes.val, 10);
+          break;
+        case "i":
+          font = font || {};
+          font.italic = true;
+          break;
+        case "outline":
+          font = font || {};
+          font.outline = true;
+          break;
+        case "rFont":
+          font = font || {};
+          font.name = node.attributes.val;
+          break;
+        case "r":
+          inRichText = true;
+          break;
+        case "si":
+          font = null;
+          richText = [];
+          text = null;
+          inRichText = false;
+          break;
+        case "sz":
+          font = font || {};
+          font.size = parseInt(node.attributes.val, 10);
+          break;
+        case "strike":
+          font = font || {};
+          font.strike = true;
+          break;
+        case "t":
+          text = null;
+          break;
+        case "u":
+          font = font || {};
+          font.underline = true;
+          break;
+        case "vertAlign":
+          font = font || {};
+          font.vertAlign = node.attributes.val as any;
+          break;
+      }
+    });
+
+    emitParser.on("text", (value: string) => {
+      text = text ? text + value : value;
+    });
+
+    emitParser.on("closetag", (tag: SaxTag) => {
+      switch (tag.name) {
+        case "t":
+          if (text != null && text.includes("_x")) {
+            text = decodeOoxmlEscape(text);
+          }
+          break;
+        case "r":
+          if (inRichText) {
+            richText.push({ font, text });
+            font = null;
+            text = null;
+          }
+          break;
+        case "si":
+          pendingEmits.push({
+            index: index++,
+            text: richText.length ? { richText } : (text ?? "")
+          });
+          richText = [];
+          font = null;
+          text = null;
+          inRichText = false;
+          break;
+      }
+    });
+
+    for await (const chunk of iterateStream(entry)) {
+      const chunkStr =
+        typeof chunk === "string"
+          ? chunk
+          : emitDecoder.decode(chunk as Uint8Array, { stream: true });
+      emitParser.write(chunkStr);
+      if (pendingEmits.length > 0) {
+        for (const item of pendingEmits) {
+          yield item;
         }
+        pendingEmits = [];
+      }
+    }
+    emitParser.close();
+    if (pendingEmits.length > 0) {
+      for (const item of pendingEmits) {
+        yield item;
       }
     }
   }

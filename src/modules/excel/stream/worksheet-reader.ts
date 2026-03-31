@@ -415,7 +415,7 @@ class WorksheetReader extends EventEmitter {
                   case "inlineStr":
                     // Inline strings come from <is><t>...</t></is> which uses
                     // OOXML _xHHHH_ escaping in addition to XML entities.
-                    cell.value = decodeOoxmlEscape(c.v.text);
+                    cell.value = c.v.text.includes("_x") ? decodeOoxmlEscape(c.v.text) : c.v.text;
                     break;
                   case "str":
                     cell.value = c.v.text;
