@@ -6,7 +6,8 @@ import type {
   ParsedCacheDefinition,
   PivotTableSource
 } from "@excel/pivot-table";
-import { XmlStream } from "@excel/utils/xml-stream";
+import type { XmlSink } from "@xml/types";
+import { StdDocAttributes } from "@xml/writer";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
 
 /** Attribute keys on <pivotCacheDefinition> that are individually parsed (not collected into extraRootAttrs). */
@@ -71,7 +72,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
    * Render pivot cache definition XML.
    * Supports both newly created models (with PivotTableSource) and loaded models.
    */
-  render(xmlStream: XmlStream, model: CacheDefinitionModel | ParsedCacheDefinition): void {
+  render(xmlStream: XmlSink, model: CacheDefinitionModel | ParsedCacheDefinition): void {
     // Check if this is a loaded model (has isLoaded flag or no source property)
     const isLoaded = ("isLoaded" in model && model.isLoaded) || !("source" in model);
 
@@ -85,13 +86,13 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
   /**
    * Render newly created pivot cache definition
    */
-  private renderNew(xmlStream: XmlStream, model: CacheDefinitionModel): void {
+  private renderNew(xmlStream: XmlSink, model: CacheDefinitionModel): void {
     const { source, cacheFields } = model;
 
     // R8-O2: Use Array.isArray for type safety — getSheetValues() returns a sparse array of row arrays
     const recordCount = source.getSheetValues().slice(2).filter(Array.isArray).length;
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...PivotCacheDefinitionXform.PIVOT_CACHE_DEFINITION_ATTRIBUTES,
       "r:id": "rId1",
@@ -113,7 +114,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
 
     xmlStream.openNode("cacheFields", { count: cacheFields.length });
     // Note: keeping this pretty-printed for now to ease debugging.
-    xmlStream.writeXml(PivotCacheDefinitionXform.renderCacheFieldsXml(cacheFields));
+    xmlStream.writeRaw(PivotCacheDefinitionXform.renderCacheFieldsXml(cacheFields));
     xmlStream.closeNode();
 
     xmlStream.closeNode();
@@ -122,10 +123,10 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
   /**
    * Render loaded pivot cache definition (preserving original structure)
    */
-  private renderLoaded(xmlStream: XmlStream, model: ParsedCacheDefinition): void {
+  private renderLoaded(xmlStream: XmlSink, model: ParsedCacheDefinition): void {
     const { cacheFields, sourceRef, sourceSheet, sourceTableName, recordCount } = model;
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     const rootAttrs: Record<string, string | number | undefined> = {
       ...PivotCacheDefinitionXform.PIVOT_CACHE_DEFINITION_ATTRIBUTES,
       "r:id": model.rId ?? "rId1"
@@ -185,22 +186,22 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     }
     // R8-B9: Emit preserved non-worksheet cacheSource children (e.g. <consolidation>)
     if (model.cacheSourceXml) {
-      xmlStream.writeXml(model.cacheSourceXml);
+      xmlStream.writeRaw(model.cacheSourceXml);
     }
     xmlStream.closeNode();
 
     xmlStream.openNode("cacheFields", { count: cacheFields.length });
-    xmlStream.writeXml(PivotCacheDefinitionXform.renderCacheFieldsXml(cacheFields));
+    xmlStream.writeRaw(PivotCacheDefinitionXform.renderCacheFieldsXml(cacheFields));
     xmlStream.closeNode();
 
     // R6-BugA: Preserved unknown child elements for roundtrip
     if (model.unknownElementsXml) {
-      xmlStream.writeXml(model.unknownElementsXml);
+      xmlStream.writeRaw(model.unknownElementsXml);
     }
 
     // BUG-29: Preserve extLst from original file
     if (model.extLstXml) {
-      xmlStream.writeXml(model.extLstXml);
+      xmlStream.writeRaw(model.extLstXml);
     }
 
     xmlStream.closeNode();

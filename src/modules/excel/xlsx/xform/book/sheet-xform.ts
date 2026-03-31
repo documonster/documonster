@@ -1,4 +1,3 @@
-import { xmlDecode } from "@utils/utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { WorksheetState } from "@excel/types";
 
@@ -30,7 +29,7 @@ class WorksheetXform extends BaseXform {
   parseOpen(node: any): boolean {
     if (node.name === "sheet") {
       this.model = {
-        name: xmlDecode(node.attributes.name),
+        name: node.attributes.name,
         id: parseInt(node.attributes.sheetId, 10),
         state: parseWorksheetState(node.attributes.state),
         rId: node.attributes["r:id"]

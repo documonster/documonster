@@ -296,21 +296,16 @@ class FillXform extends BaseXform {
   }
 
   render(xmlStream: any, model: FillModel): void {
-    xmlStream.addRollback();
+    if (model.type !== "pattern" && model.type !== "gradient") {
+      return;
+    }
     xmlStream.openNode("fill");
-    switch (model.type) {
-      case "pattern":
-        this.map.patternFill.render(xmlStream, model);
-        break;
-      case "gradient":
-        this.map.gradientFill.render(xmlStream, model);
-        break;
-      default:
-        xmlStream.rollback();
-        return;
+    if (model.type === "pattern") {
+      this.map.patternFill.render(xmlStream, model);
+    } else {
+      this.map.gradientFill.render(xmlStream, model);
     }
     xmlStream.closeNode();
-    xmlStream.commit();
   }
 
   parseOpen(node: any): boolean {

@@ -1,5 +1,5 @@
 import { colCache } from "@excel/utils/col-cache";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
@@ -42,7 +42,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
 
   render(xmlStream: any, model?: DrawingModel): void {
     const renderModel = model || this.model;
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, DrawingXform.DRAWING_ATTRIBUTES);
 
     renderModel!.anchors.forEach(item => {

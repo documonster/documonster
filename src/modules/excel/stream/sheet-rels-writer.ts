@@ -1,4 +1,4 @@
-import { xmlEncode } from "@utils/utils";
+import { xmlEncode } from "@xml/encode";
 import { RelType } from "@excel/xlsx/rel-type";
 import { worksheetRelsPath } from "@excel/utils/ooxml-paths";
 import { isInternalLink } from "@excel/xlsx/xform/sheet/hyperlink-xform";
@@ -130,14 +130,14 @@ class SheetRelsWriter {
     if (relationship.TargetMode) {
       this.stream.write(
         `<Relationship Id="${rId}"` +
-          ` Type="${relationship.Type}"` +
+          ` Type="${xmlEncode(relationship.Type)}"` +
           ` Target="${xmlEncode(relationship.Target)}"` +
-          ` TargetMode="${relationship.TargetMode}"` +
+          ` TargetMode="${xmlEncode(relationship.TargetMode)}"` +
           "/>"
       );
     } else {
       this.stream.write(
-        `<Relationship Id="${rId}" Type="${relationship.Type}" Target="${relationship.Target}"/>`
+        `<Relationship Id="${rId}" Type="${xmlEncode(relationship.Type)}" Target="${xmlEncode(relationship.Target)}"/>`
       );
     }
 

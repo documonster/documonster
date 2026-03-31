@@ -1,5 +1,5 @@
 import { colCache } from "@excel/utils/col-cache";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
@@ -102,7 +102,7 @@ class WorkbookXform extends BaseXform {
   }
 
   render(xmlStream: any, model: any): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("workbook", WorkbookXform.WORKBOOK_ATTRIBUTES);
 
     this.map.fileVersion.render(xmlStream);

@@ -1,5 +1,5 @@
 import { Enums } from "@excel/enums";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { ExcelNotSupportedError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
@@ -139,7 +139,7 @@ class StylesXform extends BaseXform {
     const renderModel = model || this.model;
     //
     //   <fonts count="2" x14ac:knownFonts="1">
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("styleSheet", StylesXform.STYLESHEET_ATTRIBUTES);
 
@@ -148,7 +148,7 @@ class StylesXform extends BaseXform {
       if (renderModel.numFmts && renderModel.numFmts.length) {
         xmlStream.openNode("numFmts", { count: renderModel.numFmts.length });
         renderModel.numFmts.forEach((numFmtXml: string) => {
-          xmlStream.writeXml(numFmtXml);
+          xmlStream.writeRaw(numFmtXml);
         });
         xmlStream.closeNode();
       }
@@ -167,19 +167,19 @@ class StylesXform extends BaseXform {
       }
       xmlStream.openNode("fonts", { count: renderModel.fonts!.length, "x14ac:knownFonts": 1 });
       renderModel.fonts!.forEach((fontXml: string) => {
-        xmlStream.writeXml(fontXml);
+        xmlStream.writeRaw(fontXml);
       });
       xmlStream.closeNode();
 
       xmlStream.openNode("fills", { count: renderModel.fills!.length });
       renderModel.fills!.forEach((fillXml: string) => {
-        xmlStream.writeXml(fillXml);
+        xmlStream.writeRaw(fillXml);
       });
       xmlStream.closeNode();
 
       xmlStream.openNode("borders", { count: renderModel.borders!.length });
       renderModel.borders!.forEach((borderXml: string) => {
-        xmlStream.writeXml(borderXml);
+        xmlStream.writeRaw(borderXml);
       });
       xmlStream.closeNode();
 
@@ -189,7 +189,7 @@ class StylesXform extends BaseXform {
 
       xmlStream.openNode("cellXfs", { count: renderModel.styles!.length });
       renderModel.styles!.forEach((styleXml: string) => {
-        xmlStream.writeXml(styleXml);
+        xmlStream.writeRaw(styleXml);
       });
       xmlStream.closeNode();
     } else {

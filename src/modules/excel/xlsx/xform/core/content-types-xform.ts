@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
   OOXML_PATHS,
@@ -17,7 +17,7 @@ import {
 // not used for parsing
 class ContentTypesXform extends BaseXform {
   render(xmlStream: any, model: any): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Types", ContentTypesXform.PROPERTY_ATTRIBUTES);
 

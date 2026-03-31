@@ -3,7 +3,7 @@
  */
 
 import { it, expect } from "vitest";
-import { SaxesParser } from "@excel/utils/parse-sax";
+import { SaxParser } from "@xml/sax";
 
 export type EventTuple = ["opentag" | "closetag" | "text" | "error", any];
 
@@ -14,7 +14,7 @@ export function test(options: {
   opt?: { xmlns?: boolean; position?: boolean; fileName?: string; fragment?: boolean };
 }): void {
   it(options.name, () => {
-    const parser = new SaxesParser(options.opt);
+    const parser = new SaxParser(options.opt);
     const events: EventTuple[] = [];
 
     parser.on("opentag", tag => {

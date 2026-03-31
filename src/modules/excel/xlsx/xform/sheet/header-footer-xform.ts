@@ -19,51 +19,44 @@ class HeaderFooterXform extends BaseXform {
   }
 
   render(xmlStream: any, model?: HeaderFooterModel): void {
-    if (model) {
-      xmlStream.addRollback();
+    if (!model) {
+      return;
+    }
+    // Collect attributes and children first, only write if any exist
+    const attrs: Record<string, string> = {};
+    const children: Array<{ name: string; text: string }> = [];
 
-      let createTag = false;
+    if (model.differentFirst) {
+      attrs.differentFirst = "1";
+    }
+    if (model.differentOddEven) {
+      attrs.differentOddEven = "1";
+    }
+    if (model.oddHeader && typeof model.oddHeader === "string") {
+      children.push({ name: "oddHeader", text: model.oddHeader });
+    }
+    if (model.oddFooter && typeof model.oddFooter === "string") {
+      children.push({ name: "oddFooter", text: model.oddFooter });
+    }
+    if (model.evenHeader && typeof model.evenHeader === "string") {
+      children.push({ name: "evenHeader", text: model.evenHeader });
+    }
+    if (model.evenFooter && typeof model.evenFooter === "string") {
+      children.push({ name: "evenFooter", text: model.evenFooter });
+    }
+    if (model.firstHeader && typeof model.firstHeader === "string") {
+      children.push({ name: "firstHeader", text: model.firstHeader });
+    }
+    if (model.firstFooter && typeof model.firstFooter === "string") {
+      children.push({ name: "firstFooter", text: model.firstFooter });
+    }
 
-      xmlStream.openNode("headerFooter");
-      if (model.differentFirst) {
-        xmlStream.addAttribute("differentFirst", "1");
-        createTag = true;
+    if (Object.keys(attrs).length > 0 || children.length > 0) {
+      xmlStream.openNode("headerFooter", attrs);
+      for (const child of children) {
+        xmlStream.leafNode(child.name, null, child.text);
       }
-      if (model.differentOddEven) {
-        xmlStream.addAttribute("differentOddEven", "1");
-        createTag = true;
-      }
-      if (model.oddHeader && typeof model.oddHeader === "string") {
-        xmlStream.leafNode("oddHeader", null, model.oddHeader);
-        createTag = true;
-      }
-      if (model.oddFooter && typeof model.oddFooter === "string") {
-        xmlStream.leafNode("oddFooter", null, model.oddFooter);
-        createTag = true;
-      }
-      if (model.evenHeader && typeof model.evenHeader === "string") {
-        xmlStream.leafNode("evenHeader", null, model.evenHeader);
-        createTag = true;
-      }
-      if (model.evenFooter && typeof model.evenFooter === "string") {
-        xmlStream.leafNode("evenFooter", null, model.evenFooter);
-        createTag = true;
-      }
-      if (model.firstHeader && typeof model.firstHeader === "string") {
-        xmlStream.leafNode("firstHeader", null, model.firstHeader);
-        createTag = true;
-      }
-      if (model.firstFooter && typeof model.firstFooter === "string") {
-        xmlStream.leafNode("firstFooter", null, model.firstFooter);
-        createTag = true;
-      }
-
-      if (createTag) {
-        xmlStream.closeNode();
-        xmlStream.commit();
-      } else {
-        xmlStream.rollback();
-      }
+      xmlStream.closeNode();
     }
   }
 

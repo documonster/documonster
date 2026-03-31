@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { testXformHelper, normalizeXml } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,7 +59,7 @@ describe("StylesXform", () => {
       const stylesXform = new StylesXform(true);
       const expectedXml = fs.readFileSync(join(__dirname, "data/styles.2.2.xml")).toString();
 
-      const xmlStream = new XmlStream();
+      const xmlStream = new XmlWriter();
       stylesXform.render(xmlStream);
 
       // Use normalizeXml from test-xform-helper for consistent XML comparison

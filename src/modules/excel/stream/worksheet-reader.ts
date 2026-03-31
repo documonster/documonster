@@ -5,9 +5,9 @@
  */
 
 import { EventEmitter } from "@utils/event-emitter";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 import { ExcelStreamStateError } from "@excel/errors";
-import { xmlDecode, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { colCache } from "@excel/utils/col-cache";
 import { Dimensions } from "@excel/range";
 import { Row } from "@excel/row";
@@ -387,7 +387,7 @@ class WorksheetReader extends EventEmitter {
                     };
                     if (c.v) {
                       if (c.t === "str") {
-                        cellValue.result = xmlDecode(c.v.text);
+                        cellValue.result = c.v.text;
                       } else {
                         cellValue.result = parseFloat(c.v.text);
                       }
@@ -411,10 +411,10 @@ class WorksheetReader extends EventEmitter {
                       case "inlineStr":
                         // Inline strings come from <is><t>...</t></is> which uses
                         // OOXML _xHHHH_ escaping in addition to XML entities.
-                        cell.value = decodeOoxmlEscape(xmlDecode(c.v.text));
+                        cell.value = decodeOoxmlEscape(c.v.text);
                         break;
                       case "str":
-                        cell.value = xmlDecode(c.v.text);
+                        cell.value = c.v.text;
                         break;
 
                       case "e":

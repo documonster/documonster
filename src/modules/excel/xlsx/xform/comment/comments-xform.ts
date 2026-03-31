@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
 
@@ -20,7 +20,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
 
   render(xmlStream: any, model?: CommentsModel): void {
     const renderModel = model || this.model;
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("comments", CommentsXform.COMMENTS_ATTRIBUTES);
 
     // authors

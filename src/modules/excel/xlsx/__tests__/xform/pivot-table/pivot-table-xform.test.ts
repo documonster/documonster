@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Workbook } from "@excel/workbook";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 
 // ---------------------------------------------------------------------------
 // Helper: build a pivot table from a table source and return decoded XML strings
@@ -889,7 +889,7 @@ describe("PivotTableXform - Round 4 fixes", () => {
   // Helper: render a loaded model to XML string
   function renderLoaded(model: Record<string, any>): string {
     const xform = new PivotTableXform();
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
     xform.render(xmlStream, {
       isLoaded: true,
       name: "PivotTable1",

@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 
@@ -26,7 +26,7 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
 
   render(xmlStream: any, model?: VmlNotesModel): void {
     const renderModel = model || this.model;
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, VmlNotesXform.DRAWING_ATTRIBUTES);
 
     xmlStream.openNode("o:shapelayout", { "v:ext": "edit" });

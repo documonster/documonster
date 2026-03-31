@@ -1,5 +1,6 @@
-import { parseSax } from "@excel/utils/parse-sax";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { parseSax } from "@xml/sax";
+import { XmlWriter } from "@xml/writer";
+import type { XmlSink } from "@xml/types";
 
 /* 'virtual' methods used as a form of documentation */
 
@@ -60,7 +61,7 @@ class BaseXform<TModel = any> {
     // optional preparation (mutation) of model so it is ready for write
   }
 
-  render(_xmlStream?: XmlStream, _model?: any): void {
+  render(_xmlStream?: XmlSink, _model?: any): void {
     // convert model to xml
   }
 
@@ -177,7 +178,7 @@ class BaseXform<TModel = any> {
   }
 
   toXml(model?: any): string {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
     this.render(xmlStream, model);
     return xmlStream.xml;
   }

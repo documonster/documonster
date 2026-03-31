@@ -131,7 +131,7 @@ export { dateToExcel, excelToDate } from "@utils/utils.base";
 export { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils.base";
 
 // XML utilities
-export { xmlEncode, xmlDecode } from "@utils/utils.base";
+export { xmlEncode, xmlDecode } from "@xml/encode";
 
 // Date parsing/formatting (high-performance, zero-dep)
 export { DateParser, DateFormatter, getSupportedFormats, type DateFormat } from "@utils/datetime";

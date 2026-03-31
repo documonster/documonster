@@ -5,7 +5,7 @@
  */
 
 import { EventEmitter } from "@utils/event-emitter";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 import { Enums } from "@excel/enums";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";

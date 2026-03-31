@@ -9,7 +9,7 @@
  * - loadFromFiles: Load from pre-extracted ZIP data
  */
 
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlStreamWriter } from "@xml/stream-writer";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -38,7 +38,6 @@ import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@exc
 import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
 import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
 import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
-import type { FormCheckboxModel } from "@excel/form-control";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { RelType } from "@excel/xlsx/rel-type";
 import { StreamBuf } from "@excel/utils/stream-buf";
@@ -110,7 +109,7 @@ export interface IParseStream extends EmitterLike {
 }
 
 export interface IStreamBuf extends EmitterLike {
-  write(data: any): void;
+  write(data: any): boolean | void | Promise<boolean>;
   end(): void;
   read(): any;
   toBuffer?(): any;
@@ -119,8 +118,12 @@ export interface IStreamBuf extends EmitterLike {
 
 export interface IZipWriter extends EmitterLike {
   append(data: any, options: { name: string; base64?: boolean }): void;
+  /** Create a streaming entry: write chunks incrementally, then call end(). */
+  createEntry(name: string): { write(chunk: string): void; end(): void };
   pipe(stream: any): void;
   finalize(): void;
+  /** Wait for downstream backpressure to clear. Resolves immediately if no backpressure. */
+  waitForDrain(): Promise<void>;
 }
 
 class StreamingZipWriterAdapter implements IZipWriter {
@@ -133,6 +136,10 @@ class StreamingZipWriterAdapter implements IZipWriter {
   private modTime: Date | undefined;
   private timestamps: ZipTimestampMode | undefined;
   private finalized = false;
+
+  // Backpressure tracking
+  private _needsDrain = false;
+  private _drainResolvers: Array<() => void> = [];
 
   constructor(options?: ZipWriterOptions) {
     this.level = options?.level ?? 6;
@@ -147,7 +154,12 @@ class StreamingZipWriterAdapter implements IZipWriter {
       if (data && data.length > 0) {
         this._emit("data", data);
         if (this.pipedStream) {
-          this.pipedStream.write(data);
+          const ok = this.pipedStream.write(data);
+          // Track backpressure: if write() returns false, the downstream
+          // buffer is full and we should wait for 'drain' before continuing.
+          if (ok === false) {
+            this._needsDrain = true;
+          }
         }
       }
 
@@ -199,6 +211,29 @@ class StreamingZipWriterAdapter implements IZipWriter {
 
   pipe(stream: any): void {
     this.pipedStream = stream;
+    // Listen for drain events to resolve backpressure waiters
+    if (stream && typeof stream.on === "function") {
+      stream.on("drain", () => {
+        this._needsDrain = false;
+        const resolvers = this._drainResolvers.splice(0);
+        for (const resolve of resolvers) {
+          resolve();
+        }
+      });
+    }
+  }
+
+  /**
+   * Wait for the downstream writable to drain if it signaled backpressure.
+   * Resolves immediately if no backpressure is active.
+   */
+  waitForDrain(): Promise<void> {
+    if (!this._needsDrain || !this.pipedStream) {
+      return Promise.resolve();
+    }
+    return new Promise<void>(resolve => {
+      this._drainResolvers.push(resolve);
+    });
   }
 
   append(data: any, options: { name: string; base64?: boolean }): void {
@@ -229,6 +264,27 @@ class StreamingZipWriterAdapter implements IZipWriter {
     this.zip.add(file);
 
     file.push(buffer, true);
+  }
+
+  createEntry(name: string): { write(chunk: string): void; end(): void } {
+    if (this.finalized) {
+      throw new ExcelStreamStateError("createEntry", "stream already finalized");
+    }
+    const file = new ZipDeflateFile(name, {
+      level: this.level,
+      modTime: this.modTime,
+      timestamps: this.timestamps
+    });
+    this.zip.add(file);
+    const encoder = StreamingZipWriterAdapter.textEncoder;
+    return {
+      write(chunk: string): void {
+        file.push(encoder.encode(chunk));
+      },
+      end(): void {
+        file.push(new Uint8Array(0), true);
+      }
+    };
   }
 
   finalize(): void {
@@ -362,14 +418,16 @@ class XLSX {
     await this.addWorkbook(zip, model);
     await this.addWorksheets(zip, model);
     await this.addSharedStrings(zip, model);
-    this.addDrawings(zip, model);
-    this.addTables(zip, model);
-    this.addPivotTables(zip, model);
+    await this.addDrawings(zip, model);
+    await this.addTables(zip, model);
+    await this.addPivotTables(zip, model);
     this.addPassthrough(zip, model);
-    await Promise.all([this.addThemes(zip, model), this.addStyles(zip, model)]);
+    await this.addThemes(zip, model);
+    await this.addStyles(zip, model);
     await this.addFeaturePropertyBag(zip, model);
     await this.addMedia(zip, model);
-    await Promise.all([this.addApp(zip, model), this.addCore(zip, model)]);
+    await this.addApp(zip, model);
+    await this.addCore(zip, model);
   }
 
   // ===========================================================================
@@ -1320,21 +1378,35 @@ class XLSX {
   // Write methods - shared by all platforms
   // ===========================================================================
 
+  /**
+   * Helper: render an xform directly to a streaming zip entry.
+   * Avoids buffering the entire XML string in memory.
+   * Awaits backpressure drain after each entry to respect downstream flow control.
+   */
+  private async _renderToZip(
+    zip: IZipWriter,
+    path: string,
+    xform: { render(xmlStream: any, model?: any): void },
+    model?: any
+  ): Promise<void> {
+    const entry = zip.createEntry(path);
+    const stream = new XmlStreamWriter(entry);
+    xform.render(stream, model);
+    entry.end();
+    // Respect downstream backpressure between entries
+    await zip.waitForDrain();
+  }
+
   async addContentTypes(zip: IZipWriter, model: any): Promise<void> {
-    const xform = new ContentTypesXform();
-    const xml = xform.toXml(model);
-    zip.append(xml, { name: OOXML_PATHS.contentTypes });
+    await this._renderToZip(zip, OOXML_PATHS.contentTypes, new ContentTypesXform(), model);
   }
 
   async addApp(zip: IZipWriter, model: any): Promise<void> {
-    const xform = new AppXform();
-    const xml = xform.toXml(model);
-    zip.append(xml, { name: OOXML_PATHS.docPropsApp });
+    await this._renderToZip(zip, OOXML_PATHS.docPropsApp, new AppXform(), model);
   }
 
   async addCore(zip: IZipWriter, model: any): Promise<void> {
-    const xform = new CoreXform();
-    zip.append(xform.toXml(model), { name: OOXML_PATHS.docPropsCore });
+    await this._renderToZip(zip, OOXML_PATHS.docPropsCore, new CoreXform(), model);
   }
 
   async addThemes(zip: IZipWriter, model: any): Promise<void> {
@@ -1346,13 +1418,11 @@ class XLSX {
   }
 
   async addOfficeRels(zip: IZipWriter, _model: any): Promise<void> {
-    const xform = new RelationshipsXform();
-    const xml = xform.toXml([
+    await this._renderToZip(zip, OOXML_PATHS.rootRels, new RelationshipsXform(), [
       { Id: "rId1", Type: XLSX.RelType.OfficeDocument, Target: OOXML_PATHS.xlWorkbook },
       { Id: "rId2", Type: XLSX.RelType.CoreProperties, Target: OOXML_PATHS.docPropsCore },
       { Id: "rId3", Type: XLSX.RelType.ExtenderProperties, Target: OOXML_PATHS.docPropsApp }
     ]);
-    zip.append(xml, { name: OOXML_PATHS.rootRels });
   }
 
   async addWorkbookRels(zip: IZipWriter, model: any): Promise<void> {
@@ -1406,34 +1476,40 @@ class XLSX {
       });
     });
     const xform = new RelationshipsXform();
-    const xml = xform.toXml(relationships);
-    zip.append(xml, { name: OOXML_PATHS.xlWorkbookRels });
+    await this._renderToZip(zip, OOXML_PATHS.xlWorkbookRels, xform, relationships);
   }
 
   async addFeaturePropertyBag(zip: IZipWriter, model: any): Promise<void> {
     if (!model.hasCheckboxes) {
       return;
     }
-    const xform = new FeaturePropertyBagXform();
-    zip.append(xform.toXml({}), { name: OOXML_PATHS.xlFeaturePropertyBag });
+    await this._renderToZip(
+      zip,
+      OOXML_PATHS.xlFeaturePropertyBag,
+      new FeaturePropertyBagXform(),
+      {}
+    );
   }
 
   async addSharedStrings(zip: IZipWriter, model: any): Promise<void> {
     if (model.sharedStrings && model.sharedStrings.count) {
-      zip.append(model.sharedStrings.xml, { name: OOXML_PATHS.xlSharedStrings });
+      await this._renderToZip(
+        zip,
+        OOXML_PATHS.xlSharedStrings,
+        model.sharedStrings,
+        model.sharedStrings.model
+      );
     }
   }
 
   async addStyles(zip: IZipWriter, model: any): Promise<void> {
-    const { xml } = model.styles;
-    if (xml) {
-      zip.append(xml, { name: OOXML_PATHS.xlStyles });
+    if (model.styles) {
+      await this._renderToZip(zip, OOXML_PATHS.xlStyles, model.styles, model.styles.model);
     }
   }
 
   async addWorkbook(zip: IZipWriter, model: any): Promise<void> {
-    const xform = new WorkbookXform();
-    zip.append(xform.toXml(model), { name: OOXML_PATHS.xlWorkbook });
+    await this._renderToZip(zip, OOXML_PATHS.xlWorkbook, new WorkbookXform(), model);
   }
 
   async addWorksheets(zip: IZipWriter, model: any): Promise<void> {
@@ -1443,23 +1519,28 @@ class XLSX {
     const vmlDrawingXform = new VmlDrawingXform();
     const ctrlPropXform = new CtrlPropXform();
 
-    model.worksheets.forEach((worksheet: any) => {
+    for (const worksheet of model.worksheets) {
       const { fileIndex } = worksheet;
-      let xmlStream = new XmlStream();
-      worksheetXform.render(xmlStream, worksheet);
-      zip.append(xmlStream.xml, { name: worksheetPath(fileIndex) });
+
+      // Worksheet XML: stream directly to zip entry (avoids holding entire XML in memory)
+      const wsEntry = zip.createEntry(worksheetPath(fileIndex));
+      const wsStream = new XmlStreamWriter(wsEntry);
+      worksheetXform.render(wsStream, worksheet);
+      wsEntry.end();
+      await zip.waitForDrain();
 
       if (worksheet.rels && worksheet.rels.length) {
-        xmlStream = new XmlStream();
-        relationshipsXform.render(xmlStream, worksheet.rels);
-        zip.append(xmlStream.xml, { name: worksheetRelsPath(fileIndex) });
+        await this._renderToZip(
+          zip,
+          worksheetRelsPath(fileIndex),
+          relationshipsXform,
+          worksheet.rels
+        );
       }
 
       // Generate comments XML (separate from VML)
       if (worksheet.comments.length > 0) {
-        xmlStream = new XmlStream();
-        commentsXform.render(xmlStream, worksheet);
-        zip.append(xmlStream.xml, { name: commentsPath(fileIndex) });
+        await this._renderToZip(zip, commentsPath(fileIndex), commentsXform, worksheet);
       }
 
       // Generate unified VML drawing (contains both notes and form controls)
@@ -1467,30 +1548,27 @@ class XLSX {
       const hasFormControls = worksheet.formControls && worksheet.formControls.length > 0;
 
       if (hasComments || hasFormControls) {
-        xmlStream = new XmlStream();
-        vmlDrawingXform.render(xmlStream, {
+        await this._renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform, {
           comments: hasComments ? worksheet.comments : [],
           formControls: hasFormControls ? worksheet.formControls : []
         });
-        zip.append(xmlStream.xml, { name: vmlDrawingPath(fileIndex) });
       }
 
       // Generate ctrlProp files for form controls
       if (hasFormControls) {
-        worksheet.formControls.forEach((control: FormCheckboxModel) => {
-          const xml = ctrlPropXform.toXml(control);
-          zip.append(xml, { name: ctrlPropPath(control.ctrlPropId) });
-        });
+        for (const control of worksheet.formControls) {
+          await this._renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform, control);
+        }
       }
-    });
+    }
   }
 
-  addDrawings(zip: IZipWriter, model: any): void {
+  async addDrawings(zip: IZipWriter, model: any): Promise<void> {
     const drawingXform = new DrawingXform();
     const relsXform = new RelationshipsXform();
     const rawDrawings = model.rawDrawings || {};
 
-    model.worksheets.forEach((worksheet: any) => {
+    for (const worksheet of model.worksheets) {
       const { drawing } = worksheet;
       if (drawing) {
         // Check if drawing rels contain chart references using helper
@@ -1506,27 +1584,23 @@ class XLSX {
             ? { ...drawing, anchors: filteredAnchors }
             : drawing;
           drawingXform.prepare(drawingForWrite);
-          const xml = drawingXform.toXml(drawingForWrite);
-          zip.append(xml, { name: drawingPath(drawing.name) });
+          await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
         }
 
-        const relsXml = relsXform.toXml(drawing.rels);
-        zip.append(relsXml, { name: drawingRelsPath(drawing.name) });
+        await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
       }
-    });
+    }
   }
 
-  addTables(zip: IZipWriter, model: any): void {
+  async addTables(zip: IZipWriter, model: any): Promise<void> {
     const tableXform = new TableXform();
 
-    model.worksheets.forEach((worksheet: any) => {
-      const { tables } = worksheet;
-      tables.forEach((table: any) => {
+    for (const worksheet of model.worksheets) {
+      for (const table of worksheet.tables) {
         tableXform.prepare(table, {});
-        const tableXml = tableXform.toXml(table);
-        zip.append(tableXml, { name: tablePath(table.target) });
-      });
-    });
+        await this._renderToZip(zip, tablePath(table.target), tableXform, table);
+      }
+    }
   }
 
   /**
@@ -1539,7 +1613,7 @@ class XLSX {
     passthroughManager.writeToZip(zip);
   }
 
-  addPivotTables(zip: IZipWriter, model: any): void {
+  async addPivotTables(zip: IZipWriter, model: any): Promise<void> {
     if (!model.pivotTables.length) {
       return;
     }
@@ -1553,7 +1627,7 @@ class XLSX {
     // shared caches. Maps cacheId → tableNumber used for the cache file names.
     const writtenCaches = new Map<string, number>();
 
-    model.pivotTables.forEach((pivotTable: PivotTable) => {
+    for (const pivotTable of model.pivotTables as PivotTable[]) {
       const n = pivotTable.tableNumber;
       const isLoaded = pivotTable.isLoaded;
       const cacheId = pivotTable.cacheId;
@@ -1565,55 +1639,64 @@ class XLSX {
 
         if (isLoaded) {
           if (pivotTable.cacheDefinition) {
-            const xml = pivotCacheDefinitionXform.toXml(pivotTable.cacheDefinition);
-            zip.append(xml, { name: pivotCacheDefinitionPath(n) });
+            await this._renderToZip(
+              zip,
+              pivotCacheDefinitionPath(n),
+              pivotCacheDefinitionXform,
+              pivotTable.cacheDefinition
+            );
           }
           if (pivotTable.cacheRecords) {
-            const xml = pivotCacheRecordsXform.toXml(pivotTable.cacheRecords);
-            zip.append(xml, { name: pivotCacheRecordsPath(n) });
+            await this._renderToZip(
+              zip,
+              pivotCacheRecordsPath(n),
+              pivotCacheRecordsXform,
+              pivotTable.cacheRecords
+            );
           }
         } else {
-          let xml = pivotCacheRecordsXform.toXml(pivotTable);
-          zip.append(xml, { name: pivotCacheRecordsPath(n) });
-
-          xml = pivotCacheDefinitionXform.toXml(pivotTable);
-          zip.append(xml, { name: pivotCacheDefinitionPath(n) });
+          await this._renderToZip(
+            zip,
+            pivotCacheRecordsPath(n),
+            pivotCacheRecordsXform,
+            pivotTable
+          );
+          await this._renderToZip(
+            zip,
+            pivotCacheDefinitionPath(n),
+            pivotCacheDefinitionXform,
+            pivotTable
+          );
         }
 
         // R9-B4: Only write cache definition rels when cache records exist.
-        // For loaded pivot tables without cacheRecords (e.g. OLAP), skip the rels file entirely.
-        // R9-B3: Use the rId from the loaded cache definition to stay consistent with the XML.
         const hasCacheRecords = isLoaded ? !!pivotTable.cacheRecords : true;
         if (hasCacheRecords) {
           const cacheRecordsRId =
             (isLoaded ? pivotTable.cacheDefinition?.rId : undefined) ?? "rId1";
-          const xml = relsXform.toXml([
+          await this._renderToZip(zip, pivotCacheDefinitionRelsPath(n), relsXform, [
             {
               Id: cacheRecordsRId,
               Type: XLSX.RelType.PivotCacheRecords,
               Target: pivotCacheRecordsRelTarget(n)
             }
           ]);
-          zip.append(xml, { name: pivotCacheDefinitionRelsPath(n) });
         }
       }
 
       // Pivot table XML is always written (each pivot table has its own file).
-      let xml = pivotTableXform.toXml(pivotTable);
-      zip.append(xml, { name: pivotTablePath(n) });
+      await this._renderToZip(zip, pivotTablePath(n), pivotTableXform, pivotTable);
 
-      // Pivot table rels point to the cache definition file. For shared caches,
-      // use the tableNumber of the first pivot table that wrote the cache.
+      // Pivot table rels point to the cache definition file.
       const cacheTableNumber = writtenCaches.get(cacheId)!;
-      xml = relsXform.toXml([
+      await this._renderToZip(zip, pivotTableRelsPath(n), relsXform, [
         {
           Id: "rId1",
           Type: XLSX.RelType.PivotCacheDefinition,
           Target: pivotCacheDefinitionRelTargetFromPivotTable(cacheTableNumber)
         }
       ]);
-      zip.append(xml, { name: pivotTableRelsPath(n) });
-    });
+    }
   }
 
   _finalize(zip: IZipWriter): Promise<this> {

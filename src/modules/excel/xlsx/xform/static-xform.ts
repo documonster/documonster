@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 
 interface StaticModel {
   tag: string;
@@ -48,11 +48,11 @@ class StaticXform extends BaseXform {
 
   render(xmlStream: any): void {
     if (!this._xml) {
-      const stream = new XmlStream();
+      const stream = new XmlWriter();
       build(stream, this._model);
       this._xml = stream.xml;
     }
-    xmlStream.writeXml(this._xml);
+    xmlStream.writeRaw(this._xml);
   }
 
   parseOpen(): boolean {

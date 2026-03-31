@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { xmlEncode } from "@utils/utils";
+import { xmlEncode } from "@xml/encode";
 
 describe("xmlEncode", () => {
   it("encodes xml text", () => {

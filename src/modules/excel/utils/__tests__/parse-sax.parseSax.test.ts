@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 
 describe("parseSax", () => {
   // Helper to convert array to async iterable

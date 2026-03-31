@@ -9,8 +9,6 @@ export {
   dateToExcel,
   excelToDate,
   parseOoxmlDate,
-  xmlDecode,
-  xmlEncode,
   decodeOoxmlEscape,
   encodeOoxmlEscape,
   encodeOoxmlAttr,

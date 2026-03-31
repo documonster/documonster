@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/table/auto-filter-xform";
@@ -54,7 +54,7 @@ class TableXform extends BaseXform<TableModel> {
   }
 
   render(xmlStream: any, model: TableModel): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...TableXform.TABLE_ATTRIBUTES,
       id: model.id,

@@ -8,6 +8,8 @@
       "@stream": ["./src/modules/stream/index.ts"],
       "@stream/*": ["./src/modules/stream/*"],
       "@csv/*": ["./src/modules/csv/*"],
+      "@xml": ["./src/modules/xml/index.ts"],
+      "@xml/*": ["./src/modules/xml/*"],
       "@pdf": ["./src/modules/pdf/index.ts"],
       "@pdf/*": ["./src/modules/pdf/*"],
       "@utils/*": ["./src/utils/*"],

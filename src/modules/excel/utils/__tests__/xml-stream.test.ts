@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter, StdDocAttributes } from "@xml/writer";
 
-describe("XmlStream", () => {
+describe("XmlWriter", () => {
   it("Writes simple XML doc", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("root", {
       attr1: "attr1-value",
       attr2: "attr2-value"
@@ -23,7 +23,7 @@ describe("XmlStream", () => {
   });
 
   it("Writes text in XML doc", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
     xmlStream.openNode("root");
     xmlStream.openNode("l1");
@@ -42,7 +42,7 @@ describe("XmlStream", () => {
     );
   });
   it("text is escaped", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
     xmlStream.openNode("root");
     xmlStream.openNode("l1");
@@ -52,7 +52,7 @@ describe("XmlStream", () => {
     expect(xmlStream.xml).toBe("<root><l1>&lt;escape this!&gt;</l1></root>");
   });
   it("attributes are escaped", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
     xmlStream.openNode("root");
     xmlStream.openNode("l1");
@@ -68,11 +68,11 @@ describe("XmlStream", () => {
   });
 
   it("rolls back", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
     xmlStream.openNode("root");
     xmlStream.addAttribute("in", "1");
-    xmlStream.addRollback();
+    xmlStream.save();
     xmlStream.addAttribute("not", "1");
     xmlStream.openNode("invalid");
     xmlStream.rollback();
@@ -84,18 +84,18 @@ describe("XmlStream", () => {
   });
 
   it("throws when adding attributes without an open node", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
-    expect(() => xmlStream.addAttribute("a", "1")).toThrow("node is not open");
-    expect(() => xmlStream.addAttributes({ a: "1" })).toThrow("node is not open");
+    expect(() => xmlStream.addAttribute("a", "1")).toThrow("no element is open");
+    expect(() => xmlStream.addAttributes({ a: "1" })).toThrow("no element is open");
   });
 
   it("throws when adding attributes after closing a node", () => {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
 
     xmlStream.openNode("root");
     xmlStream.closeNode();
 
-    expect(() => xmlStream.addAttribute("a", "1")).toThrow("node is not open");
+    expect(() => xmlStream.addAttribute("a", "1")).toThrow("no element is open");
   });
 });

@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { Enums } from "@excel/enums";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
@@ -162,7 +162,7 @@ describe("WorksheetXform", () => {
   it("hyperlinks must be after dataValidations", () => {
     const xform = new WorkSheetXform();
     const model = JSON.parse(fs.readFileSync(join(__dirname, "data/sheet.4.0.json")).toString());
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
     const options = {
       styles: new StylesXform(true),
       sharedStrings: new SharedStringsXform(),
@@ -182,7 +182,7 @@ describe("WorksheetXform", () => {
   it("conditionalFormattings must be before dataValidations", () => {
     const xform = new WorkSheetXform();
     const model = JSON.parse(fs.readFileSync(join(__dirname, "data/sheet.4.0.json")).toString());
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
     const options = {
       styles: new StylesXform(true),
       hyperlinks: []

@@ -5,7 +5,7 @@
 import { describe } from "vitest";
 import { test } from "@excel/utils/__tests__/parse-sax.test-utils";
 
-describe("SaxesParser", () => {
+describe("SaxParser", () => {
   describe("unicode", () => {
     test({
       name: "cyrillic",

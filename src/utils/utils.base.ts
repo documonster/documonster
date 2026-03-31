@@ -131,95 +131,11 @@ export function encodeOoxmlAttr(text: string): string {
 }
 
 // =============================================================================
-// XML utilities
+// XML utilities — delegated to @xml/encode
 // =============================================================================
 
-const xmlDecodingMap: Record<string, string> = {
-  lt: "<",
-  gt: ">",
-  amp: "&",
-  quot: '"',
-  apos: "'"
-};
+export { xmlEncode, xmlDecode } from "@xml/encode";
 
-export function xmlDecode(text: string): string {
-  if (text.indexOf("&") === -1) {
-    return text;
-  }
-  return text.replace(/&(#\d+|#x[0-9A-Fa-f]+|\w+);/g, (match: string, entity: string) => {
-    if (entity[0] === "#") {
-      // Numeric character reference
-      const code = entity[1] === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1));
-      if (Number.isNaN(code)) {
-        return match;
-      }
-      return String.fromCodePoint(code);
-    }
-    return xmlDecodingMap[entity] || match;
-  });
-}
-// oxlint-disable-next-line no-control-regex -- Control characters are intentionally matched for XML encoding
-const xmlEncodeRegex = /[<>&'"\x7F\x00-\x08\x0B-\x0C\x0E-\x1F]/;
-
-/**
- * Encode special characters for XML output
- * Handles XML entities (< > & " ') and removes invalid control characters
- */
-export function xmlEncode(text: string): string {
-  const regexResult = xmlEncodeRegex.exec(text);
-  if (!regexResult) {
-    return text;
-  }
-
-  const parts: string[] = [];
-  let lastIndex = 0;
-  for (let i = regexResult.index; i < text.length; i++) {
-    const charCode = text.charCodeAt(i);
-    let escape: string;
-    switch (charCode) {
-      case 34: // "
-        escape = "&quot;";
-        break;
-      case 38: // &
-        escape = "&amp;";
-        break;
-      case 39: // '
-        escape = "&apos;";
-        break;
-      case 60: // <
-        escape = "&lt;";
-        break;
-      case 62: // >
-        escape = "&gt;";
-        break;
-      case 127:
-        escape = "";
-        break;
-      default: {
-        if (charCode <= 31 && (charCode <= 8 || (charCode >= 11 && charCode !== 13))) {
-          // Remove invalid control characters
-          escape = "";
-          break;
-        }
-        continue;
-      }
-    }
-
-    if (lastIndex !== i) {
-      parts.push(text.substring(lastIndex, i));
-    }
-    lastIndex = i + 1;
-    if (escape) {
-      parts.push(escape);
-    }
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return parts.join("");
-}
 // =============================================================================
 // Parsing utilities
 // =============================================================================

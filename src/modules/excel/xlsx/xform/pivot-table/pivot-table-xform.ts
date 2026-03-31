@@ -1,4 +1,5 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import type { XmlSink } from "@xml/types";
+import { StdDocAttributes } from "@xml/writer";
 import { colCache } from "@excel/utils/col-cache";
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
@@ -333,7 +334,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
    * Render pivot table XML.
    * Supports both newly created models and loaded models.
    */
-  render(xmlStream: XmlStream, model: PivotTableRenderModel | ParsedPivotTableModel): void {
+  render(xmlStream: XmlSink, model: PivotTableRenderModel | ParsedPivotTableModel): void {
     const isLoaded = "isLoaded" in model && model.isLoaded;
 
     if (isLoaded) {
@@ -346,7 +347,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   /**
    * Render newly created pivot table
    */
-  private renderNew(xmlStream: XmlStream, model: PivotTableRenderModel): void {
+  private renderNew(xmlStream: XmlSink, model: PivotTableRenderModel): void {
     const {
       rows,
       columns,
@@ -376,7 +377,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     const endColLetter = colCache.n2l(endCol);
     const locationRef = `A${startRow}:${endColLetter}${endRow}`;
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...PivotTableXform.PIVOT_TABLE_ATTRIBUTES,
       name: `PivotTable${tableNumber}`,
@@ -496,7 +497,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     });
 
     // Extensions
-    xmlStream.writeXml(PivotTableXform.EXTLST_XML);
+    xmlStream.writeRaw(PivotTableXform.EXTLST_XML);
 
     xmlStream.closeNode();
   }
@@ -504,10 +505,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   /**
    * Render loaded pivot table (preserving original structure)
    */
-  private renderLoaded(xmlStream: XmlStream, model: ParsedPivotTableModel): void {
+  private renderLoaded(xmlStream: XmlSink, model: ParsedPivotTableModel): void {
     const attrs = this.buildLoadedRootAttributes(model);
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, attrs);
 
     // Location
@@ -553,7 +554,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       }
       xmlStream.closeNode();
     } else if (model.hasRowItems) {
-      xmlStream.writeXml('<rowItems count="1"><i t="grand"><x/></i></rowItems>');
+      xmlStream.writeRaw('<rowItems count="1"><i t="grand"><x/></i></rowItems>');
     }
 
     // Col fields
@@ -585,7 +586,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       }
       xmlStream.closeNode();
     } else if (model.hasColItems) {
-      xmlStream.writeXml('<colItems count="1"><i t="grand"><x/></i></colItems>');
+      xmlStream.writeRaw('<colItems count="1"><i t="grand"><x/></i></colItems>');
     }
 
     // Page fields (report filters)
@@ -634,13 +635,13 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
     // Formats — preserved raw XML from loaded file
     if (model.formatsXml) {
-      xmlStream.writeXml(model.formatsXml);
+      xmlStream.writeRaw(model.formatsXml);
     }
 
     // Conditional formats — preserved raw XML from loaded file
     // OOXML order: formats → conditionalFormats → chartFormats
     if (model.conditionalFormatsXml) {
-      xmlStream.writeXml(model.conditionalFormatsXml);
+      xmlStream.writeRaw(model.conditionalFormatsXml);
     }
 
     // Chart formats (for pivot charts) - preserve original pivotArea XML
@@ -662,18 +663,18 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     // Filters — preserved raw XML from loaded file
     // <filters> appears between pivotTableStyleInfo and extLst per OOXML schema
     if (model.filtersXml) {
-      xmlStream.writeXml(model.filtersXml);
+      xmlStream.writeRaw(model.filtersXml);
     }
 
     // Unknown top-level elements — preserved raw XML for roundtrip
     if (model.unknownElementsXml) {
-      xmlStream.writeXml(model.unknownElementsXml);
+      xmlStream.writeRaw(model.unknownElementsXml);
     }
 
     // Extensions — use preserved XML from loaded file; only inject default for new tables
     const extLstXml = model.extLstXml ?? (model.isLoaded ? "" : PivotTableXform.EXTLST_XML);
     if (extLstXml) {
-      xmlStream.writeXml(extLstXml);
+      xmlStream.writeRaw(extLstXml);
     }
 
     xmlStream.closeNode();
@@ -771,7 +772,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   /**
    * Render `<chartFormats>` with preserved pivotArea XML for pivot chart roundtrip.
    */
-  private renderChartFormats(xmlStream: XmlStream, chartFormats: ChartFormatItem[]): void {
+  private renderChartFormats(xmlStream: XmlSink, chartFormats: ChartFormatItem[]): void {
     xmlStream.openNode("chartFormats", { count: chartFormats.length });
     for (const cf of chartFormats) {
       xmlStream.openNode("chartFormat", {
@@ -781,10 +782,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       });
       // Use preserved pivotArea XML or fallback to default
       if (cf.pivotAreaXml) {
-        xmlStream.writeXml(cf.pivotAreaXml);
+        xmlStream.writeRaw(cf.pivotAreaXml);
       } else {
         // Fallback for newly created chart formats (shouldn't happen for loaded models)
-        xmlStream.writeXml(
+        xmlStream.writeRaw(
           `<pivotArea type="data" outline="0" fieldPosition="0"><references count="1"><reference field="${FIELD_INDEX_DATA_VALUES}" count="1" selected="0"><x v="0"/></reference></references></pivotArea>`
         );
       }
@@ -796,7 +797,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   /**
    * Render a row or column item element
    */
-  private renderRowColItem(xmlStream: XmlStream, item: RowColItem): void {
+  private renderRowColItem(xmlStream: XmlSink, item: RowColItem): void {
     const attrs: Record<string, string | number> = {};
     if (item.t !== undefined) {
       attrs.t = item.t;
@@ -827,7 +828,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   /**
    * Render a loaded pivot field
    */
-  private renderPivotFieldLoaded(xmlStream: XmlStream, field: ParsedPivotField): void {
+  private renderPivotFieldLoaded(xmlStream: XmlSink, field: ParsedPivotField): void {
     const attrs: Record<string, string> = {};
 
     // Only add attributes that were present in the original
@@ -891,7 +892,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         xmlStream.closeNode(); // items
       }
       if (field.autoSortScopeXml) {
-        xmlStream.writeXml(field.autoSortScopeXml);
+        xmlStream.writeRaw(field.autoSortScopeXml);
       }
       xmlStream.closeNode(); // pivotField
     } else {
@@ -1453,7 +1454,7 @@ function parseRowColItem(attributes: Record<string, string>): RowColItem {
  * Each value field gets its own metric from the `valueMetrics` array.
  */
 function renderDataFields(
-  xmlStream: XmlStream,
+  xmlStream: XmlSink,
   cacheFields: CacheField[],
   values: number[],
   valueMetrics: PivotTableSubtotal[]
@@ -1486,7 +1487,7 @@ function renderDataFields(
   xmlStream.closeNode();
 }
 
-function renderPivotFields(xmlStream: XmlStream, pivotTable: PivotTableRenderModel): void {
+function renderPivotFields(xmlStream: XmlSink, pivotTable: PivotTableRenderModel): void {
   // Pre-compute field type lookup for O(1) access
   const rowSet = new Set(pivotTable.rows);
   const colSet = new Set(pivotTable.columns);
@@ -1506,7 +1507,7 @@ function renderPivotFields(xmlStream: XmlStream, pivotTable: PivotTableRenderMod
 }
 
 function renderPivotField(
-  xmlStream: XmlStream,
+  xmlStream: XmlSink,
   isRow: boolean,
   isCol: boolean,
   isValue: boolean,

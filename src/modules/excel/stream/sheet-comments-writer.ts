@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 import { RelType } from "@excel/xlsx/rel-type";
 import { colCache } from "@excel/utils/col-cache";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
@@ -92,14 +92,14 @@ class SheetCommentsWriter {
 
   private _writeComment(comment: any, index: number): void {
     const commentXform = new CommentXform();
-    const commentsXmlStream = new XmlStream();
-    commentXform.render(commentsXmlStream, comment);
-    this.commentsStream.write(commentsXmlStream.xml);
+    const commentsXmlWriter = new XmlWriter();
+    commentXform.render(commentsXmlWriter, comment);
+    this.commentsStream.write(commentsXmlWriter.xml);
 
     const vmlShapeXform = new VmlShapeXform();
-    const vmlXmlStream = new XmlStream();
-    vmlShapeXform.render(vmlXmlStream, comment, index);
-    this.vmlStream.write(vmlXmlStream.xml);
+    const vmlXmlWriter = new XmlWriter();
+    vmlShapeXform.render(vmlXmlWriter, comment, index);
+    this.vmlStream.write(vmlXmlWriter.xml);
   }
 
   private _writeClose(): void {

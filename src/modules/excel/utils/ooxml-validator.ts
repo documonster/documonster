@@ -2,7 +2,7 @@ import path from "node:path";
 
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 
 export type OoxmlProblemKind =
   | "missing-part"

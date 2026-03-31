@@ -28,21 +28,24 @@ class SheetPropertiesXform extends BaseXform {
   }
 
   render(xmlStream: any, model?: SheetPropertiesModel): void {
-    if (model) {
-      xmlStream.addRollback();
+    if (!model) {
+      return;
+    }
+    // Check if any child xform would produce output (mirror their internal conditions)
+    const hasTabColor = !!model.tabColor;
+    const hasPageSetup = !!(model.pageSetup && model.pageSetup.fitToPage);
+    const hasOutline =
+      model.outlineProperties !== undefined &&
+      model.outlineProperties !== null &&
+      (model.outlineProperties.summaryBelow !== undefined ||
+        model.outlineProperties.summaryRight !== undefined);
+
+    if (hasTabColor || hasPageSetup || hasOutline) {
       xmlStream.openNode("sheetPr");
-
-      let inner = false;
-      inner = this.map.tabColor.render(xmlStream, model.tabColor) || inner;
-      inner = this.map.pageSetUpPr.render(xmlStream, model.pageSetup) || inner;
-      inner = this.map.outlinePr.render(xmlStream, model.outlineProperties) || inner;
-
-      if (inner) {
-        xmlStream.closeNode();
-        xmlStream.commit();
-      } else {
-        xmlStream.rollback();
-      }
+      this.map.tabColor.render(xmlStream, model.tabColor);
+      this.map.pageSetUpPr.render(xmlStream, model.pageSetup);
+      this.map.outlinePr.render(xmlStream, model.outlineProperties);
+      xmlStream.closeNode();
     }
   }
 

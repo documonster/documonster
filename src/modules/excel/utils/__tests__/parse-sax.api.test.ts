@@ -3,13 +3,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { SaxesTagPlain } from "@excel/utils/parse-sax";
-import { SaxesParser } from "@excel/utils/parse-sax";
+import type { SaxTag } from "@xml/types";
+import { SaxParser } from "@xml/sax";
 
-describe("SaxesParser", () => {
+describe("SaxParser", () => {
   describe("API", () => {
     it("should support write().close() chaining", () => {
-      const parser = new SaxesParser();
+      const parser = new SaxParser();
       const events: string[] = [];
       parser.on("opentag", tag => events.push(tag.name));
       parser.write("<root/>").close();
@@ -17,9 +17,9 @@ describe("SaxesParser", () => {
     });
 
     it("should support off() to remove handlers", () => {
-      const parser = new SaxesParser();
+      const parser = new SaxParser();
       const events: string[] = [];
-      const handler = (tag: SaxesTagPlain) => events.push(tag.name);
+      const handler = (tag: SaxTag) => events.push(tag.name);
       parser.on("opentag", handler);
       parser.write("<a/>");
       parser.off("opentag");
@@ -28,7 +28,7 @@ describe("SaxesParser", () => {
     });
 
     it("should track position", () => {
-      const parser = new SaxesParser({ position: true });
+      const parser = new SaxParser({ position: true });
       parser.write("<root>\n  <child/>\n</root>");
       expect(parser.line).toBe(3);
     });

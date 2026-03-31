@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { AppHeadingPairsXform } from "@excel/xlsx/xform/core/app-heading-pairs-xform";
@@ -26,7 +26,7 @@ class AppXform extends BaseXform {
   }
 
   render(xmlStream: any, model: AppModel): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Properties", AppXform.PROPERTY_ATTRIBUTES);
 

@@ -21,25 +21,18 @@ class ProtectionXform extends BaseXform {
   }
 
   render(xmlStream: any, model: ProtectionModel): void {
-    xmlStream.addRollback();
-    xmlStream.openNode("protection");
-
-    let isValid = false;
-    function add(name: string, value: string | undefined): void {
-      if (value !== undefined) {
-        xmlStream.addAttribute(name, value);
-        isValid = true;
-      }
+    const attrs: Record<string, string> = {};
+    const locked = validation.boolean(model.locked, true) ? undefined : "0";
+    const hidden = validation.boolean(model.hidden, false) ? "1" : undefined;
+    if (locked !== undefined) {
+      attrs.locked = locked;
     }
-    add("locked", validation.boolean(model.locked, true) ? undefined : "0");
-    add("hidden", validation.boolean(model.hidden, false) ? "1" : undefined);
+    if (hidden !== undefined) {
+      attrs.hidden = hidden;
+    }
 
-    xmlStream.closeNode();
-
-    if (isValid) {
-      xmlStream.commit();
-    } else {
-      xmlStream.rollback();
+    if (Object.keys(attrs).length > 0) {
+      xmlStream.leafNode("protection", attrs);
     }
   }
 

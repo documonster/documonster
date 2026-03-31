@@ -5,7 +5,7 @@
 import { describe } from "vitest";
 import { test } from "@excel/utils/__tests__/parse-sax.test-utils";
 
-describe("SaxesParser", () => {
+describe("SaxParser", () => {
   describe("basic parsing", () => {
     test({
       name: "simple element",
@@ -350,8 +350,7 @@ describe("SaxesParser", () => {
       xml: "<r>&#;</r>",
       expect: [
         ["opentag", { name: "r", attributes: {}, isSelfClosing: false }],
-        ["error", "1:6: invalid character entity"],
-        ["text", "&#;"],
+        ["error", "1:6: invalid character entity: &#;"],
         ["closetag", { name: "r", attributes: {}, isSelfClosing: false }]
       ]
     });
@@ -361,8 +360,7 @@ describe("SaxesParser", () => {
       xml: "<r>&#x;</r>",
       expect: [
         ["opentag", { name: "r", attributes: {}, isSelfClosing: false }],
-        ["error", "1:7: invalid character entity"],
-        ["text", "&#x;"],
+        ["error", "1:7: invalid character entity: &#x;"],
         ["closetag", { name: "r", attributes: {}, isSelfClosing: false }]
       ]
     });

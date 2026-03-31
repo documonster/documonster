@@ -1,4 +1,4 @@
-import { xmlEncode } from "@utils/utils";
+import { xmlEncode } from "@xml/encode";
 import type { CacheField as CacheFieldType, SharedItemValue } from "@excel/pivot-table";
 import { PivotErrorValue } from "@excel/pivot-table";
 

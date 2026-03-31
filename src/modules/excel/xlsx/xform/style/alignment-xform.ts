@@ -123,14 +123,11 @@ class AlignmentXform extends BaseXform {
   }
 
   render(xmlStream: any, model: AlignmentModel): void {
-    xmlStream.addRollback();
-    xmlStream.openNode("alignment");
-
-    let isValid = false;
+    // Collect valid attributes first, only write if any exist
+    const attrs: Record<string, string | number> = {};
     function add(name: string, value: string | number | boolean | undefined): void {
       if (value) {
-        xmlStream.addAttribute(name, value);
-        isValid = true;
+        attrs[name] = value as string | number;
       }
     }
     add("horizontal", validation.horizontal(model.horizontal!));
@@ -141,12 +138,8 @@ class AlignmentXform extends BaseXform {
     add("textRotation", textRotationXform.toXml(model.textRotation!));
     add("readingOrder", validation.readingOrder(model.readingOrder!));
 
-    xmlStream.closeNode();
-
-    if (isValid) {
-      xmlStream.commit();
-    } else {
-      xmlStream.rollback();
+    if (Object.keys(attrs).length > 0) {
+      xmlStream.leafNode("alignment", attrs);
     }
   }
 

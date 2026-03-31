@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
@@ -46,7 +46,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     const hasComments = comments && comments.length > 0;
     const hasFormControls = formControls && formControls.length > 0;
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, VmlDrawingXform.DRAWING_ATTRIBUTES);
 
     // Shape layout - shared by both notes and form controls

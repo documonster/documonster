@@ -1,5 +1,5 @@
 import { colCache } from "@excel/utils/col-cache";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { RelType } from "@excel/xlsx/rel-type";
 import { Merges } from "@excel/xlsx/xform/sheet/merges";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
@@ -426,7 +426,7 @@ class WorkSheetXform extends BaseXform {
   }
 
   render(xmlStream, model) {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     const worksheetAttrs: any = { ...WorkSheetXform.WORKSHEET_ATTRIBUTES };
     if (model.formControls && model.formControls.length > 0) {
       worksheetAttrs["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";

@@ -1,45 +1,25 @@
 /**
- * High-performance SAX XML parser
+ * SAX XML Parser
  *
- * Minimal implementation optimized for Excel XML parsing.
- * Supports: opentag, text, closetag, error events.
- * Zero external dependencies.
+ * High-performance streaming SAX parser for XML.
+ * Zero external dependencies. Optimized for common XML patterns.
  *
- * Based on XML 1.0 specification with optimizations for common Excel XML patterns.
+ * Migrated from the excel module's parse-sax.ts into the standalone XML module.
+ * Enhancements over the original:
+ * - Uses @xml/types for event types (SaxTag, SaxEvent, SaxHandlers)
+ * - Uses @xml/errors for parse errors (XmlParseError)
+ * - Exposes CDATA, comment, and processing-instruction event handlers
+ * - Provides both callback API and async-generator API
+ *
+ * Based on XML 1.0 specification with fast-path optimizations for ASCII.
  */
 
-import { bufferToString } from "@utils/utils";
+import { XmlParseError } from "@xml/errors";
+import type { SaxEventAny, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export interface SaxEvent {
-  eventType: "opentag" | "text" | "closetag";
-  value: any;
-}
-
-export interface SaxesTagPlain {
-  name: string;
-  attributes: Record<string, string>;
-  isSelfClosing: boolean;
-}
-
-export interface SaxesOptions {
-  xmlns?: boolean;
-  position?: boolean;
-  fileName?: string;
-  fragment?: boolean;
-}
-
-type TextHandler = (text: string) => void;
-type OpenTagHandler = (tag: SaxesTagPlain) => void;
-type CloseTagHandler = (tag: SaxesTagPlain) => void;
-type ErrorHandler = (err: Error) => void;
-
-// ============================================================================
-// Character codes (for fast comparison)
-// ============================================================================
+// =============================================================================
+// Character Codes
+// =============================================================================
 
 const TAB = 9;
 const NL = 0xa;
@@ -47,6 +27,7 @@ const CR = 0xd;
 const SPACE = 0x20;
 const BANG = 0x21; // !
 const DQUOTE = 0x22; // "
+const HASH = 0x23; // #
 const AMP = 0x26; // &
 const SQUOTE = 0x27; // '
 const MINUS = 0x2d; // -
@@ -58,13 +39,11 @@ const GREATER = 0x3e; // >
 const QUESTION = 0x3f; // ?
 const OPEN_BRACKET = 0x5b; // [
 const CLOSE_BRACKET = 0x5d; // ]
-const HASH = 0x23; // #
 
-// ============================================================================
-// Pre-computed lookup tables for performance
-// ============================================================================
+// =============================================================================
+// Pre-computed Lookup Tables
+// =============================================================================
 
-// ASCII character lookup (0-127) for String.fromCharCode
 const ASCII_CHARS: string[] = /* @__PURE__ */ (() => {
   const t = new Array<string>(128);
   for (let i = 0; i < 128; i++) {
@@ -73,12 +52,10 @@ const ASCII_CHARS: string[] = /* @__PURE__ */ (() => {
   return t;
 })();
 
-// Fast charFromCode - use lookup for ASCII, fallback for others
 function charFromCode(c: number): string {
   return c < 128 ? ASCII_CHARS[c] : String.fromCodePoint(c);
 }
 
-// Bitmap for ASCII name start chars (a-zA-Z_:)
 const NAME_START_CHAR_ASCII = /* @__PURE__ */ (() => {
   const t = new Uint8Array(128);
   for (let i = 0x61; i <= 0x7a; i++) {
@@ -92,7 +69,6 @@ const NAME_START_CHAR_ASCII = /* @__PURE__ */ (() => {
   return t;
 })();
 
-// Bitmap for ASCII name chars (a-zA-Z0-9_:-.)
 const NAME_CHAR_ASCII = /* @__PURE__ */ (() => {
   const t = new Uint8Array(128);
   for (let i = 0x61; i <= 0x7a; i++) {
@@ -111,28 +87,38 @@ const NAME_CHAR_ASCII = /* @__PURE__ */ (() => {
   return t;
 })();
 
-// ============================================================================
-// Character classification (inlined for performance)
-// ============================================================================
+// =============================================================================
+// Character Classification
+// =============================================================================
 
-// isS: space characters (XML whitespace)
+/**
+ * Lookup table for valid XML 1.0 characters in the ASCII range (0-127).
+ * Invalid: 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F
+ * Valid:   0x09 (TAB), 0x0A (LF), 0x0D (CR), 0x20-0x7E
+ */
+const VALID_CHAR_ASCII = /* @__PURE__ */ (() => {
+  const t = new Uint8Array(128);
+  t[0x09] = 1; // TAB
+  t[0x0a] = 1; // LF
+  t[0x0d] = 1; // CR
+  for (let i = 0x20; i <= 0x7e; i++) {
+    t[i] = 1;
+  }
+  return t;
+})();
+
 function isS(c: number): boolean {
   return c === SPACE || c === NL || c === CR || c === TAB;
 }
 
-// isQuote: quote characters
 function isQuote(c: number): boolean {
   return c === DQUOTE || c === SQUOTE;
 }
 
-// isNameStartChar: valid first character of XML name
-// Optimized for common ASCII range first
 function isNameStartChar(c: number): boolean {
-  // Fast path: ASCII lookup
   if (c < 128) {
     return NAME_START_CHAR_ASCII[c] === 1;
   }
-  // Extended ranges (less common in Excel XML)
   return (
     (c >= 0xc0 && c <= 0xd6) ||
     (c >= 0xd8 && c <= 0xf6) ||
@@ -150,13 +136,10 @@ function isNameStartChar(c: number): boolean {
   );
 }
 
-// isNameChar: valid character in XML name (includes digits, hyphen, period)
 function isNameChar(c: number): boolean {
-  // Fast path: ASCII lookup
   if (c < 128) {
     return NAME_CHAR_ASCII[c] === 1;
   }
-  // Extended ranges
   return (
     c === 0xb7 ||
     (c >= 0xc0 && c <= 0xd6) ||
@@ -177,7 +160,6 @@ function isNameChar(c: number): boolean {
   );
 }
 
-// isChar10: valid XML 1.0 character
 function isChar10(c: number): boolean {
   return (
     (c >= SPACE && c <= 0xd7ff) ||
@@ -189,9 +171,9 @@ function isChar10(c: number): boolean {
   );
 }
 
-// ============================================================================
-// Built-in XML entities
-// ============================================================================
+// =============================================================================
+// Built-in XML Entities
+// =============================================================================
 
 const XML_ENTITIES: Record<string, string> = {
   amp: "&",
@@ -201,46 +183,71 @@ const XML_ENTITIES: Record<string, string> = {
   apos: "'"
 };
 
-// ============================================================================
+// =============================================================================
 // Parser States
-// ============================================================================
+// =============================================================================
 
 const S_TEXT = 0;
-const S_OPEN_WAKA = 1; // <
-const S_OPEN_WAKA_BANG = 2; // <!
-const S_OPEN_TAG = 3; // <tagname
-const S_OPEN_TAG_SLASH = 4; // <tagname /
-const S_ATTRIB = 5; // <tagname attr
-const S_ATTRIB_NAME = 6; // <tagname attr
+const S_OPEN_WAKA = 1;
+const S_OPEN_WAKA_BANG = 2;
+const S_OPEN_TAG = 3;
+const S_OPEN_TAG_SLASH = 4;
+const S_ATTRIB = 5;
+const S_ATTRIB_NAME = 6;
 const S_ATTRIB_NAME_SAW_WHITE = 7;
-const S_ATTRIB_VALUE = 8; // <tagname attr=
-const S_ATTRIB_VALUE_QUOTED = 9; // <tagname attr="
+const S_ATTRIB_VALUE = 8;
+const S_ATTRIB_VALUE_QUOTED = 9;
 const S_ATTRIB_VALUE_CLOSED = 10;
-const S_CLOSE_TAG = 11; // </tagname
+const S_CLOSE_TAG = 11;
 const S_CLOSE_TAG_SAW_WHITE = 12;
-const S_COMMENT = 13; // <!--
-const S_COMMENT_ENDING = 14; // <!-- text -
-const S_COMMENT_ENDED = 15; // <!-- text --
-const S_CDATA = 16; // <![CDATA[
-const S_CDATA_ENDING = 17; // <![CDATA[ text ]
-const S_CDATA_ENDING_2 = 18; // <![CDATA[ text ]]
-const S_PI = 19; // <?
-const S_PI_ENDING = 20; // <? text ?
-const S_DOCTYPE = 21; // <!DOCTYPE
+const S_COMMENT = 13;
+const S_COMMENT_ENDING = 14;
+const S_COMMENT_ENDED = 15;
+const S_CDATA = 16;
+const S_CDATA_ENDING = 17;
+const S_CDATA_ENDING_2 = 18;
+const S_PI = 19;
+const S_PI_ENDING = 20;
+const S_DOCTYPE = 21;
 const S_DOCTYPE_QUOTE = 22;
 const S_DOCTYPE_DTD = 23;
 const S_DOCTYPE_DTD_QUOTED = 24;
-const S_ENTITY = 25; // &entity;
+const S_ENTITY = 25;
 
-// ============================================================================
-// SaxesParser Class - Minimal implementation for Excel XML
-// ============================================================================
+// =============================================================================
+// SaxParser
+// =============================================================================
 
-export class SaxesParser {
+/**
+ * Streaming SAX XML parser.
+ *
+ * Feed XML text via {@link write}() in chunks; events fire synchronously
+ * as elements are encountered. Call {@link close}() when done.
+ *
+ * @example
+ * ```ts
+ * const parser = new SaxParser();
+ * parser.on("opentag", tag => console.log("open:", tag.name));
+ * parser.on("text", text => console.log("text:", text));
+ * parser.on("closetag", tag => console.log("close:", tag.name));
+ * parser.write('<root><child>hello</child></root>');
+ * parser.close();
+ * ```
+ */
+class SaxParser {
   // Configuration
   private trackPosition: boolean;
   private fileName?: string;
   private fragment: boolean;
+  private xmlns: boolean;
+  private maxDepth: number;
+  private maxEntityExpansions: number;
+
+  // Security counters
+  private _entityExpansionCount: number = 0;
+
+  // Namespace state
+  private _nsStack: Array<Record<string, string>> = [];
 
   // Parser state
   private state: number = S_TEXT;
@@ -250,8 +257,8 @@ export class SaxesParser {
   private text: string = "";
   private name: string = "";
   private q: number | null = null;
-  private tags: SaxesTagPlain[] = [];
-  private tag: SaxesTagPlain | null = null;
+  private tags: SaxTag[] = [];
+  private tag: SaxTag | null = null;
   private attribList: Array<{ name: string; value: string }> = [];
   private entity: string = "";
   private entityReturnState: number = S_TEXT;
@@ -273,15 +280,16 @@ export class SaxesParser {
   ENTITIES: Record<string, string> = { ...XML_ENTITIES };
 
   // Event handlers
-  private textHandler?: TextHandler;
-  private openTagHandler?: OpenTagHandler;
-  private closeTagHandler?: CloseTagHandler;
-  private errorHandler?: ErrorHandler;
+  private _handlers: SaxHandlers = {};
 
-  constructor(opt?: SaxesOptions) {
-    this.trackPosition = opt?.position !== false;
-    this.fileName = opt?.fileName;
-    this.fragment = opt?.fragment ?? false;
+  constructor(options?: SaxOptions) {
+    this.trackPosition = options?.position !== false;
+    this.fileName = options?.fileName;
+    this.fragment = options?.fragment ?? false;
+    this.xmlns = options?.xmlns ?? false;
+    this.maxDepth = options?.maxDepth !== undefined ? options.maxDepth : 256;
+    this.maxEntityExpansions =
+      options?.maxEntityExpansions !== undefined ? options.maxEntityExpansions : 10000;
     this._init();
   }
 
@@ -294,7 +302,7 @@ export class SaxesParser {
   }
 
   private _init(): void {
-    this.state = this.fragment ? S_TEXT : S_TEXT;
+    this.state = S_TEXT;
     this.text = "";
     this.name = "";
     this.q = null;
@@ -308,7 +316,7 @@ export class SaxesParser {
     this.reportedTextBeforeRoot = this.fragment;
     this.reportedTextAfterRoot = this.fragment;
     this.carriedFromPrevious = undefined;
-    this._closed = false;
+    // Note: _closed is NOT reset here — it is managed by end() and write().
     this.line = 1;
     this.column = 0;
     this.positionAtNewLine = 0;
@@ -316,76 +324,63 @@ export class SaxesParser {
     this.chunk = "";
     this.i = 0;
     this.prevI = 0;
+    this._nsStack = [];
+    this._entityExpansionCount = 0;
   }
 
-  // Event registration
-  on(name: "text", handler: TextHandler): void;
-  on(name: "opentag", handler: OpenTagHandler): void;
-  on(name: "closetag", handler: CloseTagHandler): void;
-  on(name: "error", handler: ErrorHandler): void;
+  // ===========================================================================
+  // Event Registration
+  // ===========================================================================
+
+  on(name: "opentag", handler: (tag: SaxTag) => void): void;
+  on(name: "text", handler: (text: string) => void): void;
+  on(name: "closetag", handler: (tag: SaxTag) => void): void;
+  on(name: "cdata", handler: (text: string) => void): void;
+  on(name: "comment", handler: (text: string) => void): void;
+  on(name: "pi", handler: (target: string, body: string) => void): void;
+  on(name: "error", handler: (err: Error) => void): void;
   on(name: string, handler: any): void {
-    switch (name) {
-      case "text":
-        this.textHandler = handler;
-        break;
-      case "opentag":
-        this.openTagHandler = handler;
-        break;
-      case "closetag":
-        this.closeTagHandler = handler;
-        break;
-      case "error":
-        this.errorHandler = handler;
-        break;
-    }
+    (this._handlers as any)[name] = handler;
   }
 
   off(name: string): void {
-    switch (name) {
-      case "text":
-        this.textHandler = undefined;
-        break;
-      case "opentag":
-        this.openTagHandler = undefined;
-        break;
-      case "closetag":
-        this.closeTagHandler = undefined;
-        break;
-      case "error":
-        this.errorHandler = undefined;
-        break;
-    }
+    delete (this._handlers as any)[name];
   }
 
-  // Error handling
-  private makeError(message: string): Error {
-    let msg = this.fileName ?? "";
-    if (this.trackPosition) {
-      if (msg.length > 0) {
-        msg += ":";
-      }
-      msg += `${this.line}:${this.column}`;
-    }
-    if (msg.length > 0) {
-      msg += ": ";
-    }
-    return new Error(msg + message);
+  // ===========================================================================
+  // Error Handling
+  // ===========================================================================
+
+  private makeError(message: string): XmlParseError {
+    return new XmlParseError(message, {
+      line: this.trackPosition ? this.line : undefined,
+      column: this.trackPosition ? this.column : undefined,
+      fileName: this.fileName
+    });
   }
 
   fail(message: string): this {
     const err = this.makeError(message);
-    if (this.errorHandler) {
-      this.errorHandler(err);
+    if (this._handlers.error) {
+      this._handlers.error(err);
     } else {
       throw err;
     }
     return this;
   }
 
-  // Main write method
+  // ===========================================================================
+  // Main Write Method
+  // ===========================================================================
+
   write(chunk: string | null): this {
+    // Auto-reset for parser reuse: if previously closed, start fresh.
     if (this._closed) {
-      return this.fail("cannot write after close");
+      if (chunk === null) {
+        return this; // no-op: already closed
+      }
+      this._closed = false;
+      this._init();
     }
 
     let end = false;
@@ -402,7 +397,6 @@ export class SaxesParser {
     let limit = chunk.length;
     if (!end && limit > 0) {
       const lastCode = chunk.charCodeAt(limit - 1);
-      // Carry CR or surrogate to next chunk
       if (lastCode === CR || (lastCode >= 0xd800 && lastCode <= 0xdbff)) {
         this.carriedFromPrevious = chunk[limit - 1];
         limit--;
@@ -426,24 +420,29 @@ export class SaxesParser {
     return this.write(null);
   }
 
-  // Get next character code, handling newlines
-  // Optimized: split into fast path (no position) and slow path
+  // ===========================================================================
+  // Character Reading
+  // ===========================================================================
+
   private getCode(): number {
     const { chunk, i } = this;
     this.prevI = i;
     this.i = i + 1;
 
     if (i >= chunk.length) {
-      return -1; // EOC
+      return -1;
     }
 
     const code = chunk.charCodeAt(i);
 
-    // Fast path: common ASCII chars (no surrogates, no CR/LF)
-    // 0x0a = LF, 0x0d = CR - both need special handling
     if (code < 0x0a || (code > 0x0d && code < 0xd800)) {
       if (this.trackPosition) {
         this.column++;
+      }
+      // Reject invalid XML 1.0 characters: 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F
+      if (code < 128 && VALID_CHAR_ASCII[code] === 0) {
+        this.fail("invalid XML character: 0x" + code.toString(16));
+        return code; // return the char but error is reported
       }
       return code;
     }
@@ -458,6 +457,13 @@ export class SaxesParser {
         }
         return 0x10000 + ((code - 0xd800) * 0x400 + (next - 0xdc00));
       }
+      // Lone high surrogate — invalid XML character
+      this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
+    }
+
+    // Lone low surrogate — invalid XML character
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
     }
 
     // Handle CR
@@ -473,7 +479,7 @@ export class SaxesParser {
       return NL;
     }
 
-    // Handle LF (code === 0x0a) or other codes between 0x0a-0x0d
+    // Handle LF
     if (code === NL && this.trackPosition) {
       this.line++;
       this.column = 0;
@@ -481,6 +487,13 @@ export class SaxesParser {
     } else if (this.trackPosition) {
       this.column++;
     }
+
+    // Reject invalid XML 1.0 characters that reach here:
+    // 0x0B (VT), 0x0C (FF), 0xFFFE, 0xFFFF
+    if (code === 0x0b || code === 0x0c || code === 0xfffe || code === 0xffff) {
+      this.fail("invalid XML character: 0x" + code.toString(16));
+    }
+
     return code;
   }
 
@@ -491,7 +504,10 @@ export class SaxesParser {
     }
   }
 
-  // State machine dispatcher
+  // ===========================================================================
+  // State Machine
+  // ===========================================================================
+
   private processState(): void {
     switch (this.state) {
       case S_TEXT:
@@ -575,12 +591,11 @@ export class SaxesParser {
     }
   }
 
-  // ============================================================================
-  // State handlers
-  // ============================================================================
+  // ===========================================================================
+  // State Handlers
+  // ===========================================================================
 
   private sText(): void {
-    // Check if we're inside or outside the root element
     if (this.tags.length !== 0) {
       this.handleTextInRoot();
     } else {
@@ -591,13 +606,12 @@ export class SaxesParser {
   private handleTextInRoot(): void {
     const { chunk } = this;
     let { i: start } = this;
-    const handler = this.textHandler;
+    const handler = this._handlers.text;
 
     while (true) {
       const c = this.getCode();
 
       if (c === -1) {
-        // End of chunk
         if (handler && start < this.i) {
           this.text += chunk.slice(start, this.i);
         }
@@ -605,7 +619,6 @@ export class SaxesParser {
       }
 
       if (c === LESS) {
-        // Start of tag
         if (handler) {
           const slice = chunk.slice(start, this.prevI);
           if (this.text.length > 0) {
@@ -620,7 +633,6 @@ export class SaxesParser {
       }
 
       if (c === AMP) {
-        // Entity reference
         if (handler) {
           this.text += chunk.slice(start, this.prevI);
         }
@@ -631,7 +643,6 @@ export class SaxesParser {
       }
 
       if (c === NL) {
-        // Handle newline in text
         if (handler) {
           this.text += chunk.slice(start, this.prevI) + "\n";
         }
@@ -643,14 +654,13 @@ export class SaxesParser {
   private handleTextOutsideRoot(): void {
     const { chunk } = this;
     let { i: start } = this;
-    const handler = this.textHandler;
+    const handler = this._handlers.text;
     let nonSpace = false;
 
     while (true) {
       const c = this.getCode();
 
       if (c === -1) {
-        // End of chunk
         if (handler && start < this.i) {
           this.text += chunk.slice(start, this.i);
         }
@@ -658,7 +668,6 @@ export class SaxesParser {
       }
 
       if (c === LESS) {
-        // Start of tag
         if (handler) {
           const slice = chunk.slice(start, this.prevI);
           if (this.text.length > 0) {
@@ -673,7 +682,6 @@ export class SaxesParser {
       }
 
       if (c === AMP) {
-        // Entity reference
         if (handler) {
           this.text += chunk.slice(start, this.prevI);
         }
@@ -685,7 +693,6 @@ export class SaxesParser {
       }
 
       if (c === NL) {
-        // Handle newline in text
         if (handler) {
           this.text += chunk.slice(start, this.prevI) + "\n";
         }
@@ -695,7 +702,6 @@ export class SaxesParser {
       }
     }
 
-    // Report error for non-whitespace text outside root
     if (nonSpace) {
       if (!this.sawRoot && !this.reportedTextBeforeRoot) {
         this.fail("text data outside of root node.");
@@ -710,6 +716,10 @@ export class SaxesParser {
 
   private sOpenWaka(): void {
     const c = this.getCode();
+
+    if (c === -1) {
+      return;
+    }
 
     if (isNameStartChar(c)) {
       this.state = S_OPEN_TAG;
@@ -738,6 +748,9 @@ export class SaxesParser {
 
   private sOpenWakaBang(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     this.openWakaBang += charFromCode(c);
 
     switch (this.openWakaBang) {
@@ -766,7 +779,6 @@ export class SaxesParser {
 
   private sOpenTag(): void {
     const c = this.getCode();
-
     if (c === -1) {
       return;
     }
@@ -776,7 +788,6 @@ export class SaxesParser {
       return;
     }
 
-    // Tag name complete
     this.tag = {
       name: this.name,
       attributes: Object.create(null) as Record<string, string>,
@@ -799,6 +810,9 @@ export class SaxesParser {
 
   private sOpenTagSlash(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === GREATER) {
       this.openSelfClosingTag();
     } else {
@@ -827,7 +841,6 @@ export class SaxesParser {
 
   private sAttribName(): void {
     const c = this.getCode();
-
     if (c === -1) {
       return;
     }
@@ -904,7 +917,6 @@ export class SaxesParser {
       }
 
       if (c === q) {
-        // End of attribute value
         this.attribList.push({
           name: this.name,
           value: this.text + chunk.slice(start, this.prevI)
@@ -925,7 +937,6 @@ export class SaxesParser {
       }
 
       if (c === NL || c === TAB) {
-        // Normalize whitespace in attributes
         this.text += chunk.slice(start, this.prevI) + " ";
         start = this.i;
       }
@@ -933,6 +944,13 @@ export class SaxesParser {
       if (c === LESS) {
         this.text += chunk.slice(start, this.prevI);
         this.fail("< not allowed in attribute value");
+        // Recover: save what we have as attribute, re-process '<' as tag start
+        this.attribList.push({ name: this.name, value: this.text });
+        this.name = "";
+        this.text = "";
+        this.q = null;
+        this.unget();
+        this.state = S_TEXT;
         return;
       }
     }
@@ -965,7 +983,8 @@ export class SaxesParser {
       return;
     }
 
-    if (isNameChar(c)) {
+    // First character must be a NameStartChar, subsequent must be NameChar
+    if (this.name === "" ? isNameStartChar(c) : isNameChar(c)) {
       this.name += charFromCode(c);
     } else if (c === GREATER) {
       this.closeTag();
@@ -1004,6 +1023,9 @@ export class SaxesParser {
 
   private sCommentEnding(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === MINUS) {
       this.state = S_COMMENT_ENDED;
     } else {
@@ -1014,8 +1036,12 @@ export class SaxesParser {
 
   private sCommentEnded(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === GREATER) {
-      // Comment done, emit nothing (we don't have a comment handler)
+      // Emit comment event
+      this._handlers.comment?.(this.text);
       this.text = "";
       this.state = S_TEXT;
     } else if (c === MINUS) {
@@ -1042,6 +1068,9 @@ export class SaxesParser {
 
   private sCDataEnding(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === CLOSE_BRACKET) {
       this.state = S_CDATA_ENDING_2;
     } else {
@@ -1052,10 +1081,15 @@ export class SaxesParser {
 
   private sCDataEnding2(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === GREATER) {
-      // CDATA done - emit as text
-      if (this.textHandler && this.text.length > 0) {
-        this.textHandler(this.text);
+      // Emit CDATA event; also emit as text for backwards compat
+      if (this._handlers.cdata) {
+        this._handlers.cdata(this.text);
+      } else if (this._handlers.text && this.text.length > 0) {
+        this._handlers.text(this.text);
       }
       this.text = "";
       this.state = S_TEXT;
@@ -1082,8 +1116,18 @@ export class SaxesParser {
 
   private sPIEnding(): void {
     const c = this.getCode();
+    if (c === -1) {
+      return;
+    }
     if (c === GREATER) {
-      // PI done, we don't emit PI events
+      // Emit PI event
+      const piText = this.text;
+      const spaceIdx = piText.indexOf(" ");
+      if (spaceIdx >= 0) {
+        this._handlers.pi?.(piText.slice(0, spaceIdx), piText.slice(spaceIdx + 1));
+      } else {
+        this._handlers.pi?.(piText, "");
+      }
       this.text = "";
       this.state = S_TEXT;
     } else if (c === QUESTION) {
@@ -1101,7 +1145,6 @@ export class SaxesParser {
     }
 
     if (c === GREATER) {
-      // DOCTYPE done
       this.text = "";
       this.state = S_TEXT;
     } else if (isQuote(c)) {
@@ -1161,7 +1204,6 @@ export class SaxesParser {
     }
 
     if (c === SEMICOLON) {
-      // Entity complete
       const entity = this.entity;
       let resolved: string;
 
@@ -1177,6 +1219,13 @@ export class SaxesParser {
       this.entity = "";
     } else if (isNameChar(c) || c === HASH) {
       this.entity += charFromCode(c);
+      // Security: reject excessively long entity names (>64 chars)
+      if (this.entity.length > 64) {
+        this.fail("entity name too long");
+        this.text += "&" + this.entity;
+        this.state = this.entityReturnState;
+        this.entity = "";
+      }
     } else {
       this.fail("invalid entity character");
       this.text += "&" + this.entity + charFromCode(c);
@@ -1185,37 +1234,66 @@ export class SaxesParser {
     }
   }
 
-  // Entity resolution
+  // ===========================================================================
+  // Entity Resolution
+  // ===========================================================================
+
   private parseEntity(entity: string): string {
     if (entity[0] !== "#") {
-      // Named entity
+      // Named entity — resolve first, then check expansion limit for non-predefined
       const resolved = this.ENTITIES[entity];
       if (resolved !== undefined) {
+        // Only count non-predefined entities against the expansion limit.
+        // The 5 standard XML entities (lt, gt, amp, quot, apos) are always allowed.
+        if (
+          this.maxEntityExpansions > 0 &&
+          entity !== "lt" &&
+          entity !== "gt" &&
+          entity !== "amp" &&
+          entity !== "quot" &&
+          entity !== "apos"
+        ) {
+          this._entityExpansionCount++;
+          if (this._entityExpansionCount > this.maxEntityExpansions) {
+            this.fail(
+              `entity expansion limit (${this.maxEntityExpansions}) exceeded — possible XML bomb`
+            );
+            return "";
+          }
+        }
         return resolved;
       }
       this.fail("undefined entity: " + entity);
       return "&" + entity + ";";
     }
 
-    // Numeric entity
+    // Numeric character reference — validate range strictly
     let num: number;
     if (entity[1] === "x" || entity[1] === "X") {
-      // Hexadecimal
       num = parseInt(entity.slice(2), 16);
     } else {
-      // Decimal
       num = parseInt(entity.slice(1), 10);
     }
 
-    if (isNaN(num) || !isChar10(num)) {
+    // Security: reject NaN, null (0x0), surrogates (0xD800-0xDFFF), out of range (>0x10FFFF)
+    if (isNaN(num) || num < 1 || (num >= 0xd800 && num <= 0xdfff) || num > 0x10ffff) {
+      this.fail("invalid character entity: &#" + entity.slice(1) + ";");
+      return "";
+    }
+
+    // Also reject XML-invalid characters
+    if (!isChar10(num)) {
       this.fail("invalid character entity");
-      return "&" + entity + ";";
+      return "";
     }
 
     return String.fromCodePoint(num);
   }
 
-  // Helper to skip whitespace
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+
   private skipSpaces(): number {
     while (true) {
       const c = this.getCode();
@@ -1225,18 +1303,83 @@ export class SaxesParser {
     }
   }
 
-  // Tag handling
+  // ===========================================================================
+  // Namespace Helpers
+  // ===========================================================================
+
+  /** Split "prefix:local" into [prefix, local]. Returns ["", name] if no prefix. */
+  private splitQName(qname: string): [string, string] {
+    const colon = qname.indexOf(":");
+    if (colon < 0) {
+      return ["", qname];
+    }
+    return [qname.slice(0, colon), qname.slice(colon + 1)];
+  }
+
+  /** Look up the URI for a namespace prefix by walking the stack top-down. */
+  private resolveNs(prefix: string): string {
+    for (let i = this._nsStack.length - 1; i >= 0; i--) {
+      const uri = this._nsStack[i][prefix];
+      if (uri !== undefined) {
+        return uri;
+      }
+    }
+    return "";
+  }
+
+  /** Extract xmlns declarations from tag attributes and populate tag namespace fields. */
+  private applyNamespaces(tag: SaxTag): void {
+    // 1. Collect xmlns declarations from already-populated attributes
+    const nsDecls: Record<string, string> = {};
+    const attrs = tag.attributes;
+    for (const name in attrs) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, name)) {
+        continue;
+      }
+      if (name === "xmlns") {
+        nsDecls[""] = attrs[name]; // default namespace
+      } else if (name.startsWith("xmlns:")) {
+        nsDecls[name.slice(6)] = attrs[name];
+      }
+    }
+
+    // 2. Push namespace scope
+    this._nsStack.push(nsDecls);
+
+    // 3. Set namespace fields on the tag
+    if (Object.keys(nsDecls).length > 0) {
+      tag.ns = nsDecls;
+    }
+    const [prefix, local] = this.splitQName(tag.name);
+    tag.prefix = prefix;
+    tag.local = local;
+    tag.uri = this.resolveNs(prefix);
+  }
+
+  // ===========================================================================
+  // Tag Emission
+  // ===========================================================================
+
   private openTag(): void {
     const tag = this.tag!;
     tag.isSelfClosing = false;
 
-    // Copy attributes from list to object
     for (const { name, value } of this.attribList) {
       tag.attributes[name] = value;
     }
     this.attribList = [];
 
-    this.openTagHandler?.(tag);
+    if (this.xmlns) {
+      this.applyNamespaces(tag);
+    }
+
+    // Security: warn on nesting depth exceeded but continue processing
+    // so that close tags still match (prevents infinite error loops)
+    if (this.maxDepth > 0 && this.tags.length >= this.maxDepth) {
+      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`);
+    }
+
+    this._handlers.opentag?.(tag);
     this.tags.push(tag);
     this.name = "";
     this.state = S_TEXT;
@@ -1246,14 +1389,27 @@ export class SaxesParser {
     const tag = this.tag!;
     tag.isSelfClosing = true;
 
-    // Copy attributes from list to object
     for (const { name, value } of this.attribList) {
       tag.attributes[name] = value;
     }
     this.attribList = [];
 
-    this.openTagHandler?.(tag);
-    this.closeTagHandler?.(tag);
+    if (this.xmlns) {
+      this.applyNamespaces(tag);
+    }
+
+    // Security: warn on nesting depth exceeded but continue processing
+    if (this.maxDepth > 0 && this.tags.length >= this.maxDepth) {
+      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`);
+    }
+
+    this._handlers.opentag?.(tag);
+    this._handlers.closetag?.(tag);
+
+    // Pop namespace scope for self-closing tags immediately
+    if (this.xmlns) {
+      this._nsStack.pop();
+    }
 
     if (this.tags.length === 0) {
       this.closedRoot = true;
@@ -1273,15 +1429,16 @@ export class SaxesParser {
       return;
     }
 
-    // Find matching open tag
     let found = false;
     for (let i = tags.length - 1; i >= 0; i--) {
       const tag = tags[i];
       if (tag.name === name) {
-        // Pop all tags including the matching one
         while (tags.length > i) {
           const t = tags.pop()!;
-          this.closeTagHandler?.(t);
+          this._handlers.closetag?.(t);
+          if (this.xmlns) {
+            this._nsStack.pop();
+          }
           if (tags.length > i) {
             this.fail("unclosed tag: " + t.name);
           }
@@ -1301,7 +1458,6 @@ export class SaxesParser {
     }
   }
 
-  // End parsing
   private end(): this {
     if (!this.sawRoot) {
       this.fail("document must contain a root element");
@@ -1312,8 +1468,8 @@ export class SaxesParser {
       this.fail("unclosed tag: " + tag.name);
     }
 
-    if (this.text.length > 0 && this.textHandler) {
-      this.textHandler(this.text);
+    if (this.text.length > 0 && this._handlers.text) {
+      this._handlers.text(this.text);
       this.text = "";
     }
 
@@ -1323,35 +1479,58 @@ export class SaxesParser {
   }
 }
 
-// ============================================================================
-// parseSax generator function
-// ============================================================================
+// =============================================================================
+// Async Generator - parseSax
+// =============================================================================
 
-async function* parseSax(iterable: any): AsyncGenerator<SaxEvent[]> {
-  const parser = new SaxesParser({
-    xmlns: false,
-    position: true // Keep position for error messages
-  });
+/**
+ * Parse an async-iterable of XML chunks as a stream of SAX event batches.
+ *
+ * Yields an array of {@link SaxEvent} per input chunk. This is the
+ * primary integration point for streaming XML parsing.
+ *
+ * @param iterable - Async iterable of string or Uint8Array chunks.
+ * @param options - Parser options.
+ *
+ * @example
+ * ```ts
+ * for await (const events of parseSax(stream)) {
+ *   for (const event of events) {
+ *     if (event.eventType === "opentag") console.log(event.value.name);
+ *   }
+ * }
+ * ```
+ */
+async function* parseSax(
+  iterable: AsyncIterable<any> | Iterable<any>,
+  options?: SaxOptions
+): AsyncGenerator<SaxEventAny[]> {
+  const decoder = new TextDecoder();
+  const parser = new SaxParser(options);
 
   let error: Error | undefined;
   parser.on("error", (err: Error) => {
     error = err;
   });
 
-  let events: SaxEvent[] = [];
-  parser.on("opentag", (value: any) => events.push({ eventType: "opentag", value }));
-  parser.on("text", (value: any) => events.push({ eventType: "text", value }));
-  parser.on("closetag", (value: any) => events.push({ eventType: "closetag", value }));
+  let events: SaxEventAny[] = [];
+  parser.on("opentag", value => events.push({ eventType: "opentag", value }));
+  parser.on("text", value => events.push({ eventType: "text", value }));
+  parser.on("closetag", value => events.push({ eventType: "closetag", value }));
+  parser.on("cdata", value => events.push({ eventType: "cdata", value }));
+  parser.on("comment", value => events.push({ eventType: "comment", value }));
+  parser.on("pi", (target, body) => events.push({ eventType: "pi", value: { target, body } }));
 
   for await (const chunk of iterable) {
-    const chunkStr = bufferToString(chunk);
-
+    const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
     parser.write(chunkStr);
     if (error) {
       throw error;
     }
-    yield events;
-    events = [];
+    if (events.length > 0) {
+      yield events;
+      events = [];
+    }
   }
 
   parser.close();
@@ -1363,4 +1542,4 @@ async function* parseSax(iterable: any): AsyncGenerator<SaxEvent[]> {
   }
 }
 
-export { parseSax };
+export { SaxParser, parseSax };

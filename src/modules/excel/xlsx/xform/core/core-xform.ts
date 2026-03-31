@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DateXform } from "@excel/xlsx/xform/simple/date-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
@@ -79,7 +79,7 @@ class CoreXform extends BaseXform {
   }
 
   render(xmlStream: any, model: CoreModel): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("cp:coreProperties", CoreXform.CORE_PROPERTY_ATTRIBUTES);
 
     for (const key of Object.keys(PROPS)) {

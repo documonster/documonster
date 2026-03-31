@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
 import { XmlParseError } from "@excel/errors";
@@ -80,7 +80,7 @@ class SharedStringsXform extends BaseXform {
 
   render(xmlStream: any, model?: SharedStringsModel): void {
     const renderModel = model || this._values;
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("sst", {
       xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",

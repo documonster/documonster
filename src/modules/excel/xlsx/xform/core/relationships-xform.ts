@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RelationshipXform } from "@excel/xlsx/xform/core/relationship-xform";
 import { XmlParseError } from "@excel/errors";
@@ -17,7 +17,7 @@ class RelationshipsXform extends BaseXform {
 
   render(xmlStream: any, model?: any[]): void {
     const renderModel = model || this._values;
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("Relationships", RelationshipsXform.RELATIONSHIPS_ATTRIBUTES);
 
     renderModel!.forEach(relationship => {

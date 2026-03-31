@@ -21,7 +21,7 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";

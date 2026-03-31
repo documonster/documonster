@@ -1,5 +1,7 @@
-import { XmlStream } from "@excel/utils/xml-stream";
-import { xmlEncode, parseOoxmlDate } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
+import { StdDocAttributes } from "@xml/writer";
+import { xmlEncode } from "@xml/encode";
+import { parseOoxmlDate } from "@utils/utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { PivotTableError } from "@excel/errors";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
@@ -48,7 +50,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
    * Render pivot cache records XML.
    * Supports both newly created models (with PivotTableSource) and loaded models.
    */
-  render(xmlStream: XmlStream, model: CacheRecordsModel | ParsedCacheRecords): void {
+  render(xmlStream: XmlSink, model: CacheRecordsModel | ParsedCacheRecords): void {
     // Check if this is a loaded model
     const isLoaded = ("isLoaded" in model && model.isLoaded) || !("source" in model);
 
@@ -62,25 +64,25 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
   /**
    * Render newly created pivot cache records
    */
-  private renderNew(xmlStream: XmlStream, model: CacheRecordsModel): void {
+  private renderNew(xmlStream: XmlSink, model: CacheRecordsModel): void {
     const { source, cacheFields } = model;
     // R8-O2: Use Array.isArray for type safety — getSheetValues() returns a sparse array of row arrays
     const sourceBodyRows = source.getSheetValues().slice(2).filter(Array.isArray);
 
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+    xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...PivotCacheRecordsXform.PIVOT_CACHE_RECORDS_ATTRIBUTES,
       count: sourceBodyRows.length
     });
-    xmlStream.writeXml(this.renderTableNew(sourceBodyRows, cacheFields));
+    xmlStream.writeRaw(this.renderTableNew(sourceBodyRows, cacheFields));
     xmlStream.closeNode();
   }
 
   /**
    * Render loaded pivot cache records
    */
-  private renderLoaded(xmlStream: XmlStream, model: ParsedCacheRecords): void {
-    xmlStream.openXml(XmlStream.StdDocAttributes);
+  private renderLoaded(xmlStream: XmlSink, model: ParsedCacheRecords): void {
+    xmlStream.openXml(StdDocAttributes);
     // R8-B11: Use preserved root attributes instead of hardcoded MS namespaces.
     // The base xmlns/xmlns:r are always needed; extra attributes (xmlns:mc, mc:Ignorable, etc.)
     // come from the parsed original if available, otherwise fall back to the hardcoded defaults.
@@ -104,12 +106,12 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
 
     // Render each record
     for (const record of model.records) {
-      xmlStream.writeXml("\n  <r>");
+      xmlStream.writeRaw("\n  <r>");
       for (const value of record) {
-        xmlStream.writeXml("\n    ");
-        xmlStream.writeXml(this.renderRecordValue(value));
+        xmlStream.writeRaw("\n    ");
+        xmlStream.writeRaw(this.renderRecordValue(value));
       }
-      xmlStream.writeXml("\n  </r>");
+      xmlStream.writeRaw("\n  </r>");
     }
 
     xmlStream.closeNode();

@@ -3,7 +3,7 @@ import { PassThrough } from "@stream";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { TableColumnXform } from "@excel/xlsx/xform/table/table-column-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
-import { parseSax } from "@excel/utils/parse-sax";
+import { parseSax } from "@xml/sax";
 
 const expectations = [
   {

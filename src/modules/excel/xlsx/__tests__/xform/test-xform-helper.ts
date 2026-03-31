@@ -1,8 +1,8 @@
 import { PassThrough } from "@stream";
 import { expect } from "vitest";
 import { CompyXform } from "@excel/xlsx/__tests__/xform/compy-xform";
-import { parseSax } from "@excel/utils/parse-sax";
-import { XmlStream } from "@excel/utils/xml-stream";
+import { parseSax } from "@xml/sax";
+import { XmlWriter } from "@xml/writer";
 import { BooleanXform } from "@excel/xlsx/xform/simple/boolean-xform";
 import { cloneDeep } from "@excel/utils/under-dash";
 
@@ -213,7 +213,7 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
       const result = getExpectation(expectation, "xml");
 
       const xform = expectation.create();
-      const xmlStream = new XmlStream();
+      const xmlStream = new XmlWriter();
       xform.render(xmlStream, model, 0);
 
       expect(normalizeXml(xmlStream.xml)).toBe(normalizeXml(result!));
@@ -227,7 +227,7 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
       const result = getExpectation(expectation, "xml");
 
       const xform = expectation.create();
-      const xmlStream = new XmlStream();
+      const xmlStream = new XmlWriter();
 
       xform.prepare(model, expectation.options);
       xform.render(xmlStream, model);
@@ -260,7 +260,7 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
         ]
       });
 
-      const xmlStream = new XmlStream();
+      const xmlStream = new XmlWriter();
       xform.render(xmlStream, model);
 
       expect(normalizeXml(xmlStream.xml)).toBe(normalizeXml(result));

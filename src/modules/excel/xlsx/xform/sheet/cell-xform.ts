@@ -1,4 +1,4 @@
-import { dateToExcel, xmlDecode, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import { dateToExcel, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { Range } from "@excel/range";
 import { Enums } from "@excel/enums";
@@ -364,7 +364,7 @@ class CellXform extends BaseXform {
           model.type = Enums.ValueType.Formula;
           if (model.value) {
             if (this.t === "str") {
-              model.result = xmlDecode(model.value);
+              model.result = model.value;
             } else if (this.t === "b") {
               model.result = parseInt(model.value, 10) !== 0;
             } else if (this.t === "e") {
@@ -382,7 +382,7 @@ class CellXform extends BaseXform {
               break;
             case "str":
               model.type = Enums.ValueType.String;
-              model.value = xmlDecode(model.value);
+              // Value already decoded by SAX parser — no xmlDecode needed
               break;
             case "inlineStr":
               model.type = Enums.ValueType.String;

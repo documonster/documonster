@@ -1,4 +1,4 @@
-import { xmlEncode } from "@utils/utils";
+import { xmlEncode } from "@xml/encode";
 
 /**
  * Reusable utility for collecting raw XML fragments during SAX parsing.

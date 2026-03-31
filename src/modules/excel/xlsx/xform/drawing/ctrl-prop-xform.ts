@@ -1,4 +1,4 @@
-import { XmlStream } from "@excel/utils/xml-stream";
+import { XmlWriter } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { FormCheckboxModel } from "@excel/form-control";
 
@@ -56,7 +56,7 @@ class CtrlPropXform extends BaseXform<FormCheckboxModel> {
    * Uses render() internally to ensure consistency
    */
   toXml(model: FormCheckboxModel): string {
-    const xmlStream = new XmlStream();
+    const xmlStream = new XmlWriter();
     this.render(xmlStream, model);
     return xmlStream.xml;
   }
