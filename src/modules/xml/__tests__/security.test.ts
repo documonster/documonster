@@ -810,4 +810,40 @@ describe("Invalid XML 1.0 character rejection", () => {
     ).toEqual([]);
     expect(texts.join("")).toBe("😀");
   });
+
+  it("xmlEncode strips U+FFFE noncharacter", () => {
+    expect(xmlEncode("a\uFFFEb")).toBe("ab");
+  });
+
+  it("xmlEncode strips U+FFFF noncharacter", () => {
+    expect(xmlEncode("a\uFFFFb")).toBe("ab");
+  });
+
+  it("xmlEncode preserves U+FFFD replacement character", () => {
+    expect(xmlEncode("\uFFFD")).toBe("\uFFFD");
+  });
+
+  it("CDATA section does not allow element-level injection", () => {
+    const parser = new SaxParser();
+    const tags: string[] = [];
+    const texts: string[] = [];
+    parser.on("opentag", t => tags.push(t.name));
+    parser.on("cdata", t => texts.push(t));
+    parser.write("<root><![CDATA[</root><script>alert(1)</script>]]></root>");
+    parser.close();
+    expect(tags).toEqual(["root"]);
+    expect(texts[0]).toContain("<script>");
+  });
+
+  it("entity expansion does not inject into attribute context", () => {
+    const parser = new SaxParser();
+    parser.ENTITIES.inject = '" newattr="injected';
+    const tags: any[] = [];
+    parser.on("opentag", t => tags.push({ ...t.attributes }));
+    parser.write('<root attr="&inject;"/>');
+    parser.close();
+    // The expanded text should be in the attr value, not create a new attribute
+    expect(tags[0].attr).toContain("injected");
+    expect(tags[0].newattr).toBeUndefined();
+  });
 });

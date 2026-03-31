@@ -22,18 +22,23 @@ function detectHanCellPrefix(
   tagName: string,
   attrs: Record<string, string>
 ): string | null | undefined {
+  let hasHanCellPrefix = false;
   for (const key in attrs) {
     if (key.length > 6 && key.startsWith("xmlns:")) {
       const prefix = key.slice(6);
-      // Check for spreadsheetml namespace prefix
+      // Check for spreadsheetml namespace prefix — always wins
       if (attrs[key] === SPREADSHEETML_NS) {
         return prefix;
       }
-      // Check if xmlns declares a known HAN CELL prefix (e.g., xmlns:dc, xmlns:dcterms)
+      // Note if we see a known HAN CELL prefix, but don't return yet
+      // because spreadsheetml might appear later in the iteration
       if (HAN_CELL_PREFIXES.has(prefix)) {
-        return null;
+        hasHanCellPrefix = true;
       }
     }
+  }
+  if (hasHanCellPrefix) {
+    return null;
   }
   // Check if tag name has a known static prefix
   const i = tagName.indexOf(":");
@@ -139,9 +144,17 @@ class BaseXform<TModel = any> {
             nsMode = 2;
             nsPrefix = prefix;
           }
-          // HAN CELL mode - strip prefix
-          value.name = stripPrefix(value.name, nsPrefix);
-          this.parseOpen(value);
+          // HAN CELL mode - strip prefix without mutating the SAX tag object
+          const strippedName = stripPrefix(value.name, nsPrefix);
+          if (strippedName !== value.name) {
+            this.parseOpen({
+              name: strippedName,
+              attributes: value.attributes,
+              isSelfClosing: value.isSelfClosing
+            });
+          } else {
+            this.parseOpen(value);
+          }
         } else if (eventType === "text") {
           this.parseText(value);
         } else if (eventType === "closetag") {

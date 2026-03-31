@@ -125,6 +125,10 @@ export function xmlEncode(text: string): string {
       }
       firstBad = i;
       break;
+    } else if (code === 0xfffe || code === 0xffff) {
+      // XML noncharacters — must strip
+      firstBad = i;
+      break;
     }
   }
 
@@ -166,6 +170,12 @@ export function xmlEncode(text: string): string {
       lastIndex = i + 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       // Lone low surrogate — strip
+      if (lastIndex < i) {
+        parts.push(text.substring(lastIndex, i));
+      }
+      lastIndex = i + 1;
+    } else if (code === 0xfffe || code === 0xffff) {
+      // XML noncharacters — strip
       if (lastIndex < i) {
         parts.push(text.substring(lastIndex, i));
       }

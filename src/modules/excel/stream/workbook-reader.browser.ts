@@ -410,7 +410,7 @@ export abstract class WorkbookReaderBase<
     // For "cache" mode, use direct SAX callbacks (no event objects, no async generator overhead)
     if (this.options.sharedStrings === "cache") {
       const sharedStrings = this.sharedStrings!;
-      const parser = new SaxParser();
+      const parser = new SaxParser({ position: false });
 
       parser.on("opentag", (node: SaxTag) => {
         switch (node.name) {

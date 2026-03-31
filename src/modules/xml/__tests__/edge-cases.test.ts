@@ -936,3 +936,168 @@ describe("parseXml declaration with single quotes", () => {
     expect(doc.declaration!.encoding).toBe("UTF-8");
   });
 });
+
+// =============================================================================
+// SAX Chunk Boundary — Additional Edge Cases
+// =============================================================================
+
+describe("SAX chunk boundary additional edge cases", () => {
+  it("attribute name split across chunks", () => {
+    const parser = new SaxParser();
+    const tags: any[] = [];
+    parser.on("opentag", t => tags.push({ name: t.name, attributes: { ...t.attributes } }));
+    parser.write("<root attr");
+    parser.write('Name="val"/>');
+    parser.close();
+    expect(tags).toHaveLength(1);
+    expect(tags[0].attributes.attrName).toBe("val");
+  });
+
+  it("close tag name split across chunks", () => {
+    const parser = new SaxParser();
+    const closed: string[] = [];
+    parser.on("closetag", t => closed.push(t.name));
+    parser.write("<root></ro");
+    parser.write("ot>");
+    parser.close();
+    expect(closed).toEqual(["root"]);
+  });
+
+  it("attribute value closing quote at chunk boundary", () => {
+    const parser = new SaxParser();
+    const tags: any[] = [];
+    parser.on("opentag", t => tags.push({ ...t.attributes }));
+    parser.write('<root attr="val');
+    parser.write('"/>');
+    parser.close();
+    expect(tags[0].attr).toBe("val");
+  });
+
+  it("empty chunk between meaningful chunks", () => {
+    const parser = new SaxParser();
+    const texts: string[] = [];
+    parser.on("text", t => texts.push(t));
+    parser.write("<root>");
+    parser.write("");
+    parser.write("hello");
+    parser.write("");
+    parser.write("</root>");
+    parser.close();
+    expect(texts.join("")).toBe("hello");
+  });
+
+  it("chunk boundary right at '=' between attribute name and value", () => {
+    const parser = new SaxParser();
+    const tags: any[] = [];
+    parser.on("opentag", t => tags.push({ ...t.attributes }));
+    parser.write("<root attr=");
+    parser.write('"val"/>');
+    parser.close();
+    expect(tags[0].attr).toBe("val");
+  });
+
+  it("surrogate pair split across string chunks", () => {
+    const parser = new SaxParser();
+    const texts: string[] = [];
+    parser.on("text", t => texts.push(t));
+    parser.write("<root>\uD83D");
+    parser.write("\uDE00</root>");
+    parser.close();
+    expect(texts.join("")).toBe("\uD83D\uDE00");
+  });
+
+  it("entity numeric reference split at '#' boundary", () => {
+    const parser = new SaxParser();
+    const texts: string[] = [];
+    parser.on("text", t => texts.push(t));
+    parser.write("<root>&#x4");
+    parser.write("1;</root>");
+    parser.close();
+    expect(texts.join("")).toBe("A");
+  });
+
+  it("entity numeric reference split at 'x' boundary", () => {
+    const parser = new SaxParser();
+    const texts: string[] = [];
+    parser.on("text", t => texts.push(t));
+    parser.write("<root>&#");
+    parser.write("x41;</root>");
+    parser.close();
+    expect(texts.join("")).toBe("A");
+  });
+});
+
+// =============================================================================
+// SAX Error Recovery
+// =============================================================================
+
+describe("SAX error recovery", () => {
+  it("continues parsing after invalid character in text", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    const tags: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.on("opentag", t => tags.push(t.name));
+    parser.write("<root>\x01<child/></root>");
+    parser.close();
+    expect(errors.length).toBeGreaterThan(0);
+    expect(tags).toContain("child");
+  });
+
+  it("continues parsing after entity expansion limit", () => {
+    const parser = new SaxParser({ maxEntityExpansions: 2 });
+    parser.ENTITIES.x = "expanded";
+    const errors: string[] = [];
+    const tags: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.on("opentag", t => tags.push(t.name));
+    parser.write("<root>&x;&x;&x;<child/></root>");
+    parser.close();
+    expect(errors.length).toBeGreaterThan(0);
+    expect(tags).toContain("child");
+  });
+});
+
+// =============================================================================
+// XmlStreamWriter Pending Tag Edge Cases
+// =============================================================================
+
+describe("XmlStreamWriter pending tag edge cases", () => {
+  it("addAttribute after writeText should throw", () => {
+    const sw = new XmlStreamWriter({ write() {} });
+    sw.openNode("r");
+    sw.writeText("text");
+    expect(() => sw.addAttribute("a", "1")).toThrow();
+  });
+
+  it("multiple addAttributes accumulate in pending buffer", () => {
+    const chunks: string[] = [];
+    const sw = new XmlStreamWriter({ write: (c: string) => chunks.push(c) });
+    sw.openNode("r");
+    sw.addAttribute("a", "1");
+    sw.addAttribute("b", "2");
+    sw.closeNode();
+    const xml = chunks.join("");
+    expect(xml).toBe('<r a="1" b="2"/>');
+  });
+
+  it("writeComment when open tag is pending flushes the tag", () => {
+    const chunks: string[] = [];
+    const sw = new XmlStreamWriter({ write: (c: string) => chunks.push(c) });
+    sw.openNode("r");
+    sw.writeComment("note");
+    sw.closeNode();
+    const xml = chunks.join("");
+    expect(xml).toBe("<r><!--note--></r>");
+  });
+
+  it("writeCData with empty string", () => {
+    const chunks: string[] = [];
+    const sw = new XmlStreamWriter({ write: (c: string) => chunks.push(c) });
+    sw.openNode("r");
+    sw.writeCData("");
+    sw.closeNode();
+    const xml = chunks.join("");
+    expect(xml).toBe("<r><![CDATA[]]></r>");
+  });
+});

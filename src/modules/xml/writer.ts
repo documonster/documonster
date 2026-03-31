@@ -118,11 +118,17 @@ class XmlWriter implements XmlSink {
       this._parts.push(">");
     }
     this._stack.push(name);
-    // Push "<name" + attributes as separate pieces — V8 optimizes array push + join
-    // better than template literal concatenation for this pattern.
-    this._parts.push("<");
-    this._parts.push(name);
-    pushAttributes(this._parts, attributes);
+    // Build complete open tag as single string — reduces array push overhead
+    let s = "<" + name;
+    if (attributes) {
+      for (const key in attributes) {
+        const value = (attributes as any)[key];
+        if (value !== undefined) {
+          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        }
+      }
+    }
+    this._parts.push(s);
     this._leaf = true;
     this._open = true;
   }
@@ -206,18 +212,22 @@ class XmlWriter implements XmlSink {
       this._parts.push(">");
       this._open = false;
     }
-    this._parts.push("<");
-    this._parts.push(name);
-    pushAttributes(this._parts, attributes);
-    if (text !== undefined) {
-      this._parts.push(">");
-      this._parts.push(xmlEncode(String(text)));
-      this._parts.push("</");
-      this._parts.push(name);
-      this._parts.push(">");
-    } else {
-      this._parts.push("/>");
+    // Build complete leaf element as single string — reduces 3-7 pushes to 1
+    let s = "<" + name;
+    if (attributes) {
+      for (const key in attributes) {
+        const value = (attributes as any)[key];
+        if (value !== undefined) {
+          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        }
+      }
     }
+    if (text !== undefined) {
+      s += ">" + xmlEncode(String(text)) + "</" + name + ">";
+    } else {
+      s += "/>";
+    }
+    this._parts.push(s);
     this._leaf = false;
   }
 

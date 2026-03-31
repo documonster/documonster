@@ -238,7 +238,7 @@ class WorksheetReader extends EventEmitter {
     // We collect worksheet events per-chunk and yield them.
     let worksheetEvents: WorksheetEvent[] | null = null;
 
-    const parser = new SaxParser();
+    const parser = new SaxParser({ position: false });
 
     parser.on("opentag", (node: SaxTag) => {
       if (emitSheet) {
