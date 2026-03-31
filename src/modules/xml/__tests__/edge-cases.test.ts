@@ -1101,3 +1101,109 @@ describe("XmlStreamWriter pending tag edge cases", () => {
     expect(xml).toBe("<r><![CDATA[]]></r>");
   });
 });
+
+// =============================================================================
+// SAX: Second root element rejection
+// =============================================================================
+
+describe("SAX second root element rejection", () => {
+  it("rejects second root element in non-fragment mode", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write("<a/><b/>");
+    parser.close();
+    expect(errors.some(e => e.includes("one root element"))).toBe(true);
+  });
+
+  it("accepts multiple roots in fragment mode", () => {
+    const parser = new SaxParser({ fragment: true });
+    const errors: string[] = [];
+    const tags: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.on("opentag", t => tags.push(t.name));
+    parser.write("<a/><b/>");
+    parser.close();
+    expect(errors).toEqual([]);
+    expect(tags).toEqual(["a", "b"]);
+  });
+});
+
+// =============================================================================
+// DOM: Second root element rejection
+// =============================================================================
+
+describe("parseXml second root element rejection", () => {
+  it("rejects document with two root elements", () => {
+    expect(() => parseXml("<a/><b/>")).toThrow(/root/i);
+  });
+
+  it("accepts multiple roots in fragment mode", () => {
+    const doc = parseXml("<a/><b/>", { fragment: true });
+    expect(doc.root.name).toBe("a");
+  });
+});
+
+// =============================================================================
+// Fatal UTF-8 decoding in parseSax
+// =============================================================================
+
+describe("parseSax fatal UTF-8 decoding", () => {
+  it("rejects invalid UTF-8 byte sequence", async () => {
+    const invalidUtf8 = new Uint8Array([
+      0x3c,
+      0x72,
+      0x6f,
+      0x6f,
+      0x74,
+      0x3e, // <root>
+      0xff,
+      0xfe, // invalid UTF-8 bytes
+      0x3c,
+      0x2f,
+      0x72,
+      0x6f,
+      0x6f,
+      0x74,
+      0x3e // </root>
+    ]);
+    const chunks = [invalidUtf8];
+
+    await expect(async () => {
+      for await (const _events of parseSax(chunks)) {
+        // consume
+      }
+    }).rejects.toThrow();
+  });
+
+  it("handles valid multibyte UTF-8 across chunks", async () => {
+    // "\u4f60\u597d" in UTF-8: E4BDA0 E5A5BD
+    const chunk1 = new Uint8Array([
+      0x3c,
+      0x72,
+      0x3e, // <r>
+      0xe4,
+      0xbd // first 2 bytes of \u4f60
+    ]);
+    const chunk2 = new Uint8Array([
+      0xa0, // last byte of \u4f60
+      0xe5,
+      0xa5,
+      0xbd, // \u597d
+      0x3c,
+      0x2f,
+      0x72,
+      0x3e // </r>
+    ]);
+
+    const texts: string[] = [];
+    for await (const events of parseSax([chunk1, chunk2])) {
+      for (const evt of events) {
+        if (evt.eventType === "text") {
+          texts.push(evt.value);
+        }
+      }
+    }
+    expect(texts.join("")).toBe("\u4f60\u597d");
+  });
+});

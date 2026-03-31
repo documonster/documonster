@@ -62,15 +62,17 @@ describe("parseSax", () => {
   });
 
   it("should yield events in batches per chunk", async () => {
-    const chunks = ["<a/>", "<b/>"];
+    const chunks = ["<root><a/>", "<b/></root>"];
     const batchSizes: number[] = [];
 
     for await (const events of parseSax(toAsyncIterable(chunks))) {
       batchSizes.push(events.length);
     }
 
-    expect(batchSizes[0]).toBe(2);
-    expect(batchSizes[1]).toBe(2);
+    // chunk 1: opentag root + opentag a + closetag a = 3
+    // chunk 2: opentag b + closetag b + closetag root = 3
+    expect(batchSizes[0]).toBe(3);
+    expect(batchSizes[1]).toBe(3);
   });
 
   it("should work with single chunk containing full XML", async () => {

@@ -179,8 +179,7 @@ class RowXform extends BaseXform<RowModel> {
         // If cell has address, extract column number from it
         // Otherwise, calculate address based on position
         if (cellModel.address) {
-          const decoded = colCache.decodeAddress(cellModel.address);
-          this.lastCellCol = decoded.col;
+          this.lastCellCol = colCache.decodeCol(cellModel.address);
         } else {
           // No r attribute, calculate address from position
           this.lastCellCol += 1;

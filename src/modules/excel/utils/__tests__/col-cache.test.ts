@@ -307,4 +307,25 @@ describe("colCache", () => {
       });
     });
   });
+
+  describe("decodeCol", () => {
+    it("decodes single letter column", () => {
+      expect(colCache.decodeCol("A1")).toBe(1);
+      expect(colCache.decodeCol("Z99")).toBe(26);
+    });
+
+    it("decodes multi-letter column", () => {
+      expect(colCache.decodeCol("AA1")).toBe(27);
+      expect(colCache.decodeCol("AZ1")).toBe(52);
+      expect(colCache.decodeCol("XFD1")).toBe(16384);
+    });
+
+    it("stops at first non-letter character", () => {
+      expect(colCache.decodeCol("B123")).toBe(2);
+    });
+
+    it("returns 0 for empty or non-letter start", () => {
+      expect(colCache.decodeCol("123")).toBe(0);
+    });
+  });
 });

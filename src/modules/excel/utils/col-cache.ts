@@ -31,6 +31,7 @@ interface ColCache {
   l2n(l: string): number;
   n2l(n: number): string;
   validateAddress(value: string): boolean;
+  decodeCol(value: string): number;
   decodeAddress(value: string): CachedAddress;
   getAddress(r: number | string, c?: number): CachedAddress;
   decode(value: string): CachedAddress | DecodedRange;
@@ -152,6 +153,24 @@ const colCache: ColCache = {
   // =========================================================================
   // Address processing
   _hash: {} as Record<string, CachedAddress>,
+
+  /**
+   * Extract column number from a cell address string (e.g. "A1" → 1, "AA11" → 27).
+   * Lightweight alternative to decodeAddress() when only the column is needed.
+   * Avoids object allocation, string construction, and cache overhead.
+   */
+  decodeCol(value: string): number {
+    let col = 0;
+    for (let i = 0; i < value.length; i++) {
+      const c = value.charCodeAt(i);
+      if (c >= 65 && c <= 90) {
+        col = col * 26 + c - 64;
+      } else {
+        break;
+      }
+    }
+    return col;
+  },
 
   // check if value looks like an address
   validateAddress(value: string): boolean {

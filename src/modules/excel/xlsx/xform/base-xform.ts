@@ -187,7 +187,7 @@ class BaseXform<TModel = any> {
    */
   async parseStreamDirect(stream: AsyncIterable<any>): Promise<TModel | undefined> {
     const parser = new SaxParser();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
 
     let done = false;
     let finalModel: TModel | undefined;

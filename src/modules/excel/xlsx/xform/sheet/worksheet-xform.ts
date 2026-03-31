@@ -702,11 +702,20 @@ class WorkSheetXform extends BaseXform {
     }, {});
     options.formulae = {};
 
-    // compact the rows and cells
-    model.rows = model.rows?.filter(Boolean) ?? [];
-    model.rows.forEach(row => {
-      row.cells = row.cells?.filter(Boolean) ?? [];
-    });
+    // compact the rows and cells — remove any holes from sparse parse results
+    if (model.rows) {
+      if (model.rows.includes(undefined as any)) {
+        model.rows = model.rows.filter(Boolean);
+      }
+      for (let i = 0; i < model.rows.length; i++) {
+        const row = model.rows[i];
+        if (row.cells?.includes(undefined as any)) {
+          row.cells = row.cells.filter(Boolean);
+        }
+      }
+    } else {
+      model.rows = [];
+    }
 
     this.map.cols.reconcile(model.cols, options);
     this.map.sheetData.reconcile(model.rows, options);

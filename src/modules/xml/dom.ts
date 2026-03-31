@@ -83,6 +83,7 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
   const includeComments = options?.comments ?? false;
   const includePI = options?.processingInstructions ?? false;
   const cdataAsNodes = options?.cdataAsNodes ?? false;
+  const isFragment = options?.fragment ?? false;
 
   const parser = new SaxParser({
     position: true,
@@ -202,6 +203,10 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
 
   if (roots.length === 0) {
     throw new XmlParseError("document has no root element");
+  }
+
+  if (!isFragment && roots.length > 1) {
+    throw new XmlParseError("document has multiple root elements");
   }
 
   return {

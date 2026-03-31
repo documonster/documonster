@@ -516,7 +516,7 @@ export abstract class WorkbookReaderBase<
 
     // "emit" mode — must yield, so use direct SAX with per-chunk yield
     const emitParser = new SaxParser();
-    const emitDecoder = new TextDecoder();
+    const emitDecoder = new TextDecoder("utf-8", { fatal: true });
     let pendingEmits: Array<{ index: number; text: SharedStringValue }> = [];
 
     emitParser.on("opentag", (node: SaxTag) => {

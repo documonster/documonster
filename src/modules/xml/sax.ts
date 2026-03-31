@@ -817,6 +817,10 @@ class SaxParser {
     }
 
     if (isNameStartChar(c)) {
+      // Reject a second root element in non-fragment mode
+      if (this.closedRoot && !this.fragment) {
+        this.fail("documents may contain only one root element");
+      }
       this.state = S_OPEN_TAG;
       this.name = charFromCode(c);
       return;
@@ -1770,7 +1774,7 @@ async function* parseSax(
   iterable: AsyncIterable<any> | Iterable<any>,
   options?: SaxOptions
 ): AsyncGenerator<SaxEventAny[]> {
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new SaxParser(options);
 
   let error: Error | undefined;
@@ -1795,6 +1799,14 @@ async function* parseSax(
     if (events.length > 0) {
       yield events;
       events = [];
+    }
+  }
+
+  // Flush any trailing bytes from the streaming decoder
+  if (typeof iterable !== "string") {
+    const trailing = decoder.decode();
+    if (trailing) {
+      parser.write(trailing);
     }
   }
 
@@ -1836,7 +1848,7 @@ async function saxStream(
   parser: SaxParser,
   iterable: AsyncIterable<any> | Iterable<any>
 ): Promise<void> {
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
 
   let error: Error | undefined;
   const prevErrorHandler = (parser as any)._handlers?.error;
@@ -1851,6 +1863,12 @@ async function saxStream(
     if (error) {
       throw error;
     }
+  }
+
+  // Flush any trailing bytes from the streaming decoder
+  const trailing = decoder.decode();
+  if (trailing) {
+    parser.write(trailing);
   }
 
   parser.close();

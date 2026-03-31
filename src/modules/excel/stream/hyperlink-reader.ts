@@ -78,7 +78,7 @@ class HyperlinkReader extends EventEmitter {
 
     try {
       const parser = new SaxParser({ position: false });
-      const decoder = new TextDecoder();
+      const decoder = new TextDecoder("utf-8", { fatal: true });
 
       parser.on("opentag", (node: SaxTag) => {
         if (node.name !== "Relationship") {

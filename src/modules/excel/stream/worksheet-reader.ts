@@ -472,7 +472,7 @@ class WorksheetReader extends EventEmitter {
     // Drive the SAX parser synchronously per chunk, yield events after each chunk.
     // SAX parser.write() is synchronous: all callbacks fire within the write() call.
     // This eliminates async queue overhead entirely.
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
 
     for await (const chunk of iterator) {
       const chunkStr =

@@ -21,10 +21,11 @@ describe("SaxParser", () => {
       const events: string[] = [];
       const handler = (tag: SaxTag) => events.push(tag.name);
       parser.on("opentag", handler);
-      parser.write("<a/>");
+      parser.write("<root><a/>");
       parser.off("opentag");
-      parser.write("<b/>").close();
-      expect(events).toEqual(["a"]);
+      parser.write("<b/></root>").close();
+      // Only "root" and "a" should be captured; "b" fires after off()
+      expect(events).toEqual(["root", "a"]);
     });
 
     it("should track position", () => {
