@@ -67,19 +67,29 @@ class StringBuf {
   addText(text: string): void {
     this._buffer = undefined;
 
-    // Encode string to UTF-8 bytes
-    const encoded = encoder.encode(text);
-    const minSpace = this._inPos + encoded.length;
-
-    // Grow preemptively: if remaining space < 4 bytes margin, double
-    // This matches original Buffer behavior where growth is triggered proactively
-    if (minSpace > this._buf.length - 4) {
-      this._grow(minSpace);
+    // Ensure there's room for at least the string length (optimistic: 1 byte per char).
+    const optimistic = this._inPos + text.length;
+    if (optimistic > this._buf.length - 4) {
+      this._grow(optimistic);
     }
 
-    // Copy encoded bytes to buffer
-    this._buf.set(encoded, this._inPos);
-    this._inPos += encoded.length;
+    // Use encodeInto to write directly into the buffer, avoiding the
+    // intermediate Uint8Array allocation that encoder.encode() creates.
+    const target = this._buf.subarray(this._inPos);
+    const result = encoder.encodeInto(text, target);
+    if (result.read! < text.length) {
+      // Didn't fit — text has multi-byte UTF-8 chars that exceed the optimistic estimate.
+      // Grow to accommodate the remainder (worst case: 3 bytes per remaining char).
+      const remaining = text.length - result.read!;
+      this._grow(this._inPos + result.written + remaining * 3);
+      const result2 = encoder.encodeInto(
+        text.substring(result.read!),
+        this._buf.subarray(this._inPos + result.written)
+      );
+      this._inPos += result.written + result2.written;
+    } else {
+      this._inPos += result.written;
+    }
   }
 
   addStringBuf(inBuf: StringBuf): void {

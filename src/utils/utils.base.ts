@@ -188,9 +188,17 @@ const DATE_FMT_RE = /[ymdhMsb]/;
 /** Strips bracket expressions `[...]` and quoted literals `"..."` from a format string. */
 const STRIP_BRACKETS_QUOTES_RE = /\[[^\]]*\]|"[^"]*"/g;
 
+/** Cache for isDateFmt results — typically only 5-20 unique formats per workbook,
+ *  but each may be tested hundreds of thousands of times during reconcile. */
+const _isDateFmtCache = new Map<string, boolean>();
+
 export function isDateFmt(fmt: string | null | undefined): boolean {
   if (!fmt) {
     return false;
+  }
+  const cached = _isDateFmtCache.get(fmt);
+  if (cached !== undefined) {
+    return cached;
   }
   // Only the first section (used for positive numbers / dates) determines
   // whether the format represents a date.  The "@" text placeholder may
@@ -202,10 +210,14 @@ export function isDateFmt(fmt: string | null | undefined): boolean {
   const clean = firstSection.replace(STRIP_BRACKETS_QUOTES_RE, "");
 
   // "@" in the cleaned section means it's a text format, not a date format.
+  let result: boolean;
   if (clean.indexOf("@") > -1) {
-    return false;
+    result = false;
+  } else {
+    result = DATE_FMT_RE.test(clean);
   }
-  return DATE_FMT_RE.test(clean);
+  _isDateFmtCache.set(fmt, result);
+  return result;
 }
 
 export function parseBoolean(value: unknown): boolean {

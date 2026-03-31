@@ -115,15 +115,20 @@ class RowXform extends BaseXform<RowModel> {
       this.numRowsSeen += 1;
       // Reset lastCellCol for each new row
       this.lastCellCol = 0;
-      const spans = node.attributes.spans
-        ? node.attributes.spans.split(":").map((span: string) => parseInt(span, 10))
-        : [undefined, undefined];
+      const spans = node.attributes.spans;
+      let spanMin: number | undefined;
+      let spanMax: number | undefined;
+      if (spans) {
+        const colonIdx = spans.indexOf(":");
+        spanMin = parseInt(spans, 10); // parses up to non-digit
+        spanMax = colonIdx > -1 ? parseInt(spans.substring(colonIdx + 1), 10) : undefined;
+      }
       // If r attribute is missing, use numRowsSeen as the row number
       const rowNumber = node.attributes.r ? parseInt(node.attributes.r, 10) : this.numRowsSeen;
       const model: RowModel = (this.model = {
         number: rowNumber,
-        min: spans[0],
-        max: spans[1],
+        min: spanMin,
+        max: spanMax,
         cells: []
       });
       if (node.attributes.s) {
