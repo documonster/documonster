@@ -80,7 +80,30 @@ const ooxmlEscapeRegex = /_x([0-9A-Fa-f]{4})_/g;
  * (the `_x005F_` decodes to `_`, consuming the match).
  */
 export function decodeOoxmlEscape(text: string): string {
-  return text.replace(ooxmlEscapeRegex, (_$0, $1) => String.fromCharCode(parseInt($1, 16)));
+  return text.replace(ooxmlEscapeRegex, (match, $1) => {
+    const code = parseInt($1, 16);
+    // Reject characters that are invalid in XML 1.0:
+    // - NUL (0x00)
+    // - ASCII control chars except TAB(0x09), LF(0x0A), CR(0x0D)
+    // - DEL (0x7F)
+    // - Lone surrogates (0xD800-0xDFFF)
+    // - Non-characters (0xFFFE, 0xFFFF)
+    if (
+      code === 0 ||
+      (code >= 0x01 && code <= 0x08) ||
+      code === 0x0b ||
+      code === 0x0c ||
+      (code >= 0x0e && code <= 0x1f) ||
+      code === 0x7f ||
+      (code >= 0xd800 && code <= 0xdfff) ||
+      code === 0xfffe ||
+      code === 0xffff
+    ) {
+      // Invalid character — leave the escape sequence as-is
+      return match;
+    }
+    return String.fromCharCode(code);
+  });
 }
 
 /**

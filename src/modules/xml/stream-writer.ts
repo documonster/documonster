@@ -9,7 +9,7 @@
  * so rendering code can target either backend transparently.
  */
 
-import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
+import { xmlEncode, xmlEncodeAttr, validateXmlName } from "@xml/encode";
 import { XmlWriteError } from "@xml/errors";
 import type { WritableTarget, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -93,6 +93,7 @@ class XmlStreamWriter implements XmlSink {
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
+    validateXmlName(name);
     // Flush any pending open tag first
     if (this._open) {
       this._flushOpen(">");
@@ -103,6 +104,7 @@ class XmlStreamWriter implements XmlSink {
       for (const key in attributes) {
         const value = attributes[key];
         if (value !== undefined) {
+          validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
         }
       }
@@ -117,6 +119,7 @@ class XmlStreamWriter implements XmlSink {
     if (!this._open) {
       throw new XmlWriteError("add attribute", "no element is open");
     }
+    validateXmlName(name);
     // Append to pending buffer — no write call
     this._pending += ` ${name}="${xmlEncodeAttr(String(value))}"`;
   }
@@ -131,6 +134,7 @@ class XmlStreamWriter implements XmlSink {
     for (const key in attributes) {
       const value = attributes[key];
       if (value !== undefined) {
+        validateXmlName(key);
         this._pending += ` ${key}="${xmlEncodeAttr(String(value))}"`;
       }
     }
@@ -195,6 +199,7 @@ class XmlStreamWriter implements XmlSink {
   }
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
+    validateXmlName(name);
     // Flush any pending open tag
     if (this._open) {
       this._flushOpen(">");
@@ -206,6 +211,7 @@ class XmlStreamWriter implements XmlSink {
       for (const key in attributes) {
         const value = attributes[key];
         if (value !== undefined) {
+          validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
         }
       }

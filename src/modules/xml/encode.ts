@@ -204,3 +204,39 @@ export function xmlEncode(text: string): string {
 export function xmlEncodeAttr(value: string): string {
   return xmlEncode(value);
 }
+
+// =============================================================================
+// Name Validation
+// =============================================================================
+
+/**
+ * Characters that must NEVER appear in XML element or attribute names.
+ * This is a fast security check to prevent markup injection via names,
+ * not a full XML NameChar validation (which would require Unicode tables).
+ */
+const INVALID_NAME_CHARS = /[\s<>"'\/=&]/;
+
+/**
+ * Validate an XML element or attribute name against injection attacks.
+ *
+ * Rejects:
+ * - Empty names
+ * - Names containing whitespace, `<`, `>`, `"`, `'`, `/`, `=`, `&`
+ * - Names starting with a digit, `-`, or `.`
+ *
+ * This is NOT a full XML Name validation (which requires Unicode NameStartChar
+ * tables). It is a focused security check to prevent markup injection.
+ */
+export function validateXmlName(name: string): void {
+  if (!name) {
+    throw new Error("XML name must not be empty");
+  }
+  if (INVALID_NAME_CHARS.test(name)) {
+    throw new Error(`Invalid XML name: contains forbidden character in "${name}"`);
+  }
+  // XML names cannot start with a digit, hyphen, or dot
+  const first = name.charCodeAt(0);
+  if ((first >= 0x30 && first <= 0x39) || first === 0x2d || first === 0x2e) {
+    throw new Error(`Invalid XML name: "${name}" starts with forbidden character`);
+  }
+}

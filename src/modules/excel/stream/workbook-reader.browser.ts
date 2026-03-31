@@ -633,6 +633,13 @@ export abstract class WorkbookReaderBase<
         pendingEmits = [];
       }
     }
+
+    // Flush trailing bytes (catches truncated UTF-8)
+    const emitTrailing = emitDecoder.decode();
+    if (emitTrailing) {
+      emitParser.write(emitTrailing);
+    }
+
     emitParser.close();
     if (pendingEmits.length > 0) {
       for (const item of pendingEmits) {

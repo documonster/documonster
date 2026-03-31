@@ -115,6 +115,13 @@ class HyperlinkReader extends EventEmitter {
           typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
         parser.write(chunkStr);
       }
+
+      // Flush trailing bytes (catches truncated UTF-8)
+      const trailing = decoder.decode();
+      if (trailing) {
+        parser.write(trailing);
+      }
+
       parser.close();
 
       this.emit("finished");

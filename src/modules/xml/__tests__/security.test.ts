@@ -14,8 +14,11 @@
 import { describe, it, expect } from "vitest";
 import { SaxParser } from "@xml/sax";
 import { parseXml } from "@xml/dom";
-import { xmlDecode, xmlEncode } from "@xml/encode";
+import { xmlDecode, xmlEncode, validateXmlName } from "@xml/encode";
+import { XmlWriter } from "@xml/writer";
+import { XmlStreamWriter } from "@xml/stream-writer";
 import { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";
+import { decodeOoxmlEscape } from "@utils/utils";
 
 // =============================================================================
 // XXE (XML External Entity) Prevention
@@ -845,5 +848,143 @@ describe("Invalid XML 1.0 character rejection", () => {
     // The expanded text should be in the attr value, not create a new attribute
     expect(tags[0].attr).toContain("injected");
     expect(tags[0].newattr).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// OOXML _xHHHH_ escape security
+// =============================================================================
+
+describe("OOXML _xHHHH_ escape security", () => {
+  it("rejects NUL character _x0000_", () => {
+    const result = decodeOoxmlEscape("hello_x0000_world");
+    expect(result).toBe("hello_x0000_world"); // left as-is
+  });
+
+  it("rejects control character _x0001_", () => {
+    const result = decodeOoxmlEscape("_x0001_");
+    expect(result).toBe("_x0001_");
+  });
+
+  it("rejects DEL character _x007F_", () => {
+    const result = decodeOoxmlEscape("_x007F_");
+    expect(result).toBe("_x007F_");
+  });
+
+  it("rejects lone surrogate _xD800_", () => {
+    const result = decodeOoxmlEscape("_xD800_");
+    expect(result).toBe("_xD800_");
+  });
+
+  it("rejects lone surrogate _xDFFF_", () => {
+    const result = decodeOoxmlEscape("_xDFFF_");
+    expect(result).toBe("_xDFFF_");
+  });
+
+  it("rejects FFFE noncharacter _xFFFE_", () => {
+    const result = decodeOoxmlEscape("_xFFFE_");
+    expect(result).toBe("_xFFFE_");
+  });
+
+  it("rejects FFFF noncharacter _xFFFF_", () => {
+    const result = decodeOoxmlEscape("_xFFFF_");
+    expect(result).toBe("_xFFFF_");
+  });
+
+  it("accepts valid characters like TAB _x0009_", () => {
+    const result = decodeOoxmlEscape("_x0009_");
+    expect(result).toBe("\t");
+  });
+
+  it("accepts valid characters like LF _x000A_", () => {
+    const result = decodeOoxmlEscape("_x000A_");
+    expect(result).toBe("\n");
+  });
+
+  it("accepts valid characters like CR _x000D_", () => {
+    const result = decodeOoxmlEscape("_x000D_");
+    expect(result).toBe("\r");
+  });
+
+  it("accepts regular characters _x0041_", () => {
+    const result = decodeOoxmlEscape("_x0041_");
+    expect(result).toBe("A");
+  });
+});
+
+// =============================================================================
+// XML name injection prevention
+// =============================================================================
+
+describe("XML name injection prevention", () => {
+  it("validateXmlName rejects empty name", () => {
+    expect(() => validateXmlName("")).toThrow(/empty/);
+  });
+
+  it("validateXmlName rejects name with space", () => {
+    expect(() => validateXmlName("bad name")).toThrow(/forbidden/);
+  });
+
+  it("validateXmlName rejects name with <", () => {
+    expect(() => validateXmlName("bad<name")).toThrow(/forbidden/);
+  });
+
+  it("validateXmlName rejects name with >", () => {
+    expect(() => validateXmlName("bad>name")).toThrow(/forbidden/);
+  });
+
+  it('validateXmlName rejects name with "', () => {
+    expect(() => validateXmlName('bad"name')).toThrow(/forbidden/);
+  });
+
+  it("validateXmlName rejects name with /", () => {
+    expect(() => validateXmlName("bad/name")).toThrow(/forbidden/);
+  });
+
+  it("validateXmlName rejects name with =", () => {
+    expect(() => validateXmlName("bad=name")).toThrow(/forbidden/);
+  });
+
+  it("validateXmlName rejects name starting with digit", () => {
+    expect(() => validateXmlName("1bad")).toThrow(/starts with/);
+  });
+
+  it("validateXmlName rejects name starting with hyphen", () => {
+    expect(() => validateXmlName("-bad")).toThrow(/starts with/);
+  });
+
+  it("validateXmlName rejects name starting with dot", () => {
+    expect(() => validateXmlName(".bad")).toThrow(/starts with/);
+  });
+
+  it("validateXmlName accepts valid names", () => {
+    expect(() => validateXmlName("root")).not.toThrow();
+    expect(() => validateXmlName("_private")).not.toThrow();
+    expect(() => validateXmlName("ns:element")).not.toThrow();
+    expect(() => validateXmlName("x14ac:dyDescent")).not.toThrow();
+  });
+
+  it("XmlWriter rejects bad element names", () => {
+    const w = new XmlWriter();
+    expect(() => w.openNode("bad name")).toThrow();
+    expect(() => w.leafNode("bad>name")).toThrow();
+  });
+
+  it("XmlWriter rejects bad attribute names", () => {
+    const w = new XmlWriter();
+    w.openNode("root");
+    expect(() => w.addAttribute("bad name", "val")).toThrow();
+  });
+
+  it("XmlStreamWriter rejects bad element names", () => {
+    const sw = new XmlStreamWriter({ write() {} });
+    expect(() => sw.openNode("bad name")).toThrow();
+    expect(() => sw.leafNode("bad>name")).toThrow();
+  });
+
+  it("XmlStreamWriter rejects bad attribute names", () => {
+    const sw = new XmlStreamWriter({ write() {} });
+    sw.openNode("root");
+    expect(() => sw.addAttribute("bad name", "val")).toThrow();
   });
 });

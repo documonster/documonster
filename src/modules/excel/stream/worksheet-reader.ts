@@ -486,6 +486,12 @@ class WorksheetReader extends EventEmitter {
       }
     }
 
+    // Flush any trailing bytes from the streaming decoder (catches truncated UTF-8)
+    const trailing = decoder.decode();
+    if (trailing) {
+      parser.write(trailing);
+    }
+
     parser.close();
     // Flush any remaining events
     const finalBatch = worksheetEvents as WorksheetEvent[] | null;

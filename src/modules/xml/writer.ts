@@ -8,7 +8,7 @@
  * with rollback support via snapshot/restore.
  */
 
-import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
+import { xmlEncode, xmlEncodeAttr, validateXmlName } from "@xml/encode";
 import { XmlWriteError } from "@xml/errors";
 import type { XmlAttributes, XmlSink } from "@xml/types";
 
@@ -23,6 +23,7 @@ function pushAttributes(parts: string[], attributes?: XmlAttributes): void {
   for (const key in attributes) {
     const value = attributes[key];
     if (value !== undefined) {
+      validateXmlName(key);
       parts.push(` ${key}="${xmlEncodeAttr(String(value))}"`);
     }
   }
@@ -114,6 +115,7 @@ class XmlWriter implements XmlSink {
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
+    validateXmlName(name);
     if (this._open) {
       this._parts.push(">");
     }
@@ -124,6 +126,7 @@ class XmlWriter implements XmlSink {
       for (const key in attributes) {
         const value = (attributes as any)[key];
         if (value !== undefined) {
+          validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
         }
       }
@@ -137,6 +140,7 @@ class XmlWriter implements XmlSink {
     if (!this._open) {
       throw new XmlWriteError("add attribute", "no element is open");
     }
+    validateXmlName(name);
     this._parts.push(` ${name}="${xmlEncodeAttr(String(value))}"`);
   }
 
@@ -208,6 +212,7 @@ class XmlWriter implements XmlSink {
   }
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
+    validateXmlName(name);
     if (this._open) {
       this._parts.push(">");
       this._open = false;
@@ -218,6 +223,7 @@ class XmlWriter implements XmlSink {
       for (const key in attributes) {
         const value = (attributes as any)[key];
         if (value !== undefined) {
+          validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
         }
       }

@@ -276,6 +276,15 @@ class BaseXform<TModel = any> {
     }
 
     if (!done) {
+      // Flush trailing bytes from streaming decoder (catches truncated UTF-8)
+      const trailing = decoder.decode();
+      if (trailing) {
+        parser.write(trailing);
+        if (parseError) {
+          throw parseError;
+        }
+      }
+
       parser.close();
       if (parseError) {
         throw parseError;
