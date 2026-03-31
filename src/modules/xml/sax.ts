@@ -778,13 +778,41 @@ class SaxParser {
   }
 
   private sOpenTag(): void {
-    const c = this.getCode();
-    if (c === -1) {
+    // Fast path: scan the tag name as a contiguous slice instead of char-by-char concat
+    // Note: first char was already consumed by sOpenWaka and stored in this.name
+    const { chunk } = this;
+    const nameStart = this.i; // start after the first char already in this.name
+    let pos = this.i;
+
+    // Fast ASCII scan
+    while (pos < chunk.length) {
+      const code = chunk.charCodeAt(pos);
+      if (code < 128 ? NAME_CHAR_ASCII[code] === 1 : isNameChar(code)) {
+        pos++;
+      } else {
+        break;
+      }
+    }
+
+    if (pos >= chunk.length) {
+      // Chunk ended in the middle of tag name
+      this.name += chunk.slice(nameStart, pos);
+      this.i = pos;
+      if (this.trackPosition) {
+        this.column += pos - nameStart;
+      }
       return;
     }
 
-    if (isNameChar(c)) {
-      this.name += charFromCode(c);
+    this.name += chunk.slice(nameStart, pos);
+    this.i = pos;
+    if (this.trackPosition) {
+      this.column += pos - nameStart;
+    }
+
+    // Now read the delimiter character
+    const c = this.getCode();
+    if (c === -1) {
       return;
     }
 
@@ -840,13 +868,38 @@ class SaxParser {
   }
 
   private sAttribName(): void {
-    const c = this.getCode();
-    if (c === -1) {
+    // Fast path: scan attribute name as a contiguous slice
+    // Note: first char was already consumed by sAttrib and stored in this.name
+    const { chunk } = this;
+    const nameStart = this.i;
+    let pos = this.i;
+
+    while (pos < chunk.length) {
+      const code = chunk.charCodeAt(pos);
+      if (code < 128 ? NAME_CHAR_ASCII[code] === 1 : isNameChar(code)) {
+        pos++;
+      } else {
+        break;
+      }
+    }
+
+    if (pos >= chunk.length) {
+      this.name += chunk.slice(nameStart, pos);
+      this.i = pos;
+      if (this.trackPosition) {
+        this.column += pos - nameStart;
+      }
       return;
     }
 
-    if (isNameChar(c)) {
-      this.name += charFromCode(c);
+    this.name += chunk.slice(nameStart, pos);
+    this.i = pos;
+    if (this.trackPosition) {
+      this.column += pos - nameStart;
+    }
+
+    const c = this.getCode();
+    if (c === -1) {
       return;
     }
 
@@ -978,15 +1031,70 @@ class SaxParser {
   }
 
   private sCloseTag(): void {
+    const { chunk } = this;
+    let pos = this.i;
+
+    if (this.name === "") {
+      // First character must be NameStartChar — read it
+      if (pos >= chunk.length) {
+        const c = this.getCode();
+        if (c === -1) {
+          return;
+        }
+        if (isNameStartChar(c)) {
+          this.name = charFromCode(c);
+        } else {
+          this.fail("unexpected character in close tag");
+        }
+        return;
+      }
+      const first = chunk.charCodeAt(pos);
+      if (first < 128 ? NAME_START_CHAR_ASCII[first] !== 1 : !isNameStartChar(first)) {
+        this.i = pos;
+        const c = this.getCode();
+        if (c !== -1) {
+          this.fail("unexpected character in close tag");
+        }
+        return;
+      }
+      // Consume the first character
+      this.name = chunk[pos];
+      pos++;
+      if (this.trackPosition) {
+        this.column++;
+      }
+    }
+
+    // Fast scan remaining name chars
+    const nameStart = pos;
+    while (pos < chunk.length) {
+      const code = chunk.charCodeAt(pos);
+      if (code < 128 ? NAME_CHAR_ASCII[code] === 1 : isNameChar(code)) {
+        pos++;
+      } else {
+        break;
+      }
+    }
+
+    if (pos > nameStart) {
+      this.name += chunk.slice(nameStart, pos);
+    }
+    if (this.trackPosition) {
+      this.column += pos - nameStart;
+    }
+
+    if (pos >= chunk.length) {
+      this.i = pos;
+      return;
+    }
+
+    this.i = pos;
     const c = this.getCode();
     if (c === -1) {
       return;
     }
 
-    // First character must be a NameStartChar, subsequent must be NameChar
-    if (this.name === "" ? isNameStartChar(c) : isNameChar(c)) {
-      this.name += charFromCode(c);
-    } else if (c === GREATER) {
+    if (c === GREATER) {
       this.closeTag();
     } else if (isS(c)) {
       this.state = S_CLOSE_TAG_SAW_WHITE;

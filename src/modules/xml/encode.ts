@@ -22,17 +22,37 @@ const DECODE_MAP: Record<string, string> = {
 const DECODE_RE = /&(#\d+|#[xX][0-9A-Fa-f]+|\w+);/g;
 
 /**
- * Regex that detects the first character requiring encoding.
- * Matches: < > & " ' DEL, invalid control characters, and lone surrogates.
- * Uses negative lookahead/lookbehind to avoid matching valid surrogate pairs.
+ * Lookup table for characters that need encoding in the ASCII range (0-127).
+ * 0 = safe, 1 = encode to entity, 2 = strip (invalid control char)
  */
-/* oxlint-disable no-control-regex -- Control characters are intentionally matched */
-const ENCODE_DETECT_RE =
-  /[<>&'"\x7F\x00-\x08\x0B-\x0C\x0E-\x1F]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const ENCODE_ACTION = /* @__PURE__ */ (() => {
+  const t = new Uint8Array(128);
+  // Invalid control chars → strip
+  for (let i = 0; i <= 0x08; i++) {
+    t[i] = 2;
+  }
+  t[0x0b] = 2;
+  t[0x0c] = 2;
+  for (let i = 0x0e; i <= 0x1f; i++) {
+    t[i] = 2;
+  }
+  t[0x7f] = 2; // DEL
+  // Entity-encode chars
+  t[0x22] = 1; // "
+  t[0x26] = 1; // &
+  t[0x27] = 1; // '
+  t[0x3c] = 1; // <
+  t[0x3e] = 1; // >
+  return t;
+})();
 
-const ENCODE_ALL_RE =
-  /[<>&'"\x7F\x00-\x08\x0B-\x0C\x0E-\x1F]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-/* oxlint-enable no-control-regex */
+const ENCODE_ENTITIES: Record<number, string> = {
+  0x22: "&quot;",
+  0x26: "&amp;",
+  0x27: "&apos;",
+  0x3c: "&lt;",
+  0x3e: "&gt;"
+};
 
 // =============================================================================
 // Decode
@@ -77,33 +97,87 @@ export function xmlDecode(text: string): string {
  * Encode special characters for XML output.
  *
  * Escapes `<`, `>`, `&`, `"`, `'` to their entity equivalents.
- * Strips invalid XML control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F).
+ * Strips invalid XML control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F)
+ * and lone surrogates (0xD800-0xDFFF without a pair).
  *
- * Fast-path: returns the original string if no special characters are found.
+ * Optimized: uses a lookup table and manual scan instead of regex for
+ * maximum throughput on the hot path (called per attribute/text value).
  */
 export function xmlEncode(text: string): string {
-  if (!ENCODE_DETECT_RE.test(text)) {
-    return text;
+  const len = text.length;
+  // Fast scan: find first character that needs encoding
+  let firstBad = -1;
+  for (let i = 0; i < len; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 128) {
+      if (ENCODE_ACTION[code] !== 0) {
+        firstBad = i;
+        break;
+      }
+    } else if (code >= 0xd800 && code <= 0xdfff) {
+      // Check for lone surrogate
+      if (code <= 0xdbff) {
+        const next = text.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          i++; // valid pair, skip low surrogate
+          continue;
+        }
+      }
+      firstBad = i;
+      break;
+    }
   }
 
-  return text.replace(ENCODE_ALL_RE, ch => {
-    const code = ch.charCodeAt(0);
-    switch (code) {
-      case 34:
-        return "&quot;";
-      case 38:
-        return "&amp;";
-      case 39:
-        return "&apos;";
-      case 60:
-        return "&lt;";
-      case 62:
-        return "&gt;";
-      default:
-        // Strip invalid control characters and DEL
-        return "";
+  if (firstBad === -1) {
+    return text; // fast path: nothing to encode
+  }
+
+  // Slow path: array + join (V8-optimized pattern)
+  const parts: string[] = [];
+  let lastIndex = 0;
+
+  for (let i = firstBad; i < len; i++) {
+    const code = text.charCodeAt(i);
+
+    if (code < 128) {
+      const action = ENCODE_ACTION[code];
+      if (action === 0) {
+        continue;
+      }
+      // Flush safe segment
+      if (lastIndex < i) {
+        parts.push(text.substring(lastIndex, i));
+      }
+      if (action === 1) {
+        parts.push(ENCODE_ENTITIES[code]);
+      }
+      // action === 2: strip
+      lastIndex = i + 1;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++; // valid pair, keep going
+        continue;
+      }
+      // Lone high surrogate — strip
+      if (lastIndex < i) {
+        parts.push(text.substring(lastIndex, i));
+      }
+      lastIndex = i + 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // Lone low surrogate — strip
+      if (lastIndex < i) {
+        parts.push(text.substring(lastIndex, i));
+      }
+      lastIndex = i + 1;
     }
-  });
+  }
+
+  if (lastIndex < len) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return parts.length === 1 ? parts[0] : parts.join("");
 }
 
 // =============================================================================

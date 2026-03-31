@@ -75,12 +75,18 @@ class XmlStreamWriter implements XmlSink {
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
-    if (this._open) {
-      this._target.write(">");
+    // Merge open-close-previous + open-new + attributes into fewer writes
+    let s = this._open ? `><${name}` : `<${name}`;
+    if (attributes) {
+      for (const key in attributes) {
+        const value = attributes[key];
+        if (value !== undefined) {
+          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        }
+      }
     }
+    this._target.write(s);
     this._stack.push(name);
-    this._target.write(`<${name}`);
-    this._writeAttributes(attributes);
     this._leaf = true;
     this._open = true;
   }
@@ -158,11 +164,26 @@ class XmlStreamWriter implements XmlSink {
   }
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
-    this.openNode(name, attributes);
-    if (text !== undefined) {
-      this.writeText(text);
+    // Optimized: build complete leaf element as a single string, single write call
+    let s = this._open ? ">" : "";
+    this._open = false;
+
+    s += `<${name}`;
+    if (attributes) {
+      for (const key in attributes) {
+        const value = attributes[key];
+        if (value !== undefined) {
+          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        }
+      }
     }
-    this.closeNode();
+    if (text !== undefined) {
+      s += `>${xmlEncode(String(text))}</${name}>`;
+    } else {
+      s += "/>";
+    }
+    this._target.write(s);
+    this._leaf = false;
   }
 
   // ===========================================================================
@@ -185,9 +206,6 @@ class XmlStreamWriter implements XmlSink {
       return;
     }
     for (const key in attributes) {
-      if (!Object.prototype.hasOwnProperty.call(attributes, key)) {
-        continue;
-      }
       const value = attributes[key];
       if (value !== undefined) {
         this._target.write(` ${key}="${xmlEncodeAttr(String(value))}"`);

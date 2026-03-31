@@ -16,21 +16,16 @@ import type { XmlAttributes, XmlSink } from "@xml/types";
 // Internal Helpers
 // =============================================================================
 
-function formatAttributes(attributes?: XmlAttributes): string {
+function pushAttributes(parts: string[], attributes?: XmlAttributes): void {
   if (!attributes) {
-    return "";
+    return;
   }
-  let result = "";
   for (const key in attributes) {
-    if (!Object.prototype.hasOwnProperty.call(attributes, key)) {
-      continue;
-    }
     const value = attributes[key];
     if (value !== undefined) {
-      result += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+      parts.push(` ${key}="${xmlEncodeAttr(String(value))}"`);
     }
   }
-  return result;
 }
 
 // =============================================================================
@@ -39,6 +34,7 @@ function formatAttributes(attributes?: XmlAttributes): string {
 
 interface Snapshot {
   partsLength: number;
+  chunksLength: number;
   stackLength: number;
   leaf: boolean;
   open: boolean;
@@ -65,10 +61,23 @@ interface Snapshot {
  */
 class XmlWriter implements XmlSink {
   private _parts: string[] = [];
+  private _chunks: string[] = [];
   private _stack: string[] = [];
   private _snapshots: Snapshot[] = [];
   private _leaf = false;
   private _open = false;
+
+  /** Periodically consolidate small strings to reduce final join overhead. */
+  private _consolidate(): void {
+    // Not safe during rollback — joining fragments cannot be undone
+    if (this._snapshots.length > 0) {
+      return;
+    }
+    if (this._parts.length >= 10000) {
+      this._chunks.push(this._parts.join(""));
+      this._parts.length = 0;
+    }
+  }
 
   // ===========================================================================
   // State Queries
@@ -89,7 +98,7 @@ class XmlWriter implements XmlSink {
    * Useful for detecting whether a section produced any output.
    */
   get cursor(): number {
-    return this._parts.length;
+    return this._chunks.length * 10000 + this._parts.length;
   }
 
   // ===========================================================================
@@ -99,7 +108,9 @@ class XmlWriter implements XmlSink {
   openXml(attributes?: XmlAttributes): void {
     const defaults: XmlAttributes = { version: "1.0", encoding: "UTF-8", standalone: "yes" };
     const merged = attributes ? { ...defaults, ...attributes } : defaults;
-    this._parts.push(`<?xml${formatAttributes(merged)}?>\n`);
+    this._parts.push("<?xml");
+    pushAttributes(this._parts, merged);
+    this._parts.push("?>\n");
   }
 
   openNode(name: string, attributes?: XmlAttributes): void {
@@ -107,7 +118,11 @@ class XmlWriter implements XmlSink {
       this._parts.push(">");
     }
     this._stack.push(name);
-    this._parts.push(`<${name}${formatAttributes(attributes)}`);
+    // Push "<name" + attributes as separate pieces — V8 optimizes array push + join
+    // better than template literal concatenation for this pattern.
+    this._parts.push("<");
+    this._parts.push(name);
+    pushAttributes(this._parts, attributes);
     this._leaf = true;
     this._open = true;
   }
@@ -123,10 +138,7 @@ class XmlWriter implements XmlSink {
     if (!this._open) {
       throw new XmlWriteError("add attributes", "no element is open");
     }
-    const s = formatAttributes(attributes);
-    if (s) {
-      this._parts.push(s);
-    }
+    pushAttributes(this._parts, attributes);
   }
 
   writeText(text: string | number): void {
@@ -186,14 +198,27 @@ class XmlWriter implements XmlSink {
     }
     this._open = false;
     this._leaf = false;
+    this._consolidate();
   }
 
   leafNode(name: string, attributes?: XmlAttributes, text?: string | number): void {
-    this.openNode(name, attributes);
-    if (text !== undefined) {
-      this.writeText(text);
+    if (this._open) {
+      this._parts.push(">");
+      this._open = false;
     }
-    this.closeNode();
+    this._parts.push("<");
+    this._parts.push(name);
+    pushAttributes(this._parts, attributes);
+    if (text !== undefined) {
+      this._parts.push(">");
+      this._parts.push(xmlEncode(String(text)));
+      this._parts.push("</");
+      this._parts.push(name);
+      this._parts.push(">");
+    } else {
+      this._parts.push("/>");
+    }
+    this._leaf = false;
   }
 
   // ===========================================================================
@@ -209,12 +234,15 @@ class XmlWriter implements XmlSink {
 
   /** Return the built XML string. */
   toString(): string {
-    return this._parts.join("");
+    if (this._chunks.length === 0) {
+      return this._parts.join("");
+    }
+    return this._chunks.join("") + this._parts.join("");
   }
 
   /** Alias for toString(). */
   get xml(): string {
-    return this._parts.join("");
+    return this.toString();
   }
 
   // ===========================================================================
@@ -230,6 +258,7 @@ class XmlWriter implements XmlSink {
   save(): void {
     this._snapshots.push({
       partsLength: this._parts.length,
+      chunksLength: this._chunks.length,
       stackLength: this._stack.length,
       leaf: this._leaf,
       open: this._open
@@ -251,6 +280,7 @@ class XmlWriter implements XmlSink {
     }
     const snap = this._snapshots.pop()!;
     this._parts.length = snap.partsLength;
+    this._chunks.length = snap.chunksLength;
     this._stack.length = snap.stackLength;
     this._leaf = snap.leaf;
     this._open = snap.open;
@@ -263,6 +293,7 @@ class XmlWriter implements XmlSink {
   /** Reset the writer to its initial empty state. */
   reset(): void {
     this._parts = [];
+    this._chunks = [];
     this._stack = [];
     this._snapshots = [];
     this._leaf = false;
