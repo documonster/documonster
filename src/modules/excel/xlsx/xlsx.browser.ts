@@ -155,11 +155,20 @@ class StreamingZipWriterAdapter implements IZipWriter {
         this._emit("data", data);
         if (this.pipedStream) {
           const ok = this.pipedStream.write(data);
-          // Track backpressure: only treat a synchronous `false` as backpressure.
-          // write() may return a Promise in browser stream implementations;
-          // in that case async backpressure is handled via the 'drain' event
-          // listener installed in pipe().
-          if (typeof ok === "boolean" && ok === false) {
+          // Handle backpressure from both sync and async write() return types.
+          // Sync Node.js streams return boolean; browser streams may return
+          // Promise<boolean>. Async backpressure is also propagated via the
+          // 'drain' event listener installed in pipe().
+          if (ok instanceof Promise) {
+            ok.then(
+              result => {
+                if (result === false) {
+                  this._needsDrain = true;
+                }
+              },
+              () => {} // write errors surface via the stream's error event
+            );
+          } else if (ok === false) {
             this._needsDrain = true;
           }
         }
