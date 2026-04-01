@@ -9,7 +9,7 @@
  * - `a/b[@id='1']`  — match child `b` with attribute `id` equal to `"1"`
  * - `a/*​/c`          — wildcard: any element name at that level
  * - `a//c`           — recursive descent: `c` at any depth under `a`
- * - `a/b[0]`         — index: first matching `b` at that level
+ * - `a/b[0]`         — index: first matching `b` under each parent `a`
  *
  * Functions:
  * - `query(el, path)`    — first match or undefined
@@ -145,18 +145,23 @@ function matchDescendants(el: XmlElement, step: PathStep): XmlElement[] {
 function applyStep(contexts: XmlElement[], step: PathStep): XmlElement[] {
   let results: XmlElement[] = [];
 
-  for (const ctx of contexts) {
-    if (step.recursive) {
-      results = results.concat(matchDescendants(ctx, step));
-    } else {
-      results = results.concat(matchChildren(ctx, step));
-    }
-  }
-
-  // Apply index filter after collecting all matches at this level
   if (step.index !== undefined) {
+    // Per-parent index: for each context, find the Nth match among its children/descendants.
     const idx = step.index;
-    return idx >= 0 && idx < results.length ? [results[idx]] : [];
+    for (const ctx of contexts) {
+      const matches = step.recursive ? matchDescendants(ctx, step) : matchChildren(ctx, step);
+      if (idx >= 0 && idx < matches.length) {
+        results.push(matches[idx]);
+      }
+    }
+  } else {
+    for (const ctx of contexts) {
+      if (step.recursive) {
+        results = results.concat(matchDescendants(ctx, step));
+      } else {
+        results = results.concat(matchChildren(ctx, step));
+      }
+    }
   }
 
   return results;
@@ -165,6 +170,21 @@ function applyStep(contexts: XmlElement[], step: PathStep): XmlElement[] {
 // =============================================================================
 // Public API
 // =============================================================================
+
+/** Internal: run a parsed path against a root element, return all matches. */
+function runQuery(element: XmlElement, path: string): XmlElement[] {
+  const steps = parsePath(path);
+  let contexts: XmlElement[] = [element];
+
+  for (const step of steps) {
+    contexts = applyStep(contexts, step);
+    if (contexts.length === 0) {
+      return contexts;
+    }
+  }
+
+  return contexts;
+}
 
 /**
  * Find the first element matching a path expression.
@@ -181,17 +201,7 @@ function applyStep(contexts: XmlElement[], step: PathStep): XmlElement[] {
  * ```
  */
 function query(element: XmlElement, path: string): XmlElement | undefined {
-  const steps = parsePath(path);
-  let contexts: XmlElement[] = [element];
-
-  for (const step of steps) {
-    contexts = applyStep(contexts, step);
-    if (contexts.length === 0) {
-      return undefined;
-    }
-  }
-
-  return contexts[0];
+  return runQuery(element, path)[0];
 }
 
 /**
@@ -209,17 +219,7 @@ function query(element: XmlElement, path: string): XmlElement | undefined {
  * ```
  */
 function queryAll(element: XmlElement, path: string): XmlElement[] {
-  const steps = parsePath(path);
-  let contexts: XmlElement[] = [element];
-
-  for (const step of steps) {
-    contexts = applyStep(contexts, step);
-    if (contexts.length === 0) {
-      return [];
-    }
-  }
-
-  return contexts;
+  return runQuery(element, path);
 }
 
 export { query, queryAll };

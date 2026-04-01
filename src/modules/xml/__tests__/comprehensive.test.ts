@@ -226,10 +226,9 @@ describe("Attribute parsing — extended", () => {
     expect(attrs.a).toBe("second");
   });
 
-  it("should handle duplicate attributes via DOM parser", () => {
-    const doc = parseXml('<r a="first" a="second"/>');
-    // DOM parser also takes the last value
-    expect(attr(doc.root, "a")).toBe("second");
+  it("should reject duplicate attributes via DOM parser", () => {
+    // XML 1.0 §3.1 WFC: Unique Att Spec — duplicate attributes are a well-formedness error
+    expect(() => parseXml('<r a="first" a="second"/>')).toThrow(/duplicate attribute/);
   });
 });
 
@@ -845,9 +844,10 @@ describe("Namespace — extended", () => {
     parser.on("opentag", tag => tags.push({ ...tag }));
     parser.write('<root xml:lang="en"/>');
     parser.close();
-    // xml: prefix is always bound to http://www.w3.org/XML/1998/namespace
-    // Our parser doesn't auto-bind xml: prefix, but it shouldn't crash
+    // xml: prefix is pre-bound to http://www.w3.org/XML/1998/namespace
     expect(tags[0].name).toBe("root");
+    expect(tags[0].prefix).toBe("");
+    // The element itself has no prefix, but xml:lang attribute is valid
   });
 });
 

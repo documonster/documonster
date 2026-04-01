@@ -9,7 +9,14 @@
  * so rendering code can target either backend transparently.
  */
 
-import { xmlEncode, xmlEncodeAttr, validateXmlName } from "@xml/encode";
+import {
+  xmlEncode,
+  xmlEncodeAttr,
+  validateXmlName,
+  encodeCData,
+  validateCommentText,
+  StdDocAttributes
+} from "@xml/encode";
 import { XmlWriteError } from "@xml/errors";
 import type { WritableTarget, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -80,12 +87,12 @@ class XmlStreamWriter implements XmlSink {
   // ===========================================================================
 
   openXml(attributes?: XmlAttributes): void {
-    const defaults: XmlAttributes = { version: "1.0", encoding: "UTF-8", standalone: "yes" };
-    const merged = attributes ? { ...defaults, ...attributes } : defaults;
+    const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
     let s = "<?xml";
     for (const key in merged) {
       const value = (merged as any)[key];
       if (value !== undefined) {
+        validateXmlName(key);
         s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
       }
     }
@@ -161,8 +168,7 @@ class XmlStreamWriter implements XmlSink {
       this._flushOpen(">");
     }
     this._leaf = false;
-    // Split on ]]> to produce valid CDATA — the sequence ]]> cannot appear inside CDATA.
-    this._target.write("<![CDATA[" + text.split("]]>").join("]]]]><![CDATA[>") + "]]>");
+    this._target.write(encodeCData(text));
   }
 
   writeComment(text: string): void {
@@ -170,13 +176,7 @@ class XmlStreamWriter implements XmlSink {
       this._flushOpen(">");
     }
     this._leaf = false;
-    // XML spec: comments must not contain "--" and must not end with "-".
-    if (text.includes("--") || text.endsWith("-")) {
-      throw new XmlWriteError(
-        "write comment",
-        'comment text must not contain "--" or end with "-"'
-      );
-    }
+    validateCommentText(text);
     this._target.write(`<!--${text}-->`);
   }
 

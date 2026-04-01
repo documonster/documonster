@@ -988,3 +988,97 @@ describe("XML name injection prevention", () => {
     expect(() => sw.addAttribute("bad name", "val")).toThrow();
   });
 });
+
+// =============================================================================
+// Duplicate Attribute Rejection (XML 1.0 §3.1 WFC: Unique Att Spec)
+// =============================================================================
+
+describe("Duplicate attribute rejection", () => {
+  it("should error on duplicate attribute in open tag", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write('<root a="1" a="2"/>');
+    parser.close();
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain("duplicate attribute");
+    expect(errors[0]).toContain("a");
+  });
+
+  it("should use last-value-wins after reporting error (error-recovery)", () => {
+    const parser = new SaxParser();
+    const tags: Array<Record<string, string>> = [];
+    parser.on("error", () => {}); // swallow
+    parser.on("opentag", t => tags.push({ ...t.attributes }));
+    parser.write('<root x="first" x="second"/>');
+    parser.close();
+    expect(tags[0].x).toBe("second");
+  });
+
+  it("should throw when no error handler is registered", () => {
+    const parser = new SaxParser();
+    expect(() => {
+      parser.write('<root a="1" a="2"/>');
+      parser.close();
+    }).toThrow(/duplicate attribute/);
+  });
+
+  it("should error on duplicate attribute in non-self-closing tag", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write('<root a="1" a="2"></root>');
+    parser.close();
+    expect(errors.some(e => e.includes("duplicate attribute"))).toBe(true);
+  });
+
+  it("should error on duplicate xmlns declaration", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write('<root xmlns="http://a" xmlns="http://b"/>');
+    parser.close();
+    expect(errors.some(e => e.includes("duplicate attribute"))).toBe(true);
+  });
+
+  it("should error on duplicate prefixed xmlns declaration", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write('<root xmlns:x="http://a" xmlns:x="http://b"/>');
+    parser.close();
+    expect(errors.some(e => e.includes("duplicate attribute"))).toBe(true);
+  });
+
+  it("should detect duplicates when attribute spans chunk boundary", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    // Split so first attr is in chunk 1, duplicate is in chunk 2
+    parser.write('<root foo="1" ');
+    parser.write('foo="2"/>');
+    parser.close();
+    expect(errors.some(e => e.includes("duplicate attribute"))).toBe(true);
+  });
+
+  it("should not error when attributes have different names", () => {
+    const parser = new SaxParser();
+    const errors: string[] = [];
+    parser.on("error", e => errors.push(e.message));
+    parser.write('<root a="1" b="2" c="3"/>');
+    parser.close();
+    expect(errors.length).toBe(0);
+  });
+
+  it("DOM parser should reject duplicate attributes", () => {
+    expect(() => {
+      parseXml('<root a="1" a="2"/>');
+    }).toThrow(/duplicate attribute/);
+  });
+
+  it("DOM parser in fragment mode should reject duplicate attributes", () => {
+    expect(() => {
+      parseXml('<a x="1" x="2"/><b/>', { fragment: true });
+    }).toThrow(/duplicate attribute/);
+  });
+});

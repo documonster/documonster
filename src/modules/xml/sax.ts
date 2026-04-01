@@ -250,6 +250,7 @@ class SaxParser {
   private sawRoot: boolean = false;
   private closedRoot: boolean = false;
   private carriedFromPrevious?: string;
+  private _bomStripped: boolean = false;
   private _closed: boolean = false;
   private reportedTextBeforeRoot: boolean = false;
   private reportedTextAfterRoot: boolean = false;
@@ -300,6 +301,7 @@ class SaxParser {
     this.reportedTextBeforeRoot = this.fragment;
     this.reportedTextAfterRoot = this.fragment;
     this.carriedFromPrevious = undefined;
+    this._bomStripped = false;
     // Note: _closed is NOT reset here — it is managed by end() and write().
     this.line = 1;
     this.column = 0;
@@ -308,7 +310,14 @@ class SaxParser {
     this.chunk = "";
     this.i = 0;
     this.prevI = 0;
-    this._nsStack = [];
+    this._nsStack = this.xmlns
+      ? [
+          {
+            xml: "http://www.w3.org/XML/1998/namespace",
+            xmlns: "http://www.w3.org/2000/xmlns/"
+          }
+        ]
+      : [];
     this._entityExpansionCount = 0;
   }
 
@@ -376,6 +385,14 @@ class SaxParser {
     if (this.carriedFromPrevious !== undefined) {
       chunk = this.carriedFromPrevious + chunk;
       this.carriedFromPrevious = undefined;
+    }
+
+    // Strip UTF-8 BOM (U+FEFF) from the very beginning of input
+    if (!this._bomStripped) {
+      this._bomStripped = true;
+      if (chunk.length > 0 && chunk.charCodeAt(0) === 0xfeff) {
+        chunk = chunk.slice(1);
+      }
     }
 
     let limit = chunk.length;
@@ -1598,6 +1615,9 @@ class SaxParser {
 
   /** Extract xmlns declarations from tag attributes and populate tag namespace fields. */
   private applyNamespaces(tag: SaxTag): void {
+    const XML_NS = "http://www.w3.org/XML/1998/namespace";
+    const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
+
     // 1. Collect xmlns declarations from already-populated attributes
     const nsDecls: Record<string, string> = {};
     const attrs = tag.attributes;
@@ -1608,21 +1628,75 @@ class SaxParser {
       if (name === "xmlns") {
         nsDecls[""] = attrs[name]; // default namespace
       } else if (name.startsWith("xmlns:")) {
-        nsDecls[name.slice(6)] = attrs[name];
+        const prefix = name.slice(6);
+        const uri = attrs[name];
+
+        // Namespace well-formedness checks (XML Namespaces §3)
+        if (prefix === "xmlns") {
+          this.fail('the "xmlns" prefix must not be declared');
+        } else if (prefix === "xml" && uri !== XML_NS) {
+          this.fail(`the "xml" prefix must be bound to "${XML_NS}"`);
+        } else if (uri === XML_NS && prefix !== "xml") {
+          this.fail(`namespace "${XML_NS}" must only be bound to the "xml" prefix`);
+        } else if (uri === XMLNS_NS) {
+          this.fail(`namespace "${XMLNS_NS}" must not be bound to any prefix`);
+        }
+
+        nsDecls[prefix] = uri;
       }
     }
 
     // 2. Push namespace scope
     this._nsStack.push(nsDecls);
 
-    // 3. Set namespace fields on the tag
+    // 3. Set namespace fields on the tag element
     if (Object.keys(nsDecls).length > 0) {
       tag.ns = nsDecls;
     }
     const [prefix, local] = this.splitQName(tag.name);
+
+    // Multi-colon QName check (namespace-mode only)
+    if (local.includes(":")) {
+      this.fail(`invalid QName "${tag.name}": local part must not contain ":"`);
+    }
+
     tag.prefix = prefix;
     tag.local = local;
     tag.uri = this.resolveNs(prefix);
+
+    // 4. Report unbound element prefix
+    if (prefix !== "" && tag.uri === "") {
+      this.fail(`unbound namespace prefix: "${prefix}"`);
+    }
+
+    // 5. Resolve attribute namespaces, check unbound prefixes and expanded-name duplicates
+    //    Note: unprefixed attributes do NOT inherit the default namespace (XML Namespaces §6.2)
+    const expandedNames = new Set<string>();
+    for (const name in attrs) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, name)) {
+        continue;
+      }
+      // Skip xmlns declarations — they are not ordinary attributes
+      if (name === "xmlns" || name.startsWith("xmlns:")) {
+        continue;
+      }
+      const [aPrefix, aLocal] = this.splitQName(name);
+      if (aLocal.includes(":")) {
+        this.fail(`invalid attribute QName "${name}": local part must not contain ":"`);
+      }
+      if (aPrefix !== "") {
+        const aUri = this.resolveNs(aPrefix);
+        if (aUri === "") {
+          this.fail(`unbound namespace prefix on attribute: "${aPrefix}"`);
+        }
+        // Check expanded-name duplicate: same URI + local name
+        const expanded = aUri + "\0" + aLocal;
+        if (expandedNames.has(expanded)) {
+          this.fail(`duplicate attribute by expanded name: {${aUri}}${aLocal}`);
+        }
+        expandedNames.add(expanded);
+      }
+    }
   }
 
   // ===========================================================================
@@ -1634,6 +1708,9 @@ class SaxParser {
     tag.isSelfClosing = false;
 
     for (const { name, value } of this.attribList) {
+      if (name in tag.attributes) {
+        this.fail(`duplicate attribute: ${name}`);
+      }
       tag.attributes[name] = value;
     }
     this.attribList = [];
@@ -1659,6 +1736,9 @@ class SaxParser {
     tag.isSelfClosing = true;
 
     for (const { name, value } of this.attribList) {
+      if (name in tag.attributes) {
+        this.fail(`duplicate attribute: ${name}`);
+      }
       tag.attributes[name] = value;
     }
     this.attribList = [];

@@ -155,8 +155,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
       parts.push("\n  <r>");
       const fieldCount = Math.min(realRow.length, cacheFields.length);
       for (let i = 0; i < fieldCount; i++) {
-        parts.push("\n    ");
-        parts.push(this.renderCellNew(realRow[i], cacheFields[i].sharedItems));
+        parts.push("\n    " + this.renderCellNew(realRow[i], cacheFields[i].sharedItems));
       }
       // Pad missing columns with <m /> so every record has exactly one value per cacheField (OOXML requirement)
       for (let i = fieldCount; i < cacheFields.length; i++) {

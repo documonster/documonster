@@ -217,6 +217,20 @@ describe("parseXml fragment mode", () => {
     expect(doc.root.name).toBe("a");
   });
 
+  it("should expose all root elements via roots", () => {
+    const doc = parseXml("<a/><b/><c/>", { fragment: true });
+    expect(doc.roots.length).toBe(3);
+    expect(doc.roots[0].name).toBe("a");
+    expect(doc.roots[1].name).toBe("b");
+    expect(doc.roots[2].name).toBe("c");
+  });
+
+  it("roots should have exactly one element in non-fragment mode", () => {
+    const doc = parseXml("<root/>");
+    expect(doc.roots.length).toBe(1);
+    expect(doc.roots[0]).toBe(doc.root);
+  });
+
   it("should still throw on truly empty input in fragment mode", () => {
     expect(() => parseXml("", { fragment: true })).toThrow("no root element");
   });
@@ -225,6 +239,39 @@ describe("parseXml fragment mode", () => {
     // Fragment mode doesn't require a root element to start, but parseXml
     // always requires at least one element to return as doc.root
     expect(() => parseXml("just text", { fragment: true })).toThrow("no root element");
+  });
+});
+
+// =============================================================================
+// parseXml prologue (top-level comments / PIs)
+// =============================================================================
+
+describe("parseXml prologue", () => {
+  it("should collect top-level comments when enabled", () => {
+    const doc = parseXml("<!-- before --><root/><!-- after -->", { comments: true });
+    expect(doc.prologue.length).toBe(2);
+    expect(doc.prologue[0].type).toBe("comment");
+    expect((doc.prologue[0] as any).value).toBe(" before ");
+    expect((doc.prologue[1] as any).value).toBe(" after ");
+  });
+
+  it("should collect top-level PIs when enabled", () => {
+    const doc = parseXml('<?style type="xsl"?><root/>', { processingInstructions: true });
+    expect(doc.prologue.length).toBe(1);
+    expect(doc.prologue[0].type).toBe("processing-instruction");
+    expect((doc.prologue[0] as any).target).toBe("style");
+  });
+
+  it("should return empty prologue when comments/PIs are disabled", () => {
+    const doc = parseXml("<!-- hidden --><root/>");
+    expect(doc.prologue.length).toBe(0);
+  });
+
+  it("should not include XML declaration in prologue", () => {
+    const doc = parseXml('<?xml version="1.0"?><root/>', { processingInstructions: true });
+    // xml declaration is captured in doc.declaration, not prologue
+    expect(doc.prologue.length).toBe(0);
+    expect(doc.declaration).toBeDefined();
   });
 });
 

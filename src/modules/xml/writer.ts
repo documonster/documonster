@@ -8,7 +8,14 @@
  * with rollback support via snapshot/restore.
  */
 
-import { xmlEncode, xmlEncodeAttr, validateXmlName } from "@xml/encode";
+import {
+  xmlEncode,
+  xmlEncodeAttr,
+  validateXmlName,
+  encodeCData,
+  validateCommentText,
+  StdDocAttributes
+} from "@xml/encode";
 import { XmlWriteError } from "@xml/errors";
 import type { XmlAttributes, XmlSink } from "@xml/types";
 
@@ -107,8 +114,7 @@ class XmlWriter implements XmlSink {
   // ===========================================================================
 
   openXml(attributes?: XmlAttributes): void {
-    const defaults: XmlAttributes = { version: "1.0", encoding: "UTF-8", standalone: "yes" };
-    const merged = attributes ? { ...defaults, ...attributes } : defaults;
+    const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
     this._parts.push("<?xml");
     pushAttributes(this._parts, merged);
     this._parts.push("?>\n");
@@ -175,9 +181,7 @@ class XmlWriter implements XmlSink {
       this._open = false;
     }
     this._leaf = false;
-    // Split on ]]> to produce valid CDATA — the sequence ]]> cannot appear inside CDATA.
-    // Standard technique: split into adjacent CDATA sections at each occurrence.
-    this._parts.push("<![CDATA[" + text.split("]]>").join("]]]]><![CDATA[>") + "]]>");
+    this._parts.push(encodeCData(text));
   }
 
   writeComment(text: string): void {
@@ -186,13 +190,7 @@ class XmlWriter implements XmlSink {
       this._open = false;
     }
     this._leaf = false;
-    // XML spec: comments must not contain "--" and must not end with "-".
-    if (text.includes("--") || text.endsWith("-")) {
-      throw new XmlWriteError(
-        "write comment",
-        'comment text must not contain "--" or end with "-"'
-      );
-    }
+    validateCommentText(text);
     this._parts.push(`<!--${text}-->`);
   }
 
@@ -316,16 +314,5 @@ class XmlWriter implements XmlSink {
     this._open = false;
   }
 }
-
-// =============================================================================
-// Standard Declaration Attributes
-// =============================================================================
-
-/** Default XML declaration attributes. */
-const StdDocAttributes: XmlAttributes = {
-  version: "1.0",
-  encoding: "UTF-8",
-  standalone: "yes"
-};
 
 export { XmlWriter, StdDocAttributes };

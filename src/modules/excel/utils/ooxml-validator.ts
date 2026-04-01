@@ -2,7 +2,7 @@ import path from "node:path";
 
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
-import { parseSax } from "@xml/sax";
+import { SaxParser, parseSax } from "@xml/sax";
 
 export type OoxmlProblemKind =
   | "missing-part"
@@ -157,18 +157,28 @@ function parseContentTypes(xml: string): {
 } {
   const defaults: Array<{ extension: string; contentType: string }> = [];
   const overrides: Array<{ partName: string; contentType: string }> = [];
-  const defaultRe = /<Default\s+[^>]*Extension="([^"]+)"[^>]*ContentType="([^"]+)"[^>]*\/>/g;
-  const overrideRe = /<Override\s+[^>]*PartName="([^"]+)"[^>]*ContentType="([^"]+)"[^>]*\/>/g;
+  let hasTypesRoot = false;
 
-  for (let match = defaultRe.exec(xml); match; match = defaultRe.exec(xml)) {
-    defaults.push({ extension: match[1], contentType: match[2] });
-  }
+  const parser = new SaxParser({ position: false });
+  parser.on("error", () => {}); // swallow — parseOk will reflect success
+  parser.on("opentag", tag => {
+    const { name, attributes: a } = tag;
+    if (name === "Types" || name.endsWith(":Types")) {
+      hasTypesRoot = true;
+    } else if (name === "Default" || name.endsWith(":Default")) {
+      if (a.Extension && a.ContentType) {
+        defaults.push({ extension: a.Extension, contentType: a.ContentType });
+      }
+    } else if (name === "Override" || name.endsWith(":Override")) {
+      if (a.PartName && a.ContentType) {
+        overrides.push({ partName: a.PartName, contentType: a.ContentType });
+      }
+    }
+  });
+  parser.write(xml);
+  parser.close();
 
-  for (let match = overrideRe.exec(xml); match; match = overrideRe.exec(xml)) {
-    overrides.push({ partName: match[1], contentType: match[2] });
-  }
-
-  const parseOk = xml.includes("<Types") && (defaults.length > 0 || overrides.length > 0);
+  const parseOk = hasTypesRoot && (defaults.length > 0 || overrides.length > 0);
   return { defaults, overrides, parseOk };
 }
 
@@ -187,18 +197,25 @@ function parseRelationships(xml: string): {
   rels: Array<{ id: string; type: string; target: string; targetMode?: string }>;
   parseOk: boolean;
 } {
-  // Ensure the rels XML itself is parseable.
-  // We still use regex to extract rels for speed/portability.
-  const relRe =
-    /<Relationship\s+[^>]*Id="([^"]+)"[^>]*Type="([^"]+)"[^>]*Target="([^"]*)"(?:[^>]*TargetMode="([^"]+)")?[^>]*\/>/g;
-
   const rels: Array<{ id: string; type: string; target: string; targetMode?: string }> = [];
-  for (let match = relRe.exec(xml); match; match = relRe.exec(xml)) {
-    rels.push({ id: match[1], type: match[2], target: match[3], targetMode: match[4] });
-  }
+  let hasRoot = false;
 
-  // Basic sanity: should have <Relationships ...> root.
-  const parseOk = xml.includes("<Relationships") && xml.includes("Relationship");
+  const parser = new SaxParser({ position: false });
+  parser.on("error", () => {}); // swallow — parseOk will reflect success
+  parser.on("opentag", tag => {
+    const { name, attributes: a } = tag;
+    if (name === "Relationships" || name.endsWith(":Relationships")) {
+      hasRoot = true;
+    } else if (name === "Relationship" || name.endsWith(":Relationship")) {
+      if (a.Id && a.Type && a.Target !== undefined) {
+        rels.push({ id: a.Id, type: a.Type, target: a.Target, targetMode: a.TargetMode });
+      }
+    }
+  });
+  parser.write(xml);
+  parser.close();
+
+  const parseOk = hasRoot;
   return { rels, parseOk };
 }
 

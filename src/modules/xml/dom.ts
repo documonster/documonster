@@ -18,6 +18,7 @@ import type {
   XmlElement,
   XmlNode,
   XmlParseOptions,
+  XmlProcessingInstruction,
   XmlText
 } from "@xml/types";
 
@@ -60,6 +61,16 @@ function createElement(name: string, attributes: Record<string, string>): XmlEle
   };
 }
 
+/** Append text to a parent element, merging with the last child if it is a text node. */
+function appendText(parent: XmlElement, text: string): void {
+  const lastChild = parent.children[parent.children.length - 1];
+  if (lastChild && lastChild.type === "text") {
+    (lastChild as XmlText).value += text;
+  } else {
+    parent.children.push({ type: "text", value: text } as XmlText);
+  }
+}
+
 // =============================================================================
 // parseXml
 // =============================================================================
@@ -71,6 +82,10 @@ function createElement(name: string, attributes: Record<string, string>): XmlEle
  * @param options - Parse options.
  * @returns The parsed XML document.
  * @throws {XmlParseError} If the XML is malformed.
+ *
+ * **Fragment mode** (`{ fragment: true }`): suppresses the "multiple root
+ * elements" error. The returned `XmlDocument.root` is the first root element,
+ * and `XmlDocument.roots` contains all root-level elements.
  *
  * @example
  * ```ts
@@ -134,15 +149,7 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
     if (text.length === 0) {
       return;
     }
-    const parent = stack[stack.length - 1];
-    // Merge adjacent text nodes
-    const lastChild = parent.children[parent.children.length - 1];
-    if (lastChild && lastChild.type === "text") {
-      (lastChild as XmlText).value += text;
-    } else {
-      const node: XmlText = { type: "text", value: text };
-      parent.children.push(node);
-    }
+    appendText(stack[stack.length - 1], text);
   });
 
   parser.on("cdata", text => {
@@ -151,14 +158,7 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
       const node: XmlCData = { type: "cdata", value: text };
       parent.children.push(node);
     } else {
-      // Merge into text
-      const lastChild = parent.children[parent.children.length - 1];
-      if (lastChild && lastChild.type === "text") {
-        (lastChild as XmlText).value += text;
-      } else {
-        const node: XmlText = { type: "text", value: text };
-        parent.children.push(node);
-      }
+      appendText(parent, text);
     }
   });
 
@@ -209,9 +209,17 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
     throw new XmlParseError("document has multiple root elements");
   }
 
+  // Collect top-level comments and processing instructions (prologue)
+  const prologue = syntheticRoot.children.filter(
+    (n): n is XmlComment | XmlProcessingInstruction =>
+      n.type === "comment" || n.type === "processing-instruction"
+  );
+
   return {
     declaration,
-    root: roots[0]
+    root: roots[0],
+    roots,
+    prologue
   };
 }
 

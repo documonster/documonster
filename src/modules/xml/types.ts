@@ -80,8 +80,19 @@ export type XmlNode = XmlElement | XmlText | XmlCData | XmlComment | XmlProcessi
 export interface XmlDocument {
   /** XML declaration attributes (version, encoding, standalone). */
   declaration?: Record<string, string>;
-  /** Root element. */
+  /** Root element (first root element in fragment mode). */
   root: XmlElement;
+  /**
+   * All root-level elements. In non-fragment mode this always has exactly one element.
+   * In fragment mode (`{ fragment: true }`), this contains all top-level elements.
+   */
+  roots: XmlElement[];
+  /**
+   * Top-level nodes that appear before the root element (comments and processing
+   * instructions). Only populated when `comments` or `processingInstructions`
+   * options are enabled.
+   */
+  prologue: Array<XmlComment | XmlProcessingInstruction>;
 }
 
 // =============================================================================

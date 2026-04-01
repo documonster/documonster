@@ -388,7 +388,7 @@ class CellXform extends BaseXform {
               model.type = Enums.ValueType.String;
               // Decode OOXML _xHHHH_ escapes for plain text inline strings.
               // Rich text inline strings are already decoded via RichTextXform -> TextXform.
-              if (typeof model.value === "string") {
+              if (typeof model.value === "string" && model.value.includes("_x")) {
                 model.value = decodeOoxmlEscape(model.value);
               }
               break;

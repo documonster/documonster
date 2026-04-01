@@ -232,6 +232,7 @@ describe("SaxParser", () => {
       name: "duplicate attribute",
       xml: '<span id="hello" id="there"></span>',
       expect: [
+        ["error", "1:28: duplicate attribute: id"],
         ["opentag", { name: "span", attributes: { id: "there" }, isSelfClosing: false }],
         ["closetag", { name: "span", attributes: { id: "there" }, isSelfClosing: false }]
       ]

@@ -139,6 +139,174 @@ describe("Namespace support", () => {
     });
   });
 
+  describe("Reserved namespace rules", () => {
+    it("should pre-bind xml prefix", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const tags: SaxTag[] = [];
+      parser.on("opentag", tag => tags.push({ ...tag }));
+      parser.write('<root xml:lang="en"/>');
+      parser.close();
+      // xml: prefix resolves without explicit declaration
+      expect(tags[0].name).toBe("root");
+    });
+
+    it("should allow re-declaring xml prefix to its correct URI", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:xml="http://www.w3.org/XML/1998/namespace"/>');
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+
+    it("should error when xml prefix is bound to wrong URI", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:xml="http://wrong.com"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("xml"))).toBe(true);
+    });
+
+    it("should error when xmlns prefix is declared", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:xmlns="http://www.w3.org/2000/xmlns/"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("xmlns"))).toBe(true);
+    });
+
+    it("should error when non-xml prefix is bound to XML namespace URI", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:foo="http://www.w3.org/XML/1998/namespace"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("xml"))).toBe(true);
+    });
+
+    it("should error when any prefix is bound to xmlns namespace URI", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:foo="http://www.w3.org/2000/xmlns/"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("xmlns"))).toBe(true);
+    });
+
+    it("should error on unbound prefix", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write("<p:root/>");
+      parser.close();
+      expect(errors.some(e => e.includes("unbound"))).toBe(true);
+    });
+
+    it("should not error on unbound prefix when xmlns is false", () => {
+      const parser = new SaxParser({ xmlns: false });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write("<p:root/>");
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+  });
+
+  describe("Attribute namespace rules", () => {
+    it("should error on unbound attribute prefix", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns="http://ns" p:attr="val"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("unbound") && e.includes("p"))).toBe(true);
+    });
+
+    it("should not error on bound attribute prefix", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:p="http://p" p:attr="val"/>');
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+
+    it("should error on expanded-name duplicate attributes", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      // a:x and b:x both resolve to {http://same}x — duplicate by expanded name
+      parser.write('<root xmlns:a="http://same" xmlns:b="http://same" a:x="1" b:x="2"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("duplicate attribute by expanded name"))).toBe(true);
+    });
+
+    it("should not error when different URIs have same local name", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:a="http://a" xmlns:b="http://b" a:x="1" b:x="2"/>');
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+
+    it("should not check unprefixed attributes for default namespace", () => {
+      // Per XML Namespaces §6.2, unprefixed attributes do NOT inherit default ns
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns="http://default" attr="val"/>');
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+  });
+
+  describe("Multi-colon QName rejection", () => {
+    it("should error on multi-colon element name", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<a xmlns:a="http://a"><a:b:c/></a>');
+      parser.close();
+      expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
+    });
+
+    it("should error on multi-colon attribute name", () => {
+      const parser = new SaxParser({ xmlns: true });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write('<root xmlns:a="http://a" a:b:c="val"/>');
+      parser.close();
+      expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
+    });
+
+    it("should accept multi-colon when xmlns is false", () => {
+      const parser = new SaxParser({ xmlns: false });
+      const errors: string[] = [];
+      parser.on("error", e => errors.push(e.message));
+      parser.on("opentag", () => {});
+      parser.write("<a:b:c/>");
+      parser.close();
+      expect(errors.length).toBe(0);
+    });
+  });
+
   describe("parseXml with xmlns", () => {
     it("should propagate namespace info to DOM elements", () => {
       const doc = parseXml(

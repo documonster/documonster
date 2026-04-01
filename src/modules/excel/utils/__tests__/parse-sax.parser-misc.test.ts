@@ -50,22 +50,18 @@ describe("SaxParser", () => {
 
   describe("BOM handling", () => {
     test({
-      name: "BOM at start produces error (not skipped)",
+      name: "BOM at start is stripped (XML spec)",
       xml: "\uFEFF<P></P>",
       expect: [
-        ["text", "\uFEFF"],
-        ["error", "1:2: text data outside of root node."],
         ["opentag", { name: "P", attributes: {}, isSelfClosing: false }],
         ["closetag", { name: "P", attributes: {}, isSelfClosing: false }]
       ]
     });
 
     test({
-      name: "BOM in contents",
+      name: "BOM in contents preserved, BOM at start stripped",
       xml: '\uFEFF<P BOM="\uFEFF">\uFEFFStarts and ends with BOM\uFEFF</P>',
       expect: [
-        ["text", "\uFEFF"],
-        ["error", "1:2: text data outside of root node."],
         ["opentag", { name: "P", attributes: { BOM: "\uFEFF" }, isSelfClosing: false }],
         ["text", "\uFEFFStarts and ends with BOM\uFEFF"],
         ["closetag", { name: "P", attributes: { BOM: "\uFEFF" }, isSelfClosing: false }]

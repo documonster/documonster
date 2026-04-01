@@ -185,4 +185,37 @@ describe("queryAll", () => {
       expect(values.length).toBe(4);
     });
   });
+
+  describe("Per-parent index semantics", () => {
+    it("[0] should return the first child of each parent", () => {
+      // Two rows, each with multiple cells — row/c[0] should return first cell of EACH row
+      const doc = parseXml(WORKSHEET_XML);
+      const firstCells = queryAll(doc.root, "sheetData/row/c[0]");
+      expect(firstCells.length).toBe(2); // one per row
+      expect(attr(firstCells[0], "r")).toBe("A1");
+      expect(attr(firstCells[1], "r")).toBe("A2");
+    });
+
+    it("[1] should return the second child of each parent", () => {
+      const doc = parseXml(WORKSHEET_XML);
+      const secondCells = queryAll(doc.root, "sheetData/row/c[1]");
+      expect(secondCells.length).toBe(2);
+      expect(attr(secondCells[0], "r")).toBe("B1");
+      expect(attr(secondCells[1], "r")).toBe("B2");
+    });
+
+    it("out-of-range index returns nothing for that parent", () => {
+      const doc = parseXml(WORKSHEET_XML);
+      // Each row has 2 cells, so [5] should match nothing
+      const none = queryAll(doc.root, "sheetData/row/c[5]");
+      expect(none.length).toBe(0);
+    });
+
+    it("query() with index returns first match across parents", () => {
+      const doc = parseXml(WORKSHEET_XML);
+      const first = query(doc.root, "sheetData/row/c[0]");
+      expect(first).toBeDefined();
+      expect(attr(first!, "r")).toBe("A1");
+    });
+  });
 });

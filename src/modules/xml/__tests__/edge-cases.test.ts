@@ -358,15 +358,19 @@ describe("Namespace edge cases", () => {
   });
 
   it("should handle element with multiple colons as a name", () => {
-    // This is technically invalid XML but shouldn't crash
+    // Multi-colon QNames are invalid in namespace mode and produce an error,
+    // but parsing continues with error recovery
     const parser = new SaxParser({ xmlns: true });
     const tags: SaxTag[] = [];
+    const errors: string[] = [];
     parser.on("opentag", tag => tags.push({ ...tag }));
-    parser.on("error", () => {}); // suppress
+    parser.on("error", e => errors.push(e.message));
     parser.write("<a:b:c/>");
     parser.close();
-    // Should parse without crashing (the "prefix" is "a", local is "b:c")
+    // Should parse without crashing; prefix is "a", local is "b:c"
     expect(tags.length).toBe(1);
+    // Should report the multi-colon error
+    expect(errors.some(e => e.includes("local part must not contain"))).toBe(true);
   });
 
   it("should handle very long namespace URI", () => {
@@ -654,6 +658,45 @@ describe("parseSax edge cases", () => {
     expect(events.some((e: any) => e.eventType === "opentag" && e.value.name === "root")).toBe(
       true
     );
+  });
+});
+
+// =============================================================================
+// BOM Handling
+// =============================================================================
+
+describe("BOM handling", () => {
+  it("should ignore UTF-8 BOM at start of input", () => {
+    const parser = new SaxParser();
+    const tags: string[] = [];
+    parser.on("opentag", tag => tags.push(tag.name));
+    parser.write("\uFEFF<root/>");
+    parser.close();
+    expect(tags).toEqual(["root"]);
+  });
+
+  it("should ignore BOM when it arrives as first chunk", () => {
+    const parser = new SaxParser();
+    const tags: string[] = [];
+    parser.on("opentag", tag => tags.push(tag.name));
+    parser.write("\uFEFF");
+    parser.write("<root/>");
+    parser.close();
+    expect(tags).toEqual(["root"]);
+  });
+
+  it("should work via parseXml with BOM", () => {
+    const doc = parseXml("\uFEFF<root><child/></root>");
+    expect(doc.root.name).toBe("root");
+  });
+
+  it("should NOT strip BOM that appears mid-stream", () => {
+    const parser = new SaxParser();
+    const texts: string[] = [];
+    parser.on("text", t => texts.push(t));
+    parser.write("<root>before\uFEFFafter</root>");
+    parser.close();
+    expect(texts.join("")).toContain("\uFEFF");
   });
 });
 

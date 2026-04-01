@@ -4,8 +4,6 @@ import { decodeOoxmlEscape, encodeOoxmlEscape } from "@utils/utils";
 //   <t xml:space="preserve"> is </t>
 
 class TextXform extends BaseXform {
-  declare private _text: string[];
-
   get tag(): string {
     return "t";
   }
@@ -21,7 +19,6 @@ class TextXform extends BaseXform {
 
   parseOpen(node: any): boolean {
     if (node.name === "t") {
-      this._text = [];
       this.model = "";
       return true;
     }
@@ -29,17 +26,20 @@ class TextXform extends BaseXform {
   }
 
   parseText(text: string): void {
-    this._text.push(text);
-    // Keep model up-to-date with raw (undecoded) text for consumers that read
-    // model before parseClose is called (e.g. RichTextXform).
-    // OOXML _xHHHH_ decoding happens in parseClose for efficiency.
-    this.model = this._text.length === 1 ? text : this._text.join("");
+    // Accumulate text incrementally. In the common case (single text event),
+    // model is still "" so the first assignment is just `text`.
+    // For multi-chunk text, we concat directly — avoids array + join overhead.
+    // model is kept up-to-date for consumers that read it before parseClose
+    // (e.g. RichTextXform reads model on close without calling parseClose).
+    this.model = this.model ? this.model + text : text;
   }
 
   parseClose(): boolean {
     // Decode OOXML escapes once, only if needed
-    const raw = this._text.length === 1 ? this._text[0] : this._text.join("");
-    this.model = raw.includes("_x") ? decodeOoxmlEscape(raw) : raw;
+    const raw = this.model as string;
+    if (raw.includes("_x")) {
+      this.model = decodeOoxmlEscape(raw);
+    }
     return false;
   }
 }

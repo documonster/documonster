@@ -50,7 +50,14 @@ export type {
 // Encoding / Decoding
 // =============================================================================
 
-export { xmlEncode, xmlDecode, xmlEncodeAttr, validateXmlName } from "./encode";
+export {
+  xmlEncode,
+  xmlDecode,
+  xmlEncodeAttr,
+  validateXmlName,
+  encodeCData,
+  validateCommentText
+} from "./encode";
 
 // =============================================================================
 // Writers

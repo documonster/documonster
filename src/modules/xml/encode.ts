@@ -2,8 +2,9 @@
  * XML Encoding / Decoding Utilities
  *
  * Self-contained XML entity encoding and decoding functions.
- * No dependencies on other modules — safe to import from anywhere.
  */
+
+import { XmlError } from "@xml/errors";
 
 // =============================================================================
 // Constants
@@ -229,14 +230,51 @@ const INVALID_NAME_CHARS = /[\s<>"'\/=&]/;
  */
 export function validateXmlName(name: string): void {
   if (!name) {
-    throw new Error("XML name must not be empty");
+    throw new XmlError("XML name must not be empty");
   }
   if (INVALID_NAME_CHARS.test(name)) {
-    throw new Error(`Invalid XML name: contains forbidden character in "${name}"`);
+    throw new XmlError(`Invalid XML name: contains forbidden character in "${name}"`);
   }
   // XML names cannot start with a digit, hyphen, or dot
   const first = name.charCodeAt(0);
   if ((first >= 0x30 && first <= 0x39) || first === 0x2d || first === 0x2e) {
-    throw new Error(`Invalid XML name: "${name}" starts with forbidden character`);
+    throw new XmlError(`Invalid XML name: "${name}" starts with forbidden character`);
   }
 }
+
+// =============================================================================
+// Writer Helpers
+// =============================================================================
+
+/**
+ * Encode text for a CDATA section, splitting on `]]>` to produce valid output.
+ *
+ * The sequence `]]>` cannot appear inside CDATA, so each occurrence is split
+ * into adjacent CDATA sections: `<![CDATA[...]]]]><![CDATA[>...]]>`.
+ */
+export function encodeCData(text: string): string {
+  return "<![CDATA[" + text.split("]]>").join("]]]]><![CDATA[>") + "]]>";
+}
+
+/**
+ * Validate that text is legal for an XML comment.
+ *
+ * XML spec: comments must not contain `--` and must not end with `-`.
+ * @throws {XmlError} if the text is invalid.
+ */
+export function validateCommentText(text: string): void {
+  if (text.includes("--") || text.endsWith("-")) {
+    throw new XmlError('Invalid comment: must not contain "--" or end with "-"');
+  }
+}
+
+// =============================================================================
+// Standard XML Declaration
+// =============================================================================
+
+/** Default XML declaration attributes (`version`, `encoding`, `standalone`). */
+export const StdDocAttributes: Readonly<Record<string, string>> = {
+  version: "1.0",
+  encoding: "UTF-8",
+  standalone: "yes"
+};

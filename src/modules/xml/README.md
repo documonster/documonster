@@ -3,7 +3,7 @@
 A zero-dependency, cross-platform XML toolkit for reading and writing XML. Supports both streaming and buffered modes.
 
 ```typescript
-import { XmlWriter, SaxParser, parseXml } from "@xml/index";
+import { XmlWriter, SaxParser, parseXml, query } from "@xml/index";
 ```
 
 ## Features
@@ -14,6 +14,9 @@ import { XmlWriter, SaxParser, parseXml } from "@xml/index";
 - **Dual-Mode Reading** — SAX streaming (`SaxParser`) and DOM tree (`parseXml`)
 - **Shared Interface** — `XmlSink` lets rendering code target both write modes transparently
 - **XML Encoding** — Fast entity encode/decode with special character handling
+- **Namespace Support** — Full XML Namespaces with prefix resolution, reserved namespace enforcement, and unbound prefix detection
+- **Query Engine** — Simplified path expressions for querying DOM trees
+- **Security Hardened** — Entity expansion limits, nesting depth limits, duplicate attribute rejection, name injection prevention, BOM handling
 
 ---
 
@@ -76,6 +79,20 @@ console.log(attr(item!, "id")); // "1"
 console.log(textContent(item!)); // "hello"
 ```
 
+### Query Engine
+
+```typescript
+import { parseXml } from "@xml/dom";
+import { query, queryAll } from "@xml/query";
+
+const doc = parseXml("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
+const first = query(doc.root, "a/b"); // first <b> element
+const all = queryAll(doc.root, "a/b"); // all <b> elements
+const indexed = queryAll(doc.root, "a/b[0]"); // first <b> under each <a>
+const filtered = query(doc.root, "a/b[@id='x']"); // <b> with id="x"
+const deep = queryAll(doc.root, "a//b"); // <b> at any depth under <a>
+```
+
 ### Encoding/Decoding
 
 ```typescript
@@ -93,11 +110,12 @@ xmlDecode("&lt;hello&gt;"); // "<hello>"
 src/modules/xml/
 ├── types.ts           # Core types (XmlNode, XmlSink, SaxTag, etc.)
 ├── errors.ts          # XmlError, XmlParseError, XmlWriteError
-├── encode.ts          # xmlEncode, xmlDecode, xmlEncodeAttr
+├── encode.ts          # xmlEncode, xmlDecode, validateXmlName, encodeCData, etc.
 ├── writer.ts          # XmlWriter (buffered, with rollback support)
 ├── stream-writer.ts   # XmlStreamWriter (streaming, writes to WritableTarget)
 ├── sax.ts             # SaxParser (event-driven) + parseSax (async generator)
 ├── dom.ts             # parseXml + DOM query helpers
+├── query.ts           # Simplified path query engine
 ├── index.ts           # Public API barrel
 └── __tests__/         # Tests
 ```
@@ -122,9 +140,12 @@ SaxParser            — Event-driven streaming parser
 │                      Feed chunks via write(), events fire synchronously
 │                      Best for: large XML, when you only need specific elements
 │
-└── parseXml         — Builds a DOM tree (XmlDocument/XmlElement)
-                       Built on top of SaxParser — no duplicate parsing logic
-                       Best for: small-medium XML, when you need tree traversal
+├── parseXml         — Builds a DOM tree (XmlDocument/XmlElement)
+│                      Built on top of SaxParser — no duplicate parsing logic
+│                      Best for: small-medium XML, when you need tree traversal
+│
+└── parseSax         — Async generator wrapping SaxParser for stream iteration
+                       Best for: async pipelines (e.g. reading from zip streams)
 ```
 
 ---
@@ -176,6 +197,17 @@ Same methods as `XmlWriter` (both implement `XmlSink`), except:
 
 **Events:** `opentag`, `closetag`, `text`, `cdata`, `comment`, `pi`, `error`
 
+**Options:**
+
+| Option                | Default | Description                                       |
+| --------------------- | ------- | ------------------------------------------------- |
+| `position`            | `true`  | Track line/column for error messages              |
+| `fragment`            | `false` | Allow multiple root elements                      |
+| `xmlns`               | `false` | Enable namespace processing                       |
+| `maxDepth`            | `256`   | Maximum element nesting depth                     |
+| `maxEntityExpansions` | `10000` | Maximum entity expansion count (XML bomb defense) |
+| `fileName`            | —       | File name for error messages                      |
+
 ### parseSax (Async Generator)
 
 ```typescript
@@ -193,10 +225,24 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 
 **Options:**
 
-- `comments` — Include comment nodes (default: false)
-- `processingInstructions` — Include PI nodes (default: false)
-- `cdataAsNodes` — Keep CDATA as explicit nodes vs merge into text (default: false)
-- `fragment` — Parse without requiring a root element (default: false)
+| Option                   | Default | Description                                     |
+| ------------------------ | ------- | ----------------------------------------------- |
+| `comments`               | `false` | Include comment nodes in DOM tree               |
+| `processingInstructions` | `false` | Include PI nodes in DOM tree                    |
+| `cdataAsNodes`           | `false` | Keep CDATA as explicit nodes vs merge into text |
+| `fragment`               | `false` | Allow multiple root elements                    |
+| `xmlns`                  | `false` | Enable namespace processing                     |
+| `maxDepth`               | `256`   | Maximum element nesting depth                   |
+| `maxEntityExpansions`    | `10000` | Maximum entity expansion count                  |
+
+**Returns:** `XmlDocument` with:
+
+| Field         | Type                                            | Description                                                |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------------- |
+| `root`        | `XmlElement`                                    | First (or only) root element                               |
+| `roots`       | `XmlElement[]`                                  | All root-level elements (useful in fragment mode)          |
+| `declaration` | `Record<string, string> \| undefined`           | XML declaration attributes (version, encoding, standalone) |
+| `prologue`    | `Array<XmlComment \| XmlProcessingInstruction>` | Top-level comments and PIs (when enabled via options)      |
 
 ### DOM Helpers
 
@@ -207,3 +253,72 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 | `textContent(node)`      | Recursive text content      |
 | `attr(el, name)`         | Get attribute value         |
 | `walk(el, visitor)`      | Depth-first traversal       |
+
+### Query Engine
+
+```typescript
+import { query, queryAll } from "@xml/query";
+```
+
+| Syntax         | Description                                     |
+| -------------- | ----------------------------------------------- |
+| `a/b/c`        | Match child `a`, then `b`, then `c`             |
+| `a/b[@id='1']` | Match `b` with attribute `id` equal to `"1"`    |
+| `a/*/c`        | Wildcard: any element name at that level        |
+| `a//c`         | Recursive descent: `c` at any depth under `a`   |
+| `a/b[0]`       | Index: first matching `b` under each parent `a` |
+
+- `query(element, path)` — First match or `undefined`
+- `queryAll(element, path)` — All matches (may be empty)
+
+Index filters use **per-parent semantics**: `a/b[0]` returns the first `b` under _each_ `a`, not the globally first `b`.
+
+### Encoding Utilities
+
+| Function                    | Description                                           |
+| --------------------------- | ----------------------------------------------------- |
+| `xmlEncode(text)`           | Encode text for XML content (`<`, `>`, `&`, `"`, `'`) |
+| `xmlDecode(text)`           | Decode XML entities back to text                      |
+| `xmlEncodeAttr(value)`      | Encode an attribute value (same as `xmlEncode`)       |
+| `validateXmlName(name)`     | Validate an XML element/attribute name                |
+| `validateCommentText(text)` | Validate text for XML comment content                 |
+| `encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)        |
+
+### Error Types
+
+| Class           | Parent      | Used by                |
+| --------------- | ----------- | ---------------------- |
+| `XmlError`      | `BaseError` | Encoding/validation    |
+| `XmlParseError` | `XmlError`  | SAX parser, DOM parser |
+| `XmlWriteError` | `XmlError`  | Writers (state errors) |
+
+All errors extend `XmlError`, so `catch (e) { if (e instanceof XmlError) ... }` catches any XML module error.
+
+---
+
+## Namespace Support
+
+When `xmlns: true` is enabled:
+
+- **Prefix resolution** — Element and attribute QNames are resolved to `{ prefix, local, uri }`
+- **Pre-bound prefixes** — `xml` is pre-bound to `http://www.w3.org/XML/1998/namespace`, `xmlns` to `http://www.w3.org/2000/xmlns/`
+- **Reserved namespace enforcement** — Cannot rebind `xml` to a different URI, cannot rebind `xmlns`, cannot bind other prefixes to reserved URIs
+- **Unbound prefix detection** — Elements and attributes with undeclared prefixes produce errors
+- **Expanded-name duplicate detection** — Two attributes with different prefixes but same URI + local name are rejected
+- **Multi-colon QName rejection** — `<a:b:c/>` is rejected in namespace mode
+- **Scope management** — Namespace declarations follow XML scoping rules (inherited by descendants, overridable in children)
+
+Note: Unprefixed attributes do **not** inherit the default namespace, per XML Namespaces §6.2.
+
+---
+
+## Security
+
+- **Entity expansion limits** — Prevents XML bomb attacks (configurable via `maxEntityExpansions`)
+- **Nesting depth limits** — Prevents stack overflow from deeply nested XML (configurable via `maxDepth`)
+- **Duplicate attribute rejection** — XML 1.0 §3.1 WFC: Unique Att Spec (reports error, recovers with last-value-wins)
+- **Name injection prevention** — Writers validate element and attribute names via `validateXmlName()`
+- **Comment/CDATA safety** — `validateCommentText()` rejects `--`, `encodeCData()` splits `]]>`
+- **BOM handling** — UTF-8 BOM at start of input is silently stripped
+- **Prototype pollution prevention** — DOM attribute maps use null-prototype objects with dangerous key filtering
+- **Invalid character handling** — Writers strip invalid XML 1.0 characters; parser rejects them
