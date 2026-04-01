@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.1.0](https://github.com/cjnoname/excelts/compare/v7.0.1...v7.1.0) (2026-04-01)
+
+
+### Features
+
+* **xml:** Add standalone [@xml](https://github.com/xml) module with streaming write pipeline and backpressure support ([a0a0630](https://github.com/cjnoname/excelts/commit/a0a063031f00cb4c8837b7cb47a37ca8a28c7b8c))
+
+
+### Bug Fixes
+
+* Enhance backpressure handling in StreamingZipWriterAdapter for sync and async write() return types ([156b5fa](https://github.com/cjnoname/excelts/commit/156b5fa95d6bcae158b2f6020183350a61c2de8d))
+* Extract _checkBackpressure to resolve CodeQL missing-await alerts [#74](https://github.com/cjnoname/excelts/issues/74) [#75](https://github.com/cjnoname/excelts/issues/75) [#76](https://github.com/cjnoname/excelts/issues/76) ([7081e1f](https://github.com/cjnoname/excelts/commit/7081e1f0ec46c3e6a933d0feb9b418e6f8a61010))
+* Handle async write() return in StreamingZipWriterAdapter backpressure check ([dc8c3fd](https://github.com/cjnoname/excelts/commit/dc8c3fd317134bf099650e306103152ff3b90a71))
+* Wait for file stream close before resolving on Windows ([84503eb](https://github.com/cjnoname/excelts/commit/84503eba664b538eed74729de013c6345a2ed335))
+* **xml:** Complete namespace support, harden parser, simplify module, and update validator ([9a59fe8](https://github.com/cjnoname/excelts/commit/9a59fe88e35700d73612f05b1b4feb825e687d73))
+* **xml:** Correct HAN CELL prefix detection, xmlEncode FFFE/FFFF, and tag mutation ([56c8665](https://github.com/cjnoname/excelts/commit/56c8665b40f3172b62156cb012c97216ed761b36))
+* **xml:** Reject second root element, fatal UTF-8 decode, lightweight decodeCol ([95b676e](https://github.com/cjnoname/excelts/commit/95b676e07dbcb8e74b4a928051bc73a1961b9929))
+
+
+### Performance Improvements
+
+* Cache isDateFmt, use encodeInto in StringBuf, optimize row spans parsing ([3c63a07](https://github.com/cjnoname/excelts/commit/3c63a0723f4fe7c5eb4e030eeae91b723531f1ec))
+* **xml:** Eliminate XML parse overhead with direct SAX callbacks ([74ebdaf](https://github.com/cjnoname/excelts/commit/74ebdaf0c3a6ad154f15161b2c09388567c008d5))
+* **xml:** Optimize hot paths for large-data throughput ([97bd074](https://github.com/cjnoname/excelts/commit/97bd07497c7eba6afd5e805043459ce83355801b))
+* **xml:** Optimize text decoding, SAX consumers, and write batching ([aaa41a9](https://github.com/cjnoname/excelts/commit/aaa41a956ab47f690c126ace6885f4885a7df85a))
+
 ## [7.0.1](https://github.com/cjnoname/excelts/compare/v7.0.0...v7.0.1) (2026-03-29)
 
 
