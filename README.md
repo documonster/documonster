@@ -10,6 +10,7 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 - 🚀 **Zero Runtime Dependencies** — Pure TypeScript, no external packages
 - 📦 **Six Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), XML (SAX/DOM/Writer), Archive (ZIP/TAR), Stream (cross-platform)
+- 🤖 **AI-Friendly** — Clean, consistent API designed to be easily generated and consumed by AI coding agents — one library handles Excel, PDF, CSV, XML, ZIP, and streaming with maximum efficiency
 - ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 

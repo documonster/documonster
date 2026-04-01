@@ -10,6 +10,7 @@ ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 
 - 🚀 **零运行时依赖** — 纯 TypeScript 实现，无任何外部包依赖
 - 📦 **六大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、XML（SAX/DOM/Writer）、Archive（ZIP/TAR）、Stream（跨平台）
+- 🤖 **AI 最佳伴侣** — 简洁一致的 API 设计，让 AI 编程助手更容易生成处理各种文件的代码——一个库搞定 Excel、PDF、CSV、XML、ZIP 和流式处理，保持最高效率
 - ✅ **跨平台** — Node.js 22+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
 - ✅ **ESM 优先** — 原生 ES Modules，兼容 CommonJS，完整 tree-shaking 支持
 

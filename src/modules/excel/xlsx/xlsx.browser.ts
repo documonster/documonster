@@ -155,9 +155,11 @@ class StreamingZipWriterAdapter implements IZipWriter {
         this._emit("data", data);
         if (this.pipedStream) {
           const ok = this.pipedStream.write(data);
-          // Track backpressure: if write() returns false, the downstream
-          // buffer is full and we should wait for 'drain' before continuing.
-          if (ok === false) {
+          // Track backpressure: only treat a synchronous `false` as backpressure.
+          // write() may return a Promise in browser stream implementations;
+          // in that case async backpressure is handled via the 'drain' event
+          // listener installed in pipe().
+          if (typeof ok === "boolean" && ok === false) {
             this._needsDrain = true;
           }
         }
