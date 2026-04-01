@@ -302,4 +302,41 @@ describe("StreamBuf", () => {
       expect(stream.toBuffer()).toBeNull();
     });
   });
+
+  describe("close event", () => {
+    it("emits close after finish on end()", async () => {
+      const stream = new StreamBuf();
+      const events: string[] = [];
+
+      stream.on("finish", () => events.push("finish"));
+      stream.on("close", () => events.push("close"));
+
+      const closed = new Promise<void>(resolve => {
+        stream.once("close", resolve);
+      });
+
+      await stream.write("hello");
+      stream.end();
+      await closed;
+
+      expect(events).toEqual(["finish", "close"]);
+    });
+
+    it("emits close after finish on end() with final chunk", async () => {
+      const stream = new StreamBuf();
+      const events: string[] = [];
+
+      stream.on("finish", () => events.push("finish"));
+      stream.on("close", () => events.push("close"));
+
+      const closed = new Promise<void>(resolve => {
+        stream.once("close", resolve);
+      });
+
+      stream.end("final chunk");
+      await closed;
+
+      expect(events).toEqual(["finish", "close"]);
+    });
+  });
 });

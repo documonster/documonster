@@ -576,17 +576,25 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   }
 
   private _finalize(): Promise<this> {
+    // Wait for "close" — emitted by all supported output streams (Node Writable,
+    // browser Writable, and StreamBuf) after "finish". For file streams this
+    // guarantees the fd is released, which is critical on Windows where reading
+    // a file before fd close can see truncated content.
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.stream.removeListener("close", onDone);
+        this.stream.removeListener("error", onError);
+      };
       const onError = (err: Error) => {
-        this.stream.removeListener("finish", onFinish);
+        cleanup();
         reject(err);
       };
-      const onFinish = () => {
-        this.stream.removeListener("error", onError);
+      const onDone = () => {
+        cleanup();
         resolve(this);
       };
       this.stream.once("error", onError);
-      this.stream.once("finish", onFinish);
+      this.stream.once("close", onDone);
       this.zip.end();
     });
   }

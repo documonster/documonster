@@ -210,30 +210,28 @@ class XLSX extends XLSXBase {
       let settled = false;
 
       const cleanup = () => {
-        stream.off("finish", onFinish);
         stream.off("error", onError);
         stream.off("close", onClose);
-      };
-
-      const onFinish = () => {
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
       };
 
       const onError = (error: Error) => {
         if (!settled) {
           settled = true;
+          cleanup();
           reject(error);
         }
       };
 
+      // Wait for "close" (fd released) instead of "finish" — on Windows,
+      // reading the file before the fd is closed can see truncated content.
       const onClose = () => {
-        cleanup();
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve();
+        }
       };
 
-      stream.once("finish", onFinish);
       stream.once("error", onError);
       stream.once("close", onClose);
 

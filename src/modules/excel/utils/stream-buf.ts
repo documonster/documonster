@@ -349,6 +349,8 @@ class StreamBuf extends EventEmitter {
         this._writeToBuffers(chunk);
         this.emit("readable");
       }
+
+      callback();
     }
 
     return true;
@@ -405,12 +407,14 @@ class StreamBuf extends EventEmitter {
           .then(() => this._writableStreamWriter!.close())
           .then(() => {
             this.emit("finish");
+            this.emit("close");
           })
           .catch(err => {
             this.emit("error", err);
           });
       } else {
         this.emit("finish");
+        this.emit("close");
       }
     };
 
