@@ -7,7 +7,7 @@
  * 2. Bundling minimal import scenarios
  * 3. Inspecting output to verify unused modules are eliminated
  *
- * Usage: npx tsx scripts/treeshake-verify/verify.ts
+ * Usage: npx tsx scripts/treeshake-verify.ts
  */
 
 import { buildSync } from "esbuild";
@@ -20,10 +20,10 @@ import path from "node:path";
 // Configuration
 // =============================================================================
 
-const ROOT = path.resolve(import.meta.dirname, "../..");
+const ROOT = path.resolve(import.meta.dirname, "..");
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8"));
 const PKG_NAME: string = PKG.name;
-const TMP_DIR = path.join(ROOT, "scripts/treeshake-verify/.tmp");
+const TMP_DIR = path.join(ROOT, "tmp");
 
 // Common mustNotInclude patterns
 const ALL_MODULES = [
@@ -31,7 +31,8 @@ const ALL_MODULES = [
   "modules/pdf/",
   "modules/csv/",
   "modules/archive/",
-  "modules/stream/"
+  "modules/stream/",
+  "modules/xml/"
 ];
 const NOT_EXCEL_PDF_CSV = ["modules/excel/", "modules/pdf/", "modules/csv/"];
 
@@ -131,6 +132,12 @@ const scenarios: Scenario[] = [
   ),
   s("/stream: collect (minimal)", `${PKG_NAME}/stream`, ["collect"], allModulesExcept("stream")),
 
+  // /xml subpath (Node)
+  s("/xml: xmlEncode", `${PKG_NAME}/xml`, ["xmlEncode"], allModulesExcept("xml")),
+  s("/xml: XmlWriter", `${PKG_NAME}/xml`, ["XmlWriter"], allModulesExcept("xml")),
+  s("/xml: parseXml", `${PKG_NAME}/xml`, ["parseXml"], allModulesExcept("xml")),
+  s("/xml: SaxParser", `${PKG_NAME}/xml`, ["SaxParser"], allModulesExcept("xml")),
+
   // Browser platform
   s("browser root: Workbook (no pdf leak)", PKG_NAME, ["Workbook"], ["modules/pdf/"], "browser"),
   s(
@@ -161,7 +168,8 @@ const scenarios: Scenario[] = [
     ["ChunkedBuilder"],
     allModulesExcept("stream"),
     "browser"
-  )
+  ),
+  s("browser /xml: xmlEncode", `${PKG_NAME}/xml`, ["xmlEncode"], allModulesExcept("xml"), "browser")
 ];
 
 // =============================================================================
