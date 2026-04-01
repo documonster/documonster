@@ -9,7 +9,7 @@
 ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 
 - 🚀 **零运行时依赖** — 纯 TypeScript 实现，无任何外部包依赖
-- 📦 **五大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、Archive（ZIP/TAR）、Stream（跨平台）
+- 📦 **六大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、XML（SAX/DOM/Writer）、Archive（ZIP/TAR）、Stream（跨平台）
 - ✅ **跨平台** — Node.js 22+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
 - ✅ **ESM 优先** — 原生 ES Modules，兼容 CommonJS，完整 tree-shaking 支持
 
@@ -126,6 +126,9 @@ ExcelTS 提供独立模块的子路径导出：
 // 主入口 - Excel 核心（Workbook, Worksheet, Cell 等）
 import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
 
+// XML 工具包（SAX 解析器、DOM 解析器、查询引擎、写入器）
+import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
+
 // ZIP/TAR 归档工具
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 
@@ -138,6 +141,7 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 
 每个子路径支持 `browser`、`import`（ESM）和 `require`（CJS）条件。详见各模块文档：
 
+- [XML 模块](src/modules/xml/README.md) - 零依赖 SAX/DOM 解析器、查询引擎和双模式写入器
 - [PDF 模块](src/modules/pdf/README.md) - 零依赖 Excel 转 PDF，支持加密和字体嵌入
 - [CSV 模块](src/modules/csv/README.md) - RFC 4180 解析/格式化、流式处理、数据生成
 - [归档模块](src/modules/archive/README.md) - ZIP/TAR 创建/读取/编辑、压缩、加密
@@ -249,6 +253,45 @@ ExcelTS 内置 ZIP/TAR 归档工具（用于 XLSX 管线）。若直接使用归
 - 自定义：提供带 `encode`/`decode` 的 codec，并可设置可选标记
 
 当使用非 UTF-8 编码时，可写入 Unicode Extra Field 以提升跨工具兼容性。
+
+## XML 工具包
+
+ExcelTS 内置一个独立的、零依赖的 XML 模块，支持流式和缓冲两种解析/写入模式。它为 XLSX 管线提供底层支持，也可作为独立子路径导出使用。
+
+### 核心特性
+
+- **SAX 解析器** — 事件驱动的高性能流式解析器
+- **DOM 解析器** — 从字符串构建可查询的 XML 树
+- **查询引擎** — 简化路径表达式（`a/b[@id='1']`、`a//c`、`a/b[0]`）
+- **双模式写入** — 缓冲模式（`XmlWriter`）和流式模式（`XmlStreamWriter`）
+- **完整命名空间支持** — 前缀解析、保留命名空间强制、未绑定前缀检测
+- **安全加固** — 实体展开限制、嵌套深度限制、重复属性拒绝、BOM 处理
+
+### 快速示例
+
+```typescript
+import { SaxParser, parseXml, XmlWriter, queryAll } from "@cj-tech-master/excelts/xml";
+
+// SAX 流式解析
+const parser = new SaxParser();
+parser.on("opentag", tag => console.log(tag.name, tag.attributes));
+parser.write('<root><item id="1">hello</item></root>');
+parser.close();
+
+// DOM 解析 + 查询
+const doc = parseXml("<root><a><b>1</b><b>2</b></a></root>");
+const items = queryAll(doc.root, "a/b"); // 所有 <b> 元素
+
+// 写入 XML
+const w = new XmlWriter();
+w.openXml();
+w.openNode("root");
+w.leafNode("item", { id: "1" }, "hello");
+w.closeNode();
+console.log(w.xml);
+```
+
+完整 API 参考请见 [XML 模块文档](src/modules/xml/README.md)。
 
 ### 编辑现有 ZIP（ZipEditor）
 
@@ -530,6 +573,8 @@ import {
   // XML 工具
   xmlEncode,
   xmlDecode,
+  xmlEncodeAttr,
+  validateXmlName,
 
   // PDF 导出
   pdf, // 最简单：pdf([["A", 1], ["B", 2]]) → Uint8Array

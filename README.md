@@ -9,7 +9,7 @@ Modern TypeScript Excel Workbook Manager - Read, manipulate and write spreadshee
 ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 - 🚀 **Zero Runtime Dependencies** — Pure TypeScript, no external packages
-- 📦 **Five Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Archive (ZIP/TAR), Stream (cross-platform)
+- 📦 **Six Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), XML (SAX/DOM/Writer), Archive (ZIP/TAR), Stream (cross-platform)
 - ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
@@ -126,6 +126,9 @@ ExcelTS provides focused subpath exports for standalone module usage:
 // Main entry - Excel core (Workbook, Worksheet, Cell, etc.)
 import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
 
+// XML toolkit (SAX parser, DOM parser, query engine, writers)
+import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
+
 // ZIP/TAR archive utilities
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 
@@ -138,6 +141,7 @@ import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/str
 
 Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions. See the module READMEs for details:
 
+- [XML Module](src/modules/xml/README.md) - Zero-dependency SAX/DOM parser, query engine, and dual-mode writer
 - [PDF Module](src/modules/pdf/README.md) - Full-featured zero-dependency PDF engine with encryption and font embedding
 - [CSV Module](src/modules/csv/README.md) - RFC 4180 parser/formatter, streaming, data generation
 - [Archive Module](src/modules/archive/README.md) - ZIP/TAR create/read/edit, compression, encryption
@@ -250,6 +254,45 @@ archive APIs directly, ZIP string encoding can be customized via `ZipStringEncod
 
 When a non-UTF-8 encoding is used, Unicode extra fields can be emitted for better
 cross-tool compatibility.
+
+## XML Toolkit
+
+ExcelTS includes a standalone, zero-dependency XML module with streaming and buffered parsing/writing. It powers the XLSX pipeline internally and is available as a standalone subpath export.
+
+### Key Features
+
+- **SAX Parser** — Event-driven streaming parser with high throughput
+- **DOM Parser** — Build a queryable XML tree from a string
+- **Query Engine** — Simplified path expressions (`a/b[@id='1']`, `a//c`, `a/b[0]`)
+- **Dual-Mode Writer** — Buffered (`XmlWriter`) and streaming (`XmlStreamWriter`)
+- **Full Namespace Support** — Prefix resolution, reserved namespace enforcement, unbound prefix detection
+- **Security Hardened** — Entity expansion limits, nesting depth limits, duplicate attribute rejection, BOM handling
+
+### Quick Example
+
+```typescript
+import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
+
+// SAX streaming parse
+const parser = new SaxParser();
+parser.on("opentag", tag => console.log(tag.name, tag.attributes));
+parser.write('<root><item id="1">hello</item></root>');
+parser.close();
+
+// DOM parse + query
+const doc = parseXml("<root><a><b>1</b><b>2</b></a></root>");
+const items = queryAll(doc.root, "a/b"); // all <b> elements
+
+// Write XML
+const w = new XmlWriter();
+w.openXml();
+w.openNode("root");
+w.leafNode("item", { id: "1" }, "hello");
+w.closeNode();
+console.log(w.xml);
+```
+
+For the full API reference, see the [XML Module documentation](src/modules/xml/README.md).
 
 ### Editing an existing ZIP (ZipEditor)
 
@@ -532,6 +575,8 @@ import {
   // XML utilities
   xmlEncode,
   xmlDecode,
+  xmlEncodeAttr,
+  validateXmlName,
 
   // PDF export
   pdf, // Simplest: pdf([["A", 1], ["B", 2]]) → Uint8Array
