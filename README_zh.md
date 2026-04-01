@@ -615,28 +615,6 @@ import {
 
 浏览器端不要求必须支持 `crypto.randomUUID()`：ExcelTS 内置了 UUID v4 生成器，并会优先使用 `crypto.getRandomValues()` 作为 fallback。
 
-## 维护者
-
-本项目由 [CJ (@cjnoname)](https://github.com/cjnoname) 积极维护。
-
-### 维护状态
-
-**积极维护中** - 本项目处于积极维护状态，重点关注：
-
-- 🔒 **安全更新** - 及时的安全补丁和依赖项更新
-- 🐛 **Bug 修复** - 关键 Bug 修复和稳定性改进
-- 📦 **依赖管理** - 保持依赖项最新且安全
-- 🔍 **代码审查** - 审查和合并社区贡献
-
-### 贡献
-
-虽然我可能没有足够的时间定期开发新功能，但**非常重视和欢迎社区贡献！**
-
-- 💡 **欢迎 Pull Request** - 我会及时审查并合并高质量的 PR
-- 🚀 **功能提议** - 在实现前请先开 issue 讨论新功能
-- 🐛 **Bug 报告** - 请提供可重现的示例报告 Bug
-- 📖 **文档改进** - 始终欢迎文档改进
-
 ## API 文档
 
 详细的 API 文档，请参考以下综合文档部分：
@@ -649,33 +627,11 @@ import {
 - 数据验证
 - 条件格式
 - 文件输入输出
-- [PDF 导出](src/modules/pdf/README.md)
-
-## 贡献指南
-
-欢迎贡献！请随时提交 Pull Request。
-
-### 提交 PR 前
-
-1. **Bug 修复**：在 `src/**/__tests__` 中添加能重现问题的单元测试或集成测试
-2. **新功能**：先开 issue 讨论功能和实现方案
-3. **文档**：更新相关文档和类型定义
-4. **代码风格**：遵循现有代码风格并通过所有代码检查（`npm run lint`）
-5. **测试**：确保所有测试通过（`npm test`）并为新功能添加测试
-
-### 重要说明
-
-- **版本号**：请不要在 PR 中修改 package 版本。版本通过发布管理。
-- **许可证**：所有贡献都将包含在项目的 MIT 许可证下
-- **提交信息**：编写清晰、描述性的提交信息
-
-### 获取帮助
-
-如果需要帮助或有疑问：
-
-- 📖 查看现有的 [issues](https://github.com/cjnoname/excelts/issues) 和[文档](https://github.com/cjnoname/excelts)
-- 💬 开一个[新 issue](https://github.com/cjnoname/excelts/issues/new) 讨论
-- 🐛 使用 issue 模板报告 Bug
+- [XML 模块](src/modules/xml/README.md)
+- [PDF 模块](src/modules/pdf/README.md)
+- [CSV 模块](src/modules/csv/README.md)
+- [归档模块](src/modules/archive/README.md)
+- [流模块](src/modules/stream/README.md)
 
 ## 许可证
 

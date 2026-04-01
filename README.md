@@ -617,28 +617,6 @@ For older browsers without native `CompressionStream` API (Firefox < 113, Safari
 
 ExcelTS does **not** require `crypto.randomUUID()` in browsers; it uses an internal UUID v4 generator with a `crypto.getRandomValues()` fallback.
 
-## Maintainer
-
-This project is actively maintained by [CJ (@cjnoname)](https://github.com/cjnoname).
-
-### Maintenance Status
-
-**Active Maintenance** - This project is actively maintained with a focus on:
-
-- 🔒 **Security Updates** - Timely security patches and dependency updates
-- 🐛 **Bug Fixes** - Critical bug fixes and stability improvements
-- 📦 **Dependency Management** - Keeping dependencies up-to-date and secure
-- 🔍 **Code Review** - Reviewing and merging community contributions
-
-### Contributing
-
-While I may not have the bandwidth to develop new features regularly, **community contributions are highly valued and encouraged!**
-
-- 💡 **Pull Requests Welcome** - I will review and merge quality PRs promptly
-- 🚀 **Feature Proposals** - Open an issue to discuss new features before implementing
-- 🐛 **Bug Reports** - Please report bugs with reproducible examples
-- 📖 **Documentation** - Improvements to documentation are always appreciated
-
 ## API Documentation
 
 For detailed API documentation, please refer to the comprehensive documentation sections:
@@ -651,33 +629,11 @@ For detailed API documentation, please refer to the comprehensive documentation 
 - Data Validation
 - Conditional Formatting
 - File I/O
-- [PDF Export](src/modules/pdf/README.md)
-
-## Contributing Guidelines
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-### Before Submitting a PR
-
-1. **Bug Fixes**: Add a unit-test or integration-test (in `src/**/__tests__`) that reproduces the issue
-2. **New Features**: Open an issue first to discuss the feature and implementation approach
-3. **Documentation**: Update relevant documentation and type definitions
-4. **Code Style**: Follow the existing code style and pass all linters (`npm run lint`)
-5. **Tests**: Ensure all tests pass (`npm test`) and add tests for new functionality
-
-### Important Notes
-
-- **Version Numbers**: Please do not modify package version in PRs. Versions are managed through releases.
-- **License**: All contributions will be included under the project's MIT license
-- **Commit Messages**: Write clear, descriptive commit messages
-
-### Getting Help
-
-If you need help or have questions:
-
-- 📖 Check existing [issues](https://github.com/cjnoname/excelts/issues) and [documentation](https://github.com/cjnoname/excelts)
-- 💬 Open a [new issue](https://github.com/cjnoname/excelts/issues/new) for discussion
-- 🐛 Use issue templates for bug reports
+- [XML Module](src/modules/xml/README.md)
+- [PDF Module](src/modules/pdf/README.md)
+- [CSV Module](src/modules/csv/README.md)
+- [Archive Module](src/modules/archive/README.md)
+- [Stream Module](src/modules/stream/README.md)
 
 ## License
 
