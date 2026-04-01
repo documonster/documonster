@@ -14,6 +14,14 @@ ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 - ✅ **跨平台** — Node.js 22+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
 - ✅ **ESM 优先** — 原生 ES Modules，兼容 CommonJS，完整 tree-shaking 支持
 
+## 模块文档
+
+- [XML 模块](src/modules/xml/README.md) — 零依赖 SAX/DOM 解析器、查询引擎和双模式写入器
+- [PDF 模块](src/modules/pdf/README.md) — 零依赖 PDF 引擎，支持加密和字体嵌入
+- [CSV 模块](src/modules/csv/README.md) — RFC 4180 解析/格式化、流式处理、数据生成
+- [归档模块](src/modules/archive/README.md) — ZIP/TAR 创建/读取/编辑、压缩、加密
+- [流模块](src/modules/stream/README.md) — 跨平台 Readable/Writable/Transform/Duplex
+
 ## 翻译
 
 - [English Documentation](README.md)
@@ -140,13 +148,7 @@ import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/cs
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 
-每个子路径支持 `browser`、`import`（ESM）和 `require`（CJS）条件。详见各模块文档：
-
-- [XML 模块](src/modules/xml/README.md) - 零依赖 SAX/DOM 解析器、查询引擎和双模式写入器
-- [PDF 模块](src/modules/pdf/README.md) - 零依赖 Excel 转 PDF，支持加密和字体嵌入
-- [CSV 模块](src/modules/csv/README.md) - RFC 4180 解析/格式化、流式处理、数据生成
-- [归档模块](src/modules/archive/README.md) - ZIP/TAR 创建/读取/编辑、压缩、加密
-- [流模块](src/modules/stream/README.md) - 跨平台 Readable/Writable/Transform/Duplex
+每个子路径支持 `browser`、`import`（ESM）和 `require`（CJS）条件。
 
 ## PDF 导出
 
@@ -627,11 +629,6 @@ import {
 - 数据验证
 - 条件格式
 - 文件输入输出
-- [XML 模块](src/modules/xml/README.md)
-- [PDF 模块](src/modules/pdf/README.md)
-- [CSV 模块](src/modules/csv/README.md)
-- [归档模块](src/modules/archive/README.md)
-- [流模块](src/modules/stream/README.md)
 
 ## 许可证
 

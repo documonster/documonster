@@ -14,6 +14,14 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 - ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
+## Module Documentation
+
+- [XML Module](src/modules/xml/README.md) — Zero-dependency SAX/DOM parser, query engine, and dual-mode writer
+- [PDF Module](src/modules/pdf/README.md) — Full-featured zero-dependency PDF engine with encryption and font embedding
+- [CSV Module](src/modules/csv/README.md) — RFC 4180 parser/formatter, streaming, data generation
+- [Archive Module](src/modules/archive/README.md) — ZIP/TAR create/read/edit, compression, encryption
+- [Stream Module](src/modules/stream/README.md) — Cross-platform Readable/Writable/Transform/Duplex
+
 ## Translations
 
 - [中文文档](README_zh.md)
@@ -140,13 +148,7 @@ import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/cs
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 
-Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions. See the module READMEs for details:
-
-- [XML Module](src/modules/xml/README.md) - Zero-dependency SAX/DOM parser, query engine, and dual-mode writer
-- [PDF Module](src/modules/pdf/README.md) - Full-featured zero-dependency PDF engine with encryption and font embedding
-- [CSV Module](src/modules/csv/README.md) - RFC 4180 parser/formatter, streaming, data generation
-- [Archive Module](src/modules/archive/README.md) - ZIP/TAR create/read/edit, compression, encryption
-- [Stream Module](src/modules/stream/README.md) - Cross-platform Readable/Writable/Transform/Duplex
+Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions.
 
 ## PDF Export
 
@@ -629,11 +631,6 @@ For detailed API documentation, please refer to the comprehensive documentation 
 - Data Validation
 - Conditional Formatting
 - File I/O
-- [XML Module](src/modules/xml/README.md)
-- [PDF Module](src/modules/pdf/README.md)
-- [CSV Module](src/modules/csv/README.md)
-- [Archive Module](src/modules/archive/README.md)
-- [Stream Module](src/modules/stream/README.md)
 
 ## License
 
