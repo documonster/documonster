@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.1.1](https://github.com/cjnoname/excelts/compare/v7.1.0...v7.1.1) (2026-04-01)
+
+
+### Bug Fixes
+
+* Consolidate module links, remove duplicate sections from READMEs ([4a85b2c](https://github.com/cjnoname/excelts/commit/4a85b2c8a2f1183cac7882a90955cab4d660e859))
+
 ## [7.1.0](https://github.com/cjnoname/excelts/compare/v7.0.1...v7.1.0) (2026-04-01)
 
 
