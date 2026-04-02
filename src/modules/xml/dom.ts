@@ -300,7 +300,7 @@ function walk(element: XmlElement, visitor: (el: XmlElement) => void): void {
 /**
  * Convert an {@link XmlElement} DOM tree to a plain JavaScript object.
  *
- * Produces output similar to fast-xml-parser: element names become object keys,
+ * Produces a plain JavaScript object where element names become object keys,
  * attributes are prefixed (default `@_`), text-only elements collapse to their
  * string value, and repeated sibling names merge into arrays.
  *
@@ -334,9 +334,11 @@ function toPlainObject(
     // Add attributes — el.attributes is created via Object.create(null)
     // by safeAttributes(), so no prototype keys to guard against.
     let hasAttributes = false;
-    for (const key in el.attributes) {
-      obj[opts.attrPrefix + key] = el.attributes[key];
-      hasAttributes = true;
+    if (!opts.ignoreAttributes) {
+      for (const key in el.attributes) {
+        obj[opts.attrPrefix + key] = el.attributes[key];
+        hasAttributes = true;
+      }
     }
 
     // Collect text and child elements in a single pass.

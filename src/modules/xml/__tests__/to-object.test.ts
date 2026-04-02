@@ -141,6 +141,25 @@ describe("parseXmlToObject", () => {
     });
   });
 
+  describe("ignoreAttributes", () => {
+    it("should discard all attributes when ignoreAttributes is true", () => {
+      const obj = parseXmlToObject('<root id="1" name="test"><child attr="v">text</child></root>', {
+        ignoreAttributes: true
+      });
+      expect(obj).toEqual({ root: { child: "text" } });
+    });
+
+    it("should collapse to string when ignoreAttributes removes all non-text content", () => {
+      const obj = parseXmlToObject('<root id="1">hello</root>', { ignoreAttributes: true });
+      expect(obj).toEqual({ root: "hello" });
+    });
+
+    it("should return empty string for attribute-only element", () => {
+      const obj = parseXmlToObject('<root id="1"/>', { ignoreAttributes: true });
+      expect(obj).toEqual({ root: "" });
+    });
+  });
+
   describe("whitespace handling", () => {
     it("should ignore whitespace-only text nodes by default", () => {
       const obj = parseXmlToObject("<root>\n  <child>text</child>\n</root>");
@@ -262,6 +281,11 @@ describe("parseXmlToObject", () => {
     it("with isArray on nested elements", () =>
       expectSameOutput("<root><parent><child>a</child></parent></root>", {
         isArray: name => name === "child"
+      }));
+
+    it("with ignoreAttributes", () =>
+      expectSameOutput('<root id="1"><child attr="v">text</child></root>', {
+        ignoreAttributes: true
       }));
   });
 });

@@ -99,9 +99,11 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
     };
 
     // Write attributes directly into frame.obj
-    for (const key in tag.attributes) {
-      frame.obj[opts.attrPrefix + key] = tag.attributes[key];
-      frame.hasAttributes = true;
+    if (!opts.ignoreAttributes) {
+      for (const key in tag.attributes) {
+        frame.obj[opts.attrPrefix + key] = tag.attributes[key];
+        frame.hasAttributes = true;
+      }
     }
 
     // Mark parent as having children

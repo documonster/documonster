@@ -236,12 +236,20 @@ export interface WritableTarget {
  * Options for `toPlainObject()`.
  *
  * Controls how an {@link XmlElement} DOM tree is converted to a plain
- * JavaScript object (similar to fast-xml-parser output format).
+ * JavaScript object.
  */
 export interface ToPlainObjectOptions {
   /**
+   * When true, discard all attributes entirely. Takes precedence over
+   * `attributePrefix` — when `ignoreAttributes` is true, no attribute keys
+   * appear in the output regardless of prefix settings.
+   * @default false
+   */
+  ignoreAttributes?: boolean;
+  /**
    * Prefix for attribute keys.
    * Set to `""` to use bare attribute names.
+   * Ignored when `ignoreAttributes` is true.
    * @default "@_"
    */
   attributePrefix?: string;

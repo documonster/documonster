@@ -32,7 +32,7 @@ const expectations = [
     xml: fs.readFileSync(path.join(__dirname, "data", "drawing.1.2.xml")).toString(),
     parsedModel: drawing13,
     reconciledModel: drawing14,
-    // Now using fast-xml-parser which can handle element ordering differences
+    // XML comparison can handle element ordering differences
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
     options
   }

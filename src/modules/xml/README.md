@@ -81,7 +81,7 @@ console.log(textContent(item!)); // "hello"
 
 ### XML to Plain Object
 
-Convert XML into plain JavaScript objects (similar to fast-xml-parser output).
+Convert XML into plain JavaScript objects.
 
 Two entry points for different scenarios:
 
@@ -321,6 +321,7 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 
 | Option                 | Default   | Description                                                 |
 | ---------------------- | --------- | ----------------------------------------------------------- |
+| `ignoreAttributes`     | `false`   | Discard all attributes entirely                             |
 | `attributePrefix`      | `"@_"`    | Prefix for attribute keys (`""` for bare names)             |
 | `textKey`              | `"#text"` | Key for text content in mixed-content elements              |
 | `alwaysArray`          | `false`   | Always wrap child elements in arrays                        |

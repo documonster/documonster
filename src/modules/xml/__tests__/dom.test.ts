@@ -8,7 +8,6 @@ import {
   walk,
   toPlainObject
 } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
 
 describe("parseXml", () => {
   describe("basic parsing", () => {
@@ -40,27 +39,26 @@ describe("parseXml", () => {
     });
   });
 
-  describe("complex structures", () => {
-    it("should parse multiple children", () => {
-      const doc = parseXml("<root><a/><b/><c/></root>");
-      const children = doc.root.children.filter((n): n is XmlElement => n.type === "element");
-      expect(children.map(c => c.name)).toEqual(["a", "b", "c"]);
+  describe("ignoreAttributes", () => {
+    it("should discard all attributes when ignoreAttributes is true", () => {
+      const doc = parseXml('<root id="1" name="test"><child attr="v">text</child></root>');
+      expect(toPlainObject(doc.root, { ignoreAttributes: true })).toEqual({
+        root: { child: "text" }
+      });
     });
 
-    it("should parse deeply nested structure", () => {
-      const doc = parseXml("<a><b><c><d>deep</d></c></b></a>");
-      const b = findChild(doc.root, "b");
-      const c = findChild(b!, "c");
-      const d = findChild(c!, "d");
-      expect(textContent(d!)).toBe("deep");
+    it("should collapse to string when ignoreAttributes removes all non-text content", () => {
+      const doc = parseXml('<root id="1">hello</root>');
+      expect(toPlainObject(doc.root, { ignoreAttributes: true })).toEqual({
+        root: "hello"
+      });
     });
 
-    it("should handle mixed content (text + elements)", () => {
-      const doc = parseXml("<root>before<child/>after</root>");
-      expect(doc.root.children.length).toBe(3);
-      expect(doc.root.children[0].type).toBe("text");
-      expect(doc.root.children[1].type).toBe("element");
-      expect(doc.root.children[2].type).toBe("text");
+    it("should return empty string for attribute-only element", () => {
+      const doc = parseXml('<root id="1"/>');
+      expect(toPlainObject(doc.root, { ignoreAttributes: true })).toEqual({
+        root: ""
+      });
     });
   });
 

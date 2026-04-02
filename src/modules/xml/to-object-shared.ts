@@ -13,6 +13,7 @@ import type { ToPlainObjectOptions } from "@xml/types";
 
 /** Options with all defaults resolved — no more `??` checks at hot-path call sites. */
 export interface ResolvedOptions {
+  readonly ignoreAttributes: boolean;
   readonly attrPrefix: string;
   readonly textKey: string;
   readonly alwaysArray: boolean;
@@ -23,6 +24,7 @@ export interface ResolvedOptions {
 
 export function resolveOptions(options?: ToPlainObjectOptions): ResolvedOptions {
   return {
+    ignoreAttributes: options?.ignoreAttributes ?? false,
     attrPrefix: options?.attributePrefix ?? "@_",
     textKey: options?.textKey ?? "#text",
     alwaysArray: options?.alwaysArray ?? false,
@@ -82,7 +84,7 @@ export function resolveValue(
     obj[opts.textKey] = text;
   }
 
-  // Empty element with no attributes → empty string (like fast-xml-parser)
+  // Empty element with no attributes → empty string
   if (!hasAttributes && !hasChildren && !hasText) {
     return "";
   }
