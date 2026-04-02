@@ -355,7 +355,7 @@ function toPlainObject(
           break;
         case "element": {
           const value = convertElement(child);
-          addChildValue(obj, child.name, value, opts.alwaysArray);
+          addChildValue(obj, child.name, value, opts.alwaysArray, opts.isArray);
           hasChildren = true;
           break;
         }

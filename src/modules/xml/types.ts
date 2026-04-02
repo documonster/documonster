@@ -258,6 +258,13 @@ export interface ToPlainObjectOptions {
    */
   alwaysArray?: boolean;
   /**
+   * Callback to determine whether a specific tag name should always be wrapped
+   * in an array, even if only a single element exists. Takes precedence over
+   * `alwaysArray` for matching names. When both `isArray` and `alwaysArray` are
+   * set, a tag is wrapped if either returns/is true.
+   */
+  isArray?: (name: string) => boolean;
+  /**
    * When true, include CDATA node values (already merged to text by default
    * in `parseXml`, only relevant with `cdataAsNodes`).
    * @default true

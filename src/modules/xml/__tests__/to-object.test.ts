@@ -103,6 +103,42 @@ describe("parseXmlToObject", () => {
       });
       expect(obj).toEqual({ root: { item: ["a", "b"] } });
     });
+
+    it("isArray callback should wrap matching single children", () => {
+      const obj = parseXmlToObject("<root><item>a</item><single>b</single></root>", {
+        isArray: name => name === "item"
+      });
+      expect(obj).toEqual({ root: { item: ["a"], single: "b" } });
+    });
+
+    it("isArray should not affect repeated siblings", () => {
+      const obj = parseXmlToObject("<root><item>a</item><item>b</item></root>", {
+        isArray: name => name === "item"
+      });
+      expect(obj).toEqual({ root: { item: ["a", "b"] } });
+    });
+
+    it("isArray combined with alwaysArray false", () => {
+      const obj = parseXmlToObject("<root><item>a</item><other>b</other></root>", {
+        alwaysArray: false,
+        isArray: name => name === "item"
+      });
+      expect(obj).toEqual({ root: { item: ["a"], other: "b" } });
+    });
+
+    it("document root is never wrapped by isArray", () => {
+      const obj = parseXmlToObject("<root><child>text</child></root>", {
+        isArray: () => true
+      });
+      expect(obj).toEqual({ root: { child: ["text"] } });
+    });
+
+    it("isArray should work on nested elements", () => {
+      const obj = parseXmlToObject("<root><parent><child>a</child></parent></root>", {
+        isArray: name => name === "child"
+      });
+      expect(obj).toEqual({ root: { parent: { child: ["a"] } } });
+    });
   });
 
   describe("whitespace handling", () => {
@@ -217,5 +253,15 @@ describe("parseXmlToObject", () => {
           "</worksheet>"
         ].join("\n")
       ));
+
+    it("with isArray callback", () =>
+      expectSameOutput("<root><item>a</item><single>b</single></root>", {
+        isArray: name => name === "item"
+      }));
+
+    it("with isArray on nested elements", () =>
+      expectSameOutput("<root><parent><child>a</child></parent></root>", {
+        isArray: name => name === "child"
+      }));
   });
 });

@@ -157,10 +157,14 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
  */
 function finishFrame(frame: Frame, parent: Frame, opts: ResolvedOptions): void {
   const value = resolveValue(frame.obj, frame.text, frame.hasAttributes, frame.hasChildren, opts);
-  // The document root element (child of synthetic root) should never be
-  // wrapped in an array by alwaysArray — it's always a direct value.
   const isDocRoot = parent.name === "";
-  addChildValue(parent.obj, frame.name, value, isDocRoot ? false : opts.alwaysArray);
+  addChildValue(
+    parent.obj,
+    frame.name,
+    value,
+    isDocRoot ? false : opts.alwaysArray,
+    isDocRoot ? null : opts.isArray
+  );
 }
 
 export { parseXmlToObject };

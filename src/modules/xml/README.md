@@ -324,6 +324,7 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 | `attributePrefix`      | `"@_"`    | Prefix for attribute keys (`""` for bare names)             |
 | `textKey`              | `"#text"` | Key for text content in mixed-content elements              |
 | `alwaysArray`          | `false`   | Always wrap child elements in arrays                        |
+| `isArray`              | —         | Callback `(name) => boolean` for per-tag array wrapping     |
 | `preserveCData`        | `true`    | Include CDATA values in text (relevant with `cdataAsNodes`) |
 | `ignoreWhitespaceText` | `true`    | Discard whitespace-only text in elements that have children |
 

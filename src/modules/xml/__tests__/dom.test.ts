@@ -426,6 +426,36 @@ describe("toPlainObject", () => {
         root: { item: ["a", "b"] }
       });
     });
+
+    it("isArray callback should wrap matching single children", () => {
+      const doc = parseXml("<root><item>a</item><single>b</single></root>");
+      expect(toPlainObject(doc.root, { isArray: name => name === "item" })).toEqual({
+        root: { item: ["a"], single: "b" }
+      });
+    });
+
+    it("isArray should not affect repeated siblings", () => {
+      const doc = parseXml("<root><item>a</item><item>b</item></root>");
+      expect(toPlainObject(doc.root, { isArray: name => name === "item" })).toEqual({
+        root: { item: ["a", "b"] }
+      });
+    });
+
+    it("isArray combined with alwaysArray false", () => {
+      const doc = parseXml("<root><item>a</item><other>b</other></root>");
+      expect(
+        toPlainObject(doc.root, { alwaysArray: false, isArray: name => name === "item" })
+      ).toEqual({
+        root: { item: ["a"], other: "b" }
+      });
+    });
+
+    it("isArray should work on nested elements", () => {
+      const doc = parseXml("<root><parent><child>a</child></parent></root>");
+      expect(toPlainObject(doc.root, { isArray: name => name === "child" })).toEqual({
+        root: { parent: { child: ["a"] } }
+      });
+    });
   });
 
   describe("CDATA handling", () => {

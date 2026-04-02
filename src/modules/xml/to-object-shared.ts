@@ -16,6 +16,7 @@ export interface ResolvedOptions {
   readonly attrPrefix: string;
   readonly textKey: string;
   readonly alwaysArray: boolean;
+  readonly isArray: ((name: string) => boolean) | null;
   readonly preserveCData: boolean;
   readonly ignoreWS: boolean;
 }
@@ -25,6 +26,7 @@ export function resolveOptions(options?: ToPlainObjectOptions): ResolvedOptions 
     attrPrefix: options?.attributePrefix ?? "@_",
     textKey: options?.textKey ?? "#text",
     alwaysArray: options?.alwaysArray ?? false,
+    isArray: options?.isArray ?? null,
     preserveCData: options?.preserveCData ?? true,
     ignoreWS: options?.ignoreWhitespaceText ?? true
   };
@@ -100,7 +102,8 @@ export function addChildValue(
   parent: Record<string, unknown>,
   name: string,
   value: unknown,
-  alwaysArray: boolean
+  alwaysArray: boolean,
+  isArray: ((name: string) => boolean) | null
 ): void {
   const existing = parent[name];
   if (existing !== undefined) {
@@ -110,6 +113,7 @@ export function addChildValue(
       parent[name] = [existing, value];
     }
   } else {
-    parent[name] = alwaysArray ? [value] : value;
+    const wrap = alwaysArray || (isArray !== null && isArray(name));
+    parent[name] = wrap ? [value] : value;
   }
 }
