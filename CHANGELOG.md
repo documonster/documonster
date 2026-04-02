@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0](https://github.com/cjnoname/excelts/compare/v7.2.0...v7.3.0) (2026-04-02)
+
+
+### Features
+
+* **xml:** Add toPlainObject and parseXmlToObject for XML-to-plain-object conversion ([b7275dc](https://github.com/cjnoname/excelts/commit/b7275dc0215b4c2d507adbc1d4efb208213c4cbf))
+
 ## [7.2.0](https://github.com/cjnoname/excelts/compare/v7.1.1...v7.2.0) (2026-04-01)
 
 
