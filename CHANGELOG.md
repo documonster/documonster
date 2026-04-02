@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.0](https://github.com/cjnoname/excelts/compare/v7.4.0...v7.5.0) (2026-04-02)
+
+
+### Features
+
+* **xml:** Add ignoreAttributes option and remove fast-xml-parser references ([3ae7f67](https://github.com/cjnoname/excelts/commit/3ae7f675f0c7749ca49f404471528983eaf96a6a))
+
 ## [7.4.0](https://github.com/cjnoname/excelts/compare/v7.3.0...v7.4.0) (2026-04-02)
 
 
