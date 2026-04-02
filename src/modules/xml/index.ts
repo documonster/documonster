@@ -43,7 +43,11 @@ export type {
   WritableTarget,
 
   // Parse options
-  XmlParseOptions
+  XmlParseOptions,
+
+  // Conversion options
+  ToPlainObjectOptions,
+  ParseXmlToObjectOptions
 } from "./types";
 
 // =============================================================================
@@ -71,7 +75,8 @@ export { XmlStreamWriter } from "./stream-writer";
 // =============================================================================
 
 export { SaxParser, parseSax, saxStream } from "./sax";
-export { parseXml, findChild, findChildren, textContent, attr, walk } from "./dom";
+export { parseXml, findChild, findChildren, textContent, attr, walk, toPlainObject } from "./dom";
+export { parseXmlToObject } from "./to-object";
 export { query, queryAll } from "./query";
 
 // =============================================================================

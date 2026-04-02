@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { parseXml, findChild, findChildren, textContent, attr, walk } from "@xml/dom";
+import {
+  parseXml,
+  findChild,
+  findChildren,
+  textContent,
+  attr,
+  walk,
+  toPlainObject
+} from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 describe("parseXml", () => {
@@ -303,5 +311,240 @@ describe("textContent on non-element nodes", () => {
     const doc = parseXml("<root><!-- hello --></root>", { comments: true });
     const commentNode = doc.root.children[0];
     expect(textContent(commentNode)).toBe("");
+  });
+});
+
+// =============================================================================
+// toPlainObject
+// =============================================================================
+
+describe("toPlainObject", () => {
+  describe("basic conversion", () => {
+    it("should convert empty element", () => {
+      const doc = parseXml("<root/>");
+      expect(toPlainObject(doc.root)).toEqual({ root: "" });
+    });
+
+    it("should convert text-only element", () => {
+      const doc = parseXml("<root>hello</root>");
+      expect(toPlainObject(doc.root)).toEqual({ root: "hello" });
+    });
+
+    it("should convert element with attributes", () => {
+      const doc = parseXml('<root id="1" name="test"/>');
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { "@_id": "1", "@_name": "test" }
+      });
+    });
+
+    it("should convert element with attributes and text", () => {
+      const doc = parseXml('<root id="1">hello</root>');
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { "@_id": "1", "#text": "hello" }
+      });
+    });
+  });
+
+  describe("nested elements", () => {
+    it("should convert single child element", () => {
+      const doc = parseXml("<root><child>text</child></root>");
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { child: "text" }
+      });
+    });
+
+    it("should convert deeply nested structure", () => {
+      const doc = parseXml("<a><b><c>deep</c></b></a>");
+      expect(toPlainObject(doc.root)).toEqual({
+        a: { b: { c: "deep" } }
+      });
+    });
+
+    it("should merge repeated siblings into arrays", () => {
+      const doc = parseXml("<list><item>a</item><item>b</item><item>c</item></list>");
+      expect(toPlainObject(doc.root)).toEqual({
+        list: { item: ["a", "b", "c"] }
+      });
+    });
+
+    it("should handle mix of unique and repeated children", () => {
+      const doc = parseXml("<root><name>test</name><tag>a</tag><tag>b</tag></root>");
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { name: "test", tag: ["a", "b"] }
+      });
+    });
+  });
+
+  describe("attributes on nested elements", () => {
+    it("should preserve attributes on child elements", () => {
+      const doc = parseXml('<root><child id="1">text</child></root>');
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { child: { "@_id": "1", "#text": "text" } }
+      });
+    });
+
+    it("should handle attributes at multiple levels", () => {
+      const doc = parseXml('<root attr="r"><child attr="c"/></root>');
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { "@_attr": "r", child: { "@_attr": "c" } }
+      });
+    });
+  });
+
+  describe("options", () => {
+    it("should use custom attribute prefix", () => {
+      const doc = parseXml('<root id="1"/>');
+      expect(toPlainObject(doc.root, { attributePrefix: "$" })).toEqual({
+        root: { $id: "1" }
+      });
+    });
+
+    it("should use empty attribute prefix", () => {
+      const doc = parseXml('<root id="1"/>');
+      expect(toPlainObject(doc.root, { attributePrefix: "" })).toEqual({
+        root: { id: "1" }
+      });
+    });
+
+    it("should use custom text key", () => {
+      const doc = parseXml('<root id="1">hello</root>');
+      expect(toPlainObject(doc.root, { textKey: "_text" })).toEqual({
+        root: { "@_id": "1", _text: "hello" }
+      });
+    });
+
+    it("should always wrap in arrays when alwaysArray is true", () => {
+      const doc = parseXml("<root><child>text</child></root>");
+      expect(toPlainObject(doc.root, { alwaysArray: true })).toEqual({
+        root: { child: ["text"] }
+      });
+    });
+
+    it("alwaysArray should still work with repeated siblings", () => {
+      const doc = parseXml("<root><item>a</item><item>b</item></root>");
+      expect(toPlainObject(doc.root, { alwaysArray: true })).toEqual({
+        root: { item: ["a", "b"] }
+      });
+    });
+  });
+
+  describe("CDATA handling", () => {
+    it("should include CDATA text by default (merged by parseXml)", () => {
+      const doc = parseXml("<root><![CDATA[content]]></root>");
+      // parseXml merges CDATA into text by default
+      expect(toPlainObject(doc.root)).toEqual({ root: "content" });
+    });
+
+    it("should include CDATA when preserveCData is true and cdataAsNodes", () => {
+      const doc = parseXml("<root><![CDATA[content]]></root>", { cdataAsNodes: true });
+      expect(toPlainObject(doc.root, { preserveCData: true })).toEqual({ root: "content" });
+    });
+
+    it("should skip CDATA when preserveCData is false and cdataAsNodes", () => {
+      const doc = parseXml("<root><![CDATA[content]]></root>", { cdataAsNodes: true });
+      expect(toPlainObject(doc.root, { preserveCData: false })).toEqual({ root: "" });
+    });
+  });
+
+  describe("Excel-like XML", () => {
+    it("should convert worksheet XML to plain object", () => {
+      const xml = [
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+        "<sheetData>",
+        '<row r="1">',
+        '<c r="A1" t="s"><v>0</v></c>',
+        '<c r="B1" t="n"><v>42</v></c>',
+        "</row>",
+        "</sheetData>",
+        "</worksheet>"
+      ].join("");
+
+      const doc = parseXml(xml);
+      const obj = toPlainObject(doc.root);
+
+      expect(obj).toEqual({
+        worksheet: {
+          "@_xmlns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          sheetData: {
+            row: {
+              "@_r": "1",
+              c: [
+                { "@_r": "A1", "@_t": "s", v: "0" },
+                { "@_r": "B1", "@_t": "n", v: "42" }
+              ]
+            }
+          }
+        }
+      });
+    });
+  });
+
+  describe("edge cases", () => {
+    it("should handle mixed content (text + elements)", () => {
+      const doc = parseXml("<p>before<b>bold</b>after</p>");
+      expect(toPlainObject(doc.root)).toEqual({
+        p: { "#text": "beforeafter", b: "bold" }
+      });
+    });
+
+    it("should handle element with only empty children", () => {
+      const doc = parseXml("<root><a/><b/></root>");
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { a: "", b: "" }
+      });
+    });
+
+    it("should handle single element child with alwaysArray", () => {
+      const doc = parseXml("<root><only/></root>");
+      expect(toPlainObject(doc.root, { alwaysArray: true })).toEqual({
+        root: { only: [""] }
+      });
+    });
+  });
+
+  describe("whitespace handling", () => {
+    it("should ignore whitespace-only text nodes by default (pretty-printed XML)", () => {
+      const xml = "<root>\n  <child>text</child>\n</root>";
+      const doc = parseXml(xml);
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { child: "text" }
+      });
+    });
+
+    it("should preserve whitespace-only text when ignoreWhitespaceText is false", () => {
+      const xml = "<root>\n  <child>text</child>\n</root>";
+      const doc = parseXml(xml);
+      expect(toPlainObject(doc.root, { ignoreWhitespaceText: false })).toEqual({
+        root: { "#text": "\n  \n", child: "text" }
+      });
+    });
+
+    it("should preserve non-whitespace text even when ignoreWhitespaceText is true", () => {
+      const xml = "<root> meaningful text </root>";
+      const doc = parseXml(xml);
+      expect(toPlainObject(doc.root)).toEqual({
+        root: " meaningful text "
+      });
+    });
+
+    it("should handle pretty-printed nested XML", () => {
+      const xml = ["<root>", "  <a>", "    <b>deep</b>", "  </a>", "</root>"].join("\n");
+      const doc = parseXml(xml);
+      expect(toPlainObject(doc.root)).toEqual({
+        root: { a: { b: "deep" } }
+      });
+    });
+
+    it("should preserve whitespace-only text in leaf elements", () => {
+      const doc = parseXml("<pre>   </pre>");
+      expect(toPlainObject(doc.root)).toEqual({ pre: "   " });
+    });
+
+    it("should preserve whitespace-only text in leaf with attributes", () => {
+      const doc = parseXml('<space xml:space="preserve"> \t </space>');
+      expect(toPlainObject(doc.root)).toEqual({
+        space: { "@_xml:space": "preserve", "#text": " \t " }
+      });
+    });
   });
 });

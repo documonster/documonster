@@ -79,6 +79,41 @@ console.log(attr(item!, "id")); // "1"
 console.log(textContent(item!)); // "hello"
 ```
 
+### XML to Plain Object
+
+Convert XML into plain JavaScript objects (similar to fast-xml-parser output).
+
+Two entry points for different scenarios:
+
+```typescript
+import { parseXml, toPlainObject } from "@xml/dom";
+import { parseXmlToObject } from "@xml/to-object";
+
+// Option 1: already have a DOM tree
+const doc = parseXml('<root attr="1"><item>a</item><item>b</item></root>');
+const obj = toPlainObject(doc.root);
+// { root: { "@_attr": "1", item: ["a", "b"] } }
+
+// Option 2: XML string → plain object directly (faster, single SAX pass)
+const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root>');
+// same output, ~1.6x faster on medium/large XML
+```
+
+**When to use which:**
+
+- `toPlainObject(element)` — when you already have an `XmlElement` from `parseXml()`
+- `parseXmlToObject(xml)` — when you only need the plain object (skips DOM allocation)
+
+**Default conversion rules:**
+
+- Attributes are prefixed with `@_`
+- Repeated sibling elements become arrays
+- Text-only elements collapse to their string value
+- Empty elements become `""`
+- Whitespace-only indentation text is discarded by default
+
+**Limitations:** plain-object conversion is intentionally lossy — it does not preserve element ordering, comments, or processing instructions. If you need exact XML structure, use `parseXml()` and work with the DOM tree directly.
+
 ### Query Engine
 
 ```typescript
@@ -108,16 +143,18 @@ xmlDecode("&lt;hello&gt;"); // "<hello>"
 
 ```
 src/modules/xml/
-├── types.ts           # Core types (XmlNode, XmlSink, SaxTag, etc.)
-├── errors.ts          # XmlError, XmlParseError, XmlWriteError
-├── encode.ts          # xmlEncode, xmlDecode, validateXmlName, encodeCData, etc.
-├── writer.ts          # XmlWriter (buffered, with rollback support)
-├── stream-writer.ts   # XmlStreamWriter (streaming, writes to WritableTarget)
-├── sax.ts             # SaxParser (event-driven) + parseSax (async generator)
-├── dom.ts             # parseXml + DOM query helpers
-├── query.ts           # Simplified path query engine
-├── index.ts           # Public API barrel
-└── __tests__/         # Tests
+├── types.ts              # Core types (XmlNode, XmlSink, SaxTag, etc.)
+├── errors.ts             # XmlError, XmlParseError, XmlWriteError
+├── encode.ts             # xmlEncode, xmlDecode, validateXmlName, encodeCData, etc.
+├── writer.ts             # XmlWriter (buffered, with rollback support)
+├── stream-writer.ts      # XmlStreamWriter (streaming, writes to WritableTarget)
+├── sax.ts                # SaxParser (event-driven) + parseSax (async generator)
+├── dom.ts                # parseXml + DOM query helpers + toPlainObject
+├── to-object.ts          # parseXmlToObject (SAX-direct, single-pass)
+├── to-object-shared.ts   # Shared conversion logic (internal)
+├── query.ts              # Simplified path query engine
+├── index.ts              # Public API barrel
+└── __tests__/            # Tests
 ```
 
 ### Write Path
@@ -141,8 +178,15 @@ SaxParser            — Event-driven streaming parser
 │                      Best for: large XML, when you only need specific elements
 │
 ├── parseXml         — Builds a DOM tree (XmlDocument/XmlElement)
-│                      Built on top of SaxParser — no duplicate parsing logic
-│                      Best for: small-medium XML, when you need tree traversal
+│   │                  Built on top of SaxParser — no duplicate parsing logic
+│   │                  Best for: small-medium XML, when you need tree traversal
+│   │
+│   └── toPlainObject — Converts XmlElement DOM to plain JS object
+│                       Best for: when you already have a DOM tree
+│
+├── parseXmlToObject — SAX-direct to plain JS object (single pass, no DOM)
+│                      ~1.6x faster than parseXml + toPlainObject
+│                      Best for: XML string → plain object → JSON.stringify
 │
 └── parseSax         — Async generator wrapping SaxParser for stream iteration
                        Best for: async pipelines (e.g. reading from zip streams)
@@ -253,6 +297,43 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 | `textContent(node)`      | Recursive text content      |
 | `attr(el, name)`         | Get attribute value         |
 | `walk(el, visitor)`      | Depth-first traversal       |
+
+### toPlainObject
+
+```typescript
+function toPlainObject(
+  element: XmlElement,
+  options?: ToPlainObjectOptions
+): Record<string, unknown>;
+```
+
+Convert an `XmlElement` DOM tree into a plain JavaScript object.
+
+### parseXmlToObject
+
+```typescript
+function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
+```
+
+Parse an XML string directly into a plain JavaScript object in a single SAX pass. ~1.6x faster than `parseXml()` + `toPlainObject()` on medium/large XML.
+
+**Conversion options** (shared by both functions):
+
+| Option                 | Default   | Description                                                 |
+| ---------------------- | --------- | ----------------------------------------------------------- |
+| `attributePrefix`      | `"@_"`    | Prefix for attribute keys (`""` for bare names)             |
+| `textKey`              | `"#text"` | Key for text content in mixed-content elements              |
+| `alwaysArray`          | `false`   | Always wrap child elements in arrays                        |
+| `preserveCData`        | `true`    | Include CDATA values in text (relevant with `cdataAsNodes`) |
+| `ignoreWhitespaceText` | `true`    | Discard whitespace-only text in elements that have children |
+
+**Parser options** (`parseXmlToObject` only):
+
+| Option                | Default | Description                                       |
+| --------------------- | ------- | ------------------------------------------------- |
+| `fragment`            | `false` | Allow multiple root elements                      |
+| `maxDepth`            | `256`   | Maximum element nesting depth                     |
+| `maxEntityExpansions` | `10000` | Maximum entity expansion count (XML bomb defense) |
 
 ### Query Engine
 

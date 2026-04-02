@@ -12,6 +12,7 @@
 import { SaxParser } from "@xml/sax";
 import { XmlParseError } from "@xml/errors";
 import type {
+  ToPlainObjectOptions,
   XmlCData,
   XmlComment,
   XmlDocument,
@@ -21,6 +22,7 @@ import type {
   XmlProcessingInstruction,
   XmlText
 } from "@xml/types";
+import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 
 // =============================================================================
 // Security
@@ -291,4 +293,80 @@ function walk(element: XmlElement, visitor: (el: XmlElement) => void): void {
   }
 }
 
-export { parseXml, findChild, findChildren, textContent, attr, walk };
+// =============================================================================
+// DOM → Plain Object Conversion
+// =============================================================================
+
+/**
+ * Convert an {@link XmlElement} DOM tree to a plain JavaScript object.
+ *
+ * Produces output similar to fast-xml-parser: element names become object keys,
+ * attributes are prefixed (default `@_`), text-only elements collapse to their
+ * string value, and repeated sibling names merge into arrays.
+ *
+ * @param element - The element to convert.
+ * @param options - Conversion options.
+ * @returns A plain JavaScript object representing the element.
+ *
+ * @example
+ * ```ts
+ * const doc = parseXml('<root attr="1"><child>text</child></root>');
+ * const obj = toPlainObject(doc.root);
+ * // { root: { "@_attr": "1", child: "text" } }
+ * ```
+ *
+ * @example
+ * ```ts
+ * const doc = parseXml('<list><item>a</item><item>b</item></list>');
+ * const obj = toPlainObject(doc.root);
+ * // { list: { item: ["a", "b"] } }
+ * ```
+ */
+function toPlainObject(
+  element: XmlElement,
+  options?: ToPlainObjectOptions
+): Record<string, unknown> {
+  const opts = resolveOptions(options);
+
+  function convertElement(el: XmlElement): unknown {
+    const obj: Record<string, unknown> = Object.create(null);
+
+    // Add attributes — el.attributes is created via Object.create(null)
+    // by safeAttributes(), so no prototype keys to guard against.
+    let hasAttributes = false;
+    for (const key in el.attributes) {
+      obj[opts.attrPrefix + key] = el.attributes[key];
+      hasAttributes = true;
+    }
+
+    // Collect text and child elements in a single pass.
+    let text = "";
+    let hasChildren = false;
+
+    for (const child of el.children) {
+      switch (child.type) {
+        case "text":
+          text += child.value;
+          break;
+        case "cdata":
+          if (opts.preserveCData) {
+            text += child.value;
+          }
+          break;
+        case "element": {
+          const value = convertElement(child);
+          addChildValue(obj, child.name, value, opts.alwaysArray);
+          hasChildren = true;
+          break;
+        }
+        // comments and PIs are ignored in plain-object conversion
+      }
+    }
+
+    return resolveValue(obj, text, hasAttributes, hasChildren, opts);
+  }
+
+  return { [element.name]: convertElement(element) } as Record<string, unknown>;
+}
+
+export { parseXml, findChild, findChildren, textContent, attr, walk, toPlainObject };

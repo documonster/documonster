@@ -229,6 +229,65 @@ export interface WritableTarget {
 }
 
 // =============================================================================
+// DOM Conversion Options
+// =============================================================================
+
+/**
+ * Options for `toPlainObject()`.
+ *
+ * Controls how an {@link XmlElement} DOM tree is converted to a plain
+ * JavaScript object (similar to fast-xml-parser output format).
+ */
+export interface ToPlainObjectOptions {
+  /**
+   * Prefix for attribute keys.
+   * Set to `""` to use bare attribute names.
+   * @default "@_"
+   */
+  attributePrefix?: string;
+  /**
+   * Key used for text content when an element has both text and child elements
+   * (mixed content).
+   * @default "#text"
+   */
+  textKey?: string;
+  /**
+   * When true, always wrap child elements in arrays even if there is only one.
+   * When false (default), single children are stored as a plain value.
+   * @default false
+   */
+  alwaysArray?: boolean;
+  /**
+   * When true, include CDATA node values (already merged to text by default
+   * in `parseXml`, only relevant with `cdataAsNodes`).
+   * @default true
+   */
+  preserveCData?: boolean;
+  /**
+   * When true, discard whitespace-only text in elements that also have child
+   * elements (typical of pretty-printed XML indentation). Leaf elements that
+   * contain only whitespace text are **not** affected — their text is preserved.
+   * @default true
+   */
+  ignoreWhitespaceText?: boolean;
+}
+
+/**
+ * Options for `parseXmlToObject()`.
+ *
+ * Extends {@link ToPlainObjectOptions} with SAX parser settings, since
+ * `parseXmlToObject` handles both parsing and conversion in a single pass.
+ */
+export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
+  /** Parse as fragment (no root element required). Default: false */
+  fragment?: boolean;
+  /** Maximum element nesting depth. Default: 256. */
+  maxDepth?: number;
+  /** Maximum total entity expansions. Default: 10000. */
+  maxEntityExpansions?: number;
+}
+
+// =============================================================================
 // DOM Parse Options
 // =============================================================================
 
