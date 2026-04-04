@@ -193,6 +193,16 @@ export interface SaxHandlers {
   error?: (err: Error) => void;
 }
 
+/**
+ * Strategy for handling invalid XML characters (control chars, lone surrogates,
+ * non-characters like U+FFFE/U+FFFF).
+ *
+ * - `"error"` — Report via error handler or throw (XML 1.0 strict). **Default.**
+ * - `"skip"` — Silently remove the invalid character from the output.
+ * - `"replace"` — Replace the invalid character with U+FFFD (REPLACEMENT CHARACTER).
+ */
+export type InvalidCharHandling = "error" | "skip" | "replace";
+
 /** SAX parser options. */
 export interface SaxOptions {
   /** Track position (line/column) for error messages. Default: true */
@@ -211,6 +221,17 @@ export interface SaxOptions {
    * Default: 10000. Set 0 to disable.
    */
   maxEntityExpansions?: number;
+  /**
+   * How to handle invalid XML characters (ASCII control chars, lone surrogates,
+   * non-characters U+FFFE/U+FFFF, DEL U+007F, etc.).
+   *
+   * - `"error"` — Report via error handler or throw. **(Default)**
+   * - `"skip"` — Silently discard the character.
+   * - `"replace"` — Replace with U+FFFD (REPLACEMENT CHARACTER).
+   *
+   * @default "error"
+   */
+  invalidCharHandling?: InvalidCharHandling;
 }
 
 // =============================================================================
@@ -300,6 +321,8 @@ export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
   maxDepth?: number;
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
+  /** How to handle invalid XML characters. Default: "error". */
+  invalidCharHandling?: InvalidCharHandling;
 }
 
 // =============================================================================
@@ -322,4 +345,6 @@ export interface XmlParseOptions {
   maxDepth?: number;
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
+  /** How to handle invalid XML characters. Default: "error". */
+  invalidCharHandling?: InvalidCharHandling;
 }

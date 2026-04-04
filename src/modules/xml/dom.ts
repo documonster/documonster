@@ -107,7 +107,8 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
     fragment: options?.fragment ?? false,
     xmlns: options?.xmlns ?? false,
     maxDepth: options?.maxDepth,
-    maxEntityExpansions: options?.maxEntityExpansions
+    maxEntityExpansions: options?.maxEntityExpansions,
+    invalidCharHandling: options?.invalidCharHandling
   });
 
   // Stack of elements being built. The bottom is a synthetic root

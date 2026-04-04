@@ -15,7 +15,7 @@
  */
 
 import { XmlParseError } from "@xml/errors";
-import type { SaxEventAny, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
+import type { InvalidCharHandling, SaxEventAny, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
 
 // =============================================================================
 // Character Codes
@@ -39,6 +39,8 @@ const GREATER = 0x3e; // >
 const QUESTION = 0x3f; // ?
 const OPEN_BRACKET = 0x5b; // [
 const CLOSE_BRACKET = 0x5d; // ]
+const REPLACEMENT_CHAR = 0xfffd; // U+FFFD REPLACEMENT CHARACTER
+const REPLACEMENT_STR = "\uFFFD"; // Pre-allocated string form of U+FFFD
 
 // =============================================================================
 // Pre-computed Lookup Tables
@@ -226,6 +228,7 @@ class SaxParser {
   private xmlns: boolean;
   private maxDepth: number;
   private maxEntityExpansions: number;
+  private invalidCharHandling: InvalidCharHandling;
 
   // Security counters
   private _entityExpansionCount: number = 0;
@@ -275,6 +278,7 @@ class SaxParser {
     this.maxDepth = options?.maxDepth !== undefined ? options.maxDepth : 256;
     this.maxEntityExpansions =
       options?.maxEntityExpansions !== undefined ? options.maxEntityExpansions : 10000;
+    this.invalidCharHandling = options?.invalidCharHandling ?? "error";
     this._init();
   }
 
@@ -422,98 +426,235 @@ class SaxParser {
   }
 
   // ===========================================================================
+  // Invalid Character Handling
+  // ===========================================================================
+
+  /**
+   * Handle an invalid XML character according to the configured strategy.
+   *
+   * Used by `handleTextInRoot()` fast path which manages its own text accumulation
+   * and cannot use the `getCode()` loop approach.
+   *
+   * - `"error"`: call `fail()` and return the original code.
+   * - `"skip"`: return `REPLACEMENT_CHAR` as a sentinel (caller handles skip).
+   * - `"replace"`: return `REPLACEMENT_CHAR`.
+   *
+   * Note: For `getCode()`, invalid char handling is inlined to avoid recursion.
+   *
+   * @param code - The invalid character code point.
+   * @param kind - Optional description (e.g. "lone surrogate") for error messages.
+   * @returns The code point to use.
+   */
+  private handleInvalidChar(code: number, kind?: string): number {
+    switch (this.invalidCharHandling) {
+      case "replace":
+        return REPLACEMENT_CHAR;
+      case "skip":
+        // Caller is responsible for the actual skip logic.
+        // We return -2 as a sentinel to tell getCode()'s loop to continue.
+        return -2;
+      default: {
+        // "error" — existing strict behavior
+        const label = kind
+          ? `invalid XML character: ${kind} 0x${code.toString(16)}`
+          : `invalid XML character: 0x${code.toString(16)}`;
+        this.fail(label);
+        return code;
+      }
+    }
+  }
+
+  /**
+   * Handle an invalid character inside the `handleTextInRoot()` fast loop.
+   *
+   * Unlike `handleInvalidChar()` (which returns a code point for `getCode()`),
+   * this method manages the text accumulation state (`this.text`, `start`) that
+   * the fast text loop relies on.
+   *
+   * - `"error"`: call `fail()`, leave text accumulation unchanged (char stays in output).
+   * - `"skip"`: flush text up to the invalid char, skip it, return new `start`.
+   * - `"replace"`: flush text up to the invalid char, append U+FFFD, return new `start`.
+   *
+   * @returns The updated `start` index for the text accumulation loop.
+   */
+  private handleInvalidCharInText(
+    code: number,
+    handler: ((text: string) => void) | undefined,
+    start: number,
+    kind?: string
+  ): number {
+    switch (this.invalidCharHandling) {
+      case "skip":
+        // Flush text accumulated before this invalid char, then skip it
+        if (handler && start < this.prevI) {
+          this.text += this.chunk.slice(start, this.prevI);
+        }
+        return this.i;
+      case "replace":
+        // Flush text accumulated before this invalid char, append replacement
+        if (handler) {
+          if (start < this.prevI) {
+            this.text += this.chunk.slice(start, this.prevI);
+          }
+          this.text += REPLACEMENT_STR;
+        }
+        return this.i;
+      default: {
+        // "error" — existing strict behavior, char stays in output
+        const label = kind
+          ? `invalid XML character: ${kind} 0x${code.toString(16)}`
+          : `invalid XML character: 0x${code.toString(16)}`;
+        this.fail(label);
+        return start;
+      }
+    }
+  }
+
+  /**
+   * Handle an invalid character inside `sAttribValueQuoted()`.
+   *
+   * Same pattern as `handleInvalidCharInText()` but for attribute value
+   * accumulation (always uses `this.text`, no conditional handler check).
+   *
+   * @returns The updated `start` index.
+   */
+  private handleInvalidCharInAttr(code: number, start: number, kind?: string): number {
+    switch (this.invalidCharHandling) {
+      case "skip":
+        if (start < this.prevI) {
+          this.text += this.chunk.slice(start, this.prevI);
+        }
+        return this.i;
+      case "replace":
+        if (start < this.prevI) {
+          this.text += this.chunk.slice(start, this.prevI);
+        }
+        this.text += REPLACEMENT_STR;
+        return this.i;
+      default: {
+        const label = kind
+          ? `invalid XML character: ${kind} 0x${code.toString(16)}`
+          : `invalid XML character: 0x${code.toString(16)}`;
+        this.fail(label);
+        return start;
+      }
+    }
+  }
+
+  // ===========================================================================
   // Character Reading
   // ===========================================================================
 
   private getCode(): number {
-    const { chunk, i } = this;
-    this.prevI = i;
-    this.i = i + 1;
+    // Loop to handle skip mode: when an invalid char returns -2, we retry
+    // with the next character instead of recursing (avoids stack overflow
+    // on long runs of consecutive invalid characters).
+    for (;;) {
+      const { chunk } = this;
+      const i = this.i;
+      this.prevI = i;
+      this.i = i + 1;
 
-    if (i >= chunk.length) {
-      return -1;
-    }
-
-    const code = chunk.charCodeAt(i);
-
-    // Ultra-fast path: printable ASCII (0x20-0x7E) — the vast majority of XML content.
-    // No validation needed; these are always valid XML 1.0 characters.
-    if (code >= 0x20 && code <= 0x7e) {
-      if (this.trackPosition) {
-        this.column++;
+      if (i >= chunk.length) {
+        return -1;
       }
-      return code;
-    }
 
-    // Secondary fast path: TAB (0x09) — common in attribute values
-    if (code === TAB) {
-      if (this.trackPosition) {
-        this.column++;
-      }
-      return code;
-    }
+      const code = chunk.charCodeAt(i);
 
-    // Handle CR (normalize CR and CR+LF to LF per XML 1.0 §2.11)
-    if (code === CR) {
-      if (chunk.charCodeAt(i + 1) === NL) {
-        this.i = i + 2;
-      }
-      if (this.trackPosition) {
-        this.line++;
-        this.column = 0;
-        this.positionAtNewLine = this.position;
-      }
-      return NL;
-    }
-
-    // Handle LF
-    if (code === NL) {
-      if (this.trackPosition) {
-        this.line++;
-        this.column = 0;
-        this.positionAtNewLine = this.position;
-      }
-      return NL;
-    }
-
-    // Handle surrogates
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = chunk.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        this.i = i + 2;
+      // Ultra-fast path: printable ASCII (0x20-0x7E) — the vast majority of XML content.
+      // No validation needed; these are always valid XML 1.0 characters.
+      if (code >= 0x20 && code <= 0x7e) {
         if (this.trackPosition) {
           this.column++;
         }
-        return 0x10000 + ((code - 0xd800) * 0x400 + (next - 0xdc00));
+        return code;
       }
-      // Lone high surrogate — invalid XML character
-      this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
-    }
 
-    // Lone low surrogate — invalid XML character
-    if (code >= 0xdc00 && code <= 0xdfff) {
-      this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
-    }
+      // Secondary fast path: TAB (0x09) — common in attribute values
+      if (code === TAB) {
+        if (this.trackPosition) {
+          this.column++;
+        }
+        return code;
+      }
 
-    // Non-ASCII above surrogate range (0x80-0xD7FF, 0xE000-0xFFFD) — all valid XML
-    if (code >= 0x80) {
+      // Handle CR (normalize CR and CR+LF to LF per XML 1.0 §2.11)
+      if (code === CR) {
+        if (chunk.charCodeAt(i + 1) === NL) {
+          this.i = i + 2;
+        }
+        if (this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        }
+        return NL;
+      }
+
+      // Handle LF
+      if (code === NL) {
+        if (this.trackPosition) {
+          this.line++;
+          this.column = 0;
+          this.positionAtNewLine = this.position;
+        }
+        return NL;
+      }
+
+      // Handle surrogates
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = chunk.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          this.i = i + 2;
+          if (this.trackPosition) {
+            this.column++;
+          }
+          return 0x10000 + ((code - 0xd800) * 0x400 + (next - 0xdc00));
+        }
+        // Lone high surrogate — invalid XML character
+        const result = this.handleInvalidChar(code, "lone surrogate");
+        if (result !== -2) {
+          return result;
+        }
+        continue; // skip: loop to next char
+      }
+
+      // Lone low surrogate — invalid XML character
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        const result = this.handleInvalidChar(code, "lone surrogate");
+        if (result !== -2) {
+          return result;
+        }
+        continue;
+      }
+
+      // Non-ASCII above surrogate range (0x80-0xD7FF, 0xE000-0xFFFD) — all valid XML
+      if (code >= 0x80) {
+        if (this.trackPosition) {
+          this.column++;
+        }
+        // Reject 0xFFFE and 0xFFFF
+        if (code === 0xfffe || code === 0xffff) {
+          const result = this.handleInvalidChar(code);
+          if (result !== -2) {
+            return result;
+          }
+          continue;
+        }
+        return code;
+      }
+
+      // Remaining: ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)
+      // All invalid in XML 1.0
       if (this.trackPosition) {
         this.column++;
       }
-      // Reject 0xFFFE and 0xFFFF
-      if (code === 0xfffe || code === 0xffff) {
-        this.fail("invalid XML character: 0x" + code.toString(16));
+      const result = this.handleInvalidChar(code);
+      if (result !== -2) {
+        return result;
       }
-      return code;
+      // skip: continue to next char
     }
-
-    // Remaining: ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)
-    // All invalid in XML 1.0
-    if (this.trackPosition) {
-      this.column++;
-    }
-    this.fail("invalid XML character: 0x" + code.toString(16));
-    return code;
   }
 
   private unget(): void {
@@ -731,14 +872,14 @@ class SaxParser {
             this.i += 2;
           } else {
             this.i++;
-            this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
+            start = this.handleInvalidCharInText(code, handler, start, "lone surrogate");
           }
         } else if (code >= 0xdc00 && code <= 0xdfff) {
           this.i++;
-          this.fail("invalid XML character: lone surrogate 0x" + code.toString(16));
+          start = this.handleInvalidCharInText(code, handler, start, "lone surrogate");
         } else if (code === 0xfffe || code === 0xffff) {
           this.i++;
-          this.fail("invalid XML character: 0x" + code.toString(16));
+          start = this.handleInvalidCharInText(code, handler, start);
         } else {
           this.i++;
         }
@@ -754,7 +895,7 @@ class SaxParser {
       if (this.trackPosition) {
         this.column++;
       }
-      this.fail("invalid XML character: 0x" + code.toString(16));
+      start = this.handleInvalidCharInText(code, handler, start);
     }
 
     // End of chunk
@@ -768,15 +909,47 @@ class SaxParser {
     let { i: start } = this;
     const handler = this._handlers.text;
     let nonSpace = false;
+    const isSkip = this.invalidCharHandling === "skip";
+    const isReplace = this.invalidCharHandling === "replace";
 
     while (true) {
+      const iBeforeGet = this.i;
       const c = this.getCode();
 
       if (c === -1) {
-        if (handler && start < this.i) {
-          this.text += chunk.slice(start, this.i);
+        if (handler && start < iBeforeGet) {
+          this.text += chunk.slice(start, iBeforeGet);
         }
         break;
+      }
+
+      // In skip mode, getCode() may have internally looped past invalid chars.
+      // Flush valid text before the gap and advance start past it.
+      if (isSkip && this.prevI > iBeforeGet) {
+        if (handler && start < iBeforeGet) {
+          this.text += chunk.slice(start, iBeforeGet);
+        }
+        start = this.prevI;
+      }
+
+      // In replace mode, getCode() returns REPLACEMENT_CHAR for invalid chars
+      // but the original byte is still in the chunk.  Detect this by checking
+      // whether getCode() returned REPLACEMENT_CHAR while the raw chunk byte
+      // at prevI is NOT U+FFFD (i.e., it was substituted by handleInvalidChar).
+      if (
+        isReplace &&
+        c === REPLACEMENT_CHAR &&
+        chunk.charCodeAt(this.prevI) !== REPLACEMENT_CHAR
+      ) {
+        if (handler) {
+          if (start < this.prevI) {
+            this.text += chunk.slice(start, this.prevI);
+          }
+          this.text += REPLACEMENT_STR;
+        }
+        start = this.i;
+        nonSpace = true;
+        continue;
       }
 
       if (c === LESS) {
@@ -1174,13 +1347,40 @@ class SaxParser {
         continue;
       }
 
-      // All other chars — fall back to getCode() for validation
-      const c = this.getCode();
-      if (c === -1) {
-        this.text += chunk.slice(start, this.i);
-        return;
+      // Non-ASCII (>= 0x80) — mostly valid, handle inline like handleTextInRoot
+      if (code >= 0x80) {
+        this.prevI = this.i;
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = chunk.charCodeAt(this.i + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            this.i += 2; // valid surrogate pair
+          } else {
+            this.i++;
+            start = this.handleInvalidCharInAttr(code, start, "lone surrogate");
+          }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          this.i++;
+          start = this.handleInvalidCharInAttr(code, start, "lone surrogate");
+        } else if (code === 0xfffe || code === 0xffff) {
+          this.i++;
+          start = this.handleInvalidCharInAttr(code, start);
+        } else {
+          this.i++; // valid non-ASCII BMP char
+        }
+        if (this.trackPosition) {
+          this.column++;
+        }
+        continue;
       }
-      // Just continue — char is already consumed by getCode()
+
+      // Remaining: ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)
+      // All invalid in XML 1.0
+      this.prevI = this.i;
+      this.i++;
+      if (this.trackPosition) {
+        this.column++;
+      }
+      start = this.handleInvalidCharInAttr(code, start);
     }
 
     // End of chunk

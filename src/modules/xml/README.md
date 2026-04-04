@@ -243,14 +243,15 @@ Same methods as `XmlWriter` (both implement `XmlSink`), except:
 
 **Options:**
 
-| Option                | Default | Description                                       |
-| --------------------- | ------- | ------------------------------------------------- |
-| `position`            | `true`  | Track line/column for error messages              |
-| `fragment`            | `false` | Allow multiple root elements                      |
-| `xmlns`               | `false` | Enable namespace processing                       |
-| `maxDepth`            | `256`   | Maximum element nesting depth                     |
-| `maxEntityExpansions` | `10000` | Maximum entity expansion count (XML bomb defense) |
-| `fileName`            | —       | File name for error messages                      |
+| Option                | Default   | Description                                       |
+| --------------------- | --------- | ------------------------------------------------- |
+| `position`            | `true`    | Track line/column for error messages              |
+| `fragment`            | `false`   | Allow multiple root elements                      |
+| `xmlns`               | `false`   | Enable namespace processing                       |
+| `maxDepth`            | `256`     | Maximum element nesting depth                     |
+| `maxEntityExpansions` | `10000`   | Maximum entity expansion count (XML bomb defense) |
+| `invalidCharHandling` | `"error"` | How to handle invalid XML characters (see below)  |
+| `fileName`            | —         | File name for error messages                      |
 
 ### parseSax (Async Generator)
 
@@ -269,15 +270,16 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 
 **Options:**
 
-| Option                   | Default | Description                                     |
-| ------------------------ | ------- | ----------------------------------------------- |
-| `comments`               | `false` | Include comment nodes in DOM tree               |
-| `processingInstructions` | `false` | Include PI nodes in DOM tree                    |
-| `cdataAsNodes`           | `false` | Keep CDATA as explicit nodes vs merge into text |
-| `fragment`               | `false` | Allow multiple root elements                    |
-| `xmlns`                  | `false` | Enable namespace processing                     |
-| `maxDepth`               | `256`   | Maximum element nesting depth                   |
-| `maxEntityExpansions`    | `10000` | Maximum entity expansion count                  |
+| Option                   | Default   | Description                                      |
+| ------------------------ | --------- | ------------------------------------------------ |
+| `comments`               | `false`   | Include comment nodes in DOM tree                |
+| `processingInstructions` | `false`   | Include PI nodes in DOM tree                     |
+| `cdataAsNodes`           | `false`   | Keep CDATA as explicit nodes vs merge into text  |
+| `fragment`               | `false`   | Allow multiple root elements                     |
+| `xmlns`                  | `false`   | Enable namespace processing                      |
+| `maxDepth`               | `256`     | Maximum element nesting depth                    |
+| `maxEntityExpansions`    | `10000`   | Maximum entity expansion count                   |
+| `invalidCharHandling`    | `"error"` | How to handle invalid XML characters (see below) |
 
 **Returns:** `XmlDocument` with:
 
@@ -331,11 +333,12 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 
 **Parser options** (`parseXmlToObject` only):
 
-| Option                | Default | Description                                       |
-| --------------------- | ------- | ------------------------------------------------- |
-| `fragment`            | `false` | Allow multiple root elements                      |
-| `maxDepth`            | `256`   | Maximum element nesting depth                     |
-| `maxEntityExpansions` | `10000` | Maximum entity expansion count (XML bomb defense) |
+| Option                | Default   | Description                                       |
+| --------------------- | --------- | ------------------------------------------------- |
+| `fragment`            | `false`   | Allow multiple root elements                      |
+| `maxDepth`            | `256`     | Maximum element nesting depth                     |
+| `maxEntityExpansions` | `10000`   | Maximum entity expansion count (XML bomb defense) |
+| `invalidCharHandling` | `"error"` | How to handle invalid XML characters (see below)  |
 
 ### Query Engine
 
@@ -404,4 +407,51 @@ Note: Unprefixed attributes do **not** inherit the default namespace, per XML Na
 - **Comment/CDATA safety** — `validateCommentText()` rejects `--`, `encodeCData()` splits `]]>`
 - **BOM handling** — UTF-8 BOM at start of input is silently stripped
 - **Prototype pollution prevention** — DOM attribute maps use null-prototype objects with dangerous key filtering
-- **Invalid character handling** — Writers strip invalid XML 1.0 characters; parser rejects them
+- **Invalid character handling** — Writers strip invalid XML 1.0 characters; parser behavior is configurable via `invalidCharHandling`
+
+---
+
+## Invalid Character Handling
+
+Real-world XML data (especially from third-party XLSX files) may contain characters that are invalid per XML 1.0 — for example, `0x7F` (DEL), `0x01`–`0x08`, `0x0B`, `0x0C`, `0x0E`–`0x1F`, lone surrogates, and non-characters `U+FFFE`/`U+FFFF`.
+
+The `invalidCharHandling` option controls how the parser responds:
+
+| Value       | Behavior                                            |
+| ----------- | --------------------------------------------------- |
+| `"error"`   | Report via error handler or throw **(default)**     |
+| `"skip"`    | Silently discard the invalid character              |
+| `"replace"` | Replace with U+FFFD (Unicode REPLACEMENT CHARACTER) |
+
+### Examples
+
+```typescript
+import { SaxParser } from "@xml/sax";
+import { parseXml } from "@xml/dom";
+
+// Default: strict mode — throws on 0x7F
+parseXml("<root>hello\x7fworld</root>");
+// => XmlParseError: invalid XML character: 0x7f
+
+// Skip mode — invalid chars are removed
+const doc = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "skip" });
+// doc.root text content: "helloworld"
+
+// Replace mode — invalid chars become U+FFFD
+const doc2 = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "replace" });
+// doc.root text content: "hello\uFFFDworld"
+
+// SAX parser with skip mode
+const parser = new SaxParser({ invalidCharHandling: "skip" });
+parser.on("text", text => console.log(text)); // "helloworld"
+parser.write("<root>hello\x7fworld</root>");
+parser.close();
+```
+
+### When to use which
+
+- **`"error"` (default)** — Use for strict XML validation, testing, or when you control the XML source.
+- **`"skip"`** — Use when reading untrusted/dirty XML (e.g., third-party XLSX files) where you want to silently discard bad characters. This is what the Excel XLSX reader uses internally.
+- **`"replace"`** — Use when you want to preserve the _position_ of invalid characters (e.g., for diagnostics or data forensics) without crashing the parser.
+
+> **Note:** The XML _writers_ (`XmlWriter`, `XmlStreamWriter`) always strip invalid characters via `xmlEncode()` — this option only affects the _parser_.

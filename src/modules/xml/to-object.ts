@@ -72,7 +72,8 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
     position: false,
     fragment: options?.fragment ?? false,
     maxDepth: options?.maxDepth,
-    maxEntityExpansions: options?.maxEntityExpansions
+    maxEntityExpansions: options?.maxEntityExpansions,
+    invalidCharHandling: options?.invalidCharHandling
   });
 
   // Stack: bottom is a synthetic root frame that collects the document root.

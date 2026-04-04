@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PassThrough } from "@stream";
-import { Workbook } from "../../../index";
+import { Workbook, WorkbookReader } from "../../../index";
+import { ZipArchive } from "@archive/zip";
 
 // =============================================================================
 // Helpers
@@ -11,6 +12,48 @@ async function buildMinimalXlsx(): Promise<Uint8Array> {
   const wb = new Workbook();
   wb.addWorksheet("Sheet1").getCell("A1").value = "hello";
   return wb.xlsx.writeBuffer();
+}
+
+/**
+ * Build a dirty XLSX buffer whose shared strings contain invalid XML characters.
+ *
+ * Creates a normal XLSX via the Workbook API, then extracts the raw ZIP entries,
+ * injects invalid bytes (0x7F, 0x01, etc.) into the shared-strings XML, and
+ * re-zips the result.  This simulates real-world XLSX files from third-party
+ * tools that embed non-XML-1.0 characters.
+ */
+async function buildDirtyXlsx(
+  invalidChars: string = "\x7f",
+  cellText: string = "hello"
+): Promise<Uint8Array> {
+  // 1. Build a clean XLSX
+  const wb = new Workbook();
+  wb.addWorksheet("Sheet1").getCell("A1").value = cellText;
+  const cleanBuffer = await wb.xlsx.writeBuffer();
+
+  // 2. Extract all ZIP entries
+  const { extractAll } = await import("@archive/unzip/extract");
+  const entries = await extractAll(cleanBuffer);
+
+  // 3. Find and mutate the shared strings XML
+  const ssiKey = "xl/sharedStrings.xml";
+  const ssiEntry = entries.get(ssiKey);
+  if (!ssiEntry) {
+    throw new Error("no sharedStrings.xml found in generated XLSX");
+  }
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let xml = decoder.decode(ssiEntry.data);
+  // Inject invalid chars right before the cell text
+  xml = xml.replace(cellText, invalidChars + cellText + invalidChars);
+  ssiEntry.data = encoder.encode(xml);
+
+  // 4. Re-zip all entries
+  const archive = new ZipArchive({ level: 0, reproducible: true });
+  for (const [name, entry] of entries) {
+    archive.add(name, entry.data);
+  }
+  return archive.bytes();
 }
 
 /** Build a feature-rich XLSX buffer for round-trip testing. */
@@ -508,6 +551,61 @@ describe("XLSX", () => {
       expect(cell.text).toBe("Go to Sheet2");
       // The hyperlink should be "#Sheet2!A1", not "#Sheet2!A1##Sheet2!A1"
       expect(cell.hyperlink).toBe("#Sheet2!A1");
+    });
+  });
+
+  // ===========================================================================
+  // Invalid XML Characters in XLSX (Regression)
+  // ===========================================================================
+
+  describe("invalid XML characters in XLSX", () => {
+    it("reads XLSX with 0x7F (DEL) in shared string without crashing", async () => {
+      const dirtyBuffer = await buildDirtyXlsx("\x7f");
+      const wb = new Workbook();
+      await wb.xlsx.load(dirtyBuffer);
+
+      const ws = wb.getWorksheet("Sheet1")!;
+      expect(ws).toBeDefined();
+      // The invalid char should be stripped; "hello" should survive
+      expect(ws.getCell("A1").text).toContain("hello");
+    });
+
+    it("reads XLSX with multiple control chars in shared string", async () => {
+      const dirtyBuffer = await buildDirtyXlsx("\x01\x02\x03\x7f");
+      const wb = new Workbook();
+      await wb.xlsx.load(dirtyBuffer);
+
+      const ws = wb.getWorksheet("Sheet1")!;
+      expect(ws).toBeDefined();
+      expect(ws.getCell("A1").text).toContain("hello");
+    });
+
+    it("reads dirty XLSX via streaming WorkbookReader", async () => {
+      const dirtyBuffer = await buildDirtyXlsx("\x7f");
+      const rows: string[] = [];
+
+      const reader = new WorkbookReader(dirtyBuffer, { worksheets: "emit" });
+      for await (const ws of reader) {
+        for await (const row of ws) {
+          const cell = row.getCell(1);
+          if (cell.text) {
+            rows.push(cell.text);
+          }
+        }
+      }
+
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]).toContain("hello");
+    });
+
+    it("reads XLSX with NUL bytes in shared string", async () => {
+      const dirtyBuffer = await buildDirtyXlsx("\x00\x00\x00");
+      const wb = new Workbook();
+      await wb.xlsx.load(dirtyBuffer);
+
+      const ws = wb.getWorksheet("Sheet1")!;
+      expect(ws).toBeDefined();
+      expect(ws.getCell("A1").text).toContain("hello");
     });
   });
 });

@@ -410,7 +410,7 @@ export abstract class WorkbookReaderBase<
     // For "cache" mode, use direct SAX callbacks (no event objects, no async generator overhead)
     if (this.options.sharedStrings === "cache") {
       const sharedStrings = this.sharedStrings!;
-      const parser = new SaxParser({ position: false });
+      const parser = new SaxParser({ position: false, invalidCharHandling: "skip" });
 
       parser.on("opentag", (node: SaxTag) => {
         switch (node.name) {
@@ -515,7 +515,7 @@ export abstract class WorkbookReaderBase<
     }
 
     // "emit" mode — must yield, so use direct SAX with per-chunk yield
-    const emitParser = new SaxParser();
+    const emitParser = new SaxParser({ invalidCharHandling: "skip" });
     const emitDecoder = new TextDecoder("utf-8", { fatal: true });
     let pendingEmits: Array<{ index: number; text: SharedStringValue }> = [];
 

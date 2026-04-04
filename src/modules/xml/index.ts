@@ -39,6 +39,9 @@ export type {
   SaxHandlers,
   SaxOptions,
 
+  // Invalid character handling
+  InvalidCharHandling,
+
   // Stream writer types
   WritableTarget,
 

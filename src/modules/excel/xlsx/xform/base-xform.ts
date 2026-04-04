@@ -186,7 +186,7 @@ class BaseXform<TModel = any> {
    * Use this instead of parse(parseSax(stream)) for hot paths.
    */
   async parseStreamDirect(stream: AsyncIterable<any>): Promise<TModel | undefined> {
-    const parser = new SaxParser();
+    const parser = new SaxParser({ invalidCharHandling: "skip" });
     const decoder = new TextDecoder("utf-8", { fatal: true });
 
     let done = false;
