@@ -93,6 +93,16 @@ export {
   createCsvFormatterStream
 } from "@csv/stream";
 
+// Markdown types
+export type { MdOptions } from "@md/types";
+export type {
+  MdAlignment,
+  MdParseResult,
+  MdParseOptions,
+  MdColumnConfig,
+  MdFormatOptions
+} from "@md/types";
+
 // =============================================================================
 // Additional Classes & Types
 // =============================================================================
@@ -200,3 +210,6 @@ export {
   ImageError,
   MaxItemsExceededError
 } from "@excel/errors";
+
+// Markdown errors
+export { MdError, MdParseError } from "@md/errors";

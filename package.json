@@ -79,6 +79,20 @@
         "default": "./dist/cjs/modules/csv/index.js"
       }
     },
+    "./md": {
+      "browser": {
+        "types": "./dist/browser/modules/md/index.d.ts",
+        "default": "./dist/browser/modules/md/index.js"
+      },
+      "import": {
+        "types": "./dist/types/modules/md/index.d.ts",
+        "default": "./dist/esm/modules/md/index.js"
+      },
+      "require": {
+        "types": "./dist/types/modules/md/index.d.ts",
+        "default": "./dist/cjs/modules/md/index.js"
+      }
+    },
     "./stream": {
       "browser": {
         "types": "./dist/browser/modules/stream/index.browser.d.ts",
@@ -125,6 +139,9 @@
       "csv": [
         "dist/types/modules/csv/index.d.ts"
       ],
+      "md": [
+        "dist/types/modules/md/index.d.ts"
+      ],
       "stream": [
         "dist/types/modules/stream/index.d.ts"
       ],
@@ -144,7 +161,7 @@
     "test:browser": "npm run generate:csv-worker && rimraf dist && npm run build:browser:bundle && vitest run --config vitest.browser.config.ts",
     "test:watch": "vitest",
     "build": "npm run generate:csv-worker && rimraf dist && concurrently \"npm run build:esm\" \"npm run build:cjs\" \"npm run build:browser\" \"npm run build:browser:bundle\" && npm run build:verify",
-    "build:verify": "tsc --noEmit --ignoreConfig --module NodeNext --moduleResolution NodeNext --lib ESNext,DOM --types node dist/types/index.d.ts dist/types/modules/archive/index.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/stream/index.d.ts dist/types/modules/xml/index.d.ts",
+    "build:verify": "tsc --noEmit --ignoreConfig --module NodeNext --moduleResolution NodeNext --lib ESNext,DOM --types node dist/types/index.d.ts dist/types/modules/archive/index.d.ts dist/types/modules/csv/index.d.ts dist/types/modules/md/index.d.ts dist/types/modules/stream/index.d.ts dist/types/modules/xml/index.d.ts",
     "verify:treeshake": "node scripts/treeshake-verify.ts",
     "analyze:browser": "rimraf dist && node --input-type=module -e \"import { execSync } from 'node:child_process'; process.env.ANALYZE='true'; execSync('rolldown -c rolldown.config.ts', { stdio: 'inherit' });\"",
     "clean": "pnpm dlx --reporter=silent rimraf \"**/node_modules\" pnpm-lock.yaml \"**/dist\" -g && pnpm i",
@@ -169,6 +186,8 @@
     "xlsx",
     "json",
     "csv",
+    "markdown",
+    "md",
     "spreadsheet",
     "workbook",
     "font",

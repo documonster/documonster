@@ -21,6 +21,9 @@ import { formatCsv } from "@csv/format";
 import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
+import { parseMd, parseMdAll } from "@md/parse/index";
+import { formatMd } from "@md/format/index";
+import type { MdOptions, MdAlignment, MdParseResult } from "@md/types";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
 import { pipeline } from "@stream";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
@@ -293,6 +296,59 @@ function createDefaultWriteMapper(dateFormat?: string, dateUTC?: boolean) {
       }
     }
     return value;
+  };
+}
+
+// =============================================================================
+// Markdown Value Mapper (Internal)
+// =============================================================================
+
+/**
+ * Create a stringify function for Markdown output.
+ * Handles hyperlinks, formulas, rich text, dates, errors, and objects.
+ */
+function createMdStringify(dateFormat?: string, dateUTC?: boolean): (value: unknown) => string {
+  const formatter = dateFormat
+    ? DateFormatter.create(dateFormat, { utc: dateUTC })
+    : DateFormatter.iso(dateUTC);
+
+  return function stringify(value: unknown): string {
+    if (value === null || value === undefined) {
+      return "";
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "bigint") {
+      return String(value);
+    }
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+    if (value instanceof Date) {
+      return formatter.format(value);
+    }
+    if (typeof value === "object") {
+      const v = value as any;
+      if (v.text || v.hyperlink) {
+        return v.hyperlink || v.text || "";
+      }
+      if (v.formula || v.result) {
+        return v.result != null ? String(v.result) : "";
+      }
+      if (v.richText && Array.isArray(v.richText)) {
+        return v.richText.map((r: { text: string }) => r.text).join("");
+      }
+      if (v.error) {
+        return v.error;
+      }
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return "[object Object]";
+      }
+    }
+    return String(value);
   };
 }
 
@@ -889,6 +945,212 @@ class Workbook {
 
     formatter.end();
     await pipelinePromise;
+  }
+
+  /**
+   * Populate a worksheet from a parsed Markdown table result.
+   * Shared by readMd and readMdAll.
+   */
+  private _populateMdWorksheet(
+    worksheet: Worksheet,
+    result: MdParseResult,
+    map?: (value: string, column: number) => unknown
+  ): void {
+    worksheet.addRow(result.headers);
+    (worksheet as any)._mdAlignments = result.alignments;
+    for (const row of result.rows) {
+      if (map) {
+        worksheet.addRow(row.map((v, i) => map(v, i)));
+      } else {
+        worksheet.addRow(row);
+      }
+    }
+  }
+
+  /**
+   * Read a Markdown table and add as worksheet.
+   *
+   * @example
+   * ```ts
+   * // From a Markdown string
+   * workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+   *
+   * // With options
+   * workbook.readMd(mdString, { sheetName: "Data", map: (v, col) => Number(v) || v });
+   * ```
+   */
+  readMd(input: string, options?: MdOptions): Worksheet {
+    const parseResult = parseMd(input, {
+      trim: options?.trim,
+      unescape: options?.unescape,
+      skipEmptyRows: options?.skipEmptyRows,
+      maxRows: options?.maxRows,
+      convertBr: options?.convertBr
+    });
+
+    const worksheet = this.addWorksheet(options?.sheetName);
+    this._populateMdWorksheet(worksheet, parseResult, options?.map);
+    return worksheet;
+  }
+
+  /**
+   * Read all Markdown tables from a document, each becoming a separate worksheet.
+   *
+   * @param input - Markdown string containing one or more tables
+   * @param options - Parse options (sheetName is used as prefix: "sheetName", "sheetName_2", ...)
+   * @returns Array of created worksheets (empty if no tables found)
+   *
+   * @example
+   * ```ts
+   * // Parse a document with multiple tables
+   * const sheets = workbook.readMdAll(markdownDoc);
+   * console.log(`Created ${sheets.length} worksheets`);
+   *
+   * // With a naming prefix
+   * const sheets = workbook.readMdAll(markdownDoc, { sheetName: "Table" });
+   * // Creates "Table", "Table_2", "Table_3", ...
+   * ```
+   */
+  readMdAll(input: string, options?: MdOptions): Worksheet[] {
+    const parseResults = parseMdAll(input, {
+      trim: options?.trim,
+      unescape: options?.unescape,
+      skipEmptyRows: options?.skipEmptyRows,
+      maxRows: options?.maxRows,
+      convertBr: options?.convertBr
+    });
+
+    const baseName = options?.sheetName;
+    const map = options?.map;
+    const worksheets: Worksheet[] = [];
+
+    for (let t = 0; t < parseResults.length; t++) {
+      const name = baseName ? (t === 0 ? baseName : `${baseName}_${t + 1}`) : undefined;
+      const worksheet = this.addWorksheet(name);
+      this._populateMdWorksheet(worksheet, parseResults[t], map);
+      worksheets.push(worksheet);
+    }
+
+    return worksheets;
+  }
+
+  /**
+   * Write worksheet as a Markdown table string.
+   *
+   * @example
+   * ```ts
+   * // Write first worksheet
+   * const md = workbook.writeMd();
+   *
+   * // Write specific worksheet with options
+   * const md = workbook.writeMd({ sheetName: "Data", padding: true });
+   * ```
+   */
+  writeMd(options?: MdOptions): string {
+    const worksheet = this.getWorksheet(options?.sheetName || options?.sheetId);
+    if (!worksheet) {
+      return "";
+    }
+
+    const dateFormat = options?.dateFormat;
+    const dateUTC = options?.dateUTC;
+    const includeEmptyRows = options?.includeEmptyRows !== false;
+
+    // Build stringify function
+    const stringify = options?.stringify ?? createMdStringify(dateFormat, dateUTC);
+
+    // Collect all rows from worksheet
+    const allRows: unknown[][] = [];
+    let lastRow = 1;
+
+    worksheet.eachRow((row: any, rowNumber: number) => {
+      if (includeEmptyRows) {
+        while (lastRow++ < rowNumber - 1) {
+          allRows.push([]);
+        }
+      }
+      // row.values is a 1-indexed sparse array — use Array.from to fill holes
+      // with undefined, then slice(1) to remove the leading 1-indexed slot
+      const values = Array.from(row.values as unknown[]).slice(1);
+      allRows.push(values);
+      lastRow = rowNumber;
+    });
+
+    if (allRows.length === 0) {
+      return "";
+    }
+
+    // First row is the header
+    const headerRow = allRows[0];
+    const headers: string[] = headerRow.map(v => stringify(v));
+    const dataRows = allRows.slice(1);
+
+    // Check for stored alignments from a previous readMd
+    const storedAlignments: MdAlignment[] | undefined = (worksheet as any)._mdAlignments;
+
+    // Build column configs
+    const columns = options?.columns;
+    let resolvedColumns: { header: string; alignment?: MdAlignment }[] | undefined;
+
+    if (!columns && storedAlignments) {
+      // Use stored alignments from parsed Markdown
+      resolvedColumns = headers.map((h, i) => ({
+        header: h,
+        alignment: i < storedAlignments.length ? storedAlignments[i] : undefined
+      }));
+    }
+
+    return formatMd(headers, dataRows, {
+      columns: resolvedColumns ?? columns,
+      alignment: options?.alignment,
+      padding: options?.padding,
+      trailingNewline: options?.trailingNewline,
+      escapeContent: options?.escapeContent,
+      stringify
+    });
+  }
+
+  /**
+   * Write worksheet to Markdown buffer (Uint8Array).
+   *
+   * @example
+   * ```ts
+   * const buffer = workbook.writeMdBuffer();
+   * ```
+   */
+  writeMdBuffer(options?: MdOptions): Uint8Array {
+    const mdString = this.writeMd(options);
+    return new TextEncoder().encode(mdString);
+  }
+
+  /**
+   * Read Markdown from file (Node.js only - throws in browser)
+   */
+  async readMdFile(_filename: string, _options?: MdOptions): Promise<Worksheet> {
+    throw new ExcelNotSupportedError(
+      "readMdFile()",
+      "not available in browser. Use readMd(string) instead."
+    );
+  }
+
+  /**
+   * Read all Markdown tables from file (Node.js only - throws in browser)
+   */
+  async readMdAllFile(_filename: string, _options?: MdOptions): Promise<Worksheet[]> {
+    throw new ExcelNotSupportedError(
+      "readMdAllFile()",
+      "not available in browser. Use readMdAll(string) instead."
+    );
+  }
+
+  /**
+   * Write Markdown to file (Node.js only - throws in browser)
+   */
+  async writeMdFile(_filename: string, _options?: MdOptions): Promise<void> {
+    throw new ExcelNotSupportedError(
+      "writeMdFile()",
+      "not available in browser. Use writeMd() and trigger a download instead."
+    );
   }
 
   // ===========================================================================

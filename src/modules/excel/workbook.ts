@@ -1,13 +1,20 @@
 /**
  * Workbook - Node.js Version
  *
- * Extends browser Workbook with Node.js file system support for CSV operations.
+ * Extends browser Workbook with Node.js file system support for CSV and Markdown operations.
  */
 
-import { fileExists, createReadStream, createWriteStream } from "@utils/fs";
+import {
+  fileExists,
+  createReadStream,
+  createWriteStream,
+  readFileText,
+  writeFileText
+} from "@utils/fs";
 import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
 import { ExcelFileError } from "@excel/errors";
 import type { Worksheet } from "@excel/worksheet";
+import type { MdOptions } from "@md/types";
 
 // =============================================================================
 // Node.js Workbook Class
@@ -66,6 +73,56 @@ class Workbook extends WorkbookBrowser {
     }
 
     return this._writeCsvStream(writeStream, options);
+  }
+
+  /**
+   * Read Markdown table from file (Node.js only)
+   *
+   * @example
+   * ```ts
+   * await workbook.readMdFile("table.md");
+   * await workbook.readMdFile("table.md", { sheetName: "Data" });
+   * ```
+   */
+  override async readMdFile(filename: string, options?: MdOptions): Promise<Worksheet> {
+    if (!(await fileExists(filename))) {
+      throw new ExcelFileError(filename, "read", "file not found");
+    }
+
+    const content = await readFileText(filename);
+    return this.readMd(content, options);
+  }
+
+  /**
+   * Read all Markdown tables from file, each as a separate worksheet (Node.js only)
+   *
+   * @example
+   * ```ts
+   * await workbook.readMdAllFile("doc.md");
+   * await workbook.readMdAllFile("doc.md", { sheetName: "Table" });
+   * ```
+   */
+  override async readMdAllFile(filename: string, options?: MdOptions): Promise<Worksheet[]> {
+    if (!(await fileExists(filename))) {
+      throw new ExcelFileError(filename, "read", "file not found");
+    }
+
+    const content = await readFileText(filename);
+    return this.readMdAll(content, options);
+  }
+
+  /**
+   * Write Markdown table to file (Node.js only)
+   *
+   * @example
+   * ```ts
+   * await workbook.writeMdFile("output.md");
+   * await workbook.writeMdFile("output.md", { sheetName: "Data", padding: true });
+   * ```
+   */
+  override async writeMdFile(filename: string, options?: MdOptions): Promise<void> {
+    const mdString = this.writeMd(options);
+    await writeFileText(filename, mdString);
   }
 }
 

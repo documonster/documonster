@@ -9,8 +9,8 @@
 ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 
 - 🚀 **零运行时依赖** — 纯 TypeScript 实现，无任何外部包依赖
-- 📦 **六大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、XML（SAX/DOM/Writer）、Archive（ZIP/TAR）、Stream（跨平台）
-- 🤖 **AI 最佳伴侣** — 简洁一致的 API 设计，让 AI 编程助手更容易生成处理各种文件的代码——一个库搞定 Excel、PDF、CSV、XML、ZIP 和流式处理，保持最高效率
+- 📦 **七大模块** — Excel（XLSX/JSON）、PDF（独立引擎 + Excel 桥接）、CSV（RFC 4180）、Markdown（GFM 表格）、XML（SAX/DOM/Writer）、Archive（ZIP/TAR）、Stream（跨平台）
+- 🤖 **AI 最佳伴侣** — 简洁一致的 API 设计，让 AI 编程助手更容易生成处理各种文件的代码——一个库搞定 Excel、PDF、CSV、Markdown、XML、ZIP 和流式处理，保持最高效率
 - ✅ **跨平台** — Node.js 22+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
 - ✅ **ESM 优先** — 原生 ES Modules，兼容 CommonJS，完整 tree-shaking 支持
 
@@ -19,6 +19,7 @@ ExcelTS 是零依赖的 TypeScript 电子表格与文档工具包：
 - [XML 模块](src/modules/xml/README.md) — 零依赖 SAX/DOM 解析器、查询引擎和双模式写入器
 - [PDF 模块](src/modules/pdf/README.md) — 零依赖 PDF 引擎，支持加密和字体嵌入
 - [CSV 模块](src/modules/csv/README.md) — RFC 4180 解析/格式化、流式处理、数据生成
+- [Markdown 模块](src/modules/md/README.md) — GFM 表格解析/格式化，支持对齐方式往返
 - [归档模块](src/modules/archive/README.md) — ZIP/TAR 创建/读取/编辑、压缩、加密
 - [流模块](src/modules/stream/README.md) — 跨平台 Readable/Writable/Transform/Duplex
 
@@ -122,6 +123,7 @@ cell.fill = {
 - **高级功能**
   - 大文件流式处理
   - CSV 导入/导出
+  - Markdown 表格导入/导出
   - 带自动筛选的表格
   - 页面设置和打印选项
   - 数据保护
@@ -143,6 +145,9 @@ import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 
 // CSV 解析、格式化与流式处理
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
+
+// Markdown 表格解析与格式化
+import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
 
 // 跨平台流式原语
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
@@ -491,6 +496,79 @@ const csvOutput = workbook.writeCsv();
 const bytes = await workbook.writeCsvBuffer();
 ```
 
+## Markdown 支持
+
+### Node.js
+
+```javascript
+import { Workbook } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+
+// 从文件读取 Markdown 表格
+await workbook.readMdFile("table.md");
+
+// 从字符串读取 Markdown 表格
+workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+
+// 使用选项读取
+workbook.readMd(mdString, {
+  sheetName: "Data",
+  map: (v, col) => Number(v) || v
+});
+
+// 写入 Markdown 到文件
+await workbook.writeMdFile("output.md");
+
+// 写入 Markdown 为字符串
+const mdText = workbook.writeMd();
+
+// 写入 Markdown 为 Uint8Array 字节
+const bytes = workbook.writeMdBuffer();
+```
+
+### 浏览器（内存中）
+
+```javascript
+import { Workbook } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+
+// 从字符串读取 Markdown 表格
+workbook.readMd(mdString);
+
+// 写入 Markdown 为字符串
+const mdOutput = workbook.writeMd();
+
+// 写入 Markdown 为 Uint8Array 字节
+const bytes = workbook.writeMdBuffer();
+```
+
+### 独立解析器 / 格式化器
+
+```typescript
+import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
+
+// 解析 Markdown 表格
+const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+// result.headers = ["Name", "Age"]
+// result.rows = [["Alice", "30"]]
+// result.alignments = ["none", "none"]
+
+// 解析文档中的所有表格
+const tables = parseMdAll(markdownDoc);
+
+// 格式化数据为 Markdown 表格
+const md = formatMd(
+  ["Name", "Age"],
+  [
+    ["Alice", "30"],
+    ["Bob", "25"]
+  ],
+  { alignment: "left", padding: true }
+);
+```
+
 ## 浏览器支持
 
 ExcelTS 原生支持浏览器环境，现代打包工具**无需任何配置**。
@@ -547,6 +625,9 @@ npx serve .
 - **支持 CSV 操作**（使用原生 RFC 4180 标准实现）
   - 使用 `await workbook.readCsv(input)` 读取 CSV
   - 使用 `workbook.writeCsv()` 或 `await workbook.writeCsvBuffer()` 写入 CSV
+- **支持 Markdown 表格操作**（GFM 表格语法）
+  - 使用 `workbook.readMd(input)` 读取 Markdown 表格
+  - 使用 `workbook.writeMd()` 或 `workbook.writeMdBuffer()` 写入 Markdown
 - 使用 `xlsx.load(arrayBuffer)` 代替 `xlsx.readFile()`
 - 使用 `xlsx.writeBuffer()` 代替 `xlsx.writeFile()`
 - 完全支持带密码的工作表保护（纯 JS SHA-512 实现）

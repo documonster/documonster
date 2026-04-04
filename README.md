@@ -9,8 +9,8 @@ Modern TypeScript Excel Workbook Manager - Read, manipulate and write spreadshee
 ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 - 🚀 **Zero Runtime Dependencies** — Pure TypeScript, no external packages
-- 📦 **Six Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), XML (SAX/DOM/Writer), Archive (ZIP/TAR), Stream (cross-platform)
-- 🤖 **AI-Friendly** — Clean, consistent API designed to be easily generated and consumed by AI coding agents — one library handles Excel, PDF, CSV, XML, ZIP, and streaming with maximum efficiency
+- 📦 **Seven Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Markdown (GFM tables), XML (SAX/DOM/Writer), Archive (ZIP/TAR), Stream (cross-platform)
+- 🤖 **AI-Friendly** — Clean, consistent API designed to be easily generated and consumed by AI coding agents — one library handles Excel, PDF, CSV, Markdown, XML, ZIP, and streaming with maximum efficiency
 - ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
@@ -19,6 +19,7 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 - [XML Module](src/modules/xml/README.md) — Zero-dependency SAX/DOM parser, query engine, and dual-mode writer
 - [PDF Module](src/modules/pdf/README.md) — Full-featured zero-dependency PDF engine with encryption and font embedding
 - [CSV Module](src/modules/csv/README.md) — RFC 4180 parser/formatter, streaming, data generation
+- [Markdown Module](src/modules/md/README.md) — GFM table parser/formatter with alignment round-trip
 - [Archive Module](src/modules/archive/README.md) — ZIP/TAR create/read/edit, compression, encryption
 - [Stream Module](src/modules/stream/README.md) — Cross-platform Readable/Writable/Transform/Duplex
 
@@ -122,6 +123,7 @@ cell.fill = {
 - **Advanced Features**
   - Streaming for large files
   - CSV import/export
+  - Markdown table import/export
   - Tables with auto-filters
   - Page setup and printing options
   - Data protection
@@ -143,6 +145,9 @@ import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 
 // CSV parsing, formatting, and streaming
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
+
+// Markdown table parsing and formatting
+import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
 
 // Cross-platform stream primitives
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
@@ -493,6 +498,79 @@ const csvOutput = workbook.writeCsv();
 const bytes = await workbook.writeCsvBuffer();
 ```
 
+## Markdown Support
+
+### Node.js
+
+```javascript
+import { Workbook } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+
+// Read Markdown table from file
+await workbook.readMdFile("table.md");
+
+// Read Markdown table from string
+workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+
+// Read with options
+workbook.readMd(mdString, {
+  sheetName: "Data",
+  map: (v, col) => Number(v) || v
+});
+
+// Write Markdown to file
+await workbook.writeMdFile("output.md");
+
+// Write Markdown to string
+const mdText = workbook.writeMd();
+
+// Write Markdown to Uint8Array bytes
+const bytes = workbook.writeMdBuffer();
+```
+
+### Browser (In-Memory)
+
+```javascript
+import { Workbook } from "@cj-tech-master/excelts";
+
+const workbook = new Workbook();
+
+// Read Markdown table from string
+workbook.readMd(mdString);
+
+// Write Markdown to string
+const mdOutput = workbook.writeMd();
+
+// Write Markdown to Uint8Array bytes
+const bytes = workbook.writeMdBuffer();
+```
+
+### Standalone Parser / Formatter
+
+```typescript
+import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
+
+// Parse a Markdown table
+const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+// result.headers = ["Name", "Age"]
+// result.rows = [["Alice", "30"]]
+// result.alignments = ["none", "none"]
+
+// Parse all tables in a document
+const tables = parseMdAll(markdownDoc);
+
+// Format data as a Markdown table
+const md = formatMd(
+  ["Name", "Age"],
+  [
+    ["Alice", "30"],
+    ["Bob", "25"]
+  ],
+  { alignment: "left", padding: true }
+);
+```
+
 ## Browser Support
 
 ExcelTS has native browser support with **zero configuration** required for modern bundlers.
@@ -549,6 +627,9 @@ Then open `http://localhost:3000/src/modules/excel/examples/browser-smoke.html`.
 - **CSV operations are supported** using native RFC 4180 implementation
   - Use `await workbook.readCsv(input)` to read CSV
   - Use `workbook.writeCsv()` or `await workbook.writeCsvBuffer()` to write CSV
+- **Markdown table operations are supported** with GFM table syntax
+  - Use `workbook.readMd(input)` to read Markdown tables
+  - Use `workbook.writeMd()` or `workbook.writeMdBuffer()` to write Markdown
 - Use `xlsx.load(arrayBuffer)` instead of `xlsx.readFile()`
 - Use `xlsx.writeBuffer()` instead of `xlsx.writeFile()`
 - Worksheet protection with passwords is fully supported (pure JS SHA-512)
