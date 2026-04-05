@@ -4,7 +4,7 @@ This document provides guidelines for AI coding agents working in the excelts co
 
 ## Project Overview
 
-**excelts** is a TypeScript Excel workbook manager for reading/writing XLSX and CSV files, with built-in PDF export.
+**excelts** is a zero-dependency TypeScript toolkit with seven standalone modules: Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Markdown (GFM tables), XML (SAX/DOM/Writer), Archive (ZIP/TAR), and Stream (cross-platform).
 
 - Zero runtime dependencies
 - Cross-platform: Node.js (22+) and browsers (Chrome 89+, Firefox 102+, Safari 14.1+)
@@ -40,10 +40,18 @@ src/
 ├── modules/
 │   ├── excel/            # Workbook, Worksheet, Cell, Row, Column
 │   │   ├── __tests__/    # Tests
+│   │   ├── examples/     # Runnable examples
 │   │   ├── stream/       # WorkbookWriter, WorkbookReader
 │   │   └── xlsx/         # XLSX format parsing/writing
 │   ├── archive/          # ZIP/compression (zero-dependency)
+│   │   ├── __tests__/    # Tests
+│   │   └── examples/     # Runnable examples
 │   ├── csv/              # CSV parsing/formatting
+│   │   ├── __tests__/    # Tests
+│   │   └── examples/     # Runnable examples
+│   ├── markdown/         # GFM table parsing/formatting
+│   │   ├── __tests__/    # Tests
+│   │   └── examples/     # Runnable examples
 │   ├── pdf/              # PDF engine (zero-dependency, standalone)
 │   │   ├── __tests__/    # Tests
 │   │   ├── core/         # PDF objects, streams, writer, encryption
@@ -51,7 +59,12 @@ src/
 │   │   ├── render/       # Layout engine, page renderer, exporter (zero @excel imports)
 │   │   ├── excel-bridge  # Excel Workbook → PdfWorkbook conversion (only @excel dependency)
 │   │   └── examples/     # Runnable examples
+│   ├── xml/              # XML SAX/DOM parser, query engine, writer
+│   │   ├── __tests__/    # Tests
+│   │   └── examples/     # Runnable examples
 │   └── stream/           # Cross-platform streaming
+│       ├── __tests__/    # Tests
+│       └── examples/     # Runnable examples
 ├── utils/                # Shared utilities (errors, datetime, fs)
 └── test/                 # Test utilities and fixtures
 ```
@@ -61,6 +74,7 @@ src/
 - `@excel/*` → `./src/modules/excel/*`
 - `@archive/*` → `./src/modules/archive/*`
 - `@csv/*` → `./src/modules/csv/*`
+- `@markdown/*` → `./src/modules/markdown/*`
 - `@pdf/*` → `./src/modules/pdf/*`
 - `@stream/*` → `./src/modules/stream/*`
 - `@utils/*` → `./src/utils/*`
