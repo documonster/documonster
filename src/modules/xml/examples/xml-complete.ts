@@ -158,10 +158,12 @@ console.log("After closeAll depth:", w5.depth); // 0
 // =============================================================================
 
 const filePath6 = path.join(outDir, "streamed.xml");
+const chunks6: string[] = [];
 const fileHandle = fs.openSync(filePath6, "w");
 const writeTarget = {
   write(str: string): void {
     fs.writeSync(fileHandle, str);
+    chunks6.push(str);
   }
 };
 
@@ -176,7 +178,7 @@ fs.closeSync(fileHandle);
 
 console.log("\n=== 6. XmlStreamWriter ===");
 console.log("Written to:", filePath6);
-console.log(fs.readFileSync(filePath6, "utf-8"));
+console.log(chunks6.join(""));
 
 // =============================================================================
 // 7. DOM parsing — parseXml
