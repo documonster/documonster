@@ -18,6 +18,7 @@ import {
 } from "@archive/compression/deflate-fallback";
 import {
   hasDeflateRawWebStreams,
+  hasDeflateRawCompressionStream,
   hasGzipCompressionStream,
   hasGzipDecompressionStream,
   hasDeflateCompressionStream,
@@ -352,11 +353,16 @@ function createStreamCodec(
     );
   }
 
-  if (hasDeflateRawWebStreams()) {
+  // Use native CompressionStream/DecompressionStream when the required
+  // direction is available. Compression only needs CompressionStream;
+  // decompression only needs DecompressionStream.
+  if (type === "deflate" ? hasDeflateRawCompressionStream() : hasDeflateRawWebStreams()) {
     return createNativeWebStreamCodec("deflate-raw", type === "deflate");
   }
 
-  return new BufferedCodec(type === "deflate" ? deflateRawCompressed : inflateRaw);
+  return new BufferedCodec(
+    type === "deflate" ? data => deflateRawCompressed(data, level) : inflateRaw
+  );
 }
 
 // =============================================================================
@@ -451,3 +457,13 @@ export function createUnzlibStream(options: StreamCompressOptions = {}): UnzlibS
  * bit-stream state across `write()` calls.
  */
 export { PureJsSyncDeflater as SyncDeflater };
+
+/**
+ * Returns true when the browser supports native `CompressionStream("deflate-raw")`,
+ * signalling that `push()` should prefer the async path over `SyncDeflater`.
+ *
+ * Only checks for compression support — decompression is not needed for writing.
+ */
+export function hasNativeAsyncDeflate(): boolean {
+  return hasDeflateRawCompressionStream();
+}

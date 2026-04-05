@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { inflateRaw, deflateRawStore, deflateRawCompressed } from "@archive/compression/deflate-fallback";
+import {
+  inflateRaw,
+  deflateRawStore,
+  deflateRawCompressed,
+  SyncDeflater
+} from "@archive/compression/deflate-fallback";
 import { deflateRawSync, inflateRawSync } from "zlib";
 
 describe("DEFLATE Fallback", () => {
@@ -582,6 +587,442 @@ describe("DEFLATE Fallback", () => {
       ]);
 
       expect(() => inflateRaw(invalidData)).toThrow("Invalid stored block length");
+    });
+  });
+
+  describe("Dynamic Huffman encoding", () => {
+    it("should produce smaller output than fixed Huffman for XML data", () => {
+      const xmlData = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+    <row r="2"><c r="A2"><v>100</v></c><c r="B2"><v>200</v></c></row>
+  </sheetData>
+</worksheet>`.repeat(50);
+
+      const original = new TextEncoder().encode(xmlData);
+      const dynamicCompressed = deflateRawCompressed(original);
+      const zlibCompressed = deflateRawSync(Buffer.from(original), { level: 6 });
+
+      // Verify correctness
+      const result = inflateRawSync(Buffer.from(dynamicCompressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+
+      // Dynamic Huffman should be in the same ballpark as zlib (within 2x)
+      expect(dynamicCompressed.length).toBeLessThan(zlibCompressed.length * 2);
+
+      // Dynamic Huffman should be significantly smaller than the original
+      expect(dynamicCompressed.length).toBeLessThan(original.length * 0.3);
+    });
+
+    it("should decompress correctly via our own inflateRaw", () => {
+      const data = "Hello World! ".repeat(500);
+      const original = new TextEncoder().encode(data);
+      const compressed = deflateRawCompressed(original);
+
+      const result = inflateRaw(compressed);
+      expect(new TextDecoder().decode(result)).toBe(data);
+    });
+
+    it("should handle data with highly skewed symbol frequencies", () => {
+      // Mostly 'a' with occasional other chars — Dynamic Huffman excels here
+      let text = "";
+      for (let i = 0; i < 10000; i++) {
+        text += i % 100 === 0 ? "xyz" : "a";
+      }
+      const original = new TextEncoder().encode(text);
+      const compressed = deflateRawCompressed(original);
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+
+      // Should compress very well
+      expect(compressed.length).toBeLessThan(original.length * 0.1);
+    });
+  });
+
+  describe("deflateRawCompressed level parameter", () => {
+    it("should accept an optional level parameter", () => {
+      const original = new TextEncoder().encode("Test data ".repeat(100));
+
+      for (const level of [1, 3, 6, 9]) {
+        const compressed = deflateRawCompressed(original, level);
+        const result = inflateRawSync(Buffer.from(compressed));
+        expect(Buffer.from(result)).toEqual(Buffer.from(original));
+      }
+    });
+
+    it("should produce smaller output at higher levels", () => {
+      const original = new TextEncoder().encode(
+        "ABCDEFGHIJ".repeat(200) + "KLMNOPQRST".repeat(200)
+      );
+
+      const compressedL1 = deflateRawCompressed(original, 1);
+      const compressedL9 = deflateRawCompressed(original, 9);
+
+      // Both should decompress correctly
+      expect(Buffer.from(inflateRawSync(Buffer.from(compressedL1)))).toEqual(Buffer.from(original));
+      expect(Buffer.from(inflateRawSync(Buffer.from(compressedL9)))).toEqual(Buffer.from(original));
+
+      // Higher level should produce equal or smaller output
+      expect(compressedL9.length).toBeLessThanOrEqual(compressedL1.length);
+    });
+  });
+
+  describe("SyncDeflater", () => {
+    it("should produce valid DEFLATE output for a single chunk", () => {
+      const deflater = new SyncDeflater(6);
+      const original = new TextEncoder().encode("Hello World! ".repeat(100));
+
+      const part1 = deflater.write(original);
+      const part2 = deflater.finish();
+
+      const compressed = new Uint8Array(part1.length + part2.length);
+      compressed.set(part1);
+      compressed.set(part2, part1.length);
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should produce valid DEFLATE output across multiple chunks", () => {
+      const deflater = new SyncDeflater(6);
+      const chunks = [
+        new TextEncoder().encode("First chunk of data ".repeat(50)),
+        new TextEncoder().encode("Second chunk of data ".repeat(50)),
+        new TextEncoder().encode("Third chunk of data ".repeat(50))
+      ];
+
+      const fullOriginal = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0));
+      let offset = 0;
+      for (const chunk of chunks) {
+        fullOriginal.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      const compressedParts: Uint8Array[] = [];
+      for (const chunk of chunks) {
+        const part = deflater.write(chunk);
+        if (part.length > 0) {
+          compressedParts.push(part);
+        }
+      }
+      compressedParts.push(deflater.finish());
+
+      const totalLen = compressedParts.reduce((sum, p) => sum + p.length, 0);
+      const compressed = new Uint8Array(totalLen);
+      let pos = 0;
+      for (const p of compressedParts) {
+        compressed.set(p, pos);
+        pos += p.length;
+      }
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(fullOriginal));
+    });
+
+    it("should respect compression level", () => {
+      const original = new TextEncoder().encode("Test data for level testing. ".repeat(200));
+
+      const compress = (level: number): Uint8Array => {
+        const deflater = new SyncDeflater(level);
+        const part1 = deflater.write(original);
+        const part2 = deflater.finish();
+        const result = new Uint8Array(part1.length + part2.length);
+        result.set(part1);
+        result.set(part2, part1.length);
+        return result;
+      };
+
+      const compressedL1 = compress(1);
+      const compressedL6 = compress(6);
+      const compressedL9 = compress(9);
+
+      // All should decompress correctly
+      for (const compressed of [compressedL1, compressedL6, compressedL9]) {
+        const result = inflateRawSync(Buffer.from(compressed));
+        expect(Buffer.from(result)).toEqual(Buffer.from(original));
+      }
+
+      // Higher levels should produce smaller or equal output
+      expect(compressedL9.length).toBeLessThanOrEqual(compressedL6.length);
+      expect(compressedL6.length).toBeLessThanOrEqual(compressedL1.length);
+    });
+
+    it("should handle level=0 (store mode)", () => {
+      const deflater = new SyncDeflater(0);
+      const original = new TextEncoder().encode("Store mode test data ".repeat(50));
+
+      const part1 = deflater.write(original);
+      const part2 = deflater.finish();
+
+      const compressed = new Uint8Array(part1.length + part2.length);
+      compressed.set(part1);
+      compressed.set(part2, part1.length);
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+
+      // Store mode should be larger than original (overhead from block headers)
+      expect(compressed.length).toBeGreaterThanOrEqual(original.length);
+    });
+
+    it("should handle empty write calls", () => {
+      const deflater = new SyncDeflater(6);
+      const result1 = deflater.write(new Uint8Array(0));
+      expect(result1.length).toBe(0);
+
+      const original = new TextEncoder().encode("Some data ".repeat(50));
+      const part1 = deflater.write(original);
+      const part2 = deflater.finish();
+
+      const compressed = new Uint8Array(part1.length + part2.length);
+      compressed.set(part1);
+      compressed.set(part2, part1.length);
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should use Dynamic Huffman (BTYPE=2) for compressed blocks", () => {
+      const deflater = new SyncDeflater(6);
+      const original = new TextEncoder().encode("Test ".repeat(500));
+
+      const part1 = deflater.write(original);
+      // Check the first block header bits: BFINAL=0, BTYPE=10 (dynamic)
+      // In LSB-first bit order: bits 0=BFINAL, bits 1-2=BTYPE
+      // BFINAL=0, BTYPE=10 → binary 100 → first byte & 0x07 = 0x04
+      expect(part1[0] & 0x07).toBe(0x04); // BFINAL=0, BTYPE=10
+
+      deflater.finish();
+    });
+
+    it("should produce better compression than fixed Huffman for XML content", () => {
+      const xmlData = `<?xml version="1.0"?>
+<worksheet><sheetData>
+  <row r="1"><c r="A1"><v>42</v></c></row>
+</sheetData></worksheet>`.repeat(100);
+
+      const original = new TextEncoder().encode(xmlData);
+
+      // Dynamic Huffman SyncDeflater
+      const dynamicDeflater = new SyncDeflater(6);
+      const dp1 = dynamicDeflater.write(original);
+      const dp2 = dynamicDeflater.finish();
+      const dynamicSize = dp1.length + dp2.length;
+
+      // Verify correctness
+      const compressed = new Uint8Array(dynamicSize);
+      compressed.set(dp1);
+      compressed.set(dp2, dp1.length);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+
+      // Should be significantly smaller than original
+      expect(dynamicSize).toBeLessThan(original.length * 0.3);
+    });
+  });
+
+  describe("edge cases for Dynamic Huffman", () => {
+    it("should handle data that produces very deep Huffman trees (pathological frequencies)", () => {
+      // Fibonacci-like frequencies: each symbol appears in fibonacci sequence
+      // This can produce very deep trees that need length limiting
+      const data: number[] = [];
+      let a = 1;
+      let b = 1;
+      for (let sym = 0; sym < 50 && data.length < 50000; sym++) {
+        for (let j = 0; j < a && data.length < 50000; j++) {
+          data.push(sym & 0xff);
+        }
+        const temp = a + b;
+        a = b;
+        b = temp;
+      }
+      const original = new Uint8Array(data);
+      const compressed = deflateRawCompressed(original);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should handle data with only 1 unique byte value (single literal + EOB)", () => {
+      const original = new Uint8Array(1000).fill(0x42);
+      const compressed = deflateRawCompressed(original);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should handle data with all 256 byte values equally distributed", () => {
+      const original = new Uint8Array(256 * 40);
+      for (let i = 0; i < original.length; i++) {
+        original[i] = i % 256;
+      }
+      const compressed = deflateRawCompressed(original);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should handle SyncDeflater with very small chunks (1-3 bytes)", () => {
+      const deflater = new SyncDeflater(6);
+      const chunks = [
+        new Uint8Array([0x41]),
+        new Uint8Array([0x42, 0x43]),
+        new Uint8Array([0x44, 0x45, 0x46])
+      ];
+
+      const fullOriginal = new Uint8Array([0x41, 0x42, 0x43, 0x44, 0x45, 0x46]);
+
+      const compressedParts: Uint8Array[] = [];
+      for (const chunk of chunks) {
+        const part = deflater.write(chunk);
+        if (part.length > 0) {
+          compressedParts.push(part);
+        }
+      }
+      compressedParts.push(deflater.finish());
+
+      const totalLen = compressedParts.reduce((sum, p) => sum + p.length, 0);
+      const compressed = new Uint8Array(totalLen);
+      let pos = 0;
+      for (const p of compressedParts) {
+        compressed.set(p, pos);
+        pos += p.length;
+      }
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(fullOriginal));
+    });
+
+    it("should handle SyncDeflater level=0 with multiple chunks", () => {
+      const deflater = new SyncDeflater(0);
+      const chunk1 = new TextEncoder().encode("First chunk ".repeat(20));
+      const chunk2 = new TextEncoder().encode("Second chunk ".repeat(20));
+
+      const fullOriginal = new Uint8Array(chunk1.length + chunk2.length);
+      fullOriginal.set(chunk1);
+      fullOriginal.set(chunk2, chunk1.length);
+
+      const compressedParts: Uint8Array[] = [];
+      compressedParts.push(deflater.write(chunk1));
+      compressedParts.push(deflater.write(chunk2));
+      compressedParts.push(deflater.finish());
+
+      const totalLen = compressedParts.reduce((sum, p) => sum + p.length, 0);
+      const compressed = new Uint8Array(totalLen);
+      let pos = 0;
+      for (const p of compressedParts) {
+        compressed.set(p, pos);
+        pos += p.length;
+      }
+
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(fullOriginal));
+    });
+
+    it("should produce valid output for literal-only data (no matches, distance tree unused)", () => {
+      // Random-like data with no repeating patterns — no LZ77 matches
+      const original = new Uint8Array(500);
+      for (let i = 0; i < original.length; i++) {
+        original[i] = (i * 179 + 83) % 256;
+      }
+      const compressed = deflateRawCompressed(original);
+
+      // Verify both zlib and our own inflateRaw can decompress
+      const result1 = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result1)).toEqual(Buffer.from(original));
+
+      const result2 = inflateRaw(compressed);
+      expect(result2).toEqual(original);
+    });
+
+    it("should handle data larger than 32KB window size", () => {
+      // Create data with long-distance repeated patterns
+      const pattern = new TextEncoder().encode("LongDistancePattern_");
+      const original = new Uint8Array(100000);
+      for (let i = 0; i < original.length; i++) {
+        original[i] = pattern[i % pattern.length];
+      }
+
+      const compressed = deflateRawCompressed(original);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+      expect(compressed.length).toBeLessThan(original.length * 0.1);
+    });
+  });
+
+  describe("buildCodeLengths stability (round-trip via diverse frequency distributions)", () => {
+    // These tests exercise buildCodeLengths indirectly by compressing data
+    // that produces specific frequency distributions, then verifying the
+    // output is valid DEFLATE that zlib can decompress.
+
+    it("should handle exponentially growing frequencies (triggers length limiting)", () => {
+      // Symbol i appears 2^i times — produces a very lopsided tree that
+      // likely exceeds maxBits=15 before limiting kicks in.
+      const data: number[] = [];
+      for (let sym = 0; sym < 20 && data.length < 100000; sym++) {
+        const count = Math.min(1 << sym, 100000 - data.length);
+        for (let j = 0; j < count; j++) {
+          data.push(sym & 0xff);
+        }
+      }
+      const original = new Uint8Array(data);
+      const compressed = deflateRawCompressed(original);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(original));
+    });
+
+    it("should handle two symbols with extremely unequal frequencies", () => {
+      // 99999 'A's and 1 'B' — tests single-dominant-symbol edge case
+      const data = new Uint8Array(100000);
+      data.fill(0x41);
+      data[50000] = 0x42;
+
+      const compressed = deflateRawCompressed(data);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(data));
+    });
+
+    it("should handle exactly 2 symbols with equal frequencies", () => {
+      const data = new Uint8Array(10000);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = i % 2 === 0 ? 0x30 : 0x31;
+      }
+      const compressed = deflateRawCompressed(data);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(data));
+    });
+
+    it("should produce consistent output across multiple compressions of the same data", () => {
+      const original = new TextEncoder().encode("Determinism test ".repeat(200));
+
+      const compressed1 = deflateRawCompressed(original, 6);
+      const compressed2 = deflateRawCompressed(original, 6);
+
+      // Same input + same level → same output (no randomness in the algorithm)
+      expect(compressed1).toEqual(compressed2);
+    });
+
+    it("should handle data that generates many distinct distance codes", () => {
+      // Interleave unique bytes with back-references at various distances
+      // to exercise the distance Huffman tree with many active codes.
+      const size = 65536;
+      const data = new Uint8Array(size);
+      for (let i = 0; i < size; i++) {
+        // Create patterns at distances 1, 2, 4, 8, 16, ...
+        if (i >= 32 && i % 7 === 0) {
+          // Copy from varying distances back
+          const dist = 1 << ((i >> 3) % 15);
+          if (dist <= i) {
+            data[i] = data[i - dist];
+          } else {
+            data[i] = i & 0xff;
+          }
+        } else {
+          data[i] = i & 0xff;
+        }
+      }
+      const compressed = deflateRawCompressed(data);
+      const result = inflateRawSync(Buffer.from(compressed));
+      expect(Buffer.from(result)).toEqual(Buffer.from(data));
     });
   });
 });

@@ -407,10 +407,6 @@ export function deflateRawStore(data: Uint8Array): Uint8Array {
 const HASH_SIZE = 32768;
 const HASH_MASK = HASH_SIZE - 1;
 
-// Maximum hash chain length to walk per position. Longer chains find better
-// matches at the cost of speed. 64 is a good balance (~zlib level 5-6).
-const MAX_CHAIN_LEN = 64;
-
 // Minimum match length for LZ77 (RFC 1951 minimum).
 const MIN_MATCH = 3;
 
@@ -419,6 +415,42 @@ const MAX_MATCH = 258;
 
 // Maximum back-reference distance (RFC 1951 / 32 KB sliding window).
 const MAX_DIST = 32768;
+
+// =============================================================================
+// Level-based LZ77 configuration (modelled after zlib's deflate parameters)
+// =============================================================================
+
+interface LZ77Config {
+  maxChainLen: number;
+  /** Lazy match: emit current match immediately if length >= this (skip lazy). */
+  goodLen: number;
+  /** Lazy match: only try lazy if current match length < niceLen. */
+  niceLen: number;
+  /** Enable lazy matching (false = greedy). */
+  lazy: boolean;
+}
+
+/**
+ * Get LZ77 configuration for the given compression level (1-9).
+ * Modelled after zlib's configuration_table.
+ */
+function getLZ77Config(level: number): LZ77Config {
+  // Level 0 should be handled by the caller (store mode).
+  if (level <= 1) {
+    return { maxChainLen: 4, goodLen: 4, niceLen: 8, lazy: false };
+  }
+  if (level <= 3) {
+    return { maxChainLen: 8, goodLen: 8, niceLen: 32, lazy: true };
+  }
+  if (level <= 5) {
+    return { maxChainLen: 32, goodLen: 16, niceLen: 128, lazy: true };
+  }
+  if (level <= 7) {
+    return { maxChainLen: 64, goodLen: 32, niceLen: 258, lazy: true };
+  }
+  // level 8-9
+  return { maxChainLen: 128, goodLen: 64, niceLen: 258, lazy: true };
+}
 
 /**
  * Hash function for 3-byte sequences.
@@ -431,16 +463,16 @@ function hash3(a: number, b: number, c: number): number {
 }
 
 /**
- * Compress data using DEFLATE with fixed Huffman codes.
+ * Compress data using DEFLATE with Dynamic Huffman codes (BTYPE=2).
  *
- * Uses LZ77 with hash chains and lazy matching for significantly better
- * compression than a single-entry hash table. The algorithm is modelled
- * after zlib's "fast" and "slow" deflate strategies.
+ * Uses LZ77 with hash chains and lazy matching for match finding, then builds
+ * optimal Huffman trees from the symbol frequencies for entropy coding.
  *
  * @param data - Data to compress
+ * @param level - Compression level (1-9, default 6)
  * @returns Compressed data in deflate-raw format
  */
-export function deflateRawCompressed(data: Uint8Array): Uint8Array {
+export function deflateRawCompressed(data: Uint8Array, level = 6): Uint8Array {
   if (data.length === 0) {
     // Empty input: single final block with just end-of-block symbol
     return new Uint8Array([0x03, 0x00]);
@@ -451,125 +483,14 @@ export function deflateRawCompressed(data: Uint8Array): Uint8Array {
     return deflateRawStore(data);
   }
 
+  const config = getLZ77Config(level);
+
+  // --- Phase 1: LZ77 match finding → collect symbols ---
+  const lz77Symbols = lz77Compress(data, 0, data.length, config, null);
+
+  // --- Phase 2: Encode as a single final DEFLATE block ---
   const output = new BitWriter();
-
-  // Write final block header with fixed Huffman (BFINAL=1, BTYPE=01)
-  output.writeBits(1, 1); // BFINAL
-  output.writeBits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-  // --- Hash chain tables (typed arrays for performance) ---
-  // head[h]: most recent position with hash h (0 = unused, positions are 1-based internally)
-  // prev[pos & (MAX_DIST-1)]: previous position in the chain for the same hash
-  const head = new Int32Array(HASH_SIZE); // filled with 0 (no match)
-  const prev = new Int32Array(MAX_DIST);
-
-  let pos = 0;
-
-  // State for lazy matching:
-  // When we find a match at position N, we check position N+1 too.
-  // If N+1 has a longer match we emit a literal for N and use the N+1 match.
-  let prevMatchLen = 0;
-  let prevMatchDist = 0;
-  let prevLiteral = 0;
-  let hasPrevMatch = false;
-
-  while (pos < data.length) {
-    let bestLen = 0;
-    let bestDist = 0;
-
-    if (pos + 2 < data.length) {
-      const h = hash3(data[pos], data[pos + 1], data[pos + 2]);
-
-      // Walk the hash chain to find the best (longest) match
-      let chainLen = MAX_CHAIN_LEN;
-      let matchHead = head[h];
-
-      while (matchHead > 0 && chainLen-- > 0) {
-        const mPos = matchHead - 1; // convert from 1-based to 0-based
-        const dist = pos - mPos;
-        if (dist > MAX_DIST || dist <= 0) {
-          break;
-        }
-
-        // Quick check: compare the byte just beyond current best length first
-        // to skip obviously shorter matches early.
-        if (bestLen >= MIN_MATCH && data[mPos + bestLen] !== data[pos + bestLen]) {
-          matchHead = prev[mPos & (MAX_DIST - 1)];
-          continue;
-        }
-
-        // Full scan
-        let len = 0;
-        const maxLen = Math.min(MAX_MATCH, data.length - pos);
-        while (len < maxLen && data[mPos + len] === data[pos + len]) {
-          len++;
-        }
-
-        if (len > bestLen) {
-          bestLen = len;
-          bestDist = dist;
-          if (len >= MAX_MATCH) {
-            break; // can't do better
-          }
-        }
-
-        matchHead = prev[mPos & (MAX_DIST - 1)];
-      }
-
-      // Insert current position into the hash chain
-      prev[pos & (MAX_DIST - 1)] = head[h];
-      head[h] = pos + 1; // 1-based
-    }
-
-    // --- Lazy matching logic ---
-    if (hasPrevMatch) {
-      if (bestLen > prevMatchLen) {
-        // Current position has a better match; emit previous as literal
-        writeLiteralCode(output, prevLiteral);
-        // Now adopt current match as the pending one
-        prevMatchLen = bestLen;
-        prevMatchDist = bestDist;
-        prevLiteral = data[pos];
-        pos++;
-      } else {
-        // Previous match is at least as good; emit it
-        writeLengthCode(output, prevMatchLen);
-        writeDistanceCode(output, prevMatchDist);
-        // Insert hash entries for the skipped bytes (positions inside the match)
-        // so future matches can find them. We already inserted pos-1 (the match
-        // start); now insert pos through pos + prevMatchLen - 2.
-        const matchEnd = pos - 1 + prevMatchLen;
-        for (let i = pos; i < matchEnd && i + 2 < data.length; i++) {
-          const h = hash3(data[i], data[i + 1], data[i + 2]);
-          prev[i & (MAX_DIST - 1)] = head[h];
-          head[h] = i + 1;
-        }
-        pos = matchEnd;
-        hasPrevMatch = false;
-        prevMatchLen = 0;
-      }
-    } else if (bestLen >= MIN_MATCH) {
-      // We have a match; hold it and try the next position (lazy evaluation)
-      hasPrevMatch = true;
-      prevMatchLen = bestLen;
-      prevMatchDist = bestDist;
-      prevLiteral = data[pos];
-      pos++;
-    } else {
-      // No match — emit literal
-      writeLiteralCode(output, data[pos]);
-      pos++;
-    }
-  }
-
-  // Flush any pending lazy match
-  if (hasPrevMatch) {
-    writeLengthCode(output, prevMatchLen);
-    writeDistanceCode(output, prevMatchDist);
-  }
-
-  // Write end-of-block symbol (256)
-  writeLiteralCode(output, 256);
+  emitDynamicBlock(output, lz77Symbols, true);
 
   return output.finish();
 }
@@ -582,6 +503,15 @@ class BitWriter {
   private buffer: number[] = [];
   private bitBuf = 0;
   private bitCount = 0;
+
+  /**
+   * Align to the next byte boundary by padding with zero bits.
+   */
+  alignToByte(): void {
+    if (this.bitCount > 0) {
+      this.writeBits(0, 8 - this.bitCount);
+    }
+  }
 
   writeBits(value: number, count: number): void {
     this.bitBuf |= value << this.bitCount;
@@ -686,92 +616,694 @@ function writeLiteralCode(output: BitWriter, symbol: number): void {
   output.writeBitsReverse(code, len);
 }
 
+// ============================================================================
+// Dynamic Huffman Encoding (RFC 1951 §3.2.7)
+// ============================================================================
+
 /**
- * Write a length code (257-285)
+ * LZ77 symbol: either a literal byte or a (length, distance) pair.
+ * Stored compactly: if dist === 0, it's a literal (value = litOrLen).
+ * Otherwise it's a match with length = litOrLen, distance = dist.
  */
-function writeLengthCode(output: BitWriter, length: number): void {
-  let code: number;
-  let extraBits: number;
-  let extraValue: number;
-
-  if (length <= 10) {
-    code = 257 + length - 3;
-    extraBits = 0;
-    extraValue = 0;
-  } else if (length <= 18) {
-    const base = length - 11;
-    code = 265 + Math.floor(base / 2);
-    extraBits = 1;
-    extraValue = base % 2;
-  } else if (length <= 34) {
-    const base = length - 19;
-    code = 269 + Math.floor(base / 4);
-    extraBits = 2;
-    extraValue = base % 4;
-  } else if (length <= 66) {
-    const base = length - 35;
-    code = 273 + Math.floor(base / 8);
-    extraBits = 3;
-    extraValue = base % 8;
-  } else if (length <= 130) {
-    const base = length - 67;
-    code = 277 + Math.floor(base / 16);
-    extraBits = 4;
-    extraValue = base % 16;
-  } else if (length <= 257) {
-    const base = length - 131;
-    code = 281 + Math.floor(base / 32);
-    extraBits = 5;
-    extraValue = base % 32;
-  } else {
-    code = 285;
-    extraBits = 0;
-    extraValue = 0;
-  }
-
-  writeLiteralCode(output, code);
-  if (extraBits > 0) {
-    output.writeBits(extraValue, extraBits);
-  }
+interface LZ77Symbol {
+  litOrLen: number;
+  dist: number;
 }
 
 /**
- * Write a distance code
+ * Compute the DEFLATE length code (257..285) and extra bits for a given
+ * match length (3..258).
  */
-function writeDistanceCode(output: BitWriter, distance: number): void {
-  // Find the appropriate distance code
-  let code = 0;
-  let extraBits = 0;
-  let baseDistance = 1;
+function getLengthSymbol(length: number): { code: number; extra: number; extraBits: number } {
+  for (let i = 0; i < LENGTH_BASE.length; i++) {
+    if (i === LENGTH_BASE.length - 1 || length < LENGTH_BASE[i + 1]) {
+      return {
+        code: 257 + i,
+        extra: length - LENGTH_BASE[i],
+        extraBits: LENGTH_EXTRA[i]
+      };
+    }
+  }
+  return { code: 285, extra: 0, extraBits: 0 };
+}
 
+/**
+ * Compute the DEFLATE distance code (0..29) and extra bits for a given
+ * distance (1..32768).
+ */
+function getDistSymbol(distance: number): { code: number; extra: number; extraBits: number } {
   for (let i = 0; i < DIST_TABLE.length; i++) {
-    const [maxDist, c, extra] = DIST_TABLE[i]!;
+    const [maxDist, c, extraBitsCount] = DIST_TABLE[i];
     if (distance <= maxDist) {
-      code = c;
-      extraBits = extra;
+      const baseVal = i === 0 ? 1 : DIST_TABLE[i - 1][0] + 1;
+      return { code: c, extra: distance - baseVal, extraBits: extraBitsCount };
+    }
+  }
+  // Fallback (should not reach for valid distances)
+  return { code: 29, extra: 0, extraBits: 13 };
+}
+
+/**
+ * Build canonical Huffman code lengths from symbol frequencies.
+ * Uses a bottom-up approach: build a Huffman tree from a priority queue,
+ * then extract depths. Limits maximum code length to maxBits using
+ * the algorithm from zlib's build_tree() / gen_bitlen().
+ *
+ * Returns an array of code lengths indexed by symbol.
+ */
+function buildCodeLengths(freqs: Uint32Array, maxBits: number): Uint8Array {
+  const n = freqs.length;
+  const codeLens = new Uint8Array(n);
+
+  // Count symbols with non-zero frequency
+  const activeSymbols: Array<{ sym: number; freq: number }> = [];
+  for (let i = 0; i < n; i++) {
+    if (freqs[i] > 0) {
+      activeSymbols.push({ sym: i, freq: freqs[i] });
+    }
+  }
+
+  if (activeSymbols.length === 0) {
+    return codeLens;
+  }
+  // RFC 1951 requires a complete prefix code. For a single symbol, we need
+  // at least 2 entries to form a valid tree. We assign code length 1 to the
+  // symbol — the decoder uses only 1 bit but the tree is valid because
+  // DEFLATE decoders handle this as per the spec (the other 1-bit code is
+  // simply unused). This matches zlib's behavior.
+  if (activeSymbols.length === 1) {
+    codeLens[activeSymbols[0].sym] = 1;
+    return codeLens;
+  }
+
+  // Sort by frequency (ascending), then by symbol (ascending) for stability
+  activeSymbols.sort((a, b) => a.freq - b.freq || a.sym - b.sym);
+
+  // Build Huffman tree using a two-queue approach (Moffat & Turpin).
+  // O(n) for pre-sorted input. Queue 1: leaf nodes. Queue 2: internal nodes.
+  interface TreeNode {
+    freq: number;
+    sym: number; // -1 for internal
+    left: TreeNode | null;
+    right: TreeNode | null;
+  }
+
+  const nodes: TreeNode[] = activeSymbols.map(s => ({
+    freq: s.freq,
+    sym: s.sym,
+    left: null,
+    right: null
+  }));
+
+  let leafIdx = 0;
+  let intIdx = 0;
+  const intNodes: TreeNode[] = [];
+
+  function getMin(): TreeNode {
+    const hasLeaf = leafIdx < nodes.length;
+    const hasInt = intIdx < intNodes.length;
+
+    if (hasLeaf && hasInt) {
+      if (nodes[leafIdx].freq <= intNodes[intIdx].freq) {
+        return nodes[leafIdx++];
+      }
+      return intNodes[intIdx++];
+    }
+    if (hasLeaf) {
+      return nodes[leafIdx++];
+    }
+    return intNodes[intIdx++];
+  }
+
+  const totalNodes = activeSymbols.length;
+  for (let i = 0; i < totalNodes - 1; i++) {
+    const a = getMin();
+    const b = getMin();
+    const merged: TreeNode = {
+      freq: a.freq + b.freq,
+      sym: -1,
+      left: a,
+      right: b
+    };
+    intNodes.push(merged);
+  }
+
+  // Extract depths from the root (last internal node)
+  const root = intNodes[intNodes.length - 1];
+
+  function extractDepths(node: TreeNode, depth: number): void {
+    if (node.sym >= 0) {
+      codeLens[node.sym] = depth;
+      return;
+    }
+    if (node.left) {
+      extractDepths(node.left, depth + 1);
+    }
+    if (node.right) {
+      extractDepths(node.right, depth + 1);
+    }
+  }
+  extractDepths(root, 0);
+
+  // --- Length limiting using the zlib bl_count redistribution algorithm ---
+  // Count code lengths at each bit depth
+  const blCount = new Uint16Array(maxBits + 1);
+
+  for (let i = 0; i < n; i++) {
+    if (codeLens[i] > 0) {
+      if (codeLens[i] > maxBits) {
+        blCount[maxBits]++;
+        codeLens[i] = maxBits;
+      } else {
+        blCount[codeLens[i]]++;
+      }
+    }
+  }
+
+  // Check Kraft inequality: sum of 2^(maxBits - len) must equal 2^maxBits
+  let kraft = 0;
+  for (let bits = 1; bits <= maxBits; bits++) {
+    kraft += blCount[bits] << (maxBits - bits);
+  }
+  const target = 1 << maxBits;
+
+  if (kraft === target) {
+    return codeLens; // Already valid
+  }
+
+  // Redistribute to satisfy Kraft's inequality.
+  // Strategy: move symbols from shorter lengths to maxBits until balanced.
+  // Each symbol moved from length `bits` to `maxBits` reduces kraft by
+  // (2^(maxBits-bits) - 1) — we remove a large weight and add a weight of 1.
+  while (kraft > target) {
+    // Find a code length < maxBits that has symbols we can push down.
+    // Start from maxBits-1 to minimize the damage per move.
+    let bits = maxBits - 1;
+    while (bits > 0 && blCount[bits] === 0) {
+      bits--;
+    }
+    if (bits === 0) {
+      break; // Can't redistribute further
+    }
+    // Move one symbol from length `bits` to length `maxBits`
+    blCount[bits]--;
+    blCount[maxBits]++;
+    // Kraft change: removed 2^(maxBits-bits), added 2^0 = 1
+    kraft -= (1 << (maxBits - bits)) - 1;
+  }
+
+  // If kraft < target (under-allocated), add dummy codes at maxBits.
+  // This can happen when we overshoot during redistribution.
+  while (kraft < target) {
+    blCount[maxBits]++;
+    kraft++;
+  }
+
+  // Reassign code lengths to symbols (preserve relative order: longer
+  // codes go to less frequent symbols, matching the Huffman property).
+  // Sort symbols by their original code length (longest first), then by
+  // frequency (rarest first) for same length.
+  const symbolsByLen: Array<{ sym: number; origLen: number; freq: number }> = [];
+  for (let i = 0; i < n; i++) {
+    if (codeLens[i] > 0) {
+      symbolsByLen.push({ sym: i, origLen: codeLens[i], freq: freqs[i] });
+    }
+  }
+  symbolsByLen.sort((a, b) => b.origLen - a.origLen || a.freq - b.freq);
+
+  // Assign new lengths from the bl_count distribution
+  codeLens.fill(0);
+  let symIdx = 0;
+  for (let bits = maxBits; bits >= 1; bits--) {
+    for (let count = blCount[bits]; count > 0; count--) {
+      if (symIdx < symbolsByLen.length) {
+        codeLens[symbolsByLen[symIdx].sym] = bits;
+        symIdx++;
+      }
+    }
+  }
+
+  return codeLens;
+}
+
+/**
+ * Build canonical Huffman codes from code lengths (RFC 1951 §3.2.2).
+ * Returns [code, length] pairs indexed by symbol.
+ */
+function buildCanonicalCodes(codeLens: Uint8Array): Array<[number, number]> {
+  const n = codeLens.length;
+  const codes: Array<[number, number]> = new Array(n);
+
+  const blCount = new Uint16Array(16);
+  for (let i = 0; i < n; i++) {
+    if (codeLens[i] > 0) {
+      blCount[codeLens[i]]++;
+    }
+  }
+
+  const nextCode = new Uint16Array(16);
+  let code = 0;
+  for (let bits = 1; bits <= 15; bits++) {
+    code = (code + blCount[bits - 1]) << 1;
+    nextCode[bits] = code;
+  }
+
+  for (let i = 0; i < n; i++) {
+    const len = codeLens[i];
+    if (len > 0) {
+      codes[i] = [nextCode[len]++, len];
+    } else {
+      codes[i] = [0, 0];
+    }
+  }
+
+  return codes;
+}
+
+/**
+ * Emit a Dynamic Huffman DEFLATE block (BTYPE=2).
+ *
+ * Takes the LZ77 symbol sequence, builds optimal Huffman trees,
+ * encodes the tree descriptions, then encodes the symbols.
+ */
+function emitDynamicBlock(out: BitWriter, symbols: LZ77Symbol[], isFinal: boolean): void {
+  // --- Step 1: Collect frequencies ---
+  const litLenFreqs = new Uint32Array(286);
+  const distFreqs = new Uint32Array(30);
+
+  // Always include EOB
+  litLenFreqs[256] = 1;
+
+  for (const sym of symbols) {
+    if (sym.dist === 0) {
+      litLenFreqs[sym.litOrLen]++;
+    } else {
+      const ls = getLengthSymbol(sym.litOrLen);
+      litLenFreqs[ls.code]++;
+      const ds = getDistSymbol(sym.dist);
+      distFreqs[ds.code]++;
+    }
+  }
+
+  // --- Step 2: Build Huffman trees ---
+  const litLenLens = buildCodeLengths(litLenFreqs, 15);
+  let distLens = buildCodeLengths(distFreqs, 15);
+
+  // DEFLATE requires at least 1 distance code even if unused.
+  // Assign two codes at length 1 to form a complete prefix code.
+  let hasDistCodes = false;
+  for (let i = 0; i < distLens.length; i++) {
+    if (distLens[i] > 0) {
+      hasDistCodes = true;
       break;
     }
-    baseDistance = maxDist + 1;
+  }
+  if (!hasDistCodes) {
+    distLens = new Uint8Array(30);
+    distLens[0] = 1;
+    distLens[1] = 1;
   }
 
-  const extraValue = distance - baseDistance;
+  const litLenCodes = buildCanonicalCodes(litLenLens);
+  const distCodes = buildCanonicalCodes(distLens);
 
-  // Distance codes use 5-bit fixed code (reversed for Huffman)
-  output.writeBitsReverse(code, 5);
-  if (extraBits > 0) {
-    output.writeBits(extraValue, extraBits);
+  // --- Step 3: Determine HLIT and HDIST ---
+  let hlit = 286;
+  while (hlit > 257 && litLenLens[hlit - 1] === 0) {
+    hlit--;
   }
+  let hdist = 30;
+  while (hdist > 1 && distLens[hdist - 1] === 0) {
+    hdist--;
+  }
+
+  // --- Step 4: Run-length encode the code lengths ---
+  const combined = new Uint8Array(hlit + hdist);
+  combined.set(litLenLens.subarray(0, hlit));
+  combined.set(distLens.subarray(0, hdist), hlit);
+
+  const clSymbols: Array<{ sym: number; extra: number; extraBits: number }> = [];
+  const clFreqs = new Uint32Array(19);
+
+  for (let i = 0; i < combined.length; ) {
+    const val = combined[i];
+
+    if (val === 0) {
+      let run = 1;
+      while (i + run < combined.length && combined[i + run] === 0) {
+        run++;
+      }
+
+      while (run > 0) {
+        if (run >= 11) {
+          const repeat = Math.min(run, 138);
+          clSymbols.push({ sym: 18, extra: repeat - 11, extraBits: 7 });
+          clFreqs[18]++;
+          run -= repeat;
+          i += repeat;
+        } else if (run >= 3) {
+          const repeat = Math.min(run, 10);
+          clSymbols.push({ sym: 17, extra: repeat - 3, extraBits: 3 });
+          clFreqs[17]++;
+          run -= repeat;
+          i += repeat;
+        } else {
+          clSymbols.push({ sym: 0, extra: 0, extraBits: 0 });
+          clFreqs[0]++;
+          run--;
+          i++;
+        }
+      }
+    } else {
+      clSymbols.push({ sym: val, extra: 0, extraBits: 0 });
+      clFreqs[val]++;
+      i++;
+
+      let run = 0;
+      while (i + run < combined.length && combined[i + run] === val) {
+        run++;
+      }
+      while (run >= 3) {
+        const repeat = Math.min(run, 6);
+        clSymbols.push({ sym: 16, extra: repeat - 3, extraBits: 2 });
+        clFreqs[16]++;
+        run -= repeat;
+        i += repeat;
+      }
+      while (run > 0) {
+        clSymbols.push({ sym: val, extra: 0, extraBits: 0 });
+        clFreqs[val]++;
+        run--;
+        i++;
+      }
+    }
+  }
+
+  // --- Step 5: Build code-length Huffman tree ---
+  const clLens = buildCodeLengths(clFreqs, 7);
+  const clCodes = buildCanonicalCodes(clLens);
+
+  let hclen = 19;
+  while (hclen > 4 && clLens[CODE_LENGTH_ORDER[hclen - 1]] === 0) {
+    hclen--;
+  }
+
+  // --- Step 6: Write block header ---
+  out.writeBits(isFinal ? 1 : 0, 1); // BFINAL
+  out.writeBits(2, 2); // BTYPE = 10 (dynamic Huffman)
+
+  out.writeBits(hlit - 257, 5);
+  out.writeBits(hdist - 1, 5);
+  out.writeBits(hclen - 4, 4);
+
+  for (let i = 0; i < hclen; i++) {
+    out.writeBits(clLens[CODE_LENGTH_ORDER[i]], 3);
+  }
+
+  for (const cls of clSymbols) {
+    const [clCode, clLen] = clCodes[cls.sym];
+    out.writeBitsReverse(clCode, clLen);
+    if (cls.extraBits > 0) {
+      out.writeBits(cls.extra, cls.extraBits);
+    }
+  }
+
+  // --- Step 7: Write compressed data ---
+  for (const sym of symbols) {
+    if (sym.dist === 0) {
+      const [lCode, lLen] = litLenCodes[sym.litOrLen];
+      out.writeBitsReverse(lCode, lLen);
+    } else {
+      const ls = getLengthSymbol(sym.litOrLen);
+      const [lCode, lLen] = litLenCodes[ls.code];
+      out.writeBitsReverse(lCode, lLen);
+      if (ls.extraBits > 0) {
+        out.writeBits(ls.extra, ls.extraBits);
+      }
+
+      const ds = getDistSymbol(sym.dist);
+      const [dCode, dLen] = distCodes[ds.code];
+      out.writeBitsReverse(dCode, dLen);
+      if (ds.extraBits > 0) {
+        out.writeBits(ds.extra, ds.extraBits);
+      }
+    }
+  }
+
+  // End of block
+  const [eobCode, eobLen] = litLenCodes[256];
+  out.writeBitsReverse(eobCode, eobLen);
+}
+
+// ============================================================================
+// Shared LZ77 Engine
+// ============================================================================
+
+/**
+ * Hash chain state that persists across chunks for the streaming deflater.
+ */
+interface LZ77State {
+  head: Int32Array;
+  prev: Int32Array;
+  window: Uint8Array;
+  windowLen: number;
+  totalIn: number;
+  hasPrevMatch: boolean;
+  prevMatchLen: number;
+  prevMatchDist: number;
+  prevLiteral: number;
+}
+
+/**
+ * Run LZ77 match-finding on `data[start..end)`.
+ *
+ * When `state` is null, performs one-shot compression with fresh hash tables.
+ * When `state` is provided, maintains sliding window and hash chains across calls.
+ *
+ * Returns an array of LZ77 symbols (literals + length/distance pairs).
+ */
+function lz77Compress(
+  data: Uint8Array,
+  start: number,
+  end: number,
+  config: LZ77Config,
+  state: LZ77State | null
+): LZ77Symbol[] {
+  const symbols: LZ77Symbol[] = [];
+  const maxChainLen = config.maxChainLen;
+  const goodLen = config.goodLen;
+  const niceLen = config.niceLen;
+  const useLazy = config.lazy;
+
+  let head: Int32Array;
+  let prevArr: Int32Array;
+  let window: Uint8Array | null;
+  let wLen: number;
+  let totalIn: number;
+  let hasPrevMatch: boolean;
+  let prevMatchLen: number;
+  let prevMatchDist: number;
+  let prevLiteral: number;
+
+  if (state) {
+    head = state.head;
+    prevArr = state.prev;
+    window = state.window;
+    wLen = state.windowLen;
+    totalIn = state.totalIn;
+    hasPrevMatch = state.hasPrevMatch;
+    prevMatchLen = state.prevMatchLen;
+    prevMatchDist = state.prevMatchDist;
+    prevLiteral = state.prevLiteral;
+  } else {
+    head = new Int32Array(HASH_SIZE);
+    prevArr = new Int32Array(MAX_DIST);
+    window = null;
+    wLen = 0;
+    totalIn = 0;
+    hasPrevMatch = false;
+    prevMatchLen = 0;
+    prevMatchDist = 0;
+    prevLiteral = 0;
+  }
+
+  const getByte = state
+    ? (globalPos: number): number => {
+        const localPos = globalPos - totalIn;
+        if (localPos >= start && localPos < end) {
+          return data[localPos];
+        }
+        return window![globalPos & (MAX_DIST - 1)];
+      }
+    : (globalPos: number): number => data[globalPos];
+
+  const insertHash = state
+    ? (localPos: number): void => {
+        if (localPos + 2 >= end) {
+          return;
+        }
+        const h = hash3(data[localPos], data[localPos + 1], data[localPos + 2]);
+        const gp = totalIn + localPos;
+        prevArr[gp & (MAX_DIST - 1)] = head[h];
+        head[h] = gp + 1;
+      }
+    : (localPos: number): void => {
+        if (localPos + 2 >= end) {
+          return;
+        }
+        const h = hash3(data[localPos], data[localPos + 1], data[localPos + 2]);
+        prevArr[localPos & (MAX_DIST - 1)] = head[h];
+        head[h] = localPos + 1;
+      };
+
+  const insertWindow = state
+    ? (localPos: number, count: number): void => {
+        for (let i = 0; i < count; i++) {
+          window![(wLen + i) & (MAX_DIST - 1)] = data[localPos + i];
+        }
+        wLen += count;
+      }
+    : (_localPos: number, _count: number): void => {};
+
+  let pos = start;
+
+  for (; pos < end; ) {
+    let bestLen = 0;
+    let bestDist = 0;
+
+    if (pos + 2 < end) {
+      const h = hash3(data[pos], data[pos + 1], data[pos + 2]);
+      const globalPos = state ? totalIn + pos : pos;
+
+      // When we already have a good match from a previous lazy evaluation,
+      // reduce the chain search length (matching zlib's good_length behavior).
+      let chainRemaining =
+        useLazy && hasPrevMatch && prevMatchLen >= goodLen ? maxChainLen >> 2 : maxChainLen;
+      let matchHead = head[h];
+
+      while (matchHead > 0 && chainRemaining-- > 0) {
+        const mGlobalPos = matchHead - 1;
+        const dist = globalPos - mGlobalPos;
+        if (dist > MAX_DIST || dist <= 0) {
+          break;
+        }
+
+        if (bestLen >= MIN_MATCH) {
+          const checkGlobal = mGlobalPos + bestLen;
+          if (getByte(checkGlobal) !== data[pos + bestLen]) {
+            matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
+            continue;
+          }
+        }
+
+        const maxLen = Math.min(MAX_MATCH, end - pos);
+        let len = 0;
+        while (len < maxLen) {
+          if (getByte(mGlobalPos + len) !== data[pos + len]) {
+            break;
+          }
+          len++;
+        }
+
+        if (len > bestLen) {
+          bestLen = len;
+          bestDist = dist;
+          if (len >= niceLen) {
+            break;
+          }
+        }
+
+        matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
+      }
+
+      if (state) {
+        prevArr[globalPos & (MAX_DIST - 1)] = head[h];
+        head[h] = globalPos + 1;
+      } else {
+        prevArr[pos & (MAX_DIST - 1)] = head[h];
+        head[h] = pos + 1;
+      }
+    }
+
+    if (useLazy && hasPrevMatch) {
+      if (bestLen > prevMatchLen) {
+        symbols.push({ litOrLen: prevLiteral, dist: 0 });
+        prevMatchLen = bestLen;
+        prevMatchDist = bestDist;
+        prevLiteral = data[pos];
+        insertWindow(pos, 1);
+        pos++;
+      } else {
+        symbols.push({ litOrLen: prevMatchLen, dist: prevMatchDist });
+        const matchEnd = Math.min(pos - 1 + prevMatchLen, end);
+        for (let i = pos; i < matchEnd; i++) {
+          insertHash(i);
+        }
+        insertWindow(pos, matchEnd - pos);
+        pos = matchEnd;
+        hasPrevMatch = false;
+        prevMatchLen = 0;
+      }
+    } else if (bestLen >= MIN_MATCH) {
+      if (useLazy) {
+        hasPrevMatch = true;
+        prevMatchLen = bestLen;
+        prevMatchDist = bestDist;
+        prevLiteral = data[pos];
+        insertWindow(pos, 1);
+        pos++;
+      } else {
+        symbols.push({ litOrLen: bestLen, dist: bestDist });
+        const matchEnd = Math.min(pos + bestLen, end);
+        for (let i = pos + 1; i < matchEnd; i++) {
+          insertHash(i);
+        }
+        insertWindow(pos, matchEnd - pos);
+        pos = matchEnd;
+      }
+    } else {
+      if (hasPrevMatch) {
+        // Non-lazy mode shouldn't reach here, but handle gracefully
+        symbols.push({ litOrLen: prevMatchLen, dist: prevMatchDist });
+        hasPrevMatch = false;
+        prevMatchLen = 0;
+      }
+      symbols.push({ litOrLen: data[pos], dist: 0 });
+      insertWindow(pos, 1);
+      pos++;
+    }
+  }
+
+  // Flush pending lazy match
+  if (hasPrevMatch) {
+    symbols.push({ litOrLen: prevMatchLen, dist: prevMatchDist });
+    const matchEnd = Math.min(pos - 1 + prevMatchLen, end);
+    for (let i = pos; i < matchEnd; i++) {
+      insertHash(i);
+    }
+    insertWindow(pos, matchEnd - pos);
+    hasPrevMatch = false;
+    prevMatchLen = 0;
+  }
+
+  if (state) {
+    state.windowLen = wLen;
+    state.totalIn = totalIn + (end - start);
+    state.hasPrevMatch = hasPrevMatch;
+    state.prevMatchLen = prevMatchLen;
+    state.prevMatchDist = prevMatchDist;
+    state.prevLiteral = prevLiteral;
+  }
+
+  return symbols;
 }
 
 // ============================================================================
 // Stateful Streaming Deflater
 // ============================================================================
 
-/** Maximum LZ77 sliding window size (32 KB per RFC 1951). */
-const WINDOW_SIZE = 32768;
-
 /**
- * Stateful synchronous DEFLATE compressor.
+ * Stateful synchronous DEFLATE compressor with Dynamic Huffman encoding.
  *
  * Unlike `deflateRawCompressed` (which is a one-shot function), this class
  * maintains state across multiple `write()` calls:
@@ -779,37 +1311,43 @@ const WINDOW_SIZE = 32768;
  *  - **LZ77 sliding window**: back-references can span across chunks.
  *  - **Hash chains**: match positions persist across chunks with typed-array
  *    hash tables for fast lookup.
- *  - **Lazy matching**: each match is compared with the next position's match
- *    to pick the longer one.
+ *  - **Lazy matching**: configurable per compression level.
+ *  - **Dynamic Huffman**: each block builds optimal Huffman trees from
+ *    actual symbol frequencies (BTYPE=2), producing significantly smaller
+ *    output than fixed Huffman (BTYPE=1).
  *  - **Bit writer**: bit position is preserved, so consecutive blocks form
  *    a single valid DEFLATE bit-stream without alignment issues.
  *
- * Each `write()` emits one non-final fixed-Huffman block (BFINAL=0).
- * `finish()` emits a final empty block (BFINAL=1) and returns the tail bytes.
+ * Each `write()` emits one non-final Dynamic Huffman block (BFINAL=0).
+ * `finish()` emits a final empty fixed-Huffman block (BFINAL=1).
  *
  * This is the pure-JS equivalent of Node.js `zlib.deflateRawSync` with
  * `Z_SYNC_FLUSH`, used by the streaming ZIP writer (`pushSync`) to achieve
  * constant-memory streaming in both Node.js and browsers.
+ *
+ * @param level - Compression level (0-9). Level 0 emits STORE blocks.
+ *                Default: 6 (matching zlib default).
  */
 export class SyncDeflater {
   private _output = new BitWriter();
+  private _config: LZ77Config;
+  private _level: number;
+  private _state: LZ77State = {
+    head: new Int32Array(HASH_SIZE),
+    prev: new Int32Array(MAX_DIST),
+    window: new Uint8Array(MAX_DIST),
+    windowLen: 0,
+    totalIn: 0,
+    hasPrevMatch: false,
+    prevMatchLen: 0,
+    prevMatchDist: 0,
+    prevLiteral: 0
+  };
 
-  // Hash chain tables — shared across chunks for cross-chunk matching.
-  private _head = new Int32Array(HASH_SIZE);
-  private _prev = new Int32Array(MAX_DIST);
-
-  /** Sliding window: the last WINDOW_SIZE bytes of uncompressed data. */
-  private _window = new Uint8Array(WINDOW_SIZE);
-  /** Number of valid bytes currently in the window. */
-  private _windowLen = 0;
-  /** Total bytes written so far (monotonically increasing; used for hash offsets). */
-  private _totalIn = 0;
-
-  // Lazy matching state that may span across chunks.
-  private _hasPrevMatch = false;
-  private _prevMatchLen = 0;
-  private _prevMatchDist = 0;
-  private _prevLiteral = 0;
+  constructor(level = 6) {
+    this._level = Math.max(0, Math.min(9, level));
+    this._config = getLZ77Config(this._level);
+  }
 
   /**
    * Compress a chunk and return the compressed bytes produced so far.
@@ -822,183 +1360,16 @@ export class SyncDeflater {
 
     const out = this._output;
 
-    // Start a non-final fixed-Huffman block
-    out.writeBits(0, 1); // BFINAL = 0
-    out.writeBits(1, 2); // BTYPE  = 01 (fixed Huffman)
-
-    const window = this._window;
-    let wLen = this._windowLen;
-    const head = this._head;
-    const prevArr = this._prev;
-    const totalIn = this._totalIn;
-
-    let hasPrevMatch = this._hasPrevMatch;
-    let prevMatchLen = this._prevMatchLen;
-    let prevMatchDist = this._prevMatchDist;
-    let prevLiteral = this._prevLiteral;
-
-    /**
-     * Insert a global position into the hash chain and the sliding window.
-     */
-    const insertHash = (localPos: number): void => {
-      if (localPos + 2 >= data.length) {
-        return;
-      }
-      const h = hash3(data[localPos], data[localPos + 1], data[localPos + 2]);
-      const globalPos = totalIn + localPos;
-      prevArr[globalPos & (MAX_DIST - 1)] = head[h];
-      head[h] = globalPos + 1; // 1-based
-    };
-
-    const insertWindow = (localPos: number, count: number): void => {
-      for (let i = 0; i < count; i++) {
-        window[(wLen + i) & (WINDOW_SIZE - 1)] = data[localPos + i];
-      }
-      wLen += count;
-    };
-
-    let pos = 0;
-    for (; pos < data.length; ) {
-      let bestLen = 0;
-      let bestDist = 0;
-
-      if (pos + 2 < data.length) {
-        const h = hash3(data[pos], data[pos + 1], data[pos + 2]);
-        const globalPos = totalIn + pos;
-
-        // Walk the hash chain
-        let chainLen = MAX_CHAIN_LEN;
-        let matchHead = head[h];
-
-        while (matchHead > 0 && chainLen-- > 0) {
-          const mGlobalPos = matchHead - 1;
-          const dist = globalPos - mGlobalPos;
-          if (dist > MAX_DIST || dist <= 0) {
-            break;
-          }
-
-          // Compare bytes through the sliding window + current chunk
-          const maxLen = Math.min(MAX_MATCH, data.length - pos);
-          let len = 0;
-
-          // Quick reject on the byte beyond current bestLen
-          if (bestLen >= MIN_MATCH) {
-            const checkOffset = mGlobalPos + bestLen;
-            // Determine the byte at checkOffset
-            let checkByte: number;
-            const checkLocal = checkOffset - totalIn;
-            if (checkLocal >= 0 && checkLocal < data.length) {
-              checkByte = data[checkLocal];
-            } else {
-              checkByte = window[checkOffset & (WINDOW_SIZE - 1)];
-            }
-            if (checkByte !== data[pos + bestLen]) {
-              matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
-              continue;
-            }
-          }
-
-          while (len < maxLen) {
-            const matchOffset = mGlobalPos + len;
-            // Get byte from window or current data
-            let matchByte: number;
-            const matchLocal = matchOffset - totalIn;
-            if (matchLocal >= 0 && matchLocal < data.length) {
-              matchByte = data[matchLocal];
-            } else {
-              matchByte = window[matchOffset & (WINDOW_SIZE - 1)];
-            }
-            if (matchByte !== data[pos + len]) {
-              break;
-            }
-            len++;
-          }
-
-          if (len > bestLen) {
-            bestLen = len;
-            bestDist = dist;
-            if (len >= MAX_MATCH) {
-              break;
-            }
-          }
-
-          matchHead = prevArr[mGlobalPos & (MAX_DIST - 1)];
-        }
-
-        // Insert current position into hash chain
-        prevArr[globalPos & (MAX_DIST - 1)] = head[h];
-        head[h] = globalPos + 1;
-      }
-
-      // --- Lazy matching logic ---
-      if (hasPrevMatch) {
-        if (bestLen > prevMatchLen) {
-          // Current position wins — emit previous as literal
-          writeLiteralCode(out, prevLiteral);
-          prevMatchLen = bestLen;
-          prevMatchDist = bestDist;
-          prevLiteral = data[pos];
-          insertWindow(pos, 1);
-          pos++;
-        } else {
-          // Previous match wins — emit it
-          writeLengthCode(out, prevMatchLen);
-          writeDistanceCode(out, prevMatchDist);
-          // Insert hash entries for skipped positions inside the match
-          const matchEnd = pos - 1 + prevMatchLen;
-          const insertEnd = Math.min(matchEnd, data.length);
-          for (let i = pos; i < insertEnd; i++) {
-            insertHash(i);
-          }
-          insertWindow(pos, insertEnd - pos);
-          pos = insertEnd;
-          hasPrevMatch = false;
-          prevMatchLen = 0;
-        }
-      } else if (bestLen >= MIN_MATCH) {
-        hasPrevMatch = true;
-        prevMatchLen = bestLen;
-        prevMatchDist = bestDist;
-        prevLiteral = data[pos];
-        insertWindow(pos, 1);
-        pos++;
-      } else {
-        writeLiteralCode(out, data[pos]);
-        insertWindow(pos, 1);
-        pos++;
-      }
+    if (this._level === 0) {
+      // Store mode: emit uncompressed block(s)
+      this._writeStore(data);
+      return out.flushBytes();
     }
 
-    // If there's a pending lazy match and we're at chunk boundary,
-    // flush it now (the next chunk will start fresh for lazy matching).
-    if (hasPrevMatch) {
-      writeLengthCode(out, prevMatchLen);
-      writeDistanceCode(out, prevMatchDist);
-      // The pending match started at pos-1 and covers prevMatchLen bytes.
-      // pos-1 was already hashed/windowed when it was first encountered;
-      // now insert the remaining positions (pos .. pos-1+prevMatchLen-1)
-      // into hash chains and the sliding window so the next chunk can
-      // reference them.
-      const matchEnd = Math.min(pos - 1 + prevMatchLen, data.length);
-      for (let i = pos; i < matchEnd; i++) {
-        insertHash(i);
-      }
-      insertWindow(pos, matchEnd - pos);
-      hasPrevMatch = false;
-      prevMatchLen = 0;
-    }
+    // LZ77 + Dynamic Huffman
+    const symbols = lz77Compress(data, 0, data.length, this._config, this._state);
+    emitDynamicBlock(out, symbols, false);
 
-    // End-of-block symbol
-    writeLiteralCode(out, 256);
-
-    this._windowLen = wLen;
-    this._totalIn = totalIn + data.length;
-    this._hasPrevMatch = hasPrevMatch;
-    this._prevMatchLen = prevMatchLen;
-    this._prevMatchDist = prevMatchDist;
-    this._prevLiteral = prevLiteral;
-
-    // Flush completed bytes from the bit writer
     return out.flushBytes();
   }
 
@@ -1010,8 +1381,46 @@ export class SyncDeflater {
     const out = this._output;
     // Final block: BFINAL=1, BTYPE=01, immediately followed by EOB (symbol 256)
     out.writeBits(1, 1); // BFINAL = 1
-    out.writeBits(1, 2); // BTYPE  = 01
+    out.writeBits(1, 2); // BTYPE  = 01 (fixed Huffman)
     writeLiteralCode(out, 256);
     return out.finish();
+  }
+
+  /**
+   * Write STORE (uncompressed) blocks for level=0.
+   * Each block is non-final (BFINAL=0); the final block is emitted by finish().
+   */
+  private _writeStore(data: Uint8Array): void {
+    const out = this._output;
+    const MAX_BLOCK_SIZE = 65535;
+    let offset = 0;
+
+    while (offset < data.length) {
+      const remaining = data.length - offset;
+      const blockSize = Math.min(MAX_BLOCK_SIZE, remaining);
+
+      // Align to byte boundary before stored block header
+      out.alignToByte();
+
+      out.writeBits(0, 1); // BFINAL = 0 (never final; finish() handles that)
+      out.writeBits(0, 2); // BTYPE = 00 (stored)
+
+      // Align to byte boundary after block header (3 bits → pad to 8)
+      out.alignToByte();
+
+      // LEN
+      out.writeBits(blockSize & 0xff, 8);
+      out.writeBits((blockSize >> 8) & 0xff, 8);
+      // NLEN
+      out.writeBits(~blockSize & 0xff, 8);
+      out.writeBits((~blockSize >> 8) & 0xff, 8);
+
+      // Data
+      for (let i = 0; i < blockSize; i++) {
+        out.writeBits(data[offset + i], 8);
+      }
+
+      offset += blockSize;
+    }
   }
 }

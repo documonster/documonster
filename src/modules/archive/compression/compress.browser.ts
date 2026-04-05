@@ -131,7 +131,7 @@ interface CodecStrategy {
     data: Uint8Array,
     opts: { level?: number; signal?: AbortSignal; allowTransfer?: boolean }
   ) => Promise<Uint8Array>;
-  jsFallback: (data: Uint8Array) => Uint8Array;
+  jsFallback: (data: Uint8Array, level?: number) => Uint8Array;
 }
 
 const deflateStrategy: CodecStrategy = {
@@ -190,7 +190,7 @@ async function processWithStrategy(
   }
 
   // Fallback to pure JS implementation.
-  return strategy.jsFallback(data);
+  return strategy.jsFallback(data, options.level);
 }
 
 // =============================================================================
@@ -223,7 +223,7 @@ export function compressSync(data: Uint8Array, options: CompressOptions = {}): U
   if (level === 0) {
     return data;
   }
-  return deflateRawCompressed(data);
+  return deflateRawCompressed(data, level);
 }
 
 /**
@@ -364,7 +364,7 @@ export async function gzip(data: Uint8Array, options: CompressOptions = {}): Pro
  */
 export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-  const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data);
+  const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
   return wrapGzip(deflated, data);
 }
 
@@ -454,7 +454,7 @@ export async function zlib(data: Uint8Array, options: CompressOptions = {}): Pro
  */
 export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-  const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data);
+  const deflated = level === 0 ? deflateRawStore(data) : deflateRawCompressed(data, level);
   return wrapZlib(deflated, data, level);
 }
 

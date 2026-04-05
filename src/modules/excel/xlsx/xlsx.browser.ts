@@ -140,6 +140,14 @@ class StreamingZipWriterAdapter implements IZipWriter {
   // Backpressure tracking
   private _needsDrain = false;
   private _drainResolvers: Array<() => void> = [];
+  // Count of in-flight async write() calls whose backpressure result is unknown.
+  // waitForDrain() must wait for this to reach 0 before checking _needsDrain.
+  private _pendingWrites = 0;
+  private _pendingWriteResolvers: Array<() => void> = [];
+
+  // Buffer errors that occur before _finalize registers its error listener,
+  // so async compression errors during writeToZip() are never silently lost.
+  private _earlyError: Error | null = null;
 
   constructor(options?: ZipWriterOptions) {
     this.level = options?.level ?? 6;
@@ -168,6 +176,15 @@ class StreamingZipWriterAdapter implements IZipWriter {
   }
 
   private _emit(event: string, ...args: any[]): void {
+    // Buffer error events that fire before any listener is registered,
+    // so _finalize() can surface them even if it registers late.
+    if (event === "error") {
+      const callbacks = this.events.get(event);
+      if (!callbacks || callbacks.size === 0) {
+        this._earlyError = args[0] instanceof Error ? args[0] : new Error(String(args[0]));
+        return;
+      }
+    }
     const callbacks = this.events.get(event);
     if (!callbacks) {
       return;
@@ -183,6 +200,7 @@ class StreamingZipWriterAdapter implements IZipWriter {
    */
   private _checkBackpressure(ok: boolean | void | Promise<boolean>): void {
     if (ok instanceof Promise) {
+      this._pendingWrites++;
       ok.then(
         result => {
           if (result === false) {
@@ -190,7 +208,15 @@ class StreamingZipWriterAdapter implements IZipWriter {
           }
         },
         () => {} // write errors surface via the stream's error event
-      );
+      ).finally(() => {
+        this._pendingWrites--;
+        if (this._pendingWrites === 0) {
+          const resolvers = this._pendingWriteResolvers.splice(0);
+          for (const resolve of resolvers) {
+            resolve();
+          }
+        }
+      });
       return;
     }
     if (ok === false) {
@@ -202,6 +228,14 @@ class StreamingZipWriterAdapter implements IZipWriter {
     const callbacks = this.events.get(event) || new Set<StreamListener>();
     callbacks.add(callback);
     this.events.set(event, callbacks);
+
+    // If an error was buffered before any listener was registered, deliver it now.
+    if (event === "error" && this._earlyError) {
+      const err = this._earlyError;
+      this._earlyError = null;
+      callback(err);
+    }
+
     return this;
   }
 
@@ -241,11 +275,18 @@ class StreamingZipWriterAdapter implements IZipWriter {
 
   /**
    * Wait for the downstream writable to drain if it signaled backpressure.
-   * Resolves immediately if no backpressure is active.
+   * If any write() calls are still in-flight (returned a Promise that hasn't
+   * settled), waits for all of them first so the backpressure signal isn't missed.
    */
-  waitForDrain(): Promise<void> {
+  async waitForDrain(): Promise<void> {
+    // Wait for all in-flight async writes to settle so _needsDrain is up to date.
+    if (this._pendingWrites > 0) {
+      await new Promise<void>(resolve => {
+        this._pendingWriteResolvers.push(resolve);
+      });
+    }
     if (!this._needsDrain || !this.pipedStream) {
-      return Promise.resolve();
+      return;
     }
     return new Promise<void>(resolve => {
       this._drainResolvers.push(resolve);

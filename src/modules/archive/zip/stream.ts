@@ -7,7 +7,11 @@
  */
 
 import { crc32Update, crc32Finalize, ensureZlibSync } from "@archive/compression/crc32";
-import { createDeflateStream, SyncDeflater } from "@archive/compression/streaming-compress";
+import {
+  createDeflateStream,
+  SyncDeflater,
+  hasNativeAsyncDeflate
+} from "@archive/compression/streaming-compress";
 import {
   zipCryptoInitKeys,
   zipCryptoCreateHeader,
@@ -772,6 +776,13 @@ export class ZipDeflateFile {
       return promise;
     }
 
+    // If a previous async operation already failed, don't do more work.
+    if (this._completeError) {
+      const promise = Promise.reject(this._completeError);
+      this._tapCallback(promise, callback);
+      return promise;
+    }
+
     if (this._deflateWanted === null) {
       this._accumulateSampleLen(data);
 
@@ -821,7 +832,16 @@ export class ZipDeflateFile {
    * memory growth when callers push data in a tight synchronous loop.
    */
   push(data: Uint8Array, final = false, callback?: (err?: Error | null) => void): Promise<void> {
-    if (!this._deflate && this._encryptionMethod === "none") {
+    // Use the synchronous path only when:
+    //  1. No async deflate stream is already active
+    //  2. No encryption (which requires async crypto)
+    //  3. No native async deflate available (browser CompressionStream)
+    //
+    // When a native async CompressionStream("deflate-raw") is available
+    // (modern browsers), prefer the async path — it produces better
+    // compression (Dynamic Huffman via the browser's native engine) and
+    // doesn't block the main thread.
+    if (!this._deflate && this._encryptionMethod === "none" && !hasNativeAsyncDeflate()) {
       try {
         this._pushSyncPath(data, final);
         callback?.();
@@ -832,8 +852,12 @@ export class ZipDeflateFile {
       return Promise.resolve();
     }
 
-    const promise = (this._pushChain = this._pushChain.then(() =>
-      this._pushUnchained(data, final, callback)
+    // Chain the async push so calls are serialized. Use a recovery wrapper
+    // so that a single failed push does not break the chain for subsequent
+    // pushes — errors are surfaced via onerror/rejectComplete instead.
+    const promise = (this._pushChain = this._pushChain.then(
+      () => this._pushUnchained(data, final, callback),
+      () => this._pushUnchained(data, final, callback)
     ));
 
     // Prevent unhandled rejection when callers intentionally ignore the Promise.
@@ -921,6 +945,13 @@ export class ZipDeflateFile {
     }
 
     this._emitDataDescriptor();
+
+    // _emitDataDescriptor may call _rejectComplete instead of throwing
+    // (e.g. ZIP64 required but zip64=false). In the sync path, surface
+    // this as a throw so push() can reject properly.
+    if (this._completeError) {
+      throw this._completeError;
+    }
   }
 
   /**

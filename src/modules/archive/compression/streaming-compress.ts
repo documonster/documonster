@@ -240,3 +240,11 @@ export class SyncDeflater implements SyncDeflaterLike {
     return new Uint8Array(result);
   }
 }
+
+/**
+ * On Node.js, `zlib.deflateRawSync` is native and fast — no need to detour
+ * through the async streaming path. Always returns false.
+ */
+export function hasNativeAsyncDeflate(): boolean {
+  return false;
+}
