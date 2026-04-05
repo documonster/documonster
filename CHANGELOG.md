@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.0](https://github.com/cjnoname/excelts/compare/v7.6.0...v8.0.0) (2026-04-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* All Md-prefixed identifiers renamed to Markdown.
+
+### Features
+
+* **md:** Add Markdown table module with GFM parsing, formatting, and Workbook integration ([dfd55b7](https://github.com/cjnoname/excelts/commit/dfd55b77594fd3c1c4e7332aee3b4bbc1090433a))
+
+
+### Bug Fixes
+
+* **archive:** Use Dynamic Huffman and native CompressionStream for browser compression ([b18414d](https://github.com/cjnoname/excelts/commit/b18414d38d5f2cfaed5daa80aa50899157624aa8)), closes [#125](https://github.com/cjnoname/excelts/issues/125)
+* Avoid file system race condition in XML stream writer example ([#77](https://github.com/cjnoname/excelts/issues/77)) ([7a83866](https://github.com/cjnoname/excelts/commit/7a8386694da3e347fce8ec200cce5db860ecae15))
+
+
+### Code Refactoring
+
+* Rename Md module to Markdown globally ([d0072ae](https://github.com/cjnoname/excelts/commit/d0072aee6f2e0cc2bfc6f8679f0a1125acd0eed6))
+* Rename remaining md variables to markdown in examples, tests, and docs ([767bc12](https://github.com/cjnoname/excelts/commit/767bc1292212b48fc0e01664696b54e63904b0e9))
+
 ## [7.6.0](https://github.com/cjnoname/excelts/compare/v7.5.0...v7.6.0) (2026-04-04)
 
 
