@@ -121,8 +121,8 @@ class Workbook extends WorkbookBrowser {
    * ```
    */
   override async writeMarkdownFile(filename: string, options?: MarkdownOptions): Promise<void> {
-    const mdString = this.writeMarkdown(options);
-    await writeFileText(filename, mdString);
+    const markdownString = this.writeMarkdown(options);
+    await writeFileText(filename, markdownString);
   }
 }
 

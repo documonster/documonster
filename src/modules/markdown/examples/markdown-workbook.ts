@@ -18,7 +18,7 @@ import { Workbook } from "../../excel/workbook";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/md-examples"
+  "../../../../tmp/markdown-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -34,7 +34,7 @@ const rows: string[][] = [
   ["Bob", "x > y", "D:\\Data"]
 ];
 
-const md1 = formatMarkdown(headers, rows, {
+const markdown1 = formatMarkdown(headers, rows, {
   columns: [
     { header: "Name", alignment: "left" },
     { header: "Formula", alignment: "center" },
@@ -42,18 +42,18 @@ const md1 = formatMarkdown(headers, rows, {
   ]
 });
 console.log("Formatted:");
-console.log(md1);
+console.log(markdown1);
 
-const parsed = parseMarkdown(md1);
-const md2 = formatMarkdown(parsed.headers, parsed.rows, {
+const parsed = parseMarkdown(markdown1);
+const markdown2 = formatMarkdown(parsed.headers, parsed.rows, {
   columns: parsed.headers.map((h, i) => ({
     header: h,
     alignment: parsed.alignments[i]
   }))
 });
 
-console.log("Round-trip match:", md1 === md2 ? "PASS" : "FAIL");
-fs.writeFileSync(path.join(outDir, "round-trip.md"), md1, "utf8");
+console.log("Round-trip match:", markdown1 === markdown2 ? "PASS" : "FAIL");
+fs.writeFileSync(path.join(outDir, "round-trip.md"), markdown1, "utf8");
 console.log();
 
 // =============================================================================
@@ -62,7 +62,7 @@ console.log();
 
 console.log("=== 2. Workbook readMarkdown / writeMarkdown ===\n");
 
-const mdInput = `
+const markdownInput = `
 | Name  | Age | Department  |
 | :---- | --: | :---------: |
 | Alice | 30  | Engineering |
@@ -71,7 +71,7 @@ const mdInput = `
 `.trim();
 
 const wb1 = new Workbook();
-const ws = wb1.readMarkdown(mdInput, { sheetName: "Employees" });
+const ws = wb1.readMarkdown(markdownInput, { sheetName: "Employees" });
 
 console.log("Sheet:", ws.name, "| Rows:", ws.rowCount);
 for (let r = 1; r <= ws.rowCount; r++) {
@@ -115,16 +115,16 @@ const wb2 = new Workbook();
 const sheets = wb2.readMarkdownAll(multiDoc, { sheetName: "Q1" });
 
 console.log(`Created ${sheets.length} worksheets:`);
-const allMd: string[] = [];
+const allMarkdown: string[] = [];
 for (const s of sheets) {
-  const md = wb2.writeMarkdown({ sheetName: s.name });
+  const markdown = wb2.writeMarkdown({ sheetName: s.name });
   console.log(`\n--- ${s.name} ---`);
-  console.log(md);
-  allMd.push(`## ${s.name}\n\n${md}`);
+  console.log(markdown);
+  allMarkdown.push(`## ${s.name}\n\n${markdown}`);
 }
 fs.writeFileSync(
   path.join(outDir, "workbook-multi.md"),
-  "# Multi-Table Workbook\n\n" + allMd.join("\n"),
+  "# Multi-Table Workbook\n\n" + allMarkdown.join("\n"),
   "utf8"
 );
 
@@ -145,7 +145,7 @@ console.log();
 console.log("=== 5. Value Mapper ===\n");
 
 const wb3 = new Workbook();
-const ws3 = wb3.readMarkdown(mdInput, {
+const ws3 = wb3.readMarkdown(markdownInput, {
   sheetName: "Typed",
   map: (value: string, _col: number) => {
     const n = Number(value);
@@ -168,14 +168,14 @@ ws4.addRow(["Name", "Address"]);
 ws4.addRow(["Alice", "123 Main St\nApt 4\nNew York"]);
 ws4.addRow(["Bob", "456 Oak Ave\nLondon"]);
 
-const mdMultiline = wb4.writeMarkdown({ sheetName: "Notes" });
+const markdownMultiline = wb4.writeMarkdown({ sheetName: "Notes" });
 console.log("Written:");
-console.log(mdMultiline);
+console.log(markdownMultiline);
 
 const wb5 = new Workbook();
-const ws5 = wb5.readMarkdown(mdMultiline, { sheetName: "Notes", convertBr: true });
+const ws5 = wb5.readMarkdown(markdownMultiline, { sheetName: "Notes", convertBr: true });
 console.log("Parsed back (address):", JSON.stringify(ws5.getRow(2).getCell(2).value));
-fs.writeFileSync(path.join(outDir, "multiline-workbook.md"), mdMultiline, "utf8");
+fs.writeFileSync(path.join(outDir, "multiline-workbook.md"), markdownMultiline, "utf8");
 console.log();
 
 // =============================================================================

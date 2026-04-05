@@ -16,7 +16,7 @@ import { parseMarkdown, parseMarkdownAll } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/md-examples"
+  "../../../../tmp/markdown-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -24,7 +24,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // 1. Basic parsing
 // =============================================================================
 
-const md1 = `
+const markdown1 = `
 | Name  | Age | City     |
 | ----- | --- | -------- |
 | Alice | 30  | New York |
@@ -32,7 +32,7 @@ const md1 = `
 | Carol | 35  | Tokyo    |
 `.trim();
 
-const result1 = parseMarkdown(md1);
+const result1 = parseMarkdown(markdown1);
 console.log("=== 1. Basic Parsing ===");
 console.log("Headers:", result1.headers);
 console.log("Rows:", result1.rows);
@@ -42,13 +42,13 @@ console.log();
 // 2. Alignment detection
 // =============================================================================
 
-const md2 = `
+const markdown2 = `
 | Left   | Center | Right  | Default |
 | :----- | :----: | -----: | ------- |
 | Alice  | 30     | $1,000 | hello   |
 `.trim();
 
-const result2 = parseMarkdown(md2);
+const result2 = parseMarkdown(markdown2);
 console.log("=== 2. Alignment Detection ===");
 for (let i = 0; i < result2.headers.length; i++) {
   console.log(`  ${result2.headers[i]}: ${result2.alignments[i]}`);
@@ -59,8 +59,8 @@ console.log();
 // 3. Without pipes + from document
 // =============================================================================
 
-const md3 = `Name | Age\n--- | ---\nAlice | 30\nBob | 25`;
-const result3 = parseMarkdown(md3);
+const markdown3 = `Name | Age\n--- | ---\nAlice | 30\nBob | 25`;
+const result3 = parseMarkdown(markdown3);
 console.log("=== 3. Without Pipes ===");
 console.log("Headers:", result3.headers);
 console.log("Rows:", result3.rows);
@@ -78,24 +78,30 @@ console.log();
 console.log("=== 4. Parse Options ===");
 
 // trim
-const mdTrim = "| A |\n| --- |\n|  hello  |";
-console.log("trim:true →", JSON.stringify(parseMarkdown(mdTrim, { trim: true }).rows[0]));
-console.log("trim:false →", JSON.stringify(parseMarkdown(mdTrim, { trim: false }).rows[0]));
+const markdownTrim = "| A |\n| --- |\n|  hello  |";
+console.log("trim:true →", JSON.stringify(parseMarkdown(markdownTrim, { trim: true }).rows[0]));
+console.log("trim:false →", JSON.stringify(parseMarkdown(markdownTrim, { trim: false }).rows[0]));
 
 // unescape
-const mdEsc = "| A |\n| --- |\n| a \\| b |";
-console.log("unescape:true →", parseMarkdown(mdEsc, { unescape: true }).rows[0][0]);
-console.log("unescape:false →", parseMarkdown(mdEsc, { unescape: false }).rows[0][0]);
+const markdownEsc = "| A |\n| --- |\n| a \\| b |";
+console.log("unescape:true →", parseMarkdown(markdownEsc, { unescape: true }).rows[0][0]);
+console.log("unescape:false →", parseMarkdown(markdownEsc, { unescape: false }).rows[0][0]);
 
 // maxRows
 const bigRows = Array.from({ length: 100 }, (_, i) => `| row${i} |`).join("\n");
-const mdBig = `| Data |\n| --- |\n${bigRows}`;
-console.log("maxRows:3 →", parseMarkdown(mdBig, { maxRows: 3 }).rows.length, "rows");
+const markdownBig = `| Data |\n| --- |\n${bigRows}`;
+console.log("maxRows:3 →", parseMarkdown(markdownBig, { maxRows: 3 }).rows.length, "rows");
 
 // convertBr
-const mdBr = "| Note |\n| --- |\n| Line1<br>Line2 |";
-console.log("convertBr:true →", JSON.stringify(parseMarkdown(mdBr, { convertBr: true }).rows[0]));
-console.log("convertBr:false →", JSON.stringify(parseMarkdown(mdBr, { convertBr: false }).rows[0]));
+const markdownBr = "| Note |\n| --- |\n| Line1<br>Line2 |";
+console.log(
+  "convertBr:true →",
+  JSON.stringify(parseMarkdown(markdownBr, { convertBr: true }).rows[0])
+);
+console.log(
+  "convertBr:false →",
+  JSON.stringify(parseMarkdown(markdownBr, { convertBr: false }).rows[0])
+);
 console.log();
 
 // =============================================================================

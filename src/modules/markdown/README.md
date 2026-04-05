@@ -86,7 +86,7 @@ const ws = workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |"
 console.log(ws.getRow(2).getCell(1).value); // "Alice"
 
 // Worksheet → Markdown
-const md = workbook.writeMarkdown();
+const markdownText = workbook.writeMarkdown();
 
 // Read all tables from a document
 const sheets = workbook.readMarkdownAll(markdownDoc, { sheetName: "Table" });
@@ -155,14 +155,14 @@ formatMarkdown(headers: string[], rows: unknown[][], options?: MarkdownFormatOpt
 
 **Format Options (`MarkdownFormatOptions`):**
 
-| Option            | Type                           | Default  | Description                               |
-| ----------------- | ------------------------------ | -------- | ----------------------------------------- | ----------------------- |
+| Option            | Type                                 | Default  | Description                               |
+| ----------------- | ------------------------------------ | -------- | ----------------------------------------- | ----------------------- |
 | `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | Per-column header and alignment config    |
 | `alignment`       | `MarkdownAlignment`                  | `"left"` | Default alignment for all columns         |
-| `padding`         | `boolean`                      | `true`   | Align columns to equal width with padding |
-| `trailingNewline` | `boolean`                      | `true`   | Include trailing newline in output        |
-| `escapeContent`   | `boolean`                      | `true`   | Escape `                                  | `and`\` in cell content |
-| `stringify`       | `(value: unknown) => string`   | built-in | Custom value-to-string converter          |
+| `padding`         | `boolean`                            | `true`   | Align columns to equal width with padding |
+| `trailingNewline` | `boolean`                            | `true`   | Include trailing newline in output        |
+| `escapeContent`   | `boolean`                            | `true`   | Escape `                                  | `and`\` in cell content |
+| `stringify`       | `(value: unknown) => string`         | built-in | Custom value-to-string converter          |
 
 **Column Config (`MarkdownColumnConfig`):**
 
@@ -226,8 +226,8 @@ try {
 
 ## Workbook Methods
 
-| Method                          | Platform | Description                      |
-| ------------------------------- | -------- | -------------------------------- |
+| Method                                | Platform | Description                      |
+| ------------------------------------- | -------- | -------------------------------- |
 | `readMarkdown(input, options?)`       | All      | Parse Markdown table → Worksheet |
 | `readMarkdownAll(input, options?)`    | All      | Parse all tables → Worksheet[]   |
 | `writeMarkdown(options?)`             | All      | Worksheet → Markdown string      |
@@ -238,11 +238,11 @@ try {
 
 **Workbook Options (`MarkdownOptions`)** extends both `MarkdownParseOptions` and `MarkdownFormatOptions`, plus:
 
-| Option             | Type                         | Description                                      |
-| ------------------ | ---------------------------- | ------------------------------------------------ |
+| Option             | Type                         | Description                                            |
+| ------------------ | ---------------------------- | ------------------------------------------------------ |
 | `sheetName`        | `string`                     | Worksheet name (for `readMarkdownAll`: used as prefix) |
-| `sheetId`          | `number`                     | Worksheet ID to write                            |
-| `map`              | `(value, column) => unknown` | Custom value mapper for parsing                  |
-| `dateFormat`       | `string`                     | Date format for writing                          |
-| `dateUTC`          | `boolean`                    | Use UTC for dates                                |
-| `includeEmptyRows` | `boolean`                    | Include empty rows in output                     |
+| `sheetId`          | `number`                     | Worksheet ID to write                                  |
+| `map`              | `(value, column) => unknown` | Custom value mapper for parsing                        |
+| `dateFormat`       | `string`                     | Date format for writing                                |
+| `dateUTC`          | `boolean`                    | Use UTC for dates                                      |
+| `includeEmptyRows` | `boolean`                    | Include empty rows in output                           |

@@ -30,7 +30,7 @@ const result = parseMarkdown("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |
 const tables = parseMarkdownAll(markdownDoc);
 
 // 格式化为 Markdown 表格
-const md = formatMarkdown(
+const markdownText = formatMarkdown(
   ["姓名", "年龄"],
   [
     ["Alice", "30"],

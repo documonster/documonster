@@ -851,8 +851,8 @@ describe("Workbook Markdown integration", () => {
 
   describe("readMarkdown", () => {
     it("should create a worksheet from Markdown table", () => {
-      const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
-      const ws = workbook.readMarkdown(md);
+      const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
+      const ws = workbook.readMarkdown(markdown);
 
       expect(ws).toBeDefined();
       expect(ws.name).toBeDefined();
@@ -860,8 +860,8 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should set header row correctly", () => {
-      const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMarkdown(md);
+      const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
+      const ws = workbook.readMarkdown(markdown);
 
       const headerRow = ws.getRow(1);
       expect(headerRow.getCell(1).value).toBe("Name");
@@ -869,8 +869,8 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should set data rows correctly", () => {
-      const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMarkdown(md);
+      const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
+      const ws = workbook.readMarkdown(markdown);
 
       const dataRow = ws.getRow(2);
       expect(dataRow.getCell(1).value).toBe("Alice");
@@ -878,14 +878,14 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should use custom sheet name", () => {
-      const md = "| A |\n| --- |\n| 1 |";
-      const ws = workbook.readMarkdown(md, { sheetName: "MyData" });
+      const markdown = "| A |\n| --- |\n| 1 |";
+      const ws = workbook.readMarkdown(markdown, { sheetName: "MyData" });
       expect(ws.name).toBe("MyData");
     });
 
     it("should apply custom value mapper", () => {
-      const md = "| Value |\n| --- |\n| 42 |\n| hello |";
-      const ws = workbook.readMarkdown(md, {
+      const markdown = "| Value |\n| --- |\n| 42 |\n| hello |";
+      const ws = workbook.readMarkdown(markdown, {
         map: (v, _col) => {
           const num = Number(v);
           return Number.isNaN(num) ? v : num;
@@ -899,7 +899,7 @@ describe("Workbook Markdown integration", () => {
 
   describe("readMarkdownAll", () => {
     it("should create multiple worksheets from a multi-table document", () => {
-      const md = [
+      const markdown = [
         "# Section 1",
         "",
         "| A | B |",
@@ -913,7 +913,7 @@ describe("Workbook Markdown integration", () => {
         "| 3 | 4 |"
       ].join("\n");
 
-      const sheets = workbook.readMarkdownAll(md);
+      const sheets = workbook.readMarkdownAll(markdown);
 
       expect(sheets).toHaveLength(2);
       expect(sheets[0].getRow(1).getCell(1).value).toBe("A");
@@ -928,8 +928,8 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should use sheetName as prefix for worksheet names", () => {
-      const md = "| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |";
-      const sheets = workbook.readMarkdownAll(md, { sheetName: "Data" });
+      const markdown = "| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |";
+      const sheets = workbook.readMarkdownAll(markdown, { sheetName: "Data" });
 
       expect(sheets).toHaveLength(2);
       expect(sheets[0].name).toBe("Data");
@@ -937,8 +937,8 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should apply value mapper to all tables", () => {
-      const md = "| V |\n| --- |\n| 10 |\n\n| V |\n| --- |\n| 20 |";
-      const sheets = workbook.readMarkdownAll(md, {
+      const markdown = "| V |\n| --- |\n| 10 |\n\n| V |\n| --- |\n| 20 |";
+      const sheets = workbook.readMarkdownAll(markdown, {
         map: v => {
           const n = Number(v);
           return Number.isNaN(n) ? v : n;
@@ -950,16 +950,16 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should preserve alignments on each worksheet", () => {
-      const md = "| L |\n| :--- |\n| a |\n\n| R |\n| ---: |\n| b |";
-      const sheets = workbook.readMarkdownAll(md);
+      const markdown = "| L |\n| :--- |\n| a |\n\n| R |\n| ---: |\n| b |";
+      const sheets = workbook.readMarkdownAll(markdown);
 
       expect((sheets[0] as any)._markdownAlignments).toEqual(["left"]);
       expect((sheets[1] as any)._markdownAlignments).toEqual(["right"]);
     });
 
     it("should apply convertBr across all tables", () => {
-      const md = "| N |\n| --- |\n| A<br>B |\n\n| N |\n| --- |\n| C<br>D |";
-      const sheets = workbook.readMarkdownAll(md, { convertBr: true });
+      const markdown = "| N |\n| --- |\n| A<br>B |\n\n| N |\n| --- |\n| C<br>D |";
+      const sheets = workbook.readMarkdownAll(markdown, { convertBr: true });
 
       expect(sheets[0].getRow(2).getCell(1).value).toBe("A\nB");
       expect(sheets[1].getRow(2).getCell(1).value).toBe("C\nD");
@@ -1088,13 +1088,13 @@ describe("Workbook Markdown integration", () => {
       ws.addRow(["Note"]);
       ws.addRow(["Line1\nLine2"]);
 
-      const md = workbook.writeMarkdown({ sheetName: "Multi" });
+      const markdown = workbook.writeMarkdown({ sheetName: "Multi" });
       // The formatter should convert \n to <br>
-      expect(md).toContain("<br>");
+      expect(markdown).toContain("<br>");
 
       // Parse back with convertBr to restore the newline
       const wb2 = new Workbook();
-      const ws2 = wb2.readMarkdown(md, { convertBr: true });
+      const ws2 = wb2.readMarkdown(markdown, { convertBr: true });
       expect(ws2.getRow(2).getCell(1).value).toBe("Line1\nLine2");
     });
   });

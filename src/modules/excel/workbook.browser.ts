@@ -307,7 +307,10 @@ function createDefaultWriteMapper(dateFormat?: string, dateUTC?: boolean) {
  * Create a stringify function for Markdown output.
  * Handles hyperlinks, formulas, rich text, dates, errors, and objects.
  */
-function createMarkdownStringify(dateFormat?: string, dateUTC?: boolean): (value: unknown) => string {
+function createMarkdownStringify(
+  dateFormat?: string,
+  dateUTC?: boolean
+): (value: unknown) => string {
   const formatter = dateFormat
     ? DateFormatter.create(dateFormat, { utc: dateUTC })
     : DateFormatter.iso(dateUTC);
@@ -976,7 +979,7 @@ class Workbook {
    * workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
    *
    * // With options
-   * workbook.readMarkdown(mdString, { sheetName: "Data", map: (v, col) => Number(v) || v });
+   * workbook.readMarkdown(markdownString, { sheetName: "Data", map: (v, col) => Number(v) || v });
    * ```
    */
   readMarkdown(input: string, options?: MarkdownOptions): Worksheet {
@@ -1040,10 +1043,10 @@ class Workbook {
    * @example
    * ```ts
    * // Write first worksheet
-   * const md = workbook.writeMarkdown();
+   * const markdownText = workbook.writeMarkdown();
    *
    * // Write specific worksheet with options
-   * const md = workbook.writeMarkdown({ sheetName: "Data", padding: true });
+   * const markdownText = workbook.writeMarkdown({ sheetName: "Data", padding: true });
    * ```
    */
   writeMarkdown(options?: MarkdownOptions): string {
@@ -1086,7 +1089,8 @@ class Workbook {
     const dataRows = allRows.slice(1);
 
     // Check for stored alignments from a previous readMarkdown
-    const storedAlignments: MarkdownAlignment[] | undefined = (worksheet as any)._markdownAlignments;
+    const storedAlignments: MarkdownAlignment[] | undefined = (worksheet as any)
+      ._markdownAlignments;
 
     // Build column configs
     const columns = options?.columns;
@@ -1119,8 +1123,8 @@ class Workbook {
    * ```
    */
   writeMarkdownBuffer(options?: MarkdownOptions): Uint8Array {
-    const mdString = this.writeMarkdown(options);
-    return new TextEncoder().encode(mdString);
+    const markdownString = this.writeMarkdown(options);
+    return new TextEncoder().encode(markdownString);
   }
 
   /**

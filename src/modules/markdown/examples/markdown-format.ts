@@ -18,7 +18,7 @@ import { formatMarkdown } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/md-examples"
+  "../../../../tmp/markdown-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
