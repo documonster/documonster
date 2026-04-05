@@ -26,6 +26,7 @@ import type { TextFragment } from "../reader/content-interpreter";
 import { PdfDocument } from "../reader/pdf-document";
 import { extractTextFromPage } from "../reader/content-interpreter";
 import { resolveFont, decodeText } from "../reader/font-decoder";
+import { decodeXmlEntities } from "../reader/metadata-reader";
 import type { ResolvedFont } from "../reader/font-decoder";
 
 // =============================================================================
@@ -702,6 +703,37 @@ describe("PDF Reader - Metadata", () => {
       expect(result.metadata.pageSize.width).toBeGreaterThan(0);
       expect(result.metadata.pageSize.height).toBeGreaterThan(0);
     }
+  });
+});
+
+// =============================================================================
+// XML Entity Decoding (regression: no double-unescaping)
+// =============================================================================
+
+describe("decodeXmlEntities", () => {
+  it("should decode basic XML entities", () => {
+    expect(decodeXmlEntities("a &amp; b")).toBe("a & b");
+    expect(decodeXmlEntities("&lt;tag&gt;")).toBe("<tag>");
+    expect(decodeXmlEntities("&quot;hello&quot;")).toBe('"hello"');
+    expect(decodeXmlEntities("it&apos;s")).toBe("it's");
+  });
+
+  it("should not double-unescape &amp;lt; into <", () => {
+    // &amp;lt; should become &lt; (not <)
+    expect(decodeXmlEntities("&amp;lt;tag&amp;gt;")).toBe("&lt;tag&gt;");
+  });
+
+  it("should not double-unescape &amp;amp; into &", () => {
+    // &amp;amp; should become &amp; (not &)
+    expect(decodeXmlEntities("&amp;amp;")).toBe("&amp;");
+  });
+
+  it("should not double-unescape &amp;quot; into a quote", () => {
+    expect(decodeXmlEntities("&amp;quot;")).toBe("&quot;");
+  });
+
+  it("should handle text with no entities", () => {
+    expect(decodeXmlEntities("plain text")).toBe("plain text");
   });
 });
 

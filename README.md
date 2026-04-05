@@ -2,7 +2,9 @@
 
 [![Build Status](https://github.com/cjnoname/excelts/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cjnoname/excelts/actions/workflows/ci.yml) &nbsp; [中文](README_zh.md)
 
-Zero-dependency, AI-friendly TypeScript toolkit — Excel, PDF, CSV, Markdown, XML, ZIP, and streaming in one library with seven standalone modules.
+The TypeScript ecosystem is heavily fragmented when it comes to document and data processing. To handle Excel, PDF, CSV, XML, ZIP, and streaming, developers often need to pull in a different package for each task — and then yet another set of packages to make them work in the browser, plus separate streaming wrappers on top. These libraries vary in API style, quality, and maintenance status, creating a tax on every project that needs more than one of them.
+
+ExcelTS was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
 
 ## About This Project
 
@@ -13,12 +15,6 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 - **Seven Modules** — Excel, PDF, CSV, Markdown, XML, Archive, Stream
 - **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
-
-## Motivation
-
-The TypeScript ecosystem is heavily fragmented when it comes to document and data processing. To handle Excel, PDF, CSV, XML, ZIP, and streaming, developers often need to pull in a different package for each task — and then yet another set of packages to make them work in the browser, plus separate streaming wrappers on top. These libraries vary in API style, quality, and maintenance status, creating a tax on every project that needs more than one of them.
-
-ExcelTS was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
 
 ## Modules
 

@@ -283,13 +283,14 @@ function extractXmpField(xml: string, field: string): string | null {
   return null;
 }
 
-function decodeXmlEntities(text: string): string {
+/** @internal Exported for testing only. */
+export function decodeXmlEntities(text: string): string {
   return text
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
 // =============================================================================
