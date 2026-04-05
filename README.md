@@ -2,30 +2,77 @@
 
 [![Build Status](https://github.com/cjnoname/excelts/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cjnoname/excelts/actions/workflows/ci.yml)
 
-Modern TypeScript Excel Workbook Manager - Read, manipulate and write spreadsheet data and styles to XLSX and JSON.
+Modern TypeScript Excel Workbook Manager — Read, manipulate and write spreadsheet data and styles to XLSX and JSON.
+
+## AI Support
+
+ExcelTS is designed to be **AI-friendly** — a clean, consistent API that AI coding agents can easily generate and consume. One library handles Excel, PDF, CSV, Markdown, XML, ZIP, and streaming with maximum efficiency. Every module has comprehensive documentation and runnable examples for AI to learn from.
 
 ## About This Project
 
 ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
-- 🚀 **Zero Runtime Dependencies** — Pure TypeScript, no external packages
-- 📦 **Seven Modules** — Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Markdown (GFM tables), XML (SAX/DOM/Writer), Archive (ZIP/TAR), Stream (cross-platform)
-- 🤖 **AI-Friendly** — Clean, consistent API designed to be easily generated and consumed by AI coding agents — one library handles Excel, PDF, CSV, Markdown, XML, ZIP, and streaming with maximum efficiency
-- ✅ **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
-- ✅ **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
-
-## Module Documentation
-
-- [XML Module](src/modules/xml/README.md) — Zero-dependency SAX/DOM parser, query engine, and dual-mode writer
-- [PDF Module](src/modules/pdf/README.md) — Full-featured zero-dependency PDF engine with encryption and font embedding
-- [CSV Module](src/modules/csv/README.md) — RFC 4180 parser/formatter, streaming, data generation
-- [Markdown Module](src/modules/md/README.md) — GFM table parser/formatter with alignment round-trip
-- [Archive Module](src/modules/archive/README.md) — ZIP/TAR create/read/edit, compression, encryption
-- [Stream Module](src/modules/stream/README.md) — Cross-platform Readable/Writable/Transform/Duplex
+- **Zero Runtime Dependencies** — Pure TypeScript, no external packages
+- **Seven Modules** — Excel, PDF, CSV, Markdown, XML, Archive, Stream
+- **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
+- **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
 ## Translations
 
 - [中文文档](README_zh.md)
+
+## Modules
+
+ExcelTS is organized into seven standalone modules. Each module has its own documentation and runnable examples.
+
+### Excel — XLSX/JSON Workbook Manager
+
+Create, read, and modify Excel spreadsheets with full styling, formulas, images, and streaming support.
+
+- [Documentation](src/modules/excel/README.md) | [中文文档](src/modules/excel/README_zh.md)
+- [Examples](src/modules/excel/examples/) (40+ runnable scripts)
+
+### PDF — Zero-Dependency PDF Engine
+
+Full-featured PDF generation with font embedding, encryption, images, and Excel-to-PDF conversion.
+
+- [Documentation](src/modules/pdf/README.md) | [中文文档](src/modules/pdf/README_zh.md)
+- [Examples](src/modules/pdf/examples/)
+
+### CSV — RFC 4180 Parser/Formatter
+
+High-performance CSV parsing and formatting with streaming, dynamic typing, data generation, and worker pool support.
+
+- [Documentation](src/modules/csv/README.md) | [中文文档](src/modules/csv/README_zh.md)
+- [Examples](src/modules/csv/examples/)
+
+### Markdown — GFM Table Parser/Formatter
+
+Parse and format GitHub Flavored Markdown tables with alignment round-trip and Workbook integration.
+
+- [Documentation](src/modules/md/README.md) | [中文文档](src/modules/md/README_zh.md)
+- [Examples](src/modules/md/examples/)
+
+### XML — SAX/DOM Parser, Query Engine, Writer
+
+Streaming and buffered XML processing with query engine, namespace support, and dual-mode writing.
+
+- [Documentation](src/modules/xml/README.md) | [中文文档](src/modules/xml/README_zh.md)
+- [Examples](src/modules/xml/examples/)
+
+### Archive — ZIP/TAR Create/Read/Edit
+
+ZIP and TAR archive creation, reading, editing, streaming, encryption, and compression utilities.
+
+- [Documentation](src/modules/archive/README.md) | [中文文档](src/modules/archive/README_zh.md)
+- [Examples](src/modules/archive/examples/)
+
+### Stream — Cross-Platform Streaming
+
+Node.js-compatible Readable/Writable/Transform/Duplex that works identically in Node.js and browsers.
+
+- [Documentation](src/modules/stream/README.md) | [中文文档](src/modules/stream/README_zh.md)
+- [Examples](src/modules/stream/examples/)
 
 ## Installation
 
@@ -35,697 +82,77 @@ npm install @cj-tech-master/excelts
 
 ## Quick Start
 
-### Creating a Workbook
-
-```javascript
+```typescript
 import { Workbook } from "@cj-tech-master/excelts";
 
+// Create
 const workbook = new Workbook();
-const sheet = workbook.addWorksheet("My Sheet");
-
-// Add data
-sheet.addRow(["Name", "Age", "Email"]);
-sheet.addRow(["John Doe", 30, "john@example.com"]);
-sheet.addRow(["Jane Smith", 25, "jane@example.com"]);
-
-// Save to file
-// Node.js only: write to a file path
+const sheet = workbook.addWorksheet("Sheet1");
+sheet.addRow(["Name", "Age"]);
+sheet.addRow(["Alice", 30]);
 await workbook.xlsx.writeFile("output.xlsx");
 
-// Browser: use `writeBuffer()` and save as a Blob (see the Browser Support section)
+// Read
+const wb = new Workbook();
+await wb.xlsx.readFile("output.xlsx");
+wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
 ```
-
-### Reading a Workbook
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-// Node.js only: read from a file path
-await workbook.xlsx.readFile("input.xlsx");
-
-// Browser: use `xlsx.load(arrayBuffer)` (see the Browser Support section)
-
-const worksheet = workbook.getWorksheet(1);
-worksheet.eachRow((row, rowNumber) => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(row.values));
-});
-```
-
-### Styling Cells
-
-```javascript
-// Set cell value and style
-const cell = worksheet.getCell("A1");
-cell.value = "Hello";
-cell.font = {
-  name: "Arial",
-  size: 16,
-  bold: true,
-  color: { argb: "FFFF0000" }
-};
-cell.fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "FFFFFF00" }
-};
-```
-
-## Features
-
-- **Excel Operations**
-  - Create, read, and modify XLSX files
-  - Multiple worksheet support
-  - Cell styling (fonts, colors, borders, fills)
-  - Cell merging and formatting
-  - Row and column properties
-  - Freeze panes and split views
-
-- **Data Handling**
-  - Rich text support
-  - Formulas and calculated values
-  - Data validation
-  - Conditional formatting
-  - Images and charts
-  - Hyperlinks
-  - Pivot tables
-
-- **PDF Export**
-  - Full-featured, zero-dependency PDF engine (standalone or with Excel)
-  - Full cell styling (fonts, colors, borders, fills, alignment)
-  - Automatic pagination with repeat header rows
-  - TrueType font embedding for Unicode/CJK text
-  - JPEG and PNG image embedding with transparency
-  - Password protection and encryption
-  - Per-worksheet page setup (size, orientation, margins)
-  - Tree-shakeable (not imported = not bundled)
-
-- **Advanced Features**
-  - Streaming for large files
-  - CSV import/export
-  - Markdown table import/export
-  - Tables with auto-filters
-  - Page setup and printing options
-  - Data protection
-  - Comments and notes
 
 ## Subpath Exports
 
-ExcelTS provides focused subpath exports for standalone module usage:
+Each module is available as a standalone subpath export:
 
 ```typescript
-// Main entry - Excel core (Workbook, Worksheet, Cell, etc.)
 import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
-
-// XML toolkit (SAX parser, DOM parser, query engine, writers)
 import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
-
-// ZIP/TAR archive utilities
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
-
-// CSV parsing, formatting, and streaming
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
-
-// Markdown table parsing and formatting
 import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
-
-// Cross-platform stream primitives
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 
 Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions.
 
-## PDF Export
-
-Export any workbook to PDF with zero external dependencies:
-
-```javascript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Report");
-sheet.columns = [
-  { header: "Product", key: "product", width: 20 },
-  { header: "Revenue", key: "revenue", width: 15 }
-];
-sheet.addRow({ product: "Widget", revenue: 1000 });
-sheet.getColumn("revenue").numFmt = "$#,##0.00";
-
-// One-line export
-const pdf = excelToPdf(workbook, {
-  showGridLines: true,
-  showPageNumbers: true,
-  title: "Sales Report"
-});
-
-// Node.js: write to file
-import { writeFileSync } from "fs";
-writeFileSync("report.pdf", pdf);
-
-// Browser: download
-const blob = new Blob([pdf], { type: "application/pdf" });
-const url = URL.createObjectURL(blob);
-window.open(url);
-```
-
-### Convert Existing XLSX to PDF
-
-```javascript
-const workbook = new Workbook();
-await workbook.xlsx.readFile("input.xlsx");
-const pdf = excelToPdf(workbook);
-```
-
-### Encryption
-
-```javascript
-const pdf = excelToPdf(workbook, {
-  encryption: {
-    ownerPassword: "admin",
-    userPassword: "reader",
-    permissions: { print: true, copy: false }
-  }
-});
-```
-
-### Unicode / CJK
-
-```javascript
-import { readFileSync } from "fs";
-
-const pdf = excelToPdf(workbook, {
-  font: readFileSync("NotoSansSC-Regular.ttf") // TrueType font for CJK text
-});
-```
-
-### Standalone PDF (No Excel)
-
-Generate PDFs from plain data — no workbook, no Map objects, no boilerplate:
-
-```javascript
-import { pdf } from "@cj-tech-master/excelts/pdf";
-
-// Simplest — pass a 2D array
-const bytes = pdf([
-  ["Product", "Revenue"],
-  ["Widget", 1000],
-  ["Gadget", 2500]
-]);
-
-// With column widths and styled cells
-const bytes = pdf(
-  {
-    name: "Report",
-    columns: [
-      { width: 25, header: "Product" },
-      { width: 15, header: "Revenue" }
-    ],
-    data: [
-      ["Widget", 1000],
-      ["Gadget", 2500]
-    ]
-  },
-  { showGridLines: true }
-);
-```
-
-For the full API reference and all options, see the [PDF Module documentation](src/modules/pdf/README.md).
-
-## Archive Utilities (ZIP/TAR)
-
-ExcelTS includes internal ZIP/TAR utilities used by the XLSX pipeline. If you use the
-archive APIs directly, ZIP string encoding can be customized via `ZipStringEncoding`:
-
-- Default: `"utf-8"`
-- Legacy: `"cp437"`
-- Custom: provide a codec with `encode`/`decode` plus optional flags
-
-When a non-UTF-8 encoding is used, Unicode extra fields can be emitted for better
-cross-tool compatibility.
-
-## XML Toolkit
-
-ExcelTS includes a standalone, zero-dependency XML module with streaming and buffered parsing/writing. It powers the XLSX pipeline internally and is available as a standalone subpath export.
-
-### Key Features
-
-- **SAX Parser** — Event-driven streaming parser with high throughput
-- **DOM Parser** — Build a queryable XML tree from a string
-- **Query Engine** — Simplified path expressions (`a/b[@id='1']`, `a//c`, `a/b[0]`)
-- **Dual-Mode Writer** — Buffered (`XmlWriter`) and streaming (`XmlStreamWriter`)
-- **Full Namespace Support** — Prefix resolution, reserved namespace enforcement, unbound prefix detection
-- **Security Hardened** — Entity expansion limits, nesting depth limits, duplicate attribute rejection, BOM handling
-
-### Quick Example
-
-```typescript
-import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
-
-// SAX streaming parse
-const parser = new SaxParser();
-parser.on("opentag", tag => console.log(tag.name, tag.attributes));
-parser.write('<root><item id="1">hello</item></root>');
-parser.close();
-
-// DOM parse + query
-const doc = parseXml("<root><a><b>1</b><b>2</b></a></root>");
-const items = queryAll(doc.root, "a/b"); // all <b> elements
-
-// Write XML
-const w = new XmlWriter();
-w.openXml();
-w.openNode("root");
-w.leafNode("item", { id: "1" }, "hello");
-w.closeNode();
-console.log(w.xml);
-```
-
-For the full API reference, see the [XML Module documentation](src/modules/xml/README.md).
-
-### Editing an existing ZIP (ZipEditor)
-
-ExcelTS also includes a ZIP editor that can apply filesystem-like edits to an existing archive
-and then output a new ZIP.
-
-- Supports `set()`, `delete()`, `rename()`, `deleteDirectory()`, `setComment()`
-- Unchanged entries are passed through efficiently when possible
-
-```js
-import { editZip } from "@cj-tech-master/excelts";
-
-const editor = await editZip(existingZipBytes, {
-  reproducible: true,
-
-  // Passthrough behavior for unchanged entries:
-  // - "strict" (default): raw passthrough must be available or it throws
-  // - "best-effort": if raw passthrough is unavailable, fall back to extract+re-add
-  preserve: "best-effort",
-  onWarning: w => console.warn(w.code, w.entry, w.message)
-});
-
-editor.delete("old.txt");
-editor.rename("a.txt", "renamed.txt");
-editor.set("new.txt", "hello");
-
-const out = await editor.bytes();
-```
-
-## Streaming API
-
-For processing large Excel files without loading them entirely into memory, ExcelTS provides streaming reader and writer APIs.
-
-- **Node.js**: `WorkbookReader` supports reading from a file path, and `WorkbookWriter` supports writing to a filename.
-- **Browsers**: use `Uint8Array` / `ArrayBuffer` / Web `ReadableStream<Uint8Array>` for reading, and Web `WritableStream<Uint8Array>` for writing.
-- Note: ExcelTS does not re-export the internal stream utility surface (e.g. `Readable`, `Writable`). Prefer standard Web Streams (browser/Node 22+) or Node.js streams.
-
-### Streaming Reader
-
-Read large XLSX files with minimal memory usage:
-
-```javascript
-import { WorkbookReader } from "@cj-tech-master/excelts";
-
-// Node.js: read from file path
-const reader = new WorkbookReader("large-file.xlsx", {
-  worksheets: "emit", // emit worksheet events
-  sharedStrings: "cache", // cache shared strings for cell values
-  hyperlinks: "ignore", // ignore hyperlinks
-  styles: "ignore" // ignore styles for faster parsing
-});
-
-for await (const worksheet of reader) {
-  console.log(`Reading: ${worksheet.name}`);
-  for await (const row of worksheet) {
-    console.log(row.values);
-  }
-}
-```
-
-### Streaming Writer
-
-Write large XLSX files row by row:
-
-```javascript
-import { WorkbookWriter } from "@cj-tech-master/excelts";
-
-// Node.js: write to filename
-const workbook = new WorkbookWriter({
-  filename: "output.xlsx",
-  useSharedStrings: true,
-  useStyles: true
-});
-
-const sheet = workbook.addWorksheet("Data");
-
-// Write rows one at a time
-for (let i = 0; i < 1000000; i++) {
-  sheet.addRow([`Row ${i}`, i, new Date()]).commit();
-}
-
-// Commit worksheet and finalize
-sheet.commit();
-await workbook.commit();
-```
-
-### Web Streams (Node.js 22+ and Browsers)
-
-`WorkbookWriter` can write to a Web `WritableStream<Uint8Array>`, and `WorkbookReader` can read from a Web `ReadableStream<Uint8Array>`.
-
-This does **not** require importing any extra stream utility surface from ExcelTS; it uses the standard Web Streams API.
-
-- Full runnable example: [src/modules/excel/examples/web-streams-reader-writer.ts](src/modules/excel/examples/web-streams-reader-writer.ts)
-
-Run locally (Node.js 22+):
-
-```bash
-npx tsx src/modules/excel/examples/web-streams-reader-writer.ts
-```
-
-Minimal end-to-end snippet:
-
-```javascript
-import { WorkbookWriter, WorkbookReader } from "@cj-tech-master/excelts";
-
-// 1) Write workbook -> Web WritableStream
-const chunks = [];
-const writable = new WritableStream({
-  write(chunk) {
-    chunks.push(chunk);
-  }
-});
-
-const writer = new WorkbookWriter({ stream: writable });
-const sheet = writer.addWorksheet("Sheet1");
-sheet.addRow(["Name", "Score"]).commit();
-sheet.addRow(["Alice", 98]).commit();
-await sheet.commit();
-await writer.commit();
-
-// 2) Read workbook <- Web ReadableStream
-const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-let offset = 0;
-for (const c of chunks) {
-  bytes.set(c, offset);
-  offset += c.length;
-}
-
-const readable = new ReadableStream({
-  start(controller) {
-    controller.enqueue(bytes);
-    controller.close();
-  }
-});
-
-const reader = new WorkbookReader(readable, { worksheets: "emit" });
-for await (const ws of reader) {
-  for await (const row of ws) {
-    console.log(row.values);
-  }
-}
-```
-
-## CSV Support
-
-### Node.js (Full Streaming Support)
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-import fs from "fs";
-
-const workbook = new Workbook();
-
-// Read CSV from file
-await workbook.readCsvFile("data.csv");
-
-// Read CSV from stream
-const stream = fs.createReadStream("data.csv");
-await workbook.readCsv(stream, { sheetName: "Imported" });
-
-// Write CSV to file
-await workbook.writeCsvFile("output.csv");
-
-// Write CSV to stream
-const writeStream = fs.createWriteStream("output.csv");
-await workbook.writeCsv(writeStream);
-
-// Write CSV to string / bytes
-const csvText = workbook.writeCsv();
-const bytes = await workbook.writeCsvBuffer();
-```
-
-### Browser (In-Memory)
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-
-// Read CSV from string
-await workbook.readCsv(csvString);
-
-// Read CSV from ArrayBuffer (e.g., from fetch)
-const response = await fetch("data.csv");
-const arrayBuffer = await response.arrayBuffer();
-await workbook.readCsv(arrayBuffer);
-
-// Read CSV from File (e.g., <input type="file">)
-await workbook.readCsv(file);
-
-// Write CSV to string
-const csvOutput = workbook.writeCsv();
-
-// Write CSV to Uint8Array bytes
-const bytes = await workbook.writeCsvBuffer();
-```
-
-## Markdown Support
-
-### Node.js
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-
-// Read Markdown table from file
-await workbook.readMdFile("table.md");
-
-// Read Markdown table from string
-workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-
-// Read with options
-workbook.readMd(mdString, {
-  sheetName: "Data",
-  map: (v, col) => Number(v) || v
-});
-
-// Write Markdown to file
-await workbook.writeMdFile("output.md");
-
-// Write Markdown to string
-const mdText = workbook.writeMd();
-
-// Write Markdown to Uint8Array bytes
-const bytes = workbook.writeMdBuffer();
-```
-
-### Browser (In-Memory)
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-
-// Read Markdown table from string
-workbook.readMd(mdString);
-
-// Write Markdown to string
-const mdOutput = workbook.writeMd();
-
-// Write Markdown to Uint8Array bytes
-const bytes = workbook.writeMdBuffer();
-```
-
-### Standalone Parser / Formatter
-
-```typescript
-import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
-
-// Parse a Markdown table
-const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-// result.headers = ["Name", "Age"]
-// result.rows = [["Alice", "30"]]
-// result.alignments = ["none", "none"]
-
-// Parse all tables in a document
-const tables = parseMdAll(markdownDoc);
-
-// Format data as a Markdown table
-const md = formatMd(
-  ["Name", "Age"],
-  [
-    ["Alice", "30"],
-    ["Bob", "25"]
-  ],
-  { alignment: "left", padding: true }
-);
-```
-
 ## Browser Support
 
-ExcelTS has native browser support with **zero configuration** required for modern bundlers.
-
-### Using with Bundlers (Vite, Webpack, Rollup, esbuild)
-
-Simply import ExcelTS - no polyfills or configuration needed:
-
-```javascript
-import { Workbook } from "@cj-tech-master/excelts";
-
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Sheet1");
-sheet.getCell("A1").value = "Hello, Browser!";
-
-// Write to buffer and download
-const buffer = await workbook.xlsx.writeBuffer();
-const blob = new Blob([buffer], {
-  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-});
-const url = URL.createObjectURL(blob);
-// ... trigger download
-```
-
-### Using with Script Tags (No Bundler)
-
-```html
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
-<script>
-  const { Workbook } = ExcelTS;
-  const wb = new Workbook();
-  // ... use workbook API
-</script>
-```
-
-### Manual Browser Example (Local)
-
-For a quick manual smoke test in a real browser (create/download/read XLSX, worksheet protection, etc.), use:
-
-- [src/modules/excel/examples/browser-smoke.html](src/modules/excel/examples/browser-smoke.html)
-
-Steps:
-
-```bash
-npm run build:browser:bundle
-npx serve .
-```
-
-Then open `http://localhost:3000/src/modules/excel/examples/browser-smoke.html`.
-
-### Browser-Specific Notes
-
-- **PDF export is fully supported** in browsers with zero configuration
-- **CSV operations are supported** using native RFC 4180 implementation
-  - Use `await workbook.readCsv(input)` to read CSV
-  - Use `workbook.writeCsv()` or `await workbook.writeCsvBuffer()` to write CSV
-- **Markdown table operations are supported** with GFM table syntax
-  - Use `workbook.readMd(input)` to read Markdown tables
-  - Use `workbook.writeMd()` or `workbook.writeMdBuffer()` to write Markdown
-- Use `xlsx.load(arrayBuffer)` instead of `xlsx.readFile()`
-- Use `xlsx.writeBuffer()` instead of `xlsx.writeFile()`
-- Worksheet protection with passwords is fully supported (pure JS SHA-512)
-
-## Utility Exports
-
-The main entry also exports commonly useful utilities:
+ExcelTS has native browser support with **zero configuration** for modern bundlers.
 
 ```typescript
-import {
-  // Excel date conversion
-  dateToExcel, // JS Date -> Excel serial number
-  excelToDate, // Excel serial number -> JS Date
-
-  // Date parsing/formatting (high-performance, zero-dep)
-  DateParser, // Batch date parser with format auto-detection
-  DateFormatter, // Batch date formatter
-
-  // Binary utilities (cross-platform)
-  base64ToUint8Array,
-  uint8ArrayToBase64,
-  concatUint8Arrays,
-  toUint8Array,
-  stringToUint8Array,
-  uint8ArrayToString,
-
-  // XML utilities
-  xmlEncode,
-  xmlDecode,
-  xmlEncodeAttr,
-  validateXmlName,
-
-  // PDF export
-  pdf, // Simplest: pdf([["A", 1], ["B", 2]]) → Uint8Array
-  excelToPdf, // Workbook -> Uint8Array (Excel-to-PDF)
-  PageSizes, // Built-in page size definitions
-  PdfError, // Base PDF error
-  PdfRenderError, // Layout/rendering failures
-  PdfFontError, // Font parsing/embedding failures
-  PdfStructureError, // PDF structure assembly failures
-  isPdfError, // Type guard for PDF errors
-
-  // Error infrastructure
-  BaseError, // Base class for all library errors
-  ExcelError, // Base Excel error (instanceof checks)
-  toError, // Normalize unknown -> Error
-  errorToJSON, // Serialize error (with cause chain)
-  getErrorChain, // Get full error cause chain as array
-  getRootCause // Get deepest error in cause chain
-} from "@cj-tech-master/excelts";
+// Bundlers (Vite, Webpack, Rollup, esbuild) — just import
+import { Workbook } from "@cj-tech-master/excelts";
+const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer();
 ```
+
+```html
+<!-- Script tag (no bundler) -->
+<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+```
+
+| Browser | Minimum Version    |
+| ------- | ------------------ |
+| Chrome  | 89+ (March 2021)   |
+| Edge    | 89+ (March 2021)   |
+| Firefox | 102+ (June 2022)   |
+| Safari  | 14.1+ (April 2021) |
+| Opera   | 75+ (March 2021)   |
+
+For older browsers without native `CompressionStream` API, ExcelTS automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.
 
 ## Requirements
 
-### Node.js
-
-- **Node.js >= 22.0.0** (ES2020 native support)
-
-### Browsers (No Polyfills Required)
-
-- **Chrome >= 89** (March 2021)
-- **Edge >= 89** (March 2021)
-- **Firefox >= 102** (June 2022)
-- **Safari >= 14.1** (April 2021)
-- **Opera >= 75** (March 2021)
-
-For older browsers without native `CompressionStream` API (Firefox < 113, Safari < 16.4), ExcelTS automatically uses a built-in pure JavaScript DEFLATE implementation - no configuration or polyfills needed.
-
-ExcelTS does **not** require `crypto.randomUUID()` in browsers; it uses an internal UUID v4 generator with a `crypto.getRandomValues()` fallback.
-
-## API Documentation
-
-For detailed API documentation, please refer to the comprehensive documentation sections:
-
-- Workbook Management
-- Worksheets
-- Cells and Values
-- Styling
-- Formulas
-- Data Validation
-- Conditional Formatting
-- File I/O
+- **Node.js >= 22.0.0**
+- See browser compatibility table above
 
 ## License
 
-MIT License
+MIT License — See LICENSE.
 
-See LICENSE.
-
-Third-party software notices and attributions are provided in THIRD_PARTY_NOTICES.md.
+Third-party attributions: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## Links
 
 - [GitHub Repository](https://github.com/cjnoname/excelts)
 - [Issue Tracker](https://github.com/cjnoname/excelts/issues)
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+- [Changelog](CHANGELOG.md)
+- [Migration Guide](MIGRATION.md)
+- [Roadmap](ROADMAP.md)
