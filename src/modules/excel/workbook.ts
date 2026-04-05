@@ -102,7 +102,10 @@ class Workbook extends WorkbookBrowser {
    * await workbook.readMarkdownAllFile("doc.md", { sheetName: "Table" });
    * ```
    */
-  override async readMarkdownAllFile(filename: string, options?: MarkdownOptions): Promise<Worksheet[]> {
+  override async readMarkdownAllFile(
+    filename: string,
+    options?: MarkdownOptions
+  ): Promise<Worksheet[]> {
     if (!(await fileExists(filename))) {
       throw new ExcelFileError(filename, "read", "file not found");
     }

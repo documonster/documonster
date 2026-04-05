@@ -15,7 +15,11 @@ const expectations = [
       return new ContentTypesXform();
     },
     preparedModel: {
-      worksheets: [{ id: 1, fileIndex: 1 }, { id: 2, fileIndex: 2 }, { id: 3, fileIndex: 3 }],
+      worksheets: [
+        { id: 1, fileIndex: 1 },
+        { id: 2, fileIndex: 2 },
+        { id: 3, fileIndex: 3 }
+      ],
       media: [],
       drawings: [],
       sharedStrings: { count: 1 }
@@ -31,7 +35,10 @@ const expectations = [
       return new ContentTypesXform();
     },
     preparedModel: {
-      worksheets: [{ id: 1, fileIndex: 1 }, { id: 2, fileIndex: 2 }],
+      worksheets: [
+        { id: 1, fileIndex: 1 },
+        { id: 2, fileIndex: 2 }
+      ],
       media: [
         { type: "image", extension: "png" },
         { type: "image", extension: "jpg" }
@@ -50,7 +57,11 @@ const expectations = [
       return new ContentTypesXform();
     },
     preparedModel: {
-      worksheets: [{ id: 1, fileIndex: 1 }, { id: 2, fileIndex: 2 }, { id: 3, fileIndex: 3 }],
+      worksheets: [
+        { id: 1, fileIndex: 1 },
+        { id: 2, fileIndex: 2 },
+        { id: 3, fileIndex: 3 }
+      ],
       media: [],
       drawings: []
     },
@@ -65,7 +76,10 @@ const expectations = [
       return new ContentTypesXform();
     },
     preparedModel: {
-      worksheets: [{ id: 1, fileIndex: 1 }, { id: 2, fileIndex: 2, useSharedStrings: false }],
+      worksheets: [
+        { id: 1, fileIndex: 1 },
+        { id: 2, fileIndex: 2, useSharedStrings: false }
+      ],
       media: [
         { type: "image", extension: "png" },
         { type: "image", extension: "jpg" }

@@ -1,6 +1,11 @@
 {
   "dimensions": "A1:B1",
-  "properties": { "defaultRowHeight": 14.4, "dyDescent": 0.55, "outlineLevelRow": 2, "customHeight": true },
+  "properties": {
+    "defaultRowHeight": 14.4,
+    "dyDescent": 0.55,
+    "outlineLevelRow": 2,
+    "customHeight": true
+  },
   "autoFilter": "A1:B1",
   "rows": [
     {

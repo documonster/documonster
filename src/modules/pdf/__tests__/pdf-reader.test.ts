@@ -1,0 +1,1799 @@
+/**
+ * Tests for PDF reader.
+ *
+ * Tests the entire reading pipeline: tokenizer, parser, document, text extraction,
+ * image extraction, and metadata reading using roundtrip tests (write then read).
+ */
+
+import { describe, it, expect, beforeAll } from "vitest";
+import { pdf } from "../pdf";
+import { excelToPdf } from "../excel-bridge";
+import { Workbook } from "@excel/workbook";
+import { readPdf } from "../reader/pdf-reader";
+import { PdfStructureError } from "../errors";
+import { _testInternals } from "../reader/pdf-decrypt";
+import { CMap, parseCMap } from "../reader/cmap-parser";
+import { PdfTokenizer, TokenType } from "../reader/pdf-tokenizer";
+import {
+  parseObject,
+  isPdfDict,
+  isPdfRef,
+  isPdfArray,
+  decodePdfStringBytes
+} from "../reader/pdf-parser";
+import { reconstructText } from "../reader/text-reconstruction";
+import type { TextFragment } from "../reader/content-interpreter";
+import { PdfDocument } from "../reader/pdf-document";
+import { extractTextFromPage } from "../reader/content-interpreter";
+import { resolveFont, decodeText } from "../reader/font-decoder";
+import type { ResolvedFont } from "../reader/font-decoder";
+
+// =============================================================================
+// Tokenizer Tests
+// =============================================================================
+
+describe("PdfTokenizer", () => {
+  it("should tokenize numbers", () => {
+    const data = new TextEncoder().encode("42 3.14 -7 +12");
+    const tokenizer = new PdfTokenizer(data);
+
+    let token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBe(42);
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBeCloseTo(3.14);
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBe(-7);
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBe(12);
+  });
+
+  it("should tokenize names", () => {
+    const data = new TextEncoder().encode("/Name /Type /Font");
+    const tokenizer = new PdfTokenizer(data);
+
+    let token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Name);
+    expect(token.strValue).toBe("Name");
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Name);
+    expect(token.strValue).toBe("Type");
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Name);
+    expect(token.strValue).toBe("Font");
+  });
+
+  it("should tokenize literal strings with escapes", () => {
+    const data = new TextEncoder().encode("(Hello\\nWorld)");
+    const tokenizer = new PdfTokenizer(data);
+
+    const token = tokenizer.next();
+    expect(token.type).toBe(TokenType.LiteralString);
+    expect(token.rawBytes).toEqual(
+      new Uint8Array([72, 101, 108, 108, 111, 10, 87, 111, 114, 108, 100])
+    );
+  });
+
+  it("should tokenize nested parentheses in strings", () => {
+    const data = new TextEncoder().encode("(a(b)c)");
+    const tokenizer = new PdfTokenizer(data);
+
+    const token = tokenizer.next();
+    expect(token.type).toBe(TokenType.LiteralString);
+    // Should contain a(b)c
+    const text = new TextDecoder().decode(token.rawBytes);
+    expect(text).toBe("a(b)c");
+  });
+
+  it("should tokenize hex strings", () => {
+    const data = new TextEncoder().encode("<48656C6C6F>");
+    const tokenizer = new PdfTokenizer(data);
+
+    const token = tokenizer.next();
+    expect(token.type).toBe(TokenType.HexString);
+    expect(token.rawBytes).toEqual(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]));
+  });
+
+  it("should tokenize booleans", () => {
+    const data = new TextEncoder().encode("true false");
+    const tokenizer = new PdfTokenizer(data);
+
+    let token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Boolean);
+    expect(token.boolValue).toBe(true);
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Boolean);
+    expect(token.boolValue).toBe(false);
+  });
+
+  it("should tokenize null", () => {
+    const data = new TextEncoder().encode("null");
+    const tokenizer = new PdfTokenizer(data);
+
+    const token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Null);
+  });
+
+  it("should tokenize dict delimiters", () => {
+    const data = new TextEncoder().encode("<< /Type /Page >>");
+    const tokenizer = new PdfTokenizer(data);
+
+    expect(tokenizer.next().type).toBe(TokenType.DictBegin);
+    expect(tokenizer.next().type).toBe(TokenType.Name);
+    expect(tokenizer.next().type).toBe(TokenType.Name);
+    expect(tokenizer.next().type).toBe(TokenType.DictEnd);
+  });
+
+  it("should tokenize array delimiters", () => {
+    const data = new TextEncoder().encode("[1 2 3]");
+    const tokenizer = new PdfTokenizer(data);
+
+    expect(tokenizer.next().type).toBe(TokenType.ArrayBegin);
+    expect(tokenizer.next().type).toBe(TokenType.Number);
+    expect(tokenizer.next().type).toBe(TokenType.Number);
+    expect(tokenizer.next().type).toBe(TokenType.Number);
+    expect(tokenizer.next().type).toBe(TokenType.ArrayEnd);
+  });
+
+  it("should skip comments", () => {
+    const data = new TextEncoder().encode("42 % this is a comment\n99");
+    const tokenizer = new PdfTokenizer(data);
+
+    let token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBe(42);
+
+    token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Number);
+    expect(token.numValue).toBe(99);
+  });
+
+  it("should tokenize keywords", () => {
+    const data = new TextEncoder().encode("obj endobj stream endstream xref trailer startxref");
+    const tokenizer = new PdfTokenizer(data);
+
+    const keywords: string[] = [];
+    let token = tokenizer.next();
+    while (token.type !== TokenType.EOF) {
+      expect(token.type).toBe(TokenType.Keyword);
+      keywords.push(token.strValue!);
+      token = tokenizer.next();
+    }
+
+    expect(keywords).toEqual([
+      "obj",
+      "endobj",
+      "stream",
+      "endstream",
+      "xref",
+      "trailer",
+      "startxref"
+    ]);
+  });
+
+  it("should handle name with hex escapes", () => {
+    const data = new TextEncoder().encode("/Name#20With#20Spaces");
+    const tokenizer = new PdfTokenizer(data);
+
+    const token = tokenizer.next();
+    expect(token.type).toBe(TokenType.Name);
+    expect(token.strValue).toBe("Name With Spaces");
+  });
+});
+
+// =============================================================================
+// Object Parser Tests
+// =============================================================================
+
+describe("PDF Object Parser", () => {
+  it("should parse dictionary", () => {
+    const data = new TextEncoder().encode("<< /Type /Page /Width 612 /Height 792 >>");
+    const tokenizer = new PdfTokenizer(data);
+    const obj = parseObject(tokenizer);
+
+    expect(isPdfDict(obj)).toBe(true);
+    if (isPdfDict(obj)) {
+      expect(obj.get("Type")).toBe("Page");
+      expect(obj.get("Width")).toBe(612);
+      expect(obj.get("Height")).toBe(792);
+    }
+  });
+
+  it("should parse nested dictionary", () => {
+    const data = new TextEncoder().encode("<< /Font << /F1 1 0 R >> >>");
+    const tokenizer = new PdfTokenizer(data);
+    const obj = parseObject(tokenizer);
+
+    expect(isPdfDict(obj)).toBe(true);
+    if (isPdfDict(obj)) {
+      const font = obj.get("Font");
+      expect(isPdfDict(font)).toBe(true);
+    }
+  });
+
+  it("should parse indirect reference", () => {
+    const data = new TextEncoder().encode("5 0 R");
+    const tokenizer = new PdfTokenizer(data);
+    const obj = parseObject(tokenizer);
+
+    expect(isPdfRef(obj)).toBe(true);
+    if (isPdfRef(obj)) {
+      expect(obj.objNum).toBe(5);
+      expect(obj.gen).toBe(0);
+    }
+  });
+
+  it("should parse array", () => {
+    const data = new TextEncoder().encode("[1 2 (hello) /Name]");
+    const tokenizer = new PdfTokenizer(data);
+    const obj = parseObject(tokenizer);
+
+    expect(isPdfArray(obj)).toBe(true);
+    if (isPdfArray(obj)) {
+      expect(obj.length).toBe(4);
+      expect(obj[0]).toBe(1);
+      expect(obj[1]).toBe(2);
+      expect(obj[2]).toBeInstanceOf(Uint8Array);
+      expect(obj[3]).toBe("Name");
+    }
+  });
+});
+
+// =============================================================================
+// String Decoding Tests
+// =============================================================================
+
+describe("PDF String Decoding", () => {
+  it("should decode ASCII string", () => {
+    const bytes = new Uint8Array([72, 101, 108, 108, 111]);
+    expect(decodePdfStringBytes(bytes)).toBe("Hello");
+  });
+
+  it("should decode UTF-16BE string", () => {
+    const bytes = new Uint8Array([
+      0xfe, 0xff, 0x00, 0x48, 0x00, 0x65, 0x00, 0x6c, 0x00, 0x6c, 0x00, 0x6f
+    ]);
+    expect(decodePdfStringBytes(bytes)).toBe("Hello");
+  });
+
+  it("should decode CJK characters from UTF-16BE", () => {
+    // "中文" in UTF-16BE: FE FF 4E 2D 65 87
+    const bytes = new Uint8Array([0xfe, 0xff, 0x4e, 0x2d, 0x65, 0x87]);
+    expect(decodePdfStringBytes(bytes)).toBe("中文");
+  });
+});
+
+// =============================================================================
+// CMap Parser Tests
+// =============================================================================
+
+describe("CMap Parser", () => {
+  it("should parse bfchar mappings", () => {
+    const cmapData = new TextEncoder().encode(
+      "/CIDInit /ProcSet findresource begin\n" +
+        "12 dict begin\n" +
+        "begincmap\n" +
+        "/CMapType 2 def\n" +
+        "1 begincodespacerange\n" +
+        "<0000> <FFFF>\n" +
+        "endcodespacerange\n" +
+        "2 beginbfchar\n" +
+        "<0001> <0048>\n" +
+        "<0002> <0065>\n" +
+        "endbfchar\n" +
+        "endcmap\n"
+    );
+
+    const cmap = parseCMap(cmapData);
+    expect(cmap.lookup(0x0001)).toBe("H");
+    expect(cmap.lookup(0x0002)).toBe("e");
+  });
+
+  it("should parse bfrange mappings", () => {
+    const cmapData = new TextEncoder().encode(
+      "1 begincodespacerange\n" +
+        "<00> <FF>\n" +
+        "endcodespacerange\n" +
+        "1 beginbfrange\n" +
+        "<41> <5A> <0041>\n" +
+        "endbfrange\n"
+    );
+
+    const cmap = parseCMap(cmapData);
+    expect(cmap.lookup(0x41)).toBe("A");
+    expect(cmap.lookup(0x42)).toBe("B");
+    expect(cmap.lookup(0x5a)).toBe("Z");
+  });
+
+  it("should handle CJK character ranges", () => {
+    const cmapData = new TextEncoder().encode(
+      "1 begincodespacerange\n" +
+        "<0000> <FFFF>\n" +
+        "endcodespacerange\n" +
+        "1 beginbfchar\n" +
+        "<0001> <4E2D>\n" +
+        "endbfchar\n"
+    );
+
+    const cmap = parseCMap(cmapData);
+    expect(cmap.lookup(0x0001)).toBe("中");
+  });
+});
+
+// =============================================================================
+// Text Reconstruction Tests
+// =============================================================================
+
+describe("Text Reconstruction", () => {
+  it("should sort fragments into reading order", () => {
+    const fragments: TextFragment[] = [
+      {
+        text: "World",
+        x: 100,
+        y: 700,
+        fontSize: 12,
+        fontName: "F1",
+        width: 50,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      },
+      {
+        text: "Hello",
+        x: 50,
+        y: 700,
+        fontSize: 12,
+        fontName: "F1",
+        width: 45,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      }
+    ];
+
+    const text = reconstructText(fragments);
+    expect(text).toContain("Hello");
+    expect(text).toContain("World");
+    expect(text.indexOf("Hello")).toBeLessThan(text.indexOf("World"));
+  });
+
+  it("should group fragments into lines", () => {
+    const fragments: TextFragment[] = [
+      {
+        text: "Line 1",
+        x: 50,
+        y: 700,
+        fontSize: 12,
+        fontName: "F1",
+        width: 50,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      },
+      {
+        text: "Line 2",
+        x: 50,
+        y: 685,
+        fontSize: 12,
+        fontName: "F1",
+        width: 50,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      }
+    ];
+
+    const text = reconstructText(fragments);
+    const lines = text.split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines[0]).toContain("Line 1");
+    expect(lines[1]).toContain("Line 2");
+  });
+
+  it("should insert spaces between fragments with gaps", () => {
+    const fragments: TextFragment[] = [
+      {
+        text: "Hello",
+        x: 50,
+        y: 700,
+        fontSize: 12,
+        fontName: "F1",
+        width: 30,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      },
+      {
+        text: "World",
+        x: 85,
+        y: 700,
+        fontSize: 12,
+        fontName: "F1",
+        width: 30,
+        charSpacing: 0,
+        wordSpacing: 0,
+        horizontalScaling: 100,
+        isVertical: false,
+        isRtl: false
+      }
+    ];
+
+    const text = reconstructText(fragments);
+    expect(text).toContain("Hello");
+    expect(text).toContain("World");
+  });
+});
+
+// =============================================================================
+// Roundtrip Tests (Write then Read)
+// =============================================================================
+
+describe("PDF Roundtrip (Write → Read)", () => {
+  let simplePdf: Uint8Array;
+
+  beforeAll(() => {
+    simplePdf = pdf(
+      [
+        ["Name", "Score"],
+        ["Alice", 95],
+        ["Bob", 87]
+      ],
+      {
+        title: "Test Document",
+        author: "Test Author",
+        showGridLines: true
+      }
+    );
+  });
+
+  it("should read a self-generated PDF without errors", () => {
+    const result = readPdf(simplePdf);
+    expect(result).toBeDefined();
+    expect(result.pages.length).toBeGreaterThan(0);
+  });
+
+  it("should extract metadata", () => {
+    const result = readPdf(simplePdf);
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata.pdfVersion).toBe("1.4");
+    expect(result.metadata.pageCount).toBeGreaterThan(0);
+    expect(result.metadata.producer).toContain("excelts");
+  });
+
+  it("should extract page dimensions", () => {
+    const result = readPdf(simplePdf);
+    expect(result.pages[0].width).toBeGreaterThan(0);
+    expect(result.pages[0].height).toBeGreaterThan(0);
+  });
+
+  it("should find fonts and content in page structure", () => {
+    const doc = new PdfDocument(simplePdf);
+    const pages = doc.getPages();
+    expect(pages.length).toBeGreaterThan(0);
+
+    const pageDict = pages[0];
+    const resources = pageDict.get("Resources");
+    expect(resources).toBeDefined();
+
+    const resolvedResources = doc.derefDict(resources);
+    expect(resolvedResources).not.toBeNull();
+
+    if (resolvedResources) {
+      const fontObj = resolvedResources.get("Font");
+      expect(fontObj).toBeDefined();
+
+      const fontDict = doc.derefDict(fontObj);
+      expect(fontDict).not.toBeNull();
+      if (fontDict) {
+        expect(fontDict.size).toBeGreaterThan(0);
+        for (const [_name, ref] of fontDict) {
+          const fd = doc.derefDict(ref);
+          expect(fd).not.toBeNull();
+          if (fd) {
+            const rf = resolveFont(fd, doc);
+            expect(rf.subtype).toBeDefined();
+          }
+        }
+      }
+    }
+
+    // Check content stream
+    const contents = pageDict.get("Contents");
+    expect(contents).toBeDefined();
+    const stream = doc.derefStream(contents);
+    expect(stream).not.toBeNull();
+    if (stream) {
+      // Check that the stream dict has Filter
+      const filter = stream.dict.get("Filter");
+      expect(filter).toBe("FlateDecode");
+
+      // Check that getStreamData decodes properly
+      const data = doc.getStreamData(stream);
+      expect(data.length).toBeGreaterThan(0);
+      const text = new TextDecoder().decode(data);
+      expect(text).toContain("BT");
+    }
+
+    // Now extract text
+    const fragments = extractTextFromPage(pageDict, doc);
+    expect(fragments.length).toBeGreaterThan(0);
+  });
+
+  it("should extract text from self-generated PDF", () => {
+    const result = readPdf(simplePdf);
+    const text = result.text;
+    // The text should contain our data values
+    expect(text).toContain("Name");
+    expect(text).toContain("Score");
+    expect(text).toContain("Alice");
+    expect(text).toContain("95");
+    expect(text).toContain("Bob");
+    expect(text).toContain("87");
+  });
+
+  it("should handle multi-sheet PDF", () => {
+    const multiSheetPdf = pdf({
+      title: "Multi-Sheet",
+      sheets: [
+        {
+          name: "Sheet1",
+          data: [
+            ["A1", "B1"],
+            ["A2", "B2"]
+          ]
+        },
+        {
+          name: "Sheet2",
+          data: [
+            ["C1", "D1"],
+            ["C2", "D2"]
+          ]
+        }
+      ]
+    });
+
+    const result = readPdf(multiSheetPdf);
+    expect(result.pages.length).toBeGreaterThanOrEqual(2);
+    expect(result.text).toContain("A1");
+    expect(result.text).toContain("C1");
+  });
+
+  it("should support selective page extraction", () => {
+    const multiSheetPdf = pdf({
+      sheets: [
+        { name: "Sheet1", data: [["Page1"]] },
+        { name: "Sheet2", data: [["Page2"]] },
+        { name: "Sheet3", data: [["Page3"]] }
+      ]
+    });
+
+    const result = readPdf(multiSheetPdf, { pages: [1, 3] });
+    expect(result.pages.length).toBe(2);
+    expect(result.pages[0].pageNumber).toBe(1);
+    expect(result.pages[1].pageNumber).toBe(3);
+  });
+
+  it("should support text-only extraction", () => {
+    const result = readPdf(simplePdf, { extractImages: false });
+    expect(result.text).toBeTruthy();
+    expect(result.pages[0].images.length).toBe(0);
+  });
+
+  it("should support metadata-only extraction", () => {
+    const result = readPdf(simplePdf, { extractText: false, extractImages: false });
+    expect(result.metadata).toBeDefined();
+    expect(result.pages[0].text).toBe("");
+  });
+});
+
+// =============================================================================
+// PDF with Styled Content
+// =============================================================================
+
+describe("PDF Reader - Styled Content", () => {
+  it("should extract text from styled cells", () => {
+    const styledPdf = pdf([
+      [
+        { value: "Bold", bold: true },
+        { value: "Italic", italic: true },
+        { value: "Colored", fontColor: "FFFF0000" }
+      ],
+      ["Normal", "Text", "Here"]
+    ]);
+
+    const result = readPdf(styledPdf);
+    expect(result.text).toContain("Bold");
+    expect(result.text).toContain("Italic");
+    expect(result.text).toContain("Normal");
+  });
+});
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+describe("PDF Reader - Edge Cases", () => {
+  it("should handle empty PDF", () => {
+    const emptyPdf = pdf([[]]);
+    const result = readPdf(emptyPdf);
+    expect(result.pages.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should handle single-cell PDF", () => {
+    const singleCellPdf = pdf([["Hello"]]);
+    const result = readPdf(singleCellPdf);
+    expect(result.text).toContain("Hello");
+  });
+
+  it("should handle numbers and dates", () => {
+    const dataPdf = pdf([
+      ["Integer", 42],
+      ["Float", 3.14],
+      ["Boolean", true]
+    ]);
+
+    const result = readPdf(dataPdf);
+    expect(result.text).toContain("42");
+    expect(result.text).toContain("3.14");
+    expect(result.text).toContain("TRUE");
+  });
+});
+
+// =============================================================================
+// Metadata Tests
+// =============================================================================
+
+describe("PDF Reader - Metadata", () => {
+  it("should extract title and author", () => {
+    const pdfBytes = pdf([["Test"]], {
+      title: "My Title",
+      author: "My Author",
+      subject: "My Subject"
+    });
+
+    const result = readPdf(pdfBytes);
+    expect(result.metadata.title).toBe("My Title");
+    expect(result.metadata.author).toBe("My Author");
+    expect(result.metadata.subject).toBe("My Subject");
+  });
+
+  it("should detect PDF version", () => {
+    const pdfBytes = pdf([["Test"]]);
+    const result = readPdf(pdfBytes);
+    expect(result.metadata.pdfVersion).toBe("1.4");
+  });
+
+  it("should report page count", () => {
+    const pdfBytes = pdf({
+      sheets: [
+        { name: "S1", data: [["A"]] },
+        { name: "S2", data: [["B"]] }
+      ]
+    });
+
+    const result = readPdf(pdfBytes);
+    expect(result.metadata.pageCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("should report page size", () => {
+    const pdfBytes = pdf([["Test"]]);
+    const result = readPdf(pdfBytes);
+    expect(result.metadata.pageSize).toBeDefined();
+    if (result.metadata.pageSize) {
+      expect(result.metadata.pageSize.width).toBeGreaterThan(0);
+      expect(result.metadata.pageSize.height).toBeGreaterThan(0);
+    }
+  });
+});
+
+// =============================================================================
+// Image Helpers (duplicated from pdf-exporter.test.ts to avoid cross-test deps)
+// =============================================================================
+
+function buildMinimalJpeg(): Uint8Array {
+  // prettier-ignore
+  return new Uint8Array([
+    0xFF, 0xD8,             // SOI
+    0xFF, 0xE0,             // APP0
+    0x00, 0x10,             // length = 16
+    0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
+    0x01, 0x01,             // version 1.1
+    0x00,                   // aspect ratio
+    0x00, 0x01, 0x00, 0x01, // 1x1 pixel density
+    0x00, 0x00,             // no thumbnail
+    0xFF, 0xDB,             // DQT
+    0x00, 0x43,             // length = 67
+    0x00,                   // table 0, 8-bit precision
+    // 64 quantization values (all 1s for simplicity)
+    ...Array.from({ length: 64 }, () => 0x01),
+    0xFF, 0xC0,             // SOF0 (baseline)
+    0x00, 0x0B,             // length = 11
+    0x08,                   // 8-bit precision
+    0x00, 0x01,             // height = 1
+    0x00, 0x01,             // width = 1
+    0x01,                   // 1 component
+    0x01,                   // component ID = 1
+    0x11,                   // H/V sampling = 1x1
+    0x00,                   // quant table 0
+    0xFF, 0xC4,             // DHT
+    0x00, 0x1F,             // length = 31
+    0x00,                   // DC table 0
+    // Number of codes of each length (1-16)
+    0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Values
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+    0xFF, 0xDA,             // SOS
+    0x00, 0x08,             // length = 8
+    0x01,                   // 1 component
+    0x01,                   // component 1
+    0x00,                   // DC/AC table 0/0
+    0x00, 0x3F, 0x00,       // spectral selection
+    0x7B, 0x40,             // scan data (minimal)
+    0xFF, 0xD9              // EOI
+  ]);
+}
+
+function buildMinimalPng(): Uint8Array {
+  const parts: number[] = [];
+  // PNG signature
+  parts.push(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  // IHDR
+  const ihdr = [
+    0x00,
+    0x00,
+    0x00,
+    0x02, // width = 2
+    0x00,
+    0x00,
+    0x00,
+    0x02, // height = 2
+    0x08, // bit depth = 8
+    0x06, // color type = 6 (RGBA)
+    0x00,
+    0x00,
+    0x00 // compression, filter, interlace
+  ];
+  writeChunk(parts, "IHDR", ihdr);
+
+  // IDAT — raw pixel data
+  const rawPixels = [
+    0x00,
+    0xff,
+    0x00,
+    0x00,
+    0xff,
+    0x00,
+    0xff,
+    0x00,
+    0x80, // row 1
+    0x00,
+    0x00,
+    0x00,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0x00 // row 2
+  ];
+  const deflated = deflateStored(rawPixels);
+  writeChunk(parts, "IDAT", Array.from(deflated));
+  writeChunk(parts, "IEND", []);
+  return new Uint8Array(parts);
+}
+
+function writeChunk(buf: number[], type: string, data: number[]): void {
+  const len = data.length;
+  buf.push((len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff);
+  for (let i = 0; i < 4; i++) {
+    buf.push(type.charCodeAt(i));
+  }
+  buf.push(...data);
+  const crcInput = new Uint8Array(4 + data.length);
+  for (let i = 0; i < 4; i++) {
+    crcInput[i] = type.charCodeAt(i);
+  }
+  for (let i = 0; i < data.length; i++) {
+    crcInput[4 + i] = data[i];
+  }
+  const crc = crc32Png(crcInput);
+  buf.push((crc >>> 24) & 0xff, (crc >>> 16) & 0xff, (crc >>> 8) & 0xff, crc & 0xff);
+}
+
+function crc32Png(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function deflateStored(data: number[]): Uint8Array {
+  const len = data.length;
+  const result = [0x78, 0x01];
+  result.push(0x01);
+  result.push(len & 0xff, (len >>> 8) & 0xff);
+  result.push(~len & 0xff, (~len >>> 8) & 0xff);
+  result.push(...data);
+  let a = 1;
+  let b = 0;
+  for (const byte of data) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  const adler = ((b << 16) | a) >>> 0;
+  result.push((adler >>> 24) & 0xff, (adler >>> 16) & 0xff, (adler >>> 8) & 0xff, adler & 0xff);
+  return new Uint8Array(result);
+}
+
+// =============================================================================
+// Encrypted PDF Roundtrip Tests
+// =============================================================================
+
+describe("PDF Reader - Encryption Roundtrip", () => {
+  let encryptedWithUserPw: Uint8Array;
+  let encryptedOwnerOnly: Uint8Array;
+
+  beforeAll(() => {
+    // Create encrypted PDF with both user and owner passwords
+    encryptedWithUserPw = pdf(
+      [
+        ["Secret", "Data"],
+        ["Alice", 42],
+        ["Bob", 99]
+      ],
+      {
+        title: "Encrypted Doc",
+        author: "Test Author",
+        encryption: {
+          ownerPassword: "owner123",
+          userPassword: "user456"
+        }
+      }
+    );
+
+    // Create encrypted PDF with owner password only (empty user password)
+    encryptedOwnerOnly = pdf(
+      [
+        ["Public", "Info"],
+        ["Row1", 100]
+      ],
+      {
+        title: "Owner Only",
+        encryption: { ownerPassword: "ownerSecret" }
+      }
+    );
+  });
+
+  it("should read encrypted PDF with correct user password", () => {
+    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Secret");
+    expect(result.text).toContain("Data");
+    expect(result.text).toContain("Alice");
+    expect(result.text).toContain("42");
+  });
+
+  it("should read encrypted PDF with owner password", () => {
+    const result = readPdf(encryptedWithUserPw, { password: "owner123" });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Secret");
+    expect(result.text).toContain("Bob");
+    expect(result.text).toContain("99");
+  });
+
+  it("should throw on wrong password", () => {
+    expect(() => readPdf(encryptedWithUserPw, { password: "wrongPassword" })).toThrow(
+      PdfStructureError
+    );
+  });
+
+  it("should read owner-only encrypted PDF with empty password", () => {
+    // When there is no user password, the empty password should work
+    const result = readPdf(encryptedOwnerOnly, { password: "" });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Public");
+    expect(result.text).toContain("Info");
+  });
+
+  it("should read owner-only encrypted PDF without providing password", () => {
+    // Default password is "" so this should also work
+    const result = readPdf(encryptedOwnerOnly);
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Public");
+  });
+
+  it("should read owner-only encrypted PDF with owner password", () => {
+    const result = readPdf(encryptedOwnerOnly, { password: "ownerSecret" });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Public");
+  });
+
+  it("should report encrypted status in metadata", () => {
+    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+    expect(result.metadata.encrypted).toBe(true);
+  });
+
+  it("should extract metadata from encrypted PDF", () => {
+    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+    expect(result.metadata.title).toBe("Encrypted Doc");
+    expect(result.metadata.author).toBe("Test Author");
+  });
+
+  it("should report non-encrypted for unencrypted PDFs", () => {
+    const plainPdf = pdf([["Hello"]]);
+    const result = readPdf(plainPdf);
+    expect(result.metadata.encrypted).toBe(false);
+  });
+});
+
+// =============================================================================
+// Encrypted PDF via excelToPdf (different path)
+// =============================================================================
+
+describe("PDF Reader - Encryption via excelToPdf", () => {
+  it("should roundtrip encrypted Excel-to-PDF", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Secrets");
+    ws.getCell("A1").value = "Confidential";
+    ws.getCell("B1").value = 12345;
+    ws.getCell("A2").value = "TopSecret";
+    ws.getCell("B2").value = 67890;
+
+    const encrypted = excelToPdf(wb, {
+      encryption: { ownerPassword: "owner", userPassword: "user" }
+    });
+
+    const result = readPdf(encrypted, { password: "user" });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(result.text).toContain("Confidential");
+    expect(result.text).toContain("12345");
+    expect(result.text).toContain("TopSecret");
+    expect(result.text).toContain("67890");
+    expect(result.metadata.encrypted).toBe(true);
+  });
+});
+
+// =============================================================================
+// Image Extraction Roundtrip Tests
+// =============================================================================
+
+describe("PDF Reader - Image Extraction", () => {
+  it("should extract JPEG image from roundtrip PDF", () => {
+    const jpegData = buildMinimalJpeg();
+    const pdfBytes = pdf({
+      data: [["Image Test"]],
+      images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 100, height: 80 }]
+    });
+
+    const result = readPdf(pdfBytes);
+    expect(result.pages.length).toBeGreaterThan(0);
+
+    const page = result.pages[0];
+    expect(page.images.length).toBeGreaterThanOrEqual(1);
+
+    const img = page.images[0];
+    expect(img.format).toBe("jpeg");
+    expect(img.width).toBe(1); // Actual pixel dimensions from JPEG header
+    expect(img.height).toBe(1);
+    // JPEG is embedded as-is, so data should be identical
+    expect(img.data).toEqual(jpegData);
+  });
+
+  it("should extract PNG image as raw pixels from roundtrip PDF", () => {
+    const pngData = buildMinimalPng();
+    const pdfBytes = pdf({
+      data: [["PNG Test"]],
+      images: [{ data: pngData, format: "png", col: 0, row: 1, width: 100, height: 80 }]
+    });
+
+    const result = readPdf(pdfBytes);
+    expect(result.pages.length).toBeGreaterThan(0);
+
+    const page = result.pages[0];
+    expect(page.images.length).toBeGreaterThanOrEqual(1);
+
+    const img = page.images[0];
+    // PNG is decoded to raw RGB during writing, so format will be "raw"
+    expect(img.format).toBe("raw");
+    expect(img.width).toBe(2);
+    expect(img.height).toBe(2);
+    expect(img.data.length).toBeGreaterThan(0);
+  });
+
+  it("should extract alpha mask (SMask) from PNG with transparency", () => {
+    const pngData = buildMinimalPng();
+    const pdfBytes = pdf({
+      data: [["Alpha Test"]],
+      images: [{ data: pngData, format: "png", col: 0, row: 1, width: 100, height: 80 }]
+    });
+
+    const result = readPdf(pdfBytes);
+    const page = result.pages[0];
+    expect(page.images.length).toBeGreaterThanOrEqual(1);
+
+    const img = page.images[0];
+    // Our test PNG has alpha channel, so SMask should be present
+    expect(img.alphaMask).not.toBeNull();
+    if (img.alphaMask) {
+      expect(img.alphaMask.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("should report image color space and components", () => {
+    const jpegData = buildMinimalJpeg();
+    const pdfBytes = pdf({
+      data: [["Color Test"]],
+      images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 50, height: 50 }]
+    });
+
+    const result = readPdf(pdfBytes);
+    const img = result.pages[0].images[0];
+    expect(img.colorSpace).toBeDefined();
+    expect(img.bitsPerComponent).toBeGreaterThan(0);
+  });
+
+  it("should skip image extraction when extractImages is false", () => {
+    const jpegData = buildMinimalJpeg();
+    const pdfBytes = pdf({
+      data: [["Skip Test"]],
+      images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 50, height: 50 }]
+    });
+
+    const result = readPdf(pdfBytes, { extractImages: false });
+    expect(result.pages[0].images.length).toBe(0);
+    // But text should still be extracted
+    expect(result.text).toContain("Skip Test");
+  });
+
+  it("should extract images from encrypted PDF", () => {
+    const jpegData = buildMinimalJpeg();
+    const pdfBytes = pdf(
+      {
+        data: [["Encrypted Image"]],
+        images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 100, height: 80 }]
+      },
+      { encryption: { ownerPassword: "owner", userPassword: "user" } }
+    );
+
+    const result = readPdf(pdfBytes, { password: "user" });
+    expect(result.pages[0].images.length).toBeGreaterThanOrEqual(1);
+
+    const img = result.pages[0].images[0];
+    expect(img.format).toBe("jpeg");
+    // After decryption, the JPEG data should be recovered
+    expect(img.data).toEqual(jpegData);
+  });
+
+  it("should handle multiple images on one page", () => {
+    const jpeg1 = buildMinimalJpeg();
+    const jpeg2 = buildMinimalJpeg();
+    const pdfBytes = pdf({
+      data: [["Multi Image"]],
+      images: [
+        { data: jpeg1, format: "jpeg", col: 0, row: 1, width: 50, height: 50 },
+        { data: jpeg2, format: "jpeg", col: 2, row: 1, width: 50, height: 50 }
+      ]
+    });
+
+    const result = readPdf(pdfBytes);
+    expect(result.pages[0].images.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// =============================================================================
+// Multilingual Text Extraction Tests
+// =============================================================================
+
+describe("PDF Reader - Multilingual Text", () => {
+  it("should extract ASCII text correctly", () => {
+    const pdfBytes = pdf([
+      ["Hello", "World"],
+      ["Foo", "Bar"]
+    ]);
+    const result = readPdf(pdfBytes);
+    expect(result.text).toContain("Hello");
+    expect(result.text).toContain("World");
+    expect(result.text).toContain("Foo");
+    expect(result.text).toContain("Bar");
+  });
+
+  it("should extract numeric values correctly", () => {
+    const pdfBytes = pdf([
+      ["Amount", 1234567.89],
+      ["Count", -42]
+    ]);
+    const result = readPdf(pdfBytes);
+    expect(result.text).toContain("1234567.89");
+    expect(result.text).toContain("-42");
+  });
+
+  it("should extract boolean values", () => {
+    const pdfBytes = pdf([
+      ["Active", true],
+      ["Deleted", false]
+    ]);
+    const result = readPdf(pdfBytes);
+    expect(result.text).toContain("TRUE");
+    expect(result.text).toContain("FALSE");
+  });
+
+  it("should extract accented European characters", () => {
+    // These characters are in WinAnsiEncoding range, should work with standard fonts
+    const pdfBytes = pdf([["Name"], ["Caf\u00e9"], ["R\u00e9sum\u00e9"]]);
+    const result = readPdf(pdfBytes);
+    // At minimum we should get the base ASCII parts
+    expect(result.text).toContain("Name");
+    expect(result.text).toContain("Caf");
+    expect(result.text).toContain("sum");
+  });
+});
+
+// =============================================================================
+// Text Reconstruction Tests
+// =============================================================================
+
+describe("PDF Reader - Text Reconstruction", () => {
+  it("should reconstruct text lines from fragments", () => {
+    const pdfBytes = pdf([
+      ["First", "Second"],
+      ["Third", "Fourth"]
+    ]);
+    const result = readPdf(pdfBytes);
+
+    // textLines should provide structured line data
+    const page = result.pages[0];
+    expect(page.textLines.length).toBeGreaterThan(0);
+
+    // Each line should have text and position info
+    for (const line of page.textLines) {
+      expect(line.text).toBeDefined();
+      expect(typeof line.y).toBe("number");
+    }
+  });
+
+  it("should preserve textFragments with position data", () => {
+    const pdfBytes = pdf([["Positioned", "Text"]]);
+    const result = readPdf(pdfBytes);
+
+    const page = result.pages[0];
+    expect(page.textFragments.length).toBeGreaterThan(0);
+
+    for (const frag of page.textFragments) {
+      expect(typeof frag.x).toBe("number");
+      expect(typeof frag.y).toBe("number");
+      expect(typeof frag.fontSize).toBe("number");
+      expect(frag.fontSize).toBeGreaterThan(0);
+      expect(frag.text.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// =============================================================================
+// Fault Tolerance Tests
+// =============================================================================
+
+describe("PDF Reader - Fault Tolerance", () => {
+  it("should throw PdfStructureError on invalid data", () => {
+    const garbage = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
+    expect(() => readPdf(garbage)).toThrow(PdfStructureError);
+  });
+
+  it("should throw PdfStructureError on empty data", () => {
+    expect(() => readPdf(new Uint8Array(0))).toThrow(PdfStructureError);
+  });
+
+  it("should throw on truncated PDF", () => {
+    const validPdf = pdf([["Hello"]]);
+    // Truncate to half
+    const truncated = validPdf.subarray(0, Math.floor(validPdf.length / 2));
+    expect(() => readPdf(truncated)).toThrow(PdfStructureError);
+  });
+
+  it("should include warnings array on every page", () => {
+    const pdfBytes = pdf([["Test"]]);
+    const result = readPdf(pdfBytes);
+    for (const page of result.pages) {
+      expect(Array.isArray(page.warnings)).toBe(true);
+    }
+  });
+
+  it("should handle PDF with no pages gracefully", () => {
+    // Minimal PDF that we can parse but has unusual structure
+    const pdfBytes = pdf([[]]);
+    const result = readPdf(pdfBytes);
+    // Should not throw; may have 0 or more pages depending on writer behavior
+    expect(result).toBeDefined();
+    expect(Array.isArray(result.pages)).toBe(true);
+  });
+
+  it("should handle very large cell values", () => {
+    const longText = "A".repeat(10000);
+    const pdfBytes = pdf([[longText]]);
+    const result = readPdf(pdfBytes);
+    // Should extract at least some portion of the long text
+    expect(result.text.length).toBeGreaterThan(0);
+  });
+
+  it("should handle special characters in cell values", () => {
+    const pdfBytes = pdf([["<>&\"'"], ["Tab\there"], ["Line\nbreak"]]);
+    const result = readPdf(pdfBytes);
+    expect(result.pages.length).toBeGreaterThan(0);
+    // At minimum the PDF should parse without throwing
+  });
+
+  it("should handle many pages", () => {
+    const sheets = Array.from({ length: 10 }, (_, i) => ({
+      name: `Sheet${i + 1}`,
+      data: [[`Page ${i + 1} content`]] as (string | number)[][]
+    }));
+    const pdfBytes = pdf({ sheets });
+    const result = readPdf(pdfBytes);
+    expect(result.pages.length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+// =============================================================================
+// Selective Extraction Tests
+// =============================================================================
+
+describe("PDF Reader - Selective Extraction", () => {
+  it("should extract only text when images disabled", () => {
+    const pdfBytes = pdf([["Text Only"]]);
+    const result = readPdf(pdfBytes, { extractImages: false });
+    expect(result.text).toContain("Text Only");
+    expect(result.pages[0].images).toEqual([]);
+  });
+
+  it("should extract only metadata when text and images disabled", () => {
+    const pdfBytes = pdf([["Metadata Only"]], { title: "My Doc" });
+    const result = readPdf(pdfBytes, {
+      extractText: false,
+      extractImages: false,
+      extractMetadata: true
+    });
+    expect(result.metadata.title).toBe("My Doc");
+    expect(result.pages[0].text).toBe("");
+    expect(result.pages[0].images).toEqual([]);
+  });
+
+  it("should skip metadata when extractMetadata is false", () => {
+    const pdfBytes = pdf([["No Metadata"]], { title: "Hidden" });
+    const result = readPdf(pdfBytes, { extractMetadata: false });
+    // Metadata should be empty/default
+    expect(result.metadata.title).toBe("");
+    expect(result.text).toContain("No Metadata");
+  });
+
+  it("should respect page selection with encryption", () => {
+    const pdfBytes = pdf(
+      {
+        sheets: [
+          { name: "S1", data: [["Page1Content"]] },
+          { name: "S2", data: [["Page2Content"]] },
+          { name: "S3", data: [["Page3Content"]] }
+        ]
+      },
+      { encryption: { ownerPassword: "owner" } }
+    );
+
+    const result = readPdf(pdfBytes, { pages: [2] });
+    expect(result.pages.length).toBe(1);
+    expect(result.pages[0].pageNumber).toBe(2);
+    expect(result.text).toContain("Page2Content");
+    expect(result.text).not.toContain("Page1Content");
+    expect(result.text).not.toContain("Page3Content");
+  });
+});
+
+// =============================================================================
+// Structural Robustness Tests
+// =============================================================================
+
+describe("PDF Reader - Structural Robustness", () => {
+  it("should resolve page dimensions correctly from roundtrip PDF", () => {
+    const pdfBytes = pdf([["Dimension Test"]], { pageSize: "A4" });
+    const result = readPdf(pdfBytes);
+    const page = result.pages[0];
+    // A4 = 595.28 x 841.89 points (approximately)
+    expect(page.width).toBeGreaterThan(500);
+    expect(page.width).toBeLessThan(700);
+    expect(page.height).toBeGreaterThan(750);
+    expect(page.height).toBeLessThan(900);
+  });
+
+  it("should resolve page dimensions consistently between page and metadata", () => {
+    const pdfBytes = pdf([["Consistency Test"]]);
+    const result = readPdf(pdfBytes);
+    const page = result.pages[0];
+    const metaSize = result.metadata.pageSize;
+    expect(metaSize).not.toBeNull();
+    if (metaSize) {
+      expect(page.width).toBe(metaSize.width);
+      expect(page.height).toBe(metaSize.height);
+    }
+  });
+
+  it("should handle landscape orientation page dimensions", () => {
+    const pdfBytes = pdf([["Landscape"]], { orientation: "landscape" });
+    const result = readPdf(pdfBytes);
+    const page = result.pages[0];
+    // Landscape: width > height
+    expect(page.width).toBeGreaterThan(page.height);
+  });
+
+  it("should resolve page resources for text extraction on all pages", () => {
+    const pdfBytes = pdf({
+      sheets: [
+        { name: "S1", data: [["TextA"]] },
+        { name: "S2", data: [["TextB"]] }
+      ]
+    });
+    const result = readPdf(pdfBytes);
+    // Both pages should have extracted text (proving resource resolution works)
+    expect(result.pages[0].text).toContain("TextA");
+    expect(result.pages[1].text).toContain("TextB");
+  });
+
+  it("should use getPagesWithObjInfo for correct page identity", () => {
+    // Encrypted multi-page PDF — if page objNum is wrong, decryption will fail
+    const pdfBytes = pdf(
+      {
+        sheets: [
+          { name: "S1", data: [["EncryptedPage1"]] },
+          { name: "S2", data: [["EncryptedPage2"]] },
+          { name: "S3", data: [["EncryptedPage3"]] }
+        ]
+      },
+      { encryption: { ownerPassword: "owner", userPassword: "user" } }
+    );
+    const result = readPdf(pdfBytes, { password: "user" });
+    expect(result.pages.length).toBeGreaterThanOrEqual(3);
+    expect(result.text).toContain("EncryptedPage1");
+    expect(result.text).toContain("EncryptedPage2");
+    expect(result.text).toContain("EncryptedPage3");
+  });
+});
+
+// =============================================================================
+// Crypto Primitive Verification (NIST test vectors)
+// =============================================================================
+
+/** Convert hex string to Uint8Array */
+function hex(s: string): Uint8Array {
+  const bytes = new Uint8Array(s.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(s.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+describe("AES-CBC Decrypt — NIST SP 800-38A test vectors", () => {
+  const { aesCbcDecrypt } = _testInternals;
+
+  it("AES-128-CBC: should decrypt NIST F.2.2 vector correctly", () => {
+    // NIST SP 800-38A, Section F.2.2 — CBC-AES128.Decrypt
+    const key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+    const iv = hex("000102030405060708090a0b0c0d0e0f");
+    const ciphertext = hex(
+      "7649abac8119b246cee98e9b12e9197d" +
+        "5086cb9b507219ee95db113a917678b2" +
+        "73bed6b8e3c1743b7116e69e22229516" +
+        "3ff1caa1681fac09120eca307586e1a7"
+    );
+    const expected = hex(
+      "6bc1bee22e409f96e93d7e117393172a" +
+        "ae2d8a571e03ac9c9eb76fac45af8e51" +
+        "30c81c46a35ce411e5fbc1191a0a52ef" +
+        "f69f2445df4f9b17ad2b417be66c3710"
+    );
+
+    // aesCbcDecrypt has PKCS#7 padding removal, but here the plaintext is not
+    // PKCS#7 padded (last byte 0x10 but remaining bytes don't match), so the
+    // full 64 bytes are returned — which is correct for NIST test vectors.
+    const result = aesCbcDecrypt(ciphertext, key, iv);
+    expect(result.length).toBe(64);
+    expect(result).toEqual(expected);
+  });
+
+  it("AES-256-CBC: should decrypt NIST F.2.6 vector correctly", () => {
+    // NIST SP 800-38A, Section F.2.6 — CBC-AES256.Decrypt
+    const key = hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+    const iv = hex("000102030405060708090a0b0c0d0e0f");
+    const ciphertext = hex(
+      "f58c4c04d6e5f1ba779eabfb5f7bfbd6" +
+        "9cfc4e967edb808d679f777bc6702c7d" +
+        "39f23369a9d9bacfa530e26304231461" +
+        "b2eb05e2c39be9fcda6c19078c6a9d1b"
+    );
+    const expected = hex(
+      "6bc1bee22e409f96e93d7e117393172a" +
+        "ae2d8a571e03ac9c9eb76fac45af8e51" +
+        "30c81c46a35ce411e5fbc1191a0a52ef" +
+        "f69f2445df4f9b17ad2b417be66c3710"
+    );
+
+    const result = aesCbcDecrypt(ciphertext, key, iv);
+    expect(result.length).toBe(64);
+    expect(result).toEqual(expected);
+  });
+
+  it("AES-128-CBC: should handle single block", () => {
+    // First block only from NIST F.2.2
+    const key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+    const iv = hex("000102030405060708090a0b0c0d0e0f");
+    const ciphertext = hex("7649abac8119b246cee98e9b12e9197d");
+    const expected = hex("6bc1bee22e409f96e93d7e117393172a");
+
+    const result = aesCbcDecrypt(ciphertext, key, iv);
+    // Last byte is 0x2a — not valid PKCS#7 padding for 16-byte block, so no stripping
+    expect(result).toEqual(expected);
+  });
+});
+
+describe("SHA-256 — NIST FIPS 180-4 test vectors", () => {
+  const { sha256 } = _testInternals;
+
+  it("should hash 'abc' correctly", () => {
+    // NIST FIPS 180-4, Section B.1 — SHA-256("abc")
+    const input = new TextEncoder().encode("abc");
+    const expected = hex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    expect(sha256(input)).toEqual(expected);
+  });
+
+  it("should hash empty string correctly", () => {
+    // SHA-256("")
+    const input = new Uint8Array(0);
+    const expected = hex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    expect(sha256(input)).toEqual(expected);
+  });
+
+  it("should hash two-block message correctly", () => {
+    // NIST FIPS 180-4, Section B.2 — SHA-256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+    const input = new TextEncoder().encode(
+      "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+    );
+    const expected = hex("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    expect(sha256(input)).toEqual(expected);
+  });
+});
+
+// =============================================================================
+// Hand-crafted PDF Fixture Tests
+// =============================================================================
+
+/**
+ * Build a minimal valid PDF from a string template.
+ * Ensures proper byte representation for the parser.
+ */
+function pdfFromString(str: string): Uint8Array {
+  return new TextEncoder().encode(str);
+}
+
+describe("PDF Reader - Indirect MediaBox", () => {
+  it("should resolve page dimensions from an indirect MediaBox reference", () => {
+    // Hand-crafted PDF where the page's /MediaBox is an indirect reference (obj 5)
+    // instead of a direct array. This tests that resolvePageBox() derefs properly.
+    //
+    // Object layout:
+    //   1 0 obj: Catalog  → /Pages 2 0 R
+    //   2 0 obj: Pages    → /Kids [3 0 R] /Count 1
+    //   3 0 obj: Page     → /MediaBox 5 0 R  (indirect!)
+    //   4 0 obj: empty content stream
+    //   5 0 obj: [0 0 200 100]  (the actual MediaBox array)
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox 5 0 R /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj [0 0 200 100] endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000206 00000 n ",
+      "0000000256 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "289",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.pages.length).toBe(1);
+    expect(result.pages[0].width).toBe(200);
+    expect(result.pages[0].height).toBe(100);
+    // Metadata page size should match
+    expect(result.metadata.pageSize).toEqual({ width: 200, height: 100 });
+  });
+});
+
+describe("PDF Reader - Form XObject Recursion Guard", () => {
+  it("should not stack overflow on self-referencing Form XObject", () => {
+    // Hand-crafted PDF where a Form XObject's content stream references itself
+    // via the Do operator: /XObj1 Do. This would infinite-recurse without the
+    // MAX_FORM_DEPTH guard.
+    //
+    // Object layout:
+    //   1 0 obj: Catalog
+    //   2 0 obj: Pages
+    //   3 0 obj: Page with Resources pointing to XObject dict
+    //   4 0 obj: Page content stream: "/XObj1 Do"
+    //   5 0 obj: XObject dict: /XObj1 → 6 0 R
+    //   6 0 obj: Form XObject whose content also does "/XObj1 Do" (self-ref via page resources)
+    const contentData = "/XObj1 Do";
+    const formData = "/XObj1 Do";
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      `3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /XObject << /XObj1 6 0 R >> >> >> endobj`,
+      `4 0 obj << /Length ${contentData.length} >> stream`,
+      contentData,
+      "endstream endobj",
+      "5 0 obj << /XObj1 6 0 R >> endobj",
+      `6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /XObject << /XObj1 6 0 R >> >> /Length ${formData.length} >> stream`,
+      formData,
+      "endstream endobj",
+      "xref",
+      "0 7",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000308 00000 n ",
+      "0000000381 00000 n ",
+      "0000000418 00000 n ",
+      "trailer << /Size 7 /Root 1 0 R >>",
+      "startxref",
+      "600",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    // Should NOT throw or hang — the recursion guard should kick in
+    const result = readPdf(pdfBytes);
+    expect(result.pages.length).toBe(1);
+    // No text in this PDF (the form xobject has no real text operators)
+    // The key assertion is that we get here at all without stack overflow
+    expect(result.pages[0].warnings.length).toBe(0);
+  });
+});
+
+// =============================================================================
+// CMap getCodeLength — overlapping codespace range bug
+// =============================================================================
+
+describe("CMap.getCodeLength — overlapping codespace ranges", () => {
+  it("should return longest match when 1-byte and 2-byte ranges overlap", () => {
+    // Real-world CJK ToUnicode CMap pattern:
+    //   <00>   <FF>     ← 1-byte range (covers ALL first bytes 0x00–0xFF)
+    //   <8140> <FEFE>   ← 2-byte range (first byte 0x81–0xFE overlaps the 1-byte range)
+    //
+    // For firstByte=0x81, the old code returned 1 (wrong — matched 1-byte first and stopped).
+    // Correct: return 2 (longest match wins per PDF spec).
+    const cmap = new CMap();
+    cmap.addCodeSpaceRange(0x00, 0xff, 1);
+    cmap.addCodeSpaceRange(0x8140, 0xfefe, 2);
+
+    // Byte in the overlapping zone → must return 2 (longest)
+    expect(cmap.getCodeLength(0x81)).toBe(2);
+    expect(cmap.getCodeLength(0xfe)).toBe(2);
+    expect(cmap.getCodeLength(0xa0)).toBe(2);
+
+    // Byte only in the 1-byte range → must return 1
+    expect(cmap.getCodeLength(0x20)).toBe(1);
+    expect(cmap.getCodeLength(0x7f)).toBe(1);
+    expect(cmap.getCodeLength(0x00)).toBe(1);
+  });
+
+  it("should return longest match when ranges are added in reverse order", () => {
+    // Same ranges but added 2-byte first — should still prefer longest
+    const cmap = new CMap();
+    cmap.addCodeSpaceRange(0x8140, 0xfefe, 2);
+    cmap.addCodeSpaceRange(0x00, 0xff, 1);
+
+    expect(cmap.getCodeLength(0x81)).toBe(2);
+    expect(cmap.getCodeLength(0x20)).toBe(1);
+  });
+
+  it("should handle non-overlapping ranges correctly", () => {
+    // Disjoint: 1-byte 0x00-0x7F, 2-byte 0x8000-0xFFFF
+    const cmap = new CMap();
+    cmap.addCodeSpaceRange(0x00, 0x7f, 1);
+    cmap.addCodeSpaceRange(0x8000, 0xffff, 2);
+
+    expect(cmap.getCodeLength(0x20)).toBe(1);
+    expect(cmap.getCodeLength(0x80)).toBe(2);
+    expect(cmap.getCodeLength(0x7f)).toBe(1);
+  });
+});
+
+// =============================================================================
+// decodeText regression — CID font with overlapping codespace ranges
+// =============================================================================
+
+describe("decodeText — CID variable-length code regression", () => {
+  /**
+   * Build a minimal synthetic ResolvedFont with a ToUnicode CMap
+   * that has overlapping 1-byte and 2-byte codespace ranges.
+   */
+  function makeCIDFont(): ResolvedFont {
+    const cmap = new CMap();
+    // Typical CJK pattern: 1-byte 00-FF, 2-byte 8140-FEFE
+    cmap.addCodeSpaceRange(0x00, 0xff, 1);
+    cmap.addCodeSpaceRange(0x8140, 0xfefe, 2);
+    // Map 2-byte code 0x8140 → "亜" (U+4E9C)
+    cmap.addBfChar(0x8140, "\u4E9C");
+    // Map 2-byte code 0x8141 → "唖" (U+5516)
+    cmap.addBfChar(0x8141, "\u5516");
+    // Map 1-byte code 0x41 → "A"
+    cmap.addBfChar(0x41, "A");
+    cmap.sortRanges();
+
+    return {
+      name: "TestCJK",
+      subtype: "Type0",
+      toUnicode: cmap,
+      encoding: new Map(),
+      bytesPerCode: 2,
+      baseFontName: "TestCJK-Identity-H",
+      isSymbolic: false,
+      widths: new Map(),
+      defaultWidth: 1000,
+      missingWidth: 0,
+      isIdentityEncoding: false,
+      wmode: 0
+    };
+  }
+
+  it("should decode 2-byte CJK code as one character, not two garbage bytes", () => {
+    const font = makeCIDFont();
+    // 0x81 0x40 should be consumed as one 2-byte code → "亜"
+    const result = decodeText(new Uint8Array([0x81, 0x40]), font);
+    expect(result).toBe("\u4E9C");
+  });
+
+  it("should decode mixed 1-byte and 2-byte codes correctly", () => {
+    const font = makeCIDFont();
+    // 0x41 (1-byte "A") + 0x81 0x41 (2-byte "唖")
+    const result = decodeText(new Uint8Array([0x41, 0x81, 0x41]), font);
+    expect(result).toBe("A\u5516");
+  });
+
+  it("should decode consecutive 2-byte codes correctly", () => {
+    const font = makeCIDFont();
+    // 0x8140 "亜" + 0x8141 "唖"
+    const result = decodeText(new Uint8Array([0x81, 0x40, 0x81, 0x41]), font);
+    expect(result).toBe("\u4E9C\u5516");
+  });
+});
+
+// =============================================================================
+// Text Reconstruction — Table vs Multi-Column
+// =============================================================================
+
+describe("Text Reconstruction — table data should not be split into columns", () => {
+  it("should keep table columns on the same line", () => {
+    // Write a 3-column table and read it back.
+    // Before the fix, detectColumns would split this into 2-3 "columns"
+    // and put each table column on its own set of lines.
+    const pdfBytes = pdf([
+      ["Product", "Price", "Quantity"],
+      ["Widget A", 19.99, 100],
+      ["Widget B", 24.5, 250]
+    ]);
+
+    const result = readPdf(pdfBytes);
+    const text = result.text;
+
+    // All three column headers should be on the same line
+    const lines = text.split("\n").filter(l => l.trim().length > 0);
+    const headerLine = lines.find(l => l.includes("Product"));
+    expect(headerLine).toBeDefined();
+    expect(headerLine).toContain("Price");
+    expect(headerLine).toContain("Quantity");
+
+    // Data rows should also be on the same line
+    const widgetALine = lines.find(l => l.includes("Widget A"));
+    expect(widgetALine).toBeDefined();
+    expect(widgetALine).toContain("19.99");
+    expect(widgetALine).toContain("100");
+  });
+
+  it("should keep 5-column table on same lines", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Test");
+    ws.columns = [
+      { header: "Item", key: "item", width: 20 },
+      { header: "SKU", key: "sku", width: 15 },
+      { header: "Qty", key: "qty", width: 10 },
+      { header: "Price", key: "price", width: 12 },
+      { header: "Stock", key: "stock", width: 10 }
+    ];
+    ws.addRows([
+      { item: "Laptop", sku: "LP-001", qty: 42, price: 1299.99, stock: true },
+      { item: "Mouse", sku: "WM-055", qty: 350, price: 29.99, stock: true }
+    ]);
+    const pdfBytes = excelToPdf(wb);
+    const result = readPdf(pdfBytes);
+
+    const lines = result.text.split("\n").filter(l => l.trim().length > 0);
+
+    // Header line should contain all 5 columns
+    const headerLine = lines.find(l => l.includes("Item"));
+    expect(headerLine).toBeDefined();
+    expect(headerLine).toContain("SKU");
+    expect(headerLine).toContain("Qty");
+    expect(headerLine).toContain("Price");
+    expect(headerLine).toContain("Stock");
+
+    // Data row
+    const laptopLine = lines.find(l => l.includes("Laptop"));
+    expect(laptopLine).toBeDefined();
+    expect(laptopLine).toContain("LP-001");
+    expect(laptopLine).toContain("42");
+    expect(laptopLine).toContain("1299.99");
+  });
+
+  it("should use tab separators between table columns", () => {
+    const pdfBytes = pdf([
+      ["Name", "Department", "Salary"],
+      ["Alice", "Engineering", 120000],
+      ["Bob", "Marketing", 95000]
+    ]);
+
+    const result = readPdf(pdfBytes);
+    const lines = result.text.split("\n").filter(l => l.trim().length > 0);
+
+    // Each line should have tab separators between the columns
+    const headerLine = lines.find(l => l.includes("Name"));
+    expect(headerLine).toBeDefined();
+    expect(headerLine!.includes("\t")).toBe(true);
+
+    // Count tabs — should have at least 2 (for 3 columns)
+    const tabCount = (headerLine!.match(/\t/g) || []).length;
+    expect(tabCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("should preserve single-column text without false column detection", () => {
+    const pdfBytes = pdf([["Single Column"], ["Row 1"], ["Row 2"], ["Row 3"]]);
+
+    const result = readPdf(pdfBytes);
+    const lines = result.text.split("\n").filter(l => l.trim().length > 0);
+
+    expect(lines).toContain("Single Column");
+    expect(lines).toContain("Row 1");
+    expect(lines).toContain("Row 2");
+    expect(lines).toContain("Row 3");
+  });
+});

@@ -7,124 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [8.0.0](https://github.com/cjnoname/excelts/compare/v7.6.0...v8.0.0) (2026-04-05)
 
-
 ### ⚠ BREAKING CHANGES
 
-* All Md-prefixed identifiers renamed to Markdown.
+- All Md-prefixed identifiers renamed to Markdown.
 
 ### Features
 
-* **md:** Add Markdown table module with GFM parsing, formatting, and Workbook integration ([dfd55b7](https://github.com/cjnoname/excelts/commit/dfd55b77594fd3c1c4e7332aee3b4bbc1090433a))
-
+- **md:** Add Markdown table module with GFM parsing, formatting, and Workbook integration ([dfd55b7](https://github.com/cjnoname/excelts/commit/dfd55b77594fd3c1c4e7332aee3b4bbc1090433a))
 
 ### Bug Fixes
 
-* **archive:** Use Dynamic Huffman and native CompressionStream for browser compression ([b18414d](https://github.com/cjnoname/excelts/commit/b18414d38d5f2cfaed5daa80aa50899157624aa8)), closes [#125](https://github.com/cjnoname/excelts/issues/125)
-* Avoid file system race condition in XML stream writer example ([#77](https://github.com/cjnoname/excelts/issues/77)) ([7a83866](https://github.com/cjnoname/excelts/commit/7a8386694da3e347fce8ec200cce5db860ecae15))
-
+- **archive:** Use Dynamic Huffman and native CompressionStream for browser compression ([b18414d](https://github.com/cjnoname/excelts/commit/b18414d38d5f2cfaed5daa80aa50899157624aa8)), closes [#125](https://github.com/cjnoname/excelts/issues/125)
+- Avoid file system race condition in XML stream writer example ([#77](https://github.com/cjnoname/excelts/issues/77)) ([7a83866](https://github.com/cjnoname/excelts/commit/7a8386694da3e347fce8ec200cce5db860ecae15))
 
 ### Code Refactoring
 
-* Rename Md module to Markdown globally ([d0072ae](https://github.com/cjnoname/excelts/commit/d0072aee6f2e0cc2bfc6f8679f0a1125acd0eed6))
-* Rename remaining md variables to markdown in examples, tests, and docs ([767bc12](https://github.com/cjnoname/excelts/commit/767bc1292212b48fc0e01664696b54e63904b0e9))
+- Rename Md module to Markdown globally ([d0072ae](https://github.com/cjnoname/excelts/commit/d0072aee6f2e0cc2bfc6f8679f0a1125acd0eed6))
+- Rename remaining md variables to markdown in examples, tests, and docs ([767bc12](https://github.com/cjnoname/excelts/commit/767bc1292212b48fc0e01664696b54e63904b0e9))
 
 ## [7.6.0](https://github.com/cjnoname/excelts/compare/v7.5.0...v7.6.0) (2026-04-04)
 
-
 ### Features
 
-* **xml:** Add invalidCharHandling option for tolerant XML parsing ([f4c5ecc](https://github.com/cjnoname/excelts/commit/f4c5ecc5eb82becbe58da0909f3fc0d9556da5e9))
+- **xml:** Add invalidCharHandling option for tolerant XML parsing ([f4c5ecc](https://github.com/cjnoname/excelts/commit/f4c5ecc5eb82becbe58da0909f3fc0d9556da5e9))
 
 ## [7.5.0](https://github.com/cjnoname/excelts/compare/v7.4.0...v7.5.0) (2026-04-02)
 
-
 ### Features
 
-* **xml:** Add ignoreAttributes option and remove fast-xml-parser references ([3ae7f67](https://github.com/cjnoname/excelts/commit/3ae7f675f0c7749ca49f404471528983eaf96a6a))
+- **xml:** Add ignoreAttributes option and remove fast-xml-parser references ([3ae7f67](https://github.com/cjnoname/excelts/commit/3ae7f675f0c7749ca49f404471528983eaf96a6a))
 
 ## [7.4.0](https://github.com/cjnoname/excelts/compare/v7.3.0...v7.4.0) (2026-04-02)
 
-
 ### Features
 
-* **xml:** Add isArray callback for per-tag array wrapping in toPlainObject/parseXmlToObject ([edd69c3](https://github.com/cjnoname/excelts/commit/edd69c3a5d92810483733692626c64ffdd4070b3))
+- **xml:** Add isArray callback for per-tag array wrapping in toPlainObject/parseXmlToObject ([edd69c3](https://github.com/cjnoname/excelts/commit/edd69c3a5d92810483733692626c64ffdd4070b3))
 
 ## [7.3.0](https://github.com/cjnoname/excelts/compare/v7.2.0...v7.3.0) (2026-04-02)
 
-
 ### Features
 
-* **xml:** Add toPlainObject and parseXmlToObject for XML-to-plain-object conversion ([b7275dc](https://github.com/cjnoname/excelts/commit/b7275dc0215b4c2d507adbc1d4efb208213c4cbf))
+- **xml:** Add toPlainObject and parseXmlToObject for XML-to-plain-object conversion ([b7275dc](https://github.com/cjnoname/excelts/commit/b7275dc0215b4c2d507adbc1d4efb208213c4cbf))
 
 ## [7.2.0](https://github.com/cjnoname/excelts/compare/v7.1.1...v7.2.0) (2026-04-01)
 
-
 ### Features
 
-* Add ./xml subpath export and treeshake verification ([6dfee7a](https://github.com/cjnoname/excelts/commit/6dfee7aaa84b076d275be50db8a4c356fc46c634))
+- Add ./xml subpath export and treeshake verification ([6dfee7a](https://github.com/cjnoname/excelts/commit/6dfee7aaa84b076d275be50db8a4c356fc46c634))
 
 ## [7.1.1](https://github.com/cjnoname/excelts/compare/v7.1.0...v7.1.1) (2026-04-01)
 
-
 ### Bug Fixes
 
-* Consolidate module links, remove duplicate sections from READMEs ([4a85b2c](https://github.com/cjnoname/excelts/commit/4a85b2c8a2f1183cac7882a90955cab4d660e859))
+- Consolidate module links, remove duplicate sections from READMEs ([4a85b2c](https://github.com/cjnoname/excelts/commit/4a85b2c8a2f1183cac7882a90955cab4d660e859))
 
 ## [7.1.0](https://github.com/cjnoname/excelts/compare/v7.0.1...v7.1.0) (2026-04-01)
 
-
 ### Features
 
-* **xml:** Add standalone [@xml](https://github.com/xml) module with streaming write pipeline and backpressure support ([a0a0630](https://github.com/cjnoname/excelts/commit/a0a063031f00cb4c8837b7cb47a37ca8a28c7b8c))
-
+- **xml:** Add standalone [@xml](https://github.com/xml) module with streaming write pipeline and backpressure support ([a0a0630](https://github.com/cjnoname/excelts/commit/a0a063031f00cb4c8837b7cb47a37ca8a28c7b8c))
 
 ### Bug Fixes
 
-* Enhance backpressure handling in StreamingZipWriterAdapter for sync and async write() return types ([156b5fa](https://github.com/cjnoname/excelts/commit/156b5fa95d6bcae158b2f6020183350a61c2de8d))
-* Extract _checkBackpressure to resolve CodeQL missing-await alerts [#74](https://github.com/cjnoname/excelts/issues/74) [#75](https://github.com/cjnoname/excelts/issues/75) [#76](https://github.com/cjnoname/excelts/issues/76) ([7081e1f](https://github.com/cjnoname/excelts/commit/7081e1f0ec46c3e6a933d0feb9b418e6f8a61010))
-* Handle async write() return in StreamingZipWriterAdapter backpressure check ([dc8c3fd](https://github.com/cjnoname/excelts/commit/dc8c3fd317134bf099650e306103152ff3b90a71))
-* Wait for file stream close before resolving on Windows ([84503eb](https://github.com/cjnoname/excelts/commit/84503eba664b538eed74729de013c6345a2ed335))
-* **xml:** Complete namespace support, harden parser, simplify module, and update validator ([9a59fe8](https://github.com/cjnoname/excelts/commit/9a59fe88e35700d73612f05b1b4feb825e687d73))
-* **xml:** Correct HAN CELL prefix detection, xmlEncode FFFE/FFFF, and tag mutation ([56c8665](https://github.com/cjnoname/excelts/commit/56c8665b40f3172b62156cb012c97216ed761b36))
-* **xml:** Reject second root element, fatal UTF-8 decode, lightweight decodeCol ([95b676e](https://github.com/cjnoname/excelts/commit/95b676e07dbcb8e74b4a928051bc73a1961b9929))
-
+- Enhance backpressure handling in StreamingZipWriterAdapter for sync and async write() return types ([156b5fa](https://github.com/cjnoname/excelts/commit/156b5fa95d6bcae158b2f6020183350a61c2de8d))
+- Extract \_checkBackpressure to resolve CodeQL missing-await alerts [#74](https://github.com/cjnoname/excelts/issues/74) [#75](https://github.com/cjnoname/excelts/issues/75) [#76](https://github.com/cjnoname/excelts/issues/76) ([7081e1f](https://github.com/cjnoname/excelts/commit/7081e1f0ec46c3e6a933d0feb9b418e6f8a61010))
+- Handle async write() return in StreamingZipWriterAdapter backpressure check ([dc8c3fd](https://github.com/cjnoname/excelts/commit/dc8c3fd317134bf099650e306103152ff3b90a71))
+- Wait for file stream close before resolving on Windows ([84503eb](https://github.com/cjnoname/excelts/commit/84503eba664b538eed74729de013c6345a2ed335))
+- **xml:** Complete namespace support, harden parser, simplify module, and update validator ([9a59fe8](https://github.com/cjnoname/excelts/commit/9a59fe88e35700d73612f05b1b4feb825e687d73))
+- **xml:** Correct HAN CELL prefix detection, xmlEncode FFFE/FFFF, and tag mutation ([56c8665](https://github.com/cjnoname/excelts/commit/56c8665b40f3172b62156cb012c97216ed761b36))
+- **xml:** Reject second root element, fatal UTF-8 decode, lightweight decodeCol ([95b676e](https://github.com/cjnoname/excelts/commit/95b676e07dbcb8e74b4a928051bc73a1961b9929))
 
 ### Performance Improvements
 
-* Cache isDateFmt, use encodeInto in StringBuf, optimize row spans parsing ([3c63a07](https://github.com/cjnoname/excelts/commit/3c63a0723f4fe7c5eb4e030eeae91b723531f1ec))
-* **xml:** Eliminate XML parse overhead with direct SAX callbacks ([74ebdaf](https://github.com/cjnoname/excelts/commit/74ebdaf0c3a6ad154f15161b2c09388567c008d5))
-* **xml:** Optimize hot paths for large-data throughput ([97bd074](https://github.com/cjnoname/excelts/commit/97bd07497c7eba6afd5e805043459ce83355801b))
-* **xml:** Optimize text decoding, SAX consumers, and write batching ([aaa41a9](https://github.com/cjnoname/excelts/commit/aaa41a956ab47f690c126ace6885f4885a7df85a))
+- Cache isDateFmt, use encodeInto in StringBuf, optimize row spans parsing ([3c63a07](https://github.com/cjnoname/excelts/commit/3c63a0723f4fe7c5eb4e030eeae91b723531f1ec))
+- **xml:** Eliminate XML parse overhead with direct SAX callbacks ([74ebdaf](https://github.com/cjnoname/excelts/commit/74ebdaf0c3a6ad154f15161b2c09388567c008d5))
+- **xml:** Optimize hot paths for large-data throughput ([97bd074](https://github.com/cjnoname/excelts/commit/97bd07497c7eba6afd5e805043459ce83355801b))
+- **xml:** Optimize text decoding, SAX consumers, and write batching ([aaa41a9](https://github.com/cjnoname/excelts/commit/aaa41a956ab47f690c126ace6885f4885a7df85a))
 
 ## [7.0.1](https://github.com/cjnoname/excelts/compare/v7.0.0...v7.0.1) (2026-03-29)
 
-
 ### Bug Fixes
 
-* **ci:** Match release-please merge commit message pattern ([4fedfd8](https://github.com/cjnoname/excelts/commit/4fedfd8d1d261c755fbd70d0084bc51709d6ec7e))
-* **stream:** Increase async transform error test timeout to prevent flaky failure ([a91642e](https://github.com/cjnoname/excelts/commit/a91642ec8fc3dfdfb6bc65977a71e0dd9882afff))
+- **ci:** Match release-please merge commit message pattern ([4fedfd8](https://github.com/cjnoname/excelts/commit/4fedfd8d1d261c755fbd70d0084bc51709d6ec7e))
+- **stream:** Increase async transform error test timeout to prevent flaky failure ([a91642e](https://github.com/cjnoname/excelts/commit/a91642ec8fc3dfdfb6bc65977a71e0dd9882afff))
 
 ## [7.0.0](https://github.com/cjnoname/excelts/compare/v6.2.0...v7.0.0) (2026-03-28)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **excel:** Deprecated type alias `ZipOptions` removed — use `WorkbookZipOptions` instead.
+- **excel:** Deprecated type alias `ZipOptions` removed — use `WorkbookZipOptions` instead.
 
 ### Features
 
-* **pdf:** Add image embedding support for standalone pdf() and excelToPdf() ([9d0f2b2](https://github.com/cjnoname/excelts/commit/9d0f2b2c0c472684b5a40d8817931b7e8d6c11a4))
-
+- **pdf:** Add image embedding support for standalone pdf() and excelToPdf() ([9d0f2b2](https://github.com/cjnoname/excelts/commit/9d0f2b2c0c472684b5a40d8817931b7e8d6c11a4))
 
 ### Bug Fixes
 
-* **ci:** Resolve merge conflict, keep quoted if expression ([f909a62](https://github.com/cjnoname/excelts/commit/f909a6210703fb7573add9f5a45e14b6e4864134))
-
+- **ci:** Resolve merge conflict, keep quoted if expression ([f909a62](https://github.com/cjnoname/excelts/commit/f909a6210703fb7573add9f5a45e14b6e4864134))
 
 ### Code Refactoring
 
-* **excel:** Remove deprecated Image and ZipOptions type aliases ([ab499d5](https://github.com/cjnoname/excelts/commit/ab499d5566bff2ee5a530571c849de3a3a9d0168))
-* **pdf:** Decouple PDF engine from Excel, add standalone pdf() API ([a426eb4](https://github.com/cjnoname/excelts/commit/a426eb46ce71c594878c6fd4abeee1d5b7cba7ab))
+- **excel:** Remove deprecated Image and ZipOptions type aliases ([ab499d5](https://github.com/cjnoname/excelts/commit/ab499d5566bff2ee5a530571c849de3a3a9d0168))
+- **pdf:** Decouple PDF engine from Excel, add standalone pdf() API ([a426eb4](https://github.com/cjnoname/excelts/commit/a426eb46ce71c594878c6fd4abeee1d5b7cba7ab))
 
 ## [6.3.0] (Unreleased)
 

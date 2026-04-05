@@ -1,9 +1,9 @@
 /**
  * PDF module for excelts.
  *
- * A full-featured, zero-dependency PDF engine.
+ * A full-featured, zero-dependency PDF engine for both writing and reading.
  *
- * @example Standalone:
+ * @example Standalone PDF generation:
  * ```typescript
  * import { pdf } from "excelts/pdf";
  *
@@ -25,11 +25,22 @@
  * const bytes = excelToPdf(workbook);
  * ```
  *
+ * @example Read PDF — extract text, images, and metadata:
+ * ```typescript
+ * import { readPdf } from "excelts/pdf";
+ *
+ * const result = readPdf(pdfBytes);
+ * console.log(result.text);               // All text
+ * console.log(result.pages[0].text);      // Page 1 text
+ * console.log(result.pages[0].images);    // Page 1 images
+ * console.log(result.metadata.title);     // Document title
+ * ```
+ *
  * @module pdf
  */
 
 // =============================================================================
-// Public API
+// Public API — Writing
 // =============================================================================
 
 /** Standalone PDF generation — accepts plain arrays, sheet objects, or workbooks. */
@@ -39,7 +50,14 @@ export { pdf } from "./pdf";
 export { excelToPdf } from "./excel-bridge";
 
 // =============================================================================
-// Types
+// Public API — Reading
+// =============================================================================
+
+/** Read a PDF file and extract text, images, and metadata. */
+export { readPdf } from "./reader/pdf-reader";
+
+// =============================================================================
+// Types — Writing
 // =============================================================================
 
 export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "./pdf";
@@ -54,6 +72,15 @@ export type {
 } from "./types";
 
 export { PageSizes } from "./types";
+
+// =============================================================================
+// Types — Reading
+// =============================================================================
+
+export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "./reader/pdf-reader";
+export type { PdfMetadata } from "./reader/metadata-reader";
+export type { ExtractedImage } from "./reader/image-extractor";
+export type { TextLine } from "./reader/text-reconstruction";
 
 // =============================================================================
 // Errors

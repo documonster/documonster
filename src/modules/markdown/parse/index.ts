@@ -447,7 +447,10 @@ function parseTableAt(
  * const result = parseMarkdown(input, { trim: false, maxRows: 100 });
  * ```
  */
-export function parseMarkdown(input: string, options: MarkdownParseOptions = {}): MarkdownParseResult {
+export function parseMarkdown(
+  input: string,
+  options: MarkdownParseOptions = {}
+): MarkdownParseResult {
   const opts = resolveParseOpts(options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
@@ -459,7 +462,10 @@ export function parseMarkdown(input: string, options: MarkdownParseOptions = {})
     }
   }
 
-  throw new MarkdownParseError("No valid Markdown table found in input", lineCount > 0 ? lineCount : 1);
+  throw new MarkdownParseError(
+    "No valid Markdown table found in input",
+    lineCount > 0 ? lineCount : 1
+  );
 }
 
 /**
@@ -476,7 +482,10 @@ export function parseMarkdown(input: string, options: MarkdownParseOptions = {})
  * tables.forEach((t, i) => console.log(`Table ${i}: ${t.headers.join(", ")}`));
  * ```
  */
-export function parseMarkdownAll(input: string, options: MarkdownParseOptions = {}): MarkdownParseResult[] {
+export function parseMarkdownAll(
+  input: string,
+  options: MarkdownParseOptions = {}
+): MarkdownParseResult[] {
   const opts = resolveParseOpts(options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
