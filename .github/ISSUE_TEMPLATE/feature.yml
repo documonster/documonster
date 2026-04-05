@@ -4,6 +4,22 @@ title: "[Feature]: "
 labels:
   - "feature"
 body:
+  - type: dropdown
+    id: module
+    attributes:
+      label: "Module"
+      options:
+        - "Excel"
+        - "PDF"
+        - "CSV"
+        - "Markdown"
+        - "XML"
+        - "Archive"
+        - "Stream"
+        - "Other"
+    validations:
+      required: true
+
   - type: textarea
     id: request
     attributes:
