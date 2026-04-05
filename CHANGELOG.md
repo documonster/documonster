@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.1.0](https://github.com/cjnoname/excelts/compare/v8.0.0...v8.1.0) (2026-04-05)
+
+
+### Features
+
+* **pdf:** Add zero-dependency PDF reader with text, image, and metadata extraction ([23663b3](https://github.com/cjnoname/excelts/commit/23663b3337392c5fc098cc4b15ee6243f6879ff2))
+* **pdf:** Upgrade writer to PDF 2.0/AES-256, add annotation and form field extraction ([c725147](https://github.com/cjnoname/excelts/commit/c725147efd803ea28d34fe0aaf8210cfbd11ee0f))
+
+
+### Performance Improvements
+
+* **archive:** Batch small async push() calls in ZipDeflateFile (4.4x browser speedup) ([54a7a78](https://github.com/cjnoname/excelts/commit/54a7a78779e2eb9772dbdf32647e63d81132fc0d)), closes [#127](https://github.com/cjnoname/excelts/issues/127)
+
 ## [8.0.0](https://github.com/cjnoname/excelts/compare/v7.6.0...v8.0.0) (2026-04-05)
 
 ### ⚠ BREAKING CHANGES
