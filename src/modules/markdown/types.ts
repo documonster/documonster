@@ -16,7 +16,7 @@
  * - `---:`  = right
  * - `---`   = none (defaults to left in most renderers)
  */
-export type MdAlignment = "left" | "center" | "right" | "none";
+export type MarkdownAlignment = "left" | "center" | "right" | "none";
 
 // =============================================================================
 // Parse Types
@@ -25,7 +25,7 @@ export type MdAlignment = "left" | "center" | "right" | "none";
 /**
  * Result of parsing a Markdown table.
  */
-export interface MdParseResult {
+export interface MarkdownParseResult {
   /** Parsed header row (column names) */
   headers: string[];
 
@@ -33,13 +33,13 @@ export interface MdParseResult {
   rows: string[][];
 
   /** Column alignments extracted from the separator row */
-  alignments: MdAlignment[];
+  alignments: MarkdownAlignment[];
 }
 
 /**
  * Markdown parsing options.
  */
-export interface MdParseOptions {
+export interface MarkdownParseOptions {
   /**
    * Trim whitespace from cell values.
    * @default true
@@ -79,7 +79,7 @@ export interface MdParseOptions {
 /**
  * Column configuration for Markdown formatting.
  */
-export interface MdColumnConfig {
+export interface MarkdownColumnConfig {
   /** Column header text */
   header: string;
 
@@ -87,7 +87,7 @@ export interface MdColumnConfig {
    * Column alignment.
    * @default "left"
    */
-  alignment?: MdAlignment;
+  alignment?: MarkdownAlignment;
 
   /**
    * Minimum column width (in characters, excluding padding).
@@ -100,18 +100,18 @@ export interface MdColumnConfig {
 /**
  * Markdown formatting options.
  */
-export interface MdFormatOptions {
+export interface MarkdownFormatOptions {
   /**
    * Column configuration. When provided, overrides auto-detected headers and alignment.
-   * Can be an array of strings (header names) or MdColumnConfig objects.
+   * Can be an array of strings (header names) or MarkdownColumnConfig objects.
    */
-  columns?: (string | MdColumnConfig)[];
+  columns?: (string | MarkdownColumnConfig)[];
 
   /**
    * Default alignment for columns without explicit alignment.
    * @default "left"
    */
-  alignment?: MdAlignment;
+  alignment?: MarkdownAlignment;
 
   /**
    * Align columns to equal width by padding cell content with spaces.
@@ -149,7 +149,7 @@ export interface MdFormatOptions {
  * Unified Markdown options for Workbook integration.
  * Combines parse and format options with worksheet-specific settings.
  */
-export interface MdOptions extends MdParseOptions, MdFormatOptions {
+export interface MarkdownOptions extends MarkdownParseOptions, MarkdownFormatOptions {
   // === Worksheet ===
   /** Name of the worksheet to read from or write to */
   sheetName?: string;

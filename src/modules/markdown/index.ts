@@ -2,7 +2,7 @@
  * Markdown Module - Public API
  *
  * Pure Markdown table parsing/formatting functionality with no Excel dependencies.
- * For Markdown-Worksheet integration, use Workbook.readMd/writeMd methods instead.
+ * For Markdown-Worksheet integration, use Workbook.readMarkdown/writeMarkdown methods instead.
  *
  * Design principles:
  * - Only export types and functions that are part of the PUBLIC API
@@ -16,18 +16,18 @@
 
 export type {
   // Alignment
-  MdAlignment,
+  MarkdownAlignment,
 
   // Parse types
-  MdParseResult,
-  MdParseOptions,
+  MarkdownParseResult,
+  MarkdownParseOptions,
 
   // Format types
-  MdColumnConfig,
-  MdFormatOptions,
+  MarkdownColumnConfig,
+  MarkdownFormatOptions,
 
   // Workbook integration types
-  MdOptions
+  MarkdownOptions
 } from "./types";
 
 // =============================================================================
@@ -35,13 +35,13 @@ export type {
 // =============================================================================
 
 // Parser
-export { parseMd, parseMdAll } from "./parse/index";
+export { parseMarkdown, parseMarkdownAll } from "./parse/index";
 
 // Formatter
-export { formatMd } from "./format/index";
+export { formatMarkdown } from "./format/index";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { MdError, MdParseError } from "./errors";
+export { MarkdownError, MarkdownParseError } from "./errors";

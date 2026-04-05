@@ -43,8 +43,8 @@ High-performance CSV parsing and formatting with streaming, dynamic typing, data
 
 Parse and format GitHub Flavored Markdown tables with alignment round-trip and Workbook integration.
 
-- [Documentation](src/modules/md/README.md) | [中文](src/modules/md/README_zh.md)
-- [Examples](src/modules/md/examples/)
+- [Documentation](src/modules/markdown/README.md) | [中文](src/modules/markdown/README_zh.md)
+- [Examples](src/modules/markdown/examples/)
 
 ### XML — SAX/DOM Parser, Query Engine, Writer
 
@@ -113,8 +113,8 @@ import { zip, unzip } from "@cj-tech-master/excelts/zip";
 const archive = await zip().add("hello.txt", "Hello!").bytes();
 
 // Markdown — parse and format tables
-import { parseMd, formatMd } from "@cj-tech-master/excelts/md";
-const table = parseMd("| A | B |\n|---|---|\n| 1 | 2 |");
+import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 ```
 
 ## Subpath Exports
@@ -126,7 +126,7 @@ import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
 import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
-import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
+import { parseMarkdown, formatMarkdown, parseMarkdownAll } from "@cj-tech-master/excelts/markdown";
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 

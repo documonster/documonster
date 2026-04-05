@@ -26,7 +26,7 @@
 - **数据保护** — 带密码的工作表保护（SHA-512）
 - **流式处理** — `WorkbookReader` 和 `WorkbookWriter` 处理大文件
 - **CSV 导入/导出** — `readCsv`、`writeCsv`、`readCsvFile`、`writeCsvFile`
-- **Markdown 导入/导出** — `readMd`、`writeMd`、`readMdFile`、`writeMdFile`
+- **Markdown 导入/导出** — `readMarkdown`、`writeMarkdown`、`readMarkdownFile`、`writeMarkdownFile`
 - **PDF 导出** — `excelToPdf()`，完整支持样式、分页、字体、加密
 - **浏览器支持** — `xlsx.load()`、`xlsx.writeBuffer()`，无需 polyfill
 
@@ -378,13 +378,13 @@ import { Workbook } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 
 // 读取 Markdown 表格
-workbook.readMd("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |");
-await workbook.readMdFile("table.md");
+workbook.readMarkdown("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |");
+await workbook.readMarkdownFile("table.md");
 
 // 写入 Markdown
-const mdText = workbook.writeMd();
-await workbook.writeMdFile("output.md");
-const bytes = workbook.writeMdBuffer();
+const mdText = workbook.writeMarkdown();
+await workbook.writeMarkdownFile("output.md");
+const bytes = workbook.writeMarkdownBuffer();
 ```
 
 ## 流式 API

@@ -4,25 +4,25 @@
  * Comprehensive tests covering:
  * - Parser: basic tables, alignment, escaping, edge cases, error handling
  * - Formatter: basic output, padding, alignment, escaping, compact mode
- * - Workbook integration: readMd, writeMd, round-trip fidelity
- * - parseMdAll: multi-table document parsing
+ * - Workbook integration: readMarkdown, writeMarkdown, round-trip fidelity
+ * - parseMarkdownAll: multi-table document parsing
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { parseMd, parseMdAll } from "@md/parse/index";
-import { formatMd } from "@md/format/index";
-import { MdParseError } from "@md/errors";
+import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
+import { formatMarkdown } from "@markdown/format/index";
+import { MarkdownParseError } from "@markdown/errors";
 import { Workbook } from "@excel/workbook";
 
 // =============================================================================
 // Parser Tests
 // =============================================================================
 
-describe("parseMd", () => {
+describe("parseMarkdown", () => {
   describe("basic parsing", () => {
     it("should parse a simple table", () => {
       const input = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([
@@ -34,7 +34,7 @@ describe("parseMd", () => {
 
     it("should parse a table without leading/trailing pipes", () => {
       const input = "Name | Age\n--- | ---\nAlice | 30\nBob | 25";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([
@@ -45,7 +45,7 @@ describe("parseMd", () => {
 
     it("should parse a single-column table", () => {
       const input = "| Name |\n| --- |\n| Alice |\n| Bob |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name"]);
       expect(result.rows).toEqual([["Alice"], ["Bob"]]);
@@ -53,7 +53,7 @@ describe("parseMd", () => {
 
     it("should parse a table with only headers and no data rows", () => {
       const input = "| Name | Age |\n| --- | --- |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([]);
@@ -61,7 +61,7 @@ describe("parseMd", () => {
 
     it("should parse a table with many columns", () => {
       const input = "| A | B | C | D | E |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toHaveLength(5);
       expect(result.rows[0]).toHaveLength(5);
@@ -71,32 +71,32 @@ describe("parseMd", () => {
   describe("alignment detection", () => {
     it("should detect left alignment", () => {
       const input = "| Name |\n| :--- |\n| Alice |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.alignments).toEqual(["left"]);
     });
 
     it("should detect right alignment", () => {
       const input = "| Amount |\n| ---: |\n| 100 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.alignments).toEqual(["right"]);
     });
 
     it("should detect center alignment", () => {
       const input = "| Status |\n| :---: |\n| Active |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.alignments).toEqual(["center"]);
     });
 
     it("should detect mixed alignments", () => {
       const input =
         "| Left | Center | Right | None |\n| :--- | :---: | ---: | --- |\n| a | b | c | d |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.alignments).toEqual(["left", "center", "right", "none"]);
     });
 
     it("should handle long dashes in separator", () => {
       const input = "| Name |\n| :------: |\n| Alice |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.alignments).toEqual(["center"]);
     });
   });
@@ -104,7 +104,7 @@ describe("parseMd", () => {
   describe("trimming and unescaping", () => {
     it("should trim cell whitespace by default", () => {
       const input = "|  Name  |  Age  |\n| --- | --- |\n|  Alice  |  30  |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows[0]).toEqual(["Alice", "30"]);
@@ -112,7 +112,7 @@ describe("parseMd", () => {
 
     it("should preserve whitespace when trim is false", () => {
       const input = "|  Name  |  Age  |\n| --- | --- |\n|  Alice  |  30  |";
-      const result = parseMd(input, { trim: false });
+      const result = parseMarkdown(input, { trim: false });
 
       expect(result.headers).toEqual(["  Name  ", "  Age  "]);
       expect(result.rows[0]).toEqual(["  Alice  ", "  30  "]);
@@ -120,19 +120,19 @@ describe("parseMd", () => {
 
     it("should unescape pipe characters", () => {
       const input = "| Formula |\n| --- |\n| a \\| b |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["a | b"]);
     });
 
     it("should unescape backslashes", () => {
       const input = "| Path |\n| --- |\n| C:\\\\Users |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["C:\\Users"]);
     });
 
     it("should not unescape when disabled", () => {
       const input = "| Formula |\n| --- |\n| a \\| b |";
-      const result = parseMd(input, { unescape: false });
+      const result = parseMarkdown(input, { unescape: false });
       // With unescape disabled, the escaped pipe is preserved as literal characters
       // The parser still splits on unescaped pipes correctly
       expect(result.rows[0][0]).toContain("\\|");
@@ -142,14 +142,14 @@ describe("parseMd", () => {
   describe("column count normalization", () => {
     it("should pad rows with fewer columns", () => {
       const input = "| A | B | C |\n| --- | --- | --- |\n| 1 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.rows[0]).toEqual(["1", "", ""]);
     });
 
     it("should truncate rows with more columns", () => {
       const input = "| A | B |\n| --- | --- |\n| 1 | 2 | 3 | 4 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.rows[0]).toHaveLength(2);
       expect(result.rows[0]).toEqual(["1", "2"]);
@@ -159,20 +159,20 @@ describe("parseMd", () => {
   describe("options", () => {
     it("should skip empty rows by default", () => {
       const input = "| A |\n| --- |\n|  |\n| value |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows).toEqual([["value"]]);
     });
 
     it("should keep empty rows when skipEmptyRows is false", () => {
       const input = "| A |\n| --- |\n|  |\n| value |";
-      const result = parseMd(input, { skipEmptyRows: false });
+      const result = parseMarkdown(input, { skipEmptyRows: false });
       expect(result.rows).toEqual([[""], ["value"]]);
     });
 
     it("should limit rows with maxRows", () => {
       const rows = Array.from({ length: 100 }, (_, i) => `| row${i} |`).join("\n");
       const input = `| Name |\n| --- |\n${rows}`;
-      const result = parseMd(input, { maxRows: 5 });
+      const result = parseMarkdown(input, { maxRows: 5 });
 
       expect(result.rows).toHaveLength(5);
       expect(result.rows[0]).toEqual(["row0"]);
@@ -183,7 +183,7 @@ describe("parseMd", () => {
   describe("non-table content", () => {
     it("should skip leading text before the table", () => {
       const input = "# Title\n\nSome text here.\n\n| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([["Alice", "30"]]);
@@ -191,7 +191,7 @@ describe("parseMd", () => {
 
     it("should stop at trailing non-table content", () => {
       const input = "| Name |\n| --- |\n| Alice |\n\nSome text after table.\n\n| Other | Table |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name"]);
       expect(result.rows).toEqual([["Alice"]]);
@@ -199,21 +199,21 @@ describe("parseMd", () => {
 
     it("should stop at empty line after table", () => {
       const input = "| A |\n| --- |\n| 1 |\n| 2 |\n\n| B |\n| --- |\n| 3 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.rows).toEqual([["1"], ["2"]]);
     });
 
     it("should not swallow prose containing a pipe after a piped table", () => {
       const input = "| A |\n| --- |\n| 1 |\nThis sentence uses a | pipe.";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.rows).toEqual([["1"]]);
     });
 
     it("should not swallow prose with pipe after a multi-column piped table", () => {
       const input = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\nSome text | more text";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([["Alice", "30"]]);
@@ -221,7 +221,7 @@ describe("parseMd", () => {
 
     it("should still parse non-piped tables (no leading pipe)", () => {
       const input = "Name | Age\n--- | ---\nAlice | 30\nBob | 25";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([
@@ -232,39 +232,39 @@ describe("parseMd", () => {
   });
 
   describe("error handling", () => {
-    it("should throw MdParseError when no table is found", () => {
-      expect(() => parseMd("just some text")).toThrow(MdParseError);
+    it("should throw MarkdownParseError when no table is found", () => {
+      expect(() => parseMarkdown("just some text")).toThrow(MarkdownParseError);
     });
 
-    it("should throw MdParseError for empty input", () => {
-      expect(() => parseMd("")).toThrow(MdParseError);
+    it("should throw MarkdownParseError for empty input", () => {
+      expect(() => parseMarkdown("")).toThrow(MarkdownParseError);
     });
 
-    it("should throw MdParseError for header without separator", () => {
-      expect(() => parseMd("| Name | Age |")).toThrow(MdParseError);
+    it("should throw MarkdownParseError for header without separator", () => {
+      expect(() => parseMarkdown("| Name | Age |")).toThrow(MarkdownParseError);
     });
 
-    it("should throw MdParseError for separator without header", () => {
-      expect(() => parseMd("| --- | --- |")).toThrow(MdParseError);
+    it("should throw MarkdownParseError for separator without header", () => {
+      expect(() => parseMarkdown("| --- | --- |")).toThrow(MarkdownParseError);
     });
 
     it("should have line number in error", () => {
       try {
-        parseMd("no table here");
+        parseMarkdown("no table here");
         expect.fail("Should have thrown");
       } catch (e) {
-        expect(e).toBeInstanceOf(MdParseError);
-        expect((e as MdParseError).line).toBe(1);
+        expect(e).toBeInstanceOf(MarkdownParseError);
+        expect((e as MarkdownParseError).line).toBe(1);
       }
     });
 
     it("should report actual line count for multi-line input with no table", () => {
       try {
-        parseMd("line 1\nline 2\nline 3\nline 4\nline 5");
+        parseMarkdown("line 1\nline 2\nline 3\nline 4\nline 5");
         expect.fail("Should have thrown");
       } catch (e) {
-        expect(e).toBeInstanceOf(MdParseError);
-        expect((e as MdParseError).line).toBe(5);
+        expect(e).toBeInstanceOf(MarkdownParseError);
+        expect((e as MarkdownParseError).line).toBe(5);
       }
     });
   });
@@ -272,7 +272,7 @@ describe("parseMd", () => {
   describe("edge cases", () => {
     it("should handle Windows-style line endings (CRLF)", () => {
       const input = "| Name |\r\n| --- |\r\n| Alice |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name"]);
       expect(result.rows).toEqual([["Alice"]]);
@@ -280,7 +280,7 @@ describe("parseMd", () => {
 
     it("should handle old Mac line endings (CR)", () => {
       const input = "| Name |\r| --- |\r| Alice |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name"]);
       expect(result.rows).toEqual([["Alice"]]);
@@ -288,7 +288,7 @@ describe("parseMd", () => {
 
     it("should handle compact tables without spaces", () => {
       const input = "|Name|Age|\n|---|---|\n|Alice|30|";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["Name", "Age"]);
       expect(result.rows).toEqual([["Alice", "30"]]);
@@ -296,20 +296,20 @@ describe("parseMd", () => {
 
     it("should handle cells with special characters", () => {
       const input = "| Symbol |\n| --- |\n| <div> |\n| `code` |\n| **bold** |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.rows).toEqual([["<div>"], ["`code`"], ["**bold**"]]);
     });
 
     it("should handle single-dash separator", () => {
       const input = "| A |\n| - |\n| 1 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.headers).toEqual(["A"]);
     });
 
     it("should handle unicode content", () => {
       const input = "| \u540d\u524d | \u5e74\u9f62 |\n| --- | --- |\n| \u592a\u90ce | 30 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
 
       expect(result.headers).toEqual(["\u540d\u524d", "\u5e74\u9f62"]);
       expect(result.rows).toEqual([["\u592a\u90ce", "30"]]);
@@ -317,32 +317,32 @@ describe("parseMd", () => {
 
     it("should handle emoji content", () => {
       const input = "| Icon | Name |\n| --- | --- |\n| \ud83d\ude00 | Smile |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["\ud83d\ude00", "Smile"]);
     });
 
     it("should handle cells with only whitespace", () => {
       const input = "| A | B |\n| --- | --- |\n|   |   |";
-      const result = parseMd(input, { skipEmptyRows: false });
+      const result = parseMarkdown(input, { skipEmptyRows: false });
       // With trim=true (default), whitespace cells become empty
       expect(result.rows[0]).toEqual(["", ""]);
     });
 
     it("should handle many escaped pipes in a single cell", () => {
       const input = "| A |\n| --- |\n| a \\| b \\| c \\| d |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["a | b | c | d"]);
     });
 
     it("should handle adjacent escaped characters", () => {
       const input = "| A |\n| --- |\n| \\|\\|\\\\ |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["||\\"]); // \| \| \\ → || \
     });
 
     it("should handle a table with trailing escaped pipe", () => {
       const input = "| A |\n| --- |\n| test\\|";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       // trailing pipe is escaped, so it's part of the content
       expect(result.rows[0][0]).toContain("|");
     });
@@ -350,7 +350,7 @@ describe("parseMd", () => {
     it("should handle double-backslash before trailing pipe (\\\\|)", () => {
       // \\| at end = escaped backslash + real trailing pipe
       const input = "| A |\n| --- |\n| foo\\\\|";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       // The trailing pipe is real (even number of backslashes before it)
       // After unescaping: foo\  (the \\ becomes \)
       expect(result.rows[0]).toEqual(["foo\\"]);
@@ -359,7 +359,7 @@ describe("parseMd", () => {
     it("should handle triple-backslash before trailing pipe (\\\\\\|)", () => {
       // \\\| at end = escaped backslash + escaped pipe
       const input = "| A |\n| --- |\n| foo\\\\\\|";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       // The trailing pipe is escaped (odd number of backslashes)
       // foo + \\ (→\) + \| (→|) = "foo\|"
       expect(result.rows[0][0]).toContain("|");
@@ -369,53 +369,53 @@ describe("parseMd", () => {
   describe("multiline cell support (convertBr)", () => {
     it("should convert <br> to newline when convertBr is true", () => {
       const input = "| Note |\n| --- |\n| Line1<br>Line2 |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.rows[0]).toEqual(["Line1\nLine2"]);
     });
 
     it("should convert <br/> to newline when convertBr is true", () => {
       const input = "| Note |\n| --- |\n| Line1<br/>Line2 |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.rows[0]).toEqual(["Line1\nLine2"]);
     });
 
     it("should convert <br /> to newline when convertBr is true", () => {
       const input = "| Note |\n| --- |\n| Line1<br />Line2 |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.rows[0]).toEqual(["Line1\nLine2"]);
     });
 
     it("should handle case-insensitive <BR> tags", () => {
       const input = "| Note |\n| --- |\n| Line1<BR>Line2<Br>Line3 |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.rows[0]).toEqual(["Line1\nLine2\nLine3"]);
     });
 
     it("should NOT convert <br> when convertBr is false (default)", () => {
       const input = "| Note |\n| --- |\n| Line1<br>Line2 |";
-      const result = parseMd(input);
+      const result = parseMarkdown(input);
       expect(result.rows[0]).toEqual(["Line1<br>Line2"]);
     });
 
     it("should convert <br> in headers too", () => {
       const input = "| Multi<br>Line |\n| --- |\n| data |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.headers).toEqual(["Multi\nLine"]);
     });
 
     it("should handle multiple <br> in one cell", () => {
       const input = "| Note |\n| --- |\n| A<br>B<br>C<br>D |";
-      const result = parseMd(input, { convertBr: true });
+      const result = parseMarkdown(input, { convertBr: true });
       expect(result.rows[0]).toEqual(["A\nB\nC\nD"]);
     });
   });
 });
 
 // =============================================================================
-// parseMdAll Tests
+// parseMarkdownAll Tests
 // =============================================================================
 
-describe("parseMdAll", () => {
+describe("parseMarkdownAll", () => {
   it("should parse multiple tables from a document", () => {
     const input = [
       "# Section 1",
@@ -431,7 +431,7 @@ describe("parseMdAll", () => {
       "| 3 | 4 |"
     ].join("\n");
 
-    const tables = parseMdAll(input);
+    const tables = parseMarkdownAll(input);
 
     expect(tables).toHaveLength(2);
     expect(tables[0].headers).toEqual(["A", "B"]);
@@ -441,13 +441,13 @@ describe("parseMdAll", () => {
   });
 
   it("should return empty array when no tables found", () => {
-    const tables = parseMdAll("just some text\nno tables here");
+    const tables = parseMarkdownAll("just some text\nno tables here");
     expect(tables).toEqual([]);
   });
 
   it("should handle document with single table", () => {
     const input = "| A |\n| --- |\n| 1 |";
-    const tables = parseMdAll(input);
+    const tables = parseMarkdownAll(input);
 
     expect(tables).toHaveLength(1);
     expect(tables[0].headers).toEqual(["A"]);
@@ -468,7 +468,7 @@ describe("parseMdAll", () => {
       "| 6 |"
     ].join("\n");
 
-    const tables = parseMdAll(input, { maxRows: 2 });
+    const tables = parseMarkdownAll(input, { maxRows: 2 });
 
     expect(tables).toHaveLength(2);
     expect(tables[0].rows).toHaveLength(2);
@@ -486,7 +486,7 @@ describe("parseMdAll", () => {
       "| C<br/>D |"
     ].join("\n");
 
-    const tables = parseMdAll(input, { convertBr: true });
+    const tables = parseMarkdownAll(input, { convertBr: true });
 
     expect(tables).toHaveLength(2);
     expect(tables[0].rows[0]).toEqual(["A\nB"]);
@@ -498,10 +498,10 @@ describe("parseMdAll", () => {
 // Formatter Tests
 // =============================================================================
 
-describe("formatMd", () => {
+describe("formatMarkdown", () => {
   describe("basic formatting", () => {
     it("should format a simple table with padding", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Name", "Age"],
         [
           ["Alice", "30"],
@@ -518,22 +518,22 @@ describe("formatMd", () => {
     });
 
     it("should produce trailing newline by default", () => {
-      const result = formatMd(["A"], [["1"]]);
+      const result = formatMarkdown(["A"], [["1"]]);
       expect(result.endsWith("\n")).toBe(true);
     });
 
     it("should omit trailing newline when disabled", () => {
-      const result = formatMd(["A"], [["1"]], { trailingNewline: false });
+      const result = formatMarkdown(["A"], [["1"]], { trailingNewline: false });
       expect(result.endsWith("\n")).toBe(false);
     });
 
     it("should return empty string for zero columns", () => {
-      const result = formatMd([], []);
+      const result = formatMarkdown([], []);
       expect(result).toBe("");
     });
 
     it("should handle headers with no data rows", () => {
-      const result = formatMd(["A", "B"], []);
+      const result = formatMarkdown(["A", "B"], []);
       const lines = result.trimEnd().split("\n");
       expect(lines).toHaveLength(2); // header + separator only
     });
@@ -541,25 +541,25 @@ describe("formatMd", () => {
 
   describe("alignment", () => {
     it("should format left-aligned columns", () => {
-      const result = formatMd(["Name"], [["Alice"]], { alignment: "left" });
+      const result = formatMarkdown(["Name"], [["Alice"]], { alignment: "left" });
       const lines = result.trimEnd().split("\n");
       expect(lines[1]).toMatch(/^\|:[-]+/);
     });
 
     it("should format right-aligned columns", () => {
-      const result = formatMd(["Amount"], [["100"]], { alignment: "right" });
+      const result = formatMarkdown(["Amount"], [["100"]], { alignment: "right" });
       const lines = result.trimEnd().split("\n");
       expect(lines[1]).toMatch(/[-]+:\|$/);
     });
 
     it("should format center-aligned columns", () => {
-      const result = formatMd(["Status"], [["OK"]], { alignment: "center" });
+      const result = formatMarkdown(["Status"], [["OK"]], { alignment: "center" });
       const lines = result.trimEnd().split("\n");
       expect(lines[1]).toMatch(/^\|:[-]+:\|$/);
     });
 
     it("should support per-column alignment via columns config", () => {
-      const result = formatMd(["Left", "Center", "Right"], [["a", "b", "c"]], {
+      const result = formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
         columns: [
           { header: "Left", alignment: "left" },
           { header: "Center", alignment: "center" },
@@ -576,7 +576,7 @@ describe("formatMd", () => {
     });
 
     it("should format none-aligned columns with plain dashes", () => {
-      const result = formatMd(["A"], [["x"]], { alignment: "none" });
+      const result = formatMarkdown(["A"], [["x"]], { alignment: "none" });
       const lines = result.trimEnd().split("\n");
       // "none" alignment: separator is all dashes, no colons
       expect(lines[1]).toMatch(/^\|[-]+\|$/);
@@ -586,7 +586,7 @@ describe("formatMd", () => {
 
   describe("compact mode (no padding)", () => {
     it("should produce compact output without extra spaces", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Name", "Age"],
         [
           ["Alice", "30"],
@@ -604,46 +604,46 @@ describe("formatMd", () => {
 
   describe("escaping", () => {
     it("should escape pipe characters in cell content", () => {
-      const result = formatMd(["Formula"], [["a | b"]]);
+      const result = formatMarkdown(["Formula"], [["a | b"]]);
       expect(result).toContain("a \\| b");
     });
 
     it("should escape backslashes in cell content", () => {
-      const result = formatMd(["Path"], [["C:\\Users"]]);
+      const result = formatMarkdown(["Path"], [["C:\\Users"]]);
       expect(result).toContain("C:\\\\Users");
     });
 
     it("should not escape when disabled", () => {
-      const result = formatMd(["Value"], [["a | b"]], { escapeContent: false });
+      const result = formatMarkdown(["Value"], [["a | b"]], { escapeContent: false });
       expect(result).not.toContain("\\|");
     });
   });
 
   describe("value stringification", () => {
     it("should convert null/undefined to empty string", () => {
-      const result = formatMd(["A", "B"], [[null, undefined]]);
+      const result = formatMarkdown(["A", "B"], [[null, undefined]]);
       const lines = result.trimEnd().split("\n");
       expect(lines[2]).toMatch(/\|\s+\|\s+\|/);
     });
 
     it("should convert numbers to strings", () => {
-      const result = formatMd(["Value"], [[42]]);
+      const result = formatMarkdown(["Value"], [[42]]);
       expect(result).toContain("42");
     });
 
     it("should convert booleans to strings", () => {
-      const result = formatMd(["Value"], [[true]]);
+      const result = formatMarkdown(["Value"], [[true]]);
       expect(result).toContain("true");
     });
 
     it("should convert Date to ISO string by default", () => {
       const date = new Date("2024-01-15T12:00:00.000Z");
-      const result = formatMd(["Date"], [[date]]);
+      const result = formatMarkdown(["Date"], [[date]]);
       expect(result).toContain("2024-01-15T12:00:00.000Z");
     });
 
     it("should use custom stringify function", () => {
-      const result = formatMd(["Value"], [[42]], {
+      const result = formatMarkdown(["Value"], [[42]], {
         stringify: v => `*${v}*`
       });
       expect(result).toContain("*42*");
@@ -652,14 +652,14 @@ describe("formatMd", () => {
 
   describe("column configuration", () => {
     it("should accept string array as columns", () => {
-      const result = formatMd(["ignored"], [["value"]], {
+      const result = formatMarkdown(["ignored"], [["value"]], {
         columns: ["Custom Header"]
       });
       expect(result).toContain("Custom Header");
     });
 
-    it("should accept MdColumnConfig objects", () => {
-      const result = formatMd(["ignored"], [["value"]], {
+    it("should accept MarkdownColumnConfig objects", () => {
+      const result = formatMarkdown(["ignored"], [["value"]], {
         columns: [{ header: "Custom", alignment: "right", minWidth: 10 }]
       });
       expect(result).toContain("Custom");
@@ -670,51 +670,51 @@ describe("formatMd", () => {
 
   describe("multiline cell content", () => {
     it("should convert literal newlines in cell values to <br>", () => {
-      const result = formatMd(["Note"], [["Line1\nLine2"]]);
+      const result = formatMarkdown(["Note"], [["Line1\nLine2"]]);
       expect(result).toContain("Line1<br>Line2");
     });
 
     it("should handle CRLF newlines in cell values", () => {
-      const result = formatMd(["Note"], [["Line1\r\nLine2"]]);
+      const result = formatMarkdown(["Note"], [["Line1\r\nLine2"]]);
       expect(result).toContain("Line1<br>Line2");
     });
 
     it("should handle CR newlines in cell values", () => {
-      const result = formatMd(["Note"], [["Line1\rLine2"]]);
+      const result = formatMarkdown(["Note"], [["Line1\rLine2"]]);
       expect(result).toContain("Line1<br>Line2");
     });
 
     it("should handle multiple newlines in one cell", () => {
-      const result = formatMd(["Note"], [["A\nB\nC\nD"]]);
+      const result = formatMarkdown(["Note"], [["A\nB\nC\nD"]]);
       expect(result).toContain("A<br>B<br>C<br>D");
     });
 
     it("should convert newlines even when escapeContent is false", () => {
-      const result = formatMd(["Note"], [["Line1\nLine2"]], { escapeContent: false });
+      const result = formatMarkdown(["Note"], [["Line1\nLine2"]], { escapeContent: false });
       expect(result).toContain("Line1<br>Line2");
     });
 
     it("should handle newlines in header values", () => {
-      const result = formatMd(["Multi\nLine"], [["data"]]);
+      const result = formatMarkdown(["Multi\nLine"], [["data"]]);
       expect(result).toContain("Multi<br>Line");
     });
   });
 
   describe("multiline round-trip (format → parse)", () => {
     it("should preserve multiline cell content through format → parse round-trip", () => {
-      const formatted = formatMd(["Note"], [["Line1\nLine2"]]);
-      const parsed = parseMd(formatted, { convertBr: true });
+      const formatted = formatMarkdown(["Note"], [["Line1\nLine2"]]);
+      const parsed = parseMarkdown(formatted, { convertBr: true });
       expect(parsed.rows[0]).toEqual(["Line1\nLine2"]);
     });
 
     it("should preserve multiple newlines through round-trip", () => {
-      const formatted = formatMd(["Text"], [["A\nB\nC"]]);
-      const parsed = parseMd(formatted, { convertBr: true });
+      const formatted = formatMarkdown(["Text"], [["A\nB\nC"]]);
+      const parsed = parseMarkdown(formatted, { convertBr: true });
       expect(parsed.rows[0]).toEqual(["A\nB\nC"]);
     });
 
     it("should preserve all alignment types through format → parse round-trip", () => {
-      const formatted = formatMd(["L", "C", "R", "N"], [["a", "b", "c", "d"]], {
+      const formatted = formatMarkdown(["L", "C", "R", "N"], [["a", "b", "c", "d"]], {
         columns: [
           { header: "L", alignment: "left" },
           { header: "C", alignment: "center" },
@@ -722,13 +722,13 @@ describe("formatMd", () => {
           { header: "N", alignment: "none" }
         ]
       });
-      const parsed = parseMd(formatted);
+      const parsed = parseMarkdown(formatted);
       expect(parsed.alignments).toEqual(["left", "center", "right", "none"]);
     });
 
     it("should preserve escaped content through format → parse round-trip", () => {
-      const formatted = formatMd(["Data"], [["a | b \\ c"]]);
-      const parsed = parseMd(formatted);
+      const formatted = formatMarkdown(["Data"], [["a | b \\ c"]]);
+      const parsed = parseMarkdown(formatted);
       expect(parsed.rows[0]).toEqual(["a | b \\ c"]);
     });
   });
@@ -742,8 +742,8 @@ describe("formatMd", () => {
         rows.push([String(i), `name_${i}`, String(i * 100)]);
       }
 
-      const formatted = formatMd(headers, rows);
-      const parsed = parseMd(formatted);
+      const formatted = formatMarkdown(headers, rows);
+      const parsed = parseMarkdown(formatted);
 
       expect(parsed.headers).toEqual(headers);
       expect(parsed.rows).toHaveLength(rowCount);
@@ -760,8 +760,8 @@ describe("formatMd", () => {
       const headers = Array.from({ length: colCount }, (_, i) => `Col${i}`);
       const rows = [Array.from({ length: colCount }, (_, i) => `val${i}`)];
 
-      const formatted = formatMd(headers, rows);
-      const parsed = parseMd(formatted);
+      const formatted = formatMarkdown(headers, rows);
+      const parsed = parseMarkdown(formatted);
 
       expect(parsed.headers).toHaveLength(colCount);
       expect(parsed.rows[0]).toHaveLength(colCount);
@@ -770,7 +770,7 @@ describe("formatMd", () => {
 
   describe("CJK/Unicode display width", () => {
     it("should account for CJK character width in padding", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Name", "\u540d\u524d"],
         [
           ["Alice", "\u592a\u90ce"],
@@ -788,7 +788,7 @@ describe("formatMd", () => {
     });
 
     it("should handle emoji display width", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Icon", "Name"],
         [
           ["\ud83d\ude00", "Smile"],
@@ -797,13 +797,13 @@ describe("formatMd", () => {
       );
 
       // Should not throw and produce valid output
-      const parsed = parseMd(result);
+      const parsed = parseMarkdown(result);
       expect(parsed.headers).toEqual(["Icon", "Name"]);
       expect(parsed.rows[0]).toEqual(["\ud83d\ude00", "Smile"]);
     });
 
     it("should handle fullwidth characters in padding", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Normal", "Full"],
         [["abc", "\uff21\uff22\uff23"]] // Ａ Ｂ Ｃ (fullwidth)
       );
@@ -817,7 +817,7 @@ describe("formatMd", () => {
 
   describe("compact mode separator alignment", () => {
     it("should produce consistent separator width in compact mode", () => {
-      const result = formatMd(
+      const result = formatMarkdown(
         ["Name", "Age"],
         [
           ["Alice", "30"],
@@ -849,10 +849,10 @@ describe("Workbook Markdown integration", () => {
     workbook = new Workbook();
   });
 
-  describe("readMd", () => {
+  describe("readMarkdown", () => {
     it("should create a worksheet from Markdown table", () => {
       const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
-      const ws = workbook.readMd(md);
+      const ws = workbook.readMarkdown(md);
 
       expect(ws).toBeDefined();
       expect(ws.name).toBeDefined();
@@ -861,7 +861,7 @@ describe("Workbook Markdown integration", () => {
 
     it("should set header row correctly", () => {
       const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMd(md);
+      const ws = workbook.readMarkdown(md);
 
       const headerRow = ws.getRow(1);
       expect(headerRow.getCell(1).value).toBe("Name");
@@ -870,7 +870,7 @@ describe("Workbook Markdown integration", () => {
 
     it("should set data rows correctly", () => {
       const md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMd(md);
+      const ws = workbook.readMarkdown(md);
 
       const dataRow = ws.getRow(2);
       expect(dataRow.getCell(1).value).toBe("Alice");
@@ -879,13 +879,13 @@ describe("Workbook Markdown integration", () => {
 
     it("should use custom sheet name", () => {
       const md = "| A |\n| --- |\n| 1 |";
-      const ws = workbook.readMd(md, { sheetName: "MyData" });
+      const ws = workbook.readMarkdown(md, { sheetName: "MyData" });
       expect(ws.name).toBe("MyData");
     });
 
     it("should apply custom value mapper", () => {
       const md = "| Value |\n| --- |\n| 42 |\n| hello |";
-      const ws = workbook.readMd(md, {
+      const ws = workbook.readMarkdown(md, {
         map: (v, _col) => {
           const num = Number(v);
           return Number.isNaN(num) ? v : num;
@@ -897,7 +897,7 @@ describe("Workbook Markdown integration", () => {
     });
   });
 
-  describe("readMdAll", () => {
+  describe("readMarkdownAll", () => {
     it("should create multiple worksheets from a multi-table document", () => {
       const md = [
         "# Section 1",
@@ -913,7 +913,7 @@ describe("Workbook Markdown integration", () => {
         "| 3 | 4 |"
       ].join("\n");
 
-      const sheets = workbook.readMdAll(md);
+      const sheets = workbook.readMarkdownAll(md);
 
       expect(sheets).toHaveLength(2);
       expect(sheets[0].getRow(1).getCell(1).value).toBe("A");
@@ -923,13 +923,13 @@ describe("Workbook Markdown integration", () => {
     });
 
     it("should return empty array for document with no tables", () => {
-      const sheets = workbook.readMdAll("just some text\nno tables here");
+      const sheets = workbook.readMarkdownAll("just some text\nno tables here");
       expect(sheets).toEqual([]);
     });
 
     it("should use sheetName as prefix for worksheet names", () => {
       const md = "| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |";
-      const sheets = workbook.readMdAll(md, { sheetName: "Data" });
+      const sheets = workbook.readMarkdownAll(md, { sheetName: "Data" });
 
       expect(sheets).toHaveLength(2);
       expect(sheets[0].name).toBe("Data");
@@ -938,7 +938,7 @@ describe("Workbook Markdown integration", () => {
 
     it("should apply value mapper to all tables", () => {
       const md = "| V |\n| --- |\n| 10 |\n\n| V |\n| --- |\n| 20 |";
-      const sheets = workbook.readMdAll(md, {
+      const sheets = workbook.readMarkdownAll(md, {
         map: v => {
           const n = Number(v);
           return Number.isNaN(n) ? v : n;
@@ -951,24 +951,24 @@ describe("Workbook Markdown integration", () => {
 
     it("should preserve alignments on each worksheet", () => {
       const md = "| L |\n| :--- |\n| a |\n\n| R |\n| ---: |\n| b |";
-      const sheets = workbook.readMdAll(md);
+      const sheets = workbook.readMarkdownAll(md);
 
-      expect((sheets[0] as any)._mdAlignments).toEqual(["left"]);
-      expect((sheets[1] as any)._mdAlignments).toEqual(["right"]);
+      expect((sheets[0] as any)._markdownAlignments).toEqual(["left"]);
+      expect((sheets[1] as any)._markdownAlignments).toEqual(["right"]);
     });
 
     it("should apply convertBr across all tables", () => {
       const md = "| N |\n| --- |\n| A<br>B |\n\n| N |\n| --- |\n| C<br>D |";
-      const sheets = workbook.readMdAll(md, { convertBr: true });
+      const sheets = workbook.readMarkdownAll(md, { convertBr: true });
 
       expect(sheets[0].getRow(2).getCell(1).value).toBe("A\nB");
       expect(sheets[1].getRow(2).getCell(1).value).toBe("C\nD");
     });
   });
 
-  describe("writeMd", () => {
+  describe("writeMarkdown", () => {
     it("should write empty string for empty workbook", () => {
-      const result = workbook.writeMd();
+      const result = workbook.writeMarkdown();
       expect(result).toBe("");
     });
 
@@ -978,7 +978,7 @@ describe("Workbook Markdown integration", () => {
       ws.addRow(["Alice", 30]);
       ws.addRow(["Bob", 25]);
 
-      const result = workbook.writeMd();
+      const result = workbook.writeMarkdown();
       expect(result).toContain("| Name");
       expect(result).toContain("---");
       expect(result).toContain("Alice");
@@ -990,7 +990,7 @@ describe("Workbook Markdown integration", () => {
       ws2.addRow(["Specific"]);
       ws2.addRow(["Data"]);
 
-      const result = workbook.writeMd({ sheetName: "Sheet2" });
+      const result = workbook.writeMarkdown({ sheetName: "Sheet2" });
       expect(result).toContain("Specific");
     });
 
@@ -999,7 +999,7 @@ describe("Workbook Markdown integration", () => {
       ws.addRow(["A", "B"]);
       ws.addRow([null, undefined]);
 
-      const result = workbook.writeMd();
+      const result = workbook.writeMarkdown();
       expect(result).toBeDefined();
       // Should not throw
     });
@@ -1012,9 +1012,9 @@ describe("Workbook Markdown integration", () => {
       row.getCell(1).value = "x";
       row.getCell(3).value = "z";
 
-      const result = workbook.writeMd({ sheetName: "Sparse" });
+      const result = workbook.writeMarkdown({ sheetName: "Sparse" });
       expect(result).toBeDefined();
-      const parsed = parseMd(result);
+      const parsed = parseMarkdown(result);
       expect(parsed.headers).toEqual(["A", "B", "C"]);
       expect(parsed.rows[0][0]).toBe("x");
       expect(parsed.rows[0][1]).toBe(""); // sparse gap → empty
@@ -1022,13 +1022,13 @@ describe("Workbook Markdown integration", () => {
     });
   });
 
-  describe("writeMdBuffer", () => {
+  describe("writeMarkdownBuffer", () => {
     it("should return a Uint8Array", () => {
       const ws = workbook.addWorksheet("Test");
       ws.addRow(["Name"]);
       ws.addRow(["Alice"]);
 
-      const buffer = workbook.writeMdBuffer();
+      const buffer = workbook.writeMarkdownBuffer();
       expect(buffer).toBeInstanceOf(Uint8Array);
       expect(buffer.length).toBeGreaterThan(0);
     });
@@ -1038,23 +1038,23 @@ describe("Workbook Markdown integration", () => {
       ws.addRow(["\u540d\u524d"]);
       ws.addRow(["\u592a\u90ce"]);
 
-      const buffer = workbook.writeMdBuffer();
+      const buffer = workbook.writeMarkdownBuffer();
       const text = new TextDecoder().decode(buffer);
       expect(text).toContain("\u540d\u524d");
       expect(text).toContain("\u592a\u90ce");
     });
   });
 
-  describe("round-trip (readMd -> writeMd)", () => {
+  describe("round-trip (readMarkdown -> writeMarkdown)", () => {
     it("should preserve data through round-trip", () => {
       const original =
         "| Name | Age | City |\n| --- | --- | --- |\n| Alice | 30 | NYC |\n| Bob | 25 | LA |";
 
-      const _ws = workbook.readMd(original);
-      const output = workbook.writeMd();
+      const _ws = workbook.readMarkdown(original);
+      const output = workbook.writeMarkdown();
 
       // Parse the output to verify content
-      const reparsed = parseMd(output);
+      const reparsed = parseMarkdown(output);
       expect(reparsed.headers).toEqual(["Name", "Age", "City"]);
       expect(reparsed.rows).toEqual([
         ["Alice", "30", "NYC"],
@@ -1065,20 +1065,20 @@ describe("Workbook Markdown integration", () => {
     it("should preserve alignment through round-trip", () => {
       const original = "| Left | Center | Right |\n| :--- | :---: | ---: |\n| a | b | c |";
 
-      workbook.readMd(original);
-      const output = workbook.writeMd();
+      workbook.readMarkdown(original);
+      const output = workbook.writeMarkdown();
 
-      const reparsed = parseMd(output);
+      const reparsed = parseMarkdown(output);
       expect(reparsed.alignments).toEqual(["left", "center", "right"]);
     });
 
     it("should handle escaped content through round-trip", () => {
       const original = "| Formula |\n| --- |\n| a \\| b |";
 
-      workbook.readMd(original);
-      const output = workbook.writeMd();
+      workbook.readMarkdown(original);
+      const output = workbook.writeMarkdown();
 
-      const reparsed = parseMd(output);
+      const reparsed = parseMarkdown(output);
       expect(reparsed.rows[0][0]).toBe("a | b");
     });
 
@@ -1088,23 +1088,23 @@ describe("Workbook Markdown integration", () => {
       ws.addRow(["Note"]);
       ws.addRow(["Line1\nLine2"]);
 
-      const md = workbook.writeMd({ sheetName: "Multi" });
+      const md = workbook.writeMarkdown({ sheetName: "Multi" });
       // The formatter should convert \n to <br>
       expect(md).toContain("<br>");
 
       // Parse back with convertBr to restore the newline
       const wb2 = new Workbook();
-      const ws2 = wb2.readMd(md, { convertBr: true });
+      const ws2 = wb2.readMarkdown(md, { convertBr: true });
       expect(ws2.getRow(2).getCell(1).value).toBe("Line1\nLine2");
     });
   });
 
-  describe("readMdFile / writeMdFile browser stubs", () => {
-    it("readMdFile should throw in browser context simulation", async () => {
+  describe("readMarkdownFile / writeMarkdownFile browser stubs", () => {
+    it("readMarkdownFile should throw in browser context simulation", async () => {
       // The base class (browser) throws ExcelNotSupportedError.
       // In Node.js test environment, the Node override will actually try to read the file.
-      // We test that readMdFile with non-existent file throws.
-      await expect(workbook.readMdFile("/nonexistent/path.md")).rejects.toThrow();
+      // We test that readMarkdownFile with non-existent file throws.
+      await expect(workbook.readMarkdownFile("/nonexistent/path.md")).rejects.toThrow();
     });
   });
 });
@@ -1113,18 +1113,18 @@ describe("Workbook Markdown integration", () => {
 // Error class tests
 // =============================================================================
 
-describe("MdError classes", () => {
-  it("MdParseError should have line number", () => {
-    const error = new MdParseError("test error", 42);
+describe("MarkdownError classes", () => {
+  it("MarkdownParseError should have line number", () => {
+    const error = new MarkdownParseError("test error", 42);
     expect(error.line).toBe(42);
     expect(error.message).toContain("42");
     expect(error.message).toContain("test error");
-    expect(error.name).toBe("MdParseError");
+    expect(error.name).toBe("MarkdownParseError");
   });
 
-  it("MdParseError should support error cause", () => {
+  it("MarkdownParseError should support error cause", () => {
     const cause = new Error("original");
-    const error = new MdParseError("wrapped", 1, { cause });
+    const error = new MarkdownParseError("wrapped", 1, { cause });
     expect(error.cause).toBe(cause);
   });
 });

@@ -13,16 +13,16 @@
  *
  * @example
  * ```ts
- * const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+ * const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
  * // result.headers = ["Name", "Age"]
  * // result.rows = [["Alice", "30"]]
  * // result.alignments = ["none", "none"]
  * ```
  */
 
-import type { MdAlignment, MdParseOptions, MdParseResult } from "../types";
+import type { MarkdownAlignment, MarkdownParseOptions, MarkdownParseResult } from "../types";
 import { BR_TAG_REGEX, LINEBREAK_REGEX, UNESCAPE_REGEX } from "../constants";
-import { MdParseError } from "../errors";
+import { MarkdownParseError } from "../errors";
 
 // =============================================================================
 // Character Codes (avoid repeated charCodeAt comparisons with magic numbers)
@@ -36,7 +36,7 @@ const CH_SPACE = 0x20; // space
 const CH_TAB = 0x09; // tab
 
 // =============================================================================
-// Resolved Options (shared between parseMd and parseMdAll)
+// Resolved Options (shared between parseMarkdown and parseMarkdownAll)
 // =============================================================================
 
 /** Internal resolved options — avoids re-destructuring in every call. */
@@ -48,7 +48,7 @@ interface ResolvedParseOpts {
   readonly convertBr: boolean;
 }
 
-function resolveParseOpts(options: MdParseOptions): ResolvedParseOpts {
+function resolveParseOpts(options: MarkdownParseOptions): ResolvedParseOpts {
   return {
     trim: options.trim !== false,
     unescape: options.unescape !== false,
@@ -151,7 +151,7 @@ function splitRow(line: string): string[] {
  * - `---:`  → right
  * - `---`   → none
  */
-function parseAlignment(cell: string): MdAlignment {
+function parseAlignment(cell: string): MarkdownAlignment {
   const trimmed = cell.trim();
   const tLen = trimmed.length;
   if (tLen === 0) {
@@ -308,7 +308,7 @@ function hasDash(line: string): boolean {
 }
 
 // =============================================================================
-// Core Table Parser (shared between parseMd and parseMdAll)
+// Core Table Parser (shared between parseMarkdown and parseMarkdownAll)
 // =============================================================================
 
 /**
@@ -321,7 +321,7 @@ function parseTableAt(
   startLine: number,
   lineCount: number,
   opts: ResolvedParseOpts
-): { result: MdParseResult; endLine: number } | null {
+): { result: MarkdownParseResult; endLine: number } | null {
   if (startLine >= lineCount - 1) {
     return null;
   }
@@ -353,7 +353,7 @@ function parseTableAt(
   // Valid table found — extract headers and alignments
   const columnCount = headerCells.length;
   const headers: string[] = new Array(columnCount);
-  const alignments: MdAlignment[] = new Array(columnCount);
+  const alignments: MarkdownAlignment[] = new Array(columnCount);
 
   for (let c = 0; c < columnCount; c++) {
     headers[c] = processCell(headerCells[c], opts);
@@ -384,7 +384,7 @@ function parseTableAt(
 
     // Check maxRows limit
     if (opts.maxRows !== undefined && rows.length >= opts.maxRows) {
-      // Skip remaining table rows for parseMdAll to correctly advance
+      // Skip remaining table rows for parseMarkdownAll to correctly advance
       while (j < lineCount) {
         const remaining = lines[j].trim();
         if (remaining === "" || !isTableLine(remaining)) {
@@ -429,25 +429,25 @@ function parseTableAt(
  * @param options - Parse options
  * @returns Parsed table data with headers, rows, and alignments
  *
- * @throws {MdParseError} When no valid table is found in the input
+ * @throws {MarkdownParseError} When no valid table is found in the input
  *
  * @example
  * ```ts
  * // Basic table
- * const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+ * const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
  *
  * // With alignment
- * const result = parseMd("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
+ * const result = parseMarkdown("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
  * // result.alignments = ["left", "center", "right"]
  *
  * // From a larger Markdown document
- * const result = parseMd(markdownDoc); // Finds the first table
+ * const result = parseMarkdown(markdownDoc); // Finds the first table
  *
  * // With options
- * const result = parseMd(input, { trim: false, maxRows: 100 });
+ * const result = parseMarkdown(input, { trim: false, maxRows: 100 });
  * ```
  */
-export function parseMd(input: string, options: MdParseOptions = {}): MdParseResult {
+export function parseMarkdown(input: string, options: MarkdownParseOptions = {}): MarkdownParseResult {
   const opts = resolveParseOpts(options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
@@ -459,7 +459,7 @@ export function parseMd(input: string, options: MdParseOptions = {}): MdParseRes
     }
   }
 
-  throw new MdParseError("No valid Markdown table found in input", lineCount > 0 ? lineCount : 1);
+  throw new MarkdownParseError("No valid Markdown table found in input", lineCount > 0 ? lineCount : 1);
 }
 
 /**
@@ -471,16 +471,16 @@ export function parseMd(input: string, options: MdParseOptions = {}): MdParseRes
  *
  * @example
  * ```ts
- * const tables = parseMdAll(markdownDoc);
+ * const tables = parseMarkdownAll(markdownDoc);
  * console.log(`Found ${tables.length} tables`);
  * tables.forEach((t, i) => console.log(`Table ${i}: ${t.headers.join(", ")}`));
  * ```
  */
-export function parseMdAll(input: string, options: MdParseOptions = {}): MdParseResult[] {
+export function parseMarkdownAll(input: string, options: MarkdownParseOptions = {}): MarkdownParseResult[] {
   const opts = resolveParseOpts(options);
   const lines = input.split(LINEBREAK_REGEX);
   const lineCount = lines.length;
-  const tables: MdParseResult[] = [];
+  const tables: MarkdownParseResult[] = [];
   let i = 0;
 
   while (i < lineCount - 1) {

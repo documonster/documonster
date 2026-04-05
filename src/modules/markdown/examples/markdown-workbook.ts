@@ -3,17 +3,17 @@
  *
  * Covers:
  * - format → parse → format round-trip fidelity
- * - Workbook.readMd / writeMd
- * - Workbook.readMdAll (multi-table → worksheets)
- * - Workbook.writeMdBuffer
- * - Value mapper on readMd
+ * - Workbook.readMarkdown / writeMarkdown
+ * - Workbook.readMarkdownAll (multi-table → worksheets)
+ * - Workbook.writeMarkdownBuffer
+ * - Value mapper on readMarkdown
  * - Multiline round-trip through Workbook
- * - Error handling with MdParseError
+ * - Error handling with MarkdownParseError
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseMd, formatMd, MdParseError } from "../index";
+import { parseMarkdown, formatMarkdown, MarkdownParseError } from "../index";
 import { Workbook } from "../../excel/workbook";
 
 const outDir = path.resolve(
@@ -34,7 +34,7 @@ const rows: string[][] = [
   ["Bob", "x > y", "D:\\Data"]
 ];
 
-const md1 = formatMd(headers, rows, {
+const md1 = formatMarkdown(headers, rows, {
   columns: [
     { header: "Name", alignment: "left" },
     { header: "Formula", alignment: "center" },
@@ -44,8 +44,8 @@ const md1 = formatMd(headers, rows, {
 console.log("Formatted:");
 console.log(md1);
 
-const parsed = parseMd(md1);
-const md2 = formatMd(parsed.headers, parsed.rows, {
+const parsed = parseMarkdown(md1);
+const md2 = formatMarkdown(parsed.headers, parsed.rows, {
   columns: parsed.headers.map((h, i) => ({
     header: h,
     alignment: parsed.alignments[i]
@@ -57,10 +57,10 @@ fs.writeFileSync(path.join(outDir, "round-trip.md"), md1, "utf8");
 console.log();
 
 // =============================================================================
-// 2. Workbook.readMd / writeMd
+// 2. Workbook.readMarkdown / writeMarkdown
 // =============================================================================
 
-console.log("=== 2. Workbook readMd / writeMd ===\n");
+console.log("=== 2. Workbook readMarkdown / writeMarkdown ===\n");
 
 const mdInput = `
 | Name  | Age | Department  |
@@ -71,7 +71,7 @@ const mdInput = `
 `.trim();
 
 const wb1 = new Workbook();
-const ws = wb1.readMd(mdInput, { sheetName: "Employees" });
+const ws = wb1.readMarkdown(mdInput, { sheetName: "Employees" });
 
 console.log("Sheet:", ws.name, "| Rows:", ws.rowCount);
 for (let r = 1; r <= ws.rowCount; r++) {
@@ -81,16 +81,16 @@ for (let r = 1; r <= ws.rowCount; r++) {
   );
 }
 
-const mdOut = wb1.writeMd({ sheetName: "Employees" });
+const mdOut = wb1.writeMarkdown({ sheetName: "Employees" });
 console.log("\nWritten back:");
 console.log(mdOut);
 fs.writeFileSync(path.join(outDir, "workbook-single.md"), mdOut, "utf8");
 
 // =============================================================================
-// 3. Workbook.readMdAll
+// 3. Workbook.readMarkdownAll
 // =============================================================================
 
-console.log("=== 3. readMdAll ===\n");
+console.log("=== 3. readMarkdownAll ===\n");
 
 const multiDoc = `
 # Q1 Report
@@ -112,12 +112,12 @@ const multiDoc = `
 `.trim();
 
 const wb2 = new Workbook();
-const sheets = wb2.readMdAll(multiDoc, { sheetName: "Q1" });
+const sheets = wb2.readMarkdownAll(multiDoc, { sheetName: "Q1" });
 
 console.log(`Created ${sheets.length} worksheets:`);
 const allMd: string[] = [];
 for (const s of sheets) {
-  const md = wb2.writeMd({ sheetName: s.name });
+  const md = wb2.writeMarkdown({ sheetName: s.name });
   console.log(`\n--- ${s.name} ---`);
   console.log(md);
   allMd.push(`## ${s.name}\n\n${md}`);
@@ -129,11 +129,11 @@ fs.writeFileSync(
 );
 
 // =============================================================================
-// 4. writeMdBuffer
+// 4. writeMarkdownBuffer
 // =============================================================================
 
-console.log("=== 4. writeMdBuffer ===\n");
-const buffer = wb2.writeMdBuffer({ sheetName: "Q1" });
+console.log("=== 4. writeMarkdownBuffer ===\n");
+const buffer = wb2.writeMarkdownBuffer({ sheetName: "Q1" });
 console.log(`Buffer: ${buffer.length} bytes`);
 fs.writeFileSync(path.join(outDir, "workbook-buffer.md"), buffer);
 console.log();
@@ -145,7 +145,7 @@ console.log();
 console.log("=== 5. Value Mapper ===\n");
 
 const wb3 = new Workbook();
-const ws3 = wb3.readMd(mdInput, {
+const ws3 = wb3.readMarkdown(mdInput, {
   sheetName: "Typed",
   map: (value: string, _col: number) => {
     const n = Number(value);
@@ -168,12 +168,12 @@ ws4.addRow(["Name", "Address"]);
 ws4.addRow(["Alice", "123 Main St\nApt 4\nNew York"]);
 ws4.addRow(["Bob", "456 Oak Ave\nLondon"]);
 
-const mdMultiline = wb4.writeMd({ sheetName: "Notes" });
+const mdMultiline = wb4.writeMarkdown({ sheetName: "Notes" });
 console.log("Written:");
 console.log(mdMultiline);
 
 const wb5 = new Workbook();
-const ws5 = wb5.readMd(mdMultiline, { sheetName: "Notes", convertBr: true });
+const ws5 = wb5.readMarkdown(mdMultiline, { sheetName: "Notes", convertBr: true });
 console.log("Parsed back (address):", JSON.stringify(ws5.getRow(2).getCell(2).value));
 fs.writeFileSync(path.join(outDir, "multiline-workbook.md"), mdMultiline, "utf8");
 console.log();
@@ -185,10 +185,10 @@ console.log();
 console.log("=== 7. Error Handling ===\n");
 
 try {
-  parseMd("no table here");
+  parseMarkdown("no table here");
 } catch (e) {
-  if (e instanceof MdParseError) {
-    console.log("MdParseError:", e.message);
+  if (e instanceof MarkdownParseError) {
+    console.log("MarkdownParseError:", e.message);
     console.log("  line:", e.line);
   }
 }
@@ -202,22 +202,22 @@ console.log();
 console.log("=== 8. File I/O ===\n");
 
 const wb6 = new Workbook();
-wb6.readMd("| X | Y |\n| - | - |\n| 1 | 2 |", { sheetName: "Data" });
+wb6.readMarkdown("| X | Y |\n| - | - |\n| 1 | 2 |", { sheetName: "Data" });
 const outFile = path.join(outDir, "file-io-output.md");
-await wb6.writeMdFile(outFile, { sheetName: "Data" });
+await wb6.writeMarkdownFile(outFile, { sheetName: "Data" });
 console.log("Wrote:", outFile);
 
 const wb7 = new Workbook();
-await wb7.readMdFile(outFile, { sheetName: "FromFile" });
+await wb7.readMarkdownFile(outFile, { sheetName: "FromFile" });
 console.log("Read back:", wb7.getWorksheet("FromFile")?.getRow(2).getCell(1).value);
 
-// readMdAllFile
+// readMarkdownAllFile
 const multiFile = path.join(outDir, "multi-input.md");
 fs.writeFileSync(multiFile, multiDoc, "utf8");
 const wb8 = new Workbook();
-const allSheets = await wb8.readMdAllFile(multiFile, { sheetName: "Sheet" });
+const allSheets = await wb8.readMarkdownAllFile(multiFile, { sheetName: "Sheet" });
 console.log(
-  `readMdAllFile: ${allSheets.length} worksheets → ${allSheets.map(s => s.name).join(", ")}`
+  `readMarkdownAllFile: ${allSheets.length} worksheets → ${allSheets.map(s => s.name).join(", ")}`
 );
 
 console.log("\nAll output files written to:", outDir);

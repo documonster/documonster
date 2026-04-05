@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatMd } from "../index";
+import { formatMarkdown } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,7 +28,7 @@ const sections: string[] = [];
 // 1. Basic padded table
 // =============================================================================
 
-const table1 = formatMd(
+const table1 = formatMarkdown(
   ["Name", "Age", "City"],
   [
     ["Alice", "30", "New York"],
@@ -44,7 +44,7 @@ console.log(table1);
 // 2. Compact mode
 // =============================================================================
 
-const table2 = formatMd(
+const table2 = formatMarkdown(
   ["Name", "Age"],
   [
     ["Alice", "30"],
@@ -60,7 +60,7 @@ console.log(table2);
 // 3. Alignment
 // =============================================================================
 
-const table3 = formatMd(
+const table3 = formatMarkdown(
   ["Name", "Amount", "Status"],
   [
     ["Alice", "$1,234.56", "Active"],
@@ -83,7 +83,7 @@ console.log(table3);
 // 4. MinWidth + header rename
 // =============================================================================
 
-const table4 = formatMd(
+const table4 = formatMarkdown(
   ["id", "x"],
   [
     ["1", "a"],
@@ -104,7 +104,7 @@ console.log(table4);
 // 5. Custom stringify
 // =============================================================================
 
-const table5 = formatMd(
+const table5 = formatMarkdown(
   ["Item", "Price", "Qty"],
   [
     ["Widget", 9.99, 100],
@@ -127,7 +127,7 @@ console.log(table5);
 // 6. Auto-escaping
 // =============================================================================
 
-const table6 = formatMd(
+const table6 = formatMarkdown(
   ["Expression", "Path"],
   [
     ["a | b", "C:\\Users\\Alice"],
@@ -142,7 +142,7 @@ console.log(table6);
 // 7. Multiline cells
 // =============================================================================
 
-const table7 = formatMd(
+const table7 = formatMarkdown(
   ["Name", "Address"],
   [
     ["Alice", "123 Main St\nApt 4\nNew York"],
@@ -157,7 +157,7 @@ console.log(table7);
 // 8. CJK / Emoji width
 // =============================================================================
 
-const table8 = formatMd(
+const table8 = formatMarkdown(
   ["Name", "名前", "Status"],
   [
     ["Alice", "アリス", "✅ Pass"],
@@ -172,7 +172,7 @@ console.log(table8);
 // 9. Mixed types
 // =============================================================================
 
-const table9 = formatMd(
+const table9 = formatMarkdown(
   ["Name", "Age", "Active", "Score", "Joined"],
   [
     ["Alice", 30, true, 95.5, new Date("2024-01-15")],

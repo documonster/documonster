@@ -14,7 +14,7 @@ import {
 import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
 import { ExcelFileError } from "@excel/errors";
 import type { Worksheet } from "@excel/worksheet";
-import type { MdOptions } from "@md/types";
+import type { MarkdownOptions } from "@markdown/types";
 
 // =============================================================================
 // Node.js Workbook Class
@@ -80,17 +80,17 @@ class Workbook extends WorkbookBrowser {
    *
    * @example
    * ```ts
-   * await workbook.readMdFile("table.md");
-   * await workbook.readMdFile("table.md", { sheetName: "Data" });
+   * await workbook.readMarkdownFile("table.md");
+   * await workbook.readMarkdownFile("table.md", { sheetName: "Data" });
    * ```
    */
-  override async readMdFile(filename: string, options?: MdOptions): Promise<Worksheet> {
+  override async readMarkdownFile(filename: string, options?: MarkdownOptions): Promise<Worksheet> {
     if (!(await fileExists(filename))) {
       throw new ExcelFileError(filename, "read", "file not found");
     }
 
     const content = await readFileText(filename);
-    return this.readMd(content, options);
+    return this.readMarkdown(content, options);
   }
 
   /**
@@ -98,17 +98,17 @@ class Workbook extends WorkbookBrowser {
    *
    * @example
    * ```ts
-   * await workbook.readMdAllFile("doc.md");
-   * await workbook.readMdAllFile("doc.md", { sheetName: "Table" });
+   * await workbook.readMarkdownAllFile("doc.md");
+   * await workbook.readMarkdownAllFile("doc.md", { sheetName: "Table" });
    * ```
    */
-  override async readMdAllFile(filename: string, options?: MdOptions): Promise<Worksheet[]> {
+  override async readMarkdownAllFile(filename: string, options?: MarkdownOptions): Promise<Worksheet[]> {
     if (!(await fileExists(filename))) {
       throw new ExcelFileError(filename, "read", "file not found");
     }
 
     const content = await readFileText(filename);
-    return this.readMdAll(content, options);
+    return this.readMarkdownAll(content, options);
   }
 
   /**
@@ -116,12 +116,12 @@ class Workbook extends WorkbookBrowser {
    *
    * @example
    * ```ts
-   * await workbook.writeMdFile("output.md");
-   * await workbook.writeMdFile("output.md", { sheetName: "Data", padding: true });
+   * await workbook.writeMarkdownFile("output.md");
+   * await workbook.writeMarkdownFile("output.md", { sheetName: "Data", padding: true });
    * ```
    */
-  override async writeMdFile(filename: string, options?: MdOptions): Promise<void> {
-    const mdString = this.writeMd(options);
+  override async writeMarkdownFile(filename: string, options?: MarkdownOptions): Promise<void> {
+    const mdString = this.writeMarkdown(options);
     await writeFileText(filename, mdString);
   }
 }

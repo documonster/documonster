@@ -21,9 +21,9 @@ import { formatCsv } from "@csv/format";
 import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
-import { parseMd, parseMdAll } from "@md/parse/index";
-import { formatMd } from "@md/format/index";
-import type { MdOptions, MdAlignment, MdParseResult } from "@md/types";
+import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
+import { formatMarkdown } from "@markdown/format/index";
+import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
 import { pipeline } from "@stream";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
@@ -307,7 +307,7 @@ function createDefaultWriteMapper(dateFormat?: string, dateUTC?: boolean) {
  * Create a stringify function for Markdown output.
  * Handles hyperlinks, formulas, rich text, dates, errors, and objects.
  */
-function createMdStringify(dateFormat?: string, dateUTC?: boolean): (value: unknown) => string {
+function createMarkdownStringify(dateFormat?: string, dateUTC?: boolean): (value: unknown) => string {
   const formatter = dateFormat
     ? DateFormatter.create(dateFormat, { utc: dateUTC })
     : DateFormatter.iso(dateUTC);
@@ -949,15 +949,15 @@ class Workbook {
 
   /**
    * Populate a worksheet from a parsed Markdown table result.
-   * Shared by readMd and readMdAll.
+   * Shared by readMarkdown and readMarkdownAll.
    */
-  private _populateMdWorksheet(
+  private _populateMarkdownWorksheet(
     worksheet: Worksheet,
-    result: MdParseResult,
+    result: MarkdownParseResult,
     map?: (value: string, column: number) => unknown
   ): void {
     worksheet.addRow(result.headers);
-    (worksheet as any)._mdAlignments = result.alignments;
+    (worksheet as any)._markdownAlignments = result.alignments;
     for (const row of result.rows) {
       if (map) {
         worksheet.addRow(row.map((v, i) => map(v, i)));
@@ -973,14 +973,14 @@ class Workbook {
    * @example
    * ```ts
    * // From a Markdown string
-   * workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+   * workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
    *
    * // With options
-   * workbook.readMd(mdString, { sheetName: "Data", map: (v, col) => Number(v) || v });
+   * workbook.readMarkdown(mdString, { sheetName: "Data", map: (v, col) => Number(v) || v });
    * ```
    */
-  readMd(input: string, options?: MdOptions): Worksheet {
-    const parseResult = parseMd(input, {
+  readMarkdown(input: string, options?: MarkdownOptions): Worksheet {
+    const parseResult = parseMarkdown(input, {
       trim: options?.trim,
       unescape: options?.unescape,
       skipEmptyRows: options?.skipEmptyRows,
@@ -989,7 +989,7 @@ class Workbook {
     });
 
     const worksheet = this.addWorksheet(options?.sheetName);
-    this._populateMdWorksheet(worksheet, parseResult, options?.map);
+    this._populateMarkdownWorksheet(worksheet, parseResult, options?.map);
     return worksheet;
   }
 
@@ -1003,16 +1003,16 @@ class Workbook {
    * @example
    * ```ts
    * // Parse a document with multiple tables
-   * const sheets = workbook.readMdAll(markdownDoc);
+   * const sheets = workbook.readMarkdownAll(markdownDoc);
    * console.log(`Created ${sheets.length} worksheets`);
    *
    * // With a naming prefix
-   * const sheets = workbook.readMdAll(markdownDoc, { sheetName: "Table" });
+   * const sheets = workbook.readMarkdownAll(markdownDoc, { sheetName: "Table" });
    * // Creates "Table", "Table_2", "Table_3", ...
    * ```
    */
-  readMdAll(input: string, options?: MdOptions): Worksheet[] {
-    const parseResults = parseMdAll(input, {
+  readMarkdownAll(input: string, options?: MarkdownOptions): Worksheet[] {
+    const parseResults = parseMarkdownAll(input, {
       trim: options?.trim,
       unescape: options?.unescape,
       skipEmptyRows: options?.skipEmptyRows,
@@ -1027,7 +1027,7 @@ class Workbook {
     for (let t = 0; t < parseResults.length; t++) {
       const name = baseName ? (t === 0 ? baseName : `${baseName}_${t + 1}`) : undefined;
       const worksheet = this.addWorksheet(name);
-      this._populateMdWorksheet(worksheet, parseResults[t], map);
+      this._populateMarkdownWorksheet(worksheet, parseResults[t], map);
       worksheets.push(worksheet);
     }
 
@@ -1040,13 +1040,13 @@ class Workbook {
    * @example
    * ```ts
    * // Write first worksheet
-   * const md = workbook.writeMd();
+   * const md = workbook.writeMarkdown();
    *
    * // Write specific worksheet with options
-   * const md = workbook.writeMd({ sheetName: "Data", padding: true });
+   * const md = workbook.writeMarkdown({ sheetName: "Data", padding: true });
    * ```
    */
-  writeMd(options?: MdOptions): string {
+  writeMarkdown(options?: MarkdownOptions): string {
     const worksheet = this.getWorksheet(options?.sheetName || options?.sheetId);
     if (!worksheet) {
       return "";
@@ -1057,7 +1057,7 @@ class Workbook {
     const includeEmptyRows = options?.includeEmptyRows !== false;
 
     // Build stringify function
-    const stringify = options?.stringify ?? createMdStringify(dateFormat, dateUTC);
+    const stringify = options?.stringify ?? createMarkdownStringify(dateFormat, dateUTC);
 
     // Collect all rows from worksheet
     const allRows: unknown[][] = [];
@@ -1085,12 +1085,12 @@ class Workbook {
     const headers: string[] = headerRow.map(v => stringify(v));
     const dataRows = allRows.slice(1);
 
-    // Check for stored alignments from a previous readMd
-    const storedAlignments: MdAlignment[] | undefined = (worksheet as any)._mdAlignments;
+    // Check for stored alignments from a previous readMarkdown
+    const storedAlignments: MarkdownAlignment[] | undefined = (worksheet as any)._markdownAlignments;
 
     // Build column configs
     const columns = options?.columns;
-    let resolvedColumns: { header: string; alignment?: MdAlignment }[] | undefined;
+    let resolvedColumns: { header: string; alignment?: MarkdownAlignment }[] | undefined;
 
     if (!columns && storedAlignments) {
       // Use stored alignments from parsed Markdown
@@ -1100,7 +1100,7 @@ class Workbook {
       }));
     }
 
-    return formatMd(headers, dataRows, {
+    return formatMarkdown(headers, dataRows, {
       columns: resolvedColumns ?? columns,
       alignment: options?.alignment,
       padding: options?.padding,
@@ -1115,41 +1115,41 @@ class Workbook {
    *
    * @example
    * ```ts
-   * const buffer = workbook.writeMdBuffer();
+   * const buffer = workbook.writeMarkdownBuffer();
    * ```
    */
-  writeMdBuffer(options?: MdOptions): Uint8Array {
-    const mdString = this.writeMd(options);
+  writeMarkdownBuffer(options?: MarkdownOptions): Uint8Array {
+    const mdString = this.writeMarkdown(options);
     return new TextEncoder().encode(mdString);
   }
 
   /**
    * Read Markdown from file (Node.js only - throws in browser)
    */
-  async readMdFile(_filename: string, _options?: MdOptions): Promise<Worksheet> {
+  async readMarkdownFile(_filename: string, _options?: MarkdownOptions): Promise<Worksheet> {
     throw new ExcelNotSupportedError(
-      "readMdFile()",
-      "not available in browser. Use readMd(string) instead."
+      "readMarkdownFile()",
+      "not available in browser. Use readMarkdown(string) instead."
     );
   }
 
   /**
    * Read all Markdown tables from file (Node.js only - throws in browser)
    */
-  async readMdAllFile(_filename: string, _options?: MdOptions): Promise<Worksheet[]> {
+  async readMarkdownAllFile(_filename: string, _options?: MarkdownOptions): Promise<Worksheet[]> {
     throw new ExcelNotSupportedError(
-      "readMdAllFile()",
-      "not available in browser. Use readMdAll(string) instead."
+      "readMarkdownAllFile()",
+      "not available in browser. Use readMarkdownAll(string) instead."
     );
   }
 
   /**
    * Write Markdown to file (Node.js only - throws in browser)
    */
-  async writeMdFile(_filename: string, _options?: MdOptions): Promise<void> {
+  async writeMarkdownFile(_filename: string, _options?: MarkdownOptions): Promise<void> {
     throw new ExcelNotSupportedError(
-      "writeMdFile()",
-      "not available in browser. Use writeMd() and trigger a download instead."
+      "writeMarkdownFile()",
+      "not available in browser. Use writeMarkdown() and trigger a download instead."
     );
   }
 

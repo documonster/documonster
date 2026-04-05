@@ -14,14 +14,14 @@
  * @example
  * ```ts
  * // Simple array data with headers
- * formatMd(["Name", "Age"], [["Alice", "30"], ["Bob", "25"]]);
+ * formatMarkdown(["Name", "Age"], [["Alice", "30"], ["Bob", "25"]]);
  * // | Name  | Age |
  * // | ----- | --- |
  * // | Alice | 30  |
  * // | Bob   | 25  |
  *
  * // With alignment
- * formatMd(["Left", "Center", "Right"], data, {
+ * formatMarkdown(["Left", "Center", "Right"], data, {
  *   alignment: "left",
  *   columns: [
  *     { header: "Left", alignment: "left" },
@@ -32,7 +32,7 @@
  * ```
  */
 
-import type { MdAlignment, MdFormatOptions } from "../types";
+import type { MarkdownAlignment, MarkdownFormatOptions } from "../types";
 import { ESCAPE_AND_NEWLINE, NEWLINE_IN_CELL } from "../constants";
 
 // =============================================================================
@@ -155,7 +155,7 @@ function convertNewlines(value: string): string {
  * - right:  `----:`
  * - center: `:---:`
  */
-function buildSeparator(alignment: MdAlignment, width: number): string {
+function buildSeparator(alignment: MarkdownAlignment, width: number): string {
   switch (alignment) {
     case "left":
       return ":" + "-".repeat(width - 1);
@@ -172,7 +172,7 @@ function buildSeparator(alignment: MdAlignment, width: number): string {
  * Pad a cell value to the target display width with alignment.
  * Uses displayWidth() for proper CJK/emoji handling.
  */
-function padCell(value: string, targetWidth: number, alignment: MdAlignment): string {
+function padCell(value: string, targetWidth: number, alignment: MarkdownAlignment): string {
   const len = displayWidth(value);
   if (len >= targetWidth) {
     return value;
@@ -198,12 +198,12 @@ function padCell(value: string, targetWidth: number, alignment: MdAlignment): st
  */
 function resolveColumns(
   headers: string[],
-  options: MdFormatOptions
-): { displayHeaders: string[]; alignments: MdAlignment[]; minWidths: number[] } {
+  options: MarkdownFormatOptions
+): { displayHeaders: string[]; alignments: MarkdownAlignment[]; minWidths: number[] } {
   const columnCount = headers.length;
-  const defaultAlignment: MdAlignment = options.alignment ?? "left";
+  const defaultAlignment: MarkdownAlignment = options.alignment ?? "left";
   const displayHeaders: string[] = new Array(columnCount);
-  const alignments: MdAlignment[] = new Array(columnCount);
+  const alignments: MarkdownAlignment[] = new Array(columnCount);
   const minWidths: number[] = new Array(columnCount);
 
   if (options.columns && options.columns.length > 0) {
@@ -248,7 +248,7 @@ function resolveColumns(
  *
  * @example
  * ```ts
- * formatMd(
+ * formatMarkdown(
  *   ["Name", "Age", "City"],
  *   [
  *     ["Alice", 30, "New York"],
@@ -257,10 +257,10 @@ function resolveColumns(
  * );
  * ```
  */
-export function formatMd(
+export function formatMarkdown(
   headers: string[],
   rows: unknown[][],
-  options: MdFormatOptions = {}
+  options: MarkdownFormatOptions = {}
 ): string {
   const {
     padding = true,

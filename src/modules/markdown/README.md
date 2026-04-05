@@ -5,7 +5,7 @@
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
 ```bash
-import { parseMd, parseMdAll, formatMd } from "@cj-tech-master/excelts/md";
+import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
 ```
 
 ## Features
@@ -18,8 +18,8 @@ import { parseMd, parseMdAll, formatMd } from "@cj-tech-master/excelts/md";
 - **Pipe Escaping** — Handles `\|` and `\\` in both parse and format directions
 - **CJK/Emoji Width** — Built-in display width calculation for proper column alignment
 - **Multiline Cells** — `<br>` tag support for newlines within cells
-- **Multi-Table** — Extract all tables from a Markdown document with `parseMdAll`
-- **Workbook Integration** — `Workbook.readMd()` / `writeMd()` for Excel↔Markdown
+- **Multi-Table** — Extract all tables from a Markdown document with `parseMarkdownAll`
+- **Workbook Integration** — `Workbook.readMarkdown()` / `writeMarkdown()` for Excel↔Markdown
 
 ---
 
@@ -28,28 +28,28 @@ import { parseMd, parseMdAll, formatMd } from "@cj-tech-master/excelts/md";
 ### Parsing
 
 ```typescript
-import { parseMd } from "@cj-tech-master/excelts/md";
+import { parseMarkdown } from "@cj-tech-master/excelts/markdown";
 
-const result = parseMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
 // result.rows = [["Alice", "30"]]
 // result.alignments = ["none", "none"]
 
 // With alignment detection
-const aligned = parseMd("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
+const aligned = parseMarkdown("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
 // aligned.alignments = ["left", "center", "right"]
 
 // From a larger document (finds the first table)
-const doc = parseMd("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
+const doc = parseMarkdown("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 // doc.headers = ["A"], doc.rows = [["1"]]
 ```
 
 ### Formatting
 
 ```typescript
-import { formatMd } from "@cj-tech-master/excelts/md";
+import { formatMarkdown } from "@cj-tech-master/excelts/markdown";
 
-formatMd(
+formatMarkdown(
   ["Name", "Age"],
   [
     ["Alice", "30"],
@@ -62,7 +62,7 @@ formatMd(
 // | Bob   | 25  |
 
 // With alignment
-formatMd(["Left", "Center", "Right"], [["a", "b", "c"]], {
+formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
   columns: [
     { header: "Left", alignment: "left" },
     { header: "Center", alignment: "center" },
@@ -71,7 +71,7 @@ formatMd(["Left", "Center", "Right"], [["a", "b", "c"]], {
 });
 
 // Any value types — auto-stringified
-formatMd(["Name", "Age", "Active"], [["Alice", 30, true]]);
+formatMarkdown(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ```
 
 ### Workbook Integration
@@ -82,46 +82,46 @@ import { Workbook } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 
 // Read Markdown → Worksheet
-const ws = workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const ws = workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 console.log(ws.getRow(2).getCell(1).value); // "Alice"
 
 // Worksheet → Markdown
-const md = workbook.writeMd();
+const md = workbook.writeMarkdown();
 
 // Read all tables from a document
-const sheets = workbook.readMdAll(markdownDoc, { sheetName: "Table" });
+const sheets = workbook.readMarkdownAll(markdownDoc, { sheetName: "Table" });
 // Creates "Table", "Table_2", "Table_3", ...
 
 // File I/O (Node.js only)
-await workbook.readMdFile("data.md");
-await workbook.writeMdFile("output.md");
+await workbook.readMarkdownFile("data.md");
+await workbook.writeMarkdownFile("output.md");
 ```
 
 ---
 
 ## Parsing API
 
-### `parseMd(input, options?)`
+### `parseMarkdown(input, options?)`
 
 Parse the first Markdown table found in the input string.
 
 ```typescript
-parseMd(input: string, options?: MdParseOptions): MdParseResult
+parseMarkdown(input: string, options?: MarkdownParseOptions): MarkdownParseResult
 ```
 
-Throws `MdParseError` if no valid table is found.
+Throws `MarkdownParseError` if no valid table is found.
 
-### `parseMdAll(input, options?)`
+### `parseMarkdownAll(input, options?)`
 
 Parse all Markdown tables from a document.
 
 ```typescript
-parseMdAll(input: string, options?: MdParseOptions): MdParseResult[]
+parseMarkdownAll(input: string, options?: MarkdownParseOptions): MarkdownParseResult[]
 ```
 
 Returns an empty array if no tables are found.
 
-**Parse Options (`MdParseOptions`):**
+**Parse Options (`MarkdownParseOptions`):**
 
 | Option          | Type      | Default | Description                                  |
 | --------------- | --------- | ------- | -------------------------------------------- | ------------ |
@@ -131,13 +131,13 @@ Returns an empty array if no tables are found.
 | `maxRows`       | `number`  | —       | Maximum data rows to parse (excludes header) |
 | `convertBr`     | `boolean` | `false` | Convert `<br>` tags to newline characters    |
 
-**Result (`MdParseResult`):**
+**Result (`MarkdownParseResult`):**
 
 ```typescript
-interface MdParseResult {
+interface MarkdownParseResult {
   headers: string[]; // Column names from header row
   rows: string[][]; // Data rows (each row = array of cell values)
-  alignments: MdAlignment[]; // "left" | "center" | "right" | "none"
+  alignments: MarkdownAlignment[]; // "left" | "center" | "right" | "none"
 }
 ```
 
@@ -145,31 +145,31 @@ interface MdParseResult {
 
 ## Formatting API
 
-### `formatMd(headers, rows, options?)`
+### `formatMarkdown(headers, rows, options?)`
 
 Format data as a Markdown table string.
 
 ```typescript
-formatMd(headers: string[], rows: unknown[][], options?: MdFormatOptions): string
+formatMarkdown(headers: string[], rows: unknown[][], options?: MarkdownFormatOptions): string
 ```
 
-**Format Options (`MdFormatOptions`):**
+**Format Options (`MarkdownFormatOptions`):**
 
 | Option            | Type                           | Default  | Description                               |
 | ----------------- | ------------------------------ | -------- | ----------------------------------------- | ----------------------- |
-| `columns`         | `(string \| MdColumnConfig)[]` | —        | Per-column header and alignment config    |
-| `alignment`       | `MdAlignment`                  | `"left"` | Default alignment for all columns         |
+| `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | Per-column header and alignment config    |
+| `alignment`       | `MarkdownAlignment`                  | `"left"` | Default alignment for all columns         |
 | `padding`         | `boolean`                      | `true`   | Align columns to equal width with padding |
 | `trailingNewline` | `boolean`                      | `true`   | Include trailing newline in output        |
 | `escapeContent`   | `boolean`                      | `true`   | Escape `                                  | `and`\` in cell content |
 | `stringify`       | `(value: unknown) => string`   | built-in | Custom value-to-string converter          |
 
-**Column Config (`MdColumnConfig`):**
+**Column Config (`MarkdownColumnConfig`):**
 
 ```typescript
-interface MdColumnConfig {
+interface MarkdownColumnConfig {
   header: string;
-  alignment?: MdAlignment; // "left" | "center" | "right" | "none"
+  alignment?: MarkdownAlignment; // "left" | "center" | "right" | "none"
   minWidth?: number; // Minimum column width (default: 3)
 }
 ```
@@ -182,13 +182,13 @@ Newlines in cell content are converted to `<br>` tags during formatting, and can
 
 ```typescript
 // Format: newlines become <br>
-formatMd(["Note"], [["Line 1\nLine 2"]]);
+formatMarkdown(["Note"], [["Line 1\nLine 2"]]);
 // | Note           |
 // | -------------- |
 // | Line 1<br>Line 2 |
 
 // Parse: <br> back to newlines
-parseMd(table, { convertBr: true });
+parseMarkdown(table, { convertBr: true });
 // rows[0] = ["Line 1\nLine 2"]
 ```
 
@@ -199,7 +199,7 @@ parseMd(table, { convertBr: true });
 The formatter automatically accounts for CJK characters, fullwidth forms, and emoji when calculating column widths. No external dependencies needed.
 
 ```typescript
-formatMd(["Name", "名前"], [["Alice", "太郎"]]);
+formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
 // | Name  | 名前 |
 // | ----- | ---- |
 // | Alice | 太郎 |
@@ -210,12 +210,12 @@ formatMd(["Name", "名前"], [["Alice", "太郎"]]);
 ## Errors
 
 ```typescript
-import { MdParseError } from "@cj-tech-master/excelts/md";
+import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
 
 try {
-  parseMd("no table here");
+  parseMarkdown("no table here");
 } catch (e) {
-  if (e instanceof MdParseError) {
+  if (e instanceof MarkdownParseError) {
     console.log(e.message); // "Line 1: No valid Markdown table found in input"
     console.log(e.line); // 1
   }
@@ -228,19 +228,19 @@ try {
 
 | Method                          | Platform | Description                      |
 | ------------------------------- | -------- | -------------------------------- |
-| `readMd(input, options?)`       | All      | Parse Markdown table → Worksheet |
-| `readMdAll(input, options?)`    | All      | Parse all tables → Worksheet[]   |
-| `writeMd(options?)`             | All      | Worksheet → Markdown string      |
-| `writeMdBuffer(options?)`       | All      | Worksheet → Uint8Array (UTF-8)   |
-| `readMdFile(path, options?)`    | Node.js  | Read from file                   |
-| `readMdAllFile(path, options?)` | Node.js  | Read all tables from file        |
-| `writeMdFile(path, options?)`   | Node.js  | Write to file                    |
+| `readMarkdown(input, options?)`       | All      | Parse Markdown table → Worksheet |
+| `readMarkdownAll(input, options?)`    | All      | Parse all tables → Worksheet[]   |
+| `writeMarkdown(options?)`             | All      | Worksheet → Markdown string      |
+| `writeMarkdownBuffer(options?)`       | All      | Worksheet → Uint8Array (UTF-8)   |
+| `readMarkdownFile(path, options?)`    | Node.js  | Read from file                   |
+| `readMarkdownAllFile(path, options?)` | Node.js  | Read all tables from file        |
+| `writeMarkdownFile(path, options?)`   | Node.js  | Write to file                    |
 
-**Workbook Options (`MdOptions`)** extends both `MdParseOptions` and `MdFormatOptions`, plus:
+**Workbook Options (`MarkdownOptions`)** extends both `MarkdownParseOptions` and `MarkdownFormatOptions`, plus:
 
 | Option             | Type                         | Description                                      |
 | ------------------ | ---------------------------- | ------------------------------------------------ |
-| `sheetName`        | `string`                     | Worksheet name (for `readMdAll`: used as prefix) |
+| `sheetName`        | `string`                     | Worksheet name (for `readMarkdownAll`: used as prefix) |
 | `sheetId`          | `number`                     | Worksheet ID to write                            |
 | `map`              | `(value, column) => unknown` | Custom value mapper for parsing                  |
 | `dateFormat`       | `string`                     | Date format for writing                          |

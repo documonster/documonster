@@ -26,7 +26,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Data protection** — sheet protection with password (SHA-512)
 - **Streaming** — `WorkbookReader` and `WorkbookWriter` for large files
 - **CSV import/export** — `readCsv`, `writeCsv`, `readCsvFile`, `writeCsvFile`
-- **Markdown import/export** — `readMd`, `writeMd`, `readMdFile`, `writeMdFile`
+- **Markdown import/export** — `readMarkdown`, `writeMarkdown`, `readMarkdownFile`, `writeMarkdownFile`
 - **PDF export** — `excelToPdf()` with full styling, pagination, fonts, encryption
 - **Browser support** — `xlsx.load()`, `xlsx.writeBuffer()`, no polyfills needed
 
@@ -378,13 +378,13 @@ import { Workbook } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 
 // Read Markdown table
-workbook.readMd("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-await workbook.readMdFile("table.md");
+workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+await workbook.readMarkdownFile("table.md");
 
 // Write Markdown
-const mdText = workbook.writeMd();
-await workbook.writeMdFile("output.md");
-const bytes = workbook.writeMdBuffer();
+const mdText = workbook.writeMarkdown();
+await workbook.writeMarkdownFile("output.md");
+const bytes = workbook.writeMarkdownBuffer();
 ```
 
 ## Streaming API

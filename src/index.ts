@@ -94,14 +94,14 @@ export {
 } from "@csv/stream";
 
 // Markdown types
-export type { MdOptions } from "@md/types";
+export type { MarkdownOptions } from "@markdown/types";
 export type {
-  MdAlignment,
-  MdParseResult,
-  MdParseOptions,
-  MdColumnConfig,
-  MdFormatOptions
-} from "@md/types";
+  MarkdownAlignment,
+  MarkdownParseResult,
+  MarkdownParseOptions,
+  MarkdownColumnConfig,
+  MarkdownFormatOptions
+} from "@markdown/types";
 
 // =============================================================================
 // Additional Classes & Types
@@ -212,4 +212,4 @@ export {
 } from "@excel/errors";
 
 // Markdown errors
-export { MdError, MdParseError } from "@md/errors";
+export { MarkdownError, MarkdownParseError } from "@markdown/errors";

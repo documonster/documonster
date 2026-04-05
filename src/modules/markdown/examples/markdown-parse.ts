@@ -7,12 +7,12 @@
  * - Tables without leading/trailing pipes
  * - Extracting tables from Markdown documents
  * - Parse options: trim, unescape, skipEmptyRows, maxRows, convertBr
- * - Multi-table parsing with parseMdAll
+ * - Multi-table parsing with parseMarkdownAll
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseMd, parseMdAll } from "../index";
+import { parseMarkdown, parseMarkdownAll } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,7 +32,7 @@ const md1 = `
 | Carol | 35  | Tokyo    |
 `.trim();
 
-const result1 = parseMd(md1);
+const result1 = parseMarkdown(md1);
 console.log("=== 1. Basic Parsing ===");
 console.log("Headers:", result1.headers);
 console.log("Rows:", result1.rows);
@@ -48,7 +48,7 @@ const md2 = `
 | Alice  | 30     | $1,000 | hello   |
 `.trim();
 
-const result2 = parseMd(md2);
+const result2 = parseMarkdown(md2);
 console.log("=== 2. Alignment Detection ===");
 for (let i = 0; i < result2.headers.length; i++) {
   console.log(`  ${result2.headers[i]}: ${result2.alignments[i]}`);
@@ -60,14 +60,14 @@ console.log();
 // =============================================================================
 
 const md3 = `Name | Age\n--- | ---\nAlice | 30\nBob | 25`;
-const result3 = parseMd(md3);
+const result3 = parseMarkdown(md3);
 console.log("=== 3. Without Pipes ===");
 console.log("Headers:", result3.headers);
 console.log("Rows:", result3.rows);
 console.log();
 
 const doc = `# Title\n\nSome text.\n\n| ID | Name |\n| -- | ---- |\n| 1  | Alice |\n\nEnd.`;
-const result4 = parseMd(doc);
+const result4 = parseMarkdown(doc);
 console.log("From document:", result4.headers, result4.rows);
 console.log();
 
@@ -79,23 +79,23 @@ console.log("=== 4. Parse Options ===");
 
 // trim
 const mdTrim = "| A |\n| --- |\n|  hello  |";
-console.log("trim:true →", JSON.stringify(parseMd(mdTrim, { trim: true }).rows[0]));
-console.log("trim:false →", JSON.stringify(parseMd(mdTrim, { trim: false }).rows[0]));
+console.log("trim:true →", JSON.stringify(parseMarkdown(mdTrim, { trim: true }).rows[0]));
+console.log("trim:false →", JSON.stringify(parseMarkdown(mdTrim, { trim: false }).rows[0]));
 
 // unescape
 const mdEsc = "| A |\n| --- |\n| a \\| b |";
-console.log("unescape:true →", parseMd(mdEsc, { unescape: true }).rows[0][0]);
-console.log("unescape:false →", parseMd(mdEsc, { unescape: false }).rows[0][0]);
+console.log("unescape:true →", parseMarkdown(mdEsc, { unescape: true }).rows[0][0]);
+console.log("unescape:false →", parseMarkdown(mdEsc, { unescape: false }).rows[0][0]);
 
 // maxRows
 const bigRows = Array.from({ length: 100 }, (_, i) => `| row${i} |`).join("\n");
 const mdBig = `| Data |\n| --- |\n${bigRows}`;
-console.log("maxRows:3 →", parseMd(mdBig, { maxRows: 3 }).rows.length, "rows");
+console.log("maxRows:3 →", parseMarkdown(mdBig, { maxRows: 3 }).rows.length, "rows");
 
 // convertBr
 const mdBr = "| Note |\n| --- |\n| Line1<br>Line2 |";
-console.log("convertBr:true →", JSON.stringify(parseMd(mdBr, { convertBr: true }).rows[0]));
-console.log("convertBr:false →", JSON.stringify(parseMd(mdBr, { convertBr: false }).rows[0]));
+console.log("convertBr:true →", JSON.stringify(parseMarkdown(mdBr, { convertBr: true }).rows[0]));
+console.log("convertBr:false →", JSON.stringify(parseMarkdown(mdBr, { convertBr: false }).rows[0]));
 console.log();
 
 // =============================================================================
@@ -118,7 +118,7 @@ Some text.
 | Rent     | $5,000  |
 `.trim();
 
-const tables = parseMdAll(multiDoc);
+const tables = parseMarkdownAll(multiDoc);
 console.log("=== 5. Multi-Table ===");
 console.log(`Found ${tables.length} tables`);
 for (let i = 0; i < tables.length; i++) {

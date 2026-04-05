@@ -43,8 +43,8 @@ ExcelTS 由七个独立模块组成，每个模块都有自己的文档和可运
 
 解析和格式化 GitHub 风格 Markdown 表格，支持对齐方式保留和工作簿集成。
 
-- [文档](src/modules/md/README.md) | [中文](src/modules/md/README_zh.md)
-- [示例](src/modules/md/examples/)
+- [文档](src/modules/markdown/README.md) | [中文](src/modules/markdown/README_zh.md)
+- [示例](src/modules/markdown/examples/)
 
 ### XML — SAX/DOM 解析器、查询引擎、写入器
 
@@ -113,8 +113,8 @@ import { zip, unzip } from "@cj-tech-master/excelts/zip";
 const archive = await zip().add("hello.txt", "Hello!").bytes();
 
 // Markdown — 解析和格式化表格
-import { parseMd, formatMd } from "@cj-tech-master/excelts/md";
-const table = parseMd("| A | B |\n|---|---|\n| 1 | 2 |");
+import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 ```
 
 ## 子路径导出
@@ -126,7 +126,7 @@ import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
 import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
-import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
+import { parseMarkdown, formatMarkdown, parseMarkdownAll } from "@cj-tech-master/excelts/markdown";
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 

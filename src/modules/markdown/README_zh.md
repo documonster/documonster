@@ -12,25 +12,25 @@ GFM（GitHub 风格 Markdown）表格解析器和格式化器，零依赖。
 - **管道符转义** — 自动处理内容中的 `|` 字符
 - **CJK/Emoji 宽度** — 正确计算东亚字符和 Emoji 的显示宽度
 - **多行单元格** — 通过 `<br>` 支持
-- **多表格提取** — `parseMdAll()` 从文档中提取所有表格
-- **工作簿集成** — `readMd()`、`writeMd()` 直接与 Excel 工作簿交互
+- **多表格提取** — `parseMarkdownAll()` 从文档中提取所有表格
+- **工作簿集成** — `readMarkdown()`、`writeMarkdown()` 直接与 Excel 工作簿交互
 
 ## 快速开始
 
 ```typescript
-import { parseMd, formatMd, parseMdAll } from "@cj-tech-master/excelts/md";
+import { parseMarkdown, formatMarkdown, parseMarkdownAll } from "@cj-tech-master/excelts/markdown";
 
 // 解析 Markdown 表格
-const result = parseMd("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |");
+const result = parseMarkdown("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["姓名", "年龄"]
 // result.rows = [["Alice", "30"]]
 // result.alignments = ["none", "none"]
 
 // 解析文档中的所有表格
-const tables = parseMdAll(markdownDoc);
+const tables = parseMarkdownAll(markdownDoc);
 
 // 格式化为 Markdown 表格
-const md = formatMd(
+const md = formatMarkdown(
   ["姓名", "年龄"],
   [
     ["Alice", "30"],
