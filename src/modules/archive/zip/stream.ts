@@ -68,6 +68,13 @@ export type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";
 
 const SMART_STORE_DECIDE_BYTES = 16 * 1024;
 
+/** Input batching threshold for push().  Small chunks are accumulated in an
+ *  internal buffer and flushed to the compression pipeline once this size is
+ *  reached.  64 KB matches the standard deflate window and keeps the number
+ *  of async push() calls — each of which creates a full Promise chain in the
+ *  browser CompressionStream path — down to a manageable level. */
+const INPUT_BATCH_BYTES = 65536;
+
 /**
  * Encryption options for streaming ZIP creation.
  */
@@ -128,6 +135,13 @@ export class ZipDeflateFile {
 
   // Serialize push() calls so callers don't need to await to preserve ordering.
   private _pushChain: Promise<void> = Promise.resolve();
+
+  // Input batching: accumulate small chunks before feeding the compression
+  // pipeline.  This collapses thousands of tiny push() calls (each creating a
+  // full async Promise chain on browsers) into a handful of large pushes.
+  // Threshold matches the common deflate window size (64 KB).
+  private _inputBuf: Uint8Array | null = null;
+  private _inputPos = 0;
 
   // Synchronous compression state for pushSync() path.
   private _syncDeflater: SyncDeflater | null = null;
@@ -852,6 +866,63 @@ export class ZipDeflateFile {
       return Promise.resolve();
     }
 
+    // --- Async path: batch small chunks to reduce Promise-chain overhead ---
+    // Each real push through the async pipeline creates a full Promise chain
+    // (push → _pushChain → _pushUnchained → AsyncStreamCodec.writeChain →
+    // CompressionStream.writer.write).  By accumulating small chunks into a
+    // 64 KB buffer we reduce the number of async round-trips by ~100x for
+    // typical XML workloads without sacrificing streaming semantics.
+
+    if (!final && data.length > 0 && data.length < INPUT_BATCH_BYTES) {
+      // Lazy-allocate the batch buffer.
+      if (!this._inputBuf) {
+        this._inputBuf = new Uint8Array(INPUT_BATCH_BYTES);
+        this._inputPos = 0;
+      }
+
+      // If the chunk fits in the remaining space, just copy it in.
+      if (this._inputPos + data.length <= INPUT_BATCH_BYTES) {
+        this._inputBuf.set(data, this._inputPos);
+        this._inputPos += data.length;
+
+        // Not full yet — return resolved promise, no async work.
+        callback?.();
+        return Promise.resolve();
+      }
+
+      // Buffer would overflow — flush everything (buffered + new data) together.
+      const combined = new Uint8Array(this._inputPos + data.length);
+      combined.set(this._inputBuf.subarray(0, this._inputPos));
+      combined.set(data, this._inputPos);
+      this._inputPos = 0;
+
+      return this._pushAsync(combined, false, callback);
+    }
+
+    // Large chunk or final — flush any buffered data first, then push.
+    if (this._inputPos > 0) {
+      const flushData = this._inputBuf!.slice(0, this._inputPos);
+      this._inputPos = 0;
+
+      // Chain: flush buffered → push current
+      const flushPromise = this._pushAsync(flushData, false);
+      const promise = (this._pushChain = flushPromise.then(
+        () => this._pushUnchained(data, final, callback),
+        () => this._pushUnchained(data, final, callback)
+      ));
+      promise.catch(() => {});
+      return promise;
+    }
+
+    return this._pushAsync(data, final, callback);
+  }
+
+  /** Enqueue an async push through the _pushChain serialization. */
+  private _pushAsync(
+    data: Uint8Array,
+    final: boolean,
+    callback?: (err?: Error | null) => void
+  ): Promise<void> {
     // Chain the async push so calls are serialized. Use a recovery wrapper
     // so that a single failed push does not break the chain for subsequent
     // pushes — errors are surfaced via onerror/rejectComplete instead.
