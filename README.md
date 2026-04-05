@@ -27,7 +27,7 @@ Create, read, and modify Excel spreadsheets with full styling, formulas, images,
 
 ### PDF — Zero-Dependency PDF Engine
 
-Full-featured PDF generation with font embedding, encryption, images, and Excel-to-PDF conversion.
+Full-featured PDF generation and reading. Write PDFs with font embedding, AES-256 encryption, images, and Excel-to-PDF conversion. Read any PDF with text, image, annotation, form field, and metadata extraction.
 
 - [Documentation](src/modules/pdf/README.md) | [中文](src/modules/pdf/README_zh.md)
 - [Examples](src/modules/pdf/examples/)
@@ -99,6 +99,12 @@ const pdfBytes = pdf([
   ["Widget", 1000]
 ]);
 
+// PDF — read text, images, and metadata from any PDF
+import { readPdf } from "@cj-tech-master/excelts/pdf";
+const result = readPdf(pdfBytes);
+console.log(result.text); // extracted text
+console.log(result.metadata); // title, author, etc.
+
 // CSV — parse and format
 import { parseCsv, formatCsv } from "@cj-tech-master/excelts/csv";
 const rows = parseCsv("name,age\nAlice,30", { headers: true });
@@ -123,6 +129,7 @@ Each module is available as a standalone subpath export:
 
 ```typescript
 import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
+import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
 import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
 import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";

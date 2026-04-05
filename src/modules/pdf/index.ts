@@ -33,7 +33,9 @@
  * console.log(result.text);               // All text
  * console.log(result.pages[0].text);      // Page 1 text
  * console.log(result.pages[0].images);    // Page 1 images
+ * console.log(result.pages[0].annotations); // Page 1 annotations
  * console.log(result.metadata.title);     // Document title
+ * console.log(result.formFields);         // Form fields
  * ```
  *
  * @module pdf
@@ -81,6 +83,8 @@ export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "./reader/pdf-re
 export type { PdfMetadata } from "./reader/metadata-reader";
 export type { ExtractedImage } from "./reader/image-extractor";
 export type { TextLine } from "./reader/text-reconstruction";
+export type { PdfAnnotation, PdfRect } from "./reader/annotation-extractor";
+export type { PdfFormField, PdfFormFieldType } from "./reader/form-extractor";
 
 // =============================================================================
 // Errors

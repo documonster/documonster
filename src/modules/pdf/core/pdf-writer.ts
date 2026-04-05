@@ -1,14 +1,16 @@
 /**
  * PDF file writer.
  *
- * Assembles a complete PDF document from indirect objects.
+ * Assembles a complete PDF 2.0 document from indirect objects.
  * Handles the four sections of a PDF file:
- * 1. Header (%PDF-1.4)
+ * 1. Header (%PDF-2.0)
  * 2. Body (indirect objects)
  * 3. Cross-reference table
  * 4. Trailer (with document catalog reference)
  *
- * @see PDF Reference 1.7, Chapter 3.4 - File Structure
+ * Encryption uses AES-256 (V=5, R=5) per ISO 32000-2:2020.
+ *
+ * @see ISO 32000-2:2020, Chapter 7.5 — File Structure
  */
 
 import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "./pdf-object";
@@ -40,7 +42,7 @@ interface PdfStreamObject extends PdfIndirectObject {
 // =============================================================================
 
 /**
- * Constructs a valid PDF 1.4 file from a set of indirect objects.
+ * Constructs a valid PDF 2.0 file from a set of indirect objects.
  *
  * Usage:
  * 1. Allocate object numbers with allocObject()
@@ -224,7 +226,7 @@ export class PdfWriter {
 
     // --- Header ---
     // Include a comment with high bytes to signal binary content per PDF spec §3.4.1
-    const headerStr = "%PDF-1.4\n";
+    const headerStr = "%PDF-2.0\n";
     const headerStrBytes = encoder.encode(headerStr);
     chunks.push(headerStrBytes);
     byteOffset += headerStrBytes.length;
@@ -298,16 +300,26 @@ export class PdfWriter {
       byteOffset += objFooter.length;
     }
 
-    // --- Encrypt dictionary (must be added before xref) ---
+    // --- Encrypt dictionary (V=5, R=5, AES-256) ---
     if (this.encryption) {
       const encDict = new PdfDict()
         .set("Filter", "/Standard")
-        .set("V", "2")
-        .set("R", "3")
-        .set("Length", "128")
+        .set("V", "5")
+        .set("R", "5")
+        .set("Length", "256")
         .set("P", String(this.encryption.permissions))
         .set("O", pdfHexString(this.encryption.oValue))
-        .set("U", pdfHexString(this.encryption.uValue));
+        .set("U", pdfHexString(this.encryption.uValue))
+        .set("OE", pdfHexString(this.encryption.oeValue))
+        .set("UE", pdfHexString(this.encryption.ueValue))
+        .set("Perms", pdfHexString(this.encryption.permsValue))
+        .set("EncryptMetadata", "true")
+        .set(
+          "CF",
+          "<< /StdCF << /Type /CryptFilter /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >>"
+        )
+        .set("StmF", "/StdCF")
+        .set("StrF", "/StdCF");
       const encContent = encDict.toString();
       const encObj: PdfIndirectObject = {
         objectNumber: encryptObjNum,

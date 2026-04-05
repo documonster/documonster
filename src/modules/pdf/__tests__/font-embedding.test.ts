@@ -433,7 +433,7 @@ describe("Font Integration with excelToPdf", () => {
     expect(pdf.length).toBeGreaterThan(100);
 
     const text = new TextDecoder().decode(pdf);
-    expect(text).toContain("%PDF-1.4");
+    expect(text).toContain("%PDF-2.0");
     expect(text).toContain("%%EOF");
     expect(text).toContain("/Type0");
     expect(text).toContain("/CIDFontType2");
@@ -461,7 +461,7 @@ describe("Font Integration with excelToPdf", () => {
     const pdf = excelToPdf(wb, { font: ttfData });
     const text = new TextDecoder().decode(pdf);
 
-    expect(text).toContain("%PDF-1.4");
+    expect(text).toContain("%PDF-2.0");
     // Subset GIDs: .notdef=0, A=1, B=2
     expect(text).toContain("<00010002> Tj");
     // Must NOT contain original GIDs

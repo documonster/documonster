@@ -77,7 +77,7 @@ describe("PdfWriter", () => {
 
       // Verify PDF structure
       const text = new TextDecoder().decode(pdf);
-      expect(text).toContain("%PDF-1.4");
+      expect(text).toContain("%PDF-2.0");
       expect(text).toContain("%%EOF");
       expect(text).toContain("xref");
       expect(text).toContain("trailer");

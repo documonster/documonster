@@ -22,7 +22,7 @@ function pdfToString(pdf: Uint8Array): string {
  */
 function expectValidPdf(pdf: Uint8Array): void {
   const text = pdfToString(pdf);
-  expect(text).toContain("%PDF-1.4");
+  expect(text).toContain("%PDF-2.0");
   expect(text).toContain("xref");
   expect(text).toContain("trailer");
   expect(text).toContain("%%EOF");

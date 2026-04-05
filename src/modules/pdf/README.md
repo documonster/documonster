@@ -2,19 +2,25 @@
 
 [中文](README_zh.md)
 
-A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. Can be used **standalone** with the `pdf()` function, or as an **Excel-to-PDF converter** via the `excelToPdf()` bridge API.
+A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with the `pdf()` function or `excelToPdf()` bridge. **Read** any PDF with `readPdf()` — extract text, images, and metadata from all major PDF versions.
 
 ```typescript
-// Standalone PDF (simplest)
+// Write — standalone
 import { pdf } from "@cj-tech-master/excelts/pdf";
 
-// Excel-to-PDF
+// Write — from Excel
 import { excelToPdf } from "@cj-tech-master/excelts/pdf";
+
+// Read — extract text, images, metadata
+import { readPdf } from "@cj-tech-master/excelts/pdf";
 ```
 
 ## Features
 
+### Writing
+
 - **Zero Dependencies** — Pure TypeScript PDF generation, no external libraries
+- **PDF 2.0** — Writes modern PDF 2.0 format
 - **Standalone Engine** — Use `pdf()` with plain arrays and objects, no Excel dependency
 - **Excel Bridge** — One-line `excelToPdf(workbook)` for Excel-to-PDF conversion
 - **Cross-Platform** — Same API in Node.js and browsers
@@ -22,14 +28,84 @@ import { excelToPdf } from "@cj-tech-master/excelts/pdf";
 - **Rich Text** — Mixed formatting within a single cell, with word-wrap support
 - **Pagination** — Automatic vertical/horizontal page splitting with repeat headers
 - **Images** — JPEG and PNG embedding with alpha transparency
-- **Encryption** — Password protection with 128-bit RC4 and permission controls
+- **AES-256 Encryption** — Password protection with AES-256 (V=5, R=5) and permission controls
 - **Font Embedding** — TrueType font subsetting for Unicode/CJK text
 - **Page Setup** — Per-sheet paper size, orientation, margins, print area
 - **Tree-Shakeable** — Not imported? Not in your bundle
 
+### Reading
+
+- **Universal Reader** — Reads all major PDF versions (1.0 through 2.0)
+- **Text Extraction** — Full text with line reconstruction, multi-column, and table detection
+- **Multilingual** — WinAnsi, MacRoman, CJK via ToUnicode CMap, Identity-H/V, Symbol, ZapfDingbats
+- **Image Extraction** — JPEG, JPEG2000, CCITT, JBIG2, raw/Flate with SMask/alpha
+- **Annotation Extraction** — Links, comments, highlights, stamps, free text, and more
+- **Form Fields** — AcroForm extraction: text inputs, checkboxes, radio buttons, dropdowns, signatures
+- **Metadata** — Info dictionary + XMP (title, author, dates, page count, page sizes)
+- **All Encryption** — RC4-40, RC4-128, AES-128, AES-256 (reads all versions)
+- **Fault-Tolerant** — Cross-reference table/stream recovery, incremental updates
+
 ---
 
 ## Quick Start
+
+### Read a PDF
+
+```typescript
+import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readFileSync } from "fs";
+
+const bytes = readFileSync("document.pdf");
+const result = readPdf(bytes);
+
+// All text
+console.log(result.text);
+
+// Per-page text
+for (const page of result.pages) {
+  console.log(`Page ${page.pageNumber}: ${page.text.length} chars`);
+}
+
+// Metadata
+console.log(result.metadata.title);
+console.log(result.metadata.author);
+console.log(result.metadata.pageCount);
+
+// Images
+for (const page of result.pages) {
+  for (const img of page.images) {
+    console.log(img.format, img.width, img.height);
+  }
+}
+
+// Annotations (links, comments, highlights)
+for (const page of result.pages) {
+  for (const annot of page.annotations) {
+    console.log(annot.subtype, annot.contents, annot.uri);
+  }
+}
+
+// Form fields
+for (const field of result.formFields) {
+  console.log(field.name, field.type, field.value);
+}
+```
+
+### Read Encrypted PDF
+
+```typescript
+const result = readPdf(bytes, { password: "secret" });
+```
+
+### Selective Extraction
+
+```typescript
+// Only pages 1 and 3, text only (no images)
+const result = readPdf(bytes, {
+  pages: [1, 3],
+  extractImages: false
+});
+```
 
 ### Excel-to-PDF (Bridge API)
 
@@ -138,27 +214,45 @@ const bytes = pdf({
 
 ## Architecture
 
-The PDF module is split into three layers:
+The PDF module is split into four layers:
 
 ```
 src/modules/pdf/
-├── core/               # PDF primitives (objects, streams, writer, encryption)
+├── core/               # PDF primitives (objects, streams, writer, encryption, crypto)
 ├── font/               # TTF parsing, glyph metrics, font subsetting, embedding
 ├── render/             # Layout engine, page renderer, style converter
 │   ├── layout-engine   — PdfSheetData → LayoutPage[] (zero @excel imports)
 │   ├── page-renderer   — LayoutPage → PDF content stream (zero @excel imports)
 │   ├── style-converter — PdfCellStyle → PDF rendering params (zero @excel imports)
 │   └── pdf-exporter    — PdfWorkbook → Uint8Array (zero @excel imports)
+├── reader/             # PDF reader — tokenizer, parser, decryption, text/image extraction
+│   ├── pdf-tokenizer   — byte-level PDF tokenization
+│   ├── pdf-parser      — objects, xref tables/streams, trailer
+│   ├── pdf-document    — document structure, page tree, object resolution
+│   ├── pdf-decrypt     — RC4/AES decryption for all PDF encryption versions
+│   ├── stream-filters  — Flate, ASCII85, ASCIIHex, LZW, RunLength decoders
+│   ├── cmap-parser     — ToUnicode CMap parsing with variable-length codespace
+│   ├── font-decoder    — Type1, TrueType, Type0/CID, Symbol, ZapfDingbats
+│   ├── content-interpreter — BT/ET, Tj/TJ, Tm/Td, Form XObject, inline images
+│   ├── text-reconstruction — line building, table/multi-column detection, RTL
+│   ├── image-extractor — JPEG, JPEG2000, CCITT, JBIG2, raw, SMask
+│   ├── annotation-extractor — Link, Text, Highlight, FreeText, Stamp, etc.
+│   ├── form-extractor — AcroForm: text, checkbox, radio, dropdown, listbox, signature
+│   ├── metadata-reader — Info dict + XMP metadata
+│   └── pdf-reader      — public API: readPdf()
 ├── types.ts            # PdfWorkbook, PdfSheetData, PdfCellData, etc.
 ├── excel-bridge.ts     # Excel Workbook → PdfWorkbook conversion (ONLY @excel dependency)
 └── index.ts
 ```
 
-The entire PDF engine (core, font, render) has **zero imports from the Excel module**. The `excel-bridge.ts` is the only file that knows about Excel — it converts `Workbook` to `PdfWorkbook`.
+The entire PDF engine (core, font, render, reader) has **zero imports from the Excel module**. The `excel-bridge.ts` is the only file that knows about Excel — it converts `Workbook` to `PdfWorkbook`.
+
+**Write strategy:** Write PDF 2.0 only (modern, AES-256).
+**Read strategy:** Read all major PDF versions (1.0 through 2.0, all encryption types).
 
 ---
 
-## Options
+## Writer Options
 
 ```typescript
 interface PdfExportOptions {
@@ -190,7 +284,7 @@ interface PdfExportOptions {
   defaultFontFamily?: string; // Fallback font family (default: "Helvetica")
   defaultFontSize?: number; // Fallback font size (default: 11)
 
-  // Encryption
+  // Encryption (AES-256, PDF 2.0)
   encryption?: {
     ownerPassword: string; // Owner password (required)
     userPassword?: string; // User open password (optional)
@@ -205,6 +299,79 @@ interface PdfExportOptions {
       printHighQuality?: boolean; // Allow high-quality printing
     };
   };
+}
+```
+
+## Reader Options
+
+```typescript
+interface ReadPdfOptions {
+  password?: string; // Password for encrypted PDFs (user or owner)
+  pages?: number[]; // Which pages to extract (1-based). Omit for all pages
+  extractText?: boolean; // Extract text (default: true)
+  extractImages?: boolean; // Extract images (default: true)
+  extractMetadata?: boolean; // Extract metadata (default: true)
+  extractAnnotations?: boolean; // Extract annotations (default: true)
+  extractFormFields?: boolean; // Extract form fields (default: true)
+}
+```
+
+### Reader Result
+
+```typescript
+interface ReadPdfResult {
+  text: string; // All text from all pages
+  pages: ReadPdfPage[]; // Per-page results
+  metadata: PdfMetadata; // Document metadata
+  formFields: PdfFormField[]; // Form fields (document-level)
+}
+
+interface ReadPdfPage {
+  pageNumber: number; // 1-based
+  text: string; // Page text
+  textLines: TextLine[]; // Structured lines with positions
+  textFragments: TextFragment[]; // Raw fragments with exact coordinates
+  images: ExtractedImage[]; // Extracted images
+  annotations: PdfAnnotation[]; // Annotations (links, comments, highlights)
+  width: number; // Page width in points
+  height: number; // Page height in points
+  warnings: string[]; // Non-fatal extraction warnings
+}
+
+interface PdfAnnotation {
+  subtype: string; // "Link", "Text", "Highlight", "FreeText", "Stamp", etc.
+  rect: PdfRect; // Bounding rectangle { x1, y1, x2, y2 }
+  contents: string; // Text content
+  author: string; // Author / title
+  uri: string; // For Link: destination URI
+  destination: string; // For Link: named destination
+  color: number[]; // Color array [r, g, b] in [0,1]
+  flags: number; // Annotation flags
+}
+
+interface PdfFormField {
+  name: string; // Fully qualified name (e.g. "form.address.city")
+  type: PdfFormFieldType; // "text" | "checkbox" | "radio" | "dropdown" | "listbox" | "button" | "signature"
+  value: string; // Current value
+  defaultValue: string; // Default value
+  readOnly: boolean; // Read-only flag
+  required: boolean; // Required flag
+  options: string[]; // For choice fields: available options
+  exportValue: string; // For checkboxes: export value when checked
+}
+
+interface PdfMetadata {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string;
+  creator?: string;
+  producer?: string;
+  creationDate?: Date;
+  modificationDate?: Date;
+  pdfVersion: string;
+  pageCount: number;
+  encrypted: boolean;
 }
 ```
 
@@ -227,7 +394,7 @@ Custom sizes: `{ width: 396, height: 612 }` (in points, 72pt = 1 inch).
 
 ## Styling Support
 
-The PDF engine renders all standard cell styles:
+The PDF writer renders all standard cell styles:
 
 ### Text
 
@@ -315,7 +482,11 @@ PNG transparency (RGBA and tRNS) is preserved via PDF soft masks.
 
 ## Encryption
 
-### Owner-Only (No Open Password)
+The writer produces **AES-256 encrypted PDFs** (PDF 2.0, V=5, R=5). The reader can decrypt **all major encryption formats** including legacy RC4.
+
+### Writer Encryption (AES-256)
+
+#### Owner-Only (No Open Password)
 
 ```typescript
 const pdf = excelToPdf(workbook, {
@@ -327,7 +498,7 @@ const pdf = excelToPdf(workbook, {
 // Opens without password, but copy/modify is restricted
 ```
 
-### Open Password Required
+#### Open Password Required
 
 ```typescript
 const pdf = excelToPdf(workbook, {
@@ -337,6 +508,22 @@ const pdf = excelToPdf(workbook, {
   }
 });
 // Requires "reader" to open
+```
+
+### Reader Decryption (All Formats)
+
+The reader automatically detects and decrypts:
+
+| Format  | Version    | Support |
+| ------- | ---------- | ------- |
+| RC4-40  | V=1, R=2   | Read    |
+| RC4-128 | V=2, R=3   | Read    |
+| AES-128 | V=4, R=4   | Read    |
+| AES-256 | V=5, R=5/6 | Read    |
+
+```typescript
+// Automatically detects encryption type
+const result = readPdf(encryptedBytes, { password: "secret" });
 ```
 
 ---
@@ -407,23 +594,55 @@ import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 Runnable examples are in `src/modules/pdf/examples/`:
 
-| File                  | What it demonstrates                                                           |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `pdf-basic.ts`        | Page sizes, margins, metadata, sheet selection, scale                          |
-| `pdf-styled.ts`       | Fonts, fills, borders, alignment, merge, rotation, rich text, number formats   |
-| `pdf-advanced.ts`     | Pagination, page breaks, encryption, transparency, bookmarks, hidden rows/cols |
-| `pdf-excel-to-pdf.ts` | Reading real `.xlsx` files and converting to PDF                               |
+| File                   | What it demonstrates                                                           |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `pdf-basic.ts`         | Page sizes, margins, metadata, sheet selection, scale                          |
+| `pdf-styled.ts`        | Fonts, fills, borders, alignment, merge, rotation, rich text, number formats   |
+| `pdf-advanced.ts`      | Pagination, page breaks, encryption, transparency, bookmarks, hidden rows/cols |
+| `pdf-excel-to-pdf.ts`  | Reading real `.xlsx` files and converting to PDF                               |
+| `pdf-images.ts`        | Image embedding (JPEG, PNG with transparency)                                  |
+| `pdf-reader.ts`        | Text extraction, metadata, images, encrypted PDFs, selective extraction        |
+| `pdf-reader-stress.ts` | Large-scale stress test: thousands of cells, encrypted roundtrip, benchmarks   |
 
 Run any example:
 
 ```bash
 npx tsx src/modules/pdf/examples/pdf-basic.ts
 # Output: tmp/pdf-examples/*.pdf
+
+npx tsx src/modules/pdf/examples/pdf-reader.ts
+# Output: tmp/pdf-reader-examples/
 ```
 
 ---
 
 ## API Reference
+
+### `readPdf(data, options?)`
+
+Read a PDF file and extract text, images, and metadata. Returns `ReadPdfResult`.
+
+```typescript
+import { readPdf } from "@cj-tech-master/excelts/pdf";
+
+// Basic
+const result = readPdf(pdfBytes);
+console.log(result.text);
+console.log(result.pages[0].images);
+console.log(result.pages[0].annotations);
+console.log(result.formFields);
+console.log(result.metadata);
+
+// Encrypted
+const result = readPdf(pdfBytes, { password: "secret" });
+
+// Selective
+const result = readPdf(pdfBytes, {
+  pages: [1, 3],
+  extractImages: false,
+  extractMetadata: false
+});
+```
 
 ### `pdf(input, options?)`
 

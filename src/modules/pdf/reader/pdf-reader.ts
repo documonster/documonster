@@ -6,6 +6,8 @@
  * - Text extraction with multilingual support (WinAnsi, MacRoman, CJK via
  *   ToUnicode CMap, Identity-H/V, Symbol, ZapfDingbats)
  * - Image extraction (JPEG, JPEG2000, raw/Flate, CCITT, JBIG2)
+ * - Annotation extraction (links, comments, highlights, stamps, etc.)
+ * - Form field extraction (AcroForm: text inputs, checkboxes, radio buttons, dropdowns)
  * - Metadata reading (Info dictionary + XMP)
  * - Encrypted PDFs:
  *   - RC4 (40-bit and 128-bit) — tested via roundtrip
@@ -55,6 +57,10 @@ import type { TextLine } from "./text-reconstruction";
 import type { TextFragment } from "./content-interpreter";
 import { extractImagesFromPage } from "./image-extractor";
 import type { ExtractedImage } from "./image-extractor";
+import { extractAnnotationsFromPage } from "./annotation-extractor";
+import type { PdfAnnotation } from "./annotation-extractor";
+import { extractFormFields } from "./form-extractor";
+import type { PdfFormField } from "./form-extractor";
 import { extractMetadata } from "./metadata-reader";
 import type { PdfMetadata } from "./metadata-reader";
 import { PdfStructureError } from "../errors";
@@ -98,6 +104,18 @@ export interface ReadPdfOptions {
    * @default true
    */
   extractMetadata?: boolean;
+
+  /**
+   * Whether to extract annotations (links, comments, highlights, etc.).
+   * @default true
+   */
+  extractAnnotations?: boolean;
+
+  /**
+   * Whether to extract form fields (AcroForm: text inputs, checkboxes, dropdowns, etc.).
+   * @default true
+   */
+  extractFormFields?: boolean;
 }
 
 /**
@@ -114,6 +132,8 @@ export interface ReadPdfPage {
   textFragments: TextFragment[];
   /** Extracted images */
   images: ExtractedImage[];
+  /** Extracted annotations (links, comments, highlights, etc.) */
+  annotations: PdfAnnotation[];
   /** Page width in points */
   width: number;
   /** Page height in points */
@@ -132,6 +152,8 @@ export interface ReadPdfResult {
   pages: ReadPdfPage[];
   /** Document metadata */
   metadata: PdfMetadata;
+  /** Form fields extracted from AcroForm (document-level) */
+  formFields: PdfFormField[];
 }
 
 // =============================================================================
@@ -153,7 +175,9 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
     pages: options?.pages,
     extractText: options?.extractText ?? true,
     extractImages: options?.extractImages ?? true,
-    extractMetadata: options?.extractMetadata ?? true
+    extractMetadata: options?.extractMetadata ?? true,
+    extractAnnotations: options?.extractAnnotations ?? true,
+    extractFormFields: options?.extractFormFields ?? true
   };
 
   // Parse document structure
@@ -211,6 +235,17 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
       }
     }
 
+    // Extract annotations
+    let annotations: PdfAnnotation[] = [];
+    if (opts.extractAnnotations) {
+      try {
+        annotations = extractAnnotationsFromPage(pageDict, doc);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        warnings.push(`Annotation extraction failed on page ${pageNumber}: ${msg}`);
+      }
+    }
+
     // Get page dimensions
     const { width, height } = getPageDimensions(pageDict, doc);
 
@@ -220,6 +255,7 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
       textLines,
       textFragments,
       images,
+      annotations,
       width,
       height,
       warnings
@@ -234,10 +270,21 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
     metadata.pageCount = pagesInfo.length;
   }
 
+  // Extract form fields (document-level, not per-page)
+  let formFields: PdfFormField[] = [];
+  if (opts.extractFormFields) {
+    try {
+      formFields = extractFormFields(doc);
+    } catch {
+      // Non-fatal — just return empty
+    }
+  }
+
   return {
     text: allText,
     pages,
-    metadata
+    metadata,
+    formFields
   };
 }
 

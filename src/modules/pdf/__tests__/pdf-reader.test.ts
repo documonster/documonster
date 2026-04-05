@@ -11,7 +11,7 @@ import { excelToPdf } from "../excel-bridge";
 import { Workbook } from "@excel/workbook";
 import { readPdf } from "../reader/pdf-reader";
 import { PdfStructureError } from "../errors";
-import { _testInternals } from "../reader/pdf-decrypt";
+import { aesCbcDecrypt, sha256 } from "../core/crypto";
 import { CMap, parseCMap } from "../reader/cmap-parser";
 import { PdfTokenizer, TokenType } from "../reader/pdf-tokenizer";
 import {
@@ -474,7 +474,7 @@ describe("PDF Roundtrip (Write → Read)", () => {
   it("should extract metadata", () => {
     const result = readPdf(simplePdf);
     expect(result.metadata).toBeDefined();
-    expect(result.metadata.pdfVersion).toBe("1.4");
+    expect(result.metadata.pdfVersion).toBe("2.0");
     expect(result.metadata.pageCount).toBeGreaterThan(0);
     expect(result.metadata.producer).toContain("excelts");
   });
@@ -679,7 +679,7 @@ describe("PDF Reader - Metadata", () => {
   it("should detect PDF version", () => {
     const pdfBytes = pdf([["Test"]]);
     const result = readPdf(pdfBytes);
-    expect(result.metadata.pdfVersion).toBe("1.4");
+    expect(result.metadata.pdfVersion).toBe("2.0");
   });
 
   it("should report page count", () => {
@@ -1392,8 +1392,6 @@ function hex(s: string): Uint8Array {
 }
 
 describe("AES-CBC Decrypt — NIST SP 800-38A test vectors", () => {
-  const { aesCbcDecrypt } = _testInternals;
-
   it("AES-128-CBC: should decrypt NIST F.2.2 vector correctly", () => {
     // NIST SP 800-38A, Section F.2.2 — CBC-AES128.Decrypt
     const key = hex("2b7e151628aed2a6abf7158809cf4f3c");
@@ -1455,8 +1453,6 @@ describe("AES-CBC Decrypt — NIST SP 800-38A test vectors", () => {
 });
 
 describe("SHA-256 — NIST FIPS 180-4 test vectors", () => {
-  const { sha256 } = _testInternals;
-
   it("should hash 'abc' correctly", () => {
     // NIST FIPS 180-4, Section B.1 — SHA-256("abc")
     const input = new TextEncoder().encode("abc");
@@ -1795,5 +1791,529 @@ describe("Text Reconstruction — table data should not be split into columns", 
     expect(lines).toContain("Row 1");
     expect(lines).toContain("Row 2");
     expect(lines).toContain("Row 3");
+  });
+});
+
+// =============================================================================
+// Annotation Extraction
+// =============================================================================
+
+describe("PDF Reader - Annotation Extraction", () => {
+  it("should extract Link annotations from hand-crafted PDF", () => {
+    // Hand-crafted PDF with a Link annotation that has a URI action
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 6 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Link annotation with URI
+      "5 0 obj << /Type /Annot /Subtype /Link /Rect [72 700 200 720] /A << /Type /Action /S /URI /URI (https://example.com) >> >> endobj",
+      // Text (sticky note) annotation
+      "6 0 obj << /Type /Annot /Subtype /Text /Rect [72 600 92 620] /Contents (This is a note) /T (Author Name) >> endobj",
+      "xref",
+      "0 7",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000260 00000 n ",
+      "0000000310 00000 n ",
+      "0000000453 00000 n ",
+      "trailer << /Size 7 /Root 1 0 R >>",
+      "startxref",
+      "600",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.pages.length).toBe(1);
+    const annots = result.pages[0].annotations;
+    expect(annots.length).toBe(2);
+
+    // Link annotation
+    const link = annots.find(a => a.subtype === "Link")!;
+    expect(link).toBeDefined();
+    expect(link.uri).toBe("https://example.com");
+    expect(link.rect.x1).toBe(72);
+    expect(link.rect.y1).toBe(700);
+    expect(link.rect.x2).toBe(200);
+    expect(link.rect.y2).toBe(720);
+
+    // Text (sticky note) annotation
+    const note = annots.find(a => a.subtype === "Text")!;
+    expect(note).toBeDefined();
+    expect(note.contents).toBe("This is a note");
+    expect(note.author).toBe("Author Name");
+  });
+
+  it("should extract Highlight annotation", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Highlight /Rect [100 500 300 520] /Contents (Important text) /C [1 1 0] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000260 00000 n ",
+      "0000000310 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "450",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    const annots = result.pages[0].annotations;
+    expect(annots.length).toBe(1);
+    expect(annots[0].subtype).toBe("Highlight");
+    expect(annots[0].contents).toBe("Important text");
+    expect(annots[0].color).toEqual([1, 1, 0]); // Yellow
+  });
+
+  it("should skip Widget and Popup annotations", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Widget (form field) — should be skipped
+      "5 0 obj << /Type /Annot /Subtype /Widget /Rect [72 700 200 720] >> endobj",
+      // Popup — should be skipped
+      "6 0 obj << /Type /Annot /Subtype /Popup /Rect [72 600 200 620] >> endobj",
+      // FreeText — should be extracted
+      "7 0 obj << /Type /Annot /Subtype /FreeText /Rect [72 500 300 530] /Contents (Free text content) >> endobj",
+      "xref",
+      "0 8",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000280 00000 n ",
+      "0000000330 00000 n ",
+      "0000000410 00000 n ",
+      "0000000490 00000 n ",
+      "trailer << /Size 8 /Root 1 0 R >>",
+      "startxref",
+      "620",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    const annots = result.pages[0].annotations;
+    // Only FreeText — Widget and Popup should be filtered out
+    expect(annots.length).toBe(1);
+    expect(annots[0].subtype).toBe("FreeText");
+    expect(annots[0].contents).toBe("Free text content");
+  });
+
+  it("should return empty annotations for pages without /Annots", () => {
+    const pdfBytes = pdf([["Hello", "World"]]);
+    const result = readPdf(pdfBytes);
+
+    // Our simple PDF writer doesn't add annotations for plain data
+    expect(result.pages[0].annotations).toEqual([]);
+  });
+
+  it("should respect extractAnnotations: false option", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Text /Rect [72 700 92 720] /Contents (Note) >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000260 00000 n ",
+      "0000000310 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "430",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes, { extractAnnotations: false });
+
+    // Annotations should be empty when extraction is disabled
+    expect(result.pages[0].annotations).toEqual([]);
+  });
+
+  it("should extract Link annotation with direct /Dest", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Dest /Chapter1 >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000260 00000 n ",
+      "0000000310 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "440",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    const annots = result.pages[0].annotations;
+    expect(annots.length).toBe(1);
+    expect(annots[0].subtype).toBe("Link");
+    expect(annots[0].destination).toBe("Chapter1");
+  });
+
+  it("should extract annotations from roundtrip Excel PDF with hyperlinks", () => {
+    // Create a workbook with hyperlinks — the writer will create Link annotations
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet("Links");
+    const row = sheet.addRow(["Click here"]);
+    row.getCell(1).value = {
+      text: "Example",
+      hyperlink: "https://example.com"
+    };
+
+    const pdfBytes = excelToPdf(workbook);
+    const result = readPdf(pdfBytes);
+
+    // The writer should have created at least one Link annotation
+    const allAnnotations = result.pages.flatMap(p => p.annotations);
+    const links = allAnnotations.filter(a => a.subtype === "Link");
+    expect(links.length).toBeGreaterThanOrEqual(1);
+    expect(links[0].uri).toBe("https://example.com");
+  });
+});
+
+// =============================================================================
+// Form Field Extraction
+// =============================================================================
+
+describe("PDF Reader - Form Field Extraction", () => {
+  it("should extract text field from AcroForm", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Text field with value
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (username) /V (john_doe) /Rect [72 700 200 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "440",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(1);
+    expect(result.formFields[0].name).toBe("username");
+    expect(result.formFields[0].type).toBe("text");
+    expect(result.formFields[0].value).toBe("john_doe");
+  });
+
+  it("should extract checkbox field", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Checkbox field — /Btn without Pushbutton or Radio flags
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Yes /Ff 0 /Rect [72 700 92 720] /AP << /N << /Yes 6 0 R /Off 6 0 R >> >> >> endobj",
+      "6 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "xref",
+      "0 7",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "0000000510 00000 n ",
+      "trailer << /Size 7 /Root 1 0 R >>",
+      "startxref",
+      "570",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(1);
+    expect(result.formFields[0].name).toBe("agree");
+    expect(result.formFields[0].type).toBe("checkbox");
+    expect(result.formFields[0].value).toBe("Yes");
+    expect(result.formFields[0].exportValue).toBe("Yes");
+  });
+
+  it("should extract dropdown (choice) field with options", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Dropdown: /Ch with /Ff bit 17 (Combo) set = 131072
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Ch /T (country) /V (Australia) /Ff 131072 /Opt [(Australia) (Canada) (Japan)] /Rect [72 700 200 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "500",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(1);
+    const field = result.formFields[0];
+    expect(field.name).toBe("country");
+    expect(field.type).toBe("dropdown");
+    expect(field.value).toBe("Australia");
+    expect(field.options).toEqual(["Australia", "Canada", "Japan"]);
+  });
+
+  it("should extract multiple form fields", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Alice) /Rect [72 700 200 720] >> endobj",
+      "6 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (email) /V (alice@example.com) /Rect [72 670 200 690] >> endobj",
+      "7 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /T (subscribe) /V /Off /Ff 0 /Rect [72 640 92 660] >> endobj",
+      "xref",
+      "0 8",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000120 00000 n ",
+      "0000000177 00000 n ",
+      "0000000272 00000 n ",
+      "0000000322 00000 n ",
+      "0000000430 00000 n ",
+      "0000000550 00000 n ",
+      "trailer << /Size 8 /Root 1 0 R >>",
+      "startxref",
+      "680",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(3);
+
+    const nameField = result.formFields.find(f => f.name === "name")!;
+    expect(nameField.type).toBe("text");
+    expect(nameField.value).toBe("Alice");
+
+    const emailField = result.formFields.find(f => f.name === "email")!;
+    expect(emailField.type).toBe("text");
+    expect(emailField.value).toBe("alice@example.com");
+
+    const subscribeField = result.formFields.find(f => f.name === "subscribe")!;
+    expect(subscribeField.type).toBe("checkbox");
+    expect(subscribeField.value).toBe("Off");
+  });
+
+  it("should extract read-only and required flags", () => {
+    // Ff: bit 0 (ReadOnly) = 1, bit 1 (Required) = 2 → combined = 3
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (readonly_required) /V (locked) /Ff 3 /Rect [72 700 200 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "460",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(1);
+    expect(result.formFields[0].readOnly).toBe(true);
+    expect(result.formFields[0].required).toBe(true);
+  });
+
+  it("should return empty formFields for PDFs without AcroForm", () => {
+    const pdfBytes = pdf([["Hello", "World"]]);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields).toEqual([]);
+  });
+
+  it("should respect extractFormFields: false option", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (field1) /V (value1) /Rect [72 700 200 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "440",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes, { extractFormFields: false });
+
+    expect(result.formFields).toEqual([]);
+  });
+
+  it("should handle hierarchical field names", () => {
+    // Parent field "address" with children "city" and "zip"
+    // → should produce "address.city" and "address.zip"
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Parent node (no /FT, has /T and /Kids)
+      "5 0 obj << /T (address) /Kids [6 0 R 7 0 R] >> endobj",
+      // Child text fields
+      "6 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (city) /V (Sydney) /Parent 5 0 R /Rect [72 700 200 720] >> endobj",
+      "7 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (zip) /V (2000) /Parent 5 0 R /Rect [72 670 200 690] >> endobj",
+      "xref",
+      "0 8",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "0000000360 00000 n ",
+      "0000000490 00000 n ",
+      "trailer << /Size 8 /Root 1 0 R >>",
+      "startxref",
+      "620",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(2);
+    const names = result.formFields.map(f => f.name).sort();
+    expect(names).toEqual(["address.city", "address.zip"]);
+
+    const cityField = result.formFields.find(f => f.name === "address.city")!;
+    expect(cityField.value).toBe("Sydney");
+
+    const zipField = result.formFields.find(f => f.name === "address.zip")!;
+    expect(zipField.value).toBe("2000");
+  });
+
+  it("should extract listbox field (Ch without Combo flag)", () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Listbox: /Ch with /Ff 0 (no Combo bit)
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Ch /T (colors) /V (Red) /Ff 0 /Opt [(Red) (Green) (Blue)] /Rect [72 700 200 780] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "480",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = readPdf(pdfBytes);
+
+    expect(result.formFields.length).toBe(1);
+    const field = result.formFields[0];
+    expect(field.name).toBe("colors");
+    expect(field.type).toBe("listbox");
+    expect(field.value).toBe("Red");
+    expect(field.options).toEqual(["Red", "Green", "Blue"]);
   });
 });
