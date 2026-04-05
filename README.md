@@ -14,6 +14,12 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 - **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
+## Motivation
+
+The TypeScript ecosystem is heavily fragmented when it comes to document and data processing. To handle Excel, PDF, CSV, XML, ZIP, and streaming, developers often need to pull in a different package for each task — and then yet another set of packages to make them work in the browser, plus separate streaming wrappers on top. These libraries vary in API style, quality, and maintenance status, creating a tax on every project that needs more than one of them.
+
+ExcelTS was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
+
 ## Modules
 
 ExcelTS is organized into seven standalone modules. Each module has its own documentation and runnable examples.
