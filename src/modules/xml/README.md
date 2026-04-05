@@ -1,5 +1,7 @@
 # XML Module
 
+[中文](README_zh.md)
+
 A zero-dependency, cross-platform XML toolkit for reading and writing XML. Supports both streaming and buffered modes.
 
 ```typescript

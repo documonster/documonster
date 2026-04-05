@@ -1,5 +1,7 @@
 # PDF Module
 
+[中文](README_zh.md)
+
 A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. Can be used **standalone** with the `pdf()` function, or as an **Excel-to-PDF converter** via the `excelToPdf()` bridge API.
 
 ```typescript

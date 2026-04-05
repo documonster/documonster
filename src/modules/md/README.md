@@ -1,5 +1,7 @@
 # Markdown Module
 
+[中文](README_zh.md)
+
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
 ```bash

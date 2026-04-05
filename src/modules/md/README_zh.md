@@ -1,5 +1,7 @@
 # Markdown 模块
 
+[English](README.md)
+
 GFM（GitHub 风格 Markdown）表格解析器和格式化器，零依赖。
 
 ## 功能特性
@@ -37,10 +39,6 @@ const md = formatMd(
   { alignment: "left", padding: true }
 );
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 

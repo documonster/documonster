@@ -1,5 +1,7 @@
 # Excel 模块
 
+[English](README.md)
+
 现代 TypeScript Excel 工作簿管理器 — 读取、操作和写入 XLSX 与 JSON 格式的电子表格，零运行时依赖。
 
 ## 功能特性

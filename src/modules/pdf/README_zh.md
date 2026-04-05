@@ -1,5 +1,7 @@
 # PDF 模块
 
+[English](README.md)
+
 功能完整的零依赖 PDF 引擎，纯 TypeScript 从零构建。可**独立使用** `pdf()` 函数，或通过 `excelToPdf()` 桥接 API 作为 **Excel 转 PDF 转换器**。
 
 ## 功能特性
@@ -35,10 +37,6 @@ const workbook = new Workbook();
 await workbook.xlsx.readFile("input.xlsx");
 const pdfBytes = excelToPdf(workbook, { showGridLines: true });
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 

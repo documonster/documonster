@@ -1,5 +1,7 @@
 # Stream Module
 
+[中文](README_zh.md)
+
 A cross-platform stream implementation that provides identical APIs for both Node.js and browsers.
 
 - **Node.js**: Uses native `stream` module for maximum performance

@@ -1,112 +1,163 @@
-# ExcelTS Feature Roadmap
+# ExcelTS Roadmap
 
-## 🔥 P1: High Priority
+## Excel Module
 
-### Chart Support
+### 🔥 P1: High Priority
+
+#### Chart Support
 
 - [ ] Preserve existing charts when reading/writing
 - [ ] Create basic charts (bar, line, pie)
 - [ ] Chart customization (title, legend, colors)
 
-### Stream/Performance
+#### Stream/Performance
 
-- [x] Zero runtime dependencies
-- [x] Pure JS DEFLATE fallback for browser
-- [x] Web Streams API support (ReadableStream/WritableStream)
 - [ ] Streaming shared strings
 - [ ] Memory optimization for large files
 
-### Style/Formatting
+#### Style/Formatting
 
 - [ ] Fix font style bleeding to other cells
 - [ ] Fix default font not applied correctly
 - [ ] Fix styles lost when reading/writing files
 
-### Image Handling
+#### Image Handling
 
 - [ ] Header/footer image support
 - [ ] Basic shape support (rectangles, arrows)
 - [ ] Fix image position for non-integer coordinates
 - [ ] SVG image support
 
-### PDF Export
+### 🟡 P2: Medium Priority
 
-- [x] Zero-dependency Excel-to-PDF conversion
-- [x] Full cell styling (fonts, colors, borders, fills, alignment)
-- [x] Automatic pagination with repeat header rows
-- [x] Manual row/column page breaks
-- [x] Print area support
-- [x] TrueType font embedding with subsetting (Unicode/CJK)
-- [x] JPEG and PNG image embedding with transparency
-- [x] Password protection / 128-bit RC4 encryption
-- [x] Per-worksheet page setup (paper size, orientation, margins)
-- [x] Rich text rendering with word-wrap
-- [x] Sheet bookmarks / outlines
-- [x] Tree-shakeable (zero cost if not imported)
-- [ ] PDF/A compliance
-- [ ] Table of contents generation
-- [ ] Watermark support
-
----
-
-## 🟡 P2: Medium Priority
-
-### Formula
+#### Formula
 
 - [ ] Fix CSP (Content Security Policy) violations
 - [ ] Fix formula parsing errors
 - [ ] Improve shared formula handling
 
-### Print/Page Setup
+#### Print/Page Setup
 
-- [x] Row page breaks (rowBreaks)
-- [x] Column page breaks (colBreaks)
-- [x] PDF export with page setup integration
 - [ ] Fix header/footer options
 - [ ] Print area improvements
 
-### Data Validation
+#### Data Validation
 
 - [ ] Dynamic list formulae support
 - [ ] Fix template data validation lost
 - [ ] Fix protection locked not preventing editing
 
-### Table Features
+#### Table Features
 
 - [ ] Append rows to existing table
 - [ ] Fix table corruption on save
 - [ ] Load tables correctly from disk
 
-### Protection & Security
+#### Protection & Security
 
 - [ ] Fix cell protection not working
 - [ ] Column key nested property path support
 
-### Comment/Note
+#### Comment/Note
 
 - [ ] Configurable note size (width/height)
 - [ ] Rich text in notes
 
----
+### 🟢 P3: Low Priority
 
-## 🟢 P3: Low Priority
-
-### Merge Cell
+#### Merge Cell
 
 - [ ] Fix date timezone issue in merged cells
 - [ ] Fix addRow() not adding merged cells correctly
 
-### Row/Column Operations
+#### Row/Column Operations
 
 - [ ] Outline/grouping improvements
 - [ ] Hidden row/column improvements
 
-### Sheet Operations
+#### Sheet Operations
 
 - [ ] Sheet tab color
 - [ ] Sheet copy improvements
 
-### Hyperlink
+#### Hyperlink
 
 - [ ] Hyperlink styling support
 - [ ] Internal hyperlinks to named ranges
+
+---
+
+## PDF Module
+
+### 🔥 P1: High Priority
+
+#### PDF Reading
+
+- [ ] Parse and extract text content from PDF documents
+- [ ] Extract document metadata (title, author, creation date, keywords)
+- [ ] Extract embedded images (JPEG, PNG)
+- [ ] Extract page dimensions and layout information
+- [ ] Support encrypted/password-protected PDF reading
+
+#### PDF Generation Improvements
+
+- [ ] PDF/A compliance
+- [ ] Table of contents generation
+- [ ] Watermark support
+
+### 🟡 P2: Medium Priority
+
+#### PDF Data Extraction
+
+- [ ] Extract tables from PDF pages
+- [ ] Extract form field values
+- [ ] Extract annotations and comments
+- [ ] Extract hyperlinks and bookmarks
+- [ ] OCR-ready text positioning (bounding boxes)
+
+#### PDF Manipulation
+
+- [ ] Merge multiple PDFs into one
+- [ ] Split PDF into individual pages
+- [ ] Add/remove pages
+- [ ] Rotate pages
+
+---
+
+## DOCX Module (Future)
+
+### 🔥 P1: High Priority
+
+#### Core Reading
+
+- [ ] Parse DOCX documents (Open XML WordprocessingML)
+- [ ] Extract text content with formatting (bold, italic, underline, colors)
+- [ ] Extract paragraphs, headings, and sections
+- [ ] Extract tables with cell styles and merges
+- [ ] Extract images and embedded objects
+
+#### Core Writing
+
+- [ ] Create DOCX documents from structured data
+- [ ] Paragraph styling (fonts, colors, alignment, spacing)
+- [ ] Table creation with styles and merges
+- [ ] Image embedding (JPEG, PNG)
+- [ ] Header/footer support
+
+### 🟡 P2: Medium Priority
+
+#### Advanced Features
+
+- [ ] Lists (numbered, bulleted, multi-level)
+- [ ] Table of contents generation
+- [ ] Page setup (size, orientation, margins)
+- [ ] Section breaks and page breaks
+- [ ] Footnotes and endnotes
+- [ ] Hyperlinks
+- [ ] Document metadata
+
+#### Conversion
+
+- [ ] DOCX to PDF conversion
+- [ ] DOCX to Markdown conversion
+- [ ] Excel to DOCX table embedding

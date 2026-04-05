@@ -1,5 +1,7 @@
 # CSV Module
 
+[中文](README_zh.md)
+
 A high-performance, RFC 4180 compliant CSV parser and formatter with zero dependencies.
 
 ```bash

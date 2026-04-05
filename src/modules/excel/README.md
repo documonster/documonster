@@ -1,5 +1,7 @@
 # Excel Module
 
+[中文](README_zh.md)
+
 Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX and JSON spreadsheets with zero runtime dependencies.
 
 ## Features

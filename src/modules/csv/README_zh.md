@@ -1,5 +1,7 @@
 # CSV 模块
 
+[English](README.md)
+
 高性能、RFC 4180 兼容的 CSV 解析器和格式化器，零依赖。
 
 ## 功能特性
@@ -40,10 +42,6 @@ import { createCsvParserStream } from "@cj-tech-master/excelts/csv";
 const parser = createCsvParserStream({ headers: true });
 parser.on("data", row => console.log(row));
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 

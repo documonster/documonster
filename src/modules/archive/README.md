@@ -1,5 +1,7 @@
 # Archive Module (ZIP / TAR)
 
+[中文](README_zh.md)
+
 A zero-dependency, cross-platform archive toolkit for creating, reading, and editing ZIP and TAR archives.
 
 ```bash

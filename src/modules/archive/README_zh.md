@@ -1,5 +1,7 @@
 # Archive 模块（ZIP / TAR）
 
+[English](README.md)
+
 零依赖、跨平台的归档工具包，用于创建、读取和编辑 ZIP 与 TAR 归档。
 
 ## 功能特性
@@ -45,10 +47,6 @@ import { compress, decompress, gzip, gunzip } from "@cj-tech-master/excelts/zip"
 const compressed = await compress(data, { level: 6 });
 const decompressed = await decompress(compressed);
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 

@@ -1,5 +1,7 @@
 # Stream 模块
 
+[English](README.md)
+
 跨平台流式实现，在 Node.js 和浏览器中提供相同的 API。
 
 - **Node.js**：使用原生 `stream` 模块以获得最佳性能
@@ -50,10 +52,6 @@ const writable = new Writable({
 await pipeline(readable, upper, writable);
 console.log(chunks); // ["HELLO", "WORLD"]
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 

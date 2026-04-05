@@ -1,5 +1,7 @@
 # XML 模块
 
+[English](README.md)
+
 零依赖、跨平台的 XML 工具包，支持流式和缓冲两种模式的读写。
 
 ## 功能特性
@@ -35,10 +37,6 @@ w.leafNode("item", { id: "1" }, "hello");
 w.closeNode();
 console.log(w.xml);
 ```
-
-## 详细文档
-
-完整 API 参考请查看 [英文文档](README.md)。
 
 ## 示例
 
