@@ -7,7 +7,7 @@ A cross-platform stream implementation that provides identical APIs for both Nod
 - **Node.js**: Uses native `stream` module for maximum performance
 - **Browser**: Uses Web Streams API (`ReadableStream`, `WritableStream`, `TransformStream`)
 
-```bash
+```typescript
 import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
 ```
 

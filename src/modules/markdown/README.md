@@ -4,7 +4,7 @@
 
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
-```bash
+```typescript
 import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
 ```
 

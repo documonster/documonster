@@ -5,7 +5,7 @@
 A zero-dependency, cross-platform XML toolkit for reading and writing XML. Supports both streaming and buffered modes.
 
 ```typescript
-import { XmlWriter, SaxParser, parseXml, query } from "@xml/index";
+import { XmlWriter, SaxParser, parseXml, query } from "@cj-tech-master/excelts/xml";
 ```
 
 ## Features
@@ -27,7 +27,7 @@ import { XmlWriter, SaxParser, parseXml, query } from "@xml/index";
 ### Writing XML (Buffered)
 
 ```typescript
-import { XmlWriter, StdDocAttributes } from "@xml/writer";
+import { XmlWriter, StdDocAttributes } from "@cj-tech-master/excelts/xml";
 
 const w = new XmlWriter();
 w.openXml(StdDocAttributes);
@@ -44,7 +44,7 @@ console.log(w.xml);
 ### Writing XML (Streaming)
 
 ```typescript
-import { XmlStreamWriter } from "@xml/stream-writer";
+import { XmlStreamWriter } from "@cj-tech-master/excelts/xml";
 
 const chunks: string[] = [];
 const target = { write: (chunk: string) => chunks.push(chunk) };
@@ -60,7 +60,7 @@ sw.closeNode();
 ### Reading XML (SAX — Streaming)
 
 ```typescript
-import { SaxParser } from "@xml/sax";
+import { SaxParser } from "@cj-tech-master/excelts/xml";
 
 const parser = new SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
@@ -73,7 +73,7 @@ parser.close();
 ### Reading XML (DOM — Buffered)
 
 ```typescript
-import { parseXml, findChild, textContent, attr } from "@xml/dom";
+import { parseXml, findChild, textContent, attr } from "@cj-tech-master/excelts/xml";
 
 const doc = parseXml('<root><item id="1">hello</item></root>');
 const item = findChild(doc.root, "item");
@@ -88,8 +88,7 @@ Convert XML into plain JavaScript objects.
 Two entry points for different scenarios:
 
 ```typescript
-import { parseXml, toPlainObject } from "@xml/dom";
-import { parseXmlToObject } from "@xml/to-object";
+import { parseXml, toPlainObject, parseXmlToObject } from "@cj-tech-master/excelts/xml";
 
 // Option 1: already have a DOM tree
 const doc = parseXml('<root attr="1"><item>a</item><item>b</item></root>');
@@ -119,8 +118,7 @@ const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root
 ### Query Engine
 
 ```typescript
-import { parseXml } from "@xml/dom";
-import { query, queryAll } from "@xml/query";
+import { parseXml, query, queryAll } from "@cj-tech-master/excelts/xml";
 
 const doc = parseXml("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
 const first = query(doc.root, "a/b"); // first <b> element
@@ -133,7 +131,7 @@ const deep = queryAll(doc.root, "a//b"); // <b> at any depth under <a>
 ### Encoding/Decoding
 
 ```typescript
-import { xmlEncode, xmlDecode } from "@xml/encode";
+import { xmlEncode, xmlDecode } from "@cj-tech-master/excelts/xml";
 
 xmlEncode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
 xmlDecode("&lt;hello&gt;"); // "<hello>"
@@ -345,7 +343,7 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 ### Query Engine
 
 ```typescript
-import { query, queryAll } from "@xml/query";
+import { query, queryAll } from "@cj-tech-master/excelts/xml";
 ```
 
 | Syntax         | Description                                     |
@@ -428,8 +426,7 @@ The `invalidCharHandling` option controls how the parser responds:
 ### Examples
 
 ```typescript
-import { SaxParser } from "@xml/sax";
-import { parseXml } from "@xml/dom";
+import { SaxParser, parseXml } from "@cj-tech-master/excelts/xml";
 
 // Default: strict mode — throws on 0x7F
 parseXml("<root>hello\x7fworld</root>");

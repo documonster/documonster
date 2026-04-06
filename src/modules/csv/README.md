@@ -4,7 +4,7 @@
 
 A high-performance, RFC 4180 compliant CSV parser and formatter with zero dependencies.
 
-```bash
+```typescript
 import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
 ```
 

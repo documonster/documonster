@@ -1,10 +1,10 @@
-# Archive Module (ZIP / TAR)
+# Archive Module
 
 [中文](README_zh.md)
 
 A zero-dependency, cross-platform archive toolkit for creating, reading, and editing ZIP and TAR archives.
 
-```bash
+```typescript
 import { zip, unzip, ZipArchive, ZipReader } from "@cj-tech-master/excelts/zip";
 ```
 

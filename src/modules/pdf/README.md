@@ -224,6 +224,7 @@ src/modules/pdf/
 │   ├── layout-engine   — PdfSheetData → LayoutPage[] (zero @excel imports)
 │   ├── page-renderer   — LayoutPage → PDF content stream (zero @excel imports)
 │   ├── style-converter — PdfCellStyle → PDF rendering params (zero @excel imports)
+│   ├── png-decoder     — PNG image decoding for PDF embedding (zero @excel imports)
 │   └── pdf-exporter    — PdfWorkbook → Uint8Array (zero @excel imports)
 ├── reader/             # PDF reader — tokenizer, parser, decryption, text/image extraction
 │   ├── pdf-tokenizer   — byte-level PDF tokenization
@@ -239,6 +240,7 @@ src/modules/pdf/
 │   ├── annotation-extractor — Link, Text, Highlight, FreeText, Stamp, etc.
 │   ├── form-extractor — AcroForm: text, checkbox, radio, dropdown, listbox, signature
 │   ├── metadata-reader — Info dict + XMP metadata
+│   ├── reader-utils    — shared reader utility functions
 │   └── pdf-reader      — public API: readPdf()
 ├── types.ts            # PdfWorkbook, PdfSheetData, PdfCellData, etc.
 ├── excel-bridge.ts     # Excel Workbook → PdfWorkbook conversion (ONLY @excel dependency)

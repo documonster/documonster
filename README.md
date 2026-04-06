@@ -2,13 +2,7 @@
 
 [![Build Status](https://github.com/cjnoname/excelts/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cjnoname/excelts/actions/workflows/ci.yml) &nbsp; [中文](README_zh.md)
 
-The TypeScript ecosystem is heavily fragmented when it comes to document and data processing. To handle Excel, PDF, CSV, XML, ZIP, and streaming, developers often need to pull in a different package for each task — and then yet another set of packages to make them work in the browser, plus separate streaming wrappers on top. These libraries vary in API style, quality, and maintenance status, creating a tax on every project that needs more than one of them.
-
-ExcelTS was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
-
-## About This Project
-
-ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
+Zero-dependency TypeScript toolkit for document and data processing. One package replaces a fragmented ecosystem of Excel, PDF, CSV, XML, ZIP, and streaming libraries — same API across Node.js, Bun, and browsers, with streaming as a first-class citizen in every module.
 
 - **AI-Friendly** — Clean, consistent API designed for AI coding agents. Every module has comprehensive documentation and runnable examples for AI to learn from
 - **Zero Runtime Dependencies** — Pure TypeScript, no external packages
@@ -55,7 +49,7 @@ Streaming and buffered XML processing with query engine, namespace support, and 
 - [Documentation](src/modules/xml/README.md) | [中文](src/modules/xml/README_zh.md)
 - [Examples](src/modules/xml/examples/)
 
-### Archive — ZIP/TAR Create/Read/Edit
+### Archive — Create/Read/Edit Archives
 
 ZIP and TAR archive creation, reading, editing, streaming, encryption, and compression utilities.
 
@@ -73,7 +67,13 @@ Node.js-compatible Readable/Writable/Transform/Duplex that works identically in 
 
 ```bash
 npm install @cj-tech-master/excelts
+# or
+pnpm add @cj-tech-master/excelts
+# or
+bun add @cj-tech-master/excelts
 ```
+
+Each module is available as a standalone subpath export. All subpaths support `browser`, `import` (ESM), and `require` (CJS) conditions.
 
 ## Quick Start
 
@@ -91,9 +91,7 @@ await workbook.xlsx.writeFile("output.xlsx");
 const wb = new Workbook();
 await wb.xlsx.readFile("output.xlsx");
 wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
-```
 
-```typescript
 // PDF — generate from data, no Workbook needed
 import { pdf } from "@cj-tech-master/excelts/pdf";
 const pdfBytes = pdf([
@@ -125,22 +123,6 @@ import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown"
 const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 ```
 
-## Subpath Exports
-
-Each module is available as a standalone subpath export:
-
-```typescript
-import { Workbook, WorkbookWriter } from "@cj-tech-master/excelts";
-import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
-import { SaxParser, parseXml, XmlWriter, query } from "@cj-tech-master/excelts/xml";
-import { zip, unzip, ZipArchive, compress } from "@cj-tech-master/excelts/zip";
-import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
-import { parseMarkdown, formatMarkdown, parseMarkdownAll } from "@cj-tech-master/excelts/markdown";
-import { Readable, pipeline, createTransform } from "@cj-tech-master/excelts/stream";
-```
-
-Each subpath supports `browser`, `import` (ESM), and `require` (CJS) conditions.
-
 ## Browser Support
 
 ExcelTS has native browser support with **zero configuration** for modern bundlers.
@@ -161,6 +143,7 @@ For older browsers without native `CompressionStream` API, ExcelTS automatically
 ## Requirements
 
 - **Node.js >= 22.0.0**
+- **Bun >= 1.0**
 
 | Browser | Minimum Version    |
 | ------- | ------------------ |
