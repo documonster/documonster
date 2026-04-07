@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.1.2](https://github.com/cjnoname/excelts/compare/v8.1.1...v8.1.2) (2026-04-07)
+
+
+### Bug Fixes
+
+* Add PDF subpath export and complete tree-shake coverage for all modules ([4faedf6](https://github.com/cjnoname/excelts/commit/4faedf6949471e9412113e33605553a5e4a93189))
+
 ## [8.1.1](https://github.com/cjnoname/excelts/compare/v8.1.0...v8.1.1) (2026-04-05)
 
 
