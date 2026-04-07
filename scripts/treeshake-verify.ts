@@ -32,7 +32,8 @@ const ALL_MODULES = [
   "modules/csv/",
   "modules/archive/",
   "modules/stream/",
-  "modules/xml/"
+  "modules/xml/",
+  "modules/markdown/"
 ];
 const NOT_EXCEL_PDF_CSV = ["modules/excel/", "modules/pdf/", "modules/csv/"];
 
@@ -138,6 +139,38 @@ const scenarios: Scenario[] = [
   s("/xml: parseXml", `${PKG_NAME}/xml`, ["parseXml"], allModulesExcept("xml")),
   s("/xml: SaxParser", `${PKG_NAME}/xml`, ["SaxParser"], allModulesExcept("xml")),
 
+  // /pdf subpath (Node)
+  // PDF legitimately depends on archive/compression for zlib/deflate
+  s("/pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive")),
+  s(
+    "/pdf: excelToPdf",
+    `${PKG_NAME}/pdf`,
+    ["excelToPdf"],
+    allModulesExcept("pdf", "excel", "archive")
+  ),
+  s("/pdf: readPdf", `${PKG_NAME}/pdf`, ["readPdf"], allModulesExcept("pdf", "archive")),
+  s("/pdf: PageSizes", `${PKG_NAME}/pdf`, ["PageSizes"], allModulesExcept("pdf")),
+
+  // /markdown subpath (Node)
+  s(
+    "/markdown: parseMarkdown",
+    `${PKG_NAME}/markdown`,
+    ["parseMarkdown"],
+    allModulesExcept("markdown")
+  ),
+  s(
+    "/markdown: formatMarkdown",
+    `${PKG_NAME}/markdown`,
+    ["formatMarkdown"],
+    allModulesExcept("markdown")
+  ),
+  s(
+    "/markdown: parseMarkdownAll",
+    `${PKG_NAME}/markdown`,
+    ["parseMarkdownAll"],
+    allModulesExcept("markdown")
+  ),
+
   // Browser platform
   s("browser root: Workbook (no pdf leak)", PKG_NAME, ["Workbook"], ["modules/pdf/"], "browser"),
   s(
@@ -169,7 +202,21 @@ const scenarios: Scenario[] = [
     allModulesExcept("stream"),
     "browser"
   ),
-  s("browser /xml: xmlEncode", `${PKG_NAME}/xml`, ["xmlEncode"], allModulesExcept("xml"), "browser")
+  s(
+    "browser /xml: xmlEncode",
+    `${PKG_NAME}/xml`,
+    ["xmlEncode"],
+    allModulesExcept("xml"),
+    "browser"
+  ),
+  s("browser /pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive"), "browser"),
+  s(
+    "browser /markdown: parseMarkdown",
+    `${PKG_NAME}/markdown`,
+    ["parseMarkdown"],
+    allModulesExcept("markdown"),
+    "browser"
+  )
 ];
 
 // =============================================================================
