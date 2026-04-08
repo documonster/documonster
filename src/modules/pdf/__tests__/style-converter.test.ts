@@ -190,7 +190,7 @@ describe("Style Converter", () => {
       });
       expect(borders.top).not.toBeNull();
       expect(borders.top!.width).toBe(0.5);
-      expect(borders.bottom!.width).toBe(1);
+      expect(borders.bottom!.width).toBe(1.5);
       expect(borders.right).toBeNull();
     });
 

@@ -594,6 +594,27 @@ function formatNumberPattern(val: number, fmt: string): string {
   // Round the value
   const roundedVal = roundTo(scaledVal, decimalPlaces);
 
+  // When value is zero and format has no required '0' digit placeholders,
+  // ? placeholders become spaces and # placeholders produce nothing.
+  // This handles accounting format zero sections like "-"?? → "-   "
+  if (roundedVal === 0 && !intFmt.includes("0") && !decFmt.includes("0")) {
+    let result = "";
+    for (const ch of intFmt) {
+      if (ch === "?") {
+        result += " ";
+      }
+    }
+    if (decimalPlaces > 0) {
+      result += ".";
+      for (const ch of decFmt) {
+        if (ch === "?") {
+          result += " ";
+        }
+      }
+    }
+    return sign + result;
+  }
+
   // Split into integer and decimal parts
   const [intPart, decPart = ""] = roundedVal.toString().split(".");
 

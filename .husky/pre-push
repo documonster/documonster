@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # filepath: .husky/pre-push
 # Harden script
-set -euo pipefail
+set -eu
+# pipefail is bash-only; enable only when running under bash
+if [ -n "${BASH_VERSION:-}" ]; then
+  set -o pipefail
+fi
 
 # If running under WSL, ensure we use Linux node, not Windows one mounted at /mnt/c/...
 case "$(uname -r)" in

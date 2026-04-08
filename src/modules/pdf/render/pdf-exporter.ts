@@ -92,7 +92,8 @@ export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Ui
       sheetRows: [],
       rowYPositions: [],
       rowHeights: [],
-      images: []
+      images: [],
+      scaleFactor: 1
     });
   }
 
@@ -342,12 +343,26 @@ function resolveOptions(
     }
   }
 
+  // In Excel, fitToPage and explicit scale are mutually exclusive: when fitting
+  // to page, the manual scale percentage is ignored. Mirror that behaviour here.
+  // If the user explicitly provides a scale it is always honoured; otherwise when
+  // fitToPage is active we default to 1.0 so the layout engine's fit-scaling is
+  // the sole sizing factor (avoiding double-shrinking).
+  const fitToPage = options?.fitToPage !== undefined ? options.fitToPage : true;
+  const sheetScale = ps?.scale ? ps.scale / 100 : 1.0;
+  const resolvedScale =
+    options?.scale !== undefined
+      ? Math.max(0.1, Math.min(3.0, options.scale))
+      : fitToPage
+        ? 1.0
+        : Math.max(0.1, Math.min(3.0, sheetScale));
+
   return {
     pageSize,
     orientation,
     margins,
-    fitToPage: options?.fitToPage !== undefined ? options.fitToPage : true,
-    scale: Math.max(0.1, Math.min(3.0, options?.scale ?? (ps?.scale ? ps.scale / 100 : 1.0))),
+    fitToPage,
+    scale: resolvedScale,
     showGridLines: options?.showGridLines ?? ps?.showGridLines ?? false,
     gridLineColor,
     repeatRows,
