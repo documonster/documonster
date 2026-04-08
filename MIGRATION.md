@@ -29,6 +29,7 @@ This document describes user-facing breaking changes and recommended migrations.
 21. [Excel: sheet-utils removed — use native Worksheet/Workbook methods](#excel-sheet-utils-removed)
 22. [EventEmitter: behavioral changes for Node.js parity](#eventemitter-behavioral-changes-for-nodejs-parity)
 23. [Package: new subpath exports](#package-new-subpath-exports)
+24. [PDF: `pdf()`, `readPdf()`, `excelToPdf()` are now async](#pdf-pdf-readpdf-exceltopdf-are-now-async)
 
 ---
 
@@ -734,3 +735,66 @@ These are additive features — no migration needed, but worth knowing about:
 - **New errors**: `StreamError`, `StreamStateError`, `StreamTypeError`
 - **ReadableStream interop**: `isReadableStreamLike()`, `readableStreamToAsyncIterable()`
 - **Event utilities**: `onceEvent()`
+
+---
+
+## PDF: `pdf()`, `readPdf()`, `excelToPdf()` are now async
+
+### What changed
+
+All three PDF public APIs now return `Promise` instead of a synchronous result. They yield to the event loop between each output page during layout, rendering, and reading, preventing large documents from blocking the main thread.
+
+| Function                         | Before          | After                    |
+| -------------------------------- | --------------- | ------------------------ |
+| `pdf(input, options?)`           | `Uint8Array`    | `Promise<Uint8Array>`    |
+| `readPdf(data, options?)`        | `ReadPdfResult` | `Promise<ReadPdfResult>` |
+| `excelToPdf(workbook, options?)` | `Uint8Array`    | `Promise<Uint8Array>`    |
+
+The previous async variants (`pdfAsync`, `readPdfAsync`, `excelToPdfAsync`) have been removed — the base names are now async.
+
+### How to migrate
+
+Add `await` to every call site:
+
+```ts
+// Before
+import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
+
+const bytes = pdf([
+  ["Name", "Age"],
+  ["Alice", 30]
+]);
+const result = readPdf(pdfBytes);
+const pdfOut = excelToPdf(workbook);
+
+// After
+const bytes = await pdf([
+  ["Name", "Age"],
+  ["Alice", 30]
+]);
+const result = await readPdf(pdfBytes);
+const pdfOut = await excelToPdf(workbook);
+```
+
+If you were using the short-lived `*Async` variants, drop the suffix:
+
+```ts
+// Before
+import { pdfAsync, readPdfAsync, excelToPdfAsync } from "@cj-tech-master/excelts/pdf";
+
+const bytes = await pdfAsync(data);
+const result = await readPdfAsync(pdfBytes);
+
+// After
+import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
+
+const bytes = await pdf(data);
+const result = await readPdf(pdfBytes);
+```
+
+### Notes
+
+- The function signatures (parameters and return shape) are unchanged — only the return type is wrapped in `Promise`.
+- The containing function must be `async`, or you must use `.then()`.
+- Top-level `await` works in ESM modules (Node.js 14.8+, all modern browsers).
+- Error handling is the same — errors are thrown (rejected) with the same `PdfError` / `PdfStructureError` types. Use `try/catch` or `.catch()`.

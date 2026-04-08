@@ -427,7 +427,7 @@ describe("Font Integration with excelToPdf", () => {
     const ws = wb.addWorksheet("Test");
     ws.getCell("A1").value = "AB";
 
-    const pdf = excelToPdf(wb, { font: ttfData });
+    const pdf = await excelToPdf(wb, { font: ttfData });
 
     expect(pdf).toBeInstanceOf(Uint8Array);
     expect(pdf.length).toBeGreaterThan(100);
@@ -458,7 +458,7 @@ describe("Font Integration with excelToPdf", () => {
     const ws = wb.addWorksheet("Test");
     ws.getCell("A1").value = "AB";
 
-    const pdf = excelToPdf(wb, { font: ttfData });
+    const pdf = await excelToPdf(wb, { font: ttfData });
     const text = new TextDecoder().decode(pdf);
 
     expect(text).toContain("%PDF-2.0");

@@ -451,8 +451,8 @@ describe("Text Reconstruction", () => {
 describe("PDF Roundtrip (Write → Read)", () => {
   let simplePdf: Uint8Array;
 
-  beforeAll(() => {
-    simplePdf = pdf(
+  beforeAll(async () => {
+    simplePdf = await pdf(
       [
         ["Name", "Score"],
         ["Alice", 95],
@@ -466,22 +466,22 @@ describe("PDF Roundtrip (Write → Read)", () => {
     );
   });
 
-  it("should read a self-generated PDF without errors", () => {
-    const result = readPdf(simplePdf);
+  it("should read a self-generated PDF without errors", async () => {
+    const result = await readPdf(simplePdf);
     expect(result).toBeDefined();
     expect(result.pages.length).toBeGreaterThan(0);
   });
 
-  it("should extract metadata", () => {
-    const result = readPdf(simplePdf);
+  it("should extract metadata", async () => {
+    const result = await readPdf(simplePdf);
     expect(result.metadata).toBeDefined();
     expect(result.metadata.pdfVersion).toBe("2.0");
     expect(result.metadata.pageCount).toBeGreaterThan(0);
     expect(result.metadata.producer).toContain("excelts");
   });
 
-  it("should extract page dimensions", () => {
-    const result = readPdf(simplePdf);
+  it("should extract page dimensions", async () => {
+    const result = await readPdf(simplePdf);
     expect(result.pages[0].width).toBeGreaterThan(0);
     expect(result.pages[0].height).toBeGreaterThan(0);
   });
@@ -539,8 +539,8 @@ describe("PDF Roundtrip (Write → Read)", () => {
     expect(fragments.length).toBeGreaterThan(0);
   });
 
-  it("should extract text from self-generated PDF", () => {
-    const result = readPdf(simplePdf);
+  it("should extract text from self-generated PDF", async () => {
+    const result = await readPdf(simplePdf);
     const text = result.text;
     // The text should contain our data values
     expect(text).toContain("Name");
@@ -551,8 +551,8 @@ describe("PDF Roundtrip (Write → Read)", () => {
     expect(text).toContain("87");
   });
 
-  it("should handle multi-sheet PDF", () => {
-    const multiSheetPdf = pdf({
+  it("should handle multi-sheet PDF", async () => {
+    const multiSheetPdf = await pdf({
       title: "Multi-Sheet",
       sheets: [
         {
@@ -572,14 +572,14 @@ describe("PDF Roundtrip (Write → Read)", () => {
       ]
     });
 
-    const result = readPdf(multiSheetPdf);
+    const result = await readPdf(multiSheetPdf);
     expect(result.pages.length).toBeGreaterThanOrEqual(2);
     expect(result.text).toContain("A1");
     expect(result.text).toContain("C1");
   });
 
-  it("should support selective page extraction", () => {
-    const multiSheetPdf = pdf({
+  it("should support selective page extraction", async () => {
+    const multiSheetPdf = await pdf({
       sheets: [
         { name: "Sheet1", data: [["Page1"]] },
         { name: "Sheet2", data: [["Page2"]] },
@@ -587,20 +587,20 @@ describe("PDF Roundtrip (Write → Read)", () => {
       ]
     });
 
-    const result = readPdf(multiSheetPdf, { pages: [1, 3] });
+    const result = await readPdf(multiSheetPdf, { pages: [1, 3] });
     expect(result.pages.length).toBe(2);
     expect(result.pages[0].pageNumber).toBe(1);
     expect(result.pages[1].pageNumber).toBe(3);
   });
 
-  it("should support text-only extraction", () => {
-    const result = readPdf(simplePdf, { extractImages: false });
+  it("should support text-only extraction", async () => {
+    const result = await readPdf(simplePdf, { extractImages: false });
     expect(result.text).toBeTruthy();
     expect(result.pages[0].images.length).toBe(0);
   });
 
-  it("should support metadata-only extraction", () => {
-    const result = readPdf(simplePdf, { extractText: false, extractImages: false });
+  it("should support metadata-only extraction", async () => {
+    const result = await readPdf(simplePdf, { extractText: false, extractImages: false });
     expect(result.metadata).toBeDefined();
     expect(result.pages[0].text).toBe("");
   });
@@ -611,8 +611,8 @@ describe("PDF Roundtrip (Write → Read)", () => {
 // =============================================================================
 
 describe("PDF Reader - Styled Content", () => {
-  it("should extract text from styled cells", () => {
-    const styledPdf = pdf([
+  it("should extract text from styled cells", async () => {
+    const styledPdf = await pdf([
       [
         { value: "Bold", bold: true },
         { value: "Italic", italic: true },
@@ -621,7 +621,7 @@ describe("PDF Reader - Styled Content", () => {
       ["Normal", "Text", "Here"]
     ]);
 
-    const result = readPdf(styledPdf);
+    const result = await readPdf(styledPdf);
     expect(result.text).toContain("Bold");
     expect(result.text).toContain("Italic");
     expect(result.text).toContain("Normal");
@@ -633,26 +633,26 @@ describe("PDF Reader - Styled Content", () => {
 // =============================================================================
 
 describe("PDF Reader - Edge Cases", () => {
-  it("should handle empty PDF", () => {
-    const emptyPdf = pdf([[]]);
-    const result = readPdf(emptyPdf);
+  it("should handle empty PDF", async () => {
+    const emptyPdf = await pdf([[]]);
+    const result = await readPdf(emptyPdf);
     expect(result.pages.length).toBeGreaterThanOrEqual(0);
   });
 
-  it("should handle single-cell PDF", () => {
-    const singleCellPdf = pdf([["Hello"]]);
-    const result = readPdf(singleCellPdf);
+  it("should handle single-cell PDF", async () => {
+    const singleCellPdf = await pdf([["Hello"]]);
+    const result = await readPdf(singleCellPdf);
     expect(result.text).toContain("Hello");
   });
 
-  it("should handle numbers and dates", () => {
-    const dataPdf = pdf([
+  it("should handle numbers and dates", async () => {
+    const dataPdf = await pdf([
       ["Integer", 42],
       ["Float", 3.14],
       ["Boolean", true]
     ]);
 
-    const result = readPdf(dataPdf);
+    const result = await readPdf(dataPdf);
     expect(result.text).toContain("42");
     expect(result.text).toContain("3.14");
     expect(result.text).toContain("TRUE");
@@ -664,40 +664,40 @@ describe("PDF Reader - Edge Cases", () => {
 // =============================================================================
 
 describe("PDF Reader - Metadata", () => {
-  it("should extract title and author", () => {
-    const pdfBytes = pdf([["Test"]], {
+  it("should extract title and author", async () => {
+    const pdfBytes = await pdf([["Test"]], {
       title: "My Title",
       author: "My Author",
       subject: "My Subject"
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.metadata.title).toBe("My Title");
     expect(result.metadata.author).toBe("My Author");
     expect(result.metadata.subject).toBe("My Subject");
   });
 
-  it("should detect PDF version", () => {
-    const pdfBytes = pdf([["Test"]]);
-    const result = readPdf(pdfBytes);
+  it("should detect PDF version", async () => {
+    const pdfBytes = await pdf([["Test"]]);
+    const result = await readPdf(pdfBytes);
     expect(result.metadata.pdfVersion).toBe("2.0");
   });
 
-  it("should report page count", () => {
-    const pdfBytes = pdf({
+  it("should report page count", async () => {
+    const pdfBytes = await pdf({
       sheets: [
         { name: "S1", data: [["A"]] },
         { name: "S2", data: [["B"]] }
       ]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.metadata.pageCount).toBeGreaterThanOrEqual(2);
   });
 
-  it("should report page size", () => {
-    const pdfBytes = pdf([["Test"]]);
-    const result = readPdf(pdfBytes);
+  it("should report page size", async () => {
+    const pdfBytes = await pdf([["Test"]]);
+    const result = await readPdf(pdfBytes);
     expect(result.metadata.pageSize).toBeDefined();
     if (result.metadata.pageSize) {
       expect(result.metadata.pageSize.width).toBeGreaterThan(0);
@@ -889,9 +889,9 @@ describe("PDF Reader - Encryption Roundtrip", () => {
   let encryptedWithUserPw: Uint8Array;
   let encryptedOwnerOnly: Uint8Array;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Create encrypted PDF with both user and owner passwords
-    encryptedWithUserPw = pdf(
+    encryptedWithUserPw = await pdf(
       [
         ["Secret", "Data"],
         ["Alice", 42],
@@ -908,7 +908,7 @@ describe("PDF Reader - Encryption Roundtrip", () => {
     );
 
     // Create encrypted PDF with owner password only (empty user password)
-    encryptedOwnerOnly = pdf(
+    encryptedOwnerOnly = await pdf(
       [
         ["Public", "Info"],
         ["Row1", 100]
@@ -920,8 +920,8 @@ describe("PDF Reader - Encryption Roundtrip", () => {
     );
   });
 
-  it("should read encrypted PDF with correct user password", () => {
-    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+  it("should read encrypted PDF with correct user password", async () => {
+    const result = await readPdf(encryptedWithUserPw, { password: "user456" });
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Secret");
     expect(result.text).toContain("Data");
@@ -929,55 +929,55 @@ describe("PDF Reader - Encryption Roundtrip", () => {
     expect(result.text).toContain("42");
   });
 
-  it("should read encrypted PDF with owner password", () => {
-    const result = readPdf(encryptedWithUserPw, { password: "owner123" });
+  it("should read encrypted PDF with owner password", async () => {
+    const result = await readPdf(encryptedWithUserPw, { password: "owner123" });
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Secret");
     expect(result.text).toContain("Bob");
     expect(result.text).toContain("99");
   });
 
-  it("should throw on wrong password", () => {
-    expect(() => readPdf(encryptedWithUserPw, { password: "wrongPassword" })).toThrow(
+  it("should throw on wrong password", async () => {
+    await expect(readPdf(encryptedWithUserPw, { password: "wrongPassword" })).rejects.toThrow(
       PdfStructureError
     );
   });
 
-  it("should read owner-only encrypted PDF with empty password", () => {
+  it("should read owner-only encrypted PDF with empty password", async () => {
     // When there is no user password, the empty password should work
-    const result = readPdf(encryptedOwnerOnly, { password: "" });
+    const result = await readPdf(encryptedOwnerOnly, { password: "" });
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Public");
     expect(result.text).toContain("Info");
   });
 
-  it("should read owner-only encrypted PDF without providing password", () => {
+  it("should read owner-only encrypted PDF without providing password", async () => {
     // Default password is "" so this should also work
-    const result = readPdf(encryptedOwnerOnly);
+    const result = await readPdf(encryptedOwnerOnly);
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Public");
   });
 
-  it("should read owner-only encrypted PDF with owner password", () => {
-    const result = readPdf(encryptedOwnerOnly, { password: "ownerSecret" });
+  it("should read owner-only encrypted PDF with owner password", async () => {
+    const result = await readPdf(encryptedOwnerOnly, { password: "ownerSecret" });
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Public");
   });
 
-  it("should report encrypted status in metadata", () => {
-    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+  it("should report encrypted status in metadata", async () => {
+    const result = await readPdf(encryptedWithUserPw, { password: "user456" });
     expect(result.metadata.encrypted).toBe(true);
   });
 
-  it("should extract metadata from encrypted PDF", () => {
-    const result = readPdf(encryptedWithUserPw, { password: "user456" });
+  it("should extract metadata from encrypted PDF", async () => {
+    const result = await readPdf(encryptedWithUserPw, { password: "user456" });
     expect(result.metadata.title).toBe("Encrypted Doc");
     expect(result.metadata.author).toBe("Test Author");
   });
 
-  it("should report non-encrypted for unencrypted PDFs", () => {
-    const plainPdf = pdf([["Hello"]]);
-    const result = readPdf(plainPdf);
+  it("should report non-encrypted for unencrypted PDFs", async () => {
+    const plainPdf = await pdf([["Hello"]]);
+    const result = await readPdf(plainPdf);
     expect(result.metadata.encrypted).toBe(false);
   });
 });
@@ -987,7 +987,7 @@ describe("PDF Reader - Encryption Roundtrip", () => {
 // =============================================================================
 
 describe("PDF Reader - Encryption via excelToPdf", () => {
-  it("should roundtrip encrypted Excel-to-PDF", () => {
+  it("should roundtrip encrypted Excel-to-PDF", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Secrets");
     ws.getCell("A1").value = "Confidential";
@@ -995,11 +995,11 @@ describe("PDF Reader - Encryption via excelToPdf", () => {
     ws.getCell("A2").value = "TopSecret";
     ws.getCell("B2").value = 67890;
 
-    const encrypted = excelToPdf(wb, {
+    const encrypted = await excelToPdf(wb, {
       encryption: { ownerPassword: "owner", userPassword: "user" }
     });
 
-    const result = readPdf(encrypted, { password: "user" });
+    const result = await readPdf(encrypted, { password: "user" });
     expect(result.pages.length).toBeGreaterThan(0);
     expect(result.text).toContain("Confidential");
     expect(result.text).toContain("12345");
@@ -1014,14 +1014,14 @@ describe("PDF Reader - Encryption via excelToPdf", () => {
 // =============================================================================
 
 describe("PDF Reader - Image Extraction", () => {
-  it("should extract JPEG image from roundtrip PDF", () => {
+  it("should extract JPEG image from roundtrip PDF", async () => {
     const jpegData = buildMinimalJpeg();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["Image Test"]],
       images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 100, height: 80 }]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.pages.length).toBeGreaterThan(0);
 
     const page = result.pages[0];
@@ -1035,14 +1035,14 @@ describe("PDF Reader - Image Extraction", () => {
     expect(img.data).toEqual(jpegData);
   });
 
-  it("should extract PNG image as raw pixels from roundtrip PDF", () => {
+  it("should extract PNG image as raw pixels from roundtrip PDF", async () => {
     const pngData = buildMinimalPng();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["PNG Test"]],
       images: [{ data: pngData, format: "png", col: 0, row: 1, width: 100, height: 80 }]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.pages.length).toBeGreaterThan(0);
 
     const page = result.pages[0];
@@ -1056,14 +1056,14 @@ describe("PDF Reader - Image Extraction", () => {
     expect(img.data.length).toBeGreaterThan(0);
   });
 
-  it("should extract alpha mask (SMask) from PNG with transparency", () => {
+  it("should extract alpha mask (SMask) from PNG with transparency", async () => {
     const pngData = buildMinimalPng();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["Alpha Test"]],
       images: [{ data: pngData, format: "png", col: 0, row: 1, width: 100, height: 80 }]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     const page = result.pages[0];
     expect(page.images.length).toBeGreaterThanOrEqual(1);
 
@@ -1075,35 +1075,35 @@ describe("PDF Reader - Image Extraction", () => {
     }
   });
 
-  it("should report image color space and components", () => {
+  it("should report image color space and components", async () => {
     const jpegData = buildMinimalJpeg();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["Color Test"]],
       images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 50, height: 50 }]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     const img = result.pages[0].images[0];
     expect(img.colorSpace).toBeDefined();
     expect(img.bitsPerComponent).toBeGreaterThan(0);
   });
 
-  it("should skip image extraction when extractImages is false", () => {
+  it("should skip image extraction when extractImages is false", async () => {
     const jpegData = buildMinimalJpeg();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["Skip Test"]],
       images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 50, height: 50 }]
     });
 
-    const result = readPdf(pdfBytes, { extractImages: false });
+    const result = await readPdf(pdfBytes, { extractImages: false });
     expect(result.pages[0].images.length).toBe(0);
     // But text should still be extracted
     expect(result.text).toContain("Skip Test");
   });
 
-  it("should extract images from encrypted PDF", () => {
+  it("should extract images from encrypted PDF", async () => {
     const jpegData = buildMinimalJpeg();
-    const pdfBytes = pdf(
+    const pdfBytes = await pdf(
       {
         data: [["Encrypted Image"]],
         images: [{ data: jpegData, format: "jpeg", col: 0, row: 1, width: 100, height: 80 }]
@@ -1111,7 +1111,7 @@ describe("PDF Reader - Image Extraction", () => {
       { encryption: { ownerPassword: "owner", userPassword: "user" } }
     );
 
-    const result = readPdf(pdfBytes, { password: "user" });
+    const result = await readPdf(pdfBytes, { password: "user" });
     expect(result.pages[0].images.length).toBeGreaterThanOrEqual(1);
 
     const img = result.pages[0].images[0];
@@ -1120,10 +1120,10 @@ describe("PDF Reader - Image Extraction", () => {
     expect(img.data).toEqual(jpegData);
   });
 
-  it("should handle multiple images on one page", () => {
+  it("should handle multiple images on one page", async () => {
     const jpeg1 = buildMinimalJpeg();
     const jpeg2 = buildMinimalJpeg();
-    const pdfBytes = pdf({
+    const pdfBytes = await pdf({
       data: [["Multi Image"]],
       images: [
         { data: jpeg1, format: "jpeg", col: 0, row: 1, width: 50, height: 50 },
@@ -1131,7 +1131,7 @@ describe("PDF Reader - Image Extraction", () => {
       ]
     });
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.pages[0].images.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -1141,42 +1141,42 @@ describe("PDF Reader - Image Extraction", () => {
 // =============================================================================
 
 describe("PDF Reader - Multilingual Text", () => {
-  it("should extract ASCII text correctly", () => {
-    const pdfBytes = pdf([
+  it("should extract ASCII text correctly", async () => {
+    const pdfBytes = await pdf([
       ["Hello", "World"],
       ["Foo", "Bar"]
     ]);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.text).toContain("Hello");
     expect(result.text).toContain("World");
     expect(result.text).toContain("Foo");
     expect(result.text).toContain("Bar");
   });
 
-  it("should extract numeric values correctly", () => {
-    const pdfBytes = pdf([
+  it("should extract numeric values correctly", async () => {
+    const pdfBytes = await pdf([
       ["Amount", 1234567.89],
       ["Count", -42]
     ]);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.text).toContain("1234567.89");
     expect(result.text).toContain("-42");
   });
 
-  it("should extract boolean values", () => {
-    const pdfBytes = pdf([
+  it("should extract boolean values", async () => {
+    const pdfBytes = await pdf([
       ["Active", true],
       ["Deleted", false]
     ]);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.text).toContain("TRUE");
     expect(result.text).toContain("FALSE");
   });
 
-  it("should extract accented European characters", () => {
+  it("should extract accented European characters", async () => {
     // These characters are in WinAnsiEncoding range, should work with standard fonts
-    const pdfBytes = pdf([["Name"], ["Caf\u00e9"], ["R\u00e9sum\u00e9"]]);
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await pdf([["Name"], ["Caf\u00e9"], ["R\u00e9sum\u00e9"]]);
+    const result = await readPdf(pdfBytes);
     // At minimum we should get the base ASCII parts
     expect(result.text).toContain("Name");
     expect(result.text).toContain("Caf");
@@ -1189,12 +1189,12 @@ describe("PDF Reader - Multilingual Text", () => {
 // =============================================================================
 
 describe("PDF Reader - Text Reconstruction", () => {
-  it("should reconstruct text lines from fragments", () => {
-    const pdfBytes = pdf([
+  it("should reconstruct text lines from fragments", async () => {
+    const pdfBytes = await pdf([
       ["First", "Second"],
       ["Third", "Fourth"]
     ]);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     // textLines should provide structured line data
     const page = result.pages[0];
@@ -1207,9 +1207,9 @@ describe("PDF Reader - Text Reconstruction", () => {
     }
   });
 
-  it("should preserve textFragments with position data", () => {
-    const pdfBytes = pdf([["Positioned", "Text"]]);
-    const result = readPdf(pdfBytes);
+  it("should preserve textFragments with position data", async () => {
+    const pdfBytes = await pdf([["Positioned", "Text"]]);
+    const result = await readPdf(pdfBytes);
 
     const page = result.pages[0];
     expect(page.textFragments.length).toBeGreaterThan(0);
@@ -1229,61 +1229,61 @@ describe("PDF Reader - Text Reconstruction", () => {
 // =============================================================================
 
 describe("PDF Reader - Fault Tolerance", () => {
-  it("should throw PdfStructureError on invalid data", () => {
+  it("should throw PdfStructureError on invalid data", async () => {
     const garbage = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
-    expect(() => readPdf(garbage)).toThrow(PdfStructureError);
+    await expect(readPdf(garbage)).rejects.toThrow(PdfStructureError);
   });
 
-  it("should throw PdfStructureError on empty data", () => {
-    expect(() => readPdf(new Uint8Array(0))).toThrow(PdfStructureError);
+  it("should throw PdfStructureError on empty data", async () => {
+    await expect(readPdf(new Uint8Array(0))).rejects.toThrow(PdfStructureError);
   });
 
-  it("should throw on truncated PDF", () => {
-    const validPdf = pdf([["Hello"]]);
+  it("should throw on truncated PDF", async () => {
+    const validPdf = await pdf([["Hello"]]);
     // Truncate to half
     const truncated = validPdf.subarray(0, Math.floor(validPdf.length / 2));
-    expect(() => readPdf(truncated)).toThrow(PdfStructureError);
+    await expect(readPdf(truncated)).rejects.toThrow(PdfStructureError);
   });
 
-  it("should include warnings array on every page", () => {
-    const pdfBytes = pdf([["Test"]]);
-    const result = readPdf(pdfBytes);
+  it("should include warnings array on every page", async () => {
+    const pdfBytes = await pdf([["Test"]]);
+    const result = await readPdf(pdfBytes);
     for (const page of result.pages) {
       expect(Array.isArray(page.warnings)).toBe(true);
     }
   });
 
-  it("should handle PDF with no pages gracefully", () => {
+  it("should handle PDF with no pages gracefully", async () => {
     // Minimal PDF that we can parse but has unusual structure
-    const pdfBytes = pdf([[]]);
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await pdf([[]]);
+    const result = await readPdf(pdfBytes);
     // Should not throw; may have 0 or more pages depending on writer behavior
     expect(result).toBeDefined();
     expect(Array.isArray(result.pages)).toBe(true);
   });
 
-  it("should handle very large cell values", () => {
+  it("should handle very large cell values", async () => {
     const longText = "A".repeat(10000);
-    const pdfBytes = pdf([[longText]]);
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await pdf([[longText]]);
+    const result = await readPdf(pdfBytes);
     // Should extract at least some portion of the long text
     expect(result.text.length).toBeGreaterThan(0);
   });
 
-  it("should handle special characters in cell values", () => {
-    const pdfBytes = pdf([["<>&\"'"], ["Tab\there"], ["Line\nbreak"]]);
-    const result = readPdf(pdfBytes);
+  it("should handle special characters in cell values", async () => {
+    const pdfBytes = await pdf([["<>&\"'"], ["Tab\there"], ["Line\nbreak"]]);
+    const result = await readPdf(pdfBytes);
     expect(result.pages.length).toBeGreaterThan(0);
     // At minimum the PDF should parse without throwing
   });
 
-  it("should handle many pages", () => {
+  it("should handle many pages", async () => {
     const sheets = Array.from({ length: 10 }, (_, i) => ({
       name: `Sheet${i + 1}`,
       data: [[`Page ${i + 1} content`]] as (string | number)[][]
     }));
-    const pdfBytes = pdf({ sheets });
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await pdf({ sheets });
+    const result = await readPdf(pdfBytes);
     expect(result.pages.length).toBeGreaterThanOrEqual(10);
   });
 });
@@ -1293,16 +1293,16 @@ describe("PDF Reader - Fault Tolerance", () => {
 // =============================================================================
 
 describe("PDF Reader - Selective Extraction", () => {
-  it("should extract only text when images disabled", () => {
-    const pdfBytes = pdf([["Text Only"]]);
-    const result = readPdf(pdfBytes, { extractImages: false });
+  it("should extract only text when images disabled", async () => {
+    const pdfBytes = await pdf([["Text Only"]]);
+    const result = await readPdf(pdfBytes, { extractImages: false });
     expect(result.text).toContain("Text Only");
     expect(result.pages[0].images).toEqual([]);
   });
 
-  it("should extract only metadata when text and images disabled", () => {
-    const pdfBytes = pdf([["Metadata Only"]], { title: "My Doc" });
-    const result = readPdf(pdfBytes, {
+  it("should extract only metadata when text and images disabled", async () => {
+    const pdfBytes = await pdf([["Metadata Only"]], { title: "My Doc" });
+    const result = await readPdf(pdfBytes, {
       extractText: false,
       extractImages: false,
       extractMetadata: true
@@ -1312,16 +1312,16 @@ describe("PDF Reader - Selective Extraction", () => {
     expect(result.pages[0].images).toEqual([]);
   });
 
-  it("should skip metadata when extractMetadata is false", () => {
-    const pdfBytes = pdf([["No Metadata"]], { title: "Hidden" });
-    const result = readPdf(pdfBytes, { extractMetadata: false });
+  it("should skip metadata when extractMetadata is false", async () => {
+    const pdfBytes = await pdf([["No Metadata"]], { title: "Hidden" });
+    const result = await readPdf(pdfBytes, { extractMetadata: false });
     // Metadata should be empty/default
     expect(result.metadata.title).toBe("");
     expect(result.text).toContain("No Metadata");
   });
 
-  it("should respect page selection with encryption", () => {
-    const pdfBytes = pdf(
+  it("should respect page selection with encryption", async () => {
+    const pdfBytes = await pdf(
       {
         sheets: [
           { name: "S1", data: [["Page1Content"]] },
@@ -1332,7 +1332,7 @@ describe("PDF Reader - Selective Extraction", () => {
       { encryption: { ownerPassword: "owner" } }
     );
 
-    const result = readPdf(pdfBytes, { pages: [2] });
+    const result = await readPdf(pdfBytes, { pages: [2] });
     expect(result.pages.length).toBe(1);
     expect(result.pages[0].pageNumber).toBe(2);
     expect(result.text).toContain("Page2Content");
@@ -1346,9 +1346,9 @@ describe("PDF Reader - Selective Extraction", () => {
 // =============================================================================
 
 describe("PDF Reader - Structural Robustness", () => {
-  it("should resolve page dimensions correctly from roundtrip PDF", () => {
-    const pdfBytes = pdf([["Dimension Test"]], { pageSize: "A4" });
-    const result = readPdf(pdfBytes);
+  it("should resolve page dimensions correctly from roundtrip PDF", async () => {
+    const pdfBytes = await pdf([["Dimension Test"]], { pageSize: "A4" });
+    const result = await readPdf(pdfBytes);
     const page = result.pages[0];
     // A4 = 595.28 x 841.89 points (approximately)
     expect(page.width).toBeGreaterThan(500);
@@ -1357,9 +1357,9 @@ describe("PDF Reader - Structural Robustness", () => {
     expect(page.height).toBeLessThan(900);
   });
 
-  it("should resolve page dimensions consistently between page and metadata", () => {
-    const pdfBytes = pdf([["Consistency Test"]]);
-    const result = readPdf(pdfBytes);
+  it("should resolve page dimensions consistently between page and metadata", async () => {
+    const pdfBytes = await pdf([["Consistency Test"]]);
+    const result = await readPdf(pdfBytes);
     const page = result.pages[0];
     const metaSize = result.metadata.pageSize;
     expect(metaSize).not.toBeNull();
@@ -1369,30 +1369,30 @@ describe("PDF Reader - Structural Robustness", () => {
     }
   });
 
-  it("should handle landscape orientation page dimensions", () => {
-    const pdfBytes = pdf([["Landscape"]], { orientation: "landscape" });
-    const result = readPdf(pdfBytes);
+  it("should handle landscape orientation page dimensions", async () => {
+    const pdfBytes = await pdf([["Landscape"]], { orientation: "landscape" });
+    const result = await readPdf(pdfBytes);
     const page = result.pages[0];
     // Landscape: width > height
     expect(page.width).toBeGreaterThan(page.height);
   });
 
-  it("should resolve page resources for text extraction on all pages", () => {
-    const pdfBytes = pdf({
+  it("should resolve page resources for text extraction on all pages", async () => {
+    const pdfBytes = await pdf({
       sheets: [
         { name: "S1", data: [["TextA"]] },
         { name: "S2", data: [["TextB"]] }
       ]
     });
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     // Both pages should have extracted text (proving resource resolution works)
     expect(result.pages[0].text).toContain("TextA");
     expect(result.pages[1].text).toContain("TextB");
   });
 
-  it("should use getPagesWithObjInfo for correct page identity", () => {
+  it("should use getPagesWithObjInfo for correct page identity", async () => {
     // Encrypted multi-page PDF — if page objNum is wrong, decryption will fail
-    const pdfBytes = pdf(
+    const pdfBytes = await pdf(
       {
         sheets: [
           { name: "S1", data: [["EncryptedPage1"]] },
@@ -1402,7 +1402,7 @@ describe("PDF Reader - Structural Robustness", () => {
       },
       { encryption: { ownerPassword: "owner", userPassword: "user" } }
     );
-    const result = readPdf(pdfBytes, { password: "user" });
+    const result = await readPdf(pdfBytes, { password: "user" });
     expect(result.pages.length).toBeGreaterThanOrEqual(3);
     expect(result.text).toContain("EncryptedPage1");
     expect(result.text).toContain("EncryptedPage2");
@@ -1522,7 +1522,7 @@ function pdfFromString(str: string): Uint8Array {
 }
 
 describe("PDF Reader - Indirect MediaBox", () => {
-  it("should resolve page dimensions from an indirect MediaBox reference", () => {
+  it("should resolve page dimensions from an indirect MediaBox reference", async () => {
     // Hand-crafted PDF where the page's /MediaBox is an indirect reference (obj 5)
     // instead of a direct array. This tests that resolvePageBox() derefs properly.
     //
@@ -1555,7 +1555,7 @@ describe("PDF Reader - Indirect MediaBox", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.pages.length).toBe(1);
     expect(result.pages[0].width).toBe(200);
@@ -1566,7 +1566,7 @@ describe("PDF Reader - Indirect MediaBox", () => {
 });
 
 describe("PDF Reader - Form XObject Recursion Guard", () => {
-  it("should not stack overflow on self-referencing Form XObject", () => {
+  it("should not stack overflow on self-referencing Form XObject", async () => {
     // Hand-crafted PDF where a Form XObject's content stream references itself
     // via the Do operator: /XObj1 Do. This would infinite-recurse without the
     // MAX_FORM_DEPTH guard.
@@ -1609,7 +1609,7 @@ describe("PDF Reader - Form XObject Recursion Guard", () => {
 
     const pdfBytes = pdfFromString(src);
     // Should NOT throw or hang — the recursion guard should kick in
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.pages.length).toBe(1);
     // No text in this PDF (the form xobject has no real text operators)
     // The key assertion is that we get here at all without stack overflow
@@ -1731,17 +1731,17 @@ describe("decodeText — CID variable-length code regression", () => {
 // =============================================================================
 
 describe("Text Reconstruction — table data should not be split into columns", () => {
-  it("should keep table columns on the same line", () => {
+  it("should keep table columns on the same line", async () => {
     // Write a 3-column table and read it back.
     // Before the fix, detectColumns would split this into 2-3 "columns"
     // and put each table column on its own set of lines.
-    const pdfBytes = pdf([
+    const pdfBytes = await pdf([
       ["Product", "Price", "Quantity"],
       ["Widget A", 19.99, 100],
       ["Widget B", 24.5, 250]
     ]);
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     const text = result.text;
 
     // All three column headers should be on the same line
@@ -1758,7 +1758,7 @@ describe("Text Reconstruction — table data should not be split into columns", 
     expect(widgetALine).toContain("100");
   });
 
-  it("should keep 5-column table on same lines", () => {
+  it("should keep 5-column table on same lines", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Test");
     ws.columns = [
@@ -1772,8 +1772,8 @@ describe("Text Reconstruction — table data should not be split into columns", 
       { item: "Laptop", sku: "LP-001", qty: 42, price: 1299.99, stock: true },
       { item: "Mouse", sku: "WM-055", qty: 350, price: 29.99, stock: true }
     ]);
-    const pdfBytes = excelToPdf(wb);
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await excelToPdf(wb);
+    const result = await readPdf(pdfBytes);
 
     const lines = result.text.split("\n").filter(l => l.trim().length > 0);
 
@@ -1793,14 +1793,14 @@ describe("Text Reconstruction — table data should not be split into columns", 
     expect(laptopLine).toContain("1299.99");
   });
 
-  it("should use tab separators between table columns", () => {
-    const pdfBytes = pdf([
+  it("should use tab separators between table columns", async () => {
+    const pdfBytes = await pdf([
       ["Name", "Department", "Salary"],
       ["Alice", "Engineering", 120000],
       ["Bob", "Marketing", 95000]
     ]);
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     const lines = result.text.split("\n").filter(l => l.trim().length > 0);
 
     // Each line should have tab separators between the columns
@@ -1813,10 +1813,10 @@ describe("Text Reconstruction — table data should not be split into columns", 
     expect(tabCount).toBeGreaterThanOrEqual(2);
   });
 
-  it("should preserve single-column text without false column detection", () => {
-    const pdfBytes = pdf([["Single Column"], ["Row 1"], ["Row 2"], ["Row 3"]]);
+  it("should preserve single-column text without false column detection", async () => {
+    const pdfBytes = await pdf([["Single Column"], ["Row 1"], ["Row 2"], ["Row 3"]]);
 
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     const lines = result.text.split("\n").filter(l => l.trim().length > 0);
 
     expect(lines).toContain("Single Column");
@@ -1831,7 +1831,7 @@ describe("Text Reconstruction — table data should not be split into columns", 
 // =============================================================================
 
 describe("PDF Reader - Annotation Extraction", () => {
-  it("should extract Link annotations from hand-crafted PDF", () => {
+  it("should extract Link annotations from hand-crafted PDF", async () => {
     // Hand-crafted PDF with a Link annotation that has a URI action
     const src = [
       "%PDF-1.4",
@@ -1860,7 +1860,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.pages.length).toBe(1);
     const annots = result.pages[0].annotations;
@@ -1882,7 +1882,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     expect(note.author).toBe("Author Name");
   });
 
-  it("should extract Highlight annotation", () => {
+  it("should extract Highlight annotation", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
@@ -1906,7 +1906,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     const annots = result.pages[0].annotations;
     expect(annots.length).toBe(1);
@@ -1915,7 +1915,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     expect(annots[0].color).toEqual([1, 1, 0]); // Yellow
   });
 
-  it("should skip Widget and Popup annotations", () => {
+  it("should skip Widget and Popup annotations", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
@@ -1946,7 +1946,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     const annots = result.pages[0].annotations;
     // Only FreeText — Widget and Popup should be filtered out
@@ -1955,15 +1955,15 @@ describe("PDF Reader - Annotation Extraction", () => {
     expect(annots[0].contents).toBe("Free text content");
   });
 
-  it("should return empty annotations for pages without /Annots", () => {
-    const pdfBytes = pdf([["Hello", "World"]]);
-    const result = readPdf(pdfBytes);
+  it("should return empty annotations for pages without /Annots", async () => {
+    const pdfBytes = await pdf([["Hello", "World"]]);
+    const result = await readPdf(pdfBytes);
 
     // Our simple PDF writer doesn't add annotations for plain data
     expect(result.pages[0].annotations).toEqual([]);
   });
 
-  it("should respect extractAnnotations: false option", () => {
+  it("should respect extractAnnotations: false option", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
@@ -1987,13 +1987,13 @@ describe("PDF Reader - Annotation Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes, { extractAnnotations: false });
+    const result = await readPdf(pdfBytes, { extractAnnotations: false });
 
     // Annotations should be empty when extraction is disabled
     expect(result.pages[0].annotations).toEqual([]);
   });
 
-  it("should extract Link annotation with direct /Dest", () => {
+  it("should extract Link annotation with direct /Dest", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
@@ -2017,7 +2017,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     const annots = result.pages[0].annotations;
     expect(annots.length).toBe(1);
@@ -2025,7 +2025,7 @@ describe("PDF Reader - Annotation Extraction", () => {
     expect(annots[0].destination).toBe("Chapter1");
   });
 
-  it("should extract annotations from roundtrip Excel PDF with hyperlinks", () => {
+  it("should extract annotations from roundtrip Excel PDF with hyperlinks", async () => {
     // Create a workbook with hyperlinks — the writer will create Link annotations
     const workbook = new Workbook();
     const sheet = workbook.addWorksheet("Links");
@@ -2035,8 +2035,8 @@ describe("PDF Reader - Annotation Extraction", () => {
       hyperlink: "https://example.com"
     };
 
-    const pdfBytes = excelToPdf(workbook);
-    const result = readPdf(pdfBytes);
+    const pdfBytes = await excelToPdf(workbook);
+    const result = await readPdf(pdfBytes);
 
     // The writer should have created at least one Link annotation
     const allAnnotations = result.pages.flatMap(p => p.annotations);
@@ -2051,7 +2051,7 @@ describe("PDF Reader - Annotation Extraction", () => {
 // =============================================================================
 
 describe("PDF Reader - Form Field Extraction", () => {
-  it("should extract text field from AcroForm", () => {
+  it("should extract text field from AcroForm", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
@@ -2076,7 +2076,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(1);
     expect(result.formFields[0].name).toBe("username");
@@ -2084,7 +2084,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(result.formFields[0].value).toBe("john_doe");
   });
 
-  it("should extract checkbox field", () => {
+  it("should extract checkbox field", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
@@ -2112,7 +2112,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(1);
     expect(result.formFields[0].name).toBe("agree");
@@ -2121,7 +2121,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(result.formFields[0].exportValue).toBe("Yes");
   });
 
-  it("should extract dropdown (choice) field with options", () => {
+  it("should extract dropdown (choice) field with options", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
@@ -2146,7 +2146,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(1);
     const field = result.formFields[0];
@@ -2156,7 +2156,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(field.options).toEqual(["Australia", "Canada", "Japan"]);
   });
 
-  it("should extract multiple form fields", () => {
+  it("should extract multiple form fields", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R] >> >> endobj",
@@ -2184,7 +2184,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(3);
 
@@ -2201,7 +2201,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(subscribeField.value).toBe("Off");
   });
 
-  it("should extract read-only and required flags", () => {
+  it("should extract read-only and required flags", async () => {
     // Ff: bit 0 (ReadOnly) = 1, bit 1 (Required) = 2 → combined = 3
     const src = [
       "%PDF-1.4",
@@ -2226,21 +2226,21 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(1);
     expect(result.formFields[0].readOnly).toBe(true);
     expect(result.formFields[0].required).toBe(true);
   });
 
-  it("should return empty formFields for PDFs without AcroForm", () => {
-    const pdfBytes = pdf([["Hello", "World"]]);
-    const result = readPdf(pdfBytes);
+  it("should return empty formFields for PDFs without AcroForm", async () => {
+    const pdfBytes = await pdf([["Hello", "World"]]);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields).toEqual([]);
   });
 
-  it("should respect extractFormFields: false option", () => {
+  it("should respect extractFormFields: false option", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
@@ -2264,12 +2264,12 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes, { extractFormFields: false });
+    const result = await readPdf(pdfBytes, { extractFormFields: false });
 
     expect(result.formFields).toEqual([]);
   });
 
-  it("should handle hierarchical field names", () => {
+  it("should handle hierarchical field names", async () => {
     // Parent field "address" with children "city" and "zip"
     // → should produce "address.city" and "address.zip"
     const src = [
@@ -2301,7 +2301,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(2);
     const names = result.formFields.map(f => f.name).sort();
@@ -2314,7 +2314,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(zipField.value).toBe("2000");
   });
 
-  it("should extract listbox field (Ch without Combo flag)", () => {
+  it("should extract listbox field (Ch without Combo flag)", async () => {
     const src = [
       "%PDF-1.4",
       "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
@@ -2339,7 +2339,7 @@ describe("PDF Reader - Form Field Extraction", () => {
     ].join("\n");
 
     const pdfBytes = pdfFromString(src);
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
 
     expect(result.formFields.length).toBe(1);
     const field = result.formFields[0];

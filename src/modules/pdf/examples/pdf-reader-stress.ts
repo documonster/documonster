@@ -500,7 +500,7 @@ log(`  Cells: ~${wb.worksheets.reduce((n, ws) => n + ws.rowCount * (ws.columnCou
 
 log("\nSTEP 2: Export encrypted PDF (landscape, images, full metadata)\n");
 
-const pdfBytes = excelToPdf(wb, {
+const pdfBytes = await excelToPdf(wb, {
   title: "ACME Corp \u2014 Annual Report 2025",
   author: "CFO Office / Ren\u00e9 M\u00fcller",
   subject: "Confidential financial & operational report with 6 departments",
@@ -522,7 +522,7 @@ log(`  Encrypted: yes (RC4-128)`);
 log("\nSTEP 3: Standalone pdf() with mixed images\n");
 
 const pngData = buildPng();
-const standalonePdf = pdf(
+const standalonePdf = await pdf(
   {
     data: [
       ["Product Catalog \u2014 Visual Guide"],
@@ -551,7 +551,7 @@ log(`  Size: ${(standalonePdf.length / 1024).toFixed(1)} KB`);
 log("\nSTEP 4: Read encrypted report (user password)\n");
 
 const t1 = process.hrtime.bigint();
-const report = readPdf(pdfBytes, { password: "R3@d0nly$2025" });
+const report = await readPdf(pdfBytes, { password: "R3@d0nly$2025" });
 const readMs = (Number(process.hrtime.bigint() - t1) / 1e6).toFixed(1);
 
 log(`  Time: ${readMs}ms`);
@@ -609,7 +609,7 @@ for (const idx of [0, 1, 2, report.pages.length - 1]) {
 
 log("\nSTEP 5: Read with owner password\n");
 
-const ownerResult = readPdf(pdfBytes, { password: "0wn3r!Adm1n#2025" });
+const ownerResult = await readPdf(pdfBytes, { password: "0wn3r!Adm1n#2025" });
 log(`  Text identical to user-read: ${ownerResult.text === report.text}`);
 log(`  Pages identical: ${ownerResult.pages.length === report.pages.length}`);
 
@@ -619,7 +619,7 @@ log(`  Pages identical: ${ownerResult.pages.length === report.pages.length}`);
 
 log("\nSTEP 6: Read standalone image PDF + verify images\n");
 
-const catalog = readPdf(standalonePdf, { password: "view" });
+const catalog = await readPdf(standalonePdf, { password: "view" });
 log(`  Pages: ${catalog.pages.length}`);
 log(`  Text: ${catalog.text.trim().substring(0, 120)}`);
 log(`  Images: ${catalog.pages[0].images.length}`);
@@ -652,7 +652,7 @@ for (const img of catalog.pages[0].images) {
 log("\nSTEP 7: Selective extraction\n");
 
 // Only first and last page
-const partial = readPdf(pdfBytes, {
+const partial = await readPdf(pdfBytes, {
   password: "R3@d0nly$2025",
   pages: [1, report.pages.length]
 });
@@ -660,7 +660,7 @@ log(`  Pages [1, ${report.pages.length}]: got ${partial.pages.length} pages`);
 log(`  Page numbers: [${partial.pages.map(p => p.pageNumber).join(", ")}]`);
 
 // Metadata only
-const metaOnly = readPdf(pdfBytes, {
+const metaOnly = await readPdf(pdfBytes, {
   password: "R3@d0nly$2025",
   extractText: false,
   extractImages: false
@@ -670,7 +670,7 @@ log(
 );
 
 // Text only
-const textOnly = readPdf(pdfBytes, {
+const textOnly = await readPdf(pdfBytes, {
   password: "R3@d0nly$2025",
   extractImages: false,
   extractMetadata: false
@@ -782,7 +782,7 @@ log("\nSTEP 10: Error handling\n");
 
 // Wrong password
 try {
-  readPdf(pdfBytes, { password: "wrong" });
+  await readPdf(pdfBytes, { password: "wrong" });
   log("  [FAIL] Should have thrown on wrong password");
 } catch (e) {
   log(`  [PASS] Wrong password: ${e instanceof PdfStructureError ? "PdfStructureError" : "Error"}`);
@@ -790,7 +790,7 @@ try {
 
 // Garbage data
 try {
-  readPdf(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+  await readPdf(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   log("  [FAIL] Should have thrown on garbage data");
 } catch (e) {
   log(`  [PASS] Garbage data: ${e instanceof PdfStructureError ? "PdfStructureError" : "Error"}`);
@@ -798,7 +798,7 @@ try {
 
 // Empty
 try {
-  readPdf(new Uint8Array(0));
+  await readPdf(new Uint8Array(0));
   log("  [FAIL] Should have thrown on empty data");
 } catch (e) {
   log(`  [PASS] Empty data: ${e instanceof PdfStructureError ? "PdfStructureError" : "Error"}`);
@@ -806,7 +806,7 @@ try {
 
 // Truncated
 try {
-  readPdf(pdfBytes.subarray(0, Math.floor(pdfBytes.length / 3)));
+  await readPdf(pdfBytes.subarray(0, Math.floor(pdfBytes.length / 3)));
   log("  [FAIL] Should have thrown on truncated PDF");
 } catch (e) {
   log(`  [PASS] Truncated PDF: ${e instanceof PdfStructureError ? "PdfStructureError" : "Error"}`);
@@ -827,9 +827,9 @@ for (const rows of benchSizes) {
   for (let i = 0; i < rows; i++) {
     data.push([`Row-${i}`, i * 3.14, i, `Val-${i}`, i * 100]);
   }
-  const p = pdf(data);
+  const p = await pdf(data);
   const st = process.hrtime.bigint();
-  const r = readPdf(p);
+  const r = await readPdf(p);
   const ms = (Number(process.hrtime.bigint() - st) / 1e6).toFixed(1);
   const frags = r.pages.reduce((a, pg) => a + pg.textFragments.length, 0);
   log(

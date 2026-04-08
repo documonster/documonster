@@ -2,7 +2,7 @@
 
 [中文](README_zh.md)
 
-A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with the `pdf()` function or `excelToPdf()` bridge. **Read** any PDF with `readPdf()` — extract text, images, and metadata from all major PDF versions.
+A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with the `pdf()` function or `excelToPdf()` bridge. **Read** any PDF with `readPdf()` — extract text, images, and metadata from all major PDF versions. All APIs are async and yield to the event loop between pages to avoid blocking.
 
 ```typescript
 // Write — standalone
@@ -32,6 +32,7 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 - **Font Embedding** — TrueType font subsetting for Unicode/CJK text
 - **Page Setup** — Per-sheet paper size, orientation, margins, print area
 - **Tree-Shakeable** — Not imported? Not in your bundle
+- **Non-Blocking** — Yields to the event loop between pages to avoid blocking
 
 ### Reading
 
@@ -56,7 +57,7 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
-const result = readPdf(bytes);
+const result = await readPdf(bytes);
 
 // All text
 console.log(result.text);
@@ -94,14 +95,14 @@ for (const field of result.formFields) {
 ### Read Encrypted PDF
 
 ```typescript
-const result = readPdf(bytes, { password: "secret" });
+const result = await readPdf(bytes, { password: "secret" });
 ```
 
 ### Selective Extraction
 
 ```typescript
 // Only pages 1 and 3, text only (no images)
-const result = readPdf(bytes, {
+const result = await readPdf(bytes, {
   pages: [1, 3],
   extractImages: false
 });
@@ -124,7 +125,7 @@ sheet.addRow({ product: "Widget", revenue: 1000 });
 sheet.addRow({ product: "Gadget", revenue: 2500 });
 sheet.getColumn("revenue").numFmt = "$#,##0.00";
 
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 
 // Node.js
 import { writeFileSync } from "fs";
@@ -144,7 +145,7 @@ import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 await workbook.xlsx.readFile("report.xlsx");
 
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Monthly Report"
@@ -159,14 +160,14 @@ Generate PDFs from plain data — no Excel module, no Map objects, no boilerplat
 import { pdf } from "@cj-tech-master/excelts/pdf";
 
 // Simplest — pass a 2D array
-const bytes = pdf([
+const bytes = await pdf([
   ["Product", "Revenue"],
   ["Widget", 1000],
   ["Gadget", 2500]
 ]);
 
 // With options
-const bytes = pdf(
+const bytes = await pdf(
   [
     ["Name", "Score"],
     ["Alice", 95],
@@ -176,7 +177,7 @@ const bytes = pdf(
 );
 
 // Multiple sheets
-const bytes = pdf({
+const bytes = await pdf({
   sheets: [
     {
       name: "Sales",
@@ -196,7 +197,7 @@ const bytes = pdf({
 });
 
 // Column widths + styled cells
-const bytes = pdf({
+const bytes = await pdf({
   name: "Report",
   columns: [{ width: 25 }, { width: 15 }],
   data: [
@@ -434,7 +435,7 @@ The PDF writer renders all standard cell styles:
 ### Repeat Header Rows
 
 ```typescript
-excelToPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
+await excelToPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
 ```
 
 Or via worksheet page setup:
@@ -474,7 +475,7 @@ worksheet.addImage(imageId, {
   ext: { width: 200, height: 150 }
 });
 
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 // Image appears in the PDF at the specified position
 ```
 
@@ -491,7 +492,7 @@ The writer produces **AES-256 encrypted PDFs** (PDF 2.0, V=5, R=5). The reader c
 #### Owner-Only (No Open Password)
 
 ```typescript
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     permissions: { print: true, copy: false, modify: false }
@@ -503,7 +504,7 @@ const pdf = excelToPdf(workbook, {
 #### Open Password Required
 
 ```typescript
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader"
@@ -525,7 +526,7 @@ The reader automatically detects and decrypts:
 
 ```typescript
 // Automatically detects encryption type
-const result = readPdf(encryptedBytes, { password: "secret" });
+const result = await readPdf(encryptedBytes, { password: "secret" });
 ```
 
 ---
@@ -537,7 +538,7 @@ Standard Type1 fonts (Helvetica, Times, Courier) only support Latin characters. 
 ```typescript
 import { readFileSync } from "fs";
 
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -560,7 +561,7 @@ ws2.pageSetup.paperSize = 1; // Letter
 ws2.pageSetup.orientation = "landscape";
 
 // Each sheet renders with its own page size/orientation
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 ```
 
 Worksheet margins are also inherited:
@@ -622,13 +623,13 @@ npx tsx src/modules/pdf/examples/pdf-reader.ts
 
 ### `readPdf(data, options?)`
 
-Read a PDF file and extract text, images, and metadata. Returns `ReadPdfResult`.
+Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdfResult>`.
 
 ```typescript
 import { readPdf } from "@cj-tech-master/excelts/pdf";
 
 // Basic
-const result = readPdf(pdfBytes);
+const result = await readPdf(pdfBytes);
 console.log(result.text);
 console.log(result.pages[0].images);
 console.log(result.pages[0].annotations);
@@ -636,10 +637,10 @@ console.log(result.formFields);
 console.log(result.metadata);
 
 // Encrypted
-const result = readPdf(pdfBytes, { password: "secret" });
+const result = await readPdf(pdfBytes, { password: "secret" });
 
 // Selective
-const result = readPdf(pdfBytes, {
+const result = await readPdf(pdfBytes, {
   pages: [1, 3],
   extractImages: false,
   extractMetadata: false
@@ -648,32 +649,32 @@ const result = readPdf(pdfBytes, {
 
 ### `pdf(input, options?)`
 
-Generate a PDF from plain data. Returns `Uint8Array`.
+Generate a PDF from plain data. Returns `Promise<Uint8Array>`.
 
 ```typescript
 // 2D array
-pdf([["Name", "Age"], ["Alice", 30]]);
+await pdf([["Name", "Age"], ["Alice", 30]]);
 
 // Single sheet with column widths
-pdf({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
+await pdf({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
 
 // Multiple sheets
-pdf({ sheets: [{ name: "S1", data: [...] }, { name: "S2", data: [...] }] });
+await pdf({ sheets: [{ name: "S1", data: [...] }, { name: "S2", data: [...] }] });
 
 // With options
-pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
+await pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
 ```
 
 ### `excelToPdf(workbook, options?)`
 
-Convert an Excel `Workbook` to PDF. Returns `Uint8Array`.
+Convert an Excel `Workbook` to PDF. Returns `Promise<Uint8Array>`.
 
 ```typescript
 import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 // ... build workbook ...
-const bytes = excelToPdf(workbook, { showGridLines: true });
+const bytes = await excelToPdf(workbook, { showGridLines: true });
 ```
 
 ### Error Types
@@ -692,7 +693,7 @@ All errors extend `BaseError` with `cause` chain support:
 
 ```typescript
 try {
-  excelToPdf(workbook);
+  await excelToPdf(workbook);
 } catch (err) {
   if (isPdfError(err)) {
     console.error(err.message, err.cause);

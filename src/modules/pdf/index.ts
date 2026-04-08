@@ -7,7 +7,7 @@
  * ```typescript
  * import { pdf } from "excelts/pdf";
  *
- * const bytes = pdf([
+ * const bytes = await pdf([
  *   ["Product", "Revenue"],
  *   ["Widget", 1000],
  *   ["Gadget", 2500]
@@ -22,14 +22,14 @@
  * const workbook = new Workbook();
  * const sheet = workbook.addWorksheet("Sales");
  * sheet.addRow(["Product", "Revenue"]);
- * const bytes = excelToPdf(workbook);
+ * const bytes = await excelToPdf(workbook);
  * ```
  *
  * @example Read PDF — extract text, images, and metadata:
  * ```typescript
  * import { readPdf } from "excelts/pdf";
  *
- * const result = readPdf(pdfBytes);
+ * const result = await readPdf(pdfBytes);
  * console.log(result.text);               // All text
  * console.log(result.pages[0].text);      // Page 1 text
  * console.log(result.pages[0].images);    // Page 1 images

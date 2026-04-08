@@ -299,7 +299,7 @@ sheet.columns = [
 sheet.addRow({ product: "Widget", revenue: 1000 });
 sheet.getColumn("revenue").numFmt = "$#,##0.00";
 
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Sales Report"
@@ -319,13 +319,13 @@ window.open(URL.createObjectURL(blob));
 ```typescript
 const workbook = new Workbook();
 await workbook.xlsx.readFile("input.xlsx");
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 ```
 
 ### PDF Encryption
 
 ```typescript
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -338,7 +338,7 @@ const pdf = excelToPdf(workbook, {
 
 ```typescript
 import { readFileSync } from "fs";
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```

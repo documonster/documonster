@@ -38,6 +38,7 @@ import {
   excelHAlignToPdf,
   excelVAlignToPdf
 } from "./style-converter";
+import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Constants
@@ -54,12 +55,65 @@ const MIN_COLUMN_WIDTH = 5;
 
 /**
  * Compute the layout for a sheet across one or more PDF pages.
+ * Yields to the event loop between each output page.
  */
-export function layoutSheet(
+export async function layoutSheet(
   sheet: PdfSheetData,
   options: ResolvedPdfOptions,
   fontManager: FontManager
-): LayoutPage[] {
+): Promise<LayoutPage[]> {
+  const ctx = prepareLayout(sheet, options);
+  if (!ctx) {
+    return [createEmptyPage(sheet, options)];
+  }
+
+  const layoutPages: LayoutPage[] = [];
+  const totalOutputPages = ctx.rowPages.length * ctx.colGroups.length;
+
+  for (const rowPage of ctx.rowPages) {
+    for (const colGroup of ctx.colGroups) {
+      layoutPages.push(
+        buildPageLayout(ctx, rowPage, colGroup, layoutPages.length, sheet, options, fontManager)
+      );
+      if (layoutPages.length < totalOutputPages) {
+        await yieldToEventLoop();
+      }
+    }
+  }
+
+  if (layoutPages.length > 0 && sheet.images) {
+    assignImagesToPages(sheet.images, layoutPages);
+  }
+
+  return layoutPages;
+}
+
+// =============================================================================
+// Internal — Shared Layout Pipeline
+// =============================================================================
+
+/** Pre-computed layout context for the layout pipeline. */
+interface LayoutContext {
+  pageWidth: number;
+  pageHeight: number;
+  contentWidth: number;
+  headerHeight: number;
+  scaleFactor: number;
+  scaledColumnWidths: number[];
+  rowHeights: number[];
+  visibleRows: number[];
+  visibleCols: number[];
+  mergeMap: Map<string, MergeInfo>;
+  rowPages: number[][];
+  colGroups: number[][];
+  margins: { top: number; right: number; bottom: number; left: number };
+}
+
+/**
+ * Steps 1–5: compute columns, scale, rows, merges, pagination.
+ * Returns null if the sheet has no visible columns (→ caller should emit an empty page).
+ */
+function prepareLayout(sheet: PdfSheetData, options: ResolvedPdfOptions): LayoutContext | null {
   const { margins } = options;
 
   let pageWidth = options.pageSize.width;
@@ -74,15 +128,12 @@ export function layoutSheet(
   const footerHeight = options.showPageNumbers ? 20 : 0;
   const availableHeight = contentHeight - headerHeight - footerHeight;
 
-  // Determine print area bounds (if set)
   const printRange = getPrintRange(sheet);
 
   // --- Step 1: Visible columns and widths ---
   const { columnWidths, visibleCols } = computeColumnWidths(sheet, printRange);
-  const columnCount = visibleCols.length;
-
-  if (columnCount === 0) {
-    return [emptyPage(pageWidth, pageHeight, sheet.name, options)];
+  if (visibleCols.length === 0) {
+    return null;
   }
 
   // --- Step 2: Scale ---
@@ -94,7 +145,6 @@ export function layoutSheet(
       scaleFactor *= fitScale;
     }
   }
-
   const scaledColumnWidths = columnWidths.map(w => w * scaleFactor);
 
   // --- Step 3: Visible rows and heights ---
@@ -103,158 +153,184 @@ export function layoutSheet(
   // --- Step 4: Merge map ---
   const mergeMap = buildMergeMap(sheet);
 
-  // --- Step 5: Paginate vertically (rows) and horizontally (columns) ---
+  // --- Step 5: Paginate ---
   const repeatRowCount = typeof options.repeatRows === "number" ? options.repeatRows : 0;
   const rowBreakSet = buildRowBreakSet(sheet, visibleRows);
   const rowPages = paginateRows(rowHeights, availableHeight, repeatRowCount, rowBreakSet);
   const colGroups = paginateColumns(scaledColumnWidths, contentWidth, sheet, visibleCols);
 
-  // --- Step 6: Layout cells per page (row page × column page) ---
-  const layoutPages: LayoutPage[] = [];
+  return {
+    pageWidth,
+    pageHeight,
+    contentWidth,
+    headerHeight,
+    scaleFactor,
+    scaledColumnWidths,
+    rowHeights,
+    visibleRows,
+    visibleCols,
+    mergeMap,
+    rowPages,
+    colGroups,
+    margins
+  };
+}
 
-  for (const rowPage of rowPages) {
-    for (const colGroup of colGroups) {
-      const cells: LayoutCell[] = [];
+/**
+ * Build the LayoutPage for a single rowPage × colGroup combination.
+ */
+function buildPageLayout(
+  ctx: LayoutContext,
+  rowPage: number[],
+  colGroup: number[],
+  currentPageCount: number,
+  sheet: PdfSheetData,
+  options: ResolvedPdfOptions,
+  fontManager: FontManager
+): LayoutPage {
+  const {
+    scaledColumnWidths,
+    rowHeights,
+    visibleRows,
+    visibleCols,
+    mergeMap,
+    pageWidth,
+    pageHeight,
+    contentWidth,
+    headerHeight,
+    scaleFactor,
+    margins
+  } = ctx;
 
-      // Compute column offsets for this column group
-      const groupColWidths = colGroup.map(ci => scaledColumnWidths[ci]);
-      const groupTotalWidth = groupColWidths.reduce((s, w) => s + w, 0);
-      const groupColOffsets: number[] = [];
-      let gx = margins.left;
-      if (groupTotalWidth < contentWidth) {
-        gx = margins.left + (contentWidth - groupTotalWidth) / 2;
+  const cells: LayoutCell[] = [];
+
+  // Compute column offsets for this column group
+  const groupColWidths = colGroup.map(ci => scaledColumnWidths[ci]);
+  const groupTotalWidth = groupColWidths.reduce((s, w) => s + w, 0);
+  const groupColOffsets: number[] = [];
+  let gx = margins.left;
+  if (groupTotalWidth < contentWidth) {
+    gx = margins.left + (contentWidth - groupTotalWidth) / 2;
+  }
+  for (const w of groupColWidths) {
+    groupColOffsets.push(gx);
+    gx += w;
+  }
+
+  // Row Y positions
+  const rowYPositions: number[] = [];
+  const pageRowHeights: number[] = [];
+  let currentY = pageHeight - margins.top - headerHeight;
+  for (const rowIdx of rowPage) {
+    const rowH = rowHeights[rowIdx] ?? DEFAULT_ROW_HEIGHT * scaleFactor;
+    rowYPositions.push(currentY);
+    pageRowHeights.push(rowH);
+    currentY -= rowH;
+  }
+
+  // Build cells for this row page × column group
+  for (let ri = 0; ri < rowPage.length; ri++) {
+    const visibleRowIdx = rowPage[ri];
+    const wsRowNumber = visibleRows[visibleRowIdx];
+
+    for (let gci = 0; gci < colGroup.length; gci++) {
+      const ci = colGroup[gci];
+      const wsColNumber = visibleCols[ci];
+
+      const mergeKey = `${wsRowNumber}:${wsColNumber}`;
+      const mergeInfo = mergeMap.get(mergeKey);
+      if (mergeInfo && !mergeInfo.isMaster) {
+        continue;
       }
-      for (const w of groupColWidths) {
-        groupColOffsets.push(gx);
-        gx += w;
-      }
 
-      // Row Y positions
-      const rowYPositions: number[] = [];
-      const pageRowHeights: number[] = [];
-      let currentY = pageHeight - margins.top - headerHeight;
-      for (const rowIdx of rowPage) {
-        const rowH = rowHeights[rowIdx] ?? DEFAULT_ROW_HEIGHT * scaleFactor;
-        rowYPositions.push(currentY);
-        pageRowHeights.push(rowH);
-        currentY -= rowH;
-      }
+      const row = sheet.rows.get(wsRowNumber);
+      const cell = row?.cells.get(wsColNumber);
 
-      // Build cells for this row page × column group
-      for (let ri = 0; ri < rowPage.length; ri++) {
-        const visibleRowIdx = rowPage[ri];
-        const wsRowNumber = visibleRows[visibleRowIdx];
-
-        for (let gci = 0; gci < colGroup.length; gci++) {
-          const ci = colGroup[gci]; // index into visibleCols
-          const wsColNumber = visibleCols[ci];
-
-          const mergeKey = `${wsRowNumber}:${wsColNumber}`;
-          const mergeInfo = mergeMap.get(mergeKey);
-          if (mergeInfo && !mergeInfo.isMaster) {
-            continue;
+      let colSpan = 1;
+      let rowSpan = 1;
+      if (mergeInfo && mergeInfo.isMaster) {
+        const mergeEndCol = wsColNumber + mergeInfo.colSpan - 1;
+        colSpan = 0;
+        for (let s = gci; s < colGroup.length; s++) {
+          if (visibleCols[colGroup[s]] <= mergeEndCol) {
+            colSpan++;
+          } else {
+            break;
           }
-
-          const row = sheet.rows.get(wsRowNumber);
-          const cell = row?.cells.get(wsColNumber);
-
-          let colSpan = 1;
-          let rowSpan = 1;
-          if (mergeInfo && mergeInfo.isMaster) {
-            const mergeEndCol = wsColNumber + mergeInfo.colSpan - 1;
-            colSpan = 0;
-            for (let s = gci; s < colGroup.length; s++) {
-              if (visibleCols[colGroup[s]] <= mergeEndCol) {
-                colSpan++;
-              } else {
-                break;
-              }
-            }
-            const mergeEndRow = wsRowNumber + mergeInfo.rowSpan - 1;
-            rowSpan = 0;
-            for (let s = visibleRowIdx; s < visibleRows.length; s++) {
-              if (visibleRows[s] <= mergeEndRow) {
-                rowSpan++;
-              } else {
-                break;
-              }
-            }
-            colSpan = Math.max(colSpan, 1);
-            rowSpan = Math.max(rowSpan, 1);
-          }
-
-          const cellX = groupColOffsets[gci];
-          const cellY = rowYPositions[ri];
-          let cellWidth = 0;
-          for (let s = 0; s < colSpan && gci + s < groupColWidths.length; s++) {
-            cellWidth += groupColWidths[gci + s];
-          }
-          let cellHeight = 0;
-          for (let s = 0; s < rowSpan && ri + s < pageRowHeights.length; s++) {
-            cellHeight += pageRowHeights[ri + s];
-          }
-          const rectY = cellY - cellHeight;
-
-          cells.push(
-            buildLayoutCell(
-              cell,
-              cellX,
-              rectY,
-              cellWidth,
-              cellHeight,
-              colSpan,
-              rowSpan,
-              options,
-              fontManager,
-              scaleFactor
-            )
-          );
         }
+        const mergeEndRow = wsRowNumber + mergeInfo.rowSpan - 1;
+        rowSpan = 0;
+        for (let s = visibleRowIdx; s < visibleRows.length; s++) {
+          if (visibleRows[s] <= mergeEndRow) {
+            rowSpan++;
+          } else {
+            break;
+          }
+        }
+        colSpan = Math.max(colSpan, 1);
+        rowSpan = Math.max(rowSpan, 1);
       }
 
-      layoutPages.push({
-        pageNumber: layoutPages.length + 1,
-        options,
-        cells,
-        width: pageWidth,
-        height: pageHeight,
-        sheetName: sheet.name,
-        sheetCols: colGroup.map(ci => visibleCols[ci]),
-        columnOffsets: groupColOffsets,
-        columnWidths: groupColWidths,
-        sheetRows: rowPage.map(ri => visibleRows[ri]),
-        rowYPositions,
-        rowHeights: pageRowHeights,
-        images: []
-      });
+      const cellX = groupColOffsets[gci];
+      const cellY = rowYPositions[ri];
+      let cellWidth = 0;
+      for (let s = 0; s < colSpan && gci + s < groupColWidths.length; s++) {
+        cellWidth += groupColWidths[gci + s];
+      }
+      let cellHeight = 0;
+      for (let s = 0; s < rowSpan && ri + s < pageRowHeights.length; s++) {
+        cellHeight += pageRowHeights[ri + s];
+      }
+      const rectY = cellY - cellHeight;
+
+      cells.push(
+        buildLayoutCell(
+          cell,
+          cellX,
+          rectY,
+          cellWidth,
+          cellHeight,
+          colSpan,
+          rowSpan,
+          options,
+          fontManager,
+          scaleFactor
+        )
+      );
     }
   }
 
-  // --- Step 7: Place images on the correct pages ---
-  if (layoutPages.length > 0 && sheet.images) {
-    assignImagesToPages(sheet.images, layoutPages);
-  }
-
-  return layoutPages;
+  return {
+    pageNumber: currentPageCount + 1,
+    options,
+    cells,
+    width: pageWidth,
+    height: pageHeight,
+    sheetName: sheet.name,
+    sheetCols: colGroup.map(ci => visibleCols[ci]),
+    columnOffsets: groupColOffsets,
+    columnWidths: groupColWidths,
+    sheetRows: rowPage.map(ri => visibleRows[ri]),
+    rowYPositions,
+    rowHeights: pageRowHeights,
+    images: []
+  };
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
+function createEmptyPage(sheet: PdfSheetData, options: ResolvedPdfOptions): LayoutPage {
+  let pageWidth = options.pageSize.width;
+  let pageHeight = options.pageSize.height;
+  if (options.orientation === "landscape") {
+    [pageWidth, pageHeight] = [pageHeight, pageWidth];
+  }
 
-function emptyPage(
-  width: number,
-  height: number,
-  sheetName: string,
-  options: ResolvedPdfOptions
-): LayoutPage {
   return {
     pageNumber: 1,
     options,
     cells: [],
-    width,
-    height,
-    sheetName,
+    width: pageWidth,
+    height: pageHeight,
+    sheetName: sheet.name,
     sheetCols: [],
     columnOffsets: [],
     columnWidths: [],

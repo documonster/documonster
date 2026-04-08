@@ -199,14 +199,14 @@ console.log(`Output directory: ${outDir}\n`);
 
 console.log("--- 1. Basic Text Extraction ---\n");
 
-const basicPdf = pdf([
+const basicPdf = await pdf([
   ["Product", "Price", "Quantity"],
   ["Widget A", 19.99, 100],
   ["Widget B", 24.5, 250],
   ["Widget C", 9.99, 500]
 ]);
 
-const basic = readPdf(basicPdf);
+const basic = await readPdf(basicPdf);
 const basicOutput = [
   `Pages: ${basic.pages.length}`,
   `Full text:`,
@@ -224,7 +224,7 @@ save("01-basic-text.txt", basicOutput);
 
 console.log("\n--- 2. Multi-Page Text Extraction ---\n");
 
-const multiPdf = pdf({
+const multiPdf = await pdf({
   sheets: [
     {
       name: "Q1 Sales",
@@ -253,7 +253,7 @@ const multiPdf = pdf({
   ]
 });
 
-const multi = readPdf(multiPdf);
+const multi = await readPdf(multiPdf);
 const multiOutput = [
   `Total pages: ${multi.pages.length}`,
   "",
@@ -275,14 +275,14 @@ save("02-multi-page.txt", multiOutput);
 
 console.log("\n--- 3. Metadata Extraction ---\n");
 
-const metaPdf = pdf([["Data", 123]], {
+const metaPdf = await pdf([["Data", 123]], {
   title: "Quarterly Report",
   author: "Finance Team",
   subject: "Q4 2025 Financials",
   creator: "excelts PDF module"
 });
 
-const meta = readPdf(metaPdf);
+const meta = await readPdf(metaPdf);
 const m = meta.metadata;
 const metaOutput = [
   `Title:      ${m.title}`,
@@ -312,7 +312,7 @@ console.log("\n--- 4. Image Extraction ---\n");
 const jpegData = buildMinimalJpeg();
 const pngData = buildMinimalPng();
 
-const imagePdf = pdf({
+const imagePdf = await pdf({
   data: [["Image Gallery"]],
   images: [
     { data: jpegData, format: "jpeg", col: 0, row: 1, width: 100, height: 80 },
@@ -320,7 +320,7 @@ const imagePdf = pdf({
   ]
 });
 
-const imageResult = readPdf(imagePdf);
+const imageResult = await readPdf(imagePdf);
 const imgLines: string[] = [
   `Pages: ${imageResult.pages.length}`,
   `Text: ${imageResult.text.trim()}`,
@@ -359,7 +359,7 @@ save("04-images.txt", imageOutput);
 
 console.log("\n--- 5. Encrypted PDF ---\n");
 
-const encPdf = pdf(
+const encPdf = await pdf(
   [
     ["Account", "Balance"],
     ["Checking", 12500.0],
@@ -377,15 +377,15 @@ const encPdf = pdf(
 );
 
 // Read with user password
-const encUser = readPdf(encPdf, { password: "reader-pass" });
+const encUser = await readPdf(encPdf, { password: "reader-pass" });
 
 // Read with owner password
-const encOwner = readPdf(encPdf, { password: "admin-secret" });
+const encOwner = await readPdf(encPdf, { password: "admin-secret" });
 
 // Try wrong password
 let wrongPwError = "";
 try {
-  readPdf(encPdf, { password: "wrong" });
+  await readPdf(encPdf, { password: "wrong" });
 } catch (err) {
   wrongPwError = err instanceof Error ? err.message : String(err);
 }
@@ -413,7 +413,7 @@ save("05-encrypted.txt", encOutput);
 
 console.log("\n--- 6. Selective Extraction ---\n");
 
-const selectPdf = pdf({
+const selectPdf = await pdf({
   sheets: [
     { name: "Page1", data: [["First page content", 111]] },
     { name: "Page2", data: [["Second page content", 222]] },
@@ -423,17 +423,17 @@ const selectPdf = pdf({
 });
 
 // Extract only pages 2 and 4
-const pages24 = readPdf(selectPdf, { pages: [2, 4] });
+const pages24 = await readPdf(selectPdf, { pages: [2, 4] });
 
 // Text only (no images, no metadata)
-const textOnly = readPdf(selectPdf, {
+const textOnly = await readPdf(selectPdf, {
   extractText: true,
   extractImages: false,
   extractMetadata: false
 });
 
 // Metadata only
-const metaOnly = readPdf(selectPdf, {
+const metaOnly = await readPdf(selectPdf, {
   extractText: false,
   extractImages: false,
   extractMetadata: true
@@ -464,14 +464,14 @@ save("06-selective.txt", selectOutput);
 
 console.log("\n--- 7. Text Positioning & Line Structure ---\n");
 
-const posPdf = pdf([
+const posPdf = await pdf([
   ["Name", "Department", "Salary"],
   ["Alice Chen", "Engineering", 120000],
   ["Bob Smith", "Marketing", 95000],
   ["Carol Davis", "Finance", 110000]
 ]);
 
-const posResult = readPdf(posPdf);
+const posResult = await readPdf(posPdf);
 const page = posResult.pages[0];
 
 const posLines: string[] = [
@@ -524,7 +524,7 @@ ws2.getCell("B1").value = 4;
 ws2.getCell("A2").value = "Total Value";
 ws2.getCell("B2").value = 76827.16;
 
-const excelPdfBytes = excelToPdf(wb, {
+const excelPdfBytes = await excelToPdf(wb, {
   title: "Inventory Report",
   author: "Warehouse System",
   orientation: "landscape"
@@ -534,7 +534,7 @@ const excelPdfBytes = excelToPdf(wb, {
 fs.writeFileSync(path.join(outDir, "08-excel-roundtrip.pdf"), excelPdfBytes);
 
 // Read it back
-const excelResult = readPdf(excelPdfBytes);
+const excelResult = await readPdf(excelPdfBytes);
 
 const excelOutput = [
   `PDF file size: ${excelPdfBytes.length} bytes`,
@@ -569,7 +569,7 @@ const errors: string[] = [];
 
 // Invalid data
 try {
-  readPdf(new Uint8Array([0, 1, 2, 3]));
+  await readPdf(new Uint8Array([0, 1, 2, 3]));
   errors.push("Invalid data: no error (unexpected)");
 } catch (err) {
   errors.push(
@@ -579,7 +579,7 @@ try {
 
 // Empty data
 try {
-  readPdf(new Uint8Array(0));
+  await readPdf(new Uint8Array(0));
   errors.push("Empty data: no error (unexpected)");
 } catch (err) {
   errors.push(
@@ -589,8 +589,8 @@ try {
 
 // Truncated PDF
 try {
-  const valid = pdf([["test"]]);
-  readPdf(valid.subarray(0, Math.floor(valid.length / 2)));
+  const valid = await pdf([["test"]]);
+  await readPdf(valid.subarray(0, Math.floor(valid.length / 2)));
   errors.push("Truncated PDF: no error (unexpected)");
 } catch (err) {
   errors.push(
@@ -600,7 +600,7 @@ try {
 
 // Wrong password
 try {
-  readPdf(encPdf, { password: "bad" });
+  await readPdf(encPdf, { password: "bad" });
   errors.push("Wrong password: no error (unexpected)");
 } catch (err) {
   errors.push(

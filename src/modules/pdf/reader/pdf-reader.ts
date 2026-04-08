@@ -16,18 +16,18 @@
  * - Cross-reference tables and streams (PDF 1.5+)
  * - Incremental updates and xref recovery
  *
- * @example Basic text extraction:
+ * @example Text extraction:
  * ```typescript
  * import { readPdf } from "excelts/pdf";
  *
- * const pdf = readPdf(pdfBytes);
+ * const pdf = await readPdf(pdfBytes);
  * console.log(pdf.text);           // All text from all pages
  * console.log(pdf.pages[0].text);  // Text from page 1
  * ```
  *
  * @example Image extraction:
  * ```typescript
- * const pdf = readPdf(pdfBytes);
+ * const pdf = await readPdf(pdfBytes);
  * for (const image of pdf.pages[0].images) {
  *   console.log(image.format, image.width, image.height);
  *   fs.writeFileSync(`image.${image.format}`, image.data);
@@ -36,7 +36,7 @@
  *
  * @example Metadata:
  * ```typescript
- * const pdf = readPdf(pdfBytes);
+ * const pdf = await readPdf(pdfBytes);
  * console.log(pdf.metadata.title);
  * console.log(pdf.metadata.author);
  * console.log(pdf.metadata.pageCount);
@@ -44,7 +44,7 @@
  *
  * @example Encrypted PDF:
  * ```typescript
- * const pdf = readPdf(pdfBytes, { password: "secret" });
+ * const pdf = await readPdf(pdfBytes, { password: "secret" });
  * ```
  */
 
@@ -64,6 +64,7 @@ import type { PdfFormField } from "./form-extractor";
 import { extractMetadata } from "./metadata-reader";
 import type { PdfMetadata } from "./metadata-reader";
 import { PdfStructureError } from "../errors";
+import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Types
@@ -162,15 +163,56 @@ export interface ReadPdfResult {
 
 /**
  * Read a PDF file and extract text, images, and metadata.
+ * Yields to the event loop between pages to avoid blocking.
  *
  * @param data - Raw PDF file bytes
  * @param options - Extraction options
- * @returns Extracted content
+ * @returns Promise of extracted content
  * @throws {PdfStructureError} If the PDF structure is invalid
  * @throws {PdfError} If decryption fails (wrong password)
  */
-export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResult {
-  const opts = {
+export async function readPdf(data: Uint8Array, options?: ReadPdfOptions): Promise<ReadPdfResult> {
+  const { doc, opts, metadata, pagesInfo, pageIndicesToProcess } = prepareRead(data, options);
+
+  const pages: ReadPdfPage[] = [];
+  for (let i = 0; i < pageIndicesToProcess.length; i++) {
+    const pageIdx = pageIndicesToProcess[i];
+    pages.push(processPage(pagesInfo[pageIdx].dict, pageIdx, doc, opts));
+    if (i < pageIndicesToProcess.length - 1) {
+      await yieldToEventLoop();
+    }
+  }
+
+  return finalizeRead(pages, pagesInfo.length, metadata, opts, doc);
+}
+
+// =============================================================================
+// Internal — Shared Pipeline
+// =============================================================================
+
+interface ResolvedReadOptions {
+  password: string;
+  pages: number[] | undefined;
+  extractText: boolean;
+  extractImages: boolean;
+  extractMetadata: boolean;
+  extractAnnotations: boolean;
+  extractFormFields: boolean;
+}
+
+interface PreparedRead {
+  doc: PdfDocument;
+  opts: ResolvedReadOptions;
+  metadata: PdfMetadata;
+  pagesInfo: Array<{ dict: PdfDictValue; objNum: number; gen: number }>;
+  pageIndicesToProcess: number[];
+}
+
+/**
+ * Shared setup: parse document, handle encryption, extract metadata, resolve pages.
+ */
+function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
+  const opts: ResolvedReadOptions = {
     password: options?.password ?? "",
     pages: options?.pages,
     extractText: options?.extractText ?? true,
@@ -180,10 +222,8 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
     extractFormFields: options?.extractFormFields ?? true
   };
 
-  // Parse document structure
   const doc = new PdfDocument(data);
 
-  // Handle encryption
   if (isEncrypted(doc)) {
     const success = initDecryption(doc, opts.password);
     if (!success) {
@@ -191,86 +231,93 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
     }
   }
 
-  // Extract metadata
   const metadata = opts.extractMetadata ? extractMetadata(doc) : createEmptyMetadata();
-
-  // Get pages (with object identity for correct decryption)
   const pagesInfo = doc.getPagesWithObjInfo();
   const pageIndicesToProcess = opts.pages
     ? opts.pages.map(p => p - 1).filter(p => p >= 0 && p < pagesInfo.length)
     : Array.from({ length: pagesInfo.length }, (_, i) => i);
 
-  // Process each page
-  const pages: ReadPdfPage[] = [];
+  return { doc, opts, metadata, pagesInfo, pageIndicesToProcess };
+}
 
-  for (const pageIdx of pageIndicesToProcess) {
-    const { dict: pageDict } = pagesInfo[pageIdx];
-    const pageNumber = pageIdx + 1;
-    const warnings: string[] = [];
+/**
+ * Process a single page: extract text, images, annotations, and dimensions.
+ */
+function processPage(
+  pageDict: PdfDictValue,
+  pageIdx: number,
+  doc: PdfDocument,
+  opts: ResolvedReadOptions
+): ReadPdfPage {
+  const pageNumber = pageIdx + 1;
+  const warnings: string[] = [];
 
-    // Extract text
-    let text = "";
-    let textLines: TextLine[] = [];
-    let textFragments: TextFragment[] = [];
+  let text = "";
+  let textLines: TextLine[] = [];
+  let textFragments: TextFragment[] = [];
 
-    if (opts.extractText) {
-      try {
-        textFragments = extractTextFromPage(pageDict, doc);
-        text = reconstructText(textFragments);
-        textLines = reconstructTextLines(textFragments);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        warnings.push(`Text extraction failed on page ${pageNumber}: ${msg}`);
-      }
+  if (opts.extractText) {
+    try {
+      textFragments = extractTextFromPage(pageDict, doc);
+      text = reconstructText(textFragments);
+      textLines = reconstructTextLines(textFragments);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Text extraction failed on page ${pageNumber}: ${msg}`);
     }
-
-    // Extract images
-    let images: ExtractedImage[] = [];
-    if (opts.extractImages) {
-      try {
-        images = extractImagesFromPage(pageDict, doc);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        warnings.push(`Image extraction failed on page ${pageNumber}: ${msg}`);
-      }
-    }
-
-    // Extract annotations
-    let annotations: PdfAnnotation[] = [];
-    if (opts.extractAnnotations) {
-      try {
-        annotations = extractAnnotationsFromPage(pageDict, doc);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        warnings.push(`Annotation extraction failed on page ${pageNumber}: ${msg}`);
-      }
-    }
-
-    // Get page dimensions
-    const { width, height } = getPageDimensions(pageDict, doc);
-
-    pages.push({
-      pageNumber,
-      text,
-      textLines,
-      textFragments,
-      images,
-      annotations,
-      width,
-      height,
-      warnings
-    });
   }
 
-  // Concatenate all page text
+  let images: ExtractedImage[] = [];
+  if (opts.extractImages) {
+    try {
+      images = extractImagesFromPage(pageDict, doc);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Image extraction failed on page ${pageNumber}: ${msg}`);
+    }
+  }
+
+  let annotations: PdfAnnotation[] = [];
+  if (opts.extractAnnotations) {
+    try {
+      annotations = extractAnnotationsFromPage(pageDict, doc);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Annotation extraction failed on page ${pageNumber}: ${msg}`);
+    }
+  }
+
+  const { width, height } = getPageDimensions(pageDict, doc);
+
+  return {
+    pageNumber,
+    text,
+    textLines,
+    textFragments,
+    images,
+    annotations,
+    width,
+    height,
+    warnings
+  };
+}
+
+/**
+ * Finalize: concatenate text, update metadata page count, extract form fields.
+ */
+function finalizeRead(
+  pages: ReadPdfPage[],
+  totalPageCount: number,
+  metadata: PdfMetadata,
+  opts: ResolvedReadOptions,
+  doc: PdfDocument
+): ReadPdfResult {
   const allText = pages.map(p => p.text).join("\n\n");
 
-  // Update page count in metadata
   if (opts.extractMetadata) {
-    metadata.pageCount = pagesInfo.length;
+    metadata.pageCount = totalPageCount;
   }
 
-  // Extract form fields (document-level, not per-page)
   let formFields: PdfFormField[] = [];
   if (opts.extractFormFields) {
     try {
@@ -280,12 +327,7 @@ export function readPdf(data: Uint8Array, options?: ReadPdfOptions): ReadPdfResu
     }
   }
 
-  return {
-    text: allText,
-    pages,
-    metadata,
-    formFields
-  };
+  return { text: allText, pages, metadata, formFields };
 }
 
 // =============================================================================

@@ -8,7 +8,7 @@
  * ```typescript
  * import { pdf } from "@cj-tech-master/excelts/pdf";
  *
- * const bytes = pdf([
+ * const bytes = await pdf([
  *   ["Product", "Revenue"],
  *   ["Widget", 1000],
  *   ["Gadget", 2500]
@@ -17,7 +17,7 @@
  *
  * @example With options:
  * ```typescript
- * const bytes = pdf([
+ * const bytes = await pdf([
  *   ["Name", "Score"],
  *   ["Alice", 95],
  *   ["Bob", 87]
@@ -26,7 +26,7 @@
  *
  * @example Multiple sheets:
  * ```typescript
- * const bytes = pdf({
+ * const bytes = await pdf({
  *   sheets: [
  *     { name: "Sales", data: [["Product", "Revenue"], ["Widget", 1000]] },
  *     { name: "Costs", data: [["Item", "Amount"], ["Rent", 500]] }
@@ -36,7 +36,7 @@
  *
  * @example With column widths and styles:
  * ```typescript
- * const bytes = pdf({
+ * const bytes = await pdf({
  *   name: "Report",
  *   columns: [{ width: 25 }, { width: 15 }],
  *   data: [
@@ -142,12 +142,13 @@ export type PdfInput = PdfRow[] | PdfSheet | PdfBook;
  * Generate a PDF.
  *
  * Accepts anything from a plain 2D array to a multi-sheet workbook.
+ * Yields to the event loop between each output page during layout and rendering.
  *
  * @param input   - 2D array, sheet object, or workbook object
  * @param options - PDF export options (page size, margins, etc.)
- * @returns PDF file as Uint8Array
+ * @returns Promise of PDF file as Uint8Array
  */
-export function pdf(input: PdfInput, options?: PdfExportOptions): Uint8Array {
+export async function pdf(input: PdfInput, options?: PdfExportOptions): Promise<Uint8Array> {
   const workbook = normalizeInput(input);
   return exportPdf(workbook, options);
 }

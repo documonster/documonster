@@ -43,7 +43,7 @@ ws1.addRows([
 ]);
 
 // Simplest possible export
-const pdf1 = excelToPdf(wb1);
+const pdf1 = await excelToPdf(wb1);
 fs.writeFileSync(path.join(outDir, "basic-minimal.pdf"), pdf1);
 console.log("1. basic-minimal.pdf — default settings");
 
@@ -51,7 +51,7 @@ console.log("1. basic-minimal.pdf — default settings");
 // 2. With grid lines, headers, footers, and metadata
 // =============================================================================
 
-const pdf2 = excelToPdf(wb1, {
+const pdf2 = await excelToPdf(wb1, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,
@@ -66,7 +66,7 @@ console.log("2. basic-gridlines.pdf — grid lines + headers + footers + metadat
 // 3. Landscape A3 with custom margins
 // =============================================================================
 
-const pdf3 = excelToPdf(wb1, {
+const pdf3 = await excelToPdf(wb1, {
   pageSize: "A3",
   orientation: "landscape",
   margins: { top: 36, right: 36, bottom: 36, left: 36 },
@@ -79,7 +79,7 @@ console.log("3. basic-landscape-a3.pdf — landscape A3, tight margins");
 // 4. Custom page size (US Half Letter)
 // =============================================================================
 
-const pdf4 = excelToPdf(wb1, {
+const pdf4 = await excelToPdf(wb1, {
   pageSize: { width: 396, height: 612 }, // 5.5" × 8.5" in points
   fitToPage: true,
   scale: 0.9
@@ -106,11 +106,11 @@ wsSum.getColumn(1).width = 20;
 wsSum.getCell("A1").value = "Q1 Summary";
 
 // Export only January and Summary by name
-const pdf5a = excelToPdf(wb5, { sheets: ["January", "Summary"] });
+const pdf5a = await excelToPdf(wb5, { sheets: ["January", "Summary"] });
 fs.writeFileSync(path.join(outDir, "basic-select-by-name.pdf"), pdf5a);
 
 // Export by 1-based position (sheets 2 and 4)
-const pdf5b = excelToPdf(wb5, { sheets: [2, 4] });
+const pdf5b = await excelToPdf(wb5, { sheets: [2, 4] });
 fs.writeFileSync(path.join(outDir, "basic-select-by-index.pdf"), pdf5b);
 console.log("5. basic-select-by-name.pdf + basic-select-by-index.pdf — sheet selection");
 
@@ -118,7 +118,7 @@ console.log("5. basic-select-by-name.pdf + basic-select-by-index.pdf — sheet s
 // 6. excelToPdf with options
 // =============================================================================
 
-const pdf6 = excelToPdf(wb1, {
+const pdf6 = await excelToPdf(wb1, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Via excelToPdf"

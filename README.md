@@ -100,14 +100,14 @@ wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
 
 // PDF — generate from data, no Workbook needed
 import { pdf } from "@cj-tech-master/excelts/pdf";
-const pdfBytes = pdf([
+const pdfBytes = await pdf([
   ["Product", "Revenue"],
   ["Widget", 1000]
 ]);
 
 // PDF — read text, images, and metadata from any PDF
 import { readPdf } from "@cj-tech-master/excelts/pdf";
-const result = readPdf(pdfBytes);
+const result = await readPdf(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
 

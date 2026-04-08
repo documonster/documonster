@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-功能完整的零依赖 PDF 引擎，纯 TypeScript 从零构建。使用 `pdf()` 函数或 `excelToPdf()` 桥接 API **写入** PDF。使用 `readPdf()` **读取**任意 PDF — 从所有主流 PDF 版本中提取文本、图片和元数据。
+功能完整的零依赖 PDF 引擎，纯 TypeScript 从零构建。使用 `pdf()` 函数或 `excelToPdf()` 桥接 API **写入** PDF。使用 `readPdf()` **读取**任意 PDF — 从所有主流 PDF 版本中提取文本、图片和元数据。所有 API 均为异步，在页间让出事件循环以避免阻塞。
 
 ```typescript
 // 写入 — 独立使用
@@ -32,6 +32,7 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 - **字体嵌入** — TrueType 字体子集化，支持 Unicode/CJK 文本
 - **页面设置** — 每工作表独立纸张大小、方向、边距、打印区域
 - **Tree-Shakeable** — 未导入则不打包
+- **非阻塞** — 在页间让出事件循环，避免阻塞
 
 ### 读取
 
@@ -56,7 +57,7 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
-const result = readPdf(bytes);
+const result = await readPdf(bytes);
 
 // All text
 console.log(result.text);
@@ -94,14 +95,14 @@ for (const field of result.formFields) {
 ### 读取加密 PDF
 
 ```typescript
-const result = readPdf(bytes, { password: "secret" });
+const result = await readPdf(bytes, { password: "secret" });
 ```
 
 ### 选择性提取
 
 ```typescript
 // Only pages 1 and 3, text only (no images)
-const result = readPdf(bytes, {
+const result = await readPdf(bytes, {
   pages: [1, 3],
   extractImages: false
 });
@@ -124,7 +125,7 @@ sheet.addRow({ product: "Widget", revenue: 1000 });
 sheet.addRow({ product: "Gadget", revenue: 2500 });
 sheet.getColumn("revenue").numFmt = "$#,##0.00";
 
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 
 // Node.js
 import { writeFileSync } from "fs";
@@ -144,7 +145,7 @@ import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 await workbook.xlsx.readFile("report.xlsx");
 
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Monthly Report"
@@ -159,14 +160,14 @@ const pdf = excelToPdf(workbook, {
 import { pdf } from "@cj-tech-master/excelts/pdf";
 
 // Simplest — pass a 2D array
-const bytes = pdf([
+const bytes = await pdf([
   ["Product", "Revenue"],
   ["Widget", 1000],
   ["Gadget", 2500]
 ]);
 
 // With options
-const bytes = pdf(
+const bytes = await pdf(
   [
     ["Name", "Score"],
     ["Alice", 95],
@@ -176,7 +177,7 @@ const bytes = pdf(
 );
 
 // Multiple sheets
-const bytes = pdf({
+const bytes = await pdf({
   sheets: [
     {
       name: "Sales",
@@ -196,7 +197,7 @@ const bytes = pdf({
 });
 
 // Column widths + styled cells
-const bytes = pdf({
+const bytes = await pdf({
   name: "Report",
   columns: [{ width: 25 }, { width: 15 }],
   data: [
@@ -434,7 +435,7 @@ PDF 写入器渲染所有标准单元格样式：
 ### 重复标题行
 
 ```typescript
-excelToPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
+await excelToPdf(workbook, { repeatRows: 2 }); // Repeat first 2 rows on every page
 ```
 
 或通过工作表页面设置：
@@ -474,7 +475,7 @@ worksheet.addImage(imageId, {
   ext: { width: 200, height: 150 }
 });
 
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 // Image appears in the PDF at the specified position
 ```
 
@@ -491,7 +492,7 @@ PNG 透明度（RGBA 和 tRNS）通过 PDF 软遮罩保留。
 #### 仅所有者密码（无打开密码）
 
 ```typescript
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     permissions: { print: true, copy: false, modify: false }
@@ -503,7 +504,7 @@ const pdf = excelToPdf(workbook, {
 #### 需要打开密码
 
 ```typescript
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader"
@@ -525,7 +526,7 @@ const pdf = excelToPdf(workbook, {
 
 ```typescript
 // Automatically detects encryption type
-const result = readPdf(encryptedBytes, { password: "secret" });
+const result = await readPdf(encryptedBytes, { password: "secret" });
 ```
 
 ---
@@ -537,7 +538,7 @@ const result = readPdf(encryptedBytes, { password: "secret" });
 ```typescript
 import { readFileSync } from "fs";
 
-const pdf = excelToPdf(workbook, {
+const pdf = await excelToPdf(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -560,7 +561,7 @@ ws2.pageSetup.paperSize = 1; // Letter
 ws2.pageSetup.orientation = "landscape";
 
 // Each sheet renders with its own page size/orientation
-const pdf = excelToPdf(workbook);
+const pdf = await excelToPdf(workbook);
 ```
 
 工作表边距同样会被继承：
@@ -622,13 +623,13 @@ npx tsx src/modules/pdf/examples/pdf-reader.ts
 
 ### `readPdf(data, options?)`
 
-读取 PDF 文件并提取文本、图片和元数据。返回 `ReadPdfResult`。
+读取 PDF 文件并提取文本、图片和元数据。返回 `Promise<ReadPdfResult>`。
 
 ```typescript
 import { readPdf } from "@cj-tech-master/excelts/pdf";
 
 // Basic
-const result = readPdf(pdfBytes);
+const result = await readPdf(pdfBytes);
 console.log(result.text);
 console.log(result.pages[0].images);
 console.log(result.pages[0].annotations);
@@ -636,10 +637,10 @@ console.log(result.formFields);
 console.log(result.metadata);
 
 // Encrypted
-const result = readPdf(pdfBytes, { password: "secret" });
+const result = await readPdf(pdfBytes, { password: "secret" });
 
 // Selective
-const result = readPdf(pdfBytes, {
+const result = await readPdf(pdfBytes, {
   pages: [1, 3],
   extractImages: false,
   extractMetadata: false
@@ -648,32 +649,32 @@ const result = readPdf(pdfBytes, {
 
 ### `pdf(input, options?)`
 
-从纯数据生成 PDF。返回 `Uint8Array`。
+从纯数据生成 PDF。返回 `Promise<Uint8Array>`。
 
 ```typescript
 // 2D array
-pdf([["Name", "Age"], ["Alice", 30]]);
+await pdf([["Name", "Age"], ["Alice", 30]]);
 
 // Single sheet with column widths
-pdf({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
+await pdf({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
 
 // Multiple sheets
-pdf({ sheets: [{ name: "S1", data: [...] }, { name: "S2", data: [...] }] });
+await pdf({ sheets: [{ name: "S1", data: [...] }, { name: "S2", data: [...] }] });
 
 // With options
-pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
+await pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
 ```
 
 ### `excelToPdf(workbook, options?)`
 
-将 Excel `Workbook` 转换为 PDF。返回 `Uint8Array`。
+将 Excel `Workbook` 转换为 PDF。返回 `Promise<Uint8Array>`。
 
 ```typescript
 import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 const workbook = new Workbook();
 // ... build workbook ...
-const bytes = excelToPdf(workbook, { showGridLines: true });
+const bytes = await excelToPdf(workbook, { showGridLines: true });
 ```
 
 ### 错误类型
@@ -692,7 +693,7 @@ import {
 
 ```typescript
 try {
-  excelToPdf(workbook);
+  await excelToPdf(workbook);
 } catch (err) {
   if (isPdfError(err)) {
     console.error(err.message, err.cause);

@@ -9,30 +9,11 @@ import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf as standalonePdf } from "@pdf/pdf";
 import { PdfError } from "@pdf/errors";
 import { buildMinimalTtf } from "./font-embedding.test";
-
-/**
- * Helper to decode a PDF Uint8Array to string for assertion.
- */
-function pdfToString(pdf: Uint8Array): string {
-  return new TextDecoder().decode(pdf);
-}
-
-/**
- * Verify basic PDF structure (header, xref, trailer, EOF).
- */
-function expectValidPdf(pdf: Uint8Array): void {
-  const text = pdfToString(pdf);
-  expect(text).toContain("%PDF-2.0");
-  expect(text).toContain("xref");
-  expect(text).toContain("trailer");
-  expect(text).toContain("%%EOF");
-  expect(text).toContain("/Catalog");
-  expect(text).toContain("/Pages");
-}
+import { pdfToString, expectValidPdf } from "./test-helpers";
 
 describe("excelToPdf", () => {
   describe("Basic Export", () => {
-    it("should export a simple workbook with one sheet", () => {
+    it("should export a simple workbook with one sheet", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
       ws.getCell("A1").value = "Hello";
@@ -40,7 +21,7 @@ describe("excelToPdf", () => {
       ws.getCell("A2").value = 42;
       ws.getCell("B2").value = 3.14;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expect(pdf).toBeInstanceOf(Uint8Array);
       expect(pdf.length).toBeGreaterThan(100);
@@ -51,24 +32,24 @@ describe("excelToPdf", () => {
       expect(text).toContain("/Helvetica");
     });
 
-    it("should export an empty workbook with at least one sheet", () => {
+    it("should export an empty workbook with at least one sheet", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Empty");
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
     });
 
-    it("should throw for workbook with no sheets", () => {
+    it("should throw for workbook with no sheets", async () => {
       const wb = new Workbook();
 
-      expect(() => excelToPdf(wb)).toThrow(PdfError);
+      await expect(excelToPdf(wb)).rejects.toThrow(PdfError);
     });
   });
 
   describe("Multiple Sheets", () => {
-    it("should export multiple worksheets", () => {
+    it("should export multiple worksheets", async () => {
       const wb = new Workbook();
 
       const ws1 = wb.addWorksheet("Sales");
@@ -83,7 +64,7 @@ describe("excelToPdf", () => {
       ws2.getCell("A2").value = "Rent";
       ws2.getCell("B2").value = 500;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -96,12 +77,12 @@ describe("excelToPdf", () => {
       expect(text).toContain("(Expenses)");
     });
 
-    it("should filter sheets by name", () => {
+    it("should filter sheets by name", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Include").getCell("A1").value = "Included";
       wb.addWorksheet("Exclude").getCell("A1").value = "Excluded";
 
-      const pdf = excelToPdf(wb, { sheets: ["Include"] });
+      const pdf = await excelToPdf(wb, { sheets: ["Include"] });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -109,14 +90,14 @@ describe("excelToPdf", () => {
       expect(text).not.toContain("Excluded");
     });
 
-    it("should filter sheets by 1-based position", () => {
+    it("should filter sheets by 1-based position", async () => {
       const wb = new Workbook();
       const ws1 = wb.addWorksheet("First");
       ws1.getCell("A1").value = "First Sheet";
       const ws2 = wb.addWorksheet("Second");
       ws2.getCell("A1").value = "Second Sheet";
 
-      const pdf = excelToPdf(wb, { sheets: [2] }); // 1-based: second sheet
+      const pdf = await excelToPdf(wb, { sheets: [2] }); // 1-based: second sheet
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -126,11 +107,11 @@ describe("excelToPdf", () => {
   });
 
   describe("Page Size and Orientation", () => {
-    it("should support A4 portrait (default)", () => {
+    it("should support A4 portrait (default)", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "A4";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -139,11 +120,11 @@ describe("excelToPdf", () => {
       expect(text).toContain("841.89");
     });
 
-    it("should support landscape orientation", () => {
+    it("should support landscape orientation", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Landscape";
 
-      const pdf = excelToPdf(wb, { orientation: "landscape" });
+      const pdf = await excelToPdf(wb, { orientation: "landscape" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -152,11 +133,11 @@ describe("excelToPdf", () => {
       expect(text).toContain("595.28");
     });
 
-    it("should support LETTER page size", () => {
+    it("should support LETTER page size", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Letter";
 
-      const pdf = excelToPdf(wb, { pageSize: "LETTER" });
+      const pdf = await excelToPdf(wb, { pageSize: "LETTER" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -164,11 +145,11 @@ describe("excelToPdf", () => {
       expect(text).toContain("792");
     });
 
-    it("should support custom page size", () => {
+    it("should support custom page size", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Custom";
 
-      const pdf = excelToPdf(wb, {
+      const pdf = await excelToPdf(wb, {
         pageSize: { width: 400, height: 600 }
       });
 
@@ -180,14 +161,14 @@ describe("excelToPdf", () => {
   });
 
   describe("Cell Styles", () => {
-    it("should render bold text", () => {
+    it("should render bold text", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Styles");
       const cell = ws.getCell("A1");
       cell.value = "Bold Text";
       cell.font = { bold: true };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -195,35 +176,35 @@ describe("excelToPdf", () => {
       expect(text).toContain("Bold Text");
     });
 
-    it("should render italic text", () => {
+    it("should render italic text", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Styles");
       const cell = ws.getCell("A1");
       cell.value = "Italic Text";
       cell.font = { italic: true };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Helvetica-Oblique");
     });
 
-    it("should render colored text", () => {
+    it("should render colored text", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Styles");
       const cell = ws.getCell("A1");
       cell.value = "Red Text";
       cell.font = { color: { argb: "FFFF0000" } };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("1 0 0 rg"); // red fill color for text
     });
 
-    it("should render background fill", () => {
+    it("should render background fill", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Styles");
       const cell = ws.getCell("A1");
@@ -234,7 +215,7 @@ describe("excelToPdf", () => {
         fgColor: { argb: "FFFFFF00" }
       };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -242,7 +223,7 @@ describe("excelToPdf", () => {
       expect(text).toContain("1 1 0 rg");
     });
 
-    it("should render cell borders", () => {
+    it("should render cell borders", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Styles");
       const cell = ws.getCell("A1");
@@ -254,7 +235,7 @@ describe("excelToPdf", () => {
         right: { style: "thin", color: { argb: "FF000000" } }
       };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       // Borders are inside compressed content streams; just verify structure
@@ -262,7 +243,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Merged Cells", () => {
-    it("should handle merged cells", () => {
+    it("should handle merged cells", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Merge");
       ws.getCell("A1").value = "Merged Title";
@@ -271,7 +252,7 @@ describe("excelToPdf", () => {
       ws.getCell("B2").value = "Col2";
       ws.getCell("C2").value = "Col3";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       // Merged cells produce one page with all cells rendered
@@ -279,7 +260,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Data Types", () => {
-    it("should handle various cell value types", () => {
+    it("should handle various cell value types", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Types");
       ws.getCell("A1").value = "String";
@@ -289,18 +270,18 @@ describe("excelToPdf", () => {
       ws.getCell("A5").value = new Date(2024, 0, 15);
       ws.getCell("A6").value = null;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       // All value types render without errors
     });
 
-    it("should handle hyperlinks", () => {
+    it("should handle hyperlinks", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Links");
       ws.getCell("A1").value = { text: "Click Me", hyperlink: "https://example.com" };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -309,7 +290,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Grid Lines", () => {
-    it("should render grid lines when enabled", () => {
+    it("should render grid lines when enabled", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Grid");
       ws.getCell("A1").value = "A1";
@@ -317,7 +298,7 @@ describe("excelToPdf", () => {
       ws.getCell("A2").value = "A2";
       ws.getCell("B2").value = "B2";
 
-      const pdf = excelToPdf(wb, { showGridLines: true });
+      const pdf = await excelToPdf(wb, { showGridLines: true });
 
       expectValidPdf(pdf);
       // Grid lines are in compressed content streams; verify the PDF is valid
@@ -325,33 +306,33 @@ describe("excelToPdf", () => {
   });
 
   describe("Page Headers and Footers", () => {
-    it("should include sheet name as header", () => {
+    it("should include sheet name as header", async () => {
       const wb = new Workbook();
       wb.addWorksheet("My Report").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, { showSheetNames: true });
+      const pdf = await excelToPdf(wb, { showSheetNames: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("My Report");
     });
 
-    it("should include page numbers in footer", () => {
+    it("should include page numbers in footer", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, { showPageNumbers: true });
+      const pdf = await excelToPdf(wb, { showPageNumbers: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Page 1 of 1");
     });
 
-    it("should register footer fonts even when using an embedded font", () => {
+    it("should register footer fonts even when using an embedded font", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, {
+      const pdf = await excelToPdf(wb, {
         showPageNumbers: true,
         font: new Uint8Array(buildMinimalTtf())
       });
@@ -362,43 +343,43 @@ describe("excelToPdf", () => {
   });
 
   describe("PDF Metadata", () => {
-    it("should set document title", () => {
+    it("should set document title", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, { title: "My Report" });
+      const pdf = await excelToPdf(wb, { title: "My Report" });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("/Title (My Report)");
     });
 
-    it("should set document author", () => {
+    it("should set document author", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, { author: "John Doe" });
+      const pdf = await excelToPdf(wb, { author: "John Doe" });
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Author (John Doe)");
     });
 
-    it("should always set producer", () => {
+    it("should always set producer", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Producer (excelts)");
     });
 
-    it("should encode Unicode metadata and bookmark titles correctly", () => {
+    it("should encode Unicode metadata and bookmark titles correctly", async () => {
       const wb = new Workbook();
       wb.addWorksheet("报告").getCell("A1").value = "One";
       wb.addWorksheet("数据").getCell("A1").value = "Two";
 
-      const pdf = excelToPdf(wb, { title: "作者" });
+      const pdf = await excelToPdf(wb, { title: "作者" });
 
       const text = pdfToString(pdf);
       expect(text).toContain("/Title <feff4f5c8005>");
@@ -408,7 +389,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Worksheet Page Setup", () => {
-    it("should honor per-sheet page setup defaults", () => {
+    it("should honor per-sheet page setup defaults", async () => {
       const wb = new Workbook();
 
       const ws1 = wb.addWorksheet("First");
@@ -420,7 +401,7 @@ describe("excelToPdf", () => {
       ws2.pageSetup.orientation = "landscape";
       ws2.pageSetup.paperSize = 9;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       const text = pdfToString(pdf);
 
       expect(text).toContain("[0 0 419.53 595.28]");
@@ -429,7 +410,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Column Widths", () => {
-    it("should respect custom column widths", () => {
+    it("should respect custom column widths", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Widths");
       ws.columns = [
@@ -437,7 +418,7 @@ describe("excelToPdf", () => {
         { header: "Wide", width: 30 }
       ];
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -447,7 +428,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Large Datasets (Pagination)", () => {
-    it("should paginate when content exceeds page height", () => {
+    it("should paginate when content exceeds page height", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("LargeData");
 
@@ -457,7 +438,7 @@ describe("excelToPdf", () => {
         ws.getCell(`B${i}`).value = i * 10;
       }
 
-      const pdf = excelToPdf(wb, { showPageNumbers: true });
+      const pdf = await excelToPdf(wb, { showPageNumbers: true });
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -470,20 +451,20 @@ describe("excelToPdf", () => {
   });
 
   describe("Options", () => {
-    it("should clamp scale factor", () => {
+    it("should clamp scale factor", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Scale";
 
       // Very small scale should be clamped to 0.1
-      const pdf1 = excelToPdf(wb, { scale: 0.01 });
+      const pdf1 = await excelToPdf(wb, { scale: 0.01 });
       expectValidPdf(pdf1);
 
       // Very large scale should be clamped to 3.0
-      const pdf2 = excelToPdf(wb, { scale: 10 });
+      const pdf2 = await excelToPdf(wb, { scale: 10 });
       expectValidPdf(pdf2);
     });
 
-    it("should handle fitToPage", () => {
+    it("should handle fitToPage", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Wide");
 
@@ -493,16 +474,16 @@ describe("excelToPdf", () => {
         ws.getCell(1, i).value = `Col${i}`;
       }
 
-      const pdf = excelToPdf(wb, { fitToPage: true });
+      const pdf = await excelToPdf(wb, { fitToPage: true });
 
       expectValidPdf(pdf);
     });
 
-    it("should handle custom margins", () => {
+    it("should handle custom margins", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "Margins";
 
-      const pdf = excelToPdf(wb, {
+      const pdf = await excelToPdf(wb, {
         margins: { top: 36, right: 36, bottom: 36, left: 36 }
       });
 
@@ -511,28 +492,28 @@ describe("excelToPdf", () => {
   });
 
   describe("Alignment", () => {
-    it("should handle center-aligned text", () => {
+    it("should handle center-aligned text", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Align");
       const cell = ws.getCell("A1");
       cell.value = "Centered";
       cell.alignment = { horizontal: "center" };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Centered");
     });
 
-    it("should handle right-aligned text", () => {
+    it("should handle right-aligned text", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Align");
       const cell = ws.getCell("A1");
       cell.value = "Right";
       cell.alignment = { horizontal: "right" };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -541,11 +522,11 @@ describe("excelToPdf", () => {
   });
 
   describe("excelToPdf function", () => {
-    it("should work as a standalone function", () => {
+    it("should work as a standalone function", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "FunctionAPI";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("FunctionAPI");
@@ -553,7 +534,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Hidden Rows and Columns", () => {
-    it("should exclude hidden columns", () => {
+    it("should exclude hidden columns", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("HidCols");
       ws.getCell("A1").value = "Visible";
@@ -561,7 +542,7 @@ describe("excelToPdf", () => {
       ws.getCell("C1").value = "Also Visible";
       ws.getColumn(2).hidden = true;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -570,7 +551,7 @@ describe("excelToPdf", () => {
       expect(text).not.toContain("SecretData");
     });
 
-    it("should exclude hidden rows", () => {
+    it("should exclude hidden rows", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("HidRows");
       ws.getCell("A1").value = "Row1";
@@ -578,7 +559,7 @@ describe("excelToPdf", () => {
       ws.getCell("A3").value = "Row3";
       ws.getRow(2).hidden = true;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -589,14 +570,14 @@ describe("excelToPdf", () => {
   });
 
   describe("Hidden Worksheets", () => {
-    it("should exclude hidden worksheets by default", () => {
+    it("should exclude hidden worksheets by default", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Visible").getCell("A1").value = "Shown";
       const hidden = wb.addWorksheet("Hidden");
       hidden.getCell("A1").value = "NotShown";
       hidden.state = "hidden";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
 
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
@@ -606,60 +587,60 @@ describe("excelToPdf", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle a single cell workbook", () => {
+    it("should handle a single cell workbook", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Solo").getCell("A1").value = "Only";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Only");
     });
 
-    it("should handle cells with special characters", () => {
+    it("should handle cells with special characters", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Special");
       ws.getCell("A1").value = "Hello (world)";
       ws.getCell("A2").value = "Back\\slash";
       ws.getCell("A3").value = "New\nLine";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       // Special chars are inside compressed streams; just verify no crash
     });
 
-    it("should handle empty string values", () => {
+    it("should handle empty string values", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Empty");
       ws.getCell("A1").value = "";
       ws.getCell("B1").value = "Not Empty";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
     });
 
-    it("should handle boolean values", () => {
+    it("should handle boolean values", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Bool");
       ws.getCell("A1").value = true;
       ws.getCell("A2").value = false;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
     });
 
-    it("should handle error values", () => {
+    it("should handle error values", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Errors");
       ws.getCell("A1").value = { error: "#DIV/0!" };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
 
   describe("Merged Cells + Hidden Columns", () => {
-    it("should handle merged cells spanning hidden columns", () => {
+    it("should handle merged cells spanning hidden columns", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("MergeHidden");
       ws.getCell("A1").value = "Merged Over Hidden";
@@ -667,14 +648,14 @@ describe("excelToPdf", () => {
       ws.getColumn(2).hidden = true; // hide B
       ws.getCell("A2").value = "Data";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Merged Over Hidden");
       expect(text).toContain("Data");
     });
 
-    it("should handle merged cells spanning hidden rows", () => {
+    it("should handle merged cells spanning hidden rows", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("MergeHidden");
       ws.getCell("A1").value = "Tall Merge";
@@ -682,7 +663,7 @@ describe("excelToPdf", () => {
       ws.getRow(2).hidden = true; // hide row 2
       ws.getCell("B1").value = "Side";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       expect(text).toContain("Tall Merge");
@@ -691,7 +672,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Repeat Rows", () => {
-    it("should repeat header rows on subsequent pages", () => {
+    it("should repeat header rows on subsequent pages", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Repeat");
       ws.getCell("A1").value = "Header";
@@ -699,7 +680,7 @@ describe("excelToPdf", () => {
         ws.getCell(`A${i}`).value = `Row ${i}`;
       }
 
-      const pdf = excelToPdf(wb, { repeatRows: 1, showPageNumbers: true });
+      const pdf = await excelToPdf(wb, { repeatRows: 1, showPageNumbers: true });
       expectValidPdf(pdf);
 
       const text = pdfToString(pdf);
@@ -710,7 +691,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Text Wrapping", () => {
-    it("should wrap long text when wrapText is enabled", () => {
+    it("should wrap long text when wrapText is enabled", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Wrap");
       const cell = ws.getCell("A1");
@@ -718,7 +699,7 @@ describe("excelToPdf", () => {
       cell.alignment = { wrapText: true };
       ws.getColumn(1).width = 15; // narrow column
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should contain part of the text
@@ -727,28 +708,28 @@ describe("excelToPdf", () => {
   });
 
   describe("Invalid Sheet Selectors", () => {
-    it("should throw when all sheet selectors are invalid", () => {
+    it("should throw when all sheet selectors are invalid", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Real").getCell("A1").value = "Data";
 
-      expect(() => excelToPdf(wb, { sheets: ["NonExistent"] })).toThrow(PdfError);
+      await expect(excelToPdf(wb, { sheets: ["NonExistent"] })).rejects.toThrow(PdfError);
     });
 
-    it("should throw for out-of-range numeric selector", () => {
+    it("should throw for out-of-range numeric selector", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Only").getCell("A1").value = "Data";
 
-      expect(() => excelToPdf(wb, { sheets: [99] })).toThrow(PdfError);
+      await expect(excelToPdf(wb, { sheets: [99] })).rejects.toThrow(PdfError);
     });
   });
 
   describe("Encryption with content streams", () => {
-    it("should encrypt stream data when encryption is enabled", () => {
+    it("should encrypt stream data when encryption is enabled", async () => {
       const wb = new Workbook();
       wb.addWorksheet("Test").getCell("A1").value = "SecretValue";
 
-      const pdfPlain = excelToPdf(wb);
-      const pdfEncrypted = excelToPdf(wb, {
+      const pdfPlain = await excelToPdf(wb);
+      const pdfEncrypted = await excelToPdf(wb, {
         encryption: { ownerPassword: "owner123" }
       });
 
@@ -769,14 +750,14 @@ describe("excelToPdf", () => {
   });
 
   describe("RichText cell text extraction", () => {
-    it("should not produce [object Object] for RichText cells", () => {
+    it("should not produce [object Object] for RichText cells", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Rich");
       ws.getCell("A1").value = {
         richText: [{ text: "Bold", font: { bold: true } }, { text: " Normal" }]
       };
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should NOT contain the stringified object
@@ -785,12 +766,12 @@ describe("excelToPdf", () => {
   });
 
   describe("Non-ASCII text with Type1 fonts", () => {
-    it("should encode accented characters correctly", () => {
+    it("should encode accented characters correctly", async () => {
       const wb = new Workbook();
       const wsAccent = wb.addWorksheet("Accent");
       wsAccent.getCell("A1").value = "café";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       // The text "café" should be encoded as WinAnsi hex, not UTF-8
       // (this will be in a compressed stream, so we just verify no crash)
@@ -798,7 +779,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Row page breaks", () => {
-    it("should break after the row with the page break, not before it", () => {
+    it("should break after the row with the page break, not before it", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Breaks");
       for (let r = 1; r <= 10; r++) {
@@ -807,7 +788,7 @@ describe("excelToPdf", () => {
       // Break after row 5: rows 1-5 on first page, 6-10 on second
       ws.getRow(5).addPageBreak();
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // Should have multiple pages
@@ -816,7 +797,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Partial margins with worksheet fallback", () => {
-    it("should merge partial PDF margins with worksheet pageSetup margins", () => {
+    it("should merge partial PDF margins with worksheet pageSetup margins", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Margins");
       ws.getCell("A1").value = "Test";
@@ -831,7 +812,7 @@ describe("excelToPdf", () => {
       };
 
       // Only override left margin (36pt = 0.5in)
-      const pdf = excelToPdf(wb, { margins: { left: 36 } });
+      const pdf = await excelToPdf(wb, { margins: { left: 36 } });
       expectValidPdf(pdf);
       const text = pdfToString(pdf);
       // The top margin should come from worksheet (1.0 * 72 = 72pt), not reset to default
@@ -841,7 +822,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Rich text with wrapping", () => {
-    it("should wrap rich text cells when wrapText is enabled", () => {
+    it("should wrap rich text cells when wrapText is enabled", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("RichWrap");
       const cell = ws.getCell("A1");
@@ -854,18 +835,18 @@ describe("excelToPdf", () => {
       cell.alignment = { wrapText: true };
       ws.getColumn(1).width = 15;
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
 
   describe("Encryption with embedded font", () => {
-    it("should produce valid encrypted PDF with embedded TrueType font", () => {
+    it("should produce valid encrypted PDF with embedded TrueType font", async () => {
       const wb = new Workbook();
       const wsEnc = wb.addWorksheet("Encrypted");
       wsEnc.getCell("A1").value = "Hello encrypted with font";
 
-      const pdf = excelToPdf(wb, {
+      const pdf = await excelToPdf(wb, {
         font: new Uint8Array(buildMinimalTtf()),
         encryption: { ownerPassword: "owner", userPassword: "user" }
       });
@@ -877,11 +858,11 @@ describe("excelToPdf", () => {
   });
 
   describe("Encrypted PDF hex string encryption", () => {
-    it("should encrypt non-ASCII metadata hex strings", () => {
+    it("should encrypt non-ASCII metadata hex strings", async () => {
       const wb = new Workbook();
       wb.addWorksheet("报告").getCell("A1").value = "Data";
 
-      const pdf = excelToPdf(wb, {
+      const pdf = await excelToPdf(wb, {
         title: "作者",
         encryption: { ownerPassword: "owner" }
       });
@@ -895,7 +876,7 @@ describe("excelToPdf", () => {
   });
 
   describe("Multi-range print area", () => {
-    it("should use the first range from a multi-range printArea", () => {
+    it("should use the first range from a multi-range printArea", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Multi");
       for (let r = 1; r <= 10; r++) {
@@ -907,13 +888,13 @@ describe("excelToPdf", () => {
       // Multi-range: only A1:B5 should be used
       ws.pageSetup.printArea = "A1:B5&&D1:D10";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
     });
   });
 
   describe("printTitlesRow single-row format", () => {
-    it("should accept single-number printTitlesRow format", () => {
+    it("should accept single-number printTitlesRow format", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Titles");
       for (let r = 1; r <= 50; r++) {
@@ -921,7 +902,7 @@ describe("excelToPdf", () => {
       }
       ws.pageSetup.printTitlesRow = "1";
 
-      const pdf = excelToPdf(wb);
+      const pdf = await excelToPdf(wb);
       expectValidPdf(pdf);
       // Should have more than 1 page (50 rows with repeat headers)
       const text = pdfToString(pdf);
@@ -1104,7 +1085,7 @@ function deflateStored(data: number[]): Uint8Array {
 }
 
 describe("Image integration", () => {
-  it("should export PDF with embedded JPEG image", () => {
+  it("should export PDF with embedded JPEG image", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Images");
     // Fill data that extends past the image range
@@ -1121,7 +1102,7 @@ describe("Image integration", () => {
       br: { col: 2, row: 4 }
     });
 
-    const pdf = excelToPdf(wb);
+    const pdf = await excelToPdf(wb);
     expectValidPdf(pdf);
     const text = pdfToString(pdf);
     // Should contain an XObject image reference
@@ -1129,7 +1110,7 @@ describe("Image integration", () => {
     expect(text).toContain("/Filter /DCTDecode");
   });
 
-  it("should export PDF with embedded PNG image (alpha channel)", () => {
+  it("should export PDF with embedded PNG image (alpha channel)", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("PngTest");
     for (let r = 1; r <= 5; r++) {
@@ -1144,7 +1125,7 @@ describe("Image integration", () => {
       ext: { width: 100, height: 100 }
     });
 
-    const pdf = excelToPdf(wb);
+    const pdf = await excelToPdf(wb);
     expectValidPdf(pdf);
     const text = pdfToString(pdf);
     // Should contain XObject image
@@ -1153,7 +1134,7 @@ describe("Image integration", () => {
     expect(text).toContain("/SMask");
   });
 
-  it("should handle workbook with image and multiple pages", () => {
+  it("should handle workbook with image and multiple pages", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Data");
 
@@ -1170,7 +1151,7 @@ describe("Image integration", () => {
       br: { col: 3, row: 3 }
     });
 
-    const pdf = excelToPdf(wb, { showPageNumbers: true });
+    const pdf = await excelToPdf(wb, { showPageNumbers: true });
     expectValidPdf(pdf);
     const text = pdfToString(pdf);
     // Multiple pages
@@ -1180,7 +1161,7 @@ describe("Image integration", () => {
     expect(text).toContain("/Filter /DCTDecode");
   });
 
-  it("should render tl/br image anchored beyond data bounds", () => {
+  it("should render tl/br image anchored beyond data bounds", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("BrBounds");
     // Only one cell of data
@@ -1194,7 +1175,7 @@ describe("Image integration", () => {
       br: { col: 5, row: 8 }
     });
 
-    const pdf = excelToPdf(wb);
+    const pdf = await excelToPdf(wb);
     expectValidPdf(pdf);
     const text = pdfToString(pdf);
     expect(text).toContain("/Subtype /Image");
@@ -1207,8 +1188,8 @@ describe("Image integration", () => {
 // =============================================================================
 
 describe("Standalone pdf() API", () => {
-  it("should generate a valid PDF from a 2D array", () => {
-    const result = standalonePdf([
+  it("should generate a valid PDF from a 2D array", async () => {
+    const result = await standalonePdf([
       ["Product", "Revenue"],
       ["Widget", 1000],
       ["Gadget", 2500]
@@ -1222,8 +1203,8 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("/Helvetica");
   });
 
-  it("should generate a valid PDF from a sheet object with columns", () => {
-    const result = standalonePdf({
+  it("should generate a valid PDF from a sheet object with columns", async () => {
+    const result = await standalonePdf({
       name: "Report",
       columns: [{ width: 25 }, { width: 15 }],
       data: [
@@ -1236,8 +1217,8 @@ describe("Standalone pdf() API", () => {
     expectValidPdf(result);
   });
 
-  it("should generate a valid PDF from a multi-sheet book", () => {
-    const result = standalonePdf({
+  it("should generate a valid PDF from a multi-sheet book", async () => {
+    const result = await standalonePdf({
       sheets: [
         {
           name: "Sales",
@@ -1264,8 +1245,8 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("(Costs)");
   });
 
-  it("should render column headers as the first row", () => {
-    const result = standalonePdf({
+  it("should render column headers as the first row", async () => {
+    const result = await standalonePdf({
       columns: [
         { width: 20, header: "Name" },
         { width: 15, header: "Score" }
@@ -1282,8 +1263,8 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("Helvetica-Bold");
   });
 
-  it("should render header-only sheet with no data rows", () => {
-    const result = standalonePdf({
+  it("should render header-only sheet with no data rows", async () => {
+    const result = await standalonePdf({
       columns: [{ header: "Name" }, { header: "Score" }],
       data: []
     });
@@ -1294,8 +1275,8 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("Helvetica-Bold");
   });
 
-  it("should place sparse column headers at the correct positions", () => {
-    const result = standalonePdf({
+  it("should place sparse column headers at the correct positions", async () => {
+    const result = await standalonePdf({
       columns: [{ header: "A" }, { width: 10 }, { header: "C" }],
       data: [["x", "y", "z"]]
     });
@@ -1308,8 +1289,8 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("Helvetica-Bold");
   });
 
-  it("should handle styled cells", () => {
-    const result = standalonePdf([
+  it("should handle styled cells", async () => {
+    const result = await standalonePdf([
       [
         { value: "Bold", bold: true },
         { value: "Red", fontColor: "FFFF0000" }
@@ -1322,27 +1303,27 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("Helvetica-Bold");
   });
 
-  it("should handle empty 2D array", () => {
-    const result = standalonePdf([]);
+  it("should handle empty 2D array", async () => {
+    const result = await standalonePdf([]);
 
     expectValidPdf(result);
   });
 
-  it("should handle boolean and Date values", () => {
-    const result = standalonePdf([[true, false, new Date(2024, 0, 15)]]);
+  it("should handle boolean and Date values", async () => {
+    const result = await standalonePdf([[true, false, new Date(2024, 0, 15)]]);
 
     expect(result.length).toBeGreaterThan(100);
     expectValidPdf(result);
   });
 
-  it("should handle null and undefined cells", () => {
-    const result = standalonePdf([["Hello", null, undefined, "World"]]);
+  it("should handle null and undefined cells", async () => {
+    const result = await standalonePdf([["Hello", null, undefined, "World"]]);
 
     expectValidPdf(result);
   });
 
-  it("should accept export options", () => {
-    const result = standalonePdf([["Test"]], {
+  it("should accept export options", async () => {
+    const result = await standalonePdf([["Test"]], {
       pageSize: "LETTER",
       orientation: "landscape",
       showGridLines: true
@@ -1355,9 +1336,9 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("612");
   });
 
-  it("should embed a JPEG image via standalone pdf()", () => {
+  it("should embed a JPEG image via standalone pdf()", async () => {
     const jpegData = buildMinimalJpeg();
-    const result = standalonePdf({
+    const result = await standalonePdf({
       data: [
         ["Product", "Price"],
         ["Widget", "$10"]
@@ -1371,9 +1352,9 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("/Filter /DCTDecode");
   });
 
-  it("should embed a PNG image with alpha via standalone pdf()", () => {
+  it("should embed a PNG image with alpha via standalone pdf()", async () => {
     const pngData = buildMinimalPng();
-    const result = standalonePdf({
+    const result = await standalonePdf({
       data: [
         ["Row 1", 100],
         ["Row 2", 200]
@@ -1387,9 +1368,9 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("/SMask");
   });
 
-  it("should render image-only sheet with no data rows", () => {
+  it("should render image-only sheet with no data rows", async () => {
     const jpegData = buildMinimalJpeg();
-    const result = standalonePdf({
+    const result = await standalonePdf({
       data: [],
       images: [{ data: jpegData, format: "jpeg", col: 0, row: 0, width: 200, height: 150 }]
     });
@@ -1400,9 +1381,9 @@ describe("Standalone pdf() API", () => {
     expect(text).toContain("/Filter /DCTDecode");
   });
 
-  it("should extend bounds for image anchored beyond data columns", () => {
+  it("should extend bounds for image anchored beyond data columns", async () => {
     const jpegData = buildMinimalJpeg();
-    const result = standalonePdf({
+    const result = await standalonePdf({
       data: [["A only"]],
       images: [{ data: jpegData, format: "jpeg", col: 3, row: 0, width: 100, height: 80 }]
     });

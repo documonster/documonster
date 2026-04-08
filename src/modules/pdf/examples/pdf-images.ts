@@ -57,7 +57,7 @@ if (hasJpeg) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-jpeg.pdf"),
-    excelToPdf(wb, { showGridLines: true })
+    await excelToPdf(wb, { showGridLines: true })
   );
   console.log("A1. excel-images-jpeg.pdf — table with embedded JPEG");
 } else {
@@ -85,7 +85,7 @@ if (hasPng) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-png.pdf"),
-    excelToPdf(wb, { showGridLines: true })
+    await excelToPdf(wb, { showGridLines: true })
   );
   console.log("A2. excel-images-png.pdf — PNG with alpha transparency");
 } else {
@@ -119,7 +119,11 @@ if (hasJpeg && hasPng) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-multi.pdf"),
-    excelToPdf(wb, { showGridLines: true, showPageNumbers: true, title: "Multi-Image Report" })
+    await excelToPdf(wb, {
+      showGridLines: true,
+      showPageNumbers: true,
+      title: "Multi-Image Report"
+    })
   );
   console.log("A3. excel-images-multi.pdf — multiple images on one sheet");
 } else {
@@ -137,7 +141,7 @@ console.log("\n--- Part B: Standalone pdf() with images ---\n");
 // =============================================================================
 
 if (hasJpeg) {
-  const result = pdf(
+  const result = await pdf(
     {
       columns: [
         { width: 20, header: "Product" },
@@ -178,7 +182,7 @@ if (hasPng) {
     rows.push([`Row ${r}`, r * 100, "filler"]);
   }
 
-  const result = pdf(
+  const result = await pdf(
     {
       name: "PNG Test",
       data: rows,

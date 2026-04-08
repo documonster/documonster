@@ -185,8 +185,8 @@ describe("encryptData (AES-256 with IV prefix)", () => {
 });
 
 describe("AES-256 writer → reader roundtrip", () => {
-  it("should write AES-256 encrypted PDF and read it back", () => {
-    const pdfBytes = pdf(
+  it("should write AES-256 encrypted PDF and read it back", async () => {
+    const pdfBytes = await pdf(
       [
         ["Name", "Value"],
         ["Secret", 42],
@@ -204,7 +204,7 @@ describe("AES-256 writer → reader roundtrip", () => {
     expect(header).toContain("%PDF-2.0");
 
     // Read with user password
-    const result = readPdf(pdfBytes, { password: "user256" });
+    const result = await readPdf(pdfBytes, { password: "user256" });
     expect(result.metadata.encrypted).toBe(true);
     expect(result.text).toContain("Secret");
     expect(result.text).toContain("42");
@@ -214,23 +214,23 @@ describe("AES-256 writer → reader roundtrip", () => {
     expect(result.metadata.author).toBe("Test Bot");
 
     // Read with owner password
-    const ownerResult = readPdf(pdfBytes, { password: "owner256" });
+    const ownerResult = await readPdf(pdfBytes, { password: "owner256" });
     expect(ownerResult.text).toBe(result.text);
   });
 
-  it("should reject wrong password", () => {
-    const pdfBytes = pdf([["Test"]], {
+  it("should reject wrong password", async () => {
+    const pdfBytes = await pdf([["Test"]], {
       encryption: { ownerPassword: "owner", userPassword: "user" }
     });
-    expect(() => readPdf(pdfBytes, { password: "wrong" })).toThrow();
+    await expect(readPdf(pdfBytes, { password: "wrong" })).rejects.toThrow();
   });
 
-  it("should read owner-only encrypted PDF without password", () => {
-    const pdfBytes = pdf([["Public Data"]], {
+  it("should read owner-only encrypted PDF without password", async () => {
+    const pdfBytes = await pdf([["Public Data"]], {
       encryption: { ownerPassword: "admin" }
     });
     // Empty user password → should open without providing a password
-    const result = readPdf(pdfBytes);
+    const result = await readPdf(pdfBytes);
     expect(result.text).toContain("Public Data");
   });
 });
@@ -289,8 +289,8 @@ describe("AES-CBC Encrypt — NIST SP 800-38A test vectors", () => {
 });
 
 describe("PDF 2.0 Encrypt dictionary structure", () => {
-  it("should contain V=5, R=5, AESV3 in encrypted output", () => {
-    const pdfBytes = pdf([["Structure Test"]], {
+  it("should contain V=5, R=5, AESV3 in encrypted output", async () => {
+    const pdfBytes = await pdf([["Structure Test"]], {
       encryption: { ownerPassword: "owner", userPassword: "user" }
     });
     const text = new TextDecoder("latin1").decode(pdfBytes);
@@ -307,16 +307,16 @@ describe("PDF 2.0 Encrypt dictionary structure", () => {
     expect(text).toContain("/EncryptMetadata true");
   });
 
-  it("should produce PDF 2.0 header", () => {
-    const pdfBytes = pdf([["Version Test"]], {
+  it("should produce PDF 2.0 header", async () => {
+    const pdfBytes = await pdf([["Version Test"]], {
       encryption: { ownerPassword: "owner" }
     });
     const header = new TextDecoder().decode(pdfBytes.subarray(0, 10));
     expect(header).toContain("%PDF-2.0");
   });
 
-  it("should produce PDF 2.0 even without encryption", () => {
-    const pdfBytes = pdf([["No Encryption"]]);
+  it("should produce PDF 2.0 even without encryption", async () => {
+    const pdfBytes = await pdf([["No Encryption"]]);
     const header = new TextDecoder().decode(pdfBytes.subarray(0, 10));
     expect(header).toContain("%PDF-2.0");
   });

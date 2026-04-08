@@ -36,7 +36,7 @@ async function convertFile(
 ): Promise<void> {
   const wb = new Workbook();
   await wb.xlsx.readFile(xlsxPath);
-  const pdf = excelToPdf(wb, options);
+  const pdf = await excelToPdf(wb, options);
   fs.writeFileSync(path.join(outDir, pdfName), pdf);
   const sheets = wb.worksheets.length;
   console.log(`  ${pdfName} — ${sheets} sheet(s), ${pdf.length} bytes`);
@@ -150,7 +150,7 @@ const wb10 = new Workbook();
 await wb10.xlsx.readFile(path.join(excelDataDir, "test.xlsx"));
 
 // Variant A: Landscape, no grid
-const pdfA = excelToPdf(wb10, { orientation: "landscape" });
+const pdfA = await excelToPdf(wb10, { orientation: "landscape" });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-landscape.pdf"), pdfA);
 console.log("  excel-to-pdf-landscape.pdf — landscape, no grid");
 
@@ -168,12 +168,12 @@ wsA5.addRows([
   { item: "Oranges", qty: 8, price: 2.8 }
 ]);
 wsA5.getColumn("price").numFmt = "$#,##0.00";
-const pdfB = excelToPdf(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
+const pdfB = await excelToPdf(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-a5.pdf"), pdfB);
 console.log("  excel-to-pdf-a5.pdf — A5, fit to page");
 
 // Variant C: Encrypted
-const pdfC = excelToPdf(wb10, {
+const pdfC = await excelToPdf(wb10, {
   showGridLines: true,
   encryption: { ownerPassword: "secret" }
 });
@@ -181,7 +181,7 @@ fs.writeFileSync(path.join(outDir, "excel-to-pdf-encrypted.pdf"), pdfC);
 console.log("  excel-to-pdf-encrypted.pdf — encrypted");
 
 // Variant D: Select first sheet only
-const pdfD = excelToPdf(wb10, {
+const pdfD = await excelToPdf(wb10, {
   sheets: [1],
   showGridLines: true,
   showPageNumbers: true

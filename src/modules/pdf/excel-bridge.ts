@@ -11,7 +11,7 @@
  *
  * const workbook = new Workbook();
  * // ... build workbook ...
- * const pdf = excelToPdf(workbook);
+ * const pdf = await excelToPdf(workbook);
  * ```
  */
 
@@ -50,12 +50,16 @@ import {
  *
  * This is a convenience function that converts the Workbook to the PDF module's
  * data model and then generates the PDF.
+ * Yields to the event loop between each output page during layout and rendering.
  *
  * @param workbook - An Excel Workbook instance
  * @param options  - PDF export options
- * @returns PDF file as a Uint8Array
+ * @returns Promise of PDF file as a Uint8Array
  */
-export function excelToPdf(workbook: Workbook, options?: PdfExportOptions): Uint8Array {
+export async function excelToPdf(
+  workbook: Workbook,
+  options?: PdfExportOptions
+): Promise<Uint8Array> {
   const pdfWorkbook = excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);
 }

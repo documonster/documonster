@@ -100,14 +100,14 @@ wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
 
 // PDF — 直接从数据生成，无需 Workbook
 import { pdf } from "@cj-tech-master/excelts/pdf";
-const pdfBytes = pdf([
+const pdfBytes = await pdf([
   ["产品", "收入"],
   ["小工具", 1000]
 ]);
 
 // PDF — 读取任意 PDF 的文本、图片和元数据
 import { readPdf } from "@cj-tech-master/excelts/pdf";
-const result = readPdf(pdfBytes);
+const result = await readPdf(pdfBytes);
 console.log(result.text); // 提取的文本
 console.log(result.metadata); // 标题、作者等
 

@@ -282,7 +282,7 @@ wsData.getCell("B12").alignment = { wrapText: true };
 // Export
 // =============================================================================
 
-const pdf = excelToPdf(wb, {
+const pdf = await excelToPdf(wb, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,

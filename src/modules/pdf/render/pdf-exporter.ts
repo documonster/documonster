@@ -30,6 +30,7 @@ import {
   type LayoutPage
 } from "../types";
 import { argbToPdfColor } from "./style-converter";
+import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Public API
@@ -37,13 +38,43 @@ import { argbToPdfColor } from "./style-converter";
 
 /**
  * Export a PdfWorkbook to PDF format.
+ * Yields to the event loop between each output page during layout and rendering.
  *
  * @param workbook - The workbook data to export
  * @param options - Export options controlling layout, pagination, and appearance
- * @returns PDF file as a Uint8Array
+ * @returns Promise of PDF file as a Uint8Array
  * @throws {PdfError} If the workbook has no sheets or export fails
  */
-export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Uint8Array {
+export async function exportPdf(
+  workbook: PdfWorkbook,
+  options?: PdfExportOptions
+): Promise<Uint8Array> {
+  const ctx = prepareExport(workbook, options);
+
+  for (const sheet of ctx.sheets) {
+    await layoutSheetInto(ctx, sheet, options);
+  }
+
+  return finishExport(ctx, workbook, options);
+}
+
+// =============================================================================
+// Internal — Shared Pipeline
+// =============================================================================
+
+/** Shared state for the export pipeline. */
+interface ExportContext {
+  sheets: PdfSheetData[];
+  fontManager: FontManager;
+  writer: PdfWriter;
+  allPages: LayoutPage[];
+}
+
+/**
+ * Shared setup: validate sheets, create font manager and writer,
+ * register embedded font.
+ */
+function prepareExport(workbook: PdfWorkbook, options?: PdfExportOptions): ExportContext {
   const sheets = selectSheets(workbook, options?.sheets);
 
   if (sheets.length === 0) {
@@ -53,7 +84,6 @@ export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Ui
   const fontManager = new FontManager();
   const writer = new PdfWriter();
 
-  // --- Step 0: Register embedded font if provided ---
   if (options?.font) {
     try {
       const ttf = parseTtf(options.font);
@@ -63,22 +93,67 @@ export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Ui
     }
   }
 
-  // --- Step 1: Layout all sheets ---
-  const allPages: LayoutPage[] = [];
-  for (const sheet of sheets) {
-    try {
-      const resolved = resolveOptions(options, sheet);
-      const pages = layoutSheet(sheet, resolved, fontManager);
-      allPages.push(...pages);
-    } catch (err) {
-      throw new PdfRenderError(`Failed to layout sheet "${sheet.name}"`, { cause: err });
-    }
-  }
+  return { sheets, fontManager, writer, allPages: [] };
+}
 
+/**
+ * Layout a single sheet and append its pages to the context.
+ */
+async function layoutSheetInto(
+  ctx: ExportContext,
+  sheet: PdfSheetData,
+  options?: PdfExportOptions
+): Promise<void> {
+  try {
+    const resolved = resolveOptions(options, sheet);
+    const pages = await layoutSheet(sheet, resolved, ctx.fontManager);
+    ctx.allPages.push(...pages);
+  } catch (err) {
+    throw new PdfRenderError(`Failed to layout sheet "${sheet.name}"`, { cause: err });
+  }
+}
+
+/**
+ * After layout: fix page numbers, track fonts, write resources,
+ * render pages, and build the final PDF binary.
+ */
+async function finishExport(
+  ctx: ExportContext,
+  workbook: PdfWorkbook,
+  options?: PdfExportOptions
+): Promise<Uint8Array> {
+  const { allPages, fontManager, writer, sheets } = ctx;
   const documentOptions = resolveOptions(options, sheets[0]);
 
+  ensureAtLeastOnePage(allPages, documentOptions, sheets);
+  fixPageNumbers(allPages);
+  trackFontsForHeaders(allPages, fontManager);
+
+  const fontObjectMap = fontManager.writeFontResources(writer);
+  const { pageObjNums, sheetFirstPage, pagesTreeObjNum } = await renderAllPages(
+    allPages,
+    fontManager,
+    writer,
+    fontObjectMap
+  );
+
+  return buildFinalPdf(
+    writer,
+    pageObjNums,
+    pagesTreeObjNum,
+    sheetFirstPage,
+    documentOptions,
+    workbook,
+    options
+  );
+}
+
+function ensureAtLeastOnePage(
+  allPages: LayoutPage[],
+  documentOptions: ResolvedPdfOptions,
+  sheets: PdfSheetData[]
+): void {
   if (allPages.length === 0) {
-    // Create at least one empty page
     allPages.push({
       pageNumber: 1,
       options: documentOptions,
@@ -95,15 +170,15 @@ export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Ui
       images: []
     });
   }
+}
 
-  // Fix page numbers (they may be off after combining multiple sheets)
+function fixPageNumbers(allPages: LayoutPage[]): void {
   for (let i = 0; i < allPages.length; i++) {
     allPages[i].pageNumber = i + 1;
   }
+}
 
-  const totalPages = allPages.length;
-
-  // --- Step 1.5: Track page header/footer text for font subsetting ---
+function trackFontsForHeaders(allPages: LayoutPage[], fontManager: FontManager): void {
   if (fontManager.hasEmbeddedFont()) {
     for (const page of allPages) {
       if (page.options.showSheetNames) {
@@ -125,118 +200,158 @@ export function exportPdf(workbook: PdfWorkbook, options?: PdfExportOptions): Ui
       }
     }
   }
+}
 
-  // --- Step 2: Write font resources (builds subset from tracked code points) ---
-  const fontObjectMap = fontManager.writeFontResources(writer);
+interface RenderResult {
+  pageObjNums: number[];
+  sheetFirstPage: Map<string, number>;
+  pagesTreeObjNum: number;
+}
 
-  // --- Step 3: Render pages and build PDF structure ---
+async function renderAllPages(
+  allPages: LayoutPage[],
+  fontManager: FontManager,
+  writer: PdfWriter,
+  fontObjectMap: Map<string, number>
+): Promise<RenderResult> {
   const pageObjNums: number[] = [];
-  const pagesTreeObjNum = writer.allocObject(); // Allocate early for forward ref
+  const pagesTreeObjNum = writer.allocObject();
+  const sheetFirstPage = new Map<string, number>();
+  const totalPages = allPages.length;
 
-  // Track first page per sheet for outline/bookmarks
-  const sheetFirstPage = new Map<string, number>(); // sheetName → pageObjNum index
-
-  for (const page of allPages) {
-    try {
-      // Render the page content (text, fills, borders)
-      const { stream: contentStream, alphaValues } = renderPage(
-        page,
-        page.options,
-        fontManager,
-        totalPages
-      );
-
-      // Handle images: create XObject Image entries and draw them
-      const imageXObjects = new Map<string, number>(); // name → objNum
-      if (page.images.length > 0) {
-        for (let imgIdx = 0; imgIdx < page.images.length; imgIdx++) {
-          const img = page.images[imgIdx];
-          const imgName = `Im${imgIdx + 1}`;
-          const imgObjNum = writeImageXObject(writer, img.data, img.format);
-          imageXObjects.set(imgName, imgObjNum);
-          // Draw the image in the content stream
-          contentStream.drawImage(imgName, img.rect.x, img.rect.y, img.rect.width, img.rect.height);
-        }
-      }
-
-      // Add content stream object
-      const contentObjNum = writer.allocObject();
-      const contentDict = new PdfDict();
-      writer.addStreamObject(contentObjNum, contentDict, contentStream);
-
-      // Add resources dictionary object
-      const resourcesObjNum = writer.allocObject();
-      const fontDictStr = fontManager.buildFontDictString(fontObjectMap);
-      const resourcesDict = new PdfDict().set("Font", fontDictStr);
-      // Add XObject resources for images
-      if (imageXObjects.size > 0) {
-        const xobjParts = ["<<"];
-        for (const [name, objNum] of imageXObjects) {
-          xobjParts.push(`/${name} ${pdfRef(objNum)}`);
-        }
-        xobjParts.push(">>");
-        resourcesDict.set("XObject", xobjParts.join("\n"));
-      }
-      // Add ExtGState resources for transparency
-      if (alphaValues.size > 0) {
-        const gsParts = ["<<"];
-        for (const alpha of alphaValues) {
-          const gsObjNum = writer.allocObject();
-          const gsDict = new PdfDict()
-            .set("Type", "/ExtGState")
-            .set("ca", pdfNumber(alpha))
-            .set("CA", pdfNumber(alpha));
-          writer.addObject(gsObjNum, gsDict);
-          gsParts.push(`/${alphaGsName(alpha)} ${pdfRef(gsObjNum)}`);
-        }
-        gsParts.push(">>");
-        resourcesDict.set("ExtGState", gsParts.join("\n"));
-      }
-      writer.addObject(resourcesObjNum, resourcesDict);
-
-      // Create link annotations for hyperlinks
-      const annotRefs: number[] = [];
-      for (const cell of page.cells) {
-        if (cell.hyperlink) {
-          const annotObjNum = writer.allocObject();
-          const rect = `[${pdfNumber(cell.rect.x)} ${pdfNumber(cell.rect.y)} ${pdfNumber(cell.rect.x + cell.rect.width)} ${pdfNumber(cell.rect.y + cell.rect.height)}]`;
-          const annotDict = new PdfDict()
-            .set("Type", "/Annot")
-            .set("Subtype", "/Link")
-            .set("Rect", rect)
-            .set("Border", "[0 0 0]")
-            .set(
-              "A",
-              `<< /Type /Action /S /URI /URI (${cell.hyperlink.replace(/[()\\]/g, "\\$&")}) >>`
-            );
-          writer.addObject(annotObjNum, annotDict);
-          annotRefs.push(annotObjNum);
-        }
-      }
-
-      // Add page object
-      const pageObjNum = writer.addPage({
-        parentRef: pagesTreeObjNum,
-        width: page.width,
-        height: page.height,
-        contentsRef: contentObjNum,
-        resourcesRef: resourcesObjNum,
-        annotRefs: annotRefs.length > 0 ? annotRefs : undefined
-      });
-
-      pageObjNums.push(pageObjNum);
-
-      // Track first page of each sheet
-      if (!sheetFirstPage.has(page.sheetName)) {
-        sheetFirstPage.set(page.sheetName, pageObjNums.length - 1);
-      }
-    } catch (err) {
-      throw new PdfRenderError(`Failed to render page ${page.pageNumber} of "${page.sheetName}"`, {
-        cause: err
-      });
+  for (let i = 0; i < allPages.length; i++) {
+    renderSinglePage(
+      allPages[i],
+      fontManager,
+      writer,
+      fontObjectMap,
+      totalPages,
+      pageObjNums,
+      pagesTreeObjNum,
+      sheetFirstPage
+    );
+    if (i < allPages.length - 1) {
+      await yieldToEventLoop();
     }
   }
 
+  return { pageObjNums, sheetFirstPage, pagesTreeObjNum };
+}
+
+function renderSinglePage(
+  page: LayoutPage,
+  fontManager: FontManager,
+  writer: PdfWriter,
+  fontObjectMap: Map<string, number>,
+  totalPages: number,
+  pageObjNums: number[],
+  pagesTreeObjNum: number,
+  sheetFirstPage: Map<string, number>
+): void {
+  try {
+    const { stream: contentStream, alphaValues } = renderPage(
+      page,
+      page.options,
+      fontManager,
+      totalPages
+    );
+
+    // Handle images: create XObject Image entries and draw them
+    const imageXObjects = new Map<string, number>();
+    if (page.images.length > 0) {
+      for (let imgIdx = 0; imgIdx < page.images.length; imgIdx++) {
+        const img = page.images[imgIdx];
+        const imgName = `Im${imgIdx + 1}`;
+        const imgObjNum = writeImageXObject(writer, img.data, img.format);
+        imageXObjects.set(imgName, imgObjNum);
+        contentStream.drawImage(imgName, img.rect.x, img.rect.y, img.rect.width, img.rect.height);
+      }
+    }
+
+    // Add content stream object
+    const contentObjNum = writer.allocObject();
+    const contentDict = new PdfDict();
+    writer.addStreamObject(contentObjNum, contentDict, contentStream);
+
+    // Add resources dictionary object
+    const resourcesObjNum = writer.allocObject();
+    const fontDictStr = fontManager.buildFontDictString(fontObjectMap);
+    const resourcesDict = new PdfDict().set("Font", fontDictStr);
+    if (imageXObjects.size > 0) {
+      const xobjParts = ["<<"];
+      for (const [name, objNum] of imageXObjects) {
+        xobjParts.push(`/${name} ${pdfRef(objNum)}`);
+      }
+      xobjParts.push(">>");
+      resourcesDict.set("XObject", xobjParts.join("\n"));
+    }
+    if (alphaValues.size > 0) {
+      const gsParts = ["<<"];
+      for (const alpha of alphaValues) {
+        const gsObjNum = writer.allocObject();
+        const gsDict = new PdfDict()
+          .set("Type", "/ExtGState")
+          .set("ca", pdfNumber(alpha))
+          .set("CA", pdfNumber(alpha));
+        writer.addObject(gsObjNum, gsDict);
+        gsParts.push(`/${alphaGsName(alpha)} ${pdfRef(gsObjNum)}`);
+      }
+      gsParts.push(">>");
+      resourcesDict.set("ExtGState", gsParts.join("\n"));
+    }
+    writer.addObject(resourcesObjNum, resourcesDict);
+
+    // Create link annotations for hyperlinks
+    const annotRefs: number[] = [];
+    for (const cell of page.cells) {
+      if (cell.hyperlink) {
+        const annotObjNum = writer.allocObject();
+        const rect = `[${pdfNumber(cell.rect.x)} ${pdfNumber(cell.rect.y)} ${pdfNumber(cell.rect.x + cell.rect.width)} ${pdfNumber(cell.rect.y + cell.rect.height)}]`;
+        const annotDict = new PdfDict()
+          .set("Type", "/Annot")
+          .set("Subtype", "/Link")
+          .set("Rect", rect)
+          .set("Border", "[0 0 0]")
+          .set(
+            "A",
+            `<< /Type /Action /S /URI /URI (${cell.hyperlink.replace(/[()\\]/g, "\\$&")}) >>`
+          );
+        writer.addObject(annotObjNum, annotDict);
+        annotRefs.push(annotObjNum);
+      }
+    }
+
+    // Add page object
+    const pageObjNum = writer.addPage({
+      parentRef: pagesTreeObjNum,
+      width: page.width,
+      height: page.height,
+      contentsRef: contentObjNum,
+      resourcesRef: resourcesObjNum,
+      annotRefs: annotRefs.length > 0 ? annotRefs : undefined
+    });
+
+    pageObjNums.push(pageObjNum);
+
+    if (!sheetFirstPage.has(page.sheetName)) {
+      sheetFirstPage.set(page.sheetName, pageObjNums.length - 1);
+    }
+  } catch (err) {
+    throw new PdfRenderError(`Failed to render page ${page.pageNumber} of "${page.sheetName}"`, {
+      cause: err
+    });
+  }
+}
+
+function buildFinalPdf(
+  writer: PdfWriter,
+  pageObjNums: number[],
+  pagesTreeObjNum: number,
+  sheetFirstPage: Map<string, number>,
+  documentOptions: ResolvedPdfOptions,
+  workbook: PdfWorkbook,
+  options?: PdfExportOptions
+): Uint8Array {
   // --- Step 4: Build page tree ---
   const pagesKids = "[" + pageObjNums.map(n => pdfRef(n)).join(" ") + "]";
   const pagesDict = new PdfDict()

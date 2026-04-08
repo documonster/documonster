@@ -373,3 +373,15 @@ export function stringToUtf16Le(str: string): Uint8Array {
   }
   return bytes;
 }
+
+// =============================================================================
+// Async utilities
+// =============================================================================
+
+/**
+ * Yield to the event loop via a macrotask.
+ * Uses `setTimeout(0)` which works in both Node.js and browsers.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
