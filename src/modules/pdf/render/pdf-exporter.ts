@@ -167,7 +167,8 @@ function ensureAtLeastOnePage(
       sheetRows: [],
       rowYPositions: [],
       rowHeights: [],
-      images: []
+      images: [],
+      scaleFactor: 1
     });
   }
 }
@@ -462,7 +463,20 @@ function resolveOptions(
     orientation,
     margins,
     fitToPage: options?.fitToPage !== undefined ? options.fitToPage : true,
-    scale: Math.max(0.1, Math.min(3.0, options?.scale ?? (ps?.scale ? ps.scale / 100 : 1.0))),
+    scale: Math.max(
+      0.1,
+      Math.min(
+        3.0,
+        options?.scale ??
+          // When fitToPage is active (default), ignore sheet's pageSetup.scale
+          // to avoid double-scaling. Only apply sheet scale when fitToPage is off.
+          ((options?.fitToPage !== undefined ? options.fitToPage : true)
+            ? 1.0
+            : ps?.scale
+              ? ps.scale / 100
+              : 1.0)
+      )
+    ),
     showGridLines: options?.showGridLines ?? ps?.showGridLines ?? false,
     gridLineColor,
     repeatRows,

@@ -1,5 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { isEqual } from "@excel/utils/under-dash";
+import { copyStyle } from "@excel/utils/copy-style";
 import { Enums } from "@excel/enums";
 import type { Cell, CellValueType } from "@excel/cell";
 import type { Row } from "@excel/row";
@@ -110,7 +111,7 @@ class Column {
       this.width = value.width !== undefined ? value.width : DEFAULT_COLUMN_WIDTH;
       this.outlineLevel = value.outlineLevel;
       if (value.style) {
-        this.style = value.style;
+        this.style = (copyStyle(value.style) as Partial<Style>) ?? {};
       } else {
         this.style = {};
       }
@@ -364,7 +365,7 @@ class Column {
   set font(value: Partial<Font> | undefined) {
     this.style.font = value;
     this.eachCell(cell => {
-      cell.font = value;
+      cell.font = value ? structuredClone(value) : value;
     });
   }
 
@@ -375,7 +376,7 @@ class Column {
   set alignment(value: Partial<Alignment> | undefined) {
     this.style.alignment = value;
     this.eachCell(cell => {
-      cell.alignment = value;
+      cell.alignment = value ? structuredClone(value) : value;
     });
   }
 
@@ -386,7 +387,7 @@ class Column {
   set protection(value: Partial<Protection> | undefined) {
     this.style.protection = value;
     this.eachCell(cell => {
-      cell.protection = value;
+      cell.protection = value ? structuredClone(value) : value;
     });
   }
 
@@ -397,7 +398,7 @@ class Column {
   set border(value: Partial<Borders> | undefined) {
     this.style.border = value;
     this.eachCell(cell => {
-      cell.border = value;
+      cell.border = value ? structuredClone(value) : value;
     });
   }
 
@@ -408,7 +409,7 @@ class Column {
   set fill(value: Fill | undefined) {
     this.style.fill = value;
     this.eachCell(cell => {
-      cell.fill = value;
+      cell.fill = value ? structuredClone(value) : value;
     });
   }
 

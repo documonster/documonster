@@ -9,6 +9,7 @@ import { SaxParser } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
 import { ExcelStreamStateError } from "@excel/errors";
 import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import { copyStyle } from "@excel/utils/copy-style";
 import { colCache } from "@excel/utils/col-cache";
 import { Dimensions } from "@excel/range";
 import { Row } from "@excel/row";
@@ -276,7 +277,7 @@ class WorksheetReader extends EventEmitter {
                 const styleId = parseInt(node.attributes.s, 10);
                 const style = styles.getStyleModel(styleId);
                 if (style) {
-                  row.style = style;
+                  row.style = (copyStyle(style) as any) ?? {};
                 }
               }
             }
@@ -381,7 +382,7 @@ class WorksheetReader extends EventEmitter {
               if (c.s !== undefined) {
                 const style = styles.getStyleModel(c.s);
                 if (style) {
-                  cell.style = style;
+                  cell.style = (copyStyle(style) as any) ?? {};
                 }
               }
 

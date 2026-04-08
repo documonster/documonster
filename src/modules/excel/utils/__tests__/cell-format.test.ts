@@ -206,6 +206,81 @@ describe("cell-format", () => {
         expect(format("#,##0", 1234567890)).toBe("1,234,567,890");
       });
     });
+
+    describe("? placeholder (space padding)", () => {
+      it("should pad integer part with leading spaces", () => {
+        expect(format("??0.00", 0)).toBe("  0.00");
+        expect(format("??0.00", 5)).toBe("  5.00");
+        expect(format("??0.00", 42)).toBe(" 42.00");
+        expect(format("??0.00", 123)).toBe("123.00");
+      });
+
+      it("should pad decimal part with trailing spaces for zero", () => {
+        expect(format("0.??", 1)).toBe("1.  ");
+        expect(format("0.??", 1.5)).toBe("1.5 ");
+        expect(format("0.??", 1.23)).toBe("1.23");
+      });
+
+      it("should handle mixed ? and 0 in decimal part", () => {
+        expect(format("0.0?", 1.5)).toBe("1.5 ");
+        expect(format("0.0?", 1.53)).toBe("1.53");
+        expect(format("0.?0", 1.5)).toBe("1.50");
+      });
+
+      it("should produce space-dot-space for all-? format with zero", () => {
+        expect(format("???.???", 0)).toBe("   .   ");
+      });
+    });
+
+    describe("# placeholder (suppress zeros)", () => {
+      it("should suppress leading zero in integer part", () => {
+        expect(format("#.00", 0)).toBe(".00");
+        expect(format("#.00", 1.5)).toBe("1.50");
+      });
+
+      it("should strip trailing zeros in decimal part", () => {
+        expect(format("#.##", 1.5)).toBe("1.5");
+        expect(format("#.##", 1.23)).toBe("1.23");
+        expect(format("#.##", 1)).toBe("1");
+      });
+
+      it("should produce empty string for #.## with zero", () => {
+        expect(format("#.##", 0)).toBe("");
+      });
+
+      it("should handle mixed # and 0 in decimal part", () => {
+        expect(format("#.0#", 0)).toBe(".0");
+        expect(format("#.0#", 1.5)).toBe("1.5");
+        expect(format("#.0#", 1.56)).toBe("1.56");
+      });
+
+      it("should handle 0.## (required integer, optional decimals)", () => {
+        expect(format("0.##", 0)).toBe("0");
+        expect(format("0.##", 1)).toBe("1");
+        expect(format("0.##", 1.5)).toBe("1.5");
+        expect(format("0.##", 1.23)).toBe("1.23");
+      });
+
+      it("should suppress leading zero with decimal value", () => {
+        expect(format("#.##", 0.25)).toBe(".25");
+        expect(format("#.##", 0.1)).toBe(".1");
+      });
+    });
+
+    describe("Zero-value section in multi-section formats", () => {
+      it("should use third section for zero with literal dash", () => {
+        expect(format('#,##0.00;-#,##0.00;"-"??', 0)).toBe("-  ");
+      });
+
+      it("should use third section for zero with literal dash (no spaces)", () => {
+        expect(format('0.00;-0.00;"-"', 0)).toBe("-");
+      });
+
+      it("should still format positive and negative correctly", () => {
+        expect(format('#,##0.00;-#,##0.00;"-"??', 1234.5)).toBe("1,234.50");
+        expect(format('#,##0.00;-#,##0.00;"-"??', -1234.5)).toBe("-1,234.50");
+      });
+    });
   });
 
   describe("isDateFormat", () => {

@@ -594,6 +594,35 @@ function formatNumberPattern(val: number, fmt: string): string {
   // Round the value
   const roundedVal = roundTo(scaledVal, decimalPlaces);
 
+  // When value is zero and the format has no required '0' digit placeholders,
+  // '?' placeholders become spaces and '#' placeholders produce nothing.
+  // This handles accounting format zero sections like "-"?? → "- " (dash + spaces).
+  if (roundedVal === 0 && !intFmt.includes("0") && !decFmt.includes("0")) {
+    let result = "";
+    for (const ch of intFmt) {
+      if (ch === "?") {
+        result += " ";
+      } else if (ch !== "#" && ch !== ",") {
+        // Preserve literal characters (already unquoted at this point)
+        result += ch;
+      }
+    }
+    if (decimalPlaces > 0) {
+      // Only emit the decimal point if the decimal format has '?' or '0' placeholders.
+      // Pure '#' decimal digits produce nothing for zero values.
+      const hasDecContent = /[0?]/.test(decFmt);
+      if (hasDecContent) {
+        result += ".";
+        for (const ch of decFmt) {
+          if (ch === "?") {
+            result += " ";
+          }
+        }
+      }
+    }
+    return sign + result;
+  }
+
   // Split into integer and decimal parts
   const [intPart, decPart = ""] = roundedVal.toString().split(".");
 
@@ -639,17 +668,49 @@ function formatNumberPattern(val: number, fmt: string): string {
       formattedInt = commaify(intPart);
     }
 
-    // Pad integer with leading zeros if needed
+    // Pad integer with leading zeros/spaces if needed
+    // '0' placeholder → pad with "0", '?' placeholder → pad with " "
     const minIntDigits = (intFmt.match(/0/g) ?? []).length;
+    const totalIntSlots = (intFmt.match(/[0?]/g) ?? []).length;
     if (formattedInt.length < minIntDigits) {
       formattedInt = "0".repeat(minIntDigits - formattedInt.length) + formattedInt;
+    }
+    if (formattedInt.length < totalIntSlots) {
+      formattedInt = " ".repeat(totalIntSlots - formattedInt.length) + formattedInt;
+    }
+
+    // '#' integer placeholder: suppress "0" when there are no required '0' or '?' digits
+    // and the integer value is zero (e.g. "#" format with value 0 → empty)
+    if (formattedInt === "0" && minIntDigits === 0 && totalIntSlots === 0) {
+      formattedInt = "";
     }
   }
 
   // Format decimal part
   let formattedDec = "";
   if (decimalPlaces > 0) {
-    formattedDec = "." + (decPart + "0".repeat(decimalPlaces)).substring(0, decimalPlaces);
+    const rawDec = (decPart + "0".repeat(decimalPlaces)).substring(0, decimalPlaces);
+    // Process each decimal digit position according to its placeholder:
+    // '0' → always show digit, '?' → show digit or space, '#' → show digit or nothing (trim trailing)
+    const decChars = rawDec.split("");
+    // Walk from the end: '#' trailing zeros are removed, '?' trailing zeros become spaces
+    for (let i = decFmt.length - 1; i >= 0; i--) {
+      if (i >= decChars.length) {
+        continue;
+      }
+      if (decFmt[i] === "#" && decChars[i] === "0") {
+        decChars[i] = "";
+      } else if (decFmt[i] === "?" && decChars[i] === "0") {
+        decChars[i] = " ";
+      } else {
+        break; // stop at first non-zero or '0' placeholder
+      }
+    }
+    const decStr = decChars.join("");
+    // Only emit decimal point if there is content after it
+    if (decStr.length > 0) {
+      formattedDec = "." + decStr;
+    }
   }
 
   return sign + formattedInt + formattedDec;

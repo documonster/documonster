@@ -4,6 +4,7 @@ import { Enums } from "@excel/enums";
 import { Note } from "@excel/note";
 import { escapeHtml } from "@excel/utils/under-dash";
 import { slideFormula } from "@excel/utils/shared-formula";
+import { copyStyle } from "@excel/utils/copy-style";
 import { ExcelError, InvalidValueTypeError } from "@excel/errors";
 import type { Row } from "@excel/row";
 import type { Column } from "@excel/column";
@@ -248,35 +249,35 @@ class Cell {
       (rowStyle && hasOwnKeys(rowStyle.font) && rowStyle.font) ||
       (colStyle && hasOwnKeys(colStyle.font) && colStyle.font);
     if (font) {
-      style.font = font;
+      style.font = structuredClone(font);
     }
 
     const alignment =
       (rowStyle && hasOwnKeys(rowStyle.alignment) && rowStyle.alignment) ||
       (colStyle && hasOwnKeys(colStyle.alignment) && colStyle.alignment);
     if (alignment) {
-      style.alignment = alignment;
+      style.alignment = structuredClone(alignment);
     }
 
     const border =
       (rowStyle && hasOwnKeys(rowStyle.border) && rowStyle.border) ||
       (colStyle && hasOwnKeys(colStyle.border) && colStyle.border);
     if (border) {
-      style.border = border;
+      style.border = structuredClone(border);
     }
 
     const fill =
       (rowStyle && hasOwnKeys(rowStyle.fill) && rowStyle.fill) ||
       (colStyle && hasOwnKeys(colStyle.fill) && colStyle.fill);
     if (fill) {
-      style.fill = fill;
+      style.fill = structuredClone(fill);
     }
 
     const protection =
       (rowStyle && hasOwnKeys(rowStyle.protection) && rowStyle.protection) ||
       (colStyle && hasOwnKeys(colStyle.protection) && colStyle.protection);
     if (protection) {
-      style.protection = protection;
+      style.protection = structuredClone(protection);
     }
 
     return style;
@@ -334,7 +335,10 @@ class Cell {
     this._value.release();
     this._value = Value.create(Cell.Types.Merge, this, master);
     if (!ignoreStyle) {
-      this.style = master.style;
+      // Deep-copy so each cell has an independent style object.
+      // Without this, all cells in the merge share the same reference,
+      // and setting a property (e.g. border) on any cell mutates all of them.
+      this.style = (copyStyle(master.style) as Partial<Style>) ?? {};
     }
   }
 
@@ -535,7 +539,7 @@ class Cell {
     }
 
     if (value.style) {
-      this.style = value.style;
+      this.style = (copyStyle(value.style) as Partial<Style>) ?? {};
     } else {
       this.style = {};
     }

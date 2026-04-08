@@ -110,6 +110,8 @@ export interface PdfCellData {
 export interface PdfRowData {
   hidden?: boolean;
   height?: number;
+  /** Whether the height was explicitly set by the user (vs auto-calculated) */
+  customHeight?: boolean;
   /** Cells keyed by 1-based column number */
   cells: Map<number, PdfCellData>;
 }
@@ -486,6 +488,8 @@ export interface LayoutCell {
   indent: number;
   /** Text rotation in degrees (0-90 ccw, 91-180 cw) or "vertical" for stacked */
   textRotation: number | "vertical";
+  /** Extra width (in points) that text can overflow into adjacent empty cells */
+  textOverflowWidth: number;
 }
 
 /**
@@ -522,6 +526,8 @@ export interface LayoutBorder {
   color: PdfColor;
   /** Dash pattern (empty array = solid) */
   dashPattern: number[];
+  /** Whether this is a double-line border */
+  isDouble?: boolean;
 }
 
 /**
@@ -554,6 +560,8 @@ export interface LayoutPage {
   rowHeights: number[];
   /** Images to render on this page */
   images: LayoutImage[];
+  /** Scale factor applied to this page (for fitToPage) */
+  scaleFactor: number;
 }
 
 /**

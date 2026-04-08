@@ -1056,6 +1056,69 @@ describe("Worksheet", () => {
           });
         }
       });
+
+      it("setting borders after merge does not cause cross-cell mutation", () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("sheet");
+
+        // Merge without any pre-existing borders
+        ws.getCell("A1").value = "Merged";
+        ws.mergeCells("A1:C3");
+
+        // Set borders on boundary cells one by one (natural user workflow)
+        ws.getCell("A1").border = {
+          top: { style: "thick", color: { argb: "FF0000FF" } },
+          left: { style: "thick", color: { argb: "FF0000FF" } }
+        };
+        ws.getCell("C1").border = {
+          right: { style: "thick", color: { argb: "FFFF0000" } }
+        };
+        ws.getCell("A3").border = {
+          bottom: { style: "thick", color: { argb: "FF00FF00" } }
+        };
+
+        // Each cell should have only the borders it was assigned
+        expect(ws.getCell("A1").border).toEqual({
+          top: { style: "thick", color: { argb: "FF0000FF" } },
+          left: { style: "thick", color: { argb: "FF0000FF" } }
+        });
+        expect(ws.getCell("C1").border).toEqual({
+          right: { style: "thick", color: { argb: "FFFF0000" } }
+        });
+        expect(ws.getCell("A3").border).toEqual({
+          bottom: { style: "thick", color: { argb: "FF00FF00" } }
+        });
+
+        // Unmodified interior cell should have no border
+        expect(ws.getCell("B2").border).toBeUndefined();
+      });
+
+      it("styles are independent after borderless merge — mutating one cell does not affect others", () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("sheet");
+
+        ws.mergeCells("A1:B2");
+
+        // Set font on A1 only
+        ws.getCell("A1").font = { bold: true };
+
+        // B1 should not be affected
+        expect(ws.getCell("A1").font).toEqual({ bold: true });
+        expect(ws.getCell("B1").font).toBeUndefined();
+
+        // Set fill on B2 only
+        ws.getCell("B2").fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFF0000" }
+        };
+        expect(ws.getCell("B2").fill).toEqual({
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFF0000" }
+        });
+        expect(ws.getCell("A1").fill).toBeUndefined();
+      });
     });
   });
 });

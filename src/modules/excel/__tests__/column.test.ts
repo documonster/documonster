@@ -314,4 +314,38 @@ describe("Column", () => {
     expect(ws2.getColumn(3).width).toBe(15);
     expect(ws2.getColumn(3).outlineLevel).toBe(1);
   });
+
+  describe("style isolation", () => {
+    it("mutating a cell border after col.border broadcast does not leak to other cells", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.getCell("A1").value = "row1";
+      ws.getCell("A2").value = "row2";
+
+      ws.getColumn(1).border = { top: { style: "thin" }, bottom: { style: "thin" } };
+
+      ws.getCell("A1").border!.top = { style: "thick" };
+
+      expect(ws.getCell("A1").border!.top).toEqual({ style: "thick" });
+      expect(ws.getCell("A2").border!.top).toEqual({ style: "thin" });
+    });
+
+    it("mutating a cell fill after col.fill broadcast does not leak to other cells", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.getCell("A1").value = "row1";
+      ws.getCell("A2").value = "row2";
+
+      ws.getColumn(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFF0000" }
+      };
+
+      (ws.getCell("A1").fill as any).fgColor = { argb: "FF00FF00" };
+
+      expect((ws.getCell("A1").fill as any).fgColor).toEqual({ argb: "FF00FF00" });
+      expect((ws.getCell("A2").fill as any).fgColor).toEqual({ argb: "FFFF0000" });
+    });
+  });
 });

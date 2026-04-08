@@ -373,7 +373,11 @@ class Row {
     this.style[name] = value;
     this._cells.forEach(cell => {
       if (cell) {
-        cell.style[name] = value;
+        // Clone object values so each cell gets an independent copy.
+        // Without this, mutating a sub-property (e.g. cell.border.top = ...)
+        // would leak to every other cell that received the same reference.
+        cell.style[name] =
+          typeof value === "object" && value !== null ? structuredClone(value) : value;
       }
     });
   }

@@ -448,4 +448,35 @@ describe("Row", () => {
     expect(row1.cellCount).toBe(5);
     expect(row1.actualCellCount).toBe(4);
   });
+
+  describe("style isolation", () => {
+    it("mutating a cell border after row.border broadcast does not leak to other cells", () => {
+      const sheet = testUtils.createSheetMock();
+      const row = sheet.getRow(1);
+      row.getCell(1).value = "A";
+      row.getCell(2).value = "B";
+
+      row.border = { top: { style: "thin" }, bottom: { style: "thin" } };
+
+      // Mutate A1's border sub-property
+      row.getCell(1).border!.top = { style: "thick" };
+
+      expect(row.getCell(1).border!.top).toEqual({ style: "thick" });
+      expect(row.getCell(2).border!.top).toEqual({ style: "thin" });
+    });
+
+    it("mutating a cell font after row.font broadcast does not leak to other cells", () => {
+      const sheet = testUtils.createSheetMock();
+      const row = sheet.getRow(1);
+      row.getCell(1).value = "A";
+      row.getCell(2).value = "B";
+
+      row.font = { bold: true, size: 12 };
+
+      row.getCell(1).font!.bold = false;
+
+      expect(row.getCell(1).font!.bold).toBe(false);
+      expect(row.getCell(2).font!.bold).toBe(true);
+    });
+  });
 });

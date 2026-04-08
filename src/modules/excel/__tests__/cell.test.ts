@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { colCache } from "@excel/utils/col-cache";
 import { Cell } from "@excel/cell";
 import { Enums } from "@excel/enums";
+import { Workbook } from "../../../index";
 
 interface SheetMock {
   rows: any[];
@@ -638,5 +639,23 @@ describe("Cell", () => {
     // After destroy, accessing .type throws because _value is nullified.
     // This verifies destroy truly clears the cell's internal state.
     expect(() => a1.type).toThrow();
+  });
+
+  it("cell inherits independent copy of row/column style at construction", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("test");
+
+    // Set row style before creating cells
+    ws.getRow(1).font = { bold: true, size: 14 };
+    ws.getRow(1).getCell(1).value = "A1";
+
+    // New cell in the same row should inherit font
+    ws.getRow(1).getCell(2).value = "B1";
+    expect(ws.getCell("B1").font).toEqual({ bold: true, size: 14 });
+
+    // Mutating B1's font should not affect A1
+    ws.getCell("B1").font!.bold = false;
+    expect(ws.getCell("B1").font!.bold).toBe(false);
+    expect(ws.getCell("A1").font!.bold).toBe(true);
   });
 });

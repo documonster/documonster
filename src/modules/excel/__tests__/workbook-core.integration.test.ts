@@ -1069,9 +1069,9 @@ describe("Workbook", () => {
         const ws2 = wb2.getWorksheet("duplicateTest")!;
 
         expect(ws2.getCell("A2").value).toBe("OneInfo");
-        expect(ws2.getCell("A2").style).toBe(ws2.getCell("A1").style);
+        expect(ws2.getCell("A2").style).toStrictEqual(ws2.getCell("A1").style);
         expect(ws2.getCell("A3").value).toBe("OneInfo");
-        expect(ws2.getCell("A3").style).toBe(ws2.getCell("A1").style);
+        expect(ws2.getCell("A3").style).toStrictEqual(ws2.getCell("A1").style);
         expect(ws2.getCell("A4").value).toBeNull();
       });
 

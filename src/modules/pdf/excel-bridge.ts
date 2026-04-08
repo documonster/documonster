@@ -115,13 +115,26 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
       }
 
       const cells = new Map<number, PdfCellData>();
-      row.eachCell({ includeEmpty: false }, cell => {
-        cells.set(cell.col, convertCell(cell));
+      row.eachCell({ includeEmpty: true }, cell => {
+        const hasValue = cell.type !== ValueType.Null && cell.type !== ValueType.Merge;
+        const hasStyle =
+          cell.style &&
+          ((cell.style.border &&
+            (cell.style.border.top ||
+              cell.style.border.right ||
+              cell.style.border.bottom ||
+              cell.style.border.left)) ||
+            cell.style.fill ||
+            cell.style.font);
+        if (hasValue || hasStyle) {
+          cells.set(cell.col, convertCell(cell));
+        }
       });
 
       rows.set(r, {
         hidden: row.hidden || undefined,
         height: row.height ?? undefined,
+        customHeight: row.customHeight || undefined,
         cells
       });
     }

@@ -23,6 +23,8 @@ import type {
   PdfCellStyle,
   PdfRichTextRunData,
   PdfSheetImage,
+  PdfAlignmentData,
+  PdfCellTypeValue,
   ResolvedPdfOptions,
   LayoutPage,
   LayoutCell,
@@ -38,16 +40,72 @@ import {
   excelHAlignToPdf,
   excelVAlignToPdf
 } from "./style-converter";
+import { wrapTextLines } from "./page-renderer";
+import {
+  CELL_PADDING_H,
+  CELL_PADDING_V,
+  LINE_HEIGHT_FACTOR,
+  INDENT_WIDTH,
+  MAX_DIGIT_WIDTH_PX,
+  EXCEL_COLUMN_PADDING_PX,
+  PX_TO_PT
+} from "./constants";
 import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const EXCEL_CHAR_WIDTH_TO_POINTS = 7;
 const DEFAULT_COLUMN_WIDTH = 8.43;
 const DEFAULT_ROW_HEIGHT = 15;
-const MIN_COLUMN_WIDTH = 5;
+const MIN_COLUMN_WIDTH = 3;
+
+// =============================================================================
+// Type-based Default Alignment
+// =============================================================================
+
+/**
+ * Resolve horizontal alignment, using Excel's type-based defaults when
+ * no explicit alignment is set (or when alignment is "general"):
+ * - Numbers/Dates → right
+ * - Booleans/Errors → center
+ * - Text/RichText/Hyperlink → left
+ * - Formulas → based on result type
+ */
+function resolveHorizontalAlign(
+  alignment: Partial<PdfAlignmentData> | undefined,
+  cellType: PdfCellTypeValue | undefined,
+  formulaResult?: unknown
+): "left" | "center" | "right" {
+  // If explicitly set (and not "general"), use the explicit alignment
+  if (alignment?.horizontal && alignment.horizontal !== "general") {
+    return excelHAlignToPdf(alignment);
+  }
+
+  // Use type-based default
+  if (cellType !== undefined) {
+    switch (cellType) {
+      case PdfCellType.Number:
+      case PdfCellType.Date:
+        return "right";
+      case PdfCellType.Boolean:
+      case PdfCellType.Error:
+        return "center";
+      case PdfCellType.Formula:
+        if (typeof formulaResult === "number" || formulaResult instanceof Date) {
+          return "right";
+        }
+        if (typeof formulaResult === "boolean") {
+          return "center";
+        }
+        return "left";
+      default:
+        return "left";
+    }
+  }
+
+  return "left";
+}
 
 // =============================================================================
 // Layout Engine
@@ -62,7 +120,7 @@ export async function layoutSheet(
   options: ResolvedPdfOptions,
   fontManager: FontManager
 ): Promise<LayoutPage[]> {
-  const ctx = prepareLayout(sheet, options);
+  const ctx = prepareLayout(sheet, options, fontManager);
   if (!ctx) {
     return [createEmptyPage(sheet, options)];
   }
@@ -82,7 +140,7 @@ export async function layoutSheet(
   }
 
   if (layoutPages.length > 0 && sheet.images) {
-    assignImagesToPages(sheet.images, layoutPages);
+    assignImagesToPages(sheet.images, layoutPages, ctx.scaleFactor);
   }
 
   return layoutPages;
@@ -113,7 +171,11 @@ interface LayoutContext {
  * Steps 1–5: compute columns, scale, rows, merges, pagination.
  * Returns null if the sheet has no visible columns (→ caller should emit an empty page).
  */
-function prepareLayout(sheet: PdfSheetData, options: ResolvedPdfOptions): LayoutContext | null {
+function prepareLayout(
+  sheet: PdfSheetData,
+  options: ResolvedPdfOptions,
+  fontManager: FontManager
+): LayoutContext | null {
   const { margins } = options;
 
   let pageWidth = options.pageSize.width;
@@ -148,7 +210,13 @@ function prepareLayout(sheet: PdfSheetData, options: ResolvedPdfOptions): Layout
   const scaledColumnWidths = columnWidths.map(w => w * scaleFactor);
 
   // --- Step 3: Visible rows and heights ---
-  const { rowHeights, visibleRows } = computeRowHeights(sheet, scaleFactor, printRange);
+  const { rowHeights, visibleRows } = computeRowHeights(
+    sheet,
+    scaleFactor,
+    printRange,
+    fontManager,
+    options
+  );
 
   // --- Step 4: Merge map ---
   const mergeMap = buildMergeMap(sheet);
@@ -229,6 +297,8 @@ function buildPageLayout(
   }
 
   // Build cells for this row page × column group
+  const cellGrid = new Map<string, LayoutCell>();
+
   for (let ri = 0; ri < rowPage.length; ri++) {
     const visibleRowIdx = rowPage[ri];
     const wsRowNumber = visibleRows[visibleRowIdx];
@@ -297,8 +367,29 @@ function buildPageLayout(
           scaleFactor
         )
       );
+
+      const layoutCell = cells[cells.length - 1];
+
+      // Propagate merged cell borders from boundary cells
+      if (mergeInfo?.isMaster) {
+        propagateMergeBorders(layoutCell, mergeInfo, wsRowNumber, wsColNumber, sheet);
+      }
+
+      cellGrid.set(`${ri}:${gci}`, layoutCell);
     }
   }
+
+  // Compute text overflow widths for non-wrapped cells
+  computeTextOverflows(
+    cellGrid,
+    rowPage,
+    colGroup,
+    visibleRows,
+    visibleCols,
+    groupColWidths,
+    mergeMap,
+    fontManager
+  );
 
   return {
     pageNumber: currentPageCount + 1,
@@ -313,7 +404,8 @@ function buildPageLayout(
     sheetRows: rowPage.map(ri => visibleRows[ri]),
     rowYPositions,
     rowHeights: pageRowHeights,
-    images: []
+    images: [],
+    scaleFactor
   };
 }
 
@@ -337,7 +429,8 @@ function createEmptyPage(sheet: PdfSheetData, options: ResolvedPdfOptions): Layo
     sheetRows: [],
     rowYPositions: [],
     rowHeights: [],
-    images: []
+    images: [],
+    scaleFactor: 1
   };
 }
 
@@ -455,7 +548,8 @@ function computeColumnWidths(
       continue;
     }
     const excelWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
-    const pointWidth = Math.max(excelWidth * EXCEL_CHAR_WIDTH_TO_POINTS, MIN_COLUMN_WIDTH);
+    const pixelWidth = excelWidth * MAX_DIGIT_WIDTH_PX + EXCEL_COLUMN_PADDING_PX;
+    const pointWidth = Math.max(pixelWidth * PX_TO_PT, MIN_COLUMN_WIDTH);
     columnWidths.push(pointWidth);
     visibleCols.push(c);
   }
@@ -470,7 +564,9 @@ function computeColumnWidths(
 function computeRowHeights(
   sheet: PdfSheetData,
   scaleFactor: number,
-  printRange: PrintRange | null
+  printRange: PrintRange | null,
+  fontManager: FontManager,
+  options: ResolvedPdfOptions
 ): { rowHeights: number[]; visibleRows: number[] } {
   const bounds = sheet.bounds;
   if (bounds.top <= 0) {
@@ -484,51 +580,33 @@ function computeRowHeights(
 
   for (let r = startRow; r <= endRow; r++) {
     const row = sheet.rows.get(r);
-    if (row && row.hidden) {
+    if (row?.hidden) {
       continue;
     }
 
     let height: number;
-    if (row?.height) {
-      // Explicit row height set by user
+    if (row?.height && row.customHeight) {
+      // Custom height explicitly set by user — use as-is
+      height = row.height;
+    } else if (row?.height) {
+      // Excel auto-calculated height — trust it as-is
       height = row.height;
     } else {
-      // Auto-size: scan cells in this row to find the largest needed height.
+      // No height info: auto-size based on cell content
       height = DEFAULT_ROW_HEIGHT;
       if (row) {
         for (const cell of row.cells.values()) {
-          let fontSize = cell.style?.font?.size ?? 11;
-
-          // For rich text cells, find the largest font size across all runs
-          const rtValue = cell.value as { richText?: Array<{ font?: { size?: number } }> } | null;
-          if (rtValue?.richText) {
-            for (const run of rtValue.richText) {
-              const runSize = run.font?.size ?? fontSize;
-              if (runSize > fontSize) {
-                fontSize = runSize;
-              }
-            }
-          }
-
-          const lineHeight = fontSize * 1.5;
-
-          // Count lines: explicit newlines in the text
-          const text = cell.text ?? "";
-          const lineCount = Math.max(1, (text.match(/\n/g) ?? []).length + 1);
-
-          // For wrapText cells, estimate how many lines word-wrapping produces
-          let wrapLineCount = lineCount;
-          if (cell.style?.alignment?.wrapText && lineCount === 1 && text.length > 0) {
-            const col = sheet.columns.get(cell.col);
-            const colWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
-            const colPts = colWidth * EXCEL_CHAR_WIDTH_TO_POINTS * scaleFactor;
-            const avgCharWidth = fontSize * 0.55; // rough average char width
-            const charsPerLine = Math.max(1, Math.floor(colPts / avgCharWidth));
-            wrapLineCount = Math.ceil(text.length / charsPerLine);
-          }
-
-          const neededHeight = lineHeight * wrapLineCount;
-
+          const fontSize = getCellFontSize(cell);
+          const wrapLineCount = countWrapLines(
+            cell,
+            fontSize,
+            scaleFactor,
+            sheet,
+            fontManager,
+            options
+          );
+          const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
+          const neededHeight = fontSize + (wrapLineCount - 1) * lineHeight + CELL_PADDING_V * 2;
           if (neededHeight > height) {
             height = neededHeight;
           }
@@ -541,6 +619,71 @@ function computeRowHeights(
   }
 
   return { rowHeights, visibleRows };
+}
+
+/**
+ * Get the largest font size for a cell, checking rich text runs.
+ */
+function getCellFontSize(cell: PdfCellData): number {
+  let fontSize = cell.style?.font?.size ?? 11;
+
+  if (cell.type === PdfCellType.RichText) {
+    const value = cell.value;
+    if (value && typeof value === "object" && "richText" in value) {
+      const runs = (value as { richText: PdfRichTextRunData[] }).richText;
+      for (const run of runs) {
+        const runSize = run.font?.size ?? fontSize;
+        if (runSize > fontSize) {
+          fontSize = runSize;
+        }
+      }
+    }
+  }
+
+  return fontSize;
+}
+
+/**
+ * Count the wrap-line count for a cell, using actual font measurements
+ * so row heights match the page renderer exactly.
+ */
+function countWrapLines(
+  cell: PdfCellData,
+  fontSize: number,
+  scaleFactor: number,
+  sheet: PdfSheetData,
+  fontManager: FontManager,
+  options: ResolvedPdfOptions
+): number {
+  const text = typeof cell.text === "string" ? cell.text : String(cell.text ?? "");
+  const lineCount = Math.max(1, (text.match(/\n/g) ?? []).length + 1);
+
+  if (!cell.style?.alignment?.wrapText || text.length === 0) {
+    return lineCount;
+  }
+
+  const col = sheet.columns.get(cell.col);
+  const colWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
+  const scaledColPts =
+    (colWidth * MAX_DIGIT_WIDTH_PX + EXCEL_COLUMN_PADDING_PX) * PX_TO_PT * scaleFactor;
+  const indent = cell.style.alignment.indent ?? 0;
+  const padding = CELL_PADDING_H * 2 + indent * INDENT_WIDTH;
+  const effectiveWidth = Math.max(scaledColPts - padding, 1);
+
+  const scaledFontSize = fontSize * scaleFactor;
+  const fontProps = extractFontProperties(
+    cell.style.font,
+    options.defaultFontFamily,
+    options.defaultFontSize
+  );
+  const pdfFontName = resolvePdfFontName(fontProps.fontFamily, fontProps.bold, fontProps.italic);
+  const resourceName = fontManager.hasEmbeddedFont()
+    ? fontManager.getEmbeddedResourceName()
+    : fontManager.ensureFont(pdfFontName);
+  const measure = (s: string) => fontManager.measureText(s, resourceName, scaledFontSize);
+  const wrappedLines = wrapTextLines(text, measure, effectiveWidth);
+
+  return Math.max(lineCount, wrappedLines.length);
 }
 
 // =============================================================================
@@ -806,7 +949,7 @@ function buildLayoutCell(
     underline: fontProps.underline,
     textColor: fontProps.textColor,
     fillColor: excelFillToPdfColor(style.fill),
-    horizontalAlign: excelHAlignToPdf(style.alignment),
+    horizontalAlign: resolveHorizontalAlign(style.alignment, cell?.type, cell?.result),
     verticalAlign: excelVAlignToPdf(style.alignment),
     wrapText: style.alignment?.wrapText ?? false,
     borders: excelBordersToPdf(style.border),
@@ -815,7 +958,9 @@ function buildLayoutCell(
     hyperlink: cell?.hyperlink ?? null,
     richText,
     indent: style.alignment?.indent ?? 0,
-    textRotation: style.alignment?.textRotation ?? 0
+    textRotation:
+      style.alignment?.textRotation === 255 ? "vertical" : (style.alignment?.textRotation ?? 0),
+    textOverflowWidth: 0
   };
 }
 
@@ -826,7 +971,11 @@ function buildLayoutCell(
 /**
  * Assign pre-collected images to the pages that contain their top-left anchor.
  */
-function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[]): void {
+function assignImagesToPages(
+  images: PdfSheetImage[],
+  layoutPages: LayoutPage[],
+  scaleFactor: number
+): void {
   for (const img of images) {
     const tl = img.range.tl;
     const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // convert 0-indexed to 1-indexed
@@ -848,9 +997,9 @@ function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[])
         targetPage.options.margins.top -
         (targetPage.options.showSheetNames ? 20 : 0);
 
-    // Apply sub-cell offsets (EMU: 1pt = 12700 EMU)
-    const tlColOff = (tl.nativeColOff ?? 0) / 12700 || 0;
-    const tlRowOff = (tl.nativeRowOff ?? 0) / 12700 || 0;
+    // Apply sub-cell offsets (EMU: 1pt = 12700 EMU), scaled to match page layout
+    const tlColOff = ((tl.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
+    const tlRowOff = ((tl.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
     const imgX = baseX + tlColOff;
     const imgY = baseY - tlRowOff;
 
@@ -858,8 +1007,8 @@ function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[])
     let imgWidth = 100;
     let imgHeight = 100;
     if (img.range.ext) {
-      imgWidth = (img.range.ext.width ?? 100) * 0.75;
-      imgHeight = (img.range.ext.height ?? 100) * 0.75;
+      imgWidth = (img.range.ext.width ?? 100) * 0.75 * scaleFactor;
+      imgHeight = (img.range.ext.height ?? 100) * 0.75 * scaleFactor;
     } else if (img.range.br) {
       const br = img.range.br;
       const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
@@ -874,8 +1023,8 @@ function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[])
         brPageRowIndex >= 0
           ? targetPage.rowYPositions[brPageRowIndex]
           : imgY - (targetPage.rowHeights[pageRowIndex] ?? 100);
-      const brColOff = (br.nativeColOff ?? 0) / 12700 || 0;
-      const brRowOff = (br.nativeRowOff ?? 0) / 12700 || 0;
+      const brColOff = ((br.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
+      const brRowOff = ((br.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
       const brX = brBaseX + brColOff;
       const brY = brBaseY - brRowOff;
       imgWidth = brX - imgX;
@@ -892,6 +1041,118 @@ function assignImagesToPages(images: PdfSheetImage[], layoutPages: LayoutPage[])
         height: Math.abs(imgHeight)
       }
     });
+  }
+}
+
+// =============================================================================
+// Merge Border Propagation
+// =============================================================================
+
+/**
+ * Excel stores merged-cell borders on the boundary cells, not on the master.
+ * Copy the right border from the rightmost column cell and the bottom border
+ * from the bottom row cell so the layout cell renders them correctly.
+ */
+function propagateMergeBorders(
+  layoutCell: LayoutCell,
+  mergeInfo: MergeInfo,
+  wsRowNumber: number,
+  wsColNumber: number,
+  sheet: PdfSheetData
+): void {
+  if (mergeInfo.colSpan > 1) {
+    const rightCol = wsColNumber + mergeInfo.colSpan - 1;
+    const rightCellData = sheet.rows.get(wsRowNumber)?.cells.get(rightCol);
+    if (rightCellData?.style?.border?.right) {
+      const converted = excelBordersToPdf({ right: rightCellData.style.border.right });
+      if (converted.right) {
+        layoutCell.borders.right = converted.right;
+      }
+    }
+  }
+  if (mergeInfo.rowSpan > 1) {
+    const bottomRowNum = wsRowNumber + mergeInfo.rowSpan - 1;
+    const bottomCellData = sheet.rows.get(bottomRowNum)?.cells.get(wsColNumber);
+    if (bottomCellData?.style?.border?.bottom) {
+      const converted = excelBordersToPdf({ bottom: bottomCellData.style.border.bottom });
+      if (converted.bottom) {
+        layoutCell.borders.bottom = converted.bottom;
+      }
+    }
+  }
+}
+
+// =============================================================================
+// Text Overflow Calculation
+// =============================================================================
+
+/**
+ * In Excel, non-wrapped text overflows into adjacent empty cells.
+ * Fill color alone does NOT block overflow — only text content does.
+ * Computes `textOverflowWidth` for cells whose text exceeds the cell width.
+ */
+function computeTextOverflows(
+  cellGrid: Map<string, LayoutCell>,
+  rowPage: number[],
+  colGroup: number[],
+  visibleRows: number[],
+  visibleCols: number[],
+  groupColWidths: number[],
+  mergeMap: Map<string, MergeInfo>,
+  fontManager: FontManager
+): void {
+  for (let ri = 0; ri < rowPage.length; ri++) {
+    for (let gci = 0; gci < colGroup.length; gci++) {
+      const cell = cellGrid.get(`${ri}:${gci}`);
+      if (
+        !cell ||
+        cell.wrapText ||
+        cell.colSpan > 1 ||
+        !cell.text ||
+        cell.richText ||
+        (typeof cell.textRotation === "number" && cell.textRotation !== 0) ||
+        cell.textRotation === "vertical"
+      ) {
+        continue;
+      }
+
+      const resourceName = fontManager.hasEmbeddedFont()
+        ? fontManager.getEmbeddedResourceName()
+        : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
+      const textWidth = fontManager.measureText(cell.text, resourceName, cell.fontSize);
+      const cellContentWidth = cell.rect.width - CELL_PADDING_H * 2;
+
+      if (textWidth <= cellContentWidth) {
+        continue;
+      }
+
+      const overflowNeeded = textWidth - cellContentWidth;
+      let overflowAvailable = 0;
+
+      for (let j = gci + 1; j < colGroup.length; j++) {
+        const visibleRowIdx = rowPage[ri];
+        const wsRow = visibleRows[visibleRowIdx];
+        const wsCol = visibleCols[colGroup[j]];
+
+        if (mergeMap.has(`${wsRow}:${wsCol}`)) {
+          break;
+        }
+
+        const neighborCell = cellGrid.get(`${ri}:${j}`);
+        if (neighborCell?.text) {
+          break;
+        }
+
+        overflowAvailable += groupColWidths[j];
+        if (overflowAvailable >= overflowNeeded) {
+          break;
+        }
+      }
+
+      if (overflowAvailable > 0) {
+        cell.textOverflowWidth = Math.min(overflowNeeded, overflowAvailable);
+      }
+    }
   }
 }
 
@@ -913,12 +1174,17 @@ function buildRichTextRuns(
     return null;
   }
 
-  const rtValue = cell.value as { richText?: PdfRichTextRunData[] };
-  if (!rtValue?.richText || rtValue.richText.length === 0) {
+  const value = cell.value;
+  if (!value || typeof value !== "object" || !("richText" in value)) {
     return null;
   }
 
-  return rtValue.richText.map(run => {
+  const runs = (value as { richText: PdfRichTextRunData[] }).richText;
+  if (runs.length === 0) {
+    return null;
+  }
+
+  return runs.map(run => {
     const fontProps = extractFontProperties(
       run.font,
       options.defaultFontFamily,

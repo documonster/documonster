@@ -699,11 +699,12 @@ describe("excelToPdf", () => {
       cell.alignment = { wrapText: true };
       ws.getColumn(1).width = 15; // narrow column
 
-      const pdf = await excelToPdf(wb);
-      expectValidPdf(pdf);
-      const text = pdfToString(pdf);
-      // Should contain part of the text
-      expect(text).toContain("This");
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      // Read back and verify text content is present
+      const { readPdf } = await import("@pdf/reader/pdf-reader");
+      const result = await readPdf(pdfBytes);
+      expect(result.text).toContain("This");
     });
   });
 

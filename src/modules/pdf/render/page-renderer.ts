@@ -21,14 +21,7 @@ import type {
   ResolvedPdfOptions,
   PdfRect
 } from "../types";
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** Internal cell padding in points */
-const CELL_PADDING_H = 3;
-const CELL_PADDING_V = 2;
+import { CELL_PADDING_H, CELL_PADDING_V, LINE_HEIGHT_FACTOR, INDENT_WIDTH } from "./constants";
 
 // =============================================================================
 // Page Renderer
@@ -73,9 +66,10 @@ export function renderPage(
   }
 
   // --- Step 4: Draw cell text ---
+  const sf = page.scaleFactor;
   for (const cell of page.cells) {
     if (cell.text) {
-      drawCellText(stream, cell, fontManager, alphaValues);
+      drawCellText(stream, cell, fontManager, alphaValues, sf);
     }
   }
 
@@ -175,16 +169,16 @@ function drawCellBorders(stream: PdfContentStream, cell: LayoutCell): void {
   const { x, y, width, height } = rect;
 
   if (borders.top) {
-    drawBorderLine(stream, borders.top, x, y + height, x + width, y + height);
+    drawBorderLine(stream, borders.top, x, y + height, x + width, y + height, true);
   }
   if (borders.bottom) {
-    drawBorderLine(stream, borders.bottom, x, y, x + width, y);
+    drawBorderLine(stream, borders.bottom, x, y, x + width, y, true);
   }
   if (borders.left) {
-    drawBorderLine(stream, borders.left, x, y, x, y + height);
+    drawBorderLine(stream, borders.left, x, y, x, y + height, false);
   }
   if (borders.right) {
-    drawBorderLine(stream, borders.right, x + width, y, x + width, y + height);
+    drawBorderLine(stream, borders.right, x + width, y, x + width, y + height, false);
   }
 }
 
@@ -194,9 +188,55 @@ function drawBorderLine(
   x1: number,
   y1: number,
   x2: number,
-  y2: number
+  y2: number,
+  isHorizontal: boolean
 ): void {
-  stream.drawLine(x1, y1, x2, y2, border.color, border.width, border.dashPattern);
+  if (border.isDouble) {
+    // Draw two parallel thin lines with a small gap between them
+    const offset = 0.4;
+    const thinWidth = Math.min(border.width, 0.25);
+    if (isHorizontal) {
+      stream.drawLine(
+        x1,
+        y1 + offset,
+        x2,
+        y2 + offset,
+        border.color,
+        thinWidth,
+        border.dashPattern
+      );
+      stream.drawLine(
+        x1,
+        y1 - offset,
+        x2,
+        y2 - offset,
+        border.color,
+        thinWidth,
+        border.dashPattern
+      );
+    } else {
+      stream.drawLine(
+        x1 + offset,
+        y1,
+        x2 + offset,
+        y2,
+        border.color,
+        thinWidth,
+        border.dashPattern
+      );
+      stream.drawLine(
+        x1 - offset,
+        y1,
+        x2 - offset,
+        y2,
+        border.color,
+        thinWidth,
+        border.dashPattern
+      );
+    }
+  } else {
+    stream.drawLine(x1, y1, x2, y2, border.color, border.width, border.dashPattern);
+  }
 }
 
 // =============================================================================
@@ -207,7 +247,8 @@ function drawCellText(
   stream: PdfContentStream,
   cell: LayoutCell,
   fontManager: FontManager,
-  alphaValues: Set<number>
+  alphaValues: Set<number>,
+  scaleFactor = 1
 ): void {
   const { rect, text, fontSize, horizontalAlign, verticalAlign, wrapText } = cell;
 
@@ -215,17 +256,20 @@ function drawCellText(
     return;
   }
 
-  const availWidth = rect.width - CELL_PADDING_H * 2;
-  const availHeight = rect.height - CELL_PADDING_V * 2;
+  const padH = CELL_PADDING_H * scaleFactor;
+  const padV = CELL_PADDING_V * scaleFactor;
+  const availWidth = rect.width - padH * 2;
+  const availHeight = rect.height - padV * 2;
   if (availWidth <= 0 || availHeight <= 0) {
     return;
   }
 
-  const indentPts = cell.indent * INDENT_WIDTH;
+  const indentPts = cell.indent * INDENT_WIDTH * scaleFactor;
 
-  // Clip to cell bounds
+  // Clip to cell bounds (extend for text overflow into adjacent empty cells)
+  const clipWidth = rect.width + (cell.textOverflowWidth || 0);
   stream.save();
-  stream.rect(rect.x, rect.y, rect.width, rect.height);
+  stream.rect(rect.x, rect.y, clipWidth, rect.height);
   stream.clip();
   stream.endPath();
 
@@ -238,19 +282,19 @@ function drawCellText(
 
   // Handle text rotation
   if (cell.textRotation === "vertical") {
-    drawVerticalStackedText(stream, cell, fontManager, indentPts);
+    drawVerticalStackedText(stream, cell, fontManager, indentPts, scaleFactor);
     stream.restore();
     return;
   }
   if (typeof cell.textRotation === "number" && cell.textRotation !== 0) {
-    drawRotatedText(stream, cell, fontManager, indentPts);
+    drawRotatedText(stream, cell, fontManager, indentPts, scaleFactor);
     stream.restore();
     return;
   }
 
   // Handle rich text runs
   if (cell.richText && cell.richText.length > 0) {
-    drawRichText(stream, cell, fontManager, indentPts);
+    drawRichText(stream, cell, fontManager, indentPts, scaleFactor);
     stream.restore();
     return;
   }
@@ -262,14 +306,14 @@ function drawCellText(
     : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
 
   const measure = (s: string) => fontManager.measureText(s, resourceName, fontSize);
-  // Leave a small buffer (1pt) for wrap width to account for font metrics rounding
-  const effectiveWidth = availWidth - indentPts - 1;
-  const lines = wrapText ? wrapTextLines(text, measure, effectiveWidth) : [text];
+  const effectiveWidth = availWidth - indentPts;
+  // Always split on explicit newlines; additionally word-wrap if wrapText is set
+  const lines = wrapText ? wrapTextLines(text, measure, effectiveWidth) : text.split(/\r?\n/);
 
-  const lineHeight = fontSize * 1.2;
+  const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
   const ascent = fontManager.getFontAscent(resourceName, fontSize);
   const totalTextHeight = lines.length * lineHeight;
-  const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent);
+  const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent, padV);
 
   stream.setFillColor(cell.textColor);
   stream.beginText();
@@ -279,7 +323,7 @@ function drawCellText(
     const line = lines[i];
     const lineY = textStartY - i * lineHeight;
     const textWidth = measure(line);
-    const textX = computeTextX(horizontalAlign, rect, textWidth, indentPts);
+    const textX = computeTextX(horizontalAlign, rect, textWidth, indentPts, padH);
 
     stream.setTextMatrix(1, 0, 0, 1, textX, lineY);
     const hexEncoded = fontManager.encodeText(line, resourceName);
@@ -314,10 +358,13 @@ function drawRichText(
   stream: PdfContentStream,
   cell: LayoutCell,
   fontManager: FontManager,
-  indentPts: number
+  indentPts: number,
+  scaleFactor = 1
 ): void {
   const { rect, horizontalAlign, verticalAlign, wrapText } = cell;
   const runs = cell.richText!;
+  const padH = CELL_PADDING_H * scaleFactor;
+  const padV = CELL_PADDING_V * scaleFactor;
 
   // Use the largest font size across all runs for line height calculation
   let maxFontSize = cell.fontSize;
@@ -327,7 +374,7 @@ function drawRichText(
     }
   }
   const primaryFontSize = maxFontSize;
-  const lineHeight = primaryFontSize * 1.2;
+  const lineHeight = primaryFontSize * LINE_HEIGHT_FACTOR;
 
   const isEmbedded = fontManager.hasEmbeddedFont();
 
@@ -339,7 +386,7 @@ function drawRichText(
 
   // --- Wrapping path ---
   if (wrapText) {
-    const availWidth = rect.width - CELL_PADDING_H * 2 - indentPts - 1;
+    const availWidth = rect.width - padH * 2 - indentPts;
     if (availWidth <= 0) {
       return;
     }
@@ -361,7 +408,7 @@ function drawRichText(
     const primaryResourceName = runResource(runs[0]);
     const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
     const totalTextHeight = lines.length * lineHeight;
-    const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent);
+    const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent, padV);
 
     let charPos = 0;
     for (let li = 0; li < lines.length; li++) {
@@ -404,7 +451,7 @@ function drawRichText(
         lineWidth += fontManager.measureText(seg.text, seg.resourceName, seg.run.fontSize);
       }
 
-      let textX = computeTextX(horizontalAlign, rect, lineWidth, indentPts);
+      let textX = computeTextX(horizontalAlign, rect, lineWidth, indentPts, padH);
       for (const seg of segments) {
         const { run, text, resourceName } = seg;
         const segWidth = fontManager.measureText(text, resourceName, run.fontSize);
@@ -451,8 +498,8 @@ function drawRichText(
 
   const primaryResourceName = runMetrics[0]?.resourceName ?? "F1";
   const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
-  const textStartY = computeTextStartY(verticalAlign, rect, lineHeight, ascent);
-  let textX = computeTextX(horizontalAlign, rect, totalWidth, indentPts);
+  const textStartY = computeTextStartY(verticalAlign, rect, lineHeight, ascent, padV);
+  let textX = computeTextX(horizontalAlign, rect, totalWidth, indentPts, padH);
 
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
@@ -497,87 +544,296 @@ function drawRotatedText(
   stream: PdfContentStream,
   cell: LayoutCell,
   fontManager: FontManager,
-  indentPts: number
+  indentPts: number,
+  scaleFactor = 1
 ): void {
-  const { rect, text } = cell;
+  const { rect, wrapText } = cell;
   let { fontSize } = cell;
+  const padH = CELL_PADDING_H * scaleFactor;
+  const padV = CELL_PADDING_V * scaleFactor;
   const isEmbedded = fontManager.hasEmbeddedFont();
   const resourceName = isEmbedded
     ? fontManager.getEmbeddedResourceName()
     : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
 
-  // Convert Excel rotation to radians
+  // Convert Excel rotation to degrees
   // 1-90: counterclockwise, 91-180: clockwise (value-90 degrees)
   let degrees: number;
   if (typeof cell.textRotation === "number") {
-    if (cell.textRotation <= 90) {
-      degrees = cell.textRotation;
-    } else {
-      degrees = -(cell.textRotation - 90);
-    }
+    degrees = cell.textRotation <= 90 ? cell.textRotation : -(cell.textRotation - 90);
   } else {
     degrees = 0;
   }
+
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
-
-  // Scale font size down if rotated bounding box exceeds cell dimensions
-  const textWidth = fontManager.measureText(text, resourceName, fontSize);
   const absSin = Math.abs(sin);
   const absCos = Math.abs(cos);
-  const rotatedWidth = textWidth * absCos + fontSize * absSin;
-  const rotatedHeight = textWidth * absSin + fontSize * absCos;
-  const maxWidth = rect.width - CELL_PADDING_H * 2;
-  const maxHeight = rect.height - CELL_PADDING_V * 2;
-  if (maxWidth > 0 && maxHeight > 0 && (rotatedWidth > maxWidth || rotatedHeight > maxHeight)) {
-    const fitScale = Math.min(maxWidth / rotatedWidth, maxHeight / rotatedHeight);
-    if (fitScale < 1) {
-      fontSize = fontSize * fitScale;
+
+  const maxWidth = rect.width - padH * 2;
+  const maxHeight = rect.height - padV * 2;
+
+  // Available length along the text flow direction for wrapping
+  let availTextLength: number;
+  if (absSin > 0.01 && absCos > 0.01) {
+    availTextLength = Math.min(maxHeight / absSin, maxWidth / absCos);
+  } else if (absSin > 0.01) {
+    availTextLength = maxHeight / absSin;
+  } else {
+    availTextLength = maxWidth;
+  }
+
+  const measure = (s: string) => fontManager.measureText(s, resourceName, fontSize);
+
+  // Split on explicit newlines first, then optionally word-wrap each paragraph
+  let lines: string[];
+  if (wrapText) {
+    lines = wrapTextLines(cell.text, measure, Math.max(availTextLength - 1, 1));
+  } else {
+    lines = cell.text.split(/\r?\n/);
+  }
+
+  const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
+  const totalTextHeight = lines.length * lineHeight;
+
+  // For non-wrapping text: scale font down if the rotated bounding box exceeds cell
+  if (!wrapText) {
+    let maxLineWidth = 0;
+    for (const line of lines) {
+      const w = measure(line);
+      if (w > maxLineWidth) {
+        maxLineWidth = w;
+      }
+    }
+    const rotatedWidth = maxLineWidth * absCos + totalTextHeight * absSin;
+    const rotatedHeight = maxLineWidth * absSin + totalTextHeight * absCos;
+    if (maxWidth > 0 && maxHeight > 0 && (rotatedWidth > maxWidth || rotatedHeight > maxHeight)) {
+      const fitScale = Math.min(maxWidth / rotatedWidth, maxHeight / rotatedHeight);
+      if (fitScale < 1) {
+        fontSize = fontSize * fitScale;
+      }
     }
   }
 
-  // Center text at rotation point
-  const indentOffset =
-    cell.horizontalAlign === "left"
-      ? indentPts / 2
-      : cell.horizontalAlign === "right"
-        ? -indentPts / 2
-        : 0;
-  const cx = rect.x + rect.width / 2 + indentOffset;
-  const cy = rect.y + rect.height / 2;
-  const finalTextWidth = fontManager.measureText(text, resourceName, fontSize);
+  const scaledLineHeight = fontSize * LINE_HEIGHT_FACTOR;
   const ascent = fontManager.getFontAscent(resourceName, fontSize);
-  // Offset to center the text around the rotation point
-  const offsetX = -finalTextWidth / 2;
-  const offsetY = -ascent / 2;
-  const tx = cx + offsetX * cos - offsetY * sin;
-  const ty = cy + offsetX * sin + offsetY * cos;
+
+  const is90 = Math.abs(degrees - 90) < 0.01;
+  const isMinus90 = Math.abs(degrees + 90) < 0.01;
 
   stream.setFillColor(cell.textColor);
-  stream.beginText();
-  stream.setFont(resourceName, fontSize);
-  stream.setTextMatrix(cos, sin, -sin, cos, tx, ty);
 
-  const hexEncoded = fontManager.encodeText(text, resourceName);
-  if (hexEncoded) {
-    stream.showTextHex(hexEncoded);
+  if (is90) {
+    // Text reads bottom-to-top. Each line becomes a column drawn left-to-right.
+    drawRotated90(
+      stream,
+      cell,
+      lines,
+      fontManager,
+      resourceName,
+      fontSize,
+      scaledLineHeight,
+      ascent,
+      padH,
+      padV
+    );
+  } else if (isMinus90) {
+    // Text reads top-to-bottom. Each line becomes a column drawn right-to-left.
+    drawRotatedMinus90(
+      stream,
+      cell,
+      lines,
+      fontManager,
+      resourceName,
+      fontSize,
+      scaledLineHeight,
+      ascent,
+      padH,
+      padV
+    );
+  } else {
+    // General rotation — center multi-line text block in cell
+    drawRotatedGeneral(
+      stream,
+      cell,
+      lines,
+      fontManager,
+      resourceName,
+      fontSize,
+      scaledLineHeight,
+      ascent,
+      cos,
+      sin,
+      indentPts
+    );
+  }
+}
+
+/** 90° CCW: text reads bottom-to-top, lines stack left-to-right. */
+function drawRotated90(
+  stream: PdfContentStream,
+  cell: LayoutCell,
+  lines: string[],
+  fontManager: FontManager,
+  resourceName: string,
+  fontSize: number,
+  lineHeight: number,
+  ascent: number,
+  padH: number,
+  padV: number
+): void {
+  const { rect, horizontalAlign, verticalAlign } = cell;
+  const totalColumnsWidth = lines.length * lineHeight;
+
+  // Horizontal centering of line columns
+  let startX: number;
+  if (horizontalAlign === "center" || lines.length === 1) {
+    startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + ascent;
+  } else if (horizontalAlign === "right") {
+    startX = rect.x + rect.width - padH - totalColumnsWidth + ascent;
+  } else {
+    startX = rect.x + padH + ascent;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineWidth = fontManager.measureText(line, resourceName, fontSize);
+    const colX = startX + i * lineHeight;
+
+    // Vertical positioning: text flows upward from bottom
+    let ty: number;
+    if (verticalAlign === "top") {
+      ty = rect.y + padV;
+    } else if (verticalAlign === "middle") {
+      ty = rect.y + (rect.height - lineWidth) / 2;
+    } else {
+      ty = rect.y + rect.height - padV - lineWidth;
+    }
+    ty = Math.max(ty, rect.y + padV);
+
+    stream.beginText();
+    stream.setFont(resourceName, fontSize);
+    stream.setTextMatrix(0, 1, -1, 0, colX, ty);
+    emitText(stream, fontManager, line, resourceName);
+    stream.endText();
+  }
+}
+
+/** -90° (270° CW): text reads top-to-bottom, lines stack right-to-left. */
+function drawRotatedMinus90(
+  stream: PdfContentStream,
+  cell: LayoutCell,
+  lines: string[],
+  fontManager: FontManager,
+  resourceName: string,
+  fontSize: number,
+  lineHeight: number,
+  ascent: number,
+  padH: number,
+  padV: number
+): void {
+  const { rect, horizontalAlign, verticalAlign } = cell;
+  const totalColumnsWidth = lines.length * lineHeight;
+
+  let startX: number;
+  if (horizontalAlign === "center" || lines.length === 1) {
+    startX = rect.x + rect.width / 2 + totalColumnsWidth / 2 - lineHeight + ascent;
+  } else if (horizontalAlign === "right") {
+    startX = rect.x + rect.width - padH - lineHeight + ascent;
+  } else {
+    startX = rect.x + padH + totalColumnsWidth - lineHeight + ascent;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineWidth = fontManager.measureText(line, resourceName, fontSize);
+    const colX = startX - i * lineHeight;
+
+    let ty: number;
+    if (verticalAlign === "top") {
+      ty = rect.y + rect.height - padV;
+    } else if (verticalAlign === "middle") {
+      ty = rect.y + (rect.height + lineWidth) / 2;
+    } else {
+      ty = rect.y + padV + lineWidth;
+    }
+    ty = Math.min(ty, rect.y + rect.height - padV);
+
+    stream.beginText();
+    stream.setFont(resourceName, fontSize);
+    stream.setTextMatrix(0, -1, 1, 0, colX, ty);
+    emitText(stream, fontManager, line, resourceName);
+    stream.endText();
+  }
+}
+
+/** General rotation — center a multi-line text block in the cell. */
+function drawRotatedGeneral(
+  stream: PdfContentStream,
+  cell: LayoutCell,
+  lines: string[],
+  fontManager: FontManager,
+  resourceName: string,
+  fontSize: number,
+  lineHeight: number,
+  ascent: number,
+  cos: number,
+  sin: number,
+  indentPts: number
+): void {
+  const { rect, horizontalAlign } = cell;
+
+  const indentOffset =
+    horizontalAlign === "left" ? indentPts / 2 : horizontalAlign === "right" ? -indentPts / 2 : 0;
+  const cx = rect.x + rect.width / 2 + indentOffset;
+  const cy = rect.y + rect.height / 2;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineWidth = fontManager.measureText(line, resourceName, fontSize);
+    const lineOffset = (i - (lines.length - 1) / 2) * lineHeight;
+    const offsetX = -lineWidth / 2;
+    const offsetY = -ascent / 2 - lineOffset;
+    const tx = cx + offsetX * cos - offsetY * sin;
+    const ty = cy + offsetX * sin + offsetY * cos;
+
+    stream.beginText();
+    stream.setFont(resourceName, fontSize);
+    stream.setTextMatrix(cos, sin, -sin, cos, tx, ty);
+    emitText(stream, fontManager, line, resourceName);
+    stream.endText();
+  }
+}
+
+/** Emit a text string with hex encoding if available. */
+function emitText(
+  stream: PdfContentStream,
+  fontManager: FontManager,
+  text: string,
+  resourceName: string
+): void {
+  const hex = fontManager.encodeText(text, resourceName);
+  if (hex) {
+    stream.showTextHex(hex);
   } else {
     stream.showText(text);
   }
-  stream.endText();
 }
 
 /**
  * Draw vertical stacked text (each character top-to-bottom).
+ * Newlines (\n) start a new column to the right.
  */
 function drawVerticalStackedText(
   stream: PdfContentStream,
   cell: LayoutCell,
   fontManager: FontManager,
-  _indentPts: number
+  _indentPts: number,
+  scaleFactor = 1
 ): void {
   const { rect, text, fontSize } = cell;
+  const padV = CELL_PADDING_V * scaleFactor;
   const isEmbedded = fontManager.hasEmbeddedFont();
   const resourceName = isEmbedded
     ? fontManager.getEmbeddedResourceName()
@@ -585,31 +841,33 @@ function drawVerticalStackedText(
 
   const charHeight = fontSize * 1.3;
   const ascent = fontManager.getFontAscent(resourceName, fontSize);
-  const startX = rect.x + rect.width / 2;
-  let currentY = rect.y + rect.height - CELL_PADDING_V - ascent;
+
+  // Split on newlines — each segment becomes a new column
+  const columns = text.split(/\r?\n/);
+  const columnWidth = fontSize * 1.4;
+  const totalColumnsWidth = columns.length * columnWidth;
+  const startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + columnWidth / 2;
 
   stream.setFillColor(cell.textColor);
 
-  for (let i = 0; i < text.length; i++) {
-    // Stop if next character would be below cell bottom
-    if (currentY < rect.y + CELL_PADDING_V) {
-      break;
-    }
-    const ch = text[i];
-    const charWidth = fontManager.measureText(ch, resourceName, fontSize);
+  for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+    const colText = columns[colIdx];
+    const colX = startX + colIdx * columnWidth;
+    let currentY = rect.y + rect.height - padV - ascent;
 
-    stream.beginText();
-    stream.setFont(resourceName, fontSize);
-    stream.setTextMatrix(1, 0, 0, 1, startX - charWidth / 2, currentY);
+    for (const ch of colText) {
+      if (currentY < rect.y + padV) {
+        break;
+      }
+      const charWidth = fontManager.measureText(ch, resourceName, fontSize);
 
-    const hexEncoded = fontManager.encodeText(ch, resourceName);
-    if (hexEncoded) {
-      stream.showTextHex(hexEncoded);
-    } else {
-      stream.showText(ch);
+      stream.beginText();
+      stream.setFont(resourceName, fontSize);
+      stream.setTextMatrix(1, 0, 0, 1, colX - charWidth / 2, currentY);
+      emitText(stream, fontManager, ch, resourceName);
+      stream.endText();
+      currentY -= charHeight;
     }
-    stream.endText();
-    currentY -= charHeight;
   }
 }
 
@@ -630,35 +888,33 @@ export function alphaGsName(alpha: number): string {
 // Text Layout Helpers
 // =============================================================================
 
-/** Indent width per level in points (~3 characters at 11pt) */
-const INDENT_WIDTH = 10;
-
 export function computeTextStartY(
   verticalAlign: "top" | "middle" | "bottom",
   rect: PdfRect,
   totalTextHeight: number,
-  ascent: number
+  ascent: number,
+  padV = CELL_PADDING_V
 ): number {
   let y: number;
   switch (verticalAlign) {
     case "top":
-      y = rect.y + rect.height - CELL_PADDING_V - ascent;
+      y = rect.y + rect.height - padV - ascent;
       break;
     case "middle":
       y = rect.y + rect.height / 2 + totalTextHeight / 2 - ascent;
       break;
     case "bottom":
     default:
-      y = rect.y + CELL_PADDING_V + (totalTextHeight - ascent);
+      y = rect.y + padV + (totalTextHeight - ascent);
       break;
   }
   // Clamp: ensure text ascent doesn't exceed the cell top
-  const maxY = rect.y + rect.height - CELL_PADDING_V - ascent;
+  const maxY = rect.y + rect.height - padV - ascent;
   if (y > maxY) {
     y = maxY;
   }
   // Clamp: ensure text descent doesn't go below cell bottom
-  const minY = rect.y + CELL_PADDING_V;
+  const minY = rect.y + padV;
   if (y < minY) {
     y = minY;
   }
@@ -669,7 +925,8 @@ export function computeTextX(
   align: "left" | "center" | "right",
   rect: { x: number; width: number },
   textWidth: number,
-  indentPts = 0
+  indentPts = 0,
+  padH = CELL_PADDING_H
 ): number {
   let x: number;
   switch (align) {
@@ -677,14 +934,14 @@ export function computeTextX(
       x = rect.x + (rect.width - textWidth) / 2;
       break;
     case "right":
-      x = rect.x + rect.width - CELL_PADDING_H - textWidth;
+      x = rect.x + rect.width - padH - textWidth;
       break;
     default:
-      x = rect.x + CELL_PADDING_H + indentPts;
+      x = rect.x + padH + indentPts;
       break;
   }
   // Clamp: don't start before cell left edge
-  const minX = rect.x + CELL_PADDING_H;
+  const minX = rect.x + padH;
   if (x < minX) {
     x = minX;
   }

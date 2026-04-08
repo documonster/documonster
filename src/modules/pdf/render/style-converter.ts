@@ -101,18 +101,18 @@ export function excelColorToPdf(color: Partial<PdfColorData> | undefined): PdfCo
  * These are the default Office theme colors.
  */
 function themeColorToPdf(themeIndex: number): PdfColor | null {
-  // Default Office theme color palette
+  // Default Office 2019+ theme color palette (hex values verified)
   const themeColors: PdfColor[] = [
-    { r: 1, g: 1, b: 1 }, // 0: lt1 (white / window background)
-    { r: 0, g: 0, b: 0 }, // 1: dk1 (black / window text)
-    { r: 0.918, g: 0.929, b: 0.941 }, // 2: lt2 (light gray)
-    { r: 0.267, g: 0.278, b: 0.298 }, // 3: dk2 (dark gray)
-    { r: 0.263, g: 0.522, b: 0.839 }, // 4: accent1 (blue)
-    { r: 0.922, g: 0.494, b: 0.196 }, // 5: accent2 (orange)
-    { r: 0.624, g: 0.624, b: 0.624 }, // 6: accent3 (gray)
-    { r: 1, g: 0.753, b: 0 }, // 7: accent4 (gold)
-    { r: 0.314, g: 0.686, b: 0.886 }, // 8: accent5 (light blue)
-    { r: 0.439, g: 0.678, b: 0.278 } // 9: accent6 (green)
+    { r: 1, g: 1, b: 1 }, // 0: lt1 — #FFFFFF (white / window background)
+    { r: 0, g: 0, b: 0 }, // 1: dk1 — #000000 (black / window text)
+    { r: 0.906, g: 0.902, b: 0.902 }, // 2: lt2 — #E7E6E6
+    { r: 0.267, g: 0.329, b: 0.416 }, // 3: dk2 — #44546A
+    { r: 0.267, g: 0.447, b: 0.769 }, // 4: accent1 — #4472C4 (blue)
+    { r: 0.929, g: 0.49, b: 0.192 }, // 5: accent2 — #ED7D31 (orange)
+    { r: 0.647, g: 0.647, b: 0.647 }, // 6: accent3 — #A5A5A5 (gray)
+    { r: 1, g: 0.753, b: 0 }, // 7: accent4 — #FFC000 (gold)
+    { r: 0.357, g: 0.608, b: 0.835 }, // 8: accent5 — #5B9BD5 (light blue)
+    { r: 0.439, g: 0.678, b: 0.278 } // 9: accent6 — #70AD47 (green)
   ];
 
   if (themeIndex >= 0 && themeIndex < themeColors.length) {
@@ -229,33 +229,33 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
 function borderStyleToLineWidth(style: string): number {
   switch (style) {
     case "thin":
-      return 0.5;
-    case "medium":
-      return 1;
-    case "thick":
-      return 1.5;
-    case "double":
-      return 0.5;
-    case "hair":
       return 0.25;
+    case "medium":
+      return 0.5;
+    case "thick":
+      return 1;
+    case "double":
+      return 0.25;
+    case "hair":
+      return 0.1;
     case "dotted":
-      return 0.5;
+      return 0.25;
     case "dashed":
-      return 0.5;
+      return 0.25;
     case "dashDot":
-      return 0.5;
+      return 0.25;
     case "dashDotDot":
-      return 0.5;
+      return 0.25;
     case "slantDashDot":
-      return 0.5;
+      return 0.25;
     case "mediumDashed":
-      return 1;
-    case "mediumDashDot":
-      return 1;
-    case "mediumDashDotDot":
-      return 1;
-    default:
       return 0.5;
+    case "mediumDashDot":
+      return 0.5;
+    case "mediumDashDotDot":
+      return 0.5;
+    default:
+      return 0.25;
   }
 }
 
@@ -296,7 +296,8 @@ function convertBorder(border: Partial<PdfBorderSideData> | undefined): LayoutBo
   return {
     width: borderStyleToLineWidth(border.style),
     color: excelColorToPdf(border.color) ?? DEFAULT_COLORS.black,
-    dashPattern: borderStyleToDashPattern(border.style)
+    dashPattern: borderStyleToDashPattern(border.style),
+    isDouble: border.style === "double"
   };
 }
 
