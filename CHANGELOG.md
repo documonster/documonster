@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0](https://github.com/cjnoname/excelts/compare/v9.0.0...v9.1.0) (2026-04-09)
+
+
+### Features
+
+* Add watermark support for PDF and Excel ([a0d72ec](https://github.com/cjnoname/excelts/commit/a0d72ec81246259b2182270ed234aa78763be53e)), closes [#134](https://github.com/cjnoname/excelts/issues/134)
+
+
+### Bug Fixes
+
+* Correct rotated text alignment and add slanted borders in PDF rendering ([10b2d8c](https://github.com/cjnoname/excelts/commit/10b2d8c2ffc5ce271a37e9a962cfef2d4686a068))
+
 ## [9.0.0](https://github.com/cjnoname/excelts/compare/v8.1.2...v9.0.0) (2026-04-09)
 
 

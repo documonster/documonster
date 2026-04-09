@@ -1,6 +1,6 @@
 {
   "name": "@cj-tech-master/excelts",
-  "version": "9.0.0",
+  "version": "9.1.0",
   "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
   "type": "module",
   "main": "./dist/cjs/index.js",
