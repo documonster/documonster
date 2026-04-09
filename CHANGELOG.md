@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0](https://github.com/cjnoname/excelts/compare/v8.1.2...v9.0.0) (2026-04-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* pdf(), readPdf(), and excelToPdf() now return Promise instead of synchronous results. All call sites must use await.
+
+### Features
+
+* Make PDF APIs async to avoid blocking the event loop ([2f521cd](https://github.com/cjnoname/excelts/commit/2f521cd3c7706c191f01e9483ebff659c963c73d))
+
+
+### Bug Fixes
+
+* Improve Excel-to-PDF style fidelity and fix cell style mutation leaks ([0448604](https://github.com/cjnoname/excelts/commit/044860403f6d5454f85b92fe701e2f7a13fbab73))
+
 ## [8.1.2](https://github.com/cjnoname/excelts/compare/v8.1.1...v8.1.2) (2026-04-07)
 
 
