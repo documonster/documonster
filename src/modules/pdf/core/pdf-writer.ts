@@ -174,17 +174,19 @@ export class PdfWriter {
     parentRef: number;
     width: number;
     height: number;
-    contentsRef: number;
+    contentsRef: number | string;
     resourcesRef: number;
     annotRefs?: number[];
   }): number {
     const objNum = this.allocObject();
     const mediaBox = `[0 0 ${pdfNumber(options.width)} ${pdfNumber(options.height)}]`;
+    const contentsValue =
+      typeof options.contentsRef === "string" ? options.contentsRef : pdfRef(options.contentsRef);
     const dict = new PdfDict()
       .set("Type", "/Page")
       .set("Parent", pdfRef(options.parentRef))
       .set("MediaBox", mediaBox)
-      .set("Contents", pdfRef(options.contentsRef))
+      .set("Contents", contentsValue)
       .set("Resources", pdfRef(options.resourcesRef));
     if (options.annotRefs && options.annotRefs.length > 0) {
       dict.set("Annots", "[" + options.annotRefs.map(r => pdfRef(r)).join(" ") + "]");

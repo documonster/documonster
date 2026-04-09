@@ -13,11 +13,23 @@ import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
  * This unified xform renders both into a single VML file.
  */
 
+/** Header/footer image model for VML rendering. */
+interface VmlHeaderImageModel {
+  /** rId referencing the image in the VML drawing's .rels */
+  imageRelId: string;
+  /** Image width in points */
+  width?: number;
+  /** Image height in points */
+  height?: number;
+}
+
 interface VmlDrawingModel {
   /** Comment/note shapes */
   comments?: any[];
   /** Form control checkboxes */
   formControls?: FormCheckboxModel[];
+  /** Header/footer image (for watermark in header mode) */
+  headerImage?: VmlHeaderImageModel;
 }
 
 class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
@@ -43,8 +55,10 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     const renderModel = (model || this.model)!;
     const comments = renderModel.comments;
     const formControls = renderModel.formControls;
+    const headerImage = renderModel.headerImage;
     const hasComments = comments && comments.length > 0;
     const hasFormControls = formControls && formControls.length > 0;
+    const hasHeaderImage = !!headerImage;
 
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, VmlDrawingXform.DRAWING_ATTRIBUTES);
@@ -87,6 +101,41 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
       xmlStream.closeNode();
     }
 
+    // Shapetype 75 for header/footer image (watermark)
+    if (hasHeaderImage) {
+      xmlStream.openNode("v:shapetype", {
+        id: "_x0000_t75",
+        coordsize: "21600,21600",
+        "o:spt": "75",
+        "o:preferrelative": "t",
+        path: "m@4@5l@4@11@9@11@9@5xe",
+        filled: "f",
+        stroked: "f"
+      });
+      xmlStream.leafNode("v:stroke", { joinstyle: "miter" });
+      xmlStream.openNode("v:formulas");
+      xmlStream.leafNode("v:f", { eqn: "if lineDrawn pixelLineWidth 0" });
+      xmlStream.leafNode("v:f", { eqn: "sum @0 1 0" });
+      xmlStream.leafNode("v:f", { eqn: "sum 0 0 @1" });
+      xmlStream.leafNode("v:f", { eqn: "prod @2 1 2" });
+      xmlStream.leafNode("v:f", { eqn: "prod @3 21600 pixelWidth" });
+      xmlStream.leafNode("v:f", { eqn: "prod @3 21600 pixelHeight" });
+      xmlStream.leafNode("v:f", { eqn: "sum @0 0 1" });
+      xmlStream.leafNode("v:f", { eqn: "prod @6 1 2" });
+      xmlStream.leafNode("v:f", { eqn: "prod @7 21600 pixelWidth" });
+      xmlStream.leafNode("v:f", { eqn: "sum @8 21600 0" });
+      xmlStream.leafNode("v:f", { eqn: "prod @7 21600 pixelHeight" });
+      xmlStream.leafNode("v:f", { eqn: "sum @10 21600 0" });
+      xmlStream.closeNode(); // v:formulas
+      xmlStream.leafNode("v:path", {
+        "o:extrusionok": "f",
+        gradientshapeok: "t",
+        "o:connecttype": "rect"
+      });
+      xmlStream.leafNode("o:lock", { "v:ext": "edit", aspectratio: "t" });
+      xmlStream.closeNode(); // v:shapetype
+    }
+
     // Render comment shapes
     if (hasComments) {
       for (let i = 0; i < comments.length; i++) {
@@ -101,7 +150,34 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
       }
     }
 
+    // Render header/footer image shape
+    if (hasHeaderImage) {
+      this._renderHeaderImageShape(xmlStream, headerImage);
+    }
+
     xmlStream.closeNode();
+  }
+
+  /**
+   * Render a header/footer image shape for watermark
+   */
+  private _renderHeaderImageShape(xmlStream: any, headerImage: VmlHeaderImageModel): void {
+    const width = headerImage.width ?? 467.25;
+    const height = headerImage.height ?? 311.25;
+
+    // CH = Center Header, used by Excel for center-positioned header images
+    xmlStream.openNode("v:shape", {
+      id: "CH",
+      "o:spid": "_x0000_s2049",
+      type: "#_x0000_t75",
+      style: `position:absolute;margin-left:0;margin-top:0;width:${width}pt;height:${height}pt;z-index:1`
+    });
+    xmlStream.leafNode("v:imagedata", {
+      "o:relid": headerImage.imageRelId,
+      "o:title": "watermark"
+    });
+    xmlStream.leafNode("o:lock", { "v:ext": "edit", rotation: "t" });
+    xmlStream.closeNode(); // v:shape
   }
 
   /**
@@ -187,7 +263,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     xmlStream.closeNode(); // v:shape
   }
 
-  // Parsing - delegate to VmlShapeXform for notes
+  // Parsing - delegate to VmlShapeXform for notes, handle header images directly
   parseOpen(node: any): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
@@ -201,10 +277,32 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
           formControls: []
         };
         break;
+      case "v:shape":
+        // Check if this is a header image shape (type="#_x0000_t75")
+        if (node.attributes.type === "#_x0000_t75") {
+          this._parsingHeaderImage = true;
+          // Extract width/height from style
+          const style = node.attributes.style || "";
+          const widthMatch = /width:([0-9.]+)pt/.exec(style);
+          const heightMatch = /height:([0-9.]+)pt/.exec(style);
+          this._headerImageWidth = widthMatch ? parseFloat(widthMatch[1]) : undefined;
+          this._headerImageHeight = heightMatch ? parseFloat(heightMatch[1]) : undefined;
+        } else {
+          // Regular shape — delegate to VmlShapeXform (comments)
+          this.parser = this.map[node.name];
+          if (this.parser) {
+            this.parser.parseOpen(node);
+          }
+        }
+        break;
       default:
-        this.parser = this.map[node.name];
-        if (this.parser) {
-          this.parser.parseOpen(node);
+        if (this._parsingHeaderImage && node.name === "v:imagedata") {
+          this._headerImageRelId = node.attributes["o:relid"];
+        } else {
+          this.parser = this.map[node.name];
+          if (this.parser) {
+            this.parser.parseOpen(node);
+          }
         }
         break;
     }
@@ -226,12 +324,31 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
       return true;
     }
     switch (name) {
+      case "v:shape":
+        if (this._parsingHeaderImage && this._headerImageRelId) {
+          this.model!.headerImage = {
+            imageRelId: this._headerImageRelId,
+            width: this._headerImageWidth,
+            height: this._headerImageHeight
+          };
+        }
+        this._parsingHeaderImage = false;
+        this._headerImageRelId = undefined;
+        this._headerImageWidth = undefined;
+        this._headerImageHeight = undefined;
+        return true;
       case this.tag:
         return false;
       default:
         return true;
     }
   }
+
+  // Internal state for parsing header image shapes
+  private _parsingHeaderImage = false;
+  private _headerImageRelId?: string;
+  private _headerImageWidth?: number;
+  private _headerImageHeight?: number;
 
   static DRAWING_ATTRIBUTES = {
     "xmlns:v": "urn:schemas-microsoft-com:vml",

@@ -30,6 +30,10 @@ export * from "@excel/enums";
 // Export all type definitions from types.ts
 export * from "@excel/types";
 
+// Watermark image generator utility
+export { createTextWatermarkImage } from "@excel/utils/watermark-image";
+export type { TextWatermarkImageOptions } from "@excel/utils/watermark-image";
+
 // Export pivot table types (type-only, no runtime dependency)
 export type {
   PivotTable,

@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BlipXform } from "@excel/xlsx/xform/drawing/blip-xform";
+import type { BlipModel } from "@excel/xlsx/xform/drawing/blip-xform";
 
 class BlipFillXform extends BaseXform {
   declare public map: { [key: string]: BlipXform };
@@ -18,12 +19,11 @@ class BlipFillXform extends BaseXform {
     return "xdr:blipFill";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: any, model: BlipModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["a:blip"].render(xmlStream, model);
 
-    // TODO: options for this + parsing
     xmlStream.openNode("a:stretch");
     xmlStream.leafNode("a:fillRect");
     xmlStream.closeNode();

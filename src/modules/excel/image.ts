@@ -26,6 +26,21 @@ interface BackgroundModel {
   imageId: string;
 }
 
+interface WatermarkModel {
+  type: "watermark";
+  imageId: string;
+  /** Opacity 0-1 for overlay mode */
+  opacity?: number;
+}
+
+interface HeaderImageModel {
+  type: "headerImage";
+  imageId: string;
+  headerWidth?: number;
+  headerHeight?: number;
+  applyTo?: "all" | "odd" | "even" | "first";
+}
+
 interface ImageRangeModel {
   tl: AnchorModel;
   br?: AnchorModel;
@@ -40,7 +55,7 @@ interface ImageModel {
   range: ImageRangeModel;
 }
 
-type Model = BackgroundModel | ImageModel;
+type Model = BackgroundModel | ImageModel | WatermarkModel | HeaderImageModel;
 type ImageModelInput = ModelInput;
 
 interface RangeInput {
@@ -56,6 +71,10 @@ interface ModelInput {
   imageId: string;
   range?: string | RangeInput | ImageRangeModel;
   hyperlinks?: ImageHyperlinks;
+  opacity?: number;
+  headerWidth?: number;
+  headerHeight?: number;
+  applyTo?: "all" | "odd" | "even" | "first";
 }
 
 class Image {
@@ -63,6 +82,14 @@ class Image {
   type?: string;
   imageId?: string;
   range?: ImageRange;
+  /** Opacity for watermark overlay mode (0-1). */
+  opacity?: number;
+  /** Header image width in points. */
+  headerWidth?: number;
+  /** Header image height in points. */
+  headerHeight?: number;
+  /** Header watermark applyTo setting. */
+  applyTo?: "all" | "odd" | "even" | "first";
 
   constructor(worksheet: Worksheet, model?: ModelInput) {
     this.worksheet = worksheet;
@@ -77,6 +104,20 @@ class Image {
         return {
           type: this.type,
           imageId: this.imageId ?? ""
+        };
+      case "watermark":
+        return {
+          type: this.type,
+          imageId: this.imageId ?? "",
+          opacity: this.opacity
+        };
+      case "headerImage":
+        return {
+          type: this.type,
+          imageId: this.imageId ?? "",
+          headerWidth: this.headerWidth,
+          headerHeight: this.headerHeight,
+          applyTo: this.applyTo
         };
       case "image": {
         const range = this.range;
@@ -100,9 +141,22 @@ class Image {
     }
   }
 
-  set model({ type, imageId, range, hyperlinks }: ModelInput) {
+  set model({
+    type,
+    imageId,
+    range,
+    hyperlinks,
+    opacity,
+    headerWidth,
+    headerHeight,
+    applyTo
+  }: ModelInput) {
     this.type = type;
     this.imageId = imageId;
+    this.opacity = opacity;
+    this.headerWidth = headerWidth;
+    this.headerHeight = headerHeight;
+    this.applyTo = applyTo;
 
     if (type === "image") {
       if (typeof range === "string") {
@@ -132,6 +186,10 @@ class Image {
     const cloned = new Image(target);
     cloned.type = this.type;
     cloned.imageId = this.imageId;
+    cloned.opacity = this.opacity;
+    cloned.headerWidth = this.headerWidth;
+    cloned.headerHeight = this.headerHeight;
+    cloned.applyTo = this.applyTo;
 
     if (this.range) {
       cloned.range = {

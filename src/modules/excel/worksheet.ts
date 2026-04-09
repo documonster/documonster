@@ -39,6 +39,7 @@ import type {
   RowValues,
   Style,
   TableProperties,
+  WatermarkOptions,
   WorksheetProperties,
   WorksheetState,
   WorksheetView
@@ -147,6 +148,7 @@ interface WorksheetModel {
   pivotTables: PivotTable[];
   conditionalFormattings: ConditionalFormattingOptions[];
   formControls: FormCheckboxModel[];
+  watermark?: WatermarkOptions | null;
   cols?: ColumnModel[];
   rows?: RowModel[];
   dimensions?: Range;
@@ -189,6 +191,8 @@ class Worksheet {
   declare private _headerRowCount?: number;
   /** Loaded drawing data (for charts, etc.) - preserved for round-trip */
   declare private _drawing: unknown;
+  /** Watermark configuration for overlay or header mode */
+  declare private _watermark: WatermarkOptions | null;
 
   constructor(options: WorksheetOptions) {
     this._workbook = options.workbook!;
@@ -295,6 +299,9 @@ class Worksheet {
 
     // for form controls (legacy checkboxes, etc.)
     this.formControls = [];
+
+    // watermark configuration
+    this._watermark = null;
   }
 
   get name(): string {
@@ -1272,6 +1279,84 @@ class Worksheet {
   }
 
   // =========================================================================
+  // Watermark
+
+  /**
+   * Add a watermark to the worksheet using an image from `workbook.addImage()`.
+   *
+   * The watermark can be placed in one of two modes:
+   *
+   * - **overlay** (default): Places the watermark image as a drawing on top of cells.
+   *   Visible on screen AND when printed. Supports transparency via DrawingML `alphaModFix`.
+   *
+   * - **header**: Places the watermark image in the page header using VML.
+   *   Visible in Page Layout view and when printed. Renders behind cell content.
+   *   Transparency must be baked into the image (PNG with alpha channel).
+   *
+   * @param options - Watermark configuration
+   *
+   * @example Overlay watermark with transparency:
+   * ```typescript
+   * const imgId = workbook.addImage({ buffer: pngData, extension: "png" });
+   * worksheet.addWatermark({ imageId: imgId, opacity: 0.15 });
+   * ```
+   *
+   * @example Header watermark (behind content):
+   * ```typescript
+   * const imgId = workbook.addImage({ buffer: pngData, extension: "png" });
+   * worksheet.addWatermark({ imageId: imgId, mode: "header" });
+   * ```
+   */
+  addWatermark(options: WatermarkOptions): void {
+    // Remove any existing watermark media entries first
+    this._media = this._media.filter(m => m.type !== "watermark" && m.type !== "headerImage");
+
+    this._watermark = {
+      imageId: String(options.imageId),
+      mode: options.mode ?? "overlay",
+      opacity: options.opacity,
+      headerWidth: options.headerWidth,
+      headerHeight: options.headerHeight,
+      applyTo: options.applyTo
+    };
+
+    if (this._watermark.mode === "overlay") {
+      // Add as a special "watermark" media entry for the drawing pipeline
+      const model = {
+        type: "watermark",
+        imageId: String(options.imageId),
+        opacity: options.opacity
+      };
+      this._media.push(new Image(this, model as any));
+    } else {
+      // Header mode: add as a "headerImage" media entry for the VML pipeline
+      const model = {
+        type: "headerImage",
+        imageId: String(options.imageId),
+        headerWidth: options.headerWidth,
+        headerHeight: options.headerHeight,
+        applyTo: options.applyTo
+      };
+      this._media.push(new Image(this, model as any));
+    }
+  }
+
+  /**
+   * Get the current watermark configuration, or null if none is set.
+   */
+  getWatermark(): WatermarkOptions | null {
+    return this._watermark;
+  }
+
+  /**
+   * Remove the watermark from the worksheet.
+   */
+  removeWatermark(): void {
+    this._watermark = null;
+    this._media = this._media.filter(m => m.type !== "watermark" && m.type !== "headerImage");
+  }
+
+  // =========================================================================
   // Form Controls (Legacy Checkboxes)
 
   /**
@@ -1638,6 +1723,7 @@ class Worksheet {
       pivotTables: this.pivotTables,
       conditionalFormattings: this.conditionalFormattings,
       formControls: this.formControls.map(fc => fc.model),
+      watermark: this._watermark,
       drawing: this._drawing
     };
 
@@ -1701,6 +1787,28 @@ class Worksheet {
     this.views = value.views;
     this.autoFilter = value.autoFilter;
     this._media = value.media.map(medium => new Image(this, medium));
+    // Restore watermark state from media entries
+    this._watermark = value.watermark ?? null;
+    if (!this._watermark) {
+      for (const medium of this._media) {
+        if (medium.type === "watermark") {
+          this._watermark = {
+            imageId: medium.imageId ?? "",
+            mode: "overlay",
+            opacity: medium.opacity
+          };
+          break;
+        } else if (medium.type === "headerImage") {
+          this._watermark = {
+            imageId: medium.imageId ?? "",
+            mode: "header",
+            headerWidth: medium.headerWidth,
+            headerHeight: medium.headerHeight
+          };
+          break;
+        }
+      }
+    }
     this.sheetProtection = value.sheetProtection;
     this.tables = value.tables.reduce((tables: { [key: string]: Table }, table: TableModel) => {
       const t = new Table(this, table);

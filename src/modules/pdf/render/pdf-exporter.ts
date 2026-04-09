@@ -9,12 +9,13 @@
  */
 
 import { PdfWriter } from "../core/pdf-writer";
+import { PdfContentStream } from "../core/pdf-stream";
 import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "../core/pdf-object";
 import { FontManager, resolvePdfFontName } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
 import { initEncryption } from "../core/encryption";
 import { layoutSheet } from "./layout-engine";
-import { renderPage, alphaGsName } from "./page-renderer";
+import { renderPage, alphaGsName, renderWatermark, parseImageDimensions } from "./page-renderer";
 import { decodePng } from "./png-decoder";
 import { PdfError, PdfRenderError } from "../errors";
 import {
@@ -27,7 +28,8 @@ import {
   type PdfMargins,
   type PdfColor,
   type PdfOrientation,
-  type LayoutPage
+  type LayoutPage,
+  type PdfWatermark
 } from "../types";
 import { argbToPdfColor } from "./style-converter";
 import { yieldToEventLoop } from "@utils/utils.base";
@@ -129,12 +131,26 @@ async function finishExport(
   fixPageNumbers(allPages);
   trackFontsForHeaders(allPages, fontManager);
 
+  // Track watermark fonts
+  const watermark = documentOptions.watermark;
+  if (watermark && watermark.type === "text") {
+    const wmFontFamily = watermark.fontFamily ?? "Helvetica";
+    const wmBold = watermark.bold ?? false;
+    const wmItalic = watermark.italic ?? false;
+    if (fontManager.hasEmbeddedFont()) {
+      fontManager.trackText(watermark.text);
+    } else {
+      fontManager.ensureFont(resolvePdfFontName(wmFontFamily, wmBold, wmItalic));
+    }
+  }
+
   const fontObjectMap = fontManager.writeFontResources(writer);
   const { pageObjNums, sheetFirstPage, pagesTreeObjNum } = await renderAllPages(
     allPages,
     fontManager,
     writer,
-    fontObjectMap
+    fontObjectMap,
+    watermark
   );
 
   return buildFinalPdf(
@@ -213,7 +229,8 @@ async function renderAllPages(
   allPages: LayoutPage[],
   fontManager: FontManager,
   writer: PdfWriter,
-  fontObjectMap: Map<string, number>
+  fontObjectMap: Map<string, number>,
+  watermark?: PdfWatermark
 ): Promise<RenderResult> {
   const pageObjNums: number[] = [];
   const pagesTreeObjNum = writer.allocObject();
@@ -229,7 +246,8 @@ async function renderAllPages(
       totalPages,
       pageObjNums,
       pagesTreeObjNum,
-      sheetFirstPage
+      sheetFirstPage,
+      watermark
     );
     if (i < allPages.length - 1) {
       await yieldToEventLoop();
@@ -247,7 +265,8 @@ function renderSinglePage(
   totalPages: number,
   pageObjNums: number[],
   pagesTreeObjNum: number,
-  sheetFirstPage: Map<string, number>
+  sheetFirstPage: Map<string, number>,
+  watermark?: PdfWatermark
 ): void {
   try {
     const { stream: contentStream, alphaValues } = renderPage(
@@ -269,10 +288,49 @@ function renderSinglePage(
       }
     }
 
-    // Add content stream object
+    // --- Render watermark into a separate content stream ---
+    // PDF supports Contents as an array of stream references. The watermark stream
+    // is placed BEFORE the main content stream so it renders behind everything.
+    let watermarkContentObjNum: number | undefined;
+    const shouldApplyWatermark = watermark && isWatermarkApplicable(watermark, page);
+    if (shouldApplyWatermark) {
+      const wmContentStream = new PdfContentStream();
+      const wmResult = renderWatermark(wmContentStream, page, watermark, fontManager);
+
+      // Register watermark alpha values in the shared set
+      for (const alpha of wmResult.alphaValues) {
+        alphaValues.add(alpha);
+      }
+
+      // Register watermark image XObjects
+      for (const wmImg of wmResult.imageXObjects) {
+        const imgObjNum = writeImageXObject(writer, wmImg.data, wmImg.format);
+        imageXObjects.set(wmImg.name, imgObjNum);
+      }
+
+      // Write watermark content stream object
+      watermarkContentObjNum = writer.allocObject();
+      writer.addStreamObject(watermarkContentObjNum, new PdfDict(), wmContentStream);
+    }
+
+    // Add main content stream object
     const contentObjNum = writer.allocObject();
-    const contentDict = new PdfDict();
-    writer.addStreamObject(contentObjNum, contentDict, contentStream);
+    writer.addStreamObject(contentObjNum, new PdfDict(), contentStream);
+
+    // Build Contents reference — array if watermark exists, single ref otherwise.
+    // placement "under" (default): watermark stream first, then content
+    // placement "over": content first, then watermark stream on top
+    let contentsRef: string;
+    if (watermarkContentObjNum) {
+      const placement = watermark?.placement ?? "under";
+      if (placement === "over") {
+        contentsRef = `[${pdfRef(contentObjNum)} ${pdfRef(watermarkContentObjNum)}]`;
+      } else {
+        contentsRef = `[${pdfRef(watermarkContentObjNum)} ${pdfRef(contentObjNum)}]`;
+      }
+    } else {
+      contentsRef = pdfRef(contentObjNum);
+    }
 
     // Add resources dictionary object
     const resourcesObjNum = writer.allocObject();
@@ -327,7 +385,7 @@ function renderSinglePage(
       parentRef: pagesTreeObjNum,
       width: page.width,
       height: page.height,
-      contentsRef: contentObjNum,
+      contentsRef: contentsRef,
       resourcesRef: resourcesObjNum,
       annotRefs: annotRefs.length > 0 ? annotRefs : undefined
     });
@@ -487,7 +545,8 @@ function resolveOptions(
     title: options?.title ?? "",
     author: options?.author ?? "",
     subject: options?.subject ?? "",
-    creator: options?.creator ?? "excelts"
+    creator: options?.creator ?? "excelts",
+    watermark: options?.watermark
   };
 }
 
@@ -602,6 +661,30 @@ function buildOutlines(
 }
 
 // =============================================================================
+// Watermark Filtering
+// =============================================================================
+
+/**
+ * Check if a watermark should be applied to a specific page based on
+ * optional page number and sheet name filters.
+ */
+function isWatermarkApplicable(watermark: PdfWatermark, page: LayoutPage): boolean {
+  if (watermark.pages && watermark.pages.length > 0) {
+    if (!watermark.pages.includes(page.pageNumber)) {
+      return false;
+    }
+  }
+  if (watermark.sheets && watermark.sheets.length > 0) {
+    // Case-insensitive sheet name matching, consistent with the rest of the API
+    const sheetLower = page.sheetName.toLowerCase();
+    if (!watermark.sheets.some(s => s.toLowerCase() === sheetLower)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// =============================================================================
 // Image XObject
 // =============================================================================
 
@@ -620,7 +703,7 @@ function writeImageXObject(writer: PdfWriter, data: Uint8Array, format: "jpeg" |
  */
 function writeJpegImageXObject(writer: PdfWriter, data: Uint8Array): number {
   const objNum = writer.allocObject();
-  const dims = getJpegDimensions(data);
+  const dims = parseImageDimensions(data, "jpeg");
   const dict = new PdfDict()
     .set("Type", "/XObject")
     .set("Subtype", "/Image")
@@ -665,44 +748,4 @@ function writePngImageXObject(writer: PdfWriter, data: Uint8Array): number {
   // RGB pixel data — compression handled by addStreamObject
   writer.addStreamObject(objNum, dict, png.pixels);
   return objNum;
-}
-
-/**
- * Extract width and height from a JPEG file header.
- * Scans for SOF markers (SOF0-SOF3, SOF5-SOF7, SOF9-SOF11, SOF13-SOF15)
- * which all share the same frame header layout.
- * Handles 0xFF padding bytes per JPEG spec.
- */
-function getJpegDimensions(data: Uint8Array): { width: number; height: number } {
-  let offset = 2; // skip SOI marker (0xFFD8)
-  while (offset < data.length - 1) {
-    // Skip any 0xFF fill bytes
-    while (offset < data.length && data[offset] === 0xff && data[offset + 1] === 0xff) {
-      offset++;
-    }
-    if (offset >= data.length - 1 || data[offset] !== 0xff) {
-      break;
-    }
-    const marker = data[offset + 1];
-
-    // SOF markers: C0-C3, C5-C7, C9-CB, CD-CF (excluding C4=DHT, C8=JPG, CC=DAC)
-    const isSof =
-      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    if (isSof) {
-      if (offset + 8 < data.length) {
-        const height = (data[offset + 5] << 8) | data[offset + 6];
-        const width = (data[offset + 7] << 8) | data[offset + 8];
-        return { width, height };
-      }
-      break;
-    }
-
-    // Skip segment: 2 byte marker + segment length (includes the 2 length bytes)
-    if (offset + 3 >= data.length) {
-      break;
-    }
-    const segLen = (data[offset + 2] << 8) | data[offset + 3];
-    offset += 2 + segLen;
-  }
-  return { width: 1, height: 1 };
 }

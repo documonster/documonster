@@ -19,7 +19,11 @@ import type {
   LayoutBorder,
   LayoutRichTextRun,
   ResolvedPdfOptions,
-  PdfRect
+  PdfRect,
+  PdfTextWatermark,
+  PdfImageWatermark,
+  PdfWatermark,
+  PdfColor
 } from "../types";
 import { CELL_PADDING_H, CELL_PADDING_V, LINE_HEIGHT_FACTOR, INDENT_WIDTH } from "./constants";
 
@@ -1216,4 +1220,336 @@ function drawPageFooter(
   stream.showText(footerText);
   stream.endText();
   stream.restore();
+}
+
+// =============================================================================
+// Watermark Rendering
+// =============================================================================
+
+/** Default values for text watermarks. */
+const TEXT_WM_DEFAULTS = {
+  fontSize: 54,
+  color: { r: 0.75, g: 0.75, b: 0.75 } as PdfColor,
+  opacity: 0.15,
+  rotation: -45,
+  fontFamily: "Helvetica",
+  bold: false,
+  italic: false,
+  repeatSpacingX: 200,
+  repeatSpacingY: 200
+};
+
+/** Default values for image watermarks. */
+const IMAGE_WM_DEFAULTS = {
+  opacity: 0.15,
+  rotation: 0,
+  scale: 0.5,
+  repeatSpacingX: 200,
+  repeatSpacingY: 200
+};
+
+/** Minimum allowed spacing for repeat patterns (prevents infinite loops). */
+const MIN_REPEAT_SPACING = 10;
+
+/**
+ * Result of rendering a watermark on a page.
+ * Contains any alpha values and image XObjects that need to be registered
+ * in the page's resource dictionary.
+ */
+export interface WatermarkRenderResult {
+  /** Alpha values used by the watermark. */
+  alphaValues: number[];
+  /** Image XObject entries: name → raw image data + format. */
+  imageXObjects: Array<{ name: string; data: Uint8Array; format: "jpeg" | "png" }>;
+}
+
+/**
+ * Render a watermark onto a PDF content stream.
+ * This should be called BEFORE the cell/grid content is rendered so the
+ * watermark sits behind everything (under-content).
+ */
+export function renderWatermark(
+  stream: PdfContentStream,
+  page: LayoutPage,
+  watermark: PdfWatermark,
+  fontManager: FontManager
+): WatermarkRenderResult {
+  if (watermark.type === "text") {
+    return renderTextWatermark(stream, page, normalizeTextWatermark(watermark), fontManager);
+  }
+  return renderImageWatermark(stream, page, normalizeImageWatermark(watermark));
+}
+
+/** Clamp/normalize text watermark options to safe ranges. */
+function normalizeTextWatermark(wm: PdfTextWatermark): PdfTextWatermark {
+  return {
+    ...wm,
+    opacity: clamp01(wm.opacity ?? TEXT_WM_DEFAULTS.opacity),
+    fontSize: Math.max(1, wm.fontSize ?? TEXT_WM_DEFAULTS.fontSize),
+    repeatSpacingX: Math.max(
+      MIN_REPEAT_SPACING,
+      wm.repeatSpacingX ?? TEXT_WM_DEFAULTS.repeatSpacingX
+    ),
+    repeatSpacingY: Math.max(
+      MIN_REPEAT_SPACING,
+      wm.repeatSpacingY ?? TEXT_WM_DEFAULTS.repeatSpacingY
+    )
+  };
+}
+
+/** Clamp/normalize image watermark options to safe ranges. */
+function normalizeImageWatermark(wm: PdfImageWatermark): PdfImageWatermark {
+  return {
+    ...wm,
+    opacity: clamp01(wm.opacity ?? IMAGE_WM_DEFAULTS.opacity),
+    scale: Math.max(0.01, wm.scale ?? IMAGE_WM_DEFAULTS.scale),
+    width: wm.width !== undefined ? Math.max(1, wm.width) : undefined,
+    height: wm.height !== undefined ? Math.max(1, wm.height) : undefined,
+    repeatSpacingX: Math.max(
+      MIN_REPEAT_SPACING,
+      wm.repeatSpacingX ?? IMAGE_WM_DEFAULTS.repeatSpacingX
+    ),
+    repeatSpacingY: Math.max(
+      MIN_REPEAT_SPACING,
+      wm.repeatSpacingY ?? IMAGE_WM_DEFAULTS.repeatSpacingY
+    )
+  };
+}
+
+/** Clamp a number to the 0..1 range. */
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+/**
+ * Render a text watermark on a single page.
+ */
+function renderTextWatermark(
+  stream: PdfContentStream,
+  page: LayoutPage,
+  watermark: PdfTextWatermark,
+  fontManager: FontManager
+): WatermarkRenderResult {
+  const fontSize = watermark.fontSize ?? TEXT_WM_DEFAULTS.fontSize;
+  const color = watermark.color ?? TEXT_WM_DEFAULTS.color;
+  const opacity = watermark.opacity ?? TEXT_WM_DEFAULTS.opacity;
+  const rotation = watermark.rotation ?? TEXT_WM_DEFAULTS.rotation;
+  const fontFamily = watermark.fontFamily ?? TEXT_WM_DEFAULTS.fontFamily;
+  const bold = watermark.bold ?? TEXT_WM_DEFAULTS.bold;
+  const italic = watermark.italic ?? TEXT_WM_DEFAULTS.italic;
+
+  const isEmbedded = fontManager.hasEmbeddedFont();
+  const resourceName = isEmbedded
+    ? fontManager.getEmbeddedResourceName()
+    : fontManager.ensureFont(resolvePdfFontName(fontFamily, bold, italic));
+
+  const textWidth = fontManager.measureText(watermark.text, resourceName, fontSize);
+  // Approximate text height using ascent (roughly 0.7 * fontSize for most fonts)
+  const textHeight = fontSize * 0.7;
+
+  const radians = (rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  const needsAlpha = opacity < 1;
+  const gsName = needsAlpha ? alphaGsName(opacity) : "";
+
+  const drawSingleWatermark = (cx: number, cy: number) => {
+    // Center the text at (cx, cy), compensating for both width and ascent height
+    const halfW = textWidth / 2;
+    const halfH = textHeight / 2;
+    const tx = cx - halfW * cos + halfH * sin;
+    const ty = cy - halfW * sin - halfH * cos;
+
+    stream.save();
+    if (needsAlpha) {
+      stream.setGraphicsState(gsName);
+    }
+    stream.setFillColor(color);
+    stream.beginText();
+    stream.setFont(resourceName, fontSize);
+    stream.setTextMatrix(cos, sin, -sin, cos, tx, ty);
+    const hex = fontManager.encodeText(watermark.text, resourceName);
+    if (hex) {
+      stream.showTextHex(hex);
+    } else {
+      stream.showText(watermark.text);
+    }
+    stream.endText();
+    stream.restore();
+  };
+
+  if (watermark.repeat) {
+    const spacingX = watermark.repeatSpacingX ?? TEXT_WM_DEFAULTS.repeatSpacingX;
+    const spacingY = watermark.repeatSpacingY ?? TEXT_WM_DEFAULTS.repeatSpacingY;
+    renderRepeatedPattern(page.width, page.height, spacingX, spacingY, drawSingleWatermark);
+  } else {
+    const { cx, cy } = resolveWatermarkCenter(page, watermark.position);
+    drawSingleWatermark(cx, cy);
+  }
+
+  return { alphaValues: needsAlpha ? [opacity] : [], imageXObjects: [] };
+}
+
+/**
+ * Render an image watermark on a single page.
+ */
+function renderImageWatermark(
+  stream: PdfContentStream,
+  page: LayoutPage,
+  watermark: PdfImageWatermark
+): WatermarkRenderResult {
+  const opacity = watermark.opacity ?? IMAGE_WM_DEFAULTS.opacity;
+  const rotation = watermark.rotation ?? IMAGE_WM_DEFAULTS.rotation;
+  const scale = watermark.scale ?? IMAGE_WM_DEFAULTS.scale;
+  const needsAlpha = opacity < 1;
+
+  // Determine image dimensions — use explicit width/height if provided,
+  // otherwise parse actual dimensions from image data and scale proportionally
+  let imgWidth: number;
+  let imgHeight: number;
+  if (watermark.width !== undefined && watermark.height !== undefined) {
+    imgWidth = watermark.width;
+    imgHeight = watermark.height;
+  } else {
+    const dims = parseImageDimensions(watermark.data, watermark.format);
+    const minDim = Math.min(page.width, page.height);
+    const targetSize = minDim * scale;
+    const maxDim = Math.max(dims.width, dims.height);
+    const ratio = maxDim > 0 ? targetSize / maxDim : 1;
+    imgWidth = dims.width * ratio;
+    imgHeight = dims.height * ratio;
+  }
+
+  const radians = (rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+
+  const gsName = needsAlpha ? alphaGsName(opacity) : "";
+  const imgName = "WmImg";
+
+  const drawSingleWatermark = (cx: number, cy: number) => {
+    stream.save();
+    if (needsAlpha) {
+      stream.setGraphicsState(gsName);
+    }
+    const halfW = imgWidth / 2;
+    const halfH = imgHeight / 2;
+    const tx = cx - halfW * cos + halfH * sin;
+    const ty = cy - halfW * sin - halfH * cos;
+
+    stream.concat(imgWidth * cos, imgWidth * sin, -imgHeight * sin, imgHeight * cos, tx, ty);
+    stream.doXObject(imgName);
+    stream.restore();
+  };
+
+  if (watermark.repeat) {
+    const spacingX = watermark.repeatSpacingX ?? IMAGE_WM_DEFAULTS.repeatSpacingX;
+    const spacingY = watermark.repeatSpacingY ?? IMAGE_WM_DEFAULTS.repeatSpacingY;
+    renderRepeatedPattern(page.width, page.height, spacingX, spacingY, drawSingleWatermark);
+  } else {
+    const { cx, cy } = resolveWatermarkCenter(page, watermark.position);
+    drawSingleWatermark(cx, cy);
+  }
+
+  return {
+    alphaValues: needsAlpha ? [opacity] : [],
+    imageXObjects: [{ name: imgName, data: watermark.data, format: watermark.format }]
+  };
+}
+
+/**
+ * Parse image dimensions from raw JPEG or PNG data without a full decode.
+ */
+export function parseImageDimensions(
+  data: Uint8Array,
+  format: "jpeg" | "png"
+): { width: number; height: number } {
+  if (format === "png") {
+    return parsePngDimensions(data);
+  }
+  return parseJpegDimensions(data);
+}
+
+/** Read width/height from a PNG IHDR chunk (bytes 16-23). */
+function parsePngDimensions(data: Uint8Array): { width: number; height: number } {
+  // PNG header: 8 byte signature, then IHDR chunk: 4 byte length, 4 byte type, 4 byte width, 4 byte height
+  if (
+    data.length >= 24 &&
+    data[12] === 0x49 &&
+    data[13] === 0x48 &&
+    data[14] === 0x44 &&
+    data[15] === 0x52
+  ) {
+    const width = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+    const height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    return { width, height };
+  }
+  return { width: 1, height: 1 };
+}
+
+/** Read width/height from JPEG SOF marker. */
+function parseJpegDimensions(data: Uint8Array): { width: number; height: number } {
+  let offset = 2; // skip SOI marker
+  while (offset < data.length - 1) {
+    while (offset < data.length && data[offset] === 0xff && data[offset + 1] === 0xff) {
+      offset++;
+    }
+    if (offset >= data.length - 1 || data[offset] !== 0xff) {
+      break;
+    }
+    const marker = data[offset + 1];
+    const isSof =
+      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isSof && offset + 8 < data.length) {
+      return {
+        width: (data[offset + 7] << 8) | data[offset + 8],
+        height: (data[offset + 5] << 8) | data[offset + 6]
+      };
+    }
+    if (offset + 3 >= data.length) {
+      break;
+    }
+    const segLen = (data[offset + 2] << 8) | data[offset + 3];
+    offset += 2 + segLen;
+  }
+  return { width: 1, height: 1 };
+}
+
+/**
+ * Resolve the center position for a watermark on a given page.
+ */
+function resolveWatermarkCenter(
+  page: LayoutPage,
+  position?: "center" | { x: number; y: number }
+): { cx: number; cy: number } {
+  if (!position || position === "center") {
+    return { cx: page.width / 2, cy: page.height / 2 };
+  }
+  return { cx: position.x, cy: position.y };
+}
+
+/**
+ * Render a repeated pattern of watermarks across the entire page.
+ * Uses a staggered grid for a natural diagonal tiling effect.
+ */
+function renderRepeatedPattern(
+  pageWidth: number,
+  pageHeight: number,
+  spacingX: number,
+  spacingY: number,
+  drawFn: (cx: number, cy: number) => void
+): void {
+  // Start from beyond the page edges to ensure full coverage with rotation
+  const margin = Math.max(pageWidth, pageHeight) * 0.5;
+  let rowIndex = 0;
+
+  for (let y = -margin; y < pageHeight + margin; y += spacingY) {
+    // Stagger every other row by half the horizontal spacing
+    const offsetX = rowIndex % 2 === 1 ? spacingX / 2 : 0;
+    for (let x = -margin; x < pageWidth + margin; x += spacingX) {
+      drawFn(x + offsetX, y);
+    }
+    rowIndex++;
+  }
 }

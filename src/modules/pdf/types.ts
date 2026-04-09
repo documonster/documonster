@@ -380,7 +380,246 @@ export interface PdfExportOptions {
       printHighQuality: boolean;
     }>;
   };
+
+  /**
+   * Watermark to render on every page.
+   * Supports text watermarks (e.g. "CONFIDENTIAL") and image watermarks (e.g. company logo).
+   *
+   * @example Text watermark:
+   * ```typescript
+   * watermark: {
+   *   type: "text",
+   *   text: "DRAFT",
+   *   opacity: 0.1,
+   *   rotation: -45
+   * }
+   * ```
+   *
+   * @example Image watermark:
+   * ```typescript
+   * watermark: {
+   *   type: "image",
+   *   data: logoPng,
+   *   format: "png",
+   *   opacity: 0.08
+   * }
+   * ```
+   */
+  watermark?: PdfWatermark;
 }
+
+// =============================================================================
+// Watermark Options
+// =============================================================================
+
+/**
+ * Text watermark configuration for PDF export.
+ *
+ * Renders semi-transparent text (e.g. "CONFIDENTIAL", "DRAFT") on every page.
+ *
+ * @example
+ * ```typescript
+ * const bytes = await pdf(data, {
+ *   watermark: {
+ *     type: "text",
+ *     text: "CONFIDENTIAL",
+ *     color: { r: 0.8, g: 0, b: 0 },
+ *     opacity: 0.1,
+ *     rotation: -45
+ *   }
+ * });
+ * ```
+ */
+export interface PdfTextWatermark {
+  type: "text";
+  /** The watermark text to display. */
+  text: string;
+  /**
+   * Font size in points.
+   * @default 54
+   */
+  fontSize?: number;
+  /**
+   * Text color (RGB, each 0-1).
+   * @default { r: 0.75, g: 0.75, b: 0.75 }
+   */
+  color?: PdfColor;
+  /**
+   * Opacity (0 = fully transparent, 1 = fully opaque).
+   * @default 0.15
+   */
+  opacity?: number;
+  /**
+   * Rotation angle in degrees (positive = counter-clockwise).
+   * @default -45
+   */
+  rotation?: number;
+  /**
+   * Font family name. Must be a standard PDF font (Type1) or the embedded font.
+   * @default "Helvetica"
+   */
+  fontFamily?: string;
+  /**
+   * Whether to render in bold.
+   * @default false
+   */
+  bold?: boolean;
+  /**
+   * Whether to render in italic.
+   * @default false
+   */
+  italic?: boolean;
+  /**
+   * Position on the page. `"center"` places the watermark at the geometric center.
+   * A custom `{ x, y }` object specifies the **center point** of the watermark
+   * in PDF points (origin at bottom-left corner of the page).
+   * @default "center"
+   */
+  position?: "center" | { x: number; y: number };
+  /**
+   * When true, the watermark text is tiled in a repeating grid across the entire page.
+   * @default false
+   */
+  repeat?: boolean;
+  /**
+   * Horizontal spacing (in points) between repeated watermark tiles.
+   * Only used when `repeat` is true.
+   * @default 200
+   */
+  repeatSpacingX?: number;
+  /**
+   * Vertical spacing (in points) between repeated watermark tiles.
+   * Only used when `repeat` is true.
+   * @default 200
+   */
+  repeatSpacingY?: number;
+}
+
+/**
+ * Image watermark configuration for PDF export.
+ *
+ * Embeds a semi-transparent image (e.g. company logo) on every page.
+ *
+ * @example
+ * ```typescript
+ * import { readFileSync } from "fs";
+ * const logo = readFileSync("logo.png");
+ *
+ * const bytes = await pdf(data, {
+ *   watermark: {
+ *     type: "image",
+ *     data: logo,
+ *     format: "png",
+ *     opacity: 0.08,
+ *     scale: 0.4
+ *   }
+ * });
+ * ```
+ */
+export interface PdfImageWatermark {
+  type: "image";
+  /** Raw image bytes (JPEG or PNG). */
+  data: Uint8Array;
+  /** Image format. */
+  format: "jpeg" | "png";
+  /**
+   * Opacity (0 = fully transparent, 1 = fully opaque).
+   * @default 0.15
+   */
+  opacity?: number;
+  /**
+   * Rotation angle in degrees (positive = counter-clockwise).
+   * @default 0
+   */
+  rotation?: number;
+  /**
+   * Scale factor relative to the page size.
+   * 0.5 means the image's largest dimension will be scaled to
+   * 50% of the smaller page dimension (width or height).
+   * Ignored when `width` and `height` are explicitly provided.
+   * @default 0.5
+   */
+  scale?: number;
+  /**
+   * Explicit image width in PDF points. When set together with `height`,
+   * overrides `scale` and renders the image at the exact specified dimensions.
+   */
+  width?: number;
+  /**
+   * Explicit image height in PDF points. When set together with `width`,
+   * overrides `scale` and renders the image at the exact specified dimensions.
+   */
+  height?: number;
+  /**
+   * Position on the page. `"center"` places the watermark at the geometric center.
+   * A custom `{ x, y }` object specifies the **center point** of the watermark
+   * in PDF points (origin at bottom-left corner of the page).
+   * @default "center"
+   */
+  position?: "center" | { x: number; y: number };
+  /**
+   * When true, the watermark image is tiled in a repeating grid across the entire page.
+   * @default false
+   */
+  repeat?: boolean;
+  /**
+   * Horizontal spacing (in points) between repeated watermark tiles.
+   * Only used when `repeat` is true.
+   * @default 200
+   */
+  repeatSpacingX?: number;
+  /**
+   * Vertical spacing (in points) between repeated watermark tiles.
+   * Only used when `repeat` is true.
+   * @default 200
+   */
+  repeatSpacingY?: number;
+}
+
+/**
+ * Common watermark filter and placement options shared by text and image watermarks.
+ */
+export interface PdfWatermarkFilter {
+  /**
+   * Restrict the watermark to specific page numbers (1-based, document-global).
+   * When set, only pages whose number is in this array get the watermark.
+   * If omitted, all pages receive the watermark.
+   *
+   * @example Only on the first page:
+   * ```typescript
+   * watermark: { type: "text", text: "COVER", pages: [1] }
+   * ```
+   */
+  pages?: number[];
+
+  /**
+   * Restrict the watermark to specific sheet names (case-insensitive).
+   * When set, only pages belonging to the named sheets get the watermark.
+   * If omitted, all sheets receive the watermark.
+   *
+   * @example Only on the "Summary" sheet:
+   * ```typescript
+   * watermark: { type: "text", text: "DRAFT", sheets: ["Summary"] }
+   * ```
+   */
+  sheets?: string[];
+
+  /**
+   * Watermark layering relative to page content.
+   *
+   * - `"under"` — watermark renders **behind** all page content including
+   *   cell fills, borders, text, grid lines, headers, and footers (default)
+   * - `"over"` — watermark renders **on top of** all page content
+   *
+   * @default "under"
+   */
+  placement?: "under" | "over";
+}
+
+/**
+ * Watermark configuration — either text or image, with optional page/sheet filters.
+ */
+export type PdfWatermark = (PdfTextWatermark | PdfImageWatermark) & PdfWatermarkFilter;
 
 // =============================================================================
 // Internal Layout Models
@@ -416,6 +655,7 @@ export interface ResolvedPdfOptions {
   author: string;
   subject: string;
   creator: string;
+  watermark?: PdfWatermark;
 }
 
 // =============================================================================

@@ -21,6 +21,7 @@ const mediaFilenameRegex = /^xl\/media\/([a-zA-Z0-9]+[.][a-zA-Z0-9]{3,4})$/;
 const drawingXmlRegex = /^xl\/drawings\/(drawing\d+)[.]xml$/;
 const drawingRelsXmlRegex = /^xl\/drawings\/_rels\/(drawing\d+)[.]xml[.]rels$/;
 const vmlDrawingRegex = /^xl\/drawings\/(vmlDrawing\d+)[.]vml$/;
+const vmlDrawingHFRegex = /^xl\/drawings\/(vmlDrawingHF\d+)[.]vml$/;
 const commentsXmlRegex = /^xl\/comments(\d+)[.]xml$/;
 const tableXmlRegex = /^xl\/tables\/(table\d+)[.]xml$/;
 
@@ -87,6 +88,11 @@ export function getDrawingNameFromRelsPath(path: string): string | undefined {
 
 export function getVmlDrawingNameFromPath(path: string): string | undefined {
   const match = vmlDrawingRegex.exec(path);
+  return match ? match[1] : undefined;
+}
+
+export function getVmlDrawingHFNameFromPath(path: string): string | undefined {
+  const match = vmlDrawingHFRegex.exec(path);
   return match ? match[1] : undefined;
 }
 
@@ -163,6 +169,14 @@ export function vmlDrawingPath(sheetId: number | string): string {
   return `xl/drawings/vmlDrawing${sheetId}.vml`;
 }
 
+export function vmlDrawingHFPath(sheetId: number | string): string {
+  return `xl/drawings/vmlDrawingHF${sheetId}.vml`;
+}
+
+export function vmlDrawingHFRelsPath(sheetId: number | string): string {
+  return `xl/drawings/_rels/vmlDrawingHF${sheetId}.vml.rels`;
+}
+
 export function tablePath(target: string): string {
   return `xl/tables/${target}`;
 }
@@ -224,6 +238,11 @@ export function commentsRelTargetFromWorksheet(sheetId: number | string): string
 export function vmlDrawingRelTargetFromWorksheet(sheetId: number | string): string {
   // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
   return `../drawings/vmlDrawing${sheetId}.vml`;
+}
+
+export function vmlDrawingHFRelTargetFromWorksheet(sheetId: number | string): string {
+  // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
+  return `../drawings/vmlDrawingHF${sheetId}.vml`;
 }
 
 export function drawingRelTargetFromWorksheet(drawingName: string): string {

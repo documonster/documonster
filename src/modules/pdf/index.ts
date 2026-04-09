@@ -70,7 +70,11 @@ export type {
   PdfPageSize,
   PdfMargins,
   PdfColor,
-  PageSizeName
+  PageSizeName,
+  PdfWatermark,
+  PdfTextWatermark,
+  PdfImageWatermark,
+  PdfWatermarkFilter
 } from "./types";
 
 export { PageSizes } from "./types";

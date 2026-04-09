@@ -134,10 +134,11 @@ class ContentTypesXform extends BaseXform {
       });
     }
 
-    // VML extension is needed for comments or form controls
+    // VML extension is needed for comments, form controls, or header watermarks
     const hasComments = model.commentRefs && model.commentRefs.length > 0;
     const hasFormControls = model.formControlRefs && model.formControlRefs.length > 0;
-    if (hasComments || hasFormControls) {
+    const hasHeaderWatermark = model.hasHeaderWatermark === true;
+    if (hasComments || hasFormControls || hasHeaderWatermark) {
       xmlStream.leafNode("Default", {
         Extension: "vml",
         ContentType: "application/vnd.openxmlformats-officedocument.vmlDrawing"

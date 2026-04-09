@@ -53,7 +53,8 @@ import type {
   AutoFilter,
   WorksheetProtection,
   ConditionalFormattingOptions,
-  AddImageRange
+  AddImageRange,
+  WatermarkOptions
 } from "@excel/types";
 
 // since prepare and render are functional, we can use singletons
@@ -166,6 +167,8 @@ class WorksheetWriter {
   startedData: boolean;
   private _background?: { imageId?: number; rId?: string };
   private _headerRowCount?: number;
+  /** Watermark configuration */
+  private _watermark: WatermarkOptions | null;
   /** Drawing model — populated during commit if images were added */
   private _drawing?: { rId: string; name: string; anchors: any[]; rels: any[] };
   /** Relationship Id - assigned by WorkbookWriter */
@@ -298,6 +301,9 @@ class WorksheetWriter {
     this.autoFilter = options.autoFilter ?? null;
 
     this._media = [];
+
+    // watermark
+    this._watermark = null;
 
     // worksheet protection
     this.sheetProtection = null;
@@ -655,6 +661,65 @@ class WorksheetWriter {
     return this._media;
   }
 
+  // =========================================================================
+  // Watermark
+
+  /**
+   * Add a watermark to the worksheet using an image from `WorkbookWriter.addImage()`.
+   * Supports overlay mode (DrawingML with transparency) and header mode (VML behind content).
+   */
+  addWatermark(options: WatermarkOptions): void {
+    // Remove existing watermark entries (both stored type tags)
+    this._media = this._media.filter(m => (m as any)._watermarkTag !== true);
+
+    const opacity =
+      options.opacity !== undefined ? Math.max(0, Math.min(1, options.opacity)) : 0.15;
+
+    this._watermark = {
+      imageId: String(options.imageId),
+      mode: options.mode ?? "overlay",
+      opacity,
+      headerWidth: options.headerWidth,
+      headerHeight: options.headerHeight,
+      applyTo: options.applyTo
+    };
+
+    if (this._watermark.mode === "overlay") {
+      // Coverage range is computed lazily during commit() via _resolveWatermarkRange()
+      const entry = {
+        type: "image",
+        imageId: String(options.imageId),
+        range: {
+          tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
+          br: { nativeCol: 100, nativeColOff: 0, nativeRow: 200, nativeRowOff: 0 },
+          editAs: "absolute"
+        },
+        // Internal tag for dedup — not part of the WriterImageModel type
+        _watermarkTag: true,
+        opacity
+      };
+      this._media.push(entry as any);
+    }
+    // Note: header mode for streaming writer is limited — the VML file generation
+    // happens in WorkbookWriter.addWorksheets(), which handles worksheet.headerImage.
+    // We store the config in _watermark and it's picked up by the commit path.
+  }
+
+  /**
+   * Get the current watermark configuration.
+   */
+  getWatermark(): WatermarkOptions | null {
+    return this._watermark;
+  }
+
+  /**
+   * Remove the watermark from the worksheet.
+   */
+  removeWatermark(): void {
+    this._watermark = null;
+    this._media = this._media.filter(m => (m as any)._watermarkTag !== true);
+  }
+
   /**
    * Parse the user-supplied range into a normalised internal model
    * mirroring what the regular Worksheet / Image class does.
@@ -876,6 +941,22 @@ class WorksheetWriter {
   private _writeDrawing(): void {
     if (this._media.length === 0) {
       return;
+    }
+
+    // Resolve watermark coverage range from actual worksheet dimensions
+    // (at commit time, all rows have been flushed so _dimensions is accurate)
+    for (const entry of this._media) {
+      if ((entry as any)._watermarkTag) {
+        const dims = this._dimensions.model;
+        const maxCol = dims ? Math.max(dims.right ?? 100, 100) : 100;
+        const maxRow = dims ? Math.max(dims.bottom ?? 200, 200) : 200;
+        (entry as any).range.br = {
+          nativeCol: maxCol,
+          nativeColOff: 0,
+          nativeRow: maxRow,
+          nativeRowOff: 0
+        };
+      }
     }
 
     // Build the drawing model from the stored images.

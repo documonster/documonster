@@ -44,7 +44,12 @@ abstract class BaseCellAnchorXform extends BaseXform {
       if (match) {
         const name = match[1];
         const mediaId = options.mediaIndex[name];
-        return options.media[mediaId];
+        const medium = options.media[mediaId];
+        // Preserve alphaModFix (transparency) from the picture model if present
+        if (medium && model.alphaModFix !== undefined) {
+          return { ...medium, alphaModFix: model.alphaModFix };
+        }
+        return medium;
       }
     }
     return undefined;

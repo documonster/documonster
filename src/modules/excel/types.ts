@@ -531,6 +531,84 @@ export interface ImageHyperlinkValue {
 }
 
 // ============================================================================
+// Watermark Types
+// ============================================================================
+
+/**
+ * Watermark placement mode in the Excel worksheet.
+ *
+ * - `"overlay"` — Places the watermark image as a DrawingML picture on top of cells.
+ *   Visible on screen AND when printed. Supports transparency via `<a:alphaModFix>`.
+ *   Users can move/delete the watermark unless the sheet is protected.
+ *
+ * - `"header"` — Places the watermark image in the page header using VML.
+ *   Renders behind cell content. Visible in Page Layout view and Print Preview.
+ *   Cannot be accidentally moved/deleted. The standard "true watermark" approach.
+ */
+export type WatermarkMode = "overlay" | "header";
+
+/**
+ * Options for adding a watermark to a worksheet.
+ *
+ * @example Overlay watermark (visible on screen + prints):
+ * ```typescript
+ * const imgId = workbook.addImage({ buffer: pngData, extension: "png" });
+ * worksheet.addWatermark({
+ *   imageId: imgId,
+ *   mode: "overlay",
+ *   opacity: 0.15
+ * });
+ * ```
+ *
+ * @example Header watermark (behind content, prints correctly):
+ * ```typescript
+ * const imgId = workbook.addImage({ buffer: pngData, extension: "png" });
+ * worksheet.addWatermark({
+ *   imageId: imgId,
+ *   mode: "header"
+ * });
+ * ```
+ */
+export interface WatermarkOptions {
+  /** Image ID obtained from `workbook.addImage()`. */
+  imageId: string | number;
+  /**
+   * Watermark placement mode.
+   * @default "overlay"
+   */
+  mode?: WatermarkMode;
+  /**
+   * Opacity for overlay mode (0 = fully transparent, 1 = fully opaque).
+   * Expressed as a percentage in OOXML (e.g. 0.15 = 15000 out of 100000).
+   * Only applies to `"overlay"` mode. In `"header"` mode, transparency
+   * must be baked into the image itself (use a PNG with alpha channel).
+   * @default 0.15
+   */
+  opacity?: number;
+  /**
+   * Image width in points (for "header" mode VML rendering).
+   * @default 467.25
+   */
+  headerWidth?: number;
+  /**
+   * Image height in points (for "header" mode VML rendering).
+   * @default 311.25
+   */
+  headerHeight?: number;
+  /**
+   * Which header sections to apply the watermark to (only for "header" mode).
+   *
+   * - `"all"` — applies to oddHeader, evenHeader, and firstHeader
+   * - `"odd"` — applies only to oddHeader (standard pages)
+   * - `"even"` — applies only to evenHeader
+   * - `"first"` — applies only to firstHeader
+   *
+   * @default "all"
+   */
+  applyTo?: "all" | "odd" | "even" | "first";
+}
+
+// ============================================================================
 // Location and Address Types
 // ============================================================================
 export type Location = {

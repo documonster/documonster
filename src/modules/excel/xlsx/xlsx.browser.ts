@@ -79,6 +79,7 @@ import {
   themePath,
   getThemeNameFromPath,
   getVmlDrawingNameFromPath,
+  getVmlDrawingHFNameFromPath,
   getWorksheetNoFromWorksheetPath,
   getWorksheetNoFromWorksheetRelsPath,
   isBinaryEntryPath,
@@ -86,6 +87,8 @@ import {
   OOXML_PATHS,
   vmlDrawingRelTargetFromWorksheetName,
   vmlDrawingPath,
+  vmlDrawingHFPath,
+  vmlDrawingHFRelsPath,
   worksheetPath,
   worksheetRelsPath,
   worksheetRelTarget
@@ -1204,6 +1207,18 @@ class XLSX {
     model.vmlDrawings[vmlDrawingRelTargetFromWorksheetName(name)] = vmlDrawing;
   }
 
+  async _processVmlDrawingHFEntry(entry: any, model: any, _name: string): Promise<void> {
+    const xform = new VmlDrawingXform();
+    const vmlDrawing = await xform.parseStream(entry);
+    // Store parsed header image info for reconciliation
+    if (vmlDrawing && vmlDrawing.headerImage) {
+      if (!model.vmlDrawingHF) {
+        model.vmlDrawingHF = {};
+      }
+      model.vmlDrawingHF[_name] = vmlDrawing.headerImage;
+    }
+  }
+
   async _processThemeEntry(stream: IParseStream, model: any, name: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const streamBuf = this.createStreamBuf();
@@ -1349,6 +1364,14 @@ class XLSX {
     const vmlDrawingName = getVmlDrawingNameFromPath(entryName);
     if (vmlDrawingName) {
       await this._processVmlDrawingEntry(stream, model, vmlDrawingName);
+      return true;
+    }
+
+    // VML header/footer drawings (watermark in header mode).
+    // Parse to extract header image info for round-trip preservation.
+    const vmlHFName = getVmlDrawingHFNameFromPath(entryName);
+    if (vmlHFName) {
+      await this._processVmlDrawingHFEntry(stream, model, vmlHFName);
       return true;
     }
 
@@ -1611,6 +1634,39 @@ class XLSX {
         });
       }
 
+      // Generate VML drawing for header/footer images (watermark in header mode)
+      if (worksheet.headerImage) {
+        const hdrImage = worksheet.headerImage;
+        const bookImage = hdrImage.bookImage;
+        const imageFileName =
+          bookImage.name &&
+          bookImage.extension &&
+          bookImage.name.endsWith(`.${bookImage.extension}`)
+            ? bookImage.name
+            : `${bookImage.name}.${bookImage.extension}`;
+        const imageRelTarget = `../media/${imageFileName}`;
+
+        // Write the VML file for the header image
+        await this._renderToZip(zip, vmlDrawingHFPath(fileIndex), vmlDrawingXform, {
+          comments: [],
+          formControls: [],
+          headerImage: {
+            imageRelId: "rId1",
+            width: hdrImage.headerWidth,
+            height: hdrImage.headerHeight
+          }
+        });
+
+        // Write the VML rels file referencing the image
+        await this._renderToZip(zip, vmlDrawingHFRelsPath(fileIndex), relationshipsXform, [
+          {
+            Id: "rId1",
+            Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+            Target: imageRelTarget
+          }
+        ]);
+      }
+
       // Generate ctrlProp files for form controls
       if (hasFormControls) {
         for (const control of worksheet.formControls) {
@@ -1800,6 +1856,7 @@ class XLSX {
     worksheetOptions.drawings = model.drawings = [];
     worksheetOptions.commentRefs = model.commentRefs = [];
     worksheetOptions.formControlRefs = model.formControlRefs = [];
+    model.hasHeaderWatermark = false;
     let tableCount = 0;
     model.tables = [];
     model.worksheets.forEach((worksheet: any, index: number) => {
@@ -1821,6 +1878,11 @@ class XLSX {
 
     // ContentTypesXform expects this flag
     model.hasCheckboxes = model.styles.hasCheckboxes;
+
+    // Propagate header watermark flag from worksheet prepare options
+    if (worksheetOptions.hasHeaderWatermark) {
+      model.hasHeaderWatermark = true;
+    }
 
     // Build passthroughContentTypes for ContentTypesXform using PassthroughManager
     const passthrough = model.passthrough || {};

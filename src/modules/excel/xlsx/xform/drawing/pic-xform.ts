@@ -6,6 +6,9 @@ import { spPrJSON } from "@excel/xlsx/xform/drawing/sp-pr";
 
 interface PicModel {
   index?: number;
+  rId?: string;
+  /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */
+  alphaModFix?: number;
   [key: string]: any;
 }
 
@@ -36,7 +39,11 @@ class PicXform extends BaseXform {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:nvPicPr"].render(xmlStream, model);
-    this.map["xdr:blipFill"].render(xmlStream, model);
+    // Pass alphaModFix through to blipFill → blip
+    this.map["xdr:blipFill"].render(xmlStream, {
+      rId: model.rId,
+      alphaModFix: model.alphaModFix
+    });
     this.map["xdr:spPr"].render(xmlStream, model);
 
     xmlStream.closeNode();

@@ -32,7 +32,8 @@ import {
   drawingRelTargetFromWorksheet,
   pivotTableRelTargetFromWorksheet,
   tableRelTargetFromWorksheet,
-  vmlDrawingRelTargetFromWorksheet
+  vmlDrawingRelTargetFromWorksheet,
+  vmlDrawingHFRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
 import { buildDrawingAnchorsAndRels, resolveMediaTarget } from "@excel/utils/drawing-utils";
 
@@ -274,11 +275,17 @@ class WorkSheetXform extends BaseXform {
     // Process background and image media entries
     const backgroundMedia: any[] = [];
     const imageMedia: any[] = [];
+    const watermarkMedia: any[] = [];
+    const headerImageMedia: any[] = [];
     model.media.forEach(medium => {
       if (medium.type === "background") {
         backgroundMedia.push(medium);
       } else if (medium.type === "image") {
         imageMedia.push(medium);
+      } else if (medium.type === "watermark") {
+        watermarkMedia.push(medium);
+      } else if (medium.type === "headerImage") {
+        headerImageMedia.push(medium);
       }
     });
 
@@ -319,6 +326,115 @@ class WorkSheetXform extends BaseXform {
       });
       drawing.anchors.push(...result.anchors);
       drawing.rels = result.rels;
+    }
+
+    // Handle watermark overlay images — placed as a full-sheet drawing with transparency
+    if (watermarkMedia.length > 0) {
+      let { drawing } = model;
+      if (!drawing) {
+        drawing = model.drawing = {
+          rId: nextRid(rels),
+          name: `drawing${++options.drawingsCount}`,
+          anchors: [],
+          rels: []
+        };
+        options.drawings.push(drawing);
+        rels.push({
+          Id: drawing.rId,
+          Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+          Target: drawingRelTargetFromWorksheet(drawing.name)
+        });
+      }
+
+      for (const medium of watermarkMedia) {
+        const bookImage = options.media[medium.imageId];
+        if (!bookImage) {
+          continue;
+        }
+        const rIdImage = nextRid(drawing.rels);
+        drawing.rels.push({
+          Id: rIdImage,
+          Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+          Target: resolveMediaTarget(bookImage)
+        });
+        // Convert opacity (0-1) to OOXML percentage (0-100000), clamped
+        const rawOpacity = medium.opacity !== undefined ? medium.opacity : 0.15;
+        const clampedOpacity = Math.max(0, Math.min(1, rawOpacity));
+        const alphaModFix = Math.round(clampedOpacity * 100000);
+
+        // Compute coverage based on actual worksheet dimensions.
+        // Use the model's dimensions if available, otherwise use generous defaults.
+        const dims = model.dimensions;
+        const maxCol = dims ? Math.max(dims.model?.right ?? 100, 100) : 100;
+        const maxRow = dims ? Math.max(dims.model?.bottom ?? 200, 200) : 200;
+
+        drawing.anchors.push({
+          picture: {
+            rId: rIdImage,
+            alphaModFix
+          },
+          // Cover the full data area with extra margin
+          range: {
+            editAs: "absolute",
+            tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
+            br: { nativeCol: maxCol, nativeColOff: 0, nativeRow: maxRow, nativeRowOff: 0 }
+          }
+        });
+      }
+    }
+
+    // Handle header watermark images — VML header/footer image
+    if (headerImageMedia.length > 0) {
+      const medium = headerImageMedia[0]; // Only one header image per sheet
+      const bookImage = options.media[medium.imageId];
+      if (bookImage) {
+        const rIdVml = nextRid(rels);
+        rels.push({
+          Id: rIdVml,
+          Type: RelType.VmlDrawing,
+          Target: vmlDrawingHFRelTargetFromWorksheet(fileIndex)
+        });
+        // Store header image info on the model for the VML writer and worksheet render
+        model.headerImage = {
+          vmlRelId: rIdVml,
+          imageId: medium.imageId,
+          bookImage,
+          headerWidth: medium.headerWidth,
+          headerHeight: medium.headerHeight
+        };
+
+        // Flag for content-types registration
+        options.hasHeaderWatermark = true;
+
+        // Update headerFooter to include &G placeholder.
+        // Respects the applyTo option: "all" (default), "odd", "even", "first".
+        if (!model.headerFooter) {
+          model.headerFooter = {};
+        }
+        const applyTo = medium.applyTo || "all";
+        const insertG = (field: string): string => {
+          const existing = (model.headerFooter as any)[field] || "";
+          if (existing.includes("&G")) {
+            return existing;
+          }
+          if (existing.includes("&C")) {
+            return existing.replace("&C", "&C&G");
+          }
+          return existing + "&C&G";
+        };
+
+        if (applyTo === "all" || applyTo === "odd") {
+          model.headerFooter.oddHeader = insertG("oddHeader");
+        }
+        if (applyTo === "all" || applyTo === "even") {
+          model.headerFooter.evenHeader = insertG("evenHeader");
+          model.headerFooter.differentOddEven = true;
+        }
+        if (applyTo === "all" || applyTo === "first") {
+          model.headerFooter.firstHeader = insertG("firstHeader");
+          model.headerFooter.differentFirst = true;
+        }
+      }
     }
 
     // prepare tables
@@ -496,9 +612,18 @@ class WorkSheetXform extends BaseXform {
       // NOTE: Excel is picky about worksheet child element order; legacyDrawing must come before controls.
       model.rels.forEach(rel => {
         if (rel.Type === RelType.VmlDrawing) {
+          // Skip VML rels that are for header images (they use legacyDrawingHF instead)
+          if (model.headerImage && rel.Id === model.headerImage.vmlRelId) {
+            return;
+          }
           xmlStream.leafNode("legacyDrawing", { "r:id": rel.Id });
         }
       });
+    }
+
+    // legacyDrawingHF — VML drawing for header/footer images (watermark in header mode)
+    if (model.headerImage) {
+      xmlStream.leafNode("legacyDrawingHF", { "r:id": model.headerImage.vmlRelId });
     }
 
     // Controls section for legacy form controls (checkboxes, etc.)
@@ -741,13 +866,23 @@ class WorkSheetXform extends BaseXform {
             // Also extract images to model.media for backward compatibility
             drawing.anchors.forEach(anchor => {
               if (anchor.medium) {
-                const image = {
-                  type: "image",
-                  imageId: anchor.medium.index,
-                  range: anchor.range,
-                  hyperlinks: anchor.picture.hyperlinks
-                };
-                model.media.push(image);
+                // Detect overlay watermarks: drawings that carry alphaModFix
+                const hasAlpha =
+                  anchor.medium.alphaModFix !== undefined && anchor.medium.alphaModFix < 100000;
+                if (hasAlpha) {
+                  model.media.push({
+                    type: "watermark",
+                    imageId: anchor.medium.index,
+                    opacity: anchor.medium.alphaModFix / 100000
+                  });
+                } else {
+                  model.media.push({
+                    type: "image",
+                    imageId: anchor.medium.index,
+                    range: anchor.range,
+                    hyperlinks: anchor.picture.hyperlinks
+                  });
+                }
               }
             });
           } else {

@@ -17,6 +17,8 @@ interface DrawingAnchor {
   picture: {
     rId: string;
     hyperlinks?: { tooltip?: string; rId: string };
+    /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */
+    alphaModFix?: number;
   };
   range: any;
 }
@@ -37,6 +39,8 @@ interface ImageMedium {
   imageId: string | number;
   range: any;
   hyperlinks?: { hyperlink?: string; tooltip?: string };
+  /** Opacity 0-1 for watermark overlay mode. */
+  opacity?: number;
 }
 
 /**
@@ -119,6 +123,12 @@ export function buildDrawingAnchorsAndRels(
       },
       range: medium.range
     };
+
+    // Pass through watermark opacity as alphaModFix
+    if (medium.opacity !== undefined) {
+      const clamped = Math.max(0, Math.min(1, medium.opacity));
+      anchor.picture.alphaModFix = Math.round(clamped * 100000);
+    }
 
     // Handle image hyperlinks
     if (medium.hyperlinks && medium.hyperlinks.hyperlink) {

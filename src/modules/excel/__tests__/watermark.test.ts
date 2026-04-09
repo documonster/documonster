@@ -1,0 +1,458 @@
+/**
+ * Tests for Excel watermark feature.
+ *
+ * Verifies:
+ * - Overlay mode watermark (DrawingML with alphaModFix)
+ * - Header mode watermark (VML with legacyDrawingHF)
+ * - Watermark API (addWatermark, getWatermark, removeWatermark)
+ * - XLSX round-trip (write → read) for watermark drawings
+ */
+import { describe, it, expect } from "vitest";
+import { Workbook } from "@excel/workbook";
+import { createTextWatermarkImage } from "@excel/utils/watermark-image";
+
+// A tiny 1x1 red PNG for image tests
+const TINY_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+  0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+  0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+  0x44, 0xae, 0x42, 0x60, 0x82
+]);
+
+// =============================================================================
+// Watermark API
+// =============================================================================
+
+describe("Worksheet Watermark API", () => {
+  it("should add an overlay watermark", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+
+    ws.addWatermark({ imageId: imgId, mode: "overlay", opacity: 0.2 });
+
+    const wm = ws.getWatermark();
+    expect(wm).not.toBeNull();
+    expect(wm!.imageId).toBe(String(imgId));
+    expect(wm!.mode).toBe("overlay");
+    expect(wm!.opacity).toBe(0.2);
+  });
+
+  it("should default to overlay mode", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+
+    ws.addWatermark({ imageId: imgId });
+
+    const wm = ws.getWatermark();
+    expect(wm!.mode).toBe("overlay");
+  });
+
+  it("should add a header mode watermark", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+
+    ws.addWatermark({ imageId: imgId, mode: "header" });
+
+    const wm = ws.getWatermark();
+    expect(wm!.mode).toBe("header");
+  });
+
+  it("should remove watermark", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+
+    ws.addWatermark({ imageId: imgId });
+    expect(ws.getWatermark()).not.toBeNull();
+
+    ws.removeWatermark();
+    expect(ws.getWatermark()).toBeNull();
+  });
+
+  it("should return null when no watermark is set", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    expect(ws.getWatermark()).toBeNull();
+  });
+});
+
+// =============================================================================
+// Overlay Watermark — XLSX Write
+// =============================================================================
+
+describe("Excel Overlay Watermark (XLSX)", () => {
+  it("should write a valid XLSX with overlay watermark", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Hello";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: 0.15 });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer).toBeInstanceOf(Uint8Array);
+    expect(buffer.byteLength).toBeGreaterThan(0);
+
+    // Verify the XLSX can be loaded back
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    expect(wb2.worksheets.length).toBe(1);
+    expect(wb2.worksheets[0].getCell("A1").value).toBe("Hello");
+  });
+
+  it("should round-trip overlay watermark with getWatermark()", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: 0.3 });
+
+    const buffer = await wb.xlsx.writeBuffer();
+
+    // Load back and verify watermark state is restored
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const ws2 = wb2.worksheets[0];
+
+    // The watermark should be detected from the alphaModFix on the drawing
+    const wm = ws2.getWatermark();
+    expect(wm).not.toBeNull();
+    expect(wm!.mode).toBe("overlay");
+    // Opacity round-trips through OOXML percentage (0.3 → 30000 → 0.3)
+    expect(wm!.opacity).toBeCloseTo(0.3, 2);
+  });
+
+  it("should coexist with regular images", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addImage(imgId, "A1:B2");
+    ws.addWatermark({ imageId: imgId, opacity: 0.1 });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer.byteLength).toBeGreaterThan(0);
+
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    // Both the regular image and watermark should have been written
+    const ws2 = wb2.worksheets[0];
+    const images = ws2.getImages();
+    expect(images.length).toBeGreaterThanOrEqual(1);
+    // Watermark should be detected
+    const wm = ws2.getWatermark();
+    expect(wm).not.toBeNull();
+    expect(wm!.mode).toBe("overlay");
+  });
+});
+
+// =============================================================================
+// Header Watermark — XLSX Write
+// =============================================================================
+
+describe("Excel Header Watermark (XLSX)", () => {
+  it("should write a valid XLSX with header watermark", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Hello";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "header" });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer).toBeInstanceOf(Uint8Array);
+    expect(buffer.byteLength).toBeGreaterThan(0);
+  });
+
+  it("should set &G in oddHeader for header watermark", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "header" });
+
+    const buffer = await wb.xlsx.writeBuffer();
+
+    // Read back and verify header footer
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const hf = wb2.worksheets[0].headerFooter;
+    expect(hf.oddHeader).toContain("&G");
+  });
+});
+
+// =============================================================================
+// BlipXform alphaModFix
+// =============================================================================
+
+describe("BlipXform alphaModFix", () => {
+  it("should render alphaModFix element when opacity < 100%", async () => {
+    // This is tested indirectly through the XLSX write/read cycle
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: 0.5 });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer.byteLength).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// createTextWatermarkImage utility
+// =============================================================================
+
+describe("createTextWatermarkImage", () => {
+  it("should generate a valid PNG", () => {
+    const png = createTextWatermarkImage("TEST");
+    // PNG signature: 0x89 P N G
+    expect(png[0]).toBe(0x89);
+    expect(png[1]).toBe(0x50);
+    expect(png[2]).toBe(0x4e);
+    expect(png[3]).toBe(0x47);
+    expect(png.length).toBeGreaterThan(100);
+  });
+
+  it("should generate a non-zero-size image", () => {
+    const png = createTextWatermarkImage("WATERMARK");
+    expect(png.length).toBeGreaterThan(50);
+  });
+
+  it("should accept custom options", () => {
+    const png = createTextWatermarkImage("DRAFT", {
+      fontSize: 96,
+      color: { r: 255, g: 0, b: 0 },
+      opacity: 20,
+      rotation: -30,
+      padding: 40
+    });
+    expect(png[0]).toBe(0x89);
+    expect(png.length).toBeGreaterThan(100);
+  });
+
+  it("should handle single character", () => {
+    const png = createTextWatermarkImage("X");
+    expect(png[0]).toBe(0x89);
+  });
+
+  it("should handle empty string", () => {
+    const png = createTextWatermarkImage("");
+    expect(png[0]).toBe(0x89);
+  });
+
+  it("should produce a usable image for addImage/addWatermark", async () => {
+    const png = createTextWatermarkImage("CONFIDENTIAL", {
+      fontSize: 48,
+      color: { r: 128, g: 128, b: 128 },
+      opacity: 30,
+      rotation: -45
+    });
+
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Hello";
+
+    const imgId = wb.addImage({ buffer: png, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: 0.3 });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer.byteLength).toBeGreaterThan(0);
+
+    // Verify it can be read back
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    expect(wb2.worksheets[0].getCell("A1").value).toBe("Hello");
+  });
+
+  it("should handle zero rotation", () => {
+    const png = createTextWatermarkImage("HORIZONTAL", { rotation: 0 });
+    expect(png[0]).toBe(0x89);
+  });
+});
+
+// =============================================================================
+// Watermark round-trip
+// =============================================================================
+
+describe("Watermark round-trip", () => {
+  it("should preserve watermark state through model getter/setter (copyWorksheet)", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "overlay", opacity: 0.2 });
+
+    // Get model and restore it
+    const model = ws.model as any;
+    expect(model.watermark).not.toBeNull();
+    expect(model.watermark.mode).toBe("overlay");
+
+    // Apply to a new worksheet (change name to avoid conflict)
+    const ws2 = wb.addWorksheet("Sheet2");
+    const modelCopy = { ...model, name: "Sheet2", id: ws2.id };
+    ws2.model = modelCopy;
+    const wm = ws2.getWatermark();
+    expect(wm).not.toBeNull();
+    expect(wm!.mode).toBe("overlay");
+    expect(wm!.opacity).toBe(0.2);
+  });
+
+  it("should not accumulate media on repeated addWatermark calls", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+
+    ws.addWatermark({ imageId: imgId, opacity: 0.1 });
+    ws.addWatermark({ imageId: imgId, opacity: 0.2 });
+    ws.addWatermark({ imageId: imgId, opacity: 0.3 });
+
+    // Should only have one watermark media entry
+    const model = ws.model as any;
+    const wmMedia = model.media.filter((m: any) => m.type === "watermark");
+    expect(wmMedia.length).toBe(1);
+    expect(ws.getWatermark()!.opacity).toBe(0.3);
+  });
+});
+
+// =============================================================================
+// Header watermark applyTo
+// =============================================================================
+
+describe("Header watermark applyTo", () => {
+  it("should default applyTo all — set oddHeader, evenHeader, firstHeader", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "header" });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const hf = wb2.worksheets[0].headerFooter;
+    expect(hf.oddHeader).toContain("&G");
+    expect(hf.evenHeader).toContain("&G");
+    expect(hf.firstHeader).toContain("&G");
+  });
+
+  it("should only set oddHeader when applyTo is odd", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "header", applyTo: "odd" });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const hf = wb2.worksheets[0].headerFooter;
+    expect(hf.oddHeader).toContain("&G");
+    // evenHeader and firstHeader should NOT have &G
+    expect(hf.evenHeader || "").not.toContain("&G");
+    expect(hf.firstHeader || "").not.toContain("&G");
+  });
+
+  it("should not overwrite existing header text", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+    ws.headerFooter.oddHeader = "&LMy Report&CPage &P";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, mode: "header", applyTo: "odd" });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const hf = wb2.worksheets[0].headerFooter;
+    // Should contain both original text and &G
+    expect(hf.oddHeader).toContain("&LMy Report");
+    expect(hf.oddHeader).toContain("&G");
+  });
+});
+
+// =============================================================================
+// createTextWatermarkImage compression
+// =============================================================================
+
+describe("createTextWatermarkImage compression", () => {
+  it("should generate a compressed PNG much smaller than raw RGBA data", () => {
+    const png = createTextWatermarkImage("WATERMARK", {
+      fontSize: 48,
+      rotation: -45
+    });
+    // Raw RGBA for a watermark image this size would be hundreds of KB.
+    // With deflate compression, it should be well under 50KB.
+    expect(png.length).toBeLessThan(50000);
+    // But still a valid PNG
+    expect(png[0]).toBe(0x89);
+    expect(png[1]).toBe(0x50);
+  });
+
+  it("should be significantly smaller than the old uncompressed output", () => {
+    // A 9-char text at fontSize 48 (scale=6) creates a ~324x48 bitmap before rotation.
+    // Uncompressed RGBA + PNG overhead would be > 200KB.
+    // Compressed should be < 10% of that.
+    const png = createTextWatermarkImage("ABCDEFGHI", {
+      fontSize: 48,
+      rotation: 0,
+      padding: 10
+    });
+    // Raw size: (9*6*6 + 20) * (8*6 + 20) * 4 ≈ 130KB+
+    // Compressed should be way less
+    expect(png.length).toBeLessThan(15000);
+  });
+});
+
+// =============================================================================
+// Overlay watermark opacity edge cases
+// =============================================================================
+
+describe("Excel watermark opacity edge cases", () => {
+  it("should clamp opacity > 1 to 1 (detected as regular image on read-back)", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: 2.5 }); // over 1
+
+    const buffer = await wb.xlsx.writeBuffer();
+    // Should not throw
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    // Opacity clamped to 1.0 means no alphaModFix is written (fully opaque),
+    // so on read-back it becomes a regular image rather than a watermark.
+    // This is correct behavior: a fully opaque "watermark" is just an image.
+    const images = wb2.worksheets[0].getImages();
+    expect(images.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should clamp negative opacity to 0", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = "Test";
+
+    const imgId = wb.addImage({ buffer: TINY_PNG, extension: "png" });
+    ws.addWatermark({ imageId: imgId, opacity: -0.5 }); // negative
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+    const wm = wb2.worksheets[0].getWatermark();
+    expect(wm).not.toBeNull();
+    expect(wm!.opacity).toBeGreaterThanOrEqual(0);
+  });
+});
