@@ -383,7 +383,7 @@ describe("PDF Rendering Edge Cases", () => {
   });
 
   // ===========================================================================
-  // Vertical stacked text (textRotation = 255)
+  // Vertical stacked text (textRotation = 255 / "vertical")
   // ===========================================================================
 
   describe("Vertical stacked text", () => {
@@ -400,6 +400,341 @@ describe("PDF Rendering Edge Cases", () => {
       // Vertical stacked renders each char separately
       expect(text).toContain("V");
       expect(text).toContain("e");
+    });
+
+    it("should respect horizontal alignment for vertical stacked text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+      ws.getColumn(2).width = 20;
+      ws.getRow(1).height = 100;
+
+      ws.getCell("A1").value = "Hi";
+      ws.getCell("A1").alignment = {
+        textRotation: "vertical" as any,
+        horizontal: "left"
+      };
+      ws.getCell("B1").value = "Hi";
+      ws.getCell("B1").alignment = {
+        textRotation: "vertical" as any,
+        horizontal: "right"
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const hFrags = frags.filter(f => f.text === "H");
+      expect(hFrags.length).toBeGreaterThanOrEqual(2);
+      // Left-aligned "H" should have a smaller x than right-aligned "H"
+      expect(hFrags[0].x).toBeLessThan(hFrags[1].x);
+    });
+
+    it("should respect vertical alignment for vertical stacked text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10;
+      ws.getColumn(2).width = 10;
+      ws.getColumn(3).width = 10;
+      ws.getRow(1).height = 120;
+
+      ws.getCell("A1").value = "A";
+      ws.getCell("A1").alignment = {
+        textRotation: "vertical" as any,
+        vertical: "top"
+      };
+      ws.getCell("B1").value = "B";
+      ws.getCell("B1").alignment = {
+        textRotation: "vertical" as any,
+        vertical: "middle"
+      };
+      ws.getCell("C1").value = "C";
+      ws.getCell("C1").alignment = {
+        textRotation: "vertical" as any,
+        vertical: "bottom"
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const aFrag = frags.find(f => f.text === "A");
+      const bFrag = frags.find(f => f.text === "B");
+      const cFrag = frags.find(f => f.text === "C");
+      expect(aFrag).toBeDefined();
+      expect(bFrag).toBeDefined();
+      expect(cFrag).toBeDefined();
+      // top has highest y, bottom has lowest y (PDF coords)
+      expect(aFrag!.y).toBeGreaterThan(bFrag!.y);
+      expect(bFrag!.y).toBeGreaterThan(cFrag!.y);
+    });
+  });
+
+  // ===========================================================================
+  // Rotated text alignment (90°, -90°, general angles)
+  // ===========================================================================
+
+  describe("Rotated text alignment", () => {
+    // --- 90° vertical alignment ---
+    it("should position 90° text according to vertical alignment (top > middle > bottom)", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 12;
+      ws.getColumn(2).width = 12;
+      ws.getColumn(3).width = 12;
+      ws.getRow(1).height = 80;
+
+      ws.getCell("A1").value = "Top";
+      ws.getCell("A1").alignment = { textRotation: 90, horizontal: "center", vertical: "top" };
+      ws.getCell("B1").value = "Mid";
+      ws.getCell("B1").alignment = { textRotation: 90, horizontal: "center", vertical: "middle" };
+      ws.getCell("C1").value = "Bot";
+      ws.getCell("C1").alignment = { textRotation: 90, horizontal: "center", vertical: "bottom" };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const topFrag = frags.find(f => f.text === "Top");
+      const midFrag = frags.find(f => f.text === "Mid");
+      const botFrag = frags.find(f => f.text === "Bot");
+      expect(topFrag).toBeDefined();
+      expect(midFrag).toBeDefined();
+      expect(botFrag).toBeDefined();
+      // In PDF coords (origin bottom-left), top text starts at highest y
+      expect(topFrag!.y).toBeGreaterThan(midFrag!.y);
+      expect(midFrag!.y).toBeGreaterThan(botFrag!.y);
+    });
+
+    // --- 90° horizontal alignment ---
+    it("should position 90° text left/right with horizontal alignment", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+      ws.getColumn(2).width = 20;
+      ws.getRow(1).height = 80;
+
+      ws.getCell("A1").value = "Left";
+      ws.getCell("A1").alignment = { textRotation: 90, horizontal: "left" };
+      ws.getCell("B1").value = "Right";
+      ws.getCell("B1").alignment = { textRotation: 90, horizontal: "right" };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const leftFrag = frags.find(f => f.text === "Left");
+      const rightFrag = frags.find(f => f.text === "Right");
+      expect(leftFrag).toBeDefined();
+      expect(rightFrag).toBeDefined();
+      // Right cell's text x should be greater (further right)
+      expect(rightFrag!.x).toBeGreaterThan(leftFrag!.x);
+    });
+
+    // --- 90° combined: left+bottom vs right+top (issue #133 core scenario) ---
+    it("should handle 90° combined h/v alignment (issue #133)", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+      ws.getColumn(2).width = 20;
+      ws.getRow(1).height = 100;
+
+      ws.getCell("A1").value = "LB";
+      ws.getCell("A1").alignment = {
+        textRotation: 90,
+        horizontal: "left",
+        vertical: "bottom"
+      };
+      ws.getCell("B1").value = "RT";
+      ws.getCell("B1").alignment = {
+        textRotation: 90,
+        horizontal: "right",
+        vertical: "top"
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const lbFrag = frags.find(f => f.text === "LB");
+      const rtFrag = frags.find(f => f.text === "RT");
+      expect(lbFrag).toBeDefined();
+      expect(rtFrag).toBeDefined();
+      // LB: left+bottom → low x, low y; RT: right+top → high x, high y
+      expect(lbFrag!.x).toBeLessThan(rtFrag!.x);
+      expect(lbFrag!.y).toBeLessThan(rtFrag!.y);
+    });
+
+    // --- -90° alignment ---
+    it("should render -90° rotated text with alignment", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 12;
+      ws.getColumn(2).width = 12;
+      ws.getColumn(3).width = 12;
+      ws.getRow(1).height = 80;
+
+      ws.getCell("A1").value = "Top";
+      ws.getCell("A1").alignment = { textRotation: -90, vertical: "top" };
+      ws.getCell("B1").value = "Mid";
+      ws.getCell("B1").alignment = { textRotation: -90, vertical: "middle" };
+      ws.getCell("C1").value = "Bot";
+      ws.getCell("C1").alignment = { textRotation: -90, vertical: "bottom" };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const topFrag = frags.find(f => f.text === "Top");
+      const midFrag = frags.find(f => f.text === "Mid");
+      const botFrag = frags.find(f => f.text === "Bot");
+      expect(topFrag).toBeDefined();
+      expect(midFrag).toBeDefined();
+      expect(botFrag).toBeDefined();
+      // For -90° (text flows downward), top text starts from highest y
+      expect(topFrag!.y).toBeGreaterThan(midFrag!.y);
+      expect(midFrag!.y).toBeGreaterThan(botFrag!.y);
+    });
+
+    it("should position -90° text left/right with horizontal alignment", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+      ws.getColumn(2).width = 20;
+      ws.getRow(1).height = 80;
+
+      ws.getCell("A1").value = "Left";
+      ws.getCell("A1").alignment = { textRotation: -90, horizontal: "left" };
+      ws.getCell("B1").value = "Right";
+      ws.getCell("B1").alignment = { textRotation: -90, horizontal: "right" };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const leftFrag = frags.find(f => f.text === "Left");
+      const rightFrag = frags.find(f => f.text === "Right");
+      expect(leftFrag).toBeDefined();
+      expect(rightFrag).toBeDefined();
+      expect(rightFrag!.x).toBeGreaterThan(leftFrag!.x);
+    });
+
+    // --- General angle (45°) alignment ---
+    it("should render 45° text with top-left vs bottom-right alignment", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 15;
+      ws.getColumn(2).width = 15;
+      ws.getRow(1).height = 60;
+
+      ws.getCell("A1").value = "TL";
+      ws.getCell("A1").alignment = {
+        textRotation: 45,
+        horizontal: "left",
+        vertical: "top"
+      };
+      ws.getCell("B1").value = "BR";
+      ws.getCell("B1").alignment = {
+        textRotation: 45,
+        horizontal: "right",
+        vertical: "bottom"
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+      const tlFrag = frags.find(f => f.text === "TL");
+      const brFrag = frags.find(f => f.text === "BR");
+      expect(tlFrag).toBeDefined();
+      expect(brFrag).toBeDefined();
+      // Top-left should have higher y than bottom-right
+      expect(tlFrag!.y).toBeGreaterThan(brFrag!.y);
+    });
+
+    // --- 45° slanted borders ---
+    it("should render slanted borders for general rotation angles", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getRow(1).height = 60;
+      ws.getCell("A1").value = "Slant";
+      ws.getCell("A1").alignment = { textRotation: 45 };
+      ws.getCell("A1").border = {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const text = await extractText(pdfBytes);
+      expect(text).toContain("Slant");
+    });
+
+    // --- 45° negative angle ---
+    it("should render -45° text with slanted borders", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getRow(1).height = 60;
+      ws.getCell("A1").value = "Neg";
+      ws.getCell("A1").alignment = { textRotation: -45 };
+      ws.getCell("A1").border = {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const text = await extractText(pdfBytes);
+      expect(text).toContain("Neg");
+    });
+
+    // --- All 6 combos from issue #133 reproduced ---
+    it("should match Excel alignment for all 6 rotation combos from issue #133", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let c = 1; c <= 6; c++) {
+        ws.getColumn(c).width = 12;
+      }
+      ws.getRow(1).height = 110;
+
+      // The exact combos from the issue's PDF-Test-2.xlsx Row 8
+      const combos: Array<{ value: string; h: string; v?: string }> = [
+        { value: "Col1", h: "center", v: "top" },
+        { value: "Col2", h: "center", v: "middle" },
+        { value: "Col3", h: "center" },
+        { value: "Col4", h: "left" },
+        { value: "Col5", h: "right" },
+        { value: "Col6", h: "left", v: "top" }
+      ];
+
+      for (let i = 0; i < combos.length; i++) {
+        const cell = ws.getCell(1, i + 1);
+        cell.value = combos[i].value;
+        cell.alignment = {
+          textRotation: 90,
+          horizontal: combos[i].h as any,
+          vertical: combos[i].v as any,
+          wrapText: true
+        };
+      }
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+      const frags = await getFragments(pdfBytes);
+
+      // All 6 texts should be present
+      for (const combo of combos) {
+        expect(frags.find(f => f.text === combo.value)).toBeDefined();
+      }
+
+      // Col1 (center/top) should have higher y than Col3 (center/bottom-default)
+      const col1 = frags.find(f => f.text === "Col1")!;
+      const col3 = frags.find(f => f.text === "Col3")!;
+      expect(col1.y).toBeGreaterThan(col3.y);
+
+      // Col4 (left) should have smaller x than Col5 (right) within their cells
+      // Col4 is in column 4 (offset ~3*colWidth), Col5 in column 5 (offset ~4*colWidth)
+      // Col4 left-aligned within its cell, Col5 right-aligned within its cell
+      const col4 = frags.find(f => f.text === "Col4")!;
+      const col5 = frags.find(f => f.text === "Col5")!;
+      // Despite being in adjacent cells, right-aligned Col5 should have notably larger x
+      expect(col5.x).toBeGreaterThan(col4.x);
     });
   });
 });

@@ -192,29 +192,76 @@ wsAlign.getCell("A8").alignment = { indent: 1 };
 wsAlign.getCell("A9").value = "Indent 3";
 wsAlign.getCell("A9").alignment = { indent: 3 };
 
-// Text rotation
+// Text rotation — basic
 wsAlign.getRow(11).height = 60;
 wsAlign.getCell("A11").value = "45° rotation";
 wsAlign.getCell("A11").alignment = { textRotation: 45 };
 wsAlign.getCell("B11").value = "90° rotation";
 wsAlign.getCell("B11").alignment = { textRotation: 90 };
 wsAlign.getCell("C11").value = "Vertical";
-wsAlign.getCell("C11").alignment = { textRotation: 255 }; // 255 = vertical stacked
+wsAlign.getCell("C11").alignment = { textRotation: "vertical" };
+wsAlign.getCell("D11").value = "-90° rotation";
+wsAlign.getCell("D11").alignment = { textRotation: -90 };
+
+const thinBorder = {
+  top: { style: "thin" as const },
+  bottom: { style: "thin" as const },
+  left: { style: "thin" as const },
+  right: { style: "thin" as const }
+};
+
+// Text rotation — 90° with alignment combinations
+wsAlign.getRow(13).height = 80;
+wsAlign.getCell("A13").value = "center/top";
+wsAlign.getCell("A13").alignment = { textRotation: 90, horizontal: "center", vertical: "top" };
+wsAlign.getCell("A13").border = thinBorder;
+wsAlign.getCell("B13").value = "center/mid";
+wsAlign.getCell("B13").alignment = {
+  textRotation: 90,
+  horizontal: "center",
+  vertical: "middle"
+};
+wsAlign.getCell("B13").border = thinBorder;
+wsAlign.getCell("C13").value = "left/bot";
+wsAlign.getCell("C13").alignment = { textRotation: 90, horizontal: "left", vertical: "bottom" };
+wsAlign.getCell("C13").border = thinBorder;
+wsAlign.getCell("D13").value = "right/bot";
+wsAlign.getCell("D13").alignment = { textRotation: 90, horizontal: "right", vertical: "bottom" };
+wsAlign.getCell("D13").border = thinBorder;
+
+// Text rotation — 45° with slanted borders and alignment
+wsAlign.getRow(15).height = 60;
+wsAlign.getCell("A15").value = "45° top";
+wsAlign.getCell("A15").alignment = { textRotation: 45, horizontal: "center", vertical: "top" };
+wsAlign.getCell("A15").border = thinBorder;
+wsAlign.getCell("B15").value = "45° mid";
+wsAlign.getCell("B15").alignment = {
+  textRotation: 45,
+  horizontal: "center",
+  vertical: "middle"
+};
+wsAlign.getCell("B15").border = thinBorder;
+wsAlign.getCell("C15").value = "45° left";
+wsAlign.getCell("C15").alignment = { textRotation: 45, horizontal: "left", vertical: "bottom" };
+wsAlign.getCell("C15").border = thinBorder;
+wsAlign.getCell("D15").value = "45° right";
+wsAlign.getCell("D15").alignment = { textRotation: 45, horizontal: "right", vertical: "bottom" };
+wsAlign.getCell("D15").border = thinBorder;
 
 // Merged cells
-wsAlign.mergeCells("A13:D13");
-wsAlign.getCell("A13").value = "Merged across 4 columns";
-wsAlign.getCell("A13").alignment = { horizontal: "center" };
-wsAlign.getCell("A13").font = { bold: true, size: 14 };
-wsAlign.getCell("A13").fill = {
+wsAlign.mergeCells("A17:D17");
+wsAlign.getCell("A17").value = "Merged across 4 columns";
+wsAlign.getCell("A17").alignment = { horizontal: "center" };
+wsAlign.getCell("A17").font = { bold: true, size: 14 };
+wsAlign.getCell("A17").fill = {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FFE0E0E0" }
 };
 
-wsAlign.mergeCells("A15:A18");
-wsAlign.getCell("A15").value = "Merged down 4 rows";
-wsAlign.getCell("A15").alignment = { vertical: "middle", horizontal: "center" };
+wsAlign.mergeCells("A19:A22");
+wsAlign.getCell("A19").value = "Merged down 4 rows";
+wsAlign.getCell("A19").alignment = { vertical: "middle", horizontal: "center" };
 
 // =============================================================================
 // Sheet 4: Number Formatting, Hyperlinks, Rich Text

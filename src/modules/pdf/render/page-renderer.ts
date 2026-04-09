@@ -161,24 +161,63 @@ function drawCellFill(stream: PdfContentStream, cell: LayoutCell, alphaValues: S
 }
 
 // =============================================================================
+// Rotation Helpers
+// =============================================================================
+
+/**
+ * Convert Excel textRotation to standard signed degrees.
+ * Excel uses 1-90 for CCW and 91-180 for CW (where 91 = -1°, 180 = -90°).
+ * Returns 0 for non-numeric values (e.g. "vertical").
+ */
+function excelRotationToDegrees(textRotation: number | "vertical"): number {
+  if (typeof textRotation !== "number") {
+    return 0;
+  }
+  return textRotation <= 90 ? textRotation : -(textRotation - 90);
+}
+
+// =============================================================================
 // Cell Borders
 // =============================================================================
 
+/**
+ * Compute the horizontal slant offset for parallelogram borders.
+ * For general rotation angles (not 0°/90°), Excel renders cell borders as a
+ * parallelogram whose left/right edges tilt to match the text rotation angle.
+ * Returns 0 for straight borders (no rotation, 90°, -90°, or vertical stacked).
+ */
+function computeSlantOffset(textRotation: number | "vertical", height: number): number {
+  const degrees = excelRotationToDegrees(textRotation);
+  if (degrees === 0) {
+    return 0;
+  }
+  const absDeg = Math.abs(degrees);
+  if (absDeg < 0.01 || absDeg > 89.99) {
+    return 0;
+  }
+  const radians = (absDeg * Math.PI) / 180;
+  const offset = (height * Math.cos(radians)) / Math.sin(radians);
+  return degrees < 0 ? -offset : offset;
+}
+
 function drawCellBorders(stream: PdfContentStream, cell: LayoutCell): void {
-  const { rect, borders } = cell;
+  const { rect, borders, textRotation } = cell;
   const { x, y, width, height } = rect;
 
+  // Compute slant for parallelogram borders on general-angle rotated cells
+  const slant = computeSlantOffset(textRotation, height);
+
   if (borders.top) {
-    drawBorderLine(stream, borders.top, x, y + height, x + width, y + height, true);
+    drawBorderLine(stream, borders.top, x + slant, y + height, x + width + slant, y + height, true);
   }
   if (borders.bottom) {
     drawBorderLine(stream, borders.bottom, x, y, x + width, y, true);
   }
   if (borders.left) {
-    drawBorderLine(stream, borders.left, x, y, x, y + height, false);
+    drawBorderLine(stream, borders.left, x, y, x + slant, y + height, false);
   }
   if (borders.right) {
-    drawBorderLine(stream, borders.right, x + width, y, x + width, y + height, false);
+    drawBorderLine(stream, borders.right, x + width, y, x + width + slant, y + height, false);
   }
 }
 
@@ -267,9 +306,22 @@ function drawCellText(
   const indentPts = cell.indent * INDENT_WIDTH * scaleFactor;
 
   // Clip to cell bounds (extend for text overflow into adjacent empty cells)
+  // For rotated text with slanted borders, use a parallelogram clip path
   const clipWidth = rect.width + (cell.textOverflowWidth || 0);
   stream.save();
-  stream.rect(rect.x, rect.y, clipWidth, rect.height);
+
+  const slantClip = computeSlantOffset(cell.textRotation, rect.height);
+
+  if (slantClip !== 0) {
+    // Parallelogram clip: bottom-left, bottom-right, top-right (shifted), top-left (shifted)
+    stream.moveTo(rect.x, rect.y);
+    stream.lineTo(rect.x + clipWidth, rect.y);
+    stream.lineTo(rect.x + clipWidth + slantClip, rect.y + rect.height);
+    stream.lineTo(rect.x + slantClip, rect.y + rect.height);
+    stream.closePath();
+  } else {
+    stream.rect(rect.x, rect.y, clipWidth, rect.height);
+  }
   stream.clip();
   stream.endPath();
 
@@ -557,13 +609,7 @@ function drawRotatedText(
     : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
 
   // Convert Excel rotation to degrees
-  // 1-90: counterclockwise, 91-180: clockwise (value-90 degrees)
-  let degrees: number;
-  if (typeof cell.textRotation === "number") {
-    degrees = cell.textRotation <= 90 ? cell.textRotation : -(cell.textRotation - 90);
-  } else {
-    degrees = 0;
-  }
+  const degrees = excelRotationToDegrees(cell.textRotation);
 
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.cos(radians);
@@ -686,13 +732,14 @@ function drawRotated90(
   const { rect, horizontalAlign, verticalAlign } = cell;
   const totalColumnsWidth = lines.length * lineHeight;
 
-  // Horizontal centering of line columns
+  // horizontalAlign controls X placement of line columns (same visual axis)
   let startX: number;
-  if (horizontalAlign === "center" || lines.length === 1) {
+  if (horizontalAlign === "center") {
     startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + ascent;
   } else if (horizontalAlign === "right") {
     startX = rect.x + rect.width - padH - totalColumnsWidth + ascent;
   } else {
+    // left (default)
     startX = rect.x + padH + ascent;
   }
 
@@ -701,14 +748,17 @@ function drawRotated90(
     const lineWidth = fontManager.measureText(line, resourceName, fontSize);
     const colX = startX + i * lineHeight;
 
-    // Vertical positioning: text flows upward from bottom
+    // verticalAlign controls Y placement (text flows upward from ty)
+    // In PDF coords: higher y = top of cell
     let ty: number;
     if (verticalAlign === "top") {
-      ty = rect.y + padV;
+      // text at top → text end near top → ty starts at bottom so text reaches top
+      ty = rect.y + rect.height - padV - lineWidth;
     } else if (verticalAlign === "middle") {
       ty = rect.y + (rect.height - lineWidth) / 2;
     } else {
-      ty = rect.y + rect.height - padV - lineWidth;
+      // bottom (default) → text at bottom → ty near bottom
+      ty = rect.y + padV;
     }
     ty = Math.max(ty, rect.y + padV);
 
@@ -736,12 +786,14 @@ function drawRotatedMinus90(
   const { rect, horizontalAlign, verticalAlign } = cell;
   const totalColumnsWidth = lines.length * lineHeight;
 
+  // horizontalAlign controls X placement: lines stack right-to-left
   let startX: number;
-  if (horizontalAlign === "center" || lines.length === 1) {
+  if (horizontalAlign === "center") {
     startX = rect.x + rect.width / 2 + totalColumnsWidth / 2 - lineHeight + ascent;
   } else if (horizontalAlign === "right") {
     startX = rect.x + rect.width - padH - lineHeight + ascent;
   } else {
+    // left (default)
     startX = rect.x + padH + totalColumnsWidth - lineHeight + ascent;
   }
 
@@ -750,12 +802,16 @@ function drawRotatedMinus90(
     const lineWidth = fontManager.measureText(line, resourceName, fontSize);
     const colX = startX - i * lineHeight;
 
+    // verticalAlign controls Y placement (text flows downward from ty)
+    // In PDF coords: higher y = top of cell; text drawn downward = toward lower y
     let ty: number;
     if (verticalAlign === "top") {
+      // text at top → ty near top (high PDF y)
       ty = rect.y + rect.height - padV;
     } else if (verticalAlign === "middle") {
       ty = rect.y + (rect.height + lineWidth) / 2;
     } else {
+      // bottom (default) → text at bottom → ty so text ends at bottom
       ty = rect.y + padV + lineWidth;
     }
     ty = Math.min(ty, rect.y + rect.height - padV);
@@ -782,12 +838,56 @@ function drawRotatedGeneral(
   sin: number,
   indentPts: number
 ): void {
-  const { rect, horizontalAlign } = cell;
+  const { rect, horizontalAlign, verticalAlign } = cell;
+  const padH = CELL_PADDING_H;
+  const padV = CELL_PADDING_V;
 
+  // Compute the rotated bounding box of the text block
+  let maxLineWidth = 0;
+  for (const line of lines) {
+    const w = fontManager.measureText(line, resourceName, fontSize);
+    if (w > maxLineWidth) {
+      maxLineWidth = w;
+    }
+  }
+  const totalTextHeight = lines.length * lineHeight;
+  const absSin = Math.abs(sin);
+  const absCos = Math.abs(cos);
+  const rotatedWidth = maxLineWidth * absCos + totalTextHeight * absSin;
+  const rotatedHeight = maxLineWidth * absSin + totalTextHeight * absCos;
+
+  // Compute slant offset to match parallelogram border shape
+  const slantShift = computeSlantOffset(cell.textRotation, rect.height) / 2;
+
+  // Determine vertical position first, then horizontal (because slant depends on Y position)
   const indentOffset =
     horizontalAlign === "left" ? indentPts / 2 : horizontalAlign === "right" ? -indentPts / 2 : 0;
-  const cx = rect.x + rect.width / 2 + indentOffset;
-  const cy = rect.y + rect.height / 2;
+
+  let cy: number;
+  if (verticalAlign === "top") {
+    cy = rect.y + rect.height - padV - rotatedHeight / 2;
+  } else if (verticalAlign === "bottom") {
+    cy = rect.y + padV + rotatedHeight / 2;
+  } else {
+    // middle (default)
+    cy = rect.y + rect.height / 2;
+  }
+
+  // For slanted parallelogram, the horizontal offset depends on the vertical position
+  // At bottom (y), left edge is at x; at top (y+height), left edge is at x+slantOffset
+  // At cy, the horizontal shift is proportional: slantOffset * (cy - y) / height
+  const verticalRatio = rect.height > 0 ? (cy - rect.y) / rect.height : 0.5;
+  const slantAtCy = slantShift * 2 * verticalRatio; // slantShift*2 = full slantOffset
+
+  let cx: number;
+  if (horizontalAlign === "right") {
+    cx = rect.x + rect.width - padH - rotatedWidth / 2 + indentOffset + slantAtCy;
+  } else if (horizontalAlign === "left") {
+    cx = rect.x + padH + rotatedWidth / 2 + indentOffset + slantAtCy;
+  } else {
+    // center (default for rotated)
+    cx = rect.x + rect.width / 2 + indentOffset + slantAtCy;
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -832,7 +932,8 @@ function drawVerticalStackedText(
   _indentPts: number,
   scaleFactor = 1
 ): void {
-  const { rect, text, fontSize } = cell;
+  const { rect, text, fontSize, horizontalAlign, verticalAlign } = cell;
+  const padH = CELL_PADDING_H * scaleFactor;
   const padV = CELL_PADDING_V * scaleFactor;
   const isEmbedded = fontManager.hasEmbeddedFont();
   const resourceName = isEmbedded
@@ -846,14 +947,35 @@ function drawVerticalStackedText(
   const columns = text.split(/\r?\n/);
   const columnWidth = fontSize * 1.4;
   const totalColumnsWidth = columns.length * columnWidth;
-  const startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + columnWidth / 2;
+
+  // Horizontal alignment controls column X positioning
+  let startX: number;
+  if (horizontalAlign === "center") {
+    startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + columnWidth / 2;
+  } else if (horizontalAlign === "right") {
+    startX = rect.x + rect.width - padH - totalColumnsWidth + columnWidth / 2;
+  } else {
+    // left (default)
+    startX = rect.x + padH + columnWidth / 2;
+  }
 
   stream.setFillColor(cell.textColor);
 
   for (let colIdx = 0; colIdx < columns.length; colIdx++) {
     const colText = columns[colIdx];
     const colX = startX + colIdx * columnWidth;
-    let currentY = rect.y + rect.height - padV - ascent;
+    const totalTextHeight = colText.length * charHeight;
+
+    // Vertical alignment controls starting Y position (PDF y-axis: higher = top of cell)
+    let currentY: number;
+    if (verticalAlign === "middle") {
+      currentY = rect.y + rect.height / 2 + totalTextHeight / 2 - ascent;
+    } else if (verticalAlign === "bottom") {
+      currentY = rect.y + padV + totalTextHeight - ascent;
+    } else {
+      // top (default)
+      currentY = rect.y + rect.height - padV - ascent;
+    }
 
     for (const ch of colText) {
       if (currentY < rect.y + padV) {
