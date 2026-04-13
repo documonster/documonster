@@ -7,58 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [9.1.0](https://github.com/cjnoname/excelts/compare/v9.0.0...v9.1.0) (2026-04-09)
 
-
 ### Features
 
-* Add watermark support for PDF and Excel ([a0d72ec](https://github.com/cjnoname/excelts/commit/a0d72ec81246259b2182270ed234aa78763be53e)), closes [#134](https://github.com/cjnoname/excelts/issues/134)
-
+- Add watermark support for PDF and Excel ([a0d72ec](https://github.com/cjnoname/excelts/commit/a0d72ec81246259b2182270ed234aa78763be53e)), closes [#134](https://github.com/cjnoname/excelts/issues/134)
 
 ### Bug Fixes
 
-* Correct rotated text alignment and add slanted borders in PDF rendering ([10b2d8c](https://github.com/cjnoname/excelts/commit/10b2d8c2ffc5ce271a37e9a962cfef2d4686a068))
+- Correct rotated text alignment and add slanted borders in PDF rendering ([10b2d8c](https://github.com/cjnoname/excelts/commit/10b2d8c2ffc5ce271a37e9a962cfef2d4686a068))
 
 ## [9.0.0](https://github.com/cjnoname/excelts/compare/v8.1.2...v9.0.0) (2026-04-09)
 
-
 ### ⚠ BREAKING CHANGES
 
-* pdf(), readPdf(), and excelToPdf() now return Promise instead of synchronous results. All call sites must use await.
+- pdf(), readPdf(), and excelToPdf() now return Promise instead of synchronous results. All call sites must use await.
 
 ### Features
 
-* Make PDF APIs async to avoid blocking the event loop ([2f521cd](https://github.com/cjnoname/excelts/commit/2f521cd3c7706c191f01e9483ebff659c963c73d))
-
+- Make PDF APIs async to avoid blocking the event loop ([2f521cd](https://github.com/cjnoname/excelts/commit/2f521cd3c7706c191f01e9483ebff659c963c73d))
 
 ### Bug Fixes
 
-* Improve Excel-to-PDF style fidelity and fix cell style mutation leaks ([0448604](https://github.com/cjnoname/excelts/commit/044860403f6d5454f85b92fe701e2f7a13fbab73))
+- Improve Excel-to-PDF style fidelity and fix cell style mutation leaks ([0448604](https://github.com/cjnoname/excelts/commit/044860403f6d5454f85b92fe701e2f7a13fbab73))
 
 ## [8.1.2](https://github.com/cjnoname/excelts/compare/v8.1.1...v8.1.2) (2026-04-07)
 
-
 ### Bug Fixes
 
-* Add PDF subpath export and complete tree-shake coverage for all modules ([4faedf6](https://github.com/cjnoname/excelts/commit/4faedf6949471e9412113e33605553a5e4a93189))
+- Add PDF subpath export and complete tree-shake coverage for all modules ([4faedf6](https://github.com/cjnoname/excelts/commit/4faedf6949471e9412113e33605553a5e4a93189))
 
 ## [8.1.1](https://github.com/cjnoname/excelts/compare/v8.1.0...v8.1.1) (2026-04-05)
 
-
 ### Bug Fixes
 
-* **pdf:** Prevent double-unescaping in XML entity decoding (CWE-116) ([4423033](https://github.com/cjnoname/excelts/commit/442303343894cc7686fb43b0b7bed88772ac8d62))
+- **pdf:** Prevent double-unescaping in XML entity decoding (CWE-116) ([4423033](https://github.com/cjnoname/excelts/commit/442303343894cc7686fb43b0b7bed88772ac8d62))
 
 ## [8.1.0](https://github.com/cjnoname/excelts/compare/v8.0.0...v8.1.0) (2026-04-05)
 
-
 ### Features
 
-* **pdf:** Add zero-dependency PDF reader with text, image, and metadata extraction ([23663b3](https://github.com/cjnoname/excelts/commit/23663b3337392c5fc098cc4b15ee6243f6879ff2))
-* **pdf:** Upgrade writer to PDF 2.0/AES-256, add annotation and form field extraction ([c725147](https://github.com/cjnoname/excelts/commit/c725147efd803ea28d34fe0aaf8210cfbd11ee0f))
-
+- **pdf:** Add zero-dependency PDF reader with text, image, and metadata extraction ([23663b3](https://github.com/cjnoname/excelts/commit/23663b3337392c5fc098cc4b15ee6243f6879ff2))
+- **pdf:** Upgrade writer to PDF 2.0/AES-256, add annotation and form field extraction ([c725147](https://github.com/cjnoname/excelts/commit/c725147efd803ea28d34fe0aaf8210cfbd11ee0f))
 
 ### Performance Improvements
 
-* **archive:** Batch small async push() calls in ZipDeflateFile (4.4x browser speedup) ([54a7a78](https://github.com/cjnoname/excelts/commit/54a7a78779e2eb9772dbdf32647e63d81132fc0d)), closes [#127](https://github.com/cjnoname/excelts/issues/127)
+- **archive:** Batch small async push() calls in ZipDeflateFile (4.4x browser speedup) ([54a7a78](https://github.com/cjnoname/excelts/commit/54a7a78779e2eb9772dbdf32647e63d81132fc0d)), closes [#127](https://github.com/cjnoname/excelts/issues/127)
 
 ## [8.0.0](https://github.com/cjnoname/excelts/compare/v7.6.0...v8.0.0) (2026-04-05)
 

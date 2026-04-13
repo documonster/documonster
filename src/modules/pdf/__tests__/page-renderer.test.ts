@@ -18,6 +18,29 @@ describe("page-renderer helpers", () => {
     it("should ignore indent for centered text", () => {
       expect(computeTextX("center", { x: 10, width: 100 }, 20, 8)).toBe(50);
     });
+
+    it("should use asymmetric padding when provided", () => {
+      const rect = { x: 10, width: 100 };
+      const padLeft = 5;
+      const padRight = 10;
+
+      // left-aligned: x + padLeft + indent
+      expect(computeTextX("left", rect, 20, 0, padLeft, padRight)).toBe(15);
+
+      // right-aligned: x + width - padRight - textWidth
+      expect(computeTextX("right", rect, 20, 0, padLeft, padRight)).toBe(80);
+
+      // center: unchanged by padding
+      expect(computeTextX("center", rect, 20, 0, padLeft, padRight)).toBe(50);
+    });
+
+    it("should clamp right-aligned text to padLeft boundary", () => {
+      // Right-aligned with very wide text that would start before cell left
+      const rect = { x: 10, width: 50 };
+      // textWidth=100 > rect.width, so right-align would put x at 10+50-5-100 = -45
+      // Clamp to minX = x + padLeft = 15
+      expect(computeTextX("right", rect, 100, 0, 5, 5)).toBe(15);
+    });
   });
 
   describe("computeTextStartY", () => {
@@ -30,6 +53,19 @@ describe("page-renderer helpers", () => {
 
       expect(top).toBeGreaterThan(middle);
       expect(middle).toBeGreaterThan(bottom);
+    });
+
+    it("should use asymmetric vertical padding", () => {
+      const padTop = 5;
+      const padBottom = 10;
+
+      // top-aligned: y + height - padTop - ascent
+      const topY = computeTextStartY("top", rect, 12, 8, padTop, padBottom);
+      expect(topY).toBe(10 + 40 - 5 - 8); // 37
+
+      // bottom-aligned: y + padBottom + (totalTextHeight - ascent)
+      const bottomY = computeTextStartY("bottom", rect, 12, 8, padTop, padBottom);
+      expect(bottomY).toBe(10 + 10 + (12 - 8)); // 24
     });
   });
 

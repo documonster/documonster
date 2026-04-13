@@ -28,6 +28,34 @@ import type {
 import { CELL_PADDING_H, CELL_PADDING_V, LINE_HEIGHT_FACTOR, INDENT_WIDTH } from "./constants";
 
 // =============================================================================
+// Border-aware Padding
+// =============================================================================
+
+/**
+ * Compute cell padding that accounts for border width.
+ *
+ * PDF strokes are centred on the path, so half the border width extends
+ * inward into the cell.  `borderInsets` already contains the resolved
+ * half-width for each side (accounting for shared-edge resolution where a
+ * neighbour may draw the line but it still intrudes into this cell).
+ */
+interface CellPadding {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+function computeCellPadding(cell: LayoutCell, scaleFactor = 1): CellPadding {
+  return {
+    left: (CELL_PADDING_H + cell.borderInsets.left) * scaleFactor,
+    right: (CELL_PADDING_H + cell.borderInsets.right) * scaleFactor,
+    top: (CELL_PADDING_V + cell.borderInsets.top) * scaleFactor,
+    bottom: (CELL_PADDING_V + cell.borderInsets.bottom) * scaleFactor
+  };
+}
+
+// =============================================================================
 // Page Renderer
 // =============================================================================
 
@@ -299,10 +327,9 @@ function drawCellText(
     return;
   }
 
-  const padH = CELL_PADDING_H * scaleFactor;
-  const padV = CELL_PADDING_V * scaleFactor;
-  const availWidth = rect.width - padH * 2;
-  const availHeight = rect.height - padV * 2;
+  const pad = computeCellPadding(cell, scaleFactor);
+  const availWidth = rect.width - pad.left - pad.right;
+  const availHeight = rect.height - pad.top - pad.bottom;
   if (availWidth <= 0 || availHeight <= 0) {
     return;
   }
@@ -369,7 +396,14 @@ function drawCellText(
   const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
   const ascent = fontManager.getFontAscent(resourceName, fontSize);
   const totalTextHeight = lines.length * lineHeight;
-  const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent, padV);
+  const textStartY = computeTextStartY(
+    verticalAlign,
+    rect,
+    totalTextHeight,
+    ascent,
+    pad.top,
+    pad.bottom
+  );
 
   stream.setFillColor(cell.textColor);
   stream.beginText();
@@ -379,7 +413,7 @@ function drawCellText(
     const line = lines[i];
     const lineY = textStartY - i * lineHeight;
     const textWidth = measure(line);
-    const textX = computeTextX(horizontalAlign, rect, textWidth, indentPts, padH);
+    const textX = computeTextX(horizontalAlign, rect, textWidth, indentPts, pad.left, pad.right);
 
     stream.setTextMatrix(1, 0, 0, 1, textX, lineY);
     const hexEncoded = fontManager.encodeText(line, resourceName);
@@ -401,7 +435,8 @@ function drawCellText(
     measure,
     resourceName,
     fontManager,
-    indentPts
+    indentPts,
+    pad
   );
   stream.restore();
 }
@@ -419,8 +454,7 @@ function drawRichText(
 ): void {
   const { rect, horizontalAlign, verticalAlign, wrapText } = cell;
   const runs = cell.richText!;
-  const padH = CELL_PADDING_H * scaleFactor;
-  const padV = CELL_PADDING_V * scaleFactor;
+  const pad = computeCellPadding(cell, scaleFactor);
 
   // Use the largest font size across all runs for line height calculation
   let maxFontSize = cell.fontSize;
@@ -442,7 +476,7 @@ function drawRichText(
 
   // --- Wrapping path ---
   if (wrapText) {
-    const availWidth = rect.width - padH * 2 - indentPts;
+    const availWidth = rect.width - pad.left - pad.right - indentPts;
     if (availWidth <= 0) {
       return;
     }
@@ -464,7 +498,14 @@ function drawRichText(
     const primaryResourceName = runResource(runs[0]);
     const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
     const totalTextHeight = lines.length * lineHeight;
-    const textStartY = computeTextStartY(verticalAlign, rect, totalTextHeight, ascent, padV);
+    const textStartY = computeTextStartY(
+      verticalAlign,
+      rect,
+      totalTextHeight,
+      ascent,
+      pad.top,
+      pad.bottom
+    );
 
     let charPos = 0;
     for (let li = 0; li < lines.length; li++) {
@@ -507,7 +548,7 @@ function drawRichText(
         lineWidth += fontManager.measureText(seg.text, seg.resourceName, seg.run.fontSize);
       }
 
-      let textX = computeTextX(horizontalAlign, rect, lineWidth, indentPts, padH);
+      let textX = computeTextX(horizontalAlign, rect, lineWidth, indentPts, pad.left, pad.right);
       for (const seg of segments) {
         const { run, text, resourceName } = seg;
         const segWidth = fontManager.measureText(text, resourceName, run.fontSize);
@@ -554,8 +595,15 @@ function drawRichText(
 
   const primaryResourceName = runMetrics[0]?.resourceName ?? "F1";
   const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
-  const textStartY = computeTextStartY(verticalAlign, rect, lineHeight, ascent, padV);
-  let textX = computeTextX(horizontalAlign, rect, totalWidth, indentPts, padH);
+  const textStartY = computeTextStartY(
+    verticalAlign,
+    rect,
+    lineHeight,
+    ascent,
+    pad.top,
+    pad.bottom
+  );
+  let textX = computeTextX(horizontalAlign, rect, totalWidth, indentPts, pad.left, pad.right);
 
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
@@ -605,8 +653,7 @@ function drawRotatedText(
 ): void {
   const { rect, wrapText } = cell;
   let { fontSize } = cell;
-  const padH = CELL_PADDING_H * scaleFactor;
-  const padV = CELL_PADDING_V * scaleFactor;
+  const pad = computeCellPadding(cell, scaleFactor);
   const isEmbedded = fontManager.hasEmbeddedFont();
   const resourceName = isEmbedded
     ? fontManager.getEmbeddedResourceName()
@@ -621,8 +668,8 @@ function drawRotatedText(
   const absSin = Math.abs(sin);
   const absCos = Math.abs(cos);
 
-  const maxWidth = rect.width - padH * 2;
-  const maxHeight = rect.height - padV * 2;
+  const maxWidth = rect.width - pad.left - pad.right;
+  const maxHeight = rect.height - pad.top - pad.bottom;
 
   // Available length along the text flow direction for wrapping
   let availTextLength: number;
@@ -685,8 +732,7 @@ function drawRotatedText(
       fontSize,
       scaledLineHeight,
       ascent,
-      padH,
-      padV
+      pad
     );
   } else if (isMinus90) {
     // Text reads top-to-bottom. Each line becomes a column drawn right-to-left.
@@ -699,8 +745,7 @@ function drawRotatedText(
       fontSize,
       scaledLineHeight,
       ascent,
-      padH,
-      padV
+      pad
     );
   } else {
     // General rotation — center multi-line text block in cell
@@ -730,8 +775,7 @@ function drawRotated90(
   fontSize: number,
   lineHeight: number,
   ascent: number,
-  padH: number,
-  padV: number
+  pad: CellPadding
 ): void {
   const { rect, horizontalAlign, verticalAlign } = cell;
   const totalColumnsWidth = lines.length * lineHeight;
@@ -741,10 +785,10 @@ function drawRotated90(
   if (horizontalAlign === "center") {
     startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + ascent;
   } else if (horizontalAlign === "right") {
-    startX = rect.x + rect.width - padH - totalColumnsWidth + ascent;
+    startX = rect.x + rect.width - pad.right - totalColumnsWidth + ascent;
   } else {
     // left (default)
-    startX = rect.x + padH + ascent;
+    startX = rect.x + pad.left + ascent;
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -757,14 +801,14 @@ function drawRotated90(
     let ty: number;
     if (verticalAlign === "top") {
       // text at top → text end near top → ty starts at bottom so text reaches top
-      ty = rect.y + rect.height - padV - lineWidth;
+      ty = rect.y + rect.height - pad.top - lineWidth;
     } else if (verticalAlign === "middle") {
       ty = rect.y + (rect.height - lineWidth) / 2;
     } else {
       // bottom (default) → text at bottom → ty near bottom
-      ty = rect.y + padV;
+      ty = rect.y + pad.bottom;
     }
-    ty = Math.max(ty, rect.y + padV);
+    ty = Math.max(ty, rect.y + pad.bottom);
 
     stream.beginText();
     stream.setFont(resourceName, fontSize);
@@ -784,8 +828,7 @@ function drawRotatedMinus90(
   fontSize: number,
   lineHeight: number,
   ascent: number,
-  padH: number,
-  padV: number
+  pad: CellPadding
 ): void {
   const { rect, horizontalAlign, verticalAlign } = cell;
   const totalColumnsWidth = lines.length * lineHeight;
@@ -795,10 +838,10 @@ function drawRotatedMinus90(
   if (horizontalAlign === "center") {
     startX = rect.x + rect.width / 2 + totalColumnsWidth / 2 - lineHeight + ascent;
   } else if (horizontalAlign === "right") {
-    startX = rect.x + rect.width - padH - lineHeight + ascent;
+    startX = rect.x + rect.width - pad.right - lineHeight + ascent;
   } else {
     // left (default)
-    startX = rect.x + padH + totalColumnsWidth - lineHeight + ascent;
+    startX = rect.x + pad.left + totalColumnsWidth - lineHeight + ascent;
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -811,14 +854,14 @@ function drawRotatedMinus90(
     let ty: number;
     if (verticalAlign === "top") {
       // text at top → ty near top (high PDF y)
-      ty = rect.y + rect.height - padV;
+      ty = rect.y + rect.height - pad.top;
     } else if (verticalAlign === "middle") {
       ty = rect.y + (rect.height + lineWidth) / 2;
     } else {
       // bottom (default) → text at bottom → ty so text ends at bottom
-      ty = rect.y + padV + lineWidth;
+      ty = rect.y + pad.bottom + lineWidth;
     }
-    ty = Math.min(ty, rect.y + rect.height - padV);
+    ty = Math.min(ty, rect.y + rect.height - pad.top);
 
     stream.beginText();
     stream.setFont(resourceName, fontSize);
@@ -843,8 +886,8 @@ function drawRotatedGeneral(
   indentPts: number
 ): void {
   const { rect, horizontalAlign, verticalAlign } = cell;
-  const padH = CELL_PADDING_H;
-  const padV = CELL_PADDING_V;
+  // Use border-aware padding (no scaleFactor — font size is already scaled by caller)
+  const pad = computeCellPadding(cell);
 
   // Compute the rotated bounding box of the text block
   let maxLineWidth = 0;
@@ -869,9 +912,9 @@ function drawRotatedGeneral(
 
   let cy: number;
   if (verticalAlign === "top") {
-    cy = rect.y + rect.height - padV - rotatedHeight / 2;
+    cy = rect.y + rect.height - pad.top - rotatedHeight / 2;
   } else if (verticalAlign === "bottom") {
-    cy = rect.y + padV + rotatedHeight / 2;
+    cy = rect.y + pad.bottom + rotatedHeight / 2;
   } else {
     // middle (default)
     cy = rect.y + rect.height / 2;
@@ -885,9 +928,9 @@ function drawRotatedGeneral(
 
   let cx: number;
   if (horizontalAlign === "right") {
-    cx = rect.x + rect.width - padH - rotatedWidth / 2 + indentOffset + slantAtCy;
+    cx = rect.x + rect.width - pad.right - rotatedWidth / 2 + indentOffset + slantAtCy;
   } else if (horizontalAlign === "left") {
-    cx = rect.x + padH + rotatedWidth / 2 + indentOffset + slantAtCy;
+    cx = rect.x + pad.left + rotatedWidth / 2 + indentOffset + slantAtCy;
   } else {
     // center (default for rotated)
     cx = rect.x + rect.width / 2 + indentOffset + slantAtCy;
@@ -937,8 +980,7 @@ function drawVerticalStackedText(
   scaleFactor = 1
 ): void {
   const { rect, text, fontSize, horizontalAlign, verticalAlign } = cell;
-  const padH = CELL_PADDING_H * scaleFactor;
-  const padV = CELL_PADDING_V * scaleFactor;
+  const pad = computeCellPadding(cell, scaleFactor);
   const isEmbedded = fontManager.hasEmbeddedFont();
   const resourceName = isEmbedded
     ? fontManager.getEmbeddedResourceName()
@@ -957,10 +999,10 @@ function drawVerticalStackedText(
   if (horizontalAlign === "center") {
     startX = rect.x + rect.width / 2 - totalColumnsWidth / 2 + columnWidth / 2;
   } else if (horizontalAlign === "right") {
-    startX = rect.x + rect.width - padH - totalColumnsWidth + columnWidth / 2;
+    startX = rect.x + rect.width - pad.right - totalColumnsWidth + columnWidth / 2;
   } else {
     // left (default)
-    startX = rect.x + padH + columnWidth / 2;
+    startX = rect.x + pad.left + columnWidth / 2;
   }
 
   stream.setFillColor(cell.textColor);
@@ -975,14 +1017,14 @@ function drawVerticalStackedText(
     if (verticalAlign === "middle") {
       currentY = rect.y + rect.height / 2 + totalTextHeight / 2 - ascent;
     } else if (verticalAlign === "bottom") {
-      currentY = rect.y + padV + totalTextHeight - ascent;
+      currentY = rect.y + pad.bottom + totalTextHeight - ascent;
     } else {
       // top (default)
-      currentY = rect.y + rect.height - padV - ascent;
+      currentY = rect.y + rect.height - pad.top - ascent;
     }
 
     for (const ch of colText) {
-      if (currentY < rect.y + padV) {
+      if (currentY < rect.y + pad.bottom) {
         break;
       }
       const charWidth = fontManager.measureText(ch, resourceName, fontSize);
@@ -1019,28 +1061,29 @@ export function computeTextStartY(
   rect: PdfRect,
   totalTextHeight: number,
   ascent: number,
-  padV = CELL_PADDING_V
+  padVTop = CELL_PADDING_V,
+  padVBottom = padVTop
 ): number {
   let y: number;
   switch (verticalAlign) {
     case "top":
-      y = rect.y + rect.height - padV - ascent;
+      y = rect.y + rect.height - padVTop - ascent;
       break;
     case "middle":
       y = rect.y + rect.height / 2 + totalTextHeight / 2 - ascent;
       break;
     case "bottom":
     default:
-      y = rect.y + padV + (totalTextHeight - ascent);
+      y = rect.y + padVBottom + (totalTextHeight - ascent);
       break;
   }
   // Clamp: ensure text ascent doesn't exceed the cell top
-  const maxY = rect.y + rect.height - padV - ascent;
+  const maxY = rect.y + rect.height - padVTop - ascent;
   if (y > maxY) {
     y = maxY;
   }
   // Clamp: ensure text descent doesn't go below cell bottom
-  const minY = rect.y + padV;
+  const minY = rect.y + padVBottom;
   if (y < minY) {
     y = minY;
   }
@@ -1052,7 +1095,8 @@ export function computeTextX(
   rect: { x: number; width: number },
   textWidth: number,
   indentPts = 0,
-  padH = CELL_PADDING_H
+  padHLeft = CELL_PADDING_H,
+  padHRight = padHLeft
 ): number {
   let x: number;
   switch (align) {
@@ -1060,14 +1104,14 @@ export function computeTextX(
       x = rect.x + (rect.width - textWidth) / 2;
       break;
     case "right":
-      x = rect.x + rect.width - padH - textWidth;
+      x = rect.x + rect.width - padHRight - textWidth;
       break;
     default:
-      x = rect.x + padH + indentPts;
+      x = rect.x + padHLeft + indentPts;
       break;
   }
   // Clamp: don't start before cell left edge
-  const minX = rect.x + padH;
+  const minX = rect.x + padHLeft;
   if (x < minX) {
     x = minX;
   }
@@ -1083,7 +1127,8 @@ function drawTextDecorations(
   measure: (s: string) => number,
   resourceName: string,
   fontManager: FontManager,
-  indentPts: number
+  indentPts: number,
+  pad?: CellPadding
 ): void {
   if (cell.strike) {
     const descent = fontManager.getFontDescent(resourceName, cell.fontSize);
@@ -1091,7 +1136,14 @@ function drawTextDecorations(
     for (let i = 0; i < lines.length; i++) {
       const lineY = strikeY - i * lineHeight;
       const lw = measure(lines[i]);
-      const startX = computeTextX(cell.horizontalAlign, cell.rect, lw, indentPts);
+      const startX = computeTextX(
+        cell.horizontalAlign,
+        cell.rect,
+        lw,
+        indentPts,
+        pad?.left,
+        pad?.right
+      );
       stream.drawLine(startX, lineY, startX + lw, lineY, cell.textColor, 0.5);
     }
   }
@@ -1101,7 +1153,14 @@ function drawTextDecorations(
     for (let i = 0; i < lines.length; i++) {
       const lineY = textStartY - i * lineHeight + underlineOffset;
       const lw = measure(lines[i]);
-      const startX = computeTextX(cell.horizontalAlign, cell.rect, lw, indentPts);
+      const startX = computeTextX(
+        cell.horizontalAlign,
+        cell.rect,
+        lw,
+        indentPts,
+        pad?.left,
+        pad?.right
+      );
       stream.drawLine(startX, lineY, startX + lw, lineY, cell.textColor, 0.5);
     }
   }

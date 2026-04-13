@@ -1,33 +1,46 @@
-# AGENTS.md - AI Coding Agent Guidelines
-
-This document provides guidelines for AI coding agents working in the excelts codebase.
+# AGENTS.md
 
 ## Project Overview
 
-**excelts** is a zero-dependency TypeScript toolkit with seven standalone modules: Excel (XLSX/JSON), PDF (standalone engine + Excel bridge), CSV (RFC 4180), Markdown (GFM tables), XML (SAX/DOM/Writer), Archive (ZIP/TAR), and Stream (cross-platform).
+**excelts** — zero-dependency TypeScript toolkit. Seven modules: Excel, PDF, CSV, Markdown, XML, Archive, Stream.
 
-- Zero runtime dependencies
-- Cross-platform: Node.js (22+) and browsers (Chrome 89+, Firefox 102+, Safari 14.1+)
+- Zero runtime dependencies — never add packages to `dependencies`
+- Cross-platform: Node.js 22+ and modern browsers
 - ESM-first with CommonJS compatibility
 
-## Build/Lint/Test Commands
+## Hard Rules
+
+1. **No runtime dependencies.** All functionality must be self-contained.
+2. **No circular imports.** Enforced by `import/no-cycle`.
+3. **Named exports only.** No default exports.
+4. **Respect module dependency direction.** See layer diagram below. Never introduce upward dependencies.
+5. **Run `pnpm run check` then `pnpm run format` before committing.**
+
+## Bug Fixing & Code Changes
+
+- **Fix root causes, not symptoms.** Trace every bug to its origin. Never patch over a problem — fix the underlying logic.
+- **Read before writing.** Before modifying any file, read the surrounding code to understand context, patterns, and invariants. Do not assume — verify.
+- **Match existing patterns.** Follow the conventions already present in the file and module. When unsure, search for similar code in the codebase first.
+- **No speculative code.** If you are uncertain about an API, type, or behavior, look it up in the source. Do not guess.
+- **Fix it properly.** If the correct fix requires changing multiple files, refactoring a helper, or adjusting an interface — do it. Do not take shortcuts to minimize the diff. The goal is the best solution, not the smallest patch.
+- **Do not be afraid of large changes.** If the best solution means rewriting a function, restructuring a module, or breaking an existing API — do it. Correctness and quality come first. Tests exist to catch regressions; use them.
+- **Do not touch unrelated files.** Only modify files directly relevant to the task. Never make drive-by changes to code you were not asked to work on.
+- **Verify your fix.** After making changes, run the relevant tests or `pnpm run check` to confirm the fix works. Never claim a problem is resolved without evidence.
+- **No over-engineering.** Solve the actual problem, not a hypothetical general case. If unsure whether a design is over-engineered, summarize the tradeoffs and ask before proceeding.
+
+## Commands
 
 ```bash
-pnpm install             # Install dependencies (use pnpm)
-pnpm run check           # Type check + lint (parallel)
-pnpm run type            # Type checking only
-pnpm run lint            # Linting (ESLint + OxLint)
-pnpm run lint:fix        # Auto-fix lint issues
-pnpm run format          # Format with Prettier
-pnpm run test            # Run all tests (Node + browser)
-pnpm run test:watch      # Watch mode
-pnpm run test:browser    # Browser tests only
-pnpm run build           # Full production build
+pnpm install                  # Install (use pnpm, not npm/yarn)
+pnpm run check                # Type check + lint — run before commit
+pnpm run format               # Prettier format — run before commit
+pnpm run lint:fix             # Auto-fix lint issues
+pnpm run test                 # All tests
+pnpm run build                # Production build
 
-# Run a SINGLE test file
+# Single test file
 pnpm exec vitest run src/modules/excel/__tests__/cell.test.ts
-
-# Run tests matching a pattern
+# Pattern match
 pnpm exec vitest run -t "should handle empty cells"
 ```
 
@@ -35,146 +48,43 @@ pnpm exec vitest run -t "should handle empty cells"
 
 ```
 src/
-├── index.ts              # Main Node.js entry
-├── index.browser.ts      # Browser entry
 ├── modules/
-│   ├── excel/            # Workbook, Worksheet, Cell, Row, Column
-│   │   ├── __tests__/    # Tests
-│   │   ├── examples/     # Runnable examples
-│   │   ├── stream/       # WorkbookWriter, WorkbookReader
-│   │   └── xlsx/         # XLSX format parsing/writing
-│   ├── archive/          # ZIP/compression (zero-dependency)
-│   │   ├── __tests__/    # Tests
-│   │   └── examples/     # Runnable examples
-│   ├── csv/              # CSV parsing/formatting
-│   │   ├── __tests__/    # Tests
-│   │   └── examples/     # Runnable examples
-│   ├── markdown/         # GFM table parsing/formatting
-│   │   ├── __tests__/    # Tests
-│   │   └── examples/     # Runnable examples
-│   ├── pdf/              # PDF engine (zero-dependency, standalone)
-│   │   ├── __tests__/    # Tests
-│   │   ├── core/         # PDF objects, streams, writer, encryption
-│   │   ├── font/         # Font metrics, TTF parsing, embedding
-│   │   ├── render/       # Layout engine, page renderer, exporter (zero @excel imports)
-│   │   ├── excel-bridge  # Excel Workbook → PdfWorkbook conversion (only @excel dependency)
-│   │   └── examples/     # Runnable examples
-│   ├── xml/              # XML SAX/DOM parser, query engine, writer
-│   │   ├── __tests__/    # Tests
-│   │   └── examples/     # Runnable examples
-│   └── stream/           # Cross-platform streaming
-│       ├── __tests__/    # Tests
-│       └── examples/     # Runnable examples
-├── utils/                # Shared utilities (errors, datetime, fs)
-└── test/                 # Test utilities and fixtures
+│   ├── excel/          # Workbook, Worksheet, Cell; stream/ xlsx/
+│   ├── pdf/            # core/ font/ render/ + excel-bridge.ts
+│   ├── csv/            # Parsing/formatting + streaming
+│   ├── markdown/       # GFM table parsing/formatting
+│   ├── xml/            # SAX/DOM parser, query engine, writer
+│   ├── archive/        # ZIP/TAR compression
+│   └── stream/         # Cross-platform streaming primitives
+├── utils/              # Shared: errors, datetime, fs, binary
+└── test/               # Test utilities and fixtures
 ```
+
+## Module Dependency Layers
+
+```
+Layer 4:  excel    → archive, xml, csv, markdown, stream, utils
+Layer 3:  pdf      → excel (only excel-bridge.ts), archive, utils
+Layer 2:  csv, archive → stream, utils
+Layer 1:  xml, markdown, stream → utils
+Layer 0:  utils    (no module dependencies)
+```
+
+- Modules may only import from **lower** layers — never sideways or upward.
+- **Sole exception**: `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may.
+- `utils/` must never import from any module.
 
 ## Path Aliases
 
-- `@excel/*` → `./src/modules/excel/*`
-- `@archive/*` → `./src/modules/archive/*`
-- `@csv/*` → `./src/modules/csv/*`
-- `@markdown/*` → `./src/modules/markdown/*`
-- `@pdf/*` → `./src/modules/pdf/*`
-- `@stream/*` → `./src/modules/stream/*`
-- `@utils/*` → `./src/utils/*`
-- `@test/*` → `./src/test/*`
+`@excel/*`, `@pdf/*`, `@csv/*`, `@markdown/*`, `@xml/*`, `@archive/*`, `@stream/*` → `./src/modules/<name>/*`
+`@utils/*` → `./src/utils/*` | `@test/*` → `./src/test/*`
 
-## Code Style Guidelines
+Use aliases for cross-module imports. Use relative paths only within the same module.
 
-### Formatting (Prettier)
+## Code Style
 
-- Semi-colons: required | Quotes: double (`"`) | Trailing commas: none
-- Print width: 100 chars | Tab width: 2 spaces | Line endings: LF
-- Arrow parens: avoid when possible (`x => x` not `(x) => x`)
-
-### Imports
-
-```typescript
-import type { WorksheetModel } from "@excel/worksheet"; // Type-only imports
-import { Worksheet } from "@excel/worksheet";
-import { Cell } from "@excel/cell"; // Use path aliases (Good)
-import { Cell } from "../../excel/cell"; // Avoid relative cross-module
-import { Foo, Bar } from "./module"; // Combine, no duplicates
-```
-
-### TypeScript
-
-- Use `type` keyword for type-only exports: `export type { MyType }`
-- Prefix unused variables with underscore: `_unusedVar`
-- Use `declare` for class properties assigned in constructor
-- Use ES2022 error cause pattern for error chaining
-
-### Naming Conventions
-
-- **Classes**: PascalCase (`Workbook`, `Cell`)
-- **Interfaces/Types**: PascalCase (`WorkbookModel`, `CellValue`)
-- **Functions/Methods**: camelCase (`getCell`, `addWorksheet`)
-- **Files**: kebab-case (`workbook-writer.ts`)
-- **Test files**: `*.test.ts` in `__tests__/` directories
-- **Browser variants**: `*.browser.ts` (e.g., `fs.browser.ts`)
-
-### Error Handling
-
-```typescript
-import { BaseError } from "@utils/errors";
-
-export class ExcelError extends BaseError {
-  override name = "ExcelError";
-}
-throw new ExcelError("Failed to parse", { cause: originalError });
-```
-
-### Code Organization
-
-```typescript
-// =============================================================================
-// Section Name
-// =============================================================================
-
-/** Creates a new worksheet. @param name - The worksheet name */
-```
-
-### Control Flow
-
-Always use braces (enforced by OxLint):
-
-```typescript
-if (condition) {
-  doSomething();
-} // Good
-if (condition) doSomething(); // Bad
-```
-
-## Testing
-
-```typescript
-import { describe, it, expect, beforeEach } from "vitest";
-
-describe("Cell", () => {
-  it("should set value correctly", () => {
-    expect(cell.value).toBe(expected);
-  });
-});
-```
-
-### Test File Patterns
-
-- Unit tests: `src/**/__tests__/*.test.ts`
-- Integration: `*.integration.test.ts`
-- Browser: `src/**/__tests__/browser/*.test.ts`
-- Node-specific: `*.node.test.ts`
-
-## Git Hooks & CI
-
-- **pre-push**: Runs `pnpm run check`
-- **CI**: Node 22.x/24.x/25.x on Ubuntu/macOS/Windows
-- **Browser tests**: Playwright with Chromium
-
-## Important Notes
-
-1. Files ending in `.browser.ts` are browser-specific (swapped via build)
-2. No circular imports (enforced by `import/no-cycle`)
-3. Named exports only (for tree-shaking)
-4. Test timeout: 30 seconds
-5. ESM-first with `.js` extensions in built output
+- **Type-only imports**: `import type { Foo } from "..."`
+- **Error handling**: Extend `BaseError` from `@utils/errors`, use `{ cause }` for chaining.
+- **Files**: kebab-case. **Browser variants**: `*.browser.ts`.
+- **Formatting**: Handled entirely by Prettier — just run `pnpm run format`.
+- **Tests**: Vitest, in `__tests__/*.test.ts`. Timeout: 30s.

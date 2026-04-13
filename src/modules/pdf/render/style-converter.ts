@@ -226,7 +226,7 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
 /**
  * Map border styles to PDF line widths.
  */
-function borderStyleToLineWidth(style: string): number {
+export function borderStyleToLineWidth(style: string): number {
   switch (style) {
     case "thin":
       return 0.25;

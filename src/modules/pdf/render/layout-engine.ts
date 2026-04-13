@@ -28,6 +28,7 @@ import type {
   ResolvedPdfOptions,
   LayoutPage,
   LayoutCell,
+  LayoutBorder,
   LayoutRichTextRun
 } from "../types";
 import { PdfCellType } from "../types";
@@ -38,7 +39,8 @@ import {
   excelFillToPdfColor,
   excelBordersToPdf,
   excelHAlignToPdf,
-  excelVAlignToPdf
+  excelVAlignToPdf,
+  borderStyleToLineWidth
 } from "./style-converter";
 import { wrapTextLines } from "./page-renderer";
 import {
@@ -379,6 +381,10 @@ function buildPageLayout(
     }
   }
 
+  // Resolve shared borders: on each shared edge between adjacent cells, keep
+  // only the winning border for drawing but preserve insets for both cells.
+  resolveSharedBorders(cellGrid, rowPage.length, colGroup.length);
+
   // Compute text overflow widths for non-wrapped cells
   computeTextOverflows(
     cellGrid,
@@ -606,7 +612,17 @@ function computeRowHeights(
             options
           );
           const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
-          const neededHeight = fontSize + (wrapLineCount - 1) * lineHeight + CELL_PADDING_V * 2;
+          // Account for border width: half of each border extends inward
+          const borderTop = cell.style?.border?.top?.style
+            ? borderStyleToLineWidth(cell.style.border.top.style) / 2
+            : 0;
+          const borderBottom = cell.style?.border?.bottom?.style
+            ? borderStyleToLineWidth(cell.style.border.bottom.style) / 2
+            : 0;
+          const neededHeight =
+            fontSize +
+            (wrapLineCount - 1) * lineHeight +
+            (CELL_PADDING_V + borderTop + borderBottom) * 2;
           if (neededHeight > height) {
             height = neededHeight;
           }
@@ -667,7 +683,14 @@ function countWrapLines(
   const scaledColPts =
     (colWidth * MAX_DIGIT_WIDTH_PX + EXCEL_COLUMN_PADDING_PX) * PX_TO_PT * scaleFactor;
   const indent = cell.style.alignment.indent ?? 0;
-  const padding = CELL_PADDING_H * 2 + indent * INDENT_WIDTH;
+  const borderLeft = cell.style?.border?.left?.style
+    ? borderStyleToLineWidth(cell.style.border.left.style) / 2
+    : 0;
+  const borderRight = cell.style?.border?.right?.style
+    ? borderStyleToLineWidth(cell.style.border.right.style) / 2
+    : 0;
+  const padding =
+    CELL_PADDING_H + borderLeft + (CELL_PADDING_H + borderRight) + indent * INDENT_WIDTH;
   const effectiveWidth = Math.max(scaledColPts - padding, 1);
 
   const scaledFontSize = fontSize * scaleFactor;
@@ -938,6 +961,8 @@ function buildLayoutCell(
   // Rich text runs
   const richText = buildRichTextRuns(cell, options, fontManager, scaleFactor);
 
+  const borders = excelBordersToPdf(style.border);
+
   return {
     text,
     rect: { x, y, width, height },
@@ -952,7 +977,13 @@ function buildLayoutCell(
     horizontalAlign: resolveHorizontalAlign(style.alignment, cell?.type, cell?.result),
     verticalAlign: excelVAlignToPdf(style.alignment),
     wrapText: style.alignment?.wrapText ?? false,
-    borders: excelBordersToPdf(style.border),
+    borders,
+    borderInsets: {
+      top: (borders.top?.width ?? 0) / 2,
+      right: (borders.right?.width ?? 0) / 2,
+      bottom: (borders.bottom?.width ?? 0) / 2,
+      left: (borders.left?.width ?? 0) / 2
+    },
     colSpan,
     rowSpan,
     hyperlink: cell?.hyperlink ?? null,
@@ -962,6 +993,91 @@ function buildLayoutCell(
       style.alignment?.textRotation === 255 ? "vertical" : (style.alignment?.textRotation ?? 0),
     textOverflowWidth: 0
   };
+}
+
+// =============================================================================
+// Shared-Edge Border Resolution
+// =============================================================================
+
+/**
+ * Border precedence weight.
+ *
+ * When two adjacent cells both declare a border on a shared edge the winning
+ * border is chosen by:  1. thicker wins,  2. solid beats dashed,
+ * 3. double beats single,  4. darker colour wins (tie-break).
+ *
+ * Returns a numeric score – higher score wins.
+ */
+export function borderPrecedence(b: LayoutBorder): number {
+  let score = b.width * 1000; // width dominates
+  if (b.dashPattern.length === 0) {
+    score += 100; // solid beats dashed
+  }
+  if (b.isDouble) {
+    score += 50; // double beats single
+  }
+  // Darker colour = lower sum of RGB → higher score
+  const brightness = b.color.r + b.color.g + b.color.b;
+  score += (3 - brightness) * 10; // max RGB sum = 3 → adds up to 30
+  return score;
+}
+
+/**
+ * Resolve shared borders between adjacent cells.
+ *
+ * For each shared edge, determine the winning border (by precedence), then:
+ * - The cell that "owns" the winning border keeps it in `borders` for drawing.
+ * - The losing cell has that border side set to `null` (it won't draw).
+ * - Both cells' `borderInsets` are updated to reflect the winning border's
+ *   half-width, so text padding accounts for the line that is actually there.
+ */
+export function resolveSharedBorders(
+  cellGrid: Map<string, LayoutCell>,
+  rowCount: number,
+  colCount: number
+): void {
+  for (let ri = 0; ri < rowCount; ri++) {
+    for (let gci = 0; gci < colCount; gci++) {
+      const cell = cellGrid.get(`${ri}:${gci}`);
+      if (!cell) {
+        continue;
+      }
+
+      // Horizontal shared edge: this cell's right border vs right neighbour's left
+      if (cell.borders.right) {
+        const rightNeighbor = cellGrid.get(`${ri}:${gci + 1}`);
+        if (rightNeighbor?.borders.left) {
+          const myScore = borderPrecedence(cell.borders.right);
+          const theirScore = borderPrecedence(rightNeighbor.borders.left);
+          if (theirScore > myScore) {
+            // Neighbour wins — this cell stops drawing, but its inset = winner's half-width
+            cell.borderInsets.right = rightNeighbor.borders.left.width / 2;
+            cell.borders.right = null;
+          } else {
+            // This cell wins (or tie) — neighbour stops drawing
+            rightNeighbor.borderInsets.left = cell.borders.right.width / 2;
+            rightNeighbor.borders.left = null;
+          }
+        }
+      }
+
+      // Vertical shared edge: this cell's bottom border vs below neighbour's top
+      if (cell.borders.bottom) {
+        const belowNeighbor = cellGrid.get(`${ri + 1}:${gci}`);
+        if (belowNeighbor?.borders.top) {
+          const myScore = borderPrecedence(cell.borders.bottom);
+          const theirScore = borderPrecedence(belowNeighbor.borders.top);
+          if (theirScore > myScore) {
+            cell.borderInsets.bottom = belowNeighbor.borders.top.width / 2;
+            cell.borders.bottom = null;
+          } else {
+            belowNeighbor.borderInsets.top = cell.borders.bottom.width / 2;
+            belowNeighbor.borders.top = null;
+          }
+        }
+      }
+    }
+  }
 }
 
 // =============================================================================
@@ -1067,6 +1183,7 @@ function propagateMergeBorders(
       const converted = excelBordersToPdf({ right: rightCellData.style.border.right });
       if (converted.right) {
         layoutCell.borders.right = converted.right;
+        layoutCell.borderInsets.right = converted.right.width / 2;
       }
     }
   }
@@ -1077,6 +1194,7 @@ function propagateMergeBorders(
       const converted = excelBordersToPdf({ bottom: bottomCellData.style.border.bottom });
       if (converted.bottom) {
         layoutCell.borders.bottom = converted.bottom;
+        layoutCell.borderInsets.bottom = converted.bottom.width / 2;
       }
     }
   }
@@ -1120,7 +1238,10 @@ function computeTextOverflows(
         ? fontManager.getEmbeddedResourceName()
         : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
       const textWidth = fontManager.measureText(cell.text, resourceName, cell.fontSize);
-      const cellContentWidth = cell.rect.width - CELL_PADDING_H * 2;
+      const cellContentWidth =
+        cell.rect.width -
+        (CELL_PADDING_H + cell.borderInsets.left) -
+        (CELL_PADDING_H + cell.borderInsets.right);
 
       if (textWidth <= cellContentWidth) {
         continue;

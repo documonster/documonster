@@ -714,8 +714,16 @@ export interface LayoutCell {
   verticalAlign: "top" | "middle" | "bottom";
   /** Whether text wrapping is enabled */
   wrapText: boolean;
-  /** Border definitions for this cell */
+  /** Border definitions for this cell (after shared-edge resolution: only edges this cell draws) */
   borders: LayoutBorders;
+  /**
+   * Effective border insets in points for text padding.
+   *
+   * On a shared edge the border line is drawn by only one of the two cells,
+   * but it still visually intrudes into both.  These values record the actual
+   * half-width intrusion on each side regardless of which cell draws the line.
+   */
+  borderInsets: { top: number; right: number; bottom: number; left: number };
   /** Number of columns this cell spans (for merged cells) */
   colSpan: number;
   /** Number of rows this cell spans (for merged cells) */
