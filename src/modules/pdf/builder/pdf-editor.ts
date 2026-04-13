@@ -25,7 +25,7 @@
 
 import { PdfDocument } from "../reader/pdf-document";
 import type { PdfContentStream } from "../core/pdf-stream";
-import { PdfWriter } from "../core/pdf-writer";
+import { PdfWriter, buildIncremental } from "../core/pdf-writer";
 import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "../core/pdf-object";
 import { FontManager } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
@@ -33,8 +33,14 @@ import { initDecryption, isEncrypted } from "../reader/pdf-decrypt";
 import { extractFormFields } from "../reader/form-extractor";
 import { extractMetadata } from "../reader/metadata-reader";
 import type { PdfFormField } from "../reader/form-extractor";
-import { isPdfArray, isPdfRef, dictGetName, decodePdfStringBytes } from "../reader/pdf-parser";
-import type { PdfDictValue, PdfObject } from "../reader/pdf-parser";
+import {
+  isPdfArray,
+  isPdfRef,
+  dictGetName,
+  dictGetNumber,
+  decodePdfStringBytes
+} from "../reader/pdf-parser";
+import type { PdfDictValue, PdfObject, PdfRef } from "../reader/pdf-parser";
 import { PdfPageBuilder } from "./document-builder";
 import type {
   DrawTextOptions,
@@ -45,7 +51,10 @@ import type {
   PageOptions
 } from "./document-builder";
 import { PdfStructureError } from "../errors";
-import { writeImageXObject } from "./image-utils";
+import { writeImageXObject, parseImageDimensions } from "./image-utils";
+import { generateTextFieldAppearance, buildAppearanceBBox } from "./form-appearance";
+import { parseResourceDict, mergeResourceDicts, serializeResourceDict } from "./resource-merger";
+import type { PdfResourceDict } from "./resource-merger";
 
 // =============================================================================
 // Types
@@ -158,11 +167,18 @@ export class PdfEditorPage {
  */
 export class PdfEditor {
   private _doc: PdfDocument;
+  private _password: string;
   private _pages: PdfEditorPage[] = [];
   private _newPages: PdfPageBuilder[] = [];
   private _fontManager = new FontManager();
   private _formFieldUpdates = new Map<string, string>();
   private _copiedPages: CopiedPage[] = [];
+  /** @internal - Indices of original pages to remove on save */
+  private _removedPageIndices = new Set<number>();
+  /** @internal - True during saveIncremental() to preserve original refs */
+  private _isIncrementalSave = false;
+  /** @internal - Rotation overrides for original pages: index → degrees (0/90/180/270) */
+  private _rotationOverrides = new Map<number, number>();
   /** @internal - Writer reference during save(), for deep-clone */
   private _writerForSave: PdfWriter | null = null;
   /** @internal - Cache of cloned indirect refs: "objNum:gen" → new objNum in writer */
@@ -170,6 +186,7 @@ export class PdfEditor {
 
   private constructor(data: Uint8Array, password: string) {
     this._doc = new PdfDocument(data);
+    this._password = password;
 
     // Handle encryption
     if (isEncrypted(this._doc)) {
@@ -225,6 +242,66 @@ export class PdfEditor {
     const page = new PdfPageBuilder(width, height, this._fontManager);
     this._newPages.push(page);
     return page;
+  }
+
+  /**
+   * Remove a page from the document.
+   *
+   * @param index - 0-based page index (of original pages only)
+   */
+  removePage(index: number): this {
+    if (index < 0 || index >= this._pages.length) {
+      throw new PdfStructureError(`Page index ${index} out of range (0-${this._pages.length - 1})`);
+    }
+    this._removedPageIndices.add(index);
+    return this;
+  }
+
+  /**
+   * Set the rotation of an existing page.
+   *
+   * @param index - 0-based page index (of original pages only)
+   * @param degrees - Rotation in degrees (must be 0, 90, 180, or 270)
+   */
+  rotatePage(index: number, degrees: number): this {
+    if (index < 0 || index >= this._pages.length) {
+      throw new PdfStructureError(`Page index ${index} out of range (0-${this._pages.length - 1})`);
+    }
+    if (degrees !== 0 && degrees !== 90 && degrees !== 180 && degrees !== 270) {
+      throw new PdfStructureError(`Invalid rotation ${degrees}: must be 0, 90, 180, or 270`);
+    }
+    this._rotationOverrides.set(index, degrees);
+    return this;
+  }
+
+  /**
+   * Split the document: save each page (or a subset) as a separate PDF.
+   *
+   * @param pageIndices - 0-based page indices to extract. Omit to split all pages.
+   * @returns Array of Uint8Array, one per requested page.
+   */
+  async splitPages(pageIndices?: number[]): Promise<Uint8Array[]> {
+    const pagesInfo = this._doc.getPagesWithObjInfo();
+    const indices = pageIndices ?? Array.from({ length: pagesInfo.length }, (_, i) => i);
+    const results: Uint8Array[] = [];
+
+    for (const idx of indices) {
+      if (idx < 0 || idx >= pagesInfo.length) {
+        continue;
+      }
+
+      // Create a single-page editor from original bytes and save it
+      const singlePageEditor = PdfEditor.load(this._doc.data, { password: this._password });
+      // Remove all pages except the one we want
+      for (let i = 0; i < pagesInfo.length; i++) {
+        if (i !== idx) {
+          singlePageEditor.removePage(i);
+        }
+      }
+      results.push(await singlePageEditor.save());
+    }
+
+    return results;
   }
 
   /**
@@ -347,6 +424,11 @@ export class PdfEditor {
     // Re-emit existing pages
     const pagesInfo = this._doc.getPagesWithObjInfo();
     for (let i = 0; i < pagesInfo.length; i++) {
+      // Skip removed pages
+      if (this._removedPageIndices.has(i)) {
+        continue;
+      }
+
       const { dict: pageDict } = pagesInfo[i];
       const dims = this._doc.resolvePageBox(pageDict) ?? { width: 612, height: 792 };
       const editorPage = this._pages[i];
@@ -372,9 +454,10 @@ export class PdfEditor {
         writer.addStreamObject(overlayObjNum, new PdfDict(), editorPage._overlay._stream);
         allContentRefs.push(overlayObjNum);
 
-        // Build overlay-specific resources (fonts, images)
+        // Build overlay-specific resources (fonts, images) as structured dict
         const imageXObjectMap = this._writeOverlayImages(writer, editorPage._overlay);
-        overlayResourcesStr = this._buildOverlayResourcesStr(fontDictStr, imageXObjectMap);
+        const overlayDict = this._buildOverlayResourceDict(fontDictStr, imageXObjectMap);
+        overlayResourcesStr = serializeResourceDict(overlayDict);
       }
 
       // Write resources (merge original + overlay)
@@ -400,6 +483,17 @@ export class PdfEditor {
 
       // Preserve page-level properties from the original page dict
       this._copyPageProperties(pageDict, pageDict2);
+
+      // Apply rotation override if set
+      const rotationOverride = this._rotationOverrides.get(i);
+      if (rotationOverride !== undefined) {
+        if (rotationOverride === 0) {
+          // Remove rotation (unset the key)
+          pageDict2.delete("Rotate");
+        } else {
+          pageDict2.set("Rotate", String(rotationOverride));
+        }
+      }
 
       if (annotRefs.length > 0) {
         pageDict2.set("Annots", `[${annotRefs.map(r => pdfRef(r)).join(" ")}]`);
@@ -495,8 +589,23 @@ export class PdfEditor {
 
     // If we have form field updates, write an AcroForm dict
     if (this._formFieldUpdates.size > 0) {
-      // Add NeedAppearances flag so PDF viewers regenerate field appearances
-      catalogDict.set("AcroForm", "<< /NeedAppearances true >>");
+      try {
+        const catalog = this._doc.getCatalog();
+        const acroFormRef = catalog.get("AcroForm");
+        if (acroFormRef) {
+          const acroFormStr = this._deepSerialize(this._doc, acroFormRef);
+          // Insert /NeedAppearances into the cloned dict
+          if (acroFormStr && acroFormStr.startsWith("<<")) {
+            catalogDict.set("AcroForm", acroFormStr.replace("<<", "<< /NeedAppearances true"));
+          } else {
+            catalogDict.set("AcroForm", "<< /NeedAppearances true >>");
+          }
+        } else {
+          catalogDict.set("AcroForm", "<< /NeedAppearances true >>");
+        }
+      } catch {
+        catalogDict.set("AcroForm", "<< /NeedAppearances true >>");
+      }
     }
 
     // Preserve XMP metadata stream from original catalog
@@ -529,6 +638,466 @@ export class PdfEditor {
     this._clonedRefs.clear();
 
     return writer.build();
+  }
+
+  /**
+   * Save the modified PDF using incremental update.
+   *
+   * Appends new/modified objects after the original PDF bytes, preserving the
+   * original data byte-for-byte. This is ideal for overlays and form field
+   * updates on existing pages — it preserves digital signatures on unmodified
+   * content and produces smaller output.
+   *
+   * Falls back to {@link save} (full rebuild) if structural changes are
+   * present (new pages, copied pages, or removed pages).
+   *
+   * @returns The modified PDF as Uint8Array
+   */
+  async saveIncremental(): Promise<Uint8Array> {
+    // Fall back to full rebuild if structural changes are present
+    if (
+      this._newPages.length > 0 ||
+      this._copiedPages.length > 0 ||
+      this._removedPageIndices.size > 0
+    ) {
+      return this.save();
+    }
+
+    // Fall back to full rebuild if rotation overrides are present
+    if (this._rotationOverrides.size > 0) {
+      return this.save();
+    }
+
+    // Fall back to full rebuild for xref-stream PDFs (no "trailer" keyword)
+    const tailBytes = this._doc.data.subarray(Math.max(0, this._doc.data.length - 1024));
+    const tailStr = new TextDecoder().decode(tailBytes);
+    if (!tailStr.includes("trailer")) {
+      return this.save();
+    }
+
+    // Check if there are any modifications at all
+    const hasOverlays = this._pages.some(p => p._hasOverlay());
+    const hasFormUpdates = this._formFieldUpdates.size > 0;
+
+    if (!hasOverlays && !hasFormUpdates) {
+      // No modifications — return the original bytes
+      return this._doc.data;
+    }
+
+    this._isIncrementalSave = true;
+    try {
+      return await this._buildIncrementalUpdate();
+    } finally {
+      this._isIncrementalSave = false;
+      this._writerForSave = null;
+      this._clonedRefs.clear();
+    }
+  }
+
+  /** @internal — Core incremental update logic, separated for try/finally cleanup. */
+  private async _buildIncrementalUpdate(): Promise<Uint8Array> {
+    // Determine the next available object number from the original PDF's /Size
+    const originalSize = dictGetNumber(this._doc.trailer, "Size") ?? 1;
+    let nextObjNum = originalSize;
+
+    // Collect modified objects: objNum → serialized content
+    const modifiedObjects = new Map<number, string | { dict: PdfDict; data: Uint8Array }>();
+
+    // Check what kinds of modifications exist
+    const hasOverlays = this._pages.some(p => p._hasOverlay());
+
+    // We need a temporary PdfWriter for font resources used in overlays
+    const writer = new PdfWriter();
+    this._writerForSave = writer;
+    this._clonedRefs = new Map();
+
+    let fontDictStr = "";
+    // Map of writer objNum → actual new objNum we'll use in the incremental update
+    const writerFontObjRemap = new Map<number, number>();
+
+    if (hasOverlays) {
+      // Write font resources via the writer (to serialize font objects)
+      const fontObjectMap = await this._fontManager.writeFontResources(writer);
+
+      // Remap all writer-allocated objects (fonts + their dependencies like
+      // CID font descriptors, ToUnicode CMaps, etc.) into the incremental
+      // update's object number space.
+      const writerObjects = writer.getObjects();
+      for (const obj of writerObjects) {
+        if (!writerFontObjRemap.has(obj.objectNumber)) {
+          writerFontObjRemap.set(obj.objectNumber, nextObjNum++);
+        }
+      }
+
+      // Write all font objects into modifiedObjects with remapped refs
+      for (const obj of writerObjects) {
+        const newObjNum = writerFontObjRemap.get(obj.objectNumber)!;
+        const remappedContent = this._remapRefsInString(obj.content, writerFontObjRemap);
+        if (obj.streamData) {
+          // Parse the remapped content back into a PdfDict for stream objects
+          modifiedObjects.set(newObjNum, {
+            dict: PdfDict.fromRawString(remappedContent),
+            data: obj.streamData
+          });
+        } else {
+          modifiedObjects.set(newObjNum, remappedContent);
+        }
+      }
+
+      // Build a remapped font dict string
+      const rawFontDict = this._fontManager.buildFontDictString(fontObjectMap);
+      fontDictStr = this._remapRefsInString(rawFontDict, writerFontObjRemap);
+    }
+
+    const pagesInfo = this._doc.getPagesWithObjInfo();
+
+    for (let i = 0; i < pagesInfo.length; i++) {
+      const editorPage = this._pages[i];
+      const { dict: pageDict, objNum: pageObjNum } = pagesInfo[i];
+
+      if (pageObjNum === 0) {
+        // Can't do incremental update without knowing the page object number.
+        // Fall back to full rebuild (finally block handles cleanup).
+        return this.save();
+      }
+
+      const pageHasOverlay = editorPage._hasOverlay();
+      const pageHasFormUpdates = this._hasFormUpdatesForPage(pageDict);
+
+      if (!pageHasOverlay && !pageHasFormUpdates) {
+        continue; // Page is unchanged
+      }
+
+      // Build the updated page dictionary. We start from the original page
+      // dict's entries and modify only what's necessary.
+      const updatedPageDict = new PdfDict();
+
+      // Copy all existing entries from the original page dict
+      for (const [key, val] of pageDict.entries()) {
+        if (key === "Contents" && pageHasOverlay) {
+          continue; // We'll rewrite /Contents below
+        }
+        if (key === "Resources" && pageHasOverlay) {
+          continue; // We'll rewrite /Resources below
+        }
+        if (key === "Annots" && pageHasFormUpdates) {
+          continue; // We'll rewrite /Annots below
+        }
+        updatedPageDict.set(key, this._serializeOriginalValue(val));
+      }
+
+      if (pageHasOverlay) {
+        // Create a new content stream object for the overlay
+        const overlayStreamData = editorPage._overlay._stream.toUint8Array();
+        const overlayObjNum = nextObjNum++;
+        modifiedObjects.set(overlayObjNum, {
+          dict: new PdfDict(),
+          data: overlayStreamData
+        });
+
+        // Build the new /Contents array: original refs + overlay ref
+        const originalContentsObj = pageDict.get("Contents");
+        const contentRefs = this._collectOriginalContentRefs(originalContentsObj);
+        contentRefs.push(pdfRef(overlayObjNum));
+
+        const contentsStr =
+          contentRefs.length === 1 ? contentRefs[0] : `[${contentRefs.join(" ")}]`;
+        updatedPageDict.set("Contents", contentsStr);
+
+        // Build merged resources: original + overlay fonts/images
+        const originalResources = this._serializeOriginalResources(this._doc, pageDict);
+
+        // For overlay images, write them as new objects
+        const imageObjMap = new Map<string, number>();
+        for (let imgIdx = 0; imgIdx < editorPage._overlay._images.length; imgIdx++) {
+          const img = editorPage._overlay._images[imgIdx];
+          const imgName = `Im${imgIdx + 1}`;
+          const imgObjNum = nextObjNum++;
+          imageObjMap.set(imgName, imgObjNum);
+          modifiedObjects.set(
+            imgObjNum,
+            this._buildImageXObjectForIncremental(img.data, img.format)
+          );
+        }
+
+        // Build overlay resource string
+        let overlayStr = "<< ";
+        if (fontDictStr) {
+          overlayStr += `/Font ${fontDictStr} `;
+        }
+        if (imageObjMap.size > 0) {
+          const entries = [...imageObjMap.entries()]
+            .map(([name, objNum]) => `/${name} ${pdfRef(objNum)}`)
+            .join(" ");
+          overlayStr += `/XObject << ${entries} >> `;
+        }
+        overlayStr += ">>";
+
+        const mergedResources = this._mergeResourceStrings(originalResources, overlayStr);
+        // Write merged resources as a new object
+        const resourcesObjNum = nextObjNum++;
+        modifiedObjects.set(resourcesObjNum, mergedResources || "<< >>");
+        updatedPageDict.set("Resources", pdfRef(resourcesObjNum));
+      }
+
+      if (pageHasFormUpdates) {
+        // Build updated annotations list
+        const annotsResult = this._buildIncrementalAnnots(pageDict, modifiedObjects, nextObjNum);
+        nextObjNum = annotsResult.nextObjNum;
+        if (annotsResult.annotRefs.length > 0) {
+          updatedPageDict.set(
+            "Annots",
+            `[${annotsResult.annotRefs.map(r => pdfRef(r)).join(" ")}]`
+          );
+        }
+      }
+
+      // Write the updated page dict as a modified object (same object number as original)
+      modifiedObjects.set(pageObjNum, updatedPageDict.toString());
+    }
+
+    if (modifiedObjects.size === 0) {
+      return this._doc.data;
+    }
+
+    return buildIncremental(this._doc.data, modifiedObjects, new Map());
+  }
+
+  /**
+   * Check if a page has form field updates in its annotations.
+   * @internal
+   */
+  private _hasFormUpdatesForPage(pageDict: PdfDictValue): boolean {
+    if (this._formFieldUpdates.size === 0) {
+      return false;
+    }
+
+    const annotsObj = pageDict.get("Annots");
+    if (!annotsObj) {
+      return false;
+    }
+
+    const annotsResolved = this._doc.deref(annotsObj);
+    if (!isPdfArray(annotsResolved)) {
+      return false;
+    }
+
+    for (const annotRef of annotsResolved) {
+      const annotDict = this._doc.derefDict(annotRef);
+      if (!annotDict) {
+        continue;
+      }
+
+      const subtype = dictGetName(annotDict, "Subtype");
+      if (subtype === "Widget") {
+        const fieldName = this._resolveFieldName(annotDict);
+        if (fieldName && this._formFieldUpdates.has(fieldName)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Collect original /Contents refs as serialized ref strings.
+   * For incremental update — preserves original object references.
+   * @internal
+   */
+  private _collectOriginalContentRefs(contentsObj: PdfObject | undefined): string[] {
+    if (!contentsObj) {
+      return [];
+    }
+
+    if (isPdfRef(contentsObj)) {
+      // Could be a single ref to a stream, or a ref to an array
+      const resolved = this._doc.deref(contentsObj);
+      if (isPdfArray(resolved)) {
+        return resolved
+          .filter((item): item is PdfRef => isPdfRef(item))
+          .map(item => pdfRef(item.objNum, item.gen));
+      }
+      return [pdfRef(contentsObj.objNum, contentsObj.gen)];
+    }
+
+    if (isPdfArray(contentsObj)) {
+      return contentsObj
+        .filter((item): item is PdfRef => isPdfRef(item))
+        .map(item => pdfRef(item.objNum, item.gen));
+    }
+
+    return [];
+  }
+
+  /**
+   * Serialize a page's Resources dict preserving original object references.
+   * Unlike _serializeResources which deep-clones into the writer, this keeps
+   * the original object numbers intact for incremental updates.
+   * @internal
+   */
+  private _serializeOriginalResources(doc: PdfDocument, pageDict: PdfDictValue): string {
+    const resourcesDict = doc.resolvePageResources(pageDict);
+    if (!resourcesDict || resourcesDict.size === 0) {
+      return "<< >>";
+    }
+
+    const parts: string[] = ["<<"];
+    for (const [key, val] of resourcesDict.entries()) {
+      const serialized = this._serializeOriginalValue(val);
+      if (serialized) {
+        parts.push(`/${key} ${serialized}`);
+      }
+    }
+    parts.push(">>");
+    return parts.join(" ");
+  }
+
+  /**
+   * Serialize a PDF value from the original document, preserving original refs.
+   * Unlike _deepSerialize which clones refs into a new writer, this keeps
+   * the original object numbers intact.
+   * @internal
+   */
+  private _serializeOriginalValue(val: PdfObject): string {
+    if (val === null || val === undefined) {
+      return "null";
+    }
+    if (typeof val === "string") {
+      // In parsed PDF objects, string type = PDF name (without leading /)
+      // Uint8Array = PDF string literal
+      return "/" + val;
+    }
+    if (typeof val === "number") {
+      return pdfNumber(val);
+    }
+    if (typeof val === "boolean") {
+      return val ? "true" : "false";
+    }
+    if (val instanceof Uint8Array) {
+      return pdfHexString(val);
+    }
+    if (isPdfRef(val)) {
+      return pdfRef(val.objNum, val.gen);
+    }
+    if (isPdfArray(val)) {
+      const items = val.map(item => this._serializeOriginalValue(item));
+      return `[${items.join(" ")}]`;
+    }
+    if (val instanceof Map) {
+      const parts: string[] = ["<<"];
+      for (const [k, v] of (val as PdfDictValue).entries()) {
+        parts.push(`/${k} ${this._serializeOriginalValue(v)}`);
+      }
+      parts.push(">>");
+      return parts.join(" ");
+    }
+    return "";
+  }
+
+  /**
+   * Replace object number references in a serialized string.
+   * Maps old obj numbers (from temporary writer) to new obj numbers.
+   * @internal
+   */
+  private _remapRefsInString(str: string, remap: Map<number, number>): string {
+    // Replace patterns like "N 0 R" where N is in the remap map
+    return str.replace(/(\d+) (\d+) R/g, (match, objNumStr, genStr) => {
+      const objNum = parseInt(objNumStr, 10);
+      const remapped = remap.get(objNum);
+      if (remapped !== undefined) {
+        return `${remapped} ${genStr} R`;
+      }
+      return match;
+    });
+  }
+
+  /**
+   * Build image XObject content for incremental update.
+   * @internal
+   */
+  private _buildImageXObjectForIncremental(
+    data: Uint8Array,
+    format: string
+  ): { dict: PdfDict; data: Uint8Array } {
+    const dims = parseImageDimensions(data, format as "jpeg" | "png");
+    const dict = new PdfDict()
+      .set("Type", "/XObject")
+      .set("Subtype", "/Image")
+      .set("Width", pdfNumber(dims.width))
+      .set("Height", pdfNumber(dims.height))
+      .set("BitsPerComponent", "8")
+      .set("ColorSpace", "/DeviceRGB");
+
+    if (format === "jpeg") {
+      dict.set("Filter", "/DCTDecode");
+    }
+
+    return { dict, data };
+  }
+
+  /**
+   * Build updated annotations for incremental save.
+   * Modified widgets get rewritten at their original object number;
+   * unmodified annots keep original refs.
+   * @internal
+   */
+  private _buildIncrementalAnnots(
+    pageDict: PdfDictValue,
+    modifiedObjects: Map<number, string | { dict: PdfDict; data: Uint8Array }>,
+    nextObjNum: number
+  ): { annotRefs: number[]; nextObjNum: number } {
+    const annotsObj = pageDict.get("Annots");
+    if (!annotsObj) {
+      return { annotRefs: [], nextObjNum };
+    }
+
+    const annotsResolved = this._doc.deref(annotsObj);
+    if (!isPdfArray(annotsResolved)) {
+      return { annotRefs: [], nextObjNum };
+    }
+
+    const annotRefs: number[] = [];
+
+    for (const annotRef of annotsResolved) {
+      const annotDict = this._doc.derefDict(annotRef);
+      if (!annotDict) {
+        // Keep original ref if we can't resolve
+        if (isPdfRef(annotRef)) {
+          annotRefs.push(annotRef.objNum);
+        }
+        continue;
+      }
+
+      const subtype = dictGetName(annotDict, "Subtype");
+
+      if (subtype === "Widget" && this._formFieldUpdates.size > 0) {
+        const fieldName = this._resolveFieldName(annotDict);
+        const newValue = fieldName ? this._formFieldUpdates.get(fieldName) : undefined;
+
+        if (newValue !== undefined) {
+          // Rewrite the annotation at its original object number
+          const annotObjNum = isPdfRef(annotRef) ? annotRef.objNum : nextObjNum++;
+          const newDict = this._buildModifiedWidgetDict(annotDict, newValue);
+          modifiedObjects.set(annotObjNum, newDict);
+          annotRefs.push(annotObjNum);
+          continue;
+        }
+      }
+
+      // Keep original annotation reference
+      if (isPdfRef(annotRef)) {
+        annotRefs.push(annotRef.objNum);
+      } else {
+        // Inline annotation — write as new object
+        const annotObjNum = nextObjNum++;
+        const serialized = this._serializeAnnotDict(annotDict);
+        modifiedObjects.set(annotObjNum, serialized);
+        annotRefs.push(annotObjNum);
+      }
+    }
+
+    return { annotRefs, nextObjNum };
   }
 
   // ===========================================================================
@@ -639,7 +1208,8 @@ export class PdfEditor {
       return "null";
     }
     if (typeof val === "string") {
-      return val.startsWith("/") ? val : pdfString(val);
+      // In parsed PDF objects, string type = PDF name (without leading /)
+      return "/" + val;
     }
     if (typeof val === "number") {
       return pdfNumber(val);
@@ -653,7 +1223,8 @@ export class PdfEditor {
 
     if (isPdfRef(val)) {
       // Check if this ref has already been cloned
-      const cacheKey = `${val.objNum}:${val.gen}`;
+      const docId = doc === this._doc ? "main" : `src${doc.data.length}`;
+      const cacheKey = `${docId}:${val.objNum}:${val.gen}`;
       const cached = this._clonedRefs.get(cacheKey);
       if (cached !== undefined) {
         return pdfRef(cached);
@@ -727,26 +1298,38 @@ export class PdfEditor {
     return map;
   }
 
-  /** @internal */
-  private _buildOverlayResourcesStr(
+  /** @internal - Build overlay resources as a structured PdfResourceDict. */
+  private _buildOverlayResourceDict(
     fontDictStr: string,
     imageXObjectMap: Map<string, number>
-  ): string {
-    let str = "<< ";
+  ): PdfResourceDict {
+    const dict: PdfResourceDict = new Map();
+
     if (fontDictStr) {
-      str += `/Font ${fontDictStr} `;
+      // Parse the font dict string into structured entries
+      // fontDictStr is already a `<< /F1 3 0 R ... >>` string
+      const fontInner = fontDictStr.trim();
+      if (fontInner.startsWith("<<") && fontInner.endsWith(">>")) {
+        const parsed = parseResourceDict(`<< /Font ${fontInner} >>`);
+        const fontMap = parsed.get("Font");
+        if (fontMap) {
+          dict.set("Font", fontMap);
+        }
+      }
     }
+
     if (imageXObjectMap.size > 0) {
-      const entries = [...imageXObjectMap.entries()]
-        .map(([name, objNum]) => `/${name} ${pdfRef(objNum)}`)
-        .join(" ");
-      str += `/XObject << ${entries} >> `;
+      const xobjMap = new Map<string, string>();
+      for (const [name, objNum] of imageXObjectMap) {
+        xobjMap.set(name, pdfRef(objNum));
+      }
+      dict.set("XObject", xobjMap);
     }
-    str += ">>";
-    return str;
+
+    return dict;
   }
 
-  /** @internal */
+  /** @internal - Merge original and overlay resource strings via parsed object graph. */
   private _mergeResourceStrings(original: string, overlay: string): string {
     // If no overlay, return original
     if (!overlay || overlay === "<< >>") {
@@ -757,43 +1340,10 @@ export class PdfEditor {
       return overlay;
     }
 
-    // Parse top-level keys from both resource dict strings and merge them.
-    // For sub-dict keys (/Font, /XObject, /ExtGState) we merge the inner dicts.
-    // For other keys the overlay value takes precedence.
-    const origEntries = parseResourceDictEntries(original);
-    const overlayEntries = parseResourceDictEntries(overlay);
-
-    // Start with all original entries
-    const merged = new Map<string, string>(origEntries);
-
-    // Merge overlay entries
-    for (const [key, overlayVal] of overlayEntries) {
-      const origVal = merged.get(key);
-      if (origVal && origVal.startsWith("<<") && overlayVal.startsWith("<<")) {
-        // Both are sub-dicts — merge their inner entries
-        const origInner = parseResourceDictEntries(origVal);
-        const overlayInner = parseResourceDictEntries(overlayVal);
-        for (const [ik, iv] of overlayInner) {
-          origInner.set(ik, iv); // overlay wins on collision
-        }
-        const innerParts: string[] = ["<<"];
-        for (const [ik, iv] of origInner) {
-          innerParts.push(`/${ik} ${iv}`);
-        }
-        innerParts.push(">>");
-        merged.set(key, innerParts.join(" "));
-      } else {
-        // Overlay value wins
-        merged.set(key, overlayVal);
-      }
-    }
-
-    const parts: string[] = ["<<"];
-    for (const [key, val] of merged) {
-      parts.push(`/${key} ${val}`);
-    }
-    parts.push(">>");
-    return parts.join(" ");
+    const origDict = parseResourceDict(original);
+    const overlayDict = parseResourceDict(overlay);
+    const merged = mergeResourceDicts(origDict, overlayDict);
+    return serializeResourceDict(merged);
   }
 
   /** @internal - Write form field value updates as annotation objects. */
@@ -902,28 +1452,130 @@ export class PdfEditor {
 
   /** @internal */
   private _buildModifiedWidgetDict(originalDict: PdfDictValue, newValue: string): string {
-    // Build a minimal widget dict with the updated /V value
+    // Determine the field type (/FT) — may be directly on the widget or inherited from parent
+    const fieldType = this._resolveFieldType(originalDict);
+
+    // For text fields, generate an appearance stream instead of stripping /AP
+    if (fieldType === "Tx" && this._writerForSave) {
+      return this._buildTextFieldWidgetDict(originalDict, newValue);
+    }
+
+    // For non-text fields, fall back to stripping /AP (force viewer to regenerate)
     const parts: string[] = ["<<"];
 
-    // Copy known keys from original
     for (const [key, val] of originalDict.entries()) {
       if (key === "V" || key === "AP") {
-        // Skip — we'll write our own /V and clear /AP (to force viewer to regenerate appearance)
         continue;
       }
 
-      // Serialize the value
       const serialized = this._serializePdfValue(val);
       if (serialized) {
         parts.push(`/${key} ${serialized}`);
       }
     }
 
-    // Write the new value
     parts.push(`/V ${pdfString(newValue)}`);
+    parts.push(">>");
+    return parts.join(" ");
+  }
+
+  /**
+   * @internal - Build a modified widget dict for a text field with an inline
+   * appearance stream. The stream renders the field value so it is visible
+   * in all viewers, even those that ignore /NeedAppearances.
+   */
+  private _buildTextFieldWidgetDict(originalDict: PdfDictValue, newValue: string): string {
+    const writer = this._writerForSave!;
+
+    // Extract the widget Rect for sizing the appearance
+    const rect = this._resolveWidgetRect(originalDict);
+
+    // Determine alignment from /Q entry (0=left, 1=center, 2=right)
+    const qVal = originalDict.get("Q");
+    let alignment: "left" | "center" | "right" = "left";
+    if (qVal === 1) {
+      alignment = "center";
+    } else if (qVal === 2) {
+      alignment = "right";
+    }
+
+    // Generate the appearance stream
+    const { stream, resources } = generateTextFieldAppearance({
+      value: newValue,
+      rect,
+      alignment
+    });
+
+    // Write the appearance stream as a Form XObject indirect object
+    const apObjNum = writer.allocObject();
+    const apDict = new PdfDict()
+      .set("Type", "/XObject")
+      .set("Subtype", "/Form")
+      .set("BBox", buildAppearanceBBox(rect))
+      .set("Resources", resources);
+    writer.addStreamObject(apObjNum, apDict, stream, { compress: false });
+
+    // Build the widget dict
+    const parts: string[] = ["<<"];
+
+    for (const [key, val] of originalDict.entries()) {
+      if (key === "V" || key === "AP") {
+        continue;
+      }
+
+      const serialized = this._serializePdfValue(val);
+      if (serialized) {
+        parts.push(`/${key} ${serialized}`);
+      }
+    }
+
+    // Set the new value and appearance
+    parts.push(`/V ${pdfString(newValue)}`);
+    parts.push(`/AP << /N ${pdfRef(apObjNum)} >>`);
 
     parts.push(">>");
     return parts.join(" ");
+  }
+
+  /**
+   * @internal - Resolve the field type (/FT) which may be inherited from a parent dict.
+   */
+  private _resolveFieldType(dict: PdfDictValue): string | undefined {
+    let current: PdfDictValue | null | undefined = dict;
+    const visited = new Set<string>();
+
+    while (current) {
+      const ft = dictGetName(current, "FT");
+      if (ft) {
+        return ft;
+      }
+      const parentVal = current.get("Parent");
+      if (!parentVal) {
+        break;
+      }
+      const key = String(parentVal);
+      if (visited.has(key)) {
+        break;
+      }
+      visited.add(key);
+      current = this._doc.derefDict(parentVal);
+    }
+    return undefined;
+  }
+
+  /**
+   * @internal - Extract the /Rect array from a widget annotation dict as [x1, y1, x2, y2].
+   */
+  private _resolveWidgetRect(dict: PdfDictValue): number[] {
+    let rectVal = dict.get("Rect");
+    if (rectVal) {
+      rectVal = this._doc.deref(rectVal);
+    }
+    if (rectVal && isPdfArray(rectVal)) {
+      return rectVal.map(v => (typeof v === "number" ? v : 0));
+    }
+    // Fallback: 0-size rect
+    return [0, 0, 100, 20];
   }
 
   /** @internal */
@@ -947,8 +1599,8 @@ export class PdfEditor {
       return "null";
     }
     if (typeof val === "string") {
-      // Could be a name (starts with /) or other token
-      return val.startsWith("/") ? val : pdfString(val);
+      // In parsed PDF objects, string type = PDF name (without leading /)
+      return "/" + val;
     }
     if (typeof val === "number") {
       return pdfNumber(val);
@@ -960,11 +1612,11 @@ export class PdfEditor {
       return pdfHexString(val);
     }
     if (isPdfRef(val)) {
-      // Deep-clone the referenced object into the new writer so the ref is valid
-      if (this._writerForSave) {
+      // During incremental save, original refs remain valid — preserve them as-is.
+      // During full save, deep-clone into the new writer.
+      if (this._writerForSave && !this._isIncrementalSave) {
         return this._deepSerialize(this._doc, val);
       }
-      // Fallback if no writer context (should not happen in practice)
       return `${val.objNum} ${val.gen} R`;
     }
     if (isPdfArray(val)) {
@@ -982,118 +1634,6 @@ export class PdfEditor {
     }
     return "";
   }
-}
-
-// =============================================================================
-// Resource Dict String Parser
-// =============================================================================
-
-/**
- * Parse a serialized PDF dict string (e.g. `<< /Font << /F1 3 0 R >> /XObject << ... >> >>`)
- * into a Map of top-level key → value string.
- *
- * This is a lightweight parser that handles nested `<< >>` by brace counting.
- * It doesn't need to understand every PDF token — just enough to split the
- * top-level entries so they can be merged.
- */
-function parseResourceDictEntries(dictStr: string): Map<string, string> {
-  const entries = new Map<string, string>();
-  const trimmed = dictStr.trim();
-  if (!trimmed.startsWith("<<") || !trimmed.endsWith(">>")) {
-    return entries;
-  }
-
-  // Strip the outer << >>
-  const inner = trimmed.slice(2, -2).trim();
-  if (!inner) {
-    return entries;
-  }
-
-  let i = 0;
-  while (i < inner.length) {
-    // Skip whitespace
-    while (i < inner.length && /\s/.test(inner[i])) {
-      i++;
-    }
-    if (i >= inner.length) {
-      break;
-    }
-
-    // Expect a name: /KeyName
-    if (inner[i] !== "/") {
-      break; // malformed — bail
-    }
-    i++; // skip '/'
-    const nameStart = i;
-    while (i < inner.length && !/[\s/<>[\]()]/.test(inner[i])) {
-      i++;
-    }
-    const key = inner.slice(nameStart, i);
-
-    // Skip whitespace
-    while (i < inner.length && /\s/.test(inner[i])) {
-      i++;
-    }
-
-    // Read the value — could be a sub-dict <<...>>, array [...], name /..., ref N N R, etc.
-    const valueStart = i;
-    if (inner[i] === "<" && i + 1 < inner.length && inner[i + 1] === "<") {
-      // Sub-dict: count nested << >>
-      let depth = 0;
-      while (i < inner.length) {
-        if (inner[i] === "<" && i + 1 < inner.length && inner[i + 1] === "<") {
-          depth++;
-          i += 2;
-        } else if (inner[i] === ">" && i + 1 < inner.length && inner[i + 1] === ">") {
-          depth--;
-          i += 2;
-          if (depth === 0) {
-            break;
-          }
-        } else {
-          i++;
-        }
-      }
-    } else if (inner[i] === "[") {
-      // Array: find matching ]
-      let depth = 0;
-      while (i < inner.length) {
-        if (inner[i] === "[") {
-          depth++;
-        } else if (inner[i] === "]") {
-          depth--;
-          if (depth === 0) {
-            i++;
-            break;
-          }
-        }
-        i++;
-      }
-    } else {
-      // Token(s) — read until next '/' at top level or end
-      // Could be a ref like "3 0 R", a name "/Something", a number, etc.
-      while (i < inner.length) {
-        if (inner[i] === "/" && i > valueStart) {
-          // Check if this '/' starts a new key (preceded by whitespace)
-          const prevChar = inner[i - 1];
-          if (/\s/.test(prevChar)) {
-            break;
-          }
-        }
-        if (inner[i] === "<" && i + 1 < inner.length && inner[i + 1] === "<") {
-          break; // shouldn't happen at top level, but be safe
-        }
-        i++;
-      }
-    }
-
-    const value = inner.slice(valueStart, i).trim();
-    if (key && value) {
-      entries.set(key, value);
-    }
-  }
-
-  return entries;
 }
 
 // =============================================================================

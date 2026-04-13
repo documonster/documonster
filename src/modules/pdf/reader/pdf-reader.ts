@@ -61,8 +61,12 @@ import { extractAnnotationsFromPage } from "./annotation-extractor";
 import type { PdfAnnotation } from "./annotation-extractor";
 import { extractFormFields } from "./form-extractor";
 import type { PdfFormField } from "./form-extractor";
+import { extractBookmarks } from "./bookmark-extractor";
+import type { PdfBookmark } from "./bookmark-extractor";
 import { extractMetadata } from "./metadata-reader";
 import type { PdfMetadata } from "./metadata-reader";
+import { extractTables } from "./table-extractor";
+import type { PdfTable } from "./table-extractor";
 import { PdfStructureError } from "../errors";
 import { yieldToEventLoop } from "@utils/utils.base";
 
@@ -117,6 +121,19 @@ export interface ReadPdfOptions {
    * @default true
    */
   extractFormFields?: boolean;
+
+  /**
+   * Whether to extract bookmarks (document outline / table of contents).
+   * @default true
+   */
+  extractBookmarks?: boolean;
+
+  /**
+   * Whether to extract tables from pages using text positioning heuristics.
+   * Opt-in since table detection is heavier than plain text extraction.
+   * @default false
+   */
+  extractTables?: boolean;
 }
 
 /**
@@ -135,6 +152,8 @@ export interface ReadPdfPage {
   images: ExtractedImage[];
   /** Extracted annotations (links, comments, highlights, etc.) */
   annotations: PdfAnnotation[];
+  /** Tables detected from text fragment positioning (opt-in via extractTables) */
+  tables: PdfTable[];
   /** Page width in points */
   width: number;
   /** Page height in points */
@@ -155,6 +174,8 @@ export interface ReadPdfResult {
   metadata: PdfMetadata;
   /** Form fields extracted from AcroForm (document-level) */
   formFields: PdfFormField[];
+  /** Bookmarks (document outline) extracted from the outline tree */
+  bookmarks: PdfBookmark[];
 }
 
 // =============================================================================
@@ -198,6 +219,8 @@ interface ResolvedReadOptions {
   extractMetadata: boolean;
   extractAnnotations: boolean;
   extractFormFields: boolean;
+  extractBookmarks: boolean;
+  extractTables: boolean;
 }
 
 interface PreparedRead {
@@ -219,7 +242,9 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
     extractImages: options?.extractImages ?? true,
     extractMetadata: options?.extractMetadata ?? true,
     extractAnnotations: options?.extractAnnotations ?? true,
-    extractFormFields: options?.extractFormFields ?? true
+    extractFormFields: options?.extractFormFields ?? true,
+    extractBookmarks: options?.extractBookmarks ?? true,
+    extractTables: options?.extractTables ?? false
   };
 
   const doc = new PdfDocument(data);
@@ -289,6 +314,16 @@ function processPage(
 
   const { width, height } = getPageDimensions(pageDict, doc);
 
+  let tables: PdfTable[] = [];
+  if (opts.extractTables) {
+    try {
+      tables = extractTables(textFragments, width, height);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Table extraction failed on page ${pageNumber}: ${msg}`);
+    }
+  }
+
   return {
     pageNumber,
     text,
@@ -296,6 +331,7 @@ function processPage(
     textFragments,
     images,
     annotations,
+    tables,
     width,
     height,
     warnings
@@ -327,7 +363,16 @@ function finalizeRead(
     }
   }
 
-  return { text: allText, pages, metadata, formFields };
+  let bookmarks: PdfBookmark[] = [];
+  if (opts.extractBookmarks) {
+    try {
+      bookmarks = extractBookmarks(doc);
+    } catch {
+      // Non-fatal — just return empty
+    }
+  }
+
+  return { text: allText, pages, metadata, formFields, bookmarks };
 }
 
 // =============================================================================

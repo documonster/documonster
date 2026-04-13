@@ -87,43 +87,6 @@
 
 ---
 
-## PDF Module
-
-### 🔥 P1: High Priority
-
-#### PDF Reading
-
-- [ ] Parse and extract text content from PDF documents
-- [ ] Extract document metadata (title, author, creation date, keywords)
-- [ ] Extract embedded images (JPEG, PNG)
-- [ ] Extract page dimensions and layout information
-- [ ] Support encrypted/password-protected PDF reading
-
-#### PDF Generation Improvements
-
-- [ ] PDF/A compliance
-- [ ] Table of contents generation
-- [ ] Watermark support
-
-### 🟡 P2: Medium Priority
-
-#### PDF Data Extraction
-
-- [ ] Extract tables from PDF pages
-- [ ] Extract form field values
-- [ ] Extract annotations and comments
-- [ ] Extract hyperlinks and bookmarks
-- [ ] OCR-ready text positioning (bounding boxes)
-
-#### PDF Manipulation
-
-- [ ] Merge multiple PDFs into one
-- [ ] Split PDF into individual pages
-- [ ] Add/remove pages
-- [ ] Rotate pages
-
----
-
 ## DOCX Module (Future)
 
 ### 🔥 P1: High Priority

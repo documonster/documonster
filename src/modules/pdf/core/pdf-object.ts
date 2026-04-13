@@ -154,12 +154,37 @@ function encodePdfUtf16String(value: string): Uint8Array {
  */
 export class PdfDict {
   private entries: Array<[string, string]> = [];
+  /** When set, toString() returns this raw string. set() appends/replaces entries within it. */
+  private _raw: string | null = null;
+
+  /**
+   * Create a PdfDict that wraps a pre-serialized dictionary string.
+   * toString() returns the raw string (with any set() overrides applied).
+   */
+  static fromRawString(raw: string): PdfDict {
+    const d = new PdfDict();
+    d._raw = raw;
+    return d;
+  }
 
   /**
    * Set a dictionary entry. The key should NOT include the leading /.
    * The value should be a pre-serialized PDF value string.
    */
   set(key: string, value: string): this {
+    if (this._raw !== null) {
+      // Update or append the entry in the raw string.
+      // Use a regex that matches /Key followed by a simple token value (number, name, ref).
+      // This is safe for keys like /Length, /Filter which have simple values.
+      const keyPattern = new RegExp(`(/${key})\\s+\\S+(?:\\s+\\d+\\s+R)?`);
+      if (keyPattern.test(this._raw)) {
+        this._raw = this._raw.replace(keyPattern, `/${key} ${value}`);
+      } else {
+        // Append before the closing >>
+        this._raw = this._raw.replace(/>>$/, `\n${pdfName(key)} ${value}\n>>`);
+      }
+      return this;
+    }
     const idx = this.entries.findIndex(([k]) => k === key);
     if (idx >= 0) {
       this.entries[idx] = [key, value];
@@ -180,9 +205,23 @@ export class PdfDict {
   }
 
   /**
+   * Remove a dictionary entry by key.
+   */
+  delete(key: string): this {
+    const idx = this.entries.findIndex(([k]) => k === key);
+    if (idx >= 0) {
+      this.entries.splice(idx, 1);
+    }
+    return this;
+  }
+
+  /**
    * Serialize to a PDF dictionary string.
    */
   toString(): string {
+    if (this._raw !== null) {
+      return this._raw;
+    }
     const parts = ["<<"];
     for (const [key, value] of this.entries) {
       parts.push(`${pdfName(key)} ${value}`);

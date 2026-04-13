@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { PdfDocumentBuilder, PdfEditor, readPdf, pdf } from "../index";
+import {
+  parseResourceDict,
+  mergeResourceDicts,
+  serializeResourceDict
+} from "../builder/resource-merger";
+import type { PdfResourceDict } from "../builder/resource-merger";
+import {
+  generateTextFieldAppearance,
+  generateCheckboxAppearance
+} from "../builder/form-appearance";
 
 // =============================================================================
 // PdfDocumentBuilder — Free Text & Vector Drawing
@@ -318,6 +328,299 @@ describe("PdfDocumentBuilder", () => {
 });
 
 // =============================================================================
+// Bookmarks & Table of Contents
+// =============================================================================
+
+describe("PdfDocumentBuilder — Bookmarks", () => {
+  it("should produce PDF with outline bookmarks", async () => {
+    const doc = new PdfDocumentBuilder();
+    const p1 = doc.addPage();
+    p1.drawText("Chapter 1", { x: 72, y: 750, fontSize: 20 });
+    const p2 = doc.addPage();
+    p2.drawText("Chapter 2", { x: 72, y: 750, fontSize: 20 });
+
+    doc.addBookmark("Chapter 1", 0);
+    doc.addBookmark("Chapter 2", 1);
+
+    const bytes = await doc.build();
+    expect(bytes).toBeInstanceOf(Uint8Array);
+
+    // The PDF should contain outline-related keywords
+    const pdfStr = new TextDecoder().decode(bytes);
+    expect(pdfStr).toContain("/Outlines");
+    expect(pdfStr).toContain("/UseOutlines");
+    expect(pdfStr).toContain("Chapter 1");
+    expect(pdfStr).toContain("Chapter 2");
+
+    // Should still be readable
+    const result = await readPdf(bytes);
+    expect(result.pages.length).toBe(2);
+  });
+
+  it("should support nested bookmarks", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Part I", { x: 72, y: 750 });
+    doc.addPage().drawText("Chapter 1.1", { x: 72, y: 750 });
+    doc.addPage().drawText("Chapter 1.2", { x: 72, y: 750 });
+
+    doc.addBookmark("Part I", 0); // index 0 in top-level bookmarks
+    doc.addBookmark("Chapter 1.1", 1, 0); // child of "Part I"
+    doc.addBookmark("Chapter 1.2", 2, 0); // child of "Part I"
+
+    const bytes = await doc.build();
+    const pdfStr = new TextDecoder().decode(bytes);
+
+    expect(pdfStr).toContain("/Outlines");
+    expect(pdfStr).toContain("Part I");
+    expect(pdfStr).toContain("Chapter 1.1");
+    expect(pdfStr).toContain("Chapter 1.2");
+
+    // The outline items should have First/Last for the parent
+    expect(pdfStr).toContain("/First");
+    expect(pdfStr).toContain("/Last");
+
+    const result = await readPdf(bytes);
+    expect(result.pages.length).toBe(3);
+  });
+
+  it("should throw for invalid parent index", () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage();
+
+    expect(() => doc.addBookmark("Child", 0, 5)).toThrow(RangeError);
+    expect(() => doc.addBookmark("Child", 0, -1)).toThrow(RangeError);
+  });
+
+  it("should roundtrip bookmarks through builder and reader", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Page 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 2", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 3", { x: 72, y: 750 });
+
+    doc.addBookmark("Intro", 0);
+    doc.addBookmark("Main", 1);
+    doc.addBookmark("Sub A", 1, 1);
+    doc.addBookmark("Sub B", 2, 1);
+    doc.addBookmark("End", 2);
+
+    const pdfBytes = await doc.build();
+    const result = await readPdf(pdfBytes);
+
+    expect(result.bookmarks.length).toBe(3); // Intro, Main, End
+    expect(result.bookmarks[0].title).toBe("Intro");
+    expect(result.bookmarks[0].pageIndex).toBe(0);
+    expect(result.bookmarks[1].title).toBe("Main");
+    expect(result.bookmarks[1].children.length).toBe(2);
+    expect(result.bookmarks[1].children[0].title).toBe("Sub A");
+    expect(result.bookmarks[1].children[1].title).toBe("Sub B");
+    expect(result.bookmarks[2].title).toBe("End");
+  });
+});
+
+describe("PdfDocumentBuilder — Table of Contents", () => {
+  it("should generate a TOC page with entry text", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Introduction", { x: 72, y: 750 });
+    doc.addPage().drawText("Chapter 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Conclusion", { x: 72, y: 750 });
+
+    doc.addBookmark("Introduction", 0);
+    doc.addBookmark("Chapter 1", 1);
+    doc.addBookmark("Conclusion", 2);
+
+    const tocPage = doc.generateTableOfContents();
+    expect(tocPage).toBeDefined();
+    expect(tocPage.width).toBeGreaterThan(0);
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+
+    // The TOC page is the 4th page (added after the 3 content pages)
+    expect(result.pages.length).toBe(4);
+
+    // TOC page should contain bookmark titles and the default title
+    const tocText = result.pages[3].text;
+    expect(tocText).toContain("Table of Contents");
+    expect(tocText).toContain("Introduction");
+    expect(tocText).toContain("Chapter 1");
+    expect(tocText).toContain("Conclusion");
+  });
+
+  it("should accept custom TOC options", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Section A", { x: 72, y: 750 });
+    doc.addPage().drawText("Section B", { x: 72, y: 750 });
+
+    doc.addBookmark("Section A", 0);
+    doc.addBookmark("Section B", 1);
+
+    doc.generateTableOfContents({
+      title: "Contents",
+      fontSize: 14,
+      indent: 30
+    });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+
+    const tocText = result.pages[2].text;
+    expect(tocText).toContain("Contents");
+    expect(tocText).toContain("Section A");
+    expect(tocText).toContain("Section B");
+  });
+
+  it("should include link annotations on the TOC page", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Page 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 2", { x: 72, y: 750 });
+
+    doc.addBookmark("First Page", 0);
+    doc.addBookmark("Second Page", 1);
+
+    doc.generateTableOfContents();
+
+    const bytes = await doc.build();
+    const pdfStr = new TextDecoder().decode(bytes);
+
+    // Should contain Link annotations with Dest entries
+    expect(pdfStr).toContain("/Subtype /Link");
+    expect(pdfStr).toContain("/Dest");
+
+    const result = await readPdf(bytes);
+    expect(result.pages.length).toBe(3);
+  });
+
+  it("should render nested bookmarks with indentation in TOC", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Part I", { x: 72, y: 750 });
+    doc.addPage().drawText("Ch 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Ch 2", { x: 72, y: 750 });
+
+    doc.addBookmark("Part I", 0);
+    doc.addBookmark("Chapter 1", 1, 0);
+    doc.addBookmark("Chapter 2", 2, 0);
+
+    doc.generateTableOfContents();
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+
+    const tocText = result.pages[3].text;
+    expect(tocText).toContain("Part I");
+    expect(tocText).toContain("Chapter 1");
+    expect(tocText).toContain("Chapter 2");
+  });
+
+  it("should generate multi-page TOC when entries overflow", async () => {
+    const doc = new PdfDocumentBuilder();
+
+    // Create 60 pages with bookmarks — enough to overflow a single TOC page
+    for (let i = 0; i < 60; i++) {
+      doc.addPage().drawText(`Page ${i + 1}`, { x: 72, y: 750 });
+      doc.addBookmark(`Chapter ${i + 1}`, i);
+    }
+
+    doc.generateTableOfContents();
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+
+    // Should have more than 61 pages (60 content + at least 2 TOC pages)
+    expect(result.pages.length).toBeGreaterThan(61);
+
+    // First TOC page should have the title
+    const tocPage1 = result.pages[60];
+    expect(tocPage1.text).toContain("Table of Contents");
+    expect(tocPage1.text).toContain("Chapter 1");
+
+    // Last chapter should appear on a continuation TOC page
+    const allText = result.pages
+      .slice(60)
+      .map(p => p.text)
+      .join("\n");
+    expect(allText).toContain("Chapter 60");
+  });
+});
+
+// =============================================================================
+// PDF/A-1b Compliance
+// =============================================================================
+
+describe("PdfDocumentBuilder — PDF/A-1b", () => {
+  it("should produce a PDF with XMP containing pdfaid:part and pdfaid:conformance", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.setPdfACompliance("1b");
+    doc.setMetadata({ title: "Test PDF/A", author: "Test Author" });
+    doc.addPage().drawText("PDF/A content", { x: 72, y: 750 });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+
+    // Should use PDF 1.4
+    expect(text.startsWith("%PDF-1.4")).toBe(true);
+
+    // XMP metadata must declare PDF/A-1b
+    expect(text).toContain("<pdfaid:part>1</pdfaid:part>");
+    expect(text).toContain("<pdfaid:conformance>B</pdfaid:conformance>");
+
+    // XMP should contain document metadata
+    expect(text).toContain("Test PDF/A");
+    expect(text).toContain("Test Author");
+  });
+
+  it("should produce a PDF with /OutputIntents", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.setPdfACompliance();
+    doc.addPage();
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+
+    expect(text).toContain("/OutputIntents");
+    expect(text).toContain("/GTS_PDFA1");
+    expect(text).toContain("sRGB IEC61966-2.1");
+  });
+
+  it("should produce a PDF with /MarkInfo", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.setPdfACompliance();
+    doc.addPage();
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+
+    expect(text).toContain("/MarkInfo");
+    expect(text).toContain("/Marked true");
+  });
+
+  it("should contain /Metadata reference in the catalog", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.setPdfACompliance();
+    doc.addPage();
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+
+    // Catalog should reference the metadata stream
+    expect(text).toContain("/Metadata");
+    expect(text).toContain("/Type /Metadata");
+    expect(text).toContain("/Subtype /XML");
+  });
+
+  it("should produce valid PDF readable by readPdf", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.setPdfACompliance("1b");
+    doc.setMetadata({ title: "Readable PDF/A" });
+    doc.addPage().drawText("Hello PDF/A", { x: 72, y: 750 });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+    expect(result.pages.length).toBe(1);
+    expect(result.text).toContain("Hello PDF/A");
+  });
+});
+
+// =============================================================================
 // PdfEditor — Modify Existing PDF
 // =============================================================================
 
@@ -620,6 +923,90 @@ describe("PdfEditor", () => {
     const result = await readPdf(bytes);
     expect(result.pages.length).toBe(1);
   });
+
+  it("should remove a page", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Page 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 2", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 3", { x: 72, y: 750 });
+    const pdfBytes = await doc.build();
+
+    const editor = PdfEditor.load(pdfBytes);
+    editor.removePage(1); // remove Page 2
+    const result = await editor.save();
+    const readResult = await readPdf(result);
+
+    expect(readResult.pages.length).toBe(2);
+    expect(readResult.pages[0].text).toContain("Page 1");
+    expect(readResult.pages[1].text).toContain("Page 3");
+  });
+
+  it("should rotate a page", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Rotated", { x: 72, y: 750 });
+    const pdfBytes = await doc.build();
+
+    const editor = PdfEditor.load(pdfBytes);
+    editor.rotatePage(0, 90);
+    const result = await editor.save();
+
+    const pdfStr = new TextDecoder().decode(result);
+    expect(pdfStr).toContain("/Rotate 90");
+  });
+
+  it("should split pages into separate PDFs", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Page A", { x: 72, y: 750 });
+    doc.addPage().drawText("Page B", { x: 72, y: 750 });
+    doc.addPage().drawText("Page C", { x: 72, y: 750 });
+    const pdfBytes = await doc.build();
+
+    const editor = PdfEditor.load(pdfBytes);
+    const pages = await editor.splitPages();
+
+    expect(pages.length).toBe(3);
+
+    // Each should be a valid single-page PDF
+    for (let i = 0; i < pages.length; i++) {
+      const result = await readPdf(pages[i]);
+      expect(result.pages.length).toBe(1);
+    }
+
+    const resultA = await readPdf(pages[0]);
+    expect(resultA.text).toContain("Page A");
+    const resultC = await readPdf(pages[2]);
+    expect(resultC.text).toContain("Page C");
+  });
+
+  it("should split specific pages", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Page A", { x: 72, y: 750 });
+    doc.addPage().drawText("Page B", { x: 72, y: 750 });
+    doc.addPage().drawText("Page C", { x: 72, y: 750 });
+    const pdfBytes = await doc.build();
+
+    const editor = PdfEditor.load(pdfBytes);
+    const pages = await editor.splitPages([0, 2]); // Only A and C
+
+    expect(pages.length).toBe(2);
+    const resultA = await readPdf(pages[0]);
+    expect(resultA.text).toContain("Page A");
+    const resultC = await readPdf(pages[1]);
+    expect(resultC.text).toContain("Page C");
+  });
+
+  it("should throw for invalid removePage index", async () => {
+    const pdfBytes = await pdf([["Test"]]);
+    const editor = PdfEditor.load(pdfBytes);
+    expect(() => editor.removePage(-1)).toThrow();
+    expect(() => editor.removePage(100)).toThrow();
+  });
+
+  it("should throw for invalid rotatePage degrees", async () => {
+    const pdfBytes = await pdf([["Test"]]);
+    const editor = PdfEditor.load(pdfBytes);
+    expect(() => editor.rotatePage(0, 45)).toThrow();
+  });
 });
 
 // =============================================================================
@@ -673,5 +1060,389 @@ describe("PdfContentStream — Vector Drawing", () => {
 
     const bytes = await doc.build();
     expect(bytes.length).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// Form Field Appearance Stream Generation
+// =============================================================================
+
+describe("Form Field Appearance Streams", () => {
+  it("should produce /AP with a stream reference when updating a text field", async () => {
+    // Hand-craft a PDF with a text form field widget on a page
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (city) /V (old) /Rect [72 700 300 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000280 00000 n ",
+      "0000000330 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "460",
+      "%%EOF"
+    ].join("\n");
+    const pdfBytes = new TextEncoder().encode(src);
+
+    const editor = PdfEditor.load(pdfBytes);
+    editor.setFormField("city", "Springfield");
+    const result = await editor.save();
+
+    const pdfStr = new TextDecoder().decode(result);
+
+    // Should contain an /AP dict with /N pointing to an indirect ref
+    expect(pdfStr).toContain("/AP");
+    expect(pdfStr).toMatch(/\/AP\s*<<\s*\/N\s+\d+\s+0\s+R\s*>>/);
+
+    // Should also still set /NeedAppearances as a fallback
+    expect(pdfStr).toContain("/NeedAppearances true");
+
+    // The new value should be present
+    expect(pdfStr).toContain("Springfield");
+  });
+
+  it("should include the field value text in the appearance stream", async () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (email) /V () /Rect [72 650 400 670] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000280 00000 n ",
+      "0000000330 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "460",
+      "%%EOF"
+    ].join("\n");
+    const pdfBytes = new TextEncoder().encode(src);
+
+    const editor = PdfEditor.load(pdfBytes);
+    editor.setFormField("email", "test@example.com");
+    const result = await editor.save();
+
+    const pdfStr = new TextDecoder().decode(result);
+
+    // The appearance stream should contain the text value
+    // (the stream is written uncompressed for small content)
+    expect(pdfStr).toContain("test@example.com");
+
+    // The appearance stream object should be a Form XObject
+    expect(pdfStr).toContain("/Subtype /Form");
+    expect(pdfStr).toContain("/BBox");
+  });
+
+  it("generateTextFieldAppearance should return stream bytes and resources", () => {
+    const { stream, resources } = generateTextFieldAppearance({
+      value: "Hello World",
+      rect: [72, 700, 300, 720]
+    });
+
+    expect(stream).toBeInstanceOf(Uint8Array);
+    expect(stream.length).toBeGreaterThan(0);
+
+    const streamStr = new TextDecoder().decode(stream);
+    // Should contain text operators
+    expect(streamStr).toContain("BT");
+    expect(streamStr).toContain("ET");
+    expect(streamStr).toContain("Hello World");
+    expect(streamStr).toContain("Tf"); // font selection
+
+    // Resources should reference a font
+    expect(resources).toContain("/Font");
+    expect(resources).toContain("/Helv");
+    expect(resources).toContain("/Helvetica");
+  });
+
+  it("generateCheckboxAppearance should return on/off streams", () => {
+    const { streamOn, streamOff } = generateCheckboxAppearance(true, [72, 700, 92, 720]);
+
+    expect(streamOn).toBeInstanceOf(Uint8Array);
+    expect(streamOff).toBeInstanceOf(Uint8Array);
+
+    // On stream should have drawing operators (X mark)
+    expect(streamOn.length).toBeGreaterThan(0);
+    const onStr = new TextDecoder().decode(streamOn);
+    expect(onStr).toContain("m"); // moveTo
+    expect(onStr).toContain("l"); // lineTo
+    expect(onStr).toContain("S"); // stroke
+
+    // Off stream should be empty (no drawing)
+    expect(streamOff.length).toBe(0);
+  });
+});
+
+// =============================================================================
+// Resource Dict Merger
+// =============================================================================
+
+describe("Resource Dict Merger", () => {
+  it("should merge two resource dicts with overlapping Font sub-dicts", () => {
+    const original: PdfResourceDict = new Map([
+      [
+        "Font",
+        new Map([
+          ["F1", "3 0 R"],
+          ["F2", "5 0 R"]
+        ])
+      ]
+    ]);
+    const overlay: PdfResourceDict = new Map([
+      [
+        "Font",
+        new Map([
+          ["F2", "10 0 R"],
+          ["F3", "12 0 R"]
+        ])
+      ]
+    ]);
+
+    const merged = mergeResourceDicts(original, overlay);
+    const fontMap = merged.get("Font")!;
+
+    expect(fontMap.size).toBe(3);
+    expect(fontMap.get("F1")).toBe("3 0 R"); // from original
+    expect(fontMap.get("F2")).toBe("10 0 R"); // overlay wins
+    expect(fontMap.get("F3")).toBe("12 0 R"); // from overlay
+  });
+
+  it("should merge when one has XObject and the other does not", () => {
+    const original: PdfResourceDict = new Map([["Font", new Map([["F1", "3 0 R"]])]]);
+    const overlay: PdfResourceDict = new Map([["XObject", new Map([["Im1", "7 0 R"]])]]);
+
+    const merged = mergeResourceDicts(original, overlay);
+
+    expect(merged.has("Font")).toBe(true);
+    expect(merged.get("Font")!.get("F1")).toBe("3 0 R");
+    expect(merged.has("XObject")).toBe(true);
+    expect(merged.get("XObject")!.get("Im1")).toBe("7 0 R");
+  });
+
+  it("should round-trip: parse → merge → serialize → parse gives correct result", () => {
+    const origStr = "<< /Font << /F1 3 0 R /F2 5 0 R >> /ExtGState << /GS0 8 0 R >> >>";
+    const overlayStr = "<< /Font << /F2 10 0 R /F3 12 0 R >> /XObject << /Im1 7 0 R >> >>";
+
+    const origDict = parseResourceDict(origStr);
+    const overlayDict = parseResourceDict(overlayStr);
+    const merged = mergeResourceDicts(origDict, overlayDict);
+    const serialized = serializeResourceDict(merged);
+
+    // Parse the serialized result back
+    const reparsed = parseResourceDict(serialized);
+
+    // Font: F1 from original, F2 from overlay, F3 from overlay
+    const fontMap = reparsed.get("Font")!;
+    expect(fontMap.size).toBe(3);
+    expect(fontMap.get("F1")).toBe("3 0 R");
+    expect(fontMap.get("F2")).toBe("10 0 R");
+    expect(fontMap.get("F3")).toBe("12 0 R");
+
+    // ExtGState: preserved from original
+    const gsMap = reparsed.get("ExtGState")!;
+    expect(gsMap.size).toBe(1);
+    expect(gsMap.get("GS0")).toBe("8 0 R");
+
+    // XObject: from overlay
+    const xobjMap = reparsed.get("XObject")!;
+    expect(xobjMap.size).toBe(1);
+    expect(xobjMap.get("Im1")).toBe("7 0 R");
+  });
+
+  it("should parse an empty dict", () => {
+    const dict = parseResourceDict("<< >>");
+    expect(dict.size).toBe(0);
+  });
+
+  it("should serialize an empty dict", () => {
+    const dict: PdfResourceDict = new Map();
+    expect(serializeResourceDict(dict)).toBe("<< >>");
+  });
+
+  it("should handle non-sub-dict categories like ProcSet", () => {
+    const dictStr = "<< /Font << /F1 3 0 R >> /ProcSet [/PDF /Text] >>";
+    const parsed = parseResourceDict(dictStr);
+
+    expect(parsed.has("Font")).toBe(true);
+    expect(parsed.has("ProcSet")).toBe(true);
+
+    // ProcSet is stored with empty-string key
+    const procSet = parsed.get("ProcSet")!;
+    expect(procSet.get("")).toBe("[/PDF /Text]");
+
+    // Round-trip
+    const serialized = serializeResourceDict(parsed);
+    expect(serialized).toContain("/ProcSet [/PDF /Text]");
+    expect(serialized).toContain("/Font");
+  });
+
+  it("should preserve original dict when overlay is empty", () => {
+    const original: PdfResourceDict = new Map([["Font", new Map([["F1", "3 0 R"]])]]);
+    const overlay: PdfResourceDict = new Map();
+
+    const merged = mergeResourceDicts(original, overlay);
+    expect(merged.get("Font")!.get("F1")).toBe("3 0 R");
+  });
+
+  it("should not mutate the original dict during merge", () => {
+    const original: PdfResourceDict = new Map([["Font", new Map([["F1", "3 0 R"]])]]);
+    const overlay: PdfResourceDict = new Map([["Font", new Map([["F2", "5 0 R"]])]]);
+
+    mergeResourceDicts(original, overlay);
+
+    // Original should be unchanged
+    const origFont = original.get("Font")!;
+    expect(origFont.size).toBe(1);
+    expect(origFont.has("F2")).toBe(false);
+  });
+});
+
+// =============================================================================
+// PdfEditor — Incremental Save
+// =============================================================================
+
+describe("PdfEditor — saveIncremental", () => {
+  it("should start with the original bytes when overlaying text", async () => {
+    const originalPdf = await pdf([["Original Content"]]);
+    const editor = PdfEditor.load(originalPdf);
+
+    editor.getPage(0).drawText("Overlay", {
+      x: 200,
+      y: 400,
+      fontSize: 24,
+      color: { r: 1, g: 0, b: 0 }
+    });
+
+    const result = await editor.saveIncremental();
+
+    // The result should start with the exact original bytes
+    expect(result.length).toBeGreaterThan(originalPdf.length);
+    const prefix = result.subarray(0, originalPdf.length);
+    expect(prefix).toEqual(originalPdf);
+
+    // The result should be a readable PDF with both original and overlay content
+    const readResult = await readPdf(result);
+    expect(readResult.text).toContain("Original Content");
+    expect(readResult.text).toContain("Overlay");
+  });
+
+  it("should update form field values incrementally", async () => {
+    // Hand-craft a PDF with a text form field
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (username) /V (old) /Rect [72 700 200 720] >> endobj",
+      "xref",
+      "0 6",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000100 00000 n ",
+      "0000000157 00000 n ",
+      "0000000280 00000 n ",
+      "0000000330 00000 n ",
+      "trailer << /Size 6 /Root 1 0 R >>",
+      "startxref",
+      "460",
+      "%%EOF"
+    ].join("\n");
+    const originalPdf = new TextEncoder().encode(src);
+
+    const editor = PdfEditor.load(originalPdf);
+    editor.setFormField("username", "new_value");
+    const result = await editor.saveIncremental();
+
+    // The result should start with the exact original bytes
+    expect(result.length).toBeGreaterThan(originalPdf.length);
+    const prefix = result.subarray(0, originalPdf.length);
+    expect(prefix).toEqual(originalPdf);
+
+    // The saved PDF should contain the new value
+    const pdfStr = new TextDecoder().decode(result);
+    expect(pdfStr).toContain("new_value");
+  });
+
+  it("should fall back to full rebuild when pages are added", async () => {
+    const originalPdf = await pdf([["Page 1"]]);
+    const editor = PdfEditor.load(originalPdf);
+
+    // Add a new page — this is a structural change
+    const newPage = editor.addPage();
+    newPage.drawText("Page 2", { x: 72, y: 750, fontSize: 20 });
+
+    const result = await editor.saveIncremental();
+
+    // Since structural changes are present, this should NOT start with original bytes
+    // (it falls back to full rebuild which re-creates the entire PDF)
+    const readResult = await readPdf(result);
+    expect(readResult.pages.length).toBe(2);
+    expect(readResult.pages[1].text).toContain("Page 2");
+  });
+
+  it("should fall back to full rebuild when pages are removed", async () => {
+    const doc = new (await import("../index")).PdfDocumentBuilder();
+    doc.addPage().drawText("Page 1", { x: 72, y: 750 });
+    doc.addPage().drawText("Page 2", { x: 72, y: 750 });
+    const originalPdf = await doc.build();
+
+    const editor = PdfEditor.load(originalPdf);
+    editor.removePage(1);
+
+    const result = await editor.saveIncremental();
+
+    // Falls back to full rebuild — result should be a valid 1-page PDF
+    const readResult = await readPdf(result);
+    expect(readResult.pages.length).toBe(1);
+    expect(readResult.pages[0].text).toContain("Page 1");
+  });
+
+  it("should return original bytes when no changes are made", async () => {
+    const originalPdf = await pdf([["Unchanged"]]);
+    const editor = PdfEditor.load(originalPdf);
+
+    const result = await editor.saveIncremental();
+
+    // No changes — should return original bytes as-is
+    expect(result).toEqual(originalPdf);
+  });
+
+  it("should not leak state between consecutive save calls", async () => {
+    const originalPdf = await pdf([["State Test"]]);
+    const editor = PdfEditor.load(originalPdf);
+
+    // First: incremental save with no changes (early return path)
+    const result1 = await editor.saveIncremental();
+    expect(result1).toEqual(originalPdf);
+
+    // Second: add overlay and do full save — should work correctly
+    editor.getPage(0).drawText("Added", { x: 200, y: 400 });
+    const result2 = await editor.save();
+    const readResult = await readPdf(result2);
+    expect(readResult.text).toContain("State Test");
+    expect(readResult.text).toContain("Added");
+
+    // Third: incremental save after full save — should not crash
+    const editor2 = PdfEditor.load(result2);
+    const result3 = await editor2.saveIncremental();
+    expect(result3.length).toBeGreaterThan(0);
   });
 });

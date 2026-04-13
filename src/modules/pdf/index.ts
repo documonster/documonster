@@ -99,6 +99,8 @@ export type { ExtractedImage } from "./reader/image-extractor";
 export type { TextLine } from "./reader/text-reconstruction";
 export type { PdfAnnotation, PdfRect } from "./reader/annotation-extractor";
 export type { PdfFormField, PdfFormFieldType } from "./reader/form-extractor";
+export type { PdfBookmark } from "./reader/bookmark-extractor";
+export type { PdfTable, PdfTableRow, PdfTableCell } from "./reader/table-extractor";
 
 // =============================================================================
 // Types — Building
@@ -114,7 +116,8 @@ export type {
   DrawPathOptions,
   DrawImageOptions,
   DocumentMetadata,
-  PathOp
+  PathOp,
+  TocOptions
 } from "./builder/document-builder";
 export type { LoadOptions } from "./builder/pdf-editor";
 

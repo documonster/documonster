@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { pdf } from "../pdf";
 import { excelToPdf } from "../excel-bridge";
+import { PdfDocumentBuilder } from "../builder/document-builder";
 import { Workbook } from "@excel/workbook";
 import { readPdf } from "../reader/pdf-reader";
 import { PdfStructureError } from "../errors";
@@ -2350,5 +2351,335 @@ describe("PDF Reader - Form Field Extraction", () => {
     expect(field.type).toBe("listbox");
     expect(field.value).toBe("Red");
     expect(field.options).toEqual(["Red", "Green", "Blue"]);
+  });
+});
+
+// =============================================================================
+// Bookmark (Outline) Extraction
+// =============================================================================
+
+describe("PDF Reader - Bookmark Extraction", () => {
+  it("should extract a 2-level outline tree", async () => {
+    // Hand-crafted PDF with a 2-level outline tree:
+    //   Chapter 1 → page 1
+    //     Section 1.1 → page 1
+    //     Section 1.2 → page 2
+    //   Chapter 2 → page 2
+    //
+    // Object layout:
+    //   1: Catalog (with /Outlines 7 0 R)
+    //   2: Pages
+    //   3: Page 1
+    //   4: Page 2
+    //   5: Contents (page 1, empty)
+    //   6: Contents (page 2, empty)
+    //   7: Outlines root (/First 8 /Last 9 /Count 4)
+    //   8: Chapter 1 (/First 10 /Last 11 /Next 9)
+    //   9: Chapter 2 (/Prev 8)
+    //  10: Section 1.1 (/Next 11)
+    //  11: Section 1.2 (/Prev 10)
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R >> endobj",
+      "4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R >> endobj",
+      "5 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "6 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      // Outlines root
+      "7 0 obj << /Type /Outlines /First 8 0 R /Last 9 0 R /Count 4 >> endobj",
+      // Chapter 1 → page 1 (obj 3), with children
+      "8 0 obj << /Title (Chapter 1) /Parent 7 0 R /First 10 0 R /Last 11 0 R /Count 2 /Next 9 0 R /Dest [3 0 R /Fit] >> endobj",
+      // Chapter 2 → page 2 (obj 4), no children
+      "9 0 obj << /Title (Chapter 2) /Parent 7 0 R /Prev 8 0 R /Dest [4 0 R /Fit] >> endobj",
+      // Section 1.1 → page 1 (obj 3)
+      "10 0 obj << /Title (Section 1.1) /Parent 8 0 R /Next 11 0 R /Dest [3 0 R /XYZ 0 700 0] >> endobj",
+      // Section 1.2 → page 2 (obj 4)
+      "11 0 obj << /Title (Section 1.2) /Parent 8 0 R /Prev 10 0 R /Dest [4 0 R /XYZ 0 700 0] >> endobj",
+      "xref",
+      "0 12",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000080 00000 n ",
+      "0000000145 00000 n ",
+      "0000000240 00000 n ",
+      "0000000335 00000 n ",
+      "0000000385 00000 n ",
+      "0000000435 00000 n ",
+      "0000000510 00000 n ",
+      "0000000650 00000 n ",
+      "0000000740 00000 n ",
+      "0000000850 00000 n ",
+      "trailer << /Size 12 /Root 1 0 R >>",
+      "startxref",
+      "960",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = await readPdf(pdfBytes);
+
+    expect(result.bookmarks.length).toBe(2);
+
+    // Chapter 1
+    const ch1 = result.bookmarks[0];
+    expect(ch1.title).toBe("Chapter 1");
+    expect(ch1.pageIndex).toBe(0); // page 1 → index 0
+    expect(ch1.children.length).toBe(2);
+
+    // Section 1.1
+    expect(ch1.children[0].title).toBe("Section 1.1");
+    expect(ch1.children[0].pageIndex).toBe(0);
+    expect(ch1.children[0].children).toEqual([]);
+
+    // Section 1.2
+    expect(ch1.children[1].title).toBe("Section 1.2");
+    expect(ch1.children[1].pageIndex).toBe(1); // page 2 → index 1
+    expect(ch1.children[1].children).toEqual([]);
+
+    // Chapter 2
+    const ch2 = result.bookmarks[1];
+    expect(ch2.title).toBe("Chapter 2");
+    expect(ch2.pageIndex).toBe(1);
+    expect(ch2.children).toEqual([]);
+  });
+
+  it("should return empty array for PDF with no outlines", async () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "xref",
+      "0 5",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "0000000230 00000 n ",
+      "trailer << /Size 5 /Root 1 0 R >>",
+      "startxref",
+      "280",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = await readPdf(pdfBytes);
+
+    expect(result.bookmarks).toEqual([]);
+  });
+
+  it("should extract bookmarks with action-based destinations", async () => {
+    // Outline items use /A << /S /GoTo /D [...] >> instead of /Dest
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 5 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >> endobj",
+      "4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >> endobj",
+      // Outlines root
+      "5 0 obj << /Type /Outlines /First 6 0 R /Last 7 0 R /Count 2 >> endobj",
+      // Bookmark with GoTo action to page 1
+      "6 0 obj << /Title (Introduction) /Parent 5 0 R /Next 7 0 R /A << /S /GoTo /D [3 0 R /Fit] >> >> endobj",
+      // Bookmark with GoTo action to page 2
+      "7 0 obj << /Title (Appendix) /Parent 5 0 R /Prev 6 0 R /A << /S /GoTo /D [4 0 R /XYZ 0 792 0] >> >> endobj",
+      "xref",
+      "0 8",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000080 00000 n ",
+      "0000000145 00000 n ",
+      "0000000220 00000 n ",
+      "0000000295 00000 n ",
+      "0000000370 00000 n ",
+      "0000000500 00000 n ",
+      "trailer << /Size 8 /Root 1 0 R >>",
+      "startxref",
+      "640",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = await readPdf(pdfBytes);
+
+    expect(result.bookmarks.length).toBe(2);
+
+    expect(result.bookmarks[0].title).toBe("Introduction");
+    expect(result.bookmarks[0].pageIndex).toBe(0);
+
+    expect(result.bookmarks[1].title).toBe("Appendix");
+    expect(result.bookmarks[1].pageIndex).toBe(1);
+  });
+
+  it("should respect extractBookmarks: false option", async () => {
+    const src = [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 5 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+      "4 0 obj << /Length 0 >> stream",
+      "endstream endobj",
+      "5 0 obj << /Type /Outlines /First 6 0 R /Last 6 0 R /Count 1 >> endobj",
+      "6 0 obj << /Title (Bookmark) /Parent 5 0 R /Dest [3 0 R /Fit] >> endobj",
+      "xref",
+      "0 7",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000080 00000 n ",
+      "0000000137 00000 n ",
+      "0000000252 00000 n ",
+      "0000000302 00000 n ",
+      "0000000380 00000 n ",
+      "trailer << /Size 7 /Root 1 0 R >>",
+      "startxref",
+      "460",
+      "%%EOF"
+    ].join("\n");
+
+    const pdfBytes = pdfFromString(src);
+    const result = await readPdf(pdfBytes, { extractBookmarks: false });
+
+    expect(result.bookmarks).toEqual([]);
+  });
+});
+
+// =============================================================================
+// Table Extraction
+// =============================================================================
+
+describe("PDF Reader - Table Extraction", () => {
+  it("should extract a 3x3 table from a simple PDF", async () => {
+    const pdfBytes = await pdf([
+      ["Name", "Age", "City"],
+      ["Alice", 30, "New York"],
+      ["Bob", 25, "London"]
+    ]);
+
+    const result = await readPdf(pdfBytes, { extractTables: true });
+    expect(result.pages.length).toBeGreaterThan(0);
+
+    const page = result.pages[0];
+    expect(page.tables.length).toBeGreaterThanOrEqual(1);
+
+    const table = page.tables[0];
+    expect(table.rows.length).toBeGreaterThanOrEqual(2);
+
+    // Each row should have at least 2 cells
+    for (const row of table.rows) {
+      expect(row.cells.length).toBeGreaterThanOrEqual(2);
+    }
+
+    // All text from the table should be present in cell text
+    const allCellText = table.rows.flatMap(r => r.cells.map(c => c.text));
+    expect(allCellText).toContain("Name");
+    expect(allCellText).toContain("Age");
+    expect(allCellText).toContain("City");
+
+    // Table bounding box should have reasonable dimensions
+    expect(table.width).toBeGreaterThan(0);
+    expect(table.height).toBeGreaterThan(0);
+    expect(table.x).toBeGreaterThanOrEqual(0);
+    expect(table.y).toBeGreaterThan(0);
+  });
+
+  it("should return empty tables when extractTables is false (default)", async () => {
+    const pdfBytes = await pdf([
+      ["Name", "Score"],
+      ["Alice", 95],
+      ["Bob", 87]
+    ]);
+
+    const result = await readPdf(pdfBytes);
+    const page = result.pages[0];
+    expect(page.tables).toEqual([]);
+  });
+
+  it("should return empty tables for a PDF with no tabular structure", async () => {
+    // Single-column data — should not detect a table
+    const pdfBytes = await pdf([["Hello"], ["World"], ["Test"]]);
+
+    const result = await readPdf(pdfBytes, { extractTables: true });
+    const page = result.pages[0];
+    expect(page.tables).toEqual([]);
+  });
+
+  it("should detect cells with correct position data", async () => {
+    const pdfBytes = await pdf([
+      ["Product", "Price"],
+      ["Widget", 19.99],
+      ["Gadget", 24.5]
+    ]);
+
+    const result = await readPdf(pdfBytes, { extractTables: true });
+    const page = result.pages[0];
+
+    if (page.tables.length > 0) {
+      const table = page.tables[0];
+      for (const row of table.rows) {
+        for (const cell of row.cells) {
+          // Each cell should have numeric position and size
+          expect(typeof cell.x).toBe("number");
+          expect(typeof cell.y).toBe("number");
+          expect(typeof cell.width).toBe("number");
+          expect(typeof cell.height).toBe("number");
+        }
+      }
+    }
+  });
+
+  it("should extract table from a multi-column Excel workbook PDF", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Data");
+    ws.columns = [
+      { header: "Item", key: "item", width: 20 },
+      { header: "Qty", key: "qty", width: 10 },
+      { header: "Price", key: "price", width: 12 }
+    ];
+    ws.addRows([
+      { item: "Laptop", qty: 5, price: 999.99 },
+      { item: "Mouse", qty: 50, price: 29.99 },
+      { item: "Keyboard", qty: 30, price: 49.99 }
+    ]);
+    const pdfBytes = await excelToPdf(wb);
+
+    const result = await readPdf(pdfBytes, { extractTables: true });
+    const page = result.pages[0];
+    expect(page.tables.length).toBeGreaterThanOrEqual(1);
+
+    const table = page.tables[0];
+    // Should have at least header + 3 data rows
+    expect(table.rows.length).toBeGreaterThanOrEqual(3);
+
+    // Verify all data values appear in cell text
+    const allCellText = table.rows.flatMap(r => r.cells.map(c => c.text));
+    expect(allCellText.some(t => t.includes("Laptop"))).toBe(true);
+    expect(allCellText.some(t => t.includes("Mouse"))).toBe(true);
+    expect(allCellText.some(t => t.includes("Keyboard"))).toBe(true);
+  });
+
+  it("should not detect single-column paragraph text as a table", async () => {
+    // A PDF with multi-line paragraph text — no tabular structure
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    const lines = [
+      "This is a paragraph of text that spans a single column.",
+      "It has multiple lines but no tabular structure at all.",
+      "Each line is positioned sequentially, one below the other.",
+      "There are no columns, no alignment patterns, no grid.",
+      "Table extraction should return zero tables for this page."
+    ];
+    let y = 700;
+    for (const line of lines) {
+      page.drawText(line, { x: 72, y, fontSize: 12 });
+      y -= 18;
+    }
+    const pdfBytes = await doc.build();
+
+    const result = await readPdf(pdfBytes, { extractTables: true });
+    expect(result.pages[0].tables.length).toBe(0);
   });
 });
