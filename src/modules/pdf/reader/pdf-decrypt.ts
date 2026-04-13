@@ -11,7 +11,8 @@
  * @see PDF 2.0 (ISO 32000-2), §7.6 - Encryption
  */
 
-import { rc4, md5, sha256, aesCbcDecrypt, aesCbcDecryptRaw, concatArrays } from "../core/crypto";
+import { rc4, md5, sha256, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
+import { concatUint8Arrays } from "@utils/binary";
 import type { PdfDictValue } from "./pdf-parser";
 import { dictGetNumber, dictGetName, dictGetBytes, dictGetArray, dictGetBool } from "./pdf-parser";
 import type { PdfDocument } from "./pdf-document";
@@ -244,7 +245,7 @@ function tryUserPasswordV5(
   const uKeySalt = uValue.subarray(40, 48);
 
   // Validate: SHA-256(password + validation salt) == first 32 bytes of U
-  const validateInput = concatArrays(passwordBytes, uValidationSalt);
+  const validateInput = concatUint8Arrays([passwordBytes, uValidationSalt]);
   const computedHash = sha256(validateInput);
 
   if (!arraysEqual(computedHash, uHash)) {
@@ -252,7 +253,7 @@ function tryUserPasswordV5(
   }
 
   // Derive key: SHA-256(password + key salt) => use as AES-256 key to decrypt UE
-  const keyInput = concatArrays(passwordBytes, uKeySalt);
+  const keyInput = concatUint8Arrays([passwordBytes, uKeySalt]);
   const keyHash = sha256(keyInput);
 
   // Decrypt UE with this key using AES-256-CBC with zero IV
@@ -278,7 +279,7 @@ function tryOwnerPasswordV5(
   const u48 = uValue.subarray(0, 48);
 
   // Validate: SHA-256(password + validation salt + U(0..47)) == first 32 bytes of O
-  const validateInput = concatArrays(passwordBytes, oValidationSalt, u48);
+  const validateInput = concatUint8Arrays([passwordBytes, oValidationSalt, u48]);
   const computedHash = sha256(validateInput);
 
   if (!arraysEqual(computedHash, oHash)) {
@@ -286,7 +287,7 @@ function tryOwnerPasswordV5(
   }
 
   // Derive key: SHA-256(password + key salt + U(0..47))
-  const keyInput = concatArrays(passwordBytes, oKeySalt, u48);
+  const keyInput = concatUint8Arrays([passwordBytes, oKeySalt, u48]);
   const keyHash = sha256(keyInput);
 
   // Decrypt OE with this key using AES-256-CBC with zero IV

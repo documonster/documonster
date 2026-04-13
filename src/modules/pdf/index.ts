@@ -63,10 +63,18 @@ export { readPdf } from "./reader/pdf-reader";
 // =============================================================================
 
 /** Build PDFs with free text positioning, vector drawing, and images. */
-export { PdfDocumentBuilder, PdfPageBuilder } from "./builder/document-builder";
+export { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "./builder/document-builder";
 
 /** Edit existing PDFs: overlay content, fill forms, copy/merge pages. */
 export { PdfEditor, PdfEditorPage } from "./builder/pdf-editor";
+
+/** Digital signatures — verify and sign PDF documents. */
+export {
+  verifyPdfSignature,
+  signPdf,
+  buildSignatureDictPlaceholder,
+  asn1Parse
+} from "./core/digital-signature";
 
 // =============================================================================
 // Types — Writing
@@ -117,9 +125,31 @@ export type {
   DrawImageOptions,
   DocumentMetadata,
   PathOp,
-  TocOptions
+  TocOptions,
+  AnnotationType,
+  AnnotationOptions,
+  TextMarkupAnnotationOptions,
+  TextAnnotationOptions,
+  FreeTextAnnotationOptions,
+  StampAnnotationOptions,
+  FormFieldOptions,
+  TextFieldOptions,
+  CheckboxOptions,
+  DropdownOptions,
+  RadioGroupOptions
 } from "./builder/document-builder";
 export type { LoadOptions } from "./builder/pdf-editor";
+
+// =============================================================================
+// Types — Digital Signatures
+// =============================================================================
+
+export type {
+  SignatureVerificationResult,
+  CmsSignedData,
+  SignOptions,
+  Asn1Node
+} from "./core/digital-signature";
 
 // =============================================================================
 // Errors

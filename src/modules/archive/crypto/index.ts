@@ -43,10 +43,12 @@ export {
   aesEncryptedSize,
   aesVerifyPassword,
   buildAesExtraField,
-  randomBytes,
   type AesKeyStrength,
   type AesExtraFieldInfo
 } from "./aes";
+
+// Random bytes — from shared @utils/crypto
+export { randomBytes } from "@utils/crypto";
 
 // Types
 export {

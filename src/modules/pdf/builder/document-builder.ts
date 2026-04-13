@@ -204,6 +204,196 @@ interface PageAnnotation {
 }
 
 // =============================================================================
+// Annotation Types (for builder-created annotations)
+// =============================================================================
+
+/** Annotation types that can be created via the builder API. */
+export type AnnotationType =
+  | "Highlight"
+  | "Underline"
+  | "StrikeOut"
+  | "Squiggly"
+  | "Text"
+  | "FreeText"
+  | "Stamp";
+
+/** Options for text markup annotations (Highlight, Underline, StrikeOut, Squiggly). */
+export interface TextMarkupAnnotationOptions {
+  /** Annotation subtype. */
+  type: "Highlight" | "Underline" | "StrikeOut" | "Squiggly";
+  /** Bounding rectangle [x1, y1, x2, y2]. */
+  rect: [number, number, number, number];
+  /**
+   * QuadPoints — four pairs of (x,y) defining the marked text region.
+   * Must be groups of 8 numbers (4 corners per quad). Order per PDF spec:
+   * bottom-left, bottom-right, top-left, top-right (some viewers use
+   * top-left, top-right, bottom-left, bottom-right — the spec is ambiguous).
+   * If omitted, defaults to the corners of `rect`.
+   */
+  quadPoints?: number[];
+  /** Annotation color (RGB, 0–1). Default: yellow for highlight, red for others. */
+  color?: PdfColor;
+  /** Text contents (e.g., comment text). */
+  contents?: string;
+  /** Author / title. */
+  author?: string;
+}
+
+/** Options for a sticky note (Text) annotation. */
+export interface TextAnnotationOptions {
+  type: "Text";
+  /** Position — the icon appears at this point. */
+  rect: [number, number, number, number];
+  /** Comment text. */
+  contents?: string;
+  /** Author. */
+  author?: string;
+  /** Icon name. Default: "Note". */
+  iconName?: "Comment" | "Key" | "Note" | "Help" | "NewParagraph" | "Paragraph" | "Insert";
+  /** Annotation color. Default: yellow. */
+  color?: PdfColor;
+  /** Whether the popup is initially open. Default: false. */
+  open?: boolean;
+}
+
+/** Options for a free-text annotation (in-line text). */
+export interface FreeTextAnnotationOptions {
+  type: "FreeText";
+  /** Bounding rectangle [x1, y1, x2, y2]. */
+  rect: [number, number, number, number];
+  /** The displayed text. */
+  contents: string;
+  /** Font size. Default: 12. */
+  fontSize?: number;
+  /** Text color. Default: black. */
+  color?: PdfColor;
+  /** Border color. Omit for no border. */
+  borderColor?: PdfColor;
+  /** Author. */
+  author?: string;
+}
+
+/** Options for a rubber stamp annotation. */
+export interface StampAnnotationOptions {
+  type: "Stamp";
+  /** Bounding rectangle [x1, y1, x2, y2]. */
+  rect: [number, number, number, number];
+  /** Standard stamp name. */
+  stampName?:
+    | "Approved"
+    | "Experimental"
+    | "NotApproved"
+    | "AsIs"
+    | "Expired"
+    | "NotForPublicRelease"
+    | "Confidential"
+    | "Final"
+    | "Sold"
+    | "Departmental"
+    | "ForComment"
+    | "TopSecret"
+    | "Draft"
+    | "ForPublicRelease";
+  /** Annotation color. */
+  color?: PdfColor;
+  /** Comment text. */
+  contents?: string;
+  /** Author. */
+  author?: string;
+}
+
+/** Union of all annotation option types. */
+export type AnnotationOptions =
+  | TextMarkupAnnotationOptions
+  | TextAnnotationOptions
+  | FreeTextAnnotationOptions
+  | StampAnnotationOptions;
+
+/** @internal Stored annotation for build-time serialization. */
+interface BuilderAnnotation {
+  subtype: string;
+  rect: [number, number, number, number];
+  entries: Array<[string, string]>;
+}
+
+// =============================================================================
+// Form Field Types (for builder-created forms)
+// =============================================================================
+
+/** Common options shared by all form field types. */
+interface FormFieldBaseOptions {
+  /** Fully qualified field name (e.g., "form.name"). */
+  name: string;
+  /** Bounding rectangle [x1, y1, x2, y2]. */
+  rect: [number, number, number, number];
+  /** Default value. */
+  value?: string;
+  /** Read-only. Default: false. */
+  readOnly?: boolean;
+  /** Required. Default: false. */
+  required?: boolean;
+}
+
+/** Options for creating a text input field. */
+export interface TextFieldOptions extends FormFieldBaseOptions {
+  type: "text";
+  /** Maximum character count. Omit for unlimited. */
+  maxLength?: number;
+  /** Multiline. Default: false. */
+  multiline?: boolean;
+  /** Password field (masked input). Default: false. */
+  password?: boolean;
+}
+
+/** Options for creating a checkbox. */
+export interface CheckboxOptions extends FormFieldBaseOptions {
+  type: "checkbox";
+  /** Whether initially checked. Default: false. */
+  checked?: boolean;
+}
+
+/** Options for creating a dropdown (combo box). */
+export interface DropdownOptions extends FormFieldBaseOptions {
+  type: "dropdown";
+  /** Available options. */
+  options: string[];
+  /** Allow typing a custom value. Default: false. */
+  editable?: boolean;
+}
+
+/** Options for creating a radio button group. */
+export interface RadioGroupOptions {
+  type: "radio";
+  /** Fully qualified field name for the group. */
+  name: string;
+  /** Individual radio buttons. */
+  buttons: Array<{
+    /** Bounding rectangle. */
+    rect: [number, number, number, number];
+    /** Export value for this button. */
+    value: string;
+  }>;
+  /** Initially selected value. */
+  selected?: string;
+  /** Read-only. Default: false. */
+  readOnly?: boolean;
+  /** Required. Default: false. */
+  required?: boolean;
+}
+
+/** Union of all form field creation options. */
+export type FormFieldOptions =
+  | TextFieldOptions
+  | CheckboxOptions
+  | DropdownOptions
+  | RadioGroupOptions;
+
+/** @internal Stored form field for build-time serialization. */
+interface BuilderFormField {
+  options: FormFieldOptions;
+}
+
+// =============================================================================
 // Constants
 // =============================================================================
 
@@ -234,6 +424,10 @@ export class PdfPageBuilder {
   readonly _images: DrawImageOptions[] = [];
   /** @internal */
   readonly _annotations: PageAnnotation[] = [];
+  /** @internal */
+  readonly _builderAnnotations: BuilderAnnotation[] = [];
+  /** @internal */
+  readonly _formFields: BuilderFormField[] = [];
   /** @internal */
   readonly _fontManager: FontManager;
 
@@ -454,6 +648,138 @@ export class PdfPageBuilder {
     const imgName = `Im${this._images.length}`;
     this._stream.drawImage(imgName, options.x, options.y, options.width, options.height);
     return this;
+  }
+
+  // ===========================================================================
+  // Annotations
+  // ===========================================================================
+
+  /**
+   * Add an annotation to this page.
+   *
+   * Supports: Highlight, Underline, StrikeOut, Squiggly, Text (sticky note),
+   * FreeText (inline text), and Stamp.
+   */
+  addAnnotation(options: AnnotationOptions): this {
+    const entries: Array<[string, string]> = [];
+
+    switch (options.type) {
+      case "Highlight":
+      case "Underline":
+      case "StrikeOut":
+      case "Squiggly": {
+        const color =
+          options.color ??
+          (options.type === "Highlight" ? { r: 1, g: 1, b: 0 } : { r: 1, g: 0, b: 0 });
+        entries.push(["C", `[${pdfNumber(color.r)} ${pdfNumber(color.g)} ${pdfNumber(color.b)}]`]);
+        if (options.contents) {
+          entries.push(["Contents", pdfString(options.contents)]);
+        }
+        if (options.author) {
+          entries.push(["T", pdfString(options.author)]);
+        }
+        // QuadPoints
+        const qp = options.quadPoints ?? [
+          options.rect[0],
+          options.rect[1],
+          options.rect[2],
+          options.rect[1],
+          options.rect[0],
+          options.rect[3],
+          options.rect[2],
+          options.rect[3]
+        ];
+        entries.push(["QuadPoints", `[${qp.map(v => pdfNumber(v)).join(" ")}]`]);
+        break;
+      }
+      case "Text": {
+        const color = options.color ?? { r: 1, g: 1, b: 0 };
+        entries.push(["C", `[${pdfNumber(color.r)} ${pdfNumber(color.g)} ${pdfNumber(color.b)}]`]);
+        if (options.contents) {
+          entries.push(["Contents", pdfString(options.contents)]);
+        }
+        if (options.author) {
+          entries.push(["T", pdfString(options.author)]);
+        }
+        entries.push(["Name", `/${options.iconName ?? "Note"}`]);
+        if (options.open) {
+          entries.push(["Open", "true"]);
+        }
+        break;
+      }
+      case "FreeText": {
+        const fontSize = options.fontSize ?? 12;
+        const color = options.color ?? BLACK;
+        entries.push(["Contents", pdfString(options.contents)]);
+        entries.push([
+          "DA",
+          pdfString(
+            `/Helv ${pdfNumber(fontSize)} Tf ${pdfNumber(color.r)} ${pdfNumber(color.g)} ${pdfNumber(color.b)} rg`
+          )
+        ]);
+        if (options.borderColor) {
+          const bc = options.borderColor;
+          entries.push(["C", `[${pdfNumber(bc.r)} ${pdfNumber(bc.g)} ${pdfNumber(bc.b)}]`]);
+        }
+        if (options.author) {
+          entries.push(["T", pdfString(options.author)]);
+        }
+        break;
+      }
+      case "Stamp": {
+        entries.push(["Name", `/${options.stampName ?? "Draft"}`]);
+        if (options.color) {
+          const c = options.color;
+          entries.push(["C", `[${pdfNumber(c.r)} ${pdfNumber(c.g)} ${pdfNumber(c.b)}]`]);
+        }
+        if (options.contents) {
+          entries.push(["Contents", pdfString(options.contents)]);
+        }
+        if (options.author) {
+          entries.push(["T", pdfString(options.author)]);
+        }
+        break;
+      }
+    }
+
+    this._builderAnnotations.push({
+      subtype: options.type,
+      rect: options.rect,
+      entries
+    });
+    return this;
+  }
+
+  // ===========================================================================
+  // Form Fields
+  // ===========================================================================
+
+  /**
+   * Add a form field to this page.
+   *
+   * Supports: text input, checkbox, dropdown (combo box), and radio button groups.
+   */
+  addFormField(options: FormFieldOptions): this {
+    this._formFields.push({ options });
+    return this;
+  }
+
+  // ===========================================================================
+  // SVG Path
+  // ===========================================================================
+
+  /**
+   * Draw an SVG path from a `d` attribute string.
+   *
+   * Supports all SVG path commands: M, L, H, V, C, S, Q, T, A, Z
+   * (both absolute and relative).
+   *
+   * @param d - The SVG path data string (e.g., "M10 10 L90 90 Z")
+   * @param options - Fill/stroke options
+   */
+  drawSvgPath(d: string, options?: DrawPathOptions): this {
+    const ops = parseSvgPath(d);
+    return this.drawPath(ops, options);
   }
 
   // ===========================================================================
@@ -771,6 +1097,7 @@ export class PdfDocumentBuilder {
     // Track content and resource refs per page for page dict construction
     const pageContentRefs: number[] = [];
     const pageResourceRefs: number[] = [];
+    const allFormFieldRefs: number[] = [];
 
     // Write pages with their content, resources, and annotations
     for (let i = 0; i < this._pages.length; i++) {
@@ -831,6 +1158,29 @@ export class PdfDocumentBuilder {
           .set("Dest", `[${pdfRef(destPageObj)} /Fit]`);
         writer.addObject(annotObjNum, annotDict);
         annotRefs.push(annotObjNum);
+      }
+
+      // Write builder-created annotations (Highlight, Text, FreeText, Stamp, etc.)
+      for (const annot of page._builderAnnotations) {
+        const annotObjNum = writer.allocObject();
+        const rect = `[${pdfNumber(annot.rect[0])} ${pdfNumber(annot.rect[1])} ${pdfNumber(annot.rect[2])} ${pdfNumber(annot.rect[3])}]`;
+        const annotDict = new PdfDict()
+          .set("Type", "/Annot")
+          .set("Subtype", `/${annot.subtype}`)
+          .set("Rect", rect)
+          .set("F", "4"); // Print flag — annotation is printable
+        for (const [key, value] of annot.entries) {
+          annotDict.set(key, value);
+        }
+        writer.addObject(annotObjNum, annotDict);
+        annotRefs.push(annotObjNum);
+      }
+
+      // Write form field widget annotations
+      for (const field of page._formFields) {
+        const refs = this._writeFormFieldAnnotation(writer, field.options, pageObjNums[i]);
+        annotRefs.push(...refs);
+        allFormFieldRefs.push(...refs);
       }
 
       // Write page object (using pre-allocated obj num)
@@ -901,6 +1251,30 @@ export class PdfDocumentBuilder {
       outlinesRef,
       extraEntries: catalogExtras.length > 0 ? catalogExtras : undefined
     });
+
+    // AcroForm — if any pages have form fields
+    if (allFormFieldRefs.length > 0) {
+      // We need to patch the catalog to include AcroForm.
+      // addCatalog already wrote the catalog — we need to add the AcroForm to it.
+      // Instead, add it as an extra entry by rebuilding the catalog.
+      // The simplest approach: use setCatalog to replace it.
+      const catalogObjNum = writer.allocObject();
+      const catalogDict = new PdfDict()
+        .set("Type", "/Catalog")
+        .set("Pages", pdfRef(pagesTreeObjNum));
+      if (outlinesRef) {
+        catalogDict.set("Outlines", pdfRef(outlinesRef));
+        catalogDict.set("PageMode", "/UseOutlines");
+      }
+      for (const [key, value] of catalogExtras) {
+        catalogDict.set(key, value);
+      }
+      const fieldsStr = allFormFieldRefs.map(r => pdfRef(r)).join(" ");
+      const acroFormStr = `<< /Fields [${fieldsStr}] /NeedAppearances true /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >> /DA (/Helv 0 Tf 0 g) >>`;
+      catalogDict.set("AcroForm", acroFormStr);
+      writer.addObject(catalogObjNum, catalogDict);
+      writer.setCatalog(catalogObjNum);
+    }
 
     // Info dict
     if (
@@ -1021,5 +1395,573 @@ export class PdfDocumentBuilder {
     writer.addObject(outlinesObjNum, outlinesDict);
 
     return outlinesObjNum;
+  }
+
+  /**
+   * Write form field annotation(s) as indirect objects.
+   * @internal
+   */
+  private _writeFormFieldAnnotation(
+    writer: PdfWriter,
+    options: FormFieldOptions,
+    pageObjNum: number
+  ): number[] {
+    const refs: number[] = [];
+
+    if (options.type === "radio") {
+      // Radio group: one parent field + one widget per button
+      const parentObjNum = writer.allocObject();
+      const childRefs: number[] = [];
+      let ff = 1 << 15; // /Ff bit 16 = Radio
+      ff |= 1 << 14; // /Ff bit 15 = NoToggleToOff
+      if (options.readOnly) {
+        ff |= 1;
+      }
+      if (options.required) {
+        ff |= 1 << 1;
+      }
+
+      for (const btn of options.buttons) {
+        const childObjNum = writer.allocObject();
+        const rect = `[${btn.rect.map(v => pdfNumber(v)).join(" ")}]`;
+        const isSelected = options.selected === btn.value;
+        const apState = isSelected ? `/${btn.value}` : "/Off";
+
+        const childDict = new PdfDict()
+          .set("Type", "/Annot")
+          .set("Subtype", "/Widget")
+          .set("Rect", rect)
+          .set("Parent", pdfRef(parentObjNum))
+          .set("AS", apState)
+          .set("AP", `<< /N << /${btn.value} null /Off null >> >>`);
+        writer.addObject(childObjNum, childDict);
+        childRefs.push(childObjNum);
+      }
+
+      const parentDict = new PdfDict()
+        .set("FT", "/Btn")
+        .set("T", pdfString(options.name))
+        .set("Ff", String(ff))
+        .set("Kids", `[${childRefs.map(r => pdfRef(r)).join(" ")}]`);
+      if (options.selected) {
+        parentDict.set("V", `/${options.selected}`);
+      }
+      writer.addObject(parentObjNum, parentDict);
+      refs.push(parentObjNum);
+      return refs;
+    }
+
+    // Single-widget fields: text, checkbox, dropdown
+    const objNum = writer.allocObject();
+    const r = options.rect;
+    const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
+
+    const dict = new PdfDict()
+      .set("Type", "/Annot")
+      .set("Subtype", "/Widget")
+      .set("Rect", rect)
+      .set("T", pdfString(options.name))
+      .set("P", pdfRef(pageObjNum));
+
+    let ff = 0;
+    if (options.readOnly) {
+      ff |= 1;
+    }
+    if (options.required) {
+      ff |= 1 << 1;
+    }
+
+    switch (options.type) {
+      case "text": {
+        dict.set("FT", "/Tx");
+        if (options.multiline) {
+          ff |= 1 << 12;
+        }
+        if (options.password) {
+          ff |= 1 << 13;
+        }
+        if (options.maxLength !== undefined) {
+          dict.set("MaxLen", String(options.maxLength));
+        }
+        if (options.value) {
+          dict.set("V", pdfString(options.value));
+        }
+        // Default appearance
+        dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+        break;
+      }
+      case "checkbox": {
+        dict.set("FT", "/Btn");
+        const checked = options.checked ?? false;
+        dict.set("V", checked ? "/Yes" : "/Off");
+        dict.set("AS", checked ? "/Yes" : "/Off");
+        break;
+      }
+      case "dropdown": {
+        dict.set("FT", "/Ch");
+        ff |= 1 << 17; // Combo flag
+        if (options.editable) {
+          ff |= 1 << 18;
+        }
+        const optStr = options.options.map(o => pdfString(o)).join(" ");
+        dict.set("Opt", `[${optStr}]`);
+        if (options.value) {
+          dict.set("V", pdfString(options.value));
+        }
+        dict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+        break;
+      }
+    }
+
+    if (ff !== 0) {
+      dict.set("Ff", String(ff));
+    }
+
+    writer.addObject(objNum, dict);
+    refs.push(objNum);
+    return refs;
+  }
+}
+
+// =============================================================================
+// SVG Path Parser
+// =============================================================================
+
+/**
+ * Parse an SVG path `d` attribute into PathOp array.
+ *
+ * Supports all SVG path commands:
+ * - M/m (moveTo), L/l (lineTo), H/h (horizontal), V/v (vertical)
+ * - C/c (cubic Bézier), S/s (smooth cubic)
+ * - Q/q (quadratic Bézier), T/t (smooth quadratic)
+ * - A/a (elliptical arc), Z/z (close)
+ *
+ * Arc commands are approximated with cubic Bézier curves.
+ */
+export function parseSvgPath(d: string): PathOp[] {
+  const ops: PathOp[] = [];
+  // Tokenize: split into commands + numbers
+  const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
+  if (!tokens) {
+    return ops;
+  }
+
+  let i = 0;
+  let cx = 0; // current x
+  let cy = 0; // current y
+  let sx = 0; // subpath start x
+  let sy = 0; // subpath start y
+  let lastCmd = "";
+  // For smooth curves: last control point
+  let lastCpX = 0;
+  let lastCpY = 0;
+
+  const num = (): number => {
+    if (i >= tokens.length) {
+      return 0;
+    }
+    return parseFloat(tokens[i++]);
+  };
+
+  const isNum = (): boolean => {
+    if (i >= tokens.length) {
+      return false;
+    }
+    const c = tokens[i].charCodeAt(0);
+    return c === 0x2d || c === 0x2b || c === 0x2e || (c >= 0x30 && c <= 0x39);
+  };
+
+  while (i < tokens.length) {
+    let cmd = tokens[i];
+    if (/[a-zA-Z]/.test(cmd)) {
+      i++;
+    } else {
+      // Implicit repeat of last command (except M becomes L, m becomes l)
+      cmd = lastCmd === "M" ? "L" : lastCmd === "m" ? "l" : lastCmd;
+    }
+
+    switch (cmd) {
+      case "M":
+        cx = num();
+        cy = num();
+        ops.push({ op: "move", x: cx, y: cy });
+        sx = cx;
+        sy = cy;
+        lastCmd = "M";
+        while (isNum()) {
+          cx = num();
+          cy = num();
+          ops.push({ op: "line", x: cx, y: cy });
+        }
+        break;
+      case "m":
+        cx += num();
+        cy += num();
+        ops.push({ op: "move", x: cx, y: cy });
+        sx = cx;
+        sy = cy;
+        lastCmd = "m";
+        while (isNum()) {
+          cx += num();
+          cy += num();
+          ops.push({ op: "line", x: cx, y: cy });
+        }
+        break;
+      case "L":
+        do {
+          cx = num();
+          cy = num();
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "L";
+        break;
+      case "l":
+        do {
+          const dx = num();
+          const dy = num();
+          cx += dx;
+          cy += dy;
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "l";
+        break;
+      case "H":
+        do {
+          cx = num();
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "H";
+        break;
+      case "h":
+        do {
+          cx += num();
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "h";
+        break;
+      case "V":
+        do {
+          cy = num();
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "V";
+        break;
+      case "v":
+        do {
+          cy += num();
+          ops.push({ op: "line", x: cx, y: cy });
+        } while (isNum());
+        lastCmd = "v";
+        break;
+      case "C":
+        do {
+          const x1 = num(),
+            y1 = num(),
+            x2 = num(),
+            y2 = num(),
+            x = num(),
+            y = num();
+          ops.push({ op: "curve", x1, y1, x2, y2, x3: x, y3: y });
+          lastCpX = x2;
+          lastCpY = y2;
+          cx = x;
+          cy = y;
+        } while (isNum());
+        lastCmd = "C";
+        break;
+      case "c":
+        do {
+          const x1 = cx + num(),
+            y1 = cy + num(),
+            x2 = cx + num(),
+            y2 = cy + num();
+          const x = cx + num(),
+            y = cy + num();
+          ops.push({ op: "curve", x1, y1, x2, y2, x3: x, y3: y });
+          lastCpX = x2;
+          lastCpY = y2;
+          cx = x;
+          cy = y;
+        } while (isNum());
+        lastCmd = "c";
+        break;
+      case "S":
+        do {
+          const rx =
+            lastCmd === "S" || lastCmd === "s" || lastCmd === "C" || lastCmd === "c"
+              ? 2 * cx - lastCpX
+              : cx;
+          const ry =
+            lastCmd === "S" || lastCmd === "s" || lastCmd === "C" || lastCmd === "c"
+              ? 2 * cy - lastCpY
+              : cy;
+          const x2 = num(),
+            y2 = num(),
+            x = num(),
+            y = num();
+          ops.push({ op: "curve", x1: rx, y1: ry, x2, y2, x3: x, y3: y });
+          lastCpX = x2;
+          lastCpY = y2;
+          cx = x;
+          cy = y;
+          lastCmd = "S";
+        } while (isNum());
+        break;
+      case "s":
+        do {
+          const rx =
+            lastCmd === "S" || lastCmd === "s" || lastCmd === "C" || lastCmd === "c"
+              ? 2 * cx - lastCpX
+              : cx;
+          const ry =
+            lastCmd === "S" || lastCmd === "s" || lastCmd === "C" || lastCmd === "c"
+              ? 2 * cy - lastCpY
+              : cy;
+          const x2 = cx + num(),
+            y2 = cy + num(),
+            x = cx + num(),
+            y = cy + num();
+          ops.push({ op: "curve", x1: rx, y1: ry, x2, y2, x3: x, y3: y });
+          lastCpX = x2;
+          lastCpY = y2;
+          cx = x;
+          cy = y;
+          lastCmd = "s";
+        } while (isNum());
+        break;
+      case "Q":
+        do {
+          const qx = num(),
+            qy = num(),
+            x = num(),
+            y = num();
+          // Convert quadratic to cubic: CP1 = P0 + 2/3*(QP-P0), CP2 = P1 + 2/3*(QP-P1)
+          const c1x = cx + (2 / 3) * (qx - cx),
+            c1y = cy + (2 / 3) * (qy - cy);
+          const c2x = x + (2 / 3) * (qx - x),
+            c2y = y + (2 / 3) * (qy - y);
+          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          lastCpX = qx;
+          lastCpY = qy;
+          cx = x;
+          cy = y;
+        } while (isNum());
+        lastCmd = "Q";
+        break;
+      case "q":
+        do {
+          const qx = cx + num(),
+            qy = cy + num(),
+            x = cx + num(),
+            y = cy + num();
+          const c1x = cx + (2 / 3) * (qx - cx),
+            c1y = cy + (2 / 3) * (qy - cy);
+          const c2x = x + (2 / 3) * (qx - x),
+            c2y = y + (2 / 3) * (qy - y);
+          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          lastCpX = qx;
+          lastCpY = qy;
+          cx = x;
+          cy = y;
+        } while (isNum());
+        lastCmd = "q";
+        break;
+      case "T":
+        do {
+          const qx =
+            lastCmd === "Q" || lastCmd === "q" || lastCmd === "T" || lastCmd === "t"
+              ? 2 * cx - lastCpX
+              : cx;
+          const qy =
+            lastCmd === "Q" || lastCmd === "q" || lastCmd === "T" || lastCmd === "t"
+              ? 2 * cy - lastCpY
+              : cy;
+          const x = num(),
+            y = num();
+          const c1x = cx + (2 / 3) * (qx - cx),
+            c1y = cy + (2 / 3) * (qy - cy);
+          const c2x = x + (2 / 3) * (qx - x),
+            c2y = y + (2 / 3) * (qx - y);
+          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          lastCpX = qx;
+          lastCpY = qy;
+          cx = x;
+          cy = y;
+          lastCmd = "T";
+        } while (isNum());
+        break;
+      case "t":
+        do {
+          const qx =
+            lastCmd === "Q" || lastCmd === "q" || lastCmd === "T" || lastCmd === "t"
+              ? 2 * cx - lastCpX
+              : cx;
+          const qy =
+            lastCmd === "Q" || lastCmd === "q" || lastCmd === "T" || lastCmd === "t"
+              ? 2 * cy - lastCpY
+              : cy;
+          const x = cx + num(),
+            y = cy + num();
+          const c1x = cx + (2 / 3) * (qx - cx),
+            c1y = cy + (2 / 3) * (qy - cy);
+          const c2x = x + (2 / 3) * (qx - x),
+            c2y = y + (2 / 3) * (qy - y);
+          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          lastCpX = qx;
+          lastCpY = qy;
+          cx = x;
+          cy = y;
+          lastCmd = "t";
+        } while (isNum());
+        break;
+      case "A":
+      case "a": {
+        const isRel = cmd === "a";
+        do {
+          const rx = Math.abs(num()),
+            ry = Math.abs(num());
+          const rotation = (num() * Math.PI) / 180;
+          const largeArc = num() !== 0;
+          const sweep = num() !== 0;
+          const ex = isRel ? cx + num() : num();
+          const ey = isRel ? cy + num() : num();
+          arcToCurves(ops, cx, cy, rx, ry, rotation, largeArc, sweep, ex, ey);
+          cx = ex;
+          cy = ey;
+        } while (isNum());
+        lastCmd = cmd;
+        break;
+      }
+      case "Z":
+      case "z":
+        ops.push({ op: "close" });
+        cx = sx;
+        cy = sy;
+        lastCmd = cmd;
+        break;
+      default:
+        // Unknown command — skip
+        i++;
+        break;
+    }
+  }
+
+  return ops;
+}
+
+/**
+ * Convert an SVG elliptical arc to cubic Bézier curves.
+ * Follows the SVG spec's endpoint-to-center arc parameterization.
+ * @internal
+ */
+function arcToCurves(
+  ops: PathOp[],
+  x1: number,
+  y1: number,
+  rx: number,
+  ry: number,
+  phi: number,
+  largeArc: boolean,
+  sweep: boolean,
+  x2: number,
+  y2: number
+): void {
+  if (rx === 0 || ry === 0) {
+    ops.push({ op: "line", x: x2, y: y2 });
+    return;
+  }
+  if (x1 === x2 && y1 === y2) {
+    return;
+  }
+
+  const cosPhi = Math.cos(phi),
+    sinPhi = Math.sin(phi);
+  const dx = (x1 - x2) / 2,
+    dy = (y1 - y2) / 2;
+  const x1p = cosPhi * dx + sinPhi * dy;
+  const y1p = -sinPhi * dx + cosPhi * dy;
+
+  // Correct radii
+  let rxSq = rx * rx,
+    rySq = ry * ry;
+  const x1pSq = x1p * x1p,
+    y1pSq = y1p * y1p;
+  const lambda = x1pSq / rxSq + y1pSq / rySq;
+  if (lambda > 1) {
+    const s = Math.sqrt(lambda);
+    rx *= s;
+    ry *= s;
+    rxSq = rx * rx;
+    rySq = ry * ry;
+  }
+
+  // Center parameterization
+  let sq = (rxSq * rySq - rxSq * y1pSq - rySq * x1pSq) / (rxSq * y1pSq + rySq * x1pSq);
+  if (sq < 0) {
+    sq = 0;
+  }
+  let root = Math.sqrt(sq);
+  if (largeArc === sweep) {
+    root = -root;
+  }
+  const cxp = (root * rx * y1p) / ry;
+  const cyp = (-root * ry * x1p) / rx;
+
+  const cxr = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+  const cyr = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+
+  const angle = (ux: number, uy: number, vx: number, vy: number): number => {
+    const dot = ux * vx + uy * vy;
+    const len = Math.sqrt(ux * ux + uy * uy) * Math.sqrt(vx * vx + vy * vy);
+    let a = Math.acos(Math.max(-1, Math.min(1, dot / len)));
+    if (ux * vy - uy * vx < 0) {
+      a = -a;
+    }
+    return a;
+  };
+
+  const theta1 = angle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let dTheta = angle((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+
+  if (!sweep && dTheta > 0) {
+    dTheta -= 2 * Math.PI;
+  }
+  if (sweep && dTheta < 0) {
+    dTheta += 2 * Math.PI;
+  }
+
+  // Split into segments of at most π/2
+  const segments = Math.ceil(Math.abs(dTheta) / (Math.PI / 2));
+  const segAngle = dTheta / segments;
+
+  for (let s = 0; s < segments; s++) {
+    const t1 = theta1 + s * segAngle;
+    const t2 = theta1 + (s + 1) * segAngle;
+    const alpha = (4 * Math.tan((t2 - t1) / 4)) / 3;
+
+    const cos1 = Math.cos(t1),
+      sin1 = Math.sin(t1);
+    const cos2 = Math.cos(t2),
+      sin2 = Math.sin(t2);
+
+    const ep1x = rx * cos1,
+      ep1y = ry * sin1;
+    const ep2x = rx * cos2,
+      ep2y = ry * sin2;
+
+    const cp1x = ep1x - alpha * rx * sin1;
+    const cp1y = ep1y + alpha * ry * cos1;
+    const cp2x = ep2x + alpha * rx * sin2;
+    const cp2y = ep2y - alpha * ry * cos2;
+
+    ops.push({
+      op: "curve",
+      x1: cosPhi * cp1x - sinPhi * cp1y + cxr,
+      y1: sinPhi * cp1x + cosPhi * cp1y + cyr,
+      x2: cosPhi * cp2x - sinPhi * cp2y + cxr,
+      y2: sinPhi * cp2x + cosPhi * cp2y + cyr,
+      x3: cosPhi * ep2x - sinPhi * ep2y + cxr,
+      y3: sinPhi * ep2x + cosPhi * ep2y + cyr
+    });
   }
 }

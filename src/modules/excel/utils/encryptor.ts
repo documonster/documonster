@@ -1,8 +1,8 @@
 /**
- * Node.js Encryptor - uses native crypto module
+ * Node.js Encryptor — uses shared crypto primitives from `@utils/crypto`.
  */
 
-import crypto from "crypto";
+import { hash, randomBytes } from "@utils/crypto";
 import { base64ToUint8Array, uint8ArrayToBase64, stringToUtf16Le } from "@utils/utils.base";
 import { concatUint8Arrays } from "@utils/binary";
 
@@ -17,10 +17,7 @@ function uint32ToLe(num: number): Uint8Array {
 
 const Encryptor = {
   hash(algorithm: string, ...buffers: Uint8Array[]): Uint8Array {
-    const algo = algorithm.toLowerCase().replace(/-/g, "");
-    const hash = crypto.createHash(algo);
-    hash.update(concatUint8Arrays(buffers));
-    return new Uint8Array(hash.digest());
+    return hash(algorithm, concatUint8Arrays(buffers));
   },
 
   async convertPasswordToHash(
@@ -41,7 +38,7 @@ const Encryptor = {
   },
 
   randomBytes(size: number): Uint8Array {
-    return new Uint8Array(crypto.randomBytes(size));
+    return randomBytes(size);
   }
 };
 

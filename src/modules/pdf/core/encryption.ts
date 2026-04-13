@@ -14,14 +14,8 @@
  * @see ISO 32000-2:2020, §7.6 — Encryption
  */
 
-import {
-  sha256,
-  aesCbcEncrypt,
-  aesCbcEncryptRaw,
-  aesEcbEncrypt,
-  randomBytes,
-  concatArrays
-} from "./crypto";
+import { sha256, aesCbcEncrypt, aesCbcEncryptRaw, aesEcbEncrypt, randomBytes } from "@utils/crypto";
+import { concatUint8Arrays } from "@utils/binary";
 
 // =============================================================================
 // Types
@@ -109,25 +103,25 @@ export function initEncryption(options: PdfEncryptionOptions): EncryptionState {
 
   // Step 3: Compute U value
   // U hash = SHA-256(userPassword + uValidationSalt)
-  const uHash = sha256(concatArrays(userPwd, uValidationSalt));
-  const uValue = concatArrays(uHash, uValidationSalt, uKeySalt);
+  const uHash = sha256(concatUint8Arrays([userPwd, uValidationSalt]));
+  const uValue = concatUint8Arrays([uHash, uValidationSalt, uKeySalt]);
 
   // Step 4: Compute UE value
   // UE = AES-256-CBC-encrypt(encryptionKey, SHA-256(userPassword + uKeySalt), zeroIV)
   // Actually: the key for encrypting UE is SHA-256(password + key_salt),
   // and we encrypt the file encryption key with it.
-  const ueKey = sha256(concatArrays(userPwd, uKeySalt));
+  const ueKey = sha256(concatUint8Arrays([userPwd, uKeySalt]));
   const zeroIv = new Uint8Array(16);
   const ueValue = aesCbcEncryptRaw(encryptionKey, ueKey, zeroIv);
 
   // Step 5: Compute O value
   // O hash = SHA-256(ownerPassword + oValidationSalt + U(0..47))
-  const oHash = sha256(concatArrays(ownerPwd, oValidationSalt, uValue));
-  const oValue = concatArrays(oHash, oValidationSalt, oKeySalt);
+  const oHash = sha256(concatUint8Arrays([ownerPwd, oValidationSalt, uValue]));
+  const oValue = concatUint8Arrays([oHash, oValidationSalt, oKeySalt]);
 
   // Step 6: Compute OE value
   // OE = AES-256-CBC-encrypt(encryptionKey, SHA-256(ownerPassword + oKeySalt + U(0..47)), zeroIV)
-  const oeKey = sha256(concatArrays(ownerPwd, oKeySalt, uValue));
+  const oeKey = sha256(concatUint8Arrays([ownerPwd, oKeySalt, uValue]));
   const oeValue = aesCbcEncryptRaw(encryptionKey, oeKey, zeroIv);
 
   // Step 7: Compute Perms value

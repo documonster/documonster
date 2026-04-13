@@ -48,7 +48,11 @@ import type {
   DrawCircleOptions,
   DrawLineOptions,
   DrawImageOptions,
-  PageOptions
+  DrawPathOptions,
+  PathOp,
+  PageOptions,
+  AnnotationOptions,
+  FormFieldOptions
 } from "./document-builder";
 import { PdfStructureError } from "../errors";
 import { writeImageXObject, parseImageDimensions } from "./image-utils";
@@ -149,9 +153,46 @@ export class PdfEditorPage {
     return this._overlay._stream;
   }
 
+  /**
+   * Add an annotation to this existing page (Highlight, Text, FreeText, Stamp, etc.).
+   */
+  addAnnotation(options: AnnotationOptions): this {
+    this._overlay.addAnnotation(options);
+    return this;
+  }
+
+  /**
+   * Add a form field to this existing page.
+   */
+  addFormField(options: FormFieldOptions): this {
+    this._overlay.addFormField(options);
+    return this;
+  }
+
+  /**
+   * Draw an SVG path on this existing page.
+   */
+  drawSvgPath(d: string, options?: DrawPathOptions): this {
+    this._overlay.drawSvgPath(d, options);
+    return this;
+  }
+
+  /**
+   * Draw a complex path from a list of path operations.
+   */
+  drawPath(ops: PathOp[], options?: DrawPathOptions): this {
+    this._overlay.drawPath(ops, options);
+    return this;
+  }
+
   /** @internal */
   _hasOverlay(): boolean {
-    return this._overlay._stream.toString().length > 0 || this._overlay._images.length > 0;
+    return (
+      this._overlay._stream.toString().length > 0 ||
+      this._overlay._images.length > 0 ||
+      this._overlay._builderAnnotations.length > 0 ||
+      this._overlay._formFields.length > 0
+    );
   }
 }
 
@@ -473,6 +514,50 @@ export class PdfEditor {
 
       // Apply form field updates to annotations
       const annotRefs = this._writeFormFieldUpdates(writer, pageDict, i);
+
+      // Write overlay builder annotations (Highlight, Text, FreeText, Stamp, etc.)
+      for (const annot of editorPage._overlay._builderAnnotations) {
+        const annotObjNum = writer.allocObject();
+        const rect = `[${pdfNumber(annot.rect[0])} ${pdfNumber(annot.rect[1])} ${pdfNumber(annot.rect[2])} ${pdfNumber(annot.rect[3])}]`;
+        const annotDict = new PdfDict()
+          .set("Type", "/Annot")
+          .set("Subtype", `/${annot.subtype}`)
+          .set("Rect", rect)
+          .set("F", "4");
+        for (const [key, value] of annot.entries) {
+          annotDict.set(key, value);
+        }
+        writer.addObject(annotObjNum, annotDict);
+        annotRefs.push(annotObjNum);
+      }
+
+      // Write overlay form fields
+      for (const field of editorPage._overlay._formFields) {
+        const fieldObjNum = writer.allocObject();
+        const r = field.options.type === "radio" ? [0, 0, 0, 0] : field.options.rect;
+        const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
+        const fieldDict = new PdfDict()
+          .set("Type", "/Annot")
+          .set("Subtype", "/Widget")
+          .set("Rect", rect);
+        if (field.options.type !== "radio") {
+          fieldDict.set("T", pdfString(field.options.name));
+          fieldDict.set(
+            "FT",
+            field.options.type === "text"
+              ? "/Tx"
+              : field.options.type === "checkbox"
+                ? "/Btn"
+                : "/Ch"
+          );
+          if (field.options.value) {
+            fieldDict.set("V", pdfString(field.options.value));
+          }
+          fieldDict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+        }
+        writer.addObject(fieldObjNum, fieldDict);
+        annotRefs.push(fieldObjNum);
+      }
 
       const pageDict2 = new PdfDict()
         .set("Type", "/Page")

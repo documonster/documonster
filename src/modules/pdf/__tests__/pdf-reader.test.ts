@@ -12,7 +12,7 @@ import { PdfDocumentBuilder } from "../builder/document-builder";
 import { Workbook } from "@excel/workbook";
 import { readPdf } from "../reader/pdf-reader";
 import { PdfStructureError } from "../errors";
-import { aesCbcDecrypt, sha256 } from "../core/crypto";
+import { aesCbcDecrypt, sha256 } from "@utils/crypto";
 import { CMap, parseCMap } from "../reader/cmap-parser";
 import { PdfTokenizer, TokenType } from "../reader/pdf-tokenizer";
 import {

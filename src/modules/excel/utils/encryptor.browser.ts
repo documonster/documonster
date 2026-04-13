@@ -1,12 +1,11 @@
 /**
- * Browser-only Encryptor
- * Uses Web Crypto API (hardware accelerated)
+ * Browser-only Encryptor — uses shared crypto primitives from `@utils/crypto`.
  */
 
+import { hashAsync, randomBytes } from "@utils/crypto";
 import { base64ToUint8Array, uint8ArrayToBase64, stringToUtf16Le } from "@utils/utils.base";
 import { concatUint8Arrays } from "@utils/binary";
 
-// Helper to convert number to little-endian Uint8Array
 function uint32ToLe(num: number): Uint8Array {
   const arr = new Uint8Array(4);
   arr[0] = num & 0xff;
@@ -18,16 +17,14 @@ function uint32ToLe(num: number): Uint8Array {
 
 const Encryptor = {
   /**
-   * Calculate hash using Web Crypto API
+   * Calculate hash using shared crypto (Web Crypto API in browser).
    */
   async hash(algorithm: string, ...buffers: Uint8Array[]): Promise<Uint8Array> {
-    const data = concatUint8Arrays(buffers);
-    const hashBuffer = await crypto.subtle.digest(algorithm, new Uint8Array(data));
-    return new Uint8Array(hashBuffer);
+    return hashAsync(algorithm, concatUint8Arrays(buffers));
   },
 
   /**
-   * Convert password to hash
+   * Convert password to hash.
    */
   async convertPasswordToHash(
     password: string,
@@ -48,12 +45,10 @@ const Encryptor = {
   },
 
   /**
-   * Generate cryptographically strong random bytes
+   * Generate cryptographically strong random bytes.
    */
   randomBytes(size: number): Uint8Array {
-    const bytes = new Uint8Array(size);
-    crypto.getRandomValues(bytes);
-    return bytes;
+    return randomBytes(size);
   }
 };
 

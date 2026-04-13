@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { PdfDocumentBuilder, PdfEditor, readPdf, pdf } from "../index";
+import {
+  PdfDocumentBuilder,
+  PdfEditor,
+  readPdf,
+  pdf,
+  parseSvgPath,
+  verifyPdfSignature,
+  buildSignatureDictPlaceholder,
+  asn1Parse
+} from "../index";
 import {
   parseResourceDict,
   mergeResourceDicts,
@@ -1444,5 +1453,381 @@ describe("PdfEditor — saveIncremental", () => {
     const editor2 = PdfEditor.load(result2);
     const result3 = await editor2.saveIncremental();
     expect(result3.length).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// Annotation Creation
+// =============================================================================
+
+describe("Annotation Creation", () => {
+  it("should create a PDF with a Highlight annotation", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.drawText("Highlighted text", { x: 72, y: 750, fontSize: 14 });
+    page.addAnnotation({
+      type: "Highlight",
+      rect: [72, 745, 200, 765],
+      color: { r: 1, g: 1, b: 0 },
+      contents: "Important!"
+    });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+    expect(result.pages.length).toBe(1);
+
+    // Check that the annotation appears in the PDF structure
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/Subtype /Highlight");
+    expect(text).toContain("/QuadPoints");
+  });
+
+  it("should create Text (sticky note) annotation", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addAnnotation({
+      type: "Text",
+      rect: [100, 700, 124, 724],
+      contents: "A sticky note",
+      author: "Test Author",
+      iconName: "Comment",
+      open: true
+    });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/Subtype /Text");
+    expect(text).toContain("/Name /Comment");
+    expect(text).toContain("/Open true");
+  });
+
+  it("should create FreeText annotation", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addAnnotation({
+      type: "FreeText",
+      rect: [72, 600, 300, 640],
+      contents: "Free text content",
+      fontSize: 16,
+      color: { r: 0, g: 0, b: 0 }
+    });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/Subtype /FreeText");
+    expect(text).toContain("/DA");
+  });
+
+  it("should create Stamp annotation", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addAnnotation({
+      type: "Stamp",
+      rect: [100, 500, 300, 550],
+      stampName: "Approved",
+      contents: "Approved by QA"
+    });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/Subtype /Stamp");
+    expect(text).toContain("/Name /Approved");
+  });
+
+  it("should create Underline and StrikeOut annotations", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addAnnotation({
+      type: "Underline",
+      rect: [72, 700, 200, 715]
+    });
+    page.addAnnotation({
+      type: "StrikeOut",
+      rect: [72, 670, 200, 685]
+    });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/Subtype /Underline");
+    expect(text).toContain("/Subtype /StrikeOut");
+  });
+
+  it("should add annotations via PdfEditorPage", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Hello", { x: 72, y: 750, fontSize: 12 });
+    const original = await doc.build();
+
+    const editor = PdfEditor.load(original);
+    editor.getPage(0).addAnnotation({
+      type: "Highlight",
+      rect: [72, 745, 150, 760],
+      contents: "Highlighted via editor"
+    });
+    const result = await editor.save();
+    const text = new TextDecoder().decode(result);
+    expect(text).toContain("/Subtype /Highlight");
+  });
+});
+
+// =============================================================================
+// Form Field Creation
+// =============================================================================
+
+describe("Form Field Creation", () => {
+  it("should create a text field", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.drawText("Name:", { x: 72, y: 750, fontSize: 12 });
+    page.addFormField({
+      type: "text",
+      name: "fullName",
+      rect: [140, 735, 300, 755],
+      value: "John Doe"
+    });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+    expect(result.formFields.length).toBeGreaterThanOrEqual(1);
+    const nameField = result.formFields.find(f => f.name === "fullName");
+    expect(nameField).toBeDefined();
+    expect(nameField!.type).toBe("text");
+    expect(nameField!.value).toBe("John Doe");
+  });
+
+  it("should create a checkbox field", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addFormField({
+      type: "checkbox",
+      name: "agree",
+      rect: [72, 700, 92, 720],
+      checked: true
+    });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+    const checkField = result.formFields.find(f => f.name === "agree");
+    expect(checkField).toBeDefined();
+    expect(checkField!.type).toBe("checkbox");
+  });
+
+  it("should create a dropdown field with options", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addFormField({
+      type: "dropdown",
+      name: "country",
+      rect: [72, 650, 200, 670],
+      options: ["USA", "Canada", "UK", "Australia"],
+      value: "USA"
+    });
+
+    const bytes = await doc.build();
+    const result = await readPdf(bytes);
+    const dropField = result.formFields.find(f => f.name === "country");
+    expect(dropField).toBeDefined();
+    expect(dropField!.type).toBe("dropdown");
+    expect(dropField!.options).toContain("USA");
+    expect(dropField!.options).toContain("Canada");
+  });
+
+  it("should create a radio button group", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    page.addFormField({
+      type: "radio",
+      name: "gender",
+      buttons: [
+        { rect: [72, 600, 92, 620], value: "male" },
+        { rect: [120, 600, 140, 620], value: "female" }
+      ],
+      selected: "male"
+    });
+
+    const bytes = await doc.build();
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("/FT /Btn");
+    expect(text).toContain("/V /male");
+  });
+
+  it("should create form fields on editor pages", async () => {
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Form", { x: 72, y: 750, fontSize: 12 });
+    const original = await doc.build();
+
+    const editor = PdfEditor.load(original);
+    editor.getPage(0).addFormField({
+      type: "text",
+      name: "editorField",
+      rect: [72, 700, 250, 720]
+    });
+    // Form fields on editor pages need full save (not incremental)
+    const result = await editor.save();
+    expect(result.length).toBeGreaterThan(0);
+    const text = new TextDecoder().decode(result);
+    expect(text).toContain("/FT /Tx");
+  });
+});
+
+// =============================================================================
+// SVG Path Parser
+// =============================================================================
+
+describe("SVG Path Parser", () => {
+  it("should parse M L Z commands", () => {
+    const ops = parseSvgPath("M10 20 L30 40 Z");
+    expect(ops).toEqual([
+      { op: "move", x: 10, y: 20 },
+      { op: "line", x: 30, y: 40 },
+      { op: "close" }
+    ]);
+  });
+
+  it("should parse relative m l z commands", () => {
+    const ops = parseSvgPath("m10 20 l20 20 z");
+    expect(ops).toEqual([
+      { op: "move", x: 10, y: 20 },
+      { op: "line", x: 30, y: 40 },
+      { op: "close" }
+    ]);
+  });
+
+  it("should parse H and V commands", () => {
+    const ops = parseSvgPath("M0 0 H100 V50");
+    expect(ops).toEqual([
+      { op: "move", x: 0, y: 0 },
+      { op: "line", x: 100, y: 0 },
+      { op: "line", x: 100, y: 50 }
+    ]);
+  });
+
+  it("should parse C (cubic bezier) command", () => {
+    const ops = parseSvgPath("M0 0 C10 20 30 40 50 60");
+    expect(ops.length).toBe(2);
+    expect(ops[0]).toEqual({ op: "move", x: 0, y: 0 });
+    expect(ops[1].op).toBe("curve");
+    if (ops[1].op === "curve") {
+      expect(ops[1].x1).toBe(10);
+      expect(ops[1].y1).toBe(20);
+      expect(ops[1].x3).toBe(50);
+      expect(ops[1].y3).toBe(60);
+    }
+  });
+
+  it("should parse Q (quadratic bezier) as cubic", () => {
+    const ops = parseSvgPath("M0 0 Q50 100 100 0");
+    expect(ops.length).toBe(2);
+    expect(ops[1].op).toBe("curve");
+  });
+
+  it("should parse A (arc) as curves", () => {
+    const ops = parseSvgPath("M0 0 A25 25 0 0 1 50 0");
+    expect(ops.length).toBeGreaterThanOrEqual(2);
+    // Arc should be approximated as one or more curves
+    expect(ops[0]).toEqual({ op: "move", x: 0, y: 0 });
+    expect(ops[ops.length - 1].op).toBe("curve");
+  });
+
+  it("should handle implicit repeated commands", () => {
+    const ops = parseSvgPath("M0 0 10 20 30 40");
+    // After M, implicit L
+    expect(ops).toEqual([
+      { op: "move", x: 0, y: 0 },
+      { op: "line", x: 10, y: 20 },
+      { op: "line", x: 30, y: 40 }
+    ]);
+  });
+
+  it("should handle empty path", () => {
+    expect(parseSvgPath("")).toEqual([]);
+    expect(parseSvgPath("   ")).toEqual([]);
+  });
+
+  it("should draw SVG path on a page", async () => {
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    // Simple triangle
+    page.drawSvgPath("M100 100 L200 100 L150 200 Z", {
+      fill: { r: 1, g: 0, b: 0 },
+      stroke: { r: 0, g: 0, b: 0 }
+    });
+
+    const bytes = await doc.build();
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(100);
+  });
+
+  it("should parse S (smooth cubic) command", () => {
+    const ops = parseSvgPath("M0 0 C10 20 30 40 50 60 S70 80 90 100");
+    expect(ops.length).toBe(3);
+    expect(ops[2].op).toBe("curve");
+  });
+
+  it("should parse T (smooth quadratic) command", () => {
+    const ops = parseSvgPath("M0 0 Q25 50 50 0 T100 0");
+    expect(ops.length).toBe(3);
+    expect(ops[2].op).toBe("curve");
+  });
+
+  it("should handle arc with zero radius as line", () => {
+    const ops = parseSvgPath("M0 0 A0 0 0 0 1 50 50");
+    expect(ops.length).toBe(2);
+    expect(ops[1]).toEqual({ op: "line", x: 50, y: 50 });
+  });
+});
+
+// =============================================================================
+// ASN.1 Parser
+// =============================================================================
+
+describe("ASN.1 Parser", () => {
+  it("should parse a simple SEQUENCE with INTEGER", () => {
+    // SEQUENCE { INTEGER 42 }
+    const data = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x2a]);
+    const node = asn1Parse(data);
+    expect(node.tag).toBe(0x30);
+    expect(node.children.length).toBe(1);
+    expect(node.children[0].tag).toBe(0x02);
+    expect(node.children[0].bytes[0]).toBe(42);
+  });
+
+  it("should parse nested SEQUENCE", () => {
+    // SEQUENCE { SEQUENCE { NULL } }
+    const data = new Uint8Array([0x30, 0x04, 0x30, 0x02, 0x05, 0x00]);
+    const node = asn1Parse(data);
+    expect(node.children.length).toBe(1);
+    expect(node.children[0].tag).toBe(0x30);
+    expect(node.children[0].children.length).toBe(1);
+    expect(node.children[0].children[0].tag).toBe(0x05); // NULL
+  });
+});
+
+// =============================================================================
+// Digital Signature Infrastructure
+// =============================================================================
+
+describe("Digital Signature", () => {
+  it("should build signature dict placeholder with correct structure", () => {
+    const { dictString, placeholder } = buildSignatureDictPlaceholder({
+      name: "Test Signer",
+      reason: "Testing"
+    });
+    expect(dictString).toContain("/Type /Sig");
+    expect(dictString).toContain("/Filter /Adobe.PPKLite");
+    expect(dictString).toContain("/SubFilter /adbe.pkcs7.detached");
+    expect(dictString).toContain("/Contents <");
+    expect(dictString).toContain("/ByteRange [");
+    expect(dictString).toContain("/Name (Test Signer)");
+    expect(dictString).toContain("/Reason (Testing)");
+    expect(placeholder.length).toBeGreaterThan(0);
+    // Placeholder should be all zeros
+    expect(placeholder).toMatch(/^0+$/);
+  });
+
+  it("should handle verifyPdfSignature with invalid data gracefully", async () => {
+    const fakePdf = new Uint8Array(100);
+    const result = await verifyPdfSignature(fakePdf, "00", [0, 10, 20, 80]);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBeDefined();
   });
 });

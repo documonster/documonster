@@ -1,22 +1,20 @@
 /**
- * Shared cryptographic primitives for PDF encryption/decryption.
+ * Cryptographic primitives — Browser version.
  *
- * Zero-dependency, pure JavaScript implementations of:
- * - AES (128/256-bit) CBC encrypt and decrypt
- * - SHA-256
- * - MD5
- * - RC4 (for reading legacy PDFs only)
+ * Uses pure JavaScript for synchronous operations (SHA-256, MD5, AES-CBC, RC4)
+ * since Web Crypto API is async-only and cannot replace synchronous call sites.
  *
- * @see FIPS 197 — AES
- * @see FIPS 180-4 — SHA-256
- * @see RFC 1321 — MD5
+ * Uses Web Crypto API for:
+ * - `randomBytes` (crypto.getRandomValues — truly random)
+ * - `rsaVerify` / `rsaSign` (SubtleCrypto — hardware-accelerated)
+ *
+ * Exports the same API as `crypto.ts` (Node.js version).
  */
 
 // =============================================================================
 // AES S-Box & Constants
 // =============================================================================
 
-/** AES S-Box */
 const SBOX = new Uint8Array([
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
   0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -36,7 +34,6 @@ const SBOX = new Uint8Array([
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]);
 
-/** Inverse S-Box for decryption */
 const INV_SBOX = new Uint8Array(256);
 /* @__PURE__ */ (() => {
   for (let i = 0; i < 256; i++) {
@@ -44,19 +41,16 @@ const INV_SBOX = new Uint8Array(256);
   }
 })();
 
-/** AES round constants */
 const RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
 
 // =============================================================================
 // AES Helpers
 // =============================================================================
 
-/** GF(2^8) multiplication by 2 */
 function gf2(a: number): number {
   return a < 128 ? a << 1 : (a << 1) ^ 0x11b;
 }
 
-/** GF(2^8) multiplication */
 function gfMul(a: number, b: number): number {
   let result = 0;
   let aa = a;
@@ -71,9 +65,6 @@ function gfMul(a: number, b: number): number {
   return result;
 }
 
-/**
- * AES key expansion. Supports AES-128 (16-byte key) and AES-256 (32-byte key).
- */
 function aesKeyExpansion(key: Uint8Array): Uint8Array[] {
   const nk = key.length / 4;
   const nr = nk + 6;
@@ -108,55 +99,43 @@ function aesKeyExpansion(key: Uint8Array): Uint8Array[] {
 }
 
 // =============================================================================
-// AES Encrypt Block
+// AES Block Encrypt / Decrypt
 // =============================================================================
 
-/**
- * Encrypt a single AES block (16 bytes).
- * State layout: column-major per FIPS 197 §3.4.
- */
 function aesEncryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array {
   const nr = roundKeys.length / 4 - 1;
   const state = new Uint8Array(16);
   state.set(block);
 
-  // Initial AddRoundKey
   for (let c = 0; c < 4; c++) {
     for (let r = 0; r < 4; r++) {
       state[4 * c + r] ^= roundKeys[c][r];
     }
   }
 
-  // Rounds 1 to nr-1
   for (let round = 1; round < nr; round++) {
-    // SubBytes
     for (let i = 0; i < 16; i++) {
       state[i] = SBOX[state[i]];
     }
 
-    // ShiftRows: row r shifts left by r
     let tmp: number;
-    // Row 1: shift left by 1
     tmp = state[1];
     state[1] = state[5];
     state[5] = state[9];
     state[9] = state[13];
     state[13] = tmp;
-    // Row 2: shift left by 2
     tmp = state[2];
     state[2] = state[10];
     state[10] = tmp;
     tmp = state[6];
     state[6] = state[14];
     state[14] = tmp;
-    // Row 3: shift left by 3
     tmp = state[15];
     state[15] = state[11];
     state[11] = state[7];
     state[7] = state[3];
     state[3] = tmp;
 
-    // MixColumns
     for (let c = 0; c < 4; c++) {
       const s0 = state[4 * c];
       const s1 = state[4 * c + 1];
@@ -168,7 +147,6 @@ function aesEncryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
       state[4 * c + 3] = gf2(s0) ^ s0 ^ s1 ^ s2 ^ gf2(s3);
     }
 
-    // AddRoundKey
     const keyOffset = round * 4;
     for (let c = 0; c < 4; c++) {
       for (let r = 0; r < 4; r++) {
@@ -177,7 +155,6 @@ function aesEncryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
     }
   }
 
-  // Final round (no MixColumns)
   for (let i = 0; i < 16; i++) {
     state[i] = SBOX[state[i]];
   }
@@ -208,28 +185,18 @@ function aesEncryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
   return state;
 }
 
-// =============================================================================
-// AES Decrypt Block
-// =============================================================================
-
-/**
- * Decrypt a single AES block (16 bytes).
- */
 function aesDecryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array {
   const nr = roundKeys.length / 4 - 1;
   const state = new Uint8Array(16);
   state.set(block);
 
-  // Initial AddRoundKey
   for (let c = 0; c < 4; c++) {
     for (let r = 0; r < 4; r++) {
       state[4 * c + r] ^= roundKeys[nr * 4 + c][r];
     }
   }
 
-  // Rounds nr-1 down to 1
   for (let round = nr - 1; round >= 1; round--) {
-    // InvShiftRows
     let tmp: number;
     tmp = state[13];
     state[13] = state[9];
@@ -248,12 +215,10 @@ function aesDecryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
     state[11] = state[15];
     state[15] = tmp;
 
-    // InvSubBytes
     for (let i = 0; i < 16; i++) {
       state[i] = INV_SBOX[state[i]];
     }
 
-    // AddRoundKey
     const keyOffset = round * 4;
     for (let c = 0; c < 4; c++) {
       for (let r = 0; r < 4; r++) {
@@ -261,7 +226,6 @@ function aesDecryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
       }
     }
 
-    // InvMixColumns
     for (let c = 0; c < 4; c++) {
       const s0 = state[4 * c];
       const s1 = state[4 * c + 1];
@@ -274,7 +238,6 @@ function aesDecryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
     }
   }
 
-  // Final round (no InvMixColumns)
   let tmp2: number;
   tmp2 = state[13];
   state[13] = state[9];
@@ -310,12 +273,7 @@ function aesDecryptBlock(block: Uint8Array, roundKeys: Uint8Array[]): Uint8Array
 // AES-CBC Public API
 // =============================================================================
 
-/**
- * AES-CBC encryption with PKCS#7 padding.
- * Supports AES-128 (16-byte key) and AES-256 (32-byte key).
- */
 export function aesCbcEncrypt(plaintext: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-  // PKCS#7 padding
   const padLen = 16 - (plaintext.length % 16);
   const padded = new Uint8Array(plaintext.length + padLen);
   padded.set(plaintext);
@@ -329,7 +287,6 @@ export function aesCbcEncrypt(plaintext: Uint8Array, key: Uint8Array, iv: Uint8A
   let prevBlock = iv;
 
   for (let b = 0; b < numBlocks; b++) {
-    // XOR plaintext block with previous ciphertext (or IV)
     const block = new Uint8Array(16);
     for (let i = 0; i < 16; i++) {
       block[i] = padded[b * 16 + i] ^ prevBlock[i];
@@ -342,10 +299,6 @@ export function aesCbcEncrypt(plaintext: Uint8Array, key: Uint8Array, iv: Uint8A
   return output;
 }
 
-/**
- * AES-CBC decryption with PKCS#7 padding removal.
- * Supports AES-128 (16-byte key) and AES-256 (32-byte key).
- */
 export function aesCbcDecrypt(ciphertext: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
   const roundKeys = aesKeyExpansion(key);
   const numBlocks = ciphertext.length / 16;
@@ -362,7 +315,6 @@ export function aesCbcDecrypt(ciphertext: Uint8Array, key: Uint8Array, iv: Uint8
     prevBlock = block;
   }
 
-  // Remove PKCS#7 padding
   if (output.length > 0) {
     const padLen = output[output.length - 1];
     if (padLen > 0 && padLen <= 16) {
@@ -382,10 +334,6 @@ export function aesCbcDecrypt(ciphertext: Uint8Array, key: Uint8Array, iv: Uint8
   return output;
 }
 
-/**
- * AES-CBC decryption WITHOUT PKCS#7 padding removal.
- * Used for key derivation in V=5 where the output length is known.
- */
 export function aesCbcDecryptRaw(
   ciphertext: Uint8Array,
   key: Uint8Array,
@@ -409,13 +357,6 @@ export function aesCbcDecryptRaw(
   return output;
 }
 
-/**
- * AES-CBC encryption WITHOUT PKCS#7 padding.
- * Used when the plaintext is already block-aligned (e.g., encrypting
- * the 32-byte file encryption key in V=5).
- *
- * @throws if plaintext length is not a multiple of 16.
- */
 export function aesCbcEncryptRaw(
   plaintext: Uint8Array,
   key: Uint8Array,
@@ -443,10 +384,6 @@ export function aesCbcEncryptRaw(
   return output;
 }
 
-/**
- * AES-ECB encryption of a single 16-byte block (no padding, no IV).
- * Used for the /Perms value in V=5 encryption.
- */
 export function aesEcbEncrypt(block: Uint8Array, key: Uint8Array): Uint8Array {
   const roundKeys = aesKeyExpansion(key);
   return aesEncryptBlock(block, roundKeys);
@@ -456,12 +393,10 @@ export function aesEcbEncrypt(block: Uint8Array, key: Uint8Array): Uint8Array {
 // SHA-256
 // =============================================================================
 
-/** SHA-256 initial hash values */
 const SHA256_H = new Uint32Array([
   0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 ]);
 
-/** SHA-256 round constants */
 const SHA256_K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -477,10 +412,6 @@ function rotr32(x: number, n: number): number {
   return ((x >>> n) | (x << (32 - n))) >>> 0;
 }
 
-/**
- * SHA-256 hash function.
- * @returns 32-byte digest
- */
 export function sha256(input: Uint8Array): Uint8Array {
   const msgLen = input.length;
   const paddedLen = Math.ceil((msgLen + 9) / 64) * 64;
@@ -565,7 +496,7 @@ export function sha256(input: Uint8Array): Uint8Array {
 }
 
 // =============================================================================
-// MD5 (for legacy PDF reading)
+// MD5
 // =============================================================================
 
 function rotl(x: number, n: number): number {
@@ -589,10 +520,6 @@ const MD5_K = new Uint32Array([
   0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
 ]);
 
-/**
- * MD5 hash function (RFC 1321).
- * @returns 16-byte digest
- */
 export function md5(input: Uint8Array): Uint8Array {
   const msgLen = input.length;
   const bitLen = msgLen * 8;
@@ -659,12 +586,12 @@ export function md5(input: Uint8Array): Uint8Array {
 }
 
 // =============================================================================
-// RC4 (for legacy PDF reading only)
+// RC4 (legacy)
 // =============================================================================
 
 /**
  * RC4 stream cipher.
- * @deprecated Only used for reading legacy encrypted PDFs. Writer uses AES-256.
+ * @deprecated Only used for reading legacy encrypted PDFs.
  */
 export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
   const s = new Uint8Array(256);
@@ -690,34 +617,120 @@ export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
 }
 
 // =============================================================================
-// Random bytes (for IV generation)
+// Random bytes
 // =============================================================================
 
 /**
- * Generate pseudo-random bytes.
- * Uses Math.random — adequate for PDF IVs but not cryptographically secure.
+ * Generate cryptographically secure random bytes.
+ * Uses crypto.getRandomValues (available in all modern browsers).
  */
 export function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    bytes[i] = (Math.random() * 256) | 0;
-  }
+  globalThis.crypto.getRandomValues(bytes);
   return bytes;
 }
 
+// =============================================================================
+// Generic hash (async in browser — Web Crypto API)
+// =============================================================================
+
 /**
- * Concatenate multiple Uint8Arrays.
+ * Compute a hash digest using Web Crypto API.
+ *
+ * NOTE: In the browser, this is async. The Node.js version is sync.
+ * For callers that need sync hashing, use `sha256()` or `md5()` directly.
+ *
+ * @param algorithm - Hash algorithm name (e.g., "SHA-256", "SHA-512", "SHA-1").
+ * @param data - Data to hash
+ * @returns The digest bytes
  */
-export function concatArrays(...arrays: Uint8Array[]): Uint8Array {
-  let totalLen = 0;
-  for (const arr of arrays) {
-    totalLen += arr.length;
+export async function hashAsync(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
+  const buf = await globalThis.crypto.subtle.digest(
+    algorithm,
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
+  return new Uint8Array(buf);
+}
+
+/**
+ * Compute a hash digest synchronously (pure JS — SHA-256 and MD5 only).
+ *
+ * @param algorithm - "SHA-256" or "MD5" (case-insensitive, hyphens optional)
+ * @param data - Data to hash
+ * @returns The digest bytes
+ * @throws If algorithm is not SHA-256 or MD5
+ */
+export function hash(algorithm: string, data: Uint8Array): Uint8Array {
+  const algo = algorithm.toLowerCase().replace(/-/g, "");
+  if (algo === "sha256") {
+    return sha256(data);
   }
-  const result = new Uint8Array(totalLen);
-  let offset = 0;
-  for (const arr of arrays) {
-    result.set(arr, offset);
-    offset += arr.length;
+  if (algo === "md5") {
+    return md5(data);
   }
-  return result;
+  throw new Error(
+    `hash: unsupported algorithm "${algorithm}" in browser sync mode. Use hashAsync() for other algorithms.`
+  );
+}
+
+// =============================================================================
+// RSA signature operations (async — Web Crypto API)
+// =============================================================================
+
+/**
+ * Verify an RSA PKCS#1 v1.5 signature.
+ *
+ * @param publicKeyDer - DER-encoded SubjectPublicKeyInfo
+ * @param signature - The signature bytes
+ * @param data - The signed data (will be hashed with SHA-256)
+ */
+export async function rsaVerify(
+  publicKeyDer: Uint8Array,
+  signature: Uint8Array,
+  data: Uint8Array
+): Promise<boolean> {
+  const key = await globalThis.crypto.subtle.importKey(
+    "spki",
+    publicKeyDer.buffer.slice(
+      publicKeyDer.byteOffset,
+      publicKeyDer.byteOffset + publicKeyDer.byteLength
+    ) as ArrayBuffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  return globalThis.crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    signature.buffer.slice(
+      signature.byteOffset,
+      signature.byteOffset + signature.byteLength
+    ) as ArrayBuffer,
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
+}
+
+/**
+ * Create an RSA PKCS#1 v1.5 signature.
+ *
+ * @param privateKeyDer - DER-encoded PKCS#8 private key
+ * @param data - The data to sign (will be hashed with SHA-256)
+ */
+export async function rsaSign(privateKeyDer: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const key = await globalThis.crypto.subtle.importKey(
+    "pkcs8",
+    privateKeyDer.buffer.slice(
+      privateKeyDer.byteOffset,
+      privateKeyDer.byteOffset + privateKeyDer.byteLength
+    ) as ArrayBuffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await globalThis.crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
+  return new Uint8Array(sig);
 }

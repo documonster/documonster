@@ -15,6 +15,7 @@
  */
 
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { randomBytes } from "@utils/crypto";
 import { toArrayBuffer } from "@archive/shared/text";
 
 /**
@@ -141,28 +142,6 @@ function getWebCrypto(): SubtleCrypto {
     return globalThis.crypto.subtle;
   }
   throw new Error("Web Crypto API not available");
-}
-
-/**
- * Get crypto.getRandomValues (works in both Node.js and browsers).
- */
-export function getRandomValues(array: Uint8Array): Uint8Array {
-  if (typeof globalThis.crypto?.getRandomValues !== "undefined") {
-    // Uint8Array's buffer type (ArrayBufferLike) is wider than what the TS lib
-    // definition of getRandomValues expects (ArrayBuffer). The cast is safe
-    // because getRandomValues fills the view in-place regardless of buffer type.
-    (globalThis.crypto.getRandomValues as (a: Uint8Array) => void)(array);
-    return array;
-  }
-  throw new Error("crypto.getRandomValues not available");
-}
-
-/**
- * Generate random bytes.
- */
-export function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  return getRandomValues(bytes);
 }
 
 /**
