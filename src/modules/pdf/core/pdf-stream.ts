@@ -148,6 +148,35 @@ export class PdfContentStream {
     return this;
   }
 
+  /**
+   * Append a cubic Bezier curve to the current path.
+   * From current point to (x3, y3), with control points (x1, y1) and (x2, y2).
+   */
+  curveTo(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): this {
+    this.parts.push(
+      `${pdfNumber(x1)} ${pdfNumber(y1)} ${pdfNumber(x2)} ${pdfNumber(y2)} ${pdfNumber(x3)} ${pdfNumber(y3)} c`
+    );
+    return this;
+  }
+
+  /**
+   * Append a cubic Bezier curve where the first control point is the current point.
+   * From current point to (x3, y3), with control points (current, y1) and (x2, y2).
+   */
+  curveToV(x2: number, y2: number, x3: number, y3: number): this {
+    this.parts.push(`${pdfNumber(x2)} ${pdfNumber(y2)} ${pdfNumber(x3)} ${pdfNumber(y3)} v`);
+    return this;
+  }
+
+  /**
+   * Append a cubic Bezier curve where the second control point equals (x3, y3).
+   * From current point to (x3, y3), with control point (x1, y1).
+   */
+  curveToY(x1: number, y1: number, x3: number, y3: number): this {
+    this.parts.push(`${pdfNumber(x1)} ${pdfNumber(y1)} ${pdfNumber(x3)} ${pdfNumber(y3)} y`);
+    return this;
+  }
+
   // ===========================================================================
   // Path Painting
   // ===========================================================================
@@ -412,6 +441,60 @@ export class PdfContentStream {
       this.setDashPattern(dashPattern);
     }
     return this.moveTo(x1, y1).lineTo(x2, y2).stroke().restore();
+  }
+
+  /**
+   * Append an ellipse to the current path using 4 cubic Bezier curves.
+   * (cx, cy) is the center; rx, ry are the radii.
+   *
+   * Uses the standard kappa = 4 * (sqrt(2) - 1) / 3 ≈ 0.5522847 approximation.
+   */
+  ellipse(cx: number, cy: number, rx: number, ry: number): this {
+    const k = 0.5522847;
+    const kx = k * rx;
+    const ky = k * ry;
+
+    this.moveTo(cx + rx, cy);
+    this.curveTo(cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
+    this.curveTo(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
+    this.curveTo(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
+    this.curveTo(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
+    return this;
+  }
+
+  /**
+   * Append a circle to the current path.
+   * (cx, cy) is the center; r is the radius.
+   */
+  circle(cx: number, cy: number, r: number): this {
+    return this.ellipse(cx, cy, r, r);
+  }
+
+  /**
+   * Append a rounded rectangle to the current path.
+   * (x, y) is the lower-left corner; r is the corner radius.
+   */
+  roundedRect(x: number, y: number, width: number, height: number, r: number): this {
+    const k = 0.5522847;
+    const kr = k * r;
+
+    this.moveTo(x + r, y);
+    this.lineTo(x + width - r, y);
+    this.curveTo(x + width - r + kr, y, x + width, y + r - kr, x + width, y + r);
+    this.lineTo(x + width, y + height - r);
+    this.curveTo(
+      x + width,
+      y + height - r + kr,
+      x + width - r + kr,
+      y + height,
+      x + width - r,
+      y + height
+    );
+    this.lineTo(x + r, y + height);
+    this.curveTo(x + r - kr, y + height, x, y + height - r + kr, x, y + height - r);
+    this.lineTo(x, y + r);
+    this.curveTo(x, y + r - kr, x + r - kr, y, x + r, y);
+    return this;
   }
 
   // ===========================================================================

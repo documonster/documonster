@@ -59,6 +59,16 @@ export { excelToPdf } from "./excel-bridge";
 export { readPdf } from "./reader/pdf-reader";
 
 // =============================================================================
+// Public API — Building (free-form content)
+// =============================================================================
+
+/** Build PDFs with free text positioning, vector drawing, and images. */
+export { PdfDocumentBuilder, PdfPageBuilder } from "./builder/document-builder";
+
+/** Edit existing PDFs: overlay content, fill forms, copy/merge pages. */
+export { PdfEditor, PdfEditorPage } from "./builder/pdf-editor";
+
+// =============================================================================
 // Types — Writing
 // =============================================================================
 
@@ -89,6 +99,24 @@ export type { ExtractedImage } from "./reader/image-extractor";
 export type { TextLine } from "./reader/text-reconstruction";
 export type { PdfAnnotation, PdfRect } from "./reader/annotation-extractor";
 export type { PdfFormField, PdfFormFieldType } from "./reader/form-extractor";
+
+// =============================================================================
+// Types — Building
+// =============================================================================
+
+export type {
+  PageOptions,
+  DrawTextOptions,
+  DrawRectOptions,
+  DrawCircleOptions,
+  DrawEllipseOptions,
+  DrawLineOptions,
+  DrawPathOptions,
+  DrawImageOptions,
+  DocumentMetadata,
+  PathOp
+} from "./builder/document-builder";
+export type { LoadOptions } from "./builder/pdf-editor";
 
 // =============================================================================
 // Errors

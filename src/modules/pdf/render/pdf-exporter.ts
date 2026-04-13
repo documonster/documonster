@@ -15,8 +15,8 @@ import { FontManager, resolvePdfFontName } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
 import { initEncryption } from "../core/encryption";
 import { layoutSheet } from "./layout-engine";
-import { renderPage, alphaGsName, renderWatermark, parseImageDimensions } from "./page-renderer";
-import { decodePng } from "./png-decoder";
+import { renderPage, alphaGsName, renderWatermark } from "./page-renderer";
+import { writeImageXObject } from "../builder/image-utils";
 import { PdfError, PdfRenderError } from "../errors";
 import {
   PageSizes,
@@ -682,70 +682,4 @@ function isWatermarkApplicable(watermark: PdfWatermark, page: LayoutPage): boole
     }
   }
   return true;
-}
-
-// =============================================================================
-// Image XObject
-// =============================================================================
-
-/**
- * Write a JPEG or PNG image as a PDF XObject Image.
- */
-function writeImageXObject(writer: PdfWriter, data: Uint8Array, format: "jpeg" | "png"): number {
-  if (format === "png") {
-    return writePngImageXObject(writer, data);
-  }
-  return writeJpegImageXObject(writer, data);
-}
-
-/**
- * Write a JPEG image using DCTDecode (raw JPEG data embedded directly).
- */
-function writeJpegImageXObject(writer: PdfWriter, data: Uint8Array): number {
-  const objNum = writer.allocObject();
-  const dims = parseImageDimensions(data, "jpeg");
-  const dict = new PdfDict()
-    .set("Type", "/XObject")
-    .set("Subtype", "/Image")
-    .set("Width", pdfNumber(dims.width))
-    .set("Height", pdfNumber(dims.height))
-    .set("ColorSpace", "/DeviceRGB")
-    .set("BitsPerComponent", "8")
-    .set("Filter", "/DCTDecode");
-  writer.addStreamObject(objNum, dict, data);
-  return objNum;
-}
-
-/**
- * Write a PNG image: decode to raw RGB, create SMask for alpha if needed.
- */
-function writePngImageXObject(writer: PdfWriter, data: Uint8Array): number {
-  const png = decodePng(data);
-  const objNum = writer.allocObject();
-
-  const dict = new PdfDict()
-    .set("Type", "/XObject")
-    .set("Subtype", "/Image")
-    .set("Width", pdfNumber(png.width))
-    .set("Height", pdfNumber(png.height))
-    .set("ColorSpace", "/DeviceRGB")
-    .set("BitsPerComponent", pdfNumber(png.bitsPerComponent));
-
-  // If the image has an alpha channel, create a soft mask XObject
-  if (png.alpha) {
-    const smaskObjNum = writer.allocObject();
-    const smaskDict = new PdfDict()
-      .set("Type", "/XObject")
-      .set("Subtype", "/Image")
-      .set("Width", pdfNumber(png.width))
-      .set("Height", pdfNumber(png.height))
-      .set("ColorSpace", "/DeviceGray")
-      .set("BitsPerComponent", "8");
-    writer.addStreamObject(smaskObjNum, smaskDict, png.alpha);
-    dict.set("SMask", pdfRef(smaskObjNum));
-  }
-
-  // RGB pixel data — compression handled by addStreamObject
-  writer.addStreamObject(objNum, dict, png.pixels);
-  return objNum;
 }
