@@ -58,9 +58,11 @@ try {
   writeUtf8(generatedPath, generated);
 
   // Format the generated file
-  execFileSync(path.join(projectRoot, "node_modules", ".bin", "oxfmt"), [generatedPath], {
-    stdio: "inherit"
-  });
+  execFileSync(
+    process.execPath,
+    [path.join(projectRoot, "node_modules", "oxfmt", "bin", "oxfmt"), generatedPath],
+    { stdio: "inherit" }
+  );
 } catch (err) {
   console.error("Failed to generate CSV worker script.");
   console.error(err);
