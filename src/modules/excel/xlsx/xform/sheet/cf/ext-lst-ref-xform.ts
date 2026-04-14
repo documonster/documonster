@@ -71,6 +71,9 @@ class ExtLstRefXform extends CompositeXform {
   }
 
   render(xmlStream: any, model: any): void {
+    if (!model.x14Id) {
+      return;
+    }
     xmlStream.openNode(this.tag);
     this.map!.ext.render(xmlStream, model);
     xmlStream.closeNode();

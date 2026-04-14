@@ -41,7 +41,7 @@ class CfRuleExtXform extends CompositeXform {
   }
 
   prepare(model) {
-    if (CfRuleExtXform.isExt(model)) {
+    if (CfRuleExtXform.isExt(model) && !model.x14Id) {
       model.x14Id = `{${uuidV4()}}`.toUpperCase();
     }
   }

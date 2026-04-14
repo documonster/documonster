@@ -608,4 +608,99 @@ describe("XLSX", () => {
       expect(ws.getCell("A1").text).toContain("hello");
     });
   });
+
+  // ===========================================================================
+  // Data Bar Conditional Formatting (exceljs/exceljs#3015)
+  // ===========================================================================
+
+  describe("data bar conditional formatting", () => {
+    async function getSheetXml(buffer: Uint8Array): Promise<string> {
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(buffer);
+      return new TextDecoder().decode(entries.get("xl/worksheets/sheet1.xml")!.data);
+    }
+
+    function addDataBarWorkbook(ruleOverrides: Record<string, unknown> = {}): Promise<Uint8Array> {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let i = 1; i <= 10; i++) {
+        ws.getCell(`A${i}`).value = i * 10;
+      }
+      ws.addConditionalFormatting({
+        ref: "A1:A10",
+        rules: [{ type: "dataBar", priority: 1, ...ruleOverrides } as any]
+      });
+      return wb.xlsx.writeBuffer();
+    }
+
+    it("should produce valid data bar with default settings", async () => {
+      const buf = await addDataBarWorkbook();
+      const xml = await getSheetXml(buf);
+
+      // Primary section must have <dataBar> with <cfvo> and <color>
+      expect(xml).toMatch(/<dataBar>/);
+      expect(xml).toMatch(/<cfvo type="min"/);
+      expect(xml).toMatch(/<cfvo type="max"/);
+      expect(xml).toMatch(/<color rgb="FF638EC6"/);
+
+      // Primary section must have <x14:id> referencing ext section
+      const primaryIdMatch = xml.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(primaryIdMatch).not.toBeNull();
+      const x14Id = primaryIdMatch![1];
+      expect(x14Id).toMatch(/^\{[0-9A-F-]+\}$/);
+
+      // Ext section must have matching <x14:cfRule id="...">
+      expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
+      expect(xml).toMatch(/<x14:dataBar/);
+    });
+
+    it("should produce valid data bar with explicit gradient=true", async () => {
+      const buf = await addDataBarWorkbook({ gradient: true });
+      const xml = await getSheetXml(buf);
+
+      // Must still have ext section even when gradient is true
+      const primaryIdMatch = xml.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(primaryIdMatch).not.toBeNull();
+      const x14Id = primaryIdMatch![1];
+      expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
+    });
+
+    it("should produce valid data bar with gradient=false", async () => {
+      const buf = await addDataBarWorkbook({ gradient: false });
+      const xml = await getSheetXml(buf);
+
+      const primaryIdMatch = xml.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(primaryIdMatch).not.toBeNull();
+      const x14Id = primaryIdMatch![1];
+      expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
+
+      // gradient=false should appear in ext section
+      expect(xml).toMatch(/x14:dataBar[^>]*gradient="0"/);
+    });
+
+    it("should round-trip data bar without corruption", async () => {
+      const buf1 = await addDataBarWorkbook();
+
+      // Read it back
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buf1);
+
+      // Verify conditional formatting survived
+      const ws = wb2.getWorksheet("Sheet1")!;
+      const cfs = ws.conditionalFormattings;
+      expect(cfs.length).toBeGreaterThan(0);
+      const dbRule = cfs[0].rules.find((r: any) => r.type === "dataBar");
+      expect(dbRule).toBeDefined();
+
+      // Write again
+      const buf2 = await wb2.xlsx.writeBuffer();
+      const xml = await getSheetXml(buf2);
+
+      // Must still have matching primary + ext IDs after round-trip
+      const primaryIdMatch = xml.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(primaryIdMatch).not.toBeNull();
+      const x14Id = primaryIdMatch![1];
+      expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
+    });
+  });
 });

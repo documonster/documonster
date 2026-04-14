@@ -26,10 +26,13 @@ class DatabarExtXform extends CompositeXform {
     };
   }
 
-  static isExt(rule) {
-    // not all databars need ext
-    // TODO: refine this
-    return !rule.gradient;
+  static isExt(_rule) {
+    // All data bars require an ext section for proper rendering in modern Excel
+    // (Excel 2010+). Without the ext section, data bars may not display or Excel
+    // may show a repair dialog. The ext section carries additional formatting
+    // attributes (minLength, maxLength, border, gradient, axis, etc.) that the
+    // primary <dataBar> element does not support.
+    return true;
   }
 
   get tag() {
