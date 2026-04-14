@@ -14,7 +14,6 @@
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
   "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit",
     "source.fixAll.oxc": "explicit"
   },
   "js/ts.experimental.useTsgo": true,
@@ -24,7 +23,6 @@
   "git.autofetch": "all",
   "git.mergeEditor": false,
   "debug.javascript.autoAttachFilter": "onlyWithFlag",
-  "colorize.languages": ["typescript"],
   "js/ts.preferences.autoImportFileExcludePatterns": [
     "src/index.ts",
     "src/index.browser.ts",

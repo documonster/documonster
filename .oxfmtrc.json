@@ -1,6 +1,11 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "endOfLine": "lf",
+  "insertFinalNewline": true,
+  "useTabs": false,
+  "tabWidth": 2,
   "trailingComma": "none",
   "arrowParens": "avoid",
-  "sortImports": true
+  "sortImports": true,
+  "ignorePatterns": ["CHANGELOG.md"]
 }
