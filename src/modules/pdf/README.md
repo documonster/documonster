@@ -2,7 +2,7 @@
 
 [中文](README_zh.md)
 
-A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with the `pdf()` function or `excelToPdf()` bridge. **Read** any PDF with `readPdf()` — extract text, images, and metadata from all major PDF versions. All APIs are async and yield to the event loop between pages to avoid blocking.
+A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with the `pdf()` function or `excelToPdf()` bridge. **Read** any PDF with `readPdf()` — extract text, images, and metadata from all major PDF versions. **Build** free-form PDFs with `PdfDocumentBuilder` — text, vector graphics, SVG paths, annotations, and form fields. **Edit** existing PDFs with `PdfEditor` — overlay content, fill forms, add/remove/rotate pages, merge documents, and sign digitally. All APIs are async and yield to the event loop between pages to avoid blocking.
 
 ```typescript
 // Write — standalone
@@ -13,6 +13,15 @@ import { excelToPdf } from "@cj-tech-master/excelts/pdf";
 
 // Read — extract text, images, metadata
 import { readPdf } from "@cj-tech-master/excelts/pdf";
+
+// Build — free-form PDF with text, shapes, annotations, forms
+import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+
+// Edit — overlay content, fill forms, merge, sign
+import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+
+// Sign — digital signatures (verify and create)
+import { verifyPdfSignature, signPdf } from "@cj-tech-master/excelts/pdf";
 ```
 
 ## Features
@@ -42,9 +51,45 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 - **Image Extraction** — JPEG, JPEG2000, CCITT, JBIG2, raw/Flate with SMask/alpha
 - **Annotation Extraction** — Links, comments, highlights, stamps, free text, and more
 - **Form Fields** — AcroForm extraction: text inputs, checkboxes, radio buttons, dropdowns, signatures
+- **Bookmark Extraction** — Nested outline tree with named/action destinations
+- **Table Extraction** — Heuristic table detection from text fragment positioning
 - **Metadata** — Info dictionary + XMP (title, author, dates, page count, page sizes)
 - **All Encryption** — RC4-40, RC4-128, AES-128, AES-256 (reads all versions)
 - **Fault-Tolerant** — Cross-reference table/stream recovery, incremental updates
+
+### Building (PdfDocumentBuilder)
+
+- **Free Text Positioning** — Place text anywhere with font, size, color, bold/italic
+- **Vector Graphics** — Rectangles, circles, ellipses, lines, arbitrary paths with fill/stroke
+- **SVG Path Rendering** — Parse and render SVG `d` attributes (all commands including arcs)
+- **Images** — JPEG and PNG embedding at any position
+- **Annotations** — Create Highlight, Underline, StrikeOut, Squiggly, Text (sticky note), FreeText, and Stamp annotations
+- **Form Field Creation** — Create TextField, Checkbox, Dropdown, and RadioGroup from scratch
+- **Bookmarks** — Nested outline tree with page destinations
+- **Table of Contents** — Auto-generated TOC with dot leaders, page numbers, and clickable links
+- **PDF/A-1b** — Archival compliance with XMP metadata, OutputIntent, and sRGB ICC profile
+- **Font Embedding** — TrueType font subsetting for Unicode/CJK text
+
+### Editing (PdfEditor)
+
+- **Overlay Content** — Draw text, shapes, images on existing PDF pages
+- **Form Filling** — Set text field values and checkbox states
+- **Add Pages** — Append new blank pages with content
+- **Remove Pages** — Delete pages by index
+- **Rotate Pages** — Rotate pages by 90/180/270 degrees
+- **Split Pages** — Split a PDF into individual single-page PDFs
+- **Merge / Copy Pages** — Copy pages from other PDFs (including encrypted sources)
+- **Incremental Save** — Append-only updates preserving original bytes (safe for signed PDFs)
+- **Full Save** — Rebuild entire PDF with all modifications
+- **Metadata Preservation** — Retains XMP, page properties (Rotate, CropBox, etc.)
+
+### Digital Signatures
+
+- **Signature Verification** — Verify RSA PKCS#1 v1.5 + SHA-256 signatures with full PKCS#7/CMS parsing
+- **Signature Creation** — Create CMS SignedData signatures with ByteRange placeholder/backfill
+- **ASN.1 DER Codec** — Parse and encode ASN.1 structures (shared by verify and sign)
+- **X.509 Certificate** — Extract public keys from DER-encoded certificates
+- **Platform-Native Crypto** — Uses `node:crypto` on Node.js, Web Crypto API in browsers
 
 ---
 
@@ -211,6 +256,95 @@ const bytes = await pdf({
 });
 ```
 
+### Build Free-Form PDFs (PdfDocumentBuilder)
+
+Create PDFs with precise control over text, shapes, and layout:
+
+```typescript
+import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+
+const doc = new PdfDocumentBuilder();
+doc.setMetadata({ title: "My Report", author: "excelts" });
+
+const page = doc.addPage({ width: 595, height: 842 }); // A4
+
+// Text
+page.drawText("Hello, World!", { x: 72, y: 770, fontSize: 24, bold: true });
+
+// Shapes
+page.drawRect({ x: 72, y: 700, width: 200, height: 50, fill: { r: 0.2, g: 0.4, b: 0.8 } });
+page.drawCircle({ cx: 400, cy: 725, r: 25, fill: { r: 1, g: 0, b: 0 } });
+
+// SVG paths
+page.drawSvgPath("M 100 600 C 150 500 250 500 300 600", {
+  stroke: { r: 0, g: 0.5, b: 0 },
+  lineWidth: 2
+});
+
+// Annotations
+page.addAnnotation({
+  type: "Highlight",
+  rect: [72, 765, 250, 785],
+  color: { r: 1, g: 1, b: 0 }
+});
+
+// Form fields
+page.addFormField({
+  type: "text",
+  name: "email",
+  rect: [72, 550, 300, 575]
+});
+
+const bytes = await doc.build();
+```
+
+### Edit Existing PDFs (PdfEditor)
+
+Overlay content, fill forms, merge documents, and manipulate pages:
+
+```typescript
+import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+
+const editor = PdfEditor.load(existingPdfBytes);
+
+// Overlay text and shapes on page 1
+const page = editor.getPage(0);
+page.drawText("CONFIDENTIAL", { x: 200, y: 400, fontSize: 36, color: { r: 1, g: 0, b: 0 } });
+
+// Fill form fields
+editor.setFormField("name", "Jane Doe");
+editor.setFormField("agree", true);
+
+// Page manipulation
+editor.removePage(2); // Remove page 3
+editor.rotatePage(0, 90); // Rotate page 1
+editor.addPage(); // Add blank page
+
+// Copy pages from another PDF
+editor.copyPagesFrom(otherPdfBytes);
+
+// Save (full rebuild or incremental append)
+const result = await editor.save();
+const incremental = await editor.saveIncremental(); // preserves original bytes
+```
+
+### Digital Signatures
+
+```typescript
+import {
+  verifyPdfSignature,
+  signPdf,
+  buildSignatureDictPlaceholder
+} from "@cj-tech-master/excelts/pdf";
+
+// Verify a signature
+const result = await verifyPdfSignature(pdfBytes, signatureHex, byteRange);
+console.log(result.valid, result.coversWholeFile);
+
+// Sign a PDF (requires DER-encoded certificate + PKCS#8 private key)
+const signed = await signPdf(pdfWithPlaceholder, certificate, privateKey);
+```
+
 ---
 
 ## Architecture
@@ -219,7 +353,7 @@ The PDF module is split into four layers:
 
 ```
 src/modules/pdf/
-├── core/               # PDF primitives (objects, streams, writer, encryption, crypto)
+├── core/               # PDF primitives (objects, streams, writer, encryption, digital signatures)
 ├── font/               # TTF parsing, glyph metrics, font subsetting, embedding
 ├── render/             # Layout engine, page renderer, style converter
 │   ├── layout-engine   — PdfSheetData → LayoutPage[] (zero @excel imports)
@@ -227,6 +361,12 @@ src/modules/pdf/
 │   ├── style-converter — PdfCellStyle → PDF rendering params (zero @excel imports)
 │   ├── png-decoder     — PNG image decoding for PDF embedding (zero @excel imports)
 │   └── pdf-exporter    — PdfWorkbook → Uint8Array (zero @excel imports)
+├── builder/            # Free-form PDF creation and editing
+│   ├── document-builder — PdfDocumentBuilder + PdfPageBuilder (text, shapes, SVG, annotations, forms)
+│   ├── pdf-editor      — PdfEditor + PdfEditorPage (overlay, merge, split, sign)
+│   ├── form-appearance — Form field appearance stream generation
+│   ├── resource-merger — Resource dictionary merge for overlays
+│   └── image-utils     — Shared image XObject writing
 ├── reader/             # PDF reader — tokenizer, parser, decryption, text/image extraction
 │   ├── pdf-tokenizer   — byte-level PDF tokenization
 │   ├── pdf-parser      — objects, xref tables/streams, trailer
@@ -239,7 +379,9 @@ src/modules/pdf/
 │   ├── text-reconstruction — line building, table/multi-column detection, RTL
 │   ├── image-extractor — JPEG, JPEG2000, CCITT, JBIG2, raw, SMask
 │   ├── annotation-extractor — Link, Text, Highlight, FreeText, Stamp, etc.
-│   ├── form-extractor — AcroForm: text, checkbox, radio, dropdown, listbox, signature
+│   ├── form-extractor  — AcroForm: text, checkbox, radio, dropdown, listbox, signature
+│   ├── bookmark-extractor — Nested outline tree extraction
+│   ├── table-extractor — Heuristic table detection from text positions
 │   ├── metadata-reader — Info dict + XMP metadata
 │   ├── reader-utils    — shared reader utility functions
 │   └── pdf-reader      — public API: readPdf()
@@ -597,15 +739,17 @@ import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 
 Runnable examples are in `src/modules/pdf/examples/`:
 
-| File                   | What it demonstrates                                                           |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `pdf-basic.ts`         | Page sizes, margins, metadata, sheet selection, scale                          |
-| `pdf-styled.ts`        | Fonts, fills, borders, alignment, merge, rotation, rich text, number formats   |
-| `pdf-advanced.ts`      | Pagination, page breaks, encryption, transparency, bookmarks, hidden rows/cols |
-| `pdf-excel-to-pdf.ts`  | Reading real `.xlsx` files and converting to PDF                               |
-| `pdf-images.ts`        | Image embedding (JPEG, PNG with transparency)                                  |
-| `pdf-reader.ts`        | Text extraction, metadata, images, encrypted PDFs, selective extraction        |
-| `pdf-reader-stress.ts` | Large-scale stress test: thousands of cells, encrypted roundtrip, benchmarks   |
+| File                   | What it demonstrates                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `pdf-basic.ts`         | Page sizes, margins, metadata, sheet selection, scale                                                        |
+| `pdf-styled.ts`        | Fonts, fills, borders, alignment, merge, rotation, rich text, number formats                                 |
+| `pdf-advanced.ts`      | Pagination, page breaks, encryption, transparency, bookmarks, hidden rows/cols                               |
+| `pdf-excel-to-pdf.ts`  | Reading real `.xlsx` files and converting to PDF                                                             |
+| `pdf-images.ts`        | Image embedding (JPEG, PNG with transparency)                                                                |
+| `pdf-reader.ts`        | Text extraction, metadata, images, encrypted PDFs, selective extraction                                      |
+| `pdf-reader-stress.ts` | Large-scale stress test: thousands of cells, encrypted roundtrip, benchmarks                                 |
+| `pdf-builder.ts`       | PdfDocumentBuilder, PdfEditor, annotations, forms, SVG paths, bookmarks, TOC, PDF/A, merge, incremental save |
+| `pdf-signatures.ts`    | Digital signature placeholders, ASN.1 parsing, signature verification                                        |
 
 Run any example:
 
@@ -613,8 +757,11 @@ Run any example:
 npx tsx src/modules/pdf/examples/pdf-basic.ts
 # Output: tmp/pdf-examples/*.pdf
 
-npx tsx src/modules/pdf/examples/pdf-reader.ts
-# Output: tmp/pdf-reader-examples/
+npx tsx src/modules/pdf/examples/pdf-builder.ts
+# Output: tmp/pdf-builder-examples/*.pdf
+
+npx tsx src/modules/pdf/examples/pdf-signatures.ts
+# Output: tmp/pdf-signature-examples/
 ```
 
 ---

@@ -29,7 +29,7 @@ Create, read, and modify Excel spreadsheets with full styling, formulas, images,
 
 ### PDF — Zero-Dependency PDF Engine
 
-Full-featured PDF generation and reading. Write PDFs with font embedding, AES-256 encryption, images, and Excel-to-PDF conversion. Read any PDF with text, image, annotation, form field, and metadata extraction.
+Full-featured PDF generation, reading, building, editing, and signing. Write PDFs with font embedding, AES-256 encryption, images, and Excel-to-PDF conversion. Build free-form PDFs with text, vector graphics, SVG paths, annotations, and form fields. Edit existing PDFs with overlays, form filling, page manipulation, and merging. Read any PDF with text, image, annotation, form field, bookmark, and metadata extraction. Verify and create digital signatures with PKCS#7/CMS.
 
 - [Documentation](src/modules/pdf/README.md) | [中文](src/modules/pdf/README_zh.md)
 - [Examples](src/modules/pdf/examples/)
@@ -110,6 +110,21 @@ import { readPdf } from "@cj-tech-master/excelts/pdf";
 const result = await readPdf(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
+
+// PDF — build free-form PDFs with text, shapes, SVG paths
+import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+const doc = new PdfDocumentBuilder();
+const page = doc.addPage();
+page.drawText("Hello!", { x: 72, y: 770, fontSize: 24 });
+page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
+page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
+
+// PDF — edit existing PDFs (overlay, merge, fill forms)
+import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+const editor = PdfEditor.load(existingPdf);
+editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
+editor.setFormField("name", "Jane");
+editor.copyPagesFrom(otherPdf);
 
 // CSV — parse and format
 import { parseCsv, formatCsv } from "@cj-tech-master/excelts/csv";
