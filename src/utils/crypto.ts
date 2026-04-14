@@ -49,10 +49,20 @@ export function hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
 
 /**
  * MD5 hash function (RFC 1321).
+ *
+ * **Security note:** MD5 is cryptographically broken for password hashing.
+ * This function exists solely for PDF specification compliance — ISO 32000
+ * mandates MD5 in its key derivation algorithms for RC4 and AES-128
+ * encryption (Algorithm 2, Algorithm 3 in PDF 1.7 Reference). It cannot
+ * be replaced with a stronger hash without breaking compatibility with
+ * every existing encrypted PDF file.
+ *
  * @returns 16-byte digest
  */
 export function md5(input: Uint8Array): Uint8Array {
-  return new Uint8Array(crypto.createHash("md5").update(input).digest()); // lgtm[js/insufficient-password-hash]
+  // nosemgrep: insecure-hash-md5
+  // lgtm[js/insufficient-password-hash]
+  return new Uint8Array(crypto.createHash("md5").update(input).digest());
 }
 
 // =============================================================================
