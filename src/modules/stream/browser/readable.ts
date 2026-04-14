@@ -43,7 +43,10 @@ interface _AsyncIterState<T> {
   dataQueueIndex: number;
   queuedSize: number;
   /** Per-iterator resolve/reject callbacks waiting for the next chunk. */
-  resolverQueue: Array<{ resolve: (v: any) => void; reject: (e: Error) => void }>;
+  resolverQueue: Array<{
+    resolve: (v: any) => void;
+    reject: (e: Error) => void;
+  }>;
   done: boolean;
   streamError: Error | null;
   /** Number of active (not-yet-returned) iterators. */
@@ -328,7 +331,10 @@ export class Readable<T = Uint8Array> extends EventEmitter {
       throw err;
     }
 
-    const readable = new Readable<T>({ ...options, objectMode: options?.objectMode ?? true });
+    const readable = new Readable<T>({
+      ...options,
+      objectMode: options?.objectMode ?? true
+    });
 
     const iter = iterable as unknown;
 
@@ -433,7 +439,9 @@ export class Readable<T = Uint8Array> extends EventEmitter {
 
     // Reject push() after EOF (matches Node.js ERR_STREAM_PUSH_AFTER_EOF)
     if (this._ended && chunk !== null) {
-      const err = new Error("stream.push() after EOF") as Error & { code: string };
+      const err = new Error("stream.push() after EOF") as Error & {
+        code: string;
+      };
       err.code = "ERR_STREAM_PUSH_AFTER_EOF";
       deferTask(() => this.emit("error", err));
       return false;
@@ -571,7 +579,9 @@ export class Readable<T = Uint8Array> extends EventEmitter {
     // Note: unshift(data) right after push(null) but before end event is
     // silently ignored by Node.js — we match that by checking _endEmitted.
     if (this._endEmitted) {
-      const err = new Error("stream.unshift() after end event") as Error & { code: string };
+      const err = new Error("stream.unshift() after end event") as Error & {
+        code: string;
+      };
       err.code = "ERR_STREAM_UNSHIFT_AFTER_END_EVENT";
       deferTask(() => this.emit("error", err));
       return;
@@ -1443,7 +1453,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
         }
 
         // No data available — park this iterator until a chunk arrives.
-        const chunk = await new Promise<any | null>((resolve, reject) => {
+        const chunk = await new Promise<any>((resolve, reject) => {
           state.resolverQueue.push({ resolve, reject });
         });
 
@@ -1776,7 +1786,11 @@ export class Readable<T = Uint8Array> extends EventEmitter {
    */
   map<U>(
     fn: (data: T, options: { signal: AbortSignal }) => U | Promise<U>,
-    options?: { concurrency?: number; highWaterMark?: number; signal?: AbortSignal }
+    options?: {
+      concurrency?: number;
+      highWaterMark?: number;
+      signal?: AbortSignal;
+    }
   ): Readable<U> {
     const signal = options?.signal;
     _validateAbortSignal(signal);
@@ -1824,7 +1838,11 @@ export class Readable<T = Uint8Array> extends EventEmitter {
    */
   filter(
     fn: (data: T, options: { signal: AbortSignal }) => boolean | Promise<boolean>,
-    options?: { concurrency?: number; highWaterMark?: number; signal?: AbortSignal }
+    options?: {
+      concurrency?: number;
+      highWaterMark?: number;
+      signal?: AbortSignal;
+    }
   ): Readable<T> {
     const signal = options?.signal;
     _validateAbortSignal(signal);
@@ -2008,7 +2026,10 @@ export class Readable<T = Uint8Array> extends EventEmitter {
       } else {
         for await (const item of _mapWithConcurrency<T, { chunk: T; match: boolean }>(
           this,
-          async chunk => ({ chunk, match: await fn(chunk, { signal: innerSignal }) }),
+          async chunk => ({
+            chunk,
+            match: await fn(chunk, { signal: innerSignal })
+          }),
           concurrency,
           signal
         )) {
@@ -2352,7 +2373,9 @@ Readable.prototype.addListener = Readable.prototype.on;
 // Factory-created readables (e.g., from async iterables) rely on the internal `_read` check
 // being falsy, so the instance field `_read?: ...` shadows this prototype method when set.
 (Readable.prototype as any)._read = function _read(_size?: number): void {
-  const err = new Error("The _read() method is not implemented") as Error & { code: string };
+  const err = new Error("The _read() method is not implemented") as Error & {
+    code: string;
+  };
   err.code = "ERR_METHOD_NOT_IMPLEMENTED";
   throw err;
 };

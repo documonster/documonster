@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   ws.addRow(["Name", "Score"]).commit();
   ws.addRow(["Alice", 98]).commit();
   ws.addRow(["Bob", 87]).commit();
-  await ws.commit();
+  ws.commit();
   await writer.commit();
 
   const xlsxBytes = concatUint8Arrays(outputChunks);

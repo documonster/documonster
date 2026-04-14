@@ -1,5 +1,9 @@
 {
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["import", "typescript"],
+  "options": {
+    "typeAware": true
+  },
   "ignorePatterns": ["scripts/**/*", "test/**/*", "dist/**/*"],
   "overrides": [
     {
@@ -36,10 +40,24 @@
         "typescript/no-unsafe-function-type": 0,
         "typescript/no-unused-expressions": 0,
         "typescript/no-empty-interface": 2,
-        // Wait to enable
-        "typescript/no-non-null-asserted-optional-chain": 0,
+        "typescript/no-non-null-asserted-optional-chain": 2,
         "typescript/no-empty-object-type": 2,
-        "typescript/consistent-type-imports": 0,
+        "typescript/consistent-type-imports": 2,
+        "typescript/consistent-type-exports": 2,
+        "typescript/no-require-imports": "error",
+
+        // Type-aware rules (via tsgolint)
+        "typescript/await-thenable": "error",
+        "typescript/no-redundant-type-constituents": "error",
+        // Wait to enable, too many hits
+        "typescript/no-floating-promises": 0,
+        "typescript/no-base-to-string": 0,
+        "typescript/unbound-method": 0,
+        "typescript/restrict-template-expressions": 0,
+        "typescript/no-duplicate-type-constituents": 0,
+        "typescript/no-array-delete": 0,
+        "typescript/no-implied-eval": 0,
+        "typescript/require-array-sort-compare": 0,
 
         "import/no-cycle": [2, { "ignoreExternal": true }]
         // "import/no-duplicates": "error"

@@ -25,7 +25,7 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
       const chunks: T[] = [];
       let head = 0;
       let done = false;
-      let error: unknown | null = null;
+      let error: unknown = null;
       let cleanedUp = false;
       let pending: {
         resolve: (r: IteratorResult<T>) => void;

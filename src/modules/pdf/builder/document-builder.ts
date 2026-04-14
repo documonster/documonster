@@ -148,7 +148,15 @@ export interface DrawPathOptions {
 export type PathOp =
   | { op: "move"; x: number; y: number }
   | { op: "line"; x: number; y: number }
-  | { op: "curve"; x1: number; y1: number; x2: number; y2: number; x3: number; y3: number }
+  | {
+      op: "curve";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      x3: number;
+      y3: number;
+    }
   | { op: "close" };
 
 /** Image drawing options. */
@@ -543,7 +551,12 @@ export class PdfPageBuilder {
    */
   measureText(
     text: string,
-    options?: { fontSize?: number; fontFamily?: string; bold?: boolean; italic?: boolean }
+    options?: {
+      fontSize?: number;
+      fontFamily?: string;
+      bold?: boolean;
+      italic?: boolean;
+    }
   ): number {
     const fontSize = options?.fontSize ?? DEFAULT_FONT_SIZE;
     const fontFamily = options?.fontFamily ?? "Helvetica";
@@ -1129,7 +1142,7 @@ export class PdfDocumentBuilder {
     }
 
     // Write font resources
-    const fontObjectMap = await this._fontManager.writeFontResources(writer);
+    const fontObjectMap = this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     // Build each page
@@ -1875,7 +1888,15 @@ export function parseSvgPath(d: string): PathOp[] {
             c1y = cy + (2 / 3) * (qy - cy);
           const c2x = x + (2 / 3) * (qx - x),
             c2y = y + (2 / 3) * (qy - y);
-          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          ops.push({
+            op: "curve",
+            x1: c1x,
+            y1: c1y,
+            x2: c2x,
+            y2: c2y,
+            x3: x,
+            y3: y
+          });
           lastCpX = qx;
           lastCpY = qy;
           cx = x;
@@ -1893,7 +1914,15 @@ export function parseSvgPath(d: string): PathOp[] {
             c1y = cy + (2 / 3) * (qy - cy);
           const c2x = x + (2 / 3) * (qx - x),
             c2y = y + (2 / 3) * (qy - y);
-          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          ops.push({
+            op: "curve",
+            x1: c1x,
+            y1: c1y,
+            x2: c2x,
+            y2: c2y,
+            x3: x,
+            y3: y
+          });
           lastCpX = qx;
           lastCpY = qy;
           cx = x;
@@ -1917,7 +1946,15 @@ export function parseSvgPath(d: string): PathOp[] {
             c1y = cy + (2 / 3) * (qy - cy);
           const c2x = x + (2 / 3) * (qx - x),
             c2y = y + (2 / 3) * (qy - y);
-          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          ops.push({
+            op: "curve",
+            x1: c1x,
+            y1: c1y,
+            x2: c2x,
+            y2: c2y,
+            x3: x,
+            y3: y
+          });
           lastCpX = qx;
           lastCpY = qy;
           cx = x;
@@ -1941,7 +1978,15 @@ export function parseSvgPath(d: string): PathOp[] {
             c1y = cy + (2 / 3) * (qy - cy);
           const c2x = x + (2 / 3) * (qx - x),
             c2y = y + (2 / 3) * (qy - y);
-          ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
+          ops.push({
+            op: "curve",
+            x1: c1x,
+            y1: c1y,
+            x2: c2x,
+            y2: c2y,
+            x3: x,
+            y3: y
+          });
           lastCpX = qx;
           lastCpY = qy;
           cx = x;

@@ -54,7 +54,7 @@ async function main() {
   }
 
   console.timeLog("xlsx", "Committing worksheet...");
-  await sheet.commit();
+  sheet.commit();
 
   console.timeLog("xlsx", "Committing workbook...");
   await book.commit();

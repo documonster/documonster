@@ -113,7 +113,12 @@ export class PdfEditorPage {
    */
   measureText(
     text: string,
-    options?: { fontSize?: number; fontFamily?: string; bold?: boolean; italic?: boolean }
+    options?: {
+      fontSize?: number;
+      fontFamily?: string;
+      bold?: boolean;
+      italic?: boolean;
+    }
   ): number {
     return this._overlay.measureText(text, options);
   }
@@ -262,7 +267,10 @@ export class PdfEditor {
     const pagesInfo = this._doc.getPagesWithObjInfo();
     for (let i = 0; i < pagesInfo.length; i++) {
       const { dict } = pagesInfo[i];
-      const dims = this._doc.resolvePageBox(dict) ?? { width: 612, height: 792 };
+      const dims = this._doc.resolvePageBox(dict) ?? {
+        width: 612,
+        height: 792
+      };
       this._pages.push(new PdfEditorPage(i, dims.width, dims.height, this._fontManager));
     }
   }
@@ -353,7 +361,9 @@ export class PdfEditor {
       }
 
       // Create a single-page editor from original bytes and save it
-      const singlePageEditor = PdfEditor.load(this._doc.data, { password: this._password });
+      const singlePageEditor = PdfEditor.load(this._doc.data, {
+        password: this._password
+      });
       // Remove all pages except the one we want
       for (let i = 0; i < pagesInfo.length; i++) {
         if (i !== idx) {
@@ -440,7 +450,10 @@ export class PdfEditor {
       }
 
       const { dict: pageDict } = sourcePagesInfo[idx];
-      const dims = sourceDoc.resolvePageBox(pageDict) ?? { width: 612, height: 792 };
+      const dims = sourceDoc.resolvePageBox(pageDict) ?? {
+        width: 612,
+        height: 792
+      };
 
       // Collect all content streams from the source page
       const contentStreams = this._collectContentStreams(sourceDoc, pageDict);
@@ -487,7 +500,7 @@ export class PdfEditor {
   /** @internal Full rebuild implementation, extracted for try/finally cleanup. */
   private async _buildFullSave(writer: PdfWriter): Promise<Uint8Array> {
     // Write font resources for any overlay content
-    const fontObjectMap = await this._fontManager.writeFontResources(writer);
+    const fontObjectMap = this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     const pagesTreeObjNum = writer.allocObject();
@@ -502,7 +515,10 @@ export class PdfEditor {
       }
 
       const { dict: pageDict } = pagesInfo[i];
-      const dims = this._doc.resolvePageBox(pageDict) ?? { width: 612, height: 792 };
+      const dims = this._doc.resolvePageBox(pageDict) ?? {
+        width: 612,
+        height: 792
+      };
       const editorPage = this._pages[i];
 
       // Get original content streams
@@ -898,7 +914,7 @@ export class PdfEditor {
 
     if (hasOverlays) {
       // Write font resources via the writer (to serialize font objects)
-      const fontObjectMap = await this._fontManager.writeFontResources(writer);
+      const fontObjectMap = this._fontManager.writeFontResources(writer);
 
       // Remap all writer-allocated objects (fonts + their dependencies like
       // CID font descriptors, ToUnicode CMaps, etc.) into the incremental

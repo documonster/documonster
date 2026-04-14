@@ -1,369 +1,438 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ExcelTS Browser Test</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-      max-width: 900px; 
-      margin: 0 auto; 
-      padding: 20px;
-      background: #f5f5f5;
-    }
-    h1 { color: #2563eb; }
-    .card {
-      background: white;
-      padding: 20px;
-      margin: 20px 0;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    button {
-      background: #2563eb;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      margin: 5px;
-    }
-    button:hover { background: #1d4ed8; }
-    button:disabled { background: #9ca3af; cursor: not-allowed; }
-    .success { color: #059669; font-weight: bold; }
-    .error { color: #dc2626; font-weight: bold; }
-    .info { color: #6b7280; font-size: 14px; }
-    pre {
-      background: #1f2937;
-      color: #f3f4f6;
-      padding: 15px;
-      border-radius: 6px;
-      overflow-x: auto;
-      font-size: 13px;
-    }
-    #log {
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 15px;
-      margin: 15px 0;
-    }
-    .stat-card {
-      background: #f0f9ff;
-      padding: 15px;
-      border-radius: 6px;
-      text-align: center;
-    }
-    .stat-value { font-size: 24px; font-weight: bold; color: #2563eb; }
-    .stat-label { font-size: 12px; color: #6b7280; }
-    input[type="file"] { margin: 10px 0; }
-  </style>
-</head>
-<body>
-  <h1>📊 ExcelTS Browser Test</h1>
-  
-  <div class="card">
-    <h2>Bundle Info</h2>
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-value" id="bundleSize">-</div>
-        <div class="stat-label">Minified Size</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="loadTime">-</div>
-        <div class="stat-label">Load Time</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="testStatus">⏳</div>
-        <div class="stat-label">Status</div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ExcelTS Browser Test</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      h1 {
+        color: #2563eb;
+      }
+      .card {
+        background: white;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      button {
+        background: #2563eb;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        margin: 5px;
+      }
+      button:hover {
+        background: #1d4ed8;
+      }
+      button:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+      }
+      .success {
+        color: #059669;
+        font-weight: bold;
+      }
+      .error {
+        color: #dc2626;
+        font-weight: bold;
+      }
+      .info {
+        color: #6b7280;
+        font-size: 14px;
+      }
+      pre {
+        background: #1f2937;
+        color: #f3f4f6;
+        padding: 15px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 13px;
+      }
+      #log {
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin: 15px 0;
+      }
+      .stat-card {
+        background: #f0f9ff;
+        padding: 15px;
+        border-radius: 6px;
+        text-align: center;
+      }
+      .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #2563eb;
+      }
+      .stat-label {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      input[type="file"] {
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📊 ExcelTS Browser Test</h1>
+
+    <div class="card">
+      <h2>Bundle Info</h2>
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-value" id="bundleSize">-</div>
+          <div class="stat-label">Minified Size</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="loadTime">-</div>
+          <div class="stat-label">Load Time</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="testStatus">⏳</div>
+          <div class="stat-label">Status</div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>Test 1: Create & Download Excel</h2>
-    <p class="info">Creates a new workbook with sample data and downloads it as .xlsx file</p>
-    <button id="btnCreate">Create & Download Excel</button>
-    <span id="createResult"></span>
-  </div>
+    <div class="card">
+      <h2>Test 1: Create & Download Excel</h2>
+      <p class="info">Creates a new workbook with sample data and downloads it as .xlsx file</p>
+      <button id="btnCreate">Create & Download Excel</button>
+      <span id="createResult"></span>
+    </div>
 
-  <div class="card">
-    <h2>Test 2: Read Excel File</h2>
-    <p class="info">Upload an Excel file to read and display its contents</p>
-    <input type="file" id="fileInput" accept=".xlsx,.xls">
-    <button id="btnRead" disabled>Read File</button>
-    <div id="readResult"></div>
-  </div>
+    <div class="card">
+      <h2>Test 2: Read Excel File</h2>
+      <p class="info">Upload an Excel file to read and display its contents</p>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" />
+      <button id="btnRead" disabled>Read File</button>
+      <div id="readResult"></div>
+    </div>
 
-  <div class="card">
-    <h2>Test 3: Protected Worksheet</h2>
-    <p class="info">Creates a workbook with password-protected worksheet (tests SHA-512 crypto)</p>
-    <button id="btnProtected">Create Protected Excel</button>
-    <span id="protectedResult"></span>
-  </div>
+    <div class="card">
+      <h2>Test 3: Protected Worksheet</h2>
+      <p class="info">
+        Creates a workbook with password-protected worksheet (tests SHA-512 crypto)
+      </p>
+      <button id="btnProtected">Create Protected Excel</button>
+      <span id="protectedResult"></span>
+    </div>
 
-  <div class="card">
-    <h2>Test 4: Roundtrip Test</h2>
-    <p class="info">Creates an Excel, writes to buffer, reads it back, and verifies data integrity</p>
-    <button id="btnRoundtrip">Run Roundtrip Test</button>
-    <span id="roundtripResult"></span>
-  </div>
+    <div class="card">
+      <h2>Test 4: Roundtrip Test</h2>
+      <p class="info">
+        Creates an Excel, writes to buffer, reads it back, and verifies data integrity
+      </p>
+      <button id="btnRoundtrip">Run Roundtrip Test</button>
+      <span id="roundtripResult"></span>
+    </div>
 
-  <div class="card">
-    <h2>Console Log</h2>
-    <pre id="log"></pre>
-  </div>
+    <div class="card">
+      <h2>Console Log</h2>
+      <pre id="log"></pre>
+    </div>
 
-  <script>
-    // Logging helper
-    const logEl = document.getElementById('log');
-    function log(msg, type = 'info') {
-      const time = new Date().toLocaleTimeString();
-      const color = type === 'error' ? '#ef4444' : type === 'success' ? '#10b981' : '#9ca3af';
-      const span = document.createElement('span');
-      span.style.color = color;
-      span.textContent = `[${time}] ${msg}`;
-      logEl.appendChild(span);
-      logEl.appendChild(document.createTextNode('\n'));
-      logEl.scrollTop = logEl.scrollHeight;
-      console.log(msg);
-    }
-
-    // Load the bundle
-    const startTime = performance.now();
-    const script = document.createElement('script');
-    script.src = '../../../../dist/iife/excelts.iife.min.js';
-    script.onload = () => {
-      const loadTime = (performance.now() - startTime).toFixed(0);
-      document.getElementById('loadTime').textContent = loadTime + 'ms';
-      document.getElementById('testStatus').textContent = '✅';
-      log('ExcelTS loaded successfully!', 'success');
-      log(`Available exports: ${Object.keys(window.ExcelTS).join(', ')}`);
-      
-      // Fetch bundle size
-      fetch('../../../../dist/iife/excelts.iife.min.js')
-        .then(r => r.blob())
-        .then(b => {
-          document.getElementById('bundleSize').textContent = (b.size / 1024).toFixed(0) + ' KB';
-        });
-    };
-    script.onerror = () => {
-      document.getElementById('testStatus').textContent = '❌';
-      log('Failed to load ExcelTS bundle!', 'error');
-    };
-    document.head.appendChild(script);
-
-    // Test 1: Create & Download
-    document.getElementById('btnCreate').onclick = async () => {
-      const result = document.getElementById('createResult');
-      try {
-        log('Creating workbook...');
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        wb.creator = 'ExcelTS Browser Test';
-        wb.created = new Date();
-        
-        const ws = wb.addWorksheet('Sample Data');
-        
-        // Headers
-        ws.columns = [
-          { header: 'ID', key: 'id', width: 10 },
-          { header: 'Name', key: 'name', width: 20 },
-          { header: 'Email', key: 'email', width: 30 },
-          { header: 'Amount', key: 'amount', width: 15 },
-          { header: 'Date', key: 'date', width: 15 }
-        ];
-        
-        // Style header row
-        ws.getRow(1).font = { bold: true };
-        ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-        ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        
-        // Add data
-        const data = [
-          { id: 1, name: 'Alice Johnson', email: 'alice@example.com', amount: 1500.50, date: new Date('2024-01-15') },
-          { id: 2, name: 'Bob Smith', email: 'bob@example.com', amount: 2300.00, date: new Date('2024-02-20') },
-          { id: 3, name: 'Carol White', email: 'carol@example.com', amount: 890.75, date: new Date('2024-03-10') },
-          { id: 4, name: 'David Brown', email: 'david@example.com', amount: 3200.25, date: new Date('2024-04-05') },
-          { id: 5, name: '中文测试', email: 'chinese@example.com', amount: 1234.56, date: new Date('2024-05-01') }
-        ];
-        data.forEach(row => ws.addRow(row));
-        
-        // Format amount column as currency
-        ws.getColumn('amount').numFmt = '$#,##0.00';
-        ws.getColumn('date').numFmt = 'yyyy-mm-dd';
-        
-        log('Writing to buffer...');
-        const buffer = await wb.xlsx.writeBuffer();
-        
-        log(`Buffer size: ${(buffer.length / 1024).toFixed(2)} KB`);
-        
-        // Download
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'excelts-test.xlsx';
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        result.innerHTML = '<span class="success">✅ Downloaded!</span>';
-        log('Excel file created and downloaded!', 'success');
-      } catch (err) {
-        result.textContent = '❌ ' + err.message;
-        result.className = 'error';
-        log(`Error: ${err.message}`, 'error');
+    <script>
+      // Logging helper
+      const logEl = document.getElementById("log");
+      function log(msg, type = "info") {
+        const time = new Date().toLocaleTimeString();
+        const color = type === "error" ? "#ef4444" : type === "success" ? "#10b981" : "#9ca3af";
+        const span = document.createElement("span");
+        span.style.color = color;
+        span.textContent = `[${time}] ${msg}`;
+        logEl.appendChild(span);
+        logEl.appendChild(document.createTextNode("\n"));
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(msg);
       }
-    };
 
-    // Test 2: Read File
-    const fileInput = document.getElementById('fileInput');
-    const btnRead = document.getElementById('btnRead');
-    
-    fileInput.onchange = () => {
-      btnRead.disabled = !fileInput.files.length;
-    };
-    
-    btnRead.onclick = async () => {
-      const result = document.getElementById('readResult');
-      try {
-        const file = fileInput.files[0];
-        log(`Reading file: ${file.name} (${(file.size/1024).toFixed(2)} KB)`);
-        
-        const arrayBuffer = await file.arrayBuffer();
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        await wb.xlsx.load(arrayBuffer);
-        
-        let html = '<h4>Worksheets:</h4>';
-        wb.eachSheet((ws, id) => {
-          html += `<strong>${ws.name}</strong> (${ws.rowCount} rows, ${ws.columnCount} cols)<br>`;
-          log(`Sheet "${ws.name}": ${ws.rowCount} rows, ${ws.columnCount} cols`);
-          
-          // Show first 5 rows
-          html += '<table style="border-collapse:collapse;margin:10px 0;font-size:12px;">';
-          let rowCount = 0;
-          ws.eachRow((row, rowNum) => {
-            if (rowCount++ >= 6) return;
-            html += '<tr>';
-            row.eachCell((cell, colNum) => {
-              const style = rowNum === 1 ? 'background:#e5e7eb;font-weight:bold;' : '';
-              html += `<td style="border:1px solid #d1d5db;padding:4px 8px;${style}">${cell.value ?? ''}</td>`;
-            });
-            html += '</tr>';
+      // Load the bundle
+      const startTime = performance.now();
+      const script = document.createElement("script");
+      script.src = "../../../../dist/iife/excelts.iife.min.js";
+      script.onload = () => {
+        const loadTime = (performance.now() - startTime).toFixed(0);
+        document.getElementById("loadTime").textContent = loadTime + "ms";
+        document.getElementById("testStatus").textContent = "✅";
+        log("ExcelTS loaded successfully!", "success");
+        log(`Available exports: ${Object.keys(window.ExcelTS).join(", ")}`);
+
+        // Fetch bundle size
+        fetch("../../../../dist/iife/excelts.iife.min.js")
+          .then(r => r.blob())
+          .then(b => {
+            document.getElementById("bundleSize").textContent = (b.size / 1024).toFixed(0) + " KB";
           });
-          html += '</table>';
-        });
-        
-        result.innerHTML = html;
-        log('File read successfully!', 'success');
-      } catch (err) {
-        result.textContent = '❌ ' + err.message;
-        result.className = 'error';
-        log(`Error: ${err.message}`, 'error');
-      }
-    };
+      };
+      script.onerror = () => {
+        document.getElementById("testStatus").textContent = "❌";
+        log("Failed to load ExcelTS bundle!", "error");
+      };
+      document.head.appendChild(script);
 
-    // Test 3: Protected Worksheet
-    document.getElementById('btnProtected').onclick = async () => {
-      const result = document.getElementById('protectedResult');
-      try {
-        log('Creating protected workbook...');
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        const ws = wb.addWorksheet('Protected Sheet');
-        
-        ws.getCell('A1').value = 'This sheet is protected!';
-        ws.getCell('A2').value = 'Password: test123';
-        ws.getCell('A3').value = 'Try to edit cells in Excel - it should be locked.';
-        
-        log('Applying password protection (SHA-512)...');
-        const startTime = performance.now();
-        await ws.protect('test123', { sheet: true, formatCells: false });
-        const protectTime = (performance.now() - startTime).toFixed(0);
-        
-        log(`Protection applied in ${protectTime}ms (spinCount: ${ws.sheetProtection.spinCount})`);
-        
-        const buffer = await wb.xlsx.writeBuffer();
-        
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'excelts-protected.xlsx';
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        result.innerHTML = `<span class="success">✅ Downloaded! (${protectTime}ms)</span>`;
-        log('Protected Excel created!', 'success');
-      } catch (err) {
-        result.textContent = '❌ ' + err.message;
-        result.className = 'error';
-        log(`Error: ${err.message}`, 'error');
-      }
-    };
+      // Test 1: Create & Download
+      document.getElementById("btnCreate").onclick = async () => {
+        const result = document.getElementById("createResult");
+        try {
+          log("Creating workbook...");
+          const { Workbook } = ExcelTS;
+          const wb = new Workbook();
+          wb.creator = "ExcelTS Browser Test";
+          wb.created = new Date();
 
-    // Test 4: Roundtrip
-    document.getElementById('btnRoundtrip').onclick = async () => {
-      const result = document.getElementById('roundtripResult');
-      try {
-        log('Starting roundtrip test...');
-        const { Workbook } = ExcelTS;
-        
-        // Create
-        const wb1 = new Workbook();
-        const ws1 = wb1.addWorksheet('Test');
-        ws1.getCell('A1').value = 'Hello';
-        ws1.getCell('B1').value = 12345;
-        ws1.getCell('C1').value = new Date('2024-06-15');
-        ws1.getCell('A2').value = '中文测试';
-        ws1.getCell('B2').value = 3.14159;
-        
-        // Write to buffer
-        log('Writing to buffer...');
-        const buffer = await wb1.xlsx.writeBuffer();
-        log(`Buffer size: ${buffer.length} bytes`);
-        
-        // Read back
-        log('Reading from buffer...');
-        const wb2 = new Workbook();
-        await wb2.xlsx.load(buffer);
-        
-        const ws2 = wb2.getWorksheet('Test');
-        
-        // Verify
-        const checks = [
-          { cell: 'A1', expected: 'Hello', actual: ws2.getCell('A1').value },
-          { cell: 'B1', expected: 12345, actual: ws2.getCell('B1').value },
-          { cell: 'A2', expected: '中文测试', actual: ws2.getCell('A2').value },
-          { cell: 'B2', expected: 3.14159, actual: ws2.getCell('B2').value }
-        ];
-        
-        let allPassed = true;
-        for (const check of checks) {
-          const passed = check.expected === check.actual;
-          log(`  ${check.cell}: ${passed ? '✅' : '❌'} expected=${check.expected}, actual=${check.actual}`);
-          if (!passed) allPassed = false;
+          const ws = wb.addWorksheet("Sample Data");
+
+          // Headers
+          ws.columns = [
+            { header: "ID", key: "id", width: 10 },
+            { header: "Name", key: "name", width: 20 },
+            { header: "Email", key: "email", width: 30 },
+            { header: "Amount", key: "amount", width: 15 },
+            { header: "Date", key: "date", width: 15 }
+          ];
+
+          // Style header row
+          ws.getRow(1).font = { bold: true };
+          ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } };
+          ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+
+          // Add data
+          const data = [
+            {
+              id: 1,
+              name: "Alice Johnson",
+              email: "alice@example.com",
+              amount: 1500.5,
+              date: new Date("2024-01-15")
+            },
+            {
+              id: 2,
+              name: "Bob Smith",
+              email: "bob@example.com",
+              amount: 2300.0,
+              date: new Date("2024-02-20")
+            },
+            {
+              id: 3,
+              name: "Carol White",
+              email: "carol@example.com",
+              amount: 890.75,
+              date: new Date("2024-03-10")
+            },
+            {
+              id: 4,
+              name: "David Brown",
+              email: "david@example.com",
+              amount: 3200.25,
+              date: new Date("2024-04-05")
+            },
+            {
+              id: 5,
+              name: "中文测试",
+              email: "chinese@example.com",
+              amount: 1234.56,
+              date: new Date("2024-05-01")
+            }
+          ];
+          data.forEach(row => ws.addRow(row));
+
+          // Format amount column as currency
+          ws.getColumn("amount").numFmt = "$#,##0.00";
+          ws.getColumn("date").numFmt = "yyyy-mm-dd";
+
+          log("Writing to buffer...");
+          const buffer = await wb.xlsx.writeBuffer();
+
+          log(`Buffer size: ${(buffer.length / 1024).toFixed(2)} KB`);
+
+          // Download
+          const blob = new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "excelts-test.xlsx";
+          a.click();
+          URL.revokeObjectURL(url);
+
+          result.innerHTML = '<span class="success">✅ Downloaded!</span>';
+          log("Excel file created and downloaded!", "success");
+        } catch (err) {
+          result.textContent = "❌ " + err.message;
+          result.className = "error";
+          log(`Error: ${err.message}`, "error");
         }
-        
-        if (allPassed) {
-          result.innerHTML = '<span class="success">✅ All checks passed!</span>';
-          log('Roundtrip test passed!', 'success');
-        } else {
-          result.innerHTML = '<span class="error">❌ Some checks failed</span>';
-          log('Roundtrip test failed!', 'error');
+      };
+
+      // Test 2: Read File
+      const fileInput = document.getElementById("fileInput");
+      const btnRead = document.getElementById("btnRead");
+
+      fileInput.onchange = () => {
+        btnRead.disabled = !fileInput.files.length;
+      };
+
+      btnRead.onclick = async () => {
+        const result = document.getElementById("readResult");
+        try {
+          const file = fileInput.files[0];
+          log(`Reading file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+
+          const arrayBuffer = await file.arrayBuffer();
+          const { Workbook } = ExcelTS;
+          const wb = new Workbook();
+          await wb.xlsx.load(arrayBuffer);
+
+          let html = "<h4>Worksheets:</h4>";
+          wb.eachSheet((ws, id) => {
+            html += `<strong>${ws.name}</strong> (${ws.rowCount} rows, ${ws.columnCount} cols)<br>`;
+            log(`Sheet "${ws.name}": ${ws.rowCount} rows, ${ws.columnCount} cols`);
+
+            // Show first 5 rows
+            html += '<table style="border-collapse:collapse;margin:10px 0;font-size:12px;">';
+            let rowCount = 0;
+            ws.eachRow((row, rowNum) => {
+              if (rowCount++ >= 6) return;
+              html += "<tr>";
+              row.eachCell((cell, colNum) => {
+                const style = rowNum === 1 ? "background:#e5e7eb;font-weight:bold;" : "";
+                html += `<td style="border:1px solid #d1d5db;padding:4px 8px;${style}">${cell.value ?? ""}</td>`;
+              });
+              html += "</tr>";
+            });
+            html += "</table>";
+          });
+
+          result.innerHTML = html;
+          log("File read successfully!", "success");
+        } catch (err) {
+          result.textContent = "❌ " + err.message;
+          result.className = "error";
+          log(`Error: ${err.message}`, "error");
         }
-      } catch (err) {
-        result.textContent = '❌ ' + err.message;
-        result.className = 'error';
-        log(`Error: ${err.stack}`, 'error');
-      }
-    };
-  </script>
-</body>
+      };
+
+      // Test 3: Protected Worksheet
+      document.getElementById("btnProtected").onclick = async () => {
+        const result = document.getElementById("protectedResult");
+        try {
+          log("Creating protected workbook...");
+          const { Workbook } = ExcelTS;
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("Protected Sheet");
+
+          ws.getCell("A1").value = "This sheet is protected!";
+          ws.getCell("A2").value = "Password: test123";
+          ws.getCell("A3").value = "Try to edit cells in Excel - it should be locked.";
+
+          log("Applying password protection (SHA-512)...");
+          const startTime = performance.now();
+          await ws.protect("test123", { sheet: true, formatCells: false });
+          const protectTime = (performance.now() - startTime).toFixed(0);
+
+          log(
+            `Protection applied in ${protectTime}ms (spinCount: ${ws.sheetProtection.spinCount})`
+          );
+
+          const buffer = await wb.xlsx.writeBuffer();
+
+          const blob = new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "excelts-protected.xlsx";
+          a.click();
+          URL.revokeObjectURL(url);
+
+          result.innerHTML = `<span class="success">✅ Downloaded! (${protectTime}ms)</span>`;
+          log("Protected Excel created!", "success");
+        } catch (err) {
+          result.textContent = "❌ " + err.message;
+          result.className = "error";
+          log(`Error: ${err.message}`, "error");
+        }
+      };
+
+      // Test 4: Roundtrip
+      document.getElementById("btnRoundtrip").onclick = async () => {
+        const result = document.getElementById("roundtripResult");
+        try {
+          log("Starting roundtrip test...");
+          const { Workbook } = ExcelTS;
+
+          // Create
+          const wb1 = new Workbook();
+          const ws1 = wb1.addWorksheet("Test");
+          ws1.getCell("A1").value = "Hello";
+          ws1.getCell("B1").value = 12345;
+          ws1.getCell("C1").value = new Date("2024-06-15");
+          ws1.getCell("A2").value = "中文测试";
+          ws1.getCell("B2").value = 3.14159;
+
+          // Write to buffer
+          log("Writing to buffer...");
+          const buffer = await wb1.xlsx.writeBuffer();
+          log(`Buffer size: ${buffer.length} bytes`);
+
+          // Read back
+          log("Reading from buffer...");
+          const wb2 = new Workbook();
+          await wb2.xlsx.load(buffer);
+
+          const ws2 = wb2.getWorksheet("Test");
+
+          // Verify
+          const checks = [
+            { cell: "A1", expected: "Hello", actual: ws2.getCell("A1").value },
+            { cell: "B1", expected: 12345, actual: ws2.getCell("B1").value },
+            { cell: "A2", expected: "中文测试", actual: ws2.getCell("A2").value },
+            { cell: "B2", expected: 3.14159, actual: ws2.getCell("B2").value }
+          ];
+
+          let allPassed = true;
+          for (const check of checks) {
+            const passed = check.expected === check.actual;
+            log(
+              `  ${check.cell}: ${passed ? "✅" : "❌"} expected=${check.expected}, actual=${check.actual}`
+            );
+            if (!passed) allPassed = false;
+          }
+
+          if (allPassed) {
+            result.innerHTML = '<span class="success">✅ All checks passed!</span>';
+            log("Roundtrip test passed!", "success");
+          } else {
+            result.innerHTML = '<span class="error">❌ Some checks failed</span>';
+            log("Roundtrip test failed!", "error");
+          }
+        } catch (err) {
+          result.textContent = "❌ " + err.message;
+          result.className = "error";
+          log(`Error: ${err.stack}`, "error");
+        }
+      };
+    </script>
+  </body>
 </html>

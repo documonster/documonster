@@ -534,7 +534,7 @@ describe("WorkbookWriter", () => {
       ws.getCell("A1").value = "Hello, World!";
       ws.addBackgroundImage(imageId);
 
-      await ws.commit();
+      ws.commit();
       await wb.commit();
 
       const wb2 = new Workbook();
@@ -610,7 +610,11 @@ describe("WorkbookWriter", () => {
       const chunks: Uint8Array[] = [];
       output.on("data", (chunk: Uint8Array) => chunks.push(chunk));
 
-      const workbook = new WorkbookWriter({ stream: output, useSharedStrings: false, ...options });
+      const workbook = new WorkbookWriter({
+        stream: output,
+        useSharedStrings: false,
+        ...options
+      });
       const worksheet = workbook.addWorksheet("Sheet 1");
       populate(worksheet);
       await workbook.commit();
@@ -1197,8 +1201,18 @@ describe("WorkbookWriter", () => {
       });
 
       ws.addImage(imageId, {
-        tl: { nativeCol: 1, nativeRow: 2, nativeColOff: 100000, nativeRowOff: 50000 } as any,
-        br: { nativeCol: 3, nativeRow: 5, nativeColOff: 200000, nativeRowOff: 80000 } as any,
+        tl: {
+          nativeCol: 1,
+          nativeRow: 2,
+          nativeColOff: 100000,
+          nativeRowOff: 50000
+        } as any,
+        br: {
+          nativeCol: 3,
+          nativeRow: 5,
+          nativeColOff: 200000,
+          nativeRowOff: 80000
+        } as any,
         editAs: "twoCell"
       });
 

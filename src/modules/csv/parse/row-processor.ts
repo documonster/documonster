@@ -157,9 +157,9 @@ export function rowToRecord(
   row: string[],
   state: ParseState,
   config: Pick<ParseConfig, "groupColumnsByName" | "dynamicTyping" | "castDate">
-): Record<string, string | string[] | unknown> {
+): Record<string, unknown> {
   if (state.headerRow) {
-    let record: Record<string, string | string[] | unknown> = convertRowToObject(
+    let record: Record<string, unknown> = convertRowToObject(
       row,
       state.headerRow,
       state.originalHeaders,

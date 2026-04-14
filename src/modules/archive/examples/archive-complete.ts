@@ -151,7 +151,7 @@ for await (const chunk of op6.iterable) {
 // 7. Read/extract ZIP
 // =============================================================================
 
-const reader7 = await unzip(zipBytes1);
+const reader7 = unzip(zipBytes1);
 console.log("\n7. Reading basic.zip:");
 for await (const entry of reader7.entries()) {
   const bytes = await entry.bytes();
@@ -179,7 +179,7 @@ fs.writeFileSync(path.join(outDir, "edited.zip"), editedZip);
 console.log("\n8. edited.zip — added, deleted, renamed entries");
 
 // Verify
-const reader8 = await unzip(editedZip);
+const reader8 = unzip(editedZip);
 console.log("  Entries after edit:");
 for await (const entry of reader8.entries()) {
   console.log(`    ${entry.path}`);
@@ -213,7 +213,7 @@ fs.writeFileSync(path.join(outDir, "archive.tar"), tarBytes);
 console.log("\n10. archive.tar —", tarBytes.length, "bytes");
 
 // Read TAR
-const tarReader = await unzip(tarBytes, { format: "tar" });
+const tarReader = unzip(tarBytes, { format: "tar" });
 console.log("  TAR entries:");
 for await (const entry of tarReader.entries()) {
   console.log(`    ${entry.path} (${entry.isDirectory ? "dir" : "file"})`);
@@ -348,7 +348,7 @@ fs.writeFileSync(path.join(outDir, "encrypted.zip"), encryptedZip);
 console.log("  encrypted.zip:", encryptedZip.length, "bytes");
 
 // Read back with password
-const af18b = await ArchiveFile.fromBuffer(encryptedZip, {
+const af18b = ArchiveFile.fromBuffer(encryptedZip, {
   format: "zip",
   password: "secret123"
 });

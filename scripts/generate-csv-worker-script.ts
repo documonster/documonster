@@ -56,6 +56,11 @@ try {
     `export const CSV_WORKER_SCRIPT = ${JSON.stringify(js)};\n`;
 
   writeUtf8(generatedPath, generated);
+
+  // Format the generated file
+  execFileSync(path.join(projectRoot, "node_modules", ".bin", "oxfmt"), [generatedPath], {
+    stdio: "inherit"
+  });
 } catch (err) {
   console.error("Failed to generate CSV worker script.");
   console.error(err);

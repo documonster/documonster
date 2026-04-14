@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-redundant-type-constituents -- Cell is intentionally `CellAddress & any` */
 import { colCache } from "@excel/utils/col-cache";
 
 // Safe deep clone that filters out prototype pollution keys

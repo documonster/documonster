@@ -2,12 +2,46 @@
   "name": "@cj-tech-master/excelts",
   "version": "9.1.0",
   "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
-  "type": "module",
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/types/index.d.ts",
-  "publishConfig": {
-    "access": "public"
+  "keywords": [
+    "archive",
+    "compression",
+    "cross-platform",
+    "csv",
+    "csv-parser",
+    "csv-writer",
+    "deflate",
+    "dom",
+    "excel",
+    "excel-to-pdf",
+    "gfm",
+    "gzip",
+    "markdown",
+    "markdown-table",
+    "openxml",
+    "pdf",
+    "pdf-generation",
+    "rfc4180",
+    "sax",
+    "spreadsheet",
+    "stream",
+    "streaming",
+    "tar",
+    "typescript",
+    "workbook",
+    "xlsx",
+    "xlsx-reader",
+    "xlsx-writer",
+    "xml",
+    "xml-parser",
+    "xml-writer",
+    "zero-dependency",
+    "zip",
+    "zip64",
+    "zlib"
+  ],
+  "homepage": "https://github.com/cjnoname/excelts#readme",
+  "bugs": {
+    "url": "https://github.com/cjnoname/excelts/issues"
   },
   "license": "MIT",
   "author": {
@@ -18,20 +52,43 @@
     "type": "git",
     "url": "https://github.com/cjnoname/excelts.git"
   },
-  "homepage": "https://github.com/cjnoname/excelts#readme",
-  "bugs": {
-    "url": "https://github.com/cjnoname/excelts/issues"
-  },
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "browserslist": [
-    "chrome >= 89",
-    "edge >= 89",
-    "firefox >= 102",
-    "safari >= 14.1",
-    "opera >= 75"
+  "files": [
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "README_zh.md"
   ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "zip": [
+        "dist/types/modules/archive/index.d.ts"
+      ],
+      "csv": [
+        "dist/types/modules/csv/index.d.ts"
+      ],
+      "markdown": [
+        "dist/types/modules/markdown/index.d.ts"
+      ],
+      "stream": [
+        "dist/types/modules/stream/index.d.ts"
+      ],
+      "pdf": [
+        "dist/types/modules/pdf/index.d.ts"
+      ],
+      "xml": [
+        "dist/types/modules/xml/index.d.ts"
+      ],
+      "browser": [
+        "dist/browser/index.browser.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "browser": {
@@ -137,38 +194,8 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "LICENSE",
-    "THIRD_PARTY_NOTICES.md",
-    "README.md",
-    "README_zh.md"
-  ],
-  "sideEffects": false,
-  "typesVersions": {
-    "*": {
-      "zip": [
-        "dist/types/modules/archive/index.d.ts"
-      ],
-      "csv": [
-        "dist/types/modules/csv/index.d.ts"
-      ],
-      "markdown": [
-        "dist/types/modules/markdown/index.d.ts"
-      ],
-      "stream": [
-        "dist/types/modules/stream/index.d.ts"
-      ],
-      "pdf": [
-        "dist/types/modules/pdf/index.d.ts"
-      ],
-      "xml": [
-        "dist/types/modules/xml/index.d.ts"
-      ],
-      "browser": [
-        "dist/browser/index.browser.d.ts"
-      ]
-    }
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "example": "node scripts/run-examples.ts",
@@ -185,7 +212,7 @@
     "lint": "eslint && oxlint",
     "lint:fix": "eslint --fix && oxlint --fix",
     "type": "tsgo --noEmit",
-    "format": "prettier --write \"**/*.{js,ts,json,md}\"",
+    "format": "oxfmt",
     "benchmark": "rimraf dist && pnpm run build && node --expose-gc scripts/benchmark.ts",
     "benchmark:compress": "rimraf dist && pnpm run build && node --expose-gc scripts/benchmark-compress.ts",
     "build:esm": "tsc --project tsconfig.esm.json && node scripts/fix-esm-imports.ts",
@@ -196,49 +223,11 @@
     "preversion": "pnpm run lint && pnpm run type && pnpm run build && pnpm run test",
     "prepare": "husky"
   },
-  "keywords": [
-    "excel",
-    "xlsx",
-    "xlsx-reader",
-    "xlsx-writer",
-    "openxml",
-    "spreadsheet",
-    "workbook",
-    "pdf",
-    "pdf-generation",
-    "excel-to-pdf",
-    "csv",
-    "csv-parser",
-    "csv-writer",
-    "rfc4180",
-    "markdown",
-    "markdown-table",
-    "gfm",
-    "xml",
-    "xml-parser",
-    "xml-writer",
-    "sax",
-    "dom",
-    "zip",
-    "zip64",
-    "tar",
-    "archive",
-    "compression",
-    "gzip",
-    "zlib",
-    "deflate",
-    "stream",
-    "streaming",
-    "typescript",
-    "zero-dependency",
-    "cross-platform"
-  ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@rspack/core": "^1.7.11",
     "@types/node": "^25.6.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.1",
-    "@typescript-eslint/parser": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.2",
     "@typescript/native-preview": "^7.0.0-dev.20260413.1",
     "@vitest/browser": "^4.1.4",
     "@vitest/browser-playwright": "^4.1.4",
@@ -250,18 +239,27 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.2",
-    "eslint-plugin-oxlint": "^1.59.0",
+    "eslint-plugin-oxlint": "^1.60.0",
     "eslint-plugin-unused-imports": "^4.4.1",
     "fast-xml-parser": "^5.5.12",
     "husky": "^9.1.7",
-    "oxlint": "^1.60.0",
+    "oxfmt": "^0.45.0",
+    "oxlint-tsgolint": "latest",
     "playwright": "^1.59.1",
-    "prettier": "^3.8.2",
     "rimraf": "^6.1.3",
     "rolldown": "^1.0.0-rc.15",
     "rollup-plugin-visualizer": "^7.0.1",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.1",
     "vitest": "^4.1.4"
+  },
+  "browserslist": [
+    "chrome >= 89",
+    "edge >= 89",
+    "firefox >= 102",
+    "safari >= 14.1",
+    "opera >= 75"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
   }
 }

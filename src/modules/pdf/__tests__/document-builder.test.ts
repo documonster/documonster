@@ -7,9 +7,9 @@ import {
   parseSvgPath,
   verifyPdfSignature,
   buildSignatureDictPlaceholder,
-  asn1Parse,
-  generateTestCertificate
+  asn1Parse
 } from "../index";
+import { generateTestCertificate } from "./test-certificate";
 import {
   parseResourceDict,
   mergeResourceDicts,

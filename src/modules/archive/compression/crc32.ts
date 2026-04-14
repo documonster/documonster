@@ -50,7 +50,7 @@ export function ensureZlibSync(): void {
     return;
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // oxlint-disable-next-line typescript/no-require-imports
     _zlib = require("zlib") as typeof zlibType;
     _zlibInitStarted = true;
   } catch {

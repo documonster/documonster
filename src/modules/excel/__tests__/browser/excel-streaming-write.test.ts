@@ -99,7 +99,7 @@ describe("Real Excel Streaming Write - Browser", () => {
 
     const chunksBeforeCommit = chunks.length;
 
-    await worksheet.commit();
+    worksheet.commit();
     const chunksAfterWorksheetCommit = chunks.length;
 
     await workbook.commit();
@@ -177,7 +177,7 @@ describe("Real Excel Streaming Write - Browser", () => {
 
     outputPhase = 1;
     outputChunks.push([]);
-    await worksheet.commit();
+    worksheet.commit();
     const chunksAfterWorksheetCommit = chunks.length;
     const phase1Size = outputChunks[1].reduce((sum, c) => sum + c.length, 0);
 
@@ -273,7 +273,11 @@ describe("Real Excel Streaming Write - Browser", () => {
       // Yield to event loop regularly so async readers can flush.
       if (i > 0 && i % 2000 === 0) {
         await new Promise(r => setTimeout(r, 0));
-        bytesLog.push({ stage: `Row ${i}`, chunks: chunks.length, bytes: totalBytes });
+        bytesLog.push({
+          stage: `Row ${i}`,
+          chunks: chunks.length,
+          bytes: totalBytes
+        });
       }
     }
 
@@ -284,7 +288,7 @@ describe("Real Excel Streaming Write - Browser", () => {
     });
     const bytesBeforeCommit = totalBytes;
 
-    await worksheet.commit();
+    worksheet.commit();
     bytesLog.push({
       stage: "After worksheet.commit()",
       chunks: chunks.length,
@@ -292,7 +296,11 @@ describe("Real Excel Streaming Write - Browser", () => {
     });
 
     await workbook.commit();
-    bytesLog.push({ stage: "After workbook.commit()", chunks: chunks.length, bytes: totalBytes });
+    bytesLog.push({
+      stage: "After workbook.commit()",
+      chunks: chunks.length,
+      bytes: totalBytes
+    });
 
     console.log("\n=== 25MB Row Data Streaming Analysis ===");
     bytesLog.forEach(log => {
@@ -363,7 +371,7 @@ describe("Real Excel Streaming Write - Browser", () => {
     const chunksBeforeCommit = chunks.length;
     console.log(`\nChunks before worksheet.commit(): ${chunksBeforeCommit}`);
 
-    await worksheet.commit();
+    worksheet.commit();
 
     await workbook.commit();
 

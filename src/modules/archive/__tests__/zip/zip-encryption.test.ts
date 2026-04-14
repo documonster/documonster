@@ -17,7 +17,10 @@ describe("ZIP Encryption End-to-End", () => {
   describe("createZip with ZipCrypto", () => {
     it("should create and extract ZipCrypto-encrypted ZIP", async () => {
       const entries: ZipEntry[] = [
-        { name: "secret.txt", data: new TextEncoder().encode("This is secret content") }
+        {
+          name: "secret.txt",
+          data: new TextEncoder().encode("This is secret content")
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -68,7 +71,10 @@ describe("ZIP Encryption End-to-End", () => {
   describe("createZipSync with ZipCrypto", () => {
     it("should create and extract ZipCrypto-encrypted ZIP (sync)", async () => {
       const entries: ZipEntry[] = [
-        { name: "sync-secret.txt", data: new TextEncoder().encode("Sync secret") }
+        {
+          name: "sync-secret.txt",
+          data: new TextEncoder().encode("Sync secret")
+        }
       ];
 
       const zipData = createZipSync(entries, {
@@ -88,7 +94,10 @@ describe("ZIP Encryption End-to-End", () => {
       const entries: ZipEntry[] = [{ name: "test.txt", data: new Uint8Array(10) }];
 
       expect(() =>
-        createZipSync(entries, { encryptionMethod: "aes-256", password: "test" })
+        createZipSync(entries, {
+          encryptionMethod: "aes-256",
+          password: "test"
+        })
       ).toThrow(/async API/i);
     });
   });
@@ -96,7 +105,10 @@ describe("ZIP Encryption End-to-End", () => {
   describe("createZip with AES", () => {
     it("should create and extract AES-256 encrypted ZIP", async () => {
       const entries: ZipEntry[] = [
-        { name: "aes-file.txt", data: new TextEncoder().encode("AES-256 protected") }
+        {
+          name: "aes-file.txt",
+          data: new TextEncoder().encode("AES-256 protected")
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -117,7 +129,10 @@ describe("ZIP Encryption End-to-End", () => {
 
     it("should create and extract AES-192 encrypted ZIP", async () => {
       const entries: ZipEntry[] = [
-        { name: "aes192.txt", data: new TextEncoder().encode("AES-192 content") }
+        {
+          name: "aes192.txt",
+          data: new TextEncoder().encode("AES-192 content")
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -135,7 +150,10 @@ describe("ZIP Encryption End-to-End", () => {
 
     it("should create and extract AES-128 encrypted ZIP", async () => {
       const entries: ZipEntry[] = [
-        { name: "aes128.txt", data: new TextEncoder().encode("AES-128 content") }
+        {
+          name: "aes128.txt",
+          data: new TextEncoder().encode("AES-128 content")
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -294,7 +312,11 @@ describe("ZIP Encryption End-to-End", () => {
 
     it("should handle STORE mode (level=0) with encryption", async () => {
       const entries: ZipEntry[] = [
-        { name: "stored.txt", data: new TextEncoder().encode("Stored content"), level: 0 }
+        {
+          name: "stored.txt",
+          data: new TextEncoder().encode("Stored content"),
+          level: 0
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -315,7 +337,11 @@ describe("ZIP Encryption End-to-End", () => {
 
     it("should handle STORE mode with AES encryption", async () => {
       const entries: ZipEntry[] = [
-        { name: "aes-stored.txt", data: new TextEncoder().encode("AES Stored"), level: 0 }
+        {
+          name: "aes-stored.txt",
+          data: new TextEncoder().encode("AES Stored"),
+          level: 0
+        }
       ];
 
       const zipData = await createZip(entries, {
@@ -472,7 +498,7 @@ describe("ZIP Encryption End-to-End", () => {
       const entries: any[] = [];
       for await (const entry of reader.entries()) {
         entries.push(entry);
-        await entry.discard();
+        entry.discard();
       }
       expect(entries).toHaveLength(1);
       expect(entries[0].isEncrypted).toBe(true);
@@ -496,7 +522,7 @@ describe("ZIP Encryption End-to-End", () => {
       const entries: any[] = [];
       for await (const entry of reader.entries()) {
         entries.push(entry);
-        await entry.discard();
+        entry.discard();
       }
       expect(entries).toHaveLength(1);
       expect(entries[0].isEncrypted).toBe(false);

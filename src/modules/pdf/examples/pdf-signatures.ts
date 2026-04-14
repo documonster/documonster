@@ -13,13 +13,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  PdfDocumentBuilder,
-  PdfEditor,
-  readPdf,
-  verifyPdfSignature,
-  generateTestCertificate
-} from "../index";
+import { PdfDocumentBuilder, PdfEditor, readPdf, verifyPdfSignature } from "../index";
+import { generateTestCertificate } from "../__tests__/test-certificate";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
