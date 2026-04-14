@@ -79,6 +79,8 @@
         "typescript/no-unnecessary-boolean-literal-compare": 2,
         "typescript/no-extraneous-class": 2,
         "typescript/no-useless-constructor": 2,
+        "typescript/no-misused-spread": 0,
+        "typescript/no-useless-default-assignment": 2,
 
         "typescript/await-thenable": "error",
         "typescript/no-redundant-type-constituents": "error",
