@@ -2,10 +2,10 @@
  * Example: PDF Digital Signatures
  *
  * Covers:
- *   1. Build a signature dictionary placeholder
- *   2. ASN.1 DER parsing
- *   3. Signature verification — graceful handling of invalid data
- *   4. Full sign + verify roundtrip with a generated RSA key pair
+ *   1. Sign a new PDF with PdfDocumentBuilder.sign()
+ *   2. Sign an existing PDF with PdfEditor.sign()
+ *   3. Verify a signature with verifyPdfSignature()
+ *   4. Tamper detection — modified PDF fails verification
  *
  * Run: npx tsx src/modules/pdf/examples/pdf-signatures.ts
  */
@@ -14,13 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import {
-  PdfDocumentBuilder,
-  buildSignatureDictPlaceholder,
-  verifyPdfSignature,
-  signPdf,
-  asn1Parse
-} from "../index";
+import { PdfDocumentBuilder, PdfEditor, verifyPdfSignature, readPdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,245 +22,191 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
+// Generate a temporary RSA key pair + self-signed certificate for this demo
+const { certDer, privKeyDer } = generateTestCredentials();
+
 // =============================================================================
-// 1. Signature Dictionary Placeholder
+// 1. Sign a New PDF (PdfDocumentBuilder)
 // =============================================================================
 
 {
-  const { dictString, placeholder } = buildSignatureDictPlaceholder({
-    name: "John Doe",
-    reason: "Document approval",
-    location: "New York, NY",
-    contactInfo: "john@example.com"
+  console.log("1. Sign a new PDF with PdfDocumentBuilder:");
+
+  const doc = new PdfDocumentBuilder();
+  doc.setMetadata({ title: "Signed Agreement", author: "excelts" });
+
+  const page = doc.addPage();
+  page.drawText("Service Agreement", { x: 72, y: 750, fontSize: 24, bold: true });
+  page.drawText("This document is digitally signed to ensure authenticity.", {
+    x: 72,
+    y: 720,
+    fontSize: 12
+  });
+  page.drawText("Any modification after signing will invalidate the signature.", {
+    x: 72,
+    y: 700,
+    fontSize: 11,
+    color: { r: 0.4, g: 0.4, b: 0.4 }
   });
 
-  console.log("1. Signature dict placeholder:");
-  console.log(`   Contains /Type /Sig: ${dictString.includes("/Type /Sig")}`);
-  console.log(`   Contains /Filter: ${dictString.includes("/Adobe.PPKLite")}`);
-  console.log(`   Contains /SubFilter: ${dictString.includes("/adbe.pkcs7.detached")}`);
-  console.log(`   Contains /ByteRange: ${dictString.includes("/ByteRange")}`);
-  console.log(`   Contains /Name: ${dictString.includes("/Name")}`);
-  console.log(`   Contains /Reason: ${dictString.includes("/Reason")}`);
-  console.log(`   Placeholder length: ${placeholder.length} hex chars`);
+  // One method call — certificate, key, and metadata
+  doc.sign({
+    certificate: certDer,
+    privateKey: privKeyDer,
+    name: "Alice Johnson",
+    reason: "Contract approval",
+    location: "San Francisco, CA"
+  });
+
+  const signedPdf = await doc.build();
+  fs.writeFileSync(path.join(outDir, "01-builder-signed.pdf"), signedPdf);
+  console.log(`   Output: 01-builder-signed.pdf (${signedPdf.length} bytes)`);
+
+  // Verify it
+  const verification = await verifyFromPdf(signedPdf);
+  console.log(`   Valid: ${verification.valid}`);
+  console.log(`   Covers whole file: ${verification.coversWholeFile}`);
 }
 
 // =============================================================================
-// 2. ASN.1 Parser — Parse DER Structures
+// 2. Sign an Existing PDF (PdfEditor)
 // =============================================================================
 
 {
-  // SEQUENCE { INTEGER 42, NULL }
-  const derData = new Uint8Array([0x30, 0x05, 0x02, 0x01, 0x2a, 0x05, 0x00]);
-  const node = asn1Parse(derData);
+  console.log("\n2. Sign an existing PDF with PdfEditor:");
 
-  console.log("\n2. ASN.1 parser:");
-  console.log(`   Root tag: 0x${node.tag.toString(16)} (SEQUENCE)`);
-  console.log(`   Children: ${node.children.length}`);
-  console.log(`   Child[0] tag: 0x${node.children[0].tag.toString(16)} (INTEGER)`);
-  console.log(`   Child[0] value: ${node.children[0].bytes[0]}`);
-  console.log(`   Child[1] tag: 0x${node.children[1].tag.toString(16)} (NULL)`);
-}
-
-// =============================================================================
-// 3. Signature Verification — Graceful Handling of Invalid Data
-// =============================================================================
-
-{
+  // First, create an unsigned PDF
   const doc = new PdfDocumentBuilder();
   const page = doc.addPage();
-  page.drawText("Test document for signature verification", { x: 72, y: 770, fontSize: 14 });
-  const pdfBytes = await doc.build();
-  fs.writeFileSync(path.join(outDir, "unsigned.pdf"), pdfBytes);
+  page.drawText("Invoice #12345", { x: 72, y: 750, fontSize: 20, bold: true });
+  page.drawText("Amount: $1,500.00", { x: 72, y: 720, fontSize: 14 });
+  page.drawText("Due: 2026-05-01", { x: 72, y: 700, fontSize: 12 });
+  const unsignedPdf = await doc.build();
+  fs.writeFileSync(path.join(outDir, "02-unsigned.pdf"), unsignedPdf);
+  console.log(`   Unsigned: 02-unsigned.pdf (${unsignedPdf.length} bytes)`);
 
-  // Attempt to verify with fake signature data — should fail gracefully
-  const result = await verifyPdfSignature(pdfBytes, "00112233", [
-    0,
-    100,
-    200,
-    pdfBytes.length - 200
-  ]);
+  // Load and sign it
+  const editor = PdfEditor.load(unsignedPdf);
+  const signedPdf = await editor.sign({
+    certificate: certDer,
+    privateKey: privKeyDer,
+    name: "Bob Smith",
+    reason: "Invoice approval"
+  });
+  fs.writeFileSync(path.join(outDir, "02-editor-signed.pdf"), signedPdf);
+  console.log(`   Signed:   02-editor-signed.pdf (${signedPdf.length} bytes)`);
 
-  console.log("\n3. Signature verification (invalid data — expected to fail gracefully):");
-  console.log(`   Valid: ${result.valid}`);
-  console.log(`   Covers whole file: ${result.coversWholeFile}`);
-  console.log(`   Reason: ${result.reason}`);
+  // Verify
+  const verification = await verifyFromPdf(signedPdf);
+  console.log(`   Valid: ${verification.valid}`);
+  console.log(`   Covers whole file: ${verification.coversWholeFile}`);
 }
 
 // =============================================================================
-// 4. Full Sign + Verify Roundtrip
+// 3. Tamper Detection
 // =============================================================================
 
 {
-  console.log("\n4. Full sign + verify roundtrip:");
+  console.log("\n3. Tamper detection:");
 
-  // Step 1: Generate a temporary RSA key pair + self-signed certificate
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: "spki", format: "der" },
-    privateKeyEncoding: { type: "pkcs8", format: "der" }
-  });
-  const pubKeyDer = new Uint8Array(publicKey);
-  const privKeyDer = new Uint8Array(privateKey);
+  // Create and sign
+  const doc = new PdfDocumentBuilder();
+  doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 16 });
+  doc.sign({ certificate: certDer, privateKey: privKeyDer, name: "Security Test" });
+  const signedPdf = await doc.build();
 
-  // Create a self-signed X.509 certificate using node:crypto
-  const certDer = createSelfSignedCert(pubKeyDer, privKeyDer);
-  console.log(`   Generated RSA-2048 key pair + self-signed cert (${certDer.length} bytes DER)`);
+  // Verify original — should pass
+  const original = await verifyFromPdf(signedPdf);
+  console.log(`   Original: valid=${original.valid}`);
 
-  // Step 2: Build a PDF with the signature placeholder embedded
-  const { dictString } = buildSignatureDictPlaceholder({
-    name: "Test Signer",
-    reason: "Roundtrip test"
-  });
-
-  // Build a minimal PDF that includes the signature dict as a Sig annotation
-  const pdfWithPlaceholder = buildPdfWithSignaturePlaceholder(dictString);
-  fs.writeFileSync(path.join(outDir, "with-placeholder.pdf"), pdfWithPlaceholder);
-  console.log(`   Built PDF with signature placeholder (${pdfWithPlaceholder.length} bytes)`);
-
-  // Step 3: Sign the PDF
-  const signed = await signPdf(pdfWithPlaceholder, certDer, privKeyDer);
-  fs.writeFileSync(path.join(outDir, "signed.pdf"), signed);
-  console.log(`   Signed PDF (${signed.length} bytes)`);
-
-  // Step 4: Extract signature info and verify
-  const { signatureHex, byteRange } = extractSignatureInfo(signed);
-  console.log(`   Extracted signature: ${signatureHex.length} hex chars`);
-  console.log(`   ByteRange: [${byteRange.join(", ")}]`);
-
-  const result = await verifyPdfSignature(signed, signatureHex, byteRange);
-  console.log(`   Verification result:`);
-  console.log(`     Valid: ${result.valid}`);
-  console.log(`     Covers whole file: ${result.coversWholeFile}`);
-  console.log(`     Digest algorithm: ${result.digestAlgorithm}`);
-  if (result.reason) {
-    console.log(`     Reason: ${result.reason}`);
-  }
-
-  // Step 5: Tamper with the PDF and verify again — should fail
-  const tampered = new Uint8Array(signed);
-  // Modify a byte in the first range (before the signature)
+  // Tamper with a byte and verify — should fail
+  const tampered = new Uint8Array(signedPdf);
   tampered[50] = tampered[50] ^ 0xff;
-  const tamperedResult = await verifyPdfSignature(tampered, signatureHex, byteRange);
-  console.log(`\n   Tampered PDF verification:`);
-  console.log(`     Valid: ${tamperedResult.valid} (expected: false)`);
-  console.log(`     Reason: ${tamperedResult.reason}`);
+  const tamperedResult = await verifyFromPdf(tampered);
+  console.log(`   Tampered: valid=${tamperedResult.valid}`);
+  console.log(`   Reason:   ${tamperedResult.reason}`);
+}
+
+// =============================================================================
+// 4. Read Signed PDF — Confirm Signature Presence
+// =============================================================================
+
+{
+  console.log("\n4. Read signed PDF to confirm signature field:");
+
+  const doc = new PdfDocumentBuilder();
+  doc.addPage().drawText("Document with signature field", { x: 72, y: 750, fontSize: 14 });
+  doc.sign({ certificate: certDer, privateKey: privKeyDer, name: "Reader Test" });
+  const signedPdf = await doc.build();
+
+  const result = await readPdf(signedPdf);
+  const sigField = result.formFields.find(f => f.type === "signature");
+  console.log(`   Form fields: ${result.formFields.length}`);
+  console.log(`   Signature field found: ${sigField !== undefined}`);
+  if (sigField) {
+    console.log(`   Field name: "${sigField.name}"`);
+  }
 }
 
 console.log(`\nAll examples written to: ${outDir}`);
 
 // =============================================================================
-// Helper: Build a minimal PDF with a signature placeholder
+// Helpers
 // =============================================================================
 
-function buildPdfWithSignaturePlaceholder(sigDictString: string): Uint8Array {
-  // Build a minimal valid PDF with visible content + a /Sig annotation
-  // Build page content stream — visible signature info drawn above the widget
-  const streamContent = [
-    "BT /F1 20 Tf 72 750 Td (Digitally Signed Document) Tj ET",
-    "BT /F1 11 Tf 72 725 Td (This PDF contains a PKCS#7 digital signature.) Tj ET",
-    "BT /F1 11 Tf 72 710 Td (The signature is embedded in the PDF structure below.) Tj ET",
-    "0.9 0.95 1 rg 72 640 300 50 re f",
-    "0.2 0.4 0.8 RG 1 w 72 640 300 50 re S",
-    "BT /F1 11 Tf 82 672 Td (Signed by: Test Signer) Tj ET",
-    "BT /F1 9 Tf 82 657 Td (Reason: Roundtrip test) Tj ET",
-    "BT /F1 9 Tf 82 644 Td (Status: Signature valid, covers whole file) Tj ET"
-  ].join("\n");
+/** Extract signature hex + byte range from a signed PDF and verify. */
+async function verifyFromPdf(pdf: Uint8Array) {
+  const text = new TextDecoder().decode(pdf);
 
-  const lines = [
-    "%PDF-2.0",
-    "",
-    "1 0 obj",
-    "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /SigFlags 3 >> >>",
-    "endobj",
-    "",
-    "2 0 obj",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "endobj",
-    "",
-    "3 0 obj",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>",
-    "endobj",
-    "",
-    // Signature widget — visible rect matching the blue box area
-    "4 0 obj",
-    `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [72 640 372 690] /T (Signature1) /V 5 0 R /F 4 >>`,
-    "endobj",
-    "",
-    "5 0 obj",
-    sigDictString,
-    "endobj",
-    "",
-    "6 0 obj",
-    `<< /Length ${streamContent.length} >>`,
-    "stream",
-    streamContent,
-    "endstream",
-    "endobj",
-    ""
-  ];
-
-  const body = lines.join("\n");
-
-  // Build xref
-  const offsets: number[] = [];
-  for (let objNum = 1; objNum <= 6; objNum++) {
-    const marker = `${objNum} 0 obj`;
-    offsets.push(body.indexOf(marker));
+  const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/);
+  if (!contentsMatch) {
+    return { valid: false, coversWholeFile: false, digestAlgorithm: "", reason: "No /Contents" };
   }
 
-  const xrefOffset = body.length;
-  let xref = "xref\n";
-  xref += `0 7\n`;
-  xref += "0000000000 65535 f \n";
-  for (const off of offsets) {
-    xref += `${String(off).padStart(10, "0")} 00000 n \n`;
+  const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+  if (!brMatch) {
+    return { valid: false, coversWholeFile: false, digestAlgorithm: "", reason: "No /ByteRange" };
   }
-  xref += "trailer\n";
-  xref += "<< /Size 7 /Root 1 0 R >>\n";
-  xref += "startxref\n";
-  xref += `${xrefOffset}\n`;
-  xref += "%%EOF\n";
 
-  return new TextEncoder().encode(body + xref);
+  return verifyPdfSignature(pdf, contentsMatch[1], [
+    parseInt(brMatch[1]),
+    parseInt(brMatch[2]),
+    parseInt(brMatch[3]),
+    parseInt(brMatch[4])
+  ]);
 }
 
-// =============================================================================
-// Helper: Create a minimal self-signed X.509 certificate (DER)
-// =============================================================================
+/** Generate a test RSA key pair + self-signed X.509 certificate. */
+function generateTestCredentials(): { certDer: Uint8Array; privKeyDer: Uint8Array } {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "spki", format: "der" },
+    privateKeyEncoding: { type: "pkcs8", format: "der" }
+  });
 
-function createSelfSignedCert(publicKeyDer: Uint8Array, privateKeyDer: Uint8Array): Uint8Array {
-  // Build a minimal X.509 v3 TBSCertificate, then sign it with RSA-SHA256
+  const pubKeyDer = new Uint8Array(publicKey);
+  const privKeyDer = new Uint8Array(privateKey);
 
-  // OIDs
+  // Build minimal self-signed X.509 certificate
   const sha256WithRsa = new Uint8Array([
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00
   ]);
-
-  // Version [0] EXPLICIT INTEGER 2 (v3)
   const version = new Uint8Array([0xa0, 0x03, 0x02, 0x01, 0x02]);
-
-  // Serial number: INTEGER 1
   const serial = new Uint8Array([0x02, 0x01, 0x01]);
-
-  // Issuer/Subject: SEQUENCE { SET { SEQUENCE { OID(CN), UTF8String "Test" } } }
   const cn = new Uint8Array([
     0x30, 0x13, 0x31, 0x11, 0x30, 0x0f, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x08, 0x54, 0x65, 0x73,
     0x74, 0x43, 0x65, 0x72, 0x74
   ]);
-
-  // Validity: not before/after (UTCTime)
   const validity = new Uint8Array([
     0x30, 0x1e, 0x17, 0x0d, 0x32, 0x35, 0x30, 0x31, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
     0x5a, 0x17, 0x0d, 0x33, 0x35, 0x30, 0x31, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x5a
   ]);
 
-  // TBSCertificate
-  const tbsContent = concatAll(version, serial, sha256WithRsa, cn, validity, cn, publicKeyDer);
+  const tbsContent = concat(version, serial, sha256WithRsa, cn, validity, cn, pubKeyDer);
   const tbs = derWrap(0x30, tbsContent);
 
-  // Sign TBS
   const key = crypto.createPrivateKey({
-    key: Buffer.from(privateKeyDer),
+    key: Buffer.from(privKeyDer),
     format: "der",
     type: "pkcs8"
   });
@@ -274,18 +214,27 @@ function createSelfSignedCert(publicKeyDer: Uint8Array, privateKeyDer: Uint8Arra
   signer.update(tbs);
   const sig = signer.sign(key);
 
-  // BIT STRING wrapping of signature
   const sigBits = new Uint8Array(sig.length + 1);
-  sigBits[0] = 0; // no unused bits
+  sigBits[0] = 0;
   sigBits.set(sig, 1);
-  const sigBitString = derWrap(0x03, sigBits);
 
-  // Certificate = SEQUENCE { TBS, AlgorithmIdentifier, Signature }
-  return derWrap(0x30, concatAll(tbs, sha256WithRsa, sigBitString));
+  const certDer = derWrap(0x30, concat(tbs, sha256WithRsa, derWrap(0x03, sigBits)));
+  return { certDer, privKeyDer };
 }
 
 function derWrap(tag: number, value: Uint8Array): Uint8Array {
-  const len = derLength(value.length);
+  const len =
+    value.length < 0x80
+      ? new Uint8Array([value.length])
+      : (() => {
+          const bytes: number[] = [];
+          let l = value.length;
+          while (l > 0) {
+            bytes.unshift(l & 0xff);
+            l >>= 8;
+          }
+          return new Uint8Array([0x80 | bytes.length, ...bytes]);
+        })();
   const result = new Uint8Array(1 + len.length + value.length);
   result[0] = tag;
   result.set(len, 1);
@@ -293,20 +242,7 @@ function derWrap(tag: number, value: Uint8Array): Uint8Array {
   return result;
 }
 
-function derLength(length: number): Uint8Array {
-  if (length < 0x80) {
-    return new Uint8Array([length]);
-  }
-  const bytes: number[] = [];
-  let l = length;
-  while (l > 0) {
-    bytes.unshift(l & 0xff);
-    l >>= 8;
-  }
-  return new Uint8Array([0x80 | bytes.length, ...bytes]);
-}
-
-function concatAll(...arrays: Uint8Array[]): Uint8Array {
+function concat(...arrays: Uint8Array[]): Uint8Array {
   let total = 0;
   for (const a of arrays) {
     total += a.length;
@@ -318,36 +254,4 @@ function concatAll(...arrays: Uint8Array[]): Uint8Array {
     offset += a.length;
   }
   return result;
-}
-
-// =============================================================================
-// Helper: Extract signature hex and byte range from a signed PDF
-// =============================================================================
-
-function extractSignatureInfo(pdf: Uint8Array): {
-  signatureHex: string;
-  byteRange: [number, number, number, number];
-} {
-  const text = new TextDecoder().decode(pdf);
-
-  // Extract /Contents <hex>
-  const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/);
-  if (!contentsMatch) {
-    throw new Error("No /Contents found");
-  }
-  const signatureHex = contentsMatch[1];
-
-  // Extract /ByteRange [n n n n]
-  const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
-  if (!brMatch) {
-    throw new Error("No /ByteRange found");
-  }
-  const byteRange: [number, number, number, number] = [
-    parseInt(brMatch[1]),
-    parseInt(brMatch[2]),
-    parseInt(brMatch[3]),
-    parseInt(brMatch[4])
-  ];
-
-  return { signatureHex, byteRange };
 }

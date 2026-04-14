@@ -394,6 +394,26 @@ interface BuilderFormField {
 }
 
 // =============================================================================
+// Signature Options
+// =============================================================================
+
+/** Options for digitally signing a PDF. */
+export interface PdfSignatureOptions {
+  /** DER-encoded X.509 certificate. */
+  certificate: Uint8Array;
+  /** DER-encoded PKCS#8 private key. */
+  privateKey: Uint8Array;
+  /** Signer name (displayed in PDF viewers). */
+  name?: string;
+  /** Reason for signing. */
+  reason?: string;
+  /** Location of signing. */
+  location?: string;
+  /** Contact info. */
+  contactInfo?: string;
+}
+
+// =============================================================================
 // Constants
 // =============================================================================
 
@@ -848,6 +868,7 @@ export class PdfDocumentBuilder {
   private _encryption: PdfExportOptions["encryption"];
   private _embeddedFont: Uint8Array | null = null;
   private _pdfA = false;
+  private _signatureOptions: PdfSignatureOptions | null = null;
 
   /**
    * Add a new blank page to the document.
@@ -908,6 +929,32 @@ export class PdfDocumentBuilder {
    */
   setPdfACompliance(_level?: "1b"): this {
     this._pdfA = true;
+    return this;
+  }
+
+  /**
+   * Digitally sign the PDF during `build()`.
+   *
+   * When set, `build()` will:
+   * 1. Embed a signature dictionary with placeholder in the PDF
+   * 2. Compute the byte ranges and sign with RSA PKCS#1 v1.5 + SHA-256
+   * 3. Return the fully signed PDF bytes
+   *
+   * @param options - Certificate, private key, and optional signer metadata
+   *
+   * @example
+   * ```typescript
+   * doc.sign({
+   *   certificate: certDerBytes,
+   *   privateKey: pkcs8DerBytes,
+   *   name: "John Doe",
+   *   reason: "Document approval"
+   * });
+   * const signedPdf = await doc.build();
+   * ```
+   */
+  sign(options: PdfSignatureOptions): this {
+    this._signatureOptions = options;
     return this;
   }
 
@@ -1290,6 +1337,71 @@ export class PdfDocumentBuilder {
     if (this._encryption) {
       const encState = initEncryption(this._encryption);
       writer.setEncryption(encState);
+    }
+
+    // If signing is requested, we need to:
+    // 1. Add the signature dict placeholder + widget to the PDF
+    // 2. Build the PDF bytes
+    // 3. Call signPdf() to fill in the real signature
+    if (this._signatureOptions) {
+      const { buildSignatureDictPlaceholder, signPdf } = await import("../core/digital-signature");
+
+      const { dictString } = buildSignatureDictPlaceholder({
+        name: this._signatureOptions.name,
+        reason: this._signatureOptions.reason,
+        location: this._signatureOptions.location,
+        contactInfo: this._signatureOptions.contactInfo
+      });
+
+      // Write signature dict as indirect object
+      const sigDictObjNum = writer.allocObject();
+      writer.addObject(sigDictObjNum, dictString);
+
+      // Write signature widget annotation
+      const sigWidgetObjNum = writer.allocObject();
+      const sigWidgetDict = new PdfDict()
+        .set("Type", "/Annot")
+        .set("Subtype", "/Widget")
+        .set("FT", "/Sig")
+        .set("Rect", "[0 0 0 0]")
+        .set("T", pdfString("Signature1"))
+        .set("V", pdfRef(sigDictObjNum))
+        .set("F", "4");
+      writer.addObject(sigWidgetObjNum, sigWidgetDict);
+
+      // Patch catalog to include AcroForm with SigFlags
+      // We need to rebuild the catalog with AcroForm
+      const sigCatalogObjNum = writer.allocObject();
+      const sigCatalogDict = new PdfDict()
+        .set("Type", "/Catalog")
+        .set("Pages", pdfRef(pagesTreeObjNum));
+      if (outlinesRef) {
+        sigCatalogDict.set("Outlines", pdfRef(outlinesRef));
+        sigCatalogDict.set("PageMode", "/UseOutlines");
+      }
+      for (const [key, value] of catalogExtras) {
+        sigCatalogDict.set(key, value);
+      }
+
+      // Merge existing form field refs with signature widget
+      const allFields = [...allFormFieldRefs, sigWidgetObjNum];
+      const fieldsStr = allFields.map(r => pdfRef(r)).join(" ");
+      sigCatalogDict.set("AcroForm", `<< /Fields [${fieldsStr}] /SigFlags 3 >>`);
+
+      // Add signature widget to first page's annotations
+      // (We need to patch the first page dict to include the widget in /Annots)
+      // For simplicity, add it as a document-level field (already in AcroForm /Fields)
+      writer.addObject(sigCatalogObjNum, sigCatalogDict);
+      writer.setCatalog(sigCatalogObjNum);
+
+      const pdfWithPlaceholder = writer.build();
+
+      // Sign the PDF
+      return signPdf(
+        pdfWithPlaceholder,
+        this._signatureOptions.certificate,
+        this._signatureOptions.privateKey
+      );
     }
 
     return writer.build();

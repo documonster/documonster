@@ -52,7 +52,8 @@ import type {
   PathOp,
   PageOptions,
   AnnotationOptions,
-  FormFieldOptions
+  FormFieldOptions,
+  PdfSignatureOptions
 } from "./document-builder";
 import { PdfStructureError } from "../errors";
 import { writeImageXObject, parseImageDimensions } from "./image-utils";
@@ -220,6 +221,7 @@ export class PdfEditor {
   private _isIncrementalSave = false;
   /** @internal - Rotation overrides for original pages: index → degrees (0/90/180/270) */
   private _rotationOverrides = new Map<number, number>();
+  private _signaturePlaceholder: string | null = null;
   /** @internal - Writer reference during save(), for deep-clone */
   private _writerForSave: PdfWriter | null = null;
   /** @internal - Cache of cloned indirect refs: "objNum:gen" → new objNum in writer */
@@ -709,6 +711,33 @@ export class PdfEditor {
 
     writer.addObject(catalogObjNum, catalogDict);
     writer.setCatalog(catalogObjNum);
+
+    // Inject signature placeholder if signing is in progress
+    if (this._signaturePlaceholder) {
+      const sigDictObjNum = writer.allocObject();
+      writer.addObject(sigDictObjNum, this._signaturePlaceholder);
+
+      const sigWidgetObjNum = writer.allocObject();
+      const sigWidgetDict = new PdfDict()
+        .set("Type", "/Annot")
+        .set("Subtype", "/Widget")
+        .set("FT", "/Sig")
+        .set("Rect", "[0 0 0 0]")
+        .set("T", pdfString("Signature1"))
+        .set("V", pdfRef(sigDictObjNum))
+        .set("F", "4");
+      writer.addObject(sigWidgetObjNum, sigWidgetDict);
+
+      // Patch catalog to include signature widget in AcroForm with SigFlags
+      // Grab existing fields from the catalog dict string representation
+      const catalogStr = catalogDict.toString();
+      const existingFieldsMatch = catalogStr.match(/\/Fields\s*\[([^\]]*)\]/);
+      const existingFields = existingFieldsMatch ? existingFieldsMatch[1].trim() : "";
+      const sigFieldRef = pdfRef(sigWidgetObjNum);
+      const allFieldRefs = existingFields ? `${existingFields} ${sigFieldRef}` : sigFieldRef;
+      catalogDict.set("AcroForm", `<< /Fields [${allFieldRefs}] /SigFlags 3 >>`);
+      writer.addObject(catalogObjNum, catalogDict);
+    }
 
     // Info dict — preserve original metadata
     const originalMeta = extractMetadata(this._doc);
@@ -1210,6 +1239,45 @@ export class PdfEditor {
         target.set(key, this._deepSerialize(resolveDoc, val));
       }
     }
+  }
+
+  /**
+   * Sign this PDF with a digital signature.
+   *
+   * Performs a full save with an embedded PKCS#7 signature placeholder,
+   * then fills in the real CMS SignedData.
+   *
+   * @param options - Certificate, private key, and optional signer metadata
+   * @returns The signed PDF as Uint8Array
+   *
+   * @example
+   * ```typescript
+   * const editor = PdfEditor.load(pdfBytes);
+   * const signed = await editor.sign({
+   *   certificate: certDerBytes,
+   *   privateKey: pkcs8DerBytes,
+   *   name: "Jane Doe",
+   *   reason: "Approval"
+   * });
+   * ```
+   */
+  async sign(options: PdfSignatureOptions): Promise<Uint8Array> {
+    const { buildSignatureDictPlaceholder, signPdf } = await import("../core/digital-signature");
+
+    const { dictString } = buildSignatureDictPlaceholder({
+      name: options.name,
+      reason: options.reason,
+      location: options.location,
+      contactInfo: options.contactInfo
+    });
+
+    // Inject the signature placeholder into the form field updates
+    // so that save() includes it in the output
+    this._signaturePlaceholder = dictString;
+    const pdfWithPlaceholder = await this.save();
+    this._signaturePlaceholder = null;
+
+    return signPdf(pdfWithPlaceholder, options.certificate, options.privateKey);
   }
 
   /** @internal - Collect decoded content stream bytes from a page dict. */

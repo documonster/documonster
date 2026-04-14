@@ -136,7 +136,8 @@ export type {
   TextFieldOptions,
   CheckboxOptions,
   DropdownOptions,
-  RadioGroupOptions
+  RadioGroupOptions,
+  PdfSignatureOptions
 } from "./builder/document-builder";
 export type { LoadOptions } from "./builder/pdf-editor";
 
