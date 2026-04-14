@@ -50,13 +50,13 @@ pnpm exec vitest run -t "should handle empty cells"
 src/
 ├── modules/
 │   ├── excel/          # Workbook, Worksheet, Cell; stream/ xlsx/
-│   ├── pdf/            # core/ font/ render/ + excel-bridge.ts
+│   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts
 │   ├── csv/            # Parsing/formatting + streaming
 │   ├── markdown/       # GFM table parsing/formatting
 │   ├── xml/            # SAX/DOM parser, query engine, writer
 │   ├── archive/        # ZIP/TAR compression
 │   └── stream/         # Cross-platform streaming primitives
-├── utils/              # Shared: errors, datetime, fs, binary
+├── utils/              # Shared: errors, datetime, fs, binary, crypto
 └── test/               # Test utilities and fixtures
 ```
 
@@ -88,3 +88,7 @@ Use aliases for cross-module imports. Use relative paths only within the same mo
 - **Files**: kebab-case. **Browser variants**: `*.browser.ts`.
 - **Formatting**: Handled entirely by Prettier — just run `pnpm run format`.
 - **Tests**: Vitest, in `__tests__/*.test.ts`. Timeout: 30s.
+
+## Example Output
+
+All runnable examples write output to `tmp/` under the project root. This directory is gitignored.
