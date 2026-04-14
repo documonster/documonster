@@ -73,7 +73,8 @@ export {
   verifyPdfSignature,
   signPdf,
   buildSignatureDictPlaceholder,
-  asn1Parse
+  asn1Parse,
+  generateTestCertificate
 } from "./core/digital-signature";
 
 // =============================================================================
@@ -149,7 +150,8 @@ export type {
   SignatureVerificationResult,
   CmsSignedData,
   SignOptions,
-  Asn1Node
+  Asn1Node,
+  TestCertificate
 } from "./core/digital-signature";
 
 // =============================================================================

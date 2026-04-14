@@ -28,7 +28,7 @@ const ASN1_CONSTRUCTED = 0x20;
 
 /** Common ASN.1 tags. */
 const TAG_INTEGER = 0x02;
-
+const TAG_BIT_STRING = 0x03;
 const TAG_OCTET_STRING = 0x04;
 const TAG_NULL = 0x05;
 const TAG_OID = 0x06;
@@ -793,4 +793,104 @@ function formatUtcTime(d: Date): string {
 function formatPdfDate(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `D:${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+}
+
+// =============================================================================
+// Test Certificate Generation
+// =============================================================================
+
+/** Result of generating a test certificate. */
+export interface TestCertificate {
+  /** DER-encoded X.509 certificate. */
+  certificate: Uint8Array;
+  /** DER-encoded PKCS#8 private key. */
+  privateKey: Uint8Array;
+}
+
+/**
+ * Generate a self-signed RSA test certificate for development and testing.
+ *
+ * **Not for production use.** The generated certificate uses a random RSA-2048
+ * key pair and a minimal X.509 v3 structure with CN="Test". It is valid for
+ * 10 years from 2025-01-01.
+ *
+ * This is a convenience function so you don't need to provide real certificates
+ * when testing digital signature functionality.
+ *
+ * @param commonName - Certificate CN field. Default: "Test"
+ * @returns DER-encoded certificate and private key
+ *
+ * @example
+ * ```typescript
+ * const { certificate, privateKey } = await generateTestCertificate();
+ * doc.sign({ certificate, privateKey, name: "Test Signer" });
+ * ```
+ */
+export async function generateTestCertificate(commonName?: string): Promise<TestCertificate> {
+  // Dynamic import to avoid pulling node:crypto at module load time
+  // (this function is only for testing, not production)
+  const nodeCrypto = await import("node:crypto");
+
+  const cn = commonName ?? "Test";
+
+  const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "spki", format: "der" },
+    privateKeyEncoding: { type: "pkcs8", format: "der" }
+  });
+
+  const pubKeyDer = new Uint8Array(publicKey);
+  const privKeyDer = new Uint8Array(privateKey);
+
+  // Build X.509 v3 TBSCertificate
+  const sha256WithRsaAlg = asn1Sequence(
+    asn1Oid(OID_SHA256_WITH_RSA),
+    asn1Encode(TAG_NULL, new Uint8Array())
+  );
+
+  const versionExplicit = asn1ContextExplicit(0, asn1Integer(new Uint8Array([2]))); // v3
+  const serial = asn1Integer(new Uint8Array([1]));
+
+  // CN=<commonName>
+  const cnUtf8 = asn1Encode(0x0c, new TextEncoder().encode(cn)); // UTF8String
+  const cnAttr = asn1Sequence(asn1Oid("2.5.4.3"), cnUtf8); // OID for CN
+  const rdnSet = asn1Set(cnAttr);
+  const name = asn1Sequence(rdnSet);
+
+  // Validity: 2025-01-01 to 2035-01-01 (UTCTime)
+  const notBefore = asn1Encode(0x17, new TextEncoder().encode("250101000000Z"));
+  const notAfter = asn1Encode(0x17, new TextEncoder().encode("350101000000Z"));
+  const validity = asn1Sequence(notBefore, notAfter);
+
+  const tbsContent = concatDer(
+    versionExplicit,
+    serial,
+    sha256WithRsaAlg,
+    name, // issuer
+    validity,
+    name, // subject (same as issuer for self-signed)
+    pubKeyDer // SubjectPublicKeyInfo
+  );
+  const tbs = asn1Encode(TAG_SEQUENCE, tbsContent);
+
+  // Sign TBS with RSA-SHA256
+  const key = nodeCrypto.createPrivateKey({
+    key: Buffer.from(privKeyDer),
+    format: "der",
+    type: "pkcs8"
+  });
+  const signer = nodeCrypto.createSign("SHA256");
+  signer.update(tbs);
+  const sig = signer.sign(key);
+
+  // BIT STRING wrapping of signature (prepend 0x00 for unused bits)
+  const sigBits = new Uint8Array(sig.length + 1);
+  sigBits[0] = 0;
+  sigBits.set(sig, 1);
+  const sigBitString = asn1Encode(TAG_BIT_STRING, sigBits);
+
+  // Certificate = SEQUENCE { TBS, AlgorithmIdentifier, Signature }
+  const certDer = asn1Encode(TAG_SEQUENCE, concatDer(tbs, sha256WithRsaAlg, sigBitString));
+
+  return { certificate: certDer, privateKey: privKeyDer };
 }

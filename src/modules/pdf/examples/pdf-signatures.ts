@@ -12,9 +12,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { PdfDocumentBuilder, PdfEditor, verifyPdfSignature, readPdf } from "../index";
+import {
+  PdfDocumentBuilder,
+  PdfEditor,
+  readPdf,
+  verifyPdfSignature,
+  generateTestCertificate
+} from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -22,8 +27,8 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
-// Generate a temporary RSA key pair + self-signed certificate for this demo
-const { certDer, privKeyDer } = generateTestCredentials();
+// Generate a test certificate (for development/testing only)
+const { certificate, privateKey } = await generateTestCertificate("Example Signer");
 
 // =============================================================================
 // 1. Sign a New PDF (PdfDocumentBuilder)
@@ -51,8 +56,8 @@ const { certDer, privKeyDer } = generateTestCredentials();
 
   // One method call — certificate, key, and metadata
   doc.sign({
-    certificate: certDer,
-    privateKey: privKeyDer,
+    certificate,
+    privateKey,
     name: "Alice Johnson",
     reason: "Contract approval",
     location: "San Francisco, CA"
@@ -85,18 +90,17 @@ const { certDer, privKeyDer } = generateTestCredentials();
   fs.writeFileSync(path.join(outDir, "02-unsigned.pdf"), unsignedPdf);
   console.log(`   Unsigned: 02-unsigned.pdf (${unsignedPdf.length} bytes)`);
 
-  // Load and sign it
+  // Load and sign — one method call
   const editor = PdfEditor.load(unsignedPdf);
   const signedPdf = await editor.sign({
-    certificate: certDer,
-    privateKey: privKeyDer,
+    certificate,
+    privateKey,
     name: "Bob Smith",
     reason: "Invoice approval"
   });
   fs.writeFileSync(path.join(outDir, "02-editor-signed.pdf"), signedPdf);
   console.log(`   Signed:   02-editor-signed.pdf (${signedPdf.length} bytes)`);
 
-  // Verify
   const verification = await verifyFromPdf(signedPdf);
   console.log(`   Valid: ${verification.valid}`);
   console.log(`   Covers whole file: ${verification.coversWholeFile}`);
@@ -109,10 +113,9 @@ const { certDer, privKeyDer } = generateTestCredentials();
 {
   console.log("\n3. Tamper detection:");
 
-  // Create and sign
   const doc = new PdfDocumentBuilder();
   doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 16 });
-  doc.sign({ certificate: certDer, privateKey: privKeyDer, name: "Security Test" });
+  doc.sign({ certificate, privateKey, name: "Security Test" });
   const signedPdf = await doc.build();
 
   // Verify original — should pass
@@ -136,7 +139,7 @@ const { certDer, privKeyDer } = generateTestCredentials();
 
   const doc = new PdfDocumentBuilder();
   doc.addPage().drawText("Document with signature field", { x: 72, y: 750, fontSize: 14 });
-  doc.sign({ certificate: certDer, privateKey: privKeyDer, name: "Reader Test" });
+  doc.sign({ certificate, privateKey, name: "Reader Test" });
   const signedPdf = await doc.build();
 
   const result = await readPdf(signedPdf);
@@ -151,10 +154,9 @@ const { certDer, privKeyDer } = generateTestCredentials();
 console.log(`\nAll examples written to: ${outDir}`);
 
 // =============================================================================
-// Helpers
+// Helper: Extract and verify signature from PDF bytes
 // =============================================================================
 
-/** Extract signature hex + byte range from a signed PDF and verify. */
 async function verifyFromPdf(pdf: Uint8Array) {
   const text = new TextDecoder().decode(pdf);
 
@@ -174,84 +176,4 @@ async function verifyFromPdf(pdf: Uint8Array) {
     parseInt(brMatch[3]),
     parseInt(brMatch[4])
   ]);
-}
-
-/** Generate a test RSA key pair + self-signed X.509 certificate. */
-function generateTestCredentials(): { certDer: Uint8Array; privKeyDer: Uint8Array } {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: "spki", format: "der" },
-    privateKeyEncoding: { type: "pkcs8", format: "der" }
-  });
-
-  const pubKeyDer = new Uint8Array(publicKey);
-  const privKeyDer = new Uint8Array(privateKey);
-
-  // Build minimal self-signed X.509 certificate
-  const sha256WithRsa = new Uint8Array([
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00
-  ]);
-  const version = new Uint8Array([0xa0, 0x03, 0x02, 0x01, 0x02]);
-  const serial = new Uint8Array([0x02, 0x01, 0x01]);
-  const cn = new Uint8Array([
-    0x30, 0x13, 0x31, 0x11, 0x30, 0x0f, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x08, 0x54, 0x65, 0x73,
-    0x74, 0x43, 0x65, 0x72, 0x74
-  ]);
-  const validity = new Uint8Array([
-    0x30, 0x1e, 0x17, 0x0d, 0x32, 0x35, 0x30, 0x31, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
-    0x5a, 0x17, 0x0d, 0x33, 0x35, 0x30, 0x31, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x5a
-  ]);
-
-  const tbsContent = concat(version, serial, sha256WithRsa, cn, validity, cn, pubKeyDer);
-  const tbs = derWrap(0x30, tbsContent);
-
-  const key = crypto.createPrivateKey({
-    key: Buffer.from(privKeyDer),
-    format: "der",
-    type: "pkcs8"
-  });
-  const signer = crypto.createSign("SHA256");
-  signer.update(tbs);
-  const sig = signer.sign(key);
-
-  const sigBits = new Uint8Array(sig.length + 1);
-  sigBits[0] = 0;
-  sigBits.set(sig, 1);
-
-  const certDer = derWrap(0x30, concat(tbs, sha256WithRsa, derWrap(0x03, sigBits)));
-  return { certDer, privKeyDer };
-}
-
-function derWrap(tag: number, value: Uint8Array): Uint8Array {
-  const len =
-    value.length < 0x80
-      ? new Uint8Array([value.length])
-      : (() => {
-          const bytes: number[] = [];
-          let l = value.length;
-          while (l > 0) {
-            bytes.unshift(l & 0xff);
-            l >>= 8;
-          }
-          return new Uint8Array([0x80 | bytes.length, ...bytes]);
-        })();
-  const result = new Uint8Array(1 + len.length + value.length);
-  result[0] = tag;
-  result.set(len, 1);
-  result.set(value, 1 + len.length);
-  return result;
-}
-
-function concat(...arrays: Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const a of arrays) {
-    total += a.length;
-  }
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
-    result.set(a, offset);
-    offset += a.length;
-  }
-  return result;
 }
