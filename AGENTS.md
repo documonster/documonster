@@ -11,10 +11,11 @@
 ## Hard Rules
 
 1. **No runtime dependencies.** All functionality must be self-contained.
-2. **No circular imports.** Enforced by `import/no-cycle`.
-3. **Named exports only.** No default exports.
-4. **Respect module dependency direction.** See layer diagram below. Never introduce upward dependencies.
-5. **Run `pnpm run check` then `pnpm run format` before committing.**
+2. **Prefer native APIs.** If a browser or Node.js built-in can do the job, use it instead of writing a custom implementation. Only roll your own when the native API is missing, insufficient, or unavailable on a target platform.
+3. **No circular imports.** Enforced by `import/no-cycle`.
+4. **Named exports only.** No default exports.
+5. **Respect module dependency direction.** See layer diagram below. Never introduce upward dependencies.
+6. **Run `pnpm run check` then `pnpm run format` before committing.**
 
 ## Bug Fixing & Code Changes
 
