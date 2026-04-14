@@ -431,6 +431,68 @@ fs.mkdirSync(outDir, { recursive: true });
 }
 
 // =============================================================================
+// 6b. PdfDocumentBuilder — Encryption
+// =============================================================================
+
+{
+  const doc = new PdfDocumentBuilder();
+  const page = doc.addPage();
+  page.drawText("This PDF is encrypted with AES-256", { x: 72, y: 770, fontSize: 16 });
+  page.drawText("Owner password: admin, User password: reader", {
+    x: 72,
+    y: 740,
+    fontSize: 11,
+    color: { r: 0.3, g: 0.3, b: 0.3 }
+  });
+
+  doc.setEncryption({
+    ownerPassword: "admin",
+    userPassword: "reader",
+    permissions: { print: true, copy: false, modify: false }
+  });
+
+  const bytes = await doc.build();
+  fs.writeFileSync(path.join(outDir, "06b-encrypted.pdf"), bytes);
+
+  // Verify it's encrypted and readable with password
+  const result = await readPdf(bytes, { password: "reader" });
+  console.log(
+    `6b. 06b-encrypted.pdf — encrypted: ${result.metadata.encrypted}, text: "${result.text.slice(0, 40)}..."`
+  );
+}
+
+// =============================================================================
+// 6c. Watermarks (via pdf() / excelToPdf())
+// =============================================================================
+
+{
+  // Text watermark
+  const { pdf: pdfFn } = await import("../pdf");
+  const bytes = await pdfFn(
+    [
+      ["Product", "Revenue", "Region"],
+      ["Widget A", 1200, "North"],
+      ["Widget B", 800, "South"],
+      ["Gadget C", 3200, "East"]
+    ],
+    {
+      showGridLines: true,
+      watermark: {
+        type: "text",
+        text: "CONFIDENTIAL",
+        fontSize: 48,
+        color: { r: 0.8, g: 0.8, b: 0.8 },
+        opacity: 0.3,
+        rotation: -45,
+        position: "center"
+      }
+    }
+  );
+  fs.writeFileSync(path.join(outDir, "06c-watermark-text.pdf"), bytes);
+  console.log("6c. 06c-watermark-text.pdf — text watermark: CONFIDENTIAL");
+}
+
+// =============================================================================
 // 7. PdfEditor — Overlay Content on Existing PDF
 // =============================================================================
 

@@ -39,6 +39,7 @@ import { verifyPdfSignature, signPdf } from "@cj-tech-master/excelts/pdf";
 - **Images** — JPEG and PNG embedding with alpha transparency
 - **AES-256 Encryption** — Password protection with AES-256 (V=5, R=5) and permission controls
 - **Font Embedding** — TrueType font subsetting for Unicode/CJK text
+- **Watermarks** — Text and image watermarks with opacity, rotation, tiling, per-page/per-sheet filtering
 - **Page Setup** — Per-sheet paper size, orientation, margins, print area
 - **Tree-Shakeable** — Not imported? Not in your bundle
 - **Non-Blocking** — Yields to the event loop between pages to avoid blocking
@@ -68,11 +69,15 @@ import { verifyPdfSignature, signPdf } from "@cj-tech-master/excelts/pdf";
 - **Bookmarks** — Nested outline tree with page destinations
 - **Table of Contents** — Auto-generated TOC with dot leaders, page numbers, and clickable links
 - **PDF/A-1b** — Archival compliance with XMP metadata, OutputIntent, and sRGB ICC profile
+- **AES-256 Encryption** — Password-protect builder-created PDFs
 - **Font Embedding** — TrueType font subsetting for Unicode/CJK text
 
 ### Editing (PdfEditor)
 
 - **Overlay Content** — Draw text, shapes, images on existing PDF pages
+- **Annotations on Existing Pages** — Add Highlight, Text, FreeText, Stamp, etc. to existing PDFs
+- **Form Fields on Existing Pages** — Add TextField, Checkbox, Dropdown to existing PDFs
+- **SVG Paths on Existing Pages** — Draw SVG paths on existing PDF pages
 - **Form Filling** — Set text field values and checkbox states
 - **Add Pages** — Append new blank pages with content
 - **Remove Pages** — Delete pages by index
@@ -135,6 +140,11 @@ for (const page of result.pages) {
 for (const field of result.formFields) {
   console.log(field.name, field.type, field.value);
 }
+
+// Bookmarks (document outline)
+for (const bm of result.bookmarks) {
+  console.log(bm.title, bm.pageIndex);
+}
 ```
 
 ### Read Encrypted PDF
@@ -151,6 +161,22 @@ const result = await readPdf(bytes, {
   pages: [1, 3],
   extractImages: false
 });
+
+// Extract bookmarks (outline tree)
+const result = await readPdf(bytes, { extractBookmarks: true });
+for (const bm of result.bookmarks) {
+  console.log(bm.title, `→ page ${bm.pageIndex + 1}`);
+}
+
+// Extract tables (heuristic text-position detection)
+const result = await readPdf(bytes, { extractTables: true });
+for (const page of result.pages) {
+  for (const table of page.tables) {
+    for (const row of table.rows) {
+      console.log(row.cells.map(c => c.text).join(" | "));
+    }
+  }
+}
 ```
 
 ### Excel-to-PDF (Bridge API)
@@ -256,6 +282,53 @@ const bytes = await pdf({
 });
 ```
 
+### Watermarks
+
+Add text or image watermarks to any PDF generated via `pdf()` or `excelToPdf()`:
+
+```typescript
+// Text watermark — centered, semi-transparent, rotated
+const bytes = await pdf(data, {
+  watermark: {
+    type: "text",
+    text: "CONFIDENTIAL",
+    fontSize: 48,
+    color: { r: 0.8, g: 0.8, b: 0.8 },
+    opacity: 0.3,
+    rotation: -45,
+    position: "center"
+  }
+});
+
+// Image watermark — tiled across every page
+const bytes = await excelToPdf(workbook, {
+  watermark: {
+    type: "image",
+    data: logoPngBytes,
+    format: "png",
+    width: 100,
+    height: 50,
+    opacity: 0.1,
+    repeat: true,
+    repeatSpacingX: 150,
+    repeatSpacingY: 100
+  }
+});
+
+// Watermark on specific pages or sheets only
+const bytes = await pdf(data, {
+  watermark: {
+    type: "text",
+    text: "DRAFT",
+    fontSize: 60,
+    color: { r: 1, g: 0, b: 0 },
+    opacity: 0.2,
+    pages: [1], // Only first page
+    sheets: ["Summary"] // Only "Summary" sheet
+  }
+});
+```
+
 ### Build Free-Form PDFs (PdfDocumentBuilder)
 
 Create PDFs with precise control over text, shapes, and layout:
@@ -295,6 +368,12 @@ page.addFormField({
   rect: [72, 550, 300, 575]
 });
 
+// Encryption
+doc.setEncryption({ ownerPassword: "admin", userPassword: "reader" });
+
+// Font embedding (for Unicode/CJK)
+doc.embedFont(fontFileBytes);
+
 const bytes = await doc.build();
 ```
 
@@ -311,9 +390,18 @@ const editor = PdfEditor.load(existingPdfBytes);
 const page = editor.getPage(0);
 page.drawText("CONFIDENTIAL", { x: 200, y: 400, fontSize: 36, color: { r: 1, g: 0, b: 0 } });
 
+// Add annotations to existing pages
+page.addAnnotation({ type: "Highlight", rect: [72, 700, 300, 720] });
+
+// Add form fields to existing pages
+page.addFormField({ type: "text", name: "note", rect: [72, 650, 300, 675] });
+
+// Draw SVG paths on existing pages
+page.drawSvgPath("M 100 600 L 200 600 L 150 550 Z", { fill: { r: 0, g: 0.5, b: 1 } });
+
 // Fill form fields
 editor.setFormField("name", "Jane Doe");
-editor.setFormField("agree", true);
+editor.setFormField("agree", "Yes");
 
 // Page manipulation
 editor.removePage(2); // Remove page 3
@@ -458,6 +546,8 @@ interface ReadPdfOptions {
   extractMetadata?: boolean; // Extract metadata (default: true)
   extractAnnotations?: boolean; // Extract annotations (default: true)
   extractFormFields?: boolean; // Extract form fields (default: true)
+  extractBookmarks?: boolean; // Extract bookmarks/outlines (default: true)
+  extractTables?: boolean; // Extract tables via heuristics (default: false)
 }
 ```
 
@@ -469,6 +559,7 @@ interface ReadPdfResult {
   pages: ReadPdfPage[]; // Per-page results
   metadata: PdfMetadata; // Document metadata
   formFields: PdfFormField[]; // Form fields (document-level)
+  bookmarks: PdfBookmark[]; // Document outline / TOC
 }
 
 interface ReadPdfPage {
@@ -822,6 +913,121 @@ import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
 const workbook = new Workbook();
 // ... build workbook ...
 const bytes = await excelToPdf(workbook, { showGridLines: true });
+```
+
+### `PdfDocumentBuilder`
+
+Build free-form PDFs with text, vector graphics, annotations, and form fields.
+
+```typescript
+import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+
+const doc = new PdfDocumentBuilder();
+doc.setMetadata({ title, author, subject, creator });
+doc.setEncryption({ ownerPassword, userPassword?, permissions? });
+doc.setPdfACompliance();       // Enable PDF/A-1b
+doc.embedFont(fontBytes);      // TrueType font for Unicode/CJK
+
+const page = doc.addPage({ width?, height? }); // Returns PdfPageBuilder
+
+// PdfPageBuilder methods:
+page.drawText(text, { x, y, fontSize?, bold?, italic?, color?, font? });
+page.drawRect({ x, y, width, height, fill?, stroke?, lineWidth? });
+page.drawCircle({ cx, cy, r, fill?, stroke? });
+page.drawEllipse({ cx, cy, rx, ry, fill?, stroke? });
+page.drawLine({ x1, y1, x2, y2, color?, lineWidth? });
+page.drawPath(ops, { fill?, stroke?, lineWidth? });
+page.drawSvgPath(d, { fill?, stroke?, lineWidth? });
+page.drawImage({ x, y, width, height, data, format });
+page.addAnnotation({ type, rect, ...options });
+page.addFormField({ type, name, rect, ...options });
+page.addLink({ rect, destPageIndex });
+
+doc.addBookmark(title, pageIndex, parent?);
+doc.generateTableOfContents({ title?, fontSize?, indent? });
+
+const bytes = await doc.build(); // Returns Promise<Uint8Array>
+```
+
+### `PdfEditor`
+
+Edit existing PDFs — overlay content, fill forms, merge, split, and sign.
+
+```typescript
+import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+
+const editor = PdfEditor.load(pdfBytes, { password? });
+
+// Page access
+const page = editor.getPage(index);    // Returns PdfEditorPage
+const count = editor.getPageCount();
+
+// PdfEditorPage methods (same drawing API as PdfPageBuilder):
+page.drawText(text, options);
+page.drawRect(options);
+page.drawCircle(options);
+page.drawLine(options);
+page.drawImage(options);
+page.drawSvgPath(d, options);
+page.drawPath(ops, options);
+page.addAnnotation(options);
+page.addFormField(options);
+
+// Page manipulation
+editor.addPage(options?);              // Returns PdfEditorPage
+editor.removePage(index);
+editor.rotatePage(index, degrees);     // 90, 180, 270
+editor.copyPagesFrom(otherPdfBytes);
+
+// Form filling
+editor.setFormField(name, value);
+editor.setFormFields({ name: value, ... });
+
+// Save
+const full = await editor.save();             // Full rebuild
+const incr = await editor.saveIncremental();  // Append-only
+const pages = await editor.splitPages();      // Split into individual PDFs
+```
+
+### `verifyPdfSignature(pdfData, signatureHex, byteRange)`
+
+Verify a digital signature. Returns `Promise<SignatureVerificationResult>`.
+
+```typescript
+import { verifyPdfSignature } from "@cj-tech-master/excelts/pdf";
+
+const result = await verifyPdfSignature(pdfBytes, sigHex, [0, off1, off2, len2]);
+// result.valid            — boolean
+// result.coversWholeFile  — boolean (no unsigned gaps)
+// result.digestAlgorithm  — OID string
+// result.reason           — failure reason (if !valid)
+```
+
+### `signPdf(pdfBytes, certificate, privateKey)`
+
+Sign a PDF containing a signature placeholder. Returns `Promise<Uint8Array>`.
+
+```typescript
+import { signPdf, buildSignatureDictPlaceholder } from "@cj-tech-master/excelts/pdf";
+
+// Step 1: Build placeholder
+const { dictString, placeholder } = buildSignatureDictPlaceholder({
+  name?, reason?, location?, contactInfo?
+});
+
+// Step 2: Sign (certificate = DER X.509, privateKey = DER PKCS#8)
+const signed = await signPdf(pdfWithPlaceholder, certificate, privateKey);
+```
+
+### `parseSvgPath(d)`
+
+Parse an SVG path `d` attribute into an array of `PathOp` objects for `drawPath()`.
+
+```typescript
+import { parseSvgPath } from "@cj-tech-master/excelts/pdf";
+
+const ops = parseSvgPath("M10 10 L90 10 L50 80 Z");
+page.drawPath(ops, { fill: { r: 1, g: 0, b: 0 } });
 ```
 
 ### Error Types
