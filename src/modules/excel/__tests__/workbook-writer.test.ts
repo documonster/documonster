@@ -294,4 +294,108 @@ describe("WorkbookWriter", () => {
       expect(typeof id).toBe("number");
     });
   });
+
+  // ===========================================================================
+  // Data Bar Conditional Formatting (exceljs/exceljs#3015)
+  // ===========================================================================
+
+  describe("data bar conditional formatting via streaming writer", () => {
+    async function getSheetXml(buffer: Uint8Array): Promise<string> {
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(buffer);
+      return new TextDecoder().decode(entries.get("xl/worksheets/sheet1.xml")!.data);
+    }
+
+    it("should produce matching primary and ext sections", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let i = 1; i <= 10; i++) {
+        ws.addRow([i * 10]).commit();
+      }
+      ws.addConditionalFormatting({
+        ref: "A1:A10",
+        rules: [{ type: "dataBar", priority: 1 } as any]
+      });
+      ws.commit();
+
+      const buffer = await getBuffer();
+      const xml = await getSheetXml(buffer);
+
+      // Primary section must have <dataBar> with cfvo and color
+      expect(xml).toMatch(/<dataBar>/);
+      expect(xml).toMatch(/<cfvo type="min"/);
+      expect(xml).toMatch(/<cfvo type="max"/);
+      expect(xml).toMatch(/<color rgb="FF638EC6"/);
+
+      // Primary section must have <x14:id> linking to ext
+      const primaryIdMatch = xml.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(primaryIdMatch).not.toBeNull();
+      const x14Id = primaryIdMatch![1];
+      expect(x14Id).toMatch(/^\{[0-9A-F-]+\}$/);
+
+      // Ext section must have matching <x14:cfRule id="...">
+      expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
+      expect(xml).toMatch(/<x14:dataBar/);
+
+      // Must also have the ext wrapper structure
+      expect(xml).toMatch(/<extLst>/);
+      expect(xml).toMatch(/<x14:conditionalFormattings>/);
+    });
+
+    it("should round-trip data bar written by streaming writer", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let i = 1; i <= 5; i++) {
+        ws.addRow([i * 10]).commit();
+      }
+      ws.addConditionalFormatting({
+        ref: "A1:A5",
+        rules: [{ type: "dataBar", priority: 1 } as any]
+      });
+      ws.commit();
+      const buffer = await getBuffer();
+
+      // Read back with non-streaming reader
+      const readBack = new Workbook();
+      await readBack.xlsx.load(buffer);
+      const sheet = readBack.getWorksheet("Sheet1")!;
+      const cfs = sheet.conditionalFormattings;
+      expect(cfs.length).toBeGreaterThan(0);
+      const dbRule = cfs[0].rules.find((r: any) => r.type === "dataBar");
+      expect(dbRule).toBeDefined();
+
+      // Write again with non-streaming writer and verify still valid
+      const buf2 = await readBack.xlsx.writeBuffer();
+      const xml2 = await getSheetXml(buf2);
+      const id2Match = xml2.match(/<x14:id>([^<]+)<\/x14:id>/);
+      expect(id2Match).not.toBeNull();
+      expect(xml2).toContain(`<x14:cfRule type="dataBar" id="${id2Match![1]}"`);
+    });
+
+    it("should not write extLst when no ext rules exist", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addRow(["hello"]).commit();
+      // Add a non-ext conditional formatting (cellIs rule)
+      ws.addConditionalFormatting({
+        ref: "A1",
+        rules: [
+          {
+            type: "cellIs",
+            operator: "greaterThan",
+            formulae: ["5"],
+            priority: 1
+          } as any
+        ]
+      });
+      ws.commit();
+
+      const buffer = await getBuffer();
+      const xml = await getSheetXml(buffer);
+
+      // Should have primary CF but no ext section
+      expect(xml).toMatch(/<conditionalFormatting/);
+      expect(xml).not.toMatch(/<x14:conditionalFormattings>/);
+    });
+  });
 });

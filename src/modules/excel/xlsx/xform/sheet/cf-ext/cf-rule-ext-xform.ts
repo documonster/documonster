@@ -40,10 +40,18 @@ class CfRuleExtXform extends CompositeXform {
     return false;
   }
 
-  prepare(model) {
-    if (CfRuleExtXform.isExt(model) && !model.x14Id) {
-      model.x14Id = `{${uuidV4()}}`.toUpperCase();
+  /**
+   * Assign x14Id to a rule if it requires an ext section.
+   * Idempotent — safe to call multiple times on the same rule.
+   */
+  static prepareRule(rule) {
+    if (CfRuleExtXform.isExt(rule) && !rule.x14Id) {
+      rule.x14Id = `{${uuidV4()}}`.toUpperCase();
     }
+  }
+
+  prepare(model) {
+    CfRuleExtXform.prepareRule(model);
   }
 
   render(xmlStream, model) {

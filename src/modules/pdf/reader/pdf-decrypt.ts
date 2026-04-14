@@ -11,8 +11,9 @@
  * @see PDF 2.0 (ISO 32000-2), §7.6 - Encryption
  */
 
-import { rc4, md5, sha256, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
+import { rc4, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
 import { concatUint8Arrays } from "@utils/binary";
+import { pdfMd5, pdfSha256 } from "../core/pdf-kdf";
 import type { PdfDictValue } from "./pdf-parser";
 import { dictGetNumber, dictGetName, dictGetBytes, dictGetArray, dictGetBool } from "./pdf-parser";
 import type { PdfDocument } from "./pdf-document";
@@ -246,7 +247,7 @@ function tryUserPasswordV5(
 
   // Validate: SHA-256(password + validation salt) == first 32 bytes of U
   const validateInput = concatUint8Arrays([passwordBytes, uValidationSalt]);
-  const computedHash = sha256(validateInput);
+  const computedHash = pdfSha256(validateInput);
 
   if (!arraysEqual(computedHash, uHash)) {
     return null;
@@ -254,7 +255,7 @@ function tryUserPasswordV5(
 
   // Derive key: SHA-256(password + key salt) => use as AES-256 key to decrypt UE
   const keyInput = concatUint8Arrays([passwordBytes, uKeySalt]);
-  const keyHash = sha256(keyInput);
+  const keyHash = pdfSha256(keyInput);
 
   // Decrypt UE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
@@ -280,7 +281,7 @@ function tryOwnerPasswordV5(
 
   // Validate: SHA-256(password + validation salt + U(0..47)) == first 32 bytes of O
   const validateInput = concatUint8Arrays([passwordBytes, oValidationSalt, u48]);
-  const computedHash = sha256(validateInput);
+  const computedHash = pdfSha256(validateInput);
 
   if (!arraysEqual(computedHash, oHash)) {
     return null;
@@ -288,7 +289,7 @@ function tryOwnerPasswordV5(
 
   // Derive key: SHA-256(password + key salt + U(0..47))
   const keyInput = concatUint8Arrays([passwordBytes, oKeySalt, u48]);
-  const keyHash = sha256(keyInput);
+  const keyHash = pdfSha256(keyInput);
 
   // Decrypt OE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
@@ -354,7 +355,7 @@ function tryUserPassword(
     const hashInput = new Uint8Array(32 + fileId.length);
     hashInput.set(PASSWORD_PADDING);
     hashInput.set(fileId, 32);
-    const hash = md5(hashInput);
+    const hash = pdfMd5(hashInput);
     let result = rc4(key, hash);
 
     for (let i = 1; i <= 19; i++) {
@@ -416,12 +417,12 @@ function computeEncryptionKeyForReading(
     offset += 4;
   }
 
-  let hash = md5(input.subarray(0, offset));
+  let hash = pdfMd5(input.subarray(0, offset));
 
   // For revision >= 3, hash 50 more times
   if (revision >= 3) {
     for (let i = 0; i < 50; i++) {
-      hash = md5(hash.subarray(0, keyLength));
+      hash = pdfMd5(hash.subarray(0, keyLength));
     }
   }
 
@@ -438,11 +439,11 @@ function deriveUserPasswordFromOwner(
   revision: number,
   keyLength: number
 ): string {
-  let hash = md5(padPassword(ownerPassword));
+  let hash = pdfMd5(padPassword(ownerPassword));
 
   if (revision >= 3) {
     for (let i = 0; i < 50; i++) {
-      hash = md5(hash.subarray(0, keyLength));
+      hash = pdfMd5(hash.subarray(0, keyLength));
     }
   }
 
@@ -501,7 +502,7 @@ function decryptRc4PerObject(
   keyInput[encryptionKey.length + 3] = generation & 0xff;
   keyInput[encryptionKey.length + 4] = (generation >> 8) & 0xff;
 
-  const objKey = md5(keyInput);
+  const objKey = pdfMd5(keyInput);
   const keyLen = Math.min(encryptionKey.length + 5, 16);
   return rc4(objKey.subarray(0, keyLen), data);
 }
@@ -534,7 +535,7 @@ function decryptAes128(
   keyInput[encryptionKey.length + 7] = 0x6c; // l
   keyInput[encryptionKey.length + 8] = 0x54; // T
 
-  const objKey = md5(keyInput);
+  const objKey = pdfMd5(keyInput);
   const keyLen = Math.min(encryptionKey.length + 5, 16);
   const aesKey = objKey.subarray(0, keyLen);
 

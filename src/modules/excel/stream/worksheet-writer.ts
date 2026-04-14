@@ -38,6 +38,7 @@ import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
 import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
+import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
 import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
 import { RowBreaksXform } from "@excel/xlsx/xform/sheet/row-breaks-xform";
 import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
@@ -81,6 +82,7 @@ const xform = {
   picture: new PictureXform(),
   drawing: new DrawingPartXform(),
   conditionalFormattings: new ConditionalFormattingsXform(),
+  extLst: new ExtLstXform(),
   headerFooter: new HeaderFooterXform(),
   rowBreaks: new RowBreaksXform(),
   colBreaks: new ColBreaksXform()
@@ -374,6 +376,9 @@ class WorksheetWriter {
 
     // Legacy Data tag for comments
     this._writeLegacyData();
+
+    // extLst must be the last child element before </worksheet>
+    this._writeExtLst();
 
     this._writeCloseWorksheet();
     // signal end of stream to workbook
@@ -902,8 +907,33 @@ class WorksheetWriter {
     const options = {
       styles: this._workbook.styles
     };
+
+    // Prepare both primary and ext sections upfront.
+    // The primary prepare handles priorities, dxfId, and dataBar defaults.
+    // The ext prepare (via ExtLstXform) assigns x14Id for rules that need
+    // an ext section (dataBar, custom iconSet). Both must run before either
+    // section is rendered, because the primary <cfRule> references the ext
+    // via <x14:id>. This mirrors the non-streaming path where
+    // WorkSheetXform.prepare() calls both chains sequentially.
     xform.conditionalFormattings.prepare(this.conditionalFormatting, options);
+    const extModel = { conditionalFormattings: this.conditionalFormatting };
+    xform.extLst.prepare(extModel);
+
+    // Render primary section (position: after hyperlinks, before dataValidations)
     this.stream.write(xform.conditionalFormattings.toXml(this.conditionalFormatting));
+  }
+
+  /**
+   * Write the `<extLst>` section at the end of the worksheet.
+   * Currently this only contains conditional formatting extensions (data bar
+   * ext attributes, custom icon sets), but the ExtLstXform will automatically
+   * skip rendering when there is no ext content.
+   *
+   * The prepare phase was already done in _writeConditionalFormatting().
+   */
+  private _writeExtLst(): void {
+    const model = { conditionalFormattings: this.conditionalFormatting };
+    this.stream.write(xform.extLst.toXml(model));
   }
 
   private _writeRowBreaks(): void {
