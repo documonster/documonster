@@ -109,6 +109,16 @@ export class PdfEditorPage {
   }
 
   /**
+   * Measure the width of a text string in points.
+   */
+  measureText(
+    text: string,
+    options?: { fontSize?: number; fontFamily?: string; bold?: boolean; italic?: boolean }
+  ): number {
+    return this._overlay.measureText(text, options);
+  }
+
+  /**
    * Draw text on this existing page (overlaid on top).
    */
   drawText(text: string, options: DrawTextOptions): this {
@@ -138,16 +148,6 @@ export class PdfEditorPage {
   drawEllipse(options: DrawEllipseOptions): this {
     this._overlay.drawEllipse(options);
     return this;
-  }
-
-  /**
-   * Measure the width of a text string in points.
-   */
-  measureText(
-    text: string,
-    options?: { fontSize?: number; bold?: boolean; italic?: boolean }
-  ): number {
-    return this._overlay.measureText(text, options);
   }
 
   /**

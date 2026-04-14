@@ -1394,7 +1394,17 @@ export class PdfDocumentBuilder {
       // Merge existing form field refs with signature widget
       const allFields = [...allFormFieldRefs, sigWidgetObjNum];
       const fieldsStr = allFields.map(r => pdfRef(r)).join(" ");
-      sigCatalogDict.set("AcroForm", `<< /Fields [${fieldsStr}] /SigFlags 3 >>`);
+      // Include form field resources (NeedAppearances, DR, DA) when form fields exist
+      const hasFormFields = allFormFieldRefs.length > 0;
+      const acroFormEntries = [`/Fields [${fieldsStr}]`, "/SigFlags 3"];
+      if (hasFormFields) {
+        acroFormEntries.push("/NeedAppearances true");
+        acroFormEntries.push(
+          "/DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >>"
+        );
+        acroFormEntries.push("/DA (/Helv 0 Tf 0 g)");
+      }
+      sigCatalogDict.set("AcroForm", `<< ${acroFormEntries.join(" ")} >>`);
 
       // Add signature widget to first page's annotations
       // (We need to patch the first page dict to include the widget in /Annots)

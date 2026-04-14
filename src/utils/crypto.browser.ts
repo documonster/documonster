@@ -646,10 +646,31 @@ export function randomBytes(length: number): Uint8Array {
  */
 export async function hashAsync(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
   const buf = await globalThis.crypto.subtle.digest(
-    algorithm,
+    normalizeAlgorithmForWebCrypto(algorithm),
     data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
   );
   return new Uint8Array(buf);
+}
+
+/**
+ * Normalize a hash algorithm name to the format Web Crypto API expects.
+ * Accepts: "sha256", "SHA-256", "sha-256", "SHA256" → "SHA-256"
+ */
+function normalizeAlgorithmForWebCrypto(algorithm: string): string {
+  const lower = algorithm.toLowerCase().replace(/-/g, "");
+  switch (lower) {
+    case "sha1":
+      return "SHA-1";
+    case "sha256":
+      return "SHA-256";
+    case "sha384":
+      return "SHA-384";
+    case "sha512":
+      return "SHA-512";
+    default:
+      // Pass through for any other algorithm — let Web Crypto validate
+      return algorithm;
+  }
 }
 
 /**
