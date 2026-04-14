@@ -652,10 +652,29 @@ export async function signPdf(
 ): Promise<Uint8Array> {
   const result = new Uint8Array(pdfBytes);
 
-  // Find the /Contents <...> placeholder
-  const contentsPattern = findPattern(result, "/Contents <");
+  // Find /ByteRange first — this uniquely identifies the signature dictionary
+  const byteRangePattern = findPattern(result, "/ByteRange [");
+  if (byteRangePattern === -1) {
+    throw new Error("signPdf: /ByteRange placeholder not found");
+  }
+
+  // Search for /Contents <hex> near /ByteRange (within the same object, search backwards)
+  // The signature dict typically has /Contents before /ByteRange, but search both directions
+  const searchStart = Math.max(0, byteRangePattern - 20000); // signature hex can be ~16K
+  const searchEnd = Math.min(result.length, byteRangePattern + 200);
+  let contentsPattern = -1;
+  const contentsBytes = new TextEncoder().encode("/Contents <");
+  outer: for (let i = searchStart; i < searchEnd; i++) {
+    for (let j = 0; j < contentsBytes.length; j++) {
+      if (result[i + j] !== contentsBytes[j]) {
+        continue outer;
+      }
+    }
+    contentsPattern = i;
+    break;
+  }
   if (contentsPattern === -1) {
-    throw new Error("signPdf: /Contents placeholder not found");
+    throw new Error("signPdf: /Contents placeholder not found near /ByteRange");
   }
 
   const hexStart = contentsPattern + "/Contents <".length;
@@ -665,11 +684,6 @@ export async function signPdf(
     hexEnd++;
   }
 
-  // Find and patch /ByteRange
-  const byteRangePattern = findPattern(result, "/ByteRange [");
-  if (byteRangePattern === -1) {
-    throw new Error("signPdf: /ByteRange placeholder not found");
-  }
   const brStart = byteRangePattern + "/ByteRange [".length;
   let brEnd = brStart;
   while (brEnd < result.length && result[brEnd] !== 0x5d /* ] */) {

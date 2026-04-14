@@ -46,6 +46,7 @@ import type {
   DrawTextOptions,
   DrawRectOptions,
   DrawCircleOptions,
+  DrawEllipseOptions,
   DrawLineOptions,
   DrawImageOptions,
   DrawPathOptions,
@@ -129,6 +130,24 @@ export class PdfEditorPage {
   drawCircle(options: DrawCircleOptions): this {
     this._overlay.drawCircle(options);
     return this;
+  }
+
+  /**
+   * Draw an ellipse on this existing page.
+   */
+  drawEllipse(options: DrawEllipseOptions): this {
+    this._overlay.drawEllipse(options);
+    return this;
+  }
+
+  /**
+   * Measure the width of a text string in points.
+   */
+  measureText(
+    text: string,
+    options?: { fontSize?: number; bold?: boolean; italic?: boolean }
+  ): number {
+    return this._overlay.measureText(text, options);
   }
 
   /**
@@ -457,6 +476,16 @@ export class PdfEditor {
     this._writerForSave = writer;
     this._clonedRefs = new Map();
 
+    try {
+      return await this._buildFullSave(writer);
+    } finally {
+      this._writerForSave = null;
+      this._clonedRefs.clear();
+    }
+  }
+
+  /** @internal Full rebuild implementation, extracted for try/finally cleanup. */
+  private async _buildFullSave(writer: PdfWriter): Promise<Uint8Array> {
     // Write font resources for any overlay content
     const fontObjectMap = await this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
@@ -747,9 +776,6 @@ export class PdfEditor {
       subject: originalMeta.subject || undefined,
       creator: originalMeta.creator || "excelts"
     });
-
-    this._writerForSave = null;
-    this._clonedRefs.clear();
 
     return writer.build();
   }
@@ -1274,8 +1300,12 @@ export class PdfEditor {
     // Inject the signature placeholder into the form field updates
     // so that save() includes it in the output
     this._signaturePlaceholder = dictString;
-    const pdfWithPlaceholder = await this.save();
-    this._signaturePlaceholder = null;
+    let pdfWithPlaceholder: Uint8Array;
+    try {
+      pdfWithPlaceholder = await this.save();
+    } finally {
+      this._signaturePlaceholder = null;
+    }
 
     return signPdf(pdfWithPlaceholder, options.certificate, options.privateKey);
   }

@@ -1294,17 +1294,21 @@ export class PdfDocumentBuilder {
       catalogExtras.push(["MarkInfo", "<< /Marked true >>"]);
     }
 
-    writer.addCatalog(pagesTreeObjNum, {
-      outlinesRef,
-      extraEntries: catalogExtras.length > 0 ? catalogExtras : undefined
-    });
+    // Build catalog — handle three cases:
+    // 1. Simple: no form fields, no signing → addCatalog()
+    // 2. Form fields only → rebuild catalog with AcroForm
+    // 3. Signing (with or without form fields) → signing path builds the catalog
+    const needsCustomCatalog = allFormFieldRefs.length > 0 || this._signatureOptions;
 
-    // AcroForm — if any pages have form fields
-    if (allFormFieldRefs.length > 0) {
-      // We need to patch the catalog to include AcroForm.
-      // addCatalog already wrote the catalog — we need to add the AcroForm to it.
-      // Instead, add it as an extra entry by rebuilding the catalog.
-      // The simplest approach: use setCatalog to replace it.
+    if (!needsCustomCatalog) {
+      writer.addCatalog(pagesTreeObjNum, {
+        outlinesRef,
+        extraEntries: catalogExtras.length > 0 ? catalogExtras : undefined
+      });
+    }
+
+    // AcroForm — if any pages have form fields (and not signing — signing path builds its own catalog)
+    if (allFormFieldRefs.length > 0 && !this._signatureOptions) {
       const catalogObjNum = writer.allocObject();
       const catalogDict = new PdfDict()
         .set("Type", "/Catalog")
@@ -1893,7 +1897,7 @@ export function parseSvgPath(d: string): PathOp[] {
           const c1x = cx + (2 / 3) * (qx - cx),
             c1y = cy + (2 / 3) * (qy - cy);
           const c2x = x + (2 / 3) * (qx - x),
-            c2y = y + (2 / 3) * (qx - y);
+            c2y = y + (2 / 3) * (qy - y);
           ops.push({ op: "curve", x1: c1x, y1: c1y, x2: c2x, y2: c2y, x3: x, y3: y });
           lastCpX = qx;
           lastCpY = qy;

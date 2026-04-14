@@ -7,7 +7,8 @@ import {
   parseSvgPath,
   verifyPdfSignature,
   buildSignatureDictPlaceholder,
-  asn1Parse
+  asn1Parse,
+  generateTestCertificate
 } from "../index";
 import {
   parseResourceDict,
@@ -1829,5 +1830,124 @@ describe("Digital Signature", () => {
     const result = await verifyPdfSignature(fakePdf, "00", [0, 10, 20, 80]);
     expect(result.valid).toBe(false);
     expect(result.reason).toBeDefined();
+  });
+
+  it("should sign+verify roundtrip with PdfDocumentBuilder", async () => {
+    const { certificate, privateKey } = await generateTestCertificate("TestBuilder");
+
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Signed doc", { x: 72, y: 750, fontSize: 14 });
+    doc.sign({ certificate, privateKey, name: "Test Signer", reason: "Testing" });
+    const signed = await doc.build();
+
+    // Extract signature info and verify
+    const text = new TextDecoder().decode(signed);
+    const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/);
+    const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+    expect(contentsMatch).not.toBeNull();
+    expect(brMatch).not.toBeNull();
+
+    const result = await verifyPdfSignature(signed, contentsMatch![1], [
+      parseInt(brMatch![1]),
+      parseInt(brMatch![2]),
+      parseInt(brMatch![3]),
+      parseInt(brMatch![4])
+    ]);
+    expect(result.valid).toBe(true);
+    expect(result.coversWholeFile).toBe(true);
+  });
+
+  it("should sign+verify roundtrip with PdfEditor", async () => {
+    const { certificate, privateKey } = await generateTestCertificate("TestEditor");
+
+    // Create unsigned PDF
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Unsigned", { x: 72, y: 750, fontSize: 14 });
+    const unsigned = await doc.build();
+
+    // Sign via editor
+    const editor = PdfEditor.load(unsigned);
+    const signed = await editor.sign({ certificate, privateKey, name: "Editor Signer" });
+
+    // Verify
+    const text = new TextDecoder().decode(signed);
+    const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/);
+    const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+    expect(contentsMatch).not.toBeNull();
+    expect(brMatch).not.toBeNull();
+
+    const result = await verifyPdfSignature(signed, contentsMatch![1], [
+      parseInt(brMatch![1]),
+      parseInt(brMatch![2]),
+      parseInt(brMatch![3]),
+      parseInt(brMatch![4])
+    ]);
+    expect(result.valid).toBe(true);
+    expect(result.coversWholeFile).toBe(true);
+  });
+
+  it("should detect tampering after signing", async () => {
+    const { certificate, privateKey } = await generateTestCertificate("TamperTest");
+
+    const doc = new PdfDocumentBuilder();
+    doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 14 });
+    doc.sign({ certificate, privateKey });
+    const signed = await doc.build();
+
+    // Tamper
+    const tampered = new Uint8Array(signed);
+    tampered[50] ^= 0xff;
+
+    const text = new TextDecoder().decode(signed);
+    const contentsMatch = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/)!;
+    const brMatch = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/)!;
+    const byteRange: [number, number, number, number] = [
+      parseInt(brMatch[1]),
+      parseInt(brMatch[2]),
+      parseInt(brMatch[3]),
+      parseInt(brMatch[4])
+    ];
+
+    const result = await verifyPdfSignature(tampered, contentsMatch[1], byteRange);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("digest mismatch");
+  });
+
+  it("should generate a valid test certificate", async () => {
+    const { certificate, privateKey } = await generateTestCertificate("UnitTest");
+    expect(certificate).toBeInstanceOf(Uint8Array);
+    expect(privateKey).toBeInstanceOf(Uint8Array);
+    expect(certificate.length).toBeGreaterThan(100);
+    expect(privateKey.length).toBeGreaterThan(100);
+
+    // Certificate should start with SEQUENCE tag
+    expect(certificate[0]).toBe(0x30);
+    // Private key should be parseable (starts with SEQUENCE)
+    expect(privateKey[0]).toBe(0x30);
+  });
+});
+
+// =============================================================================
+// SVG Path — Regression: T command control point
+// =============================================================================
+
+describe("SVG Path T command regression", () => {
+  it("should compute correct c2y using qy (not qx) for T command", () => {
+    // Q50,100 means control point at (50,100). After reaching (100,0),
+    // T150,0 reflects control to (150,-100). The c2 control point Y
+    // should use qy=-100, not qx=150.
+    const ops = parseSvgPath("M0 0 Q50 100 100 0 T200 0");
+    expect(ops.length).toBe(3);
+
+    // The third op (from T) should be a curve
+    const curve = ops[2];
+    expect(curve.op).toBe("curve");
+    if (curve.op === "curve") {
+      // Reflected control point: qx = 2*100-50 = 150, qy = 2*0-100 = -100
+      // c2x = endX + 2/3*(qx-endX) = 200 + 2/3*(150-200) = 200 - 33.33 = 166.67
+      // c2y = endY + 2/3*(qy-endY) = 0 + 2/3*(-100-0) = -66.67
+      expect(curve.x2).toBeCloseTo(166.67, 1);
+      expect(curve.y2).toBeCloseTo(-66.67, 1); // Would be wrong if qx was used instead of qy
+    }
   });
 });
