@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.2.1](https://github.com/cjnoname/excelts/compare/v9.2.0...v9.2.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* Data bar CF ext section in streaming writer, add WorksheetWriter.addRows() ([ea47ced](https://github.com/cjnoname/excelts/commit/ea47ced479679861e03f70f3a11790058e20bc80))
+* Resolve CodeQL [#80](https://github.com/cjnoname/excelts/issues/80) [#82](https://github.com/cjnoname/excelts/issues/82) — isolate PDF key derivation from shared crypto ([ef2347c](https://github.com/cjnoname/excelts/commit/ef2347cb6db1656797b1cb1f869b8186c80a9d81))
+* Resolve CodeQL security alerts [#79](https://github.com/cjnoname/excelts/issues/79), [#80](https://github.com/cjnoname/excelts/issues/80), [#81](https://github.com/cjnoname/excelts/issues/81) ([b35777c](https://github.com/cjnoname/excelts/commit/b35777c33213f6bf42289c713071300dd5a891fa))
+* Resolve CodeQL security alerts [#80](https://github.com/cjnoname/excelts/issues/80) [#82](https://github.com/cjnoname/excelts/issues/82) — exclude PDF-mandated hashes ([b99bd23](https://github.com/cjnoname/excelts/commit/b99bd23deba0d1325036f1ad68234ded79b2de24))
+* Use crypto.hash() instead of createHash() to resolve CodeQL alerts ([0125c19](https://github.com/cjnoname/excelts/commit/0125c192e86e49a840875430366d2a72f3677914))
+
 ## [9.2.0](https://github.com/cjnoname/excelts/compare/v9.1.0...v9.2.0) (2026-04-14)
 
 ### Features
