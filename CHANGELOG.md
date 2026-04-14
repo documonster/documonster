@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.2.0](https://github.com/cjnoname/excelts/compare/v9.1.0...v9.2.0) (2026-04-14)
+
+
+### Features
+
+* Add annotation/form creation, SVG path, digital signatures; extract shared crypto ([12f1a7b](https://github.com/cjnoname/excelts/commit/12f1a7bc5a50d2e0bd5fa355c9e6d5e4498ba560))
+* Add generateTestCertificate() API; remove raw DER bytes from example ([e09f2c7](https://github.com/cjnoname/excelts/commit/e09f2c7100bb3d1738df6997d52b266cff9b8e95))
+* Add high-level sign() API to PdfDocumentBuilder and PdfEditor ([5b61561](https://github.com/cjnoname/excelts/commit/5b615616590220b72042e74b0b665065554c00d4))
+* Add PDF builder and editor APIs with unified image/text utilities ([e7e4709](https://github.com/cjnoname/excelts/commit/e7e47091b09414fa076eb009328f914ed44ae1ab))
+* Complete PDF builder, editor, and reader roadmap ([7572e0b](https://github.com/cjnoname/excelts/commit/7572e0b3964ecea5eee8f042e24615c4251df608))
+
+
+### Bug Fixes
+
+* Make signature widget visible so Adobe Acrobat shows signature status ([d4cfcef](https://github.com/cjnoname/excelts/commit/d4cfcef5c911131a5795108d4251abe2f604dd78))
+* Move signature widget to invisible rect so visible text is not clickable ([4d2bc96](https://github.com/cjnoname/excelts/commit/4d2bc9690cf073b7c1f89ea4ea2ba20c9bab268a))
+* Radio button Annots, signature digest algorithm, editor radio overlay ([1d2d785](https://github.com/cjnoname/excelts/commit/1d2d785979be1a5ba58b68cc48edb2ec32e985b9))
+* Resolve PDF border overlap and text-border collision ([#136](https://github.com/cjnoname/excelts/issues/136)) ([6ce6c2c](https://github.com/cjnoname/excelts/commit/6ce6c2cb9012a940f5017fa33cb1c3cff314cbde))
+* Signing+forms AcroForm resources, restore drawText, normalize browser hash ([71d2281](https://github.com/cjnoname/excelts/commit/71d2281d13e226105d31c001cd037a95a52a2d9a))
+* SVG T command bug, editor state leaks, signPdf pattern matching, orphaned catalogs ([a248e34](https://github.com/cjnoname/excelts/commit/a248e343b0cacad3a37cc914adf9b4ac4d08e147))
+* Update cspell words list and add oxlint dependency in package.json ([1a8691f](https://github.com/cjnoname/excelts/commit/1a8691f4e9282997b1e77b37c8664fa900dc88a3))
+* Use process.execPath to run oxfmt in generate script for Windows compat ([fe83656](https://github.com/cjnoname/excelts/commit/fe83656e3a65cde20b3b084a8026c4f836613601))
+
+
+### Code Refactoring
+
+* Replace prettier with oxfmt, migrate typescript-eslint to tsgolint ([8e24fdb](https://github.com/cjnoname/excelts/commit/8e24fdb901863e929065266c83575529f457d5e6))
+
 ## [9.1.0](https://github.com/cjnoname/excelts/compare/v9.0.0...v9.1.0) (2026-04-09)
 
 ### Features
