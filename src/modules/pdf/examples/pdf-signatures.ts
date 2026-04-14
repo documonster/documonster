@@ -187,9 +187,9 @@ function buildPdfWithSignaturePlaceholder(sigDictString: string): Uint8Array {
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>",
     "endobj",
     "",
-    // Signature widget — tiny invisible rect at bottom corner (not overlapping visible content)
+    // Signature widget — visible rect matching the blue box area
     "4 0 obj",
-    `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [0 0 1 1] /T (Signature1) /V 5 0 R /F 132 >>`,
+    `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [72 640 372 690] /T (Signature1) /V 5 0 R /F 4 >>`,
     "endobj",
     "",
     "5 0 obj",
