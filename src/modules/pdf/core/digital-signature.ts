@@ -17,7 +17,7 @@
  * @see ISO 32000-2:2020 §12.8 — Digital Signatures in PDF
  */
 
-import { sha256, rsaVerify, rsaSign } from "@utils/crypto";
+import { sha256, md5, hash, rsaVerify, rsaSign } from "@utils/crypto";
 
 // =============================================================================
 // ASN.1 DER — Types
@@ -554,8 +554,8 @@ export async function verifyPdfSignature(
     signedData.set(range1);
     signedData.set(range2, len1);
 
-    // Verify message digest
-    const computedDigest = sha256(signedData);
+    // Verify message digest using the algorithm from the signature
+    const computedDigest = hashByOid(cms.digestAlgorithmOid, signedData);
     if (!bytesEqual(computedDigest, cms.messageDigest)) {
       return {
         valid: false,
@@ -765,6 +765,25 @@ function checkCoversWholeFile(
 ): boolean {
   // The two ranges should cover everything except the /Contents hex value
   return byteRange[0] === 0 && byteRange[2] + byteRange[3] === fileSize;
+}
+
+/** Map digest algorithm OID to a hash function. Falls back to sha256 for unknown OIDs. */
+function hashByOid(oid: string, data: Uint8Array): Uint8Array {
+  switch (oid) {
+    case "1.3.14.3.2.26": // SHA-1
+      return hash("SHA-1", data);
+    case OID_SHA256: // SHA-256
+      return sha256(data);
+    case "2.16.840.1.101.3.4.2.2": // SHA-384
+      return hash("SHA-384", data);
+    case "2.16.840.1.101.3.4.2.3": // SHA-512
+      return hash("SHA-512", data);
+    case "1.2.840.113549.2.5": // MD5
+      return md5(data);
+    default:
+      // Fallback to SHA-256 for unrecognized OIDs
+      return sha256(data);
+  }
 }
 
 function findPattern(data: Uint8Array, pattern: string): number {

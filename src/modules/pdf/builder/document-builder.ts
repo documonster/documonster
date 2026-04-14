@@ -1225,9 +1225,13 @@ export class PdfDocumentBuilder {
 
       // Write form field widget annotations
       for (const field of page._formFields) {
-        const refs = this._writeFormFieldAnnotation(writer, field.options, pageObjNums[i]);
-        annotRefs.push(...refs);
-        allFormFieldRefs.push(...refs);
+        const { fieldRefs, annotRefs: fieldAnnotRefs } = this._writeFormFieldAnnotation(
+          writer,
+          field.options,
+          pageObjNums[i]
+        );
+        annotRefs.push(...fieldAnnotRefs);
+        allFormFieldRefs.push(...fieldRefs);
       }
 
       // Write page object (using pre-allocated obj num)
@@ -1521,8 +1525,9 @@ export class PdfDocumentBuilder {
     writer: PdfWriter,
     options: FormFieldOptions,
     pageObjNum: number
-  ): number[] {
-    const refs: number[] = [];
+  ): { fieldRefs: number[]; annotRefs: number[] } {
+    const fieldRefs: number[] = [];
+    const annotRefs: number[] = [];
 
     if (options.type === "radio") {
       // Radio group: one parent field + one widget per button
@@ -1563,8 +1568,10 @@ export class PdfDocumentBuilder {
         parentDict.set("V", `/${options.selected}`);
       }
       writer.addObject(parentObjNum, parentDict);
-      refs.push(parentObjNum);
-      return refs;
+      // Parent goes into AcroForm /Fields; children go into page /Annots
+      fieldRefs.push(parentObjNum);
+      annotRefs.push(...childRefs);
+      return { fieldRefs, annotRefs };
     }
 
     // Single-widget fields: text, checkbox, dropdown
@@ -1634,8 +1641,10 @@ export class PdfDocumentBuilder {
     }
 
     writer.addObject(objNum, dict);
-    refs.push(objNum);
-    return refs;
+    // Single-widget fields go into both /Annots and /Fields
+    fieldRefs.push(objNum);
+    annotRefs.push(objNum);
+    return { fieldRefs, annotRefs };
   }
 }
 

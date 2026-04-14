@@ -564,30 +564,71 @@ export class PdfEditor {
 
       // Write overlay form fields
       for (const field of editorPage._overlay._formFields) {
-        const fieldObjNum = writer.allocObject();
-        const r = field.options.type === "radio" ? [0, 0, 0, 0] : field.options.rect;
-        const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
-        const fieldDict = new PdfDict()
-          .set("Type", "/Annot")
-          .set("Subtype", "/Widget")
-          .set("Rect", rect);
-        if (field.options.type !== "radio") {
-          fieldDict.set("T", pdfString(field.options.name));
-          fieldDict.set(
-            "FT",
-            field.options.type === "text"
-              ? "/Tx"
-              : field.options.type === "checkbox"
-                ? "/Btn"
-                : "/Ch"
-          );
+        if (field.options.type === "radio") {
+          // Radio group: parent field + child widgets
+          const parentObjNum = writer.allocObject();
+          const childRefs: number[] = [];
+          let ff = 1 << 15; // Radio
+          ff |= 1 << 14; // NoToggleToOff
+          if (field.options.readOnly) {
+            ff |= 1;
+          }
+          if (field.options.required) {
+            ff |= 1 << 1;
+          }
+
+          for (const btn of field.options.buttons) {
+            const childObjNum = writer.allocObject();
+            const rect = `[${btn.rect.map(v => pdfNumber(v)).join(" ")}]`;
+            const isSelected = field.options.selected === btn.value;
+            const apState = isSelected ? `/${btn.value}` : "/Off";
+            const childDict = new PdfDict()
+              .set("Type", "/Annot")
+              .set("Subtype", "/Widget")
+              .set("Rect", rect)
+              .set("Parent", pdfRef(parentObjNum))
+              .set("AS", apState)
+              .set("AP", `<< /N << /${btn.value} null /Off null >> >>`);
+            writer.addObject(childObjNum, childDict);
+            childRefs.push(childObjNum);
+            annotRefs.push(childObjNum); // Children go into page /Annots
+          }
+
+          const parentDict = new PdfDict()
+            .set("FT", "/Btn")
+            .set("T", pdfString(field.options.name))
+            .set("Ff", String(ff))
+            .set("Kids", `[${childRefs.map(r => pdfRef(r)).join(" ")}]`);
+          if (field.options.selected) {
+            parentDict.set("V", `/${field.options.selected}`);
+          }
+          writer.addObject(parentObjNum, parentDict);
+          // Parent does NOT go into annotRefs (not a visual annotation)
+        } else {
+          // Single-widget fields: text, checkbox, dropdown
+          const fieldObjNum = writer.allocObject();
+          const r = field.options.rect;
+          const rect = `[${pdfNumber(r[0])} ${pdfNumber(r[1])} ${pdfNumber(r[2])} ${pdfNumber(r[3])}]`;
+          const fieldDict = new PdfDict()
+            .set("Type", "/Annot")
+            .set("Subtype", "/Widget")
+            .set("Rect", rect)
+            .set("T", pdfString(field.options.name))
+            .set(
+              "FT",
+              field.options.type === "text"
+                ? "/Tx"
+                : field.options.type === "checkbox"
+                  ? "/Btn"
+                  : "/Ch"
+            );
           if (field.options.value) {
             fieldDict.set("V", pdfString(field.options.value));
           }
           fieldDict.set("DA", pdfString("/Helv 12 Tf 0 g"));
+          writer.addObject(fieldObjNum, fieldDict);
+          annotRefs.push(fieldObjNum);
         }
-        writer.addObject(fieldObjNum, fieldDict);
-        annotRefs.push(fieldObjNum);
       }
 
       const pageDict2 = new PdfDict()
