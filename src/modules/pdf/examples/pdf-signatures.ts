@@ -159,7 +159,18 @@ console.log(`\nAll examples written to: ${outDir}`);
 // =============================================================================
 
 function buildPdfWithSignaturePlaceholder(sigDictString: string): Uint8Array {
-  // Build a minimal valid PDF with a /Sig annotation that contains the placeholder
+  // Build a minimal valid PDF with visible content + a /Sig annotation
+  // Build page content stream
+  const streamContent = [
+    "BT /F1 20 Tf 72 750 Td (Digitally Signed Document) Tj ET",
+    "BT /F1 11 Tf 72 725 Td (This PDF contains a PKCS#7 digital signature.) Tj ET",
+    "BT /F1 11 Tf 72 710 Td (The signature widget is in the box below.) Tj ET",
+    "0.9 0.95 1 rg 72 680 228 40 re f",
+    "0.2 0.4 0.8 RG 72 680 228 40 re S",
+    "BT /F1 10 Tf 80 696 Td (Signed by: Test Signer) Tj ET",
+    "BT /F1 8 Tf 80 684 Td (Reason: Roundtrip test) Tj ET"
+  ].join("\n");
+
   const lines = [
     "%PDF-2.0",
     "",
@@ -172,15 +183,22 @@ function buildPdfWithSignaturePlaceholder(sigDictString: string): Uint8Array {
     "endobj",
     "",
     "3 0 obj",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>",
     "endobj",
     "",
     "4 0 obj",
-    `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [0 0 0 0] /T (Signature1) /V 5 0 R >>`,
+    `<< /Type /Annot /Subtype /Widget /FT /Sig /Rect [72 680 300 720] /T (Signature1) /V 5 0 R >>`,
     "endobj",
     "",
     "5 0 obj",
     sigDictString,
+    "endobj",
+    "",
+    "6 0 obj",
+    `<< /Length ${streamContent.length} >>`,
+    "stream",
+    streamContent,
+    "endstream",
     "endobj",
     ""
   ];
@@ -189,20 +207,20 @@ function buildPdfWithSignaturePlaceholder(sigDictString: string): Uint8Array {
 
   // Build xref
   const offsets: number[] = [];
-  for (let objNum = 1; objNum <= 5; objNum++) {
+  for (let objNum = 1; objNum <= 6; objNum++) {
     const marker = `${objNum} 0 obj`;
     offsets.push(body.indexOf(marker));
   }
 
   const xrefOffset = body.length;
   let xref = "xref\n";
-  xref += `0 6\n`;
+  xref += `0 7\n`;
   xref += "0000000000 65535 f \n";
   for (const off of offsets) {
     xref += `${String(off).padStart(10, "0")} 00000 n \n`;
   }
   xref += "trailer\n";
-  xref += "<< /Size 6 /Root 1 0 R >>\n";
+  xref += "<< /Size 7 /Root 1 0 R >>\n";
   xref += "startxref\n";
   xref += `${xrefOffset}\n`;
   xref += "%%EOF\n";
