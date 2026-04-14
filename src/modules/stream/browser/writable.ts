@@ -345,7 +345,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     let proto = Object.getPrototypeOf(this);
     while (proto && proto !== Writable.prototype && proto !== Object.prototype) {
       if (Object.prototype.hasOwnProperty.call(proto, "_write")) {
-        return (proto._write as Function).bind(this);
+        return (proto._write as (...args: any[]) => any).bind(this);
       }
       proto = Object.getPrototypeOf(proto);
     }
@@ -362,7 +362,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     let proto = Object.getPrototypeOf(this);
     while (proto && proto !== Writable.prototype && proto !== Object.prototype) {
       if (Object.prototype.hasOwnProperty.call(proto, "_final")) {
-        return (proto._final as Function).bind(this);
+        return (proto._final as (...args: any[]) => any).bind(this);
       }
       proto = Object.getPrototypeOf(proto);
     }

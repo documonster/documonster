@@ -168,10 +168,7 @@ class AsyncStreamCodec extends EventEmitter {
 
 type WebStreamFormat = "deflate-raw" | "deflate" | "gzip";
 
-function createNativeWebStreamCodec(
-  format: WebStreamFormat,
-  isCompress: boolean
-): DeflateStream | InflateStream {
+function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean): DeflateStream {
   const stream = isCompress
     ? new CompressionStream(format as CompressionFormat)
     : new DecompressionStream(format as CompressionFormat);
@@ -227,7 +224,7 @@ function createWorkerStreamCodec(
   pool: WorkerPool | undefined,
   level: number | undefined,
   allowTransfer: boolean | undefined
-): DeflateStream | InflateStream {
+): DeflateStream {
   const effectivePool = pool ?? getDefaultWorkerPool();
 
   let endResolve: (() => void) | null = null;
@@ -341,7 +338,7 @@ class BufferedCodec extends EventEmitter {
 function createStreamCodec(
   type: "deflate" | "inflate",
   options: StreamCompressOptions
-): DeflateStream | InflateStream {
+): DeflateStream {
   const level = type === "deflate" ? (options.level ?? DEFAULT_COMPRESS_LEVEL) : undefined;
 
   if (options.useWorker && hasWorkerSupport()) {
@@ -417,7 +414,7 @@ function createWrappedStream(
   config: WrappedCodecConfig,
   isCompress: boolean,
   options: StreamCompressOptions
-): DeflateStream | InflateStream {
+): DeflateStream {
   if (config.hasNative()) {
     return createNativeWebStreamCodec(config.format, isCompress);
   }

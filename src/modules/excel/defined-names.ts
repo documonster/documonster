@@ -158,8 +158,12 @@ class DefinedNames {
       c.mark = false;
       return true;
     }
-    for (y = cell.row - 1; vGrow(y, "top"); y--) {}
-    for (y = cell.row + 1; vGrow(y, "bottom"); y++) {}
+    for (y = cell.row - 1; vGrow(y, "top"); y--) {
+      /* advance */
+    }
+    for (y = cell.row + 1; vGrow(y, "bottom"); y++) {
+      /* advance */
+    }
 
     // grow horizontal - ensure all rows can grow
     function hGrow(xx: number, edge: "left" | "right"): boolean {
@@ -178,8 +182,12 @@ class DefinedNames {
       }
       return true;
     }
-    for (x = cell.col - 1; hGrow(x, "left"); x--) {}
-    for (x = cell.col + 1; hGrow(x, "right"); x++) {}
+    for (x = cell.col - 1; hGrow(x, "left"); x--) {
+      /* advance */
+    }
+    for (x = cell.col + 1; hGrow(x, "right"); x++) {
+      /* advance */
+    }
 
     return range;
   }

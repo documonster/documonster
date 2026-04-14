@@ -168,6 +168,48 @@ describe("WorksheetWriter", () => {
       expect(row.getCell(3).value).toBe(true);
     });
 
+    it("addRows() creates multiple rows", () => {
+      const { ws } = createRealWriter();
+      const rows = ws.addRows([
+        [1, "a"],
+        [2, "b"],
+        [3, "c"]
+      ]);
+
+      expect(rows.length).toBe(3);
+      expect(rows[0].getCell(1).value).toBe(1);
+      expect(rows[1].getCell(2).value).toBe("b");
+      expect(rows[2].getCell(1).value).toBe(3);
+      expect(rows[0].number).toBe(1);
+      expect(rows[1].number).toBe(2);
+      expect(rows[2].number).toBe(3);
+    });
+
+    it("addRows() handles null, undefined, and object values", () => {
+      const { ws } = createRealWriter();
+      ws.columns = [
+        { key: "name", header: "Name" },
+        { key: "age", header: "Age" }
+      ];
+      const rows = ws.addRows([[10, 20], null, undefined, { name: "Alice", age: 30 }]);
+
+      expect(rows.length).toBe(4);
+      // normal array row
+      expect(rows[0].getCell(1).value).toBe(10);
+      // null / undefined produce empty rows
+      expect(rows[1].cellCount).toBe(0);
+      expect(rows[2].cellCount).toBe(0);
+      // object row mapped by column keys
+      expect(rows[3].getCell(1).value).toBe("Alice");
+      expect(rows[3].getCell(2).value).toBe(30);
+    });
+
+    it("addRows() with empty array returns empty array", () => {
+      const { ws } = createRealWriter();
+      const rows = ws.addRows([]);
+      expect(rows).toEqual([]);
+    });
+
     it("getRow() creates/returns a row by number", () => {
       const { ws } = createRealWriter();
       const row = ws.getRow(5);

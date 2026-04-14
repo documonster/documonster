@@ -1293,7 +1293,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
       const writable = createWritable<number>({
         objectMode: true,
         write(_chunk, _encoding, callback) {
-          setTimeout(callback, 10);
+          setTimeout(() => callback(), 10);
         }
       });
 
@@ -1342,7 +1342,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
           if (seen.length === 1) {
             controller.abort(new Error("stop-mid-flight"));
           }
-          setTimeout(callback, 1);
+          setTimeout(() => callback(), 1);
         }
       });
 
@@ -4607,7 +4607,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
         highWaterMark: 1,
         write(chunk, _encoding, callback) {
           results.push(chunk);
-          setTimeout(callback, 1);
+          setTimeout(() => callback(), 1);
         }
       });
 
@@ -4629,7 +4629,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
         highWaterMark: 1,
         write(chunk, _encoding, callback) {
           output.push(chunk);
-          setTimeout(callback, 1);
+          setTimeout(() => callback(), 1);
         }
       });
 
@@ -4658,7 +4658,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
           if (output.length === 5) {
             controller.abort(new Error("abort-compose"));
           }
-          setTimeout(callback, 1);
+          setTimeout(() => callback(), 1);
         }
       });
 
@@ -10604,7 +10604,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
       const w = createWritable<Uint8Array>({
         highWaterMark: 10,
         write(_chunk, _enc, cb) {
-          setTimeout(cb, 50);
+          setTimeout(() => cb(), 50);
         }
       });
 
@@ -12003,7 +12003,7 @@ export function runStreamTests(imports: StreamModuleImports): void {
       );
 
       // All items visited (order may vary due to concurrency)
-      expect(visited.sort()).toEqual([1, 2, 3, 4]);
+      expect(visited.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
       expect(maxConcurrent).toBeGreaterThanOrEqual(2);
     });
 

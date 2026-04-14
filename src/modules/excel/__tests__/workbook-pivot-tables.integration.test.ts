@@ -2248,7 +2248,9 @@ describe("Workbook", () => {
         await loaded.xlsx.readFile(filepath);
 
         expect(loaded.pivotTables.length).toBe(3);
-        expect(loaded.pivotTables.map(pt => pt.tableNumber).sort()).toEqual([1, 2, 3]);
+        expect(loaded.pivotTables.map(pt => pt.tableNumber).sort((a, b) => a - b)).toEqual([
+          1, 2, 3
+        ]);
 
         // Step 3: Add a new pivot table to the loaded workbook
         const newSource = loaded.getWorksheet("Data")!;

@@ -112,7 +112,7 @@ class CellMatrix {
     if (!row) {
       return;
     }
-    delete row[address.col >>> 0];
+    row[address.col >>> 0] = undefined!;
   }
 
   forEachInSheet(

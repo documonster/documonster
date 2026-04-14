@@ -113,7 +113,7 @@ function scheduleRow(callback) {
       scheduleRow(callback);
     });
   } else {
-    setImmediate(callback);
+    setImmediate(() => callback());
   }
 }
 

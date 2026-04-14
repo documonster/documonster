@@ -28,22 +28,10 @@ type ReturnExtends<A extends (...args: any[]) => any, Base> =
 
 import type * as NodeStreams from "@stream/index";
 import type * as BrowserStreams from "@stream/index.browser";
-
-import type {
-  FinishedOptions as NodeFinishedOptions,
-  PipelineOptions as NodePipelineOptions
-} from "@stream/index";
-import type {
-  FinishedOptions as BrowserFinishedOptions,
-  PipelineOptions as BrowserPipelineOptions
-} from "@stream/index.browser";
-
-import type * as NodeRuntimeModule from "@stream/index";
-import type * as BrowserRuntimeModule from "@stream/index.browser";
 import type { ICollector, IDuplex, IReadable, ITransform, IWritable } from "@stream/types";
 
-type NodeRuntime = typeof NodeRuntimeModule;
-type BrowserRuntime = typeof BrowserRuntimeModule;
+type NodeRuntime = typeof NodeStreams;
+type BrowserRuntime = typeof BrowserStreams;
 
 type ClassKeys<T> = {
   [K in keyof T]-?: T[K] extends abstract new (...args: any[]) => any ? K : never;
@@ -65,8 +53,12 @@ type BrowserRuntimeNonClass = Pick<BrowserRuntime, NonClassKeys<BrowserRuntime>>
 // classes and browser wrapper classes are not expected to be structurally equal.
 // ============================================================================
 
-type _ExportedTypesPipelineOptions = Assert<IsEqual<NodePipelineOptions, BrowserPipelineOptions>>;
-type _ExportedTypesFinishedOptions = Assert<IsEqual<NodeFinishedOptions, BrowserFinishedOptions>>;
+type _ExportedTypesPipelineOptions = Assert<
+  IsEqual<NodeStreams.PipelineOptions, BrowserStreams.PipelineOptions>
+>;
+type _ExportedTypesFinishedOptions = Assert<
+  IsEqual<NodeStreams.FinishedOptions, BrowserStreams.FinishedOptions>
+>;
 
 type _ClassExportNames_NodeExtra = Assert<
   IsNever<Exclude<ClassKeys<NodeRuntime>, ClassKeys<BrowserRuntime>>>

@@ -277,8 +277,8 @@ class StreamBuf extends EventEmitter {
    */
   async write(
     data: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView,
-    encoding?: TextEncoding | Function,
-    callback?: Function
+    encoding?: TextEncoding | ((...args: any[]) => any),
+    callback?: (...args: any[]) => any
   ): Promise<boolean> {
     if (typeof encoding === "function") {
       callback = encoding;
@@ -386,7 +386,7 @@ class StreamBuf extends EventEmitter {
   /**
    * End the stream
    */
-  end(chunk?: any, encoding?: TextEncoding, callback?: Function): void {
+  end(chunk?: any, encoding?: TextEncoding, callback?: (...args: any[]) => any): void {
     const writeComplete = (error?: Error) => {
       if (error) {
         callback?.(error);
@@ -492,7 +492,9 @@ class StreamBuf extends EventEmitter {
   /**
    * Pipe to a writable stream
    */
-  pipe<T extends { write: Function; end?: Function }>(destination: T): T {
+  pipe<T extends { write: (...args: any[]) => any; end?: (...args: any[]) => any }>(
+    destination: T
+  ): T {
     this.pipes.push(destination);
     if (!this.paused && this.buffers.length) {
       this.end();

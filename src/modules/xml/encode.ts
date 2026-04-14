@@ -215,7 +215,7 @@ export function xmlEncodeAttr(value: string): string {
  * This is a fast security check to prevent markup injection via names,
  * not a full XML NameChar validation (which would require Unicode tables).
  */
-const INVALID_NAME_CHARS = /[\s<>"'\/=&]/;
+const INVALID_NAME_CHARS = /[\s<>"'/=&]/;
 
 /**
  * Validate an XML element or attribute name against injection attacks.

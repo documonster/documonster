@@ -383,7 +383,7 @@ class Table {
             ...formulaValue,
             formula: shouldQualify
               ? formulaValue.formula.replace(
-                  /(^|[^A-Za-z0-9_])\[@\[?([^\[\]]+?)\]?\]/g,
+                  /(^|[^A-Za-z0-9_])\[@\[?([^[\]]+?)\]?\]/g,
                   `$1${table.name}[[#This Row],[$2]]`
                 )
               : formulaValue.formula

@@ -23,22 +23,20 @@
         ],
         "no-sparse-arrays": 0,
         "no-unsafe-finally": 2,
-        "no-useless-escape": 0,
-        "no-empty": 0,
-        "no-case-declarations": 0,
-        "no-async-promise-executor": 0,
+        "no-useless-escape": 2,
+        "no-empty": 2,
+        "no-case-declarations": 2,
+        "no-async-promise-executor": 2,
         "curly": ["error", "all"],
-        // Wait to enable
-        "no-return-assign": 0,
+        "no-return-assign": 2,
         "no-unneeded-ternary": 2,
         "yoda": 2,
 
         "typescript/no-explicit-any": 0,
-        "typescript/no-duplicate-enum-values": 0,
-        "typescript/ban-ts-comment": 0,
-        "typescript/ban-types": 0,
-        "typescript/no-unsafe-function-type": 0,
-        "typescript/no-unused-expressions": 0,
+        "typescript/no-duplicate-enum-values": 2,
+        "typescript/ban-ts-comment": 2,
+        "typescript/no-unsafe-function-type": 2,
+        "typescript/no-unused-expressions": 2,
         "typescript/no-empty-interface": 2,
         "typescript/no-non-null-asserted-optional-chain": 2,
         "typescript/no-empty-object-type": 2,
@@ -46,21 +44,19 @@
         "typescript/consistent-type-exports": 2,
         "typescript/no-require-imports": "error",
 
-        // Type-aware rules (via tsgolint)
         "typescript/await-thenable": "error",
         "typescript/no-redundant-type-constituents": "error",
-        // Wait to enable, too many hits
         "typescript/no-floating-promises": 0,
         "typescript/no-base-to-string": 0,
         "typescript/unbound-method": 0,
         "typescript/restrict-template-expressions": 0,
-        "typescript/no-duplicate-type-constituents": 0,
-        "typescript/no-array-delete": 0,
-        "typescript/no-implied-eval": 0,
-        "typescript/require-array-sort-compare": 0,
+        "typescript/no-duplicate-type-constituents": 2,
+        "typescript/no-array-delete": 2,
+        "typescript/no-implied-eval": 2,
+        "typescript/require-array-sort-compare": 2,
 
-        "import/no-cycle": [2, { "ignoreExternal": true }]
-        // "import/no-duplicates": "error"
+        "import/no-cycle": [2, { "ignoreExternal": true }],
+        "import/no-duplicates": "error"
       }
     }
   ]

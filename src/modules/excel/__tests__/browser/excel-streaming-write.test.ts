@@ -53,7 +53,7 @@ describe("Real Excel Streaming Write - Browser", () => {
       let xml = "";
       const end = Math.min(totalRows, i + rowsPerChunk);
       for (let r = i; r < end; r++) {
-        xml += `<row r=\"${r}\"><c r=\"A${r}\"><v>Row ${r} data content</v></c></row>\n`;
+        xml += `<row r="${r}"><c r="A${r}"><v>Row ${r} data content</v></c></row>\n`;
       }
       await writer.write(encoder.encode(xml));
 

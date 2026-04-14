@@ -117,7 +117,7 @@ class StyleXform extends BaseXform {
     }
     // used during sax parsing of xml to build font object
     switch (node.name) {
-      case "xf":
+      case "xf": {
         this.model = {
           numFmtId: parseInt(node.attributes.numFmtId, 10),
           fontId: parseInt(node.attributes.fontId, 10),
@@ -145,6 +145,7 @@ class StyleXform extends BaseXform {
           }
         }
         return true;
+      }
       case "alignment":
         this.parser = this.map.alignment;
         this.parser.parseOpen(node);

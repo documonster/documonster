@@ -1261,7 +1261,7 @@ class Workbook {
   }
 
   removeWorksheetEx(worksheet: Worksheet): void {
-    delete this._worksheets[worksheet.id];
+    this._worksheets[worksheet.id] = undefined!;
   }
 
   removeWorksheet(id: number | string): void {

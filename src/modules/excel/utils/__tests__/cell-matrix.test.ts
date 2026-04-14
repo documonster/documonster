@@ -74,7 +74,7 @@ describe("CellMatrix", () => {
     cm.getCell("Sheet1!A1");
     cm.getCell("Sheet1!B2");
 
-    const addresses = cm.map(c => c.address).sort();
+    const addresses = cm.map(c => c.address).sort((a, b) => a.localeCompare(b));
     expect(addresses).toEqual(["A1", "B2"]);
   });
 

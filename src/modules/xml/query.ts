@@ -71,7 +71,7 @@ function parsePath(path: string): PathStep[] {
   return steps;
 }
 
-const STEP_RE = /^([^[]+)(?:\[@([\w:.\-]+)='([^']*)'\]|\[(\d+)\])?$/;
+const STEP_RE = /^([^[]+)(?:\[@([\w:.-]+)='([^']*)'\]|\[(\d+)\])?$/;
 
 function parseStep(raw: string, recursive: boolean): PathStep {
   const m = STEP_RE.exec(raw);

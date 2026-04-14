@@ -55,7 +55,8 @@ import type {
   WorksheetProtection,
   ConditionalFormattingOptions,
   AddImageRange,
-  WatermarkOptions
+  WatermarkOptions,
+  RowValues
 } from "@excel/types";
 
 // since prepare and render are functional, we can use singletons
@@ -557,11 +558,15 @@ class WorksheetWriter {
     return row;
   }
 
-  addRow(value: any[] | Record<string, any>): Row {
+  addRow(value: RowValues): Row {
     const row = new Row(this as any, this._nextRow);
     this._rows![row.number - this._rowZero + this._rowOffset] = row;
     row.values = value;
     return row;
+  }
+
+  addRows(values: RowValues[]): Row[] {
+    return values.map(value => this.addRow(value));
   }
 
   // ================================================================================
