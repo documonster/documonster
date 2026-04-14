@@ -68,6 +68,9 @@ importers:
       oxfmt:
         specifier: ^0.45.0
         version: 0.45.0
+      oxlint:
+        specifier: ^1.60.0
+        version: 1.60.0(oxlint-tsgolint@0.20.0)
       oxlint-tsgolint:
         specifier: latest
         version: 0.20.0

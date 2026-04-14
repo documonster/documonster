@@ -1,4 +1,15 @@
 {
   "version": "0.2",
-  "words": ["autodrain", "cjnoname", "excelts", "fflate", "oxlint", "tsgo", "Vitest"]
+  "words": [
+    "autodrain",
+    "cjnoname",
+    "excelts",
+    "fflate",
+    "oxfmt",
+    "oxlint",
+    "rspack",
+    "tsgo",
+    "tsgolint",
+    "Vitest"
+  ]
 }
