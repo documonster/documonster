@@ -7,6 +7,7 @@
 
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+
 import type { ZipEntryOptions } from "./index";
 
 // =============================================================================

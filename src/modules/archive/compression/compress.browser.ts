@@ -12,7 +12,6 @@
  * to prevent UI blocking for large files.
  */
 
-import { concatUint8Arrays } from "@utils/binary";
 import {
   type CompressOptions,
   compressWithStream,
@@ -48,20 +47,21 @@ import {
   readZlibTrailer,
   verifyAdler32
 } from "@archive/compression/compress.base";
+import { crc32 } from "@archive/compression/crc32.browser";
 import {
   inflateRaw,
   deflateRawCompressed,
   deflateRawStore
 } from "@archive/compression/deflate-fallback";
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
-import { createAbortError, isAbortError, throwIfAborted } from "@archive/shared/errors";
 import {
   deflateWithPool,
   inflateWithPool,
   hasWorkerSupport
 } from "@archive/compression/worker-pool/index.browser";
-import { crc32 } from "@archive/compression/crc32.browser";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { createAbortError, isAbortError, throwIfAborted } from "@archive/shared/errors";
 import { readUint32LE } from "@archive/zip-spec/binary";
+import { concatUint8Arrays } from "@utils/binary";
 
 // Re-export shared types and GZIP utilities
 export { type CompressOptions };

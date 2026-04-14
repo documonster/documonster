@@ -1,3 +1,8 @@
+import { Workbook } from "@excel/workbook";
+import { PdfError, PdfStructureError } from "@pdf/errors";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { pdf } from "@pdf/pdf";
+import { readPdf } from "@pdf/reader/pdf-reader";
 /**
  * Tests for PDF APIs: pdf, excelToPdf, readPdf.
  *
@@ -5,11 +10,7 @@
  * and roundtrip (write → read) integrity.
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { pdf } from "@pdf/pdf";
-import { excelToPdf } from "@pdf/excel-bridge";
-import { readPdf } from "@pdf/reader/pdf-reader";
-import { PdfError, PdfStructureError } from "@pdf/errors";
+
 import { pdfToString, expectValidPdf } from "./test-helpers";
 
 // =============================================================================

@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
 import { createReadStream } from "fs";
 import { join } from "path";
+
+import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.base";
 import { createParse, type ZipEntry } from "@archive/unzip/stream";
 import { createZipSync } from "@archive/zip/zip-bytes";
-import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.base";
+import { describe, it, expect } from "vitest";
 
 // Path to test xlsx file (xlsx files are zip archives)
 const testFilePath = join(__dirname, "./data/formulas.xlsx");

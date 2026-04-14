@@ -9,10 +9,11 @@
  * with filesystem-specific features (filename input + temp-file buffering).
  */
 
-import { Readable } from "@stream";
-import { EventEmitter } from "@utils/event-emitter";
 import { createParse } from "@archive/unzip/stream";
 import { ExcelFileError } from "@excel/errors";
+import { HyperlinkReader, type Hyperlink } from "@excel/stream/hyperlink-reader";
+import { WorksheetReader } from "@excel/stream/worksheet-reader";
+import type { WorksheetState, Font, WorkbookProperties } from "@excel/types";
 import { iterateStream } from "@excel/utils/iterate-stream";
 import {
   getWorksheetNoFromWorksheetPath,
@@ -21,16 +22,14 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { SaxParser, saxStream } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
-import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import type { WorksheetState, Font, WorkbookProperties } from "@excel/types";
-
+import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
+import { Readable } from "@stream";
+import { EventEmitter } from "@utils/event-emitter";
 import { decodeOoxmlEscape } from "@utils/utils";
-import { WorksheetReader } from "@excel/stream/worksheet-reader";
-import { HyperlinkReader, type Hyperlink } from "@excel/stream/hyperlink-reader";
+import { SaxParser, saxStream } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
 
 // ============================================================================
 // Types

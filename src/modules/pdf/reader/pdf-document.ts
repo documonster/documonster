@@ -11,7 +11,7 @@
  * @see PDF Reference 1.7, §3.4 - File Structure
  */
 
-import { PdfTokenizer, TokenType } from "./pdf-tokenizer";
+import { PdfStructureError } from "../errors";
 import {
   parseObject,
   isPdfDict,
@@ -25,8 +25,8 @@ import {
   decodePdfStringBytes
 } from "./pdf-parser";
 import type { PdfObject, PdfDictValue, PdfRef, PdfStream } from "./pdf-parser";
+import { PdfTokenizer, TokenType } from "./pdf-tokenizer";
 import { decodeStreamFilters } from "./stream-filters";
-import { PdfStructureError } from "../errors";
 
 // =============================================================================
 // Module-level cached TextEncoder

@@ -1,3 +1,7 @@
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+
 /**
  * End-to-end test for OOXML _xHHHH_ escape decoding in table column headers.
  *
@@ -9,10 +13,8 @@
  * into both `table.columns[].name` and the cell value visible to the user.
  */
 import { describe, it, expect } from "vitest";
+
 import { Workbook } from "../../../index";
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

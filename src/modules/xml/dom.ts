@@ -9,8 +9,10 @@
  * This is intended for small-to-medium XML where tree access is convenient.
  */
 
-import { SaxParser } from "@xml/sax";
+import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
+import { SaxParser } from "@xml/sax";
+import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 import type {
   ToPlainObjectOptions,
   XmlCData,
@@ -22,7 +24,6 @@ import type {
   XmlProcessingInstruction,
   XmlText
 } from "@xml/types";
-import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 
 // =============================================================================
 // Security
@@ -198,7 +199,7 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
   parser.close();
 
   if (error) {
-    throw error;
+    throw toError(error);
   }
 
   // Extract the real root from the synthetic container

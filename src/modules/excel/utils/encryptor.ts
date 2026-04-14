@@ -2,9 +2,9 @@
  * Node.js Encryptor — uses shared crypto primitives from `@utils/crypto`.
  */
 
+import { concatUint8Arrays } from "@utils/binary";
 import { hash, randomBytes } from "@utils/crypto";
 import { base64ToUint8Array, uint8ArrayToBase64, stringToUtf16Le } from "@utils/utils.base";
-import { concatUint8Arrays } from "@utils/binary";
 
 function uint32ToLe(num: number): Uint8Array {
   const arr = new Uint8Array(4);

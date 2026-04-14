@@ -6,6 +6,7 @@
  */
 
 import { describe } from "vitest";
+
 import { runInternalTypeGuardsTests } from "./internal-type-guards.shared";
 
 describe("internal/type-guards (Node)", () => {

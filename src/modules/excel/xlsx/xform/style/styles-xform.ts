@@ -1,15 +1,15 @@
 import { Enums } from "@excel/enums";
-import { StdDocAttributes } from "@xml/writer";
 import { ExcelNotSupportedError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
-import { FontXform } from "@excel/xlsx/xform/style/font-xform";
-import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
+import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
+import { DxfXform } from "@excel/xlsx/xform/style/dxf-xform";
+import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
+import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
-import { DxfXform } from "@excel/xlsx/xform/style/dxf-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
 const NUMFMT_BASE = 164;

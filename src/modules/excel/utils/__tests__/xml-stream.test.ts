@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { XmlWriter, StdDocAttributes } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 describe("XmlWriter", () => {
   it("Writes simple XML doc", () => {

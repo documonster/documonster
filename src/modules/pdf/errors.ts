@@ -2,17 +2,13 @@
  * PDF module error types.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 /**
  * Base class for all PDF-related errors.
  */
 export class PdfError extends BaseError {
   override name = "PdfError";
-
-  constructor(message: string, options?: BaseErrorOptions) {
-    super(message, options);
-  }
 }
 
 /**

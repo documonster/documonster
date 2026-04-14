@@ -1,9 +1,9 @@
-import { fix } from "@excel/__tests__/shared/tools";
 import testValuesJson from "@excel/__tests__/shared/data/sheet-values.json" with { type: "json" };
+import { fix } from "@excel/__tests__/shared/tools";
 const testValues = fix(testValuesJson);
-import { dateToExcel } from "@utils/utils";
 import { ValueType } from "@excel/enums";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
+import { dateToExcel } from "@utils/utils";
 
 function fillFormula(f: any) {
   return Object.assign({ formula: undefined }, f);
@@ -17,9 +17,9 @@ const streamedValues = {
   F1: { sharedString: 1 },
   G1: { sharedString: 2 }
 };
-import stylesJson from "@excel/__tests__/shared/data/styles.json" with { type: "json" };
-import propertiesJson from "@excel/__tests__/shared/data/sheet-properties.json" with { type: "json" };
 import pageSetupJson from "@excel/__tests__/shared/data/page-setup.json" with { type: "json" };
+import propertiesJson from "@excel/__tests__/shared/data/sheet-properties.json" with { type: "json" };
+import stylesJson from "@excel/__tests__/shared/data/styles.json" with { type: "json" };
 
 const testWorkbookReader = {
   testValues: fix(testValuesJson),

@@ -1,7 +1,7 @@
-import { StdDocAttributes } from "@xml/writer";
+import { XmlParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RelationshipXform } from "@excel/xlsx/xform/core/relationship-xform";
-import { XmlParseError } from "@excel/errors";
+import { StdDocAttributes } from "@xml/writer";
 
 class RelationshipsXform extends BaseXform {
   declare public parser: any;

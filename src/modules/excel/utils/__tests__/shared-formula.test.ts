@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { slideFormula } from "@excel/utils/shared-formula";
+import { describe, it, expect } from "vitest";
 
 describe("shared-formula", () => {
   describe("slideFormula", () => {

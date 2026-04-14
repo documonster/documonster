@@ -1,11 +1,4 @@
-import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { ZipDeflateFile } from "@archive/zip/stream";
-import { createZip, createZipSync } from "@archive/zip/zip-bytes";
+import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import {
   toAsyncIterable,
@@ -15,9 +8,17 @@ import {
   isInMemoryArchiveSource,
   type ArchiveSource
 } from "@archive/io/archive-source";
+import { ByteQueue } from "@archive/shared/byte-queue";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/shared/defaults";
 import { throwIfAborted } from "@archive/shared/errors";
-import { createZipOperation } from "./zip-output-pipeline";
-import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
+import type { ArchiveFormat } from "@archive/shared/types";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import {
   buildDataDescriptor,
   FLAG_DATA_DESCRIPTOR,
@@ -26,20 +27,20 @@ import {
   writeLocalFileHeaderInto,
   type Zip64Mode
 } from "@archive/zip-spec/zip-records";
-import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
-import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
-import type { ArchiveFormat } from "@archive/shared/types";
-import { isNode } from "@utils/env";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
+import { ZipDeflateFile } from "@archive/zip/stream";
 import {
   measureCentralDirectoryAndEocd,
   writeCentralDirectoryAndEocdInto,
   type ZipCentralDirectoryEntryInput
 } from "@archive/zip/writer-core";
+import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
-import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
+import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
+import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
+import { isNode } from "@utils/env";
+
+import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
+import { createZipOperation } from "./zip-output-pipeline";
 
 /** Archive options */
 export interface ZipOptions {
@@ -475,7 +476,7 @@ export class ZipArchive {
     const canUseBrowserFastPath =
       !isNode() &&
       hasBlobSource &&
-      this._options.smartStore === false &&
+      !this._options.smartStore &&
       this._options.zip64 !== true &&
       typeof CompressionStream !== "undefined";
 

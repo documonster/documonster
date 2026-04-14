@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { createZip } from "@archive/zip/zip-bytes";
+import type { ZipStringCodec } from "@archive/shared/text";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import type { ZipStringCodec } from "@archive/shared/text";
+import { createZip } from "@archive/zip/zip-bytes";
+import { describe, it, expect } from "vitest";
 
 /**
  * Creates a simple custom codec for testing purposes.

@@ -1,6 +1,6 @@
 import conditionalFormattingJson from "@excel/__tests__/shared/data/conditional-formatting.json" with { type: "json" };
-import { expect } from "vitest";
 import { fix } from "@excel/__tests__/shared/tools";
+import { expect } from "vitest";
 
 const self = {
   conditionalFormattings: fix(conditionalFormattingJson),

@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-
+import { ZipArchive } from "@archive";
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
-import { ZipArchive } from "@archive";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import { describe, it, expect } from "vitest";
+
 import { Workbook } from "../../../../index";
 
 const textDecoder = new TextDecoder();

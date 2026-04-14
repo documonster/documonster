@@ -17,9 +17,9 @@ import {
   type Gunzip,
   type Inflate
 } from "zlib";
-import { Transform, type TransformCallback } from "@stream";
 
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { Transform, type TransformCallback } from "@stream";
 
 export type {
   DeflateStream,

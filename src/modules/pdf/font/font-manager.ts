@@ -16,16 +16,16 @@
  */
 
 import { PdfDict, pdfName, pdfRef } from "../core/pdf-object";
+import type { PdfWriter } from "../core/pdf-writer";
 import { PdfFontError } from "../errors";
+import { embedTtfFont, type EmbeddedFont } from "./font-embedder";
 import {
   measureText as measureType1Text,
   getFontAscent as getType1Ascent,
   getFontDescent as getType1Descent,
   getLineHeight as getType1LineHeight
 } from "./metrics";
-import type { PdfWriter } from "../core/pdf-writer";
 import type { TtfFont } from "./ttf-parser";
-import { embedTtfFont, type EmbeddedFont } from "./font-embedder";
 
 // =============================================================================
 // Font Name Mapping (Type1 fallback)

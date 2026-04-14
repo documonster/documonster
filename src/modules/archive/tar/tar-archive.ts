@@ -5,16 +5,17 @@
  * as ZipArchive and ZipReader, allowing seamless format switching.
  */
 
+import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { toAsyncIterable, toUint8Array, isInMemoryArchiveSource } from "@archive/io/archive-source";
-import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import { createLinkedAbortController } from "@archive/shared/errors";
-import { concatUint8Arrays, textEncoder, getTextDecoder } from "@utils/binary";
 import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
 } from "@archive/shared/progress";
+import { concatUint8Arrays, textEncoder, getTextDecoder } from "@utils/binary";
+
 import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE, type TarType } from "./tar-constants";
 import { type TarEntryInfo, isDataEntry, isDirectory } from "./tar-entry-info";
 import {

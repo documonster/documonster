@@ -1,7 +1,3 @@
-/**
- * Tests for PDF low-level object serialization.
- */
-import { describe, it, expect } from "vitest";
 import {
   pdfString,
   pdfHexString,
@@ -13,6 +9,10 @@ import {
   pdfDate,
   PdfDict
 } from "@pdf/core/pdf-object";
+/**
+ * Tests for PDF low-level object serialization.
+ */
+import { describe, it, expect } from "vitest";
 
 describe("PDF Object Primitives", () => {
   describe("pdfString", () => {

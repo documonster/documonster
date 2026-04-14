@@ -1,3 +1,5 @@
+import { pdf } from "@pdf/pdf";
+import type { PdfExportOptions, PdfTextWatermark, PdfImageWatermark } from "@pdf/types";
 /**
  * Tests for PDF watermark feature.
  *
@@ -9,9 +11,8 @@
  * - Watermark combined with other features (grid lines, page numbers)
  */
 import { describe, it, expect } from "vitest";
-import { pdf } from "@pdf/pdf";
+
 import { pdfToString, expectValidPdf } from "./test-helpers";
-import type { PdfExportOptions, PdfTextWatermark, PdfImageWatermark } from "@pdf/types";
 
 // A tiny valid 1x1 red PNG for image watermark tests
 const TINY_PNG = new Uint8Array([

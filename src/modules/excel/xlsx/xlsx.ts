@@ -14,11 +14,12 @@
  * - addMedia: Supports buffer, base64, and filename (via readFileAsync)
  */
 
-import { fileExists, readFileBytes, createReadStream, createWriteStream } from "@utils/fs";
-import { XLSX as XLSXBase } from "@excel/xlsx/xlsx.browser";
-import { ExcelFileError } from "@excel/errors";
 import { Parse, type ZipEntry } from "@archive/unzip/stream";
+import { ExcelFileError } from "@excel/errors";
+import { XLSX as XLSXBase } from "@excel/xlsx/xlsx.browser";
 import { Writable, pipeline } from "@stream";
+import { toError } from "@utils/errors";
+import { fileExists, readFileBytes, createReadStream, createWriteStream } from "@utils/fs";
 
 class XLSX extends XLSXBase {
   constructor(workbook: any) {
@@ -57,7 +58,7 @@ class XLSX extends XLSXBase {
 
     while (!done || head < queue.length) {
       if (error) {
-        throw error;
+        throw toError(error);
       }
       if (head < queue.length) {
         const entry = queue[head++]!;

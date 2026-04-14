@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { Enums } from "@excel/enums";
 import { extractAll } from "@archive/unzip/extract";
-import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { testUtils } from "@excel/__tests__/shared";
+import { Enums } from "@excel/enums";
+import { Workbook } from "@excel/workbook";
+import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
+import { describe, it, expect } from "vitest";
 
 describe("Checkbox Feature", () => {
   describe("Cell checkbox value", () => {

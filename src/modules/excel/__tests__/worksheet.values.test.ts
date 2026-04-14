@@ -1,9 +1,10 @@
 import fs from "node:fs";
 
-import { describe, it, expect } from "vitest";
-import { Workbook } from "../../../index";
 import { Enums } from "@excel/enums";
 import { getUniqueTestFilePath } from "@test/utils";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 describe("Worksheet", () => {
   describe("Values", () => {

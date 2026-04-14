@@ -2,17 +2,16 @@
  * Browser Stream - Transform
  */
 
-import type { DuplexStreamOptions, IDuplex, WritableLike } from "@stream/types";
-import { EventEmitter } from "@utils/event-emitter";
-import { createAbortError } from "@utils/errors";
 import { parseEndArgs } from "@stream/common/end-args";
-
-import { Readable } from "./readable";
-import { Writable } from "./writable";
-import { createListenerRegistry } from "./helpers";
-import { deferTask, inDeferredContext } from "./microtask-context";
+import type { DuplexStreamOptions, IDuplex, WritableLike } from "@stream/types";
+import { createAbortError, toError } from "@utils/errors";
+import { EventEmitter } from "@utils/event-emitter";
 
 import { Duplex } from "./duplex";
+import { createListenerRegistry } from "./helpers";
+import { deferTask, inDeferredContext } from "./microtask-context";
+import { Readable } from "./readable";
+import { Writable } from "./writable";
 
 // =============================================================================
 // Transform Stream Wrapper
@@ -619,7 +618,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
       if (syncDone) {
         if (syncErr) {
-          throw syncErr;
+          throw toError(syncErr);
         }
         if (syncData !== undefined) {
           this.push(syncData);
@@ -669,7 +668,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
       if (syncDone) {
         if (syncErr) {
-          throw syncErr;
+          throw toError(syncErr);
         }
         if (syncData !== undefined) {
           this.push(syncData);
@@ -739,7 +738,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     if (syncDone) {
       // Callback was called synchronously — ignore return value (Node.js behavior).
       if (syncErr) {
-        throw syncErr;
+        throw toError(syncErr);
       }
       if (syncData !== undefined) {
         this.push(syncData);

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import { unzip, zip } from "@archive";
 import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.base";
 import { Readable } from "@stream";
+import { describe, it, expect } from "vitest";
 
 describe("parse threshold optimization (browser)", () => {
   it("should have default threshold of 5MB", () => {

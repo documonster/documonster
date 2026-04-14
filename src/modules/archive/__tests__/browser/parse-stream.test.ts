@@ -5,9 +5,9 @@
  * These tests verify that entry.buffer() works correctly.
  */
 
-import { describe, it, expect } from "vitest";
 import { zip } from "@archive";
 import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
+import { describe, it, expect } from "vitest";
 
 describe("parse.browser - createParse streaming", () => {
   // Helper to create a test ZIP with known content

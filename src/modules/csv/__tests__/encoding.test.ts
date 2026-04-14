@@ -11,9 +11,10 @@
  * - Roundtrip encoding preservation
  */
 
-import { describe, it, expect } from "vitest";
 import { parseCsv, formatCsv, stripBom, detectLinebreak } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
+import { describe, it, expect } from "vitest";
+
 import { parseStreamCsv } from "./csv-test-utils";
 
 // =============================================================================

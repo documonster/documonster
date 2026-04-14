@@ -2,6 +2,13 @@
  * Browser Stream - Utilities
  */
 
+import { createAddAbortSignal } from "@stream/common/add-abort-signal";
+import { toStreamBytes } from "@stream/common/binary-chunk";
+import { createConsumers } from "@stream/common/consumers";
+import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
+import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { UnsupportedStreamTypeError } from "@stream/errors";
+import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
 import type {
   IDuplex,
   ITransform,
@@ -9,21 +16,14 @@ import type {
   WritableLike,
   DuplexStreamOptions
 } from "@stream/types";
-import { UnsupportedStreamTypeError } from "@stream/errors";
 import { concatUint8Arrays, createTextDecoder } from "@utils/binary";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
-import { createConsumers } from "@stream/common/consumers";
-import { createAddAbortSignal } from "@stream/common/add-abort-signal";
-import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
-import { toStreamBytes } from "@stream/common/binary-chunk";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
 
-import { Readable } from "./readable";
-import { Writable } from "./writable";
-import { Transform } from "./transform";
 import { Duplex } from "./duplex";
 import { removeEmitterListener, addEmitterListener } from "./helpers";
 import { pipeline, finished } from "./pipeline";
+import { Readable } from "./readable";
+import { Transform } from "./transform";
+import { Writable } from "./writable";
 
 // =============================================================================
 // Utility Functions

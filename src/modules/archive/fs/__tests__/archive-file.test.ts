@@ -3,12 +3,14 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ArchiveFile } from "../archive-file.js";
-import type { ZipEntry } from "@archive/zip/zip-bytes";
+import * as path from "node:path";
+
 import { S_IFLNK, ZIP_OS_UNIX } from "@archive/zip-spec/zip-records";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+import { ArchiveFile } from "../archive-file.js";
 
 describe("ArchiveFile", () => {
   let testDir: string;

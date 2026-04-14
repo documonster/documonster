@@ -1,10 +1,10 @@
-import { fix } from "@excel/__tests__/shared/tools";
-import { ValueType } from "@excel/enums";
+import headerFooterJson from "@excel/__tests__/shared/data/header-footer.json" with { type: "json" };
+import pageSetupJson from "@excel/__tests__/shared/data/page-setup.json" with { type: "json" };
+import propertiesJson from "@excel/__tests__/shared/data/sheet-properties.json" with { type: "json" };
 import testValuesJson from "@excel/__tests__/shared/data/sheet-values.json" with { type: "json" };
 import stylesJson from "@excel/__tests__/shared/data/styles.json" with { type: "json" };
-import propertiesJson from "@excel/__tests__/shared/data/sheet-properties.json" with { type: "json" };
-import pageSetupJson from "@excel/__tests__/shared/data/page-setup.json" with { type: "json" };
-import headerFooterJson from "@excel/__tests__/shared/data/header-footer.json" with { type: "json" };
+import { fix } from "@excel/__tests__/shared/tools";
+import { ValueType } from "@excel/enums";
 
 const testValues = fix(testValuesJson);
 const styles = fix(stylesJson);

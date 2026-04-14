@@ -8,12 +8,11 @@
  * runStreamingZipTests() with your platform's imports.
  */
 
-import { describe, it, expect } from "vitest";
-import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
-import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { findSignatureFromEnd, hasSignature } from "@archive/__tests__/zip/zip-test-utils";
 import type { ZipEncryptionMethod } from "@archive/crypto";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { concatUint8Arrays } from "@utils/binary";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import {
   CENTRAL_DIR_HEADER_SIG,
   DATA_DESCRIPTOR_SIG,
@@ -21,7 +20,8 @@ import {
   ZIP64_END_OF_CENTRAL_DIR_LOCATOR_SIG,
   ZIP64_END_OF_CENTRAL_DIR_SIG
 } from "@archive/zip-spec/zip-records";
-import { findSignatureFromEnd, hasSignature } from "@archive/__tests__/zip/zip-test-utils";
+import { concatUint8Arrays } from "@utils/binary";
+import { describe, it, expect } from "vitest";
 
 /**
  * Streaming ZIP module interface - must be provided by platform-specific test

@@ -1,6 +1,6 @@
-import { describe } from "vitest";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { CfRuleExtXform } from "@excel/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform";
+import { describe } from "vitest";
 
 const expectations = [
   {

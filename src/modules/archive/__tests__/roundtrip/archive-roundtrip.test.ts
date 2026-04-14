@@ -12,9 +12,9 @@
  * - Performance: many small files, large files
  */
 
-import { describe, it, expect } from "vitest";
 import { zip, unzip, TarArchive, parseTar, TarReader, TAR_TYPE } from "@archive";
 import { concatUint8Arrays } from "@utils/binary";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Types & Constants

@@ -1,48 +1,27 @@
-import { RelType } from "@excel/xlsx/rel-type";
-import { colCache } from "@excel/utils/col-cache";
-import { ExcelStreamStateError, MergeConflictError, RowOutOfBoundsError } from "@excel/errors";
-import { Dimensions } from "@excel/range";
-import { StringBuf } from "@excel/utils/string-buf";
-import { Row } from "@excel/row";
+import { Anchor } from "@excel/anchor";
 import type { Cell } from "@excel/cell";
 import { Column } from "@excel/column";
-import { buildSheetProtection } from "@excel/utils/sheet-protection";
-import { Anchor } from "@excel/anchor";
-import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
-import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
 import { DataValidations } from "@excel/data-validations";
+import { ExcelStreamStateError, MergeConflictError, RowOutOfBoundsError } from "@excel/errors";
+import { Dimensions } from "@excel/range";
+import { Row } from "@excel/row";
+import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
+import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
+import { colCache } from "@excel/utils/col-cache";
+import { buildDrawingAnchorsAndRels } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import type { StreamBuf } from "@excel/utils/stream-buf";
 import {
   drawingRelTargetFromWorksheet,
   mediaRelTargetFromRels,
   worksheetPath
 } from "@excel/utils/ooxml-paths";
-import { buildDrawingAnchorsAndRels } from "@excel/utils/drawing-utils";
+import { buildSheetProtection } from "@excel/utils/sheet-protection";
+import type { StreamBuf } from "@excel/utils/stream-buf";
+import { StringBuf } from "@excel/utils/string-buf";
+import { RelType } from "@excel/xlsx/rel-type";
 
 const xmlBuffer = /* @__PURE__ */ new StringBuf();
 
-// ============================================================================================
-// Xforms
-import { ListXform } from "@excel/xlsx/xform/list-xform";
-import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
-import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-xform";
-import { SheetFormatPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-format-properties-xform";
-import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
-import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
-import { HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
-import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
-import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
-import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
-import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
-import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
-import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
-import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
-import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
-import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
-import { RowBreaksXform } from "@excel/xlsx/xform/sheet/row-breaks-xform";
-import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
-import { DrawingXform as DrawingPartXform } from "@excel/xlsx/xform/sheet/drawing-xform";
 import type {
   RowBreak,
   ColBreak,
@@ -58,6 +37,27 @@ import type {
   WatermarkOptions,
   RowValues
 } from "@excel/types";
+// ============================================================================================
+// Xforms
+import { ListXform } from "@excel/xlsx/xform/list-xform";
+import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
+import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
+import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
+import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
+import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
+import { DrawingXform as DrawingPartXform } from "@excel/xlsx/xform/sheet/drawing-xform";
+import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
+import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
+import { HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
+import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
+import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
+import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
+import { RowBreaksXform } from "@excel/xlsx/xform/sheet/row-breaks-xform";
+import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
+import { SheetFormatPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-format-properties-xform";
+import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-xform";
+import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
+import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
 
 // since prepare and render are functional, we can use singletons
 const xform = {

@@ -1,8 +1,3 @@
-import type { XmlSink } from "@xml/types";
-import { StdDocAttributes } from "@xml/writer";
-import { colCache } from "@excel/utils/col-cache";
-
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type {
   CacheField,
   DataField,
@@ -10,10 +5,14 @@ import type {
   SharedItemValue
 } from "@excel/pivot-table";
 import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/pivot-table";
+import { colCache } from "@excel/utils/col-cache";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
   RawXmlCollector,
   serializeAttributes
 } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
+import type { XmlSink } from "@xml/types";
+import { StdDocAttributes } from "@xml/writer";
 
 /** OOXML sentinel field index meaning "data values" pseudo-field (used in pivotArea references) */
 const FIELD_INDEX_DATA_VALUES = 4294967294; // 0xFFFFFFFE

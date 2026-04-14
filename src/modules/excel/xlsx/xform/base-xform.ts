@@ -1,6 +1,7 @@
+import { toError } from "@utils/errors";
 import { SaxParser } from "@xml/sax";
-import { XmlWriter } from "@xml/writer";
 import type { XmlSink, SaxTag } from "@xml/types";
+import { XmlWriter } from "@xml/writer";
 
 /* 'virtual' methods used as a form of documentation */
 
@@ -271,7 +272,7 @@ class BaseXform<TModel = any> {
         typeof chunk === "string" ? chunk : decoder.decode(chunk as Uint8Array, { stream: true });
       parser.write(chunkStr);
       if (parseError) {
-        throw parseError;
+        throw toError(parseError);
       }
     }
 
@@ -281,13 +282,13 @@ class BaseXform<TModel = any> {
       if (trailing) {
         parser.write(trailing);
         if (parseError) {
-          throw parseError;
+          throw toError(parseError);
         }
       }
 
       parser.close();
       if (parseError) {
-        throw parseError;
+        throw toError(parseError);
       }
     }
 

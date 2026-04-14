@@ -1,9 +1,9 @@
-import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BooleanXform } from "@excel/xlsx/xform/simple/boolean-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { UnderlineXform } from "@excel/xlsx/xform/style/underline-xform";
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 interface FontModel {
   bold?: boolean;

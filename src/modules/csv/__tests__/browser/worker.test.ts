@@ -4,7 +4,6 @@
  * Comprehensive tests for the CSV Web Worker implementation.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { parseCsv, formatCsv } from "@csv/index";
 import {
   CsvWorkerPool,
@@ -15,6 +14,7 @@ import {
   getDefaultWorkerPool,
   terminateDefaultWorkerPool
 } from "@csv/worker/index.browser";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 type ParseOptions = Parameters<typeof parseCsv>[1];
 type FormatOptions = Parameters<typeof formatCsv>[1];

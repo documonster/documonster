@@ -2,6 +2,8 @@
  * Browser Stream - Factory functions
  */
 
+import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,
   WritableStreamOptions,
@@ -16,15 +18,12 @@ import type {
   IPassThrough
 } from "@stream/types";
 
-import { Readable, pumpAsyncIterableToReadable } from "./readable";
-import { Writable } from "./writable";
-import { Transform } from "./transform";
+import { createCollector } from "./collector";
 import { Duplex } from "./duplex";
 import { PassThrough } from "./passthrough";
-import { createCollector } from "./collector";
-
-import { PullStream } from "@stream/pull-stream";
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { Readable, pumpAsyncIterableToReadable } from "./readable";
+import { Transform } from "./transform";
+import { Writable } from "./writable";
 
 // Re-export shared stream classes
 export { PullStream, BufferedStream, StringChunk, ByteChunk };

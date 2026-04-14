@@ -1,10 +1,7 @@
-import { Enums } from "@excel/enums";
-import { colCache } from "@excel/utils/col-cache";
 import { Cell, type CellModel, type CellAddress } from "@excel/cell";
-import { ExcelError } from "@excel/errors";
-import { copyStyle } from "@excel/utils/copy-style";
-import type { Worksheet } from "@excel/worksheet";
 import type { Column } from "@excel/column";
+import { Enums } from "@excel/enums";
+import { ExcelError } from "@excel/errors";
 import type {
   Style,
   NumFmt,
@@ -17,6 +14,9 @@ import type {
   RowValues,
   RowBreak
 } from "@excel/types";
+import { colCache } from "@excel/utils/col-cache";
+import { copyStyle } from "@excel/utils/copy-style";
+import type { Worksheet } from "@excel/worksheet";
 
 // Internal interface for row dimensions
 interface RowDimensions {

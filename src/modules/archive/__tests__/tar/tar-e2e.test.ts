@@ -5,9 +5,9 @@
  * Tests roundtrip functionality, long filenames, symlinks, and streaming.
  */
 
-import { describe, it, expect } from "vitest";
 import { TAR_BLOCK_SIZE, TAR_TYPE, TarArchive, tar, tarSync, parseTar, untar } from "@archive/tar";
 import { concatUint8Arrays } from "@utils/binary";
+import { describe, it, expect } from "vitest";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

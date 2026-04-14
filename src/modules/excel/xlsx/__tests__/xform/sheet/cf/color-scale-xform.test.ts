@@ -1,6 +1,6 @@
-import { describe } from "vitest";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";
+import { describe } from "vitest";
 
 const expectations = [
   {

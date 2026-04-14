@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { collectMergeBorders, applyMergeBorders } from "@excel/utils/merge-borders";
+import { describe, it, expect } from "vitest";
 
 /**
  * Minimal cell stub used by the utility functions.

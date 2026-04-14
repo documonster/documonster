@@ -1,9 +1,9 @@
-import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
 } from "@archive/shared/progress";
+import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 
 /**
  * Progress phase for ZIP creation operations.

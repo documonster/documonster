@@ -2,10 +2,10 @@
  * Browser Stream - Collector
  */
 
-import type { ICollector, WritableStreamOptions } from "@stream/types";
-import { StreamTypeError } from "@stream/errors";
-import { concatUint8Arrays, chunksToString } from "@utils/binary";
 import { toBinaryChunk } from "@stream/common/binary-chunk";
+import { StreamTypeError } from "@stream/errors";
+import type { ICollector, WritableStreamOptions } from "@stream/types";
+import { concatUint8Arrays, chunksToString } from "@utils/binary";
 
 import { Writable } from "./writable";
 

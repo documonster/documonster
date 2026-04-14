@@ -18,8 +18,8 @@
  * This is NOT a bug - it's how JavaScript's single-threaded event loop works with async streams.
  */
 
-import { describe, it, expect } from "vitest";
 import { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
+import { describe, it, expect } from "vitest";
 
 describe("Real Excel Streaming Write - Browser", () => {
   it("should test raw CompressionStream behavior in browser", async () => {

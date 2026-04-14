@@ -5,7 +5,6 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   StreamError,
   StreamStateError,
@@ -13,6 +12,7 @@ import {
   UnsupportedStreamTypeError
 } from "@stream/errors";
 import { BaseError } from "@utils/errors";
+import { describe, it, expect } from "vitest";
 
 export function runStreamErrorsTests(): void {
   // ===========================================================================

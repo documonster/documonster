@@ -25,26 +25,18 @@ import {
   isAesEncryption,
   getAesKeyStrength
 } from "@archive/crypto";
-import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
-import { DEFAULT_ZIP_LEVEL, DEFAULT_ZIP_TIMESTAMPS } from "@archive/shared/defaults";
 import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import {
-  buildZipEntryMetadata,
-  resolveZipCompressionMethod
-} from "@archive/zip/zip-entry-metadata";
-import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
-import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { DEFAULT_ZIP_LEVEL, DEFAULT_ZIP_TIMESTAMPS } from "@archive/shared/defaults";
+import { createAbortError, toError } from "@archive/shared/errors";
 import {
   encodeZipStringWithCodec,
   resolveZipStringCodec,
   type ZipStringCodec,
   type ZipStringEncoding
 } from "@archive/shared/text";
-import { isProbablyIncompressibleChunks } from "@archive/zip/compressibility";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { createAbortError, toError } from "@archive/shared/errors";
-import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
-import type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";
+import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
 import {
   buildDataDescriptor,
   buildDataDescriptorZip64,
@@ -62,6 +54,15 @@ import {
   isSymlinkMode,
   type Zip64Mode
 } from "@archive/zip-spec/zip-records";
+import { isProbablyIncompressibleChunks } from "@archive/zip/compressibility";
+import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
+import {
+  buildZipEntryMetadata,
+  resolveZipCompressionMethod
+} from "@archive/zip/zip-entry-metadata";
+
+import type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";
+import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
 
 export type { Zip64Mode } from "@archive/zip-spec/zip-records";
 export type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";

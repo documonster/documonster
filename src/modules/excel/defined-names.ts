@@ -1,7 +1,7 @@
-import { colCache, type DecodedRange } from "@excel/utils/col-cache";
-import { CellMatrix } from "@excel/utils/cell-matrix";
 import { Range } from "@excel/range";
 import type { Address } from "@excel/types";
+import { CellMatrix } from "@excel/utils/cell-matrix";
+import { colCache, type DecodedRange } from "@excel/utils/col-cache";
 
 const rangeRegexp = /[$](\w+)[$](\d+)(:[$](\w+)[$](\d+))?/;
 

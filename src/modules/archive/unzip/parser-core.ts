@@ -1,14 +1,14 @@
-import {
-  parseDosDateTimeUTC,
-  resolveZipLastModifiedDateFromUnixSeconds
-} from "@archive/zip-spec/timestamps";
+import { indexOfUint8ArrayPattern } from "@archive/shared/bytes";
+import type { ZipStringEncoding } from "@archive/shared/text";
 import {
   parseFormattedTyped as parseBuffer,
   readUint32LE,
   writeUint32LE
 } from "@archive/zip-spec/binary";
-import { indexOfUint8ArrayPattern } from "@archive/shared/bytes";
-import type { ZipStringEncoding } from "@archive/shared/text";
+import {
+  parseDosDateTimeUTC,
+  resolveZipLastModifiedDateFromUnixSeconds
+} from "@archive/zip-spec/timestamps";
 import {
   parseZipExtraFields,
   type ZipExtraFields,

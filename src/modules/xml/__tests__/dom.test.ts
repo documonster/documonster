@@ -1,4 +1,3 @@
-import { describe, it, expect } from "vitest";
 import {
   parseXml,
   findChild,
@@ -8,6 +7,7 @@ import {
   walk,
   toPlainObject
 } from "@xml/dom";
+import { describe, it, expect } from "vitest";
 
 describe("parseXml", () => {
   describe("basic parsing", () => {

@@ -13,9 +13,9 @@
  * - Backpressure handling
  */
 
-import { describe, it, expect } from "vitest";
-import { Readable, Writable, pipeline } from "@stream";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
+import { Readable, Writable, pipeline } from "@stream";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Basic Formatting

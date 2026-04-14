@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { getSupportedFormats, DateParser, DateFormatter } from "@utils/datetime";
+import { describe, it, expect } from "vitest";
 
 describe("datetime", () => {
   describe("DateParser", () => {

@@ -2,8 +2,8 @@
  * Shared helpers for parse-sax tests.
  */
 
-import { it, expect } from "vitest";
 import { SaxParser } from "@xml/sax";
+import { it, expect } from "vitest";
 
 export type EventTuple = ["opentag" | "closetag" | "text" | "error", any];
 

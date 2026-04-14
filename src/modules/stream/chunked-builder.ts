@@ -5,8 +5,8 @@
  * This file provides the same API but works in browser environments.
  */
 
-import { textEncoder } from "@utils/binary";
 import { StreamStateError } from "@stream/errors";
+import { textEncoder } from "@utils/binary";
 
 /**
  * Options for ChunkedBuilder

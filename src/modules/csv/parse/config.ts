@@ -5,8 +5,9 @@
  * normalized parsing configuration from user options.
  */
 
+import { DEFAULT_LINEBREAK_REGEX } from "../constants";
+import { CsvError } from "../errors";
 import type { CsvParseOptions } from "../types";
-import { createOnSkipHandler } from "./helpers";
 import {
   normalizeQuoteOption,
   normalizeEscapeOption,
@@ -14,8 +15,7 @@ import {
   detectLinebreak,
   stripBom
 } from "../utils/detect";
-import { DEFAULT_LINEBREAK_REGEX } from "../constants";
-import { CsvError } from "../errors";
+import { createOnSkipHandler } from "./helpers";
 import type { ScannerConfig } from "./scanner";
 
 // =============================================================================

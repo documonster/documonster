@@ -2,8 +2,8 @@
  * Tests for ZIP path normalization and joining utilities.
  */
 
-import { describe, it, expect } from "vitest";
 import { normalizeZipPath, joinZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { describe, it, expect } from "vitest";
 
 describe("zip-path", () => {
   describe("normalizeZipPath", () => {

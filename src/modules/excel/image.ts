@@ -1,6 +1,6 @@
-import { colCache } from "@excel/utils/col-cache";
 import { Anchor, type AnchorModel } from "@excel/anchor";
 import { ImageError } from "@excel/errors";
+import { colCache } from "@excel/utils/col-cache";
 import type { Worksheet } from "@excel/worksheet";
 
 interface ImageHyperlinks {

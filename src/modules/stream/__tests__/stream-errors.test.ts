@@ -6,6 +6,7 @@
  */
 
 import { describe } from "vitest";
+
 import { runStreamErrorsTests } from "./stream-errors.shared";
 
 describe("stream/errors (Node)", () => {

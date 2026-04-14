@@ -2,14 +2,15 @@
  * Browser Stream - Writable
  */
 
-import type { WritableStreamOptions, WritableLike } from "@stream/types";
-import { EventEmitter } from "@utils/event-emitter";
+import { stringToEncodedBytes } from "@stream/common/binary-chunk";
 import { parseEndArgs } from "@stream/common/end-args";
-import { StreamStateError } from "@stream/errors";
 import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { StreamStateError } from "@stream/errors";
+import type { WritableStreamOptions, WritableLike } from "@stream/types";
 import { decodeBytesToString } from "@utils/binary";
 import { createAbortError } from "@utils/errors";
-import { stringToEncodedBytes } from "@stream/common/binary-chunk";
+import { EventEmitter } from "@utils/event-emitter";
+
 import { deferTask, inDeferredContext } from "./microtask-context";
 import { Readable } from "./readable";
 

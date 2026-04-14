@@ -1,4 +1,3 @@
-import { describe, it, expect } from "vitest";
 import {
   decodeCol,
   encodeCol,
@@ -9,6 +8,7 @@ import {
   decodeRange,
   encodeRange
 } from "@excel/utils/address";
+import { describe, it, expect } from "vitest";
 
 describe("Address utilities", () => {
   // ===========================================================================

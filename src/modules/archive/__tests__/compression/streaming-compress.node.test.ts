@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { createDeflateStream } from "@archive/compression/streaming-compress";
+import { describe, it, expect } from "vitest";
 
 describe("streaming-compress (Node)", () => {
   it("createDeflateStream output should be inflateRaw compatible", async () => {

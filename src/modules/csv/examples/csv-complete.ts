@@ -18,9 +18,10 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Readable, pipeline } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
 import {
   parseCsv,
   parseCsvAsync,

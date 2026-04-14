@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Workbook } from "../../../index";
-import type { DataValidationWithFormulae } from "@excel/types";
 import fs from "fs";
 import path from "path";
+
+import type { DataValidationWithFormulae } from "@excel/types";
 import { testOutDir } from "@test/utils";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+import { Workbook } from "../../../index";
 
 describe("DataValidation Large Range Performance", () => {
   let tempDir: string;

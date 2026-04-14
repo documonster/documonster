@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
 import fs from "fs";
 import { promisify } from "util";
+
 import { testUtils } from "@excel/__tests__/shared";
-import { Workbook, WorkbookWriter } from "../../../../index";
 import type { NoteConfig } from "@excel/cell";
 import { makeTestDataPath, testFilePath } from "@test/utils";
+import { describe, it, expect } from "vitest";
+
+import { Workbook, WorkbookWriter } from "../../../../index";
 
 const streamTestDataPath = makeTestDataPath(import.meta.url, "./data");
 

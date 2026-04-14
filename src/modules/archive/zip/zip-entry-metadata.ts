@@ -11,16 +11,16 @@ import {
   type ZipTimestampMode
 } from "@archive/zip-spec/timestamps";
 import {
+  buildUnicodeCommentExtraField,
+  buildUnicodePathExtraField
+} from "@archive/zip-spec/zip-extra-fields";
+import {
   COMPRESSION_DEFLATE,
   COMPRESSION_STORE,
   FLAG_DATA_DESCRIPTOR,
   FLAG_UTF8,
   concatExtraFields
 } from "@archive/zip-spec/zip-records";
-import {
-  buildUnicodeCommentExtraField,
-  buildUnicodePathExtraField
-} from "@archive/zip-spec/zip-extra-fields";
 
 export interface ZipEntryMetadata {
   nameBytes: Uint8Array;

@@ -13,9 +13,9 @@
  * the batch parser (parse.ts) and the streaming parser (csv-stream.ts).
  */
 
-import { deduplicateHeadersWithRenames, type HeaderArray } from "../utils/row";
-import type { CsvRecordError, OnSkipCallback } from "../types";
 import { CsvError } from "../errors";
+import type { CsvRecordError, OnSkipCallback } from "../types";
+import { deduplicateHeadersWithRenames, type HeaderArray } from "../utils/row";
 
 // =============================================================================
 // Types
@@ -114,7 +114,7 @@ export function processHeaders(
     // Array: use provided headers, don't skip current row (it's data)
     rawHeaders = headers;
     skipCurrentRow = false;
-  } else if (headers === true) {
+  } else if (headers) {
     // true: use first row as headers, skip it
     rawHeaders = row;
     skipCurrentRow = true;

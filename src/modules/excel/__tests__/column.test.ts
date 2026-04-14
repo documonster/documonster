@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
 import { testUtils } from "@excel/__tests__/shared";
 import { Column } from "@excel/column";
+import { describe, it, expect } from "vitest";
+
 import { Workbook } from "../../../index";
 
 describe("Column", () => {

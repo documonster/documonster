@@ -2,10 +2,10 @@
  * Tests for stream.base utilities: bufferStream and PullStream.
  */
 
-import { describe, it, expect } from "vitest";
+import { bufferStream, PullStream } from "@archive/unzip/stream.base";
 import { Readable } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
-import { bufferStream, PullStream } from "@archive/unzip/stream.base";
+import { describe, it, expect } from "vitest";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();

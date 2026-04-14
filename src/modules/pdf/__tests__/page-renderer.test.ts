@@ -1,13 +1,13 @@
-/**
- * Focused tests for page renderer helpers.
- */
-import { describe, expect, it } from "vitest";
 import {
   computeTextStartY,
   computeTextX,
   wrapTextLines,
   alphaGsName
 } from "@pdf/render/page-renderer";
+/**
+ * Focused tests for page renderer helpers.
+ */
+import { describe, expect, it } from "vitest";
 
 describe("page-renderer helpers", () => {
   describe("computeTextX", () => {

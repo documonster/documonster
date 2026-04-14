@@ -1,15 +1,10 @@
-import { colCache } from "@excel/utils/col-cache";
+import type { Column } from "@excel/column";
+import type { DataValidations } from "@excel/data-validations";
 import type { ValueType, FormulaType } from "@excel/enums";
 import { Enums } from "@excel/enums";
-import { Note } from "@excel/note";
-import { escapeHtml } from "@excel/utils/under-dash";
-import { slideFormula } from "@excel/utils/shared-formula";
-import { copyStyle } from "@excel/utils/copy-style";
 import { ExcelError, InvalidValueTypeError } from "@excel/errors";
+import { Note } from "@excel/note";
 import type { Row } from "@excel/row";
-import type { Column } from "@excel/column";
-import type { Worksheet } from "@excel/worksheet";
-import type { Workbook } from "@excel/workbook";
 import type {
   Style,
   NumFmt,
@@ -25,7 +20,12 @@ import type {
   CellHyperlinkValue,
   CellCheckboxValue
 } from "@excel/types";
-import type { DataValidations } from "@excel/data-validations";
+import { colCache } from "@excel/utils/col-cache";
+import { copyStyle } from "@excel/utils/copy-style";
+import { slideFormula } from "@excel/utils/shared-formula";
+import { escapeHtml } from "@excel/utils/under-dash";
+import type { Workbook } from "@excel/workbook";
+import type { Worksheet } from "@excel/worksheet";
 
 export type FormulaResult = string | number | boolean | Date | CellErrorValue;
 

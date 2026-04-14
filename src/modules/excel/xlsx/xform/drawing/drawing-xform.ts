@@ -1,8 +1,8 @@
 import { colCache } from "@excel/utils/col-cache";
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
+import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 function getAnchorType(model: any): string {
   const range = typeof model.range === "string" ? colCache.decode(model.range) : model.range;

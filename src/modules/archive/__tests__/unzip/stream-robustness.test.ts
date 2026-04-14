@@ -10,11 +10,13 @@
  * 6. Soak tests (key cases repeated 50 times)
  */
 
-import { describe, it, expect } from "vitest";
 import { Readable } from "stream";
-import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+
 import { unzip, zip } from "@archive";
 import { crc32 } from "@archive/compression/crc32";
+import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+import { describe, it, expect } from "vitest";
+
 import { delay, chunkBytes, createDataDescriptorZip, concatChunks } from "./test-helpers";
 
 // ---------------------------------------------------------------------------

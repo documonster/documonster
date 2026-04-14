@@ -1,13 +1,13 @@
+import { EntrySizeMismatchError } from "@archive/shared/errors";
+import { processEntryDataStream, readLocalHeaderDataOffset } from "@archive/unzip/zip-extract-core";
+import { ZipParser } from "@archive/unzip/zip-parser";
+import { BinaryReader } from "@archive/zip-spec/binary";
+import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
+import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
 /**
  * Tests for validateEntrySizes option - ZIP bomb protection
  */
 import { describe, it, expect } from "vitest";
-import { EntrySizeMismatchError } from "@archive/shared/errors";
-import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
-import { ZipParser } from "@archive/unzip/zip-parser";
-import { processEntryDataStream, readLocalHeaderDataOffset } from "@archive/unzip/zip-extract-core";
-import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { BinaryReader } from "@archive/zip-spec/binary";
 
 // Helper to create an async iterable from Uint8Array
 async function* toAsyncIterable(data: Uint8Array): AsyncIterable<Uint8Array> {

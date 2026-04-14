@@ -2,7 +2,6 @@
  * Zlib compression tests (RFC 1950)
  */
 
-import { describe, it, expect } from "vitest";
 import {
   zlib,
   unzlib,
@@ -26,6 +25,7 @@ import {
   readZlibTrailer,
   verifyAdler32
 } from "@archive/compression/compress.base";
+import { describe, it, expect } from "vitest";
 
 describe("Zlib compression (RFC 1950)", () => {
   const testData = new TextEncoder().encode("Hello, World! This is a test for Zlib compression.");

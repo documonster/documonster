@@ -2,18 +2,18 @@
  * Browser Stream - Readable
  */
 
+import { stringToEncodedBytes } from "@stream/common/binary-chunk";
+import { getDefaultHighWaterMark } from "@stream/common/utils";
 import type { IDuplex, ReadableStreamOptions, WritableLike } from "@stream/types";
-import { EventEmitter } from "@utils/event-emitter";
 import { createStreamDecoder, decodeBytesToString } from "@utils/binary";
 import type { StreamDecoder } from "@utils/binary";
-import { createAbortError } from "@utils/errors";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
-import { stringToEncodedBytes } from "@stream/common/binary-chunk";
+import { createAbortError, toError } from "@utils/errors";
+import { EventEmitter } from "@utils/event-emitter";
 
-import { ChunkBuffer } from "./chunk-buffer";
-import { PipeManager } from "./pipe-manager";
-import { deferTask, inDeferredContext } from "./microtask-context";
 import { getDuplexFrom } from "./_lazy";
+import { ChunkBuffer } from "./chunk-buffer";
+import { deferTask, inDeferredContext } from "./microtask-context";
+import { PipeManager } from "./pipe-manager";
 
 /**
  * Shared toString implementation for Uint8Array chunks converted from strings.
@@ -1736,7 +1736,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
     const iter: AsyncIterableIterator<T> = {
       next: async () => {
         if (streamError) {
-          throw streamError;
+          throw toError(streamError);
         }
 
         // Try synchronous read first
@@ -2473,7 +2473,7 @@ async function* _mapWithConcurrency<T, U>(
       _throwIfAborted(signal);
       const result = await queue.shift()!;
       if (error) {
-        throw error;
+        throw toError(error);
       }
       if (result === _EOF) {
         // Source exhausted — drain any remaining real results

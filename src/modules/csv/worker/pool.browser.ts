@@ -33,6 +33,7 @@
  */
 
 import { CsvWorkerError } from "@csv/errors";
+
 import type {
   CsvWorkerPoolOptions,
   CsvWorkerPoolStats,

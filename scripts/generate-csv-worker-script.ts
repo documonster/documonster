@@ -2,9 +2,9 @@
 // Generates src/modules/csv/worker/worker-script.generated.ts by bundling
 // src/modules/csv/worker/worker.entry.ts into a single classic-worker script.
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 const projectRoot = process.cwd();
 const configPath = path.join(projectRoot, "rolldown.csv-worker.config.ts");

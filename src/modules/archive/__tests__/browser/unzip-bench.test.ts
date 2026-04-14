@@ -5,9 +5,9 @@
  * so it stays stable across browsers/CI.
  */
 
-import { describe, it, expect } from "vitest";
 import { zip } from "@archive";
 import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
+import { describe, it, expect } from "vitest";
 
 function createTestZip(fileCount: number, bytesPerFile: number): Uint8Array {
   const encoder = new TextEncoder();

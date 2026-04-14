@@ -1,8 +1,8 @@
-import { describe } from "vitest";
+import { Enums } from "@excel/enums";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
-import { Enums } from "@excel/enums";
+import { describe } from "vitest";
 
 const fakeStyles = {
   addStyleModel(style: any) {

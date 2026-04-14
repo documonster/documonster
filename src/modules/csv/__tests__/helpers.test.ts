@@ -8,7 +8,7 @@
  * - isFormattedValue
  */
 
-import { describe, it, expect } from "vitest";
+import { isFormattedValue } from "@csv/format/formatted-value";
 import {
   isRowHashArray,
   rowHashArrayToValues,
@@ -21,7 +21,7 @@ import {
 } from "@csv/index";
 // Internal helpers - not part of public API
 import { rowHashArrayToMap, rowHashArrayGet } from "@csv/utils/row";
-import { isFormattedValue } from "@csv/format/formatted-value";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // RowHashArray Helper Functions

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { XmlStreamWriter } from "@xml/stream-writer";
 import { parseXml, textContent } from "@xml/dom";
+import { XmlStreamWriter } from "@xml/stream-writer";
 import type { WritableTarget } from "@xml/types";
+import { describe, it, expect } from "vitest";
 
 /** Helper to capture stream output. */
 function createCapture(): { target: WritableTarget; output: () => string } {

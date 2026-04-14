@@ -6,9 +6,9 @@
  * compress() and decompress() functions.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
 import { compress, decompress, hasWorkerSupport } from "@archive/compression/compress.browser";
 import { terminateDefaultWorkerPool } from "@archive/compression/worker-pool/index.browser";
+import { describe, it, expect, afterEach } from "vitest";
 
 // Helper to create compressible data
 function createCompressibleData(size: number): Uint8Array {

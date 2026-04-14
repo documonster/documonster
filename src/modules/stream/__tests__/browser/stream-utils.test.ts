@@ -4,8 +4,8 @@
  * Runs the shared stream utils test suite against the Browser implementation.
  */
 
-import { describe } from "vitest";
 import { runStreamUtilsTests } from "@stream/__tests__/stream-utils.shared";
+import { describe } from "vitest";
 
 describe("stream/utils (Browser)", () => {
   runStreamUtilsTests();

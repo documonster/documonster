@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { testUtils } from "@excel/__tests__/shared";
 import { Enums } from "@excel/enums";
+import { describe, it, expect } from "vitest";
 
 describe("Row", () => {
   it("stores cells", () => {

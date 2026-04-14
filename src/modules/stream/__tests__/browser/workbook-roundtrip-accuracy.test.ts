@@ -2,8 +2,8 @@
  * WorkbookWriter/WorkbookReader Accuracy Tests - Browser
  */
 
-import { beforeAll } from "vitest";
 import { createWorkbookRoundtripAccuracyTests } from "@stream/__tests__/streaming/workbook-roundtrip-accuracy-tests";
+import { beforeAll } from "vitest";
 
 let WorkbookWriter: any;
 let WorkbookReader: any;

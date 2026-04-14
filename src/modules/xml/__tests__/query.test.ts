@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { parseXml, textContent, attr } from "@xml/dom";
 import { query, queryAll } from "@xml/query";
+import { describe, it, expect } from "vitest";
 
 // Helper to build a test document
 const WORKSHEET_XML = [

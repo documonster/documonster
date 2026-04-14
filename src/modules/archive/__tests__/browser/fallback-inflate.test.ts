@@ -1,11 +1,11 @@
+import { Parse } from "@archive/unzip/stream.browser";
+import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
+import { concatUint8Arrays } from "@utils/binary";
 /**
  * Test that Parse.browser.ts (with FallbackInflateRaw) can parse
  * ZIP files created by StreamingZip
  */
 import { describe, it, expect } from "vitest";
-import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-import { Parse } from "@archive/unzip/stream.browser";
-import { concatUint8Arrays } from "@utils/binary";
 
 // Type helper for browser Parse which has different methods than Node version
 type BrowserParse = Parse & {

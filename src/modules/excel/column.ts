@@ -1,10 +1,6 @@
-import { colCache } from "@excel/utils/col-cache";
-import { isEqual } from "@excel/utils/under-dash";
-import { copyStyle } from "@excel/utils/copy-style";
-import { Enums } from "@excel/enums";
 import type { Cell, CellValueType } from "@excel/cell";
+import { Enums } from "@excel/enums";
 import type { Row } from "@excel/row";
-import type { Worksheet } from "@excel/worksheet";
 import type {
   Style,
   NumFmt,
@@ -16,6 +12,10 @@ import type {
   CellValue,
   ColBreak
 } from "@excel/types";
+import { colCache } from "@excel/utils/col-cache";
+import { copyStyle } from "@excel/utils/copy-style";
+import { isEqual } from "@excel/utils/under-dash";
+import type { Worksheet } from "@excel/worksheet";
 
 const DEFAULT_COLUMN_WIDTH = 9;
 

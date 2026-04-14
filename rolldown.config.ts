@@ -1,7 +1,9 @@
-import { defineConfig } from "rolldown";
 import fs from "node:fs";
-import { preferBrowserFilesPlugin } from "./src/utils/browser";
+
+import { defineConfig } from "rolldown";
 import { visualizer } from "rollup-plugin-visualizer";
+
+import { preferBrowserFilesPlugin } from "./src/utils/browser";
 
 const pkg = JSON.parse(fs.readFileSync("./package.json", "utf-8"));
 const banner = `/*!

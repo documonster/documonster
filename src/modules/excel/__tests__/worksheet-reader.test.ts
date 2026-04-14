@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Workbook, WorkbookReader, ExcelStreamStateError } from "../../../index";
 import type { Row } from "@excel/row";
+import { describe, it, expect } from "vitest";
+
+import { Workbook, WorkbookReader, ExcelStreamStateError } from "../../../index";
 
 // =============================================================================
 // Helpers

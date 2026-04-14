@@ -1,5 +1,3 @@
-import { StdDocAttributes } from "@xml/writer";
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
   OOXML_PATHS,
   commentsPathFromName,
@@ -12,6 +10,8 @@ import {
   toContentTypesPartName,
   worksheetPath
 } from "@excel/utils/ooxml-paths";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 // used for rendering the [Content_Types].xml file
 // not used for parsing

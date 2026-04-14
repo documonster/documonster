@@ -10,8 +10,8 @@
 
 import { createReadableFromArray, createTransform } from "@stream/browser/factories";
 import { consumers } from "@stream/browser/utils";
-import type { UtilsDeps } from "./utils.base";
 
+import type { UtilsDeps } from "./utils.base";
 import {
   collect,
   createText,

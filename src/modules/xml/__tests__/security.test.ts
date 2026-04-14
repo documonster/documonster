@@ -11,14 +11,14 @@
  * - Quadratic blowup
  */
 
-import { describe, it, expect } from "vitest";
-import { SaxParser } from "@xml/sax";
+import { decodeOoxmlEscape } from "@utils/utils";
 import { parseXml } from "@xml/dom";
 import { xmlDecode, xmlEncode, validateXmlName } from "@xml/encode";
-import { XmlWriter } from "@xml/writer";
-import { XmlStreamWriter } from "@xml/stream-writer";
 import { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";
-import { decodeOoxmlEscape } from "@utils/utils";
+import { SaxParser } from "@xml/sax";
+import { XmlStreamWriter } from "@xml/stream-writer";
+import { XmlWriter } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // XXE (XML External Entity) Prevention
@@ -263,7 +263,9 @@ describe("Prototype pollution prevention", () => {
 
   it("should strip __proto__ from attribute names", () => {
     const doc = parseXml('<root __proto__="polluted"/>');
+    // oxlint-disable-next-line no-proto
     expect(doc.root.attributes.__proto__).toBeUndefined();
+    // oxlint-disable-next-line no-proto
     expect(doc.root.attributes["__proto__"]).toBeUndefined();
   });
 

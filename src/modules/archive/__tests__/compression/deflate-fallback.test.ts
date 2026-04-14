@@ -1,11 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { deflateRawSync, inflateRawSync } from "zlib";
+
 import {
   inflateRaw,
   deflateRawStore,
   deflateRawCompressed,
   SyncDeflater
 } from "@archive/compression/deflate-fallback";
-import { deflateRawSync, inflateRawSync } from "zlib";
+import { describe, it, expect } from "vitest";
 
 describe("DEFLATE Fallback", () => {
   describe("inflateRaw (decompression)", () => {

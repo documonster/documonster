@@ -2,7 +2,6 @@
  * Tests for error utilities and base error classes.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   BaseError,
   AbortError,
@@ -14,6 +13,7 @@ import {
   getErrorChain,
   getRootCause
 } from "@utils/errors";
+import { describe, it, expect } from "vitest";
 
 describe("BaseError", () => {
   it("should create error with message", () => {

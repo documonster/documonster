@@ -27,6 +27,8 @@ import type {
   TransformContext,
   TransformResult
 } from "../types";
+import { startsWithFormulaChar } from "../utils/detect";
+import { formatNumberForCsv, type DecimalSeparator } from "../utils/number";
 import {
   deduplicateHeaders,
   isRowHashArray,
@@ -35,11 +37,9 @@ import {
   rowHashArrayMapByHeaders,
   processColumns
 } from "../utils/row";
-import { startsWithFormulaChar } from "../utils/detect";
-import { formatNumberForCsv, type DecimalSeparator } from "../utils/number";
-import { isFormattedValue } from "./formatted-value";
 import type { CsvFormatRegex, FormatFieldContext, FormatRowOptions, FormatConfig } from "./config";
 import { createFormatConfig } from "./config";
+import { isFormattedValue } from "./formatted-value";
 
 // =============================================================================
 // Type Transform Functions

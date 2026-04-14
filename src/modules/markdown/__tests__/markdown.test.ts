@@ -8,11 +8,11 @@
  * - parseMarkdownAll: multi-table document parsing
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
-import { formatMarkdown } from "@markdown/format/index";
-import { MarkdownParseError } from "@markdown/errors";
 import { Workbook } from "@excel/workbook";
+import { MarkdownParseError } from "@markdown/errors";
+import { formatMarkdown } from "@markdown/format/index";
+import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
+import { describe, it, expect, beforeEach } from "vitest";
 
 // =============================================================================
 // Parser Tests

@@ -205,6 +205,7 @@ export function assertParseResult<T>(
 // =============================================================================
 
 import { Readable } from "node:stream";
+
 import type { CsvParserStream } from "@csv/stream";
 
 /**

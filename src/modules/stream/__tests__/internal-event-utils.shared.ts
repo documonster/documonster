@@ -5,9 +5,9 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import { describe, it, expect } from "vitest";
 import { onceEvent } from "@stream/internal/event-utils";
 import type { EventEmitterLike } from "@stream/types";
+import { describe, it, expect } from "vitest";
 
 /**
  * Minimal emitter with `once` support (like Node EventEmitter).

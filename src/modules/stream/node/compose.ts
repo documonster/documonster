@@ -6,8 +6,9 @@
 
 import { Transform } from "stream";
 import type { TransformCallback as NodeTransformCallback } from "stream";
-import type { ITransform } from "@stream/types";
+
 import { getDefaultHighWaterMark } from "@stream/common/utils";
+import type { ITransform } from "@stream/types";
 
 // =============================================================================
 // Compose

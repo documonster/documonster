@@ -9,9 +9,9 @@
  * - AES-192 key strength
  */
 
-import { describe, it, expect } from "vitest";
-import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
 import { ZipParser } from "@archive/unzip/zip-parser";
+import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import { describe, it, expect } from "vitest";
 
 describe("ZIP Encryption End-to-End", () => {
   describe("createZip with ZipCrypto", () => {

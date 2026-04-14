@@ -1,6 +1,6 @@
-import { describe } from "vitest";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { MergeCellXform } from "@excel/xlsx/xform/sheet/merge-cell-xform";
+import { describe } from "vitest";
 
 const expectations = [
   {

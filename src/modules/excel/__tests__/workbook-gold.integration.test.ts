@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { Workbook } from "../../../index";
 import { makeTestDataPath } from "@test/utils";
+import { describe, it, expect, beforeAll } from "vitest";
+
+import { Workbook } from "../../../index";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 

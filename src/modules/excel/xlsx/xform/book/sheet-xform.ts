@@ -1,5 +1,5 @@
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { WorksheetState } from "@excel/types";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 const VALID_STATES: Set<string> = new Set(["visible", "hidden", "veryHidden"]);
 

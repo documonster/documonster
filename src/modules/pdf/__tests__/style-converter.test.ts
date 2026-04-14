@@ -1,7 +1,3 @@
-/**
- * Tests for style conversion (Excel -> PDF).
- */
-import { describe, it, expect } from "vitest";
 import {
   argbToPdfColor,
   excelColorToPdf,
@@ -13,6 +9,10 @@ import {
   excelVAlignToPdf,
   DEFAULT_COLORS
 } from "@pdf/render/style-converter";
+/**
+ * Tests for style conversion (Excel -> PDF).
+ */
+import { describe, it, expect } from "vitest";
 
 describe("Style Converter", () => {
   describe("argbToPdfColor", () => {

@@ -16,13 +16,14 @@
  * @see ISO 32000-2:2020, Chapter 7.5 — File Structure
  */
 
-import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "./pdf-object";
-import type { PdfContentStream } from "./pdf-stream";
-import { PdfStructureError } from "../errors";
-import { concatUint8Arrays } from "@utils/binary";
 import { zlibSync } from "@archive/compression/compress";
+import { concatUint8Arrays } from "@utils/binary";
+
+import { PdfStructureError } from "../errors";
 import type { EncryptionState } from "./encryption";
 import { encryptData } from "./encryption";
+import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "./pdf-object";
+import type { PdfContentStream } from "./pdf-stream";
 
 // =============================================================================
 // Types

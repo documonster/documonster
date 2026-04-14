@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
-
 import { zip, isAbortError } from "@archive";
+import { describe, expect, it } from "vitest";
 
 function delay(ms = 0): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

@@ -6,13 +6,14 @@
  */
 
 import { Transform } from "@stream";
-import type { CsvFormatOptions, Row } from "../types";
+
 import {
   createFormatConfig,
   formatRowWithLookup,
   type FormatConfig,
   type FormatRowOptions
 } from "../format";
+import type { CsvFormatOptions, Row } from "../types";
 import { extractRowValues, detectRowKeys, processColumns, deduplicateHeaders } from "../utils/row";
 
 /**

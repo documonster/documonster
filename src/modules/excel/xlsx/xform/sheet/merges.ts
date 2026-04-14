@@ -1,6 +1,6 @@
+import { Enums } from "@excel/enums";
 import { Range } from "@excel/range";
 import { colCache } from "@excel/utils/col-cache";
-import { Enums } from "@excel/enums";
 
 interface MergeData {
   address: string;

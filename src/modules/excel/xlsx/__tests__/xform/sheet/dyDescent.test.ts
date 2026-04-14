@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { SheetFormatPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-format-properties-xform";
 import { XmlWriter } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 describe("dyDescent behavior", () => {
   describe("1. New worksheet creation - should NOT have dyDescent unless explicitly provided", () => {

@@ -18,6 +18,12 @@
  * parseCsvAsync buffers the entire input; parseCsvRows streams progressively.
  */
 
+import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
+import { toError } from "@utils/errors";
+
+import { getUtf8ByteLength } from "../constants";
+import { CsvError } from "../errors";
+import { CsvParserStream } from "../stream/parser";
 import type {
   CsvParseOptions,
   CsvParseArrayOptions,
@@ -26,10 +32,6 @@ import type {
   RecordWithInfo
 } from "../types";
 import { parseCsv } from "./sync";
-import { CsvParserStream } from "../stream/parser";
-import { getUtf8ByteLength } from "../constants";
-import { CsvError } from "../errors";
-import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
 
 type ReadableStreamLike = { getReader: () => any };
 type AsyncInput = AsyncIterable<string | Uint8Array>;
@@ -347,14 +349,14 @@ export async function* parseCsvRows(
           continue;
         }
         if (ev.type === "error") {
-          throw ev.error;
+          throw toError(ev.error);
         }
         // end
         break;
       }
 
       if (streamError) {
-        throw streamError;
+        throw toError(streamError);
       }
       if (ended) {
         break;
@@ -367,7 +369,7 @@ export async function* parseCsvRows(
       if (ev.type === "data") {
         yield ev.value;
       } else if (ev.type === "error") {
-        throw ev.error;
+        throw toError(ev.error);
       } else {
         break;
       }

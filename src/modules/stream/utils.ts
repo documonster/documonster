@@ -11,8 +11,8 @@
 
 import { createReadableFromArray, createTransform } from "@stream/node/factories";
 import { consumers } from "@stream/node/utils";
-import type { UtilsDeps } from "./utils.base";
 
+import type { UtilsDeps } from "./utils.base";
 import {
   collect,
   createText,

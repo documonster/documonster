@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
 import fs from "fs";
+
+import { extractAll } from "@archive/unzip/extract";
 import { testUtils } from "@excel/__tests__/shared";
-import { Workbook, type CsvOptions } from "../../../index";
 import { ValueType } from "@excel/enums";
 import { makeTestDataPath, testFilePath } from "@test/utils";
-import { extractAll } from "@archive/unzip/extract";
+import { describe, it, expect } from "vitest";
+
+import { Workbook, type CsvOptions } from "../../../index";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 

@@ -4,6 +4,10 @@
  * Extends browser Workbook with Node.js file system support for CSV and Markdown operations.
  */
 
+import { ExcelFileError } from "@excel/errors";
+import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
+import type { Worksheet } from "@excel/worksheet";
+import type { MarkdownOptions } from "@markdown/types";
 import {
   fileExists,
   createReadStream,
@@ -11,10 +15,6 @@ import {
   readFileText,
   writeFileText
 } from "@utils/fs";
-import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
-import { ExcelFileError } from "@excel/errors";
-import type { Worksheet } from "@excel/worksheet";
-import type { MarkdownOptions } from "@markdown/types";
 
 // =============================================================================
 // Node.js Workbook Class

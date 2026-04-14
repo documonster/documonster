@@ -14,9 +14,10 @@
  * - transform/validate callbacks
  */
 
-import { describe, it, expect } from "vitest";
 import { parseCsv, detectDelimiter, type CsvParseResult, type RecordWithInfo } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
+import { describe, it, expect } from "vitest";
+
 import { parseStreamCsv } from "../csv-test-utils";
 
 // =============================================================================

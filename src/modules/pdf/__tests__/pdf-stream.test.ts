@@ -1,8 +1,8 @@
+import { PdfContentStream } from "@pdf/core/pdf-stream";
 /**
  * Tests for PDF content stream builder.
  */
 import { describe, it, expect } from "vitest";
-import { PdfContentStream } from "@pdf/core/pdf-stream";
 
 describe("PdfContentStream", () => {
   describe("Graphics State", () => {

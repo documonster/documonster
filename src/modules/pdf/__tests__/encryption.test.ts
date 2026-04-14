@@ -1,11 +1,12 @@
+import { initEncryption, encryptData } from "@pdf/core/encryption";
+import { md5, rc4, sha256, aesCbcEncrypt, aesCbcDecrypt } from "@utils/crypto";
 /**
  * Tests for PDF encryption: crypto primitives and V=5/R=5 AES-256 encryption.
  */
 import { describe, it, expect } from "vitest";
-import { md5, rc4, sha256, aesCbcEncrypt, aesCbcDecrypt } from "@utils/crypto";
-import { initEncryption, encryptData } from "@pdf/core/encryption";
-import { readPdf } from "../reader/pdf-reader";
+
 import { pdf } from "../pdf";
+import { readPdf } from "../reader/pdf-reader";
 
 describe("MD5", () => {
   it("should hash empty string correctly", () => {

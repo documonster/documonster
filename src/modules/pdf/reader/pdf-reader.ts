@@ -48,27 +48,28 @@
  * ```
  */
 
-import { PdfDocument } from "./pdf-document";
-import type { PdfDictValue } from "./pdf-parser";
-import { initDecryption, isEncrypted } from "./pdf-decrypt";
-import { extractTextFromPage } from "./content-interpreter";
-import { reconstructText, reconstructTextLines } from "./text-reconstruction";
-import type { TextLine } from "./text-reconstruction";
-import type { TextFragment } from "./content-interpreter";
-import { extractImagesFromPage } from "./image-extractor";
-import type { ExtractedImage } from "./image-extractor";
+import { yieldToEventLoop } from "@utils/utils.base";
+
+import { PdfStructureError } from "../errors";
 import { extractAnnotationsFromPage } from "./annotation-extractor";
 import type { PdfAnnotation } from "./annotation-extractor";
-import { extractFormFields } from "./form-extractor";
-import type { PdfFormField } from "./form-extractor";
 import { extractBookmarks } from "./bookmark-extractor";
 import type { PdfBookmark } from "./bookmark-extractor";
+import { extractTextFromPage } from "./content-interpreter";
+import type { TextFragment } from "./content-interpreter";
+import { extractFormFields } from "./form-extractor";
+import type { PdfFormField } from "./form-extractor";
+import { extractImagesFromPage } from "./image-extractor";
+import type { ExtractedImage } from "./image-extractor";
 import { extractMetadata } from "./metadata-reader";
 import type { PdfMetadata } from "./metadata-reader";
+import { initDecryption, isEncrypted } from "./pdf-decrypt";
+import { PdfDocument } from "./pdf-document";
+import type { PdfDictValue } from "./pdf-parser";
 import { extractTables } from "./table-extractor";
 import type { PdfTable } from "./table-extractor";
-import { PdfStructureError } from "../errors";
-import { yieldToEventLoop } from "@utils/utils.base";
+import { reconstructText, reconstructTextLines } from "./text-reconstruction";
+import type { TextLine } from "./text-reconstruction";
 
 // =============================================================================
 // Types

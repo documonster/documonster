@@ -4,10 +4,10 @@
  * A writable stream that collects all chunks.
  */
 
+import { toBinaryChunk } from "@stream/common/binary-chunk";
 import { StreamTypeError } from "@stream/errors";
 import type { WritableStreamOptions, ICollector } from "@stream/types";
 import { chunksToString, concatUint8Arrays } from "@utils/binary";
-import { toBinaryChunk } from "@stream/common/binary-chunk";
 
 import { Writable } from "./writable";
 

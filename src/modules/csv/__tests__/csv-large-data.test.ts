@@ -9,9 +9,10 @@
  * - Performance boundaries
  */
 
-import { describe, it, expect } from "vitest";
 import { parseCsv, parseCsvRows, formatCsv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
+import { describe, it, expect } from "vitest";
+
 import {
   generateLargeCsv,
   generateEdgeCaseCsv,

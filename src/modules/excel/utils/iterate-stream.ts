@@ -1,3 +1,5 @@
+import { toError } from "@utils/errors";
+
 type Listener = (...args: any[]) => void;
 
 interface EventEmitterLike {
@@ -59,7 +61,7 @@ async function* iterateStream(stream: Readable): AsyncGenerator<any> {
         yield data;
       }
       if (error) {
-        throw error;
+        throw toError(error);
       }
     }
   } finally {

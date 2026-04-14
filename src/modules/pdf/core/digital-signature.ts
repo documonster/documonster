@@ -663,14 +663,18 @@ export async function signPdf(
   const searchEnd = Math.min(result.length, byteRangePattern + 200);
   let contentsPattern = -1;
   const contentsBytes = new TextEncoder().encode("/Contents <");
-  outer: for (let i = searchStart; i < searchEnd; i++) {
+  for (let i = searchStart; i < searchEnd; i++) {
+    let matched = true;
     for (let j = 0; j < contentsBytes.length; j++) {
       if (result[i + j] !== contentsBytes[j]) {
-        continue outer;
+        matched = false;
+        break;
       }
     }
-    contentsPattern = i;
-    break;
+    if (matched) {
+      contentsPattern = i;
+      break;
+    }
   }
   if (contentsPattern === -1) {
     throw new Error("signPdf: /Contents placeholder not found near /ByteRange");
@@ -787,13 +791,17 @@ function hashByOid(oid: string, data: Uint8Array): Uint8Array {
 
 function findPattern(data: Uint8Array, pattern: string): number {
   const patBytes = new TextEncoder().encode(pattern);
-  outer: for (let i = 0; i <= data.length - patBytes.length; i++) {
+  for (let i = 0; i <= data.length - patBytes.length; i++) {
+    let matched = true;
     for (let j = 0; j < patBytes.length; j++) {
       if (data[i + j] !== patBytes[j]) {
-        continue outer;
+        matched = false;
+        break;
       }
     }
-    return i;
+    if (matched) {
+      return i;
+    }
   }
   return -1;
 }

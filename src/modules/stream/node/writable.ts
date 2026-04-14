@@ -5,8 +5,9 @@
  */
 
 import { Writable as NodeWritable } from "stream";
-import type { WritableStreamOptions, WritableLike } from "@stream/types";
+
 import { getDefaultHighWaterMark } from "@stream/common/utils";
+import type { WritableStreamOptions, WritableLike } from "@stream/types";
 
 // =============================================================================
 // Unified Writable class (compatible with browser API)

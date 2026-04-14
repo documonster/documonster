@@ -6,6 +6,7 @@
  */
 
 import { describe } from "vitest";
+
 import { runInternalEventedReadableTests } from "./internal-evented-readable.shared";
 
 describe("internal/evented-readable-to-async-iterable (Node)", () => {

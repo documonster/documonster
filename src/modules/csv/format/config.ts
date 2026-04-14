@@ -5,10 +5,10 @@
  * Creates regex patterns, quote lookup functions, and format settings.
  */
 
+import { CsvError } from "../errors";
 import type { CsvFormatOptions, TypeTransformMap } from "../types";
 import { escapeRegex, normalizeQuoteOption, normalizeEscapeOption } from "../utils/detect";
 import type { DecimalSeparator } from "../utils/number";
-import { CsvError } from "../errors";
 
 /**
  * Escape a string for use inside a regex character class [...].
@@ -201,11 +201,10 @@ export function createQuoteLookup(quoteConfig: QuoteColumnConfig | undefined): Q
     return () => false;
   }
   if (Array.isArray(quoteConfig)) {
-    return (index: number) => quoteConfig[index] === true;
+    return (index: number) => !!quoteConfig[index];
   }
   // Record<string, boolean>
-  return (_index: number, header: string | undefined) =>
-    header ? quoteConfig[header] === true : false;
+  return (_index: number, header: string | undefined) => (header ? !!quoteConfig[header] : false);
 }
 
 // =============================================================================

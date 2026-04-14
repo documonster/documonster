@@ -5,8 +5,8 @@
  * Supports boolean, number, null detection with customizable per-column config.
  */
 
-import { DateParser } from "@utils/datetime";
 import type { DynamicTypingConfig, CastDateConfig } from "@csv/types";
+import { DateParser } from "@utils/datetime";
 
 // =============================================================================
 // Pre-compiled Regex Constants

@@ -12,11 +12,11 @@
  * (buffering, serialization, _writableLength, drain) properly tracked.
  */
 
-import type { ITransform } from "@stream/types";
 import { getDefaultHighWaterMark } from "@stream/common/utils";
+import type { ITransform } from "@stream/types";
 
-import { Transform } from "./transform";
 import { createListenerRegistry } from "./helpers";
+import { Transform } from "./transform";
 
 // =============================================================================
 // Compose

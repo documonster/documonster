@@ -1,8 +1,8 @@
+import { paginateRows } from "@pdf/render/layout-engine";
 /**
  * Focused tests for layout engine pagination helpers.
  */
 import { describe, expect, it } from "vitest";
-import { paginateRows } from "@pdf/render/layout-engine";
 
 describe("layout-engine pagination", () => {
   it("should repeat header rows on subsequent pages", () => {

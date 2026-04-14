@@ -1,5 +1,3 @@
-import { describe, expect, it } from "vitest";
-
 import {
   AbortError,
   createAbortError,
@@ -7,6 +5,7 @@ import {
   isAbortError,
   throwIfAborted
 } from "@archive/shared/errors";
+import { describe, expect, it } from "vitest";
 
 describe("abort utils", () => {
   it("createAbortError should preserve reason as cause with fixed message", () => {

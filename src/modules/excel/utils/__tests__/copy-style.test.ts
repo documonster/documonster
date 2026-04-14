@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { copyStyle } from "@excel/utils/copy-style";
 import { styles } from "@excel/__tests__/shared/styles";
+import { copyStyle } from "@excel/utils/copy-style";
+import { describe, it, expect } from "vitest";
 
 const style1 = {
   numFmt: styles.numFmts.numFmt1,

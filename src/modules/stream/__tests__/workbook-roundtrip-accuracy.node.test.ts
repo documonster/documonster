@@ -2,9 +2,9 @@
  * WorkbookWriter/WorkbookReader Accuracy Tests - Node.js
  */
 
-import { beforeAll } from "vitest";
 import { PassThrough, Readable } from "@stream";
 import { createWorkbookRoundtripAccuracyTests } from "@stream/__tests__/streaming/workbook-roundtrip-accuracy-tests";
+import { beforeAll } from "vitest";
 
 let WorkbookWriter: any;
 let WorkbookReader: any;

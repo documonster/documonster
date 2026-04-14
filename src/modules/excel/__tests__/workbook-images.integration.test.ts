@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
 import fs from "fs";
 import { promisify } from "util";
-import { Workbook } from "../../../index";
 
 import { makeTestDataPath, testFilePath } from "@test/utils";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 

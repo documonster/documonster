@@ -5,7 +5,14 @@
  */
 
 import { Readable, Transform, Duplex } from "stream";
+
+import { createAddAbortSignal } from "@stream/common/add-abort-signal";
+import { toStreamBytes } from "@stream/common/binary-chunk";
+import { createConsumers } from "@stream/common/consumers";
+import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
+import { getDefaultHighWaterMark } from "@stream/common/utils";
 import { UnsupportedStreamTypeError } from "@stream/errors";
+import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
 import type {
   DuplexStreamOptions,
   IDuplex,
@@ -13,16 +20,10 @@ import type {
   ReadableLike,
   WritableLike
 } from "@stream/types";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
-import { createConsumers } from "@stream/common/consumers";
-import { createAddAbortSignal } from "@stream/common/add-abort-signal";
-import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
 import { createTextDecoder, concatUint8Arrays } from "@utils/binary";
-import { toStreamBytes } from "@stream/common/binary-chunk";
 
-import { Writable } from "./writable";
 import { pipeline, finished } from "./pipeline";
+import { Writable } from "./writable";
 
 // =============================================================================
 // Utility Functions

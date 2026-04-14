@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
 import { testUtils } from "@excel/__tests__/shared";
-import { Workbook } from "../../../index";
-import { Dimensions } from "@excel/range";
 import { Enums } from "@excel/enums";
+import { Dimensions } from "@excel/range";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 describe("Worksheet", () => {
   describe("Merge Cells", () => {

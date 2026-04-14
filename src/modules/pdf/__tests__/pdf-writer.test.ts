@@ -1,13 +1,13 @@
+import { initEncryption } from "@pdf/core/encryption";
+import { PdfDict, pdfRef } from "@pdf/core/pdf-object";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfWriter } from "@pdf/core/pdf-writer";
+import { PdfStructureError } from "@pdf/errors";
+import { alphaGsName } from "@pdf/render/page-renderer";
 /**
  * Tests for the PDF Writer (file assembly).
  */
 import { describe, it, expect } from "vitest";
-import { PdfWriter } from "@pdf/core/pdf-writer";
-import { PdfDict, pdfRef } from "@pdf/core/pdf-object";
-import { PdfContentStream } from "@pdf/core/pdf-stream";
-import { PdfStructureError } from "@pdf/errors";
-import { initEncryption } from "@pdf/core/encryption";
-import { alphaGsName } from "@pdf/render/page-renderer";
 
 describe("PdfWriter", () => {
   describe("Object Allocation", () => {

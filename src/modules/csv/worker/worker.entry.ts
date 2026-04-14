@@ -9,9 +9,8 @@
  * - Parsing/formatting are delegated to the main CSV implementations to avoid drift.
  */
 
-import { parseCsv } from "../parse";
 import { formatCsv } from "../format";
-
+import { parseCsv } from "../parse";
 import type {
   CsvWorkerRequestMessage,
   CsvWorkerResponseMessage,

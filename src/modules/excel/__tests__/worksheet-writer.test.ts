@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { ExcelStreamStateError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { StreamBuf } from "@excel/utils/stream-buf";
-import { ExcelStreamStateError } from "@excel/errors";
-import { WorkbookWriter } from "../../../index";
 import { Writable } from "@stream";
+import { describe, it, expect } from "vitest";
+
+import { WorkbookWriter } from "../../../index";
 
 // =============================================================================
 // Helpers

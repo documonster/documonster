@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { DefinedNames } from "@excel/defined-names";
+import { describe, it, expect } from "vitest";
+
 import { Workbook } from "../../../index";
 
 describe("DefinedNames", () => {

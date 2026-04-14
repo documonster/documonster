@@ -1,9 +1,10 @@
-import { Duplex, PassThrough, Transform, pipeline, finished, type Readable } from "@stream";
-import { concatUint8Arrays, textEncoder as utf8Encoder } from "@utils/binary";
 import { ByteQueue } from "@archive/shared/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 import { decodeZipPath, resolveZipStringCodec } from "@archive/shared/text";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
+import { Duplex, PassThrough, Transform, pipeline, finished, type Readable } from "@stream";
+import { concatUint8Arrays, textEncoder as utf8Encoder } from "@utils/binary";
+import { toError } from "@utils/errors";
 
 /**
  * Returns true when `err` is the Node.js ERR_STREAM_PREMATURE_CLOSE error.
@@ -1005,7 +1006,7 @@ async function pumpKnownCompressedSizeToEntry(
 
     while (remaining > 0) {
       if (err) {
-        throw err;
+        throw toError(err);
       }
 
       // If downstream decides to autodrain mid-entry (common when a consumer bails out

@@ -19,15 +19,15 @@
  * ```
  */
 
+import { initEncryption } from "../core/encryption";
+import { PdfDict, pdfRef, pdfString, pdfNumber } from "../core/pdf-object";
 import { PdfContentStream } from "../core/pdf-stream";
 import { PdfWriter } from "../core/pdf-writer";
-import { PdfDict, pdfRef, pdfString, pdfNumber } from "../core/pdf-object";
 import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
 import { FontManager } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
 import { wrapTextLines } from "../render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "../types";
-import { initEncryption } from "../core/encryption";
 import { writeImageXObject } from "./image-utils";
 
 // =============================================================================

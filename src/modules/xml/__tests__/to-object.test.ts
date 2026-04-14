@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { parseXml, toPlainObject } from "@xml/dom";
 import { parseXmlToObject } from "@xml/to-object";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Helper: verify parseXmlToObject matches parseXml + toPlainObject

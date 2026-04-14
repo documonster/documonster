@@ -2,8 +2,8 @@
  * parseSax async generator function tests
  */
 
-import { describe, it, expect } from "vitest";
 import { parseSax } from "@xml/sax";
+import { describe, it, expect } from "vitest";
 
 describe("parseSax", () => {
   // Helper to convert array to async iterable

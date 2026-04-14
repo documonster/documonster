@@ -1,3 +1,7 @@
+import { Workbook } from "@excel/workbook";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { pdf as standalonePdf } from "@pdf/pdf";
+import { readPdf } from "@pdf/reader/pdf-reader";
 /**
  * Integration tests for PDF rendering edge cases.
  *
@@ -6,10 +10,7 @@
  * zero-value number formats, fitToPage, row heights, error cells, and newline handling.
  */
 import { describe, it, expect } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { excelToPdf } from "@pdf/excel-bridge";
-import { pdf as standalonePdf } from "@pdf/pdf";
-import { readPdf } from "@pdf/reader/pdf-reader";
+
 import { expectValidPdf } from "./test-helpers";
 
 // Helper: extract page text from PDF bytes

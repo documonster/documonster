@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { VmlAnchorXform } from "@excel/xlsx/xform/comment/vml-anchor-xform";
-import { VmlProtectionXform } from "@excel/xlsx/xform/comment/style/vml-protection-xform";
 import { VmlPositionXform } from "@excel/xlsx/xform/comment/style/vml-position-xform";
+import { VmlProtectionXform } from "@excel/xlsx/xform/comment/style/vml-protection-xform";
+import { VmlAnchorXform } from "@excel/xlsx/xform/comment/vml-anchor-xform";
 
 const POSITION_TYPE = ["twoCells", "oneCells", "absolute"];
 

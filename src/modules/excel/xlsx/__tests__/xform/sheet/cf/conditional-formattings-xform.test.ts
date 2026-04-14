@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
+import { describe, it, expect } from "vitest";
 
 describe("ConditionalFormattingsXform", () => {
   describe("prepare", () => {

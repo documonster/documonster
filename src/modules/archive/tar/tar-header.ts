@@ -4,6 +4,9 @@
  * Functions for encoding and decoding TAR headers.
  */
 
+import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { textEncoder, textDecoder } from "@utils/binary";
+
 import {
   TAR_BLOCK_SIZE,
   TAR_HEADER,
@@ -19,8 +22,6 @@ import {
   type TarType
 } from "./tar-constants";
 import type { TarEntryInfo } from "./tar-entry-info";
-import { textEncoder, textDecoder } from "@utils/binary";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 
 /**
  * Encode a string to a fixed-size field (null-terminated if space allows)

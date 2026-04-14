@@ -1,6 +1,6 @@
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 interface VmlNotesModel {
   comments: any[];

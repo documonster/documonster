@@ -408,18 +408,22 @@ export function uint8ArrayIndexOf(
   const firstByte = needle[0];
   const last = haystackLen - needleLen;
 
-  outer: for (let i = start; i <= last; i++) {
+  for (let i = start; i <= last; i++) {
     // Quick check first byte
     if (haystack[i] !== firstByte) {
       continue;
     }
     // Check rest of pattern
+    let matched = true;
     for (let j = 1; j < needleLen; j++) {
       if (haystack[i + j] !== needle[j]) {
-        continue outer;
+        matched = false;
+        break;
       }
     }
-    return i;
+    if (matched) {
+      return i;
+    }
   }
 
   return -1;

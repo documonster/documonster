@@ -1,6 +1,7 @@
-import { Workbook } from "../../../index";
-import { Range } from "@excel/range";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Range } from "@excel/range";
+
+import { Workbook } from "../../../index";
 
 const [, , filename] = process.argv;
 

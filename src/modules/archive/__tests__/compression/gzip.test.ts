@@ -1,4 +1,3 @@
-import { describe, it, expect } from "vitest";
 import {
   gzip,
   gunzip,
@@ -8,6 +7,7 @@ import {
   GZIP_ID1,
   GZIP_ID2
 } from "@archive/compression/compress";
+import { describe, it, expect } from "vitest";
 
 describe("gzip", () => {
   describe("isGzipData", () => {

@@ -7,12 +7,14 @@
  * Each exclusion is documented with its reason.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { Workbook } from "../workbook";
-import { ZipParser } from "../../archive/unzip/zip-parser";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+
+import { describe, it, expect, beforeAll } from "vitest";
+
+import { ZipParser } from "../../archive/unzip/zip-parser";
+import { Workbook } from "../workbook";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

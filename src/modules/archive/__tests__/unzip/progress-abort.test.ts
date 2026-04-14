@@ -5,8 +5,9 @@
  * stress tests are in stream-lifecycle.test.ts and stream-robustness.test.ts.
  */
 
-import { describe, expect, it } from "vitest";
 import { unzip, zip, isAbortError } from "@archive";
+import { describe, expect, it } from "vitest";
+
 import { delay, chunkBytes } from "./test-helpers";
 
 describe("unzip progress + abort", () => {

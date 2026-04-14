@@ -32,8 +32,8 @@
  * ```
  */
 
-import type { MarkdownAlignment, MarkdownFormatOptions } from "../types";
 import { ESCAPE_AND_NEWLINE, NEWLINE_IN_CELL } from "../constants";
+import type { MarkdownAlignment, MarkdownFormatOptions } from "../types";
 
 // =============================================================================
 // Unicode Display Width

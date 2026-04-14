@@ -4,9 +4,9 @@
  * Tests for tar.gz / tgz archive creation and extraction.
  */
 
-import { describe, it, expect } from "vitest";
-import { TarGzArchive, targz, parseTarGz, untargz, TarArchive } from "@archive/tar";
 import { gzip, gunzip, gzipSync, gunzipSync } from "@archive/compression/compress";
+import { TarGzArchive, targz, parseTarGz, untargz, TarArchive } from "@archive/tar";
+import { describe, it, expect } from "vitest";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

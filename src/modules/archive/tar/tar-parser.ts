@@ -5,11 +5,12 @@
  * Supports POSIX ustar, GNU tar (long filenames), and PAX extensions.
  */
 
+import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { textDecoder } from "@utils/binary";
+
 import { TAR_BLOCK_SIZE, TAR_TYPE } from "./tar-constants";
 import type { TarEntryInfo } from "./tar-entry-info";
 import { decodeHeader, isZeroBlock, calculatePadding } from "./tar-header";
-import { textDecoder } from "@utils/binary";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 
 // Helper to strip trailing null characters without using control char regex
 const NULL_CHAR = String.fromCharCode(0);

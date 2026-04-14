@@ -14,6 +14,7 @@
  * Based on XML 1.0 specification with fast-path optimizations for ASCII.
  */
 
+import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
 import type { InvalidCharHandling, SaxEventAny, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
 
@@ -2074,7 +2075,7 @@ async function* parseSax(
     const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
     parser.write(chunkStr);
     if (error) {
-      throw error;
+      throw toError(error);
     }
     if (events.length > 0) {
       yield events;
@@ -2092,7 +2093,7 @@ async function* parseSax(
 
   parser.close();
   if (error) {
-    throw error;
+    throw toError(error);
   }
   if (events.length > 0) {
     yield events;
@@ -2141,7 +2142,7 @@ async function saxStream(
     const chunkStr = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
     parser.write(chunkStr);
     if (error) {
-      throw error;
+      throw toError(error);
     }
   }
 
@@ -2153,7 +2154,7 @@ async function saxStream(
 
   parser.close();
   if (error) {
-    throw error;
+    throw toError(error);
   }
 }
 

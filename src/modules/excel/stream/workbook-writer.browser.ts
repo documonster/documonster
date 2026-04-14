@@ -9,25 +9,11 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { StreamBuf } from "@excel/utils/stream-buf";
-import { base64ToUint8Array } from "@utils/utils";
-import { ExcelNotSupportedError, ImageError } from "@excel/errors";
-import { RelType } from "@excel/xlsx/rel-type";
-import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { SharedStrings } from "@excel/utils/shared-strings";
 import { DefinedNames } from "@excel/defined-names";
-import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
-import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
-import { AppXform } from "@excel/xlsx/xform/core/app-xform";
-import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
-import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
-import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
-import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
-import { theme1Xml } from "@excel/xlsx/xml/theme1";
-import type { Writable } from "@stream";
-import { toWritable } from "@stream";
-import { stringToUint8Array } from "@utils/binary";
+import { ExcelNotSupportedError, ImageError } from "@excel/errors";
+import { WorksheetWriter } from "@excel/stream/worksheet-writer";
+import type { ImageData, WorkbookView, AddWorksheetOptions } from "@excel/types";
+import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import {
   drawingPath,
   drawingRelsPath,
@@ -36,9 +22,23 @@ import {
   OOXML_REL_TARGETS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
-import type { ImageData, WorkbookView, AddWorksheetOptions } from "@excel/types";
-import { WorksheetWriter } from "@excel/stream/worksheet-writer";
+import { SharedStrings } from "@excel/utils/shared-strings";
+import { StreamBuf } from "@excel/utils/stream-buf";
+import { RelType } from "@excel/xlsx/rel-type";
+import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
+import { AppXform } from "@excel/xlsx/xform/core/app-xform";
+import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
+import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
+import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
+import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
+import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
+import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
+import { theme1Xml } from "@excel/xlsx/xml/theme1";
+import type { Writable } from "@stream";
+import { toWritable } from "@stream";
+import { stringToUint8Array } from "@utils/binary";
+import { base64ToUint8Array } from "@utils/utils";
 
 const EMPTY_U8 = new Uint8Array(0);
 const TEXT_DECODER = new TextDecoder();

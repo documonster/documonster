@@ -1,33 +1,19 @@
-import { colCache, type DecodedRange } from "@excel/utils/col-cache";
-import { Range, type RangeInput } from "@excel/range";
-import { Row, type RowModel } from "@excel/row";
-import { WorksheetNameError, MergeConflictError } from "@excel/errors";
-import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
-import { Enums } from "@excel/enums";
-import { Image, type ImageModel } from "@excel/image";
-import { Table, type TableModel } from "@excel/table";
+import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
+import { Enums } from "@excel/enums";
+import { WorksheetNameError, MergeConflictError } from "@excel/errors";
 import {
   FormCheckbox,
   type FormCheckboxModel,
   type FormCheckboxOptions,
   type FormControlRange
 } from "@excel/form-control";
+import { Image, type ImageModel } from "@excel/image";
 import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
-import { copyStyle } from "@excel/utils/copy-style";
-import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import { getCellDisplayText } from "@excel/utils/cell-format";
-import { buildSheetProtection } from "@excel/utils/sheet-protection";
-import {
-  calculateAutoFitWidth,
-  getMaxDigitWidth,
-  getColumnContentWidthPx,
-  getCellTextWidthPx,
-  getCellHeightPt
-} from "@excel/utils/text-metrics";
-import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/address";
-import type { Workbook } from "@excel/workbook";
+import { Range, type RangeInput } from "@excel/range";
+import { Row, type RowModel } from "@excel/row";
+import { Table, type TableModel } from "@excel/table";
 import type {
   AddImageRange,
   AutoFilter,
@@ -44,6 +30,20 @@ import type {
   WorksheetState,
   WorksheetView
 } from "@excel/types";
+import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/address";
+import { getCellDisplayText } from "@excel/utils/cell-format";
+import { colCache, type DecodedRange } from "@excel/utils/col-cache";
+import { copyStyle } from "@excel/utils/copy-style";
+import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
+import { buildSheetProtection } from "@excel/utils/sheet-protection";
+import {
+  calculateAutoFitWidth,
+  getMaxDigitWidth,
+  getColumnContentWidthPx,
+  getCellTextWidthPx,
+  getCellHeightPt
+} from "@excel/utils/text-metrics";
+import type { Workbook } from "@excel/workbook";
 
 // Type for data validation model - maps address to validation
 type DataValidationModel = { [address: string]: DataValidation | undefined };

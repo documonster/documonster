@@ -5,14 +5,14 @@
  * plus browser-specific tests for CompressionStream.
  */
 
-import { describe, it, expect } from "vitest";
 import { createDeflateStream } from "@archive";
-import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { ZipParser } from "@archive/unzip/zip-parser";
 import {
   runStreamingZipTests,
   type StreamingZipModuleImports
 } from "@archive/__tests__/zip/streaming-zip.shared";
+import { ZipParser } from "@archive/unzip/zip-parser";
+import { Zip, ZipDeflate } from "@archive/zip/stream";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Run Shared Tests

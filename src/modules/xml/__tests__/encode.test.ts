@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { xmlEncode, xmlDecode, xmlEncodeAttr } from "@xml/encode";
+import { describe, it, expect } from "vitest";
 
 describe("xmlEncode", () => {
   it("should return unchanged string when no special characters", () => {

@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import { testUtils } from "@excel/__tests__/shared";
 import { Anchor } from "@excel/anchor";
+import { describe, it, expect, beforeEach } from "vitest";
 
 describe("Anchor", () => {
   describe("colWidth", () => {

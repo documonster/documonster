@@ -10,12 +10,6 @@
  * API compatible with Node.js version - supports .on("data"), .on("end"), .write(callback), .end()
  */
 
-import { EventEmitter } from "@utils/event-emitter";
-import {
-  deflateRawCompressed,
-  inflateRaw,
-  SyncDeflater as PureJsSyncDeflater
-} from "@archive/compression/deflate-fallback";
 import {
   hasDeflateRawWebStreams,
   hasDeflateRawCompressionStream,
@@ -24,14 +18,20 @@ import {
   hasDeflateCompressionStream,
   hasDeflateDecompressionStream
 } from "@archive/compression/compress.base";
-import { concatUint8Arrays } from "@utils/binary";
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { gzipSync, gunzipSync, zlibSync, unzlibSync } from "@archive/compression/compress.browser";
+import {
+  deflateRawCompressed,
+  inflateRaw,
+  SyncDeflater as PureJsSyncDeflater
+} from "@archive/compression/deflate-fallback";
 import type { WorkerPool, WorkerTaskType } from "@archive/compression/worker-pool/index.browser";
 import {
   hasWorkerSupport,
   getDefaultWorkerPool
 } from "@archive/compression/worker-pool/index.browser";
-import { gzipSync, gunzipSync, zlibSync, unzlibSync } from "@archive/compression/compress.browser";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { concatUint8Arrays } from "@utils/binary";
+import { EventEmitter } from "@utils/event-emitter";
 
 export type {
   DeflateStream,
@@ -203,7 +203,7 @@ function createNativeWebStreamCodec(format: WebStreamFormat, isCompress: boolean
       await writer.close();
       await readLoop;
       if (readLoopError) {
-        throw readLoopError;
+        throw toError(readLoopError);
       }
     },
     abort: err => {

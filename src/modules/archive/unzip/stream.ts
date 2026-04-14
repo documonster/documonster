@@ -1,5 +1,11 @@
 import zlib from "zlib";
-import type { Duplex, PassThrough, Transform } from "@stream";
+
+import {
+  DATA_DESCRIPTOR_SIGNATURE_BYTES,
+  type CrxHeader,
+  type ParseDriverState,
+  type ParseOptions
+} from "@archive/unzip/parser-core";
 import {
   PullStream,
   type PullStreamPublicApi,
@@ -10,12 +16,7 @@ import {
   type ParseIO,
   type ZipEntry
 } from "@archive/unzip/stream.base";
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type ParseDriverState,
-  type ParseOptions
-} from "@archive/unzip/parser-core";
+import type { Duplex, PassThrough, Transform } from "@stream";
 
 /**
  * Creates an InflateRaw stream using Node.js native zlib.

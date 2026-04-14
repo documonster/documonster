@@ -13,6 +13,12 @@
  * - Graceful error handling and recovery
  */
 
+import {
+  resolvePoolOptions,
+  getPriorityValue,
+  hasWorkerSupport,
+  createAbortError
+} from "./pool.base";
 import type {
   WorkerPoolOptions,
   WorkerPoolStats,
@@ -23,12 +29,6 @@ import type {
   WorkerResponseMessage,
   TaskPriority
 } from "./types";
-import {
-  resolvePoolOptions,
-  getPriorityValue,
-  hasWorkerSupport,
-  createAbortError
-} from "./pool.base";
 import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "./worker-script";
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };

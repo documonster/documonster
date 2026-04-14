@@ -23,16 +23,17 @@
  * ```
  */
 
-import { PdfDocument } from "../reader/pdf-document";
+import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "../core/pdf-object";
 import type { PdfContentStream } from "../core/pdf-stream";
 import { PdfWriter, buildIncremental } from "../core/pdf-writer";
-import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "../core/pdf-object";
+import { PdfStructureError } from "../errors";
 import { FontManager } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
-import { initDecryption, isEncrypted } from "../reader/pdf-decrypt";
 import { extractFormFields } from "../reader/form-extractor";
-import { extractMetadata } from "../reader/metadata-reader";
 import type { PdfFormField } from "../reader/form-extractor";
+import { extractMetadata } from "../reader/metadata-reader";
+import { initDecryption, isEncrypted } from "../reader/pdf-decrypt";
+import { PdfDocument } from "../reader/pdf-document";
 import {
   isPdfArray,
   isPdfRef,
@@ -56,9 +57,8 @@ import type {
   FormFieldOptions,
   PdfSignatureOptions
 } from "./document-builder";
-import { PdfStructureError } from "../errors";
-import { writeImageXObject, parseImageDimensions } from "./image-utils";
 import { generateTextFieldAppearance, buildAppearanceBBox } from "./form-appearance";
+import { writeImageXObject, parseImageDimensions } from "./image-utils";
 import { parseResourceDict, mergeResourceDicts, serializeResourceDict } from "./resource-merger";
 import type { PdfResourceDict } from "./resource-merger";
 

@@ -6,7 +6,6 @@
  * createDeflateStream() and createInflateStream() functions.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
 import {
   createDeflateStream,
   createInflateStream,
@@ -17,6 +16,7 @@ import {
   terminateDefaultWorkerPool
 } from "@archive/compression/worker-pool/index.browser";
 import { concatUint8Arrays } from "@utils/binary";
+import { describe, it, expect, afterEach } from "vitest";
 
 // Helper to create compressible data
 function createCompressibleData(size: number): Uint8Array {

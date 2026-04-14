@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { SaxParser, parseSax } from "@xml/sax";
 import type { SaxTag, SaxEventAny } from "@xml/types";
+import { describe, it, expect } from "vitest";
 
 describe("SaxParser", () => {
   describe("basic parsing", () => {

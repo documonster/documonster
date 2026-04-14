@@ -8,8 +8,8 @@
  * This is about determinism/correctness, not performance.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
 import { StreamBuf } from "@excel/utils/stream-buf";
+import { describe, it, expect, beforeAll } from "vitest";
 
 interface WorkbookLike {
   addWorksheet: (name?: string) => any;

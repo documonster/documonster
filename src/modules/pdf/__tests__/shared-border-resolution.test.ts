@@ -1,9 +1,9 @@
+import { borderPrecedence, resolveSharedBorders } from "@pdf/render/layout-engine";
+import type { LayoutCell, LayoutBorder, PdfColor } from "@pdf/types";
 /**
  * Tests for shared-edge border resolution and border precedence.
  */
 import { describe, expect, it } from "vitest";
-import { borderPrecedence, resolveSharedBorders } from "@pdf/render/layout-engine";
-import type { LayoutCell, LayoutBorder, PdfColor } from "@pdf/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

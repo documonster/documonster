@@ -2,7 +2,6 @@
  * Tests for binary reader/writer utilities.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   BinaryReader,
   writeUint32LE,
@@ -10,6 +9,7 @@ import {
   parseFormatted,
   parseFormattedTyped
 } from "@archive/zip-spec/binary";
+import { describe, it, expect } from "vitest";
 
 describe("binary", () => {
   describe("writeUint32LE", () => {

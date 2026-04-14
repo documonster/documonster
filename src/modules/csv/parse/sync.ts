@@ -5,6 +5,7 @@
  * Provides parseCsv function and low-level parsing generators.
  */
 
+import { getUtf8ByteLength } from "../constants";
 import type {
   CsvParseOptions,
   CsvParseArrayOptions,
@@ -17,18 +18,17 @@ import type {
   DynamicTypingConfig,
   CastDateConfig
 } from "../types";
-import type { ParseConfig } from "./config";
-import type { ParseState } from "./state";
-import type { RowProcessResult } from "./row-processor";
-import { resolveParseConfig, toScannerConfig } from "./config";
-import { createParseState, resetInfoState, getUnquotedArray } from "./state";
-import { processCompletedRow, rowToRecord } from "./row-processor";
 import { applyDynamicTypingToArrayRow } from "../utils/dynamic-typing";
 import { isEmptyRow } from "../utils/row";
+import type { ParseConfig } from "./config";
+import { resolveParseConfig, toScannerConfig } from "./config";
 import { filterValidHeaders } from "./helpers";
-import { getUtf8ByteLength } from "../constants";
-import { scanRow as scanRowImpl } from "./scanner";
 import { splitLinesWithEndings } from "./lines";
+import type { RowProcessResult } from "./row-processor";
+import { processCompletedRow, rowToRecord } from "./row-processor";
+import { scanRow as scanRowImpl } from "./scanner";
+import type { ParseState } from "./state";
+import { createParseState, resetInfoState, getUnquotedArray } from "./state";
 
 // =============================================================================
 // Helper Functions

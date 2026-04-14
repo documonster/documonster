@@ -1,9 +1,9 @@
+import { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/errors";
+import { BaseError } from "@utils/errors";
 /**
  * Tests for PDF error classes.
  */
 import { describe, it, expect } from "vitest";
-import { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/errors";
-import { BaseError } from "@utils/errors";
 
 describe("PDF Errors", () => {
   describe("PdfError", () => {

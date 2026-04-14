@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { colCache } from "@excel/utils/col-cache";
-import { Workbook } from "../../../index";
 import { extractAll } from "@archive/unzip/extract";
 import { sanitizeTableName } from "@excel/table";
+import { colCache } from "@excel/utils/col-cache";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 const spliceArray = (a: any[], index: number, count: number, ...rest: any[]) => {
   const clone = [...a];

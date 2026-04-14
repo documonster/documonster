@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { testUtils } from "@excel/__tests__/shared";
+import { describe, it, expect } from "vitest";
+
 import { Workbook, ValueType } from "../../../index";
 
 // =============================================================================

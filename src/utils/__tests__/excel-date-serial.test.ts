@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { dateToExcel, excelToDate } from "@utils/utils";
+import { describe, it, expect } from "vitest";
 
 describe("excel date serial", () => {
   it("converts Date -> serial", () => {

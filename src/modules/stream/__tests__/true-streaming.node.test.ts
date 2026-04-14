@@ -5,8 +5,8 @@
  */
 
 import { PassThrough, Readable } from "@stream";
-import { beforeAll } from "vitest";
 import { createTrueStreamingTests } from "@stream/__tests__/streaming/true-streaming-tests";
+import { beforeAll } from "vitest";
 
 // Lazy imports
 let WorkbookWriter: any;

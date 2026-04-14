@@ -8,8 +8,8 @@
  * - Static factory method
  */
 
-import { describe, it, expect } from "vitest";
 import { Note } from "@excel/note";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Constructor Tests

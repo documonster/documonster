@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { XmlWriter } from "@xml/writer";
 import { parseXml, textContent } from "@xml/dom";
+import { XmlWriter } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 describe("XmlWriter", () => {
   describe("basic XML generation", () => {

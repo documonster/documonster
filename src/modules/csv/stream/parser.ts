@@ -6,6 +6,21 @@
  */
 
 import { Transform } from "@stream";
+
+import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "../constants";
+// Import shared core functionality from parse/
+import type { ParseConfig } from "../parse/config";
+import { createParseConfig, toScannerConfig } from "../parse/config";
+import { convertRowToObject, filterValidHeaders } from "../parse/helpers";
+import { splitLinesWithEndings } from "../parse/lines";
+import {
+  processCompletedRow as processCompletedRowCore,
+  shouldSkipRow as shouldSkipRowCore
+} from "../parse/row-processor";
+// Import Scanner for efficient batch scanning
+import { createScanner, type Scanner } from "../parse/scanner";
+import type { ParseState } from "../parse/state";
+import { createParseState, getUnquotedArray } from "../parse/state";
 import type {
   CsvParseOptions,
   RowTransformFunction,
@@ -20,22 +35,6 @@ import type {
 import { isSyncTransform, isSyncValidate } from "../types";
 import { detectDelimiter, stripBom } from "../utils/detect";
 import { applyDynamicTypingToRow, applyDynamicTypingToArrayRow } from "../utils/dynamic-typing";
-import { convertRowToObject, filterValidHeaders } from "../parse/helpers";
-import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "../constants";
-import { splitLinesWithEndings } from "../parse/lines";
-
-// Import shared core functionality from parse/
-import type { ParseConfig } from "../parse/config";
-import type { ParseState } from "../parse/state";
-import { createParseConfig, toScannerConfig } from "../parse/config";
-import { createParseState, getUnquotedArray } from "../parse/state";
-import {
-  processCompletedRow as processCompletedRowCore,
-  shouldSkipRow as shouldSkipRowCore
-} from "../parse/row-processor";
-
-// Import Scanner for efficient batch scanning
-import { createScanner, type Scanner } from "../parse/scanner";
 
 /**
  * Transform stream that parses CSV data row by row

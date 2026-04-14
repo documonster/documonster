@@ -5,12 +5,12 @@
  * to verify TRUE streaming behavior.
  */
 
-import { describe, beforeAll, expect, it } from "vitest";
-import { createTrueStreamingTests } from "@stream/__tests__/streaming/true-streaming-tests";
 import {
   yieldToEventLoop,
   generateLargeText
 } from "@stream/__tests__/streaming/streaming-test-base";
+import { createTrueStreamingTests } from "@stream/__tests__/streaming/true-streaming-tests";
+import { describe, beforeAll, expect, it } from "vitest";
 
 // Lazy import to avoid Node.js module resolution issues
 let WorkbookWriter: any;

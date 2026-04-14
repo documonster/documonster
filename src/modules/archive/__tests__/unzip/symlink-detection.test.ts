@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { createZipSync } from "@archive/zip/zip-bytes";
-import { ZipParser } from "@archive/unzip/zip-parser";
 import { extractAll } from "@archive/unzip/extract";
+import { ZipParser } from "@archive/unzip/zip-parser";
 import { ZipReader } from "@archive/unzip/zip-reader";
+import { createZipSync } from "@archive/zip/zip-bytes";
 import { textEncoder } from "@utils/binary";
+import { describe, it, expect } from "vitest";
 
 describe("Symlink detection", () => {
   describe("ZipParser", () => {

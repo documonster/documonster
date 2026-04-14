@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { SaxParser } from "@xml/sax";
 import { parseXml, findChild, attr } from "@xml/dom";
+import { SaxParser } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
+import { describe, it, expect } from "vitest";
 
 describe("Namespace support", () => {
   describe("SaxParser with xmlns", () => {

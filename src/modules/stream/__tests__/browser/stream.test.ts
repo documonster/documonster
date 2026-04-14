@@ -6,7 +6,6 @@
  * data integrity stay consistent across environments.
  */
 
-import { describe } from "vitest";
 import {
   Readable,
   Writable,
@@ -55,7 +54,7 @@ import {
   promises,
   promisify
 } from "@stream";
-import { EventEmitter } from "@utils/event-emitter";
+import { runStreamTests, type StreamModuleImports } from "@stream/__tests__/stream.shared";
 import {
   stringToUint8Array,
   uint8ArrayToString,
@@ -63,7 +62,8 @@ import {
   uint8ArrayIndexOf,
   concatUint8Arrays
 } from "@utils/binary";
-import { runStreamTests, type StreamModuleImports } from "@stream/__tests__/stream.shared";
+import { EventEmitter } from "@utils/event-emitter";
+import { describe } from "vitest";
 
 // =============================================================================
 // Run Shared Tests (Identical behavior for Node.js and Browser)

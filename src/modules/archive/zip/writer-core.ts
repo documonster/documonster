@@ -1,6 +1,5 @@
-import type { Zip64Mode } from "@archive/zip-spec/zip-records";
-import type { ZipCentralDirEntry } from "./writable-file";
 import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildEndOfCentralDirectory,
   buildZip64EndOfCentralDirectory,
@@ -21,6 +20,8 @@ import {
   VERSION_NEEDED,
   VERSION_ZIP64
 } from "@archive/zip-spec/zip-records";
+
+import type { ZipCentralDirEntry } from "./writable-file";
 
 /**
  * Input type for building Central Directory entries.

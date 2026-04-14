@@ -1,7 +1,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Workbook } from "../../../index";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+
+import { Workbook } from "../../../index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 

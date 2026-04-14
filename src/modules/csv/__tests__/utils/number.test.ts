@@ -6,8 +6,8 @@
  * - parseNumberFromCsv: Parse numbers from CSV input
  */
 
-import { describe, it, expect } from "vitest";
 import { formatNumberForCsv, parseNumberFromCsv } from "@csv/utils/number";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // formatNumberForCsv Tests

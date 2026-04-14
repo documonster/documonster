@@ -1,5 +1,5 @@
-import { deepMerge } from "@excel/utils/under-dash";
 import type { Font } from "@excel/types";
+import { deepMerge } from "@excel/utils/under-dash";
 
 interface NoteText {
   text: string;

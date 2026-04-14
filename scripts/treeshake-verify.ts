@@ -10,11 +10,12 @@
  * Usage: npx tsx scripts/treeshake-verify.ts
  */
 
-import { buildSync } from "esbuild";
-import { build as rolldownBuild } from "rolldown";
-import { rspack } from "@rspack/core";
 import fs from "node:fs";
 import path from "node:path";
+
+import { rspack } from "@rspack/core";
+import { buildSync } from "esbuild";
+import { build as rolldownBuild } from "rolldown";
 
 // =============================================================================
 // Configuration

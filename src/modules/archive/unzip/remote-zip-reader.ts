@@ -14,7 +14,6 @@
  * @module
  */
 
-import { BinaryReader } from "@archive/zip-spec/binary";
 import { crc32 } from "@archive/compression/crc32";
 import {
   zipCryptoVerifyPassword,
@@ -23,13 +22,17 @@ import {
   AES_SALT_LENGTH,
   ZIP_CRYPTO_HEADER_SIZE
 } from "@archive/crypto";
+import { pipeIterableToSink } from "@archive/io/archive-sink";
+import type { RandomAccessReader, HttpRangeReaderOptions } from "@archive/io/random-access";
+import { HttpRangeReader } from "@archive/io/random-access";
+import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { resolveZipStringCodec, type ZipStringEncoding } from "@archive/shared/text";
 import {
   processEntryData,
   processEntryDataStream,
   LOCAL_HEADER_FIXED_SIZE
 } from "@archive/unzip/zip-extract-core";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { pipeIterableToSink } from "@archive/io/archive-sink";
+import { BinaryReader } from "@archive/zip-spec/binary";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
 import {
   EOCD_MAX_SEARCH_SIZE,
@@ -43,10 +46,7 @@ import {
   type EOCDInfo,
   type ZIP64EOCDInfo
 } from "@archive/zip-spec/zip-parser-core";
-import { resolveZipStringCodec, type ZipStringEncoding } from "@archive/shared/text";
 import { LOCAL_FILE_HEADER_SIG } from "@archive/zip-spec/zip-records";
-import type { RandomAccessReader, HttpRangeReaderOptions } from "@archive/io/random-access";
-import { HttpRangeReader } from "@archive/io/random-access";
 
 /**
  * Options for RemoteZipReader

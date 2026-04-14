@@ -1,6 +1,6 @@
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
-import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { CfvoXform } from "@excel/xlsx/xform/sheet/cf/cfvo-xform";
+import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 
 class ColorScaleXform extends CompositeXform {
   cfvoXform: CfvoXform;

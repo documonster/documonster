@@ -1,9 +1,9 @@
+import { testUtils } from "@excel/__tests__/shared";
+import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import { makeTestDataPath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import { testUtils } from "@excel/__tests__/shared";
-import { makeTestDataPath } from "@test/utils";
 
 async function assertWorkbookOoxmlOk(wb: Workbook): Promise<void> {
   const buffer = await wb.xlsx.writeBuffer();

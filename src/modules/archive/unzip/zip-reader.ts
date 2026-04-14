@@ -1,14 +1,3 @@
-import { ZipParser, type ZipEntryInfo, type ZipParseOptions } from "@archive/unzip/zip-parser";
-import {
-  processEntryData,
-  processEntryDataStream,
-  readEntryCompressedData
-} from "@archive/unzip/zip-extract-core";
-import {
-  createParse,
-  type ParseOptions,
-  type ZipEntry as ParseZipEntry
-} from "@archive/unzip/stream";
 import { pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import {
   isInMemoryArchiveSource,
@@ -24,15 +13,27 @@ import {
   suppressUnhandledRejection
 } from "@archive/shared/errors";
 import { ProgressEmitter } from "@archive/shared/progress";
-import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
-import { getTextDecoder } from "@utils/binary";
-import { eventedReadableToAsyncIterableNoDestroy } from "@stream/internal/evented-readable-to-async-iterable";
-import { isWritableStream } from "@stream/internal/type-guards";
-import type { ArchiveFormat } from "@archive/shared/types";
 import type { ZipStringEncoding } from "@archive/shared/text";
-import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
+import type { ArchiveFormat } from "@archive/shared/types";
+import {
+  createParse,
+  type ParseOptions,
+  type ZipEntry as ParseZipEntry
+} from "@archive/unzip/stream";
+import {
+  processEntryData,
+  processEntryDataStream,
+  readEntryCompressedData
+} from "@archive/unzip/zip-extract-core";
+import { ZipParser, type ZipEntryInfo, type ZipParseOptions } from "@archive/unzip/zip-parser";
 import type { ZipEntryEncryptionMethod, ZipEntryType } from "@archive/zip-spec/zip-entry-info";
 import { isSymlink } from "@archive/zip-spec/zip-entry-info";
+import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
+import { eventedReadableToAsyncIterableNoDestroy } from "@stream/internal/evented-readable-to-async-iterable";
+import { isWritableStream } from "@stream/internal/type-guards";
+import { getTextDecoder } from "@utils/binary";
+
+import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
 
 function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   let cleanedUp = false;

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { StringBuf } from "@excel/utils/string-buf";
+import { describe, it, expect } from "vitest";
 
 const decoder = new TextDecoder();
 

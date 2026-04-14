@@ -1,7 +1,7 @@
-import { StdDocAttributes } from "@xml/writer";
+import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
-import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
+import { StdDocAttributes } from "@xml/writer";
 
 /**
  * Unified VML Drawing Xform - Combines Notes (comments) and Form Controls

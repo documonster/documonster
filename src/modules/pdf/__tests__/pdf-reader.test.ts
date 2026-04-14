@@ -5,16 +5,21 @@
  * image extraction, and metadata reading using roundtrip tests (write then read).
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { pdf } from "../pdf";
-import { excelToPdf } from "../excel-bridge";
-import { PdfDocumentBuilder } from "../builder/document-builder";
 import { Workbook } from "@excel/workbook";
-import { readPdf } from "../reader/pdf-reader";
-import { PdfStructureError } from "../errors";
 import { aesCbcDecrypt, sha256 } from "@utils/crypto";
+import { describe, it, expect, beforeAll } from "vitest";
+
+import { PdfDocumentBuilder } from "../builder/document-builder";
+import { PdfStructureError } from "../errors";
+import { excelToPdf } from "../excel-bridge";
+import { pdf } from "../pdf";
 import { CMap, parseCMap } from "../reader/cmap-parser";
-import { PdfTokenizer, TokenType } from "../reader/pdf-tokenizer";
+import type { TextFragment } from "../reader/content-interpreter";
+import { extractTextFromPage } from "../reader/content-interpreter";
+import { resolveFont, decodeText } from "../reader/font-decoder";
+import type { ResolvedFont } from "../reader/font-decoder";
+import { decodeXmlEntities } from "../reader/metadata-reader";
+import { PdfDocument } from "../reader/pdf-document";
 import {
   parseObject,
   isPdfDict,
@@ -22,13 +27,9 @@ import {
   isPdfArray,
   decodePdfStringBytes
 } from "../reader/pdf-parser";
+import { readPdf } from "../reader/pdf-reader";
+import { PdfTokenizer, TokenType } from "../reader/pdf-tokenizer";
 import { reconstructText } from "../reader/text-reconstruction";
-import type { TextFragment } from "../reader/content-interpreter";
-import { PdfDocument } from "../reader/pdf-document";
-import { extractTextFromPage } from "../reader/content-interpreter";
-import { resolveFont, decodeText } from "../reader/font-decoder";
-import { decodeXmlEntities } from "../reader/metadata-reader";
-import type { ResolvedFont } from "../reader/font-decoder";
 
 // =============================================================================
 // Tokenizer Tests

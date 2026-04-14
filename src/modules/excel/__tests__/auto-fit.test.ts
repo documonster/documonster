@@ -1,5 +1,4 @@
-import { describe, it, expect } from "vitest";
-import { Workbook } from "../../../index";
+import { getCalibri11PtPixelWidth } from "@excel/utils/font-data";
 import {
   measureTextWidthPx,
   measureRichTextWidthPx,
@@ -13,7 +12,9 @@ import {
   calculateWrappedLineCount,
   pixelToPoints
 } from "@excel/utils/text-metrics";
-import { getCalibri11PtPixelWidth } from "@excel/utils/font-data";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 // =============================================================================
 // Font Data Tests

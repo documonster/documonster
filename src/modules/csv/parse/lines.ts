@@ -70,38 +70,38 @@ export function* splitLinesWithEndings(
       yield { line, lineEndingLength, lineLengthWithEnding };
       pos = idx + sep.length;
     }
-  }
+  } else {
+    const re = linebreakRegex.global ? linebreakRegex : getCachedGlobalRegex(linebreakRegex);
 
-  const re = linebreakRegex.global ? linebreakRegex : getCachedGlobalRegex(linebreakRegex);
+    let pos = 0;
+    re.lastIndex = 0;
 
-  let pos = 0;
-  re.lastIndex = 0;
+    while (true) {
+      const match = re.exec(input);
+      if (!match) {
+        break;
+      }
 
-  while (true) {
-    const match = re.exec(input);
-    if (!match) {
-      break;
+      const start = match.index;
+      const end = start + match[0].length;
+      const line = input.slice(pos, start);
+      const lineEndingLength = match[0].length;
+      const lineLengthWithEnding = line.length + lineEndingLength;
+      yield { line, lineEndingLength, lineLengthWithEnding };
+      pos = end;
+
+      // Safety: avoid infinite loops for zero-length matches.
+      if (match[0].length === 0) {
+        re.lastIndex++;
+      }
     }
 
-    const start = match.index;
-    const end = start + match[0].length;
-    const line = input.slice(pos, start);
-    const lineEndingLength = match[0].length;
-    const lineLengthWithEnding = line.length + lineEndingLength;
-    yield { line, lineEndingLength, lineLengthWithEnding };
-    pos = end;
-
-    // Safety: avoid infinite loops for zero-length matches.
-    if (match[0].length === 0) {
-      re.lastIndex++;
+    // If input ends with a line ending, don't yield a trailing empty line.
+    if (pos === input.length) {
+      return;
     }
-  }
 
-  // If input ends with a line ending, don't yield a trailing empty line.
-  if (pos === input.length) {
-    return;
+    const tail = input.slice(pos);
+    yield { line: tail, lineEndingLength: 0, lineLengthWithEnding: tail.length };
   }
-
-  const tail = input.slice(pos);
-  yield { line: tail, lineEndingLength: 0, lineLengthWithEnding: tail.length };
 }

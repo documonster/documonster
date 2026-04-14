@@ -14,8 +14,9 @@
  * @see ISO 32000-2:2020, §7.6 — Encryption
  */
 
-import { aesCbcEncrypt, aesCbcEncryptRaw, aesEcbEncrypt, randomBytes } from "@utils/crypto";
 import { concatUint8Arrays } from "@utils/binary";
+import { aesCbcEncrypt, aesCbcEncryptRaw, aesEcbEncrypt, randomBytes } from "@utils/crypto";
+
 import { pdfSha256 } from "./pdf-kdf";
 
 // =============================================================================

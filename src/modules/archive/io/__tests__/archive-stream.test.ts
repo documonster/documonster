@@ -1,7 +1,6 @@
-import { describe, it, expect } from "vitest";
-
 import { resolveArchiveSourceToBuffer, toReadableStream } from "@archive/io/archive-source";
 import { toNodeReadable } from "@archive/io/archive-source.node";
+import { describe, it, expect } from "vitest";
 
 async function* makeChunks(): AsyncIterable<Uint8Array> {
   yield new Uint8Array([1, 2, 3]);

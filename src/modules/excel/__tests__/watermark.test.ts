@@ -1,3 +1,5 @@
+import { createTextWatermarkImage } from "@excel/utils/watermark-image";
+import { Workbook } from "@excel/workbook";
 /**
  * Tests for Excel watermark feature.
  *
@@ -8,8 +10,6 @@
  * - XLSX round-trip (write → read) for watermark drawings
  */
 import { describe, it, expect } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { createTextWatermarkImage } from "@excel/utils/watermark-image";
 
 // A tiny 1x1 red PNG for image tests
 const TINY_PNG = new Uint8Array([

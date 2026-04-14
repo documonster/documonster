@@ -14,10 +14,10 @@
  * - Error handling
  */
 
-import { describe, it, expect } from "vitest";
-import { Readable } from "@stream";
-import { CsvParserStream } from "@csv/stream";
 import { parseCsvRows } from "@csv/index";
+import { CsvParserStream } from "@csv/stream";
+import { Readable } from "@stream";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Test Helpers

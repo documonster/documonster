@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { CellMatrix } from "@excel/utils/cell-matrix";
 import { colCache } from "@excel/utils/col-cache";
+import { describe, it, expect } from "vitest";
 
 describe("CellMatrix", () => {
   it("getCell creates and caches cells", () => {
@@ -81,6 +81,7 @@ describe("CellMatrix", () => {
   it("clones template deeply and filters prototype pollution keys", () => {
     const template: any = Object.create(null);
     template.style = { nested: { n: 1 } };
+    // oxlint-disable-next-line no-proto
     template["__proto__"] = { polluted: true };
 
     const cm = new CellMatrix(template);

@@ -5,9 +5,7 @@
  * Used by both `ZipParser` (in-memory) and `RemoteZipReader` (random-access).
  */
 
-import { BinaryReader } from "@archive/zip-spec/binary";
-import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { resolveZipLastModifiedDateFromUnixSeconds } from "@archive/zip-spec/timestamps";
+import type { AesKeyStrength } from "@archive/crypto/aes";
 import {
   decodeZipPath,
   decodeZipComment,
@@ -15,7 +13,11 @@ import {
   type ZipStringEncoding,
   type ZipStringCodec
 } from "@archive/shared/text";
+import { BinaryReader } from "@archive/zip-spec/binary";
+import { resolveZipLastModifiedDateFromUnixSeconds } from "@archive/zip-spec/timestamps";
+import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
 import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
+
 import type { ZipEntryInfo, ZipEntryEncryptionMethod } from "./zip-entry-info";
 import {
   CENTRAL_DIR_HEADER_SIG,
@@ -29,7 +31,6 @@ import {
   isSymlinkMode,
   isDirectoryMode
 } from "./zip-records";
-import type { AesKeyStrength } from "@archive/crypto/aes";
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------

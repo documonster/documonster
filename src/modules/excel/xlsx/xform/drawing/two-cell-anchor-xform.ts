@@ -1,8 +1,8 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
-import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
+import { StaticXform } from "@excel/xlsx/xform/static-xform";
 
 interface TwoCellModel {
   range: {

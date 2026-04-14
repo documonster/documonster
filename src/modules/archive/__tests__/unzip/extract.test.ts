@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { extractAll, extractFile, listFiles, forEachEntry } from "@archive/unzip/extract";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
+
+import { extractAll, extractFile, listFiles, forEachEntry } from "@archive/unzip/extract";
+import { describe, it, expect } from "vitest";
 
 // Path to test xlsx file (xlsx files are zip archives)
 const testFilePath = fileURLToPath(new URL("./data/formulas.xlsx", import.meta.url));

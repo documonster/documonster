@@ -1,10 +1,10 @@
+import { Range } from "@excel/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
-import { Range } from "@excel/range";
+import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";
 import { DatabarXform } from "@excel/xlsx/xform/sheet/cf/databar-xform";
 import { ExtLstRefXform } from "@excel/xlsx/xform/sheet/cf/ext-lst-ref-xform";
 import { FormulaXform } from "@excel/xlsx/xform/sheet/cf/formula-xform";
-import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";
 import { IconSetXform } from "@excel/xlsx/xform/sheet/cf/icon-set-xform";
 
 const extIcons = {

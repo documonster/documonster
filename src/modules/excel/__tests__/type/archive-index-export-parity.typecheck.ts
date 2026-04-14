@@ -14,8 +14,6 @@ type IsEqualStrict<A, B> =
   IsAny<A> extends true ? false : IsAny<B> extends true ? false : IsEqual<A, B>;
 
 import type * as NodeIndexModule from "@archive";
-import type * as BrowserIndexModule from "@archive/index.browser";
-
 import type {
   CompressOptions as NodeCompressOptions,
   StreamCompressOptions as NodeStreamCompressOptions,
@@ -25,7 +23,7 @@ import type {
   ArchiveSource as NodeArchiveSource,
   ArchiveSink as NodeArchiveSink
 } from "@archive";
-
+import type * as BrowserIndexModule from "@archive/index.browser";
 import type {
   CompressOptions as BrowserCompressOptions,
   StreamCompressOptions as BrowserStreamCompressOptions,

@@ -14,7 +14,8 @@
  * - parseWithScanner integration
  */
 
-import { describe, it, expect } from "vitest";
+import { createParseConfig } from "@csv/parse/config";
+import type { RowProcessResult } from "@csv/parse/row-processor";
 import {
   createScanner,
   scanAllRows,
@@ -25,11 +26,10 @@ import {
   DEFAULT_SCANNER_CONFIG
 } from "@csv/parse/scanner";
 import type { ScannerConfig, RowScanResult } from "@csv/parse/scanner";
-import { parseWithScanner } from "@csv/parse/sync";
-import { createParseConfig } from "@csv/parse/config";
 import { createParseState } from "@csv/parse/state";
-import type { RowProcessResult } from "@csv/parse/row-processor";
+import { parseWithScanner } from "@csv/parse/sync";
 import type { CsvParseOptions, CsvRecordError } from "@csv/types";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Test Helpers

@@ -4,12 +4,12 @@
  * Cross-platform implementation.
  */
 
+import { Enums } from "@excel/enums";
+import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
+import { RelType } from "@excel/xlsx/rel-type";
 import { EventEmitter } from "@utils/event-emitter";
 import { SaxParser } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
-import { Enums } from "@excel/enums";
-import { RelType } from "@excel/xlsx/rel-type";
-import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
 
 export interface HyperlinkReaderOptions<TWorkbook = unknown> {
   workbook: TWorkbook;

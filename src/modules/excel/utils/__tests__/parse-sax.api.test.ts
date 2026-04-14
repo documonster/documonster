@@ -2,9 +2,9 @@
  * API tests for the SAX XML parser (parse-sax.ts)
  */
 
-import { describe, it, expect } from "vitest";
-import type { SaxTag } from "@xml/types";
 import { SaxParser } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
+import { describe, it, expect } from "vitest";
 
 describe("SaxParser", () => {
   describe("API", () => {

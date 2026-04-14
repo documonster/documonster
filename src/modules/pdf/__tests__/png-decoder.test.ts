@@ -1,8 +1,8 @@
+import { decodePng } from "@pdf/render/png-decoder";
 /**
  * Tests for the PNG decoder.
  */
 import { describe, it, expect } from "vitest";
-import { decodePng } from "@pdf/render/png-decoder";
 
 /**
  * Build a minimal valid PNG file programmatically.

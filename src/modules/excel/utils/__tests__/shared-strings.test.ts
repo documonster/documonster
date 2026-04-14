@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { SharedStrings } from "@excel/utils/shared-strings";
+import { describe, it, expect } from "vitest";
 
 describe("SharedStrings", () => {
   it("Stores and shares string values", () => {

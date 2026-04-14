@@ -5,9 +5,9 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { EventEmitter } from "@utils/event-emitter";
-import { uint8ArrayIndexOf } from "@utils/binary";
 import type { PullStreamOptions } from "@stream/types";
+import { uint8ArrayIndexOf } from "@utils/binary";
+import { EventEmitter } from "@utils/event-emitter";
 
 export type { PullStreamOptions } from "@stream/types";
 

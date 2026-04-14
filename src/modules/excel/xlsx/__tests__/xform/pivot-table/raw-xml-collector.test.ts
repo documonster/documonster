@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
 import {
   RawXmlCollector,
   serializeAttributes
 } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
+import { describe, it, expect } from "vitest";
 
 describe("RawXmlCollector", () => {
   describe("start() / basic lifecycle", () => {

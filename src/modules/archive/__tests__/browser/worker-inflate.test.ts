@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import { zip } from "@archive";
-import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
+import { describe, it, expect } from "vitest";
 
 describe("parse.browser - worker inflate (optional)", () => {
   function createTestZip(files: Array<{ name: string; content: string }>): Uint8Array {

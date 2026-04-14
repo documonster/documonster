@@ -1,6 +1,7 @@
+import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+
 import { Workbook } from "../../../index";
 import type { Fill } from "../../../index";
-import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 
 const [, , filename] = process.argv;
 

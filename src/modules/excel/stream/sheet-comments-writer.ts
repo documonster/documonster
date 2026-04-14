@@ -1,14 +1,14 @@
-import { XmlWriter } from "@xml/writer";
-import { RelType } from "@excel/xlsx/rel-type";
 import { colCache } from "@excel/utils/col-cache";
-import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
-import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import {
   commentsPath,
   commentsRelTargetFromWorksheet,
   vmlDrawingPath,
   vmlDrawingRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
+import { RelType } from "@excel/xlsx/rel-type";
+import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
+import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import { XmlWriter } from "@xml/writer";
 
 interface SheetCommentsWriterOptions {
   id: number;

@@ -19,19 +19,14 @@ import {
   isAesEncryption,
   getAesKeyStrength
 } from "@archive/crypto";
+import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 import {
   DEFAULT_ZIP_LEVEL,
   DEFAULT_ZIP_TIMESTAMPS,
   REPRODUCIBLE_ZIP_MOD_TIME
 } from "@archive/shared/defaults";
-import { isProbablyIncompressible } from "@archive/zip/compressibility";
-import { type ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import {
-  buildZipEntryMetadata,
-  resolveZipCompressionMethod
-} from "@archive/zip/zip-entry-metadata";
-import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
+import { type ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
 import {
   FLAG_ENCRYPTED,
@@ -44,8 +39,14 @@ import {
   writeLocalFileHeaderInto
 } from "@archive/zip-spec/zip-records";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
+import { isProbablyIncompressible } from "@archive/zip/compressibility";
+import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
+import {
+  buildZipEntryMetadata,
+  resolveZipCompressionMethod
+} from "@archive/zip/zip-entry-metadata";
+
 import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 
 interface ProcessedEntry {
   name: Uint8Array;

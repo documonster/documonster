@@ -1,7 +1,4 @@
-/**
- * Tests for PDF font metrics and font manager.
- */
-import { describe, it, expect } from "vitest";
+import { FontManager, resolvePdfFontName } from "@pdf/font/font-manager";
 import {
   measureText,
   getFontAscent,
@@ -11,7 +8,10 @@ import {
   isStandardFont,
   getStandardFontNames
 } from "@pdf/font/metrics";
-import { FontManager, resolvePdfFontName } from "@pdf/font/font-manager";
+/**
+ * Tests for PDF font metrics and font manager.
+ */
+import { describe, it, expect } from "vitest";
 
 describe("Font Metrics", () => {
   describe("getCharWidth", () => {

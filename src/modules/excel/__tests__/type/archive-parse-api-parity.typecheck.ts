@@ -7,8 +7,8 @@ type IsEqual<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 import type { Parse as NodeParse } from "@archive/unzip/stream";
-import type { Parse as BrowserParse } from "@archive/unzip/stream.browser";
 import type * as NodeParseModule from "@archive/unzip/stream";
+import type { Parse as BrowserParse } from "@archive/unzip/stream.browser";
 import type * as BrowserParseModule from "@archive/unzip/stream.browser";
 
 // Strict export type parity: ParseStream must be identical across Node and browser.

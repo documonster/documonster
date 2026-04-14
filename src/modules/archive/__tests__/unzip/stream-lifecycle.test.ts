@@ -11,13 +11,15 @@
  * 7. Stress + stability
  */
 
-import { describe, it, expect } from "vitest";
 import { createReadStream } from "fs";
-import { Readable } from "stream";
 import { join } from "path";
-import { PassThrough } from "@stream";
-import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+import { Readable } from "stream";
+
 import { unzip, zip } from "@archive";
+import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+import { PassThrough } from "@stream";
+import { describe, it, expect } from "vitest";
+
 import { delay, chunkBytes, createDataDescriptorZip } from "./test-helpers";
 
 const testFilePath = join(__dirname, "./data/formulas.xlsx");

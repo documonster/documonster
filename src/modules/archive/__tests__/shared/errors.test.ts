@@ -2,7 +2,6 @@
  * Tests for archive error classes.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   ArchiveError,
   AbortError,
@@ -19,6 +18,7 @@ import {
   toError,
   suppressUnhandledRejection
 } from "@archive/shared/errors";
+import { describe, it, expect } from "vitest";
 
 describe("errors", () => {
   describe("ArchiveError", () => {

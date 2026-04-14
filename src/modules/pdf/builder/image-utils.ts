@@ -6,8 +6,8 @@
  * share a single implementation.
  */
 
-import type { PdfWriter } from "../core/pdf-writer";
 import { PdfDict, pdfRef, pdfNumber } from "../core/pdf-object";
+import type { PdfWriter } from "../core/pdf-writer";
 import { decodePng } from "../render/png-decoder";
 
 // =============================================================================

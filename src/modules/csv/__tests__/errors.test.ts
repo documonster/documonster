@@ -9,9 +9,10 @@
  * - Callback safety
  */
 
-import { describe, it, expect } from "vitest";
 import { parseCsv, parseCsvRows, type CsvRecordError } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
+import { describe, it, expect } from "vitest";
+
 import { generateMalformedCsv, parseStreamCsv } from "./csv-test-utils";
 
 // =============================================================================

@@ -8,10 +8,10 @@
  * - Hyperlinks handling
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { Image } from "@excel/image";
 import { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
-import { Image } from "@excel/image";
+import { describe, it, expect, beforeEach } from "vitest";
 
 // =============================================================================
 // Test Setup

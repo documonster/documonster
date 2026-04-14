@@ -1,13 +1,14 @@
+import { Workbook } from "@excel/workbook";
+import { PdfError } from "@pdf/errors";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { pdf as standalonePdf } from "@pdf/pdf";
 /**
  * Integration tests for the full PDF export pipeline.
  * Tests the PDF exporter with real Workbook instances via the Excel bridge,
  * and standalone pdf() API.
  */
 import { describe, it, expect } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { excelToPdf } from "@pdf/excel-bridge";
-import { pdf as standalonePdf } from "@pdf/pdf";
-import { PdfError } from "@pdf/errors";
+
 import { buildMinimalTtf } from "./font-embedding.test";
 import { pdfToString, expectValidPdf } from "./test-helpers";
 

@@ -2,8 +2,8 @@
  * XLSX stream vs non-stream parity tests - Browser
  */
 
-import { beforeAll } from "vitest";
 import { createXlsxStreamParityTests } from "@stream/__tests__/streaming/xlsx-stream-parity-tests";
+import { beforeAll } from "vitest";
 
 let Workbook: any;
 let PassThrough: any;

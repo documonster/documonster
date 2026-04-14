@@ -1,4 +1,15 @@
 import { describe, it, expect } from "vitest";
+
+import {
+  generateTextFieldAppearance,
+  generateCheckboxAppearance
+} from "../builder/form-appearance";
+import {
+  parseResourceDict,
+  mergeResourceDicts,
+  serializeResourceDict
+} from "../builder/resource-merger";
+import type { PdfResourceDict } from "../builder/resource-merger";
 import {
   PdfDocumentBuilder,
   PdfEditor,
@@ -10,16 +21,6 @@ import {
   asn1Parse
 } from "../index";
 import { generateTestCertificate } from "./test-certificate";
-import {
-  parseResourceDict,
-  mergeResourceDicts,
-  serializeResourceDict
-} from "../builder/resource-merger";
-import type { PdfResourceDict } from "../builder/resource-merger";
-import {
-  generateTextFieldAppearance,
-  generateCheckboxAppearance
-} from "../builder/form-appearance";
 
 // =============================================================================
 // PdfDocumentBuilder — Free Text & Vector Drawing

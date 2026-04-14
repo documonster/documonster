@@ -6,6 +6,7 @@
  */
 
 import { describe } from "vitest";
+
 import { runStreamUtilsTests } from "./stream-utils.shared";
 
 describe("stream/utils (Node)", () => {

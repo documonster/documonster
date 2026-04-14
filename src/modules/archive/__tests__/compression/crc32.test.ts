@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { crc32, crc32Update, crc32Finalize } from "@archive/compression/crc32";
 import { crc32UpdateByte } from "@archive/compression/crc32.base";
+import { describe, it, expect } from "vitest";
 
 describe("crc32", () => {
   describe("basic crc32 calculation", () => {

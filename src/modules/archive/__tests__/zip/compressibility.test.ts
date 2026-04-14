@@ -6,11 +6,11 @@
  * - isProbablyIncompressibleChunks: Chunk-based variant for streaming
  */
 
-import { describe, it, expect } from "vitest";
 import {
   isProbablyIncompressible,
   isProbablyIncompressibleChunks
 } from "@archive/zip/compressibility";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Test Data Generators

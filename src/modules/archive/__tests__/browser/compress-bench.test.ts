@@ -1,6 +1,5 @@
-import { describe, it } from "vitest";
-
 import { compress, decompress, hasCompressionStream } from "@archive/compression/compress.browser";
+import { describe, it } from "vitest";
 
 function makeData(size: number): Uint8Array {
   const out = new Uint8Array(size);

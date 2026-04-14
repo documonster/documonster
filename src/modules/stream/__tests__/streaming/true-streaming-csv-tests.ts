@@ -7,8 +7,8 @@
  * Both test runners (node and browser) simply call `runTrueStreamingCsvTests()`.
  */
 
-import { describe, it, expect } from "vitest";
 import { CsvParserStream, CsvFormatterStream } from "@csv/index";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Public Entry Point

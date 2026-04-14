@@ -11,7 +11,6 @@
  * - detectDelimiter: Delimiter auto-detection (tested in parse-options.test.ts but expanded here)
  */
 
-import { describe, it, expect } from "vitest";
 import {
   escapeRegex,
   normalizeQuoteOption,
@@ -21,6 +20,7 @@ import {
   detectLinebreak,
   detectDelimiter
 } from "@csv/utils/detect";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // escapeRegex Tests

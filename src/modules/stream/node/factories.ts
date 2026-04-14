@@ -6,6 +6,10 @@
 
 import { Readable, Transform, Duplex, PassThrough } from "stream";
 import type { TransformCallback as NodeTransformCallback } from "stream";
+
+import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,
   WritableStreamOptions,
@@ -19,10 +23,6 @@ import type {
   IDuplex,
   IPassThrough
 } from "@stream/types";
-
-import { PullStream } from "@stream/pull-stream";
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
 
 // Re-export shared stream classes
 export { PullStream, BufferedStream, StringChunk, ByteChunk };

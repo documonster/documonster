@@ -8,11 +8,12 @@
  * Related issue: https://github.com/nickmessing/excelts/issues/41
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { extractAll } from "@archive/unzip/extract";
 import * as fs from "fs";
 import * as path from "path";
+
+import { extractAll } from "@archive/unzip/extract";
+import { Workbook } from "@excel/workbook";
+import { describe, it, expect, beforeAll } from "vitest";
 
 // Path to test data file
 const SAMPLE_FILE = path.join(__dirname, "data", "chart-pivot-sample.xlsx");

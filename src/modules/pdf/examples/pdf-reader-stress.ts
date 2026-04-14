@@ -25,10 +25,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { Workbook, excelToPdf } from "../../../index";
+import { PdfStructureError } from "../errors";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
-import { PdfStructureError } from "../errors";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

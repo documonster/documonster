@@ -12,7 +12,6 @@
  * - Worker idle timeout and cleanup
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   WorkerPool,
   getDefaultWorkerPool,
@@ -22,6 +21,7 @@ import {
   hasWorkerSupport,
   type WorkerPoolOptions
 } from "@archive/compression/worker-pool/index.browser";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // Helper to create test data
 function createTestData(size: number, pattern = 0x42): Uint8Array {

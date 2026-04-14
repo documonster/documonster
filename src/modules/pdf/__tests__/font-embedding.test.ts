@@ -1,10 +1,10 @@
+import { PdfFontError } from "@pdf/errors";
+import { FontManager } from "@pdf/font/font-manager";
+import { parseTtf } from "@pdf/font/ttf-parser";
 /**
  * Tests for TrueType font parsing, subsetting, and embedding.
  */
 import { describe, it, expect } from "vitest";
-import { parseTtf } from "@pdf/font/ttf-parser";
-import { FontManager } from "@pdf/font/font-manager";
-import { PdfFontError } from "@pdf/errors";
 
 /**
  * Build a minimal valid TrueType font for testing.

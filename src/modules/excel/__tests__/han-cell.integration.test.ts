@@ -9,8 +9,9 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, it, expect } from "vitest";
+
 import { Workbook } from "@excel/workbook";
+import { describe, it, expect } from "vitest";
 
 const TEST_DATA_DIR = path.join(__dirname, "data");
 

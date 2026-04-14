@@ -5,12 +5,13 @@
  * Uses the unified compress module for compression/decompression.
  */
 
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
 import { gunzip } from "@archive/compression/compress";
 import { createGzipStream } from "@archive/compression/streaming-compress";
+import { collect } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { toUint8Array, isInMemoryArchiveSource, toAsyncIterable } from "@archive/io/archive-source";
-import { collect } from "@archive/io/archive-sink";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+
 import { TarArchive, addEntries, type TarArchiveOptions } from "./tar-archive";
 import { parseTar, untar, type TarEntry, type TarParseOptions } from "./tar-parser";
 

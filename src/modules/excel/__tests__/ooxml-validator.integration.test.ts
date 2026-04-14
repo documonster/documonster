@@ -1,9 +1,9 @@
+import { testUtils } from "@excel/__tests__/shared";
+import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import { makeTestDataPath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import { testUtils } from "@excel/__tests__/shared";
-import { makeTestDataPath } from "@test/utils";
 
 describe("OOXML validator", () => {
   it("validates a complex generated workbook", async () => {

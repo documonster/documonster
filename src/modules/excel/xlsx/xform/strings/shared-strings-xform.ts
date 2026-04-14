@@ -1,7 +1,7 @@
-import { StdDocAttributes } from "@xml/writer";
+import { XmlParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
-import { XmlParseError } from "@excel/errors";
+import { StdDocAttributes } from "@xml/writer";
 
 interface SharedStringsModel {
   values: any[];

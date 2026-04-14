@@ -1,9 +1,9 @@
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/table/auto-filter-xform";
 import { TableColumnXform } from "@excel/xlsx/xform/table/table-column-xform";
 import { TableStyleInfoXform } from "@excel/xlsx/xform/table/table-style-info-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 interface TableModel {
   id?: number;

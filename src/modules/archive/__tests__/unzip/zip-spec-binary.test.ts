@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { parseFormatted as parse } from "@archive/zip-spec/binary";
+import { describe, it, expect } from "vitest";
 
 const buf = Buffer.from([
   0x62, 0x75, 0x66, 0x68, 0x65, 0x72, 0xff, 0xae, 0x00, 0x11, 0x99, 0xd7, 0x7b, 0x13, 0x35

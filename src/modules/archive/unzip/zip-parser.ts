@@ -4,10 +4,11 @@
  * No dependency on Node.js stream module
  */
 
-import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import type { ZipStringEncoding } from "@archive/shared/text";
 import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import type { ZipStringEncoding } from "@archive/shared/text";
+import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
 import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
+
 import {
   processEntryData,
   processEntryDataSync,

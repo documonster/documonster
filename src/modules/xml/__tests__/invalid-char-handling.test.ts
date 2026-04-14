@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { SaxParser } from "@xml/sax";
 import { parseXml } from "@xml/dom";
+import { SaxParser } from "@xml/sax";
 import { parseXmlToObject } from "@xml/to-object";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Test Helpers

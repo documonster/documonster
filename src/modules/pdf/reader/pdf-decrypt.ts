@@ -11,13 +11,14 @@
  * @see PDF 2.0 (ISO 32000-2), §7.6 - Encryption
  */
 
-import { rc4, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
 import { concatUint8Arrays } from "@utils/binary";
+import { rc4, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
+
 import { pdfMd5, pdfSha256 } from "../core/pdf-kdf";
+import { PdfStructureError } from "../errors";
+import type { PdfDocument } from "./pdf-document";
 import type { PdfDictValue } from "./pdf-parser";
 import { dictGetNumber, dictGetName, dictGetBytes, dictGetArray, dictGetBool } from "./pdf-parser";
-import type { PdfDocument } from "./pdf-document";
-import { PdfStructureError } from "../errors";
 
 // =============================================================================
 // Constants

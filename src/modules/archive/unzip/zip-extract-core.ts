@@ -12,6 +12,7 @@
 
 import { decompress, decompressSync } from "@archive/compression/compress";
 import { crc32, crc32Finalize, crc32Update } from "@archive/compression/crc32";
+import { createInflateStream } from "@archive/compression/streaming-compress";
 import {
   ZIP_CRYPTO_HEADER_SIZE,
   aesDecrypt,
@@ -19,13 +20,8 @@ import {
   zipCryptoDecryptByte,
   zipCryptoInitKeys
 } from "@archive/crypto";
-import { BinaryReader } from "@archive/zip-spec/binary";
-import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import {
-  COMPRESSION_DEFLATE,
-  COMPRESSION_STORE,
-  LOCAL_FILE_HEADER_SIG
-} from "@archive/zip-spec/zip-records";
+import { collect } from "@archive/io/archive-sink";
+import { createAsyncQueue } from "@archive/shared/async-queue";
 import {
   Crc32MismatchError,
   DecryptionError,
@@ -35,9 +31,13 @@ import {
   throwIfAborted,
   toError
 } from "@archive/shared/errors";
-import { createAsyncQueue } from "@archive/shared/async-queue";
-import { createInflateStream } from "@archive/compression/streaming-compress";
-import { collect } from "@archive/io/archive-sink";
+import { BinaryReader } from "@archive/zip-spec/binary";
+import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
+import {
+  COMPRESSION_DEFLATE,
+  COMPRESSION_STORE,
+  LOCAL_FILE_HEADER_SIG
+} from "@archive/zip-spec/zip-records";
 
 /**
  * Local file header fixed size (30 bytes)

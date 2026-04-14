@@ -7,9 +7,9 @@
  * @see PDF Reference 1.7, Chapter 3 - Objects
  */
 
+import { PdfStructureError } from "../errors";
 import { TokenType } from "./pdf-tokenizer";
 import type { Token, PdfTokenizer } from "./pdf-tokenizer";
-import { PdfStructureError } from "../errors";
 
 // =============================================================================
 // PDF Object Types

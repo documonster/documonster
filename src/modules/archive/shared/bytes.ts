@@ -90,13 +90,17 @@ export function indexOfUint8ArrayPattern(
     return -1;
   }
 
-  outer: for (let i = start; i <= bufLen - patLen; i++) {
+  for (let i = start; i <= bufLen - patLen; i++) {
+    let matched = true;
     for (let j = 0; j < patLen; j++) {
       if (buffer[i + j] !== pattern[j]) {
-        continue outer;
+        matched = false;
+        break;
       }
     }
-    return i;
+    if (matched) {
+      return i;
+    }
   }
   return -1;
 }

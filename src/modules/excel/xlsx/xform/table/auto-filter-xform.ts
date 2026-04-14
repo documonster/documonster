@@ -1,6 +1,6 @@
+import { XmlParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
-import { XmlParseError } from "@excel/errors";
 
 interface AutoFilterModel {
   autoFilterRef: string;

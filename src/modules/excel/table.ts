@@ -1,4 +1,4 @@
-import { colCache } from "@excel/utils/col-cache";
+import type { Cell } from "@excel/cell";
 import { TableError } from "@excel/errors";
 import type {
   Address,
@@ -8,8 +8,8 @@ import type {
   TableColumnProperties,
   TableStyleProperties
 } from "@excel/types";
+import { colCache } from "@excel/utils/col-cache";
 import type { Worksheet } from "@excel/worksheet";
-import type { Cell } from "@excel/cell";
 
 interface TableModel {
   ref: string;

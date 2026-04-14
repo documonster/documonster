@@ -2,8 +2,8 @@
  * Unit tests for the SAX XML parser (parse-sax.ts)
  */
 
-import { describe } from "vitest";
 import { test } from "@excel/utils/__tests__/parse-sax.test-utils";
+import { describe } from "vitest";
 
 describe("SaxParser", () => {
   describe("basic parsing", () => {

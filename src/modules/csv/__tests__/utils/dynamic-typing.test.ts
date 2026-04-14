@@ -10,7 +10,6 @@
  * - applyDynamicTypingToArrayRow: Array row conversion
  */
 
-import { describe, it, expect } from "vitest";
 import {
   convertValue,
   tryParseDate,
@@ -19,6 +18,7 @@ import {
   applyDynamicTypingToRow,
   applyDynamicTypingToArrayRow
 } from "@csv/utils/dynamic-typing";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // convertValue Tests

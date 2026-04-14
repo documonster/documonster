@@ -5,7 +5,7 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import { describe, it, expect } from "vitest";
+import { createReadableFromArray } from "@stream";
 import {
   collect,
   text,
@@ -20,7 +20,7 @@ import {
   readableStreamToAsyncIterable
 } from "@stream/utils";
 import { stringToUint8Array } from "@utils/binary";
-import { createReadableFromArray } from "@stream";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Helpers

@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Workbook } from "../../../index";
 import { testFilePath } from "@test/utils";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 const TEST_XLSX_FILE_NAME = testFilePath("workbook-styles.test");
 
@@ -8,8 +9,8 @@ const TEST_XLSX_FILE_NAME = testFilePath("workbook-styles.test");
 // Sample Data
 import { richTextSample } from "@excel/__tests__/data/rich-text-sample";
 import richTextSampleA1 from "@excel/__tests__/data/rich-text-sample-a1.json" with { type: "json" };
-import { PassThrough } from "@stream";
 import { testUtils } from "@excel/__tests__/shared";
+import { PassThrough } from "@stream";
 
 // =============================================================================
 // Tests

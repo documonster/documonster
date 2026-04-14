@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { colCache } from "@excel/utils/col-cache";
+import { describe, it, expect } from "vitest";
 
 describe("colCache", () => {
   it("caches values", () => {

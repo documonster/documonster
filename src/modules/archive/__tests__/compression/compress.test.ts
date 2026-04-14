@@ -1,4 +1,3 @@
-import { describe, it, expect } from "vitest";
 import {
   compress,
   compressSync,
@@ -7,6 +6,7 @@ import {
   hasCompressionStream
 } from "@archive/compression/compress";
 import { isNode } from "@utils/env";
+import { describe, it, expect } from "vitest";
 
 describe("compress", () => {
   describe("environment detection", () => {

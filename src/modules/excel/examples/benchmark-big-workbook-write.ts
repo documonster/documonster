@@ -1,7 +1,8 @@
-import { Workbook, WorkbookWriter } from "../../../index";
-import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { ColumnSum } from "@excel/examples/utils/column-sum";
+import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { randomName, randomNum } from "@excel/examples/utils/utils";
+
+import { Workbook, WorkbookWriter } from "../../../index";
 
 if (process.argv[2] === "help") {
   console.log("Usage:");

@@ -1,5 +1,5 @@
-import { colCache, type DecodedRange } from "@excel/utils/col-cache";
 import type { DataValidation } from "@excel/types";
+import { colCache, type DecodedRange } from "@excel/utils/col-cache";
 
 interface ValidationModel {
   [address: string]: DataValidation | undefined;

@@ -1,31 +1,5 @@
 import { colCache } from "@excel/utils/col-cache";
-import { StdDocAttributes } from "@xml/writer";
-import { RelType } from "@excel/xlsx/rel-type";
-import { Merges } from "@excel/xlsx/xform/sheet/merges";
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { isInternalLink, HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
-import { ListXform } from "@excel/xlsx/xform/list-xform";
-import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
-import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
-import { DimensionXform } from "@excel/xlsx/xform/sheet/dimension-xform";
-import { MergeCellXform } from "@excel/xlsx/xform/sheet/merge-cell-xform";
-import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
-import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-xform";
-import { SheetFormatPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-format-properties-xform";
-import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
-import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
-import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
-import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
-import { PrintOptionsXform } from "@excel/xlsx/xform/sheet/print-options-xform";
-import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
-import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
-import { DrawingXform } from "@excel/xlsx/xform/sheet/drawing-xform";
-import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
-import { RowBreaksXform } from "@excel/xlsx/xform/sheet/row-breaks-xform";
-import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
-import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
-import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
-import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
+import { buildDrawingAnchorsAndRels, resolveMediaTarget } from "@excel/utils/drawing-utils";
 import {
   commentsRelTargetFromWorksheet,
   ctrlPropRelTargetFromWorksheet,
@@ -35,7 +9,33 @@ import {
   vmlDrawingRelTargetFromWorksheet,
   vmlDrawingHFRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
-import { buildDrawingAnchorsAndRels, resolveMediaTarget } from "@excel/utils/drawing-utils";
+import { RelType } from "@excel/xlsx/rel-type";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { ListXform } from "@excel/xlsx/xform/list-xform";
+import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
+import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
+import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
+import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
+import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
+import { DimensionXform } from "@excel/xlsx/xform/sheet/dimension-xform";
+import { DrawingXform } from "@excel/xlsx/xform/sheet/drawing-xform";
+import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
+import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
+import { isInternalLink, HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
+import { MergeCellXform } from "@excel/xlsx/xform/sheet/merge-cell-xform";
+import { Merges } from "@excel/xlsx/xform/sheet/merges";
+import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
+import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
+import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
+import { PrintOptionsXform } from "@excel/xlsx/xform/sheet/print-options-xform";
+import { RowBreaksXform } from "@excel/xlsx/xform/sheet/row-breaks-xform";
+import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
+import { SheetFormatPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-format-properties-xform";
+import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-xform";
+import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
+import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
+import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 const mergeRule = (rule, extRule) => {
   Object.keys(extRule).forEach(key => {

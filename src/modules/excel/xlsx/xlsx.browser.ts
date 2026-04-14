@@ -9,7 +9,9 @@
  * - loadFromFiles: Load from pre-extracted ZIP data
  */
 
-import { XmlStreamWriter } from "@xml/stream-writer";
+import { ZipParser } from "@archive/unzip/zip-parser";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -17,36 +19,8 @@ import {
   ExcelNotSupportedError,
   XmlParseError
 } from "@excel/errors";
-import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
-import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
-import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
-import { AppXform } from "@excel/xlsx/xform/core/app-xform";
-import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
-import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
-import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
-import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
-import { TableXform } from "@excel/xlsx/xform/table/table-xform";
-import { PivotCacheRecordsXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-records-xform";
-import { PivotCacheDefinitionXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform";
-import {
-  PivotTableXform,
-  type ParsedPivotTableModel
-} from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
-import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
-import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
-import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
-import { theme1Xml } from "@excel/xlsx/xml/theme1";
-import { RelType } from "@excel/xlsx/rel-type";
-import { StreamBuf } from "@excel/utils/stream-buf";
-import { bufferToString, base64ToUint8Array } from "@utils/utils";
-import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-import { ZipParser } from "@archive/unzip/zip-parser";
-import { PassThrough, type IEventEmitter } from "@stream";
-import { concatUint8Arrays } from "@utils/binary";
-import type { Workbook } from "@excel/workbook";
+import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import {
   commentsPath,
   commentsRelTargetFromWorksheetName,
@@ -93,10 +67,35 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import { PassthroughManager } from "@excel/utils/passthrough-manager";
-
-import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import { StreamBuf } from "@excel/utils/stream-buf";
+import type { Workbook } from "@excel/workbook";
+import { RelType } from "@excel/xlsx/rel-type";
+import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
+import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
+import { AppXform } from "@excel/xlsx/xform/core/app-xform";
+import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
+import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
+import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
+import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
+import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
+import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
+import { PivotCacheDefinitionXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform";
+import { PivotCacheRecordsXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-records-xform";
+import {
+  PivotTableXform,
+  type ParsedPivotTableModel
+} from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
+import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
+import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
+import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
+import { TableXform } from "@excel/xlsx/xform/table/table-xform";
+import { theme1Xml } from "@excel/xlsx/xml/theme1";
+import { PassThrough, type IEventEmitter } from "@stream";
+import { concatUint8Arrays } from "@utils/binary";
+import { bufferToString, base64ToUint8Array } from "@utils/utils";
+import { XmlStreamWriter } from "@xml/stream-writer";
 
 type StreamListener = Parameters<IEventEmitter["on"]>[1];
 
@@ -206,7 +205,7 @@ class StreamingZipWriterAdapter implements IZipWriter {
       this._pendingWrites++;
       ok.then(
         result => {
-          if (result === false) {
+          if (!result) {
             this._needsDrain = true;
           }
         },

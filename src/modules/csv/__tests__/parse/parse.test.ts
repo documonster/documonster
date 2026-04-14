@@ -13,8 +13,8 @@
  * 6. Spaces are part of the field and should not be trimmed
  */
 
-import { describe, it, expect } from "vitest";
 import { parseCsv, parseCsvRows } from "@csv/index";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Basic Parsing

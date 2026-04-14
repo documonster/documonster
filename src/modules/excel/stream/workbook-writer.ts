@@ -4,8 +4,6 @@
  * Extends base with file path support and file system image loading.
  */
 
-import { readFileBytes, createWriteStream } from "@utils/fs";
-import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { ImageError } from "@excel/errors";
 import {
   WorkbookWriterBase,
@@ -13,7 +11,9 @@ import {
   type WorkbookZipOptions,
   type ZlibOptions
 } from "@excel/stream/workbook-writer.browser";
+import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { mediaPath } from "@excel/utils/ooxml-paths";
+import { readFileBytes, createWriteStream } from "@utils/fs";
 
 export type { WorkbookZipOptions, ZlibOptions };
 

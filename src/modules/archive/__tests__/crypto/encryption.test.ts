@@ -3,15 +3,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  zipCryptoInitKeys,
-  zipCryptoDecryptByte,
-  zipCryptoEncryptByte,
-  zipCryptoDecrypt,
-  zipCryptoEncrypt,
-  zipCryptoCheckPassword,
-  ZIP_CRYPTO_HEADER_SIZE
-} from "../../crypto/zip-crypto";
+
+import { crc32 } from "../../compression/crc32";
 import {
   aesDerive,
   aesDecrypt,
@@ -26,7 +19,15 @@ import {
   AES_AUTH_CODE_LENGTH
 } from "../../crypto/aes";
 import type { AesKeyStrength } from "../../crypto/aes";
-import { crc32 } from "../../compression/crc32";
+import {
+  zipCryptoInitKeys,
+  zipCryptoDecryptByte,
+  zipCryptoEncryptByte,
+  zipCryptoDecrypt,
+  zipCryptoEncrypt,
+  zipCryptoCheckPassword,
+  ZIP_CRYPTO_HEADER_SIZE
+} from "../../crypto/zip-crypto";
 
 /**
  * Helper to generate random bytes using crypto.getRandomValues

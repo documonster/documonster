@@ -5,13 +5,13 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   isReadableStream,
   isWritableStream,
   isAsyncIterable,
   isTransformStream
 } from "@stream/internal/type-guards";
+import { describe, it, expect } from "vitest";
 
 export function runInternalTypeGuardsTests(): void {
   // ===========================================================================

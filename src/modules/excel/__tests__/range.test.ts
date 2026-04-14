@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { Range } from "@excel/range";
+import { describe, it, expect } from "vitest";
 
 describe("Range", () => {
   function check(

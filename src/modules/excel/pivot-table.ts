@@ -1,7 +1,7 @@
-import { range, toSortedArray } from "@utils/utils";
-import { colCache } from "@excel/utils/col-cache";
 import { PivotTableError } from "@excel/errors";
 import type { Table } from "@excel/table";
+import { colCache } from "@excel/utils/col-cache";
+import { range, toSortedArray } from "@utils/utils";
 
 /**
  * Interface representing the source data abstraction for pivot tables.

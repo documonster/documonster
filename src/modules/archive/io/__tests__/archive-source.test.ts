@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { toAsyncIterable } from "@archive/io/archive-source";
+import { describe, it, expect } from "vitest";
 
 async function collect(iter: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];

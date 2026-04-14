@@ -1,3 +1,4 @@
+import { ValueType } from "@excel/enums";
 /**
  * Text measurement engine for auto-fit column width and row height calculation.
  *
@@ -25,7 +26,6 @@
  * - excelize col.go (factor-based calculation)
  */
 import type { Font, Alignment, NumFmt, RichText } from "@excel/types";
-import { ValueType } from "@excel/enums";
 import { getCellDisplayText } from "@excel/utils/cell-format";
 import {
   getCalibri11PtPixelWidth,

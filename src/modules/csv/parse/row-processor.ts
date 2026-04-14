@@ -6,11 +6,11 @@
  */
 
 import type { CsvRecordError, HeaderArray, RecordInfo } from "../types";
-import type { ParseConfig } from "./config";
-import type { ParseState } from "./state";
-import { processHeaders, validateAndAdjustColumns, convertRowToObject } from "./helpers";
-import { isEmptyRow, hasAllEmptyValues } from "../utils/row";
 import { applyDynamicTypingToRow } from "../utils/dynamic-typing";
+import { isEmptyRow, hasAllEmptyValues } from "../utils/row";
+import type { ParseConfig } from "./config";
+import { processHeaders, validateAndAdjustColumns, convertRowToObject } from "./helpers";
+import type { ParseState } from "./state";
 
 // =============================================================================
 // Types

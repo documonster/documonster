@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { createGzipStream, createGunzipStream } from "@archive/compression/streaming-compress";
 import { isGzipData, GZIP_ID1, GZIP_ID2 } from "@archive/compression/compress";
+import { createGzipStream, createGunzipStream } from "@archive/compression/streaming-compress";
+import { describe, it, expect } from "vitest";
 
 describe("streaming gzip", () => {
   describe("createGzipStream", () => {

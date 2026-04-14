@@ -9,15 +9,16 @@
  * {@link toPlainObject} from `./dom` instead.
  */
 
-import { SaxParser } from "@xml/sax";
+import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
-import type { ParseXmlToObjectOptions } from "@xml/types";
+import { SaxParser } from "@xml/sax";
 import {
   resolveOptions,
   resolveValue,
   addChildValue,
   type ResolvedOptions
 } from "@xml/to-object-shared";
+import type { ParseXmlToObjectOptions } from "@xml/types";
 
 // =============================================================================
 // Stack Frame
@@ -147,7 +148,7 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
   parser.close();
 
   if (error) {
-    throw error;
+    throw toError(error);
   }
 
   // The synthetic root's obj should contain exactly one key (the document root).

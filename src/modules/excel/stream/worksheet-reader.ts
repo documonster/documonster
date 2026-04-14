@@ -4,18 +4,18 @@
  * Works in both Node.js and Browser.
  */
 
-import { EventEmitter } from "@utils/event-emitter";
-import { SaxParser } from "@xml/sax";
-import type { SaxTag } from "@xml/types";
+import { Column } from "@excel/column";
 import { ExcelStreamStateError } from "@excel/errors";
-import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
-import { copyStyle } from "@excel/utils/copy-style";
-import { colCache } from "@excel/utils/col-cache";
 import { Dimensions } from "@excel/range";
 import { Row } from "@excel/row";
-import { Column } from "@excel/column";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
 import type { WorksheetState, CellErrorValue } from "@excel/types";
+import { colCache } from "@excel/utils/col-cache";
+import { copyStyle } from "@excel/utils/copy-style";
+import { EventEmitter } from "@utils/event-emitter";
+import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import { SaxParser } from "@xml/sax";
+import type { SaxTag } from "@xml/types";
 
 // ============================================================================
 // Internal Types

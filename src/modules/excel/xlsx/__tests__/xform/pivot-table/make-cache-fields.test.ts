@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { Workbook } from "@excel/workbook";
+import { describe, it, expect } from "vitest";
 
 describe("makeCacheFields", () => {
   describe("field categorization", () => {

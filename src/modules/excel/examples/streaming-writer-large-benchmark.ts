@@ -1,12 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
+
 /**
  * Using WorkbookWriter (streaming) for large data
  *
  * WorkbookWriter writes data to disk incrementally, reducing peak memory use
  */
 import { WorkbookWriter } from "../../../index";
-
-import fs from "node:fs";
-import path from "node:path";
 
 async function main() {
   console.time("xlsx");

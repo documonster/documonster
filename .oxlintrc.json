@@ -4,7 +4,7 @@
   "options": {
     "typeAware": true
   },
-  "ignorePatterns": ["scripts/**/*", "test/**/*", "dist/**/*"],
+  "ignorePatterns": ["scripts/**/*", "test/**/*", "dist/**/*", "**/*.generated.ts"],
   "overrides": [
     {
       "files": ["src/**/*.{ts,tsx}"],
@@ -31,6 +31,36 @@
         "no-return-assign": 2,
         "no-unneeded-ternary": 2,
         "yoda": 2,
+        "no-debugger": 2,
+        "no-var": 2,
+        "prefer-const": 2,
+        "no-eval": 2,
+        "no-self-compare": 2,
+        "no-template-curly-in-string": 2,
+        "no-unreachable": 2,
+        "no-constant-condition": 2,
+        "no-throw-literal": 2,
+        "eqeqeq": ["error", "smart"],
+        "no-proto": 2,
+        "no-constructor-return": 2,
+        "no-new-wrappers": 2,
+        "no-iterator": 2,
+        "no-loss-of-precision": 2,
+        "no-nonoctal-decimal-escape": 2,
+        "no-unsafe-optional-chaining": 2,
+        "no-unused-private-class-members": 2,
+        "no-constant-binary-expression": 2,
+        "no-object-constructor": 2,
+        "no-dupe-class-members": 2,
+        "no-this-before-super": 2,
+        "require-yield": 2,
+        "no-prototype-builtins": 2,
+        "no-regex-spaces": 2,
+        "no-sequences": 2,
+        "prefer-rest-params": 2,
+        "prefer-spread": 2,
+        "no-with": 2,
+        "no-labels": 2,
 
         "typescript/no-explicit-any": 0,
         "typescript/no-duplicate-enum-values": 2,
@@ -43,6 +73,12 @@
         "typescript/consistent-type-imports": 2,
         "typescript/consistent-type-exports": 2,
         "typescript/no-require-imports": "error",
+        "typescript/prefer-ts-expect-error": 2,
+        "typescript/no-this-alias": 2,
+        "typescript/prefer-as-const": 2,
+        "typescript/no-unnecessary-boolean-literal-compare": 2,
+        "typescript/no-extraneous-class": 2,
+        "typescript/no-useless-constructor": 2,
 
         "typescript/await-thenable": "error",
         "typescript/no-redundant-type-constituents": "error",
@@ -56,7 +92,9 @@
         "typescript/require-array-sort-compare": 2,
 
         "import/no-cycle": [2, { "ignoreExternal": true }],
-        "import/no-duplicates": "error"
+        "import/no-duplicates": "error",
+        "import/no-self-import": 2,
+        "import/no-default-export": 2
       }
     }
   ]

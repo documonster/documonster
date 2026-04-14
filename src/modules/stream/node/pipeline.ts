@@ -12,7 +12,7 @@ import {
   finished as nodeFinished
 } from "stream";
 import { pipeline as nodePipeline } from "stream/promises";
-import type { PipelineStreamLike } from "@stream/types";
+
 import { createFinishedAll } from "@stream/common/finished-all";
 import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
 import { isPipelineOptions } from "@stream/common/options";
@@ -21,6 +21,7 @@ import {
   isTransformStream,
   isWritableStream
 } from "@stream/internal/type-guards";
+import type { PipelineStreamLike } from "@stream/types";
 
 // Re-export for consumers
 export type { PipelineOptions, FinishedOptions } from "@stream/common/options";

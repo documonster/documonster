@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { Writable } from "@stream";
+import { describe, it, expect } from "vitest";
+
 import { Workbook, WorkbookWriter } from "../../../index";
 
 // =============================================================================

@@ -1,6 +1,6 @@
-import { XmlWriter } from "@xml/writer";
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { FormCheckboxModel } from "@excel/form-control";
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { XmlWriter } from "@xml/writer";
 
 /**
  * Control Properties Xform - Generates ctrlProp*.xml for form controls

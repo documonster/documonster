@@ -1,5 +1,6 @@
-import { WorkbookWriter } from "../../../index";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+
+import { WorkbookWriter } from "../../../index";
 
 const [, , filename] = process.argv;
 

@@ -17,6 +17,10 @@
  * - Skip hidden rows and columns
  */
 
+import { yieldToEventLoop } from "@utils/utils.base";
+
+import type { FontManager } from "../font/font-manager";
+import { resolvePdfFontName } from "../font/font-manager";
 import type {
   PdfSheetData,
   PdfCellData,
@@ -32,17 +36,6 @@ import type {
   LayoutRichTextRun
 } from "../types";
 import { PdfCellType } from "../types";
-import type { FontManager } from "../font/font-manager";
-import { resolvePdfFontName } from "../font/font-manager";
-import {
-  extractFontProperties,
-  excelFillToPdfColor,
-  excelBordersToPdf,
-  excelHAlignToPdf,
-  excelVAlignToPdf,
-  borderStyleToLineWidth
-} from "./style-converter";
-import { wrapTextLines } from "./page-renderer";
 import {
   CELL_PADDING_H,
   CELL_PADDING_V,
@@ -52,7 +45,15 @@ import {
   EXCEL_COLUMN_PADDING_PX,
   PX_TO_PT
 } from "./constants";
-import { yieldToEventLoop } from "@utils/utils.base";
+import { wrapTextLines } from "./page-renderer";
+import {
+  extractFontProperties,
+  excelFillToPdfColor,
+  excelBordersToPdf,
+  excelHAlignToPdf,
+  excelVAlignToPdf,
+  borderStyleToLineWidth
+} from "./style-converter";
 
 // =============================================================================
 // Constants

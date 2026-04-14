@@ -5,10 +5,10 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import { EventEmitter } from "@utils/event-emitter";
 import { StreamStateError } from "@stream/errors";
-import { textEncoder } from "@utils/binary";
 import type { BufferedStreamOptions, DataChunk } from "@stream/types";
+import { textEncoder } from "@utils/binary";
+import { EventEmitter } from "@utils/event-emitter";
 
 export type { BufferedStreamOptions, DataChunk } from "@stream/types";
 

@@ -9,8 +9,8 @@
  * @see PDF Reference 1.7, Chapter 5 - Text
  */
 
-import { pdfNumber } from "./pdf-object";
 import type { PdfColor } from "../types";
+import { pdfNumber } from "./pdf-object";
 
 // =============================================================================
 // Content Stream Builder

@@ -13,8 +13,8 @@
  * - Round-trip parsing/formatting
  */
 
-import { describe, it, expect } from "vitest";
 import { formatCsv, parseCsv } from "@csv/index";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Basic Formatting

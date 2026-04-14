@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Workbook, ValueType } from "../../../index";
 import { testFilePath } from "@test/utils";
+import { describe, it, expect } from "vitest";
+
+import { Workbook, ValueType } from "../../../index";
 
 describe("Workbook", () => {
   describe("CSV", () => {

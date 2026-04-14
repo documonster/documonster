@@ -9,8 +9,9 @@
  * Run: npx tsx scripts/xml-benchmark.ts
  */
 
-import { SaxParser, parseXml, XmlWriter } from "../dist/esm/modules/xml/index.js";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
+
+import { SaxParser, parseXml, XmlWriter } from "../dist/esm/modules/xml/index.js";
 
 // =============================================================================
 // Test Data Generation

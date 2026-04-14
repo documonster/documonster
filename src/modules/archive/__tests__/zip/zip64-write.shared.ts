@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { findSignatureFromEnd, hasSignature } from "@archive/__tests__/zip/zip-test-utils";
 import { ZipParser } from "@archive/unzip/zip-parser";
-import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
 import {
   CENTRAL_DIR_HEADER_SIG,
   ZIP64_END_OF_CENTRAL_DIR_LOCATOR_SIG,
   ZIP64_END_OF_CENTRAL_DIR_SIG,
   END_OF_CENTRAL_DIR_SIG
 } from "@archive/zip-spec/zip-records";
-import { findSignatureFromEnd, hasSignature } from "@archive/__tests__/zip/zip-test-utils";
+import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import { describe, it, expect } from "vitest";
 
 export function runZip64WriteTests(): void {
   describe("ZIP64 write", () => {

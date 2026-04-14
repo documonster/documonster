@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { PdfDocumentBuilder, PdfEditor, readPdf, parseSvgPath } from "../index";
 
 const outDir = path.resolve(

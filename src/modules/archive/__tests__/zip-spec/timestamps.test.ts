@@ -2,7 +2,6 @@
  * Tests for ZIP timestamp utilities.
  */
 
-import { describe, it, expect } from "vitest";
 import {
   dateToDos,
   parseDosDateTimeUTC,
@@ -12,6 +11,7 @@ import {
   EXTENDED_TIMESTAMP_ID,
   NTFS_TIMESTAMP_ID
 } from "@archive/zip-spec/timestamps";
+import { describe, it, expect } from "vitest";
 
 describe("timestamps", () => {
   describe("dateToDos", () => {

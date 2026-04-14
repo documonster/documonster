@@ -1,4 +1,3 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   HttpRangeReader,
   BufferReader,
@@ -6,6 +5,7 @@ import {
   HttpRangeError,
   type RandomAccessReader
 } from "@archive/io/random-access";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("BufferReader", () => {
   it("should provide correct size", () => {

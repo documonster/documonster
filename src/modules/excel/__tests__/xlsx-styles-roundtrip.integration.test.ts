@@ -1,7 +1,7 @@
+import { getUniqueTestFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
 import { Workbook } from "../../../index";
-import { getUniqueTestFilePath } from "@test/utils";
 
 describe("xlsx styles roundtrip", () => {
   it("writes and reads common formatting", async () => {

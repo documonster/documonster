@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
 import { zip, editZip, editZipUrl, BufferReader, ZipEditPlan, type ZipEditWarning } from "@archive";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
+import { describe, it, expect, vi } from "vitest";
 
 const decode = (data: Uint8Array): string => new TextDecoder().decode(data);
 const encode = (str: string): Uint8Array => new TextEncoder().encode(str);

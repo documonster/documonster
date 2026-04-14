@@ -1,7 +1,6 @@
-import { describe, expect, it } from "vitest";
-
 import { isAbortError } from "@archive";
 import { toAsyncIterable } from "@archive/io/archive-source";
+import { describe, expect, it } from "vitest";
 
 describe("archive-source", () => {
   it("toAsyncIterable(Uint8Array) should yield once and call onChunk", async () => {

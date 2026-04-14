@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { decodeOoxmlEscape, encodeOoxmlEscape, encodeOoxmlAttr } from "@utils/utils";
+import { describe, it, expect } from "vitest";
 
 describe("decodeOoxmlEscape", () => {
   it("decodes uppercase hex digits", () => {

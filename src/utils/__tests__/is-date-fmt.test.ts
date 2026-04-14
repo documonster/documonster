@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { isDateFmt, splitFormatSections } from "@utils/utils.base";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // splitFormatSections

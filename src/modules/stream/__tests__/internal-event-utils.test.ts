@@ -6,6 +6,7 @@
  */
 
 import { describe } from "vitest";
+
 import { runInternalEventUtilsTests } from "./internal-event-utils.shared";
 
 describe("internal/event-utils (Node)", () => {

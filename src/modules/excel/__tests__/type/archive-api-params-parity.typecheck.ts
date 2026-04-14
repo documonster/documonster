@@ -20,13 +20,10 @@ type ReturnsEqual<A extends (...args: any[]) => any, B extends (...args: any[]) 
 // This keeps tsgo happy and lets us use `typeof module.fn` for signature extraction.
 import type * as NodeCompress from "@archive/compression/compress";
 import type * as BrowserCompress from "@archive/compression/compress.browser";
-
 import type * as NodeCrc32 from "@archive/compression/crc32";
 import type * as BrowserCrc32 from "@archive/compression/crc32.browser";
-
 import type * as NodeStreaming from "@archive/compression/streaming-compress";
 import type * as BrowserStreaming from "@archive/compression/streaming-compress.browser";
-
 import type * as NodeParse from "@archive/unzip/stream";
 import type * as BrowserParse from "@archive/unzip/stream.browser";
 

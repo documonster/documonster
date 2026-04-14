@@ -2,11 +2,10 @@
  * Tests for shared file system utilities.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 import {
   // Glob matching
@@ -58,6 +57,7 @@ import {
   copyFile,
   copyFileSync
 } from "@utils/fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 describe("fs utilities", () => {
   let tempDir: string;

@@ -1,5 +1,5 @@
-import { fix, concatenateFormula } from "@excel/__tests__/shared/tools";
 import dataValidationsJson from "@excel/__tests__/shared/data/data-validations.json" with { type: "json" };
+import { fix, concatenateFormula } from "@excel/__tests__/shared/tools";
 
 const self = {
   dataValidations: fix(dataValidationsJson),

@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { Workbook } from "@excel/workbook";
-import { FormCheckbox } from "@excel/form-control";
 import { extractAll } from "@archive/unzip/extract";
+import { FormCheckbox } from "@excel/form-control";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import { Workbook } from "@excel/workbook";
+import { describe, it, expect } from "vitest";
 
 describe("Form Control Checkbox", () => {
   describe("FormCheckbox class via worksheet", () => {

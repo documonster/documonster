@@ -12,14 +12,14 @@
  * - Writer edge cases
  */
 
-import { describe, it, expect } from "vitest";
-import { SaxParser, parseSax } from "@xml/sax";
 import { parseXml, findChild, findChildren, textContent, attr, walk } from "@xml/dom";
 import { xmlEncode, xmlDecode } from "@xml/encode";
-import { XmlWriter } from "@xml/writer";
-import { XmlStreamWriter } from "@xml/stream-writer";
 import { query, queryAll } from "@xml/query";
+import { SaxParser, parseSax } from "@xml/sax";
+import { XmlStreamWriter } from "@xml/stream-writer";
 import type { SaxTag, WritableTarget } from "@xml/types";
+import { XmlWriter } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 // =============================================================================
 // Entity Handling Edge Cases

@@ -6,9 +6,20 @@
  * Uses the browser Duplex stream implementation for compatibility.
  */
 
-import { Duplex, PassThrough } from "@stream";
-import { concatUint8Arrays } from "@utils/binary";
+import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
+import { ByteQueue } from "@archive/shared/byte-queue";
+import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 import { toError } from "@archive/shared/errors";
+import {
+  DATA_DESCRIPTOR_SIGNATURE_BYTES,
+  type CrxHeader,
+  type EntryProps,
+  type EntryVars,
+  type ParseDriverState,
+  type ParseOptions
+} from "@archive/unzip/parser-core";
+import { PatternScanner } from "@archive/unzip/pattern-scanner";
 import {
   runParseLoop,
   type PullStreamPublicApi,
@@ -19,19 +30,8 @@ import {
   DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK,
   streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type EntryProps,
-  type EntryVars,
-  type ParseDriverState,
-  type ParseOptions
-} from "@archive/unzip/parser-core";
-import { PatternScanner } from "@archive/unzip/pattern-scanner";
-import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { Duplex, PassThrough } from "@stream";
+import { concatUint8Arrays } from "@utils/binary";
 
 // =============================================================================
 // Browser InflateRaw using DecompressionStream

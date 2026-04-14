@@ -18,11 +18,12 @@
  * @see PDF Reference 1.7, §5.9 - ToUnicode CMaps
  */
 
-import type { TtfFont } from "./ttf-parser";
-import { PdfDict, pdfName, pdfNumber, pdfRef, pdfArray } from "../core/pdf-object";
-import type { PdfWriter } from "../core/pdf-writer";
 import { zlibSync } from "@archive/compression/compress";
 import { concatUint8Arrays } from "@utils/binary";
+
+import { PdfDict, pdfName, pdfNumber, pdfRef, pdfArray } from "../core/pdf-object";
+import type { PdfWriter } from "../core/pdf-writer";
+import type { TtfFont } from "./ttf-parser";
 
 // =============================================================================
 // Types

@@ -2,7 +2,7 @@
  * Tests for archive text encoding/decoding utilities.
  */
 
-import { describe, it, expect } from "vitest";
+import { crc32 } from "@archive/compression/crc32";
 import {
   decodeCp437,
   encodeCp437,
@@ -13,7 +13,7 @@ import {
   toArrayBuffer,
   type ZipStringCodec
 } from "@archive/shared/text";
-import { crc32 } from "@archive/compression/crc32";
+import { describe, it, expect } from "vitest";
 
 describe("text", () => {
   describe("decodeCp437", () => {

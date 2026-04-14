@@ -1,7 +1,7 @@
-import { xmlEncode } from "@xml/encode";
-import { RelType } from "@excel/xlsx/rel-type";
 import { worksheetRelsPath } from "@excel/utils/ooxml-paths";
+import { RelType } from "@excel/xlsx/rel-type";
 import { isInternalLink } from "@excel/xlsx/xform/sheet/hyperlink-xform";
+import { xmlEncode } from "@xml/encode";
 
 interface Hyperlink {
   address: string;

@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { CNvPrXform } from "@excel/xlsx/xform/drawing/c-nv-pr-xform";
 import { CNvPicPrXform } from "@excel/xlsx/xform/drawing/c-nv-pic-pr-xform";
+import { CNvPrXform } from "@excel/xlsx/xform/drawing/c-nv-pr-xform";
 
 class NvPicPrXform extends BaseXform {
   declare public map: { [key: string]: any };

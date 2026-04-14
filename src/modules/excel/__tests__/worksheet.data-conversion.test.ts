@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Workbook } from "../../../index";
 import type { CellValue, WorksheetViewFrozen } from "@excel/types";
+import { describe, it, expect } from "vitest";
+
+import { Workbook } from "../../../index";
 
 describe("Worksheet", () => {
   // ===========================================================================

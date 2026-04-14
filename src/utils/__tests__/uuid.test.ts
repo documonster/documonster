@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
-
 import { uuidV4 } from "@utils/uuid";
+import { describe, expect, it } from "vitest";
 
 describe("uuidV4", () => {
   it("generates RFC 4122 v4 UUIDs", () => {

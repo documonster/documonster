@@ -6,8 +6,9 @@
  * so Readable doesn't need to know anything about piping internals.
  */
 
-import type { WritableLike } from "@stream/types";
 import { StreamTypeError } from "@stream/errors";
+import type { WritableLike } from "@stream/types";
+
 import { removeEmitterListener } from "./helpers";
 
 // =============================================================================

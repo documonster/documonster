@@ -6,8 +6,8 @@
  * a single, correct image-rel deduplication strategy.
  */
 
-import { RelType } from "@excel/xlsx/rel-type";
 import { mediaRelTargetFromRels } from "@excel/utils/ooxml-paths";
+import { RelType } from "@excel/xlsx/rel-type";
 
 // =============================================================================
 // Types

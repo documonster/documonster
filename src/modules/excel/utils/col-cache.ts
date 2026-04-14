@@ -1,5 +1,5 @@
-import type { Address, Location } from "@excel/types";
 import { ColumnOutOfBoundsError, InvalidAddressError } from "@excel/errors";
+import type { Address, Location } from "@excel/types";
 
 const addressRegex = /^[A-Z]+\d+$/;
 

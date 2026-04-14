@@ -1,6 +1,6 @@
-import { colCache } from "@excel/utils/col-cache";
 import { ExcelError } from "@excel/errors";
 import type { Address } from "@excel/types";
+import { colCache } from "@excel/utils/col-cache";
 
 interface RangeModel {
   top: number;

@@ -1,8 +1,8 @@
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DateXform } from "@excel/xlsx/xform/simple/date-xform";
-import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
+import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 interface CoreModel {
   creator?: string;

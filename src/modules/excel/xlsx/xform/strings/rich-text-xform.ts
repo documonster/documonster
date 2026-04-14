@@ -1,6 +1,6 @@
+import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
-import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 // <r>
 //   <rPr>

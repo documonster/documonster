@@ -394,7 +394,7 @@ export class DateFormatter {
             return "";
           }
           const t = d.getTime();
-          if (t !== t) {
+          if (Number.isNaN(t)) {
             return "";
           } // NaN check
           const y = d.getUTCFullYear();
@@ -411,7 +411,7 @@ export class DateFormatter {
             return "";
           }
           const t = d.getTime();
-          if (t !== t) {
+          if (Number.isNaN(t)) {
             return "";
           } // NaN check
           const y = d.getFullYear();
@@ -437,7 +437,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${d.getUTCFullYear()}-${PAD2[d.getUTCMonth() + 1]}-${PAD2[d.getUTCDate()]}`;
@@ -447,7 +447,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${d.getFullYear()}-${PAD2[d.getMonth() + 1]}-${PAD2[d.getDate()]}`;
@@ -461,7 +461,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${d.getUTCFullYear()}-${PAD2[d.getUTCMonth() + 1]}-${PAD2[d.getUTCDate()]} ${PAD2[d.getUTCHours()]}:${PAD2[d.getUTCMinutes()]}:${PAD2[d.getUTCSeconds()]}`;
@@ -471,7 +471,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${d.getFullYear()}-${PAD2[d.getMonth() + 1]}-${PAD2[d.getDate()]} ${PAD2[d.getHours()]}:${PAD2[d.getMinutes()]}:${PAD2[d.getSeconds()]}`;
@@ -486,7 +486,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${PAD2[d.getUTCMonth() + 1]}${sep}${PAD2[d.getUTCDate()]}${sep}${d.getUTCFullYear()}`;
@@ -496,7 +496,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${PAD2[d.getMonth() + 1]}${sep}${PAD2[d.getDate()]}${sep}${d.getFullYear()}`;
@@ -511,7 +511,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${PAD2[d.getUTCDate()]}${sep}${PAD2[d.getUTCMonth() + 1]}${sep}${d.getUTCFullYear()}`;
@@ -521,7 +521,7 @@ export class DateFormatter {
               return "";
             }
             const t = d.getTime();
-            if (t !== t) {
+            if (Number.isNaN(t)) {
               return "";
             }
             return `${PAD2[d.getDate()]}${sep}${PAD2[d.getMonth() + 1]}${sep}${d.getFullYear()}`;
@@ -573,7 +573,7 @@ export class DateFormatter {
         return "";
       }
       const t = d.getTime();
-      if (t !== t) {
+      if (Number.isNaN(t)) {
         return "";
       }
 

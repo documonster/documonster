@@ -1,6 +1,6 @@
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 interface CommentsModel {
   comments: any[];

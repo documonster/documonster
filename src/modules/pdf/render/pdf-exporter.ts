@@ -8,16 +8,16 @@
  * It is used internally by the public `pdf()` and `excelToPdf()` APIs.
  */
 
-import { PdfWriter } from "../core/pdf-writer";
-import { PdfContentStream } from "../core/pdf-stream";
+import { yieldToEventLoop } from "@utils/utils.base";
+
+import { writeImageXObject } from "../builder/image-utils";
+import { initEncryption } from "../core/encryption";
 import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "../core/pdf-object";
+import { PdfContentStream } from "../core/pdf-stream";
+import { PdfWriter } from "../core/pdf-writer";
+import { PdfError, PdfRenderError } from "../errors";
 import { FontManager, resolvePdfFontName } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
-import { initEncryption } from "../core/encryption";
-import { layoutSheet } from "./layout-engine";
-import { renderPage, alphaGsName, renderWatermark } from "./page-renderer";
-import { writeImageXObject } from "../builder/image-utils";
-import { PdfError, PdfRenderError } from "../errors";
 import {
   PageSizes,
   type PdfWorkbook,
@@ -31,8 +31,9 @@ import {
   type LayoutPage,
   type PdfWatermark
 } from "../types";
+import { layoutSheet } from "./layout-engine";
+import { renderPage, alphaGsName, renderWatermark } from "./page-renderer";
 import { argbToPdfColor } from "./style-converter";
-import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Public API

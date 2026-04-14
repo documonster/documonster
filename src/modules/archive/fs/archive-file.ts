@@ -30,25 +30,49 @@
  * @module
  */
 
+import { createReadStream, createWriteStream } from "node:fs";
 import * as path from "node:path";
 
-import { TarArchive, TarReader } from "@archive/tar/tar-archive";
-import { isDirectory as isTarDirectory } from "@archive/tar/tar-entry-info";
-import { textEncoder as utf8Encoder } from "@utils/binary";
 import { gzipSync, gunzipSync } from "@archive/compression/compress";
 import { createGzipStream } from "@archive/compression/streaming-compress";
-import { ZipParser, type ZipEntryInfo as ParserEntryInfo } from "@archive/unzip/zip-parser";
-import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
-import { ZipArchive } from "@archive/zip/zip-archive";
-import { collectUint8ArrayStream, toAsyncIterable } from "@archive/io/archive-source";
 import { pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
-import { joinZipPath, normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
-import { ZipEditView } from "@archive/zip/zip-edit-view";
+import { collectUint8ArrayStream, toAsyncIterable } from "@archive/io/archive-source";
 import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
 import type { ZipStringEncoding } from "@archive/shared/text";
-import { createReadStream, createWriteStream } from "node:fs";
-
 import type { ArchiveFormat } from "@archive/shared/types";
+import { TarArchive, TarReader } from "@archive/tar/tar-archive";
+import { isDirectory as isTarDirectory } from "@archive/tar/tar-entry-info";
+import { ZipParser, type ZipEntryInfo as ParserEntryInfo } from "@archive/unzip/zip-parser";
+import { joinZipPath, normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { ZipArchive } from "@archive/zip/zip-archive";
+import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import { ZipEditView } from "@archive/zip/zip-edit-view";
+import { textEncoder as utf8Encoder } from "@utils/binary";
+import {
+  type FileEntry,
+  traverseDirectory,
+  traverseDirectorySync,
+  glob as globFiles,
+  globSync as globFilesSync,
+  ensureDir,
+  ensureDirSync,
+  fileExists,
+  fileExistsSync,
+  readFileBytes,
+  readFileBytesSync,
+  writeFileBytes,
+  writeFileBytesSync,
+  setFileTime,
+  setFileTimeSync,
+  safeStats,
+  safeStatsSync,
+  createSymlink,
+  createSymlinkSync,
+  chmod,
+  chmodSync,
+  supportsUnixPermissions
+} from "@utils/fs";
+
 import type {
   AddFileOptions,
   AddDirectoryOptions,
@@ -76,31 +100,6 @@ import type {
   TransformFunction,
   TransformEntryData
 } from "./types";
-
-import {
-  type FileEntry,
-  traverseDirectory,
-  traverseDirectorySync,
-  glob as globFiles,
-  globSync as globFilesSync,
-  ensureDir,
-  ensureDirSync,
-  fileExists,
-  fileExistsSync,
-  readFileBytes,
-  readFileBytesSync,
-  writeFileBytes,
-  writeFileBytesSync,
-  setFileTime,
-  setFileTimeSync,
-  safeStats,
-  safeStatsSync,
-  createSymlink,
-  createSymlinkSync,
-  chmod,
-  chmodSync,
-  supportsUnixPermissions
-} from "@utils/fs";
 
 // =============================================================================
 // Transform Helpers (internal)

@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { PassThrough } from "@stream";
-import { Workbook, WorkbookReader } from "../../../index";
 import { ZipArchive } from "@archive/zip";
+import { PassThrough } from "@stream";
+import { describe, it, expect } from "vitest";
+
+import { Workbook, WorkbookReader } from "../../../index";
 
 // =============================================================================
 // Helpers

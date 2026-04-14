@@ -4,8 +4,8 @@
  * Runs the shared stream errors test suite against the Browser implementation.
  */
 
-import { describe } from "vitest";
 import { runStreamErrorsTests } from "@stream/__tests__/stream-errors.shared";
+import { describe } from "vitest";
 
 describe("stream/errors (Browser)", () => {
   runStreamErrorsTests();

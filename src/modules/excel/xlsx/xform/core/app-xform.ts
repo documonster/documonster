@@ -1,8 +1,8 @@
-import { StdDocAttributes } from "@xml/writer";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { AppHeadingPairsXform } from "@excel/xlsx/xform/core/app-heading-pairs-xform";
 import { AppTitlesOfPartsXform } from "@excel/xlsx/xform/core/app-titles-of-parts-xform";
+import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import { StdDocAttributes } from "@xml/writer";
 
 interface AppModel {
   worksheets: any[];

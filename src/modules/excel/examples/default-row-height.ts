@@ -1,4 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+
 import { Workbook } from "../../../index";
 
 const [, , filename] = process.argv;

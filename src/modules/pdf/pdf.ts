@@ -47,6 +47,7 @@
  * ```
  */
 
+import { exportPdf } from "./render/pdf-exporter";
 import {
   PdfCellType,
   type PdfWorkbook,
@@ -58,7 +59,6 @@ import {
   type PdfSheetImage,
   type PdfExportOptions
 } from "./types";
-import { exportPdf } from "./render/pdf-exporter";
 
 // =============================================================================
 // Input Types
