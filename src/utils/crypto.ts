@@ -28,7 +28,7 @@ import crypto from "node:crypto";
  * @returns 32-byte digest
  */
 export function sha256(input: Uint8Array): Uint8Array {
-  return new Uint8Array(crypto.createHash("sha256").update(input).digest());
+  return new Uint8Array(crypto.createHash("sha256").update(input).digest()); // lgtm[js/insufficient-password-hash]
 }
 
 // =============================================================================
@@ -52,7 +52,7 @@ export function hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
  * @returns 16-byte digest
  */
 export function md5(input: Uint8Array): Uint8Array {
-  return new Uint8Array(crypto.createHash("md5").update(input).digest());
+  return new Uint8Array(crypto.createHash("md5").update(input).digest()); // lgtm[js/insufficient-password-hash]
 }
 
 // =============================================================================

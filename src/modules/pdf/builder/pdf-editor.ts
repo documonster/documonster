@@ -1198,15 +1198,65 @@ export class PdfEditor {
    * @internal
    */
   private _remapRefsInString(str: string, remap: Map<number, number>): string {
-    // Replace patterns like "N 0 R" where N is in the remap map
-    return str.replace(/(\d+) (\d+) R/g, (match, objNumStr, genStr) => {
-      const objNum = parseInt(objNumStr, 10);
+    // Replace patterns like "N G R" where N is in the remap map.
+    // Linear scan avoids polynomial backtracking on untrusted PDF content.
+    const parts: string[] = [];
+    let last = 0;
+    let i = 0;
+    const len = str.length;
+
+    while (i < len) {
+      // Look for a digit
+      if (str.charCodeAt(i) < 0x30 || str.charCodeAt(i) > 0x39) {
+        i++;
+        continue;
+      }
+      // Parse first number (object number)
+      const numStart = i;
+      while (i < len && str.charCodeAt(i) >= 0x30 && str.charCodeAt(i) <= 0x39) {
+        i++;
+      }
+      // Must be followed by " <digits> R"
+      if (i >= len || str.charCodeAt(i) !== 0x20) {
+        continue;
+      }
+      const genStart = i + 1;
+      let g = genStart;
+      while (g < len && str.charCodeAt(g) >= 0x30 && str.charCodeAt(g) <= 0x39) {
+        g++;
+      }
+      if (g === genStart || g >= len || str.charCodeAt(g) !== 0x20) {
+        continue;
+      }
+      if (g + 1 >= len || str.charCodeAt(g + 1) !== 0x52 /* 'R' */) {
+        continue;
+      }
+      // Ensure R is not followed by another word char (boundary check)
+      const afterR = g + 2;
+      if (
+        afterR < len &&
+        str.charCodeAt(afterR) > 0x20 &&
+        str.charCodeAt(afterR) !== 0x2f /* '/' */ &&
+        str.charCodeAt(afterR) !== 0x3e /* '>' */
+      ) {
+        continue;
+      }
+
+      const objNum = parseInt(str.slice(numStart, i), 10);
       const remapped = remap.get(objNum);
       if (remapped !== undefined) {
-        return `${remapped} ${genStr} R`;
+        parts.push(str.slice(last, numStart));
+        parts.push(`${remapped} ${str.slice(genStart, g)} R`);
+        last = afterR;
       }
-      return match;
-    });
+      i = afterR;
+    }
+
+    if (last === 0) {
+      return str;
+    }
+    parts.push(str.slice(last));
+    return parts.join("");
   }
 
   /**
