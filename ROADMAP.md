@@ -6,84 +6,49 @@
 
 #### Chart Support
 
-- [ ] Preserve existing charts when reading/writing
 - [ ] Create basic charts (bar, line, pie)
 - [ ] Chart customization (title, legend, colors)
 
 #### Stream/Performance
 
-- [ ] Streaming shared strings
-- [ ] Memory optimization for large files
-
-#### Style/Formatting
-
-- [ ] Fix font style bleeding to other cells
-- [ ] Fix default font not applied correctly
-- [ ] Fix styles lost when reading/writing files
-
-#### Image Handling
-
-- [ ] Header/footer image support
-- [ ] Basic shape support (rectangles, arrows)
-- [ ] Fix image position for non-integer coordinates
-- [ ] SVG image support
-
-### 🟡 P2: Medium Priority
+- [ ] Streaming shared strings (currently built in memory, then flushed)
 
 #### Formula
 
-- [ ] Fix CSP (Content Security Policy) violations
-- [ ] Fix formula parsing errors
-- [ ] Improve shared formula handling
+- [ ] Dynamic array formula support (`FILTER`, `SORT`, `UNIQUE`, `XLOOKUP`, `SEQUENCE`) — requires `cm` attribute on `<c>`, `xl/metadata.xml` parsing/writing, `<xda:dynamicArrayProperties>` handling
 
-#### Print/Page Setup
+### 🟡 P2: Medium Priority
 
-- [ ] Fix header/footer options
-- [ ] Print area improvements
+#### Image Handling
+
+- [ ] Basic shape support (rectangles, arrows)
+- [ ] SVG image support
 
 #### Data Validation
 
-- [ ] Dynamic list formulae support
-- [ ] Fix template data validation lost
-- [ ] Fix protection locked not preventing editing
-
-#### Table Features
-
-- [ ] Append rows to existing table
-- [ ] Fix table corruption on save
-- [ ] Load tables correctly from disk
-
-#### Protection & Security
-
-- [ ] Fix cell protection not working
-- [ ] Column key nested property path support
+- [ ] Dynamic list formulae support (INDIRECT/OFFSET in list validation)
 
 #### Comment/Note
 
 - [ ] Configurable note size (width/height)
-- [ ] Rich text in notes
 
-### 🟢 P3: Low Priority
+#### Column Key
 
-#### Merge Cell
-
-- [ ] Fix date timezone issue in merged cells
-- [ ] Fix addRow() not adding merged cells correctly
-
-#### Row/Column Operations
-
-- [ ] Outline/grouping improvements
-- [ ] Hidden row/column improvements
-
-#### Sheet Operations
-
-- [ ] Sheet tab color
-- [ ] Sheet copy improvements
+- [ ] Nested property path support (e.g. `"address.city"`)
 
 #### Hyperlink
 
-- [ ] Hyperlink styling support
-- [ ] Internal hyperlinks to named ranges
+- [ ] Hyperlink auto-styling (blue underline for cells with hyperlinks)
+
+### 🟢 P3: Low Priority
+
+#### Formula
+
+- [ ] Formula parsing/validation engine
+
+#### Protection
+
+- [ ] Runtime enforcement of cell `locked` property (currently serialization-only)
 
 ---
 

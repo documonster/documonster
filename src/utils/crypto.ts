@@ -28,7 +28,7 @@ import crypto from "node:crypto";
  * @returns 32-byte digest
  */
 export function sha256(input: Uint8Array): Uint8Array {
-  return new Uint8Array(crypto.createHash("sha256").update(input).digest());
+  return new Uint8Array(crypto.hash("sha256", input, "buffer"));
 }
 
 // =============================================================================
@@ -60,7 +60,7 @@ export function hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
  * @returns 16-byte digest
  */
 export function md5(input: Uint8Array): Uint8Array {
-  return new Uint8Array(crypto.createHash("md5").update(input).digest());
+  return new Uint8Array(crypto.hash("md5", input, "buffer"));
 }
 
 // =============================================================================
@@ -197,7 +197,7 @@ export function randomBytes(length: number): Uint8Array {
  */
 export function hash(algorithm: string, data: Uint8Array): Uint8Array {
   const algo = algorithm.toLowerCase().replace(/-/g, "");
-  return new Uint8Array(crypto.createHash(algo).update(data).digest());
+  return new Uint8Array(crypto.hash(algo, data, "buffer"));
 }
 
 /**
