@@ -1,5 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
 import { StdDocAttributes } from "@xml/writer";
@@ -7,6 +8,9 @@ import { StdDocAttributes } from "@xml/writer";
 function getAnchorType(model: any): string {
   const range = typeof model.range === "string" ? colCache.decode(model.range) : model.range;
 
+  if (range.pos !== undefined) {
+    return "xdr:absoluteAnchor";
+  }
   return range.br ? "xdr:twoCellAnchor" : "xdr:oneCellAnchor";
 }
 
@@ -23,7 +27,8 @@ class DrawingXform extends BaseXform<DrawingModel> {
 
     this.map = {
       "xdr:twoCellAnchor": new TwoCellAnchorXform(),
-      "xdr:oneCellAnchor": new OneCellAnchorXform()
+      "xdr:oneCellAnchor": new OneCellAnchorXform(),
+      "xdr:absoluteAnchor": new AbsoluteAnchorXform()
     };
     this.model = { anchors: [] };
   }
@@ -100,7 +105,9 @@ class DrawingXform extends BaseXform<DrawingModel> {
 
   reconcile(model: DrawingModel, options: any): void {
     model.anchors.forEach(anchor => {
-      if (anchor.br) {
+      if (anchor.range?.pos !== undefined) {
+        this.map["xdr:absoluteAnchor"].reconcile(anchor, options);
+      } else if (anchor.br) {
         this.map["xdr:twoCellAnchor"].reconcile(anchor, options);
       } else {
         this.map["xdr:oneCellAnchor"].reconcile(anchor, options);

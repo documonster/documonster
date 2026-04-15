@@ -13,12 +13,20 @@ interface ImageExt {
   height?: number;
 }
 
+/** Absolute position in pixels (for absoluteAnchor). */
+interface ImagePos {
+  x: number;
+  y: number;
+}
+
 interface ImageRange {
   tl: Anchor;
   br?: Anchor;
   ext?: ImageExt;
   editAs?: string;
   hyperlinks?: ImageHyperlinks;
+  /** Absolute position — mutually exclusive with tl/br cell anchors. */
+  pos?: ImagePos;
 }
 
 interface BackgroundModel {
@@ -46,6 +54,8 @@ interface ImageRangeModel {
   br?: AnchorModel;
   ext?: ImageExt;
   editAs?: string;
+  /** Absolute position — when present, tl/br are ignored. */
+  pos?: ImagePos;
 }
 
 interface ImageModel {
@@ -64,6 +74,8 @@ interface RangeInput {
   ext?: ImageExt;
   editAs?: string;
   hyperlinks?: ImageHyperlinks;
+  /** Absolute position — when present, tl/br are ignored. */
+  pos?: ImagePos;
 }
 
 interface ModelInput {
@@ -124,6 +136,19 @@ class Image {
         if (!range) {
           throw new ImageError("Image has no range");
         }
+        // Absolute positioning — no cell anchors
+        if (range.pos) {
+          return {
+            type: this.type,
+            imageId: this.imageId ?? "",
+            hyperlinks: range.hyperlinks,
+            range: {
+              tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
+              ext: range.ext,
+              pos: range.pos
+            }
+          };
+        }
         return {
           type: this.type,
           imageId: this.imageId ?? "",
@@ -169,6 +194,14 @@ class Image {
             editAs: "oneCell"
           };
         }
+      } else if (range && "pos" in range && range.pos) {
+        // Absolute positioning — preserve pos/ext, use dummy tl anchor
+        this.range = {
+          tl: new Anchor(this.worksheet, null, 0),
+          ext: range.ext,
+          hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined),
+          pos: range.pos
+        };
       } else if (range) {
         this.range = {
           tl: new Anchor(this.worksheet, range.tl, 0),
@@ -197,7 +230,8 @@ class Image {
         br: this.range.br ? this.range.br.clone(target) : undefined,
         ext: this.range.ext ? { ...this.range.ext } : undefined,
         editAs: this.range.editAs,
-        hyperlinks: this.range.hyperlinks ? { ...this.range.hyperlinks } : undefined
+        hyperlinks: this.range.hyperlinks ? { ...this.range.hyperlinks } : undefined,
+        pos: this.range.pos ? { ...this.range.pos } : undefined
       };
     }
 

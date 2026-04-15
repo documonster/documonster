@@ -28,5 +28,25 @@ describe("TwoCellAnchorXform", () => {
       expect(model.tl).toEqual({ col: 1, row: 1 });
       expect(model.br).toBeUndefined();
     });
+
+    it("returns undefined when rId is missing from rels", () => {
+      const twoCell = new TwoCellAnchorXform();
+      const model: any = {
+        picture: { rId: "rId99" },
+        range: { editAs: "oneCell" }
+      };
+      const options = {
+        rels: {
+          // rId99 does not exist in rels
+          rId1: { Target: "../media/image1.png" }
+        },
+        media: [],
+        mediaIndex: {}
+      };
+      // Should not throw — previously this would crash with TypeError
+      expect(() => twoCell.reconcile(model, options)).not.toThrow();
+      // medium should be undefined since the rel was not found
+      expect(model.medium).toBeUndefined();
+    });
   });
 });

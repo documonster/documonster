@@ -22,6 +22,7 @@ import { DrawingXform } from "@excel/xlsx/xform/sheet/drawing-xform";
 import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
 import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
 import { isInternalLink, HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
+import { IgnoredErrorsXform } from "@excel/xlsx/xform/sheet/ignored-errors-xform";
 import { MergeCellXform } from "@excel/xlsx/xform/sheet/merge-cell-xform";
 import { Merges } from "@excel/xlsx/xform/sheet/merges";
 import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
@@ -158,7 +159,8 @@ class WorkSheetXform extends BaseXform {
         childXform: new TablePartXform()
       }),
       conditionalFormatting: new ConditionalFormattingsXform(),
-      extLst: new ExtLstXform()
+      extLst: new ExtLstXform(),
+      ignoredErrors: new IgnoredErrorsXform()
     };
   }
 
@@ -681,7 +683,9 @@ class WorkSheetXform extends BaseXform {
       xmlStream.closeNode();
     }
 
-    // Table parts must come after <controls> in worksheet element order.
+    // ignoredErrors must come after controls, before tableParts (OOXML schema order).
+    this.map.ignoredErrors.render(xmlStream, model.ignoredErrors);
+    // tableParts must come after ignoredErrors.
     this.map.tableParts.render(xmlStream, model.tables);
 
     // extLst should be the last element in the worksheet.
@@ -765,7 +769,8 @@ class WorkSheetXform extends BaseXform {
           tables: this.map.tableParts.model,
           conditionalFormattings,
           rowBreaks: this.map.rowBreaks.model ?? [],
-          colBreaks: this.map.colBreaks.model ?? []
+          colBreaks: this.map.colBreaks.model ?? [],
+          ignoredErrors: this.map.ignoredErrors.model ?? []
         };
 
         if (this.map.autoFilter.model) {
@@ -863,7 +868,7 @@ class WorkSheetXform extends BaseXform {
               rels: options.drawingRels?.[drawingName] ?? drawing.rels ?? []
             };
 
-            // Also extract images to model.media for backward compatibility
+            // Also extract images to model.media for backward compatibility.
             drawing.anchors.forEach(anchor => {
               if (anchor.medium) {
                 // Detect overlay watermarks: drawings that carry alphaModFix

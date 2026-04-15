@@ -166,6 +166,10 @@ export function filterDrawingAnchors(anchors: any[]): any[] {
     if (a == null) {
       return false;
     }
+    // Absolute anchors need a valid picture
+    if (a.range?.pos !== undefined) {
+      return !!a.picture;
+    }
     // Form controls have range.br and shape properties
     if (a.range?.br && a.shape) {
       return true;

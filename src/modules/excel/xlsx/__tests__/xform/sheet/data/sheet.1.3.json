@@ -121,5 +121,6 @@
   },
   "conditionalFormattings": [],
   "rowBreaks": [],
-  "colBreaks": []
+  "colBreaks": [],
+  "ignoredErrors": []
 }

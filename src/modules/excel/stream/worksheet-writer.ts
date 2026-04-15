@@ -34,6 +34,7 @@ import type {
   WorksheetProtection,
   ConditionalFormattingOptions,
   AddImageRange,
+  IgnoredError,
   WatermarkOptions,
   RowValues
 } from "@excel/types";
@@ -49,6 +50,7 @@ import { DrawingXform as DrawingPartXform } from "@excel/xlsx/xform/sheet/drawin
 import { ExtLstXform } from "@excel/xlsx/xform/sheet/ext-lst-xform";
 import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
 import { HyperlinkXform } from "@excel/xlsx/xform/sheet/hyperlink-xform";
+import { IgnoredErrorsXform } from "@excel/xlsx/xform/sheet/ignored-errors-xform";
 import { PageMarginsXform } from "@excel/xlsx/xform/sheet/page-margins-xform";
 import { PageSetupXform } from "@excel/xlsx/xform/sheet/page-setup-xform";
 import { PictureXform } from "@excel/xlsx/xform/sheet/picture-xform";
@@ -84,6 +86,7 @@ const xform = {
   drawing: new DrawingPartXform(),
   conditionalFormattings: new ConditionalFormattingsXform(),
   extLst: new ExtLstXform(),
+  ignoredErrors: new IgnoredErrorsXform(),
   headerFooter: new HeaderFooterXform(),
   rowBreaks: new RowBreaksXform(),
   colBreaks: new ColBreaksXform()
@@ -114,6 +117,8 @@ interface WriterImageModel {
     br?: { nativeCol: number; nativeColOff: number; nativeRow: number; nativeRowOff: number };
     ext?: { width: number; height: number };
     editAs?: string;
+    /** Absolute position in pixels — mutually exclusive with tl/br cell anchors. */
+    pos?: { x: number; y: number };
   };
   hyperlinks?: { hyperlink?: string; tooltip?: string };
 }
@@ -141,6 +146,7 @@ class WorksheetWriter {
   private _formulae: { [key: string]: unknown };
   private _siFormulae: number;
   conditionalFormatting: ConditionalFormattingOptions[];
+  ignoredErrors: IgnoredError[];
   rowBreaks: RowBreak[];
   colBreaks: ColBreak[];
   properties: Partial<WorksheetProperties> & {
@@ -227,6 +233,9 @@ class WorksheetWriter {
 
     // keep a record of conditionalFormattings
     this.conditionalFormatting = [];
+
+    // ignored errors (suppress green triangles in Excel)
+    this.ignoredErrors = [];
 
     // keep a record of all row and column pageBreaks
     this.rowBreaks = [];
@@ -377,6 +386,9 @@ class WorksheetWriter {
 
     // Legacy Data tag for comments
     this._writeLegacyData();
+
+    // ignoredErrors must be before extLst
+    this._writeIgnoredErrors();
 
     // extLst must be the last child element before </worksheet>
     this._writeExtLst();
@@ -752,18 +764,34 @@ class WorksheetWriter {
       throw new Error(`Invalid image range: "${range}". Expected a range like "A1:C3".`);
     }
 
-    const tl = new Anchor(this as any, range.tl as any, 0).model;
-    const br = range.br ? new Anchor(this as any, range.br as any, 0).model : undefined;
+    // Absolute positioning (pos + ext, no cell anchors)
+    if ("pos" in range && range.pos) {
+      return {
+        type: "image",
+        imageId,
+        range: {
+          tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
+          ext: range.ext,
+          pos: range.pos
+        },
+        hyperlinks: range.hyperlinks
+      };
+    }
+
+    // Cell-based positioning (tl/br anchors)
+    const cellRange = range as Exclude<typeof range, string | { pos: any }>;
+    const tl = new Anchor(this as any, cellRange.tl as any, 0).model;
+    const br = cellRange.br ? new Anchor(this as any, cellRange.br as any, 0).model : undefined;
     return {
       type: "image",
       imageId,
       range: {
         tl,
         br,
-        ext: range.ext,
-        editAs: range.editAs
+        ext: cellRange.ext,
+        editAs: cellRange.editAs
       },
-      hyperlinks: range.hyperlinks
+      hyperlinks: cellRange.hyperlinks
     };
   }
 
@@ -948,6 +976,12 @@ class WorksheetWriter {
   private _writeExtLst(): void {
     const model = { conditionalFormattings: this.conditionalFormatting };
     this.stream.write(xform.extLst.toXml(model));
+  }
+
+  private _writeIgnoredErrors(): void {
+    if (this.ignoredErrors.length > 0) {
+      this.stream.write(xform.ignoredErrors.toXml(this.ignoredErrors));
+    }
   }
 
   private _writeRowBreaks(): void {

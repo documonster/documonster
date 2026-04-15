@@ -873,5 +873,76 @@ describe("Workbook", () => {
         }
       });
     });
+
+    it("round-trips absoluteAnchor image through write and read", async () => {
+      const imageData = await fsReadFileAsync(IMAGE_FILENAME);
+
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("absolute");
+      const imageId = wb.addImage({
+        buffer: imageData,
+        extension: "png"
+      });
+
+      // Add image with absolute positioning (pos + ext)
+      ws.addImage(imageId, {
+        pos: { x: 50, y: 100 },
+        ext: { width: 200, height: 150 }
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+
+      // Read back
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      const ws2 = wb2.getWorksheet("absolute")!;
+      const images = ws2.getImages();
+
+      expect(images).toHaveLength(1);
+      const img = images[0];
+
+      // Verify absolute position is preserved
+      expect(img.range).toBeDefined();
+      expect(img.range!.pos).toEqual({ x: 50, y: 100 });
+      expect(img.range!.ext).toEqual({ width: 200, height: 150 });
+
+      // Verify the actual image data survived
+      const imgBuffer = wb2.getImage(img.imageId!);
+      expect(imgBuffer).toBeDefined();
+      expect(Buffer.compare(imageData, imgBuffer!.buffer as Uint8Array)).toBe(0);
+    });
+
+    it("round-trips absoluteAnchor image through streaming writer", async () => {
+      const { WorkbookWriter } = await import("@excel/stream/workbook-writer");
+      const imageData = await fsReadFileAsync(IMAGE_FILENAME);
+
+      const outFile = testFilePath("streaming-absolute-anchor.test");
+      const wb = new WorkbookWriter({ filename: outFile });
+      const imageId = wb.addImage({ buffer: imageData, extension: "png" });
+
+      const ws = wb.addWorksheet("absolute");
+      ws.addImage(imageId, {
+        pos: { x: 30, y: 60 },
+        ext: { width: 120, height: 80 }
+      });
+
+      ws.getCell("A1").value = "data";
+      ws.commit();
+      await wb.commit();
+
+      // Read back with standard reader
+      const wb2 = new Workbook();
+      await wb2.xlsx.readFile(outFile);
+      const ws2 = wb2.getWorksheet("absolute")!;
+      const images = ws2.getImages();
+
+      expect(images).toHaveLength(1);
+      expect(images[0].range!.pos).toEqual({ x: 30, y: 60 });
+      expect(images[0].range!.ext).toEqual({ width: 120, height: 80 });
+
+      const imgBuffer = wb2.getImage(images[0].imageId!);
+      expect(imgBuffer).toBeDefined();
+      expect(Buffer.compare(imageData, imgBuffer!.buffer as Uint8Array)).toBe(0);
+    });
   });
 });

@@ -538,6 +538,14 @@ export type AddImageRange =
       editAs?: "oneCell" | "twoCell" | "absolute";
       /** Hyperlink for the image */
       hyperlinks?: { hyperlink?: string; tooltip?: string };
+    }
+  | {
+      /** Absolute position in pixels — mutually exclusive with tl/br. */
+      pos: { x: number; y: number };
+      /** Image dimensions in pixels (required for absolute positioning). */
+      ext: { width: number; height: number };
+      /** Hyperlink for the image */
+      hyperlinks?: { hyperlink?: string; tooltip?: string };
     };
 
 export interface ImageHyperlinkValue {
@@ -775,6 +783,10 @@ export interface DataBarRuleType extends ConditionalFormattingBaseRule {
   direction?: "context" | "leftToRight" | "rightToLeft";
   cfvo?: Cvfo[];
   color?: Partial<Color>;
+  negativeFillColor?: Partial<Color>;
+  borderColor?: Partial<Color>;
+  negativeBorderColor?: Partial<Color>;
+  axisColor?: Partial<Color>;
 }
 
 export type ConditionalFormattingRule =
@@ -902,4 +914,30 @@ export interface ColBreak {
   max: number;
   min?: number;
   man: number;
+}
+
+// ============================================================================
+// Ignored Error Types
+// ============================================================================
+export interface IgnoredError {
+  /** Cell reference range, e.g. "A1:B10" or "A1:XFD1048576" */
+  ref: string;
+  /** Ignore "Number Stored as Text" errors (green triangle) */
+  numberStoredAsText?: boolean;
+  /** Ignore formula errors */
+  formula?: boolean;
+  /** Ignore formula range errors */
+  formulaRange?: boolean;
+  /** Ignore unlocked formula errors */
+  unlockedFormula?: boolean;
+  /** Ignore empty cell reference errors */
+  emptyCellReference?: boolean;
+  /** Ignore list data validation errors */
+  listDataValidation?: boolean;
+  /** Ignore calculated column errors */
+  calculatedColumn?: boolean;
+  /** Ignore eval errors */
+  evalError?: boolean;
+  /** Ignore two-digit text year errors */
+  twoDigitTextYear?: boolean;
 }

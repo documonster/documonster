@@ -21,6 +21,7 @@ import type {
   ColBreak,
   ConditionalFormattingOptions,
   DataValidation,
+  IgnoredError,
   RowBreak,
   RowValues,
   Style,
@@ -148,6 +149,7 @@ interface WorksheetModel {
   pivotTables: PivotTable[];
   conditionalFormattings: ConditionalFormattingOptions[];
   formControls: FormCheckboxModel[];
+  ignoredErrors: IgnoredError[];
   watermark?: WatermarkOptions | null;
   cols?: ColumnModel[];
   rows?: RowModel[];
@@ -188,6 +190,7 @@ class Worksheet {
   declare public pivotTables: PivotTable[];
   declare public conditionalFormattings: ConditionalFormattingOptions[];
   declare public formControls: FormCheckbox[];
+  declare public ignoredErrors: IgnoredError[];
   declare private _headerRowCount?: number;
   /** Loaded drawing data (for charts, etc.) - preserved for round-trip */
   declare private _drawing: unknown;
@@ -299,6 +302,9 @@ class Worksheet {
 
     // for form controls (legacy checkboxes, etc.)
     this.formControls = [];
+
+    // ignored errors (suppress green triangles in Excel)
+    this.ignoredErrors = [];
 
     // watermark configuration
     this._watermark = null;
@@ -1741,6 +1747,7 @@ class Worksheet {
       pivotTables: this.pivotTables,
       conditionalFormattings: this.conditionalFormattings,
       formControls: this.formControls.map(fc => fc.model),
+      ignoredErrors: this.ignoredErrors,
       watermark: this._watermark,
       drawing: this._drawing
     };
@@ -1837,6 +1844,7 @@ class Worksheet {
     }, {});
     this.pivotTables = value.pivotTables;
     this.conditionalFormattings = value.conditionalFormattings;
+    this.ignoredErrors = value.ignoredErrors ?? [];
     // Form controls are currently write-only (not parsed from XLSX)
     this.formControls = [];
     // Preserve loaded drawing data (charts, etc.)

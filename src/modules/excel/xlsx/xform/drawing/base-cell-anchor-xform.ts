@@ -40,6 +40,9 @@ abstract class BaseCellAnchorXform extends BaseXform {
   reconcilePicture(model: any, options: any): any {
     if (model && model.rId) {
       const rel = options.rels[model.rId];
+      if (!rel) {
+        return undefined;
+      }
       const match = rel.Target.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
       if (match) {
         const name = match[1];
