@@ -55,4 +55,157 @@ describe("Table", () => {
     expect(ws3.getCell("A4").value).toBe("Carol");
     expect(ws3.getCell("B4").value).toBe(41);
   });
+
+  it("throws on duplicate table names across worksheets", () => {
+    const wb = new Workbook();
+    const ws1: any = wb.addWorksheet("Sheet1");
+    const ws2: any = wb.addWorksheet("Sheet2");
+
+    const tableConfig = {
+      name: "MyTable",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    };
+
+    ws1.addTable(tableConfig);
+    expect(() => ws2.addTable(tableConfig)).toThrow(/already exists/i);
+  });
+
+  it("throws on duplicate table names (case-insensitive)", () => {
+    const wb = new Workbook();
+    const ws1: any = wb.addWorksheet("Sheet1");
+    const ws2: any = wb.addWorksheet("Sheet2");
+
+    ws1.addTable({
+      name: "Sales",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    expect(() =>
+      ws2.addTable({
+        name: "SALES",
+        ref: "A1",
+        columns: [{ name: "Col1", filterButton: true }],
+        rows: [["other"]]
+      })
+    ).toThrow(/already exists/i);
+  });
+
+  it("allows distinct table names across worksheets", async () => {
+    const wb = new Workbook();
+    const ws1: any = wb.addWorksheet("Sheet1");
+    const ws2: any = wb.addWorksheet("Sheet2");
+
+    ws1.addTable({
+      name: "Table1",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+    ws2.addTable({
+      name: "Table2",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    // Should not throw
+    const buffer = await wb.xlsx.writeBuffer();
+    expect(buffer).toBeTruthy();
+  });
+
+  it("throws on duplicate table names within the same worksheet", () => {
+    const wb = new Workbook();
+    const ws: any = wb.addWorksheet("Sheet1");
+
+    ws.addTable({
+      name: "Orders",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    expect(() =>
+      ws.addTable({
+        name: "Orders",
+        ref: "D1",
+        columns: [{ name: "Col2", filterButton: true }],
+        rows: [["other"]]
+      })
+    ).toThrow(/already exists/i);
+  });
+
+  it("throws when sanitized table names collide on the same worksheet", () => {
+    const wb = new Workbook();
+    const ws: any = wb.addWorksheet("Sheet1");
+
+    // "My Table" sanitizes to "My_Table" (spaces become underscores)
+    ws.addTable({
+      name: "My Table",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    expect(() =>
+      ws.addTable({
+        name: "My_Table",
+        ref: "D1",
+        columns: [{ name: "Col2", filterButton: true }],
+        rows: [["other"]]
+      })
+    ).toThrow(/already exists/i);
+  });
+
+  it("allows reusing a table name after removeTable", () => {
+    const wb = new Workbook();
+    const ws: any = wb.addWorksheet("Sheet1");
+
+    ws.addTable({
+      name: "Reuse",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    ws.removeTable("Reuse");
+
+    // Should succeed — name is freed
+    expect(() =>
+      ws.addTable({
+        name: "Reuse",
+        ref: "A1",
+        columns: [{ name: "Col1", filterButton: true }],
+        rows: [["new data"]]
+      })
+    ).not.toThrow();
+  });
+
+  it("allows reusing a table name on another worksheet after removeTable", () => {
+    const wb = new Workbook();
+    const ws1: any = wb.addWorksheet("Sheet1");
+    const ws2: any = wb.addWorksheet("Sheet2");
+
+    ws1.addTable({
+      name: "Shared",
+      ref: "A1",
+      columns: [{ name: "Col1", filterButton: true }],
+      rows: [["data"]]
+    });
+
+    ws1.removeTable("Shared");
+
+    // Name freed globally — another worksheet can now use it
+    expect(() =>
+      ws2.addTable({
+        name: "Shared",
+        ref: "A1",
+        columns: [{ name: "Col1", filterButton: true }],
+        rows: [["other"]]
+      })
+    ).not.toThrow();
+  });
 });

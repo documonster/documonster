@@ -208,13 +208,15 @@ class BorderXform extends BaseXform {
       return true;
     }
     if (name === "border") {
-      const model: any = (this.model = {});
+      const model: any = {};
+      let hasContent = false;
       const add = (key: string, edgeModel: any, extensions?: any): void => {
         if (edgeModel) {
           if (extensions) {
             Object.assign(edgeModel, extensions);
           }
           model[key] = edgeModel;
+          hasContent = true;
         }
       };
       add("left", this.map.left.model);
@@ -222,6 +224,7 @@ class BorderXform extends BaseXform {
       add("top", this.map.top.model);
       add("bottom", this.map.bottom.model);
       add("diagonal", this.map.diagonal.model, { up: this.diagonalUp, down: this.diagonalDown });
+      this.model = hasContent ? model : undefined;
     }
     return false;
   }

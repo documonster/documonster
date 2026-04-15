@@ -328,4 +328,27 @@ describe("colCache", () => {
       expect(colCache.decodeCol("123")).toBe(0);
     });
   });
+
+  describe("compareAddress", () => {
+    it("sorts by column first, then row", () => {
+      expect(colCache.compareAddress("A1", "B1")).toBeLessThan(0);
+      expect(colCache.compareAddress("B1", "A1")).toBeGreaterThan(0);
+      expect(colCache.compareAddress("A1", "A2")).toBeLessThan(0);
+      expect(colCache.compareAddress("A2", "A1")).toBeGreaterThan(0);
+      expect(colCache.compareAddress("A1", "A1")).toBe(0);
+    });
+
+    it("handles double-digit rows correctly (unlike localeCompare)", () => {
+      // localeCompare: "C10" < "C2" (string comparison)
+      // compareAddress: C2 < C10 (numeric comparison)
+      expect(colCache.compareAddress("C2", "C10")).toBeLessThan(0);
+      expect(colCache.compareAddress("C10", "C2")).toBeGreaterThan(0);
+      expect(colCache.compareAddress("A9", "A10")).toBeLessThan(0);
+    });
+
+    it("orders columns before rows", () => {
+      // A10 should come before B1 (column A < column B)
+      expect(colCache.compareAddress("A10", "B1")).toBeLessThan(0);
+    });
+  });
 });

@@ -38,6 +38,7 @@ interface ColCache {
   decodeEx(value: string): DecodeExResult;
   encodeAddress(row: number, col: number): string;
   encode(...args: number[]): string;
+  compareAddress(a: string, b: string): number;
   inRange(range: number[], address: number[]): boolean;
 }
 
@@ -356,6 +357,22 @@ const colCache: ColCache = {
       default:
         throw new InvalidAddressError(String(args.length), "Can only encode with 2 or 4 arguments");
     }
+  },
+
+  /**
+   * Compare two cell addresses by column then row (numeric order).
+   *
+   * Returns a negative number if `a` should come before `b`,
+   * a positive number if `a` should come after `b`, or zero if equal.
+   *
+   * This avoids the pitfalls of `localeCompare` which treats addresses
+   * as strings (e.g. "C10" < "C2") instead of comparing their numeric
+   * column and row components.
+   */
+  compareAddress(a: string, b: string): number {
+    const addrA = colCache.decodeAddress(a);
+    const addrB = colCache.decodeAddress(b);
+    return addrA.col - addrB.col || addrA.row - addrB.row;
   },
 
   // return true if address is contained within range

@@ -17,7 +17,8 @@ import {
   ExcelFileError,
   ImageError,
   ExcelNotSupportedError,
-  XmlParseError
+  XmlParseError,
+  TableError
 } from "@excel/errors";
 import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
 import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
@@ -1889,6 +1890,7 @@ class XLSX {
     model.hasHeaderWatermark = false;
     let tableCount = 0;
     model.tables = [];
+    const tableNameMap = new Map<string, string>(); // name (lowercase) → worksheet name
     model.worksheets.forEach((worksheet: any, index: number) => {
       // Assign fileIndex early so that worksheet-xform.prepare() can use it
       // for comment/VML relationship targets and content type names.
@@ -1897,6 +1899,19 @@ class XLSX {
       worksheet.fileIndex = index + 1;
 
       worksheet.tables.forEach((table: any) => {
+        // OOXML requires table names to be unique across the entire workbook
+        // (case-insensitive). Detect duplicates early to produce a clear error
+        // instead of generating a corrupt file that Excel must repair.
+        const nameKey = table.name.toLowerCase();
+        const existingSheet = tableNameMap.get(nameKey);
+        if (existingSheet !== undefined) {
+          throw new TableError(
+            `Duplicate table name "${table.name}": already used in worksheet "${existingSheet}". ` +
+              `Table names must be unique across the entire workbook (case-insensitive).`
+          );
+        }
+        tableNameMap.set(nameKey, worksheet.name);
+
         tableCount++;
         table.target = `table${tableCount}.xml`;
         table.id = tableCount;

@@ -517,6 +517,8 @@ class Workbook {
   declare protected _rawDrawings: Record<string, Uint8Array>;
   /** Default font preserved from original file for round-trip fidelity */
   declare protected _defaultFont?: Partial<Font>;
+  /** Global registry of table names (lowercase) for cross-worksheet uniqueness checks. */
+  readonly _tableNames = new Set<string>();
   private _xlsx?: XLSX;
 
   // ===========================================================================
@@ -1468,6 +1470,7 @@ class Workbook {
     this.protection = value.protection;
     this.calcProperties = value.calcProperties;
     this._worksheets = [];
+    this._tableNames.clear();
     value.worksheets.forEach(worksheetModel => {
       const { id, name, state } = worksheetModel;
       const orderNo = value.sheets && value.sheets.findIndex(ws => ws.id === id);

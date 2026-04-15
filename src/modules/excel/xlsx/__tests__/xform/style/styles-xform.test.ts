@@ -46,7 +46,13 @@ const expectations = [
     xml: fs.readFileSync(join(__dirname, "data/styles.1.2.xml")).toString(),
     get parsedModel() {
       // parsedModel includes apply* flags from the XML
-      return addApplyFlags(this.preparedModel);
+      const model = addApplyFlags(this.preparedModel);
+      // An empty border (<border><left/><right/><top/><bottom/><diagonal/></border>)
+      // parses to undefined rather than {}, because there are no edges with
+      // style/color data. This is correct — cells referencing borderId 0 should
+      // not get a truthy border property.
+      model.borders[0] = undefined;
+      return model;
     },
     tests: ["render", "renderIn", "parse"]
   }

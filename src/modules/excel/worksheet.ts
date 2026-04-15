@@ -2,7 +2,7 @@ import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
 import { Enums } from "@excel/enums";
-import { WorksheetNameError, MergeConflictError } from "@excel/errors";
+import { WorksheetNameError, MergeConflictError, TableError } from "@excel/errors";
 import {
   FormCheckbox,
   type FormCheckboxModel,
@@ -1418,8 +1418,23 @@ class Worksheet {
    */
   addTable(model: TableProperties): Table {
     const table = new Table(this, model);
-    // Use table.name (sanitized by Table.validate()) as the key
+    // table.name is sanitized by Table.validate() — check against the
+    // sanitized name so that e.g. "My Table" and "My_Table" (which both
+    // sanitize to "My_Table") are correctly detected as duplicates.
+    const nameKey = table.name.toLowerCase();
+    if (this.tables[table.name]) {
+      throw new TableError(
+        `Table name "${table.name}" already exists in worksheet "${this.name}".`
+      );
+    }
+    if (this.workbook._tableNames.has(nameKey)) {
+      throw new TableError(
+        `Table name "${table.name}" already exists in another worksheet. ` +
+          `Table names must be unique across the entire workbook (case-insensitive).`
+      );
+    }
     this.tables[table.name] = table;
+    this.workbook._tableNames.add(nameKey);
     return table;
   }
 
@@ -1434,6 +1449,9 @@ class Worksheet {
    * Delete table by name
    */
   removeTable(name: string): void {
+    if (this.tables[name]) {
+      this.workbook._tableNames.delete(name.toLowerCase());
+    }
     delete this.tables[name];
   }
 
@@ -1814,6 +1832,7 @@ class Worksheet {
       const t = new Table(this, table);
       t.model = table;
       tables[table.name] = t;
+      this.workbook._tableNames.add(table.name.toLowerCase());
       return tables;
     }, {});
     this.pivotTables = value.pivotTables;

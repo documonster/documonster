@@ -61,7 +61,7 @@ function optimiseDataValidations(model: any): any[] {
       dataValidation,
       marked: false
     }))
-    .sort((a: any, b: any) => a.address.localeCompare(b.address));
+    .sort((a, b) => colCache.compareAddress(a.address, b.address));
   const dvMap = Object.fromEntries(dvList.map(dv => [dv.address, dv]));
   const matchCol = (addr: any, height: number, col: number): boolean => {
     for (let i = 0; i < height; i++) {

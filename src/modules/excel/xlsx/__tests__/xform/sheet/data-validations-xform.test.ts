@@ -1,6 +1,7 @@
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { DataValidationsXform } from "@excel/xlsx/xform/sheet/data-validations-xform";
-import { describe } from "vitest";
+import { XmlWriter } from "@xml/writer";
+import { describe, it, expect } from "vitest";
 
 const expectations = [
   {
@@ -160,4 +161,46 @@ const expectations = [
 
 describe("DataValidationsXform", () => {
   testXformHelper(expectations);
+
+  describe("optimisation with double-digit rows", () => {
+    it("should merge C5:C15 into a single validation range", () => {
+      // This is the exact scenario from exceljs#2820:
+      // With localeCompare, "C10" < "C2" (string comparison),
+      // which broke the downward expansion and produced overlapping ranges.
+      const validation = { type: "list", formulae: ["Yes,No"] };
+      const model: Record<string, any> = {};
+      for (let row = 5; row <= 15; row++) {
+        model[`C${row}`] = validation;
+      }
+
+      const xform = new DataValidationsXform();
+      const xmlStream = new XmlWriter();
+      xform.render(xmlStream, model);
+
+      // Should produce exactly one <dataValidation> with sqref="C5:C15"
+      expect(xmlStream.xml).toContain('sqref="C5:C15"');
+      // Should NOT contain multiple dataValidation nodes
+      const dvCount = (xmlStream.xml.match(/<dataValidation /g) || []).length;
+      expect(dvCount).toBe(1);
+    });
+
+    it("should merge a 2D block with double-digit rows", () => {
+      const validation = { type: "whole", operator: "between", formulae: [1, 100] };
+      const model: Record<string, any> = {};
+      // A5:B12 — 2 columns × 8 rows crossing the single/double digit boundary
+      for (const col of ["A", "B"]) {
+        for (let row = 5; row <= 12; row++) {
+          model[`${col}${row}`] = validation;
+        }
+      }
+
+      const xform = new DataValidationsXform();
+      const xmlStream = new XmlWriter();
+      xform.render(xmlStream, model);
+
+      expect(xmlStream.xml).toContain('sqref="A5:B12"');
+      const dvCount = (xmlStream.xml.match(/<dataValidation /g) || []).length;
+      expect(dvCount).toBe(1);
+    });
+  });
 });

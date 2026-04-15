@@ -10,9 +10,7 @@ const expectations = [
     },
     preparedModel: {},
     xml: "<border><left/><right/><top/><bottom/><diagonal/></border>",
-    get parsedModel() {
-      return this.preparedModel;
-    },
+    parsedModel: undefined,
     tests: ["render", "renderIn", "parse"]
   },
   {
