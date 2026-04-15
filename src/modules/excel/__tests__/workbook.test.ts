@@ -476,4 +476,200 @@ describe("Workbook", () => {
       expect((wb as any)._themes).toBeUndefined();
     });
   });
+
+  // ===========================================================================
+  // Workbook Protection
+  // ===========================================================================
+
+  describe("workbook protection", () => {
+    it("protect() sets lockStructure by default", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect();
+
+      expect(wb.protection).toBeDefined();
+      expect(wb.protection!.lockStructure).toBe(true);
+      // No password → no hash fields
+      expect(wb.protection!.algorithmName).toBeUndefined();
+      expect(wb.protection!.hashValue).toBeUndefined();
+    });
+
+    it("protect() with password generates hash fields", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect("secret");
+
+      expect(wb.protection).toBeDefined();
+      expect(wb.protection!.lockStructure).toBe(true);
+      expect(wb.protection!.algorithmName).toBe("SHA-512");
+      expect(wb.protection!.hashValue).toBeTruthy();
+      expect(wb.protection!.saltValue).toBeTruthy();
+      expect(wb.protection!.spinCount).toBe(100000);
+    });
+
+    it("protect() with options overrides defaults", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect("pass", {
+        lockStructure: false,
+        lockWindows: true,
+        spinCount: 50000
+      });
+
+      expect(wb.protection!.lockStructure).toBe(false);
+      expect(wb.protection!.lockWindows).toBe(true);
+      expect(wb.protection!.spinCount).toBe(50000);
+    });
+
+    it("protect() normalizes spinCount edge cases", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+
+      // undefined → default 100000
+      await wb.protect("a", { lockStructure: true });
+      expect(wb.protection!.spinCount).toBe(100000);
+
+      // negative → 0
+      await wb.protect("a", { spinCount: -1 });
+      expect(wb.protection!.spinCount).toBe(0);
+
+      // fractional → rounded
+      await wb.protect("a", { spinCount: 1.8 });
+      expect(wb.protection!.spinCount).toBe(2);
+    });
+
+    it("unprotect() removes protection", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect("secret");
+      expect(wb.protection).toBeDefined();
+
+      wb.unprotect();
+      expect(wb.protection).toBeUndefined();
+    });
+
+    it("protection survives model round-trip", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect("secret", { lockWindows: true });
+
+      const model = wb.model;
+      expect(model.protection).toBeDefined();
+      expect(model.protection!.lockStructure).toBe(true);
+      expect(model.protection!.lockWindows).toBe(true);
+
+      const wb2 = new Workbook();
+      wb2.addWorksheet("Sheet1");
+      wb2.model = model;
+      expect(wb2.protection).toBeDefined();
+      expect(wb2.protection!.lockStructure).toBe(true);
+      expect(wb2.protection!.lockWindows).toBe(true);
+      expect(wb2.protection!.algorithmName).toBe("SHA-512");
+    });
+
+    it("protection round-trips through XLSX write/load", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      await wb.protect("test123", { lockStructure: true });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      expect(wb2.protection).toBeDefined();
+      expect(wb2.protection!.lockStructure).toBe(true);
+      expect(wb2.protection!.algorithmName).toBe("SHA-512");
+      expect(wb2.protection!.hashValue).toBe(wb.protection!.hashValue);
+      expect(wb2.protection!.saltValue).toBe(wb.protection!.saltValue);
+      expect(wb2.protection!.spinCount).toBe(100000);
+    });
+
+    it("unprotected workbook has no protection in XLSX", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      expect(wb2.protection).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Default Font
+  // ===========================================================================
+
+  describe("defaultFont", () => {
+    it("is undefined by default", () => {
+      const wb = new Workbook();
+      expect(wb.defaultFont).toBeUndefined();
+    });
+
+    it("can be set and read back", () => {
+      const wb = new Workbook();
+      wb.defaultFont = { name: "Arial", size: 12 };
+
+      expect(wb.defaultFont).toEqual({ name: "Arial", size: 12 });
+    });
+
+    it("can be cleared by setting to undefined", () => {
+      const wb = new Workbook();
+      wb.defaultFont = { name: "Arial", size: 12 };
+      wb.defaultFont = undefined;
+
+      expect(wb.defaultFont).toBeUndefined();
+    });
+
+    it("survives model round-trip", () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      wb.defaultFont = { name: "Times New Roman", size: 14 };
+
+      const model = wb.model;
+      expect(model.defaultFont).toEqual({ name: "Times New Roman", size: 14 });
+
+      const wb2 = new Workbook();
+      wb2.addWorksheet("Sheet1");
+      wb2.model = model;
+      expect(wb2.defaultFont).toEqual({ name: "Times New Roman", size: 14 });
+    });
+
+    it("round-trips through XLSX write/load", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "test";
+      wb.defaultFont = { name: "Arial", size: 12, family: 2 };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      // After round-trip, the default font should be preserved
+      expect(wb2.defaultFont).toBeDefined();
+      expect(wb2.defaultFont!.name).toBe("Arial");
+      expect(wb2.defaultFont!.size).toBe(12);
+    });
+
+    it("writes defaultFont as fontId=0 in styles.xml", async () => {
+      const { extractAll } = await import("@archive/unzip/extract");
+
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "test";
+      wb.defaultFont = { name: "Arial", size: 12 };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const entries = await extractAll(buffer as Uint8Array);
+      const stylesXml = new TextDecoder().decode(entries.get("xl/styles.xml")!.data);
+
+      // The first <font> in styles.xml should be Arial 12, not Calibri 11
+      const firstFontMatch = stylesXml.match(/<font>([\s\S]*?)<\/font>/);
+      expect(firstFontMatch).toBeTruthy();
+      const firstFont = firstFontMatch![1];
+      expect(firstFont).toContain('val="Arial"');
+      expect(firstFont).toContain('val="12"');
+      expect(firstFont).not.toContain('val="Calibri"');
+    });
+  });
 });

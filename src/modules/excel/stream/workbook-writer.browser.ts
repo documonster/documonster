@@ -12,7 +12,13 @@ import { Zip, ZipDeflate } from "@archive/zip/stream";
 import { DefinedNames } from "@excel/defined-names";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
-import type { ImageData, WorkbookView, AddWorksheetOptions } from "@excel/types";
+import type {
+  Font,
+  ImageData,
+  WorkbookView,
+  WorkbookProtection,
+  AddWorksheetOptions
+} from "@excel/types";
 import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import {
   drawingPath,
@@ -24,6 +30,7 @@ import {
 } from "@excel/utils/ooxml-paths";
 import { SharedStrings } from "@excel/utils/shared-strings";
 import { StreamBuf } from "@excel/utils/stream-buf";
+import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import { RelType } from "@excel/xlsx/rel-type";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
@@ -152,6 +159,16 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   commentRefs: CommentRef[];
   /** Number of cells with dynamic array formulas, accumulated during worksheet commit */
   dynamicArrayCount: number;
+  /** Workbook-level structure protection */
+  protection?: {
+    lockStructure?: boolean;
+    lockWindows?: boolean;
+    lockRevision?: boolean;
+    algorithmName?: string;
+    hashValue?: string;
+    saltValue?: string;
+    spinCount?: number;
+  };
   zip: Zip;
   stream: OutputStreamLike;
   promise: Promise<void[] | void>;
@@ -230,6 +247,20 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
   get definedNames(): DefinedNames {
     return this._definedNames;
+  }
+
+  /**
+   * The default font for the workbook (fontId=0 / "Normal" style).
+   * Must be set before any worksheet rows are committed.
+   */
+  get defaultFont(): Partial<Font> | undefined {
+    return this.styles.defaultFont;
+  }
+
+  set defaultFont(font: Partial<Font> | undefined) {
+    if (this.styles.setDefaultFont) {
+      this.styles.setDefaultFont(font);
+    }
   }
 
   /** @internal */
@@ -328,6 +359,21 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
   getImage(id: number): ImageData | undefined {
     return this.media[id];
+  }
+
+  /**
+   * Protect the workbook structure with an optional password.
+   * Prevents users from adding, deleting, renaming, moving, or copying worksheets.
+   */
+  async protect(password?: string, options?: Partial<WorkbookProtection>): Promise<void> {
+    this.protection = await buildWorkbookProtection(password, options);
+  }
+
+  /**
+   * Remove workbook structure protection.
+   */
+  unprotect(): void {
+    this.protection = undefined;
   }
 
   addWorksheet(name?: string, options?: Partial<AddWorksheetOptions>): TWorksheetWriter {
@@ -591,6 +637,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       definedNames: this._definedNames.model,
       views: this.views,
       properties: {},
+      protection: this.protection,
       calcProperties: {}
     };
     return new Promise(resolve => {

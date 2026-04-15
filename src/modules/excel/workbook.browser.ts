@@ -24,11 +24,14 @@ import type {
   AddWorksheetOptions,
   CalculationProperties,
   CellErrorValue,
+  Font,
   ImageData,
   WorkbookProperties,
+  WorkbookProtection,
   WorkbookView,
   Buffer as ExcelBuffer
 } from "@excel/types";
+import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import { Worksheet, type WorksheetModel } from "@excel/worksheet";
 import { XLSX } from "@excel/xlsx/xlsx";
 import { formatMarkdown } from "@markdown/format/index";
@@ -62,6 +65,7 @@ export interface WorkbookModel {
   created: Date;
   modified: Date;
   properties: Partial<WorkbookProperties>;
+  protection?: WorkbookProtectionModel;
   worksheets: WorksheetModel[];
   sheets?: WorksheetModel[];
   definedNames: DefinedNameModel[];
@@ -87,7 +91,20 @@ export interface WorkbookModel {
   /** Raw drawing XML data for passthrough (when drawing contains chart references) */
   rawDrawings?: Record<string, Uint8Array>;
   /** Default font preserved from the original file for round-trip fidelity */
-  defaultFont?: any;
+  defaultFont?: Partial<Font>;
+}
+
+/** Internal model for workbook-level protection (serialized to <workbookProtection>) */
+export interface WorkbookProtectionModel {
+  lockStructure?: boolean;
+  lockWindows?: boolean;
+  lockRevision?: boolean;
+  workbookPassword?: string;
+  revisionsPassword?: string;
+  algorithmName?: string;
+  hashValue?: string;
+  saltValue?: string;
+  spinCount?: number;
 }
 
 // =============================================================================
@@ -485,6 +502,7 @@ class Workbook {
   declare public views: WorkbookView[];
   declare public media: WorkbookMedia[];
   declare public pivotTables: PivotTable[];
+  declare public protection?: WorkbookProtectionModel;
 
   // ===========================================================================
   // Private Properties
@@ -498,7 +516,7 @@ class Workbook {
   /** Raw drawing XML data for passthrough (when drawing contains chart references) */
   declare protected _rawDrawings: Record<string, Uint8Array>;
   /** Default font preserved from original file for round-trip fidelity */
-  declare protected _defaultFont?: any;
+  declare protected _defaultFont?: Partial<Font>;
   private _xlsx?: XLSX;
 
   // ===========================================================================
@@ -524,6 +542,31 @@ class Workbook {
     this._passthrough = {};
     this._rawDrawings = {};
     this._definedNames = new DefinedNames();
+  }
+
+  // ===========================================================================
+  // Default Font
+  // ===========================================================================
+
+  /**
+   * The default font for the workbook (fontId=0 / "Normal" style).
+   * Cells without explicit font styles will inherit this font in Excel.
+   *
+   * @example
+   * ```ts
+   * wb.defaultFont = { name: "Arial", size: 12 };
+   * ```
+   *
+   * When reading an existing XLSX file, this preserves the original default font
+   * for round-trip fidelity. Setting it on a new workbook changes the default
+   * from Calibri 11 to your chosen font.
+   */
+  get defaultFont(): Partial<Font> | undefined {
+    return this._defaultFont;
+  }
+
+  set defaultFont(font: Partial<Font> | undefined) {
+    this._defaultFont = font;
   }
 
   // ===========================================================================
@@ -554,6 +597,28 @@ class Workbook {
     };
 
     return newWs;
+  }
+
+  // ===========================================================================
+  // Workbook Protection
+  // ===========================================================================
+
+  /**
+   * Protect the workbook structure with an optional password.
+   * Prevents users from adding, deleting, renaming, moving, or copying worksheets.
+   *
+   * @param password - Optional password to protect the structure
+   * @param options  - Optional protection flags (lockStructure, lockWindows, lockRevision)
+   */
+  async protect(password?: string, options?: Partial<WorkbookProtection>): Promise<void> {
+    this.protection = await buildWorkbookProtection(password, options);
+  }
+
+  /**
+   * Remove workbook structure protection.
+   */
+  unprotect(): void {
+    this.protection = undefined;
   }
 
   // ===========================================================================
@@ -1357,6 +1422,7 @@ class Workbook {
       created: this.created,
       modified: this.modified,
       properties: this.properties,
+      protection: this.protection,
       worksheets: this.worksheets.map(worksheet => worksheet.model),
       sheets: this.worksheets.map(ws => ws.model).filter(Boolean),
       definedNames: this._definedNames.model,
@@ -1399,6 +1465,7 @@ class Workbook {
     this.contentStatus = value.contentStatus;
 
     this.properties = value.properties;
+    this.protection = value.protection;
     this.calcProperties = value.calcProperties;
     this._worksheets = [];
     value.worksheets.forEach(worksheetModel => {

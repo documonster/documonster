@@ -130,4 +130,10 @@ class Workbook extends WorkbookBrowser {
 }
 
 export { Workbook };
-export type { CsvOptions, CsvInput, WorkbookModel, WorkbookMedia } from "@excel/workbook.browser";
+export type {
+  CsvOptions,
+  CsvInput,
+  WorkbookModel,
+  WorkbookMedia,
+  WorkbookProtectionModel
+} from "@excel/workbook.browser";

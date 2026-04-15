@@ -485,4 +485,51 @@ describe("WorkbookWriter", () => {
       expect(metadataXml).toBeUndefined();
     });
   });
+
+  // ===========================================================================
+  // Workbook Protection
+  // ===========================================================================
+
+  describe("workbook protection", () => {
+    it("protection round-trips through streaming write then load", async () => {
+      const { wb, getBuffer } = createMemoryWriter({ useStyles: true });
+      await wb.protect("mypass", { lockStructure: true });
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addRow(["data"]).commit();
+      ws.commit();
+      const buffer = await getBuffer();
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      expect(wb2.protection).toBeDefined();
+      expect(wb2.protection!.lockStructure).toBe(true);
+      expect(wb2.protection!.algorithmName).toBe("SHA-512");
+      expect(wb2.protection!.hashValue).toBeTruthy();
+      expect(wb2.protection!.saltValue).toBeTruthy();
+      expect(wb2.protection!.spinCount).toBe(100000);
+    });
+  });
+
+  // ===========================================================================
+  // Default Font
+  // ===========================================================================
+
+  describe("defaultFont", () => {
+    it("defaultFont round-trips through streaming write then load", async () => {
+      const { wb, getBuffer } = createMemoryWriter({ useStyles: true });
+      wb.defaultFont = { name: "Arial", size: 12 };
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addRow(["data"]).commit();
+      ws.commit();
+      const buffer = await getBuffer();
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      expect(wb2.defaultFont).toBeDefined();
+      expect(wb2.defaultFont!.name).toBe("Arial");
+      expect(wb2.defaultFont!.size).toBe(12);
+    });
+  });
 });

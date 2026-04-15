@@ -5,6 +5,7 @@ import { WorksheetXform } from "@excel/xlsx/xform/book/sheet-xform";
 import { WorkbookCalcPropertiesXform } from "@excel/xlsx/xform/book/workbook-calc-properties-xform";
 import { WorkbookPivotCacheXform } from "@excel/xlsx/xform/book/workbook-pivot-cache-xform";
 import { WorkbookPropertiesXform } from "@excel/xlsx/xform/book/workbook-properties-xform";
+import { WorkbookProtectionXform } from "@excel/xlsx/xform/book/workbook-protection-xform";
 import { WorkbookViewXform } from "@excel/xlsx/xform/book/workbook-view-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
@@ -20,6 +21,7 @@ class WorkbookXform extends BaseXform {
     this.map = {
       fileVersion: WorkbookXform.STATIC_XFORMS.fileVersion,
       workbookPr: new WorkbookPropertiesXform(),
+      workbookProtection: new WorkbookProtectionXform(),
       bookViews: new ListXform({
         tag: "bookViews",
         count: false,
@@ -107,6 +109,7 @@ class WorkbookXform extends BaseXform {
 
     this.map.fileVersion.render(xmlStream);
     this.map.workbookPr.render(xmlStream, model.properties);
+    this.map.workbookProtection.render(xmlStream, model.protection);
     this.map.bookViews.render(xmlStream, model.views);
     this.map.sheets.render(xmlStream, model.sheets);
     this.map.definedNames.render(xmlStream, model.definedNames);
@@ -163,6 +166,7 @@ class WorkbookXform extends BaseXform {
         this.model = {
           sheets: this.map.sheets.model,
           properties: this.map.workbookPr.model || {},
+          protection: this.map.workbookProtection.model,
           views: this.map.bookViews.model,
           calcProperties: {}
         };

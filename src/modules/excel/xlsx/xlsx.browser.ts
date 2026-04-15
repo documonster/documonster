@@ -699,6 +699,7 @@ class XLSX {
         model.definedNames = workbook.definedNames;
         model.views = workbook.views;
         model.properties = workbook.properties;
+        model.protection = workbook.protection;
         model.calcProperties = workbook.calcProperties;
         model.pivotCaches = workbook.pivotCaches;
         return true;

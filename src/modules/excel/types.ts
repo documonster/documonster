@@ -354,6 +354,13 @@ export interface WorkbookProperties {
   date1904: boolean;
 }
 
+export interface WorkbookProtection {
+  lockStructure: boolean;
+  lockWindows: boolean;
+  lockRevision: boolean;
+  spinCount: number;
+}
+
 export interface CalculationProperties {
   fullCalcOnLoad: boolean;
 }
