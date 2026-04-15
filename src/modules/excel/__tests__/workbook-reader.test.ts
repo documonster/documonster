@@ -570,4 +570,123 @@ describe("WorkbookReader", () => {
       ]);
     });
   });
+
+  // ===========================================================================
+  // Dynamic Array Formulas via streaming reader (exceljs#2910)
+  // ===========================================================================
+
+  describe("dynamic array formulas via streaming reader", () => {
+    it("should read isDynamicArray flag from dynamic array formula cells", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = wb.addWorksheet("Sheet1");
+        for (let i = 1; i <= 5; i++) {
+          ws.getCell(`A${i}`).value = i;
+        }
+        ws.getCell("C1").value = {
+          formula: "_xlfn._xlws.FILTER(A1:A5,A1:A5>2)",
+          shareType: "array",
+          ref: "C1",
+          result: 3,
+          isDynamicArray: true
+        };
+      });
+
+      const reader = new WorkbookReader(buffer, {
+        worksheets: "emit",
+        sharedStrings: "cache"
+      });
+
+      let foundDynamicArray = false;
+      for await (const ws of reader) {
+        for await (const row of ws) {
+          const cell = row.getCell(3);
+          const val = cell.value as any;
+          if (val && typeof val === "object" && val.formula && val.isDynamicArray) {
+            foundDynamicArray = true;
+            expect(val.formula).toContain("FILTER");
+            expect(val.isDynamicArray).toBe(true);
+          }
+        }
+      }
+      expect(foundDynamicArray).toBe(true);
+    });
+
+    it("should not mark non-dynamic formulas as isDynamicArray", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = wb.addWorksheet("Sheet1");
+        ws.getCell("A1").value = { formula: "SUM(B1:B10)", result: 55 };
+        ws.getCell("A2").value = {
+          formula: "{A1*2}",
+          shareType: "array",
+          ref: "A2",
+          result: 110
+        };
+      });
+
+      const reader = new WorkbookReader(buffer, {
+        worksheets: "emit",
+        sharedStrings: "cache"
+      });
+
+      for await (const ws of reader) {
+        for await (const row of ws) {
+          for (let col = 1; col <= 3; col++) {
+            const val = row.getCell(col).value as any;
+            if (val && typeof val === "object" && val.formula) {
+              expect(val.isDynamicArray).toBeUndefined();
+            }
+          }
+        }
+      }
+    });
+
+    it("should handle mixed CSE array + dynamic array formulas in same workbook", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = wb.addWorksheet("Sheet1");
+        // Legacy CSE array formula
+        ws.getCell("A1").value = {
+          formula: "{ROW(1:3)}",
+          shareType: "array",
+          ref: "A1:A3",
+          result: 1
+        };
+        // Dynamic array formula
+        ws.getCell("C1").value = {
+          formula: "_xlfn._xlws.SORT(B1:B10)",
+          shareType: "array",
+          ref: "C1",
+          result: 1,
+          isDynamicArray: true
+        };
+      });
+
+      const reader = new WorkbookReader(buffer, {
+        worksheets: "emit",
+        sharedStrings: "cache"
+      });
+
+      let cseFormula: any = null;
+      let dynamicFormula: any = null;
+      for await (const ws of reader) {
+        for await (const row of ws) {
+          const a = row.getCell(1).value as any;
+          if (a && typeof a === "object" && a.formula) {
+            cseFormula = a;
+          }
+          const c = row.getCell(3).value as any;
+          if (c && typeof c === "object" && c.formula) {
+            dynamicFormula = c;
+          }
+        }
+      }
+
+      // CSE formula should NOT have isDynamicArray
+      expect(cseFormula).toBeDefined();
+      expect(cseFormula.isDynamicArray).toBeUndefined();
+
+      // Dynamic array formula SHOULD have isDynamicArray
+      expect(dynamicFormula).toBeDefined();
+      expect(dynamicFormula.isDynamicArray).toBe(true);
+    });
+  });
 });

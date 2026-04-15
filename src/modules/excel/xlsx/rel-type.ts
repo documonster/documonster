@@ -23,7 +23,8 @@ const RelType = {
   PivotTable: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable",
   FeaturePropertyBag:
     "http://schemas.microsoft.com/office/2022/11/relationships/FeaturePropertyBag",
-  CtrlProp: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp"
+  CtrlProp: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp",
+  SheetMetadata: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
 };
 
 export { RelType };

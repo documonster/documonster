@@ -880,6 +880,15 @@ class WorksheetWriter {
       xform.row.prepare(model, options);
       this.stream.write(xform.row.toXml(model));
 
+      // Count dynamic array formula cells for metadata generation
+      if (model.cells) {
+        for (const cell of model.cells) {
+          if (cell && cell.isDynamicArray) {
+            this._workbook.dynamicArrayCount++;
+          }
+        }
+      }
+
       if (options.comments.length) {
         this.hasComments = true;
         this._sheetCommentsWriter.addComments(options.comments);

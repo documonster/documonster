@@ -30,6 +30,7 @@ import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
 import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
+import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
@@ -149,6 +150,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   compressionLevel: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   media: Medium[];
   commentRefs: CommentRef[];
+  /** Number of cells with dynamic array formulas, accumulated during worksheet commit */
+  dynamicArrayCount: number;
   zip: Zip;
   stream: OutputStreamLike;
   promise: Promise<void[] | void>;
@@ -189,6 +192,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
     this.media = [];
     this.commentRefs = [];
+    this.dynamicArrayCount = 0;
     this._trueStreaming = options.trueStreaming ?? false;
 
     // Create Zip instance
@@ -295,6 +299,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       this.addSharedStrings(),
       this.addStyles(),
       this.addFeaturePropertyBag(),
+      this.addMetadata(),
       this.addWorkbookRels()
     ]);
     await this.addWorkbook();
@@ -414,7 +419,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
         commentRefs: this.commentRefs,
         media: this.media,
         drawings,
-        hasCheckboxes: this.styles.hasCheckboxes
+        hasCheckboxes: this.styles.hasCheckboxes,
+        hasDynamicArrayFormulas: this.dynamicArrayCount > 0
       };
       const xform = new ContentTypesXform();
       this._addFile(xform.toXml(model), OOXML_PATHS.contentTypes);
@@ -520,6 +526,18 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return Promise.resolve();
   }
 
+  addMetadata(): Promise<void> {
+    if (this.dynamicArrayCount <= 0) {
+      return Promise.resolve();
+    }
+    const xform = new MetadataXform();
+    this._addFile(
+      xform.toXml({ dynamicArrayCount: this.dynamicArrayCount }),
+      OOXML_PATHS.xlMetadata
+    );
+    return Promise.resolve();
+  }
+
   addWorkbookRels(): Promise<void> {
     let count = 1;
     const relationships: Array<{ Id: string; Type: string; Target: string }> = [
@@ -539,6 +557,14 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
         Id: `rId${count++}`,
         Type: RelType.FeaturePropertyBag,
         Target: OOXML_REL_TARGETS.workbookFeaturePropertyBag
+      });
+    }
+    // Add metadata relationship for dynamic array formulas
+    if (this.dynamicArrayCount > 0) {
+      relationships.push({
+        Id: `rId${count++}`,
+        Type: RelType.SheetMetadata,
+        Target: OOXML_REL_TARGETS.workbookMetadata
       });
     }
     this._worksheets.forEach(ws => {

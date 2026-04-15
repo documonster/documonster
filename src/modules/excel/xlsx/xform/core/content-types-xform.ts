@@ -108,6 +108,14 @@ class ContentTypesXform extends BaseXform {
       });
     }
 
+    // Add metadata part for dynamic array formulas
+    if (model.hasDynamicArrayFormulas) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(OOXML_PATHS.xlMetadata),
+        ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"
+      });
+    }
+
     const hasSharedStrings = model.sharedStrings && model.sharedStrings.count;
     if (hasSharedStrings) {
       xmlStream.leafNode("Override", {

@@ -103,6 +103,12 @@ class CellXform extends BaseXform {
           model.date1904 = true;
         }
 
+        // Convert isDynamicArray flag to cm attribute for XML rendering.
+        // All dynamic array cells share cm=1 pointing to a single XLDAPR metadata record.
+        if (model.isDynamicArray) {
+          model.cm = 1;
+        }
+
         if (model.shareType === "shared") {
           model.si = options.siFormulae++;
         }
@@ -217,6 +223,11 @@ class CellXform extends BaseXform {
       xmlStream.addAttribute("s", model.styleId);
     }
 
+    // Dynamic array formulas require the cm attribute linking to xl/metadata.xml
+    if (model.cm) {
+      xmlStream.addAttribute("cm", model.cm);
+    }
+
     switch (model.type) {
       case Enums.ValueType.Null:
         break;
@@ -302,6 +313,9 @@ class CellXform extends BaseXform {
         this.t = node.attributes.t;
         if (node.attributes.s) {
           this.model.styleId = parseInt(node.attributes.s, 10);
+        }
+        if (node.attributes.cm) {
+          this.model.cm = parseInt(node.attributes.cm, 10);
         }
         return true;
 
@@ -501,6 +515,23 @@ class CellXform extends BaseXform {
           }
           delete model.si;
         }
+        // Convert cm metadata index into isDynamicArray flag.
+        // The cm attribute (1-indexed) links to a cellMetadata record in
+        // xl/metadata.xml. We use the precise dynamicArrayCmIndices set
+        // (built by MetadataXform) to check whether this specific cm value
+        // maps to an XLDAPR metadataType. Falls back to the coarser
+        // hasDynamicArrayMetadata boolean for backwards compatibility.
+        // We strip cm from the model — it will be reassigned during write prepare.
+        if (model.cm) {
+          if (options.dynamicArrayCmIndices) {
+            if (options.dynamicArrayCmIndices.has(model.cm)) {
+              model.isDynamicArray = true;
+            }
+          } else if (options.hasDynamicArrayMetadata) {
+            model.isDynamicArray = true;
+          }
+        }
+        delete model.cm;
         break;
 
       default:

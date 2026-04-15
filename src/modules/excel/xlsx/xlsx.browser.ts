@@ -77,6 +77,7 @@ import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
 import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
+import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
 import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
@@ -484,6 +485,7 @@ class XLSX {
     await this.addThemes(zip, model);
     await this.addStyles(zip, model);
     await this.addFeaturePropertyBag(zip, model);
+    await this.addMetadata(zip, model);
     await this.addMedia(zip, model);
     await this.addApp(zip, model);
     await this.addCore(zip, model);
@@ -727,6 +729,14 @@ class XLSX {
         model.styles = new StylesXform();
         await model.styles.parseStream(stream);
         return true;
+      case OOXML_PATHS.xlMetadata: {
+        const metadataXform = new MetadataXform();
+        const metadataResult = await metadataXform.parseStream(stream);
+        if (metadataResult) {
+          model.metadata = metadataResult;
+        }
+        return true;
+      }
       default:
         return false;
     }
@@ -935,7 +945,9 @@ class XLSX {
       comments: model.comments,
       tables: model.tables,
       vmlDrawings: model.vmlDrawings,
-      pivotTables: model.pivotTablesIndexed
+      pivotTables: model.pivotTablesIndexed,
+      hasDynamicArrayMetadata: !!model.metadata?.hasDynamicArrays,
+      dynamicArrayCmIndices: model.metadata?.dynamicArrayCmIndices as Set<number> | undefined
     };
     model.worksheets.forEach((worksheet: any) => {
       worksheet.relationships = model.worksheetRels[worksheet.sheetNo];
@@ -957,6 +969,7 @@ class XLSX {
     delete model.drawingRels;
     delete model.vmlDrawings;
     delete model.pivotTableRels;
+    delete model.metadata;
   }
 
   /**
@@ -1526,6 +1539,14 @@ class XLSX {
         Target: OOXML_REL_TARGETS.workbookFeaturePropertyBag
       });
     }
+    // Add metadata relationship for dynamic array formulas
+    if (model.hasDynamicArrayFormulas) {
+      relationships.push({
+        Id: `rId${count++}`,
+        Type: XLSX.RelType.SheetMetadata,
+        Target: OOXML_REL_TARGETS.workbookMetadata
+      });
+    }
     // R9-B6: Deduplicate pivot cache relationships by cacheId. When multiple pivot
     // tables share the same cache, only one workbook relationship should be created.
     // Also assigns rId to each pivot table (R9-B7: typed on PivotTable interface).
@@ -1568,6 +1589,15 @@ class XLSX {
       new FeaturePropertyBagXform(),
       {}
     );
+  }
+
+  async addMetadata(zip: IZipWriter, model: any): Promise<void> {
+    if (!model.hasDynamicArrayFormulas) {
+      return;
+    }
+    await this._renderToZip(zip, OOXML_PATHS.xlMetadata, new MetadataXform(), {
+      dynamicArrayCount: model.dynamicArrayCount
+    });
   }
 
   async addSharedStrings(zip: IZipWriter, model: any): Promise<void> {
@@ -1877,6 +1907,21 @@ class XLSX {
 
     // ContentTypesXform expects this flag
     model.hasCheckboxes = model.styles.hasCheckboxes;
+
+    // Scan all worksheets for dynamic array formulas.
+    // cm=1 is assigned later by cell-xform.prepare() during worksheet rendering.
+    let dynamicArrayCount = 0;
+    model.worksheets.forEach((worksheet: any) => {
+      (worksheet.rows ?? []).forEach((row: any) => {
+        (row.cells ?? []).forEach((cell: any) => {
+          if (cell.isDynamicArray) {
+            dynamicArrayCount++;
+          }
+        });
+      });
+    });
+    model.hasDynamicArrayFormulas = dynamicArrayCount > 0;
+    model.dynamicArrayCount = dynamicArrayCount;
 
     // Propagate header watermark flag from worksheet prepare options
     if (worksheetOptions.hasHeaderWatermark) {

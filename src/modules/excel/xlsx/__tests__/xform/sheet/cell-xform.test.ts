@@ -591,6 +591,52 @@ const expectations = [
       formulae: {},
       siFormulae: 0
     }
+  },
+  // Dynamic Array Formula (Excel 365 FILTER/SORT/UNIQUE etc.)
+  {
+    title: "Dynamic Array Formula",
+    create() {
+      return new CellXform();
+    },
+    preparedModel: {
+      address: "D1",
+      type: Enums.ValueType.Formula,
+      shareType: "array",
+      ref: "D1",
+      formula: "_xlfn._xlws.FILTER(A1:A10,B1:B10>5)",
+      result: 3,
+      isDynamicArray: true,
+      cm: 1
+    },
+    xml: '<c r="D1" cm="1"><f t="array" ref="D1">_xlfn._xlws.FILTER(A1:A10,B1:B10&gt;5)</f><v>3</v></c>',
+    parsedModel: {
+      address: "D1",
+      type: Enums.ValueType.Formula,
+      shareType: "array",
+      ref: "D1",
+      formula: "_xlfn._xlws.FILTER(A1:A10,B1:B10>5)",
+      result: 3,
+      cm: 1
+    },
+    reconciledModel: {
+      address: "D1",
+      type: Enums.ValueType.Formula,
+      shareType: "array",
+      ref: "D1",
+      formula: "_xlfn._xlws.FILTER(A1:A10,B1:B10>5)",
+      result: 3,
+      isDynamicArray: true
+    },
+    tests: ["render", "renderIn", "parse", "reconcile"],
+    options: {
+      styles: fakeStyles,
+      hyperlinks: [],
+      hyperlinkMap: fakeHyperlinkMap,
+      formulae: {},
+      siFormulae: 0,
+      hasDynamicArrayMetadata: true,
+      dynamicArrayCmIndices: new Set([1])
+    }
   }
 ];
 

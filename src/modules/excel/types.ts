@@ -394,6 +394,14 @@ export interface CellArrayFormulaValue {
   shareType: "array";
   /** The range this array formula applies to, e.g. "A1:B2" */
   ref: string;
+  /**
+   * Mark this as an Excel 365 dynamic array formula (FILTER, SORT, UNIQUE, etc.).
+   * Dynamic array formulas differ from legacy CSE (Ctrl+Shift+Enter) array formulas:
+   * - The `ref` typically points to the formula cell itself (spill is dynamic)
+   * - Excel writes a `cm` attribute on the `<c>` element linking to `xl/metadata.xml`
+   * - The metadata marks the formula with `<xda:dynamicArrayProperties fDynamic="1"/>`
+   */
+  isDynamicArray?: boolean;
 }
 
 export interface CellSharedFormulaValue {

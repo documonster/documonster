@@ -704,4 +704,439 @@ describe("XLSX", () => {
       expect(xml).toContain(`<x14:cfRule type="dataBar" id="${x14Id}"`);
     });
   });
+
+  // ===========================================================================
+  // Dynamic Array Formulas (exceljs/exceljs#2910)
+  // ===========================================================================
+
+  describe("dynamic array formulas", () => {
+    async function getZipEntry(buffer: Uint8Array, path: string): Promise<string | undefined> {
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(buffer);
+      const entry = entries.get(path);
+      return entry ? new TextDecoder().decode(entry.data) : undefined;
+    }
+
+    function createDynamicArrayWorkbook(): Promise<Uint8Array> {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      // Source data
+      for (let i = 1; i <= 10; i++) {
+        ws.getCell(`A${i}`).value = i;
+        ws.getCell(`B${i}`).value = i > 5 ? 1 : 0;
+      }
+      // Dynamic array formula
+      ws.getCell("D1").value = {
+        formula: "_xlfn._xlws.FILTER(A1:A10,B1:B10=1)",
+        shareType: "array",
+        ref: "D1",
+        result: 6,
+        isDynamicArray: true
+      };
+      return wb.xlsx.writeBuffer();
+    }
+
+    it("should write cm attribute and metadata.xml for dynamic array formula", async () => {
+      const buf = await createDynamicArrayWorkbook();
+
+      // Check sheet XML has cm attribute
+      const sheetXml = await getZipEntry(buf, "xl/worksheets/sheet1.xml");
+      expect(sheetXml).toBeDefined();
+      expect(sheetXml).toMatch(/<c r="D1"[^>]*cm="1"/);
+      expect(sheetXml).toContain('t="array"');
+      expect(sheetXml).toContain("_xlfn._xlws.FILTER");
+
+      // Check metadata.xml exists
+      const metadataXml = await getZipEntry(buf, "xl/metadata.xml");
+      expect(metadataXml).toBeDefined();
+      expect(metadataXml).toContain("XLDAPR");
+      expect(metadataXml).toContain("xda:dynamicArrayProperties");
+      expect(metadataXml).toContain('fDynamic="1"');
+
+      // Check Content_Types.xml has metadata override
+      const ctXml = await getZipEntry(buf, "[Content_Types].xml");
+      expect(ctXml).toContain("sheetMetadata+xml");
+
+      // Check workbook.xml.rels has metadata relationship
+      const relsXml = await getZipEntry(buf, "xl/_rels/workbook.xml.rels");
+      expect(relsXml).toContain("sheetMetadata");
+      expect(relsXml).toContain("metadata.xml");
+    });
+
+    it("should not write metadata.xml when no dynamic array formulas exist", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = { formula: "SUM(B1:B10)", result: 55 };
+      const buf = await wb.xlsx.writeBuffer();
+
+      const metadataXml = await getZipEntry(buf, "xl/metadata.xml");
+      expect(metadataXml).toBeUndefined();
+
+      const ctXml = await getZipEntry(buf, "[Content_Types].xml");
+      expect(ctXml).not.toContain("sheetMetadata");
+    });
+
+    it("should round-trip dynamic array formula", async () => {
+      const buf1 = await createDynamicArrayWorkbook();
+
+      // Read back
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buf1);
+      const ws2 = wb2.getWorksheet("Sheet1")!;
+      const cellValue = ws2.getCell("D1").value as any;
+
+      expect(cellValue).toBeDefined();
+      expect(cellValue.formula).toBe("_xlfn._xlws.FILTER(A1:A10,B1:B10=1)");
+      expect(cellValue.shareType).toBe("array");
+      expect(cellValue.isDynamicArray).toBe(true);
+
+      // Write again
+      const buf2 = await wb2.xlsx.writeBuffer();
+
+      // Verify second generation
+      const sheetXml = await getZipEntry(buf2, "xl/worksheets/sheet1.xml");
+      expect(sheetXml).toMatch(/<c r="D1"[^>]*cm="1"/);
+      const metadataXml = await getZipEntry(buf2, "xl/metadata.xml");
+      expect(metadataXml).toContain("XLDAPR");
+    });
+
+    it("should handle multiple dynamic array formulas in same workbook", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = {
+        formula: "_xlfn._xlws.SORT(B1:B10)",
+        shareType: "array",
+        ref: "A1",
+        result: 1,
+        isDynamicArray: true
+      };
+      ws.getCell("C1").value = {
+        formula: "_xlfn._xlws.UNIQUE(D1:D10)",
+        shareType: "array",
+        ref: "C1",
+        result: "a",
+        isDynamicArray: true
+      };
+      const buf = await wb.xlsx.writeBuffer();
+
+      const sheetXml = (await getZipEntry(buf, "xl/worksheets/sheet1.xml"))!;
+      // Both cells should have cm="1"
+      expect(sheetXml).toMatch(/<c r="A1"[^>]*cm="1"/);
+      expect(sheetXml).toMatch(/<c r="C1"[^>]*cm="1"/);
+
+      // Only one metadata record needed
+      const metadataXml = (await getZipEntry(buf, "xl/metadata.xml"))!;
+      expect(metadataXml).toContain('<cellMetadata count="1"');
+    });
+
+    it("should handle mixed CSE array + dynamic array in same workbook", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      // Legacy CSE array formula
+      ws.getCell("A1").value = {
+        formula: "{ROW(1:3)}",
+        shareType: "array",
+        ref: "A1:A3",
+        result: 1
+      };
+      // Dynamic array formula
+      ws.getCell("C1").value = {
+        formula: "_xlfn._xlws.SORT(B1:B10)",
+        shareType: "array",
+        ref: "C1",
+        result: 1,
+        isDynamicArray: true
+      };
+      const buf = await wb.xlsx.writeBuffer();
+
+      const sheetXml = (await getZipEntry(buf, "xl/worksheets/sheet1.xml"))!;
+      // Only the dynamic array cell should have cm
+      expect(sheetXml).toMatch(/<c r="C1"[^>]*cm="1"/);
+      // CSE cell should NOT have cm
+      expect(sheetXml).not.toMatch(/<c r="A1"[^>]*cm="/);
+
+      // Round-trip: read back and verify
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buf);
+      const ws2 = wb2.getWorksheet("Sheet1")!;
+
+      const cseVal = ws2.getCell("A1").value as any;
+      expect(cseVal.formula).toBeDefined();
+      expect(cseVal.isDynamicArray).toBeUndefined();
+
+      const daVal = ws2.getCell("C1").value as any;
+      expect(daVal.formula).toContain("SORT");
+      expect(daVal.isDynamicArray).toBe(true);
+    });
+
+    it("should load Excel 365-style dynamic array XLSX built from raw ZIP parts", async () => {
+      // Construct a minimal XLSX that mimics the exact structure Excel 365 produces
+      // for a workbook with a FILTER() dynamic array formula in D1.
+      // This tests our parser against externally-authored files, not just our own output.
+      const archive = new ZipArchive({ level: 0, reproducible: true });
+      const enc = new TextEncoder();
+
+      // [Content_Types].xml
+      archive.add(
+        "[Content_Types].xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+            '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+            '  <Default Extension="xml" ContentType="application/xml"/>',
+            '  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+            '  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+            '  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+            '  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>',
+            '  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>',
+            "</Types>"
+          ].join("")
+        )
+      );
+
+      // _rels/.rels
+      archive.add(
+        "_rels/.rels",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+            '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>',
+            "</Relationships>"
+          ].join("")
+        )
+      );
+
+      // xl/_rels/workbook.xml.rels
+      archive.add(
+        "xl/_rels/workbook.xml.rels",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+            '  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>',
+            '  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
+            '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>',
+            '  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>',
+            "</Relationships>"
+          ].join("")
+        )
+      );
+
+      // xl/workbook.xml
+      archive.add(
+        "xl/workbook.xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+            '  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+            "  <sheets>",
+            '    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>',
+            "  </sheets>",
+            "</workbook>"
+          ].join("")
+        )
+      );
+
+      // xl/styles.xml — minimal
+      archive.add(
+        "xl/styles.xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+            '  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>',
+            '  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>',
+            '  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>',
+            '  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
+            '  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>',
+            "</styleSheet>"
+          ].join("")
+        )
+      );
+
+      // xl/sharedStrings.xml — empty
+      archive.add(
+        "xl/sharedStrings.xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"/>'
+          ].join("")
+        )
+      );
+
+      // xl/metadata.xml — exact Excel 365 structure
+      archive.add(
+        "xl/metadata.xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+            '  xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">',
+            '  <metadataTypes count="1">',
+            '    <metadataType name="XLDAPR" minSupportedVersion="120000"',
+            '      copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1"',
+            '      rowColShift="1" clearFormats="1" clearComments="1" assign="1"',
+            '      coerce="1" adjust="1" cellMeta="1"/>',
+            "  </metadataTypes>",
+            '  <futureMetadata name="XLDAPR" count="1">',
+            "    <bk>",
+            "      <extLst>",
+            '        <ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}">',
+            '          <xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/>',
+            "        </ext>",
+            "      </extLst>",
+            "    </bk>",
+            "  </futureMetadata>",
+            '  <cellMetadata count="1">',
+            "    <bk>",
+            '      <rc t="1" v="0"/>',
+            "    </bk>",
+            "  </cellMetadata>",
+            "</metadata>"
+          ].join("\n")
+        )
+      );
+
+      // xl/worksheets/sheet1.xml — with cm="1" on D1
+      archive.add(
+        "xl/worksheets/sheet1.xml",
+        enc.encode(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+            '  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+            '  <dimension ref="A1:D5"/>',
+            "  <sheetData>",
+            '    <row r="1">',
+            '      <c r="A1"><v>10</v></c>',
+            '      <c r="B1"><v>1</v></c>',
+            '      <c r="D1" cm="1"><f t="array" ref="D1">_xlfn._xlws.FILTER(A1:A5,B1:B5=1)</f><v>10</v></c>',
+            "    </row>",
+            '    <row r="2">',
+            '      <c r="A2"><v>20</v></c>',
+            '      <c r="B2"><v>0</v></c>',
+            "    </row>",
+            '    <row r="3">',
+            '      <c r="A3"><v>30</v></c>',
+            '      <c r="B3"><v>1</v></c>',
+            "    </row>",
+            '    <row r="4">',
+            '      <c r="A4"><v>40</v></c>',
+            '      <c r="B4"><v>0</v></c>',
+            "    </row>",
+            '    <row r="5">',
+            '      <c r="A5"><v>50</v></c>',
+            '      <c r="B5"><v>1</v></c>',
+            "    </row>",
+            "  </sheetData>",
+            "</worksheet>"
+          ].join("\n")
+        )
+      );
+
+      const xlsxBuffer = await archive.bytes();
+
+      // ---- Test 1: Load and verify isDynamicArray ----
+      const wb = new Workbook();
+      await wb.xlsx.load(xlsxBuffer);
+      const ws = wb.getWorksheet("Sheet1")!;
+
+      // Regular cells should load normally
+      expect(ws.getCell("A1").value).toBe(10);
+      expect(ws.getCell("B1").value).toBe(1);
+
+      // Dynamic array formula cell
+      const d1 = ws.getCell("D1").value as any;
+      expect(d1).toBeDefined();
+      expect(d1.formula).toBe("_xlfn._xlws.FILTER(A1:A5,B1:B5=1)");
+      expect(d1.shareType).toBe("array");
+      expect(d1.isDynamicArray).toBe(true);
+      expect(d1.result).toBe(10);
+
+      // ---- Test 2: Round-trip — write back and verify structure ----
+      const buf2 = await wb.xlsx.writeBuffer();
+      const sheetXml = await getZipEntry(buf2, "xl/worksheets/sheet1.xml");
+      expect(sheetXml).toMatch(/<c r="D1"[^>]*cm="1"/);
+
+      const metadataXml = await getZipEntry(buf2, "xl/metadata.xml");
+      expect(metadataXml).toBeDefined();
+      expect(metadataXml).toContain("XLDAPR");
+
+      // ---- Test 3: Streaming reader should also detect isDynamicArray ----
+      const reader = new WorkbookReader(xlsxBuffer, {
+        worksheets: "emit",
+        sharedStrings: "cache"
+      });
+
+      let streamDaFound = false;
+      for await (const wsReader of reader) {
+        for await (const row of wsReader) {
+          const cell = row.getCell(4);
+          const val = cell.value as any;
+          if (val && typeof val === "object" && val.formula) {
+            streamDaFound = true;
+            expect(val.formula).toContain("FILTER");
+            expect(val.isDynamicArray).toBe(true);
+          }
+        }
+      }
+      expect(streamDaFound).toBe(true);
+    });
+
+    it("should not mark isDynamicArray when cm exists but metadata has no XLDAPR", async () => {
+      // Construct a workbook with a dynamic array formula, then manually strip
+      // the XLDAPR type from metadata.xml to simulate a non-XLDAPR cm reference.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = {
+        formula: "_xlfn._xlws.FILTER(B1:B5,B1:B5>0)",
+        shareType: "array",
+        ref: "A1",
+        result: 1,
+        isDynamicArray: true
+      };
+      const buf = await wb.xlsx.writeBuffer();
+
+      // Extract ZIP, replace metadata.xml with one that has NO XLDAPR type
+      const { extractAll } = await import("@archive/unzip/extract");
+      const { ZipArchive } = await import("@archive/zip");
+      const entries = await extractAll(buf);
+
+      const fakeMetadata = [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+        '  <metadataTypes count="1">',
+        '    <metadataType name="XLRICHVALUE" minSupportedVersion="120000" cellMeta="1"/>',
+        "  </metadataTypes>",
+        '  <cellMetadata count="1">',
+        "    <bk>",
+        '      <rc t="1" v="0"/>',
+        "    </bk>",
+        "  </cellMetadata>",
+        "</metadata>"
+      ].join("\n");
+
+      const encoder = new TextEncoder();
+      entries.get("xl/metadata.xml")!.data = encoder.encode(fakeMetadata);
+
+      const archive = new ZipArchive({ level: 0, reproducible: true });
+      for (const [name, entry] of entries) {
+        archive.add(name, entry.data);
+      }
+      const tamperedBuf = await archive.bytes();
+
+      // Load the tampered file
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(tamperedBuf);
+      const cellVal = wb2.getWorksheet("Sheet1")!.getCell("A1").value as any;
+
+      // cm was present but mapped to XLRICHVALUE, not XLDAPR — should NOT be isDynamicArray
+      expect(cellVal.formula).toContain("FILTER");
+      expect(cellVal.isDynamicArray).toBeUndefined();
+    });
+  });
 });

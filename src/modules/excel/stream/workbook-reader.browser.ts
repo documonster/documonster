@@ -23,6 +23,7 @@ import {
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
+import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { Readable } from "@stream";
@@ -162,6 +163,11 @@ export abstract class WorkbookReaderBase<
   workbookRels?: WorkbookRelationship[];
   properties?: WorkbookPropertiesXform;
   model?: WorkbookModel;
+
+  /** Whether xl/metadata.xml contains XLDAPR dynamic array metadata */
+  hasDynamicArrayMetadata = false;
+  /** Precise set of cm values (1-indexed) that map to XLDAPR metadataType */
+  dynamicArrayCmIndices?: Set<number>;
 
   /** Maximum bytes to buffer for worksheets waiting on prerequisites. Default: 256 MB. */
   protected _maxBufferedBytes: number;
@@ -655,6 +661,15 @@ export abstract class WorkbookReaderBase<
     }
   }
 
+  private async _parseMetadata(entry: Parameters<typeof iterateStream>[0]): Promise<void> {
+    const xform = new MetadataXform();
+    const result = await xform.parseStream(iterateStream(entry));
+    if (result) {
+      this.hasDynamicArrayMetadata = !!result.hasDynamicArrays;
+      this.dynamicArrayCmIndices = result.dynamicArrayCmIndices;
+    }
+  }
+
   protected *_parseWorksheet(
     iterator: AsyncIterable<unknown>,
     sheetNo: string
@@ -739,6 +754,9 @@ export abstract class WorkbookReaderBase<
           break;
         case OOXML_PATHS.xlStyles:
           await this._parseStyles(entry);
+          break;
+        case OOXML_PATHS.xlMetadata:
+          await this._parseMetadata(entry);
           break;
         default:
           sheetNo = getWorksheetNoFromWorksheetPath(normalizedPath)?.toString();

@@ -34,6 +34,8 @@ interface CellParseState {
   ref: string;
   s?: number;
   t?: string;
+  /** cm attribute — cell metadata index (1-indexed), used for dynamic array formulas */
+  cm?: number;
   f?: { text: string };
   v?: { text: string };
 }
@@ -285,10 +287,12 @@ class WorksheetReader extends EventEmitter {
           case "c":
             if (row) {
               const styleAttr = node.attributes.s;
+              const cmAttr = node.attributes.cm;
               c = {
                 ref: node.attributes.r,
                 s: styleAttr !== undefined ? parseInt(styleAttr, 10) : undefined,
-                t: node.attributes.t
+                t: node.attributes.t,
+                cm: cmAttr !== undefined ? parseInt(cmAttr, 10) : undefined
               };
             }
             break;
@@ -395,6 +399,19 @@ class WorksheetReader extends EventEmitter {
                     cellValue.result = c.v.text;
                   } else {
                     cellValue.result = parseFloat(c.v.text);
+                  }
+                }
+                // Check if this cell is a dynamic array formula via cm → metadata mapping.
+                // Uses the precise dynamicArrayCmIndices set from WorkbookReaderBase,
+                // falling back to the coarser hasDynamicArrayMetadata boolean.
+                if (c.cm !== undefined) {
+                  const { workbook: wb } = this;
+                  if (wb.dynamicArrayCmIndices) {
+                    if (wb.dynamicArrayCmIndices.has(c.cm)) {
+                      cellValue.isDynamicArray = true;
+                    }
+                  } else if (wb.hasDynamicArrayMetadata) {
+                    cellValue.isDynamicArray = true;
                   }
                 }
                 cell.value = cellValue;

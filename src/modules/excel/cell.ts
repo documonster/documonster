@@ -37,6 +37,7 @@ export interface FormulaValueData {
   sharedFormula?: string;
   result?: FormulaResult;
   date1904?: boolean;
+  isDynamicArray?: boolean;
 }
 
 // FullAddress for Cell - only needs basic fields for defined names
@@ -99,6 +100,7 @@ export interface CellModel {
   sharedString?: number;
   error?: CellErrorValue;
   rawValue?: unknown;
+  isDynamicArray?: boolean;
 }
 
 // Internal interface for Value type objects
@@ -601,6 +603,7 @@ interface FormulaValueModel {
   formula?: string;
   sharedFormula?: string;
   result?: FormulaResult;
+  isDynamicArray?: boolean;
 }
 
 interface SharedStringValueModel {
@@ -1019,7 +1022,8 @@ class FormulaValue {
       ref: value ? value.ref : undefined,
       formula: value ? value.formula : undefined,
       sharedFormula: value ? value.sharedFormula : undefined,
-      result: value ? value.result : undefined
+      result: value ? value.result : undefined,
+      isDynamicArray: value ? value.isDynamicArray : undefined
     };
   }
 
@@ -1039,6 +1043,9 @@ class FormulaValue {
     }
     if (model.sharedFormula) {
       copy.sharedFormula = model.sharedFormula;
+    }
+    if (model.isDynamicArray) {
+      copy.isDynamicArray = model.isDynamicArray;
     }
     return copy;
   }
@@ -1062,6 +1069,9 @@ class FormulaValue {
     }
     if (value.sharedFormula) {
       this.model.sharedFormula = value.sharedFormula;
+    }
+    if (value.isDynamicArray !== undefined) {
+      this.model.isDynamicArray = value.isDynamicArray;
     }
   }
 

@@ -10,7 +10,8 @@ export const OOXML_PATHS = {
   xlSharedStrings: "xl/sharedStrings.xml",
   xlStyles: "xl/styles.xml",
   xlTheme1: "xl/theme/theme1.xml",
-  xlFeaturePropertyBag: "xl/featurePropertyBag/featurePropertyBag.xml"
+  xlFeaturePropertyBag: "xl/featurePropertyBag/featurePropertyBag.xml",
+  xlMetadata: "xl/metadata.xml"
 } as const;
 
 const worksheetXmlRegex = /^xl\/worksheets\/sheet(\d+)[.]xml$/;
@@ -222,7 +223,8 @@ export const OOXML_REL_TARGETS = {
   workbookStyles: "styles.xml",
   workbookSharedStrings: "sharedStrings.xml",
   workbookTheme1: "theme/theme1.xml",
-  workbookFeaturePropertyBag: "featurePropertyBag/featurePropertyBag.xml"
+  workbookFeaturePropertyBag: "featurePropertyBag/featurePropertyBag.xml",
+  workbookMetadata: "metadata.xml"
 } as const;
 
 export function pivotCacheDefinitionRelTargetFromWorkbook(n: number | string): string {

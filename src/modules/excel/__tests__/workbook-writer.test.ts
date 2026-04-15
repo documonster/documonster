@@ -399,4 +399,90 @@ describe("WorkbookWriter", () => {
       expect(xml).not.toMatch(/<x14:conditionalFormattings>/);
     });
   });
+
+  // ===========================================================================
+  // Dynamic Array Formulas via streaming writer (exceljs#2910)
+  // ===========================================================================
+
+  describe("dynamic array formulas via streaming writer", () => {
+    async function getZipEntry(buffer: Uint8Array, path: string): Promise<string | undefined> {
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(buffer);
+      const entry = entries.get(path);
+      return entry ? new TextDecoder().decode(entry.data) : undefined;
+    }
+
+    it("should produce cm attribute and metadata.xml", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let i = 1; i <= 5; i++) {
+        ws.addRow([i]).commit();
+      }
+      // Add a row with a dynamic array formula
+      const row = ws.addRow([]);
+      row.getCell(3).value = {
+        formula: "_xlfn._xlws.FILTER(A1:A5,A1:A5>2)",
+        shareType: "array",
+        ref: "C6",
+        result: 3,
+        isDynamicArray: true
+      };
+      row.commit();
+      ws.commit();
+
+      const buffer = await getBuffer();
+
+      // Sheet XML should have cm="1"
+      const sheetXml = await getZipEntry(buffer, "xl/worksheets/sheet1.xml");
+      expect(sheetXml).toMatch(/<c r="C6"[^>]*cm="1"/);
+
+      // metadata.xml should exist
+      const metadataXml = await getZipEntry(buffer, "xl/metadata.xml");
+      expect(metadataXml).toBeDefined();
+      expect(metadataXml).toContain("XLDAPR");
+
+      // Content types should include metadata
+      const ctXml = await getZipEntry(buffer, "[Content_Types].xml");
+      expect(ctXml).toContain("sheetMetadata+xml");
+
+      // Workbook rels should include metadata relationship
+      const relsXml = await getZipEntry(buffer, "xl/_rels/workbook.xml.rels");
+      expect(relsXml).toContain("sheetMetadata");
+    });
+
+    it("should round-trip dynamic array formula written by streaming writer", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addRow([10]).commit();
+      const row = ws.addRow([]);
+      row.getCell(1).value = {
+        formula: "_xlfn._xlws.SORT(B1:B5)",
+        shareType: "array",
+        ref: "A2",
+        result: 1,
+        isDynamicArray: true
+      };
+      row.commit();
+      ws.commit();
+      const buffer = await getBuffer();
+
+      // Read back with non-streaming reader
+      const readBack = new Workbook();
+      await readBack.xlsx.load(buffer);
+      const cellValue = readBack.getWorksheet("Sheet1")!.getCell("A2").value as any;
+      expect(cellValue.formula).toBe("_xlfn._xlws.SORT(B1:B5)");
+      expect(cellValue.isDynamicArray).toBe(true);
+    });
+
+    it("should not write metadata.xml when no dynamic array formulas", async () => {
+      const { wb, getBuffer } = createMemoryWriter();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addRow(["hello"]).commit();
+      ws.commit();
+      const buffer = await getBuffer();
+
+      const metadataXml = await getZipEntry(buffer, "xl/metadata.xml");
+      expect(metadataXml).toBeUndefined();
+    });
+  });
 });
