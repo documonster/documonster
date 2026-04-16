@@ -672,4 +672,112 @@ describe("Workbook", () => {
       expect(firstFont).not.toContain('val="Calibri"');
     });
   });
+
+  // ===========================================================================
+  // calcProperties XLSX Round-Trip
+  // ===========================================================================
+
+  describe("calcProperties", () => {
+    it("round-trips iterate/iterateCount/iterateDelta through XLSX write/load", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+      wb.calcProperties = {
+        fullCalcOnLoad: true,
+        iterate: true,
+        iterateCount: 200,
+        iterateDelta: 0.01
+      };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      expect(wb2.calcProperties).toBeDefined();
+      expect(wb2.calcProperties.fullCalcOnLoad).toBe(true);
+      expect(wb2.calcProperties.iterate).toBe(true);
+      expect(wb2.calcProperties.iterateCount).toBe(200);
+      expect(wb2.calcProperties.iterateDelta).toBe(0.01);
+    });
+
+    it("preserves default calcProperties when not explicitly set", async () => {
+      const wb = new Workbook();
+      wb.addWorksheet("Sheet1");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      // Default: fullCalcOnLoad should be false, iterate fields undefined
+      expect(wb2.calcProperties).toBeDefined();
+      expect(wb2.calcProperties.fullCalcOnLoad).toBe(false);
+      expect(wb2.calcProperties.iterate).toBeUndefined();
+      expect(wb2.calcProperties.iterateCount).toBeUndefined();
+      expect(wb2.calcProperties.iterateDelta).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Formula-based Defined Names XLSX Round-Trip
+  // ===========================================================================
+
+  describe("formula-based defined names", () => {
+    it("round-trips formula-based defined names through XLSX write/load", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+
+      // Register a formula-based defined name
+      wb.definedNames.addFormula("MyFormula", "OFFSET(Sheet1!$A$1,0,0,3,1)");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      // The formula-based name should survive round-trip
+      const { ranges } = wb2.definedNames.getRanges("MyFormula");
+      expect(ranges).toHaveLength(1);
+      expect(ranges[0]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+    });
+
+    it("preserves addFormula names alongside cell-reference names", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+
+      wb.definedNames.add("Sheet1!$A$1:$A$3", "CellRange");
+      wb.definedNames.addFormula("FormulaName", "SUM(Sheet1!$A$1:$A$3)");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      // Cell-reference name
+      const cellRange = wb2.definedNames.getRanges("CellRange");
+      expect(cellRange.ranges).toHaveLength(1);
+      expect(cellRange.ranges[0]).toContain("$A$1");
+
+      // Formula name
+      const formulaName = wb2.definedNames.getRanges("FormulaName");
+      expect(formulaName.ranges).toHaveLength(1);
+      expect(formulaName.ranges[0]).toBe("SUM(Sheet1!$A$1:$A$3)");
+    });
+
+    it("does not misclassify sheet names with parentheses as formulas", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Budget (2024)");
+      ws.getCell("A1").value = 100;
+
+      wb.definedNames.add("'Budget (2024)'!$A$1", "MyCell");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+
+      const result = wb2.definedNames.getRanges("MyCell");
+      expect(result.ranges).toHaveLength(1);
+      expect(result.ranges[0]).toContain("$A$1");
+      // Must NOT be treated as a formula expression
+      expect(result.formulaExpression).toBeUndefined();
+    });
+  });
 });

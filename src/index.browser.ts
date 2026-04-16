@@ -17,6 +17,7 @@ export * from "@excel/anchor";
 export { Table } from "@excel/table";
 export { DataValidations } from "@excel/data-validations";
 export { FormCheckbox } from "@excel/form-control";
+export { calculateFormulas } from "@excel/calc/calculate-formulas";
 
 // =============================================================================
 // Enums

@@ -453,6 +453,12 @@ class Cell {
     return this._value.result;
   }
 
+  set result(value: FormulaResult | undefined) {
+    if (this.type === Cell.Types.Formula) {
+      this._value.result = value;
+    }
+  }
+
   get formulaType(): FormulaType {
     return this._value.formulaType ?? Enums.FormulaType.None;
   }

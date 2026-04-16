@@ -168,7 +168,7 @@ class WorkbookXform extends BaseXform {
           properties: this.map.workbookPr.model || {},
           protection: this.map.workbookProtection.model,
           views: this.map.bookViews.model,
-          calcProperties: {}
+          calcProperties: this.map.calcPr.model || {}
         };
         if (this.map.definedNames.model) {
           this.model.definedNames = this.map.definedNames.model;
@@ -220,25 +220,34 @@ class WorkbookXform extends BaseXform {
     const definedNames: any[] = [];
     if (model.definedNames) {
       model.definedNames.forEach((definedName: any) => {
+        // For print area/titles, use rawText to extract ranges since the xform
+        // layer no longer pre-classifies content (two-phase design).
+        const effectiveRanges: string[] =
+          definedName.ranges?.length > 0
+            ? definedName.ranges
+            : definedName.rawText
+              ? [definedName.rawText]
+              : [];
+
         if (definedName.name === "_xlnm.Print_Area") {
           worksheet = worksheets[definedName.localSheetId];
-          if (worksheet && definedName.ranges?.length > 0) {
+          if (worksheet && effectiveRanges.length > 0) {
             if (!worksheet.pageSetup) {
               worksheet.pageSetup = {};
             }
-            const range: any = colCache.decodeEx(definedName.ranges[0]);
+            const range: any = colCache.decodeEx(effectiveRanges[0]);
             worksheet.pageSetup.printArea = worksheet.pageSetup.printArea
               ? `${worksheet.pageSetup.printArea}&&${range.dimensions}`
               : range.dimensions;
           }
         } else if (definedName.name === "_xlnm.Print_Titles") {
           worksheet = worksheets[definedName.localSheetId];
-          if (worksheet && definedName.ranges?.length > 0) {
+          if (worksheet && effectiveRanges.length > 0) {
             if (!worksheet.pageSetup) {
               worksheet.pageSetup = {};
             }
 
-            const rangeString = definedName.ranges.join(",");
+            const rangeString = effectiveRanges.join(",");
 
             const dollarRegex = /\$/g;
 

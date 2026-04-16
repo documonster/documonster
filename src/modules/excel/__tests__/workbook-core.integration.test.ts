@@ -383,7 +383,13 @@ describe("Workbook", () => {
 
         const definedNamesModel = wb.definedNames.model;
         expect(Array.isArray(definedNamesModel)).toBe(true);
-        expect(definedNamesModel.length).toBeLessThan(1000);
+
+        // The file contains 35000+ defined names, most of which are garbage
+        // (array constants, error values, etc.). With the two-phase classifier,
+        // garbage entries are preserved as opaque (for round-trip) but do NOT
+        // expand into CellMatrix objects. Verify that matrixMap stays small.
+        const matrixCount = Object.keys(wb.definedNames.matrixMap).length;
+        expect(matrixCount).toBeLessThan(1000);
       }, 60000);
 
       it("loads file from buffer without excessive memory use", async () => {
@@ -395,12 +401,14 @@ describe("Workbook", () => {
         expect(wb.worksheets.length).toBeGreaterThan(0);
       }, 60000);
 
-      it("filters out array constants from definedNames", async () => {
+      it("filters out array constants from definedNames ranges", async () => {
         const sourceFile = excelTestDataPath("many-defined-names.xlsx");
 
         const wb = new Workbook();
         await wb.xlsx.readFile(sourceFile);
 
+        // Collect ranges from all defined names — opaque names have empty ranges,
+        // so array constants should never appear in the ranges array.
         const allRanges: string[] = [];
         (wb.definedNames.model as Array<{ ranges: string[] }>).forEach(dn => {
           allRanges.push(...dn.ranges);

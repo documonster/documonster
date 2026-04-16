@@ -15,6 +15,7 @@ import { parseCsv } from "@csv/parse";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
+import { calculateFormulas as calcFormulas } from "@excel/calc/calculate-formulas";
 import { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
 import type { PivotTable } from "@excel/pivot-table";
@@ -1384,6 +1385,36 @@ class Workbook {
 
   get definedNames(): DefinedNames {
     return this._definedNames;
+  }
+
+  // ===========================================================================
+  // Formula Calculation
+  // ===========================================================================
+
+  /**
+   * Recalculate all formula cells in this workbook.
+   *
+   * Evaluates every formula cell using the built-in calculation engine and updates
+   * each cell's cached `result` value in-place. Formulas are evaluated with
+   * recursive dependency resolution, memoization, and circular reference detection.
+   *
+   * Call this after programmatically modifying cell values that are referenced by
+   * formulas, to ensure formula results reflect the latest data.
+   *
+   * Unsupported functions preserve their original cached result if one exists.
+   * See {@link calculateFormulas} (standalone export) for full behavioral details.
+   *
+   * @example
+   * ```ts
+   * sheet.getCell("A1").value = 100;
+   * sheet.getCell("A2").value = 200;
+   * // B1 has formula =SUM(A1:A2) — its result is stale
+   * workbook.calculateFormulas();
+   * // B1.result is now 300
+   * ```
+   */
+  calculateFormulas(): void {
+    calcFormulas(this);
   }
 
   // ===========================================================================

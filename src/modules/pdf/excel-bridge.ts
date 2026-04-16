@@ -15,6 +15,7 @@
  * ```
  */
 
+import { calculateFormulas } from "@excel/calc/calculate-formulas";
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
 import type { Workbook } from "@excel/workbook";
@@ -61,6 +62,10 @@ export async function excelToPdf(
   workbook: Workbook,
   options?: PdfExportOptions
 ): Promise<Uint8Array> {
+  // Recalculate all formulas before conversion so that formula results
+  // reflect the latest cell values (fixes stale cached results from XLSX).
+  calculateFormulas(workbook);
+
   const pdfWorkbook = excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);
 }

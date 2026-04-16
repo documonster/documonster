@@ -247,4 +247,141 @@ describe("DefinedNames", () => {
     expect(ranges.ranges.length).toBe(1);
     expect(ranges.ranges[0]).toContain("Data");
   });
+
+  // ===========================================================================
+  // Two-Phase Classifier
+  // ===========================================================================
+
+  describe("two-phase classifier", () => {
+    it("classifies sheet names with parentheses as reference, not formula", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MyCell", ranges: [], rawText: "'Budget (2024)'!$A$1" }];
+
+      // Should be in matrixMap, not formulaMap or opaqueMap
+      expect(dn.matrixMap["MyCell"]).toBeDefined();
+      expect(dn.formulaMap["MyCell"]).toBeUndefined();
+      expect(dn.opaqueMap["MyCell"]).toBeUndefined();
+    });
+
+    it("classifies OFFSET formula as formula", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MyFormula", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }];
+
+      expect(dn.formulaMap["MyFormula"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+      expect(dn.matrixMap["MyFormula"]).toBeUndefined();
+      expect(dn.opaqueMap["MyFormula"]).toBeUndefined();
+    });
+
+    it("classifies LAMBDA formula as formula", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MyLambda", ranges: [], rawText: "LAMBDA(x,y,x+y)" }];
+
+      expect(dn.formulaMap["MyLambda"]).toBe("LAMBDA(x,y,x+y)");
+      expect(dn.matrixMap["MyLambda"]).toBeUndefined();
+      expect(dn.opaqueMap["MyLambda"]).toBeUndefined();
+    });
+
+    it("classifies #REF! as opaque", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "BadRef", ranges: [], rawText: "#REF!" }];
+
+      expect(dn.opaqueMap["BadRef"]).toBeDefined();
+      expect(dn.opaqueMap["BadRef"].rawText).toBe("#REF!");
+      expect(dn.matrixMap["BadRef"]).toBeUndefined();
+      expect(dn.formulaMap["BadRef"]).toBeUndefined();
+    });
+
+    it("classifies string literal as opaque", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MyStr", ranges: [], rawText: '"hello world"' }];
+
+      expect(dn.opaqueMap["MyStr"]).toBeDefined();
+      expect(dn.opaqueMap["MyStr"].rawText).toBe('"hello world"');
+      expect(dn.matrixMap["MyStr"]).toBeUndefined();
+      expect(dn.formulaMap["MyStr"]).toBeUndefined();
+    });
+
+    it("classifies array constant as opaque", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MyArr", ranges: [], rawText: "{1,2;3,4}" }];
+
+      expect(dn.opaqueMap["MyArr"]).toBeDefined();
+      expect(dn.opaqueMap["MyArr"].rawText).toBe("{1,2;3,4}");
+      expect(dn.matrixMap["MyArr"]).toBeUndefined();
+      expect(dn.formulaMap["MyArr"]).toBeUndefined();
+    });
+
+    it("classifies plain cell reference as reference", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "SingleCell", ranges: [], rawText: "Sheet1!$A$1" }];
+
+      expect(dn.matrixMap["SingleCell"]).toBeDefined();
+      expect(dn.formulaMap["SingleCell"]).toBeUndefined();
+      expect(dn.opaqueMap["SingleCell"]).toBeUndefined();
+    });
+
+    it("classifies comma-separated ranges as reference", () => {
+      const dn = new DefinedNames();
+      dn.model = [{ name: "MultiRange", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }];
+
+      expect(dn.matrixMap["MultiRange"]).toBeDefined();
+      expect(dn.formulaMap["MultiRange"]).toBeUndefined();
+      expect(dn.opaqueMap["MultiRange"]).toBeUndefined();
+    });
+
+    it("preserves opaque names in model getter output", () => {
+      const dn = new DefinedNames();
+      dn.model = [
+        { name: "Good", ranges: [], rawText: "Sheet1!$A$1" },
+        { name: "BadRef", ranges: [], rawText: "#REF!" },
+        { name: "MyFormula", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
+      ];
+
+      const model = dn.model;
+      // Should have all three: reference + formula + opaque
+      expect(model.length).toBe(3);
+
+      const good = model.find(m => m.name === "Good");
+      expect(good).toBeDefined();
+      expect(good!.ranges.length).toBeGreaterThan(0);
+
+      const formula = model.find(m => m.name === "MyFormula");
+      expect(formula).toBeDefined();
+      expect(formula!.formulaExpression).toBe("SUM(Sheet1!$A$1:$A$3)");
+
+      const opaque = model.find(m => m.name === "BadRef");
+      expect(opaque).toBeDefined();
+      expect(opaque!.kind).toBe("opaque");
+      expect(opaque!.rawText).toBe("#REF!");
+      expect(opaque!.ranges).toEqual([]);
+    });
+  });
+
+  // ===========================================================================
+  // Opaque Round-Trip
+  // ===========================================================================
+
+  it("opaque defined names survive XLSX round-trip", async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+
+    // Inject opaque names via model setter
+    const existingModel = wb.definedNames.model;
+    wb.definedNames.model = [
+      ...existingModel,
+      { name: "OpaqueError", ranges: [], rawText: "#REF!" },
+      { name: "OpaqueStr", ranges: [], rawText: '"hello"' }
+    ];
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const wb2 = new Workbook();
+    await wb2.xlsx.load(buffer);
+
+    // Opaque names should survive round-trip
+    expect(wb2.definedNames.opaqueMap["OpaqueError"]).toBeDefined();
+    expect(wb2.definedNames.opaqueMap["OpaqueError"].rawText).toBe("#REF!");
+    expect(wb2.definedNames.opaqueMap["OpaqueStr"]).toBeDefined();
+    expect(wb2.definedNames.opaqueMap["OpaqueStr"].rawText).toBe('"hello"');
+  });
 });

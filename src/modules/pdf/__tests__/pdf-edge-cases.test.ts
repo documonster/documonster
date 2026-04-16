@@ -738,4 +738,63 @@ describe("PDF Rendering Edge Cases", () => {
       expect(col5.x).toBeGreaterThan(col4.x);
     });
   });
+
+  // ===========================================================================
+  // Formula recalculation before PDF export
+  // ===========================================================================
+
+  describe("formula recalculation on export", () => {
+    it("should recalculate formulas before rendering so stale results are updated", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+
+      // A1 has source data, B1 has formula referencing A1 with a stale cached result
+      ws.getCell("A1").value = 100;
+      ws.getCell("B1").value = { formula: "A1*2", result: 0 };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+
+      const text = await extractText(pdfBytes);
+      // The recalculated result (200) should appear, not the stale cached result (0)
+      expect(text).toContain("200");
+    });
+
+    it("should render formula results that had no cached value", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+
+      ws.getCell("A1").value = 7;
+      ws.getCell("A2").value = 3;
+      ws.getCell("A3").value = { formula: "A1+A2", result: 0 };
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+
+      const text = await extractText(pdfBytes);
+      expect(text).toContain("10");
+    });
+
+    it("should reflect the latest cell values, not the original cached results", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+
+      ws.getCell("A1").value = 5;
+      ws.getCell("B1").value = { formula: "A1*3", result: 999 };
+
+      // Modify A1 after setting up the formula — the cached result (999) is now stale
+      ws.getCell("A1").value = 10;
+
+      const pdfBytes = await excelToPdf(wb);
+      expectValidPdf(pdfBytes);
+
+      const text = await extractText(pdfBytes);
+      // Should contain 30 (10*3), not 999 or 15 (5*3)
+      expect(text).toContain("30");
+      expect(text).not.toContain("999");
+    });
+  });
 });

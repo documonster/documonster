@@ -10,7 +10,8 @@ const expectations = [
     },
     preparedModel: { name: "foo", ranges: ["bar!$A$1:$C$1"] },
     xml: '<definedName name="foo">bar!$A$1:$C$1</definedName>',
-    parsedModel: { name: "foo", ranges: ["bar!$A$1:$C$1"] },
+    // xform now only preserves rawText; classification is deferred to DefinedNames
+    parsedModel: { name: "foo", ranges: [], rawText: "bar!$A$1:$C$1" },
     tests: ["render", "renderIn", "parse"]
   },
   {
@@ -27,7 +28,8 @@ const expectations = [
     parsedModel: {
       name: "_xlnm.Print_Area",
       localSheetId: 0,
-      ranges: ["bar!$A$1:$C$10"]
+      ranges: [],
+      rawText: "bar!$A$1:$C$10"
     },
     tests: ["render", "renderIn", "parse"]
   },
@@ -56,7 +58,7 @@ const expectations = [
     },
     preparedModel: { name: "foo", ranges: [] },
     xml: '<definedName name="foo">"OFFSET($A$10;0;0;0;1)"</definedName>',
-    parsedModel: { name: "foo", ranges: [] },
+    parsedModel: { name: "foo", ranges: [], rawText: '"OFFSET($A$10;0;0;0;1)"' },
     tests: ["parse"]
   }
 ];

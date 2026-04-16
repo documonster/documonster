@@ -363,13 +363,28 @@ export interface WorkbookProtection {
 
 export interface CalculationProperties {
   fullCalcOnLoad: boolean;
+  /** Enable iterative calculation for circular references */
+  iterate?: boolean;
+  /** Maximum number of iterations (default 100) */
+  iterateCount?: number;
+  /** Convergence threshold (default 0.001) */
+  iterateDelta?: number;
 }
 
 // ============================================================================
 // Cell Value Types
 // ============================================================================
 export interface CellErrorValue {
-  error: "#N/A" | "#REF!" | "#NAME?" | "#DIV/0!" | "#NULL!" | "#VALUE!" | "#NUM!";
+  error:
+    | "#N/A"
+    | "#REF!"
+    | "#NAME?"
+    | "#DIV/0!"
+    | "#NULL!"
+    | "#VALUE!"
+    | "#NUM!"
+    | "#SPILL!"
+    | "#CALC!";
 }
 
 export interface RichText {
