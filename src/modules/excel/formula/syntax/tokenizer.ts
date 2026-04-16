@@ -7,58 +7,7 @@
  * numbers, strings, booleans, and error literals.
  */
 
-// ============================================================================
-// Token Types
-// ============================================================================
-
-export const enum TokenType {
-  Number = 1,
-  String = 2,
-  Boolean = 3,
-  Error = 4,
-  CellRef = 5,
-  Range = 6, // e.g. A1:B10
-  SheetRef = 7, // sheet prefix, e.g. Sheet1! or 'Sheet Name'!
-  Function = 8, // function name (followed by '(')
-  Operator = 9, // + - * / ^ & = < > <> <= >=
-  OpenParen = 10,
-  CloseParen = 11,
-  Comma = 12,
-  Colon = 13, // standalone : (for building ranges)
-  Percent = 14,
-  OpenBrace = 15, // { for array constants
-  CloseBrace = 16, // } for array constants
-  Semicolon = 17, // ; for array row separators
-  UnaryPrefix = 18, // unary + or -
-  Name = 19, // named range / defined name
-  ColRange = 20, // whole-column range e.g. A:B, $C:$D
-  RowRange = 21, // whole-row range e.g. 1:5, $3:$7
-  StructuredRef = 22, // structured reference e.g. Table1[Column], [@Column]
-  AtSign = 23 // @ implicit intersection prefix (Excel 365)
-}
-
-export interface Token {
-  type: TokenType;
-  value: string;
-  /** For CellRef: whether column is absolute ($A) */
-  colAbsolute?: boolean;
-  /** For CellRef: whether row is absolute ($1) */
-  rowAbsolute?: boolean;
-  /** For CellRef: uppercase column letters (e.g. "A") */
-  col?: string;
-  /** For CellRef: row number as string (e.g. "1") */
-  row?: string;
-  /** For SheetRef: the sheet name (unquoted) */
-  sheetName?: string;
-  /** For SheetRef: the end sheet name for 3D references (e.g. Sheet1:Sheet3!) */
-  endSheetName?: string;
-  /** For StructuredRef: the table name (empty string for implicit [@Col] syntax) */
-  tableName?: string;
-  /** For StructuredRef: column references (e.g. ["Column1", "Column2"]) */
-  columns?: string[];
-  /** For StructuredRef: special items (e.g. ["#Headers", "#Data"]) */
-  specials?: string[];
-}
+import { TokenType, type Token } from "./token-types";
 
 // ============================================================================
 // Character Helpers
@@ -318,7 +267,6 @@ function readBracketedItem(formula: string, pos: number): { value: string; end: 
 }
 
 // ============================================================================
-// ============================================================================
 // Tokenizer
 // ============================================================================
 
@@ -461,19 +409,19 @@ export function tokenize(formula: string): Token[] {
 
     // Array constant braces
     if (ch === "{") {
-      tokens.push({ type: TokenType.OpenBrace, value: "{" });
+      tokens.push({ type: TokenType.OpenBrace });
       i++;
       continue;
     }
     if (ch === "}") {
-      tokens.push({ type: TokenType.CloseBrace, value: "}" });
+      tokens.push({ type: TokenType.CloseBrace });
       i++;
       continue;
     }
 
     // Semicolons (array row separator)
     if (ch === ";") {
-      tokens.push({ type: TokenType.Semicolon, value: ";" });
+      tokens.push({ type: TokenType.Semicolon });
       i++;
       continue;
     }
@@ -566,14 +514,12 @@ export function tokenize(formula: string): Token[] {
         const endSheet = sheetName.slice(colonIdx + 1);
         tokens.push({
           type: TokenType.SheetRef,
-          value: sheetName + "!",
           sheetName: startSheet,
           endSheetName: endSheet
         });
       } else {
         tokens.push({
           type: TokenType.SheetRef,
-          value: sheetName + "!",
           sheetName
         });
       }
@@ -585,7 +531,6 @@ export function tokenize(formula: string): Token[] {
       const sr = parseStructuredRefBrackets(formula, i);
       tokens.push({
         type: TokenType.StructuredRef,
-        value: formula.slice(i, sr.end),
         tableName: "",
         columns: sr.columns,
         specials: sr.specials
@@ -610,7 +555,6 @@ export function tokenize(formula: string): Token[] {
         i++; // skip !
         tokens.push({
           type: TokenType.SheetRef,
-          value: word + "!",
           sheetName: word
         });
         continue;
@@ -632,7 +576,6 @@ export function tokenize(formula: string): Token[] {
             i = j + 1; // skip past !
             tokens.push({
               type: TokenType.SheetRef,
-              value: word + ":" + endSheet + "!",
               sheetName: word,
               endSheetName: endSheet
             });
@@ -646,7 +589,6 @@ export function tokenize(formula: string): Token[] {
         const sr = parseStructuredRefBrackets(formula, i);
         tokens.push({
           type: TokenType.StructuredRef,
-          value: formula.slice(start, sr.end),
           tableName: word,
           columns: sr.columns,
           specials: sr.specials
@@ -657,7 +599,7 @@ export function tokenize(formula: string): Token[] {
 
       // Check for function call: WORD(
       if (i < len && formula[i] === "(") {
-        tokens.push({ type: TokenType.Function, value: word.toUpperCase() });
+        tokens.push({ type: TokenType.Function, name: word.toUpperCase() });
         // Don't consume the '(' — it will be consumed in the next iteration
         continue;
       }
@@ -665,21 +607,21 @@ export function tokenize(formula: string): Token[] {
       // Check for boolean literals
       const upper = word.toUpperCase();
       if (upper === "TRUE" || upper === "FALSE") {
-        tokens.push({ type: TokenType.Boolean, value: upper });
+        tokens.push({ type: TokenType.Boolean, value: upper as "TRUE" | "FALSE" });
         continue;
       }
 
       // Check for cell reference
       const ref = parseCellRef(word);
       if (ref) {
-        tokens.push({
+        const cellToken: Token = {
           type: TokenType.CellRef,
-          value: (ref.colAbsolute ? "$" : "") + ref.col + (ref.rowAbsolute ? "$" : "") + ref.row,
           col: ref.col,
           row: ref.row,
           colAbsolute: ref.colAbsolute,
           rowAbsolute: ref.rowAbsolute
-        });
+        };
+        tokens.push(cellToken);
         // Check if this is part of a range (A1:B2)
         if (i < len && formula[i] === ":") {
           // Peek ahead for another cell ref
@@ -693,18 +635,19 @@ export function tokenize(formula: string): Token[] {
           const ref2 = parseCellRef(secondWord);
           if (ref2) {
             // It's a range — replace the last CellRef token with a Range token
-            const cellToken = tokens[tokens.length - 1];
-            cellToken.type = TokenType.Range;
-            cellToken.value =
-              (ref.colAbsolute ? "$" : "") +
-              ref.col +
-              (ref.rowAbsolute ? "$" : "") +
-              ref.row +
-              ":" +
-              (ref2.colAbsolute ? "$" : "") +
-              ref2.col +
-              (ref2.rowAbsolute ? "$" : "") +
-              ref2.row;
+            tokens[tokens.length - 1] = {
+              type: TokenType.Range,
+              value:
+                (ref.colAbsolute ? "$" : "") +
+                ref.col +
+                (ref.rowAbsolute ? "$" : "") +
+                ref.row +
+                ":" +
+                (ref2.colAbsolute ? "$" : "") +
+                ref2.col +
+                (ref2.rowAbsolute ? "$" : "") +
+                ref2.row
+            };
           } else {
             // Not a valid range, push : as operator and backtrack
             i = colonPos; // backtrack — let : be handled normally
@@ -790,27 +733,27 @@ export function tokenize(formula: string): Token[] {
 
     // Operators and punctuation
     if (ch === "(") {
-      tokens.push({ type: TokenType.OpenParen, value: "(" });
+      tokens.push({ type: TokenType.OpenParen });
       i++;
       continue;
     }
     if (ch === ")") {
-      tokens.push({ type: TokenType.CloseParen, value: ")" });
+      tokens.push({ type: TokenType.CloseParen });
       i++;
       continue;
     }
     if (ch === ",") {
-      tokens.push({ type: TokenType.Comma, value: "," });
+      tokens.push({ type: TokenType.Comma });
       i++;
       continue;
     }
     if (ch === ":") {
-      tokens.push({ type: TokenType.Colon, value: ":" });
+      tokens.push({ type: TokenType.Colon });
       i++;
       continue;
     }
     if (ch === "%") {
-      tokens.push({ type: TokenType.Percent, value: "%" });
+      tokens.push({ type: TokenType.Percent });
       i++;
       continue;
     }
@@ -880,7 +823,7 @@ export function tokenize(formula: string): Token[] {
 
     // @ implicit intersection prefix (Excel 365)
     if (ch === "@") {
-      tokens.push({ type: TokenType.AtSign, value: "@" });
+      tokens.push({ type: TokenType.AtSign });
       i++;
       continue;
     }

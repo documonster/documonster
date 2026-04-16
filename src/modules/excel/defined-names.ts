@@ -1,5 +1,5 @@
-import { parse } from "@excel/calc/formula-parser";
-import { tokenize } from "@excel/calc/formula-tokenizer";
+import { parse } from "@excel/formula/syntax/parser";
+import { tokenize } from "@excel/formula/syntax/tokenizer";
 import { Range } from "@excel/range";
 import type { Address } from "@excel/types";
 import { CellMatrix } from "@excel/utils/cell-matrix";
@@ -245,29 +245,49 @@ function classifyDefinedName(
 }
 
 // ============================================================================
+// Internal Key — disambiguates same-name entries with different scopes
+// ============================================================================
+
+/**
+ * Build the internal storage key for a defined name entry.
+ * Workbook-scoped: just the bare name.
+ * Sheet-scoped: `"name\0sheetId"` (null char separator avoids collisions).
+ */
+function storageKey(name: string, localSheetId?: number): string {
+  return localSheetId !== undefined ? `${name}\0${localSheetId}` : name;
+}
+
+// ============================================================================
 // DefinedNames class
 // ============================================================================
 
 class DefinedNames {
   matrixMap: Record<string, CellMatrix>;
   /**
-   * Formula-based defined names: name → formula expression string.
-   * These are names that map to an expression (e.g. "LAMBDA(x,y,x+y)",
-   * "{1,2;3,4}") rather than a cell/range reference.
+   * Formula-based defined names: storageKey → formula expression string.
    */
   formulaMap: Record<string, string>;
   /**
-   * Opaque defined names: name → original text + optional localSheetId.
-   * These are entries whose content we cannot parse (e.g. error values,
-   * string literals, unknown constructs) but must preserve for round-trip
-   * fidelity with the source XLSX file.
+   * Tracks the localSheetId for each storage key.
+   * If a key is not in this map, the name is workbook-scoped (global).
+   */
+  localSheetIdMap: Record<string, number>;
+  /**
+   * Opaque defined names: storageKey → original text + optional localSheetId.
    */
   opaqueMap: Record<string, OpaqueEntry>;
+  /**
+   * Reverse mapping: storageKey → original name (bare, without scope suffix).
+   * Needed because storageKey encodes the scope, but consumers need the bare name.
+   */
+  nameForKey: Record<string, string>;
 
   constructor() {
     this.matrixMap = {};
     this.formulaMap = {};
+    this.localSheetIdMap = {};
     this.opaqueMap = {};
+    this.nameForKey = {};
   }
 
   getMatrix(name: string): CellMatrix {
@@ -282,8 +302,10 @@ class DefinedNames {
       return; // Invalid reference, skip
     }
     // A name is either cell-reference or formula — clear any formula/opaque binding
+    // (programmatic API always operates on workbook-scoped names)
     delete this.formulaMap[name];
     delete this.opaqueMap[name];
+    this.nameForKey[name] = name;
     this.addEx(location, name);
   }
 
@@ -321,8 +343,10 @@ class DefinedNames {
    */
   addFormula(name: string, expression: string): void {
     // A name is either formula or cell-reference — clear any cell-reference/opaque binding
+    // (programmatic API always operates on workbook-scoped names)
     delete this.matrixMap[name];
     delete this.opaqueMap[name];
+    this.nameForKey[name] = name;
     this.formulaMap[name] = expression;
   }
 
@@ -374,9 +398,10 @@ class DefinedNames {
   }
 
   forEach(callback: (name: string, cell: DefinedNameCell) => void): void {
-    Object.entries(this.matrixMap).forEach(([name, matrix]) => {
+    Object.entries(this.matrixMap).forEach(([sKey, matrix]) => {
+      const bareName = this.nameForKey[sKey] ?? sKey;
       matrix.forEach((cell: DefinedNameCell) => {
-        callback(name, cell);
+        callback(bareName, cell);
       });
     });
   }
@@ -392,24 +417,81 @@ class DefinedNames {
 
   getNamesEx(address: Address): string[] {
     return Object.entries(this.matrixMap)
-      .map(([name, matrix]) => matrix.findCellEx(address, false) && name)
+      .map(([sKey, matrix]) => matrix.findCellEx(address, false) && (this.nameForKey[sKey] ?? sKey))
       .filter((name): name is string => Boolean(name));
+  }
+
+  /**
+   * Return all defined name entries in this collection, including scope info.
+   * Each entry has the bare name and optional localSheetId.
+   * Same bare name may appear multiple times with different scopes.
+   */
+  getAllNames(): { name: string; localSheetId?: number }[] {
+    return this.getAllEntries().map(e =>
+      e.localSheetId !== undefined
+        ? { name: e.name, localSheetId: e.localSheetId }
+        : { name: e.name }
+    );
+  }
+
+  /**
+   * Return all defined name entries with full details (name, ranges, scope).
+   *
+   * This is the primary enumeration API. Each entry is self-contained —
+   * no second lookup is needed. Same bare name may appear multiple times
+   * with different scopes.
+   */
+  getAllEntries(): DefinedNameModel[] {
+    const result: DefinedNameModel[] = [];
+    const seen = new Set<string>();
+    for (const sKey of Object.keys(this.matrixMap)) {
+      if (seen.has(sKey)) {
+        continue;
+      }
+      seen.add(sKey);
+      const model = this.getRanges(sKey);
+      const localSheetId = this.localSheetIdMap[sKey];
+      result.push(localSheetId !== undefined ? { ...model, localSheetId } : model);
+    }
+    for (const sKey of Object.keys(this.formulaMap)) {
+      if (seen.has(sKey)) {
+        continue;
+      }
+      seen.add(sKey);
+      const model = this.getRanges(sKey);
+      const localSheetId = this.localSheetIdMap[sKey];
+      result.push(localSheetId !== undefined ? { ...model, localSheetId } : model);
+    }
+    for (const sKey of Object.keys(this.opaqueMap)) {
+      if (seen.has(sKey)) {
+        continue;
+      }
+      seen.add(sKey);
+      const bareName = this.nameForKey[sKey] ?? sKey;
+      const entry = this.opaqueMap[sKey];
+      result.push({
+        name: bareName,
+        ranges: [],
+        rawText: entry.rawText,
+        localSheetId: entry.localSheetId,
+        kind: "opaque" as const
+      });
+    }
+    return result;
   }
 
   _explore(matrix: CellMatrix, cell: DefinedNameCell): Range {
     cell.mark = false;
-    const sheetName = cell.sheetName!; // Always set for cells in defined names
+    const sheetName = cell.sheetName!;
 
     const range = new Range(cell.row, cell.col, cell.row, cell.col, sheetName);
     let x: number;
     let y: number;
 
-    // Helper to get cell with proper type
     const getCell = (row: number, col: number): DefinedNameCell | undefined => {
       return matrix.findCellAt(sheetName, row, col) as DefinedNameCell | undefined;
     };
 
-    // grow vertical - only one col to worry about
     function vGrow(yy: number, edge: "top" | "bottom"): boolean {
       const c = getCell(yy, cell.col);
       if (!c || !c.mark) {
@@ -426,7 +508,6 @@ class DefinedNames {
       /* advance */
     }
 
-    // grow horizontal - ensure all rows can grow
     function hGrow(xx: number, edge: "left" | "right"): boolean {
       const cells: DefinedNameCell[] = [];
       for (y = range.top; y <= range.bottom; y++) {
@@ -453,16 +534,30 @@ class DefinedNames {
     return range;
   }
 
+  /**
+   * Get ranges for a specific scoped entry.
+   *
+   * Unlike `getRanges(name)` which uses the bare name (and may hit the
+   * wrong scope when the same name exists both globally and locally),
+   * this method uses the internal `storageKey` to look up the exact entry.
+   */
+  getRangesScoped(name: string, localSheetId?: number): DefinedNameModel {
+    const sKey = storageKey(name, localSheetId);
+    return this.getRanges(sKey);
+  }
+
   getRanges(name: string, matrix?: CellMatrix): DefinedNameModel {
-    // Formula-based name takes precedence if no cell matrix exists
+    // `name` can be a bare name (backward compat) or a storageKey.
+    // Try storageKey first, then bare name (workbook-scoped).
     const formula = this.formulaMap[name];
     matrix = matrix || this.matrixMap[name];
+    const bareName = this.nameForKey[name] ?? name;
 
     if (!matrix) {
       if (formula) {
-        return { name, ranges: [formula], formulaExpression: formula };
+        return { name: bareName, ranges: [formula], formulaExpression: formula };
       }
-      return { name, ranges: [] };
+      return { name: bareName, ranges: [] };
     }
 
     // mark and sweep!
@@ -475,7 +570,7 @@ class DefinedNames {
       .map((range: Range) => range.$shortRange);
 
     return {
-      name,
+      name: bareName,
       ranges
     };
   }
@@ -514,26 +609,44 @@ class DefinedNames {
   get model(): DefinedNameModel[] {
     // Cell-reference based names from matrixMap
     const cellNames = Object.entries(this.matrixMap)
-      .map(([name, matrix]) => this.getRanges(name, matrix))
+      .map(([sKey, matrix]) => {
+        const result = this.getRanges(sKey, matrix);
+        const localSheetId = this.localSheetIdMap[sKey];
+        if (localSheetId !== undefined) {
+          return { ...result, localSheetId };
+        }
+        return result;
+      })
       .filter((definedName: DefinedNameModel) => definedName.ranges.length);
 
     // Formula-based names from formulaMap (only include names not already in matrixMap)
     const formulaNames = Object.entries(this.formulaMap)
-      .filter(([name]) => !this.matrixMap[name])
-      .map(([name, expression]) => ({
-        name,
-        ranges: [expression],
-        formulaExpression: expression
-      }));
+      .filter(([sKey]) => !this.matrixMap[sKey])
+      .map(([sKey, expression]) => {
+        const bareName = this.nameForKey[sKey] ?? sKey;
+        const result: DefinedNameModel = {
+          name: bareName,
+          ranges: [expression],
+          formulaExpression: expression
+        };
+        const localSheetId = this.localSheetIdMap[sKey];
+        if (localSheetId !== undefined) {
+          return { ...result, localSheetId };
+        }
+        return result;
+      });
 
     // Opaque names — rawText preserved for round-trip
-    const opaqueNames: DefinedNameModel[] = Object.entries(this.opaqueMap).map(([name, entry]) => ({
-      name,
-      ranges: [],
-      rawText: entry.rawText,
-      localSheetId: entry.localSheetId,
-      kind: "opaque" as const
-    }));
+    const opaqueNames: DefinedNameModel[] = Object.entries(this.opaqueMap).map(([sKey, entry]) => {
+      const bareName = this.nameForKey[sKey] ?? sKey;
+      return {
+        name: bareName,
+        ranges: [],
+        rawText: entry.rawText,
+        localSheetId: entry.localSheetId,
+        kind: "opaque" as const
+      };
+    });
 
     return [...cellNames, ...formulaNames, ...opaqueNames];
   }
@@ -549,12 +662,22 @@ class DefinedNames {
   set model(value: DefinedNameModel[]) {
     const matrixMap = (this.matrixMap = {} as Record<string, CellMatrix>);
     const formulaMap = (this.formulaMap = {} as Record<string, string>);
+    const localSheetIdMap = (this.localSheetIdMap = {} as Record<string, number>);
     const opaqueMap = (this.opaqueMap = {} as Record<string, OpaqueEntry>);
+    const nameForKeyMap = (this.nameForKey = {} as Record<string, string>);
 
     for (const definedName of value) {
+      const sKey = storageKey(definedName.name, definedName.localSheetId);
+      nameForKeyMap[sKey] = definedName.name;
+
+      // Track localSheetId for all name kinds
+      if (definedName.localSheetId !== undefined) {
+        localSheetIdMap[sKey] = definedName.localSheetId;
+      }
+
       // Programmatic API path: formulaExpression already set and no rawText
       if (definedName.formulaExpression && definedName.rawText === undefined) {
-        formulaMap[definedName.name] = definedName.formulaExpression;
+        formulaMap[sKey] = definedName.formulaExpression;
         continue;
       }
 
@@ -563,7 +686,7 @@ class DefinedNames {
 
       switch (classified.kind) {
         case "reference": {
-          const matrix = (matrixMap[definedName.name] = new CellMatrix());
+          const matrix = (matrixMap[sKey] = new CellMatrix());
           for (const rangeStr of classified.ranges) {
             if (rangeRegexp.test(rangeStr.split("!").pop() ?? "")) {
               matrix.addCell(rangeStr);
@@ -572,11 +695,11 @@ class DefinedNames {
           break;
         }
         case "formula":
-          formulaMap[definedName.name] = classified.formulaExpression!;
+          formulaMap[sKey] = classified.formulaExpression!;
           break;
         case "opaque":
           if (definedName.rawText) {
-            opaqueMap[definedName.name] = {
+            opaqueMap[sKey] = {
               rawText: definedName.rawText,
               localSheetId: definedName.localSheetId
             };

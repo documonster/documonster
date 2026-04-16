@@ -384,4 +384,89 @@ describe("DefinedNames", () => {
     expect(wb2.definedNames.opaqueMap["OpaqueStr"]).toBeDefined();
     expect(wb2.definedNames.opaqueMap["OpaqueStr"].rawText).toBe('"hello"');
   });
+
+  // ===========================================================================
+  // Scoped names: workbook-scope + sheet-scope coexistence
+  // ===========================================================================
+
+  describe("scoped defined names", () => {
+    it("should store same-name entries with different scopes independently", () => {
+      const dn = new DefinedNames();
+      dn.model = [
+        { name: "Total", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
+        {
+          name: "Total",
+          ranges: ["Sheet2!$B$2"],
+          rawText: "Sheet2!$B$2",
+          localSheetId: 0
+        }
+      ];
+
+      // getAllNames should return two entries
+      const allNames = dn.getAllNames();
+      expect(allNames.length).toBe(2);
+      const global = allNames.find(e => e.localSheetId === undefined);
+      const scoped = allNames.find(e => e.localSheetId === 0);
+      expect(global).toBeDefined();
+      expect(scoped).toBeDefined();
+      expect(global!.name).toBe("Total");
+      expect(scoped!.name).toBe("Total");
+
+      // getRangesScoped should return different ranges for each scope
+      const globalRanges = dn.getRangesScoped("Total");
+      expect(globalRanges.ranges).toEqual(["Sheet1!$A$1"]);
+
+      const scopedRanges = dn.getRangesScoped("Total", 0);
+      expect(scopedRanges.ranges).toEqual(["Sheet2!$B$2"]);
+    });
+
+    it("should round-trip scoped names through model getter/setter", () => {
+      const dn = new DefinedNames();
+      dn.model = [
+        { name: "Rate", ranges: ["Sheet1!$C$1"], rawText: "Sheet1!$C$1" },
+        {
+          name: "Rate",
+          ranges: ["Sheet2!$D$1"],
+          rawText: "Sheet2!$D$1",
+          localSheetId: 1
+        }
+      ];
+
+      const model = dn.model;
+      expect(model.length).toBe(2);
+
+      const globalEntry = model.find(m => m.localSheetId === undefined);
+      const scopedEntry = model.find(m => m.localSheetId === 1);
+      expect(globalEntry).toBeDefined();
+      expect(globalEntry!.name).toBe("Rate");
+      expect(scopedEntry).toBeDefined();
+      expect(scopedEntry!.name).toBe("Rate");
+      expect(scopedEntry!.localSheetId).toBe(1);
+    });
+
+    it("should handle formula-based scoped names", () => {
+      const dn = new DefinedNames();
+      dn.model = [
+        {
+          name: "MyLambda",
+          ranges: ["LAMBDA(x,x+1)"],
+          rawText: "LAMBDA(x,x+1)",
+          formulaExpression: "LAMBDA(x,x+1)"
+        },
+        {
+          name: "MyLambda",
+          ranges: ["LAMBDA(x,x*2)"],
+          rawText: "LAMBDA(x,x*2)",
+          formulaExpression: "LAMBDA(x,x*2)",
+          localSheetId: 0
+        }
+      ];
+
+      const globalRanges = dn.getRangesScoped("MyLambda");
+      expect(globalRanges.ranges).toEqual(["LAMBDA(x,x+1)"]);
+
+      const scopedRanges = dn.getRangesScoped("MyLambda", 0);
+      expect(scopedRanges.ranges).toEqual(["LAMBDA(x,x*2)"]);
+    });
+  });
 });

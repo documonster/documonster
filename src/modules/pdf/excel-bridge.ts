@@ -15,8 +15,8 @@
  * ```
  */
 
-import { calculateFormulas } from "@excel/calc/calculate-formulas";
 import { ValueType } from "@excel/enums";
+import { calculateFormulas } from "@excel/formula/integration/calculate-formulas";
 import { formatCellValue } from "@excel/utils/cell-format";
 import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";

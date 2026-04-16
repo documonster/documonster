@@ -2680,4 +2680,132 @@ describe("calculateFormulas", () => {
       expect(ws.getCell("C1").result).toBe(10);
     });
   });
+
+  // ==========================================================================
+  // Scoped Defined Names
+  // ==========================================================================
+  describe("scoped defined names", () => {
+    it("should resolve sheet-scoped name over workbook-scoped name", async () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+
+      ws1.getCell("A1").value = 100;
+      ws2.getCell("A1").value = 200;
+
+      // Global "MyVal" → Sheet1!A1, Sheet1-local "MyVal" → Sheet2!A1
+      wb.definedNames.model = [
+        { name: "MyVal", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
+        {
+          name: "MyVal",
+          ranges: ["Sheet2!$A$1"],
+          rawText: "Sheet2!$A$1",
+          localSheetId: 0
+        }
+      ];
+
+      // Verify the DefinedNames layer works correctly
+      const allNames = wb.definedNames.getAllNames();
+      expect(allNames.length).toBe(2);
+
+      // Check snapshot construction
+      const { buildWorkbookSnapshot } = await import("../formula/integration/workbook-adapter");
+      const snapshot = buildWorkbookSnapshot(wb as any);
+
+      // Verify we have both entries in the snapshot
+      expect(snapshot.definedNames.size).toBe(2);
+
+      // Verify scope resolution
+      const { resolveDefinedName } = await import("../formula/integration/workbook-snapshot");
+      const fromSheet1 = resolveDefinedName(snapshot.definedNames, "MyVal", "Sheet1");
+      const fromSheet2 = resolveDefinedName(snapshot.definedNames, "MyVal", "Sheet2");
+      expect(fromSheet1).toBeDefined();
+      expect(fromSheet1!.ranges[0]).toContain("Sheet2"); // sheet-local on Sheet1 → Sheet2
+      expect(fromSheet2).toBeDefined();
+      expect(fromSheet2!.ranges[0]).toContain("Sheet1"); // global fallback → Sheet1
+
+      // Formula on Sheet1 should see the sheet-local "MyVal" → 200
+      ws1.getCell("B1").value = { formula: "MyVal", result: 0 };
+      // Formula on Sheet2 should see the global "MyVal" → 100
+      ws2.getCell("B1").value = { formula: "MyVal", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws1.getCell("B1").result).toBe(200);
+      expect(ws2.getCell("B1").result).toBe(100);
+    });
+
+    it("should fall back to global name when no sheet-local exists", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+
+      ws1.getCell("A1").value = 42;
+
+      // Only a global "GlobalOnly" name, no sheet-local override
+      wb.definedNames.model = [
+        { name: "GlobalOnly", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" }
+      ];
+
+      ws1.getCell("B1").value = { formula: "GlobalOnly", result: 0 };
+      ws2.getCell("B1").value = { formula: "GlobalOnly", result: 0 };
+
+      wb.calculateFormulas();
+
+      // Both sheets should resolve to the global name
+      expect(ws1.getCell("B1").result).toBe(42);
+      expect(ws2.getCell("B1").result).toBe(42);
+    });
+
+    it("should not cross-contaminate scoped and global name content in snapshot", async () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+
+      ws1.getCell("A1").value = 10;
+      ws2.getCell("A1").value = 20;
+
+      // Global "X" = Sheet1!A1, Sheet2-local "X" = Sheet2!A1
+      wb.definedNames.model = [
+        { name: "X", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
+        {
+          name: "X",
+          ranges: ["Sheet2!$A$1"],
+          rawText: "Sheet2!$A$1",
+          localSheetId: 1
+        }
+      ];
+
+      const { buildWorkbookSnapshot } = await import("../formula/integration/workbook-adapter");
+      const snapshot = buildWorkbookSnapshot(wb as any);
+
+      // Verify distinct entries exist and don't cross-contaminate
+      const globalEntry = snapshot.definedNames.get("X");
+      expect(globalEntry).toBeDefined();
+      expect(globalEntry!.ranges[0]).toContain("Sheet1");
+      expect(globalEntry!.scope).toBeUndefined();
+
+      const { scopedNameKey } = await import("../formula/integration/workbook-snapshot");
+      const scopedEntry = snapshot.definedNames.get(scopedNameKey("Sheet2", "X"));
+      expect(scopedEntry).toBeDefined();
+      expect(scopedEntry!.ranges[0]).toContain("Sheet2");
+      expect(scopedEntry!.scope).toBe("Sheet2");
+    });
+
+    it("should propagate deps for formula-based scoped defined name", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+
+      // A1=5, A2=10, formula name "MySum" = Sheet1!A1+Sheet1!A2
+      ws1.getCell("A1").value = 5;
+      ws1.getCell("A2").value = 10;
+      wb.definedNames.addFormula("MySum", "Sheet1!$A$1+Sheet1!$A$2");
+
+      ws1.getCell("B1").value = { formula: "MySum", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws1.getCell("B1").result).toBe(15);
+    });
+  });
 });
