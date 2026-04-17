@@ -19,7 +19,7 @@
 import type { WorkbookLike } from "../materialize/types";
 import { calculateFormulasImpl } from "./calculate-formulas-impl";
 
-// Re-export shared types so existing consumers can still import from here
+// Re-export shared types for external consumers
 export type { DefinedNamesLike, WorkbookLike } from "../materialize/types";
 
 /**

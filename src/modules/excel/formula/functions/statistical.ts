@@ -531,7 +531,12 @@ export const fnQUARTILEEXC: NF = args => {
 };
 
 export const fnMODE: NF = args => {
-  const nums = flattenNumbers(args).filter((v): v is number => typeof v === "number");
+  const all = flattenNumbers(args);
+  const err = firstError(all);
+  if (err) {
+    return err;
+  }
+  const nums = all as number[];
   if (nums.length === 0) {
     return ERRORS.NA;
   }
@@ -664,99 +669,10 @@ export const fnFORECAST: NF = args => {
 
 // ============================================================================
 // FACT, FACTDOUBLE, COMBIN, COMBINA, PERMUT
+// Re-exported from math.ts — canonical definitions live there.
 // ============================================================================
 
-export const fnFACT: NF = args => {
-  const n = numArg(args, 0);
-  if (n.kind === RVKind.Error) {
-    return n;
-  }
-  const num = Math.floor(n.value);
-  if (num < 0) {
-    return ERRORS.NUM;
-  }
-  if (num > 170) {
-    return ERRORS.NUM;
-  }
-  let result = 1;
-  for (let i = 2; i <= num; i++) {
-    result *= i;
-  }
-  return rvNumber(result);
-};
-
-export const fnFACTDOUBLE: NF = args => {
-  const n = numArg(args, 0);
-  if (n.kind === RVKind.Error) {
-    return n;
-  }
-  const num = Math.floor(n.value);
-  if (num < -1) {
-    return ERRORS.NUM;
-  }
-  if (num <= 0) {
-    return rvNumber(1);
-  }
-  let result = 1;
-  for (let i = num; i > 0; i -= 2) {
-    result *= i;
-  }
-  return rvNumber(result);
-};
-
-export const fnCOMBIN: NF = args => {
-  const nRV = numArg(args, 0);
-  if (nRV.kind === RVKind.Error) {
-    return nRV;
-  }
-  const kRV = numArg(args, 1);
-  if (kRV.kind === RVKind.Error) {
-    return kRV;
-  }
-  const ni = Math.floor(nRV.value);
-  const ki = Math.floor(kRV.value);
-  if (ni < 0 || ki < 0 || ki > ni) {
-    return ERRORS.NUM;
-  }
-  let result = 1;
-  for (let i = 0; i < ki; i++) {
-    result = (result * (ni - i)) / (i + 1);
-  }
-  return rvNumber(Math.round(result));
-};
-
-export const fnCOMBINA: NF = args => {
-  const nRV = numArg(args, 0);
-  if (nRV.kind === RVKind.Error) {
-    return nRV;
-  }
-  const kRV = numArg(args, 1);
-  if (kRV.kind === RVKind.Error) {
-    return kRV;
-  }
-  return fnCOMBIN([rvNumber(nRV.value + kRV.value - 1), rvNumber(kRV.value)]);
-};
-
-export const fnPERMUT: NF = args => {
-  const nRV = numArg(args, 0);
-  if (nRV.kind === RVKind.Error) {
-    return nRV;
-  }
-  const kRV = numArg(args, 1);
-  if (kRV.kind === RVKind.Error) {
-    return kRV;
-  }
-  const ni = Math.floor(nRV.value);
-  const ki = Math.floor(kRV.value);
-  if (ni < 0 || ki < 0 || ki > ni) {
-    return ERRORS.NUM;
-  }
-  let result = 1;
-  for (let i = 0; i < ki; i++) {
-    result *= ni - i;
-  }
-  return rvNumber(result);
-};
+export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "./math";
 
 // ============================================================================
 // GEOMEAN, HARMEAN, TRIMMEAN, DEVSQ, AVEDEV
@@ -804,7 +720,12 @@ export const fnTRIMMEAN: NF = args => {
   if (!isArrayArg(args[0])) {
     return ERRORS.VALUE;
   }
-  const nums = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
+  const all = flattenNumbers([args[0]]);
+  const err = firstError(all);
+  if (err) {
+    return err;
+  }
+  const nums = all as number[];
   const pct = numArg(args, 1);
   if (pct.kind === RVKind.Error) {
     return pct;
@@ -1439,7 +1360,8 @@ export const fnT_DIST: NF = args => {
   const v = Math.floor(df.value);
   if (cum.value) {
     const t = v / (v + x.value * x.value);
-    return rvNumber(1 - 0.5 * betaIncomplete(t, v / 2, 0.5));
+    const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
+    return rvNumber(x.value >= 0 ? 1 - halfBeta : halfBeta);
   }
   return rvNumber(
     Math.exp(lnGamma((v + 1) / 2) - lnGamma(v / 2)) /
@@ -1463,7 +1385,8 @@ export const fnT_INV: NF = args => {
   const v = Math.floor(df.value);
   for (let iter = 0; iter < 100; iter++) {
     const t = v / (v + x * x);
-    const cdf = 1 - 0.5 * betaIncomplete(t, v / 2, 0.5);
+    const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
+    const cdf = x >= 0 ? 1 - halfBeta : halfBeta;
     const pdf =
       Math.exp(lnGamma((v + 1) / 2) - lnGamma(v / 2)) /
       (Math.sqrt(v * Math.PI) * Math.pow(1 + (x * x) / v, (v + 1) / 2));
@@ -1508,7 +1431,11 @@ export const fnT_DIST_RT: NF = args => {
     return ERRORS.NUM;
   }
   const v = Math.floor(df.value);
-  return rvNumber(0.5 * betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5));
+  const halfBeta = 0.5 * betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5);
+  // T.DIST.RT(x, df) = right-tail = 1 - CDF(x)
+  // For x >= 0: right-tail = halfBeta
+  // For x < 0: right-tail = 1 - halfBeta
+  return rvNumber(x.value >= 0 ? halfBeta : 1 - halfBeta);
 };
 
 export const fnT_INV_2T: NF = args => {
@@ -1902,8 +1829,18 @@ export const fnFREQUENCY: NF = args => {
   if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
     return ERRORS.VALUE;
   }
-  const data = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const bins = flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number");
+  const rawData = flattenNumbers([args[0]]);
+  const dataErr = firstError(rawData);
+  if (dataErr) {
+    return dataErr;
+  }
+  const data = rawData as number[];
+  const rawBins = flattenNumbers([args[1]]);
+  const binsErr = firstError(rawBins);
+  if (binsErr) {
+    return binsErr;
+  }
+  const bins = rawBins as number[];
   bins.sort((a, b) => a - b);
   const result: ScalarValue[][] = [];
   for (let i = 0; i <= bins.length; i++) {
@@ -1926,15 +1863,34 @@ export const fnGROWTH: NF = args => {
   if (!isArrayArg(args[0])) {
     return ERRORS.VALUE;
   }
-  const knownY = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const knownX =
-    args.length > 1 && isArrayArg(args[1])
-      ? flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number")
-      : knownY.map((_, i) => i + 1);
-  const newX =
-    args.length > 2 && isArrayArg(args[2])
-      ? flattenNumbers([args[2]]).filter((v): v is number => typeof v === "number")
-      : knownX;
+  const rawY = flattenNumbers([args[0]]);
+  const yErr = firstError(rawY);
+  if (yErr) {
+    return yErr;
+  }
+  const knownY = rawY as number[];
+  let knownX: number[];
+  if (args.length > 1 && isArrayArg(args[1])) {
+    const rawX = flattenNumbers([args[1]]);
+    const xErr = firstError(rawX);
+    if (xErr) {
+      return xErr;
+    }
+    knownX = rawX as number[];
+  } else {
+    knownX = knownY.map((_, i) => i + 1);
+  }
+  let newX: number[];
+  if (args.length > 2 && isArrayArg(args[2])) {
+    const rawNewX = flattenNumbers([args[2]]);
+    const newXErr = firstError(rawNewX);
+    if (newXErr) {
+      return newXErr;
+    }
+    newX = rawNewX as number[];
+  } else {
+    newX = knownX;
+  }
   const n = Math.min(knownX.length, knownY.length);
   if (n < 1) {
     return ERRORS.VALUE;
@@ -1966,15 +1922,34 @@ export const fnTREND: NF = args => {
   if (!isArrayArg(args[0])) {
     return ERRORS.VALUE;
   }
-  const knownY = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const knownX =
-    args.length > 1 && isArrayArg(args[1])
-      ? flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number")
-      : knownY.map((_, i) => i + 1);
-  const newX =
-    args.length > 2 && isArrayArg(args[2])
-      ? flattenNumbers([args[2]]).filter((v): v is number => typeof v === "number")
-      : knownX;
+  const rawY = flattenNumbers([args[0]]);
+  const yErr = firstError(rawY);
+  if (yErr) {
+    return yErr;
+  }
+  const knownY = rawY as number[];
+  let knownX: number[];
+  if (args.length > 1 && isArrayArg(args[1])) {
+    const rawX = flattenNumbers([args[1]]);
+    const xErr = firstError(rawX);
+    if (xErr) {
+      return xErr;
+    }
+    knownX = rawX as number[];
+  } else {
+    knownX = knownY.map((_, i) => i + 1);
+  }
+  let newX: number[];
+  if (args.length > 2 && isArrayArg(args[2])) {
+    const rawNewX = flattenNumbers([args[2]]);
+    const newXErr = firstError(rawNewX);
+    if (newXErr) {
+      return newXErr;
+    }
+    newX = rawNewX as number[];
+  } else {
+    newX = knownX;
+  }
   const n = Math.min(knownX.length, knownY.length);
   if (n < 1) {
     return ERRORS.VALUE;
@@ -2003,11 +1978,23 @@ export const fnLINEST: NF = args => {
   if (!isArrayArg(args[0])) {
     return ERRORS.VALUE;
   }
-  const knownY = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const knownX =
-    args.length > 1 && isArrayArg(args[1])
-      ? flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number")
-      : knownY.map((_, i) => i + 1);
+  const rawY = flattenNumbers([args[0]]);
+  const yErr = firstError(rawY);
+  if (yErr) {
+    return yErr;
+  }
+  const knownY = rawY as number[];
+  let knownX: number[];
+  if (args.length > 1 && isArrayArg(args[1])) {
+    const rawX = flattenNumbers([args[1]]);
+    const xErr = firstError(rawX);
+    if (xErr) {
+      return xErr;
+    }
+    knownX = rawX as number[];
+  } else {
+    knownX = knownY.map((_, i) => i + 1);
+  }
   const n = Math.min(knownX.length, knownY.length);
   if (n < 1) {
     return ERRORS.VALUE;
@@ -2035,11 +2022,23 @@ export const fnLOGEST: NF = args => {
   if (!isArrayArg(args[0])) {
     return ERRORS.VALUE;
   }
-  const knownY = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const knownX =
-    args.length > 1 && isArrayArg(args[1])
-      ? flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number")
-      : knownY.map((_, i) => i + 1);
+  const rawY = flattenNumbers([args[0]]);
+  const yErr = firstError(rawY);
+  if (yErr) {
+    return yErr;
+  }
+  const knownY = rawY as number[];
+  let knownX: number[];
+  if (args.length > 1 && isArrayArg(args[1])) {
+    const rawX = flattenNumbers([args[1]]);
+    const xErr = firstError(rawX);
+    if (xErr) {
+      return xErr;
+    }
+    knownX = rawX as number[];
+  } else {
+    knownX = knownY.map((_, i) => i + 1);
+  }
   const n = Math.min(knownX.length, knownY.length);
   if (n < 1) {
     return ERRORS.VALUE;
@@ -2064,4 +2063,190 @@ export const fnLOGEST: NF = args => {
   const lnM = (n * sumXLnY - sumX * sumLnY) / denom;
   const lnB = (sumLnY - lnM * sumX) / n;
   return rvArray([[rvNumber(Math.exp(lnM)), rvNumber(Math.exp(lnB))]]);
+};
+
+// ============================================================================
+// F.DIST.RT, F.INV.RT — F-distribution right tail
+// ============================================================================
+
+/**
+ * F.DIST.RT(x, d1, d2) — right-tail probability of the F-distribution.
+ *
+ * Equivalent to `1 - F.DIST(x, d1, d2, TRUE)`. Using the symmetry of the
+ * regularized incomplete beta function, this can be expressed as
+ * `I(d2/(d2 + d1*x), d2/2, d1/2)`, which avoids subtracting from 1 and
+ * is numerically stable in the upper tail.
+ */
+export const fnF_DIST_RT: NF = args => {
+  const x = numArg(args, 0);
+  if (x.kind === RVKind.Error) {
+    return x;
+  }
+  const df1 = numArg(args, 1);
+  if (df1.kind === RVKind.Error) {
+    return df1;
+  }
+  const df2 = numArg(args, 2);
+  if (df2.kind === RVKind.Error) {
+    return df2;
+  }
+  if (x.value <= 0 || df1.value < 1 || df2.value < 1) {
+    return ERRORS.NUM;
+  }
+  const d1 = Math.floor(df1.value);
+  const d2 = Math.floor(df2.value);
+  // Right tail via symmetry: I(d2/(d2 + d1*x), d2/2, d1/2).
+  return rvNumber(betaIncomplete(d2 / (d2 + d1 * x.value), d2 / 2, d1 / 2));
+};
+
+/**
+ * F.INV.RT(p, d1, d2) — inverse right-tail of the F-distribution.
+ * Returns x such that P(F > x) = p. Implemented via binary search on the
+ * right-tail CDF (monotonically decreasing from 1 at x=0 to 0 at x=∞).
+ */
+export const fnF_INV_RT: NF = args => {
+  const p = numArg(args, 0);
+  if (p.kind === RVKind.Error) {
+    return p;
+  }
+  const df1 = numArg(args, 1);
+  if (df1.kind === RVKind.Error) {
+    return df1;
+  }
+  const df2 = numArg(args, 2);
+  if (df2.kind === RVKind.Error) {
+    return df2;
+  }
+  if (p.value <= 0 || p.value > 1 || df1.value < 1 || df2.value < 1) {
+    return ERRORS.NUM;
+  }
+  const d1 = Math.floor(df1.value);
+  const d2 = Math.floor(df2.value);
+  // Right-tail CDF at x: I(d2/(d2 + d1*x), d2/2, d1/2), decreases with x.
+  let lo = 0;
+  let hi = 1e6;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const rt = betaIncomplete(d2 / (d2 + d1 * mid), d2 / 2, d1 / 2);
+    if (rt > p.value) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+    if (hi - lo < 1e-10) {
+      break;
+    }
+  }
+  return rvNumber((lo + hi) / 2);
+};
+
+// ============================================================================
+// SKEW, SKEW.P, KURT
+// ============================================================================
+
+/**
+ * SKEW — sample skewness.
+ * Formula: n / ((n-1)(n-2)) * Σ((xi-mean)/s)^3, where s is the sample stdev.
+ */
+export const fnSKEW: NF = args => {
+  const nums = flattenNumbers(args);
+  const err = firstError(nums);
+  if (err) {
+    return err;
+  }
+  const xs = nums as number[];
+  const n = xs.length;
+  if (n < 3) {
+    return ERRORS.DIV0;
+  }
+  let sum = 0;
+  for (const v of xs) {
+    sum += v;
+  }
+  const mean = sum / n;
+  let sumSq = 0;
+  for (const v of xs) {
+    sumSq += (v - mean) ** 2;
+  }
+  const sampleStd = Math.sqrt(sumSq / (n - 1));
+  if (sampleStd === 0) {
+    return ERRORS.DIV0;
+  }
+  let sumCubed = 0;
+  for (const v of xs) {
+    sumCubed += ((v - mean) / sampleStd) ** 3;
+  }
+  return rvNumber((n / ((n - 1) * (n - 2))) * sumCubed);
+};
+
+/**
+ * SKEW.P — population skewness.
+ * Formula: (1/n) * Σ((xi-mean)/σ)^3, where σ is the population stdev.
+ */
+export const fnSKEW_P: NF = args => {
+  const nums = flattenNumbers(args);
+  const err = firstError(nums);
+  if (err) {
+    return err;
+  }
+  const xs = nums as number[];
+  const n = xs.length;
+  if (n < 1) {
+    return ERRORS.DIV0;
+  }
+  let sum = 0;
+  for (const v of xs) {
+    sum += v;
+  }
+  const mean = sum / n;
+  let sumSq = 0;
+  for (const v of xs) {
+    sumSq += (v - mean) ** 2;
+  }
+  const popStd = Math.sqrt(sumSq / n);
+  if (popStd === 0) {
+    return ERRORS.DIV0;
+  }
+  let sumCubed = 0;
+  for (const v of xs) {
+    sumCubed += ((v - mean) / popStd) ** 3;
+  }
+  return rvNumber(sumCubed / n);
+};
+
+/**
+ * KURT — sample excess kurtosis.
+ * Formula: n(n+1) / ((n-1)(n-2)(n-3)) * Σ((xi-mean)/s)^4 - 3(n-1)^2 / ((n-2)(n-3)).
+ */
+export const fnKURT: NF = args => {
+  const nums = flattenNumbers(args);
+  const err = firstError(nums);
+  if (err) {
+    return err;
+  }
+  const xs = nums as number[];
+  const n = xs.length;
+  if (n < 4) {
+    return ERRORS.DIV0;
+  }
+  let sum = 0;
+  for (const v of xs) {
+    sum += v;
+  }
+  const mean = sum / n;
+  let sumSq = 0;
+  for (const v of xs) {
+    sumSq += (v - mean) ** 2;
+  }
+  const sampleStd = Math.sqrt(sumSq / (n - 1));
+  if (sampleStd === 0) {
+    return ERRORS.DIV0;
+  }
+  let sumQuad = 0;
+  for (const v of xs) {
+    sumQuad += ((v - mean) / sampleStd) ** 4;
+  }
+  const term1 = (n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3));
+  const term2 = (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
+  return rvNumber(term1 * sumQuad - term2);
 };

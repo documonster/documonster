@@ -2,13 +2,14 @@
  * Engineering Functions — Native RuntimeValue implementation.
  */
 
-import type { RuntimeValue } from "../runtime/values";
+import type { RuntimeValue, ErrorValue } from "../runtime/values";
 import {
   RVKind,
   ERRORS,
   isError,
   toNumberRV,
   toStringRV,
+  topLeft,
   rvNumber,
   rvString
 } from "../runtime/values";
@@ -20,10 +21,23 @@ import {
 type NativeFunction = (args: RuntimeValue[]) => RuntimeValue;
 
 // ============================================================================
+// Local utility
+// ============================================================================
+
+function checkError(v: RuntimeValue): ErrorValue | null {
+  const s = topLeft(v);
+  return s.kind === RVKind.Error ? s : null;
+}
+
+// ============================================================================
 // Base Conversion Functions
 // ============================================================================
 
 export const fnBIN2DEC: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const s = toStringRV(args[0]);
   if (!/^[01]{1,10}$/.test(s)) {
     return ERRORS.NUM;
@@ -57,6 +71,10 @@ export const fnDEC2BIN: NativeFunction = args => {
 };
 
 export const fnHEX2DEC: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const s = toStringRV(args[0]);
   if (!/^[0-9A-Fa-f]{1,10}$/.test(s)) {
     return ERRORS.NUM;
@@ -88,6 +106,10 @@ export const fnDEC2HEX: NativeFunction = args => {
 };
 
 export const fnOCT2DEC: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const s = toStringRV(args[0]);
   if (!/^[0-7]{1,10}$/.test(s)) {
     return ERRORS.NUM;
@@ -204,7 +226,14 @@ export const fnCOMPLEX: NativeFunction = args => {
   if (isError(im)) {
     return im;
   }
-  const suffix = args.length > 2 ? toStringRV(args[2]) : "i";
+  let suffix = "i";
+  if (args.length > 2) {
+    const e2 = checkError(args[2]);
+    if (e2) {
+      return e2;
+    }
+    suffix = toStringRV(args[2]);
+  }
   if (suffix !== "i" && suffix !== "j") {
     return ERRORS.VALUE;
   }
@@ -212,16 +241,28 @@ export const fnCOMPLEX: NativeFunction = args => {
 };
 
 export const fnIMREAL: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   return c ? rvNumber(c[0]) : ERRORS.NUM;
 };
 
 export const fnIMAGINARY: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   return c ? rvNumber(c[1]) : ERRORS.NUM;
 };
 
 export const fnIMABS: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -230,6 +271,10 @@ export const fnIMABS: NativeFunction = args => {
 };
 
 export const fnIMARGUMENT: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -241,6 +286,10 @@ export const fnIMARGUMENT: NativeFunction = args => {
 };
 
 export const fnIMCONJUGATE: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -252,6 +301,10 @@ export const fnIMSUM: NativeFunction = args => {
   let re = 0,
     im = 0;
   for (const a of args) {
+    const err = checkError(a);
+    if (err) {
+      return err;
+    }
     const s =
       a.kind === RVKind.Array && a.height > 0 && a.width > 0
         ? toStringRV(a.rows[0][0])
@@ -267,6 +320,14 @@ export const fnIMSUM: NativeFunction = args => {
 };
 
 export const fnIMSUB: NativeFunction = args => {
+  const e0 = checkError(args[0]);
+  if (e0) {
+    return e0;
+  }
+  const e1 = checkError(args[1]);
+  if (e1) {
+    return e1;
+  }
   const c1 = parseComplex(toStringRV(args[0]));
   const c2 = parseComplex(toStringRV(args[1]));
   if (!c1 || !c2) {
@@ -279,6 +340,10 @@ export const fnIMPRODUCT: NativeFunction = args => {
   let re = 1,
     im = 0;
   for (const a of args) {
+    const err = checkError(a);
+    if (err) {
+      return err;
+    }
     const s =
       a.kind === RVKind.Array && a.height > 0 && a.width > 0
         ? toStringRV(a.rows[0][0])
@@ -296,6 +361,14 @@ export const fnIMPRODUCT: NativeFunction = args => {
 };
 
 export const fnIMDIV: NativeFunction = args => {
+  const e0 = checkError(args[0]);
+  if (e0) {
+    return e0;
+  }
+  const e1 = checkError(args[1]);
+  if (e1) {
+    return e1;
+  }
   const c1 = parseComplex(toStringRV(args[0]));
   const c2 = parseComplex(toStringRV(args[1]));
   if (!c1 || !c2) {
@@ -311,6 +384,10 @@ export const fnIMDIV: NativeFunction = args => {
 };
 
 export const fnIMPOWER: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -326,6 +403,10 @@ export const fnIMPOWER: NativeFunction = args => {
 };
 
 export const fnIMSQRT: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -337,6 +418,10 @@ export const fnIMSQRT: NativeFunction = args => {
 };
 
 export const fnIMLN: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -349,6 +434,10 @@ export const fnIMLN: NativeFunction = args => {
 };
 
 export const fnIMLOG2: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -362,6 +451,10 @@ export const fnIMLOG2: NativeFunction = args => {
 };
 
 export const fnIMLOG10: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -375,6 +468,10 @@ export const fnIMLOG10: NativeFunction = args => {
 };
 
 export const fnIMEXP: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -384,6 +481,10 @@ export const fnIMEXP: NativeFunction = args => {
 };
 
 export const fnIMSIN: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;
@@ -394,6 +495,10 @@ export const fnIMSIN: NativeFunction = args => {
 };
 
 export const fnIMCOS: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const c = parseComplex(toStringRV(args[0]));
   if (!c) {
     return ERRORS.NUM;

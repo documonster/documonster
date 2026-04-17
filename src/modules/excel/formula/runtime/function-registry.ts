@@ -9,8 +9,9 @@
  * are handled directly by the evaluator's special-form dispatch.
  */
 
+import { stripFunctionPrefix } from "../syntax/token-types";
 import type { RuntimeValue, ScalarValue } from "./values";
-import { RVKind, BLANK, ERRORS, rvBoolean, rvNumber, topLeft } from "./values";
+import { RVKind, BLANK, ERRORS, rvBoolean, rvNumber, rvString, topLeft } from "./values";
 
 // ============================================================================
 // Function Descriptor
@@ -73,8 +74,9 @@ const registryMap = new Map<string, FunctionDescriptor>();
 export function registerFunction(desc: FunctionDescriptor): void {
   registryMap.set(desc.name, desc);
 
-  // Auto-register prefixed variants
-  if (!desc.name.startsWith("_XLFN.")) {
+  // Auto-register prefixed variants for the canonical (unprefixed) name.
+  const canonical = stripFunctionPrefix(desc.name);
+  if (canonical === desc.name) {
     const xlfnKey = `_XLFN.${desc.name}`;
     const xlwsKey = `_XLFN._XLWS.${desc.name}`;
     if (!registryMap.has(xlfnKey)) {
@@ -208,6 +210,10 @@ function registerNativeInformationAndLogical(): void {
     return rvNumber(0);
   });
   defineEager("TYPE", 1, 1, args => {
+    // Check for array BEFORE topLeft extraction
+    if (args[0]?.kind === RVKind.Array) {
+      return rvNumber(64);
+    }
     const v = scalar(args);
     switch (v.kind) {
       case RVKind.Number:
@@ -251,6 +257,38 @@ function registerNativeInformationAndLogical(): void {
   // SHEET/SHEETS: would need full workbook context — returns 1 as default
   defineEager("SHEET", 0, 1, () => rvNumber(1));
   defineEager("SHEETS", 0, 1, () => rvNumber(1));
+  // ISFORMULA / FORMULATEXT: need evaluator-level reference inspection.
+  // The evaluator intercepts these when the argument is a CellRef/AreaRef;
+  // these stubs only run when the argument has been dereferenced to a value,
+  // in which case the answer is false / #N/A respectively.
+  defineEager("ISFORMULA", 1, 1, () => rvBoolean(false));
+  defineEager("FORMULATEXT", 1, 1, () => ERRORS.NA);
+  // HYPERLINK: simplified semantics — return the friendly name if provided,
+  // otherwise the URL. The link behavior is outside the calculation engine.
+  defineEager("HYPERLINK", 1, 2, args => {
+    const display = args.length > 1 ? topLeft(args[1]) : topLeft(args[0]);
+    if (display.kind === RVKind.Error) {
+      return display;
+    }
+    if (display.kind === RVKind.Blank) {
+      // If friendly_name was an empty/blank cell, fall back to URL.
+      const url = topLeft(args[0]);
+      if (url.kind === RVKind.Error) {
+        return url;
+      }
+      return rvString(url.kind === RVKind.String ? url.value : String(url));
+    }
+    if (display.kind === RVKind.String) {
+      return display;
+    }
+    if (display.kind === RVKind.Number) {
+      return rvString(String(display.value));
+    }
+    if (display.kind === RVKind.Boolean) {
+      return rvString(display.value ? "TRUE" : "FALSE");
+    }
+    return rvString("");
+  });
 
   // ── Logical ──
   defineEager("NOT", 1, 1, args => {
@@ -600,7 +638,12 @@ import {
   fnPRICEDISC,
   fnYIELDDISC,
   fnRECEIVED,
-  fnINTRATE
+  fnINTRATE,
+  fnPRICE,
+  fnYIELD,
+  fnDURATION,
+  fnMDURATION,
+  fnACCRINT
 } from "../functions/financial";
 
 function registerNativeFinancialFunctions(): void {
@@ -631,6 +674,11 @@ function registerNativeFinancialFunctions(): void {
   defineEager("YIELDDISC", 4, 5, fnYIELDDISC);
   defineEager("RECEIVED", 4, 5, fnRECEIVED);
   defineEager("INTRATE", 4, 5, fnINTRATE);
+  defineEager("PRICE", 6, 7, fnPRICE);
+  defineEager("YIELD", 6, 7, fnYIELD);
+  defineEager("DURATION", 5, 6, fnDURATION);
+  defineEager("MDURATION", 5, 6, fnMDURATION);
+  defineEager("ACCRINT", 6, 8, fnACCRINT);
 }
 
 // ============================================================================
@@ -681,6 +729,11 @@ import {
   fnCHISQ_DIST_RT,
   fnF_DIST,
   fnF_INV,
+  fnF_DIST_RT,
+  fnF_INV_RT,
+  fnSKEW,
+  fnSKEW_P,
+  fnKURT,
   fnT_DIST,
   fnT_INV,
   fnT_DIST_2T,
@@ -766,6 +819,11 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("CHISQ.DIST.RT", 2, 2, fnCHISQ_DIST_RT);
   defineEager("F.DIST", 4, 4, fnF_DIST);
   defineEager("F.INV", 3, 3, fnF_INV);
+  defineEager("F.DIST.RT", 3, 3, fnF_DIST_RT);
+  defineEager("F.INV.RT", 3, 3, fnF_INV_RT);
+  defineEager("SKEW", 1, 255, fnSKEW);
+  defineEager("SKEW.P", 1, 255, fnSKEW_P);
+  defineEager("KURT", 1, 255, fnKURT);
   defineEager("T.DIST", 3, 3, fnT_DIST);
   defineEager("T.INV", 2, 2, fnT_INV);
   defineEager("T.DIST.2T", 2, 2, fnT_DIST_2T);

@@ -32,7 +32,9 @@ export const enum TokenType {
   ColRange = 20, // whole-column range e.g. A:B, $C:$D
   RowRange = 21, // whole-row range e.g. 1:5, $3:$7
   StructuredRef = 22, // structured reference e.g. Table1[Column], [@Column]
-  AtSign = 23 // @ implicit intersection prefix (Excel 365)
+  AtSign = 23, // @ implicit intersection prefix (Excel 365)
+  Intersect = 24, // space between two refs, e.g. A1:A10 B1:B10 (intersection operator)
+  ExternalRef = 25 // external workbook reference, e.g. [Book1]Sheet1!A1 — unsupported
 }
 
 // ============================================================================
@@ -162,9 +164,50 @@ export interface AtSignToken {
   type: TokenType.AtSign;
 }
 
+/**
+ * Intersection operator — emitted by the tokenizer when a whitespace
+ * character separates two reference-producing tokens (ranges or refs).
+ * In Excel, `A1:A10 B1:B10` intersects the two areas.
+ */
+export interface IntersectToken {
+  type: TokenType.Intersect;
+}
+
+/**
+ * External workbook reference, e.g. `[Book1]Sheet1!A1`. Recognised as a
+ * distinct token type so the engine can unambiguously evaluate it to
+ * `#REF!` (cross-workbook references are not supported).
+ */
+export interface ExternalRefToken {
+  type: TokenType.ExternalRef;
+  /** The full text of the external reference, preserved for diagnostics. */
+  value: string;
+}
+
 // ============================================================================
 // Discriminated Union
 // ============================================================================
+
+/**
+ * Strip Excel's `_XLFN.` / `_XLFN._XLWS.` function-name prefixes.
+ *
+ * Excel emits these prefixes for functions introduced after the original
+ * XLSX schema was frozen (e.g. `_XLFN.FILTER`, `_XLFN._XLWS.SORT`). The
+ * canonical function name is recovered by stripping the prefix.
+ *
+ * The input may or may not already be uppercased — this helper does not
+ * alter case; callers that compare against an uppercase table should
+ * uppercase first (or compare case-insensitively).
+ */
+export function stripFunctionPrefix(name: string): string {
+  if (name.startsWith("_XLFN._XLWS.")) {
+    return name.slice(12);
+  }
+  if (name.startsWith("_XLFN.")) {
+    return name.slice(6);
+  }
+  return name;
+}
 
 export type Token =
   | NumberToken
@@ -189,4 +232,6 @@ export type Token =
   | ColRangeToken
   | RowRangeToken
   | StructuredRefToken
-  | AtSignToken;
+  | AtSignToken
+  | IntersectToken
+  | ExternalRefToken;

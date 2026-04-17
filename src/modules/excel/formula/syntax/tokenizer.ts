@@ -26,6 +26,51 @@ function isAlphaNumOrUnderscore(ch: string): boolean {
 }
 
 // ============================================================================
+// Error Literal Detection
+// ============================================================================
+
+/**
+ * Known Excel error literals. Listed longest-first so a greedy longest-match
+ * does the right thing (e.g. "#NAME?" must be preferred over "#NAM").
+ */
+const ERROR_LITERALS = [
+  "#GETTING_DATA",
+  "#BLOCKED!",
+  "#CONNECT!",
+  "#UNKNOWN!",
+  "#SPILL!",
+  "#VALUE!",
+  "#FIELD!",
+  "#DIV/0!",
+  "#NAME?",
+  "#NULL!",
+  "#CALC!",
+  "#BUSY!",
+  "#REF!",
+  "#NUM!",
+  "#N/A"
+];
+
+/**
+ * Try to match a known Excel error literal at `pos` (which must point at `#`).
+ * Matches case-insensitively and greedily (longest list entry wins).
+ * Returns the canonical (upper-cased) value and end index, or null on no match.
+ */
+function matchErrorLiteral(formula: string, pos: number): { value: string; end: number } | null {
+  for (const lit of ERROR_LITERALS) {
+    const end = pos + lit.length;
+    if (end > formula.length) {
+      continue;
+    }
+    const slice = formula.slice(pos, end);
+    if (slice.toUpperCase() === lit) {
+      return { value: lit, end };
+    }
+  }
+  return null;
+}
+
+// ============================================================================
 // Cell Reference Detection
 // ============================================================================
 
@@ -295,16 +340,66 @@ export function tokenize(formula: string): Token[] {
       last.type === TokenType.Error ||
       last.type === TokenType.ColRange ||
       last.type === TokenType.RowRange ||
-      last.type === TokenType.StructuredRef
+      last.type === TokenType.StructuredRef ||
+      last.type === TokenType.ExternalRef
     );
+  }
+
+  /**
+   * True if the previous token produces a reference (cell / range / area).
+   * Used to detect Excel's intersection operator — a whitespace character
+   * that separates two refs (e.g. `A1:A10 B1:B10`).
+   *
+   * Intentionally narrower than {@link lastTokenIsValue}: scalars (numbers,
+   * strings, booleans, errors) are not references, so whitespace that
+   * follows them must not be treated as an intersection operator.
+   */
+  function lastTokenIsRef(): boolean {
+    if (tokens.length === 0) {
+      return false;
+    }
+    const last = tokens[tokens.length - 1];
+    return (
+      last.type === TokenType.CellRef ||
+      last.type === TokenType.Range ||
+      last.type === TokenType.ColRange ||
+      last.type === TokenType.RowRange ||
+      last.type === TokenType.StructuredRef ||
+      last.type === TokenType.CloseParen ||
+      last.type === TokenType.Name
+    );
+  }
+
+  /**
+   * True if `ch` can start a reference-producing token: a cell ref, range,
+   * sheet-qualified ref (`Sheet!`, `'Sheet'!`), named range, external ref,
+   * or a parenthesised ref expression.
+   */
+  function couldStartRef(ch: string): boolean {
+    return isAlpha(ch) || ch === "$" || ch === "_" || ch === "'" || ch === "[" || ch === "(";
   }
 
   while (i < len) {
     const ch = formula[i];
 
-    // Skip whitespace
+    // Whitespace — normally ignored, but between two refs it is Excel's
+    // intersection operator (e.g. `A1:A10 B1:B10` → intersection of areas).
     if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
-      i++;
+      // Consume every consecutive whitespace character in one go.
+      while (i < len) {
+        const c = formula[i];
+        if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+          i++;
+        } else {
+          break;
+        }
+      }
+      // Emit an intersection token only when the previous token is a ref
+      // AND the next character can start another ref. Emits at most one
+      // token per whitespace run.
+      if (i < len && lastTokenIsRef() && couldStartRef(formula[i])) {
+        tokens.push({ type: TokenType.Intersect });
+      }
       continue;
     }
 
@@ -331,8 +426,18 @@ export function tokenize(formula: string): Token[] {
       continue;
     }
 
-    // Error literals (#N/A, #REF!, etc.)
+    // Error literals (#N/A, #REF!, #DIV/0!, etc.)
+    // Match greedily against the known Excel error literals (case-insensitive),
+    // preferring the longest match so that "#N/A" isn't parsed as "#N" + "/A".
     if (ch === "#") {
+      const matched = matchErrorLiteral(formula, i);
+      if (matched) {
+        tokens.push({ type: TokenType.Error, value: matched.value });
+        i = matched.end;
+        continue;
+      }
+      // Fallback: treat as a generic error-shaped token up to the next
+      // delimiter. Preserves prior behaviour for unknown error forms.
       let errStr = "#";
       i++;
       while (
@@ -362,49 +467,100 @@ export function tokenize(formula: string): Token[] {
     // When [ appears and is NOT preceded by a value token (not array literal context),
     // consume the bracketed workbook name and subsequent sheet!ref as a Name token.
     // This allows the engine to fall back to cached results gracefully.
+    //
+    // But: a bare [...] can also be a standalone structured reference
+    // ([@Col], [#Headers], [[#This Row],[Col]], [Column Name]). Only treat it
+    // as an external ref when it really is followed by a `Sheet!` suffix;
+    // otherwise fall through to the structured-reference branch below.
     if (ch === "[" && !lastTokenIsValue()) {
-      // Peek: if this looks like [filename]Sheet!... consume as external ref
-      const bracketStart = i;
-      i++; // skip [
-      let hasClose = false;
-      while (i < len) {
-        if (formula[i] === "]") {
-          hasClose = true;
-          i++;
-          break;
-        }
-        i++;
+      // Peek at first non-whitespace char after [ — @ or # always means a
+      // structured reference, never an external workbook reference.
+      let peek = i + 1;
+      while (peek < len && (formula[peek] === " " || formula[peek] === "\t")) {
+        peek++;
       }
-      if (hasClose) {
-        // Consume the rest as sheet!cellref (Name token for external ref)
-        const refStart = bracketStart;
-        while (
-          i < len &&
-          formula[i] !== "+" &&
-          formula[i] !== "-" &&
-          formula[i] !== "*" &&
-          formula[i] !== "/" &&
-          formula[i] !== "^" &&
-          formula[i] !== "&" &&
-          formula[i] !== "=" &&
-          formula[i] !== "<" &&
-          formula[i] !== ">" &&
-          formula[i] !== ")" &&
-          formula[i] !== "," &&
-          formula[i] !== " " &&
-          formula[i] !== "}" &&
-          formula[i] !== ":" &&
-          formula[i] !== "%" &&
-          formula[i] !== ";" &&
-          formula[i] !== "{"
-        ) {
-          i++;
+      const firstCh = peek < len ? formula[peek] : "";
+      const looksStructured = firstCh === "@" || firstCh === "#" || firstCh === "[";
+
+      if (!looksStructured) {
+        // Try to parse as an external ref: [WorkbookName]Sheet!...
+        const bracketStart = i;
+        let scan = i + 1;
+        let hasClose = false;
+        while (scan < len) {
+          if (formula[scan] === "]") {
+            hasClose = true;
+            scan++;
+            break;
+          }
+          scan++;
         }
-        tokens.push({ type: TokenType.Name, value: formula.slice(refStart, i) });
-        continue;
+        // Validate: after the closing ], we must see a sheet name (or quoted
+        // sheet name) followed by `!`. Otherwise this isn't an external ref.
+        let isExternal = false;
+        if (hasClose && scan < len) {
+          let p = scan;
+          if (formula[p] === "'") {
+            // Quoted sheet name — scan to matching '
+            p++;
+            while (p < len) {
+              if (formula[p] === "'") {
+                if (p + 1 < len && formula[p + 1] === "'") {
+                  p += 2;
+                } else {
+                  p++;
+                  break;
+                }
+              } else {
+                p++;
+              }
+            }
+            if (p < len && formula[p] === "!") {
+              isExternal = true;
+            }
+          } else {
+            // Unquoted sheet name — identifier chars, then !
+            const sheetStart = p;
+            while (p < len && (isAlphaNumOrUnderscore(formula[p]) || formula[p] === "$")) {
+              p++;
+            }
+            if (p > sheetStart && p < len && formula[p] === "!") {
+              isExternal = true;
+            }
+          }
+        }
+
+        if (isExternal) {
+          i = scan;
+          const refStart = bracketStart;
+          while (
+            i < len &&
+            formula[i] !== "+" &&
+            formula[i] !== "-" &&
+            formula[i] !== "*" &&
+            formula[i] !== "/" &&
+            formula[i] !== "^" &&
+            formula[i] !== "&" &&
+            formula[i] !== "=" &&
+            formula[i] !== "<" &&
+            formula[i] !== ">" &&
+            formula[i] !== ")" &&
+            formula[i] !== "," &&
+            formula[i] !== " " &&
+            formula[i] !== "}" &&
+            formula[i] !== ":" &&
+            formula[i] !== "%" &&
+            formula[i] !== ";" &&
+            formula[i] !== "{"
+          ) {
+            i++;
+          }
+          tokens.push({ type: TokenType.ExternalRef, value: formula.slice(refStart, i) });
+          continue;
+        }
+        // Not an external ref — fall through to the structured-reference
+        // branch below, which handles bare [Column Name] etc.
       }
-      // Not a valid external ref, backtrack
-      i = bracketStart;
     }
 
     // Array constant braces
@@ -464,20 +620,33 @@ export function tokenize(formula: string): Token[] {
           i = colonPos;
         }
       }
-      if (i < len && formula[i] === ".") {
+      // Fractional part — only consume the `.` when at least one digit
+      // follows. This prevents "1..2" from being tokenised as "1." + ".2"
+      // with the first `.` silently absorbed into the integer number.
+      if (i < len && formula[i] === "." && i + 1 < len && isDigit(formula[i + 1])) {
         i++;
         while (i < len && isDigit(formula[i])) {
           i++;
         }
       }
-      // Scientific notation
+      // Scientific notation. Only commit to consuming `e[+-]?` when at least
+      // one digit actually follows — otherwise restore position and stop the
+      // number here, so `1e` or `1e+` don't parse as the number `1`.
       if (i < len && (formula[i] === "E" || formula[i] === "e")) {
-        i++;
-        if (i < len && (formula[i] === "+" || formula[i] === "-")) {
-          i++;
+        const expStart = i;
+        let j = i + 1;
+        if (j < len && (formula[j] === "+" || formula[j] === "-")) {
+          j++;
         }
-        while (i < len && isDigit(formula[i])) {
-          i++;
+        if (j < len && isDigit(formula[j])) {
+          // Commit: consume e, optional sign, and the digit run.
+          i = j;
+          while (i < len && isDigit(formula[i])) {
+            i++;
+          }
+        } else {
+          // Not a valid exponent — leave the `e`/`E` for the identifier lexer.
+          i = expStart;
         }
       }
       tokens.push({ type: TokenType.Number, value: formula.slice(start, i) });
@@ -561,7 +730,10 @@ export function tokenize(formula: string): Token[] {
       }
 
       // Check for 3D sheet reference: WORD:WORD! (e.g. Sheet1:Sheet3!A1)
-      if (i < len && formula[i] === ":") {
+      // Skip this branch if `word` is itself a cell reference (like A1) —
+      // otherwise `A1:Sheet1!B2` would be mis-tokenised as a 3D SheetRef
+      // with sheetName="A1".
+      if (i < len && formula[i] === ":" && parseCellRef(word) === null) {
         const colonPos3D = i;
         let j = i + 1;
         // Collect the second sheet name (alphanumeric + underscore + .)
@@ -571,8 +743,10 @@ export function tokenize(formula: string): Token[] {
         if (j > colonPos3D + 1 && j < len && formula[j] === "!") {
           const endSheet = formula.slice(colonPos3D + 1, j);
           // Verify endSheet is not a cell reference (contains alpha chars, not purely dollar+digits)
+          // AND is not itself a valid cell ref like "B2" — that would make
+          // `Sheet1:B2!` nonsensical and should not become a 3D ref.
           const hasAlpha = /[A-Za-z]/.test(endSheet);
-          if (hasAlpha) {
+          if (hasAlpha && parseCellRef(endSheet) === null) {
             i = j + 1; // skip past !
             tokens.push({
               type: TokenType.SheetRef,

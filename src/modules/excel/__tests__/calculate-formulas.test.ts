@@ -463,8 +463,9 @@ describe("calculateFormulas", () => {
       // Should not hang — circular refs return 0 (Excel behavior)
       const r1 = ws.getCell("A1").result;
       const r2 = ws.getCell("A2").result;
-      // At least one should be a number (0-based from circular ref break)
-      expect(typeof r1 === "number" || typeof r2 === "number").toBe(true);
+      // Both should be numbers (circular refs get fallback 0, then evaluate)
+      expect(typeof r1).toBe("number");
+      expect(typeof r2).toBe("number");
     });
   });
 
@@ -759,7 +760,9 @@ describe("calculateFormulas", () => {
       // At least one cell in the cycle should resolve to a number
       const r1 = ws.getCell("A1").result;
       const r2 = ws.getCell("A2").result;
-      expect(typeof r1 === "number" || typeof r2 === "number").toBe(true);
+      // Both cells in the cycle should resolve to numbers
+      expect(typeof r1).toBe("number");
+      expect(typeof r2).toBe("number");
     });
   });
 
@@ -2806,6 +2809,534 @@ describe("calculateFormulas", () => {
       wb.calculateFormulas();
 
       expect(ws1.getCell("B1").result).toBe(15);
+    });
+  });
+
+  // ==========================================================================
+  // Critical Edge Cases
+  // ==========================================================================
+  describe("critical edge cases", () => {
+    it("should resolve INDIRECT to correct sheet", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+      ws1.getCell("A1").value = 10;
+      ws2.getCell("A1").value = 20;
+      // INDIRECT("A1") on Sheet1 should get Sheet1!A1
+      ws1.getCell("B1").value = { formula: 'INDIRECT("A1")', result: 0 };
+      // INDIRECT("A1") on Sheet2 should get Sheet2!A1
+      ws2.getCell("B1").value = { formula: 'INDIRECT("A1")', result: 0 };
+      wb.calculateFormulas();
+      expect(ws1.getCell("B1").result).toBe(10);
+      expect(ws2.getCell("B1").result).toBe(20);
+    });
+
+    it("should handle OFFSET with negative height", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+      ws.getCell("A2").value = 2;
+      ws.getCell("A3").value = 3;
+      // OFFSET(A3,0,0,-3,1) should reference A1:A3
+      ws.getCell("B1").value = { formula: "SUM(OFFSET(A3,0,0,-3,1))", result: 0 };
+      // OFFSET(A1,0,0,-1,1) → just A1
+      ws.getCell("B2").value = { formula: "SUM(OFFSET(A1,0,0,-1,1))", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(6);
+      expect(ws.getCell("B2").result).toBe(1);
+    });
+
+    it("should return #REF! for OFFSET with zero height", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+      ws.getCell("B1").value = { formula: "OFFSET(A1,0,0,0,1)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toEqual({ error: "#REF!" });
+    });
+
+    it("should re-evaluate non-circular dependents after iterative convergence", () => {
+      const wb = new Workbook();
+      wb.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 };
+      const ws = wb.addWorksheet("Sheet1");
+      // Circular: A1 = IF(A1>0, A1, 1) — self-ref that seeds to 1
+      ws.getCell("A1").value = { formula: "IF(A1>0,A1,1)", result: 0 };
+      // Non-circular dependent
+      ws.getCell("B1").value = { formula: "A1*10", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toBe(1);
+      expect(ws.getCell("B1").result).toBe(10);
+    });
+
+    it("should propagate errors through text functions", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = { formula: "1/0", result: 0 };
+      ws.getCell("B1").value = { formula: "LEFT(A1, 2)", result: 0 };
+      ws.getCell("C1").value = { formula: 'CONCATENATE("x", A1)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toEqual({ error: "#DIV/0!" });
+      expect(ws.getCell("C1").result).toEqual({ error: "#DIV/0!" });
+    });
+
+    it("should merge INDIRECT dynamic deps and re-evaluate dependents", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // A1 holds a cell address, B1 holds the value at that address
+      ws.getCell("A1").value = "C1";
+      ws.getCell("C1").value = 42;
+      // INDIRECT(A1) resolves "C1" → C1 at runtime (dynamic dep)
+      ws.getCell("B1").value = { formula: "INDIRECT(A1)", result: 0 };
+      // D1 depends on B1 (downstream of dynamic dep)
+      ws.getCell("D1").value = { formula: "B1*2", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("B1").result).toBe(42);
+      expect(ws.getCell("D1").result).toBe(84);
+    });
+
+    it("should evaluate position-dependent formula names per cell", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Formula name "R" = ROW() — depends on calling cell's position
+      wb.definedNames.addFormula("R", "ROW()");
+
+      ws.getCell("A1").value = { formula: "R", result: 0 };
+      ws.getCell("A2").value = { formula: "R", result: 0 };
+      ws.getCell("A3").value = { formula: "R", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A1").result).toBe(1);
+      expect(ws.getCell("A2").result).toBe(2);
+      expect(ws.getCell("A3").result).toBe(3);
+    });
+
+    it("should re-evaluate defined name dependents after iterative convergence", () => {
+      const wb = new Workbook();
+      wb.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 };
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Circular: A1 = IF(A1>0,A1,1)
+      ws.getCell("A1").value = { formula: "IF(A1>0,A1,1)", result: 0 };
+      // Name "N" references A1
+      wb.definedNames.addFormula("N", "Sheet1!$A$1");
+      // B1 depends on N (indirect dependency on circular A1)
+      ws.getCell("B1").value = { formula: "N*10", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A1").result).toBe(1);
+      expect(ws.getCell("B1").result).toBe(10);
+    });
+
+    it("should handle OFFSET with negative width", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = 1;
+      ws.getCell("B1").value = 2;
+      ws.getCell("C1").value = 3;
+
+      // OFFSET(C1,0,0,1,-3) → A1:C1
+      ws.getCell("A2").value = { formula: "SUM(OFFSET(C1,0,0,1,-3))", result: 0 };
+      // OFFSET(A1,0,0,1,0) → #REF!
+      ws.getCell("B2").value = { formula: "OFFSET(A1,0,0,1,0)", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A2").result).toBe(6);
+      expect(ws.getCell("B2").result).toEqual({ error: "#REF!" });
+    });
+
+    it("should handle 3D cell reference across sheets", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+      const ws3 = wb.addWorksheet("Sheet3");
+      const wsResult = wb.addWorksheet("Result");
+
+      ws1.getCell("A1").value = 1;
+      ws2.getCell("A1").value = 2;
+      ws3.getCell("A1").value = 3;
+
+      // 3D cell reference: SUM across Sheet1:Sheet3!A1
+      wsResult.getCell("A1").value = { formula: "SUM(Sheet1:Sheet3!A1)", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(wsResult.getCell("A1").result).toBe(6);
+    });
+
+    it("should handle 3D whole-row reference across sheets", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+      const wsResult = wb.addWorksheet("Result");
+
+      ws1.getCell("A1").value = 10;
+      ws1.getCell("B1").value = 20;
+      ws2.getCell("A1").value = 30;
+      ws2.getCell("B1").value = 40;
+
+      // 3D row range: SUM(Sheet1:Sheet2!1:1)
+      wsResult.getCell("A1").value = { formula: "SUM(Sheet1:Sheet2!1:1)", result: 0 };
+
+      wb.calculateFormulas();
+
+      // 10 + 20 + 30 + 40 = 100
+      expect(wsResult.getCell("A1").result).toBe(100);
+    });
+
+    it("should propagate errors through FILTER include array", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = 10;
+      ws.getCell("A2").value = 20;
+      ws.getCell("B1").value = true;
+      ws.getCell("B2").value = { formula: "1/0", result: 0 };
+
+      ws.getCell("C1").value = {
+        formula: "FILTER(A1:A2,B1:B2)",
+        result: 0,
+        isDynamicArray: true
+      };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("C1").result).toEqual({ error: "#DIV/0!" });
+    });
+
+    it("should return correct weekday for return types 11-17", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // 2024-01-01 is a Monday. Excel serial = 45292
+      ws.getCell("A1").value = 45292;
+      // Type 11: Mon=1
+      ws.getCell("B1").value = { formula: "WEEKDAY(A1,11)", result: 0 };
+      // Type 17: Sun=1, Mon=2
+      ws.getCell("C1").value = { formula: "WEEKDAY(A1,17)", result: 0 };
+      // Invalid type → #NUM!
+      ws.getCell("D1").value = { formula: "WEEKDAY(A1,4)", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("B1").result).toBe(1); // Monday → 1 for type 11
+      expect(ws.getCell("C1").result).toBe(2); // Monday → 2 for type 17
+      expect(ws.getCell("D1").result).toEqual({ error: "#NUM!" });
+    });
+
+    it("should handle structured ref #Headers+#Data combination", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.addTable({
+        name: "Sales",
+        ref: "A1",
+        headerRow: true,
+        totalsRow: false,
+        columns: [{ name: "Item" }, { name: "Price" }],
+        rows: [
+          ["Apple", 1],
+          ["Banana", 2],
+          ["Cherry", 3]
+        ]
+      });
+
+      // COUNTA of #Headers + #Data for the Price column = header + 3 data rows = 4
+      ws.getCell("D1").value = {
+        formula: "COUNTA(Sales[[#Headers],[#Data],[Price]])",
+        result: 0
+      };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("D1").result).toBe(4);
+    });
+
+    it("should handle structured ref #Data+#Totals combination", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.addTable({
+        name: "Inventory",
+        ref: "A1",
+        headerRow: true,
+        totalsRow: true,
+        columns: [{ name: "Item" }, { name: "Qty", totalsRowFunction: "sum" }],
+        rows: [
+          ["Apple", 10],
+          ["Banana", 20]
+        ]
+      });
+
+      // #Data + #Totals for Qty = data rows + totals row = 3 cells
+      ws.getCell("D1").value = {
+        formula: "COUNTA(Inventory[[#Data],[#Totals],[Qty]])",
+        result: 0
+      };
+
+      wb.calculateFormulas();
+
+      // 2 data cells + 1 totals cell = 3
+      expect(ws.getCell("D1").result).toBe(3);
+    });
+
+    it("should re-evaluate INDIRECT when target address changes", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = "C1";
+      ws.getCell("C1").value = 100;
+      ws.getCell("E1").value = 200;
+      ws.getCell("B1").value = { formula: "INDIRECT(A1)", result: 0 };
+
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(100);
+
+      // Change the target address
+      ws.getCell("A1").value = "E1";
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(200);
+    });
+
+    it("should re-evaluate multi-hop downstream after iterative convergence", () => {
+      const wb = new Workbook();
+      wb.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 };
+      const ws = wb.addWorksheet("Sheet1");
+
+      // A1 = circular self-ref that converges to 1
+      ws.getCell("A1").value = { formula: "IF(A1>0,A1,1)", result: 0 };
+      // B1 = first hop
+      ws.getCell("B1").value = { formula: "A1*10", result: 0 };
+      // C1 = second hop
+      ws.getCell("C1").value = { formula: "B1+5", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A1").result).toBe(1);
+      expect(ws.getCell("B1").result).toBe(10);
+      expect(ws.getCell("C1").result).toBe(15);
+    });
+
+    it.skip("should handle structured ref #This Row (parser does not yet support this syntax)", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.addTable({
+        name: "T1",
+        ref: "A1",
+        headerRow: true,
+        totalsRow: false,
+        columns: [{ name: "Val" }, { name: "Double" }],
+        rows: [
+          [10, null],
+          [20, null],
+          [30, null]
+        ]
+      });
+
+      // Formulas in the Double column reference [#This Row]
+      ws.getCell("B2").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
+      ws.getCell("B3").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
+      ws.getCell("B4").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("B2").result).toBe(20);
+      expect(ws.getCell("B3").result).toBe(40);
+      expect(ws.getCell("B4").result).toBe(60);
+    });
+
+    it("should propagate error from SUMIF criteria", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = 1;
+      ws.getCell("A2").value = 2;
+      ws.getCell("B1").value = 10;
+      ws.getCell("B2").value = 20;
+
+      // Criteria is an error
+      ws.getCell("C1").value = { formula: "1/0", result: 0 };
+      ws.getCell("D1").value = { formula: "SUMIF(A1:A2,C1,B1:B2)", result: 0 };
+      ws.getCell("D2").value = { formula: "COUNTIF(A1:A2,C1)", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("D1").result).toEqual({ error: "#DIV/0!" });
+      expect(ws.getCell("D2").result).toEqual({ error: "#DIV/0!" });
+    });
+  });
+
+  // ==========================================================================
+  // Newly added functions — ISFORMULA, FORMULATEXT, HYPERLINK,
+  // F.DIST.RT, F.INV.RT, SKEW, SKEW.P, KURT, PRICE, YIELD, DURATION,
+  // MDURATION, ACCRINT.
+  // ==========================================================================
+  describe("newly added functions dispatch", () => {
+    it("should dispatch ISFORMULA, FORMULATEXT, HYPERLINK, stats, and bond functions", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // A1 contains a value; A2 contains a formula referring to A1.
+      ws.getCell("A1").value = 10;
+      ws.getCell("A2").value = { formula: "A1*2", result: 0 };
+
+      // ISFORMULA / FORMULATEXT.
+      ws.getCell("B1").value = { formula: "ISFORMULA(A1)", result: 0 };
+      ws.getCell("B2").value = { formula: "ISFORMULA(A2)", result: 0 };
+      ws.getCell("B3").value = { formula: "FORMULATEXT(A2)", result: 0 };
+      ws.getCell("B4").value = { formula: "FORMULATEXT(A1)", result: 0 };
+
+      // HYPERLINK(url, friendly) and HYPERLINK(url) alone.
+      ws.getCell("C1").value = {
+        formula: 'HYPERLINK("http://x.com","click me")',
+        result: 0
+      };
+      ws.getCell("C2").value = { formula: 'HYPERLINK("http://x.com")', result: 0 };
+
+      // Statistical data for SKEW / SKEW.P / KURT — known values:
+      // sample 1..10: SKEW ≈ 0, SKEW.P = 0, KURT ≈ -1.2
+      ws.getCell("D1").value = 1;
+      ws.getCell("D2").value = 2;
+      ws.getCell("D3").value = 3;
+      ws.getCell("D4").value = 4;
+      ws.getCell("D5").value = 5;
+      ws.getCell("D6").value = 6;
+      ws.getCell("D7").value = 7;
+      ws.getCell("D8").value = 8;
+      ws.getCell("D9").value = 9;
+      ws.getCell("D10").value = 10;
+      ws.getCell("E1").value = { formula: "SKEW(D1:D10)", result: 0 };
+      ws.getCell("E2").value = { formula: "SKEW.P(D1:D10)", result: 0 };
+      ws.getCell("E3").value = { formula: "KURT(D1:D10)", result: 0 };
+
+      // F.DIST.RT and F.INV.RT — self-consistency check:
+      // F.INV.RT(F.DIST.RT(2, 5, 10), 5, 10) ≈ 2.
+      ws.getCell("F1").value = { formula: "F.DIST.RT(2,5,10)", result: 0 };
+      ws.getCell("F2").value = { formula: "F.INV.RT(F.DIST.RT(2,5,10),5,10)", result: 0 };
+
+      // Bond functions using simple parameters (basis 0, semi-annual).
+      // Settlement 2020-01-01 = 43831, maturity 2025-01-01 = 45658.
+      ws.getCell("G1").value = 43831; // settlement
+      ws.getCell("G2").value = 45658; // maturity
+      ws.getCell("G3").value = {
+        formula: "PRICE(G1,G2,0.05,0.05,100,2,0)",
+        result: 0
+      };
+      // For equal rate and yield, price should be ~100.
+      ws.getCell("G4").value = {
+        formula: "YIELD(G1,G2,0.05,100,100,2,0)",
+        result: 0
+      };
+      ws.getCell("G5").value = {
+        formula: "DURATION(G1,G2,0.05,0.05,2,0)",
+        result: 0
+      };
+      ws.getCell("G6").value = {
+        formula: "MDURATION(G1,G2,0.05,0.05,2,0)",
+        result: 0
+      };
+      // ACCRINT: issue 2020-01-01, settlement 2020-07-01 (= 44013),
+      // rate 0.05, par 1000, basis 0 → 1000 * 0.05 * (180/360) = 25.
+      ws.getCell("H1").value = 44013;
+      ws.getCell("H2").value = {
+        formula: "ACCRINT(G1,G1,H1,0.05,1000,2,0)",
+        result: 0
+      };
+
+      wb.calculateFormulas();
+
+      // ISFORMULA / FORMULATEXT.
+      expect(ws.getCell("B1").result).toBe(false);
+      expect(ws.getCell("B2").result).toBe(true);
+      expect(ws.getCell("B3").result).toBe("=A1*2");
+      expect(ws.getCell("B4").result).toEqual({ error: "#N/A" });
+
+      // HYPERLINK — friendly name wins; otherwise URL.
+      expect(ws.getCell("C1").result).toBe("click me");
+      expect(ws.getCell("C2").result).toBe("http://x.com");
+
+      // SKEW/SKEW.P should be ~0 for the symmetric sample 1..10.
+      expect(Math.abs(ws.getCell("E1").result as number)).toBeLessThan(1e-9);
+      expect(Math.abs(ws.getCell("E2").result as number)).toBeLessThan(1e-9);
+      // KURT for 1..10 is approximately -1.2.
+      expect(ws.getCell("E3").result as number).toBeCloseTo(-1.2, 5);
+
+      // F.DIST.RT in (0,1); round-trip through F.INV.RT returns ~2.
+      const frt = ws.getCell("F1").result as number;
+      expect(frt).toBeGreaterThan(0);
+      expect(frt).toBeLessThan(1);
+      expect(ws.getCell("F2").result as number).toBeCloseTo(2, 4);
+
+      // PRICE at par when yield == coupon.
+      expect(ws.getCell("G3").result as number).toBeCloseTo(100, 4);
+      // YIELD given price 100 should return 0.05.
+      expect(ws.getCell("G4").result as number).toBeCloseTo(0.05, 4);
+      // 5-year par bond, 5% coupon semi-annual → duration ≈ 4.49 years.
+      expect(ws.getCell("G5").result as number).toBeGreaterThan(4);
+      expect(ws.getCell("G5").result as number).toBeLessThan(5);
+      // Modified duration slightly less than Macaulay duration.
+      expect(ws.getCell("G6").result as number).toBeLessThan(ws.getCell("G5").result as number);
+      // ACCRINT on a 30/360 half-year → $25.
+      expect(ws.getCell("H2").result as number).toBeCloseTo(25, 6);
+    });
+  });
+
+  // ==========================================================================
+  // Language features: intersection operator and external references
+  // ==========================================================================
+  describe("intersection operator and external references", () => {
+    it("should compute intersection of two overlapping ranges (space operator)", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // A1:A4 contain 1..4. A1:A3 ∩ A2:A4 = A2:A3 → sum = 2+3 = 5.
+      ws.getCell("A1").value = 1;
+      ws.getCell("A2").value = 2;
+      ws.getCell("A3").value = 3;
+      ws.getCell("A4").value = 4;
+
+      ws.getCell("B1").value = { formula: "SUM(A1:A3 A2:A4)", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("B1").result).toBe(5);
+    });
+
+    it("should return #NULL! when intersected ranges do not overlap", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = 10;
+      ws.getCell("B1").value = 20;
+
+      // A1 and B1 are distinct single-cell refs with no overlap.
+      ws.getCell("C1").value = { formula: "A1 B1", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("C1").result).toEqual({ error: "#NULL!" });
+    });
+
+    it("should return #REF! for an external workbook reference", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Cross-workbook references like [Book1]Sheet1!A1 are recognised but
+      // unsupported — the engine reports #REF! instead of silently
+      // swallowing the text.
+      ws.getCell("A1").value = { formula: "[Book1]Sheet1!A1", result: 0 };
+
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A1").result).toEqual({ error: "#REF!" });
     });
   });
 });

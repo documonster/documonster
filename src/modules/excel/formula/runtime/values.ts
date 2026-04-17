@@ -332,7 +332,7 @@ export function toNumberRV(v: RuntimeValue): NumberValue | ErrorValue {
       return rvNumber(v.value ? 1 : 0);
     case RVKind.String: {
       if (v.value === "") {
-        return rvNumber(0);
+        return ERRORS.VALUE;
       }
       const n = Number(v.value);
       return isNaN(n) ? ERRORS.VALUE : rvNumber(n);

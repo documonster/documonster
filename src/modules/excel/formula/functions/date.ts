@@ -13,6 +13,7 @@ import {
   toNumberRV,
   toStringRV,
   toBooleanRV,
+  topLeft,
   rvNumber,
   rvBoolean
 } from "../runtime/values";
@@ -22,6 +23,15 @@ import {
 // ============================================================================
 
 type NativeFunction = (args: RuntimeValue[]) => RuntimeValue;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function checkError(v: RuntimeValue): ErrorValue | null {
+  const s = topLeft(v);
+  return s.kind === RVKind.Error ? s : null;
+}
 
 // ============================================================================
 // Helpers
@@ -181,8 +191,16 @@ export const fnWEEKDAY: NativeFunction = args => {
       return rvNumber(day === 0 ? 7 : day); // 1=Mon, 7=Sun
     case 3:
       return rvNumber(day === 0 ? 6 : day - 1); // 0=Mon, 6=Sun
+    case 11: // Mon=1..Sun=7
+    case 12: // Tue=1..Mon=7
+    case 13: // Wed=1..Tue=7
+    case 14: // Thu=1..Wed=7
+    case 15: // Fri=1..Thu=7
+    case 16: // Sat=1..Fri=7
+    case 17: // Sun=1..Sat=7
+      return rvNumber(((((day - (returnType.value - 10)) % 7) + 7) % 7) + 1);
     default:
-      return rvNumber(day + 1);
+      return ERRORS.NUM;
   }
 };
 
@@ -430,6 +448,10 @@ export const fnYEARFRAC: NativeFunction = args => {
 };
 
 export const fnDATEVALUE: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const text = toStringRV(args[0]);
 
   // Lotus 1-2-3 bug: "2/29/1900" or "February 29, 1900" etc. should return 60
@@ -447,6 +469,10 @@ export const fnDATEVALUE: NativeFunction = args => {
 };
 
 export const fnTIMEVALUE: NativeFunction = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
   const text = toStringRV(args[0]);
   const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
   if (!m) {
@@ -502,6 +528,42 @@ export const fnDAYS360: NativeFunction = args => {
   return rvNumber((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1));
 };
 
+/** Map weekend-type code to the set of day-of-week indices (0=Sun..6=Sat) that are weekends. */
+function getWeekendDays(weekendType: number): Set<number> {
+  switch (weekendType) {
+    case 1:
+      return new Set([0, 6]); // Sat, Sun
+    case 2:
+      return new Set([0, 1]); // Sun, Mon
+    case 3:
+      return new Set([1, 2]); // Mon, Tue
+    case 4:
+      return new Set([2, 3]); // Tue, Wed
+    case 5:
+      return new Set([3, 4]); // Wed, Thu
+    case 6:
+      return new Set([4, 5]); // Thu, Fri
+    case 7:
+      return new Set([5, 6]); // Fri, Sat
+    case 11:
+      return new Set([0]); // Sun only
+    case 12:
+      return new Set([1]); // Mon only
+    case 13:
+      return new Set([2]); // Tue only
+    case 14:
+      return new Set([3]); // Wed only
+    case 15:
+      return new Set([4]); // Thu only
+    case 16:
+      return new Set([5]); // Fri only
+    case 17:
+      return new Set([6]); // Sat only
+    default:
+      return new Set([0, 6]); // Default: Sat, Sun
+  }
+}
+
 export const fnNETWORKDAYS_INTL: NativeFunction = args => {
   const startN = numArg(args[0]);
   if (isError(startN)) {
@@ -516,45 +578,7 @@ export const fnNETWORKDAYS_INTL: NativeFunction = args => {
     return weekendArg;
   }
   const holidays = args.length > 3 ? collectHolidays(args[3]) : new Set<number>();
-  const weekendDays = new Set<number>();
-  switch (weekendArg.value) {
-    case 1:
-      weekendDays.add(0).add(6);
-      break;
-    case 2:
-      weekendDays.add(0).add(1);
-      break;
-    case 3:
-      weekendDays.add(1).add(2);
-      break;
-    case 7:
-      weekendDays.add(5).add(6);
-      break;
-    case 11:
-      weekendDays.add(0);
-      break;
-    case 12:
-      weekendDays.add(1);
-      break;
-    case 13:
-      weekendDays.add(2);
-      break;
-    case 14:
-      weekendDays.add(3);
-      break;
-    case 15:
-      weekendDays.add(4);
-      break;
-    case 16:
-      weekendDays.add(5);
-      break;
-    case 17:
-      weekendDays.add(6);
-      break;
-    default:
-      weekendDays.add(0).add(6);
-      break;
-  }
+  const weekendDays = getWeekendDays(weekendArg.value);
   const s = Math.floor(Math.min(startN.value, endN.value));
   const e = Math.floor(Math.max(startN.value, endN.value));
   const sign = startN.value <= endN.value ? 1 : -1;
@@ -582,24 +606,7 @@ export const fnWORKDAY_INTL: NativeFunction = args => {
     return weekendArg;
   }
   const holidays = args.length > 3 ? collectHolidays(args[3]) : new Set<number>();
-  const weekendDays = new Set<number>();
-  switch (weekendArg.value) {
-    case 1:
-      weekendDays.add(0).add(6);
-      break;
-    case 2:
-      weekendDays.add(0).add(1);
-      break;
-    case 7:
-      weekendDays.add(5).add(6);
-      break;
-    case 11:
-      weekendDays.add(0);
-      break;
-    default:
-      weekendDays.add(0).add(6);
-      break;
-  }
+  const weekendDays = getWeekendDays(weekendArg.value);
   let current = Math.floor(startN.value);
   const step = days.value >= 0 ? 1 : -1;
   let remaining = Math.abs(days.value);

@@ -25,7 +25,8 @@ export const enum NodeType {
   ColRangeRef = 13,
   RowRangeRef = 14,
   StructuredRef = 15,
-  Missing = 16
+  Missing = 16,
+  ExternalRef = 17
 }
 
 // ============================================================================
@@ -152,6 +153,16 @@ export interface MissingNode {
   type: NodeType.Missing;
 }
 
+/**
+ * An external workbook reference (e.g. `[Book1]Sheet1!A1`). Cross-workbook
+ * references are not supported — the binder lowers this to a `#REF!` error.
+ */
+export interface ExternalRefNode {
+  type: NodeType.ExternalRef;
+  /** Full text of the reference, preserved for diagnostics. */
+  text: string;
+}
+
 // ============================================================================
 // Discriminated Union
 // ============================================================================
@@ -172,4 +183,5 @@ export type AstNode =
   | ColRangeRefNode
   | RowRangeRefNode
   | StructuredRefNode
-  | MissingNode;
+  | MissingNode
+  | ExternalRefNode;

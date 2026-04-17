@@ -3,7 +3,16 @@
  */
 
 import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
-import { RVKind, ERRORS, BLANK, rvNumber, toStringRV, topLeft, isArray } from "../runtime/values";
+import {
+  RVKind,
+  ERRORS,
+  BLANK,
+  rvNumber,
+  toStringRV,
+  topLeft,
+  isArray,
+  isError
+} from "../runtime/values";
 
 // ============================================================================
 // Criteria Predicate Builder (RuntimeValue version)
@@ -118,6 +127,9 @@ export function fnSUMIF(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.VALUE;
   }
   const criteriaScalar = topLeft(args[1]);
+  if (isError(criteriaScalar)) {
+    return criteriaScalar;
+  }
   const pred = buildCriteriaPredicateRV(criteriaScalar);
   const sumArr = args.length > 2 ? (asArray(args[2]) ?? rangeArr) : rangeArr;
   let sum = 0;
@@ -145,9 +157,13 @@ export function fnSUMIFS(args: RuntimeValue[]): RuntimeValue {
     if (!critRange) {
       return ERRORS.VALUE;
     }
+    const cs = topLeft(args[i + 1]);
+    if (isError(cs)) {
+      return cs;
+    }
     pairs.push({
       arr: critRange,
-      pred: buildCriteriaPredicateRV(topLeft(args[i + 1]))
+      pred: buildCriteriaPredicateRV(cs)
     });
   }
   let sum = 0;
@@ -176,7 +192,11 @@ export function fnCOUNTIF(args: RuntimeValue[]): RuntimeValue {
   if (!rangeArr) {
     return ERRORS.VALUE;
   }
-  const pred = buildCriteriaPredicateRV(topLeft(args[1]));
+  const cs = topLeft(args[1]);
+  if (isError(cs)) {
+    return cs;
+  }
+  const pred = buildCriteriaPredicateRV(cs);
   let count = 0;
   for (let r = 0; r < rangeArr.height; r++) {
     for (let c = 0; c < rangeArr.width; c++) {
@@ -198,9 +218,13 @@ export function fnCOUNTIFS(args: RuntimeValue[]): RuntimeValue {
     if (!critRange) {
       return ERRORS.VALUE;
     }
+    const cs = topLeft(args[i + 1]);
+    if (isError(cs)) {
+      return cs;
+    }
     pairs.push({
       arr: critRange,
-      pred: buildCriteriaPredicateRV(topLeft(args[i + 1]))
+      pred: buildCriteriaPredicateRV(cs)
     });
   }
   const rows = pairs[0].arr.height;
@@ -228,7 +252,11 @@ export function fnAVERAGEIF(args: RuntimeValue[]): RuntimeValue {
   if (!rangeArr) {
     return ERRORS.VALUE;
   }
-  const pred = buildCriteriaPredicateRV(topLeft(args[1]));
+  const cs = topLeft(args[1]);
+  if (isError(cs)) {
+    return cs;
+  }
+  const pred = buildCriteriaPredicateRV(cs);
   const avgArr = args.length > 2 ? (asArray(args[2]) ?? rangeArr) : rangeArr;
   let sum = 0;
   let count = 0;
@@ -257,9 +285,13 @@ export function fnAVERAGEIFS(args: RuntimeValue[]): RuntimeValue {
     if (!critRange) {
       return ERRORS.VALUE;
     }
+    const cs = topLeft(args[i + 1]);
+    if (isError(cs)) {
+      return cs;
+    }
     pairs.push({
       arr: critRange,
-      pred: buildCriteriaPredicateRV(topLeft(args[i + 1]))
+      pred: buildCriteriaPredicateRV(cs)
     });
   }
   let sum = 0;
@@ -296,9 +328,13 @@ export function fnMAXIFS(args: RuntimeValue[]): RuntimeValue {
     if (!critRange) {
       return ERRORS.VALUE;
     }
+    const cs = topLeft(args[i + 1]);
+    if (isError(cs)) {
+      return cs;
+    }
     pairs.push({
       arr: critRange,
-      pred: buildCriteriaPredicateRV(topLeft(args[i + 1]))
+      pred: buildCriteriaPredicateRV(cs)
     });
   }
   let result = -Infinity;
@@ -337,9 +373,13 @@ export function fnMINIFS(args: RuntimeValue[]): RuntimeValue {
     if (!critRange) {
       return ERRORS.VALUE;
     }
+    const cs = topLeft(args[i + 1]);
+    if (isError(cs)) {
+      return cs;
+    }
     pairs.push({
       arr: critRange,
-      pred: buildCriteriaPredicateRV(topLeft(args[i + 1]))
+      pred: buildCriteriaPredicateRV(cs)
     });
   }
   let result = Infinity;

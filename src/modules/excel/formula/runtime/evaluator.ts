@@ -19,6 +19,11 @@ import type {
 } from "../compile/bound-ast";
 import { BoundExprKind } from "../compile/bound-ast";
 import type { CompiledFormula } from "../compile/compiled-formula";
+import {
+  resolveStructuredRefRows,
+  buildTableGeometry,
+  resolveStructuredRefColumns
+} from "../compile/structured-ref-utils";
 import type { WorkbookSnapshot } from "../integration/workbook-snapshot";
 import {
   snapshotCellKey,
@@ -54,6 +59,7 @@ import {
   isLambda,
   toNumberRV,
   toStringRV,
+  toBooleanRV,
   topLeft,
   fromSnapshotValue
 } from "./values";
@@ -152,15 +158,6 @@ export interface EvalContext {
   currentAddress?: { sheet: string; row: number; col: number };
   /** Local variable bindings from LET expressions. */
   localBindings?: Map<string, RuntimeValue>;
-  /**
-   * Defined names from the snapshot for runtime name resolution.
-   * This replaces the old `definedNamesResolver` live-object dependency —
-   * the runtime now only depends on the snapshot.
-   */
-  readonly definedNames?: ReadonlyMap<
-    string,
-    { readonly name: string; readonly ranges: readonly string[] }
-  >;
 }
 
 // ============================================================================
@@ -441,39 +438,30 @@ function getCellValue(
 // ============================================================================
 
 /**
- * Evaluate a compiled formula and return its **scalar** result.
+ * Shared implementation for evaluateFormula and evaluateFormulaRaw.
  *
- * This is the standard evaluation path for regular (non-array) formulas.
- * The result is:
- * 1. Evaluated from the bound expression tree
- * 2. Implicit-intersected to a single value/reference
- * 3. Dereferenced if it's a reference
- * 4. Cached for subsequent lookups by dependent formulas
- *
- * Use `evaluateFormulaRaw` instead when the full array result is needed
- * (dynamic array formulas, CSE formulas).
+ * Handles key computation, cache lookup, circular reference detection,
+ * expression evaluation, and result caching.
  */
-export function evaluateFormula(
+function evaluateFormulaInner(
   compiled: CompiledFormula,
   ctx: EvalContext,
   session: EvalSession
-): RuntimeValue {
+): CachedResult {
   const inst = compiled.instance;
   const key = session.makeKey(inst.sheetName, inst.row, inst.col);
 
   // Check cache
   const cached = session.resultCache.get(key);
   if (cached !== undefined) {
-    return cached.scalar;
+    return cached;
   }
 
   // Circular reference detection
   if (session.evaluating.has(key)) {
     const fallback = session.circularFallback.get(key);
-    if (fallback !== undefined) {
-      return fallback;
-    }
-    return rvNumber(0);
+    const val = fallback !== undefined ? fallback : rvNumber(0);
+    return { scalar: val, raw: val };
   }
 
   session.evaluating.add(key);
@@ -491,14 +479,37 @@ export function evaluateFormula(
     const result = evaluate(compiled.bound, ctx, session);
     const intersected = implicitIntersect(result, ctx);
     const scalar = dereferenceValue(intersected, ctx, session);
-    session.resultCache.set(key, { scalar, raw: scalar });
-    return scalar;
+    const raw = dereferenceValue(result, ctx, session);
+    const entry: CachedResult = { scalar, raw };
+    session.resultCache.set(key, entry);
+    return entry;
   } finally {
     session.evaluating.delete(key);
     ctx.currentAddress = prevAddress;
     ctx.currentSheet = prevSheet;
     session.recordingKey = prevRecording;
   }
+}
+
+/**
+ * Evaluate a compiled formula and return its **scalar** result.
+ *
+ * This is the standard evaluation path for regular (non-array) formulas.
+ * The result is:
+ * 1. Evaluated from the bound expression tree
+ * 2. Implicit-intersected to a single value/reference
+ * 3. Dereferenced if it's a reference
+ * 4. Cached for subsequent lookups by dependent formulas
+ *
+ * Use `evaluateFormulaRaw` instead when the full array result is needed
+ * (dynamic array formulas, CSE formulas).
+ */
+export function evaluateFormula(
+  compiled: CompiledFormula,
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  return evaluateFormulaInner(compiled, ctx, session).scalar;
 }
 
 /**
@@ -519,50 +530,7 @@ export function evaluateFormulaRaw(
   ctx: EvalContext,
   session: EvalSession
 ): RuntimeValue {
-  const inst = compiled.instance;
-  const key = session.makeKey(inst.sheetName, inst.row, inst.col);
-
-  // Check result cache — return raw form if available
-  const cachedResult = session.resultCache.get(key);
-  if (cachedResult !== undefined) {
-    return cachedResult.raw;
-  }
-
-  // If only the scalar is cached (evaluated via dependency chain),
-  // we must re-evaluate to get the raw array.
-  // But first check circular reference detection.
-  if (session.evaluating.has(key)) {
-    const fallback = session.circularFallback.get(key);
-    if (fallback !== undefined) {
-      return fallback;
-    }
-    return rvNumber(0);
-  }
-
-  session.evaluating.add(key);
-  const prevAddress = ctx.currentAddress;
-  const prevSheet = ctx.currentSheet;
-  const prevRecording = session.recordingKey;
-  ctx.currentAddress = { sheet: inst.sheetName, row: inst.row, col: inst.col };
-  ctx.currentSheet = inst.sheetName;
-  if (compiled.hasDynamicRefs) {
-    session.recordingKey = key;
-  }
-
-  try {
-    const result = evaluate(compiled.bound, ctx, session);
-    // Cache both scalar and raw forms
-    const intersected = implicitIntersect(result, ctx);
-    const scalar = dereferenceValue(intersected, ctx, session);
-    const raw = dereferenceValue(result, ctx, session);
-    session.resultCache.set(key, { scalar, raw });
-    return raw;
-  } finally {
-    session.evaluating.delete(key);
-    ctx.currentAddress = prevAddress;
-    ctx.currentSheet = prevSheet;
-    session.recordingKey = prevRecording;
-  }
+  return evaluateFormulaInner(compiled, ctx, session).raw;
 }
 
 // ============================================================================
@@ -576,6 +544,12 @@ function evaluateBinaryOp(
   ctx: EvalContext,
   session: EvalSession
 ): RuntimeValue {
+  // Intersection operator (whitespace between two refs). Must be handled
+  // BEFORE dereferencing so we can inspect the reference areas.
+  if (op === " ") {
+    return evaluateIntersection(leftExpr, rightExpr, ctx, session);
+  }
+
   const left = dereferenceValue(evaluate(leftExpr, ctx, session), ctx, session);
   const right = dereferenceValue(evaluate(rightExpr, ctx, session), ctx, session);
 
@@ -587,6 +561,60 @@ function evaluateBinaryOp(
   }
 
   return applyScalarBinaryOp(op, toScalar(left), toScalar(right));
+}
+
+/**
+ * Excel's intersection operator — a whitespace character separating two
+ * references (e.g. `A1:A10 B1:B10`).
+ *
+ * Semantics:
+ * - Both operands must evaluate to single-area references. Otherwise the
+ *   result is `#VALUE!` (matches Excel's behaviour when non-refs or
+ *   multi-area refs are intersected).
+ * - Intersection is the rectangle overlap of the two areas on the same
+ *   sheet.
+ * - If the areas do not overlap (or are on different sheets) the result
+ *   is `#NULL!`, Excel's canonical "empty intersection" error.
+ */
+function evaluateIntersection(
+  leftExpr: BoundExpr,
+  rightExpr: BoundExpr,
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  const left = evaluate(leftExpr, ctx, session);
+  const right = evaluate(rightExpr, ctx, session);
+
+  if (isError(left)) {
+    return left;
+  }
+  if (isError(right)) {
+    return right;
+  }
+  if (left.kind !== RVKind.Reference || right.kind !== RVKind.Reference) {
+    return ERRORS.VALUE;
+  }
+  if (left.areas.length !== 1 || right.areas.length !== 1) {
+    return ERRORS.VALUE;
+  }
+
+  const la = left.areas[0];
+  const ra = right.areas[0];
+
+  if (la.sheet.toLowerCase() !== ra.sheet.toLowerCase()) {
+    return ERRORS.NULL;
+  }
+
+  const top = Math.max(la.top, ra.top);
+  const left_ = Math.max(la.left, ra.left);
+  const bottom = Math.min(la.bottom, ra.bottom);
+  const right_ = Math.min(la.right, ra.right);
+
+  if (top > bottom || left_ > right_) {
+    return ERRORS.NULL;
+  }
+
+  return rvRef(la.sheet, top, left_, bottom, right_);
 }
 
 function applyScalarBinaryOp(op: string, left: ScalarValue, right: ScalarValue): ScalarValue {
@@ -884,6 +912,60 @@ function evaluateCall(expr: BoundCall, ctx: EvalContext, session: EvalSession): 
         }
         return desc.invoke(args);
       }
+      case "ISFORMULA": {
+        // ISFORMULA requires a reference argument. When the raw argument is
+        // a CellRef/AreaRef we can look up the underlying cell's formulaKind.
+        // Any other shape (literal, computed value, etc.) yields #N/A per
+        // Excel's behavior for non-reference arguments.
+        const raw = expr.args[0];
+        if (raw && raw.kind === BoundExprKind.CellRef) {
+          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
+          if (!ws) {
+            return ERRORS.REF;
+          }
+          const cell = ws.cells.get(snapshotCellKey(raw.row, raw.col));
+          return rvBoolean(cell !== undefined && cell.formulaKind !== "none");
+        }
+        if (raw && raw.kind === BoundExprKind.AreaRef) {
+          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
+          if (!ws) {
+            return ERRORS.REF;
+          }
+          // ISFORMULA on an area ref inspects the top-left cell.
+          const cell = ws.cells.get(snapshotCellKey(raw.top, raw.left));
+          return rvBoolean(cell !== undefined && cell.formulaKind !== "none");
+        }
+        return ERRORS.NA;
+      }
+      case "FORMULATEXT": {
+        // FORMULATEXT returns the formula source text at the referenced cell,
+        // or #N/A if the cell has no formula. Non-reference arguments also
+        // yield #N/A.
+        const raw = expr.args[0];
+        if (raw && raw.kind === BoundExprKind.CellRef) {
+          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
+          if (!ws) {
+            return ERRORS.REF;
+          }
+          const cell = ws.cells.get(snapshotCellKey(raw.row, raw.col));
+          if (cell && cell.formulaKind !== "none" && cell.formula !== undefined) {
+            return rvString(`=${cell.formula}`);
+          }
+          return ERRORS.NA;
+        }
+        if (raw && raw.kind === BoundExprKind.AreaRef) {
+          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
+          if (!ws) {
+            return ERRORS.REF;
+          }
+          const cell = ws.cells.get(snapshotCellKey(raw.top, raw.left));
+          if (cell && cell.formulaKind !== "none" && cell.formula !== undefined) {
+            return rvString(`=${cell.formula}`);
+          }
+          return ERRORS.NA;
+        }
+        return ERRORS.NA;
+      }
       default:
         return desc.invoke(args);
     }
@@ -956,17 +1038,12 @@ function evaluateIF(
   if (isError(cond)) {
     return cond;
   }
-  if (cond.kind === RVKind.String) {
-    return ERRORS.VALUE;
+  const bool = toBooleanRV(cond);
+  if (isError(bool)) {
+    return bool;
   }
-  const truthy =
-    cond.kind === RVKind.Boolean
-      ? cond.value
-      : cond.kind === RVKind.Number
-        ? cond.value !== 0
-        : false;
-  if (truthy) {
-    return args.length > 1 ? evaluate(args[1], ctx, session) : rvBoolean(true);
+  if (bool.value) {
+    return evaluate(args[1], ctx, session);
   }
   return args.length > 2 ? evaluate(args[2], ctx, session) : rvBoolean(false);
 }
@@ -980,8 +1057,21 @@ function evaluateIFERROR(
     return ERRORS.VALUE;
   }
   const val = evalDeref(args[0], ctx, session);
-  const scalar = topLeft(val);
-  return isError(scalar) ? evaluate(args[1], ctx, session) : val;
+  // Array: element-wise replacement of errors with the value-if-error
+  if (val.kind === RVKind.Array) {
+    const replacement = evalDeref(args[1], ctx, session);
+    const replaceScalar = topLeft(replacement);
+    const rows: ScalarValue[][] = [];
+    for (const row of val.rows) {
+      const newRow: ScalarValue[] = [];
+      for (const cell of row) {
+        newRow.push(cell.kind === RVKind.Error ? replaceScalar : cell);
+      }
+      rows.push(newRow);
+    }
+    return rvArray(rows);
+  }
+  return isError(val) ? evaluate(args[1], ctx, session) : val;
 }
 
 function evaluateIFNA(
@@ -993,8 +1083,21 @@ function evaluateIFNA(
     return ERRORS.VALUE;
   }
   const val = evalDeref(args[0], ctx, session);
-  const scalar = topLeft(val);
-  return isError(scalar) && scalar.code === "#N/A" ? evaluate(args[1], ctx, session) : val;
+  // Array: element-wise replacement of #N/A with the value-if-na
+  if (val.kind === RVKind.Array) {
+    const replacement = evalDeref(args[1], ctx, session);
+    const replaceScalar = topLeft(replacement);
+    const rows: ScalarValue[][] = [];
+    for (const row of val.rows) {
+      const newRow: ScalarValue[] = [];
+      for (const cell of row) {
+        newRow.push(cell.kind === RVKind.Error && cell.code === "#N/A" ? replaceScalar : cell);
+      }
+      rows.push(newRow);
+    }
+    return rvArray(rows);
+  }
+  return isError(val) && val.code === "#N/A" ? evaluate(args[1], ctx, session) : val;
 }
 
 function evaluateIFS(
@@ -1010,16 +1113,11 @@ function evaluateIFS(
     if (isError(cond)) {
       return cond;
     }
-    if (cond.kind === RVKind.String) {
-      return ERRORS.VALUE;
+    const bool = toBooleanRV(cond);
+    if (isError(bool)) {
+      return bool;
     }
-    const truthy =
-      cond.kind === RVKind.Boolean
-        ? cond.value
-        : cond.kind === RVKind.Number
-          ? cond.value !== 0
-          : false;
-    if (truthy) {
+    if (bool.value) {
       return evaluate(args[i + 1], ctx, session);
     }
   }
@@ -1059,7 +1157,11 @@ function evaluateCHOOSE(
   if (isError(idxVal)) {
     return idxVal;
   }
-  const idx = idxVal.kind === RVKind.Number ? Math.floor(idxVal.value) : 0;
+  const num = toNumberRV(idxVal);
+  if (isError(num)) {
+    return num;
+  }
+  const idx = Math.floor(num.value);
   if (idx < 1 || idx >= args.length) {
     return ERRORS.VALUE;
   }
@@ -1142,7 +1244,7 @@ function evaluateINDIRECT(
 
   // A1 style — parse and bind at runtime
   try {
-    const cacheKey = `__INDIRECT__${refText}`;
+    const cacheKey = `__INDIRECT__${ctx.currentSheet}__${refText}`;
     let bound = ctx.astCache.get(cacheKey);
     if (!bound) {
       const tokens = tokenize(refText);
@@ -1207,7 +1309,7 @@ function evaluateOFFSET(
       return h;
     }
     height = Math.trunc(h.value);
-    if (height <= 0) {
+    if (height === 0) {
       return ERRORS.REF;
     }
   }
@@ -1217,24 +1319,34 @@ function evaluateOFFSET(
       return w;
     }
     width = Math.trunc(w.value);
-    if (width <= 0) {
+    if (width === 0) {
       return ERRORS.REF;
     }
   }
 
-  if (height === 1 && width === 1) {
-    return getCellValue(baseSheet, newRow, newCol, ctx, session);
+  // Resolve range coordinates — negative height/width extend upward/leftward
+  let top = newRow;
+  let bottom = newRow + height - 1;
+  if (height < 0) {
+    top = newRow + height + 1;
+    bottom = newRow;
+  }
+  let left = newCol;
+  let right = newCol + width - 1;
+  if (width < 0) {
+    left = newCol + width + 1;
+    right = newCol;
   }
 
-  return buildRangeArray(
-    ctx,
-    session,
-    baseSheet,
-    newRow,
-    newCol,
-    newRow + height - 1,
-    newCol + width - 1
-  );
+  if (top < 1 || left < 1) {
+    return ERRORS.REF;
+  }
+
+  if (top === bottom && left === right) {
+    return getCellValue(baseSheet, top, left, ctx, session);
+  }
+
+  return buildRangeArray(ctx, session, baseSheet, top, left, bottom, right);
 }
 
 // ============================================================================
@@ -1515,11 +1627,7 @@ function evaluateNameExpr(
 
   // Try snapshot defined name resolution (for formula-based names).
   // Respects scope precedence: sheet-local > workbook-global.
-  const dn = resolveDefinedNameFromSnapshot(
-    ctx.definedNames ?? ctx.snapshot.definedNames,
-    expr.name,
-    ctx.currentSheet
-  );
+  const dn = resolveDefinedNameFromSnapshot(ctx.snapshot.definedNames, expr.name, ctx.currentSheet);
   if (dn && dn.ranges.length > 0) {
     if (dn.ranges.length > 1) {
       return ERRORS.VALUE;
@@ -1540,27 +1648,50 @@ function evaluateNameExpr(
         Math.max(parsed.startCol, parsed.endCol)
       );
     }
-    // Formula expression — parse and evaluate
-    const cacheKey = `__NAME__${expr.upperName}__${ctx.currentSheet}`;
-    const cachedVal = session.nameCache.get(cacheKey);
-    if (cachedVal !== undefined) {
-      return cachedVal;
-    }
-
-    try {
-      const tokens = tokenize(rangeStr);
-      const ast = parse(tokens);
-      const bindCtx: BindingContext = { snapshot: ctx.snapshot, currentSheet: ctx.currentSheet };
-      const bound = bind(ast, bindCtx);
-      const result = evaluate(bound, ctx, session);
-      session.nameCache.set(cacheKey, result);
-      return result;
-    } catch {
-      return ERRORS.NAME;
-    }
+    // Formula expression — parse and evaluate via shared helper
+    const nameResult = evaluateFormulaName(expr.upperName, rangeStr, ctx, session);
+    return nameResult ?? ERRORS.NAME;
   }
 
   return ERRORS.NAME;
+}
+
+// ============================================================================
+// Formula-based Defined Name Evaluation (shared helper)
+// ============================================================================
+
+/**
+ * Evaluate a formula-based defined name expression, with caching.
+ * Cache key includes name + sheet + cell address to handle position-dependent
+ * formulas like ROW()/COLUMN().
+ *
+ * Returns the evaluated result, or undefined if parsing/evaluation fails.
+ */
+function evaluateFormulaName(
+  upperName: string,
+  formulaExpr: string,
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue | undefined {
+  const addr = ctx.currentAddress;
+  const cacheKey = addr
+    ? `__NAME__${upperName}__${ctx.currentSheet}__${addr.row}:${addr.col}`
+    : `__NAME__${upperName}__${ctx.currentSheet}`;
+  const cached = session.nameCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    const tokens = tokenize(formulaExpr);
+    const ast = parse(tokens);
+    const bindCtx: BindingContext = { snapshot: ctx.snapshot, currentSheet: ctx.currentSheet };
+    const bound = bind(ast, bindCtx);
+    const result = evaluate(bound, ctx, session);
+    session.nameCache.set(cacheKey, result);
+    return result;
+  } catch {
+    return undefined;
+  }
 }
 
 // ============================================================================
@@ -1609,15 +1740,13 @@ function evaluateStructuredRef(
         continue;
       }
       for (const t of ws.tables) {
-        const tl = t.topLeft;
+        const g = buildTableGeometry(t);
         const width = t.columns.length;
-        const dataStart = tl.row + (t.hasHeaderRow ? 1 : 0);
-        const dataEnd = dataStart + t.dataRowCount - 1;
         if (
-          addr.row >= dataStart &&
-          addr.row <= dataEnd &&
-          addr.col >= tl.col &&
-          addr.col < tl.col + width
+          addr.row >= g.dataRowStart &&
+          addr.row <= g.dataRowEnd &&
+          addr.col >= t.topLeft.col &&
+          addr.col < t.topLeft.col + width
         ) {
           tableInfo = t;
           tableSheet = ws.name;
@@ -1642,74 +1771,39 @@ function evaluateStructuredRef(
     return ERRORS.REF;
   }
 
-  const tl = tableInfo.topLeft;
-  const width = tableInfo.columns.length;
-  const dataRowStart = tl.row + (tableInfo.hasHeaderRow ? 1 : 0);
-  const dataRowEnd = dataRowStart + tableInfo.dataRowCount - 1;
+  const geo = buildTableGeometry(tableInfo);
 
-  // Determine column range
-  let colLeft = tl.col;
-  let colRight = tl.col + width - 1;
-
-  if (expr.columns.length > 0) {
-    const indices: number[] = [];
-    for (const colName of expr.columns) {
-      const idx = tableInfo.columns.findIndex(c => c.name.toLowerCase() === colName.toLowerCase());
-      if (idx === -1) {
-        return ERRORS.REF;
-      }
-      indices.push(idx);
-    }
-    colLeft = tl.col + Math.min(...indices);
-    colRight = tl.col + Math.max(...indices);
+  // Strict column resolution — unknown column names surface as #REF!
+  const colRange = resolveStructuredRefColumns(expr.columns, tableInfo, "strict");
+  if (colRange === "error") {
+    return ERRORS.REF;
   }
 
-  // Determine row range
-  let rowTop = dataRowStart;
-  let rowBottom = dataRowEnd;
+  const rowRange = resolveStructuredRefRows(expr.specials, geo);
 
-  const hasThisRow = expr.specials.includes("#This Row");
-  const hasHeaders = expr.specials.includes("#Headers");
-  const hasTotalsSpec = expr.specials.includes("#Totals");
-  const hasAll = expr.specials.includes("#All");
-  const hasData = expr.specials.includes("#Data");
-
-  if (hasAll) {
-    rowTop = tl.row;
-    rowBottom = tableInfo.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-  } else if (hasThisRow) {
-    // #This Row — use the current cell's row
+  let rowTop: number;
+  let rowBottom: number;
+  if (rowRange === "error") {
+    return ERRORS.REF;
+  } else if (rowRange === "thisRow") {
     if (addr) {
       rowTop = addr.row;
       rowBottom = addr.row;
-    }
-  } else if (hasHeaders && hasTotalsSpec) {
-    rowTop = tl.row;
-    rowBottom = tableInfo.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-  } else if (hasHeaders) {
-    if (tableInfo.hasHeaderRow) {
-      rowTop = tl.row;
-      rowBottom = tl.row;
-    }
-  } else if (hasTotalsSpec) {
-    if (tableInfo.hasTotalsRow) {
-      rowTop = dataRowEnd + 1;
-      rowBottom = dataRowEnd + 1;
     } else {
-      return ERRORS.REF;
+      return ERRORS.VALUE;
     }
-  } else if (hasData || expr.specials.length === 0) {
-    rowTop = dataRowStart;
-    rowBottom = dataRowEnd;
+  } else {
+    rowTop = rowRange.rowTop;
+    rowBottom = rowRange.rowBottom;
   }
 
   // Single cell — return as single-cell ReferenceValue
-  if (rowTop === rowBottom && colLeft === colRight) {
-    return rvCellRef(tableSheet, rowTop, colLeft);
+  if (rowTop === rowBottom && colRange.colLeft === colRange.colRight) {
+    return rvCellRef(tableSheet, rowTop, colRange.colLeft);
   }
 
   // Range — return as area ReferenceValue
-  return rvRef(tableSheet, rowTop, colLeft, rowBottom, colRight);
+  return rvRef(tableSheet, rowTop, colRange.colLeft, rowBottom, colRange.colRight);
 }
 
 // ============================================================================
@@ -1932,11 +2026,7 @@ function resolveLambdaName(
   }
 
   // Check defined names that resolve to lambdas (via snapshot, scope-aware)
-  const dn = resolveDefinedNameFromSnapshot(
-    ctx.definedNames ?? ctx.snapshot.definedNames,
-    name,
-    ctx.currentSheet
-  );
+  const dn = resolveDefinedNameFromSnapshot(ctx.snapshot.definedNames, name, ctx.currentSheet);
   if (dn && dn.ranges.length === 1) {
     const rangeStr = dn.ranges[0];
     const parsed = parseDefinedNameRange(rangeStr);
@@ -1946,26 +2036,10 @@ function resolveLambdaName(
         return invokeLambda(cellVal, args, ctx, session);
       }
     }
-    // Formula-based name
+    // Formula-based name — evaluate via shared helper
     if (!parsed) {
-      const cacheKey = `__NAME__${name.toUpperCase()}__${ctx.currentSheet}`;
-      let nameVal = session.nameCache.get(cacheKey);
-      if (nameVal === undefined) {
-        try {
-          const tokens = tokenize(rangeStr);
-          const ast = parse(tokens);
-          const bindCtx: BindingContext = {
-            snapshot: ctx.snapshot,
-            currentSheet: ctx.currentSheet
-          };
-          const bound = bind(ast, bindCtx);
-          nameVal = evaluate(bound, ctx, session);
-          session.nameCache.set(cacheKey, nameVal);
-        } catch {
-          return undefined;
-        }
-      }
-      if (isLambda(nameVal)) {
+      const nameVal = evaluateFormulaName(name.toUpperCase(), rangeStr, ctx, session);
+      if (nameVal !== undefined && isLambda(nameVal)) {
         return invokeLambda(nameVal, args, ctx, session);
       }
     }

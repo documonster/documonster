@@ -67,6 +67,12 @@ function infixBindingPower(op: string): [number, number] {
       return [40, 41];
     case "^":
       return [61, 60]; // right-associative
+    // Intersection operator — whitespace between two refs. In Excel
+    // precedence this sits between `:` (range, already handled at the
+    // tokenizer level) and unary +/-. Left-associative, binds tighter
+    // than every arithmetic operator.
+    case " ":
+      return [80, 81];
     default:
       return [0, 0];
   }
@@ -108,6 +114,13 @@ class Parser {
   // Entry point
   parse(): AstNode {
     const node = this.parseExpr(0);
+    // After parsing a complete expression, every token must have been
+    // consumed. Otherwise inputs like "A1:B2:C3" or "1+2 3" would silently
+    // produce an AST that drops the trailing tokens.
+    if (this.pos !== this.tokens.length) {
+      const t = this.tokens[this.pos];
+      throw new Error(`Unexpected trailing token at position ${this.pos} (type ${t.type})`);
+    }
     return node;
   }
 
@@ -139,6 +152,20 @@ class Parser {
         continue;
       }
 
+      // Intersection: whitespace separating two refs. Modelled as a binary
+      // operation with op=" ". The evaluator resolves both sides to refs
+      // and returns their rectangle intersection (or `#NULL!`).
+      if (t.type === TokenType.Intersect) {
+        const [lbp, rbp] = infixBindingPower(" ");
+        if (lbp < minBp) {
+          break;
+        }
+        this.next();
+        const right = this.parseExpr(rbp);
+        left = { type: NodeType.BinaryOp, op: " ", left, right };
+        continue;
+      }
+
       break;
     }
 
@@ -146,6 +173,21 @@ class Parser {
   }
 
   parsePrefix(): AstNode {
+    const result = this.parsePrefixInner();
+    // If the SheetRef consumer below set pendingSheet but the prefix that
+    // followed wasn't a ref (CellRef / Range / ColRange / RowRange), the
+    // sheet qualifier would leak into the next parse and silently attach
+    // itself to an unrelated node. Detect it here.
+    if (this.pendingSheet !== undefined) {
+      const sheet = this.pendingSheet;
+      this.pendingSheet = undefined;
+      this.pendingEndSheet = undefined;
+      throw new Error(`Sheet reference '${sheet}' not followed by a cell or range`);
+    }
+    return result;
+  }
+
+  private parsePrefixInner(): AstNode {
     const t = this.peek();
     if (!t) {
       throw new Error("Unexpected end of formula");
@@ -280,6 +322,13 @@ class Parser {
         columns: t.columns,
         specials: t.specials
       };
+    }
+
+    // External workbook reference (e.g. [Book1]Sheet1!A1). Cross-workbook
+    // references are not supported — the binder lowers this to `#REF!`.
+    if (t.type === TokenType.ExternalRef) {
+      this.next();
+      return { type: NodeType.ExternalRef, text: t.value };
     }
 
     throw new Error(`Unexpected token: ${t.type}`);

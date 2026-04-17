@@ -46,7 +46,7 @@ import {
   type EvalContext
 } from "../runtime/evaluator";
 import type { RuntimeValue } from "../runtime/values";
-import { RVKind, rvNumber, fromSnapshotValue, BLANK, ERRORS } from "../runtime/values";
+import { RVKind, rvNumber, BLANK, ERRORS } from "../runtime/values";
 import type { AstNode } from "../syntax/ast";
 import { parse } from "../syntax/parser";
 import { tokenize } from "../syntax/tokenizer";
@@ -108,7 +108,6 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
 
   // ── Step 4: Compile (Bind) ──
   const compiledMap = new Map<string, CompiledFormula>();
-  const compiledList: CompiledFormula[] = [];
   const results = new Map<string, RuntimeValue>();
   for (const inst of instances) {
     const compiled = compileFormula(inst, astCache, snapshot);
@@ -120,13 +119,62 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
       results.set(key, compiled.reason === "parse" ? ERRORS.NAME : ERRORS.CALC);
     } else {
       compiledMap.set(key, compiled);
-      compiledList.push(compiled);
     }
   }
 
   // ── Step 5: Dependency Analysis + Topological Sort ──
-  // Build the dependency graph directly from compiled formulas' static deps.
-  let graph = buildDependencyGraphFromDeps(compiledMap);
+  // Build a producer map so that formulas depending on cells that are:
+  //   (a) CSE target range slaves, or
+  //   (b) previous-cycle spill ghost cells
+  // correctly get ordered after their producing formula.
+  const producerMap = new Map<string, string>();
+
+  // CSE: distribute targetRef across all slave cells → master key
+  for (const [masterKey, cf] of compiledMap) {
+    const inst = cf.instance;
+    if (inst.kind === "cse" && inst.targetRef) {
+      const rng = parseRefRange(inst.targetRef);
+      if (rng) {
+        for (let r = rng.top; r <= rng.bottom; r++) {
+          for (let c = rng.left; c <= rng.right; c++) {
+            const slaveKey = formulaCellKey(inst.sheetName, r, c);
+            if (slaveKey !== masterKey) {
+              producerMap.set(slaveKey, masterKey);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Dynamic array spill: use previous-cycle spill regions as static hint.
+  // The actual spill may differ this cycle, but this covers the common case
+  // of a formula that reads a stable spill target.
+  const persistentSpills = getPersistentSpillMap(workbook);
+  for (const [, region] of persistentSpills) {
+    const ws = snapshot.worksheetsById.get(region.worksheetId);
+    if (!ws) {
+      continue;
+    }
+    const masterKey = formulaCellKey(ws.name, region.sourceRow, region.sourceCol);
+    if (!compiledMap.has(masterKey)) {
+      continue; // source formula no longer exists
+    }
+    for (let r = 0; r < region.rows; r++) {
+      for (let c = 0; c < region.cols; c++) {
+        if (r === 0 && c === 0) {
+          continue; // skip source
+        }
+        const ghostKey = formulaCellKey(ws.name, region.sourceRow + r, region.sourceCol + c);
+        if (!producerMap.has(ghostKey)) {
+          producerMap.set(ghostKey, masterKey);
+        }
+      }
+    }
+  }
+
+  // Build the dependency graph with producer remapping.
+  let graph = buildDependencyGraphFromDeps(compiledMap, producerMap);
   let evalOrder = topologicalSort(graph);
 
   // ── Step 6: Evaluate ──
@@ -136,8 +184,7 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
     snapshot,
     compiledFormulas: compiledMap,
     astCache: indirectCache,
-    currentSheet: snapshot.worksheets[0]?.name ?? "",
-    definedNames: snapshot.definedNames
+    currentSheet: snapshot.worksheets[0]?.name ?? ""
   };
 
   // Evaluate in topological order
@@ -150,6 +197,7 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
   if (session.dynamicDeps.size > 0) {
     const mergeResult = mergeDynamicDeps(graph, session.dynamicDeps);
     if (mergeResult.changed) {
+      const prevCircularKeys = graph.circularKeys;
       graph = mergeResult.graph;
       evalOrder = topologicalSort(graph);
 
@@ -161,6 +209,13 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
         if (!toClear.has(formulaKey)) {
           toClear.add(formulaKey);
           queue.push(formulaKey);
+        }
+      }
+      // If the merge introduced new circular refs, include all new members too
+      for (const key of graph.circularKeys) {
+        if (!prevCircularKeys.has(key) && !toClear.has(key)) {
+          toClear.add(key);
+          queue.push(key);
         }
       }
       // BFS through reverse edges to find all transitive dependents
@@ -182,6 +237,8 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
         session.resultCache.delete(key);
         results.delete(key);
       }
+      // Formula-based name results may depend on cell values that just changed
+      session.nameCache.clear();
 
       // Re-evaluate the full order (evaluateInOrder skips already-computed cells)
       evaluateInOrder(evalOrder, compiledMap, results, ctx, session);
@@ -250,6 +307,34 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
     }
 
     session.circularFallback.clear();
+
+    // Re-evaluate non-circular cells that depend (transitively) on circular cells,
+    // since they were initially computed with stale fallback values.
+    const circularKeySet = new Set(circularKeys);
+    const affectedDownstream = new Set<string>();
+    const queue: string[] = [...circularKeys];
+    let head = 0;
+    while (head < queue.length) {
+      const key = queue[head++];
+      const deps = graph.dependedBy.get(key);
+      if (deps) {
+        for (const depKey of deps) {
+          if (!circularKeySet.has(depKey) && !affectedDownstream.has(depKey)) {
+            affectedDownstream.add(depKey);
+            queue.push(depKey);
+          }
+        }
+      }
+    }
+    if (affectedDownstream.size > 0) {
+      for (const key of affectedDownstream) {
+        session.resultCache.delete(key);
+        results.delete(key);
+      }
+      // Clear name cache — formula-based names may depend on circular cell values
+      session.nameCache.clear();
+      evaluateInOrder(evalOrder, compiledMap, results, ctx, session);
+    }
   }
 
   // ── Step 7: Materialize (Build Writeback Plan) ──
@@ -258,18 +343,11 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
 
   const plan = buildWritebackPlan(
     snapshot,
-    compiledList,
+    [...compiledMap.values()],
     results,
-    session,
     previousSpills,
     previousGhosts
   );
-
-  // Apply CSE session updates
-  for (const [key, val] of plan.sessionDelta.cseUpdates) {
-    const sv = fromSnapshotValue(val);
-    session.resultCache.set(key, { scalar: sv, raw: sv });
-  }
 
   // ── Step 8: Apply ──
   applyWritebackPlan(workbook, plan);
@@ -461,7 +539,6 @@ function cleanupStaleSpillsIfNeeded(workbook: WorkbookLike, snapshot: WorkbookSn
     snapshot,
     [],
     new Map(),
-    new EvalSession(),
     previousSpills,
     getGhostSnapshots(workbook)
   );

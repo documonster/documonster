@@ -45,6 +45,9 @@ export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
   const resultRows: ScalarValue[][] = [];
   for (let r = 0; r < dataArr.height; r++) {
     const inc = r < includeArr.height ? getCell(includeArr, r, 0) : BLANK;
+    if (inc.kind === RVKind.Error) {
+      return inc;
+    }
     if (
       (inc.kind === RVKind.Boolean && inc.value) ||
       (inc.kind === RVKind.Number && inc.value !== 0)

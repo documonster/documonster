@@ -15,6 +15,7 @@ import type { DefinedNameSnapshot, WorkbookSnapshot } from "../integration/workb
 import { resolveDefinedName as resolveDefinedNameFromSnapshot } from "../integration/workbook-snapshot";
 import type { AstNode, CellRefNode, RangeRefNode } from "../syntax/ast";
 import { NodeType } from "../syntax/ast";
+import { stripFunctionPrefix } from "../syntax/token-types";
 import { colLetterToNumber, parseDefinedNameRange } from "./address-utils";
 import type { BoundExpr, SpecialFormName } from "./bound-ast";
 import {
@@ -27,6 +28,11 @@ import {
   boundNameExpr,
   boundSpecialCall
 } from "./bound-ast";
+import {
+  resolveStructuredRefRows,
+  buildTableGeometry,
+  resolveStructuredRefColumns
+} from "./structured-ref-utils";
 
 // ============================================================================
 // Binding Context
@@ -59,31 +65,18 @@ const SPECIAL_FORMS = new Set<string>([
   "INDIRECT",
   "OFFSET",
   "MAP",
-  "_XLFN.MAP",
   "REDUCE",
-  "_XLFN.REDUCE",
   "SCAN",
-  "_XLFN.SCAN",
   "MAKEARRAY",
-  "_XLFN.MAKEARRAY",
   "BYROW",
-  "_XLFN.BYROW",
-  "BYCOL",
-  "_XLFN.BYCOL"
+  "BYCOL"
 ]);
 
 /**
  * Map prefixed names to their canonical special form name.
  */
 function canonicalSpecialForm(name: string): SpecialFormName | undefined {
-  // Strip _XLFN. and _XLFN._XLWS. prefixes
-  let canonical = name;
-  if (canonical.startsWith("_XLFN._XLWS.")) {
-    canonical = canonical.slice(13);
-  } else if (canonical.startsWith("_XLFN.")) {
-    canonical = canonical.slice(6);
-  }
-
+  const canonical = stripFunctionPrefix(name);
   if (SPECIAL_FORMS.has(canonical)) {
     return canonical as SpecialFormName;
   }
@@ -165,6 +158,12 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
     case NodeType.StructuredRef:
       return bindStructuredRef(node.tableName, node.columns, node.specials, ctx);
 
+    case NodeType.ExternalRef:
+      // External workbook references (e.g. [Book1]Sheet1!A1) are recognised
+      // but unsupported — lower to `#REF!` at compile time so the runtime
+      // simply surfaces the error.
+      return boundErrorLiteral("#REF!");
+
     default: {
       const _: never = node;
       return boundErrorLiteral("#VALUE!");
@@ -242,6 +241,26 @@ function bindColRangeRef(
   const leftCol = Math.min(startCol, endCol);
   const rightCol = Math.max(startCol, endCol);
 
+  // Validate sheet exists
+  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+    return boundErrorLiteral("#REF!");
+  }
+
+  // 3D col range: Sheet1:Sheet3!A:B
+  if (node.endSheet) {
+    const sheets = getSheetsInRange(ctx.snapshot, sheet, node.endSheet);
+    if (!sheets) {
+      return boundErrorLiteral("#REF!");
+    }
+    // Return Ref3D wrapping an area for the full column range
+    const inner = boundAreaRef(sheets[0], 1, leftCol, 1_048_576, rightCol);
+    return {
+      kind: BoundExprKind.Ref3D,
+      sheets,
+      inner
+    };
+  }
+
   return {
     kind: BoundExprKind.ColRangeRef,
     sheet,
@@ -257,6 +276,25 @@ function bindRowRangeRef(
   const sheet = node.sheet ?? ctx.currentSheet;
   const topRow = Math.min(node.startRow, node.endRow);
   const bottomRow = Math.max(node.startRow, node.endRow);
+
+  // Validate sheet exists
+  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+    return boundErrorLiteral("#REF!");
+  }
+
+  // 3D row range: Sheet1:Sheet3!1:5
+  if (node.endSheet) {
+    const sheets = getSheetsInRange(ctx.snapshot, sheet, node.endSheet);
+    if (!sheets) {
+      return boundErrorLiteral("#REF!");
+    }
+    const inner = boundAreaRef(sheets[0], topRow, 1, bottomRow, 16_384);
+    return {
+      kind: BoundExprKind.Ref3D,
+      sheets,
+      inner
+    };
+  }
 
   return {
     kind: BoundExprKind.RowRangeRef,
@@ -399,72 +437,33 @@ function resolveStructuredRefBounds(
   specials: string[]
 ): { sheet: string; top: number; left: number; bottom: number; right: number } | null {
   const t = tw.table;
-  const tl = t.topLeft;
-  const width = t.columns.length;
-  const dataRowStart = tl.row + (t.hasHeaderRow ? 1 : 0);
-  const dataRowEnd = dataRowStart + t.dataRowCount - 1;
+  const geo = buildTableGeometry(t);
 
-  // Determine column range
-  let colLeft = tl.col;
-  let colRight = tl.col + width - 1;
-
-  if (columns.length > 0) {
-    const indices: number[] = [];
-    for (const colName of columns) {
-      const idx = t.columns.findIndex(c => c.name.toLowerCase() === colName.toLowerCase());
-      if (idx === -1) {
-        return null;
-      }
-      indices.push(idx);
-    }
-    colLeft = tl.col + Math.min(...indices);
-    colRight = tl.col + Math.max(...indices);
+  const colRange = resolveStructuredRefColumns(columns, t, "strict");
+  if (colRange === "error") {
+    return null;
   }
 
-  // Determine row range based on specials
-  let rowTop = dataRowStart;
-  let rowBottom = dataRowEnd;
-
-  const hasThisRow = specials.includes("#This Row");
-  const hasHeaders = specials.includes("#Headers");
-  const hasTotalsSpec = specials.includes("#Totals");
-  const hasAll = specials.includes("#All");
-  const hasData = specials.includes("#Data");
-
-  if (hasAll) {
-    rowTop = tl.row;
-    rowBottom = t.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-  } else if (hasThisRow) {
-    // #This Row requires runtime context — we can't resolve it statically
-    // Return the data range and let the evaluator apply implicit intersection
-    rowTop = dataRowStart;
-    rowBottom = dataRowEnd;
-  } else if (hasHeaders && hasTotalsSpec) {
-    rowTop = tl.row;
-    rowBottom = t.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-  } else if (hasHeaders) {
-    if (t.hasHeaderRow) {
-      rowTop = tl.row;
-      rowBottom = tl.row;
-    }
-  } else if (hasTotalsSpec) {
-    if (t.hasTotalsRow) {
-      rowTop = dataRowEnd + 1;
-      rowBottom = dataRowEnd + 1;
-    } else {
-      return null;
-    }
-  } else if (hasData || specials.length === 0) {
-    rowTop = dataRowStart;
-    rowBottom = dataRowEnd;
+  const rowRange = resolveStructuredRefRows(specials, geo);
+  let rowTop: number;
+  let rowBottom: number;
+  if (rowRange === "error") {
+    return null;
+  } else if (rowRange === "thisRow") {
+    // #This Row requires runtime context — use data range as static fallback
+    rowTop = geo.dataRowStart;
+    rowBottom = geo.dataRowEnd;
+  } else {
+    rowTop = rowRange.rowTop;
+    rowBottom = rowRange.rowBottom;
   }
 
   return {
     sheet: tw.sheetName,
     top: rowTop,
-    left: colLeft,
+    left: colRange.colLeft,
     bottom: rowBottom,
-    right: colRight
+    right: colRange.colRight
   };
 }
 

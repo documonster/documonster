@@ -27,7 +27,6 @@ import {
   spillCellKeyFromId,
   formulaCellKey
 } from "../integration/workbook-snapshot";
-import type { EvalSession } from "../runtime/evaluator";
 import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
 import { RVKind } from "../runtime/values";
 import type {
@@ -73,7 +72,6 @@ type GhostMap = Map<string, string>;
  * @param snapshot - The workbook snapshot
  * @param compiled - All compiled formulas in evaluation order
  * @param results - Raw evaluation results, keyed by formula cell key
- * @param session - The eval session (for cache access)
  * @param previousSpills - Persistent spill regions from previous calculation
  * @param previousGhosts - Persistent ghost snapshots from previous calculation
  */
@@ -81,7 +79,6 @@ export function buildWritebackPlan(
   snapshot: WorkbookSnapshot,
   compiled: readonly CompiledFormula[],
   results: ReadonlyMap<string, RuntimeValue>,
-  session: EvalSession,
   previousSpills: ReadonlyMap<string, SpillRegionInfo>,
   previousGhosts: ReadonlyMap<string, unknown>
 ): WritebackPlan {
@@ -89,7 +86,6 @@ export function buildWritebackPlan(
   const spillRegions = new Map<string, SpillRegionInfo>();
   const ghostSnapshots = new Map<string, SnapshotCellValue>();
   const removedSpillKeys: string[] = [];
-  const cseSessionUpdates = new Map<string, SnapshotCellValue>();
 
   // Build a set of current formula cell keys (using worksheet-id-based keys)
   const formulaKeys = new Set<string>();
@@ -123,17 +119,16 @@ export function buildWritebackPlan(
   // Clean up stale spill regions (source formula no longer exists)
   for (const [srcKey, region] of previousSpills) {
     if (!formulaKeys.has(srcKey)) {
-      const cleanupCells = collectStaleGhosts(region, previousGhosts, snapshot);
-      if (cleanupCells.length > 0) {
-        const ws = snapshot.worksheetsById.get(region.worksheetId);
-        if (ws) {
-          operations.push({
-            type: "cleanup",
-            sheetName: ws.name,
-            sheetId: region.worksheetId,
-            cells: cleanupCells
-          } satisfies CleanupWrite);
-        }
+      const ws = snapshot.worksheetsById.get(region.worksheetId);
+      if (ws) {
+        emitPreviousSpillCleanup(
+          region,
+          previousGhosts,
+          snapshot,
+          operations,
+          ws.name,
+          region.worksheetId
+        );
       }
       removedSpillKeys.push(srcKey);
     }
@@ -153,7 +148,7 @@ export function buildWritebackPlan(
 
     if (isCSE) {
       // CSE array formula
-      const op = buildCSEWrite(inst, result, session, cseSessionUpdates);
+      const op = buildCSEWrite(inst, result);
       if (op) {
         operations.push(op);
       }
@@ -196,18 +191,14 @@ export function buildWritebackPlan(
       const srcKey = spillCellKeyFromId(inst.sheetId, inst.row, inst.col);
       const prevRegion = previousSpills.get(srcKey);
       if (prevRegion) {
-        const cleanupCells = collectStaleGhosts(prevRegion, previousGhosts, snapshot);
-        if (cleanupCells.length > 0) {
-          const ws = snapshot.worksheetsById.get(inst.sheetId);
-          if (ws) {
-            operations.push({
-              type: "cleanup",
-              sheetName: ws.name,
-              sheetId: inst.sheetId,
-              cells: cleanupCells
-            } satisfies CleanupWrite);
-          }
-        }
+        emitPreviousSpillCleanup(
+          prevRegion,
+          previousGhosts,
+          snapshot,
+          operations,
+          inst.sheetName,
+          inst.sheetId
+        );
         removedSpillKeys.push(srcKey);
       }
 
@@ -236,9 +227,6 @@ export function buildWritebackPlan(
       spillRegions,
       ghostSnapshots,
       removedSpillKeys
-    },
-    sessionDelta: {
-      cseUpdates: cseSessionUpdates
     }
   };
 }
@@ -247,12 +235,7 @@ export function buildWritebackPlan(
 // CSE Write
 // ============================================================================
 
-function buildCSEWrite(
-  inst: FormulaInstance,
-  result: RuntimeValue,
-  session: EvalSession,
-  cseUpdates: Map<string, SnapshotCellValue>
-): CSEWrite | null {
+function buildCSEWrite(inst: FormulaInstance, result: RuntimeValue): CSEWrite | null {
   const ref = inst.targetRef;
   if (!ref) {
     return null;
@@ -271,11 +254,7 @@ function buildCSEWrite(
       const row: SnapshotCellValue[] = [];
       for (let c = 0; c < numCols; c++) {
         const val = result.rows[r]?.[c] ?? { kind: RVKind.Blank };
-        const sv = runtimeToSnapshotValue(val);
-        row.push(sv);
-        // Update session cache for CSE cells
-        const cellKey = formulaCellKey(inst.sheetName, range.top + r, range.left + c);
-        cseUpdates.set(cellKey, sv);
+        row.push(runtimeToSnapshotValue(val));
       }
       results.push(row);
     }
@@ -292,14 +271,6 @@ function buildCSEWrite(
 
   // Scalar fill
   const scalarVal = runtimeToSnapshotValue(scalarFromResult(result));
-  const numRows = range.bottom - range.top + 1;
-  const numCols = range.right - range.left + 1;
-  for (let r = 0; r < numRows; r++) {
-    for (let c = 0; c < numCols; c++) {
-      const cellKey = formulaCellKey(inst.sheetName, range.top + r, range.left + c);
-      cseUpdates.set(cellKey, scalarVal);
-    }
-  }
   return {
     type: "cse",
     sheetName: inst.sheetName,
@@ -346,15 +317,14 @@ function buildSpillWrite(
     } satisfies ScalarWrite);
     // Clean up previous spill if any
     if (previousRegion) {
-      const cleanups = collectStaleGhosts(previousRegion, previousGhosts, snapshot);
-      if (cleanups.length > 0) {
-        operations.push({
-          type: "cleanup",
-          sheetName: inst.sheetName,
-          sheetId: inst.sheetId,
-          cells: cleanups
-        } satisfies CleanupWrite);
-      }
+      emitPreviousSpillCleanup(
+        previousRegion,
+        previousGhosts,
+        snapshot,
+        operations,
+        inst.sheetName,
+        inst.sheetId
+      );
     }
     return "ok";
   }
@@ -369,12 +339,13 @@ function buildSpillWrite(
       const targetCol = inst.col + c;
       const targetKey = spillCellKeyFromId(inst.sheetId, targetRow, targetCol);
 
-      // Check if the cell is a ghost from a previous spill of this same formula
-      if (ghostMap.has(targetKey) && ghostMap.get(targetKey) === srcKey) {
-        // It's our own ghost — check if user has modified it
+      // Check if the cell is a ghost from ANY previous spill.
+      // If the user hasn't modified it, it's safe to overwrite — the
+      // originating formula will clean it up (or we'll overwrite it).
+      if (ghostMap.has(targetKey)) {
         const cell = ws.cells.get(snapshotCellKey(targetRow, targetCol));
         if (!isGhostUnmodified(cell, targetKey, previousGhosts)) {
-          return "error"; // User wrote into our ghost → #SPILL!
+          return "error"; // User wrote into a ghost → #SPILL!
         }
         continue;
       }
@@ -394,15 +365,14 @@ function buildSpillWrite(
 
   // Clean up previous spill region if size changed
   if (previousRegion) {
-    const cleanups = collectStaleGhosts(previousRegion, previousGhosts, snapshot);
-    if (cleanups.length > 0) {
-      operations.push({
-        type: "cleanup",
-        sheetName: inst.sheetName,
-        sheetId: inst.sheetId,
-        cells: cleanups
-      } satisfies CleanupWrite);
-    }
+    emitPreviousSpillCleanup(
+      previousRegion,
+      previousGhosts,
+      snapshot,
+      operations,
+      inst.sheetName,
+      inst.sheetId
+    );
   }
 
   // Build spill write operation
@@ -473,6 +443,36 @@ function collectStaleGhosts(
     }
   }
   return cells;
+}
+
+/**
+ * Emit a cleanup operation for a previous spill region whose ghosts are
+ * still unmodified.
+ *
+ * Collects the stale ghost cells and, if any remain, pushes a single
+ * `CleanupWrite` onto `operations`. The caller is responsible for
+ * updating `removedSpillKeys` / `spillRegions` as appropriate for its
+ * situation (this helper deliberately does not touch them since the
+ * three callsites have slightly different follow-up actions).
+ */
+function emitPreviousSpillCleanup(
+  previousRegion: SpillRegionInfo,
+  previousGhosts: ReadonlyMap<string, unknown>,
+  snapshot: WorkbookSnapshot,
+  operations: WriteOperation[],
+  sheetName: string,
+  sheetId: number
+): void {
+  const cleanupCells = collectStaleGhosts(previousRegion, previousGhosts, snapshot);
+  if (cleanupCells.length === 0) {
+    return;
+  }
+  operations.push({
+    type: "cleanup",
+    sheetName,
+    sheetId,
+    cells: cleanupCells
+  } satisfies CleanupWrite);
 }
 
 function isGhostUnmodified(

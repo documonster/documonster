@@ -14,6 +14,7 @@ import {
   ERRORS,
   rvNumber,
   rvString,
+  rvArray,
   toNumberRV,
   toStringRV,
   topLeft,
@@ -334,13 +335,14 @@ export const fnSUMPRODUCT: NativeFunction = args => {
   if (args.length === 0) {
     return ERRORS.VALUE;
   }
-  // All args must be arrays of the same dimensions
+  // Promote scalar args to 1x1 arrays (Excel behavior)
   const arrays: ArrayValue[] = [];
   for (const a of args) {
-    if (!isArray(a)) {
-      return ERRORS.VALUE;
+    if (isArray(a)) {
+      arrays.push(a);
+    } else {
+      arrays.push(rvArray([[topLeft(a)]]));
     }
-    arrays.push(a);
   }
   const rows = arrays[0].height;
   const cols = arrays[0].width;
@@ -732,7 +734,11 @@ export const fnBASE: NativeFunction = args => {
 };
 
 export const fnDECIMAL: NativeFunction = args => {
-  const text = toStringRV(topLeft(args[0]));
+  const e = topLeft(args[0]);
+  if (e.kind === RVKind.Error) {
+    return e;
+  }
+  const text = toStringRV(e);
   const radix = argToNumber(args[1]);
   if (isError(radix)) {
     return radix;
@@ -772,7 +778,11 @@ export const fnROMAN: NativeFunction = args => {
 };
 
 export const fnARABIC: NativeFunction = args => {
-  const text = toStringRV(topLeft(args[0])).toUpperCase().trim();
+  const s = topLeft(args[0]);
+  if (s.kind === RVKind.Error) {
+    return s;
+  }
+  const text = toStringRV(s).toUpperCase().trim();
   if (text === "") {
     return rvNumber(0);
   }
@@ -804,43 +814,88 @@ export const fnRADIANS: NativeFunction = args => {
 };
 
 export const fnSUMX2MY2: NativeFunction = args => {
-  if (!isArray(args[0]) || !isArray(args[1])) {
+  const a0 = args[0],
+    a1 = args[1];
+  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
-  const xs = flattenNumbers([args[0]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const ys = flattenNumbers([args[1]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const n = Math.min(xs.length, ys.length);
   let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += xs[i].value * xs[i].value - ys[i].value * ys[i].value;
+  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
+    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
+      const x = a0.rows[r]?.[c];
+      const y = a1.rows[r]?.[c];
+      if (!x || !y) {
+        continue;
+      }
+      if (x.kind === RVKind.Error) {
+        return x;
+      }
+      if (y.kind === RVKind.Error) {
+        return y;
+      }
+      if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
+        continue;
+      }
+      sum += x.value * x.value - y.value * y.value;
+    }
   }
   return rvNumber(sum);
 };
 
 export const fnSUMX2PY2: NativeFunction = args => {
-  if (!isArray(args[0]) || !isArray(args[1])) {
+  const a0 = args[0],
+    a1 = args[1];
+  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
-  const xs = flattenNumbers([args[0]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const ys = flattenNumbers([args[1]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const n = Math.min(xs.length, ys.length);
   let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += xs[i].value * xs[i].value + ys[i].value * ys[i].value;
+  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
+    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
+      const x = a0.rows[r]?.[c];
+      const y = a1.rows[r]?.[c];
+      if (!x || !y) {
+        continue;
+      }
+      if (x.kind === RVKind.Error) {
+        return x;
+      }
+      if (y.kind === RVKind.Error) {
+        return y;
+      }
+      if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
+        continue;
+      }
+      sum += x.value * x.value + y.value * y.value;
+    }
   }
   return rvNumber(sum);
 };
 
 export const fnSUMXMY2: NativeFunction = args => {
-  if (!isArray(args[0]) || !isArray(args[1])) {
+  const a0 = args[0],
+    a1 = args[1];
+  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
-  const xs = flattenNumbers([args[0]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const ys = flattenNumbers([args[1]]).filter((v): v is NumberValue => v.kind === RVKind.Number);
-  const n = Math.min(xs.length, ys.length);
   let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += (xs[i].value - ys[i].value) ** 2;
+  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
+    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
+      const x = a0.rows[r]?.[c];
+      const y = a1.rows[r]?.[c];
+      if (!x || !y) {
+        continue;
+      }
+      if (x.kind === RVKind.Error) {
+        return x;
+      }
+      if (y.kind === RVKind.Error) {
+        return y;
+      }
+      if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
+        continue;
+      }
+      sum += (x.value - y.value) ** 2;
+    }
   }
   return rvNumber(sum);
 };

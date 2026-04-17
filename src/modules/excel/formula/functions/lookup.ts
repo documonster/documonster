@@ -163,6 +163,9 @@ export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
 
 export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.NA;
   }
@@ -264,6 +267,9 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
 
 export function fnVLOOKUP(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.NA;
   }
@@ -323,6 +329,9 @@ export function fnVLOOKUP(args: RuntimeValue[]): RuntimeValue {
 
 export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.NA;
   }
@@ -359,9 +368,7 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
       // For approximate match, find largest <= lookupValue
       if (scalarIsNumber(hv) && scalarIsNumber(lookupValue)) {
         if (hv.value <= lookupValue.value) {
-          if (bestCol === -1 || getCell(table, 0, hv.value as never) !== undefined) {
-            bestCol = c;
-          }
+          bestCol = c;
         }
       } else if (scalarIsString(hv) && scalarIsString(lookupValue)) {
         if (hv.value.toLowerCase() <= lookupValue.value.toLowerCase()) {
@@ -375,6 +382,9 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
 
 export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.VALUE;
   }
@@ -521,6 +531,9 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
 
 export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.VALUE;
   }
@@ -660,6 +673,9 @@ export function fnADDRESS(args: RuntimeValue[]): RuntimeValue {
 
 export function fnLOOKUP(args: RuntimeValue[]): RuntimeValue {
   const lookupValue = topLeft(args[0]);
+  if (lookupValue.kind === RVKind.Error) {
+    return lookupValue;
+  }
   if (!isArray(args[1])) {
     return ERRORS.NA;
   }

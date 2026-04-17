@@ -137,6 +137,10 @@ function expandRefsToKeys(
  * the binder, the dependency edges are complete.
  *
  * @param compiled - Map from formula cell key to compiled formula with static deps
+ * @param producerMap - Optional map from cell key → formula key that produces
+ *   that cell's value (via CSE distribution or dynamic-array spill). Allows
+ *   dependency edges to be added to the producer even when the target cell
+ *   isn't itself a formula.
  * @returns The complete dependency graph
  */
 export function buildDependencyGraphFromDeps(
@@ -154,7 +158,8 @@ export function buildDependencyGraphFromDeps(
         }[];
       };
     }
-  >
+  >,
+  producerMap?: ReadonlyMap<string, string>
 ): DependencyGraph {
   // Build a lookup of all formula cell coordinates for range intersection
   const formulaKeySet = new Set<string>();
@@ -200,6 +205,34 @@ export function buildDependencyGraphFromDeps(
 
     // Expand to concrete cell keys
     const depKeys = expandRefsToKeys(refs, formulaKeySet, formulaCellCoords);
+
+    // Remap producer keys: if a dep points to a cell that's not a formula
+    // but IS produced by another formula (CSE target or spill target),
+    // depend on the producer instead.
+    if (producerMap && producerMap.size > 0) {
+      const remapped = new Set<string>();
+      for (const depKey of depKeys) {
+        if (!formulaKeySet.has(depKey)) {
+          const producer = producerMap.get(depKey);
+          if (producer) {
+            remapped.add(producer);
+            continue;
+          }
+        }
+        remapped.add(depKey);
+      }
+      dependsOn.set(key, remapped);
+      for (const depKey of remapped) {
+        let set = dependedBy.get(depKey);
+        if (!set) {
+          set = new Set();
+          dependedBy.set(depKey, set);
+        }
+        set.add(key);
+      }
+      continue;
+    }
+
     dependsOn.set(key, depKeys);
 
     // Build reverse index
@@ -303,77 +336,110 @@ export function mergeDynamicDeps(
 // ============================================================================
 
 /**
- * Detect circular references using iterative DFS with three-color marking.
- * Returns the set of formula keys involved in cycles.
+ * Detect circular references using Tarjan's SCC algorithm.
+ *
+ * A formula is "circular" if it belongs to a strongly connected component
+ * of size > 1, or if it has a direct self-loop (A = f(A)).
+ *
+ * This correctly identifies ALL nodes in cycles, including nodes reachable
+ * only through cross-edges to already-visited SCC members — a case that
+ * a simple 3-color DFS misses (e.g. diamond cycles like A→B→C→A plus A→D→C).
  */
 function detectCircularRefs(
   formulaKeys: readonly string[],
   dependsOn: ReadonlyMap<string, ReadonlySet<string>>
 ): { circularKeys: Set<string> } {
-  const WHITE = 0; // Not visited
-  const GRAY = 1; // On current DFS path (in stack)
-  const BLACK = 2; // Fully processed
-
-  const color = new Map<string, number>();
   const circularKeys = new Set<string>();
 
-  // Initialize all formula keys as WHITE
-  for (const key of formulaKeys) {
-    color.set(key, WHITE);
+  // Tarjan's iterative SCC
+  const index = new Map<string, number>();
+  const lowlink = new Map<string, number>();
+  const onStack = new Set<string>();
+  const sccStack: string[] = [];
+  let nextIndex = 0;
+
+  // DFS frame: [key, iterator, processingChild]
+  // processingChild holds the key we just recursed into, so we can update
+  // lowlink when we come back up.
+  interface Frame {
+    key: string;
+    iter: Iterator<string>;
+    pendingChild: string | null;
   }
 
   for (const startKey of formulaKeys) {
-    if (color.get(startKey) !== WHITE) {
+    if (index.has(startKey)) {
       continue;
     }
 
-    // Iterative DFS using an explicit stack.
-    const stack: [string, Iterator<string> | null, boolean][] = [[startKey, null, true]];
+    const dfsStack: Frame[] = [];
+    index.set(startKey, nextIndex);
+    lowlink.set(startKey, nextIndex);
+    nextIndex++;
+    sccStack.push(startKey);
+    onStack.add(startKey);
+    dfsStack.push({
+      key: startKey,
+      iter: (dependsOn.get(startKey) ?? new Set<string>())[Symbol.iterator](),
+      pendingChild: null
+    });
 
-    while (stack.length > 0) {
-      const frame = stack[stack.length - 1];
-      const [key, , entering] = frame;
+    while (dfsStack.length > 0) {
+      const frame = dfsStack[dfsStack.length - 1];
 
-      if (entering) {
-        frame[2] = false;
-
-        if (color.get(key) === BLACK) {
-          stack.pop();
-          continue;
-        }
-
-        color.set(key, GRAY);
-        const deps = dependsOn.get(key);
-        frame[1] = deps ? deps[Symbol.iterator]() : null;
+      // If we just returned from a child, update our lowlink
+      if (frame.pendingChild !== null) {
+        const childLow = lowlink.get(frame.pendingChild)!;
+        lowlink.set(frame.key, Math.min(lowlink.get(frame.key)!, childLow));
+        frame.pendingChild = null;
       }
 
-      // Process next dependency
-      const iter = frame[1];
-      if (iter) {
-        const next = iter.next();
-        if (!next.done) {
-          const depKey = next.value;
-          const depColor = color.get(depKey);
+      const next = frame.iter.next();
+      if (next.done) {
+        // Finished processing all children — check if this is an SCC root
+        if (lowlink.get(frame.key) === index.get(frame.key)) {
+          const scc: string[] = [];
+          let node: string;
+          do {
+            node = sccStack.pop()!;
+            onStack.delete(node);
+            scc.push(node);
+          } while (node !== frame.key);
 
-          if (depColor === GRAY) {
-            // Back edge — cycle detected
-            circularKeys.add(depKey);
-            for (let i = stack.length - 1; i >= 0; i--) {
-              circularKeys.add(stack[i][0]);
-              if (stack[i][0] === depKey) {
-                break;
-              }
+          // Mark as circular if SCC has > 1 node, OR if it's a self-loop
+          const hasSelfLoop = scc.length === 1 && dependsOn.get(scc[0])?.has(scc[0]);
+          if (scc.length > 1 || hasSelfLoop) {
+            for (const k of scc) {
+              circularKeys.add(k);
             }
-          } else if (depColor === WHITE) {
-            stack.push([depKey, null, true]);
           }
-          continue;
         }
+        dfsStack.pop();
+        // Record returning to parent so it can update its lowlink
+        if (dfsStack.length > 0) {
+          dfsStack[dfsStack.length - 1].pendingChild = frame.key;
+        }
+        continue;
       }
 
-      // All deps processed — mark BLACK and pop
-      color.set(key, BLACK);
-      stack.pop();
+      const depKey = next.value;
+      if (!index.has(depKey)) {
+        // Unvisited — push new frame
+        index.set(depKey, nextIndex);
+        lowlink.set(depKey, nextIndex);
+        nextIndex++;
+        sccStack.push(depKey);
+        onStack.add(depKey);
+        dfsStack.push({
+          key: depKey,
+          iter: (dependsOn.get(depKey) ?? new Set<string>())[Symbol.iterator](),
+          pendingChild: null
+        });
+      } else if (onStack.has(depKey)) {
+        // Back edge — update lowlink with dep's index
+        lowlink.set(frame.key, Math.min(lowlink.get(frame.key)!, index.get(depKey)!));
+      }
+      // Cross edge to fully-processed SCC: skip (correct Tarjan behavior)
     }
   }
 

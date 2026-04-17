@@ -24,8 +24,14 @@ import type { FormulaInstance } from "../integration/formula-instance";
 import type { ResolvedTable, WorkbookSnapshot } from "../integration/workbook-snapshot";
 import type { AstNode } from "../syntax/ast";
 import { NodeType } from "../syntax/ast";
+import { stripFunctionPrefix } from "../syntax/token-types";
 import type { BoundExpr } from "./bound-ast";
 import { BoundExprKind } from "./bound-ast";
+import {
+  resolveStructuredRefRows,
+  buildTableGeometry,
+  resolveStructuredRefColumns
+} from "./structured-ref-utils";
 
 // ============================================================================
 // CompiledFormula
@@ -229,56 +235,33 @@ function walkDeps(
         const resolved = tablesByName.get(expr.tableName.toLowerCase());
         if (resolved) {
           const t = resolved.table;
-          const tl = t.topLeft;
-          const width = t.columns.length;
-          const dataRowStart = tl.row + (t.hasHeaderRow ? 1 : 0);
-          const dataRowEnd = dataRowStart + t.dataRowCount - 1;
+          const geo = buildTableGeometry(t);
 
-          // Determine column range
-          let colLeft = tl.col;
-          let colRight = tl.col + width - 1;
-          if (expr.columns.length > 0) {
-            const indices: number[] = [];
-            for (const colName of expr.columns) {
-              const idx = t.columns.findIndex(c => c.name.toLowerCase() === colName.toLowerCase());
-              if (idx !== -1) {
-                indices.push(idx);
-              }
-            }
-            if (indices.length > 0) {
-              colLeft = tl.col + Math.min(...indices);
-              colRight = tl.col + Math.max(...indices);
-            }
+          // Permissive column resolution — static-deps is conservative, so
+          // unknown column names fall back to the full table width rather
+          // than being treated as errors.
+          const colRange = resolveStructuredRefColumns(expr.columns, t, "permissive");
+          if (colRange === "error") {
+            // Not reachable in permissive mode, but guard for exhaustiveness.
+            break;
           }
 
-          // Determine row range based on specials
-          let rowTop = dataRowStart;
-          let rowBottom = dataRowEnd;
-          const hasAll = expr.specials.includes("#All");
-          const hasHeaders = expr.specials.includes("#Headers");
-          const hasTotals = expr.specials.includes("#Totals");
-          if (hasAll) {
-            rowTop = tl.row;
-            rowBottom = t.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-          } else if (hasHeaders && hasTotals) {
-            rowTop = tl.row;
-            rowBottom = t.hasTotalsRow ? dataRowEnd + 1 : dataRowEnd;
-          } else if (hasHeaders) {
-            rowTop = tl.row;
-            rowBottom = tl.row;
-          } else if (hasTotals && t.hasTotalsRow) {
-            rowTop = dataRowEnd + 1;
-            rowBottom = dataRowEnd + 1;
+          // #This Row can't be resolved statically; we still record the data
+          // range as a conservative dependency bound.
+          const rowRange = resolveStructuredRefRows(expr.specials, geo);
+          let rowTop = geo.dataRowStart;
+          let rowBottom = geo.dataRowEnd;
+          if (rowRange !== "thisRow" && rowRange !== "error") {
+            rowTop = rowRange.rowTop;
+            rowBottom = rowRange.rowBottom;
           }
-          // #This Row can't be resolved statically, but we add the data range
-          // as a conservative dependency bound.
 
           areas.push({
             sheet: resolved.sheetName,
             top: rowTop,
-            left: colLeft,
+            left: colRange.colLeft,
             bottom: rowBottom,
-            right: colRight
+            right: colRange.colRight
           });
           break;
         }
@@ -353,13 +336,7 @@ export function detectDynamicArrayFunction(ast: AstNode, bound: BoundExpr): bool
     if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(upper)) {
       return true;
     }
-    // Strip prefixes
-    let canonical = upper;
-    if (canonical.startsWith("_XLFN._XLWS.")) {
-      canonical = canonical.slice(13);
-    } else if (canonical.startsWith("_XLFN.")) {
-      canonical = canonical.slice(6);
-    }
+    const canonical = stripFunctionPrefix(upper);
     if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(canonical)) {
       return true;
     }

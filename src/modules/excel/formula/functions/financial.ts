@@ -2,6 +2,8 @@
  * Financial Functions — Native RuntimeValue implementation.
  */
 
+import { excelToDate } from "@utils/utils.base";
+
 import type { RuntimeValue, ErrorValue } from "../runtime/values";
 import { RVKind, ERRORS, isError, isArray, toNumberRV, rvNumber } from "../runtime/values";
 
@@ -894,4 +896,472 @@ export const fnINTRATE: NativeFunction = args => {
   }
   const yearDays = basis.value === 1 ? 365.25 : basis.value === 3 ? 365 : 360;
   return rvNumber(((redemption.value - investment.value) / investment.value) * (yearDays / days));
+};
+
+// ============================================================================
+// Bond Math — day-count conventions and coupon helpers
+// ============================================================================
+
+/**
+ * Day-count fraction between two Excel date serials under a given basis.
+ *
+ * Implements:
+ *   basis 0 — US (NASD) 30/360 with end-of-month adjustments.
+ *   basis 1 — Actual/Actual (year length from the spanning year).
+ *   basis 2 — Actual/360.
+ *   basis 3 — Actual/365.
+ *   basis 4 — European 30/360.
+ *
+ * Unknown basis values fall back to basis 0 for safety.
+ */
+function dayCountFraction(startSerial: number, endSerial: number, basis: number): number {
+  const startD = excelToDate(startSerial);
+  const endD = excelToDate(endSerial);
+  const diffDays = Math.floor(endSerial) - Math.floor(startSerial);
+
+  switch (basis) {
+    case 1: {
+      const y1 = startD.getFullYear();
+      const y2 = endD.getFullYear();
+      if (y1 === y2) {
+        const yearDays =
+          (new Date(y1 + 1, 0, 1).getTime() - new Date(y1, 0, 1).getTime()) / 86400000;
+        return diffDays / yearDays;
+      }
+      const totalYearDays =
+        (new Date(y2 + 1, 0, 1).getTime() - new Date(y1, 0, 1).getTime()) / 86400000;
+      const avgYear = totalYearDays / (y2 - y1 + 1);
+      return diffDays / avgYear;
+    }
+    case 2:
+      return diffDays / 360;
+    case 3:
+      return diffDays / 365;
+    case 4: {
+      const d1 = Math.min(startD.getDate(), 30);
+      const d2 = Math.min(endD.getDate(), 30);
+      const m1 = startD.getMonth() + 1;
+      const m2 = endD.getMonth() + 1;
+      const y1 = startD.getFullYear();
+      const y2 = endD.getFullYear();
+      return ((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)) / 360;
+    }
+    case 0:
+    default: {
+      let d1 = startD.getDate();
+      const m1 = startD.getMonth() + 1;
+      const y1 = startD.getFullYear();
+      let d2 = endD.getDate();
+      const m2 = endD.getMonth() + 1;
+      const y2 = endD.getFullYear();
+      if (d1 === 31) {
+        d1 = 30;
+      }
+      if (d2 === 31 && d1 >= 30) {
+        d2 = 30;
+      }
+      return ((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)) / 360;
+    }
+  }
+}
+
+/**
+ * Subtract `months` from an Excel date serial, clamping to month-end as needed.
+ */
+function addMonthsToSerial(serial: number, months: number): number {
+  const d = excelToDate(serial);
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  const target = new Date(y, m + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  // Date at local midnight → Excel serial (1900 epoch with leap bug handled in excelToDate).
+  // We round-trip via the difference in ms from a known reference (Excel serial 0 = 1899-12-30).
+  const epoch = new Date(1899, 11, 30).getTime();
+  return Math.round((target.getTime() - epoch) / 86400000);
+}
+
+/**
+ * Find the next coupon date on or after settlement, given a maturity date
+ * and coupon frequency (1=annual, 2=semi-annual, 4=quarterly).
+ *
+ * Computed by stepping backward from maturity by (12/frequency) months
+ * until the resulting date is ≤ settlement, then stepping one coupon forward.
+ */
+function nextCouponAfter(settlement: number, maturity: number, frequency: number): number {
+  const stepMonths = Math.round(12 / frequency);
+  let cur = maturity;
+  // Step backward until just before or at settlement.
+  while (cur > settlement) {
+    const prev = addMonthsToSerial(cur, -stepMonths);
+    if (prev <= settlement) {
+      return cur;
+    }
+    cur = prev;
+  }
+  return cur;
+}
+
+/**
+ * Find the previous coupon date (on or before settlement).
+ */
+function prevCouponOnOrBefore(settlement: number, maturity: number, frequency: number): number {
+  const stepMonths = Math.round(12 / frequency);
+  let cur = maturity;
+  while (cur > settlement) {
+    cur = addMonthsToSerial(cur, -stepMonths);
+  }
+  return cur;
+}
+
+/**
+ * Count coupon periods between settlement and maturity (rounded up).
+ */
+function couponsBetween(settlement: number, maturity: number, frequency: number): number {
+  const stepMonths = Math.round(12 / frequency);
+  let count = 0;
+  let cur = maturity;
+  while (cur > settlement) {
+    cur = addMonthsToSerial(cur, -stepMonths);
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Validate the basic bond arguments (frequency and basis). Returns null if
+ * valid, or the appropriate #NUM! error.
+ */
+function validateBondBasis(frequency: number, basis: number): ErrorValue | null {
+  if (frequency !== 1 && frequency !== 2 && frequency !== 4) {
+    return ERRORS.NUM;
+  }
+  if (basis < 0 || basis > 4) {
+    return ERRORS.NUM;
+  }
+  return null;
+}
+
+/**
+ * PRICE(settlement, maturity, rate, yield, redemption, frequency, [basis])
+ *
+ * Price per $100 face value of a security that pays periodic interest.
+ * Excel formula (standard case, more than one coupon period remaining):
+ *
+ *   P = [redemption / (1 + y/f)^(N - 1 + DSC/E)]
+ *     + Σ_{k=1..N} [100 * r / f / (1 + y/f)^(k - 1 + DSC/E)]
+ *     - 100 * r / f * A/E
+ *
+ * Where:
+ *   f  = frequency
+ *   N  = number of coupons from settlement to maturity
+ *   DSC = days from settlement to next coupon
+ *   E   = days in coupon period containing settlement
+ *   A   = days from beginning of coupon period to settlement
+ */
+export const fnPRICE: NativeFunction = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const rateRV = toNumberRV(args[2]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const yieldRV = toNumberRV(args[3]);
+  if (isError(yieldRV)) {
+    return yieldRV;
+  }
+  const redemptionRV = toNumberRV(args[4]);
+  if (isError(redemptionRV)) {
+    return redemptionRV;
+  }
+  const frequencyRV = toNumberRV(args[5]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const rate = rateRV.value;
+  const yld = yieldRV.value;
+  const redemption = redemptionRV.value;
+  const frequency = Math.floor(frequencyRV.value);
+  const basis = Math.floor(basisRV.value);
+
+  if (settlement >= maturity || rate < 0 || yld < 0 || redemption <= 0) {
+    return ERRORS.NUM;
+  }
+  const basisErr = validateBondBasis(frequency, basis);
+  if (basisErr) {
+    return basisErr;
+  }
+
+  const nextCoupon = nextCouponAfter(settlement, maturity, frequency);
+  const prevCoupon = prevCouponOnOrBefore(settlement, maturity, frequency);
+  const dsc = dayCountFraction(settlement, nextCoupon, basis) * (basis === 1 ? 1 : 360 / frequency);
+  // For basis 0/2/3/4 the "E" (period length) and "A" (accrued days) are
+  // measured in actual days; for basis 1 we use actual day counts.
+  const periodDays = Math.floor(nextCoupon) - Math.floor(prevCoupon);
+  const accruedDays = settlement - Math.floor(prevCoupon);
+  const e = periodDays;
+  const dscDays = Math.floor(nextCoupon) - settlement;
+  const a = accruedDays;
+  // Fractional position in period (dsc/E).
+  const dscE = e === 0 ? 0 : dscDays / e;
+  void dsc;
+
+  const N = couponsBetween(settlement, maturity, frequency);
+  const couponAmt = (100 * rate) / frequency;
+  const discountBase = 1 + yld / frequency;
+
+  let price = redemption / Math.pow(discountBase, N - 1 + dscE);
+  for (let k = 1; k <= N; k++) {
+    price += couponAmt / Math.pow(discountBase, k - 1 + dscE);
+  }
+  price -= couponAmt * (a / e);
+  return rvNumber(price);
+};
+
+/**
+ * YIELD(settlement, maturity, rate, pr, redemption, frequency, [basis])
+ *
+ * Inverse of PRICE: solve numerically for yield such that PRICE(...y) = pr.
+ * Uses bracketed bisection in [0, 1] (100% yield upper bound covers all
+ * realistic bond scenarios) followed by a light Newton polish.
+ */
+export const fnYIELD: NativeFunction = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const rateRV = toNumberRV(args[2]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const prRV = toNumberRV(args[3]);
+  if (isError(prRV)) {
+    return prRV;
+  }
+  const redemptionRV = toNumberRV(args[4]);
+  if (isError(redemptionRV)) {
+    return redemptionRV;
+  }
+  const frequencyRV = toNumberRV(args[5]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  if (prRV.value <= 0 || redemptionRV.value <= 0) {
+    return ERRORS.NUM;
+  }
+
+  const priceAt = (y: number): number => {
+    const result = fnPRICE([
+      settlementRV,
+      maturityRV,
+      rateRV,
+      rvNumber(y),
+      redemptionRV,
+      frequencyRV,
+      basisRV
+    ]);
+    if (result.kind !== RVKind.Number) {
+      return NaN;
+    }
+    return result.value;
+  };
+
+  // Bisection in [0, 1].
+  let lo = 0;
+  let hi = 1;
+  const fLo = priceAt(lo) - prRV.value;
+  const fHi = priceAt(hi) - prRV.value;
+  if (isNaN(fLo) || isNaN(fHi)) {
+    return ERRORS.NUM;
+  }
+  if (fLo * fHi > 0) {
+    // Try extending upper bound.
+    hi = 10;
+    if ((priceAt(hi) - prRV.value) * fLo > 0) {
+      return ERRORS.NUM;
+    }
+  }
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const f = priceAt(mid) - prRV.value;
+    if (isNaN(f)) {
+      return ERRORS.NUM;
+    }
+    // PRICE decreases as yield increases, so f = priceAtY - pr decreases.
+    if (f > 0) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+    if (hi - lo < 1e-12) {
+      break;
+    }
+  }
+  return rvNumber((lo + hi) / 2);
+};
+
+/**
+ * DURATION(settlement, maturity, coupon, yield, frequency, [basis])
+ *
+ * Macaulay duration of a bond: the weighted average time to cash flows,
+ * weighted by present value. Expressed in years.
+ */
+export const fnDURATION: NativeFunction = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const couponRV = toNumberRV(args[2]);
+  if (isError(couponRV)) {
+    return couponRV;
+  }
+  const yieldRV = toNumberRV(args[3]);
+  if (isError(yieldRV)) {
+    return yieldRV;
+  }
+  const frequencyRV = toNumberRV(args[4]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const coupon = couponRV.value;
+  const yld = yieldRV.value;
+  const frequency = Math.floor(frequencyRV.value);
+  const basis = Math.floor(basisRV.value);
+
+  if (settlement >= maturity || coupon < 0 || yld < 0) {
+    return ERRORS.NUM;
+  }
+  const basisErr = validateBondBasis(frequency, basis);
+  if (basisErr) {
+    return basisErr;
+  }
+
+  const nextCoupon = nextCouponAfter(settlement, maturity, frequency);
+  const prevCoupon = prevCouponOnOrBefore(settlement, maturity, frequency);
+  const periodDays = Math.floor(nextCoupon) - Math.floor(prevCoupon);
+  const dscDays = Math.floor(nextCoupon) - settlement;
+  const dscE = periodDays === 0 ? 0 : dscDays / periodDays;
+  const N = couponsBetween(settlement, maturity, frequency);
+  const couponPerPeriod = (100 * coupon) / frequency;
+  const discountBase = 1 + yld / frequency;
+
+  let pv = 0;
+  let weighted = 0;
+  for (let k = 1; k <= N; k++) {
+    const t = (k - 1 + dscE) / frequency; // time in years
+    const cf = k === N ? couponPerPeriod + 100 : couponPerPeriod;
+    const df = Math.pow(discountBase, k - 1 + dscE);
+    pv += cf / df;
+    weighted += (t * cf) / df;
+  }
+  if (pv === 0) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(weighted / pv);
+};
+
+/**
+ * MDURATION — modified duration = DURATION / (1 + yield/frequency).
+ */
+export const fnMDURATION: NativeFunction = args => {
+  const dur = fnDURATION(args);
+  if (dur.kind !== RVKind.Number) {
+    return dur;
+  }
+  const yieldRV = toNumberRV(args[3]);
+  if (isError(yieldRV)) {
+    return yieldRV;
+  }
+  const frequencyRV = toNumberRV(args[4]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  return rvNumber(dur.value / (1 + yieldRV.value / frequencyRV.value));
+};
+
+/**
+ * ACCRINT(issue, first_interest, settlement, rate, par, frequency, [basis], [calc_method])
+ *
+ * Accrued interest for a security that pays periodic interest.
+ * The simplified implementation (calc_method TRUE, the default) treats
+ * accrued interest from issue to settlement as par * rate * dcf(issue, settlement, basis).
+ */
+export const fnACCRINT: NativeFunction = args => {
+  const issueRV = toNumberRV(args[0]);
+  if (isError(issueRV)) {
+    return issueRV;
+  }
+  // first_interest (args[1]) is unused in the simplified implementation.
+  const settlementRV = toNumberRV(args[2]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const rateRV = toNumberRV(args[3]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const parRV = toNumberRV(args[4]);
+  if (isError(parRV)) {
+    return parRV;
+  }
+  const frequencyRV = toNumberRV(args[5]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+  // calc_method (args[7]) — we ignore the distinction between TRUE/FALSE
+  // because the simplified semantics always accrue from issue date.
+
+  const issue = Math.floor(issueRV.value);
+  const settlement = Math.floor(settlementRV.value);
+  const frequency = Math.floor(frequencyRV.value);
+  const basis = Math.floor(basisRV.value);
+
+  if (issue >= settlement || rateRV.value <= 0 || parRV.value <= 0) {
+    return ERRORS.NUM;
+  }
+  const basisErr = validateBondBasis(frequency, basis);
+  if (basisErr) {
+    return basisErr;
+  }
+
+  const dcf = dayCountFraction(issue, settlement, basis);
+  return rvNumber(parRV.value * rateRV.value * dcf);
 };

@@ -160,12 +160,6 @@ export interface WritebackPlan {
    * that the adapter must update in the persistent tracking maps.
    */
   readonly spillState: SpillStateDelta;
-
-  /**
-   * Session cache deltas — entries that must be written into the eval
-   * session's cache so that CSE slave cells see the distributed values.
-   */
-  readonly sessionDelta: SessionDelta;
 }
 
 // ============================================================================
@@ -206,19 +200,4 @@ export interface SpillStateDelta {
    * spill was replaced.
    */
   readonly removedSpillKeys: readonly string[];
-}
-
-// ============================================================================
-// Session Delta
-// ============================================================================
-
-/**
- * Describes changes to the eval session cache.
- * These entries are CSE formula cell key → scalar result mappings that
- * must be written into the session cache so that dependent formulas see
- * the distributed CSE values.
- */
-export interface SessionDelta {
-  /** Session cache entries — formula cell key → scalar result. */
-  readonly cseUpdates: ReadonlyMap<string, SnapshotCellValue>;
 }
