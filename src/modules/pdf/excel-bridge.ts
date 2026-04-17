@@ -17,6 +17,7 @@
 
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
+import { evaluateWorksheetFormulas } from "@excel/utils/formula-evaluator";
 import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
 import { base64ToUint8Array } from "@utils/utils.base";
@@ -82,6 +83,9 @@ function excelWorkbookToPdf(workbook: Workbook): PdfWorkbook {
 // =============================================================================
 
 function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
+  // Evaluate formula cells
+  evaluateWorksheetFormulas(ws);
+
   const dimensions = ws.dimensions;
   const hasData = dimensions && dimensions.model.top > 0 && dimensions.model.left > 0;
 
