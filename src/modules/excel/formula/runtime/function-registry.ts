@@ -1018,7 +1018,12 @@ import {
   fnCSCH,
   fnCOTH,
   fnACOT,
-  fnACOTH
+  fnACOTH,
+  fnMMULT,
+  fnMDETERM,
+  fnMINVERSE,
+  fnMUNIT,
+  fnSERIESSUM
 } from "../functions/math";
 
 function registerNativeMathFunctions(): void {
@@ -1031,6 +1036,11 @@ function registerNativeMathFunctions(): void {
   defineEager("COUNTBLANK", 1, 1, fnCOUNTBLANK);
   defineEager("PRODUCT", 1, 255, fnPRODUCT);
   defineEager("SUMPRODUCT", 1, 255, fnSUMPRODUCT);
+  defineEager("MMULT", 2, 2, fnMMULT);
+  defineEager("MDETERM", 1, 1, fnMDETERM);
+  defineEager("MINVERSE", 1, 1, fnMINVERSE);
+  defineEager("MUNIT", 1, 1, fnMUNIT);
+  defineEager("SERIESSUM", 4, 4, fnSERIESSUM);
   defineEager("ABS", 1, 1, fnABS);
   defineEager("CEILING", 2, 2, fnCEILING);
   defineEager("CEILING.MATH", 1, 3, fnCEILING);

@@ -2,13 +2,20 @@
  * Math / Aggregate Functions — Native RuntimeValue implementation.
  */
 
-import type { RuntimeValue, NumberValue, ArrayValue, ErrorValue } from "../runtime/values";
+import type {
+  RuntimeValue,
+  NumberValue,
+  ArrayValue,
+  ErrorValue,
+  ScalarValue
+} from "../runtime/values";
 import {
   RVKind,
   ERRORS,
   rvNumber,
   rvString,
   rvArray,
+  toNumberRV,
   toStringRV,
   topLeft,
   isError,
@@ -1252,4 +1259,248 @@ export const fnPERMUT: NativeFn = args => {
     result *= ni - i;
   }
   return rvNumber(result);
+};
+
+// ============================================================================
+// Matrix functions: MMULT, MDETERM, MINVERSE, MUNIT
+// ============================================================================
+
+/**
+ * Extract a numeric matrix from an ArrayValue. Returns #VALUE! when any
+ * cell is non-numeric or an error propagates.
+ */
+function asNumericMatrix(v: RuntimeValue): number[][] | ErrorValue {
+  if (!isArray(v)) {
+    return ERRORS.VALUE;
+  }
+  const arr = v as ArrayValue;
+  const out: number[][] = [];
+  for (const row of arr.rows) {
+    const r: number[] = [];
+    for (const cell of row) {
+      if (cell.kind === RVKind.Error) {
+        return cell;
+      }
+      if (cell.kind !== RVKind.Number) {
+        return ERRORS.VALUE;
+      }
+      r.push(cell.value);
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * MMULT(array1, array2) — matrix product. Dimensions must be
+ * (m×k) × (k×n) = (m×n); mismatched sizes return #VALUE!.
+ */
+export const fnMMULT: NativeFn = args => {
+  const a = asNumericMatrix(args[0]);
+  if ("kind" in a) {
+    return a;
+  }
+  const b = asNumericMatrix(args[1]);
+  if ("kind" in b) {
+    return b;
+  }
+  const m = a.length;
+  const k = a[0]?.length ?? 0;
+  const k2 = b.length;
+  const n = b[0]?.length ?? 0;
+  if (m === 0 || k === 0 || n === 0 || k !== k2) {
+    return ERRORS.VALUE;
+  }
+  const rows: ScalarValue[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row: ScalarValue[] = [];
+    for (let j = 0; j < n; j++) {
+      let sum = 0;
+      for (let p = 0; p < k; p++) {
+        sum += a[i][p] * b[p][j];
+      }
+      row.push(rvNumber(sum));
+    }
+    rows.push(row);
+  }
+  return rvArray(rows);
+};
+
+/**
+ * MDETERM(array) — determinant of a square matrix via Gaussian
+ * elimination with partial pivoting. Non-square or non-numeric input
+ * returns #VALUE!.
+ */
+export const fnMDETERM: NativeFn = args => {
+  const mat = asNumericMatrix(args[0]);
+  if ("kind" in mat) {
+    return mat;
+  }
+  const n = mat.length;
+  if (n === 0 || mat[0].length !== n) {
+    return ERRORS.VALUE;
+  }
+  // Copy rows so we don't mutate the caller's array.
+  const a = mat.map(r => r.slice());
+  let det = 1;
+  for (let i = 0; i < n; i++) {
+    // Partial pivot: find row with largest |a[r][i]| for r in [i, n).
+    let pivot = i;
+    for (let r = i + 1; r < n; r++) {
+      if (Math.abs(a[r][i]) > Math.abs(a[pivot][i])) {
+        pivot = r;
+      }
+    }
+    if (Math.abs(a[pivot][i]) < 1e-14) {
+      return rvNumber(0);
+    }
+    if (pivot !== i) {
+      const tmp = a[i];
+      a[i] = a[pivot];
+      a[pivot] = tmp;
+      det = -det;
+    }
+    det *= a[i][i];
+    for (let r = i + 1; r < n; r++) {
+      const factor = a[r][i] / a[i][i];
+      for (let c = i; c < n; c++) {
+        a[r][c] -= factor * a[i][c];
+      }
+    }
+  }
+  return rvNumber(det);
+};
+
+/**
+ * MINVERSE(array) — inverse of a square matrix via Gauss-Jordan
+ * elimination. Singular matrices return #NUM!; non-square return
+ * #VALUE!.
+ */
+export const fnMINVERSE: NativeFn = args => {
+  const mat = asNumericMatrix(args[0]);
+  if ("kind" in mat) {
+    return mat;
+  }
+  const n = mat.length;
+  if (n === 0 || mat[0].length !== n) {
+    return ERRORS.VALUE;
+  }
+  // Build augmented matrix [A | I].
+  const aug: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row = new Array<number>(2 * n).fill(0);
+    for (let j = 0; j < n; j++) {
+      row[j] = mat[i][j];
+    }
+    row[n + i] = 1;
+    aug.push(row);
+  }
+  // Gauss-Jordan elimination with partial pivoting.
+  for (let i = 0; i < n; i++) {
+    let pivot = i;
+    for (let r = i + 1; r < n; r++) {
+      if (Math.abs(aug[r][i]) > Math.abs(aug[pivot][i])) {
+        pivot = r;
+      }
+    }
+    if (Math.abs(aug[pivot][i]) < 1e-14) {
+      return ERRORS.NUM; // singular
+    }
+    if (pivot !== i) {
+      const tmp = aug[i];
+      aug[i] = aug[pivot];
+      aug[pivot] = tmp;
+    }
+    const diag = aug[i][i];
+    for (let c = 0; c < 2 * n; c++) {
+      aug[i][c] /= diag;
+    }
+    for (let r = 0; r < n; r++) {
+      if (r === i) {
+        continue;
+      }
+      const factor = aug[r][i];
+      if (factor === 0) {
+        continue;
+      }
+      for (let c = 0; c < 2 * n; c++) {
+        aug[r][c] -= factor * aug[i][c];
+      }
+    }
+  }
+  // Extract inverse from right half.
+  const rows: ScalarValue[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: ScalarValue[] = [];
+    for (let j = 0; j < n; j++) {
+      row.push(rvNumber(aug[i][n + j]));
+    }
+    rows.push(row);
+  }
+  return rvArray(rows);
+};
+
+/**
+ * MUNIT(dimension) — n×n identity matrix.
+ */
+export const fnMUNIT: NativeFn = args => {
+  const nV = toNumberRV(topLeft(args[0]));
+  if (isError(nV)) {
+    return nV;
+  }
+  const n = Math.trunc(nV.value);
+  if (n < 1) {
+    return ERRORS.VALUE;
+  }
+  const rows: ScalarValue[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: ScalarValue[] = new Array<ScalarValue>(n);
+    for (let j = 0; j < n; j++) {
+      row[j] = rvNumber(i === j ? 1 : 0);
+    }
+    rows.push(row);
+  }
+  return rvArray(rows);
+};
+
+// ============================================================================
+// SERIESSUM
+// ============================================================================
+
+/**
+ * SERIESSUM(x, n, m, coefficients) — returns the sum of a power series
+ *   x^n * coef[0] + x^(n+m) * coef[1] + x^(n+2m) * coef[2] + …
+ */
+export const fnSERIESSUM: NativeFn = args => {
+  const xV = toNumberRV(topLeft(args[0]));
+  if (isError(xV)) {
+    return xV;
+  }
+  const nV = toNumberRV(topLeft(args[1]));
+  if (isError(nV)) {
+    return nV;
+  }
+  const mV = toNumberRV(topLeft(args[2]));
+  if (isError(mV)) {
+    return mV;
+  }
+  const coeffs = flattenNumbers([args[3]]);
+  const err = firstError(coeffs);
+  if (err) {
+    return err;
+  }
+  if (coeffs.length === 0) {
+    return ERRORS.VALUE;
+  }
+
+  let total = 0;
+  let exponent = nV.value;
+  for (const c of coeffs) {
+    total += (c as NumberValue).value * Math.pow(xV.value, exponent);
+    exponent += mV.value;
+  }
+  if (!isFinite(total)) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(total);
 };

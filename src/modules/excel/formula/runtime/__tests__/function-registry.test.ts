@@ -77,7 +77,20 @@ describe("lookupFunction: sample of each family", () => {
   // function registry — they need lazy argument evaluation which the
   // generic descriptor dispatch can't do.
   const FAMILIES: Record<string, string[]> = {
-    math: ["SUM", "ABS", "ROUND", "POWER", "CEILING", "MOD", "COMBIN"],
+    math: [
+      "SUM",
+      "ABS",
+      "ROUND",
+      "POWER",
+      "CEILING",
+      "MOD",
+      "COMBIN",
+      "MMULT",
+      "MDETERM",
+      "MINVERSE",
+      "MUNIT",
+      "SERIESSUM"
+    ],
     stats: [
       "AVERAGE",
       "MEDIAN",

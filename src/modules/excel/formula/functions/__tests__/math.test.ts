@@ -24,6 +24,7 @@ import {
   rvError,
   rvNumber,
   rvString,
+  type ArrayValue,
   type NumberValue,
   type RuntimeValue,
   type StringValue
@@ -99,7 +100,12 @@ import {
   fnCSCH,
   fnCOTH,
   fnACOT,
-  fnACOTH
+  fnACOTH,
+  fnMMULT,
+  fnMDETERM,
+  fnMINVERSE,
+  fnMUNIT,
+  fnSERIESSUM
 } from "../math";
 
 /** Assert `v` is a NumberValue and return its `.value` so arithmetic checks
@@ -4776,5 +4782,229 @@ describe("RAND / ROUNDUP / ROUNDDOWN saturation", () => {
       kind: RVKind.Error,
       code: "#REF!"
     });
+  });
+});
+
+// ============================================================================
+// Matrix functions — MMULT / MDETERM / MINVERSE / MUNIT
+// ============================================================================
+
+describe("MMULT", () => {
+  it("2x3 * 3x2 = 2x2", () => {
+    const a = rvArray([
+      [rvNumber(1), rvNumber(2), rvNumber(3)],
+      [rvNumber(4), rvNumber(5), rvNumber(6)]
+    ]);
+    const b = rvArray([
+      [rvNumber(7), rvNumber(8)],
+      [rvNumber(9), rvNumber(10)],
+      [rvNumber(11), rvNumber(12)]
+    ]);
+    const r = fnMMULT([a, b]) as ArrayValue;
+    expect(r.height).toBe(2);
+    expect(r.width).toBe(2);
+    // Row 0: [1*7+2*9+3*11, 1*8+2*10+3*12] = [58, 64]
+    expect((r.rows[0][0] as NumberValue).value).toBe(58);
+    expect((r.rows[0][1] as NumberValue).value).toBe(64);
+    // Row 1: [4*7+5*9+6*11, 4*8+5*10+6*12] = [139, 154]
+    expect((r.rows[1][0] as NumberValue).value).toBe(139);
+    expect((r.rows[1][1] as NumberValue).value).toBe(154);
+  });
+
+  it("identity × matrix = matrix", () => {
+    const id = rvArray([
+      [rvNumber(1), rvNumber(0)],
+      [rvNumber(0), rvNumber(1)]
+    ]);
+    const m = rvArray([
+      [rvNumber(5), rvNumber(6)],
+      [rvNumber(7), rvNumber(8)]
+    ]);
+    const r = fnMMULT([id, m]) as ArrayValue;
+    expect((r.rows[0][0] as NumberValue).value).toBe(5);
+    expect((r.rows[0][1] as NumberValue).value).toBe(6);
+    expect((r.rows[1][0] as NumberValue).value).toBe(7);
+    expect((r.rows[1][1] as NumberValue).value).toBe(8);
+  });
+
+  it("dimension mismatch → #VALUE!", () => {
+    const a = rvArray([[rvNumber(1), rvNumber(2)]]); // 1×2
+    const b = rvArray([[rvNumber(3), rvNumber(4), rvNumber(5)]]); // 1×3
+    expect(fnMMULT([a, b])).toEqual(ERRORS.VALUE);
+  });
+
+  it("non-numeric cell → #VALUE!", () => {
+    const a = rvArray([[rvString("x")]]);
+    const b = rvArray([[rvNumber(1)]]);
+    expect(fnMMULT([a, b])).toEqual(ERRORS.VALUE);
+  });
+
+  it("error in input propagates", () => {
+    const a = rvArray([[ERRORS.NA]]);
+    const b = rvArray([[rvNumber(1)]]);
+    expect(fnMMULT([a, b])).toEqual(ERRORS.NA);
+  });
+});
+
+describe("MDETERM", () => {
+  it("det of 2x2", () => {
+    const m = rvArray([
+      [rvNumber(1), rvNumber(2)],
+      [rvNumber(3), rvNumber(4)]
+    ]);
+    // 1*4 - 2*3 = -2
+    expect((fnMDETERM([m]) as NumberValue).value).toBeCloseTo(-2, 10);
+  });
+
+  it("det of 3x3", () => {
+    const m = rvArray([
+      [rvNumber(6), rvNumber(1), rvNumber(1)],
+      [rvNumber(4), rvNumber(-2), rvNumber(5)],
+      [rvNumber(2), rvNumber(8), rvNumber(7)]
+    ]);
+    // Known determinant = -306
+    expect((fnMDETERM([m]) as NumberValue).value).toBeCloseTo(-306, 6);
+  });
+
+  it("det of identity matrix = 1", () => {
+    const id = rvArray([
+      [rvNumber(1), rvNumber(0)],
+      [rvNumber(0), rvNumber(1)]
+    ]);
+    expect((fnMDETERM([id]) as NumberValue).value).toBe(1);
+  });
+
+  it("singular matrix det = 0", () => {
+    const singular = rvArray([
+      [rvNumber(1), rvNumber(2)],
+      [rvNumber(2), rvNumber(4)] // second row is 2× first
+    ]);
+    expect((fnMDETERM([singular]) as NumberValue).value).toBe(0);
+  });
+
+  it("non-square → #VALUE!", () => {
+    const m = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnMDETERM([m])).toEqual(ERRORS.VALUE);
+  });
+
+  it("error propagation", () => {
+    expect(fnMDETERM([rvArray([[ERRORS.NA]])])).toEqual(ERRORS.NA);
+  });
+});
+
+describe("MINVERSE", () => {
+  it("inverse of 2x2", () => {
+    const m = rvArray([
+      [rvNumber(4), rvNumber(7)],
+      [rvNumber(2), rvNumber(6)]
+    ]);
+    const r = fnMINVERSE([m]) as ArrayValue;
+    // Expected inverse: [[0.6, -0.7], [-0.2, 0.4]]
+    expect((r.rows[0][0] as NumberValue).value).toBeCloseTo(0.6, 6);
+    expect((r.rows[0][1] as NumberValue).value).toBeCloseTo(-0.7, 6);
+    expect((r.rows[1][0] as NumberValue).value).toBeCloseTo(-0.2, 6);
+    expect((r.rows[1][1] as NumberValue).value).toBeCloseTo(0.4, 6);
+  });
+
+  it("inverse × original = identity", () => {
+    const m = rvArray([
+      [rvNumber(2), rvNumber(1)],
+      [rvNumber(1), rvNumber(3)]
+    ]);
+    const inv = fnMINVERSE([m]);
+    const product = fnMMULT([m, inv]) as ArrayValue;
+    expect((product.rows[0][0] as NumberValue).value).toBeCloseTo(1, 10);
+    expect((product.rows[0][1] as NumberValue).value).toBeCloseTo(0, 10);
+    expect((product.rows[1][0] as NumberValue).value).toBeCloseTo(0, 10);
+    expect((product.rows[1][1] as NumberValue).value).toBeCloseTo(1, 10);
+  });
+
+  it("singular matrix → #NUM!", () => {
+    const singular = rvArray([
+      [rvNumber(1), rvNumber(2)],
+      [rvNumber(2), rvNumber(4)]
+    ]);
+    expect(fnMINVERSE([singular])).toEqual(ERRORS.NUM);
+  });
+
+  it("non-square → #VALUE!", () => {
+    const m = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(fnMINVERSE([m])).toEqual(ERRORS.VALUE);
+  });
+});
+
+describe("MUNIT", () => {
+  it("MUNIT(3) returns 3x3 identity", () => {
+    const r = fnMUNIT([rvNumber(3)]) as ArrayValue;
+    expect(r.height).toBe(3);
+    expect(r.width).toBe(3);
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        expect((r.rows[i][j] as NumberValue).value).toBe(i === j ? 1 : 0);
+      }
+    }
+  });
+
+  it("MUNIT(1) returns 1x1 [[1]]", () => {
+    const r = fnMUNIT([rvNumber(1)]) as ArrayValue;
+    expect(r.height).toBe(1);
+    expect(r.width).toBe(1);
+    expect((r.rows[0][0] as NumberValue).value).toBe(1);
+  });
+
+  it("MUNIT with 0 or negative → #VALUE!", () => {
+    expect(fnMUNIT([rvNumber(0)])).toEqual(ERRORS.VALUE);
+    expect(fnMUNIT([rvNumber(-1)])).toEqual(ERRORS.VALUE);
+  });
+
+  it("truncates non-integer dimension", () => {
+    const r = fnMUNIT([rvNumber(2.9)]) as ArrayValue;
+    expect(r.height).toBe(2);
+    expect(r.width).toBe(2);
+  });
+});
+
+// ============================================================================
+// SERIESSUM
+// ============================================================================
+
+describe("SERIESSUM", () => {
+  it("constant series: SERIESSUM(2, 0, 1, {1,1,1,1}) = 1+2+4+8 = 15", () => {
+    const coefs = rvArray([[rvNumber(1), rvNumber(1), rvNumber(1), rvNumber(1)]]);
+    expect((fnSERIESSUM([rvNumber(2), rvNumber(0), rvNumber(1), coefs]) as NumberValue).value).toBe(
+      15
+    );
+  });
+
+  it("quadratic series: SERIESSUM(3, 2, 2, {1,1}) = 3^2 + 3^4 = 9 + 81 = 90", () => {
+    const coefs = rvArray([[rvNumber(1), rvNumber(1)]]);
+    expect((fnSERIESSUM([rvNumber(3), rvNumber(2), rvNumber(2), coefs]) as NumberValue).value).toBe(
+      90
+    );
+  });
+
+  it("SERIESSUM with coefficients scaled", () => {
+    // 2*1 + 3*2 + 5*4 = 2 + 6 + 20 = 28 (x=2, n=0, m=1, coefs=[2,3,5])
+    const coefs = rvArray([[rvNumber(2), rvNumber(3), rvNumber(5)]]);
+    expect((fnSERIESSUM([rvNumber(2), rvNumber(0), rvNumber(1), coefs]) as NumberValue).value).toBe(
+      28
+    );
+  });
+
+  it("error in coefficients propagates", () => {
+    const coefs = rvArray([[rvNumber(1), ERRORS.NA]]);
+    expect(fnSERIESSUM([rvNumber(2), rvNumber(0), rvNumber(1), coefs])).toEqual(ERRORS.NA);
+  });
+
+  it("error in x / n / m propagates", () => {
+    const coefs = rvArray([[rvNumber(1)]]);
+    expect(fnSERIESSUM([ERRORS.NA, rvNumber(0), rvNumber(1), coefs])).toEqual(ERRORS.NA);
+    expect(fnSERIESSUM([rvNumber(2), ERRORS.NA, rvNumber(1), coefs])).toEqual(ERRORS.NA);
+    expect(fnSERIESSUM([rvNumber(2), rvNumber(0), ERRORS.NA, coefs])).toEqual(ERRORS.NA);
+  });
+
+  it("empty coefficient array → #VALUE!", () => {
+    const coefs = rvArray([[]]);
+    expect(fnSERIESSUM([rvNumber(2), rvNumber(0), rvNumber(1), coefs])).toEqual(ERRORS.VALUE);
   });
 });
