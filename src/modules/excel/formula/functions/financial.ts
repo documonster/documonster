@@ -2006,3 +2006,274 @@ export const fnACCRINT: NativeFn = args => {
   const dcf = dayCountFraction(issue, settlement, basis);
   return rvNumber(parRV.value * rateRV.value * dcf);
 };
+
+/**
+ * ACCRINTM(issue, settlement, rate, par, [basis]) — accrued interest
+ * for a security that pays interest at maturity.
+ *   result = par × rate × dayCountFraction(issue, settlement, basis)
+ */
+export const fnACCRINTM: NativeFn = args => {
+  const issueRV = toNumberRV(args[0]);
+  if (isError(issueRV)) {
+    return issueRV;
+  }
+  const settlementRV = toNumberRV(args[1]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const rateRV = toNumberRV(args[2]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const parRV = toNumberRV(args[3]);
+  if (isError(parRV)) {
+    return parRV;
+  }
+  const basisRV = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const issue = Math.floor(issueRV.value);
+  const settlement = Math.floor(settlementRV.value);
+  const basis = Math.floor(basisRV.value);
+  if (issue >= settlement || rateRV.value <= 0 || parRV.value <= 0) {
+    return ERRORS.NUM;
+  }
+  if (basis < 0 || basis > 4) {
+    return ERRORS.NUM;
+  }
+
+  const dcf = dayCountFraction(issue, settlement, basis);
+  return rvNumber(parRV.value * rateRV.value * dcf);
+};
+
+/**
+ * TBILLPRICE(settlement, maturity, discount) — price per $100 face value.
+ *   price = 100 × (1 - discount × DSM / 360)
+ * where DSM is days from settlement to maturity.
+ */
+export const fnTBILLPRICE: NativeFn = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const discountRV = toNumberRV(args[2]);
+  if (isError(discountRV)) {
+    return discountRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const discount = discountRV.value;
+  if (settlement >= maturity || discount <= 0) {
+    return ERRORS.NUM;
+  }
+  // T-bills have a max maturity of 1 year (~365 days).
+  const dsm = maturity - settlement;
+  if (dsm > 365) {
+    return ERRORS.NUM;
+  }
+
+  const price = 100 * (1 - (discount * dsm) / 360);
+  if (price <= 0) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(price);
+};
+
+/**
+ * TBILLYIELD(settlement, maturity, pr) — bond-equivalent yield.
+ *   yield = (100 - pr) / pr × (360 / DSM)
+ */
+export const fnTBILLYIELD: NativeFn = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const prRV = toNumberRV(args[2]);
+  if (isError(prRV)) {
+    return prRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const pr = prRV.value;
+  if (settlement >= maturity || pr <= 0) {
+    return ERRORS.NUM;
+  }
+  const dsm = maturity - settlement;
+  if (dsm > 365) {
+    return ERRORS.NUM;
+  }
+
+  return rvNumber(((100 - pr) / pr) * (360 / dsm));
+};
+
+/**
+ * TBILLEQ(settlement, maturity, discount) — bond equivalent yield.
+ *   TBILLEQ = (365 × discount) / (360 - discount × DSM)
+ */
+export const fnTBILLEQ: NativeFn = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const discountRV = toNumberRV(args[2]);
+  if (isError(discountRV)) {
+    return discountRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const discount = discountRV.value;
+  if (settlement >= maturity || discount <= 0) {
+    return ERRORS.NUM;
+  }
+  const dsm = maturity - settlement;
+  if (dsm > 365) {
+    return ERRORS.NUM;
+  }
+
+  const denom = 360 - discount * dsm;
+  if (denom <= 0) {
+    return ERRORS.NUM;
+  }
+  return rvNumber((365 * discount) / denom);
+};
+
+/**
+ * PRICEMAT(settlement, maturity, issue, rate, yld, [basis]) —
+ * price per $100 face value for a security that pays interest at maturity.
+ *
+ *   A = DCF(issue, settlement, basis)
+ *   DSM = DCF(settlement, maturity, basis)
+ *   DIM = DCF(issue, maturity, basis)
+ *   price = (100 + DIM × rate × 100) / (1 + DSM × yld) - A × rate × 100
+ */
+export const fnPRICEMAT: NativeFn = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const issueRV = toNumberRV(args[2]);
+  if (isError(issueRV)) {
+    return issueRV;
+  }
+  const rateRV = toNumberRV(args[3]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const yldRV = toNumberRV(args[4]);
+  if (isError(yldRV)) {
+    return yldRV;
+  }
+  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const issue = Math.floor(issueRV.value);
+  const rate = rateRV.value;
+  const yld = yldRV.value;
+  const basis = Math.floor(basisRV.value);
+  if (settlement >= maturity || issue >= settlement) {
+    return ERRORS.NUM;
+  }
+  if (rate < 0 || yld < 0) {
+    return ERRORS.NUM;
+  }
+  if (basis < 0 || basis > 4) {
+    return ERRORS.NUM;
+  }
+
+  const a = dayCountFraction(issue, settlement, basis);
+  const dsm = dayCountFraction(settlement, maturity, basis);
+  const dim = dayCountFraction(issue, maturity, basis);
+  const numerator = 100 + dim * rate * 100;
+  const denominator = 1 + dsm * yld;
+  return rvNumber(numerator / denominator - a * rate * 100);
+};
+
+/**
+ * YIELDMAT(settlement, maturity, issue, rate, pr, [basis]) —
+ * annual yield for a security that pays interest at maturity.
+ *
+ *   A = DCF(issue, settlement, basis)
+ *   DSM = DCF(settlement, maturity, basis)
+ *   DIM = DCF(issue, maturity, basis)
+ *   yield = ((1 + DIM × rate) / (pr/100 + A × rate) - 1) / DSM
+ */
+export const fnYIELDMAT: NativeFn = args => {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const issueRV = toNumberRV(args[2]);
+  if (isError(issueRV)) {
+    return issueRV;
+  }
+  const rateRV = toNumberRV(args[3]);
+  if (isError(rateRV)) {
+    return rateRV;
+  }
+  const prRV = toNumberRV(args[4]);
+  if (isError(prRV)) {
+    return prRV;
+  }
+  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const issue = Math.floor(issueRV.value);
+  const rate = rateRV.value;
+  const pr = prRV.value;
+  const basis = Math.floor(basisRV.value);
+  if (settlement >= maturity || issue >= settlement) {
+    return ERRORS.NUM;
+  }
+  if (rate < 0 || pr <= 0) {
+    return ERRORS.NUM;
+  }
+  if (basis < 0 || basis > 4) {
+    return ERRORS.NUM;
+  }
+
+  const a = dayCountFraction(issue, settlement, basis);
+  const dsm = dayCountFraction(settlement, maturity, basis);
+  const dim = dayCountFraction(issue, maturity, basis);
+  if (dsm <= 0) {
+    return ERRORS.NUM;
+  }
+  const numer = 1 + dim * rate;
+  const denom = pr / 100 + a * rate;
+  if (denom <= 0) {
+    return ERRORS.NUM;
+  }
+  return rvNumber((numer / denom - 1) / dsm);
+};

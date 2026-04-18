@@ -449,7 +449,8 @@ import {
   fnREGEXEXTRACT,
   fnREGEXREPLACE,
   fnVALUETOTEXT,
-  fnARRAYTOTEXT
+  fnARRAYTOTEXT,
+  fnENCODEURL
 } from "../functions/text";
 
 function registerNativeTextFunctions(): void {
@@ -494,6 +495,7 @@ function registerNativeTextFunctions(): void {
   defineEager("REGEXREPLACE", 3, 5, fnREGEXREPLACE);
   defineEager("VALUETOTEXT", 1, 2, fnVALUETOTEXT);
   defineEager("ARRAYTOTEXT", 1, 2, fnARRAYTOTEXT);
+  defineEager("ENCODEURL", 1, 1, fnENCODEURL);
 }
 
 // ============================================================================
@@ -709,7 +711,13 @@ import {
   fnYIELD,
   fnDURATION,
   fnMDURATION,
-  fnACCRINT
+  fnACCRINT,
+  fnACCRINTM,
+  fnTBILLPRICE,
+  fnTBILLYIELD,
+  fnTBILLEQ,
+  fnPRICEMAT,
+  fnYIELDMAT
 } from "../functions/financial";
 
 function registerNativeFinancialFunctions(): void {
@@ -750,6 +758,12 @@ function registerNativeFinancialFunctions(): void {
   defineEager("DURATION", 5, 6, fnDURATION);
   defineEager("MDURATION", 5, 6, fnMDURATION);
   defineEager("ACCRINT", 6, 8, fnACCRINT);
+  defineEager("ACCRINTM", 4, 5, fnACCRINTM);
+  defineEager("TBILLPRICE", 3, 3, fnTBILLPRICE);
+  defineEager("TBILLYIELD", 3, 3, fnTBILLYIELD);
+  defineEager("TBILLEQ", 3, 3, fnTBILLEQ);
+  defineEager("PRICEMAT", 5, 6, fnPRICEMAT);
+  defineEager("YIELDMAT", 5, 6, fnYIELDMAT);
 }
 
 // ============================================================================
@@ -967,6 +981,7 @@ import {
   fnROUNDDOWN,
   fnROUNDUP,
   fnSQRT,
+  fnSQRTPI,
   fnLN,
   fnLOG,
   fnLOG10,
@@ -1056,6 +1071,7 @@ function registerNativeMathFunctions(): void {
   defineEager("ROUNDDOWN", 2, 2, fnROUNDDOWN);
   defineEager("ROUNDUP", 2, 2, fnROUNDUP);
   defineEager("SQRT", 1, 1, fnSQRT);
+  defineEager("SQRTPI", 1, 1, fnSQRTPI);
   defineEager("LN", 1, 1, fnLN);
   defineEager("LOG", 1, 2, fnLOG);
   defineEager("LOG10", 1, 1, fnLOG10);

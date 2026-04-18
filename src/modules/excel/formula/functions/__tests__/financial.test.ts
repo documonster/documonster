@@ -55,7 +55,13 @@ import {
   fnYIELD,
   fnDURATION,
   fnMDURATION,
-  fnACCRINT
+  fnACCRINT,
+  fnACCRINTM,
+  fnTBILLPRICE,
+  fnTBILLYIELD,
+  fnTBILLEQ,
+  fnPRICEMAT,
+  fnYIELDMAT
 } from "../financial";
 
 function asNumber(v: RuntimeValue): number {
@@ -3333,5 +3339,199 @@ describe("YIELD saturation", () => {
     expect(
       fnYIELD([ERRORS.NA, mat, rvNumber(0.05), rvNumber(95), rvNumber(100), rvNumber(2)])
     ).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// ACCRINTM — accrued interest for maturity-paying security
+// ============================================================================
+
+describe("ACCRINTM", () => {
+  // Excel serial for 2020-01-01 = 43831, 2020-07-01 = 44013 (182 days)
+  const issue = rvNumber(43831);
+  const settlement = rvNumber(44013);
+
+  it("basic: par*rate*dcf", () => {
+    // Basis 0 (30/360): DCF(Jan 1 → Jul 1, 30/360) ≈ 0.5
+    // ACCRINTM = 1000 * 0.05 * 0.5 = 25
+    const r = fnACCRINTM([issue, settlement, rvNumber(0.05), rvNumber(1000)]) as NumberValue;
+    expect(r.value).toBeCloseTo(25, 2);
+  });
+
+  it("with basis=2 (actual/360)", () => {
+    const r = fnACCRINTM([
+      issue,
+      settlement,
+      rvNumber(0.05),
+      rvNumber(1000),
+      rvNumber(2)
+    ]) as NumberValue;
+    // 182 days / 360 * 0.05 * 1000 ≈ 25.28
+    expect(r.value).toBeCloseTo(25.28, 1);
+  });
+
+  it("issue >= settlement → #NUM!", () => {
+    expect(fnACCRINTM([settlement, issue, rvNumber(0.05), rvNumber(1000)])).toEqual(ERRORS.NUM);
+  });
+
+  it("rate <= 0 → #NUM!", () => {
+    expect(fnACCRINTM([issue, settlement, rvNumber(0), rvNumber(1000)])).toEqual(ERRORS.NUM);
+  });
+
+  it("par <= 0 → #NUM!", () => {
+    expect(fnACCRINTM([issue, settlement, rvNumber(0.05), rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+
+  it("invalid basis → #NUM!", () => {
+    expect(fnACCRINTM([issue, settlement, rvNumber(0.05), rvNumber(1000), rvNumber(5)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("error propagation", () => {
+    expect(fnACCRINTM([ERRORS.NA, settlement, rvNumber(0.05), rvNumber(1000)])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// TBILL family
+// ============================================================================
+
+describe("TBILLPRICE", () => {
+  // Excel: 2008-03-31 = 39538, 2008-06-01 = 39600 → DSM = 62
+  const settle = rvNumber(39538);
+  const maturity = rvNumber(39600);
+
+  it("price = 100 - discount*DSM/360 * 100", () => {
+    // discount 9% → 100 - 0.09*62/360*100 = 100 - 1.55 = 98.45
+    const r = fnTBILLPRICE([settle, maturity, rvNumber(0.09)]) as NumberValue;
+    expect(r.value).toBeCloseTo(98.45, 2);
+  });
+
+  it("settlement >= maturity → #NUM!", () => {
+    expect(fnTBILLPRICE([maturity, settle, rvNumber(0.09)])).toEqual(ERRORS.NUM);
+  });
+
+  it("discount <= 0 → #NUM!", () => {
+    expect(fnTBILLPRICE([settle, maturity, rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+
+  it("maturity > 1 year → #NUM!", () => {
+    expect(fnTBILLPRICE([settle, rvNumber(settle.value + 400), rvNumber(0.05)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+});
+
+describe("TBILLYIELD", () => {
+  const settle = rvNumber(39538);
+  const maturity = rvNumber(39600);
+
+  it("yield = (100-pr)/pr * 360/DSM", () => {
+    // pr=98.45, DSM=62 → (1.55/98.45)*(360/62) ≈ 0.09142
+    const r = fnTBILLYIELD([settle, maturity, rvNumber(98.45)]) as NumberValue;
+    expect(r.value).toBeCloseTo(0.09142, 3);
+  });
+
+  it("pr <= 0 → #NUM!", () => {
+    expect(fnTBILLYIELD([settle, maturity, rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+});
+
+describe("TBILLEQ", () => {
+  const settle = rvNumber(39538);
+  const maturity = rvNumber(39600);
+
+  it("bond equivalent yield formula", () => {
+    // TBILLEQ(39538, 39600, 0.0914) = (365*0.0914)/(360 - 0.0914*62) ≈ 0.094166
+    const r = fnTBILLEQ([settle, maturity, rvNumber(0.0914)]) as NumberValue;
+    expect(r.value).toBeGreaterThan(0.09);
+    expect(r.value).toBeLessThan(0.1);
+  });
+
+  it("zero discount → #NUM!", () => {
+    expect(fnTBILLEQ([settle, maturity, rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+});
+
+// ============================================================================
+// PRICEMAT / YIELDMAT
+// ============================================================================
+
+describe("PRICEMAT", () => {
+  // Issue 2008-11-11 = 39763, Settlement 2008-02-15 would be before issue
+  // Use: Issue 2007-01-01=39083, Settlement 2008-01-01=39448, Maturity 2009-01-01=39814
+  const issue = rvNumber(39083);
+  const settlement = rvNumber(39448);
+  const maturity = rvNumber(39814);
+
+  it("price for 1-year-to-maturity security", () => {
+    const r = fnPRICEMAT([
+      settlement,
+      maturity,
+      issue,
+      rvNumber(0.0614), // coupon rate
+      rvNumber(0.061), // yield
+      rvNumber(0)
+    ]) as NumberValue;
+    // Should produce a price near par (100) since rate ≈ yield.
+    expect(r.value).toBeGreaterThan(99);
+    expect(r.value).toBeLessThan(101);
+  });
+
+  it("settlement >= maturity → #NUM!", () => {
+    expect(fnPRICEMAT([maturity, settlement, issue, rvNumber(0.05), rvNumber(0.06)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("issue >= settlement → #NUM!", () => {
+    expect(fnPRICEMAT([settlement, maturity, settlement, rvNumber(0.05), rvNumber(0.06)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("negative rate → #NUM!", () => {
+    expect(fnPRICEMAT([settlement, maturity, issue, rvNumber(-0.01), rvNumber(0.06)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("error propagation", () => {
+    expect(fnPRICEMAT([ERRORS.NA, maturity, issue, rvNumber(0.05), rvNumber(0.06)])).toEqual(
+      ERRORS.NA
+    );
+  });
+});
+
+describe("YIELDMAT", () => {
+  const issue = rvNumber(39083);
+  const settlement = rvNumber(39448);
+  const maturity = rvNumber(39814);
+
+  it("yield computes from price", () => {
+    // With price near par (100) and equal rate & yield, result ~= rate.
+    const r = fnYIELDMAT([
+      settlement,
+      maturity,
+      issue,
+      rvNumber(0.0614),
+      rvNumber(99.9382),
+      rvNumber(0)
+    ]) as NumberValue;
+    expect(r.value).toBeGreaterThan(0.05);
+    expect(r.value).toBeLessThan(0.07);
+  });
+
+  it("settlement >= maturity → #NUM!", () => {
+    expect(fnYIELDMAT([maturity, settlement, issue, rvNumber(0.05), rvNumber(100)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("price <= 0 → #NUM!", () => {
+    expect(fnYIELDMAT([settlement, maturity, issue, rvNumber(0.05), rvNumber(0)])).toEqual(
+      ERRORS.NUM
+    );
   });
 });

@@ -632,6 +632,21 @@ export const fnSQRT: NativeFn = args => {
   return rvNumber(Math.sqrt(n.value));
 };
 
+/**
+ * SQRTPI(number) — returns the square root of (number × π). Useful in
+ * statistical formulas and Gauss integrals.
+ */
+export const fnSQRTPI: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  if (n.value < 0) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(Math.sqrt(n.value * Math.PI));
+};
+
 export const fnLN: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {

@@ -66,7 +66,8 @@ import {
   fnREGEXEXTRACT,
   fnREGEXREPLACE,
   fnVALUETOTEXT,
-  fnARRAYTOTEXT
+  fnARRAYTOTEXT,
+  fnENCODEURL
 } from "../text";
 
 function asString(v: RuntimeValue): string {
@@ -3262,5 +3263,41 @@ describe("ARRAYTOTEXT", () => {
   it("blank cells in concise produce empty strings", () => {
     const arr = rvArray([[rvNumber(1), BLANK, rvNumber(3)]]);
     expect(asString(fnARRAYTOTEXT([arr]))).toBe("1, , 3");
+  });
+});
+
+// ============================================================================
+// ENCODEURL
+// ============================================================================
+
+describe("ENCODEURL", () => {
+  it("encodes spaces as %20", () => {
+    expect(asString(fnENCODEURL([rvString("hello world")]))).toBe("hello%20world");
+  });
+
+  it("preserves unreserved characters A-Z a-z 0-9 - _ . ~", () => {
+    expect(asString(fnENCODEURL([rvString("AaZz09-_.~")]))).toBe("AaZz09-_.~");
+  });
+
+  it("encodes reserved URL chars", () => {
+    expect(asString(fnENCODEURL([rvString("a+b=c")]))).toBe("a%2Bb%3Dc");
+    expect(asString(fnENCODEURL([rvString("?query=1&b=2")]))).toBe("%3Fquery%3D1%26b%3D2");
+  });
+
+  it("encodes Unicode as UTF-8 percent-encoded", () => {
+    // 中文 → %E4%B8%AD%E6%96%87
+    expect(asString(fnENCODEURL([rvString("中文")]))).toBe("%E4%B8%AD%E6%96%87");
+  });
+
+  it("empty string returns empty", () => {
+    expect(asString(fnENCODEURL([rvString("")]))).toBe("");
+  });
+
+  it("error propagates", () => {
+    expect(fnENCODEURL([ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("coerces numbers to strings first", () => {
+    expect(asString(fnENCODEURL([rvNumber(42)]))).toBe("42");
   });
 });

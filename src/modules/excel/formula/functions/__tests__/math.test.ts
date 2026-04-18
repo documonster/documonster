@@ -50,6 +50,7 @@ import {
   fnLN,
   fnPOWER,
   fnSQRT,
+  fnSQRTPI,
   fnABS,
   fnSIGN,
   fnINT,
@@ -5006,5 +5007,35 @@ describe("SERIESSUM", () => {
   it("empty coefficient array → #VALUE!", () => {
     const coefs = rvArray([[]]);
     expect(fnSERIESSUM([rvNumber(2), rvNumber(0), rvNumber(1), coefs])).toEqual(ERRORS.VALUE);
+  });
+});
+
+// ============================================================================
+// SQRTPI
+// ============================================================================
+
+describe("SQRTPI", () => {
+  it("SQRTPI(1) = √π", () => {
+    expect(asNumber(fnSQRTPI([rvNumber(1)]))).toBeCloseTo(Math.sqrt(Math.PI), 10);
+  });
+
+  it("SQRTPI(2) = √(2π)", () => {
+    expect(asNumber(fnSQRTPI([rvNumber(2)]))).toBeCloseTo(Math.sqrt(2 * Math.PI), 10);
+  });
+
+  it("SQRTPI(0) = 0", () => {
+    expect(asNumber(fnSQRTPI([rvNumber(0)]))).toBe(0);
+  });
+
+  it("SQRTPI(negative) → #NUM!", () => {
+    expect(fnSQRTPI([rvNumber(-1)])).toEqual(ERRORS.NUM);
+  });
+
+  it("propagates errors", () => {
+    expect(fnSQRTPI([ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("coerces boolean TRUE → 1 → √π", () => {
+    expect(asNumber(fnSQRTPI([rvBoolean(true)]))).toBeCloseTo(Math.sqrt(Math.PI), 10);
   });
 });

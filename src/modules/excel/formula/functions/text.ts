@@ -1970,3 +1970,24 @@ export const fnARRAYTOTEXT: NativeFn = args => {
   }
   return rvString(`{${rowStrs.join(";")}}`);
 };
+
+// ============================================================================
+// ENCODEURL
+// ============================================================================
+
+/**
+ * ENCODEURL(text) — percent-encode a string for URL use.
+ *
+ * Excel follows RFC 3986's "unreserved" character rule: A-Z, a-z, 0-9,
+ * and `- _ . ~` are kept verbatim; everything else is encoded as
+ * `%HH` using the UTF-8 byte sequence. This is exactly what JavaScript's
+ * `encodeURIComponent` does, so we delegate to it.
+ */
+export const fnENCODEURL: NativeFn = args => {
+  const err = checkError(args[0]);
+  if (err) {
+    return err;
+  }
+  const s = toStringRV(topLeft(args[0]));
+  return rvString(encodeURIComponent(s));
+};
