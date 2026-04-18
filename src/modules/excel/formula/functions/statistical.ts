@@ -4,7 +4,13 @@
  * Native RuntimeValue implementations.
  */
 
-import type { RuntimeValue, ScalarValue, NumberValue, ErrorValue } from "../runtime/values";
+import type {
+  RuntimeValue,
+  ScalarValue,
+  NumberValue,
+  ErrorValue,
+  ArrayValue
+} from "../runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -768,6 +774,34 @@ export const fnRSQ: NativeFn = args => {
     return r;
   }
   return rvNumber((r as NumberValue).value ** 2);
+};
+
+/**
+ * STEYX(known_y, known_x) — standard error of the predicted y-value for
+ * each x in a regression. Matches Excel's definition:
+ *   SE = sqrt((1/(n-2)) × (S_yy − S_xy² / S_xx))
+ * where S_xx, S_yy, S_xy are centred sums of squares / cross-product.
+ */
+export const fnSTEYX: NativeFn = args => {
+  // STEYX(known_y, known_x) — y-first ordering, like SLOPE/INTERCEPT.
+  const paired = pairedNumbers(args, 0, 1);
+  if ("code" in paired) {
+    return paired;
+  }
+  const { xs: ys, ys: xs } = paired;
+  const s = pairedSums(xs, ys);
+  if (!s || s.n < 3) {
+    return ERRORS.DIV0;
+  }
+  if (s.sxx === 0) {
+    return ERRORS.DIV0;
+  }
+  const numer = s.syy - (s.sxy * s.sxy) / s.sxx;
+  if (numer < 0) {
+    // Floating-point noise when the regression is essentially perfect.
+    return rvNumber(0);
+  }
+  return rvNumber(Math.sqrt(numer / (s.n - 2)));
 };
 
 export const fnFORECAST: NativeFn = args => {
@@ -1650,6 +1684,27 @@ export const fnCHISQ_DIST_RT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(1 - gammaIncomplete(df.value / 2, x.value / 2));
+};
+
+/**
+ * CHISQ.INV.RT(probability, df) — right-tailed inverse of chi-square.
+ * Equivalent to CHISQ.INV(1 - probability, df). Probabilities of 0 or 1
+ * return +∞ or 0 respectively; values outside (0, 1] are #NUM!.
+ */
+export const fnCHISQ_INV_RT: NativeFn = args => {
+  const p = argToNumber(args[0]);
+  if (p.kind === RVKind.Error) {
+    return p;
+  }
+  const df = argToNumber(args[1]);
+  if (df.kind === RVKind.Error) {
+    return df;
+  }
+  if (p.value <= 0 || p.value > 1 || df.value < 1) {
+    return ERRORS.NUM;
+  }
+  // Re-use CHISQ.INV with the complementary probability.
+  return fnCHISQ_INV([rvNumber(1 - p.value), df]);
 };
 
 export const fnF_DIST: NativeFn = args => {
@@ -3291,4 +3346,353 @@ export const fnPROB: NativeFn = args => {
     }
   }
   return rvNumber(result);
+};
+
+// ============================================================================
+// Z.TEST, T.TEST, F.TEST, CHISQ.TEST — hypothesis tests
+// ============================================================================
+
+/**
+ * Standard normal CDF — shared by Z.TEST and the T.TEST approximations.
+ * Uses the same erf-based formula as fnNORMSDIST.
+ */
+function normalCDF(z: number): number {
+  // Abramowitz & Stegun 7.1.26 approximation, same family used elsewhere.
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * x);
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-x * x);
+  return 0.5 * (1 + sign * y);
+}
+
+/**
+ * Z.TEST(array, x, [sigma]) — one-tailed probability value for z-test.
+ *   mean = AVERAGE(array), n = COUNT(array)
+ *   sigma = provided OR sample standard deviation of array
+ *   z = (mean - x) / (sigma / √n)
+ *   Z.TEST = 1 - NORM.S.DIST(z, TRUE)
+ */
+export const fnZ_TEST: NativeFn = args => {
+  const vals = flattenNumbers([args[0]]);
+  const err = firstError(vals);
+  if (err) {
+    return err;
+  }
+  const xV = toNumberRV(topLeft(args[1]));
+  if (isError(xV)) {
+    return xV;
+  }
+  const nums = vals.map(v => (v as NumberValue).value);
+  if (nums.length === 0) {
+    return ERRORS.NA;
+  }
+  const mean = nums.reduce((s, v) => s + v, 0) / nums.length;
+
+  let sigma: number;
+  if (args.length > 2) {
+    const sigmaV = toNumberRV(topLeft(args[2]));
+    if (isError(sigmaV)) {
+      return sigmaV;
+    }
+    if (sigmaV.value <= 0) {
+      return ERRORS.NUM;
+    }
+    sigma = sigmaV.value;
+  } else {
+    // Sample std dev.
+    if (nums.length < 2) {
+      return ERRORS.DIV0;
+    }
+    let ss = 0;
+    for (const v of nums) {
+      ss += (v - mean) * (v - mean);
+    }
+    sigma = Math.sqrt(ss / (nums.length - 1));
+    if (sigma === 0) {
+      return ERRORS.DIV0;
+    }
+  }
+
+  const z = (mean - xV.value) / (sigma / Math.sqrt(nums.length));
+  return rvNumber(1 - normalCDF(z));
+};
+
+/**
+ * F.TEST(array1, array2) — two-tailed F-test probability comparing
+ * the variances of two samples.
+ *
+ *   F = var(larger) / var(smaller)  (always >= 1)
+ *   P = 2 × P(F_dist(df1, df2) > F)
+ */
+export const fnF_TEST: NativeFn = args => {
+  const v1 = flattenNumbers([args[0]]);
+  const e1 = firstError(v1);
+  if (e1) {
+    return e1;
+  }
+  const v2 = flattenNumbers([args[1]]);
+  const e2 = firstError(v2);
+  if (e2) {
+    return e2;
+  }
+  const a1 = v1.map(v => (v as NumberValue).value);
+  const a2 = v2.map(v => (v as NumberValue).value);
+  if (a1.length < 2 || a2.length < 2) {
+    return ERRORS.DIV0;
+  }
+
+  const varOf = (xs: number[]): number => {
+    const mean = xs.reduce((s, v) => s + v, 0) / xs.length;
+    let ss = 0;
+    for (const v of xs) {
+      ss += (v - mean) * (v - mean);
+    }
+    return ss / (xs.length - 1);
+  };
+  const var1 = varOf(a1);
+  const var2 = varOf(a2);
+  if (var1 === 0 || var2 === 0) {
+    return ERRORS.DIV0;
+  }
+
+  // Ensure f >= 1 so we evaluate the right tail.
+  const f = var1 / var2;
+  const df1 = a1.length - 1;
+  const df2 = a2.length - 1;
+
+  // Regularised incomplete beta: Ix(a,b).
+  // F-distribution right-tail = I_{df2/(df2+df1*F)}(df2/2, df1/2).
+  // Two-tailed p = 2 × min(right, left) = 2 × min(right, 1-right).
+  const x = df2 / (df2 + df1 * f);
+  const rightTail = incompleteBeta(x, df2 / 2, df1 / 2);
+  const twoTail = 2 * Math.min(rightTail, 1 - rightTail);
+  return rvNumber(twoTail);
+};
+
+/**
+ * Regularised incomplete beta function I_x(a, b). Lentz's continued
+ * fraction, adapted from Numerical Recipes §6.4. Sufficient precision
+ * for probability-value calculations.
+ */
+function incompleteBeta(x: number, a: number, b: number): number {
+  if (x <= 0) {
+    return 0;
+  }
+  if (x >= 1) {
+    return 1;
+  }
+  const bt = Math.exp(
+    lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x)
+  );
+  const useFront = x < (a + 1) / (a + b + 2);
+  const cf = (xx: number, aa: number, bb: number): number => {
+    const maxIt = 200;
+    const eps = 3e-7;
+    const qab = aa + bb;
+    const qap = aa + 1;
+    const qam = aa - 1;
+    let c = 1;
+    let d = 1 - (qab * xx) / qap;
+    if (Math.abs(d) < 1e-30) {
+      d = 1e-30;
+    }
+    d = 1 / d;
+    let h = d;
+    for (let m = 1; m <= maxIt; m++) {
+      const m2 = 2 * m;
+      let aa2 = (m * (bb - m) * xx) / ((qam + m2) * (aa + m2));
+      d = 1 + aa2 * d;
+      if (Math.abs(d) < 1e-30) {
+        d = 1e-30;
+      }
+      c = 1 + aa2 / c;
+      if (Math.abs(c) < 1e-30) {
+        c = 1e-30;
+      }
+      d = 1 / d;
+      h *= d * c;
+      aa2 = (-(aa + m) * (qab + m) * xx) / ((aa + m2) * (qap + m2));
+      d = 1 + aa2 * d;
+      if (Math.abs(d) < 1e-30) {
+        d = 1e-30;
+      }
+      c = 1 + aa2 / c;
+      if (Math.abs(c) < 1e-30) {
+        c = 1e-30;
+      }
+      d = 1 / d;
+      const del = d * c;
+      h *= del;
+      if (Math.abs(del - 1) < eps) {
+        break;
+      }
+    }
+    return h;
+  };
+  if (useFront) {
+    return (bt * cf(x, a, b)) / a;
+  }
+  return 1 - (bt * cf(1 - x, b, a)) / b;
+}
+
+/**
+ * T.TEST(array1, array2, tails, type) — tails in {1, 2}, type in {1, 2, 3}.
+ *   type 1: paired
+ *   type 2: two-sample, equal variance
+ *   type 3: two-sample, unequal variance (Welch's)
+ */
+export const fnT_TEST: NativeFn = args => {
+  const v1 = flattenNumbers([args[0]]);
+  const e1 = firstError(v1);
+  if (e1) {
+    return e1;
+  }
+  const v2 = flattenNumbers([args[1]]);
+  const e2 = firstError(v2);
+  if (e2) {
+    return e2;
+  }
+  const tailsV = toNumberRV(topLeft(args[2]));
+  if (isError(tailsV)) {
+    return tailsV;
+  }
+  const typeV = toNumberRV(topLeft(args[3]));
+  if (isError(typeV)) {
+    return typeV;
+  }
+
+  const tails = Math.trunc(tailsV.value);
+  const type = Math.trunc(typeV.value);
+  if (tails !== 1 && tails !== 2) {
+    return ERRORS.NUM;
+  }
+  if (type !== 1 && type !== 2 && type !== 3) {
+    return ERRORS.NUM;
+  }
+
+  const a1 = v1.map(v => (v as NumberValue).value);
+  const a2 = v2.map(v => (v as NumberValue).value);
+  const mean = (xs: number[]) => xs.reduce((s, v) => s + v, 0) / xs.length;
+  const sampleVar = (xs: number[], m: number) => {
+    let ss = 0;
+    for (const v of xs) {
+      ss += (v - m) * (v - m);
+    }
+    return ss / (xs.length - 1);
+  };
+
+  let t: number;
+  let df: number;
+
+  if (type === 1) {
+    // Paired
+    if (a1.length !== a2.length) {
+      return ERRORS.NA;
+    }
+    if (a1.length < 2) {
+      return ERRORS.DIV0;
+    }
+    const diffs = a1.map((v, i) => v - a2[i]);
+    const md = mean(diffs);
+    const sd2 = sampleVar(diffs, md);
+    if (sd2 === 0) {
+      return ERRORS.DIV0;
+    }
+    t = md / Math.sqrt(sd2 / diffs.length);
+    df = diffs.length - 1;
+  } else if (type === 2) {
+    // Two-sample, equal variance (pooled)
+    const n1 = a1.length;
+    const n2 = a2.length;
+    if (n1 < 2 || n2 < 2) {
+      return ERRORS.DIV0;
+    }
+    const m1 = mean(a1);
+    const m2 = mean(a2);
+    const s1 = sampleVar(a1, m1);
+    const s2 = sampleVar(a2, m2);
+    const sp2 = ((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2);
+    if (sp2 === 0) {
+      return ERRORS.DIV0;
+    }
+    t = (m1 - m2) / Math.sqrt(sp2 * (1 / n1 + 1 / n2));
+    df = n1 + n2 - 2;
+  } else {
+    // Two-sample, unequal variance (Welch's)
+    const n1 = a1.length;
+    const n2 = a2.length;
+    if (n1 < 2 || n2 < 2) {
+      return ERRORS.DIV0;
+    }
+    const m1 = mean(a1);
+    const m2 = mean(a2);
+    const s1 = sampleVar(a1, m1);
+    const s2 = sampleVar(a2, m2);
+    if (s1 === 0 && s2 === 0) {
+      return ERRORS.DIV0;
+    }
+    const se2 = s1 / n1 + s2 / n2;
+    t = (m1 - m2) / Math.sqrt(se2);
+    df = (se2 * se2) / (((s1 / n1) * (s1 / n1)) / (n1 - 1) + ((s2 / n2) * (s2 / n2)) / (n2 - 1));
+  }
+
+  // Two-tailed p = I_{df/(df + t^2)}(df/2, 1/2)
+  const x = df / (df + t * t);
+  const oneTail = 0.5 * incompleteBeta(x, df / 2, 0.5);
+  return rvNumber(tails === 1 ? oneTail : 2 * oneTail);
+};
+
+/**
+ * CHISQ.TEST(actual_range, expected_range) — chi-square independence test.
+ *
+ *   χ² = Σ (actual_i - expected_i)² / expected_i
+ *   df = (rows-1)(cols-1) for a contingency table, or n-1 for 1-D
+ *   p = 1 - CHISQ.DIST(χ², df, TRUE)
+ */
+export const fnCHISQ_TEST: NativeFn = args => {
+  if (args[0].kind !== RVKind.Array || args[1].kind !== RVKind.Array) {
+    return ERRORS.VALUE;
+  }
+  const a = args[0] as ArrayValue;
+  const e = args[1] as ArrayValue;
+  if (a.height !== e.height || a.width !== e.width) {
+    return ERRORS.NA;
+  }
+  let chi2 = 0;
+  for (let r = 0; r < a.height; r++) {
+    for (let c = 0; c < a.width; c++) {
+      const av = a.rows[r][c];
+      const ev = e.rows[r][c];
+      if (av.kind === RVKind.Error) {
+        return av;
+      }
+      if (ev.kind === RVKind.Error) {
+        return ev;
+      }
+      if (av.kind !== RVKind.Number || ev.kind !== RVKind.Number) {
+        return ERRORS.VALUE;
+      }
+      if (ev.value <= 0) {
+        return ERRORS.NUM;
+      }
+      const diff = av.value - ev.value;
+      chi2 += (diff * diff) / ev.value;
+    }
+  }
+  // df: (rows-1)(cols-1) for contingency tables, n-1 for 1-D.
+  let df: number;
+  if (a.height === 1 || a.width === 1) {
+    df = a.height * a.width - 1;
+  } else {
+    df = (a.height - 1) * (a.width - 1);
+  }
+  if (df < 1) {
+    return ERRORS.NA;
+  }
+  // p = 1 - CHISQ.DIST.CDF(chi2, df) = right tail
+  return rvNumber(1 - gammaIncomplete(df / 2, chi2 / 2));
 };

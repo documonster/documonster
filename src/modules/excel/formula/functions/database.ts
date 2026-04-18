@@ -208,3 +208,99 @@ export function fnDGET(args: RuntimeValue[]): RuntimeValue {
   }
   return matches[0];
 }
+
+/**
+ * DCOUNTA(database, field, criteria) — count non-empty cells that match
+ * the criteria, in the specified field. Unlike DCOUNT (numeric-only),
+ * DCOUNTA counts any non-blank cell including text and booleans.
+ */
+export function fnDCOUNTA(args: RuntimeValue[]): RuntimeValue {
+  const matches = collectDatabaseMatches(args);
+  if (!Array.isArray(matches)) {
+    return matches;
+  }
+  let count = 0;
+  for (const v of matches) {
+    // Count anything that is not Blank and not an empty string.
+    if (v.kind === RVKind.Blank) {
+      continue;
+    }
+    if (v.kind === RVKind.String && v.value === "") {
+      continue;
+    }
+    count++;
+  }
+  return rvNumber(count);
+}
+
+/**
+ * DSTDEV(database, field, criteria) — sample standard deviation of
+ * numeric cells matching criteria in the specified field.
+ */
+export function fnDSTDEV(args: RuntimeValue[]): RuntimeValue {
+  return databaseNumericAggregate(args, vals => {
+    if (vals.length < 2) {
+      return ERRORS.DIV0;
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    let ss = 0;
+    for (const v of vals) {
+      ss += (v - mean) * (v - mean);
+    }
+    return rvNumber(Math.sqrt(ss / (vals.length - 1)));
+  });
+}
+
+/**
+ * DSTDEVP(database, field, criteria) — population standard deviation
+ * of numeric cells matching criteria.
+ */
+export function fnDSTDEVP(args: RuntimeValue[]): RuntimeValue {
+  return databaseNumericAggregate(args, vals => {
+    if (vals.length === 0) {
+      return ERRORS.DIV0;
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    let ss = 0;
+    for (const v of vals) {
+      ss += (v - mean) * (v - mean);
+    }
+    return rvNumber(Math.sqrt(ss / vals.length));
+  });
+}
+
+/**
+ * DVAR(database, field, criteria) — sample variance of matching numeric
+ * cells.
+ */
+export function fnDVAR(args: RuntimeValue[]): RuntimeValue {
+  return databaseNumericAggregate(args, vals => {
+    if (vals.length < 2) {
+      return ERRORS.DIV0;
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    let ss = 0;
+    for (const v of vals) {
+      ss += (v - mean) * (v - mean);
+    }
+    return rvNumber(ss / (vals.length - 1));
+  });
+}
+
+/**
+ * DVARP(database, field, criteria) — population variance of matching
+ * numeric cells.
+ */
+export function fnDVARP(args: RuntimeValue[]): RuntimeValue {
+  return databaseNumericAggregate(args, vals => {
+    if (vals.length === 0) {
+      return ERRORS.DIV0;
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    let ss = 0;
+    for (const v of vals) {
+      ss += (v - mean) * (v - mean);
+    }
+    return rvNumber(ss / vals.length);
+  });
+}

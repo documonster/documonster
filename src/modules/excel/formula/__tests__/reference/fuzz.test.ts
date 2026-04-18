@@ -118,7 +118,36 @@ const FUNCTIONS: [string, number, number][] = [
   ["ISTEXT", 1, 1],
   ["ISBLANK", 1, 1],
   ["ISERROR", 1, 1],
-  ["ISNA", 1, 1]
+  ["ISNA", 1, 1],
+  // Added in the expansion round — ensure the new functions don't
+  // crash / return disallowed values under random inputs.
+  ["SQRTPI", 1, 1],
+  ["ENCODEURL", 1, 1],
+  ["VALUETOTEXT", 1, 2],
+  ["ARRAYTOTEXT", 1, 2],
+  ["REGEXTEST", 2, 3],
+  ["REGEXEXTRACT", 2, 4],
+  ["REGEXREPLACE", 3, 5],
+  ["BINOM.DIST.RANGE", 3, 4],
+  ["MMULT", 2, 2],
+  ["MDETERM", 1, 1],
+  ["MINVERSE", 1, 1],
+  ["MUNIT", 1, 1],
+  ["SERIESSUM", 4, 4],
+  ["PERCENTRANK", 2, 3],
+  ["PROB", 3, 4],
+  ["STEYX", 2, 2],
+  ["Z.TEST", 2, 3],
+  ["T.TEST", 4, 4],
+  ["F.TEST", 2, 2],
+  ["CHISQ.TEST", 2, 2],
+  ["CHISQ.INV.RT", 2, 2],
+  ["LEFTB", 1, 2],
+  ["RIGHTB", 1, 2],
+  ["MIDB", 3, 3],
+  ["LENB", 1, 1],
+  ["FINDB", 2, 3],
+  ["SEARCHB", 2, 3]
 ];
 
 const OPERATORS = ["+", "-", "*", "/", "^", "&", "=", "<", ">", "<=", ">=", "<>"];

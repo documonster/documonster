@@ -831,6 +831,14 @@ function evaluateBinaryOp(
     return evaluateIntersection(leftExpr, rightExpr, ctx, session);
   }
 
+  // Range operator `:` — union of two references into the bounding
+  // rectangle. Needed when one side is a function call (e.g.
+  // `B11:INDIRECT("B" & ROW()-1)`). Both sides must be references or
+  // coerce to references; otherwise Excel returns #REF!.
+  if (op === ":") {
+    return evaluateRangeUnion(leftExpr, rightExpr, ctx, session);
+  }
+
   const left = dereferenceValue(evaluate(leftExpr, ctx, session), ctx, session);
   const right = dereferenceValue(evaluate(rightExpr, ctx, session), ctx, session);
 
@@ -894,6 +902,58 @@ function evaluateIntersection(
   if (top > bottom || left_ > right_) {
     return ERRORS.NULL;
   }
+
+  return rvRef(la.sheet, top, left_, bottom, right_);
+}
+
+/**
+ * Range operator `:` applied at runtime. Normally `A1:B2` is merged by
+ * the tokenizer, but patterns like `A1:INDIRECT("B5")` leave the colon
+ * as a standalone operator. Both operands must evaluate to references
+ * (single-cell or area); the result is the bounding rectangle of the
+ * two reference ranges on the same sheet.
+ *
+ * Semantics:
+ *   - Both sides must be references. Literal numbers / strings → #VALUE!.
+ *   - References must live on the same sheet → else #REF!.
+ *   - Multi-area references on either side → #REF! (Excel behavior).
+ */
+function evaluateRangeUnion(
+  leftExpr: BoundExpr,
+  rightExpr: BoundExpr,
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  const left = evaluate(leftExpr, ctx, session);
+  const right = evaluate(rightExpr, ctx, session);
+
+  if (isError(left)) {
+    return left;
+  }
+  if (isError(right)) {
+    return right;
+  }
+  if (left.kind !== RVKind.Reference || right.kind !== RVKind.Reference) {
+    return ERRORS.VALUE;
+  }
+  if (left.areas.length !== 1 || right.areas.length !== 1) {
+    return ERRORS.REF;
+  }
+
+  const la = left.areas[0];
+  const ra = right.areas[0];
+
+  if (la.sheet.toLowerCase() !== ra.sheet.toLowerCase()) {
+    return ERRORS.REF;
+  }
+
+  // Bounding rectangle that spans both areas — this is the union /
+  // range-op semantics (Excel), distinct from intersection which uses
+  // min/max in the opposite direction.
+  const top = Math.min(la.top, ra.top);
+  const left_ = Math.min(la.left, ra.left);
+  const bottom = Math.max(la.bottom, ra.bottom);
+  const right_ = Math.max(la.right, ra.right);
 
   return rvRef(la.sheet, top, left_, bottom, right_);
 }

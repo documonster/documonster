@@ -117,7 +117,13 @@ describe("lookupFunction: sample of each family", () => {
       "REGEXREPLACE",
       "VALUETOTEXT",
       "ARRAYTOTEXT",
-      "ENCODEURL"
+      "ENCODEURL",
+      "LEFTB",
+      "RIGHTB",
+      "MIDB",
+      "LENB",
+      "FINDB",
+      "SEARCHB"
     ],
     date: ["DATE", "YEAR", "MONTH", "DAY", "TODAY", "NOW", "WEEKDAY", "EDATE", "DATEDIF"],
     lookup: ["VLOOKUP", "HLOOKUP", "XLOOKUP", "MATCH", "INDEX", "ADDRESS"],
@@ -143,7 +149,19 @@ describe("lookupFunction: sample of each family", () => {
       "YIELDMAT"
     ],
     engineering: ["DEC2BIN", "HEX2DEC", "BITAND", "COMPLEX", "IMSUM", "BESSELJ"],
-    database: ["DSUM", "DAVERAGE", "DCOUNT", "DMAX", "DMIN", "DGET"],
+    database: [
+      "DSUM",
+      "DAVERAGE",
+      "DCOUNT",
+      "DCOUNTA",
+      "DMAX",
+      "DMIN",
+      "DGET",
+      "DSTDEV",
+      "DSTDEVP",
+      "DVAR",
+      "DVARP"
+    ],
     dynamic: ["SEQUENCE", "FILTER", "SORT", "UNIQUE", "RANDARRAY", "TAKE", "DROP"],
     info: ["ISBLANK", "ISNUMBER", "ISTEXT", "ISERROR", "TYPE", "CELL", "INFO"]
   };
@@ -207,6 +225,41 @@ describe("lookupFunction: alias equivalence", () => {
 
   it("CONFIDENCE aliases CONFIDENCE.NORM (back-compat)", () => {
     sameImpl("CONFIDENCE", "CONFIDENCE.NORM");
+  });
+
+  it("B-variant text functions alias their non-B counterparts", () => {
+    // In non-DBCS locales these are identical; Excel treats them as
+    // aliases in practice for our target use case.
+    sameImpl("LEFTB", "LEFT");
+    sameImpl("RIGHTB", "RIGHT");
+    sameImpl("MIDB", "MID");
+    sameImpl("LENB", "LEN");
+    sameImpl("FINDB", "FIND");
+    sameImpl("SEARCHB", "SEARCH");
+  });
+
+  it("ZTEST / Z.TEST share impl", () => {
+    sameImpl("ZTEST", "Z.TEST");
+  });
+
+  it("TTEST / T.TEST share impl", () => {
+    sameImpl("TTEST", "T.TEST");
+  });
+
+  it("FTEST / F.TEST share impl", () => {
+    sameImpl("FTEST", "F.TEST");
+  });
+
+  it("CHITEST / CHISQ.TEST share impl", () => {
+    sameImpl("CHITEST", "CHISQ.TEST");
+  });
+
+  it("BINOMDIST / BINOM.DIST share impl", () => {
+    sameImpl("BINOMDIST", "BINOM.DIST");
+  });
+
+  it("PERCENTRANK / PERCENTRANK.INC share impl", () => {
+    sameImpl("PERCENTRANK", "PERCENTRANK.INC");
   });
 });
 

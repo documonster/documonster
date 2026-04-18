@@ -356,6 +356,22 @@
     { "formula": "=UPPER(LEFT(\"hello world\", 5))", "expected": "HELLO" },
     { "formula": "=SUM(LARGE({5,3,4,1,2}, {1,2}))", "expected": 9 },
     { "formula": "=IF(SUM(1,2,3)=6, \"match\", \"nomatch\")", "expected": "match" },
-    { "formula": "=IFERROR(SQRT(-1), 0)", "expected": 0 }
+    { "formula": "=IFERROR(SQRT(-1), 0)", "expected": 0 },
+
+    { "formula": "=SQRTPI(1)", "expected": { "num": 1.77245385, "eps": 1e-6 } },
+    { "formula": "=SQRTPI(4)", "expected": { "num": 3.5449077, "eps": 1e-6 } },
+    { "formula": "=ENCODEURL(\"hello world\")", "expected": "hello%20world" },
+    { "formula": "=ENCODEURL(\"a+b=c\")", "expected": "a%2Bb%3Dc" },
+    { "formula": "=VALUETOTEXT(123)", "expected": "123" },
+    { "formula": "=VALUETOTEXT(\"abc\", 1)", "expected": "\"abc\"" },
+    { "formula": "=ARRAYTOTEXT({1,2,3})", "expected": "1, 2, 3" },
+    { "formula": "=ARRAYTOTEXT({1,2,3}, 1)", "expected": "{1,2,3}" },
+    { "formula": "=REGEXTEST(\"abc123\", \"\\d+\")", "expected": true },
+    { "formula": "=REGEXEXTRACT(\"abc123\", \"\\d+\")", "expected": "123" },
+    { "formula": "=REGEXREPLACE(\"a1b2c3\", \"\\d\", \"X\")", "expected": "aXbXcX" },
+    { "formula": "=BINOM.DIST.RANGE(10, 0.5, 5)", "expected": { "num": 0.24609, "eps": 1e-4 } },
+    { "formula": "=MDETERM({1,2;3,4})", "expected": { "num": -2, "eps": 1e-10 } },
+    { "formula": "=SERIESSUM(2, 0, 1, {1,1,1,1})", "expected": 15 },
+    { "formula": "=PERCENTRANK({1,2,3,4,5}, 3)", "expected": 0.5 }
   ]
 }

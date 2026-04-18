@@ -195,6 +195,26 @@ class Parser {
         continue;
       }
 
+      // Range operator `:` — binds tighter than intersection. Normally
+      // `A1:B2` is merged into a single Range token by the tokenizer,
+      // but patterns like `B11:INDIRECT("B" & ROW()-1)` where one side
+      // is a function call leave the colon as a standalone token. The
+      // evaluator then coerces both sides to references and constructs
+      // the union rectangle.
+      if (t.type === TokenType.Colon) {
+        // Right-biased binding power to guarantee higher precedence than
+        // every other operator in the table above.
+        const lbp = 100;
+        const rbp = 101;
+        if (lbp < minBp) {
+          break;
+        }
+        this.next();
+        const right = this.parseExpr(rbp);
+        left = { type: NodeType.BinaryOp, op: ":", left, right };
+        continue;
+      }
+
       break;
     }
 

@@ -35,6 +35,7 @@ import {
   fnSLOPE,
   fnINTERCEPT,
   fnRSQ,
+  fnSTEYX,
   fnFORECAST,
   fnTRIMMEAN,
   fnGEOMEAN,
@@ -64,6 +65,11 @@ import {
   fnPOISSON_DIST,
   fnBINOM_DIST,
   fnBINOM_DIST_RANGE,
+  fnCHISQ_INV_RT,
+  fnZ_TEST,
+  fnT_TEST,
+  fnF_TEST,
+  fnCHISQ_TEST,
   fnBINOM_INV,
   fnHYPGEOM_DIST,
   fnNEGBINOM_DIST,
@@ -5630,5 +5636,257 @@ describe("BINOM.DIST.RANGE", () => {
 
   it("error propagation", () => {
     expect(fnBINOM_DIST_RANGE([ERRORS.NA, rvNumber(0.5), rvNumber(5)])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// CHISQ.INV.RT
+// ============================================================================
+
+describe("CHISQ.INV.RT", () => {
+  it("CHISQ.INV.RT(0.5, df) equals CHISQ.INV(0.5, df) (median, symmetric)", () => {
+    const df = rvNumber(4);
+    const left = asNumber(fnCHISQ_INV_RT([rvNumber(0.5), df]));
+    const right = asNumber(fnCHISQ_INV([rvNumber(0.5), df]));
+    expect(left).toBeCloseTo(right, 4);
+  });
+
+  it("CHISQ.INV.RT(0.05, 10) is a standard critical value", () => {
+    // Known value ≈ 18.307
+    const r = asNumber(fnCHISQ_INV_RT([rvNumber(0.05), rvNumber(10)]));
+    expect(r).toBeCloseTo(18.307, 2);
+  });
+
+  it("p <= 0 or > 1 → #NUM!", () => {
+    expect(fnCHISQ_INV_RT([rvNumber(0), rvNumber(4)])).toEqual(ERRORS.NUM);
+    expect(fnCHISQ_INV_RT([rvNumber(1.1), rvNumber(4)])).toEqual(ERRORS.NUM);
+  });
+
+  it("df < 1 → #NUM!", () => {
+    expect(fnCHISQ_INV_RT([rvNumber(0.5), rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+});
+
+// ============================================================================
+// Z.TEST
+// ============================================================================
+
+describe("Z.TEST", () => {
+  it("returns a probability in [0, 1]", () => {
+    const data = rvArray([[rvNumber(3), rvNumber(6), rvNumber(7), rvNumber(8), rvNumber(6)]]);
+    const p = asNumber(fnZ_TEST([data, rvNumber(4)]));
+    expect(p).toBeGreaterThanOrEqual(0);
+    expect(p).toBeLessThanOrEqual(1);
+  });
+
+  it("x = mean → p = 0.5", () => {
+    const data = rvArray([[rvNumber(2), rvNumber(4), rvNumber(6)]]);
+    // mean = 4, so Z.TEST(data, 4) = 1 - NORMSDIST(0) = 0.5
+    const p = asNumber(fnZ_TEST([data, rvNumber(4)]));
+    expect(p).toBeCloseTo(0.5, 5);
+  });
+
+  it("sigma can be provided externally", () => {
+    const data = rvArray([[rvNumber(2), rvNumber(4), rvNumber(6)]]);
+    const p = asNumber(fnZ_TEST([data, rvNumber(4), rvNumber(2)]));
+    expect(p).toBeCloseTo(0.5, 5);
+  });
+
+  it("sigma <= 0 → #NUM!", () => {
+    const data = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnZ_TEST([data, rvNumber(2), rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+
+  it("empty array → #N/A", () => {
+    expect(fnZ_TEST([rvArray([[]]), rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+
+  it("error in data propagates", () => {
+    expect(fnZ_TEST([rvArray([[ERRORS.NA]]), rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// T.TEST
+// ============================================================================
+
+describe("T.TEST", () => {
+  const a1 = rvArray([[rvNumber(3), rvNumber(4), rvNumber(5), rvNumber(8), rvNumber(9)]]);
+  const a2 = rvArray([[rvNumber(1), rvNumber(2), rvNumber(4), rvNumber(5), rvNumber(6)]]);
+
+  it("returns probability in [0, 1]", () => {
+    const p = asNumber(fnT_TEST([a1, a2, rvNumber(2), rvNumber(2)]));
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
+
+  it("two-tailed is 2× one-tailed", () => {
+    const one = asNumber(fnT_TEST([a1, a2, rvNumber(1), rvNumber(2)]));
+    const two = asNumber(fnT_TEST([a1, a2, rvNumber(2), rvNumber(2)]));
+    expect(two).toBeCloseTo(2 * one, 6);
+  });
+
+  it("paired type 1 requires equal sample sizes", () => {
+    const short = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(fnT_TEST([a1, short, rvNumber(2), rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+
+  it("invalid tails → #NUM!", () => {
+    expect(fnT_TEST([a1, a2, rvNumber(3), rvNumber(2)])).toEqual(ERRORS.NUM);
+  });
+
+  it("invalid type → #NUM!", () => {
+    expect(fnT_TEST([a1, a2, rvNumber(2), rvNumber(4)])).toEqual(ERRORS.NUM);
+  });
+
+  it("type 1 paired, two-tailed", () => {
+    const paired1 = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+    const paired2 = rvArray([[rvNumber(2), rvNumber(4), rvNumber(6), rvNumber(8)]]);
+    const p = asNumber(fnT_TEST([paired1, paired2, rvNumber(2), rvNumber(1)]));
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
+
+  it("type 3 Welch's t-test", () => {
+    const p = asNumber(fnT_TEST([a1, a2, rvNumber(2), rvNumber(3)]));
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
+
+  it("error propagation", () => {
+    expect(fnT_TEST([rvArray([[ERRORS.NA]]), a2, rvNumber(2), rvNumber(2)])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// F.TEST
+// ============================================================================
+
+describe("F.TEST", () => {
+  it("identical samples → p close to 1", () => {
+    const data = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5)]]);
+    const p = asNumber(fnF_TEST([data, data]));
+    expect(p).toBeCloseTo(1, 5);
+  });
+
+  it("very different variances → p close to 0", () => {
+    const low = rvArray([[rvNumber(1), rvNumber(1.01), rvNumber(1.02), rvNumber(1.03)]]);
+    const high = rvArray([[rvNumber(1), rvNumber(100), rvNumber(200), rvNumber(300)]]);
+    const p = asNumber(fnF_TEST([low, high]));
+    expect(p).toBeLessThan(0.1);
+  });
+
+  it("zero-variance sample → #DIV/0!", () => {
+    const flat = rvArray([[rvNumber(5), rvNumber(5), rvNumber(5)]]);
+    const varied = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnF_TEST([flat, varied])).toEqual(ERRORS.DIV0);
+  });
+
+  it("samples with < 2 values → #DIV/0!", () => {
+    const single = rvArray([[rvNumber(1)]]);
+    const ok = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnF_TEST([single, ok])).toEqual(ERRORS.DIV0);
+  });
+
+  it("error propagation", () => {
+    const ok = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnF_TEST([rvArray([[ERRORS.NA]]), ok])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// CHISQ.TEST
+// ============================================================================
+
+describe("CHISQ.TEST", () => {
+  it("identical actual & expected → p = 1", () => {
+    const obs = rvArray([
+      [rvNumber(10), rvNumber(20)],
+      [rvNumber(30), rvNumber(40)]
+    ]);
+    const p = asNumber(fnCHISQ_TEST([obs, obs]));
+    expect(p).toBeCloseTo(1, 10);
+  });
+
+  it("differing → p in (0, 1)", () => {
+    const obs = rvArray([
+      [rvNumber(10), rvNumber(20)],
+      [rvNumber(30), rvNumber(40)]
+    ]);
+    const exp = rvArray([
+      [rvNumber(15), rvNumber(15)],
+      [rvNumber(25), rvNumber(45)]
+    ]);
+    const p = asNumber(fnCHISQ_TEST([obs, exp]));
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
+
+  it("mismatched shapes → #N/A", () => {
+    const a = rvArray([[rvNumber(1), rvNumber(2)]]);
+    const b = rvArray([[rvNumber(1)]]);
+    expect(fnCHISQ_TEST([a, b])).toEqual(ERRORS.NA);
+  });
+
+  it("expected has zero → #NUM!", () => {
+    const a = rvArray([[rvNumber(1), rvNumber(2)]]);
+    const b = rvArray([[rvNumber(0), rvNumber(2)]]);
+    expect(fnCHISQ_TEST([a, b])).toEqual(ERRORS.NUM);
+  });
+
+  it("non-array arg → #VALUE!", () => {
+    expect(fnCHISQ_TEST([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+  });
+
+  it("error propagation", () => {
+    const ok = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(fnCHISQ_TEST([ok, rvArray([[ERRORS.NA, rvNumber(2)]])])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// STEYX
+// ============================================================================
+
+describe("STEYX", () => {
+  it("perfect linear fit → SE = 0 (within rounding)", () => {
+    // y = 2x + 1: perfect fit.
+    const ys = rvArray([[rvNumber(3), rvNumber(5), rvNumber(7), rvNumber(9)]]);
+    const xs = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+    const r = asNumber(fnSTEYX([ys, xs]));
+    expect(Math.abs(r)).toBeLessThan(1e-9);
+  });
+
+  it("scatter produces positive SE", () => {
+    const ys = rvArray([[rvNumber(2), rvNumber(3), rvNumber(5), rvNumber(10)]]);
+    const xs = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+    const r = asNumber(fnSTEYX([ys, xs]));
+    expect(r).toBeGreaterThan(0);
+  });
+
+  it("n < 3 → #DIV/0!", () => {
+    const ys = rvArray([[rvNumber(1), rvNumber(2)]]);
+    const xs = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(fnSTEYX([ys, xs])).toEqual(ERRORS.DIV0);
+  });
+
+  it("identical x values → #DIV/0!", () => {
+    const ys = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    const xs = rvArray([[rvNumber(5), rvNumber(5), rvNumber(5)]]);
+    expect(fnSTEYX([ys, xs])).toEqual(ERRORS.DIV0);
+  });
+
+  it("length mismatch — truncates to shorter length (matches SLOPE family)", () => {
+    // Our pairedNumbers helper truncates rather than erroring, consistent
+    // with SLOPE / INTERCEPT / CORREL behavior.
+    const ys = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    const xs = rvArray([[rvNumber(1), rvNumber(2)]]);
+    // n=2 after truncation → #DIV/0! (need n >= 3 for STEYX).
+    expect(fnSTEYX([ys, xs])).toEqual(ERRORS.DIV0);
+  });
+
+  it("error propagation", () => {
+    const xs = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(fnSTEYX([rvArray([[ERRORS.NA]]), xs])).toEqual(ERRORS.NA);
   });
 });

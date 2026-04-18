@@ -458,9 +458,13 @@ function registerNativeTextFunctions(): void {
   defineEager("CONCAT", 1, 255, fnCONCAT);
   defineEager("TEXTJOIN", 3, 255, fnTEXTJOIN);
   defineEager("LEFT", 1, 2, fnLEFT);
+  defineEager("LEFTB", 1, 2, fnLEFT);
   defineEager("RIGHT", 1, 2, fnRIGHT);
+  defineEager("RIGHTB", 1, 2, fnRIGHT);
   defineEager("MID", 3, 3, fnMID);
+  defineEager("MIDB", 3, 3, fnMID);
   defineEager("LEN", 1, 1, fnLEN);
+  defineEager("LENB", 1, 1, fnLEN);
   defineEager("TRIM", 1, 1, fnTRIM);
   defineEager("LOWER", 1, 1, fnLOWER);
   defineEager("UPPER", 1, 1, fnUPPER);
@@ -468,7 +472,9 @@ function registerNativeTextFunctions(): void {
   defineEager("SUBSTITUTE", 3, 4, fnSUBSTITUTE);
   defineEager("REPLACE", 4, 4, fnREPLACE);
   defineEager("FIND", 2, 3, fnFIND);
+  defineEager("FINDB", 2, 3, fnFIND);
   defineEager("SEARCH", 2, 3, fnSEARCH);
+  defineEager("SEARCHB", 2, 3, fnSEARCH);
   defineEager("REPT", 2, 2, fnREPT);
   defineEager("TEXT", 2, 2, fnTEXT);
   defineEager("VALUE", 1, 1, fnVALUE);
@@ -799,7 +805,6 @@ import {
   fnPERCENTILEEXC,
   fnQUARTILE,
   fnQUARTILEEXC,
-  fnPERCENTRANK,
   fnPERCENTRANK_INC,
   fnPERCENTRANK_EXC,
   fnPROB,
@@ -808,6 +813,7 @@ import {
   fnSLOPE,
   fnINTERCEPT,
   fnRSQ,
+  fnSTEYX,
   fnFORECAST,
   fnGEOMEAN,
   fnHARMEAN,
@@ -829,6 +835,11 @@ import {
   fnBINOM_DIST,
   fnBINOM_DIST_RANGE,
   fnBINOM_INV,
+  fnCHISQ_INV_RT,
+  fnZ_TEST,
+  fnT_TEST,
+  fnF_TEST,
+  fnCHISQ_TEST,
   fnHYPGEOM_DIST,
   fnNEGBINOM_DIST,
   fnCHISQ_DIST,
@@ -896,7 +907,7 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("QUARTILE", 2, 2, fnQUARTILE);
   defineEager("QUARTILE.INC", 2, 2, fnQUARTILE);
   defineEager("QUARTILE.EXC", 2, 2, fnQUARTILEEXC);
-  defineEager("PERCENTRANK", 2, 3, fnPERCENTRANK);
+  defineEager("PERCENTRANK", 2, 3, fnPERCENTRANK_INC);
   defineEager("PERCENTRANK.INC", 2, 3, fnPERCENTRANK_INC);
   defineEager("PERCENTRANK.EXC", 2, 3, fnPERCENTRANK_EXC);
   defineEager("PROB", 3, 4, fnPROB);
@@ -906,6 +917,7 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("SLOPE", 2, 2, fnSLOPE);
   defineEager("INTERCEPT", 2, 2, fnINTERCEPT);
   defineEager("RSQ", 2, 2, fnRSQ);
+  defineEager("STEYX", 2, 2, fnSTEYX);
   defineEager("FORECAST", 3, 3, fnFORECAST);
   defineEager("FORECAST.LINEAR", 3, 3, fnFORECAST);
   defineEager("GEOMEAN", 1, 255, fnGEOMEAN);
@@ -927,12 +939,22 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("MINA", 1, 255, fnMINA);
   defineEager("POISSON.DIST", 3, 3, fnPOISSON_DIST);
   defineEager("BINOM.DIST", 4, 4, fnBINOM_DIST);
+  defineEager("BINOMDIST", 4, 4, fnBINOM_DIST);
   defineEager("BINOM.DIST.RANGE", 3, 4, fnBINOM_DIST_RANGE);
   defineEager("BINOM.INV", 3, 3, fnBINOM_INV);
   defineEager("HYPGEOM.DIST", 5, 5, fnHYPGEOM_DIST);
   defineEager("NEGBINOM.DIST", 4, 4, fnNEGBINOM_DIST);
   defineEager("CHISQ.DIST", 3, 3, fnCHISQ_DIST);
   defineEager("CHISQ.INV", 2, 2, fnCHISQ_INV);
+  defineEager("CHISQ.INV.RT", 2, 2, fnCHISQ_INV_RT);
+  defineEager("Z.TEST", 2, 3, fnZ_TEST);
+  defineEager("ZTEST", 2, 3, fnZ_TEST);
+  defineEager("T.TEST", 4, 4, fnT_TEST);
+  defineEager("TTEST", 4, 4, fnT_TEST);
+  defineEager("F.TEST", 2, 2, fnF_TEST);
+  defineEager("FTEST", 2, 2, fnF_TEST);
+  defineEager("CHISQ.TEST", 2, 2, fnCHISQ_TEST);
+  defineEager("CHITEST", 2, 2, fnCHISQ_TEST);
   defineEager("CHISQ.DIST.RT", 2, 2, fnCHISQ_DIST_RT);
   defineEager("F.DIST", 4, 4, fnF_DIST);
   defineEager("F.INV", 3, 3, fnF_INV);
@@ -1260,20 +1282,30 @@ import {
   fnDSUM,
   fnDAVERAGE,
   fnDCOUNT,
+  fnDCOUNTA,
   fnDMAX,
   fnDMIN,
   fnDPRODUCT,
-  fnDGET
+  fnDGET,
+  fnDSTDEV,
+  fnDSTDEVP,
+  fnDVAR,
+  fnDVARP
 } from "../functions/database";
 
 function registerNativeDatabaseFunctions(): void {
   defineEager("DSUM", 3, 3, fnDSUM);
   defineEager("DAVERAGE", 3, 3, fnDAVERAGE);
   defineEager("DCOUNT", 3, 3, fnDCOUNT);
+  defineEager("DCOUNTA", 3, 3, fnDCOUNTA);
   defineEager("DMAX", 3, 3, fnDMAX);
   defineEager("DMIN", 3, 3, fnDMIN);
   defineEager("DPRODUCT", 3, 3, fnDPRODUCT);
   defineEager("DGET", 3, 3, fnDGET);
+  defineEager("DSTDEV", 3, 3, fnDSTDEV);
+  defineEager("DSTDEVP", 3, 3, fnDSTDEVP);
+  defineEager("DVAR", 3, 3, fnDVAR);
+  defineEager("DVARP", 3, 3, fnDVARP);
 }
 
 // Auto-initialize on import

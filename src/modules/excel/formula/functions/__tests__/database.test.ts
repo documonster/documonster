@@ -21,7 +21,20 @@ import {
   type RuntimeValue,
   type ScalarValue
 } from "../../runtime/values";
-import { fnDSUM, fnDAVERAGE, fnDCOUNT, fnDMAX, fnDMIN, fnDPRODUCT, fnDGET } from "../database";
+import {
+  fnDSUM,
+  fnDAVERAGE,
+  fnDCOUNT,
+  fnDCOUNTA,
+  fnDMAX,
+  fnDMIN,
+  fnDPRODUCT,
+  fnDGET,
+  fnDSTDEV,
+  fnDSTDEVP,
+  fnDVAR,
+  fnDVARP
+} from "../database";
 
 function asNumber(v: RuntimeValue): number {
   expect(v.kind).toBe(RVKind.Number);
@@ -620,5 +633,99 @@ describe("DPRODUCT / DCOUNT extras (R9 saturation)", () => {
     const crit = rvArray([[rvString("k")], [rvString("a")]]);
     const r = fnDCOUNT([DB7, rvBoolean(true), crit]);
     expect(r.kind).toBe(RVKind.Number);
+  });
+});
+
+// ============================================================================
+// DCOUNTA, DSTDEV/DSTDEVP, DVAR/DVARP
+// ============================================================================
+
+describe("DCOUNTA", () => {
+  it("counts all non-empty matching cells including text", () => {
+    const db = buildDb();
+    // All 4 rows match empty criteria; count the Name column (text column).
+    const crit = rvArray([[rvString("Age")], [rvString(">0")]]);
+    expect(asNumber(fnDCOUNTA([db, rvString("Name"), crit]))).toBe(4);
+  });
+
+  it("skips blanks", () => {
+    const db = rvArray([
+      [rvString("A"), rvString("B")],
+      [rvString("x"), rvNumber(1)],
+      [BLANK, rvNumber(2)],
+      [rvString("y"), rvNumber(3)]
+    ]);
+    const crit = rvArray([[rvString("B")], [rvString(">0")]]);
+    // 2 non-blank cells in column A (x, y).
+    expect(asNumber(fnDCOUNTA([db, rvString("A"), crit]))).toBe(2);
+  });
+
+  it("skips empty strings", () => {
+    const db = rvArray([
+      [rvString("A"), rvString("B")],
+      [rvString(""), rvNumber(1)],
+      [rvString("y"), rvNumber(2)]
+    ]);
+    const crit = rvArray([[rvString("B")], [rvString(">0")]]);
+    // Empty string is treated as blank → only "y" counted.
+    expect(asNumber(fnDCOUNTA([db, rvString("A"), crit]))).toBe(1);
+  });
+});
+
+describe("DSTDEV", () => {
+  it("sample std dev of matching scores", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Age")], [rvString(">0")]]);
+    // Scores: 95, 82, 90, 75 — mean 85.5, sumSq 233, sample std = √(233/3) ≈ 8.81
+    const r = asNumber(fnDSTDEV([db, rvString("Score"), crit]));
+    expect(r).toBeCloseTo(Math.sqrt(233 / 3), 5);
+  });
+
+  it("n < 2 → #DIV/0!", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Name")], [rvString("Alice")]]);
+    expect(fnDSTDEV([db, rvString("Score"), crit])).toEqual(ERRORS.DIV0);
+  });
+});
+
+describe("DSTDEVP", () => {
+  it("population std dev of matching scores", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Age")], [rvString(">0")]]);
+    // Population std = √(233/4) ≈ 7.631
+    const r = asNumber(fnDSTDEVP([db, rvString("Score"), crit]));
+    expect(r).toBeCloseTo(Math.sqrt(233 / 4), 5);
+  });
+
+  it("empty matches → #DIV/0!", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Name")], [rvString("NoMatch")]]);
+    expect(fnDSTDEVP([db, rvString("Score"), crit])).toEqual(ERRORS.DIV0);
+  });
+});
+
+describe("DVAR", () => {
+  it("sample variance of matching scores", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Age")], [rvString(">0")]]);
+    // Sample variance = 233/3 ≈ 77.667
+    const r = asNumber(fnDVAR([db, rvString("Score"), crit]));
+    expect(r).toBeCloseTo(233 / 3, 5);
+  });
+
+  it("n < 2 → #DIV/0!", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Name")], [rvString("Alice")]]);
+    expect(fnDVAR([db, rvString("Score"), crit])).toEqual(ERRORS.DIV0);
+  });
+});
+
+describe("DVARP", () => {
+  it("population variance of matching scores", () => {
+    const db = buildDb();
+    const crit = rvArray([[rvString("Age")], [rvString(">0")]]);
+    // Population variance = 233/4 = 58.25
+    const r = asNumber(fnDVARP([db, rvString("Score"), crit]));
+    expect(r).toBeCloseTo(58.25, 5);
   });
 });
