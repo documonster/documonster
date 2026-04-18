@@ -33,6 +33,10 @@ const pivotCacheDefinitionRelsXmlRegex =
   /^xl\/pivotCache\/_rels\/(pivotCacheDefinition\d+)[.]xml[.]rels$/;
 const pivotCacheRecordsXmlRegex = /^xl\/pivotCache\/(pivotCacheRecords\d+)[.]xml$/;
 
+// External workbook links (xl/externalLinks/externalLink{n}.xml and its rels)
+const externalLinkXmlRegex = /^xl\/externalLinks\/externalLink(\d+)[.]xml$/;
+const externalLinkRelsXmlRegex = /^xl\/externalLinks\/_rels\/externalLink(\d+)[.]xml[.]rels$/;
+
 export function normalizeZipPath(path: string): string {
   return path.startsWith("/") ? path.slice(1) : path;
 }
@@ -132,6 +136,24 @@ export function getPivotCacheRecordsNameFromPath(path: string): string | undefin
   return match ? match[1] : undefined;
 }
 
+/**
+ * Extract the 1-based index `N` from `xl/externalLinks/externalLink{N}.xml`.
+ * Returns the raw integer (e.g. `1` for externalLink1.xml) or undefined.
+ */
+export function getExternalLinkIndexFromPath(path: string): number | undefined {
+  const match = externalLinkXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+/**
+ * Extract the 1-based index `N` from
+ * `xl/externalLinks/_rels/externalLink{N}.xml.rels`.
+ */
+export function getExternalLinkIndexFromRelsPath(path: string): number | undefined {
+  const match = externalLinkRelsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
 export function toContentTypesPartName(zipPath: string): string {
   // ContentTypes uses leading slash PartName (e.g. "/xl/workbook.xml").
   return zipPath.startsWith("/") ? zipPath : `/${zipPath}`;
@@ -212,6 +234,23 @@ export function pivotTablePath(n: number | string): string {
 
 export function pivotTableRelsPath(n: number | string): string {
   return `xl/pivotTables/_rels/pivotTable${n}.xml.rels`;
+}
+
+// -------- External links --------
+export function externalLinkPath(n: number | string): string {
+  return `xl/externalLinks/externalLink${n}.xml`;
+}
+
+export function externalLinkRelsPath(n: number | string): string {
+  return `xl/externalLinks/_rels/externalLink${n}.xml.rels`;
+}
+
+/**
+ * Build the `Target` value for an externalLink relationship inside
+ * `xl/_rels/workbook.xml.rels` (base: `xl/`).
+ */
+export function externalLinkRelTargetFromWorkbook(n: number | string): string {
+  return `externalLinks/externalLink${n}.xml`;
 }
 
 export function pivotCacheDefinitionRelTargetFromPivotTable(n: number | string): string {

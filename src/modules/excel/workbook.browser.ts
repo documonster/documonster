@@ -94,6 +94,12 @@ export interface WorkbookModel {
   rawDrawings?: Record<string, Uint8Array>;
   /** Default font preserved from the original file for round-trip fidelity */
   defaultFont?: Partial<Font>;
+  /**
+   * External workbook references in declaration order. Matches the on-disk
+   * `[N]Sheet!Ref` indexing (1-based). Empty or undefined when the workbook
+   * has no external references.
+   */
+  externalLinks?: ExternalLinkModel[];
 }
 
 /** Internal model for workbook-level protection (serialized to <workbookProtection>) */
@@ -107,6 +113,81 @@ export interface WorkbookProtectionModel {
   hashValue?: string;
   saltValue?: string;
   spinCount?: number;
+}
+
+// =============================================================================
+// External Workbook Link Types
+// =============================================================================
+
+/**
+ * Cached values for a single sheet of an external workbook. Keys are the
+ * A1-notation cell addresses *in uppercase* (e.g. `"A1"`, `"B12"`). Values
+ * are the cached primitives Excel displays when the external file is not
+ * currently available — must be JSON primitives: string, number, boolean, or
+ * null for an explicitly blank cell.
+ */
+export type ExternalLinkCachedSheet = Record<string, string | number | boolean | null>;
+
+/**
+ * A single external workbook reference. Each entry corresponds to one
+ * `xl/externalLinks/externalLink{N}.xml` part in the output file, and to
+ * one `<externalReference r:id="...">` entry in `xl/workbook.xml`.
+ *
+ * The on-disk formula syntax for referring to this workbook is `[N]Sheet!A1`
+ * where `N` is the 1-based `index` below.
+ */
+export interface ExternalLinkModel {
+  /**
+   * The 1-based index used in `[N]Sheet!A1` formulas. This is the position
+   * in the workbook's `<externalReferences>` list (in declaration order).
+   * Assigned automatically on read/write; treat as read-only when produced
+   * by the library.
+   */
+  index: number;
+  /**
+   * The rel Target that will be written into
+   * `xl/externalLinks/_rels/externalLink{N}.xml.rels`. For relative paths
+   * (which is what users almost always want), pass the bare filename or a
+   * path relative to the current workbook: `"测试.xlsx"`, `"data/ref.xlsx"`.
+   * Office resolves bare relative paths from the current workbook's
+   * directory — *that* is the fix for the "Office goes to the Documents
+   * folder" problem described in exceljs#3039.
+   *
+   * Absolute `file:///` or `http(s)://` URIs are accepted and written
+   * through unchanged.
+   */
+  target: string;
+  /**
+   * Almost always `"External"`. `"Internal"` is for embedded workbooks
+   * (rare) and is preserved on round-trip when present in the source file.
+   */
+  targetMode: "External" | "Internal";
+  /**
+   * The relationship id inside `xl/_rels/workbook.xml.rels` pointing to this
+   * external link's XML part. Populated automatically on read and
+   * re-assigned on write. Callers should leave this undefined.
+   */
+  rId?: string;
+  /**
+   * The sheet names exposed by the external workbook, in declaration order.
+   * Excel writes one `<sheetName val="..."/>` per entry under
+   * `<sheetNames>` inside the externalLink part.
+   *
+   * At minimum you must declare every sheet that appears in a formula
+   * targeting this external workbook, otherwise Excel will fail to link
+   * the cached values and show `#REF!`.
+   */
+  sheetNames: string[];
+  /**
+   * Cached primitive values per sheet. Key is the *sheet name* (matching an
+   * entry in `sheetNames`), value is a map from A1 address to primitive.
+   *
+   * Cached values are what Excel displays when the referenced external file
+   * is not available (e.g. freshly-downloaded workbook on another machine).
+   * Writing them turns your file from "opens with errors" into "opens,
+   * shows values, offers to update links".
+   */
+  cachedValues?: Record<string, ExternalLinkCachedSheet>;
 }
 
 // =============================================================================
@@ -505,6 +586,16 @@ class Workbook {
   declare public media: WorkbookMedia[];
   declare public pivotTables: PivotTable[];
   declare public protection?: WorkbookProtectionModel;
+  /**
+   * External workbook references, in declaration order. The 1-based index
+   * of each entry matches the `[N]` prefix used inside formula strings
+   * (e.g. the first entry is referenced as `[1]Sheet1!A1` on disk).
+   *
+   * Prefer {@link addExternalLink} for appending — it handles index
+   * assignment and sheet-name deduplication. Direct mutation of this array
+   * is supported but callers must keep indices contiguous starting at 1.
+   */
+  declare public externalLinks: ExternalLinkModel[];
 
   // ===========================================================================
   // Private Properties
@@ -519,6 +610,19 @@ class Workbook {
   declare protected _rawDrawings: Record<string, Uint8Array>;
   /** Default font preserved from original file for round-trip fidelity */
   declare protected _defaultFont?: Partial<Font>;
+  /**
+   * Cache of external-workbook references auto-discovered from formula
+   * strings during previous `writeBuffer()` calls. This is an internal
+   * stash used to keep subsequent writes fixed-point stable: once a
+   * formula has been normalised to `[N]Sheet!A1`, the writer needs the
+   * corresponding link metadata on the next write too, but we don't want
+   * those auto-discovered entries to appear on the user-facing
+   * `externalLinks` list. Indexed by lower-cased target path.
+   *
+   * Entries explicitly added via `addExternalLink()` live on `externalLinks`
+   * instead — the writer combines both at serialisation time.
+   */
+  declare protected _writerExternalLinkCache: Map<string, ExternalLinkModel>;
   /** Global registry of table names (lowercase) for cross-worksheet uniqueness checks. */
   readonly _tableNames = new Set<string>();
   private _xlsx?: XLSX;
@@ -552,8 +656,10 @@ class Workbook {
     this.views = [];
     this.media = [];
     this.pivotTables = [];
+    this.externalLinks = [];
     this._passthrough = {};
     this._rawDrawings = {};
+    this._writerExternalLinkCache = new Map();
     this._definedNames = new DefinedNames(options?.formulaSyntaxProbe);
   }
 
@@ -1470,6 +1576,155 @@ class Workbook {
   }
 
   // ===========================================================================
+  // External Workbook Links
+  // ===========================================================================
+
+  /**
+   * Declare that formulas in this workbook may reference an external
+   * workbook. Registers the target so the output file contains the required
+   * `xl/externalLinks/externalLink{N}.xml` part plus its `.rels` sibling
+   * and Office/WPS can resolve the reference correctly.
+   *
+   * When Office opens the file, it resolves a relative `target` like
+   * `"测试.xlsx"` **relative to the current workbook's directory** — which
+   * is the exact behaviour the user expects when they write
+   * `=[测试.xlsx]Sheet1!A1`. Absolute `file:///…` or `http(s)://…` URIs
+   * are accepted and written through unchanged.
+   *
+   * @returns the registered {@link ExternalLinkModel}. Its `index` field is
+   *   the 1-based number used inside the `[N]` prefix of on-disk formula
+   *   strings (the library rewrites `[target]` forms to `[index]` at write
+   *   time automatically).
+   *
+   * @example
+   * ```ts
+   * const wb = new Workbook();
+   * const ws = wb.addWorksheet("Main");
+   *
+   * // Declare the link once — sheet names and cached values are optional
+   * // but improve interoperability (Excel displays cached values when the
+   * // external file is unavailable).
+   * wb.addExternalLink({
+   *   target: "测试.xlsx",
+   *   sheetNames: ["Sheet1"],
+   *   cachedValues: { Sheet1: { A1: 42 } }
+   * });
+   *
+   * // Write the formula using either the target name OR the numeric index;
+   * // the library normalises both to the on-disk `[N]` form.
+   * ws.getCell("A1").value = { formula: "=[测试.xlsx]Sheet1!A1", result: 42 };
+   * ```
+   */
+  addExternalLink(input: {
+    target: string;
+    sheetNames?: string[];
+    cachedValues?: ExternalLinkModel["cachedValues"];
+    targetMode?: ExternalLinkModel["targetMode"];
+  }): ExternalLinkModel {
+    const link: ExternalLinkModel = {
+      index: this.externalLinks.length + 1,
+      target: input.target,
+      targetMode: input.targetMode ?? "External",
+      sheetNames: input.sheetNames ? [...input.sheetNames] : [],
+      cachedValues: input.cachedValues ? { ...input.cachedValues } : {}
+    };
+    this.externalLinks.push(link);
+    return link;
+  }
+
+  /**
+   * Retrieve an external link by its 1-based on-disk index (the number
+   * inside the `[N]` formula prefix) or by matching target path.
+   */
+  getExternalLink(indexOrTarget: number | string): ExternalLinkModel | undefined {
+    if (typeof indexOrTarget === "number") {
+      return this.externalLinks[indexOrTarget - 1];
+    }
+    const lower = indexOrTarget.toLowerCase();
+    return this.externalLinks.find(link => link.target.toLowerCase() === lower);
+  }
+
+  /**
+   * @internal — used by the writer to obtain the full list of external
+   * links to serialise, including entries auto-discovered from formula
+   * strings during earlier writes. User-visible `externalLinks` always
+   * comes first (in declaration order) so explicit `addExternalLink()`
+   * indices are stable across writes.
+   */
+  _collectExternalLinksForWrite(): ExternalLinkModel[] {
+    const userLower = new Set(this.externalLinks.map(l => l.target.toLowerCase()));
+    const combined: ExternalLinkModel[] = this.externalLinks.map((link, i) => ({
+      ...link,
+      index: i + 1,
+      sheetNames: [...(link.sheetNames ?? [])],
+      cachedValues: { ...(link.cachedValues ?? {}) },
+      targetMode: link.targetMode ?? "External"
+    }));
+    for (const cached of this._writerExternalLinkCache.values()) {
+      if (userLower.has(cached.target.toLowerCase())) {
+        // User explicitly added a link with the same target after an
+        // auto-discovery pass — prefer the user's definition, drop the
+        // cached one.
+        continue;
+      }
+      combined.push({
+        ...cached,
+        index: combined.length + 1,
+        sheetNames: [...cached.sheetNames],
+        cachedValues: { ...cached.cachedValues }
+      });
+    }
+    return combined;
+  }
+
+  /**
+   * @internal — record an auto-discovered external link (seen in a
+   * formula but not explicitly declared). Idempotent by target; the
+   * sheet name is upserted onto the existing cached entry when present.
+   * Returns the 1-based index the link will carry in the output file.
+   */
+  _recordAutoExternalLink(target: string, sheetName: string): number {
+    const lower = target.toLowerCase();
+    // If the user explicitly declared a link with this target, we respect
+    // their definition verbatim: no sheetName upserts, no cache entry.
+    // Excel needs the user-declared sheetNames to match the refs, and
+    // augmenting them on the user's behalf could silently hide a typo.
+    const existingUserIdx = this.externalLinks.findIndex(l => l.target.toLowerCase() === lower);
+    if (existingUserIdx !== -1) {
+      return existingUserIdx + 1;
+    }
+    let cached = this._writerExternalLinkCache.get(lower);
+    if (!cached) {
+      cached = {
+        // Index is provisional — the real on-disk index is recomputed by
+        // `_collectExternalLinksForWrite()` at serialisation time.
+        index: 0,
+        target,
+        targetMode: "External",
+        sheetNames: [],
+        cachedValues: {}
+      };
+      this._writerExternalLinkCache.set(lower, cached);
+    }
+    if (sheetName && !cached.sheetNames.includes(sheetName)) {
+      cached.sheetNames.push(sheetName);
+    }
+    // Recompute final index: user entries first, then cache entries in
+    // insertion order. The caller needs the *on-disk* index so that the
+    // formula it's rewriting matches the link that will be serialised.
+    const userCount = this.externalLinks.length;
+    let cacheIdx = 0;
+    for (const key of this._writerExternalLinkCache.keys()) {
+      cacheIdx++;
+      if (key === lower) {
+        return userCount + cacheIdx;
+      }
+    }
+    // Unreachable — we just inserted.
+    return userCount + this._writerExternalLinkCache.size;
+  }
+
+  // ===========================================================================
   // Model (Serialization)
   // ===========================================================================
 
@@ -1502,7 +1757,8 @@ class Workbook {
       calcProperties: this.calcProperties,
       passthrough: this._passthrough,
       rawDrawings: this._rawDrawings,
-      defaultFont: this._defaultFont
+      defaultFont: this._defaultFont,
+      externalLinks: this.externalLinks
     };
   }
 
@@ -1556,6 +1812,11 @@ class Workbook {
     this._rawDrawings = value.rawDrawings || {};
     // Preserve default font for round-trip fidelity
     this._defaultFont = value.defaultFont;
+    // Preserve external workbook references (empty array if none)
+    this.externalLinks = value.externalLinks ? [...value.externalLinks] : [];
+    // Reset the writer-scoped auto-discovery cache — loading a fresh
+    // workbook replaces any accumulated state from previous writes.
+    this._writerExternalLinkCache = new Map();
   }
 }
 

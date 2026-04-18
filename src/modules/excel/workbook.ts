@@ -135,5 +135,7 @@ export type {
   CsvInput,
   WorkbookModel,
   WorkbookMedia,
-  WorkbookProtectionModel
+  WorkbookProtectionModel,
+  ExternalLinkModel,
+  ExternalLinkCachedSheet
 } from "@excel/workbook.browser";

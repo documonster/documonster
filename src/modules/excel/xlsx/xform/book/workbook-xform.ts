@@ -1,6 +1,7 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DefinedNamesXform } from "@excel/xlsx/xform/book/defined-name-xform";
+import { ExternalReferenceXform } from "@excel/xlsx/xform/book/external-reference-xform";
 import { WorksheetXform } from "@excel/xlsx/xform/book/sheet-xform";
 import { WorkbookCalcPropertiesXform } from "@excel/xlsx/xform/book/workbook-calc-properties-xform";
 import { WorkbookPivotCacheXform } from "@excel/xlsx/xform/book/workbook-pivot-cache-xform";
@@ -38,6 +39,11 @@ class WorkbookXform extends BaseXform {
         tag: "pivotCaches",
         count: false,
         childXform: new WorkbookPivotCacheXform()
+      }),
+      externalReferences: new ListXform({
+        tag: "externalReferences",
+        count: false,
+        childXform: new ExternalReferenceXform()
       })
     };
   }
@@ -128,6 +134,16 @@ class WorkbookXform extends BaseXform {
     });
     this.map.pivotCaches.render(xmlStream, uniquePivotCaches);
 
+    // <externalReferences> order matters: one entry per externalLink in
+    // declaration order, each carrying the r:id that resolves (via
+    // workbook.xml.rels) to `xl/externalLinks/externalLink{N}.xml`. The
+    // index inside this list is exactly the `[N]` used in formula strings.
+    const externalLinks = model.externalLinks ?? [];
+    if (externalLinks.length > 0) {
+      const externalReferenceModels = externalLinks.map((link: any) => ({ rId: link.rId }));
+      this.map.externalReferences.render(xmlStream, externalReferenceModels);
+    }
+
     xmlStream.closeNode();
   }
 
@@ -175,6 +191,13 @@ class WorkbookXform extends BaseXform {
         }
         if (this.map.pivotCaches.model && this.map.pivotCaches.model.length > 0) {
           this.model.pivotCaches = this.map.pivotCaches.model;
+        }
+        // Attach parsed <externalReferences> as a list of { rId } objects.
+        // The reader in xlsx.browser.ts will later join each entry with the
+        // matching workbookRels row (to pick up the externalLink Target) and
+        // the parsed externalLinkN.xml part (to pick up sheetNames / cache).
+        if (this.map.externalReferences.model && this.map.externalReferences.model.length > 0) {
+          this.model.externalReferences = this.map.externalReferences.model;
         }
 
         return false;

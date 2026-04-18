@@ -110,7 +110,13 @@ export { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 export type { CheckboxState } from "@excel/form-control";
 export type { ColumnDefn, ColumnHeaderValue } from "@excel/column";
 export type { RangeInput } from "@excel/range";
-export type { WorkbookModel, WorkbookMedia, WorkbookProtectionModel } from "@excel/workbook";
+export type {
+  WorkbookModel,
+  WorkbookMedia,
+  WorkbookProtectionModel,
+  ExternalLinkModel,
+  ExternalLinkCachedSheet
+} from "@excel/workbook";
 
 // =============================================================================
 // Utilities

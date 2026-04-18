@@ -24,7 +24,23 @@ const RelType = {
   FeaturePropertyBag:
     "http://schemas.microsoft.com/office/2022/11/relationships/FeaturePropertyBag",
   CtrlProp: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp",
-  SheetMetadata: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
+  SheetMetadata:
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata",
+  /**
+   * Relationship type for the externalLink part referenced from
+   * xl/_rels/workbook.xml.rels. Target is an internal path like
+   * `externalLinks/externalLink1.xml`.
+   */
+  ExternalLink: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink",
+  /**
+   * Relationship type used *inside* xl/externalLinks/_rels/externalLinkN.xml.rels
+   * to point at the actual external workbook. When `TargetMode="External"` and
+   * `Target` is a bare relative path (e.g. `"测试.xlsx"`), Office resolves it
+   * relative to the current workbook's directory — exactly the behaviour users
+   * expect from `=[测试.xlsx]Sheet1!A1`.
+   */
+  ExternalLinkPath:
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath"
 };
 
 export { RelType };

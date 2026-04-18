@@ -3,6 +3,7 @@ import {
   commentsPathFromName,
   ctrlPropPath,
   drawingPath,
+  externalLinkPath,
   pivotCacheDefinitionPath,
   pivotCacheRecordsPath,
   pivotTablePath,
@@ -99,6 +100,19 @@ class ContentTypesXform extends BaseXform {
       PartName: toContentTypesPartName(OOXML_PATHS.xlStyles),
       ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"
     });
+
+    // Each externalLink part needs its own Override. Omitted entries make
+    // Excel fail to load the external reference (and, in some builds,
+    // trigger a "the workbook is damaged" dialog).
+    if (model.externalLinks && model.externalLinks.length > 0) {
+      for (const link of model.externalLinks) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(externalLinkPath(link.index)),
+          ContentType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"
+        });
+      }
+    }
 
     // Add FeaturePropertyBag if checkboxes are used
     if (model.hasCheckboxes) {

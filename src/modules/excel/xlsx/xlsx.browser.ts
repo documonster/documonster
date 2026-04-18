@@ -22,18 +22,24 @@ import {
 } from "@excel/errors";
 import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
 import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
+import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
   commentsPath,
   commentsRelTargetFromWorksheetName,
   ctrlPropPath,
   drawingPath,
   drawingRelsPath,
+  externalLinkPath,
+  externalLinkRelsPath,
+  externalLinkRelTargetFromWorkbook,
   OOXML_REL_TARGETS,
   pivotTableRelTargetFromWorksheetName,
   pivotCacheDefinitionRelTargetFromWorkbook,
   getCommentsIndexFromPath,
   getDrawingNameFromPath,
   getDrawingNameFromRelsPath,
+  getExternalLinkIndexFromPath,
+  getExternalLinkIndexFromRelsPath,
   getMediaFilenameFromPath,
   mediaPath,
   getPivotCacheDefinitionNameFromPath,
@@ -71,7 +77,12 @@ import {
 import { PassthroughManager } from "@excel/utils/passthrough-manager";
 import { StreamBuf } from "@excel/utils/stream-buf";
 import type { Workbook } from "@excel/workbook";
+import type { ExternalLinkModel } from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
+import {
+  ExternalLinkXform,
+  type ParsedExternalLink
+} from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
@@ -402,6 +413,59 @@ interface ZipEntryLike {
 }
 
 /**
+ * Extract the trailing integer from a workbook-rels Target like
+ * `"externalLinks/externalLink12.xml"` (a path relative to `xl/`). Mirror
+ * of {@link getExternalLinkIndexFromPath} which takes the full
+ * `xl/externalLinks/…` form. Used during reconcile to bridge the
+ * workbook.xml.rels entry to the parsed externalLinkN.xml part.
+ */
+function externalLinkIndexFromRelTarget(target: string): number | undefined {
+  const match = /(?:^|\/)externalLink(\d+)[.]xml$/.exec(target);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+/**
+ * Add `sheetName` to an ExternalLinkModel's `sheetNames` list if it isn't
+ * already present. Ordering is preserved — the first-seen sheet wins
+ * position 0, which matches what Excel does when writing externalLinks
+ * itself.
+ */
+function upsertSheet(link: { sheetNames: string[] }, sheetName: string): void {
+  if (!sheetName) {
+    return;
+  }
+  if (!link.sheetNames.includes(sheetName)) {
+    link.sheetNames.push(sheetName);
+  }
+}
+
+/**
+ * Scratch state used during `_normaliseExternalLinks`. `links` is the
+ * write-scoped ExternalLinkModel array (user-declared + auto-discovered)
+ * the writer will consume; `byTarget` indexes it by lower-cased target
+ * for O(1) lookup during formula rewriting; `workbook` is used to
+ * persist auto-discoveries to the Workbook's private cache so subsequent
+ * writes stay consistent without mutating `wb.externalLinks`.
+ */
+interface NormaliseScratch {
+  links: ExternalLinkModel[];
+  byTarget: Map<string, ExternalLinkModel>;
+  workbook: Workbook;
+}
+
+/**
+ * Shape of a parsed externalLinkN.xml.rels entry. Kept broad so any
+ * relationship type passes through verbatim — the writer only cares about
+ * the ExternalLinkPath entry, but we preserve the rest for round-trip.
+ */
+type ExternalLinkRelsEntry = {
+  Id: string;
+  Type: string;
+  Target: string;
+  TargetMode?: string;
+};
+
+/**
  * XLSX class - handles Excel file operations
  * Works in both Node.js and Browser environments
  */
@@ -482,6 +546,7 @@ class XLSX {
     await this.addDrawings(zip, model);
     await this.addTables(zip, model);
     await this.addPivotTables(zip, model);
+    await this.addExternalLinks(zip, model);
     this.addPassthrough(zip, model);
     await this.addThemes(zip, model);
     await this.addStyles(zip, model);
@@ -628,7 +693,15 @@ class XLSX {
       pivotCacheDefinitions: {},
       pivotCacheRecords: {},
       // Passthrough storage for unknown/unsupported files (charts, etc.)
-      passthrough: {} as Record<string, Uint8Array>
+      passthrough: {} as Record<string, Uint8Array>,
+      // External workbook links — parsed from xl/externalLinks/externalLinkN.xml
+      // during _processDefaultEntry, then reconciled into a dense
+      // ExternalLinkModel[] by reconcile() using workbookRels + <externalReferences>.
+      externalLinksByIndex: {} as Record<number, ParsedExternalLink>,
+      // Raw rels from each externalLinkN.rels file, keyed by index.
+      // Contains the actual Target path (e.g. "测试.xlsx", "file:///...")
+      // and TargetMode ("External" / "Internal").
+      externalLinkRelsByIndex: {} as Record<number, ExternalLinkRelsEntry[]>
     };
   }
 
@@ -703,6 +776,9 @@ class XLSX {
         model.protection = workbook.protection;
         model.calcProperties = workbook.calcProperties;
         model.pivotCaches = workbook.pivotCaches;
+        // Pass-through the ordered list of <externalReference> rIds. These
+        // get resolved into a dense externalLinks[] during reconcile().
+        model.externalReferences = workbook.externalReferences;
         return true;
       }
       case OOXML_PATHS.xlSharedStrings:
@@ -956,6 +1032,14 @@ class XLSX {
       worksheetXform.reconcile(worksheet, sheetOptions);
     });
 
+    // Reconcile external workbook links before workbookRels / externalReferences
+    // are dropped. Joins 3 sources:
+    //   1. model.externalReferences  — ordered list of { rId } from workbook.xml
+    //   2. model.workbookRels        — maps rId → target path (inside xl/)
+    //   3. model.externalLinksByIndex — parsed externalLinkN.xml parts
+    //   4. model.externalLinkRelsByIndex — parsed externalLinkN.xml.rels parts
+    this._reconcileExternalLinks(model);
+
     // delete unnecessary parts
     delete model.worksheetHash;
     delete model.worksheetRels;
@@ -972,6 +1056,197 @@ class XLSX {
     delete model.vmlDrawings;
     delete model.pivotTableRels;
     delete model.metadata;
+    // Internal-only scratch fields consumed by _reconcileExternalLinks.
+    delete model.externalReferences;
+    delete model.externalLinksByIndex;
+    delete model.externalLinkRelsByIndex;
+  }
+
+  /**
+   * Join the three on-disk sources that together describe external workbook
+   * references into a single dense `model.externalLinks: ExternalLinkModel[]`.
+   *
+   * Sources:
+   *   - `<externalReferences>` list in workbook.xml (declaration order)
+   *   - `xl/_rels/workbook.xml.rels` (rId → internal path)
+   *   - `xl/externalLinks/externalLink{N}.xml` (sheet names, cached values)
+   *   - `xl/externalLinks/_rels/externalLink{N}.xml.rels` (target, TargetMode)
+   *
+   * The 1-based index of each resulting ExternalLinkModel matches the `[N]`
+   * used in formula strings — this is the single source of truth formula
+   * code should rely on.
+   */
+  protected _reconcileExternalLinks(model: any): void {
+    const refs = model.externalReferences as Array<{ rId: string }> | undefined;
+    if (!refs || refs.length === 0) {
+      // Even when workbook.xml has no <externalReferences>, we may still
+      // have parsed externalLink parts (e.g. orphaned files); those are
+      // dropped silently rather than generating synthesised indices.
+      if (!model.externalLinks) {
+        model.externalLinks = [];
+      }
+      return;
+    }
+
+    const rels = (model.workbookRels ?? []) as Array<{
+      Id: string;
+      Type: string;
+      Target: string;
+    }>;
+    const relById = new Map<string, { Target: string }>();
+    for (const rel of rels) {
+      if (rel.Type === RelType.ExternalLink) {
+        relById.set(rel.Id, rel);
+      }
+    }
+
+    const externalLinks: ExternalLinkModel[] = [];
+    for (let i = 0; i < refs.length; i++) {
+      const ref = refs[i];
+      const rel = relById.get(ref.rId);
+      if (!rel) {
+        // Broken reference — <externalReference> points at an rId that is
+        // not of type ExternalLink. We skip silently; the formula engine
+        // will see the now-missing index and fall back to #REF! as before.
+        continue;
+      }
+
+      // The rel Target is a path inside xl/ like "externalLinks/externalLink1.xml".
+      // Extract the trailing index to look up the parsed part.
+      const partIndex = externalLinkIndexFromRelTarget(rel.Target);
+      if (partIndex === undefined) {
+        continue;
+      }
+
+      const parsed = model.externalLinksByIndex[partIndex] as ParsedExternalLink | undefined;
+      const partRels = (model.externalLinkRelsByIndex[partIndex] ?? []) as ExternalLinkRelsEntry[];
+
+      // Locate the externalLinkPath rel (should be unique within a part).
+      const pathRel =
+        partRels.find(r => r.Type === RelType.ExternalLinkPath) ??
+        partRels.find(r => r.TargetMode === "External");
+
+      externalLinks.push({
+        index: i + 1,
+        rId: ref.rId,
+        target: pathRel?.Target ?? "",
+        targetMode: (pathRel?.TargetMode as "External" | "Internal" | undefined) ?? "External",
+        sheetNames: parsed?.sheetNames ?? [],
+        cachedValues: parsed?.cachedValues ?? {}
+      });
+    }
+
+    model.externalLinks = externalLinks;
+  }
+
+  /**
+   * Write-time pass that brings the workbook model into a shape the writer
+   * can serialise cleanly. Two concerns:
+   *
+   *   1. Build the final external-link list for this write, combining
+   *      user-declared links (`wb.externalLinks`) with auto-discovered
+   *      ones from previous writes (cached on the Workbook). The result
+   *      is assigned to `model.externalLinks` and consumed by the writer;
+   *      `wb.externalLinks` is **not** modified.
+   *
+   *   2. Scan every formula cell for `[Book]Sheet!` prefixes. Filename-form
+   *      references that don't match an existing link trigger
+   *      `_recordAutoExternalLink()` on the Workbook, which adds the target
+   *      to the private writer cache (so subsequent writes are fixed-point
+   *      stable) but leaves `wb.externalLinks` untouched.
+   *
+   *   3. Rewrite every external-ref formula so it uses the numeric `[N]`
+   *      form, the canonical OOXML storage form. This mutation lands on
+   *      the cell's model object — matching the library's existing
+   *      write-time pattern for `ssId`, `styleId`, `si`, and `cm`.
+   *      Subsequent writes see the `[N]` form directly and resolve it
+   *      against `model.externalLinks`, giving idempotent output.
+   */
+  protected _normaliseExternalLinks(model: any): void {
+    // Start from user-declared links, honouring their declaration order.
+    const links = this.workbook._collectExternalLinksForWrite();
+
+    // Fast lookup: case-insensitive target → link object in `links`.
+    const byTarget = new Map<string, ExternalLinkModel>();
+    for (const link of links) {
+      if (link.target) {
+        byTarget.set(link.target.toLowerCase(), link);
+      }
+    }
+
+    const scratch: NormaliseScratch = { links, byTarget, workbook: this.workbook };
+    for (const worksheet of model.worksheets ?? []) {
+      for (const row of worksheet.rows ?? []) {
+        for (const cell of row.cells ?? []) {
+          if (typeof cell?.formula === "string" && cell.formula.length > 0) {
+            cell.formula = this._normaliseFormulaExternalRefs(cell.formula, scratch);
+          }
+          if (typeof cell?.sharedFormula === "string" && cell.sharedFormula.length > 0) {
+            // Shared-formula clones typically carry the master's *address*
+            // here, not a formula body — they won't match the ref regex.
+            // Masters carry the formula on `.formula` (handled above).
+            // We rewrite defensively in case a caller stored an actual
+            // formula string here.
+            cell.sharedFormula = this._normaliseFormulaExternalRefs(cell.sharedFormula, scratch);
+          }
+        }
+      }
+    }
+
+    model.externalLinks = links;
+  }
+
+  /**
+   * Rewrite a single formula so every external-ref prefix uses the numeric
+   * `[N]` form. When an unknown filename-form reference is found we record
+   * it on the workbook's private writer cache (so the next write can still
+   * resolve it) and append a local link to `scratch.links` so subsequent
+   * refs in the same formula see the freshly-assigned index.
+   */
+  private _normaliseFormulaExternalRefs(formula: string, scratch: NormaliseScratch): string {
+    // rewriteExternalRefs internally calls findExternalRefs and returns
+    // the original string unchanged when there are no matches — no need
+    // for a separate guard scan here.
+    return rewriteExternalRefs(formula, ref => {
+      // Numeric ref: accept if it resolves, otherwise preserve verbatim so
+      // Excel surfaces `#REF!` at load time — same as the old behaviour
+      // for truly broken references.
+      if (ref.numeric) {
+        if (ref.index !== null && ref.index >= 1 && ref.index <= scratch.links.length) {
+          upsertSheet(scratch.links[ref.index - 1], ref.sheet);
+          return ref.index;
+        }
+        return null;
+      }
+
+      // Filename form — look up or auto-register.
+      const key = ref.workbook.toLowerCase();
+      let link = scratch.byTarget.get(key);
+      if (!link) {
+        const index = scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+        link = {
+          index,
+          target: ref.workbook,
+          targetMode: "External",
+          sheetNames: ref.sheet ? [ref.sheet] : [],
+          cachedValues: {}
+        };
+        // Keep the local writer list dense: insert at its future position.
+        // `_recordAutoExternalLink` guarantees `index` is user.length + cache.size
+        // at the time of insertion, which equals `scratch.links.length + 1`
+        // whenever we walk formulas sequentially.
+        scratch.links.push(link);
+        scratch.byTarget.set(key, link);
+      } else {
+        upsertSheet(link, ref.sheet);
+        // Keep the workbook cache's sheetNames in sync so subsequent
+        // writes see the accumulated set.
+        if (ref.sheet) {
+          scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+        }
+      }
+      return link.index;
+    });
   }
 
   /**
@@ -1304,6 +1579,35 @@ class XLSX {
     }
   }
 
+  /**
+   * Parse `xl/externalLinks/externalLink{N}.xml` into the intermediate
+   * ParsedExternalLink shape. Reconciliation (joining with the rels file
+   * and the workbook's `<externalReferences>` list) happens later in
+   * {@link reconcile}.
+   */
+  async _processExternalLinkEntry(stream: IParseStream, model: any, index: number): Promise<void> {
+    const xform = new ExternalLinkXform();
+    const parsed = await xform.parseStream(stream);
+    if (parsed) {
+      model.externalLinksByIndex[index] = parsed;
+    }
+  }
+
+  /**
+   * Parse `xl/externalLinks/_rels/externalLink{N}.xml.rels`. The Target /
+   * TargetMode carried here is what Excel uses to locate the actual external
+   * file at open time, so we must preserve it verbatim (including relative
+   * paths like `"测试.xlsx"`).
+   */
+  async _processExternalLinkRelsEntry(
+    stream: IParseStream,
+    model: any,
+    index: number
+  ): Promise<void> {
+    const relationships = await this.parseRels(stream);
+    model.externalLinkRelsByIndex[index] = relationships ?? [];
+  }
+
   // ===========================================================================
   // loadFromFiles - shared logic for loading from pre-extracted ZIP data
   // ===========================================================================
@@ -1438,6 +1742,22 @@ class XLSX {
     const pivotCacheRecordsName = getPivotCacheRecordsNameFromPath(entryName);
     if (pivotCacheRecordsName) {
       await this._processPivotCacheRecordsEntry(stream, model, pivotCacheRecordsName);
+      return true;
+    }
+
+    // External workbook links: xl/externalLinks/externalLinkN.xml and its
+    // sibling _rels file. Both parts are required to reconstruct the
+    // ExternalLinkModel (the .xml carries sheet names + cached values; the
+    // .rels carries the target path and TargetMode).
+    const externalLinkIndex = getExternalLinkIndexFromPath(entryName);
+    if (externalLinkIndex !== undefined) {
+      await this._processExternalLinkEntry(stream, model, externalLinkIndex);
+      return true;
+    }
+
+    const externalLinkRelsIndex = getExternalLinkIndexFromRelsPath(entryName);
+    if (externalLinkRelsIndex !== undefined) {
+      await this._processExternalLinkRelsEntry(stream, model, externalLinkRelsIndex);
       return true;
     }
 
@@ -1577,6 +1897,28 @@ class XLSX {
         Target: worksheetRelTarget(worksheet.fileIndex)
       });
     });
+
+    // External workbook link rels are written AFTER worksheets on purpose:
+    // Excel tolerates either order, but stable ordering (worksheets then
+    // externalLinks) keeps the emitted workbook.xml.rels diff-friendly for
+    // round-trip tests. Each external link becomes a regular Relationship
+    // entry targeting `externalLinks/externalLinkN.xml` inside `xl/`; the
+    // actual external file path is pointed at by the nested
+    // externalLinkN.xml.rels part written by addExternalLinks().
+    //
+    // The list items here are the deep-copies produced by
+    // `_normaliseExternalLinks` — assigning `link.rId` is safe and does not
+    // leak into the user's Workbook.externalLinks.
+    const externalLinks = (model.externalLinks ?? []) as ExternalLinkModel[];
+    for (const link of externalLinks) {
+      link.rId = `rId${count++}`;
+      relationships.push({
+        Id: link.rId,
+        Type: XLSX.RelType.ExternalLink,
+        Target: externalLinkRelTargetFromWorkbook(link.index)
+      });
+    }
+
     const xform = new RelationshipsXform();
     await this._renderToZip(zip, OOXML_PATHS.xlWorkbookRels, xform, relationships);
   }
@@ -1748,6 +2090,45 @@ class XLSX {
   }
 
   /**
+   * Write every external workbook reference into the archive. For each
+   * {@link ExternalLinkModel} in `model.externalLinks` we emit two files:
+   *
+   *   xl/externalLinks/externalLink{index}.xml          — sheet names + cache
+   *   xl/externalLinks/_rels/externalLink{index}.xml.rels — target path
+   *
+   * The target-path rel carries `TargetMode="External"` with a **bare
+   * relative** `Target` whenever the user supplied one. This is the single
+   * line that makes Office / WPS resolve the referenced workbook relative
+   * to the current file's directory (not the `%USERPROFILE%\Documents`
+   * fallback) — the root of the behaviour reported in exceljs#3039.
+   */
+  async addExternalLinks(zip: IZipWriter, model: any): Promise<void> {
+    const externalLinks = (model.externalLinks ?? []) as ExternalLinkModel[];
+    if (externalLinks.length === 0) {
+      return;
+    }
+
+    const externalLinkXform = new ExternalLinkXform();
+    const relsXform = new RelationshipsXform();
+
+    for (const link of externalLinks) {
+      await this._renderToZip(zip, externalLinkPath(link.index), externalLinkXform, link);
+
+      // Always rId1 — the externalLink part only ever has a single rel.
+      // `TargetMode="External"` is what flags Office to look the file up
+      // at workbook-open time rather than embed it.
+      await this._renderToZip(zip, externalLinkRelsPath(link.index), relsXform, [
+        {
+          Id: "rId1",
+          Type: XLSX.RelType.ExternalLinkPath,
+          Target: link.target,
+          TargetMode: link.targetMode ?? "External"
+        }
+      ]);
+    }
+  }
+
+  /**
    * Write passthrough files (charts, etc.) that were preserved during read.
    * These files are written back unchanged to preserve unsupported features.
    */
@@ -1876,6 +2257,19 @@ class XLSX {
     const worksheetXform = new WorkSheetXform();
 
     workbookXform.prepare(model);
+
+    // Normalise external-workbook references before any formula rendering.
+    // Two jobs:
+    //   1. Scan every formula cell and make sure each referenced workbook
+    //      has a matching ExternalLinkModel in `model.externalLinks`, with
+    //      a stable 1-based index.
+    //   2. Rewrite formula strings from `[filename.xlsx]Sheet!A1` to
+    //      `[N]Sheet!A1`, which is the canonical on-disk form Excel
+    //      expects inside `<f>` elements.
+    //
+    // Done once up-front (not per cell) so the index assignment is
+    // deterministic and every cell sees the final externalLinks list.
+    this._normaliseExternalLinks(model);
 
     const worksheetOptions: any = {
       sharedStrings: model.sharedStrings,
