@@ -1265,7 +1265,8 @@ describe("Workbook", () => {
   it("throw an error for wrong data type", async () => {
     const wb = new Workbook();
     try {
-      await wb.xlsx.load({});
+      // Deliberately passing the wrong runtime type to verify the guard.
+      await wb.xlsx.load({} as unknown as Uint8Array);
       expect.fail("should fail for given argument");
     } catch (e) {
       expect((e as Error).message).toContain(

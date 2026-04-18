@@ -55,7 +55,13 @@ const TEXT_DECODER = new TextDecoder();
 // Types
 // ============================================================================
 
-interface Medium extends ImageData {
+/**
+ * An image registered in the streaming writer.
+ *
+ * Extends the public {@link ImageData} shape with the unique stored name
+ * (`name`) assigned by `addImage`, and pins `type` to `"image"`.
+ */
+export interface Medium extends ImageData {
   type: "image";
   name: string;
 }
@@ -100,9 +106,12 @@ export interface WorkbookWriterOptions {
 }
 
 interface OutputStreamLike {
-  emit(eventName: string | symbol, ...args: any[]): boolean;
-  write(chunk: any): boolean | Promise<boolean>;
+  emit(eventName: string | symbol, ...args: unknown[]): boolean;
+  write(chunk: Uint8Array | string): boolean | Promise<boolean>;
   end(): void;
+  // Node's EventEmitter-style callbacks receive heterogeneous args whose types
+  // depend on the event. We keep `any[]` here because `unknown[]` would be too
+  // restrictive for callers that declare typed listeners like `(err: Error) =>`.
   once(eventName: string | symbol, listener: (...args: any[]) => void): this;
   removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
 }
@@ -357,7 +366,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return id;
   }
 
-  getImage(id: number): ImageData | undefined {
+  getImage(id: number): Medium | undefined {
     return this.media[id];
   }
 

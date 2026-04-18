@@ -24,7 +24,8 @@ const fakeStyles = {
 };
 
 const fakeHyperlinkMap = {
-  H1: "http://www.foo.com"
+  H1: "http://www.foo.com",
+  H2: "http://www.rich.com"
 };
 
 const expectations = [
@@ -355,6 +356,49 @@ const expectations = [
       type: Enums.ValueType.Hyperlink,
       text: "www.foo.com",
       hyperlink: "http://www.foo.com"
+    },
+    tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
+    options: {
+      sharedStrings: new SharedStringsXform(),
+      hyperlinks: [],
+      hyperlinkMap: fakeHyperlinkMap,
+      styles: fakeStyles
+    }
+  },
+  {
+    // Regression test for issue #142:
+    // A hyperlink whose display text is rich-text must round-trip with
+    //   * `text` flattened to a plain string (public contract),
+    //   * `richText` runs preserved for re-writing with formatting intact.
+    title: "Hyperlink with rich-text display",
+    create() {
+      return new CellXform();
+    },
+    initialModel: {
+      address: "H2",
+      type: Enums.ValueType.Hyperlink,
+      hyperlink: "http://www.rich.com",
+      text: "hello world",
+      richText: [{ text: "hello ", font: { bold: true } }, { text: "world" }]
+    },
+    preparedModel: {
+      address: "H2",
+      type: Enums.ValueType.Hyperlink,
+      hyperlink: "http://www.rich.com",
+      text: "hello world",
+      richText: [{ text: "hello ", font: { bold: true } }, { text: "world" }],
+      ssId: 0
+    },
+    xml: '<c r="H2" t="s"><v>0</v></c>',
+    // When parsing the <c>, the shared-string index resolves later during
+    // reconcile. The shared-string itself carries the rich-text payload.
+    parsedModel: { address: "H2", type: Enums.ValueType.String, value: 0 },
+    reconciledModel: {
+      address: "H2",
+      type: Enums.ValueType.Hyperlink,
+      text: "hello world",
+      hyperlink: "http://www.rich.com",
+      richText: [{ text: "hello ", font: { bold: true } }, { text: "world" }]
     },
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
     options: {

@@ -1,4 +1,5 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
+import type { CellFormulaValue, CellValue } from "@excel/types";
 import { Workbook } from "@excel/workbook";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { XmlWriter } from "@xml/writer";
@@ -9,7 +10,7 @@ import { describe, it, expect } from "vitest";
 // ---------------------------------------------------------------------------
 interface TableDef {
   columns: { name: string }[];
-  rows: unknown[][];
+  rows: Array<Array<CellValue | CellFormulaValue>>;
 }
 
 interface PivotXml {

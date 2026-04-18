@@ -13,7 +13,7 @@ import { RelType } from "@excel/xlsx/rel-type";
 // Types
 // =============================================================================
 
-interface DrawingAnchor {
+export interface DrawingAnchor {
   picture: {
     rId: string;
     hyperlinks?: { tooltip?: string; rId: string };
@@ -23,14 +23,14 @@ interface DrawingAnchor {
   range: any;
 }
 
-interface DrawingRel {
+export interface DrawingRel {
   Id: string;
   Type: string;
   Target: string;
   TargetMode?: string;
 }
 
-interface DrawingModel {
+export interface DrawingModel {
   anchors: DrawingAnchor[];
   rels: DrawingRel[];
 }

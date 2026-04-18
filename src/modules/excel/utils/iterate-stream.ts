@@ -7,19 +7,27 @@ interface EventEmitterLike {
   removeListener(event: string, listener: Listener): this;
 }
 
-interface Readable extends EventEmitterLike {
+/**
+ * Minimal readable-stream shape consumed by {@link iterateStream}.
+ * Intentionally structural so it matches Node `Readable`, zip entry streams,
+ * object-mode streams that yield zip entries, and any third-party emitter
+ * that raises `data`/`end`/`error`.
+ */
+export interface IterableStreamLike<T = unknown> extends EventEmitterLike {
   resume(): void;
   pause(): void;
-  on(event: "data", listener: (chunk: any) => void): this;
+  on(event: "data", listener: (chunk: T) => void): this;
   on(event: "end", listener: () => void): this;
   on(event: "error", listener: (err: Error) => void): this;
 }
 
-async function* iterateStream(stream: Readable): AsyncGenerator<any> {
-  const contents: any[] = [];
+async function* iterateStream<T = Uint8Array | string>(
+  stream: IterableStreamLike<T>
+): AsyncGenerator<T> {
+  const contents: T[] = [];
   let resolveDataPromise: (() => void) | null = null;
 
-  const onData = (data: any) => {
+  const onData = (data: T) => {
     contents.push(data);
     if (resolveDataPromise) {
       resolveDataPromise();
@@ -58,7 +66,9 @@ async function* iterateStream(stream: Readable): AsyncGenerator<any> {
       } else {
         stream.pause();
         const data = contents.shift();
-        yield data;
+        if (data !== undefined) {
+          yield data;
+        }
       }
       if (error) {
         throw toError(error);

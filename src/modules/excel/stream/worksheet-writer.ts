@@ -7,14 +7,20 @@ import { Dimensions } from "@excel/range";
 import { Row } from "@excel/row";
 import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
 import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
+import type { Medium as WriterMedium } from "@excel/stream/workbook-writer";
 import { colCache } from "@excel/utils/col-cache";
-import { buildDrawingAnchorsAndRels } from "@excel/utils/drawing-utils";
+import {
+  buildDrawingAnchorsAndRels,
+  type DrawingAnchor,
+  type DrawingRel
+} from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
 import {
   drawingRelTargetFromWorksheet,
   mediaRelTargetFromRels,
   worksheetPath
 } from "@excel/utils/ooxml-paths";
+import type { SharedStrings } from "@excel/utils/shared-strings";
 import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import type { StreamBuf } from "@excel/utils/stream-buf";
 import { StringBuf } from "@excel/utils/string-buf";
@@ -94,11 +100,33 @@ const xform = {
 
 // ============================================================================================
 
+/**
+ * Structural view of the fields/methods WorksheetWriter needs from its
+ * parent WorkbookWriter. Defined here (rather than importing WorkbookWriter
+ * directly) to avoid the circular `workbook-writer.ts <-> worksheet-writer.ts`
+ * dependency. The shape must stay in sync with the concrete WorkbookWriter.
+ */
+export interface WorkbookWriterLike {
+  /** Shared-string table (deduplicates plain/rich-text cell values). */
+  readonly sharedStrings: SharedStrings;
+  /**
+   * Style manager. Typed loosely here (`unknown`) because the concrete
+   * `StylesXform` is an internal xform class and pulling it in would
+   * reintroduce the circular import. Xform methods accept it by duck-typing.
+   */
+  readonly styles: object;
+  /** Incremented once per dynamic-array formula cell during row commit. */
+  dynamicArrayCount: number;
+  /** Lookup a media (image/chart) by registered id. */
+  getImage(id: number): WriterMedium | undefined;
+  /** Open a streaming entry in the output zip for the given path. */
+  _openStream(path: string): InstanceType<typeof StreamBuf>;
+}
+
 interface WorksheetWriterOptions {
   id: number;
   name?: string;
-  // WorkbookWriter reference - any due to circular dependency
-  workbook: any;
+  workbook: WorkbookWriterLike;
   useSharedStrings?: boolean;
   properties?: Partial<WorksheetProperties>;
   state?: WorksheetState;
@@ -158,8 +186,9 @@ class WorksheetWriter {
   headerFooter: Partial<HeaderFooter>;
   pageSetup: Partial<PageSetup> & { margins: PageSetup["margins"] };
   useSharedStrings: boolean;
-  // WorkbookWriter - circular dependency, keep as any
-  private _workbook: any;
+  // WorkbookWriter parent — structural reference to avoid the circular
+  // dependency between workbook-writer.ts and worksheet-writer.ts.
+  private _workbook: WorkbookWriterLike;
   hasComments: boolean;
   private _views: Partial<WorksheetView>[];
   autoFilter: AutoFilter | null;
@@ -179,7 +208,12 @@ class WorksheetWriter {
   /** Watermark configuration */
   private _watermark: WatermarkOptions | null;
   /** Drawing model — populated during commit if images were added */
-  private _drawing?: { rId: string; name: string; anchors: any[]; rels: any[] };
+  private _drawing?: {
+    rId: string;
+    name: string;
+    anchors: DrawingAnchor[];
+    rels: DrawingRel[];
+  };
   /** Relationship Id - assigned by WorkbookWriter */
   rId?: string;
 
@@ -326,11 +360,11 @@ class WorksheetWriter {
     this.startedData = false;
   }
 
-  get workbook(): any {
+  get workbook(): WorkbookWriterLike {
     return this._workbook;
   }
 
-  get stream(): any {
+  get stream(): InstanceType<typeof StreamBuf> {
     if (!this._stream) {
       this._stream = this._workbook._openStream(worksheetPath(this.id));
 
@@ -887,7 +921,7 @@ class WorksheetWriter {
     this._write("<sheetData>");
   }
 
-  private _writeRow(row: any): void {
+  private _writeRow(row: Row): void {
     if (!this.startedData) {
       this._writeColumns();
       this._writeOpenSheetData();
@@ -896,6 +930,9 @@ class WorksheetWriter {
 
     if (row.hasValues || row.height != null) {
       const { model } = row;
+      if (!model) {
+        return;
+      }
       const options = {
         styles: this._workbook.styles,
         sharedStrings: this.useSharedStrings ? this._workbook.sharedStrings : undefined,
@@ -1064,7 +1101,9 @@ class WorksheetWriter {
   }
 
   /** Returns the drawing model if images were added, for the workbook writer. */
-  get drawing(): { rId: string; name: string; anchors: any[]; rels: any[] } | undefined {
+  get drawing():
+    | { rId: string; name: string; anchors: DrawingAnchor[]; rels: DrawingRel[] }
+    | undefined {
     return this._drawing;
   }
 
@@ -1072,6 +1111,9 @@ class WorksheetWriter {
     if (this._background) {
       if (this._background.imageId !== undefined) {
         const image = this._workbook.getImage(this._background.imageId);
+        if (!image) {
+          return;
+        }
         const pictureId = this._sheetRelsWriter.addMedia({
           Target: mediaRelTargetFromRels(image.name),
           Type: RelType.Image

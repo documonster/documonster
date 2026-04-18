@@ -123,19 +123,36 @@ export interface IParseStream extends EmitterLike {
   [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | string>;
 }
 
-export interface IStreamBuf extends EmitterLike {
-  write(data: any): boolean | void | Promise<boolean>;
+/**
+ * Minimal write-side shape required to receive XLSX bytes. Anything that
+ * behaves like a Node `WritableStream` (a `write()` method plus `end()` and
+ * event emitter basics) satisfies this — including Node's `fs.WriteStream`,
+ * `PassThrough`, and our `@stream` Writable class.
+ */
+export interface IWritableStream extends EmitterLike {
+  write(data: string | Uint8Array): boolean | void | Promise<boolean>;
   end(): void;
-  read(): any;
-  toBuffer?(): any;
+  // `pipe` is the Node stream ecosystem's polymorphic dispatcher; its return
+  // type depends entirely on the destination. Typed as `any` so callers can
+  // freely chain `.pipe(next).pipe(another)` without forced type assertions.
   pipe?(dest: any): any;
 }
 
+/**
+ * An in-memory buffered stream. Extends the write-side shape with `read()`
+ * and optional `toBuffer()` for callers that use the stream as a sink and
+ * then harvest the accumulated bytes (e.g. `writeBuffer()`'s internal buffer).
+ */
+export interface IStreamBuf extends IWritableStream {
+  read(): Uint8Array | null;
+  toBuffer?(): Uint8Array | null;
+}
+
 export interface IZipWriter extends EmitterLike {
-  append(data: any, options: { name: string; base64?: boolean }): void;
+  append(data: string | Uint8Array, options: { name: string; base64?: boolean }): void;
   /** Create a streaming entry: write chunks incrementally, then call end(). */
   createEntry(name: string): { write(chunk: string): void; end(): void };
-  pipe(stream: any): void;
+  pipe(stream: IWritableStream): void;
   finalize(): void;
   /** Wait for downstream backpressure to clear. Resolves immediately if no backpressure. */
   waitForDrain(): Promise<void>;
@@ -146,7 +163,7 @@ class StreamingZipWriterAdapter implements IZipWriter {
 
   private readonly zip: StreamingZip;
   private readonly events: Map<string, Set<StreamListener>> = new Map();
-  private pipedStream: Pick<IStreamBuf, "write" | "end"> | null = null;
+  private pipedStream: Pick<IWritableStream, "write" | "end"> | null = null;
   private level: number;
   private modTime: Date | undefined;
   private timestamps: ZipTimestampMode | undefined;
@@ -274,7 +291,7 @@ class StreamingZipWriterAdapter implements IZipWriter {
     return this;
   }
 
-  pipe(stream: any): void {
+  pipe(stream: IWritableStream): void {
     this.pipedStream = stream;
     // Listen for drain events to resolve backpressure waiters
     if (stream && typeof stream.on === "function") {
@@ -372,8 +389,41 @@ class StreamingZipWriterAdapter implements IZipWriter {
 // Minimal shared types (keep internal model flexible)
 // =============================================================================
 
+/**
+ * Options for reading (loading) an XLSX workbook.
+ *
+ * All officially supported options are declared below with proper types so
+ * callers get IDE completion and type-checking. Additional fields are
+ * permitted via the index signature for forward compatibility and for
+ * callers who subclass `XLSX` to pass through private flags.
+ */
 export interface XlsxReadOptions {
+  /**
+   * When the input to `load()` is a string, interpret it as a base64-encoded
+   * zip archive instead of a binary buffer. Defaults to `false`.
+   */
   base64?: boolean;
+  /**
+   * Maximum number of rows to parse from each worksheet. Rows beyond this
+   * limit are silently skipped. Useful for previewing very large sheets
+   * without loading everything into memory.
+   */
+  maxRows?: number;
+  /**
+   * Maximum number of columns to parse from each worksheet. Columns beyond
+   * this limit are silently skipped. Useful for previewing very wide sheets.
+   */
+  maxCols?: number;
+  /**
+   * List of worksheet XML node names to skip while parsing (e.g.
+   * `"dataValidations"`, `"conditionalFormatting"`). Use for workbooks that
+   * contain corrupted or unsupported elements you want to ignore.
+   */
+  ignoreNodes?: string[];
+  /**
+   * Forward-compatibility / subclass extension escape hatch. Unknown keys are
+   * passed through to internal loaders; unrecognised keys are ignored.
+   */
   [key: string]: unknown;
 }
 
@@ -385,8 +435,33 @@ export interface ZipWriterOptions {
   timestamps?: ZipTimestampMode;
 }
 
+/**
+ * Options for writing an XLSX workbook.
+ *
+ * All officially supported options are declared below with proper types so
+ * callers get IDE completion and type-checking. Additional fields are
+ * permitted via the index signature for forward compatibility and for
+ * callers who subclass `XLSX` to pass through private flags.
+ */
 export interface XlsxWriteOptions {
+  /** ZIP archive options (compression level, timestamps, ...). */
   zip?: ZipWriterOptions;
+  /**
+   * Use a shared-string table for cell text values. Defaults to `true`.
+   * Set to `false` to write string values inline (larger file, but streams
+   * better for very large sheets).
+   */
+  useSharedStrings?: boolean;
+  /**
+   * Emit style definitions (fonts, fills, borders, number formats, …).
+   * Defaults to `true`. Set to `false` to skip style blocks for maximum
+   * compatibility with minimal readers.
+   */
+  useStyles?: boolean;
+  /**
+   * Forward-compatibility / subclass extension escape hatch. Unknown keys are
+   * passed through to internal writers; unrecognised keys are ignored.
+   */
   [key: string]: unknown;
 }
 
@@ -407,7 +482,10 @@ export interface MediaModel {
 
 interface ZipEntryLike {
   name: string;
-  type: "Directory" | "File";
+  // Mirrors the `type` field on streaming ZipEntry. Symlink detection in
+  // streaming parsers is best-effort; for XLSX (which contains no symlinks)
+  // this is effectively "Directory" | "File" at runtime.
+  type: "Directory" | "File" | "Symlink";
   stream: IParseStream;
   drain: () => Promise<void>;
 }
@@ -564,7 +642,7 @@ class XLSX {
   /**
    * Read workbook from a stream
    */
-  async read(stream: IParseStream, options?: XlsxReadOptions): Promise<any> {
+  async read(stream: IParseStream, options?: XlsxReadOptions): Promise<Workbook> {
     // Collect all stream data into a single buffer
     const chunks: Uint8Array[] = [];
 
@@ -598,7 +676,7 @@ class XLSX {
   /**
    * Write workbook to a stream
    */
-  async write(stream: any, options?: XlsxWriteOptions): Promise<XLSX> {
+  async write(stream: IWritableStream, options?: XlsxWriteOptions): Promise<XLSX> {
     options = options || {};
 
     options.zip = options.zip || {};
@@ -611,20 +689,22 @@ class XLSX {
   }
 
   /**
-   * Load workbook from buffer/ArrayBuffer/Uint8Array
+   * Load a workbook from binary data.
+   *
+   * Accepted inputs:
+   *  - `Uint8Array` (and `Buffer`, which is a Uint8Array at runtime)
+   *  - `ArrayBuffer` / `SharedArrayBuffer`
+   *  - Any `ArrayBufferView` (DataView, Int8Array, Float32Array, …) — the
+   *    underlying bytes are reinterpreted as a zip archive
+   *  - `string` — treated as base64-encoded data when `options.base64 === true`;
+   *    raw binary cannot be round-tripped through a JS string and is rejected
+   *    to prevent silent corruption.
    */
-  async load(data: any, options?: XlsxReadOptions): Promise<any> {
-    let buffer: Uint8Array;
-
-    // Validate input
-    const isBuffer = typeof Buffer !== "undefined" ? Buffer.isBuffer(data) : false;
-    if (
-      !data ||
-      (typeof data === "object" &&
-        !isBuffer &&
-        !(data instanceof Uint8Array) &&
-        !(data instanceof ArrayBuffer))
-    ) {
+  async load(
+    data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+    options?: XlsxReadOptions
+  ): Promise<Workbook> {
+    if (data === null || data === undefined) {
       throw new ExcelFileError(
         "<input>",
         "read",
@@ -632,16 +712,34 @@ class XLSX {
       );
     }
 
-    // Handle base64 input
-    if (options && options.base64) {
-      buffer = base64ToUint8Array(data.toString());
+    let buffer: Uint8Array;
+
+    if (typeof data === "string") {
+      // Strings must be base64-encoded — binary zip bytes cannot be round-tripped
+      // through a JS string without corruption. Require the explicit opt-in.
+      if (!options?.base64) {
+        throw new ExcelFileError(
+          "<input>",
+          "read",
+          "Can't read the data of 'the loaded zip file'. Is it in a supported JavaScript type (String, Blob, ArrayBuffer, etc) ? " +
+            "String input requires options.base64 === true (base64-encoded zip archive)."
+        );
+      }
+      buffer = base64ToUint8Array(data);
+    } else if (data instanceof Uint8Array) {
+      // Covers Buffer (Node) and any typed-array view whose element size is 1.
+      buffer = data;
     } else if (data instanceof ArrayBuffer) {
       buffer = new Uint8Array(data);
-    } else if (data instanceof Uint8Array) {
-      buffer = data;
+    } else if (ArrayBuffer.isView(data)) {
+      // DataView, Int8Array, Float32Array, … — view onto an underlying buffer.
+      buffer = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     } else {
-      // Node.js Buffer or other array-like
-      buffer = new Uint8Array(data);
+      throw new ExcelFileError(
+        "<input>",
+        "read",
+        "Can't read the data of 'the loaded zip file'. Is it in a supported JavaScript type (String, Blob, ArrayBuffer, etc) ?"
+      );
     }
 
     return this.loadBuffer(buffer, options);
@@ -650,7 +748,7 @@ class XLSX {
   /**
    * Internal: Load from Uint8Array buffer
    */
-  protected async loadBuffer(buffer: Uint8Array, options?: XlsxReadOptions): Promise<any> {
+  protected async loadBuffer(buffer: Uint8Array, options?: XlsxReadOptions): Promise<Workbook> {
     const parser = new ZipParser(buffer);
     const filesMap = await parser.extractAll();
 
@@ -1612,7 +1710,10 @@ class XLSX {
   // loadFromFiles - shared logic for loading from pre-extracted ZIP data
   // ===========================================================================
 
-  async loadFromFiles(zipData: Record<string, Uint8Array>, options?: any): Promise<any> {
+  async loadFromFiles(
+    zipData: Record<string, Uint8Array>,
+    options?: XlsxReadOptions
+  ): Promise<Workbook> {
     const model: any = this.createEmptyModel();
 
     const entries = Object.keys(zipData).map(name => ({

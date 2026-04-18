@@ -1,5 +1,6 @@
 import { Cell } from "@excel/cell";
 import { Enums } from "@excel/enums";
+import type { CellHyperlinkValue } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect, beforeEach } from "vitest";
 
@@ -216,6 +217,89 @@ describe("Cell", () => {
     a1._upgradeToHyperlink(linkValue);
 
     expect(a1.type).toBe(Enums.ValueType.Hyperlink);
+  });
+
+  it("upgrades from rich text to hyperlink, preserving runs (issue #142)", () => {
+    sheetMock.getRow(1);
+    sheetMock.getColumn(1);
+
+    const a1 = sheetMock.getCell("A1");
+    const linkValue = "http://www.link.com";
+
+    a1.value = {
+      richText: [{ text: "bold", font: { bold: true } }, { text: "-plain" }]
+    };
+
+    a1._upgradeToHyperlink(linkValue);
+
+    expect(a1.type).toBe(Enums.ValueType.Hyperlink);
+    // CellHyperlinkValue.text contract: always a string
+    const v = a1.value as CellHyperlinkValue;
+    expect(typeof v.text).toBe("string");
+    expect(v.text).toBe("bold-plain");
+    expect(v.hyperlink).toBe(linkValue);
+    expect(v.richText).toEqual([{ text: "bold", font: { bold: true } }, { text: "-plain" }]);
+  });
+
+  it("hyperlink value setter normalizes rich text into plain-text mirror (issue #142)", () => {
+    sheetMock.getRow(1);
+    sheetMock.getColumn(1);
+
+    const a1 = sheetMock.getCell("A1");
+
+    a1.value = {
+      richText: [{ text: "hello " }, { text: "world", font: { italic: true } }],
+      hyperlink: "https://example.com",
+      // Intentionally inconsistent: user-supplied text should be ignored
+      // when richText is present, to keep the invariant text===flatten(richText).
+      text: "ignored"
+    } as unknown as CellHyperlinkValue;
+
+    expect(a1.type).toBe(Enums.ValueType.Hyperlink);
+    const v = a1.value as CellHyperlinkValue;
+    expect(v.text).toBe("hello world");
+    expect(typeof v.text).toBe("string");
+    expect(v.hyperlink).toBe("https://example.com");
+    expect(v.richText).toEqual([{ text: "hello " }, { text: "world", font: { italic: true } }]);
+  });
+
+  it("hyperlink cell.text always returns a string, even for rich-text link (issue #142)", () => {
+    sheetMock.getRow(1);
+    sheetMock.getColumn(1);
+
+    const a1 = sheetMock.getCell("A1");
+    a1.value = {
+      richText: [{ text: "abc" }, { text: "def" }],
+      hyperlink: "https://example.com"
+    } as unknown as CellHyperlinkValue;
+
+    expect(typeof a1.text).toBe("string");
+    expect(a1.text).toBe("abcdef");
+    expect(a1.toString()).toBe("abcdef");
+  });
+
+  it("does not classify { richText: [] } as a RichText cell", () => {
+    sheetMock.getRow(1);
+    sheetMock.getColumn(1);
+
+    const a1 = sheetMock.getCell("A1");
+    // An empty richText array carries no content. It must not produce a
+    // RichText cell with no runs (which would later flatten to "").
+    a1.value = { richText: [] } as unknown as CellHyperlinkValue;
+    expect(a1.type).not.toBe(Enums.ValueType.RichText);
+  });
+
+  it("does not classify { richText: [], hyperlink } as a Hyperlink cell", () => {
+    sheetMock.getRow(1);
+    sheetMock.getColumn(1);
+
+    const a1 = sheetMock.getCell("A1");
+    // Empty richText and no plain text => not a valid hyperlink display.
+    a1.value = {
+      richText: [],
+      hyperlink: "https://example.com"
+    } as unknown as CellHyperlinkValue;
+    expect(a1.type).not.toBe(Enums.ValueType.Hyperlink);
   });
 
   it("doesn't upgrade from non-string to hyperlink", () => {

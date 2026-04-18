@@ -10,6 +10,7 @@
  */
 
 import { createParse } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
 import { ExcelFileError } from "@excel/errors";
 import { HyperlinkReader, type Hyperlink } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
@@ -104,7 +105,7 @@ export type ParseEvent<TWorksheetReader, THyperlinkReader> =
 export interface WaitingWorksheetEntry {
   eventType: "waiting-worksheet";
   sheetNo: string;
-  entry: any;
+  entry: ZipEntry;
 }
 
 export type CommonInput = Uint8Array | ArrayBuffer | Readable | ReadableStream<Uint8Array>;
@@ -262,7 +263,7 @@ export abstract class WorkbookReaderBase<
   }
 
   // Subclass implements storage strategy
-  abstract _storeWaitingWorksheet(sheetNo: string, entry: any): Promise<TWaitingWorksheet>;
+  abstract _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<TWaitingWorksheet>;
   abstract _processWaitingWorksheets(
     waitingWorksheets: TWaitingWorksheet[]
   ): AsyncIterableIterator<WorksheetReadyEvent<TWorksheetReader>>;
@@ -816,7 +817,7 @@ class WorkbookReader extends WorkbookReaderBase<
     super(input, options, WorksheetReader, HyperlinkReader);
   }
 
-  async _storeWaitingWorksheet(sheetNo: string, entry: any): Promise<WaitingWorksheet> {
+  async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {
     const chunks: Uint8Array[] = [];
     const encoder = new TextEncoder();
     for await (const chunk of iterateStream(entry)) {

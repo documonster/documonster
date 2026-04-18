@@ -275,6 +275,36 @@ describe("XLSX", () => {
       const wb = new Workbook();
       await expect(wb.xlsx.load(undefined as any)).rejects.toThrow();
     });
+
+    it("accepts a Node Buffer (Buffer extends Uint8Array)", async () => {
+      const u8 = await buildMinimalXlsx();
+      // Node Buffer shares the Uint8Array prototype at runtime.
+      const buf = Buffer.from(u8);
+      const wb = new Workbook();
+      await wb.xlsx.load(buf);
+      expect(wb.worksheets.length).toBe(1);
+      expect(wb.getWorksheet("Sheet1")!.getCell("A1").value).toBe("hello");
+    });
+
+    it("accepts a DataView (ArrayBufferView non-Uint8Array)", async () => {
+      const u8 = await buildMinimalXlsx();
+      const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      const wb = new Workbook();
+      await wb.xlsx.load(view);
+      expect(wb.worksheets.length).toBe(1);
+      expect(wb.getWorksheet("Sheet1")!.getCell("A1").value).toBe("hello");
+    });
+
+    it("rejects a raw string without options.base64 with a helpful message", async () => {
+      // Binary zip bytes cannot round-trip through a JS string; we require
+      // the explicit opt-in so users are never silently corrupted.
+      const wb = new Workbook();
+      await expect(wb.xlsx.load("PK\u0003\u0004 not real binary" as string)).rejects.toThrow(
+        // Backwards-compatible prefix — existing callers that check
+        // err.message.includes("Can't read the data...") keep working.
+        /Can't read the data of 'the loaded zip file'/
+      );
+    });
   });
 
   // ===========================================================================

@@ -24,6 +24,7 @@ import type {
   AddWorksheetOptions,
   CalculationProperties,
   CellErrorValue,
+  CellValue,
   Font,
   ImageData,
   WorkbookProperties,
@@ -86,7 +87,7 @@ export interface WorkbookModel {
   media: WorkbookMedia[];
   pivotTables: PivotTable[];
   /** Loaded pivot tables from file - used during reconciliation */
-  loadedPivotTables?: any[];
+  loadedPivotTables?: PivotTable[];
   calcProperties: Partial<CalculationProperties>;
   /** Passthrough files (charts, etc.) preserved for round-trip */
   passthrough?: Record<string, Uint8Array>;
@@ -271,7 +272,19 @@ interface CsvOptionsExtras {
   dateFormats?: readonly DateFormat[];
   dateFormat?: string;
   dateUTC?: boolean;
-  map?(value: any, index: number): any;
+  /**
+   * Transform each cell value as rows are parsed from CSV or formatted for
+   * CSV output.
+   *
+   * - During parse: `value` is the raw JS value produced by the CSV parser
+   *   (string, number, boolean, Date, ...) and already narrows to `CellValue`.
+   * - During format: `value` is the worksheet cell's `CellValue`.
+   *
+   * The function should return a `CellValue`; returning non-`CellValue`
+   * types (functions, symbols, ...) is unsupported and will break downstream
+   * serialization.
+   */
+  map?(value: CellValue, index: number): CellValue;
   includeEmptyRows?: boolean;
 
   // === Network options (for URL input) ===
@@ -329,11 +342,11 @@ const SpecialValues: Record<string, boolean | CellErrorValue> = {
 function createDefaultValueMapper(
   dateFormats: readonly DateFormat[],
   options?: { decimalSeparator?: DecimalSeparator }
-) {
+): (datum: CellValue) => CellValue {
   const dateParser = DateParser.create(dateFormats);
   const decimalSeparator: DecimalSeparator = options?.decimalSeparator ?? ".";
 
-  return function mapValue(datum: any): any {
+  return function mapValue(datum: CellValue): CellValue {
     if (datum === "") {
       return null;
     }
@@ -350,14 +363,16 @@ function createDefaultValueMapper(
       }
     }
 
-    const date = dateParser.parse(datum);
-    if (date) {
-      return date;
-    }
+    if (typeof datum === "string") {
+      const date = dateParser.parse(datum);
+      if (date) {
+        return date;
+      }
 
-    const special = SpecialValues[datum];
-    if (special !== undefined) {
-      return special;
+      const special = SpecialValues[datum];
+      if (special !== undefined) {
+        return special;
+      }
     }
 
     return datum;
@@ -366,36 +381,71 @@ function createDefaultValueMapper(
 
 /**
  * Create a value mapper for writing Excel values to CSV format.
- * Handles hyperlinks, formulas, rich text, dates, errors, and objects.
+ *
+ * Branches below correspond to each member of the `CellValue` union, in an
+ * order that prefers the most specific shape:
+ *   1. Hyperlink   — emit the URL (falling back to display text)
+ *   2. Formula / SharedFormula / ArrayFormula — emit the evaluated `result`
+ *   3. RichText    — flatten runs to plain text
+ *   4. Checkbox    — emit the boolean state
+ *   5. Error       — emit the Excel error token (e.g. "#N/A")
+ *   6. Date        — format via the configured DateFormatter
+ *   7. Primitive   — pass through (`string | number | boolean | null | undefined`)
+ *
+ * An object that does not match any of the above is stringified as JSON so
+ * the CSV remains round-trippable rather than producing `[object Object]`.
  */
-function createDefaultWriteMapper(dateFormat?: string, dateUTC?: boolean) {
+function createDefaultWriteMapper(
+  dateFormat?: string,
+  dateUTC?: boolean
+): (value: CellValue) => CellValue {
   const formatter = dateFormat
     ? DateFormatter.create(dateFormat, { utc: dateUTC })
     : DateFormatter.iso(dateUTC);
 
-  return function mapValue(value: any): any {
-    if (value) {
-      if (value.text || value.hyperlink) {
-        return value.hyperlink || value.text || "";
-      }
-      if (value.formula || value.result) {
-        return value.result || "";
-      }
-      // Handle rich text - extract and concatenate all text fragments
-      if (value.richText && Array.isArray(value.richText)) {
-        return value.richText.map((r: { text: string }) => r.text).join("");
-      }
-      if (value instanceof Date) {
-        return formatter.format(value);
-      }
-      if (value.error) {
-        return value.error;
-      }
-      if (typeof value === "object") {
-        return JSON.stringify(value);
-      }
+  return function mapValue(value: CellValue): CellValue {
+    if (value === null || value === undefined) {
+      return value;
     }
-    return value;
+    if (value instanceof Date) {
+      return formatter.format(value);
+    }
+    if (typeof value !== "object") {
+      // string | number | boolean
+      return value;
+    }
+
+    // --- Object variants of CellValue ---
+
+    // Hyperlink: prefer URL, fall back to display text.
+    // Accepts objects carrying either `hyperlink` or just `text` — the latter
+    // is a historical input shape some callers use to denote a "link-like"
+    // cell value without an actual URL; preserving it maintains backward
+    // compatibility with pre-existing CSV output.
+    const maybeLink = value as { hyperlink?: unknown; text?: unknown };
+    if (typeof maybeLink.hyperlink === "string" || typeof maybeLink.text === "string") {
+      const url = typeof maybeLink.hyperlink === "string" ? maybeLink.hyperlink : "";
+      const text = typeof maybeLink.text === "string" ? maybeLink.text : "";
+      return url || text || "";
+    }
+    // Formula / SharedFormula / ArrayFormula — all carry an evaluated `result`
+    if ("formula" in value || "sharedFormula" in value) {
+      return value.result ?? "";
+    }
+    // Rich text — flatten runs
+    if ("richText" in value && Array.isArray(value.richText)) {
+      return value.richText.map(r => r.text).join("");
+    }
+    // Checkbox
+    if ("checkbox" in value && typeof value.checkbox === "boolean") {
+      return value.checkbox;
+    }
+    // Error
+    if ("error" in value && typeof value.error === "string") {
+      return value.error;
+    }
+    // Unknown object shape — round-trippable fallback
+    return JSON.stringify(value);
   };
 }
 
@@ -924,14 +974,17 @@ class Workbook {
     }
 
     parser.on("data", (row: unknown) => {
-      // When headers: true, CsvParserStream emits objects; otherwise arrays
+      // When headers: true, CsvParserStream emits objects; otherwise arrays.
+      // The CSV parser only ever emits primitive CellValue-compatible shapes
+      // (string/number/boolean/Date/null). Narrow once here so the rest of
+      // the pipeline — including the user-supplied `map` — sees CellValue.
       if (useHeaders && headerRow && row && typeof row === "object" && !Array.isArray(row)) {
         // Convert object row to array using header order
-        const rowObj = row as Record<string, unknown>;
-        const rowArray = headerRow.map(h => rowObj[h]);
+        const rowObj = row as Record<string, CellValue>;
+        const rowArray: CellValue[] = headerRow.map(h => rowObj[h]);
         worksheet.addRow(rowArray.map(map));
       } else if (Array.isArray(row)) {
-        worksheet.addRow((row as unknown[]).map(map));
+        worksheet.addRow((row as CellValue[]).map(map));
       }
     });
 
@@ -999,14 +1052,15 @@ class Workbook {
       }
 
       parser.on("data", (row: unknown) => {
-        // When headers: true, CsvParserStream emits objects; otherwise arrays
+        // When headers: true, CsvParserStream emits objects; otherwise arrays.
+        // See createCsvReadStream for the rationale on narrowing to CellValue.
         if (useHeaders && headerRow && row && typeof row === "object" && !Array.isArray(row)) {
           // Convert object row to array using header order
-          const rowObj = row as Record<string, unknown>;
-          const rowArray = headerRow.map(h => rowObj[h]);
+          const rowObj = row as Record<string, CellValue>;
+          const rowArray: CellValue[] = headerRow.map(h => rowObj[h]);
           worksheet.addRow(rowArray.map(map));
         } else if (Array.isArray(row)) {
-          worksheet.addRow(row.map(map));
+          worksheet.addRow((row as CellValue[]).map(map));
         }
       });
 

@@ -16,13 +16,16 @@
 
 import { Parse, type ZipEntry } from "@archive/unzip/stream";
 import { ExcelFileError } from "@excel/errors";
+import type { Workbook } from "@excel/workbook";
+import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
 import { XLSX as XLSXBase } from "@excel/xlsx/xlsx.browser";
 import { Writable, pipeline } from "@stream";
+import type { ReadableLike } from "@stream/types";
 import { toError } from "@utils/errors";
 import { fileExists, readFileBytes, createReadStream, createWriteStream } from "@utils/fs";
 
 class XLSX extends XLSXBase {
-  constructor(workbook: any) {
+  constructor(workbook: Workbook) {
     super(workbook);
     // Provide file reading capability for addMedia
     this.readFileAsync = (filename: string) => readFileBytes(filename);
@@ -80,7 +83,7 @@ class XLSX extends XLSXBase {
   // Node.js specific: TRUE streaming read
   // ==========================================================================
 
-  override async read(stream: any, options?: any): Promise<any> {
+  override async read(stream: ReadableLike, options?: XlsxReadOptions): Promise<Workbook> {
     const parser = new Parse();
 
     const swallowError = () => {
@@ -99,32 +102,36 @@ class XLSX extends XLSXBase {
     // Node treat it like a transform and surface `Premature close` errors.
     // We instead pipeline the input stream into a Writable sink that forwards
     // chunks into the parser with backpressure.
-    const sink = new Writable<any>({
-      write(chunk: any, _encoding: any, callback: (error?: Error | null) => void) {
+    const sink = new Writable<Uint8Array | string>({
+      write(
+        chunk: Uint8Array | string,
+        _encoding: string,
+        callback: (error?: Error | null) => void
+      ) {
         try {
-          const ok = (parser as any).write(chunk);
+          const ok = parser.write(chunk);
           if (ok) {
             callback();
           } else {
-            (parser as any).once("drain", () => callback());
+            parser.once("drain", () => callback());
           }
         } catch (e) {
-          callback(e as any);
+          callback(toError(e));
         }
       },
       final(callback: (error?: Error | null) => void) {
         try {
-          (parser as any).end();
+          parser.end();
           callback();
         } catch (e) {
-          callback(e as any);
+          callback(toError(e));
         }
       }
     });
 
     const onParserError = (err: unknown) => {
       try {
-        sink.destroy(err as any);
+        sink.destroy(toError(err));
       } catch {
         // ignore
       }
@@ -137,8 +144,7 @@ class XLSX extends XLSXBase {
       for await (const entry of XLSX.iterateZipEntries(parser)) {
         entry.on("error", swallowError);
         const drain = async () => {
-          const anyEntry = entry as any;
-          if (anyEntry?.readableEnded || anyEntry?.destroyed) {
+          if (entry.readableEnded || entry.destroyed) {
             return;
           }
           const draining = entry.autodrain();
@@ -147,14 +153,14 @@ class XLSX extends XLSXBase {
         yield {
           name: entry.path,
           type: entry.type,
-          stream: entry as any,
+          stream: entry,
           drain
         };
       }
     })();
 
     try {
-      const workbook = await this.loadFromZipEntries(entries as any, options);
+      const workbook = await this.loadFromZipEntries(entries, options);
       await pump;
       return workbook;
     } catch (err) {
@@ -196,7 +202,7 @@ class XLSX extends XLSXBase {
   // Node.js specific: File operations
   // ===========================================================================
 
-  async readFile(filename: string, options?: any): Promise<any> {
+  async readFile(filename: string, options?: XlsxReadOptions): Promise<Workbook> {
     if (!(await fileExists(filename))) {
       throw new ExcelFileError(filename, "read", "File not found");
     }
@@ -204,7 +210,7 @@ class XLSX extends XLSXBase {
     return this.read(stream, options);
   }
 
-  writeFile(filename: string, options?: any): Promise<void> {
+  writeFile(filename: string, options?: XlsxWriteOptions): Promise<void> {
     const stream = createWriteStream(filename);
 
     return new Promise((resolve, reject) => {

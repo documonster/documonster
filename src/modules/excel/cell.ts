@@ -18,7 +18,8 @@ import type {
   DataValidation,
   CellValue,
   CellHyperlinkValue,
-  CellCheckboxValue
+  CellCheckboxValue,
+  RichText
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
@@ -96,7 +97,17 @@ export interface CellModel {
   formula?: string;
   sharedFormula?: string;
   result?: FormulaResult;
-  richText?: CellRichTextValue;
+  /**
+   * Rich-text runs associated with this cell.
+   *
+   * - When `type === RichText`, this holds a CellRichTextValue (object wrapping
+   *   the runs array) — this is the historical, cell-level rich-text payload.
+   * - When `type === Hyperlink`, this holds a plain RichText[] — the runs used
+   *   for formatted display of the hyperlink text.
+   *
+   * Callers should branch on `type` before accessing the shape.
+   */
+  richText?: CellRichTextValue | RichText[];
   sharedString?: number;
   error?: CellErrorValue;
   rawValue?: unknown;
@@ -131,6 +142,64 @@ export type CellValueType = CellValue;
 // style property on a row from shadowing a real style property on a column.
 const hasOwnKeys = (v: unknown): boolean =>
   !!v && (typeof v !== "object" || Object.keys(v as object).length > 0);
+
+/**
+ * Flatten a rich-text array into its plain-text representation by
+ * concatenating each run's `text`. Missing/null runs contribute "".
+ */
+function flattenRichText(runs: readonly RichText[]): string {
+  let out = "";
+  for (const run of runs) {
+    if (run && typeof run.text === "string") {
+      out += run.text;
+    }
+  }
+  return out;
+}
+
+/**
+ * A `CellHyperlinkValue` with its invariants established:
+ *   - `text` is always a string (no longer optional)
+ *   - `hyperlink` is always a string (no longer optional)
+ *   - when `richText` is present, it is a non-empty array and
+ *     `text === flattenRichText(richText)`
+ */
+interface NormalizedHyperlink extends CellHyperlinkValue {
+  text: string;
+  hyperlink: string;
+}
+
+/**
+ * Normalize a CellHyperlinkValue so the {@link NormalizedHyperlink} invariants
+ * hold.
+ *
+ * - If the caller supplied `richText` but no `text`, text is derived.
+ * - If the caller supplied `text` but no `richText`, richText stays absent.
+ * - If both are supplied, `richText` wins and `text` is regenerated
+ *   (to keep `text === flatten(richText)`).
+ * - An empty `richText: []` is dropped (treated as "no rich text").
+ */
+function normalizeHyperlinkValue(value: CellHyperlinkValue): NormalizedHyperlink {
+  let text: string;
+  let richText: RichText[] | undefined;
+  if (Array.isArray(value.richText) && value.richText.length > 0) {
+    richText = value.richText;
+    text = flattenRichText(richText);
+  } else {
+    text = typeof value.text === "string" ? value.text : "";
+  }
+  const out: NormalizedHyperlink = {
+    text,
+    hyperlink: typeof value.hyperlink === "string" ? value.hyperlink : ""
+  };
+  if (richText) {
+    out.richText = richText;
+  }
+  if (typeof value.tooltip === "string" && value.tooltip.length > 0) {
+    out.tooltip = value.tooltip;
+  }
+  return out;
+}
 
 // Cell requirements
 //  Operate inside a worksheet
@@ -434,12 +503,30 @@ class Cell {
 
   /** @internal */
   _upgradeToHyperlink(hyperlink: string): void {
-    // if this cell is a string, turn it into a Hyperlink
-    if (this.type === Cell.Types.String) {
-      this._value = Value.create(Cell.Types.Hyperlink, this, {
-        text: String(this._value.value),
-        hyperlink
-      });
+    // Upgrade this cell to a Hyperlink while preserving the existing display
+    // text. Supports promotion from both plain String cells and RichText cells.
+    // For RichText cells, the runs are preserved on the new hyperlink value.
+    switch (this.type) {
+      case Cell.Types.String: {
+        this._value = Value.create(Cell.Types.Hyperlink, this, {
+          text: String(this._value.value),
+          hyperlink
+        });
+        break;
+      }
+      case Cell.Types.RichText: {
+        const current = this._value.value as CellRichTextValue | undefined;
+        const runs = current && Array.isArray(current.richText) ? current.richText : [];
+        this._value = Value.create(Cell.Types.Hyperlink, this, {
+          text: flattenRichText(runs),
+          richText: runs.length > 0 ? runs : undefined,
+          hyperlink
+        });
+        break;
+      }
+      default:
+        // Other cell types (Number, Date, Formula, ...) are not auto-upgraded.
+        break;
     }
   }
 
@@ -591,6 +678,7 @@ interface HyperlinkValueModel {
   address: string;
   type: number;
   text?: string;
+  richText?: RichText[];
   hyperlink?: string;
   tooltip?: string;
 }
@@ -876,28 +964,48 @@ class HyperlinkValue {
   constructor(cell: Cell, value?: CellHyperlinkValue) {
     this.model = {
       address: cell.address,
-      type: Cell.Types.Hyperlink,
-      text: value ? value.text : undefined,
-      hyperlink: value ? value.hyperlink : undefined
+      type: Cell.Types.Hyperlink
     };
-    if (value && value.tooltip) {
-      this.model.tooltip = value.tooltip;
+    if (value) {
+      const normalized = normalizeHyperlinkValue(value);
+      this.model.text = normalized.text;
+      this.model.hyperlink = normalized.hyperlink;
+      if (normalized.richText) {
+        this.model.richText = normalized.richText;
+      }
+      if (normalized.tooltip !== undefined) {
+        this.model.tooltip = normalized.tooltip;
+      }
     }
   }
 
   get value(): CellHyperlinkValue {
-    return {
+    const out: CellHyperlinkValue = {
       text: this.model.text ?? "",
-      hyperlink: this.model.hyperlink ?? "",
-      tooltip: this.model.tooltip
+      hyperlink: this.model.hyperlink ?? ""
     };
+    if (this.model.richText && this.model.richText.length > 0) {
+      out.richText = this.model.richText;
+    }
+    if (this.model.tooltip !== undefined) {
+      out.tooltip = this.model.tooltip;
+    }
+    return out;
   }
 
   set value(value: CellHyperlinkValue) {
-    this.model.text = value.text;
-    this.model.hyperlink = value.hyperlink;
-    if (value.tooltip) {
-      this.model.tooltip = value.tooltip;
+    const normalized = normalizeHyperlinkValue(value);
+    this.model.text = normalized.text;
+    this.model.hyperlink = normalized.hyperlink;
+    if (normalized.richText) {
+      this.model.richText = normalized.richText;
+    } else {
+      delete this.model.richText;
+    }
+    if (normalized.tooltip !== undefined) {
+      this.model.tooltip = normalized.tooltip;
+    } else {
+      delete this.model.tooltip;
     }
   }
 
@@ -906,7 +1014,27 @@ class HyperlinkValue {
   }
 
   set text(value: string | undefined) {
+    // Setting text while richText is present would break the invariant
+    // (text must equal flattenRichText(richText)). Dropping richText is the
+    // only safe resolution.
+    if (this.model.richText) {
+      delete this.model.richText;
+    }
     this.model.text = value;
+  }
+
+  get richText(): RichText[] | undefined {
+    return this.model.richText;
+  }
+
+  set richText(value: RichText[] | undefined) {
+    if (Array.isArray(value) && value.length > 0) {
+      this.model.richText = value;
+      this.model.text = flattenRichText(value);
+    } else {
+      delete this.model.richText;
+      // leave model.text untouched — caller may still want the plain text
+    }
   }
 
   get hyperlink(): string | undefined {
@@ -1451,8 +1579,17 @@ const Value = {
       if ("checkbox" in value && typeof value.checkbox === "boolean") {
         return Cell.Types.Checkbox;
       }
-      if ("text" in value && value.text && "hyperlink" in value && value.hyperlink) {
-        return Cell.Types.Hyperlink;
+      // Hyperlink detection: requires `hyperlink` and either non-empty `text`
+      // or a non-empty `richText` array. Checked before RichText so that a
+      // `{ richText, hyperlink }` payload is correctly classified as Hyperlink
+      // rather than plain RichText.
+      if ("hyperlink" in value && typeof value.hyperlink === "string" && value.hyperlink) {
+        const hasText = "text" in value && typeof value.text === "string" && value.text.length > 0;
+        const hasRichText =
+          "richText" in value && Array.isArray(value.richText) && value.richText.length > 0;
+        if (hasText || hasRichText) {
+          return Cell.Types.Hyperlink;
+        }
       }
       if (
         ("formula" in value && value.formula) ||
@@ -1460,7 +1597,10 @@ const Value = {
       ) {
         return Cell.Types.Formula;
       }
-      if ("richText" in value && value.richText) {
+      // RichText only when the runs array is non-empty. An empty `richText: []`
+      // carries no content and falls through to JSON rather than producing a
+      // RichText cell with no runs.
+      if ("richText" in value && Array.isArray(value.richText) && value.richText.length > 0) {
         return Cell.Types.RichText;
       }
       if ("sharedString" in value && value.sharedString) {

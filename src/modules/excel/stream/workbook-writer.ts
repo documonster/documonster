@@ -16,6 +16,7 @@ import { mediaPath } from "@excel/utils/ooxml-paths";
 import { readFileBytes, createWriteStream } from "@utils/fs";
 
 export type { WorkbookZipOptions, ZlibOptions };
+export type { Medium } from "@excel/stream/workbook-writer.browser";
 
 // Node.js version also supports filename option for output
 export interface WorkbookWriterOptions extends BaseOptions {
@@ -25,9 +26,10 @@ export interface WorkbookWriterOptions extends BaseOptions {
 
 // Interface for output stream
 interface OutputStreamLike {
-  emit(eventName: string | symbol, ...args: any[]): boolean;
-  write(chunk: any): boolean | Promise<boolean>;
+  emit(eventName: string | symbol, ...args: unknown[]): boolean;
+  write(chunk: Uint8Array | string): boolean | Promise<boolean>;
   end(): void;
+  // Listener args are event-specific; `any[]` is the standard EventEmitter shape.
   once(eventName: string | symbol, listener: (...args: any[]) => void): this;
   removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
 }

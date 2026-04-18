@@ -6,6 +6,7 @@
 
 import { join } from "path";
 
+import type { ZipEntry } from "@archive/unzip/stream";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import {
   WorkbookReaderBase,
@@ -63,7 +64,7 @@ class WorkbookReader extends WorkbookReaderBase<
     return super._getStream(input as CommonInput);
   }
 
-  async _storeWaitingWorksheet(sheetNo: string, entry: any): Promise<WaitingWorksheet> {
+  async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {
     const tmpDir = createTempDirSync("excelts-");
     const filePath = join(tmpDir, `sheet${sheetNo}.xml`);
     const cleanup = () => {

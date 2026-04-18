@@ -397,7 +397,18 @@ export interface CellRichTextValue {
 }
 
 export interface CellHyperlinkValue {
+  /**
+   * Plain-text display for the hyperlink. Always a string.
+   *
+   * When `richText` is also set, this field mirrors the concatenated
+   * `.text` of every run in `richText` (flattened representation).
+   */
   text: string;
+  /**
+   * Optional rich-text runs providing formatted display for the hyperlink.
+   * When present, `text` must equal the concatenation of each run's `.text`.
+   */
+  richText?: RichText[];
   hyperlink: string;
   tooltip?: string;
 }
@@ -871,7 +882,13 @@ export interface TableProperties {
   qualifyImplicitStructuredReferences?: boolean;
   style?: TableStyleProperties;
   columns: TableColumnProperties[];
-  rows: any[][];
+  /**
+   * Table data rows. Each row is an array of cell values aligned with
+   * `columns`. A cell may be any `CellValue` (scalars, dates, rich text,
+   * hyperlinks, error values, ...) or a `CellFormulaValue` when the cell
+   * stores a formula.
+   */
+  rows: Array<Array<CellValue | CellFormulaValue>>;
 }
 
 export type TableColumn = Required<TableColumnProperties>;

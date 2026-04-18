@@ -1,6 +1,7 @@
 import { Enums } from "@excel/enums";
 import { InvalidValueTypeError, ExcelError } from "@excel/errors";
 import { Range } from "@excel/range";
+import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { dateToExcel, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
@@ -42,11 +43,66 @@ function getEffectiveCellType(cell) {
   }
 }
 
+/**
+ * Extract the display form of a hyperlink cell value that came either from
+ * a shared-string rich-text payload (`{ richText: [...] }`) or from a
+ * plain scalar.
+ *
+ * Input comes from the XML parser (`raw: unknown`), so every nested value is
+ * treated defensively — the public `RichText` shape is only produced after
+ * runtime validation, never asserted.
+ *
+ * Returns:
+ *  - `text`:     always a string (flattened rich-text or `String(raw)`)
+ *  - `richText`: preserved if the source was a rich-text payload, else undefined
+ *
+ * This keeps the CellHyperlinkValue.text: string public contract intact while
+ * also letting the Hyperlink value class retain the formatted runs
+ * (see https://github.com/cjnoname/excelts/issues/142).
+ */
+function extractHyperlinkDisplay(raw: unknown): { text: string; richText?: RichText[] } {
+  if (raw === null || raw === undefined) {
+    return { text: "" };
+  }
+  if (typeof raw === "string") {
+    return { text: raw };
+  }
+  if (typeof raw === "number" || typeof raw === "boolean") {
+    return { text: String(raw) };
+  }
+  if (typeof raw === "object") {
+    const obj = raw as { richText?: unknown; error?: unknown };
+    if (Array.isArray(obj.richText)) {
+      // Empty runs array carries no content — emit empty display text rather
+      // than falling through to `String(raw)` which would produce
+      // "[object Object]".
+      if (obj.richText.length === 0) {
+        return { text: "" };
+      }
+      const runs: RichText[] = obj.richText.map(rawRun => {
+        const run = rawRun as { text?: unknown; font?: unknown } | null | undefined;
+        const normalized: RichText = {
+          text: typeof run?.text === "string" ? run.text : ""
+        };
+        if (run?.font !== null && typeof run?.font === "object") {
+          normalized.font = run.font as RichText["font"];
+        }
+        return normalized;
+      });
+      return { text: runs.map(r => r.text).join(""), richText: runs };
+    }
+    if (typeof obj.error === "string") {
+      return { text: obj.error };
+    }
+  }
+  return { text: String(raw) };
+}
+
 class CellXform extends BaseXform {
-  declare private richTextXform: any;
-  declare public parser: any;
-  declare private t: any;
-  declare private currentNode: any;
+  declare private richTextXform: RichTextXform;
+  declare public parser: BaseXform | undefined;
+  declare private t: string | undefined;
+  declare private currentNode: string | undefined;
 
   constructor() {
     super();
@@ -83,8 +139,14 @@ class CellXform extends BaseXform {
         break;
 
       case Enums.ValueType.Hyperlink:
-        if (options.sharedStrings && model.text !== undefined && model.text !== null) {
-          model.ssId = options.sharedStrings.add(model.text);
+        if (options.sharedStrings) {
+          // Prefer rich-text payload when present so formatted display
+          // survives a write. Fall back to plain text otherwise.
+          if (Array.isArray(model.richText) && model.richText.length > 0) {
+            model.ssId = options.sharedStrings.add({ richText: model.richText });
+          } else if (model.text !== undefined && model.text !== null) {
+            model.ssId = options.sharedStrings.add(model.text);
+          }
         }
         options.hyperlinks.push({
           address: model.address,
@@ -107,6 +169,18 @@ class CellXform extends BaseXform {
         // All dynamic array cells share cm=1 pointing to a single XLDAPR metadata record.
         if (model.isDynamicArray) {
           model.cm = 1;
+        }
+
+        // A formula cell may also carry an attached hyperlink (e.g. when the
+        // model came from another writer or was constructed without going
+        // through the load-side reconcile that promotes type=Formula to
+        // type=Hyperlink). Re-emit the <hyperlink> element so it survives.
+        if (model.hyperlink) {
+          options.hyperlinks.push({
+            address: model.address,
+            target: model.hyperlink,
+            tooltip: model.tooltip
+          });
         }
 
         if (model.shareType === "shared") {
@@ -275,9 +349,25 @@ class CellXform extends BaseXform {
         break;
 
       case Enums.ValueType.Hyperlink:
-        if (model.ssId !== undefined) {
+        // A hyperlink cell may also carry a formula (loaded from XLSX where
+        // a `<hyperlink>` entry shares its address with a formula `<c>`).
+        // Render the formula in that case so the underlying expression
+        // survives the round-trip; the <hyperlink> element is emitted
+        // separately via options.hyperlinks (collected in prepare).
+        if (model.formula || model.sharedFormula) {
+          this.renderFormula(xmlStream, model);
+        } else if (model.ssId !== undefined) {
           xmlStream.addAttribute("t", "s");
           xmlStream.leafNode("v", null, model.ssId);
+        } else if (Array.isArray(model.richText) && model.richText.length > 0) {
+          // Inline rich-text representation — used when shared strings are
+          // disabled (some streaming configurations).
+          xmlStream.addAttribute("t", "inlineStr");
+          xmlStream.openNode("is");
+          model.richText.forEach(text => {
+            this.richTextXform.render(xmlStream, text);
+          });
+          xmlStream.closeNode("is");
         } else {
           xmlStream.addAttribute("t", "str");
           xmlStream.leafNode("v", null, model.text);
@@ -450,7 +540,10 @@ class CellXform extends BaseXform {
       case "r":
         this.model.value = this.model.value || {};
         this.model.value.richText = this.model.value.richText ?? [];
-        this.model.value.richText.push(this.parser.model);
+        // `this.parser` is guaranteed by parseOpen("r"), which instantiates
+        // a RichTextXform. A missing parser here means malformed XML that
+        // should surface as a parse error rather than silently swallow.
+        this.model.value.richText.push(this.parser!.model);
         this.parser = undefined;
         this.currentNode = undefined;
         return true;
@@ -541,12 +634,29 @@ class CellXform extends BaseXform {
     // look for hyperlink
     const hyperlink = options.hyperlinkMap[model.address];
     if (hyperlink) {
+      // CellHyperlinkValue.text is typed as string; if the shared-string
+      // resolution produced a rich-text payload ({ richText: [...] }) we must
+      // flatten it for `text` AND preserve the runs on `richText` so formatted
+      // display survives round-trip. (See issue #142.)
+      let source: unknown;
       if (model.type === Enums.ValueType.Formula) {
-        model.text = model.result;
-        model.result = undefined;
+        // Formula + hyperlink: surface as a Hyperlink cell whose display is
+        // the formula's evaluated result, but keep `model.formula` (and the
+        // original result) on the model so write-time can re-emit both the
+        // formula <c> and the <hyperlink> entry. The cell value layer ignores
+        // unknown model fields, so the public Hyperlink shape stays clean
+        // while round-trip data is preserved internally.
+        source = model.result;
       } else {
-        model.text = model.value;
+        source = model.value;
         model.value = undefined;
+      }
+      const display = extractHyperlinkDisplay(source);
+      model.text = display.text;
+      if (display.richText) {
+        model.richText = display.richText;
+      } else {
+        delete model.richText;
       }
       model.type = Enums.ValueType.Hyperlink;
       model.hyperlink = hyperlink;
