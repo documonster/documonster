@@ -570,13 +570,22 @@ class CellXform extends BaseXform {
     switch (model.type) {
       case Enums.ValueType.String:
         if (typeof model.value === "number") {
+          // A numeric value on a String-typed cell is a sharedStrings index
+          // (originated from t="s" in parseClose).
+          //
+          // Two malformed-file cases to consider:
+          //   1. sharedStrings table missing entirely — degrade gracefully
+          //      (consistent with the "missing-bits.xlsx" graceful-loading
+          //      contract); leave value as the raw index so worksheets still
+          //      load.
+          //   2. sharedStrings table present but the specific index is out of
+          //      range — this is the case that previously crashed with
+          //      `TypeError: cannot access property "richText"`. Fail loudly
+          //      with a typed ExcelError so callers get file-corruption
+          //      context.
           if (options.sharedStrings) {
             const ssIndex = model.value;
             model.value = options.sharedStrings.getString(ssIndex);
-            // Malformed xlsx: shared-string index points past the end of the
-            // sharedStrings table. Fail loudly so the caller sees a typed
-            // ExcelError (with file address context) instead of a later
-            // TypeError on `model.value.richText`.
             if (model.value === undefined) {
               throw new ExcelError(
                 `Invalid shared string index ${ssIndex} in cell ${model.address}: the xlsx file appears to be corrupted`

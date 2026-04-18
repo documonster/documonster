@@ -413,6 +413,50 @@ export interface CellHyperlinkValue {
   tooltip?: string;
 }
 
+/**
+ * Input shape for assigning a hyperlink cell value.
+ *
+ * Accepts either:
+ *   - a plain-text hyperlink (`text + hyperlink`), OR
+ *   - a rich-text hyperlink (`richText + hyperlink`) — `text` is auto-derived
+ *     by flattening the runs, so callers do not have to repeat it.
+ *
+ * The output shape (`CellHyperlinkValue` returned from `cell.value`) always
+ * has `text: string` populated.
+ */
+export type CellHyperlinkValueInput =
+  | {
+      text: string;
+      richText?: RichText[];
+      hyperlink: string;
+      tooltip?: string;
+    }
+  | {
+      text?: string;
+      richText: RichText[];
+      hyperlink: string;
+      tooltip?: string;
+    };
+
+/**
+ * Input shape for assigning a formula cell that also carries a hyperlink.
+ *
+ * Loaded workbooks may present a formula cell with an attached hyperlink
+ * (e.g. `=HYPERLINK(...)` style or a `<hyperlink ref="..."/>` entry pointing
+ * at a formula cell). On the public surface such cells are classified as
+ * Hyperlink (`cell.type === ValueType.Hyperlink`) with the formula's result
+ * as display text, while `cell.model.formula` is preserved for round-trip.
+ *
+ * Use this shape to construct that combination directly without going
+ * through `cell.model`.
+ */
+export interface CellFormulaHyperlinkValue {
+  formula: string;
+  result?: number | string | boolean | Date | CellErrorValue;
+  hyperlink: string;
+  tooltip?: string;
+}
+
 export interface CellFormulaValue {
   formula: string;
   result?: number | string | boolean | Date | CellErrorValue;
@@ -463,6 +507,33 @@ export type CellValue =
   | CellArrayFormulaValue
   | CellSharedFormulaValue
   | CellCheckboxValue;
+
+/**
+ * Input variant of {@link CellValue} used when assigning to `cell.value`.
+ *
+ * Accepts the same shapes as `CellValue` plus more permissive forms that
+ * the runtime normalizes:
+ *   - `CellHyperlinkValueInput` — rich-text hyperlinks may omit `text`
+ *     (it will be derived from `richText`).
+ *   - `CellFormulaHyperlinkValue` — formula cells may carry a `hyperlink`.
+ *
+ * `cell.value` (the getter) still returns the canonical `CellValue` shape.
+ */
+export type CellValueInput =
+  | null
+  | number
+  | string
+  | boolean
+  | Date
+  | undefined
+  | CellErrorValue
+  | CellRichTextValue
+  | CellHyperlinkValueInput
+  | CellFormulaValue
+  | CellArrayFormulaValue
+  | CellSharedFormulaValue
+  | CellCheckboxValue
+  | CellFormulaHyperlinkValue;
 
 // ============================================================================
 // Comment Types

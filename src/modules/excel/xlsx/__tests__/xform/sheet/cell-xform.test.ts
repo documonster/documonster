@@ -1,8 +1,9 @@
 import { Enums } from "@excel/enums";
+import { ExcelError } from "@excel/errors";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { CellXform } from "@excel/xlsx/xform/sheet/cell-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
-import { describe } from "vitest";
+import { describe, expect, it } from "vitest";
 
 const fakeStyles = {
   addStyleModel(style: any, effectiveType: any) {
@@ -686,4 +687,41 @@ const expectations = [
 
 describe("CellXform", () => {
   testXformHelper(expectations);
+
+  // Regression tests for malformed xlsx files where a String-typed cell
+  // references a shared-string index that cannot be resolved. Previously the
+  // reconcile path would crash with `TypeError: cannot access property
+  // "richText", model.value is undefined`. We now throw a typed ExcelError
+  // with file-corruption context so callers can present a meaningful message.
+  // Regression tests for malformed xlsx files where a String-typed cell
+  // references an unresolvable shared-string index. Previously the reconcile
+  // path would crash with `TypeError: cannot access property "richText",
+  // model.value is undefined`.
+  describe("reconcile with malformed sharedStrings", () => {
+    it("throws ExcelError when shared-string index is out of range", () => {
+      const xform = new CellXform();
+      const sharedStrings = new SharedStringsXform();
+      const options = { sharedStrings, hyperlinkMap: {}, styles: fakeStyles };
+      // sharedStrings table is empty — index 5 is out of range
+      const makeModel = () => ({ address: "B47", type: Enums.ValueType.String, value: 5 });
+
+      expect(() => xform.reconcile(makeModel(), options)).toThrow(ExcelError);
+      expect(() => xform.reconcile(makeModel(), options)).toThrow(/shared string index 5.*B47/);
+    });
+
+    it("degrades gracefully when sharedStrings table is missing entirely", () => {
+      // The library has a graceful-loading contract for partially-missing zip
+      // entries (see "missing-bits.xlsx" integration test). When the
+      // sharedStrings table is absent we leave the raw index in place rather
+      // than throwing, so the rest of the workbook still loads.
+      const xform = new CellXform();
+      const options = { hyperlinkMap: {}, styles: fakeStyles };
+      const model = { address: "C12", type: Enums.ValueType.String, value: 0 };
+
+      expect(() => xform.reconcile(model, options)).not.toThrow();
+      // Index is preserved unchanged when the lookup table is missing
+      expect(model.value).toBe(0);
+      expect(model.type).toBe(Enums.ValueType.String);
+    });
+  });
 });

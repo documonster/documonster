@@ -17,7 +17,10 @@ import type {
   CellErrorValue,
   DataValidation,
   CellValue,
+  CellValueInput,
   CellHyperlinkValue,
+  CellHyperlinkValueInput,
+  CellFormulaHyperlinkValue,
   CellCheckboxValue,
   RichText
 } from "@excel/types";
@@ -133,8 +136,10 @@ interface ICellValue {
   isMergedTo?(master: Cell): boolean;
 }
 
-// Type for cell values (what users set/get) - alias for CellValue from types.ts
+// Type for cell values returned to callers (read side)
 export type CellValueType = CellValue;
+// Type for cell values accepted from callers (write side)
+export type CellValueInputType = CellValueInput;
 
 // Returns true if the value is a non-empty object (has at least one own key),
 // or any truthy non-object value. Returns false for undefined, null, false, 0,
@@ -179,7 +184,7 @@ interface NormalizedHyperlink extends CellHyperlinkValue {
  *   (to keep `text === flatten(richText)`).
  * - An empty `richText: []` is dropped (treated as "no rich text").
  */
-function normalizeHyperlinkValue(value: CellHyperlinkValue): NormalizedHyperlink {
+function normalizeHyperlinkValue(value: CellHyperlinkValueInput): NormalizedHyperlink {
   let text: string;
   let richText: RichText[] | undefined;
   if (Array.isArray(value.richText) && value.richText.length > 0) {
@@ -449,7 +454,7 @@ class Cell {
   }
 
   // set the value - can be number, string or raw
-  set value(v: CellValueType) {
+  set value(v: CellValueInputType) {
     // special case - merge cells set their master's value
     if (this.type === Cell.Types.Merge) {
       this._value.master!.value = v;
@@ -961,13 +966,33 @@ class DateValue {
 class HyperlinkValue {
   declare public model: HyperlinkValueModel;
 
-  constructor(cell: Cell, value?: CellHyperlinkValue) {
+  constructor(cell: Cell, value?: CellHyperlinkValueInput | CellFormulaHyperlinkValue) {
     this.model = {
       address: cell.address,
       type: Cell.Types.Hyperlink
     };
     if (value) {
-      const normalized = normalizeHyperlinkValue(value);
+      // Formula + hyperlink: surface as a Hyperlink whose display is the
+      // formula's evaluated result, but persist the formula on the model so
+      // it round-trips on write. The cell value getter ignores the formula
+      // fields, keeping the public Hyperlink shape clean.
+      if ("formula" in value && typeof value.formula === "string") {
+        const fh = value as CellFormulaHyperlinkValue;
+        const display = fh.result === undefined || fh.result === null ? "" : String(fh.result);
+        this.model.text = display;
+        this.model.hyperlink = fh.hyperlink ?? "";
+        if (fh.tooltip !== undefined) {
+          this.model.tooltip = fh.tooltip;
+        }
+        // Internal-only fields preserved for write-time re-emission.
+        (this.model as HyperlinkValueModel & { formula?: string; result?: FormulaResult }).formula =
+          fh.formula;
+        if (fh.result !== undefined) {
+          (this.model as HyperlinkValueModel & { result?: FormulaResult }).result = fh.result;
+        }
+        return;
+      }
+      const normalized = normalizeHyperlinkValue(value as CellHyperlinkValueInput);
       this.model.text = normalized.text;
       this.model.hyperlink = normalized.hyperlink;
       if (normalized.richText) {
@@ -993,7 +1018,7 @@ class HyperlinkValue {
     return out;
   }
 
-  set value(value: CellHyperlinkValue) {
+  set value(value: CellHyperlinkValueInput) {
     const normalized = normalizeHyperlinkValue(value);
     this.model.text = normalized.text;
     this.model.hyperlink = normalized.hyperlink;
@@ -1092,7 +1117,7 @@ class MergeValue {
     return this._master.value;
   }
 
-  set value(value: CellValueType | Cell) {
+  set value(value: CellValueInputType | Cell) {
     if (value instanceof Cell) {
       if (this._master) {
         this._master.releaseMergeRef();
@@ -1559,7 +1584,7 @@ class JSONValue {
 
 // Value is a place to hold common static Value type functions
 const Value = {
-  getType(value: CellValueType): number {
+  getType(value: CellValueInputType): number {
     if (value === null || value === undefined) {
       return Cell.Types.Null;
     }
@@ -1580,14 +1605,16 @@ const Value = {
         return Cell.Types.Checkbox;
       }
       // Hyperlink detection: requires `hyperlink` and either non-empty `text`
-      // or a non-empty `richText` array. Checked before RichText so that a
-      // `{ richText, hyperlink }` payload is correctly classified as Hyperlink
-      // rather than plain RichText.
+      // or a non-empty `richText` array, OR a formula (formula+hyperlink is
+      // surfaced as a Hyperlink with the formula's result as display).
+      // Checked before RichText/Formula so combined payloads route correctly.
       if ("hyperlink" in value && typeof value.hyperlink === "string" && value.hyperlink) {
         const hasText = "text" in value && typeof value.text === "string" && value.text.length > 0;
         const hasRichText =
           "richText" in value && Array.isArray(value.richText) && value.richText.length > 0;
-        if (hasText || hasRichText) {
+        const hasFormula =
+          "formula" in value && typeof (value as { formula?: unknown }).formula === "string";
+        if (hasText || hasRichText || hasFormula) {
           return Cell.Types.Hyperlink;
         }
       }
@@ -1653,7 +1680,7 @@ const Value = {
     []
   ),
 
-  create(type: number, cell: Cell, value?: CellValueType | Cell): ICellValue {
+  create(type: number, cell: Cell, value?: CellValueInputType | Cell): ICellValue {
     const T = this.types[type];
     if (!T) {
       throw new InvalidValueTypeError(String(type), "Could not create Value");

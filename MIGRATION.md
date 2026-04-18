@@ -820,6 +820,12 @@ Also introduced in this window (**purely additive — no migration needed**, inc
 - **Dynamic-array formulas** — `FILTER`, `SORT`, `UNIQUE`, `XLOOKUP`, `SEQUENCE`, spill-error detection, ghost cells.
 - **External workbook links** — `[Book.xlsx]Sheet!A1` now round-trips through load/save.
 - **Workbook structure protection**, public `Workbook.defaultFont`, `absoluteAnchor` image positioning, `ignoredErrors` support.
+- **Cast-free hyperlink + formula+hyperlink input** — `cell.value =` now accepts loose hyperlink shapes without TypeScript casts:
+  - Rich-text hyperlink: `cell.value = { richText: [...], hyperlink }` — `text` is auto-derived from the runs.
+  - Plain-text hyperlink: `cell.value = { text, hyperlink }` — unchanged, still works.
+  - Formula + hyperlink: `cell.value = { formula, result, hyperlink }` — surfaces as a Hyperlink cell whose display is the formula result, while `cell.model.formula` is preserved for round-trip.
+
+  Backed by new public types `CellValueInput`, `CellHyperlinkValueInput`, and `CellFormulaHyperlinkValue` (all re-exported from the main entry). The read side is unchanged: `cell.value` still returns the canonical `CellValue` shape (e.g. `CellHyperlinkValue` always has `text: string` and `hyperlink: string` populated).
 
 The breaking changes follow.
 

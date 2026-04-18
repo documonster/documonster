@@ -11,7 +11,6 @@
  *     a `CellRichTextValue` object where a string is promised
  */
 
-import type { CellHyperlinkValue } from "@excel/types";
 import { describe, it, expect } from "vitest";
 
 import { Workbook, ValueType } from "../../../index";
@@ -21,10 +20,11 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
 
+    // Public input shape: rich-text hyperlink — no `text`, no cast required.
     ws.getCell("A1").value = {
       richText: [{ text: "bold ", font: { bold: true } }, { text: "plain" }],
       hyperlink: "https://example.com"
-    } as CellHyperlinkValue;
+    };
 
     const buffer = await wb.xlsx.writeBuffer();
 
@@ -32,9 +32,12 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     await wb2.xlsx.load(buffer);
     const ws2 = wb2.getWorksheet("Sheet1")!;
     const cell = ws2.getCell("A1");
-    const v = cell.value as CellHyperlinkValue;
+    const v = cell.value;
 
-    // text must stay a string (not a CellRichTextValue object)
+    // Output shape always carries `text` and `hyperlink`.
+    if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
+      throw new Error("expected a hyperlink value");
+    }
     expect(typeof v.text).toBe("string");
     expect(v.text).toBe("bold plain");
     expect(v.hyperlink).toBe("https://example.com");
@@ -62,7 +65,10 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
 
-    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value as CellHyperlinkValue;
+    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value;
+    if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
+      throw new Error("expected a hyperlink value");
+    }
     expect(typeof v.text).toBe("string");
     expect(v.text).toBe("www.example.com");
     expect(v.hyperlink).toBe("https://www.example.com");
@@ -80,7 +86,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     const value = {
       richText: [{ text: "same", font: { bold: true } }],
       hyperlink: "https://example.com"
-    } as unknown as CellHyperlinkValue;
+    };
     ws.getCell("A1").value = value;
     ws.getCell("A2").value = value;
 
@@ -89,8 +95,18 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     await wb2.xlsx.load(buffer);
     const ws2 = wb2.getWorksheet("Sheet1")!;
 
-    const a1 = ws2.getCell("A1").value as CellHyperlinkValue;
-    const a2 = ws2.getCell("A2").value as CellHyperlinkValue;
+    const a1 = ws2.getCell("A1").value;
+    const a2 = ws2.getCell("A2").value;
+    if (
+      typeof a1 !== "object" ||
+      a1 === null ||
+      !("hyperlink" in a1) ||
+      typeof a2 !== "object" ||
+      a2 === null ||
+      !("hyperlink" in a2)
+    ) {
+      throw new Error("expected hyperlink values");
+    }
     expect(a1.text).toBe("same");
     expect(a2.text).toBe("same");
     expect(a1.hyperlink).toBe("https://example.com");
@@ -108,7 +124,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     ws.getCell("A1").value = {
       richText: [{ text: "display ", font: { italic: true } }, { text: "text" }],
       hyperlink: "https://example.com"
-    } as CellHyperlinkValue;
+    };
     ws.getCell("B1").value = "plain";
 
     const csv = wb.writeCsv();
@@ -127,12 +143,13 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
 
-    const cell = ws.getCell("A1");
-    cell.value = { formula: "1+2", result: 3 };
-    // No public API attaches a hyperlink to a formula cell, but loaded
-    // workbooks present this combination. Inject through the model so the
-    // xform layer is exercised.
-    (cell.model as { hyperlink?: string }).hyperlink = "https://example.com/formula-link";
+    // Public input shape for formula + hyperlink — no `cell.model` poking,
+    // no type assertions required.
+    ws.getCell("A1").value = {
+      formula: "1+2",
+      result: 3,
+      hyperlink: "https://example.com/formula-link"
+    };
 
     const buf1 = await wb.xlsx.writeBuffer();
 
@@ -144,7 +161,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     expect(a1.type).toBe(ValueType.Hyperlink);
     expect(a1.hyperlink).toBe("https://example.com/formula-link");
     // Formula source preserved on the model so a second write round-trips it
-    expect((a1.model as { formula?: string }).formula).toBe("1+2");
+    expect(a1.model.formula).toBe("1+2");
 
     // Second round-trip — formula must still be present
     const buf2 = await wb2.xlsx.writeBuffer();
@@ -153,7 +170,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     const a1b = wb3.getWorksheet("Sheet1")!.getCell("A1");
     expect(a1b.type).toBe(ValueType.Hyperlink);
     expect(a1b.hyperlink).toBe("https://example.com/formula-link");
-    expect((a1b.model as { formula?: string }).formula).toBe("1+2");
+    expect(a1b.model.formula).toBe("1+2");
   });
 
   it("supports rich-text hyperlinks inline (useSharedStrings: false)", async () => {
@@ -165,13 +182,16 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     ws.getCell("A1").value = {
       richText: [{ text: "bold ", font: { bold: true } }, { text: "plain" }],
       hyperlink: "https://example.com"
-    } as CellHyperlinkValue;
+    };
 
     const buffer = await wb.xlsx.writeBuffer({ useSharedStrings: false });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
-    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value as CellHyperlinkValue;
+    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value;
+    if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
+      throw new Error("expected a hyperlink value");
+    }
 
     expect(typeof v.text).toBe("string");
     expect(v.text).toBe("bold plain");

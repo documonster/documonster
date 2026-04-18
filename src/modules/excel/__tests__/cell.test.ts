@@ -253,7 +253,7 @@ describe("Cell", () => {
       // Intentionally inconsistent: user-supplied text should be ignored
       // when richText is present, to keep the invariant text===flatten(richText).
       text: "ignored"
-    } as unknown as CellHyperlinkValue;
+    };
 
     expect(a1.type).toBe(Enums.ValueType.Hyperlink);
     const v = a1.value as CellHyperlinkValue;
@@ -271,7 +271,7 @@ describe("Cell", () => {
     a1.value = {
       richText: [{ text: "abc" }, { text: "def" }],
       hyperlink: "https://example.com"
-    } as unknown as CellHyperlinkValue;
+    };
 
     expect(typeof a1.text).toBe("string");
     expect(a1.text).toBe("abcdef");
