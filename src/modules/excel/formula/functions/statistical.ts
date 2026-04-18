@@ -1404,6 +1404,61 @@ export const fnBINOM_DIST: NativeFn = args => {
   return rvNumber(sum);
 };
 
+/**
+ * BINOM.DIST.RANGE(trials, probability, number_s, [number_s2]) —
+ * probability of a binomial trial outcome between `number_s` and
+ * `number_s2` (inclusive). When `number_s2` is omitted, returns the
+ * probability of exactly `number_s` successes.
+ */
+export const fnBINOM_DIST_RANGE: NativeFn = args => {
+  const trialsV = argToNumber(args[0]);
+  if (trialsV.kind === RVKind.Error) {
+    return trialsV;
+  }
+  const probV = argToNumber(args[1]);
+  if (probV.kind === RVKind.Error) {
+    return probV;
+  }
+  const s1V = argToNumber(args[2]);
+  if (s1V.kind === RVKind.Error) {
+    return s1V;
+  }
+  const s2V = args.length > 3 ? argToNumber(args[3]) : s1V;
+  if (s2V.kind === RVKind.Error) {
+    return s2V;
+  }
+
+  const n = Math.floor(trialsV.value);
+  const s1 = Math.floor(s1V.value);
+  const s2 = Math.floor(s2V.value);
+  const p = probV.value;
+  if (n < 0 || p < 0 || p > 1) {
+    return ERRORS.NUM;
+  }
+  if (s1 < 0 || s1 > n) {
+    return ERRORS.NUM;
+  }
+  if (s2 < s1 || s2 > n) {
+    return ERRORS.NUM;
+  }
+
+  const pmf = (ki: number): number => {
+    if (p === 0) {
+      return ki === 0 ? 1 : 0;
+    }
+    if (p === 1) {
+      return ki === n ? 1 : 0;
+    }
+    const lnC = lnGamma(n + 1) - lnGamma(ki + 1) - lnGamma(n - ki + 1);
+    return Math.exp(lnC + ki * Math.log(p) + (n - ki) * Math.log(1 - p));
+  };
+  let sum = 0;
+  for (let i = s1; i <= s2; i++) {
+    sum += pmf(i);
+  }
+  return rvNumber(sum);
+};
+
 export const fnBINOM_INV: NativeFn = args => {
   const trials = argToNumber(args[0]);
   if (trials.kind === RVKind.Error) {

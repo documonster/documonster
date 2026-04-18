@@ -717,7 +717,13 @@ import {
   fnTBILLYIELD,
   fnTBILLEQ,
   fnPRICEMAT,
-  fnYIELDMAT
+  fnYIELDMAT,
+  fnCOUPNCD,
+  fnCOUPPCD,
+  fnCOUPNUM,
+  fnCOUPDAYSNC,
+  fnCOUPDAYBS,
+  fnCOUPDAYS
 } from "../functions/financial";
 
 function registerNativeFinancialFunctions(): void {
@@ -764,6 +770,12 @@ function registerNativeFinancialFunctions(): void {
   defineEager("TBILLEQ", 3, 3, fnTBILLEQ);
   defineEager("PRICEMAT", 5, 6, fnPRICEMAT);
   defineEager("YIELDMAT", 5, 6, fnYIELDMAT);
+  defineEager("COUPNCD", 3, 4, fnCOUPNCD);
+  defineEager("COUPPCD", 3, 4, fnCOUPPCD);
+  defineEager("COUPNUM", 3, 4, fnCOUPNUM);
+  defineEager("COUPDAYSNC", 3, 4, fnCOUPDAYSNC);
+  defineEager("COUPDAYBS", 3, 4, fnCOUPDAYBS);
+  defineEager("COUPDAYS", 3, 4, fnCOUPDAYS);
 }
 
 // ============================================================================
@@ -815,6 +827,7 @@ import {
   fnMINA,
   fnPOISSON_DIST,
   fnBINOM_DIST,
+  fnBINOM_DIST_RANGE,
   fnBINOM_INV,
   fnHYPGEOM_DIST,
   fnNEGBINOM_DIST,
@@ -914,6 +927,7 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("MINA", 1, 255, fnMINA);
   defineEager("POISSON.DIST", 3, 3, fnPOISSON_DIST);
   defineEager("BINOM.DIST", 4, 4, fnBINOM_DIST);
+  defineEager("BINOM.DIST.RANGE", 3, 4, fnBINOM_DIST_RANGE);
   defineEager("BINOM.INV", 3, 3, fnBINOM_INV);
   defineEager("HYPGEOM.DIST", 5, 5, fnHYPGEOM_DIST);
   defineEager("NEGBINOM.DIST", 4, 4, fnNEGBINOM_DIST);

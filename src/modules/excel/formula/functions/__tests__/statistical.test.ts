@@ -63,6 +63,7 @@ import {
   fnNORMINV,
   fnPOISSON_DIST,
   fnBINOM_DIST,
+  fnBINOM_DIST_RANGE,
   fnBINOM_INV,
   fnHYPGEOM_DIST,
   fnNEGBINOM_DIST,
@@ -5560,5 +5561,74 @@ describe("PROB", () => {
   it("error in prob_range propagates", () => {
     const errP = rvArray([[ERRORS.NA]]);
     expect(fnPROB([rvArray([[rvNumber(1)]]), errP, rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// BINOM.DIST.RANGE
+// ============================================================================
+
+describe("BINOM.DIST.RANGE", () => {
+  it("single number_s returns exact probability (same as BINOM.DIST non-cumulative)", () => {
+    // P(X=5) for n=10, p=0.5 ≈ 0.2461
+    const r = fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0.5), rvNumber(5)]) as NumberValue;
+    expect(r.value).toBeCloseTo(0.2461, 3);
+  });
+
+  it("range [3,7] for n=10,p=0.5 ≈ 0.8906", () => {
+    const r = fnBINOM_DIST_RANGE([
+      rvNumber(10),
+      rvNumber(0.5),
+      rvNumber(3),
+      rvNumber(7)
+    ]) as NumberValue;
+    expect(r.value).toBeCloseTo(0.8906, 3);
+  });
+
+  it("full range [0, n] = 1", () => {
+    const r = fnBINOM_DIST_RANGE([
+      rvNumber(10),
+      rvNumber(0.3),
+      rvNumber(0),
+      rvNumber(10)
+    ]) as NumberValue;
+    expect(r.value).toBeCloseTo(1, 10);
+  });
+
+  it("s1 > s2 → #NUM!", () => {
+    expect(fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0.5), rvNumber(7), rvNumber(3)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("negative s1 → #NUM!", () => {
+    expect(fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0.5), rvNumber(-1)])).toEqual(ERRORS.NUM);
+  });
+
+  it("s2 > trials → #NUM!", () => {
+    expect(fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0.5), rvNumber(0), rvNumber(20)])).toEqual(
+      ERRORS.NUM
+    );
+  });
+
+  it("probability out of [0,1] → #NUM!", () => {
+    expect(fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(1.5), rvNumber(5)])).toEqual(ERRORS.NUM);
+    expect(fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(-0.1), rvNumber(5)])).toEqual(ERRORS.NUM);
+  });
+
+  it("p=0 edge: probability mass is all at k=0", () => {
+    const r0 = fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0), rvNumber(0)]) as NumberValue;
+    expect(r0.value).toBe(1);
+    const r1 = fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(0), rvNumber(1)]) as NumberValue;
+    expect(r1.value).toBe(0);
+  });
+
+  it("p=1 edge: probability mass is all at k=n", () => {
+    const r = fnBINOM_DIST_RANGE([rvNumber(10), rvNumber(1), rvNumber(10)]) as NumberValue;
+    expect(r.value).toBe(1);
+  });
+
+  it("error propagation", () => {
+    expect(fnBINOM_DIST_RANGE([ERRORS.NA, rvNumber(0.5), rvNumber(5)])).toEqual(ERRORS.NA);
   });
 });

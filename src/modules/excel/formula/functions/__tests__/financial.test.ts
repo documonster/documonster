@@ -61,7 +61,13 @@ import {
   fnTBILLYIELD,
   fnTBILLEQ,
   fnPRICEMAT,
-  fnYIELDMAT
+  fnYIELDMAT,
+  fnCOUPNCD,
+  fnCOUPPCD,
+  fnCOUPNUM,
+  fnCOUPDAYSNC,
+  fnCOUPDAYBS,
+  fnCOUPDAYS
 } from "../financial";
 
 function asNumber(v: RuntimeValue): number {
@@ -3533,5 +3539,79 @@ describe("YIELDMAT", () => {
     expect(fnYIELDMAT([settlement, maturity, issue, rvNumber(0.05), rvNumber(0)])).toEqual(
       ERRORS.NUM
     );
+  });
+});
+
+// ============================================================================
+// COUP family — coupon-period queries
+// ============================================================================
+
+describe("COUP family", () => {
+  // 2023-01-15 serial = 44941, 2025-07-15 = 45853 (semi-annual, freq=2)
+  const settlement = rvNumber(44941);
+  const maturity = rvNumber(45853);
+  const freq = rvNumber(2);
+
+  it("COUPNCD returns a serial > settlement and <= maturity", () => {
+    const r = fnCOUPNCD([settlement, maturity, freq]) as NumberValue;
+    expect(r.value).toBeGreaterThan(settlement.value);
+    expect(r.value).toBeLessThanOrEqual(maturity.value);
+  });
+
+  it("COUPPCD returns a serial <= settlement", () => {
+    const r = fnCOUPPCD([settlement, maturity, freq]) as NumberValue;
+    expect(r.value).toBeLessThanOrEqual(settlement.value);
+  });
+
+  it("COUPPCD < COUPNCD always holds", () => {
+    const p = (fnCOUPPCD([settlement, maturity, freq]) as NumberValue).value;
+    const n = (fnCOUPNCD([settlement, maturity, freq]) as NumberValue).value;
+    expect(p).toBeLessThan(n);
+  });
+
+  it("COUPNUM ≥ 1 for securities with at least one coupon to maturity", () => {
+    const r = fnCOUPNUM([settlement, maturity, freq]) as NumberValue;
+    expect(r.value).toBeGreaterThanOrEqual(1);
+  });
+
+  it("COUPDAYSNC + COUPDAYBS = COUPDAYS (for actual/actual basis)", () => {
+    const dsnc = (fnCOUPDAYSNC([settlement, maturity, freq, rvNumber(1)]) as NumberValue).value;
+    const dsbs = (fnCOUPDAYBS([settlement, maturity, freq, rvNumber(1)]) as NumberValue).value;
+    const days = (fnCOUPDAYS([settlement, maturity, freq, rvNumber(1)]) as NumberValue).value;
+    // Basis 1 (actual/actual): the sum of days since last and days to next
+    // equals the length of the coupon period.
+    expect(dsnc + dsbs).toBeCloseTo(days, 5);
+  });
+
+  it("COUPDAYS for basis 2 = 360 / freq", () => {
+    const r = fnCOUPDAYS([settlement, maturity, freq, rvNumber(2)]) as NumberValue;
+    expect(r.value).toBe(180);
+  });
+
+  it("COUPDAYS for basis 3 = 365 / freq", () => {
+    const r = fnCOUPDAYS([settlement, maturity, freq, rvNumber(3)]) as NumberValue;
+    expect(r.value).toBe(182.5);
+  });
+
+  it("invalid frequency → #NUM!", () => {
+    // Only 1, 2, 4 are legal coupon frequencies.
+    expect(fnCOUPNUM([settlement, maturity, rvNumber(3)])).toEqual(ERRORS.NUM);
+  });
+
+  it("settlement >= maturity → #NUM!", () => {
+    expect(fnCOUPNUM([maturity, settlement, freq])).toEqual(ERRORS.NUM);
+  });
+
+  it("invalid basis → #NUM!", () => {
+    expect(fnCOUPNUM([settlement, maturity, freq, rvNumber(5)])).toEqual(ERRORS.NUM);
+  });
+
+  it("error propagation through all COUP functions", () => {
+    expect(fnCOUPNCD([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
+    expect(fnCOUPPCD([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
+    expect(fnCOUPNUM([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
+    expect(fnCOUPDAYSNC([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
+    expect(fnCOUPDAYBS([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
+    expect(fnCOUPDAYS([ERRORS.NA, maturity, freq])).toEqual(ERRORS.NA);
   });
 });

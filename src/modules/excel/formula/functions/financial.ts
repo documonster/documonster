@@ -2277,3 +2277,144 @@ export const fnYIELDMAT: NativeFn = args => {
   }
   return rvNumber((numer / denom - 1) / dsm);
 };
+
+// ============================================================================
+// COUP family — coupon-period queries
+// ============================================================================
+
+/**
+ * Shared validation + parsing for the COUP family. Returns the parsed
+ * settlement/maturity/frequency/basis values, or an error.
+ */
+function parseCoupArgs(
+  args: RuntimeValue[]
+): { settlement: number; maturity: number; frequency: number; basis: number } | ErrorValue {
+  const settlementRV = toNumberRV(args[0]);
+  if (isError(settlementRV)) {
+    return settlementRV;
+  }
+  const maturityRV = toNumberRV(args[1]);
+  if (isError(maturityRV)) {
+    return maturityRV;
+  }
+  const frequencyRV = toNumberRV(args[2]);
+  if (isError(frequencyRV)) {
+    return frequencyRV;
+  }
+  const basisRV = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  if (isError(basisRV)) {
+    return basisRV;
+  }
+
+  const settlement = Math.floor(settlementRV.value);
+  const maturity = Math.floor(maturityRV.value);
+  const frequency = Math.floor(frequencyRV.value);
+  const basis = Math.floor(basisRV.value);
+  if (settlement >= maturity) {
+    return ERRORS.NUM;
+  }
+
+  const err = validateBondBasis(frequency, basis);
+  if (err) {
+    return err;
+  }
+
+  return { settlement, maturity, frequency, basis };
+}
+
+/**
+ * COUPNCD(settlement, maturity, frequency, [basis]) — next coupon date
+ * after settlement, as an Excel serial.
+ */
+export const fnCOUPNCD: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  return rvNumber(nextCouponAfter(p.settlement, p.maturity, p.frequency));
+};
+
+/**
+ * COUPPCD(settlement, maturity, frequency, [basis]) — previous coupon
+ * date on or before settlement, as an Excel serial.
+ */
+export const fnCOUPPCD: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  return rvNumber(prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency));
+};
+
+/**
+ * COUPNUM(settlement, maturity, frequency, [basis]) — number of
+ * coupons payable between settlement and maturity, rounded up.
+ */
+export const fnCOUPNUM: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  return rvNumber(couponsBetween(p.settlement, p.maturity, p.frequency));
+};
+
+/**
+ * COUPDAYSNC(settlement, maturity, frequency, [basis]) — days from
+ * settlement to the next coupon date.
+ */
+export const fnCOUPDAYSNC: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  const next = nextCouponAfter(p.settlement, p.maturity, p.frequency);
+  if (p.basis === 0 || p.basis === 4) {
+    // 30/360 methods — Excel treats the period day-count via NASD-style
+    // adjustment; dayCountFraction already handles this. Multiply by
+    // 360 (days in 30/360 "year") to get days.
+    return rvNumber(dayCountFraction(p.settlement, next, p.basis) * 360);
+  }
+  // Actual day count: plain serial difference works for basis 1/2/3.
+  return rvNumber(next - p.settlement);
+};
+
+/**
+ * COUPDAYBS(settlement, maturity, frequency, [basis]) — days from the
+ * beginning of the coupon period to settlement.
+ */
+export const fnCOUPDAYBS: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  const prev = prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency);
+  if (p.basis === 0 || p.basis === 4) {
+    return rvNumber(dayCountFraction(prev, p.settlement, p.basis) * 360);
+  }
+  return rvNumber(p.settlement - prev);
+};
+
+/**
+ * COUPDAYS(settlement, maturity, frequency, [basis]) — days in the
+ * coupon period that contains settlement.
+ */
+export const fnCOUPDAYS: NativeFn = args => {
+  const p = parseCoupArgs(args);
+  if ("kind" in p) {
+    return p;
+  }
+  const prev = prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency);
+  const next = nextCouponAfter(p.settlement, p.maturity, p.frequency);
+  if (p.basis === 1) {
+    // Actual/actual — actual days between the two coupon dates.
+    return rvNumber(next - prev);
+  }
+  if (p.basis === 2 || p.basis === 3) {
+    // Actual/360 or actual/365 — the period length is conventionally the
+    // period basis divided by frequency (e.g. 360/freq, 365/freq).
+    const yearDays = p.basis === 2 ? 360 : 365;
+    return rvNumber(yearDays / p.frequency);
+  }
+  // 30/360 NASD or 30/360 European: 360/freq conventional.
+  return rvNumber(360 / p.frequency);
+};
