@@ -398,6 +398,7 @@ function buildRangeArray(
   // N redundant toLowerCase()/Map.get() calls inside the hot loop.
   const ws = ctx.snapshot.worksheetsByName.get(sheet.toLowerCase());
   const cells = ws?.cells;
+  const wsHiddenRows = ws?.hiddenRows;
   const compiledFormulas = ctx.compiledFormulas;
   const resultCache = session.resultCache;
   // Hoist the recording guard — when not recording, skip recordAccess
@@ -405,8 +406,24 @@ function buildRangeArray(
   const recording = session.recordingKey !== null;
 
   const rows: ScalarValue[][] = [];
+  // Lazily-allocated masks: only materialized once we encounter a
+  // SUBTOTAL/AGGREGATE cell or a hidden row inside the range. For the
+  // common case (plain data range, no hidden rows) we never touch these
+  // and emit an ArrayValue without extra metadata.
+  let subtotalMask: boolean[][] | undefined;
+  let hiddenRowMask: boolean[] | undefined;
+  const height = bottom - top + 1;
+  const width = right - left + 1;
   for (let r = top; r <= bottom; r++) {
     const row: ScalarValue[] = [];
+    const ri = r - top;
+    // Record row visibility — SUBTOTAL 1xx / AGGREGATE opt 5/7 use it.
+    if (wsHiddenRows?.has(r)) {
+      if (!hiddenRowMask) {
+        hiddenRowMask = new Array<boolean>(height).fill(false);
+      }
+      hiddenRowMask[ri] = true;
+    }
     for (let c = left; c <= right; c++) {
       if (recording) {
         session.recordAccess(sheet, r, c);
@@ -430,12 +447,24 @@ function buildRangeArray(
 
       if (cell.formulaKind !== "none" && cell.formula) {
         const fKey = formulaCellKey(sheet, r, c);
+        const compiled = compiledFormulas.get(fKey);
+        // Mark SUBTOTAL/AGGREGATE output cells so an outer SUBTOTAL /
+        // AGGREGATE over this range knows to skip them (Excel's
+        // no-double-count semantics).
+        if (compiled?.isSubtotalOutput) {
+          if (!subtotalMask) {
+            subtotalMask = new Array<boolean[]>(height);
+            for (let i = 0; i < height; i++) {
+              subtotalMask[i] = new Array<boolean>(width).fill(false);
+            }
+          }
+          subtotalMask[ri][c - left] = true;
+        }
         const cached = resultCache.get(fKey);
         if (cached !== undefined) {
           row.push(topLeft(cached.scalar));
           continue;
         }
-        const compiled = compiledFormulas.get(fKey);
         if (compiled) {
           row.push(topLeft(evaluateFormula(compiled, ctx, session)));
           continue;
@@ -455,7 +484,7 @@ function buildRangeArray(
     }
     rows.push(row);
   }
-  return rvArray(rows, top, left);
+  return rvArray(rows, top, left, subtotalMask, hiddenRowMask);
 }
 
 // ============================================================================
@@ -488,6 +517,8 @@ function dereferenceValue(v: RuntimeValue, ctx: EvalContext, session: EvalSessio
   }
   // Multi-area (3D reference) — flatten all areas into one array
   const allRows: ScalarValue[][] = [];
+  let mergedSubtotal: boolean[][] | undefined;
+  let mergedHidden: boolean[] | undefined;
   for (const area of v.areas) {
     const arr = buildRangeArray(
       ctx,
@@ -498,11 +529,62 @@ function dereferenceValue(v: RuntimeValue, ctx: EvalContext, session: EvalSessio
       area.bottom,
       area.right
     );
+    const startRow = allRows.length;
     for (const row of arr.rows) {
       allRows.push([...row]);
     }
+    // Merge masks from this area into the flattened output. Only
+    // allocate the merged masks when the first masked area shows up —
+    // most multi-area refs have no masks and should pay no overhead.
+    if (arr.subtotalMask || arr.hiddenRowMask) {
+      const height = arr.height;
+      if (arr.subtotalMask) {
+        if (!mergedSubtotal) {
+          mergedSubtotal = [];
+          for (let i = 0; i < startRow; i++) {
+            // Widths may differ across areas; mask rows use each area's
+            // own width so an outer SUBTOTAL reads the right positions.
+            mergedSubtotal.push([]);
+          }
+        }
+        for (let r = 0; r < height; r++) {
+          mergedSubtotal.push([...arr.subtotalMask[r]]);
+        }
+      } else if (mergedSubtotal) {
+        // Pad with empty rows so indices stay aligned.
+        for (let r = 0; r < height; r++) {
+          mergedSubtotal.push([]);
+        }
+      }
+      if (arr.hiddenRowMask) {
+        if (!mergedHidden) {
+          mergedHidden = new Array<boolean>(startRow).fill(false);
+        }
+        for (let r = 0; r < height; r++) {
+          mergedHidden.push(arr.hiddenRowMask[r] ?? false);
+        }
+      } else if (mergedHidden) {
+        for (let r = 0; r < height; r++) {
+          mergedHidden.push(false);
+        }
+      }
+    } else if (mergedSubtotal || mergedHidden) {
+      // An earlier area had masks; pad this area's rows with non-masked
+      // entries to keep row indices aligned.
+      const height = arr.height;
+      if (mergedSubtotal) {
+        for (let r = 0; r < height; r++) {
+          mergedSubtotal.push([]);
+        }
+      }
+      if (mergedHidden) {
+        for (let r = 0; r < height; r++) {
+          mergedHidden.push(false);
+        }
+      }
+    }
   }
-  return rvArray(allRows);
+  return rvArray(allRows, undefined, undefined, mergedSubtotal, mergedHidden);
 }
 
 // ============================================================================

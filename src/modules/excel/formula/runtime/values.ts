@@ -93,6 +93,25 @@ export interface ArrayValue {
   readonly originRow?: number;
   /** Origin column in the worksheet (1-based). Used for implicit intersection. */
   readonly originCol?: number;
+  /**
+   * Per-cell mask marking cells whose source formula is SUBTOTAL or
+   * AGGREGATE. When a range is passed to an outer SUBTOTAL/AGGREGATE
+   * call, those cells must be skipped so their results are not
+   * double-counted (Excel semantics — standard totals-row behavior).
+   *
+   * Same shape as `rows`: `subtotalMask[r][c]` is true when the cell
+   * should be excluded from outer SUBTOTAL/AGGREGATE aggregation.
+   * Omitted when no cell in the array is a SUBTOTAL/AGGREGATE output.
+   */
+  readonly subtotalMask?: readonly (readonly boolean[])[];
+  /**
+   * Per-row mask marking rows whose source worksheet row is hidden.
+   * Used by SUBTOTAL's 1xx-variant codes (101-111) and by AGGREGATE
+   * options 5/7 to skip hidden rows. `hiddenRowMask[r]` is true when
+   * row `r` of the array should be excluded under those semantics.
+   * Omitted when no row in the array is hidden.
+   */
+  readonly hiddenRowMask?: readonly boolean[];
 }
 
 // ============================================================================
@@ -204,7 +223,13 @@ export function rvError(code: ErrorCode): ErrorValue {
   return { kind: RVKind.Error, code };
 }
 
-export function rvArray(rows: ScalarValue[][], originRow?: number, originCol?: number): ArrayValue {
+export function rvArray(
+  rows: ScalarValue[][],
+  originRow?: number,
+  originCol?: number,
+  subtotalMask?: readonly (readonly boolean[])[],
+  hiddenRowMask?: readonly boolean[]
+): ArrayValue {
   const height = rows.length;
   // Determine max width across all rows for rectangular normalisation.
   let width = 0;
@@ -247,8 +272,24 @@ export function rvArray(rows: ScalarValue[][], originRow?: number, originCol?: n
     }
   }
   return originRow !== undefined
-    ? { kind: RVKind.Array, rows: normalisedRows, height, width, originRow, originCol }
-    : { kind: RVKind.Array, rows: normalisedRows, height, width };
+    ? {
+        kind: RVKind.Array,
+        rows: normalisedRows,
+        height,
+        width,
+        originRow,
+        originCol,
+        ...(subtotalMask ? { subtotalMask } : {}),
+        ...(hiddenRowMask ? { hiddenRowMask } : {})
+      }
+    : {
+        kind: RVKind.Array,
+        rows: normalisedRows,
+        height,
+        width,
+        ...(subtotalMask ? { subtotalMask } : {}),
+        ...(hiddenRowMask ? { hiddenRowMask } : {})
+      };
 }
 
 export function rvRef(

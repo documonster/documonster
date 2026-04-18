@@ -65,6 +65,7 @@ function makeWorksheet(
     name,
     dimensions: null,
     cells: new Map(),
+    hiddenRows: new Set(),
     tables
   };
 }

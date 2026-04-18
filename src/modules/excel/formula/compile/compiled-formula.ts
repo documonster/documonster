@@ -61,6 +61,14 @@ export interface CompiledFormula {
    * or bound expression.
    */
   readonly isDynamicArrayFunction: boolean;
+  /**
+   * Whether the top-level function is SUBTOTAL or AGGREGATE. When an
+   * outer SUBTOTAL/AGGREGATE range aggregates a cell whose formula is
+   * itself a SUBTOTAL/AGGREGATE call, that cell must be skipped so its
+   * result is not double-counted. This flag lets `buildRangeArray`
+   * mark those cells with the array's `subtotalMask`.
+   */
+  readonly isSubtotalOutput: boolean;
 }
 
 // ============================================================================
@@ -408,6 +416,32 @@ export function detectDynamicArrayFunction(ast: AstNode, bound: BoundExpr): bool
   }
   // Check bound expression level
   if (bound.kind === BoundExprKind.Call && DYNAMIC_ARRAY_FUNCTION_NAMES.has(bound.name)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if the formula's top-level expression is SUBTOTAL or AGGREGATE.
+ *
+ * Excel's SUBTOTAL/AGGREGATE functions deliberately skip any cell whose
+ * own source formula is itself a SUBTOTAL or AGGREGATE call — this is
+ * what makes the classic "totals row inside a filtered range" case not
+ * double-count. `buildRangeArray` reads this flag off the compiled
+ * formula to decide whether to set `subtotalMask[r][c]`.
+ */
+export function detectSubtotalOutput(ast: AstNode, bound: BoundExpr): boolean {
+  if (ast.type === NodeType.FunctionCall) {
+    const upper = ast.name.toUpperCase();
+    const canonical = stripFunctionPrefix(upper);
+    if (canonical === "SUBTOTAL" || canonical === "AGGREGATE") {
+      return true;
+    }
+  }
+  if (
+    bound.kind === BoundExprKind.Call &&
+    (bound.name === "SUBTOTAL" || bound.name === "AGGREGATE")
+  ) {
     return true;
   }
   return false;

@@ -294,4 +294,47 @@ describe("parser — names and errors", () => {
   it("rejects a bare SheetRef with nothing after it", () => {
     expect(() => compile("Sheet1!")).toThrow();
   });
+
+  it("rejects deeply nested formula beyond MAX_DEPTH guard", () => {
+    // Build a left-associative chain of 2000 `+` operators which will
+    // recurse through primary/expression routines. MAX_DEPTH guards the
+    // parser from stack-overflow crashes.
+    let formula = "1";
+    for (let i = 0; i < 2000; i++) {
+      formula = `(${formula}+1)`;
+    }
+    expect(() => compile(formula)).toThrow(/too deep/);
+  });
+
+  it("rejects unexpected end of formula", () => {
+    // Incomplete expressions that leave parser expecting more input.
+    expect(() => compile("1+")).toThrow();
+    expect(() => compile("SUM(")).toThrow();
+    expect(() => compile("(1+")).toThrow();
+  });
+
+  it("rejects unbalanced parentheses", () => {
+    // Closing paren with nothing to close.
+    expect(() => compile(")")).toThrow();
+    // More close than open.
+    expect(() => compile("SUM(1,2))")).toThrow();
+  });
+
+  it("rejects empty formula string", () => {
+    expect(() => compile("")).toThrow();
+  });
+
+  it("rejects unknown token sequences", () => {
+    // Two consecutive operators with no operand between.
+    expect(() => compile("1 + * 2")).toThrow();
+  });
+
+  it("rejects comma at the start of an argument list", () => {
+    // `SUM(,1,2)` — some tokenizers accept blank-leading args, but
+    // `SUM(,1)` should still parse the first arg as Missing.
+    // What we do reject: `SUM(` followed by `)` alone — nope actually
+    // `SUM()` should work (0-arity), `SUM(1,)` is also accepted with
+    // Missing trailing. The truly broken case is a top-level `,`.
+    expect(() => compile(",")).toThrow();
+  });
 });

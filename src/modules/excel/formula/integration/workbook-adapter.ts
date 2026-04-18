@@ -103,8 +103,15 @@ export function buildWorkbookSnapshot(workbook: WorkbookLike): WorkbookSnapshot 
 
 function buildWorksheetSnapshot(ws: Worksheet, date1904: boolean): WorksheetSnapshot {
   const cells = new Map<string, CellSnapshot>();
+  const hiddenRows = new Set<number>();
 
-  ws.eachRow((row, rowNumber) => {
+  // Use includeEmpty so we observe the `hidden` flag on rows that have
+  // no populated cells — a user may hide an empty row (e.g. filter UI)
+  // and SUBTOTAL(1xx,…) still needs to treat that row as hidden.
+  ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    if (row.hidden) {
+      hiddenRows.add(rowNumber);
+    }
     row.eachCell((cell, colNumber) => {
       const cellSnapshot = buildCellSnapshot(cell, rowNumber, colNumber, date1904);
       if (cellSnapshot) {
@@ -125,6 +132,7 @@ function buildWorksheetSnapshot(ws: Worksheet, date1904: boolean): WorksheetSnap
     name: ws.name,
     dimensions,
     cells,
+    hiddenRows,
     tables
   };
 }

@@ -341,3 +341,55 @@ describe("values — preserved shapes", () => {
     expect(Object.keys(s).sort()).toEqual(["kind", "value"]);
   });
 });
+
+describe("rvArray — subtotalMask", () => {
+  it("omits the subtotalMask field entirely when no mask is provided", () => {
+    const a = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(a.subtotalMask).toBeUndefined();
+    expect("subtotalMask" in a).toBe(false);
+  });
+
+  it("attaches a subtotalMask when one is supplied", () => {
+    const mask = [[true, false]];
+    const a = rvArray([[rvNumber(1), rvNumber(2)]], 1, 1, mask);
+    expect(a.subtotalMask).toBe(mask);
+    expect(a.subtotalMask?.[0][0]).toBe(true);
+    expect(a.subtotalMask?.[0][1]).toBe(false);
+  });
+
+  it("array origin + mask coexist", () => {
+    const mask = [[false], [true]];
+    const a = rvArray([[rvNumber(10)], [rvNumber(20)]], 5, 3, mask);
+    expect(a.originRow).toBe(5);
+    expect(a.originCol).toBe(3);
+    expect(a.subtotalMask).toBe(mask);
+    expect(a.height).toBe(2);
+    expect(a.width).toBe(1);
+  });
+});
+
+describe("rvArray — hiddenRowMask", () => {
+  it("omits hiddenRowMask when none is provided", () => {
+    const a = rvArray([[rvNumber(1)], [rvNumber(2)]]);
+    expect(a.hiddenRowMask).toBeUndefined();
+    expect("hiddenRowMask" in a).toBe(false);
+  });
+
+  it("attaches a hiddenRowMask when supplied (5th arg)", () => {
+    const mask = [true, false];
+    const a = rvArray([[rvNumber(1)], [rvNumber(2)]], 1, 1, undefined, mask);
+    expect(a.hiddenRowMask).toBe(mask);
+    expect(a.hiddenRowMask?.[0]).toBe(true);
+    expect(a.hiddenRowMask?.[1]).toBe(false);
+  });
+
+  it("both masks coexist with origin", () => {
+    const subMask = [[true], [false]];
+    const hiddenMask = [false, true];
+    const a = rvArray([[rvNumber(10)], [rvNumber(20)]], 3, 4, subMask, hiddenMask);
+    expect(a.originRow).toBe(3);
+    expect(a.originCol).toBe(4);
+    expect(a.subtotalMask).toBe(subMask);
+    expect(a.hiddenRowMask).toBe(hiddenMask);
+  });
+});

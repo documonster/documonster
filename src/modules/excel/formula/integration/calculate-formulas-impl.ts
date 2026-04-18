@@ -27,6 +27,7 @@ import {
   extractStaticDeps,
   analyzeExpr,
   detectDynamicArrayFunction,
+  detectSubtotalOutput,
   type NameDepResolver,
   type CompiledFormula
 } from "../compile/compiled-formula";
@@ -501,7 +502,8 @@ function compileFormula(
       isVolatile: analysis.isVolatile,
       hasDynamicRefs: analysis.hasDynamicRefs,
       containsLambda: analysis.containsLambda,
-      isDynamicArrayFunction: detectDynamicArrayFunction(ast, bound)
+      isDynamicArrayFunction: detectDynamicArrayFunction(ast, bound),
+      isSubtotalOutput: detectSubtotalOutput(ast, bound)
     };
   } catch {
     return { reason: "bind", formula: inst.sourceText, sheet: inst.sheetName };

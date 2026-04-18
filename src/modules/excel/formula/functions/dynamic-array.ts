@@ -15,9 +15,28 @@ import {
   isError,
   isArray
 } from "../runtime/values";
-import { asArray, getCell } from "./_shared";
+import {
+  asArray,
+  getCell,
+  stripErrorCells,
+  stripHiddenRowCells,
+  stripSubtotalMaskedCells
+} from "./_shared";
 import { fnSUM, fnAVERAGE, fnMIN, fnMAX, fnCOUNT, fnCOUNTA, fnPRODUCT } from "./math";
-import { fnSTDEV, fnSTDEVP, fnVAR, fnVARP, fnMEDIAN, fnLARGE, fnSMALL } from "./statistical";
+import {
+  fnSTDEV,
+  fnSTDEVP,
+  fnVAR,
+  fnVARP,
+  fnMEDIAN,
+  fnLARGE,
+  fnSMALL,
+  fnMODE,
+  fnPERCENTILE,
+  fnPERCENTILEEXC,
+  fnQUARTILE,
+  fnQUARTILEEXC
+} from "./statistical";
 
 function isScalarError(v: ScalarValue): boolean {
   return v.kind === RVKind.Error;
@@ -297,12 +316,26 @@ export function fnSUBTOTAL(args: RuntimeValue[]): RuntimeValue {
   if (isError(funcNumV)) {
     return funcNumV;
   }
-  const dataArgs = args.slice(1);
+  // Excel skips cells whose own formula is SUBTOTAL/AGGREGATE to avoid
+  // double-counting when an outer aggregate spans a totals row or another
+  // subtotal cell. `buildRangeArray` marks those cells via
+  // `subtotalMask`; we strip them here before handing off to the
+  // underlying aggregator.
+  let dataArgs = stripSubtotalMaskedCells(args.slice(1));
   // Truncate toward zero: Excel rejects non-integer function codes, so
   // `SUBTOTAL(9.5, …)` should behave as `SUBTOTAL(9, …)` rather than
   // slipping through the switch and returning #VALUE!. (R6-P1-9)
   const rawFn = Math.trunc(funcNumV.value);
   const fn = rawFn > 100 ? rawFn - 100 : rawFn;
+  // The 1xx variants (101-111) additionally skip hidden rows. Excel's
+  // plain 1-11 codes only skip filter-hidden rows — but our worksheet
+  // model carries a single `row.hidden` boolean that conflates the two
+  // states, so we apply hidden-row stripping only to the 1xx variants
+  // (matching manual-hide semantics; filter-hide remains a limitation
+  // at the adapter layer, not here).
+  if (rawFn > 100) {
+    dataArgs = stripHiddenRowCells(dataArgs);
+  }
   switch (fn) {
     case 1:
       return fnAVERAGE(dataArgs);
@@ -336,8 +369,38 @@ export function fnAGGREGATE(args: RuntimeValue[]): RuntimeValue {
   if (isError(funcNumV)) {
     return funcNumV;
   }
-  const dataArgs = args.slice(2);
-  switch (funcNumV.value) {
+  // Resolve the "options" parameter (arg[1]). Excel's option codes
+  // (0–7) control which cells to skip:
+  //   0 or omitted → ignore nested SUBTOTAL/AGGREGATE
+  //   1 → ignore hidden rows + nested
+  //   2 → ignore errors + nested
+  //   3 → ignore hidden rows + errors + nested
+  //   4 → ignore nothing
+  //   5 → ignore hidden rows (keep nested)
+  //   6 → ignore errors (keep nested)
+  //   7 → ignore hidden rows + errors (keep nested)
+  const optV = args[1] !== undefined ? toNumberRV(args[1]) : undefined;
+  if (optV && isError(optV)) {
+    return optV;
+  }
+  const option = optV ? Math.trunc(optV.value) : 0;
+  const skipNested = option <= 3; // 0,1,2,3 skip nested SUBTOTAL/AGGREGATE
+  const skipHidden = option === 1 || option === 3 || option === 5 || option === 7;
+  const skipErrors = option === 2 || option === 3 || option === 6 || option === 7;
+  let dataArgs = args.slice(2);
+  if (skipNested) {
+    dataArgs = stripSubtotalMaskedCells(dataArgs);
+  }
+  if (skipHidden) {
+    dataArgs = stripHiddenRowCells(dataArgs);
+  }
+  if (skipErrors) {
+    dataArgs = stripErrorCells(dataArgs);
+  }
+  // Excel rejects non-integer function codes; truncate toward zero
+  // so AGGREGATE(9.5, …) behaves as AGGREGATE(9, …), matching SUBTOTAL.
+  const fnCode = Math.trunc(funcNumV.value);
+  switch (fnCode) {
     case 1:
       return fnAVERAGE(dataArgs);
     case 2:
@@ -362,10 +425,20 @@ export function fnAGGREGATE(args: RuntimeValue[]): RuntimeValue {
       return fnVARP(dataArgs);
     case 12:
       return fnMEDIAN(dataArgs);
+    case 13:
+      return fnMODE(dataArgs);
     case 14:
       return fnLARGE(dataArgs);
     case 15:
       return fnSMALL(dataArgs);
+    case 16:
+      return fnPERCENTILE(dataArgs);
+    case 17:
+      return fnQUARTILE(dataArgs);
+    case 18:
+      return fnPERCENTILEEXC(dataArgs);
+    case 19:
+      return fnQUARTILEEXC(dataArgs);
     default:
       return ERRORS.VALUE;
   }

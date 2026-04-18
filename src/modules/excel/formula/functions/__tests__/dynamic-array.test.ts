@@ -990,8 +990,32 @@ describe("SUBTOTAL comprehensive", () => {
     expect((fnSUBTOTAL([rvNumber(5), data]) as NumberValue).value).toBe(1);
   });
 
-  it("code 109 = SUM (same as 9; hidden-row flag ignored by impl)", () => {
+  it("code 109 = SUM (1xx variant; returns same value when no rows marked hidden)", () => {
+    // Without a hiddenRowMask on the array, the 1xx variant behaves
+    // identically to code 9. Full hidden-row skipping is exercised in
+    // the integration tests (table-totals-row.test.ts) where
+    // buildRangeArray attaches the mask.
     expect((fnSUBTOTAL([rvNumber(109), data]) as NumberValue).value).toBe(10);
+  });
+
+  it("codes 7 (STDEV.S), 8 (STDEV.P), 10 (VAR.S), 11 (VAR.P)", () => {
+    const arr = rvArray([[rvNumber(10), rvNumber(20), rvNumber(30), rvNumber(40)]]);
+    // Sample stdev ≈ 12.9099, sample var ≈ 166.67
+    expect((fnSUBTOTAL([rvNumber(7), arr]) as NumberValue).value).toBeCloseTo(12.9099, 3);
+    expect((fnSUBTOTAL([rvNumber(10), arr]) as NumberValue).value).toBeCloseTo(166.6667, 3);
+    // Population stdev ≈ 11.1803, population var = 125
+    expect((fnSUBTOTAL([rvNumber(8), arr]) as NumberValue).value).toBeCloseTo(11.1803, 3);
+    expect((fnSUBTOTAL([rvNumber(11), arr]) as NumberValue).value).toBe(125);
+  });
+
+  it("1xx variants cover every aggregation", () => {
+    // All 1xx codes (101-111) route to the same underlying aggregator
+    // as their 1-11 counterparts when no rows are hidden.
+    const arr = rvArray([[rvNumber(2), rvNumber(4), rvNumber(6)]]);
+    expect((fnSUBTOTAL([rvNumber(101), arr]) as NumberValue).value).toBe(4); // AVG
+    expect((fnSUBTOTAL([rvNumber(104), arr]) as NumberValue).value).toBe(6); // MAX
+    expect((fnSUBTOTAL([rvNumber(105), arr]) as NumberValue).value).toBe(2); // MIN
+    expect((fnSUBTOTAL([rvNumber(106), arr]) as NumberValue).value).toBe(48); // PRODUCT
   });
 
   it("code 6 = PRODUCT", () => {
@@ -1060,6 +1084,99 @@ describe("AGGREGATE comprehensive", () => {
 
   it("code error propagates", () => {
     expect(fnAGGREGATE([ERRORS.NA, rvNumber(0), data])).toEqual(ERRORS.NA);
+  });
+
+  it("code 1 = AVERAGE", () => {
+    expect((fnAGGREGATE([rvNumber(1), rvNumber(0), data]) as NumberValue).value).toBe(2.5);
+  });
+
+  it("code 2 = COUNT", () => {
+    const mixed = rvArray([[rvNumber(1), rvString("x"), rvNumber(3)]]);
+    expect((fnAGGREGATE([rvNumber(2), rvNumber(0), mixed]) as NumberValue).value).toBe(2);
+  });
+
+  it("code 3 = COUNTA", () => {
+    const mixed = rvArray([[rvNumber(1), rvString("x"), rvNumber(3)]]);
+    expect((fnAGGREGATE([rvNumber(3), rvNumber(0), mixed]) as NumberValue).value).toBe(3);
+  });
+
+  it("code 6 = PRODUCT", () => {
+    expect((fnAGGREGATE([rvNumber(6), rvNumber(0), data]) as NumberValue).value).toBe(24);
+  });
+
+  it("code 7 = STDEV.S (sample)", () => {
+    const n = fnAGGREGATE([rvNumber(7), rvNumber(0), data]) as NumberValue;
+    // Sample stdev of [1,2,3,4] ≈ 1.2909944
+    expect(n.value).toBeCloseTo(1.2909944, 5);
+  });
+
+  it("code 8 = STDEV.P (population)", () => {
+    const n = fnAGGREGATE([rvNumber(8), rvNumber(0), data]) as NumberValue;
+    // Population stdev of [1,2,3,4] ≈ 1.1180339
+    expect(n.value).toBeCloseTo(1.1180339, 5);
+  });
+
+  it("code 10 = VAR.S (sample)", () => {
+    const n = fnAGGREGATE([rvNumber(10), rvNumber(0), data]) as NumberValue;
+    // Sample variance of [1,2,3,4] ≈ 1.6666667
+    expect(n.value).toBeCloseTo(1.6666667, 5);
+  });
+
+  it("code 11 = VAR.P (population)", () => {
+    const n = fnAGGREGATE([rvNumber(11), rvNumber(0), data]) as NumberValue;
+    // Population variance of [1,2,3,4] = 1.25
+    expect(n.value).toBe(1.25);
+  });
+
+  it("code 13 = MODE.SNGL", () => {
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(2), rvNumber(3)]]);
+    expect((fnAGGREGATE([rvNumber(13), rvNumber(0), arr]) as NumberValue).value).toBe(2);
+  });
+
+  it("code 16 = PERCENTILE.INC", () => {
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5)]]);
+    expect(
+      (fnAGGREGATE([rvNumber(16), rvNumber(0), arr, rvNumber(0.5)]) as NumberValue).value
+    ).toBe(3);
+  });
+
+  it("code 17 = QUARTILE.INC", () => {
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5)]]);
+    // Quartile 2 = median = 3
+    expect((fnAGGREGATE([rvNumber(17), rvNumber(0), arr, rvNumber(2)]) as NumberValue).value).toBe(
+      3
+    );
+  });
+
+  it("code 18 = PERCENTILE.EXC", () => {
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5)]]);
+    expect(
+      (fnAGGREGATE([rvNumber(18), rvNumber(0), arr, rvNumber(0.5)]) as NumberValue).value
+    ).toBe(3);
+  });
+
+  it("code 19 = QUARTILE.EXC", () => {
+    const arr = rvArray([
+      [rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5), rvNumber(6), rvNumber(7)]
+    ]);
+    // QUARTILE.EXC 2 of [1..7] = 4
+    expect((fnAGGREGATE([rvNumber(19), rvNumber(0), arr, rvNumber(2)]) as NumberValue).value).toBe(
+      4
+    );
+  });
+
+  it("non-integer code truncated toward zero", () => {
+    expect((fnAGGREGATE([rvNumber(9.9), rvNumber(0), data]) as NumberValue).value).toBe(10);
+  });
+
+  it("option 4 (ignore nothing) — error cells propagate", () => {
+    const arr = rvArray([[rvNumber(1), ERRORS.DIV0, rvNumber(3)]]);
+    expect(fnAGGREGATE([rvNumber(9), rvNumber(4), arr])).toEqual(ERRORS.DIV0);
+  });
+
+  it("option 6 (ignore errors) skips error cells in arrays", () => {
+    const arr = rvArray([[rvNumber(1), ERRORS.DIV0, rvNumber(3)]]);
+    expect((fnAGGREGATE([rvNumber(9), rvNumber(6), arr]) as NumberValue).value).toBe(4);
   });
 });
 

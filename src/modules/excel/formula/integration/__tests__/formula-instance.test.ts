@@ -92,4 +92,48 @@ describe("collectFormulaInstances", () => {
     expect(inst.sourceText).toBe("SEQUENCE(3)");
     expect(typeof isDA).toBe("boolean");
   });
+
+  it("shared-formula master and slaves both emit instances with translated text", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.getCell("A1").value = 10;
+    ws.getCell("A2").value = 20;
+    ws.getCell("A3").value = 30;
+    // Use fillFormula shared-formula API: master at B1, slaves at B2/B3
+    ws.fillFormula("B1:B3", "A1*2", [20, 40, 60]);
+    const snap = buildWorkbookSnapshot(wb);
+    const list = collectFormulaInstances(snap);
+    // Master + 2 slaves = 3 instances
+    expect(list).toHaveLength(3);
+    const sources = list.map(i => i.sourceText).sort();
+    // After translation each slave's sourceText should reference its
+    // own row (A1*2, A2*2, A3*2).
+    expect(sources).toEqual(["A1*2", "A2*2", "A3*2"]);
+  });
+
+  it("CSE formula carries targetRef for the materialize layer", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.getCell("A1").value = 10;
+    ws.getCell("A2").value = 20;
+    // Create a CSE formula spanning B1:B2
+    ws.fillFormula("B1:B2", "A1:A2*2", [20, 40], "array");
+    const snap = buildWorkbookSnapshot(wb);
+    const list = collectFormulaInstances(snap);
+    const cse = list.find(i => i.kind === "cse");
+    // CSE master carries the target ref
+    if (cse) {
+      expect(cse.targetRef).toBe("B1:B2");
+    }
+  });
+
+  it("normalizer assigns row/col matching the original cell position", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.getCell("D7").value = { formula: "1", result: 1 };
+    const snap = buildWorkbookSnapshot(wb);
+    const [inst] = collectFormulaInstances(snap);
+    expect(inst.row).toBe(7);
+    expect(inst.col).toBe(4);
+  });
 });

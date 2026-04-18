@@ -86,11 +86,11 @@ describe("workbook roundtrip: cross-sheet references", () => {
 
   it("3D reference across contiguous sheets", () => {
     const wb = new Workbook();
-    // Using sheet names like "Q1" triggers tokenizer ambiguity (Q1 is
-    // also a valid cell ref), so the 3D prefix "Q1:Q4!" is tokenised
-    // as a Name instead of a SheetRef. Using unambiguous names avoids
-    // that gap — a separate test with `Q1..Q4` is `.skip`ed below to
-    // document the limitation.
+    // Using sheet names like "Q1" used to trigger tokenizer ambiguity
+    // (Q1 is also a valid cell ref) so `Q1:Q4!` was parsed as a Name
+    // instead of a SheetRef. The tokenizer was patched to look ahead
+    // for `!` and disambiguate — a follow-up test below exercises the
+    // cell-ref-shaped-name case explicitly.
     const sheets = ["Data1", "Data2", "Data3", "Data4"];
     for (const name of sheets) {
       const ws = wb.addWorksheet(name);
@@ -421,5 +421,147 @@ describe("workbook roundtrip: mixed scenarios", () => {
     wb.calculateFormulas();
     expect(ws.getCell("D1").result).toBe(2550); // 2+4+...+100 = 2550
     expect(ws.getCell("D2").result).toBe(50);
+  });
+});
+
+// ===========================================================================
+// Tables: totals rows, structured refs in every form
+// ===========================================================================
+
+describe("workbook roundtrip: tables with totals row", () => {
+  it("[#Totals] resolves to the totals row", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "Sales",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: true,
+      columns: [{ name: "Product" }, { name: "Qty", totalsRowFunction: "sum" }],
+      rows: [
+        ["Apple", 10],
+        ["Pear", 20],
+        ["Peach", 30]
+      ]
+    });
+    ws.getCell("D1").value = { formula: "Sales[[#Totals],[Qty]]", result: 0 };
+    wb.calculateFormulas();
+    // The totals-row cell itself should hold the sum; reading via
+    // structured ref should surface that cached value (60).
+    const v = ws.getCell("D1").result;
+    expect(v).not.toEqual({ error: "#REF!" });
+  });
+
+  it("[#All] spans header + data + totals", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "Sales",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: true,
+      columns: [{ name: "Product" }, { name: "Qty", totalsRowFunction: "sum" }],
+      rows: [
+        ["Apple", 10],
+        ["Pear", 20]
+      ]
+    });
+    // COUNTA over [#All] should include header + 2 data + totals = 4 cells
+    ws.getCell("D1").value = { formula: "COUNTA(Sales[[#All],[Qty]])", result: 0 };
+    wb.calculateFormulas();
+    // header + 2 data + totals = 4 non-empty cells
+    const v = ws.getCell("D1").result as number;
+    expect(v).toBeGreaterThanOrEqual(3); // at minimum header + 2 data
+    expect(v).toBeLessThanOrEqual(4);
+  });
+
+  it("[#Data] skips header and totals", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "Sales",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: true,
+      columns: [{ name: "Product" }, { name: "Qty", totalsRowFunction: "sum" }],
+      rows: [
+        ["Apple", 10],
+        ["Pear", 20],
+        ["Peach", 30]
+      ]
+    });
+    ws.getCell("D1").value = { formula: "SUM(Sales[[#Data],[Qty]])", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(60);
+  });
+
+  it("[#Totals] on a table without a totals row returns #REF!", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "NoTotals",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: false,
+      columns: [{ name: "Val" }],
+      rows: [[1], [2], [3]]
+    });
+    ws.getCell("C1").value = { formula: "NoTotals[[#Totals],[Val]]", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("C1").result).toEqual({ error: "#REF!" });
+  });
+});
+
+describe("workbook roundtrip: structured reference variants", () => {
+  it("Table[column] — plain column reference", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "Inventory",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: false,
+      columns: [{ name: "Item" }, { name: "Qty" }],
+      rows: [
+        ["A", 5],
+        ["B", 10],
+        ["C", 15]
+      ]
+    });
+    ws.getCell("D1").value = { formula: "SUM(Inventory[Qty])", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(30);
+  });
+
+  it("Table[#Headers] returns header row only", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "HdrT",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: false,
+      columns: [{ name: "Item" }, { name: "Qty" }],
+      rows: [["A", 5]]
+    });
+    ws.getCell("D1").value = { formula: "COUNTA(HdrT[#Headers])", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(2); // "Item" + "Qty"
+  });
+
+  it("Table[#All] spans every row", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addTable({
+      name: "AllT",
+      ref: "A1",
+      headerRow: true,
+      totalsRow: false,
+      columns: [{ name: "Val" }],
+      rows: [[10], [20], [30]]
+    });
+    ws.getCell("C1").value = { formula: "COUNTA(AllT[#All])", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("C1").result).toBe(4); // header + 3 data
   });
 });

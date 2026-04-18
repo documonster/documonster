@@ -231,3 +231,173 @@ export function unescapeExcelWildcard(s: string): string {
   }
   return out;
 }
+
+/**
+ * Replace every cell marked by the array's `subtotalMask` with BLANK so an
+ * outer SUBTOTAL/AGGREGATE call does not double-count the inner aggregate's
+ * result. Only ArrayValue args carrying a mask are rewritten; scalars and
+ * arrays without masks pass through unchanged.
+ *
+ * Excel behavior: SUBTOTAL and AGGREGATE deliberately skip any cell whose
+ * own formula is itself SUBTOTAL or AGGREGATE — this is how the classic
+ * "totals row inside a filtered range" case works without double-counting.
+ */
+export function stripSubtotalMaskedCells(args: RuntimeValue[]): RuntimeValue[] {
+  let needsCopy = false;
+  for (const arg of args) {
+    if (arg.kind === RVKind.Array && arg.subtotalMask) {
+      needsCopy = true;
+      break;
+    }
+  }
+  if (!needsCopy) {
+    return args;
+  }
+  const out: RuntimeValue[] = [];
+  for (const arg of args) {
+    if (arg.kind !== RVKind.Array || !arg.subtotalMask) {
+      out.push(arg);
+      continue;
+    }
+    const mask = arg.subtotalMask;
+    const newRows: ScalarValue[][] = [];
+    for (let r = 0; r < arg.height; r++) {
+      const srcRow = arg.rows[r];
+      const maskRow = mask[r];
+      const newRow: ScalarValue[] = new Array<ScalarValue>(arg.width);
+      for (let c = 0; c < arg.width; c++) {
+        newRow[c] = maskRow?.[c] ? BLANK : srcRow[c];
+      }
+      newRows.push(newRow);
+    }
+    // Drop the mask on the rewritten array — masked cells are already BLANK.
+    // Preserve hiddenRowMask so downstream SUBTOTAL 1xx / AGGREGATE opt
+    // 5/7 handling still applies to rows whose visibility was recorded.
+    out.push({
+      kind: RVKind.Array,
+      rows: newRows,
+      height: arg.height,
+      width: arg.width,
+      ...(arg.originRow !== undefined
+        ? { originRow: arg.originRow, originCol: arg.originCol }
+        : {}),
+      ...(arg.hiddenRowMask ? { hiddenRowMask: arg.hiddenRowMask } : {})
+    } satisfies ArrayValue);
+  }
+  return out;
+}
+
+/**
+ * Replace every cell in a hidden row with BLANK so aggregate functions
+ * drop them during flattening. Callers: SUBTOTAL's 1xx-variant codes
+ * (101-111) and AGGREGATE with option 5 or 7.
+ *
+ * Only ArrayValue args carrying a hiddenRowMask are rewritten.
+ */
+export function stripHiddenRowCells(args: RuntimeValue[]): RuntimeValue[] {
+  let needsCopy = false;
+  for (const arg of args) {
+    if (arg.kind === RVKind.Array && arg.hiddenRowMask) {
+      needsCopy = true;
+      break;
+    }
+  }
+  if (!needsCopy) {
+    return args;
+  }
+  const out: RuntimeValue[] = [];
+  for (const arg of args) {
+    if (arg.kind !== RVKind.Array || !arg.hiddenRowMask) {
+      out.push(arg);
+      continue;
+    }
+    const mask = arg.hiddenRowMask;
+    const newRows: ScalarValue[][] = [];
+    for (let r = 0; r < arg.height; r++) {
+      if (mask[r]) {
+        const blankRow: ScalarValue[] = new Array<ScalarValue>(arg.width).fill(BLANK);
+        newRows.push(blankRow);
+      } else {
+        newRows.push(arg.rows[r].slice());
+      }
+    }
+    // Drop hiddenRowMask on rewritten output; preserve subtotalMask if any.
+    out.push({
+      kind: RVKind.Array,
+      rows: newRows,
+      height: arg.height,
+      width: arg.width,
+      ...(arg.originRow !== undefined
+        ? { originRow: arg.originRow, originCol: arg.originCol }
+        : {}),
+      ...(arg.subtotalMask ? { subtotalMask: arg.subtotalMask } : {})
+    } satisfies ArrayValue);
+  }
+  return out;
+}
+
+/**
+ * Replace every error cell inside ArrayValue args with BLANK so
+ * aggregate functions simply skip them during flattening. Callers:
+ * AGGREGATE with option 2, 3, 6, or 7.
+ *
+ * Direct scalar error args are left alone — AGGREGATE's caller
+ * already passes them as scalars; our aggregators will surface them
+ * as-is, which matches Excel when a direct literal is an error.
+ *
+ * This is distinct from the standard error-propagation path: arrays
+ * that contain errors normally propagate those errors out of the
+ * aggregate. With option 2/3/6/7, errors inside the *arrays* are
+ * deliberately ignored.
+ */
+export function stripErrorCells(args: RuntimeValue[]): RuntimeValue[] {
+  let needsCopy = false;
+  for (const arg of args) {
+    if (arg.kind === RVKind.Array) {
+      for (const row of arg.rows) {
+        for (const cell of row) {
+          if (cell.kind === RVKind.Error) {
+            needsCopy = true;
+            break;
+          }
+        }
+        if (needsCopy) {
+          break;
+        }
+      }
+      if (needsCopy) {
+        break;
+      }
+    }
+  }
+  if (!needsCopy) {
+    return args;
+  }
+  const out: RuntimeValue[] = [];
+  for (const arg of args) {
+    if (arg.kind !== RVKind.Array) {
+      out.push(arg);
+      continue;
+    }
+    const newRows: ScalarValue[][] = [];
+    for (const srcRow of arg.rows) {
+      const newRow: ScalarValue[] = new Array<ScalarValue>(srcRow.length);
+      for (let c = 0; c < srcRow.length; c++) {
+        newRow[c] = srcRow[c].kind === RVKind.Error ? BLANK : srcRow[c];
+      }
+      newRows.push(newRow);
+    }
+    out.push({
+      kind: RVKind.Array,
+      rows: newRows,
+      height: arg.height,
+      width: arg.width,
+      ...(arg.originRow !== undefined
+        ? { originRow: arg.originRow, originCol: arg.originCol }
+        : {}),
+      ...(arg.subtotalMask ? { subtotalMask: arg.subtotalMask } : {}),
+      ...(arg.hiddenRowMask ? { hiddenRowMask: arg.hiddenRowMask } : {})
+    } satisfies ArrayValue);
+  }
+  return out;
+}

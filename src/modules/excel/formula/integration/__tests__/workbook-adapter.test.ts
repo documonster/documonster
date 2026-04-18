@@ -195,3 +195,70 @@ describe("buildWorkbookSnapshot: date1904 property", () => {
     expect(snap.properties.date1904).toBe(true);
   });
 });
+
+describe("buildWorkbookSnapshot: hiddenRows capture", () => {
+  it("empty worksheet has empty hiddenRows set", () => {
+    const wb = new Workbook();
+    wb.addWorksheet("S");
+    const snap = buildWorkbookSnapshot(wb);
+    expect(snap.worksheets[0].hiddenRows.size).toBe(0);
+  });
+
+  it("captures a hidden row that contains data", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A2").value = 2;
+    ws.getCell("A3").value = 3;
+    ws.getRow(2).hidden = true;
+    const snap = buildWorkbookSnapshot(wb);
+    expect(snap.worksheets[0].hiddenRows.has(2)).toBe(true);
+    expect(snap.worksheets[0].hiddenRows.has(1)).toBe(false);
+    expect(snap.worksheets[0].hiddenRows.has(3)).toBe(false);
+  });
+
+  it("captures a hidden row that has no cells", () => {
+    // Pure empty hidden row — adapter must use includeEmpty iteration
+    // so the hidden flag is observed even without populated cells.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A3").value = 3;
+    // Row 2 is empty; mark it hidden anyway.
+    ws.getRow(2).hidden = true;
+    const snap = buildWorkbookSnapshot(wb);
+    expect(snap.worksheets[0].hiddenRows.has(2)).toBe(true);
+  });
+
+  it("captures multiple hidden rows across the sheet", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("S");
+    for (let i = 1; i <= 5; i++) {
+      ws.getCell(`A${i}`).value = i;
+    }
+    ws.getRow(1).hidden = true;
+    ws.getRow(3).hidden = true;
+    ws.getRow(5).hidden = true;
+    const snap = buildWorkbookSnapshot(wb);
+    const hidden = snap.worksheets[0].hiddenRows;
+    expect(hidden.has(1)).toBe(true);
+    expect(hidden.has(2)).toBe(false);
+    expect(hidden.has(3)).toBe(true);
+    expect(hidden.has(4)).toBe(false);
+    expect(hidden.has(5)).toBe(true);
+    expect(hidden.size).toBe(3);
+  });
+
+  it("independent per-sheet hiddenRows sets", () => {
+    const wb = new Workbook();
+    const s1 = wb.addWorksheet("S1");
+    const s2 = wb.addWorksheet("S2");
+    s1.getCell("A1").value = 1;
+    s1.getRow(1).hidden = true;
+    s2.getCell("A1").value = 1;
+    // S2 not hidden.
+    const snap = buildWorkbookSnapshot(wb);
+    expect(snap.worksheetsByName.get("s1")?.hiddenRows.has(1)).toBe(true);
+    expect(snap.worksheetsByName.get("s2")?.hiddenRows.has(1)).toBe(false);
+  });
+});

@@ -240,14 +240,27 @@ class Table {
     }
   }
 
+  // SUBTOTAL function codes per OOXML/Excel:
+  //   1/101=AVERAGE, 2/102=COUNT, 3/103=COUNTA, 4/104=MAX, 5/105=MIN,
+  //   6/106=PRODUCT, 7/107=STDEV, 8/108=STDEVP, 9/109=SUM, 10/110=VAR, 11/111=VARP.
+  // The 1xx variants also ignore manually hidden rows — Excel always uses
+  // these for totals-row injection. OOXML totalsRowFunction names map to:
+  //   average → 1 (AVERAGE)
+  //   countNums → 2 (COUNT, numeric-only)
+  //   count → 3 (COUNTA)
+  //   max → 4
+  //   min → 5
+  //   stdDev → 7 (sample std dev, per Excel's totals UI)
+  //   var → 10  (sample variance, per Excel's totals UI)
+  //   sum → 9
   private static readonly SUBTOTAL_FUNCTIONS: Record<string, number> = {
     average: 101,
     countNums: 102,
     count: 103,
     max: 104,
     min: 105,
-    stdDev: 106,
-    var: 107,
+    stdDev: 107,
+    var: 110,
     sum: 109
   };
 

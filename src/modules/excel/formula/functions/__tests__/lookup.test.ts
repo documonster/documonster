@@ -18,6 +18,7 @@ import {
   rvArray,
   rvBoolean,
   rvNumber,
+  rvRef,
   rvString,
   type ArrayValue,
   type NumberValue,
@@ -672,7 +673,7 @@ describe("XMATCH comprehensive", () => {
     expect(asNumber(fnXMATCH([rvString("banana"), arr]))).toBe(1);
   });
 
-  it("unsupported matchMode returns #N/A (value outside {-1,0,1})", () => {
+  it("unsupported matchMode returns #N/A (value outside {-1,0,1,2})", () => {
     const arr = rvArray([[rvNumber(1)], [rvNumber(2)]]);
     expect(fnXMATCH([rvNumber(1), arr, rvNumber(99)])).toEqual(ERRORS.NA);
   });
@@ -680,6 +681,36 @@ describe("XMATCH comprehensive", () => {
   it("matchMode 1 returns smallest ≥ lookup", () => {
     const arr = rvArray([[rvNumber(10)], [rvNumber(20)], [rvNumber(30)]]);
     expect(asNumber(fnXMATCH([rvNumber(15), arr, rvNumber(1)]))).toBe(2);
+  });
+
+  it("matchMode 2 — wildcard * matches prefix/suffix", () => {
+    const arr = rvArray([[rvString("apple")], [rvString("banana")], [rvString("cherry")]]);
+    // "b*" matches "banana" at index 2.
+    expect(asNumber(fnXMATCH([rvString("b*"), arr, rvNumber(2)]))).toBe(2);
+    // "*y" matches "cherry" at index 3.
+    expect(asNumber(fnXMATCH([rvString("*y"), arr, rvNumber(2)]))).toBe(3);
+  });
+
+  it("matchMode 2 — wildcard ? matches single char", () => {
+    const arr = rvArray([[rvString("cat")], [rvString("cut")], [rvString("coat")]]);
+    // "c?t" matches cat and cut; first is index 1.
+    expect(asNumber(fnXMATCH([rvString("c?t"), arr, rvNumber(2)]))).toBe(1);
+  });
+
+  it("matchMode 2 — is case-insensitive", () => {
+    const arr = rvArray([[rvString("APPLE")]]);
+    expect(asNumber(fnXMATCH([rvString("app*"), arr, rvNumber(2)]))).toBe(1);
+  });
+
+  it("matchMode 2 — ~ escape is honored", () => {
+    const arr = rvArray([[rvString("a*b")]]);
+    // "a~*b" matches the literal "a*b" but not "aXb".
+    expect(asNumber(fnXMATCH([rvString("a~*b"), arr, rvNumber(2)]))).toBe(1);
+  });
+
+  it("matchMode 2 — no match returns #N/A", () => {
+    const arr = rvArray([[rvString("apple")]]);
+    expect(fnXMATCH([rvString("z*"), arr, rvNumber(2)])).toEqual(ERRORS.NA);
   });
 });
 
@@ -839,8 +870,15 @@ describe("AREAS comprehensive", () => {
     expect(asNumber(fnAREAS([BLANK]))).toBe(1);
   });
 
-  it("even an error argument returns 1 (not propagated — current limitation)", () => {
-    expect(asNumber(fnAREAS([ERRORS.NA]))).toBe(1);
+  it("error argument propagates (Excel parity)", () => {
+    expect(fnAREAS([ERRORS.NA])).toEqual(ERRORS.NA);
+    expect(fnAREAS([ERRORS.DIV0])).toEqual(ERRORS.DIV0);
+  });
+
+  it("reference value returns the number of areas", () => {
+    // Single-area reference (rvRef creates one area) → 1
+    const singleArea = rvRef("Sheet1", 1, 1, 5, 5);
+    expect(asNumber(fnAREAS([singleArea]))).toBe(1);
   });
 });
 
@@ -1350,7 +1388,7 @@ describe("ROWS / COLUMNS deep coverage", () => {
 // ============================================================================
 
 describe("AREAS comprehensive", () => {
-  it("returns 1 for single reference (engine limitation)", () => {
+  it("returns 1 for a single area (array or scalar)", () => {
     expect(asNumber(fnAREAS([rvArray([[rvNumber(1)]])]))).toBe(1);
   });
 

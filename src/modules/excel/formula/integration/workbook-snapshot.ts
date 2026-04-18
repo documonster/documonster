@@ -158,6 +158,18 @@ export interface WorksheetSnapshot {
    */
   readonly cells: ReadonlyMap<string, CellSnapshot>;
 
+  /**
+   * Rows that are hidden. Used by SUBTOTAL's 1xx-variant codes
+   * (101-111) and AGGREGATE option 5/7 to skip hidden rows during
+   * aggregation. Excel distinguishes filter-hidden vs manually hidden,
+   * but our worksheet model carries a single `row.hidden` boolean for
+   * either case — SUBTOTAL 1xx/AGGREGATE treat them identically anyway,
+   * and SUBTOTAL 9 (plain) always skips filter-hidden rows (not
+   * distinguishable here, so we conservatively treat them as visible).
+   * 1-based row numbers.
+   */
+  readonly hiddenRows: ReadonlySet<number>;
+
   // ── Tables ──
 
   /** Tables defined in this worksheet. */

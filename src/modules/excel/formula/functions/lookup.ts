@@ -649,6 +649,46 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NA;
   }
 
+  if (matchMode === 2) {
+    // Wildcard matching — `*` and `?` (with `~` escape). Only meaningful
+    // when the lookup value is a string; for non-string lookup values
+    // Excel falls back to plain comparison.
+    if (lookupValue.kind !== RVKind.String) {
+      // Fall through to exact-match semantics for non-string lookups.
+      const start = searchMode === -1 ? flat.length - 1 : 0;
+      const end = searchMode === -1 ? -1 : flat.length;
+      const step = searchMode === -1 ? -1 : 1;
+      for (let i = start; i !== end; i += step) {
+        if (scalarEquals(flat[i], lookupValue)) {
+          return rvNumber(i + 1);
+        }
+      }
+      return ERRORS.NA;
+    }
+    const pattern = lookupValue.value;
+    const matcher = hasUnescapedWildcard(pattern)
+      ? new RegExp(`^${excelWildcardToRegex(pattern)}$`, "iu")
+      : null;
+    const literal = matcher ? null : unescapeExcelWildcard(pattern).toLowerCase();
+    const start = searchMode === -1 ? flat.length - 1 : 0;
+    const end = searchMode === -1 ? -1 : flat.length;
+    const step = searchMode === -1 ? -1 : 1;
+    for (let i = start; i !== end; i += step) {
+      const cell = flat[i];
+      if (cell.kind !== RVKind.String) {
+        continue;
+      }
+      if (matcher) {
+        if (matcher.test(cell.value)) {
+          return rvNumber(i + 1);
+        }
+      } else if (cell.value.toLowerCase() === literal) {
+        return rvNumber(i + 1);
+      }
+    }
+    return ERRORS.NA;
+  }
+
   if (matchMode === -1) {
     // Next-smaller-or-equal: largest item <= lookupValue.
     let best = -1;
@@ -887,5 +927,19 @@ export function fnTRANSPOSE(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnAREAS(args: RuntimeValue[]): RuntimeValue {
-  return args.length > 0 ? rvNumber(1) : ERRORS.VALUE;
+  if (args.length === 0) {
+    return ERRORS.VALUE;
+  }
+  // Error in the argument propagates (Excel parity). A reference value
+  // counts as one area; the engine does not yet build multi-area
+  // references via `(A1, B1)` union syntax — when that lands, the arity
+  // should be `v.areas.length`, not a hardcoded 1.
+  const a = args[0];
+  if (a.kind === RVKind.Error) {
+    return a;
+  }
+  if (a.kind === RVKind.Reference) {
+    return rvNumber(a.areas.length);
+  }
+  return rvNumber(1);
 }
