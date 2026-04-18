@@ -13,6 +13,8 @@
       "@xml/*": ["./src/modules/xml/*"],
       "@pdf": ["./src/modules/pdf/index.ts"],
       "@pdf/*": ["./src/modules/pdf/*"],
+      "@formula": ["./src/modules/formula/index.ts"],
+      "@formula/*": ["./src/modules/formula/*"],
       "@utils/*": ["./src/utils/*"],
       "@test/*": ["./src/test/*"]
     },

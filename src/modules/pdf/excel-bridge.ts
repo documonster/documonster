@@ -16,10 +16,10 @@
  */
 
 import { ValueType } from "@excel/enums";
-import { calculateFormulas } from "@excel/formula/integration/calculate-formulas";
 import { formatCellValue } from "@excel/utils/cell-format";
 import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
+import { tryInvokeFormulaEngine } from "@formula/host-registry";
 import { base64ToUint8Array } from "@utils/utils.base";
 
 import { exportPdf } from "./render/pdf-exporter";
@@ -64,7 +64,12 @@ export async function excelToPdf(
 ): Promise<Uint8Array> {
   // Recalculate all formulas before conversion so that formula results
   // reflect the latest cell values (fixes stale cached results from XLSX).
-  calculateFormulas(workbook);
+  //
+  // The formula engine is opt-in: callers who import
+  // `@cj-tech-master/excelts/formula` get automatic recalculation here; callers
+  // who don't import it fall back to whatever cached results the XLSX
+  // shipped with (safe for workbooks last saved by Excel itself).
+  tryInvokeFormulaEngine(workbook);
 
   const pdfWorkbook = excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);

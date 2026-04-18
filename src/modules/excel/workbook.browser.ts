@@ -17,7 +17,6 @@ import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
 import { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
-import { calculateFormulas as calcFormulas } from "@excel/formula/integration/calculate-formulas";
 import type { PivotTable } from "@excel/pivot-table";
 import { WorkbookReader, type WorkbookReaderOptions } from "@excel/stream/workbook-reader";
 import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer";
@@ -35,6 +34,8 @@ import type {
 import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import { Worksheet, type WorksheetModel } from "@excel/worksheet";
 import { XLSX } from "@excel/xlsx/xlsx";
+import type { SyntaxProbe } from "@formula/default-syntax-probe";
+import { invokeFormulaEngine } from "@formula/host-registry";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
 import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";
@@ -526,7 +527,16 @@ class Workbook {
   // Constructor
   // ===========================================================================
 
-  constructor() {
+  /**
+   * @param options Optional construction options.
+   *   - `formulaSyntaxProbe`: An explicit tokenizer+parser probe used to
+   *     classify defined-name text during XLSX load. Providing this makes
+   *     classification deterministic for *this* workbook regardless of
+   *     whether `installFormulaEngine()` has been called. Most callers
+   *     don't need it — `installFormulaEngine()` registers a
+   *     process-wide default probe that is picked up automatically.
+   */
+  constructor(options?: { formulaSyntaxProbe?: SyntaxProbe }) {
     this.category = "";
     this.company = "";
     this.created = new Date();
@@ -544,7 +554,7 @@ class Workbook {
     this.pivotTables = [];
     this._passthrough = {};
     this._rawDrawings = {};
-    this._definedNames = new DefinedNames();
+    this._definedNames = new DefinedNames(options?.formulaSyntaxProbe);
   }
 
   // ===========================================================================
@@ -1402,19 +1412,35 @@ class Workbook {
    * formulas, to ensure formula results reflect the latest data.
    *
    * Unsupported functions preserve their original cached result if one exists.
-   * See {@link calculateFormulas} (standalone export) for full behavioral details.
    *
-   * @example
+   * ## Tree-shaking note
+   *
+   * The formula engine ships ~200KB of code (433 Excel functions, parser,
+   * evaluator, dependency graph, spill materialiser). To keep it out of
+   * bundles that don't need it, the engine is registered at runtime
+   * rather than imported by the core `Workbook` module. Call
+   * {@link installFormulaEngine} once at startup before the first call
+   * to this method, or a clear error will be thrown explaining what to do.
+   *
    * ```ts
+   * import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+   *
+   * installFormulaEngine();                   // once, at startup
+   *
    * sheet.getCell("A1").value = 100;
-   * sheet.getCell("A2").value = 200;
-   * // B1 has formula =SUM(A1:A2) — its result is stale
-   * workbook.calculateFormulas();
-   * // B1.result is now 300
+   * workbook.calculateFormulas();             // now works
+   * ```
+   *
+   * Callers who prefer a zero-side-effect, tree-shakeable surface can
+   * use the functional equivalent directly:
+   *
+   * ```ts
+   * import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+   * calculateFormulas(workbook);
    * ```
    */
   calculateFormulas(): void {
-    calcFormulas(this);
+    invokeFormulaEngine(this);
   }
 
   // ===========================================================================

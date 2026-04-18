@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**excelts** — zero-dependency TypeScript toolkit. Seven modules: Excel, PDF, CSV, Markdown, XML, Archive, Stream.
+**excelts** — zero-dependency TypeScript toolkit. Eight modules: Excel, Formula, PDF, CSV, Markdown, XML, Archive, Stream.
 
 - Zero runtime dependencies — never add packages to `dependencies`
 - Cross-platform: Node.js 22+ and modern browsers
@@ -51,6 +51,7 @@ pnpm exec vitest run -t "should handle empty cells"
 src/
 ├── modules/
 │   ├── excel/          # Workbook, Worksheet, Cell; stream/ xlsx/
+│   ├── formula/        # Tokenizer, parser, evaluator, 433 functions, spill engine
 │   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts
 │   ├── csv/            # Parsing/formatting + streaming
 │   ├── markdown/       # GFM table parsing/formatting
@@ -64,20 +65,23 @@ src/
 ## Module Dependency Layers
 
 ```
-Layer 4:  excel    → archive, xml, csv, markdown, stream, utils
-Layer 3:  pdf      → excel (only excel-bridge.ts), archive, utils
+Layer 5:  pdf      → excel (only excel-bridge.ts), archive, utils
+Layer 4:  excel    → formula, archive, xml, csv, markdown, stream, utils
+Layer 3:  formula  → utils    (independent calc engine; no excel imports)
 Layer 2:  csv, archive → stream, utils
 Layer 1:  xml, markdown, stream → utils
 Layer 0:  utils    (no module dependencies)
 ```
 
 - Modules may only import from **lower** layers — never sideways or upward.
-- **Sole exception**: `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may.
+- **Sole exceptions**:
+  - `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may.
+  - `formula/` defines structural interfaces (`WorkbookLike`, `WorksheetLike`, `CellLike`) that `excel/` implements; `formula/` never imports concrete types from `@excel/*`.
 - `utils/` must never import from any module.
 
 ## Path Aliases
 
-`@excel/*`, `@pdf/*`, `@csv/*`, `@markdown/*`, `@xml/*`, `@archive/*`, `@stream/*` → `./src/modules/<name>/*`
+`@excel/*`, `@formula/*`, `@pdf/*`, `@csv/*`, `@markdown/*`, `@xml/*`, `@archive/*`, `@stream/*` → `./src/modules/<name>/*`
 `@utils/*` → `./src/utils/*` | `@test/*` → `./src/test/*`
 
 Use aliases for cross-module imports. Use relative paths only within the same module.

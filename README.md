@@ -12,13 +12,13 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 - **AI-Friendly** — Clean, consistent API designed for AI coding agents. Every module has comprehensive documentation and runnable examples for AI to learn from
 - **Zero Runtime Dependencies** — Pure TypeScript, no external packages
-- **Seven Modules** — Excel, PDF, CSV, Markdown, XML, Archive, Stream
+- **Eight Modules** — Excel, Formula, PDF, CSV, Markdown, XML, Archive, Stream
 - **Cross-Platform** — Node.js 22+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
 - **ESM First** — Native ES Modules with CommonJS compatibility and full tree-shaking
 
 ## Modules
 
-ExcelTS is organized into seven standalone modules. Each module has its own documentation and runnable examples.
+ExcelTS is organized into eight standalone modules. Each module has its own documentation and runnable examples.
 
 ### Excel — XLSX/JSON Workbook Manager
 
@@ -26,6 +26,13 @@ Create, read, and modify Excel spreadsheets with full styling, formulas, images,
 
 - [Documentation](src/modules/excel/README.md) | [中文](src/modules/excel/README_zh.md)
 - [Examples](src/modules/excel/examples/)
+
+### Formula — Excel-Compatible Calculation Engine
+
+Standalone 433-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Ships as a separate subpath so it stays out of bundles that only need to read/write XLSX.
+
+- [Documentation](src/modules/formula/README.md) | [中文](src/modules/formula/README_zh.md)
+- [Examples](src/modules/formula/examples/)
 
 ### PDF — Zero-Dependency PDF Engine
 
@@ -142,6 +149,12 @@ const archive = await zip().add("hello.txt", "Hello!").bytes();
 // Markdown — parse and format tables
 import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown";
 const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
+
+// Formula — opt-in calculation engine (kept out of the base bundle)
+import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+installFormulaEngine(); // once at startup
+sheet.getCell("A4").value = { formula: "SUM(A1:A3)" };
+workbook.calculateFormulas(); // now populates cell.result
 ```
 
 ## Browser Support
@@ -158,6 +171,10 @@ const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer
 <!-- Script tag (no bundler) -->
 <script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
 ```
+
+> The IIFE bundle does not include the formula calculation engine. Use
+> ESM + `@cj-tech-master/excelts/formula` if you need
+> `Workbook.calculateFormulas()`.
 
 For older browsers without native `CompressionStream` API, ExcelTS automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.
 

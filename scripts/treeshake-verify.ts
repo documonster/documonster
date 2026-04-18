@@ -29,6 +29,7 @@ const TMP_DIR = path.join(ROOT, "tmp");
 // Common mustNotInclude patterns
 const ALL_MODULES = [
   "modules/excel/",
+  "modules/formula/",
   "modules/pdf/",
   "modules/csv/",
   "modules/archive/",
@@ -36,7 +37,7 @@ const ALL_MODULES = [
   "modules/xml/",
   "modules/markdown/"
 ];
-const NOT_EXCEL_PDF_CSV = ["modules/excel/", "modules/pdf/", "modules/csv/"];
+const NOT_EXCEL_PDF_CSV = ["modules/excel/", "modules/formula/", "modules/pdf/", "modules/csv/"];
 
 /** Exclude all modules except the listed ones */
 function allModulesExcept(...keep: string[]): string[] {
@@ -76,8 +77,41 @@ const scenarios: Scenario[] = [
     ["encodeCell"],
     [...allModulesExcept("excel"), "modules/excel/workbook", "modules/excel/worksheet"]
   ),
-  s("root: Workbook (no pdf leak)", PKG_NAME, ["Workbook"], ["modules/pdf/"]),
-  s("root: excelToPdf (no csv leak)", PKG_NAME, ["excelToPdf"], ["modules/csv/"]),
+  s(
+    "root: Workbook (no pdf/formula leak)",
+    PKG_NAME,
+    ["Workbook"],
+    // A `Workbook` import *must* pull the two glue files from the
+    // formula module — they declare the registry that
+    // `Workbook.calculateFormulas()` and `defined-names` dispatch
+    // through. That is ~3.9 KB total, orders of magnitude smaller than
+    // the engine itself (~200 KB), which stays out of the bundle unless
+    // `installFormulaEngine` is imported. Assert on the engine source
+    // tree, not the glue.
+    [
+      "modules/pdf/",
+      "modules/formula/syntax/",
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/compile/",
+      "modules/formula/materialize/",
+      "modules/formula/integration/"
+    ]
+  ),
+  s(
+    "root: excelToPdf (no csv/formula leak)",
+    PKG_NAME,
+    ["excelToPdf"],
+    [
+      "modules/csv/",
+      "modules/formula/syntax/",
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/compile/",
+      "modules/formula/materialize/",
+      "modules/formula/integration/"
+    ]
+  ),
   s(
     "root: CsvParserStream (no pdf/archive leak)",
     PKG_NAME,
@@ -141,16 +175,83 @@ const scenarios: Scenario[] = [
   s("/xml: SaxParser", `${PKG_NAME}/xml`, ["SaxParser"], allModulesExcept("xml")),
 
   // /pdf subpath (Node)
-  // PDF legitimately depends on archive/compression for zlib/deflate
+  // PDF legitimately depends on archive/compression for zlib/deflate.
+  // `excelToPdf` legitimately references the formula registry glue
+  // (host-registry.ts) so that an app that also imports
+  // `@cj-tech-master/excelts/formula` gets automatic recalc before
+  // render — see the root Workbook scenario for the rationale.
   s("/pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive")),
   s(
     "/pdf: excelToPdf",
     `${PKG_NAME}/pdf`,
     ["excelToPdf"],
-    allModulesExcept("pdf", "excel", "archive")
+    [
+      ...allModulesExcept("pdf", "excel", "archive", "formula"),
+      "modules/formula/syntax/",
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/compile/",
+      "modules/formula/materialize/",
+      "modules/formula/integration/"
+    ]
   ),
   s("/pdf: readPdf", `${PKG_NAME}/pdf`, ["readPdf"], allModulesExcept("pdf", "archive")),
   s("/pdf: PageSizes", `${PKG_NAME}/pdf`, ["PageSizes"], allModulesExcept("pdf")),
+
+  // /formula subpath (Node)
+  //
+  // The functional form must be fully tree-shakeable: importing just
+  // `tokenize` (or any other leaf export) must not pull the evaluator,
+  // function registry, materialiser, the excel module, the engine
+  // installer, or the host glue. The scenarios below lock that
+  // contract in.
+  s(
+    "/formula: tokenize (no engine / excel leak)",
+    `${PKG_NAME}/formula`,
+    ["tokenize"],
+    [
+      ...allModulesExcept("formula"),
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/integration/",
+      "modules/formula/materialize/",
+      "modules/formula/install.js",
+      "modules/formula/host-registry.js",
+      "modules/formula/default-syntax-probe.js"
+    ]
+  ),
+  s(
+    "/formula: parse (no engine / excel leak)",
+    `${PKG_NAME}/formula`,
+    ["parse"],
+    [
+      ...allModulesExcept("formula"),
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/integration/",
+      "modules/formula/materialize/",
+      "modules/formula/install.js",
+      "modules/formula/host-registry.js",
+      "modules/formula/default-syntax-probe.js"
+    ]
+  ),
+  s(
+    "/formula: calculateFormulas (no excel, no installer)",
+    `${PKG_NAME}/formula`,
+    ["calculateFormulas"],
+    [
+      ...allModulesExcept("formula"),
+      "modules/formula/install.js",
+      "modules/formula/host-registry.js",
+      "modules/formula/default-syntax-probe.js"
+    ]
+  ),
+  s(
+    "/formula: installFormulaEngine (pulls full engine, no other modules)",
+    `${PKG_NAME}/formula`,
+    ["installFormulaEngine"],
+    allModulesExcept("formula")
+  ),
 
   // /markdown subpath (Node)
   s(
@@ -173,7 +274,23 @@ const scenarios: Scenario[] = [
   ),
 
   // Browser platform
-  s("browser root: Workbook (no pdf leak)", PKG_NAME, ["Workbook"], ["modules/pdf/"], "browser"),
+  s(
+    "browser root: Workbook (no pdf/formula leak)",
+    PKG_NAME,
+    ["Workbook"],
+    // Same 3.9 KB glue exemption as the Node scenario above — see the
+    // comment there for the rationale.
+    [
+      "modules/pdf/",
+      "modules/formula/syntax/",
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/compile/",
+      "modules/formula/materialize/",
+      "modules/formula/integration/"
+    ],
+    "browser"
+  ),
   s(
     "browser root: encodeCell",
     PKG_NAME,
@@ -211,6 +328,34 @@ const scenarios: Scenario[] = [
     "browser"
   ),
   s("browser /pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive"), "browser"),
+  s(
+    "browser /formula: tokenize (no engine leak)",
+    `${PKG_NAME}/formula`,
+    ["tokenize"],
+    [
+      ...allModulesExcept("formula"),
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/integration/",
+      "modules/formula/materialize/",
+      "modules/formula/install.js",
+      "modules/formula/host-registry.js",
+      "modules/formula/default-syntax-probe.js"
+    ],
+    "browser"
+  ),
+  s(
+    "browser /formula: calculateFormulas (no installer leak)",
+    `${PKG_NAME}/formula`,
+    ["calculateFormulas"],
+    [
+      ...allModulesExcept("formula"),
+      "modules/formula/install.js",
+      "modules/formula/host-registry.js",
+      "modules/formula/default-syntax-probe.js"
+    ],
+    "browser"
+  ),
   s(
     "browser /markdown: parseMarkdown",
     `${PKG_NAME}/markdown`,

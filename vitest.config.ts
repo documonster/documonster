@@ -9,6 +9,7 @@ export default defineConfig({
     globals: true,
     testTimeout: 30000,
     include: ["src/**/__tests__/**/*.test.ts"],
-    exclude: ["src/**/__tests__/browser/**/*.test.ts"]
+    exclude: ["src/**/__tests__/browser/**/*.test.ts"],
+    setupFiles: ["src/test/setup-formula.ts"]
   }
 });

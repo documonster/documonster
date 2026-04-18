@@ -2752,14 +2752,14 @@ describe("calculateFormulas", () => {
       expect(allNames.length).toBe(2);
 
       // Check snapshot construction
-      const { buildWorkbookSnapshot } = await import("../formula/integration/workbook-adapter");
+      const { buildWorkbookSnapshot } = await import("@formula/integration/workbook-adapter");
       const snapshot = buildWorkbookSnapshot(wb as any);
 
       // Verify we have both entries in the snapshot
       expect(snapshot.definedNames.size).toBe(2);
 
       // Verify scope resolution
-      const { resolveDefinedName } = await import("../formula/integration/workbook-snapshot");
+      const { resolveDefinedName } = await import("@formula/integration/workbook-snapshot");
       const fromSheet1 = resolveDefinedName(snapshot.definedNames, "MyVal", "Sheet1");
       const fromSheet2 = resolveDefinedName(snapshot.definedNames, "MyVal", "Sheet2");
       expect(fromSheet1).toBeDefined();
@@ -2819,7 +2819,7 @@ describe("calculateFormulas", () => {
         }
       ];
 
-      const { buildWorkbookSnapshot } = await import("../formula/integration/workbook-adapter");
+      const { buildWorkbookSnapshot } = await import("@formula/integration/workbook-adapter");
       const snapshot = buildWorkbookSnapshot(wb as any);
 
       // Verify distinct entries exist and don't cross-contaminate
@@ -2828,7 +2828,7 @@ describe("calculateFormulas", () => {
       expect(globalEntry!.ranges[0]).toContain("Sheet1");
       expect(globalEntry!.scope).toBeUndefined();
 
-      const { scopedNameKey } = await import("../formula/integration/workbook-snapshot");
+      const { scopedNameKey } = await import("@formula/integration/workbook-snapshot");
       const scopedEntry = snapshot.definedNames.get(scopedNameKey("Sheet2", "X"));
       expect(scopedEntry).toBeDefined();
       expect(scopedEntry!.ranges[0]).toContain("Sheet2");

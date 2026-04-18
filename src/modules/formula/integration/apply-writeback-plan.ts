@@ -16,12 +16,9 @@
  * 7. Update persistent spill maps and ghost snapshot maps.
  */
 
-import type { FormulaResult } from "@excel/cell";
-import { Enums } from "@excel/enums";
-import type { CellErrorValue } from "@excel/types";
-
 import { getGhostSnapshots, getPersistentSpillMap } from "../materialize/spill-engine";
-import type { WorkbookLike } from "../materialize/types";
+import type { CellErrorValueLike, FormulaResultLike, WorkbookLike } from "../materialize/types";
+import { CellValueTypeLike } from "../materialize/types";
 import type {
   WritebackPlan,
   WriteOperation,
@@ -132,7 +129,7 @@ function applyCSEWrite(workbook: WorkbookLike, op: CSEWrite): void {
       // lookup that has no side effects.
       const targetCell = ws.findCell(targetRow, targetCol);
 
-      if (targetCell && targetCell.type === Enums.ValueType.Formula) {
+      if (targetCell && targetCell.type === CellValueTypeLike.Formula) {
         if (op.scalarFill !== undefined) {
           targetCell.result = snapshotValueToResult(op.scalarFill);
         } else {
@@ -181,7 +178,7 @@ function applySpillErrorWrite(workbook: WorkbookLike, op: SpillErrorWrite): void
   }
   const cell = ws.findCell(op.row, op.col);
   if (cell) {
-    cell.result = { error: "#SPILL!" } as FormulaResult;
+    cell.result = { error: "#SPILL!" };
   }
 }
 
@@ -212,7 +209,7 @@ function applyCleanupWrite(workbook: WorkbookLike, op: CleanupWrite): void {
  * (for instance, `ISBLANK(A1)` on a cell that holds `=B1` where B1 is
  * empty should stay TRUE, not flip to FALSE because we injected 0).
  */
-function snapshotValueToResult(val: SnapshotCellValue): FormulaResult | undefined {
+function snapshotValueToResult(val: SnapshotCellValue): FormulaResultLike {
   if (val === null) {
     return undefined;
   }
@@ -220,7 +217,7 @@ function snapshotValueToResult(val: SnapshotCellValue): FormulaResult | undefine
     return val;
   }
   if (isSnapshotError(val)) {
-    return val as unknown as FormulaResult;
+    return val;
   }
   return undefined;
 }
@@ -230,7 +227,7 @@ function snapshotValueToResult(val: SnapshotCellValue): FormulaResult | undefine
  */
 function snapshotValueToRaw(
   val: SnapshotCellValue
-): number | string | boolean | CellErrorValue | null {
+): number | string | boolean | CellErrorValueLike | null {
   if (val === null) {
     return null;
   }
@@ -238,7 +235,7 @@ function snapshotValueToRaw(
     return val;
   }
   if (isSnapshotError(val)) {
-    return val as unknown as CellErrorValue;
+    return val;
   }
   return null;
 }

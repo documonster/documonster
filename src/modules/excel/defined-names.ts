@@ -1,9 +1,8 @@
-import { parse } from "@excel/formula/syntax/parser";
-import { tokenize } from "@excel/formula/syntax/tokenizer";
 import { Range } from "@excel/range";
 import type { Address } from "@excel/types";
 import { CellMatrix } from "@excel/utils/cell-matrix";
 import { colCache, type DecodedRange } from "@excel/utils/col-cache";
+import { getDefaultSyntaxProbe, type SyntaxProbe } from "@formula/default-syntax-probe";
 
 const rangeRegexp = /[$](\w+)[$](\d+)(:[$](\w+)[$](\d+))?/;
 
@@ -169,10 +168,22 @@ function hasUnquotedParen(s: string): boolean {
  *   function arguments as partial range references).
  * - Otherwise try to extract ranges (pure cell references).
  * - If neither works, fall back to opaque.
+ *
+ * **Probe semantics:** `probe` is the formula tokenizer+parser oracle. It
+ * is the *only* authority for deciding whether a non-range, non-wrapper
+ * string is a formula. When `probe` is `null` (no formula engine
+ * installed and no probe injected), any such string is classified as
+ * **opaque** — we have no evidence it is a formula, and leaving it
+ * opaque preserves round-trip bytes via `rawText`.
+ *
+ * This function is pure: the classification of a given input depends
+ * entirely on (rawText, ranges, probe) and no global state. Two calls
+ * with the same arguments always produce the same result.
  */
 function classifyDefinedName(
   rawText: string | undefined,
-  ranges: string[]
+  ranges: string[],
+  probe: SyntaxProbe | null
 ): { kind: "reference" | "formula" | "opaque"; ranges: string[]; formulaExpression?: string } {
   // If rawText is missing, fall back to existing ranges (programmatic API path)
   if (rawText === undefined) {
@@ -187,57 +198,56 @@ function classifyDefinedName(
     return { kind: "opaque", ranges: [] };
   }
 
-  // If the text contains an unquoted parenthesis (e.g. OFFSET(...), LAMBDA(...)),
-  // it is likely a formula — attempt formula parsing first so that extractRanges
-  // does not mis-split the function arguments on commas.
-  if (hasUnquotedParen(trimmed)) {
-    // Skip array constants ({…}), string literals ("…"), and error values (#…)
-    // which may contain parentheses but are not formulas.
-    const isArrayConst = trimmed.startsWith("{") && trimmed.endsWith("}");
-    const isStringLit = trimmed.startsWith('"') && trimmed.endsWith('"');
-    const isErrorVal = trimmed.startsWith("#");
+  // Opaque-looking wrappers — array constants, string literals, error
+  // values — are preserved verbatim and never routed through formula
+  // parsing. Detect them once, up front.
+  const isArrayConst = trimmed.startsWith("{") && trimmed.endsWith("}");
+  const isStringLit = trimmed.startsWith('"') && trimmed.endsWith('"');
+  const isErrorVal = trimmed.startsWith("#");
+  const isOpaqueWrapper = isArrayConst || isStringLit || isErrorVal;
 
-    if (!isArrayConst && !isStringLit && !isErrorVal) {
-      try {
-        const tokens = tokenize(trimmed);
-        if (tokens.length > 0) {
-          parse(tokens);
-          return { kind: "formula", ranges: [trimmed], formulaExpression: trimmed };
-        }
-      } catch {
-        // Parse failed — fall through to extractRanges / opaque
-      }
+  const hasParen = hasUnquotedParen(trimmed);
+
+  // If the text contains an unquoted parenthesis (e.g. OFFSET(...),
+  // LAMBDA(...)), it is either a formula or a malformed expression —
+  // never a cell-range union. `extractRanges` is not safe to call on
+  // such text because it splits on commas and can mis-identify
+  // `OFFSET(Sheet1` as a partial range reference.
+  //
+  // With a probe: confirm the expression parses before classifying as
+  // formula; if the probe rejects it, fall through to opaque.
+  // Without a probe: we cannot confirm it parses, so preserve the text
+  // verbatim as opaque. This is deliberately strict — the alternative
+  // (silently promoting unverified text to `formula`) produced
+  // classification results that depended on global install state.
+  if (hasParen && !isOpaqueWrapper) {
+    if (probe && probe(trimmed)) {
+      return { kind: "formula", ranges: [trimmed], formulaExpression: trimmed };
     }
+    return { kind: "opaque", ranges: [] };
   }
 
-  // Try to extract cell/range references (handles comma-separated multi-area names).
+  // Try to extract cell/range references (handles comma-separated
+  // multi-area names). Safe to call only after the paren check above,
+  // because `extractRanges` splits on commas.
   const extracted = extractRanges(rawText);
   if (extracted.length > 0) {
     return { kind: "reference", ranges: extracted };
   }
 
-  // For content that is clearly not a useful formula (array constants, error
-  // values, string literals), classify as opaque even if the parser could
-  // technically handle them. These should be preserved verbatim for round-trip
-  // but not participate in calculation.
-  const isArrayConst = trimmed.startsWith("{") && trimmed.endsWith("}");
-  const isStringLit = trimmed.startsWith('"') && trimmed.endsWith('"');
-  const isErrorVal = trimmed.startsWith("#");
-  if (isArrayConst || isStringLit || isErrorVal) {
+  // Opaque wrappers that didn't pass as a formula above classify
+  // straight to opaque — we preserve them verbatim without calculating.
+  if (isOpaqueWrapper) {
     return { kind: "opaque", ranges: [] };
   }
 
-  // No unquoted parens — still try formula parser for simple constant expressions.
-  if (!hasUnquotedParen(trimmed)) {
-    try {
-      const tokens = tokenize(trimmed);
-      if (tokens.length > 0) {
-        parse(tokens);
-        return { kind: "formula", ranges: [trimmed], formulaExpression: trimmed };
-      }
-    } catch {
-      // Parse failed
-    }
+  // No parens and not a range — could still be a parseable constant
+  // expression or a reference to another defined name. Only classify as
+  // formula if a probe can confirm it parses; otherwise stay opaque so
+  // round-trip text is preserved without silently promoting unparseable
+  // content to the formula bucket.
+  if (probe && probe(trimmed)) {
+    return { kind: "formula", ranges: [trimmed], formulaExpression: trimmed };
   }
 
   // Nothing worked — opaque
@@ -282,12 +292,29 @@ class DefinedNames {
    */
   nameForKey: Record<string, string>;
 
-  constructor() {
+  /**
+   * Optional explicit formula-syntax probe. When set, this is used to
+   * classify non-range, non-wrapper defined-name text during `set model`.
+   * When unset, the classifier falls back to the process-wide default
+   * probe (set by `installFormulaEngine()`). When neither is available,
+   * classification is conservative — non-range text becomes opaque.
+   */
+  private readonly _explicitProbe: SyntaxProbe | null;
+
+  /**
+   * @param probe Optional formula-syntax probe used when classifying
+   *   defined-name text. Injecting a probe here makes classification
+   *   deterministic for this instance regardless of process-global
+   *   `installFormulaEngine()` state. When omitted, the instance defers
+   *   to the default probe at classification time (see `set model`).
+   */
+  constructor(probe?: SyntaxProbe) {
     this.matrixMap = {};
     this.formulaMap = {};
     this.localSheetIdMap = {};
     this.opaqueMap = {};
     this.nameForKey = {};
+    this._explicitProbe = probe ?? null;
   }
 
   getMatrix(name: string): CellMatrix {
@@ -666,6 +693,12 @@ class DefinedNames {
     const opaqueMap = (this.opaqueMap = {} as Record<string, OpaqueEntry>);
     const nameForKeyMap = (this.nameForKey = {} as Record<string, string>);
 
+    // Resolve probe lazily: a caller may have constructed the Workbook
+    // before `installFormulaEngine()` but load XLSX data afterwards. We
+    // want whichever probe is registered at *load* time, not construct
+    // time. An explicit per-instance probe always wins when provided.
+    const probe = this._explicitProbe ?? getDefaultSyntaxProbe();
+
     for (const definedName of value) {
       const sKey = storageKey(definedName.name, definedName.localSheetId);
       nameForKeyMap[sKey] = definedName.name;
@@ -682,7 +715,7 @@ class DefinedNames {
       }
 
       // XLSX parse path (rawText present) or programmatic path with ranges only
-      const classified = classifyDefinedName(definedName.rawText, definedName.ranges);
+      const classified = classifyDefinedName(definedName.rawText, definedName.ranges, probe);
 
       switch (classified.kind) {
         case "reference": {

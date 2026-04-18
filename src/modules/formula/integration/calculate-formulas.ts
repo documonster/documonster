@@ -1,8 +1,10 @@
 /**
  * Formula Calculation Engine
  *
- * Provides `calculateFormulas()` to recalculate all formula cells in a workbook.
- * This is the sole public entry point for formula calculation.
+ * Provides `calculateFormulas()` as the primary function-style entry
+ * point. The same work runs when a host calls
+ * `Workbook.calculateFormulas()` — both paths dispatch through the
+ * engine registered via `installFormulaEngine()`.
  *
  * ## Architecture
  *
@@ -36,7 +38,9 @@ export type { DefinedNamesLike, WorkbookLike } from "../materialize/types";
  * **Supported formula features:**
  * - Cell references: `A1`, `$B$2`, `Sheet1!A1`, `'Sheet Name'!A1:B10`
  * - Operators: `+ - * / ^`, `& (concat)`, `= <> < > <= >=`, `%`
- * - 120+ built-in functions (SUM, IF, VLOOKUP, SUMIF, FILTER, etc.)
+ * - 433 built-in functions across math, text, logical, date, lookup,
+ *   statistical, financial, dynamic-array, database and engineering
+ *   categories.
  * - Shared formulas, array constants, nested expressions
  * - Dynamic array spill: FILTER, SORT, UNIQUE, SORTBY results are
  *   written to adjacent cells. #SPILL! error if target cells are occupied.

@@ -1,24 +1,29 @@
 /**
- * Workbook Adapter — Bridge between live workbook objects and the snapshot.
+ * Workbook Adapter — Bridge between a host workbook (implementing the
+ * `WorkbookLike` / `WorksheetLike` / `CellLike` interfaces) and the
+ * engine's snapshot representation.
  *
- * This is the **only** file in the new engine pipeline that imports live
- * workbook/worksheet/cell types. All other engine code depends exclusively
- * on the snapshot types.
+ * This is the only file in the engine pipeline that walks a live host
+ * workbook; the rest of the pipeline consumes the immutable
+ * `WorkbookSnapshot` this file produces.
  *
  * ## Responsibilities
  *
- * 1. `buildWorkbookSnapshot()` — walk the live workbook and produce an
+ * 1. `buildWorkbookSnapshot()` — walk the host workbook and produce an
  *    immutable `WorkbookSnapshot`.
  * 2. Cell value conversion — Date → serial number, rich text → string,
  *    shared formula translation, etc.
  */
 
-import type { Cell } from "@excel/cell";
-import { Enums } from "@excel/enums";
-import type { Worksheet } from "@excel/worksheet";
 import { dateToExcel } from "@utils/utils.base";
 
-import type { WorkbookLike } from "../materialize/types";
+import type {
+  CellLike,
+  TableDefinitionLike,
+  WorkbookLike,
+  WorksheetLike
+} from "../materialize/types";
+import { CellValueTypeLike } from "../materialize/types";
 import type {
   CalcPropertiesSnapshot,
   CellSnapshot,
@@ -101,7 +106,7 @@ export function buildWorkbookSnapshot(workbook: WorkbookLike): WorkbookSnapshot 
 // Build Worksheet Snapshot
 // ============================================================================
 
-function buildWorksheetSnapshot(ws: Worksheet, date1904: boolean): WorksheetSnapshot {
+function buildWorksheetSnapshot(ws: WorksheetLike, date1904: boolean): WorksheetSnapshot {
   const cells = new Map<string, CellSnapshot>();
   const hiddenRows = new Set<number>();
 
@@ -142,7 +147,7 @@ function buildWorksheetSnapshot(ws: Worksheet, date1904: boolean): WorksheetSnap
 // ============================================================================
 
 function buildCellSnapshot(
-  cell: Cell,
+  cell: CellLike,
   row: number,
   col: number,
   date1904: boolean
@@ -150,12 +155,12 @@ function buildCellSnapshot(
   const cellType = cell.type;
 
   // Skip truly empty cells
-  if (cellType === Enums.ValueType.Null) {
+  if (cellType === CellValueTypeLike.Null) {
     return null;
   }
 
   // ── Formula cells ──
-  if (cellType === Enums.ValueType.Formula) {
+  if (cellType === CellValueTypeLike.Formula) {
     return buildFormulaCellSnapshot(cell, row, col, date1904);
   }
 
@@ -171,7 +176,7 @@ function buildCellSnapshot(
 }
 
 function buildFormulaCellSnapshot(
-  cell: Cell,
+  cell: CellLike,
   row: number,
   col: number,
   date1904: boolean
@@ -319,7 +324,7 @@ function convertFormulaResult(result: unknown, date1904: boolean): SnapshotCellV
 // Build Tables
 // ============================================================================
 
-function buildTables(ws: Worksheet): TableSnapshot[] {
+function buildTables(ws: WorksheetLike): TableSnapshot[] {
   if (!ws.getTables) {
     return [];
   }
@@ -327,7 +332,7 @@ function buildTables(ws: Worksheet): TableSnapshot[] {
   const tables: TableSnapshot[] = [];
 
   for (const t of ws.getTables()) {
-    const model = t.table;
+    const model: TableDefinitionLike | undefined = t.table;
     if (!model || !model.tl) {
       continue;
     }

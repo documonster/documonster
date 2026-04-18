@@ -13,7 +13,10 @@ export * from "@excel/anchor";
 export { Table } from "@excel/table";
 export { DataValidations } from "@excel/data-validations";
 export { FormCheckbox } from "@excel/form-control";
-export { calculateFormulas } from "@excel/formula/integration/calculate-formulas";
+// Note: the formula engine lives at the `./formula` subpath so it stays
+// out of bundles that only need to read / write XLSX files. Import
+// `@cj-tech-master/excelts/formula` to enable `Workbook.calculateFormulas()`
+// and automatic recalculation in `excelToPdf()`.
 
 // =============================================================================
 // Node.js Only: Streaming Classes

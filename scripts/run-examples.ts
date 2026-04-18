@@ -74,6 +74,67 @@ const examples: ExampleTest[] = [
     description: "Checkbox cells (Office Online compatible)",
     outputFiles: ["src/modules/excel/examples/data/checkbox.xlsx"],
     args: ["src/modules/excel/examples/data/checkbox.xlsx"]
+  },
+  // Formula engine examples — one per function category.
+  {
+    file: "src/modules/formula/examples/formula-math.ts",
+    description: "Formula: math & trigonometry",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-text.ts",
+    description: "Formula: text functions",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-logical.ts",
+    description: "Formula: logical & conditional",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-date.ts",
+    description: "Formula: date & time",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-lookup.ts",
+    description: "Formula: lookup & reference",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-statistical.ts",
+    description: "Formula: statistical functions",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-financial.ts",
+    description: "Formula: financial functions",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-dynamic-array.ts",
+    description: "Formula: dynamic arrays & spill",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-database.ts",
+    description: "Formula: database (D-) functions",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-engineering.ts",
+    description: "Formula: engineering & conversions",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-standalone.ts",
+    description: "Formula: functional API + tokenize/parse",
+    outputFiles: []
+  },
+  {
+    file: "src/modules/formula/examples/formula-pdf-integration.ts",
+    description: "Formula: automatic recalc during excelToPdf()",
+    outputFiles: ["tmp/formula-examples/formula-pdf-integration.pdf"]
   }
 ];
 
