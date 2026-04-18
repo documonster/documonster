@@ -2489,7 +2489,7 @@ function evaluateStructuredRef(
   const addr = ctx.currentAddress;
 
   // Find the table
-  let tableName = expr.tableName;
+  const tableName = expr.tableName;
   let tableSheet: string | null = null;
   let tableInfo: {
     name: string;
@@ -2525,7 +2525,6 @@ function evaluateStructuredRef(
         ) {
           tableInfo = t;
           tableSheet = ws.name;
-          tableName = t.name;
           break;
         }
       }

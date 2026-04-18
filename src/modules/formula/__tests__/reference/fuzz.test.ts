@@ -236,7 +236,9 @@ function checkResult(formula: string, result: unknown): void {
   if (typeof result === "boolean") {
     return;
   }
-  if (typeof result === "object" && result !== null && "error" in result) {
+  // After the early returns above, the only remaining legal shape is an error
+  // object `{ error: string }`. Anything else is a bug.
+  if (typeof result === "object" && "error" in result) {
     const code = (result as { error: string }).error;
     expect(KNOWN_ERRORS.has(code)).toBe(true);
     return;

@@ -1272,14 +1272,13 @@ function betaIncomplete(x: number, a: number, b: number): number {
   if (!Number.isFinite(front) || front === 0) {
     return 0;
   }
-  let f = 1;
   let c = 1;
   let d = 1 - ((a + b) * x) / (a + 1);
   if (Math.abs(d) < 1e-30) {
     d = 1e-30;
   }
   d = 1 / d;
-  f = d;
+  let f = d;
   for (let m = 1; m <= 200; m++) {
     let num = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m));
     d = 1 + num * d;
@@ -1330,11 +1329,10 @@ function gammaIncomplete(a: number, x: number): number {
     }
     return sum * Math.exp(-x + a * Math.log(x) - lnGamma(a));
   }
-  let f = 1;
   const b0 = x + 1 - a;
   let ci = 1e30;
   let d = 1 / b0;
-  f = d;
+  let f = d;
   for (let i = 1; i <= 200; i++) {
     const an = -i * (i - a);
     const bn = x + 2 * i + 1 - a;

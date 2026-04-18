@@ -616,8 +616,9 @@ describe("Workbook", () => {
     it("can be cleared by setting to undefined", () => {
       const wb = new Workbook();
       wb.defaultFont = { name: "Arial", size: 12 };
-      wb.defaultFont = undefined;
+      expect(wb.defaultFont).toEqual({ name: "Arial", size: 12 });
 
+      wb.defaultFont = undefined;
       expect(wb.defaultFont).toBeUndefined();
     });
 

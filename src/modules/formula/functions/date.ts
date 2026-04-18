@@ -150,11 +150,9 @@ export const fnDATE: NativeFn = args => {
     return ERRORS.NUM;
   }
   if (y < 1900) {
+    // Excel's DATE interprets a year in [0, 1899] as (year + 1900). After this
+    // coercion `y` is in [1900, 3799], always within Excel's [1900, 9999] range.
     y += 1900;
-    // Excel rejects years outside [1900, 9999] after this coercion.
-    if (y > 9999) {
-      return ERRORS.NUM;
-    }
   }
 
   // Lotus 1-2-3 bug: DATE(1900,2,29) should return serial 60 even though
