@@ -63,13 +63,13 @@ export interface WorkbookLike {
  */
 export interface SpillRegion {
   /** The worksheet id — stable across renames */
-  worksheetId: number;
+  readonly worksheetId: number;
   /** The source formula cell's row */
-  sourceRow: number;
+  readonly sourceRow: number;
   /** The source formula cell's col */
-  sourceCol: number;
+  readonly sourceCol: number;
   /** Number of rows in the spill (including source) */
-  rows: number;
+  readonly rows: number;
   /** Number of cols in the spill (including source) */
-  cols: number;
+  readonly cols: number;
 }

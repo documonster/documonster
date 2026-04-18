@@ -33,8 +33,7 @@ export const enum TokenType {
   RowRange = 21, // whole-row range e.g. 1:5, $3:$7
   StructuredRef = 22, // structured reference e.g. Table1[Column], [@Column]
   AtSign = 23, // @ implicit intersection prefix (Excel 365)
-  Intersect = 24, // space between two refs, e.g. A1:A10 B1:B10 (intersection operator)
-  ExternalRef = 25 // external workbook reference, e.g. [Book1]Sheet1!A1 — unsupported
+  Intersect = 24 // space between two refs, e.g. A1:A10 B1:B10 (intersection operator)
 }
 
 // ============================================================================
@@ -173,17 +172,6 @@ export interface IntersectToken {
   type: TokenType.Intersect;
 }
 
-/**
- * External workbook reference, e.g. `[Book1]Sheet1!A1`. Recognised as a
- * distinct token type so the engine can unambiguously evaluate it to
- * `#REF!` (cross-workbook references are not supported).
- */
-export interface ExternalRefToken {
-  type: TokenType.ExternalRef;
-  /** The full text of the external reference, preserved for diagnostics. */
-  value: string;
-}
-
 // ============================================================================
 // Discriminated Union
 // ============================================================================
@@ -233,5 +221,4 @@ export type Token =
   | RowRangeToken
   | StructuredRefToken
   | AtSignToken
-  | IntersectToken
-  | ExternalRefToken;
+  | IntersectToken;

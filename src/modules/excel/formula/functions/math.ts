@@ -2,133 +2,104 @@
  * Math / Aggregate Functions — Native RuntimeValue implementation.
  */
 
-import type {
-  RuntimeValue,
-  NumberValue,
-  ErrorValue,
-  ScalarValue,
-  ArrayValue
-} from "../runtime/values";
+import type { RuntimeValue, NumberValue, ArrayValue, ErrorValue } from "../runtime/values";
 import {
   RVKind,
   ERRORS,
   rvNumber,
   rvString,
   rvArray,
-  toNumberRV,
   toStringRV,
   topLeft,
   isError,
   isArray
 } from "../runtime/values";
+import { argToNumber, flattenAll, flattenNumbers, firstError } from "./_shared";
 
 // ============================================================================
 // Native Function Type
 // ============================================================================
 
-export type NativeFunction = (args: RuntimeValue[]) => RuntimeValue;
+export type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 
 // ============================================================================
 // Internal Helpers
 // ============================================================================
 
 /**
- * Flatten all arguments into a list of numbers (or errors).
+ * Apply a rounding operation using an integer factor, avoiding the
+ * floating-point drift that `Math.pow(10, d) / Math.pow(10, d)` introduces
+ * when `d` is negative (e.g. `1/0.1` is not exactly `10`).
  *
- * For Array arguments: only numeric cells are included — booleans, strings,
- * and blanks are skipped (Excel behavior for range args).
- * For direct scalar arguments: booleans and numeric strings are coerced via toNumberRV.
+ * For `digits >= 0` we scale up by `10^digits`, round, and scale back down.
+ * For `digits < 0` we divide by `10^|digits|`, round, and multiply back up.
+ * In both branches the scaling factor is an integer, so only one rounding
+ * error is introduced.
  */
-function flattenNumbers(args: RuntimeValue[]): (NumberValue | ErrorValue)[] {
-  const result: (NumberValue | ErrorValue)[] = [];
-  for (const arg of args) {
-    if (arg.kind === RVKind.Array) {
-      for (const row of arg.rows) {
-        for (const cell of row) {
-          if (cell.kind === RVKind.Error) {
-            result.push(cell);
-          } else if (cell.kind === RVKind.Number) {
-            result.push(cell);
-          }
-          // Skip booleans, strings, blanks in array context (Excel behavior)
-        }
-      }
-    } else {
-      // Direct scalar argument — coerce
-      if (arg.kind === RVKind.Error) {
-        result.push(arg);
-      } else if (arg.kind !== RVKind.Blank && arg.kind !== RVKind.MissingArg) {
-        const n = toNumberRV(arg);
-        result.push(n);
-      }
-      // Skip blanks for scalar args
-    }
+function applyRounding(value: number, digits: number, round: (n: number) => number): number {
+  const d = Math.trunc(digits);
+  // Clamp digits to Excel's documented range [-127, 127]. Without this
+  // guard, extreme inputs blow `Math.pow(10, d)` up to Infinity; the
+  // resulting `round(value * Infinity) / Infinity` is NaN, which then
+  // leaks through the whole rounding family (ROUND / ROUNDDOWN /
+  // ROUNDUP / TRUNC / MROUND) and persists to the worksheet. Return
+  // `value` itself for well-behaved "nothing to do" edge cases (d very
+  // large is effectively "no rounding"; d very negative rounds to 0).
+  if (!Number.isFinite(value)) {
+    return value;
   }
-  return result;
+  if (d >= 308) {
+    return value;
+  }
+  if (d <= -308) {
+    return round(0);
+  }
+  if (d >= 0) {
+    const factor = Math.pow(10, d);
+    if (!Number.isFinite(factor) || factor === 0) {
+      return value;
+    }
+    return round(value * factor) / factor;
+  }
+  const factor = Math.pow(10, -d);
+  if (!Number.isFinite(factor) || factor === 0) {
+    return value;
+  }
+  return round(value / factor) * factor;
 }
 
 /**
- * Flatten all arguments into a list of scalar values (for COUNTA, COUNTBLANK, etc.).
+ * Round half away from zero, matching Excel's ROUND semantics.
+ *
+ * JavaScript's `Math.round` rounds half toward +∞ (so `Math.round(-0.5)`
+ * returns `-0` instead of `-1`), whereas Excel rounds the magnitude and
+ * preserves the sign: `ROUND(-0.5, 0) = -1`. This helper implements the
+ * Excel rule by operating on the absolute value and restoring the sign.
  */
-function flattenAll(args: RuntimeValue[]): ScalarValue[] {
-  const result: ScalarValue[] = [];
-  for (const arg of args) {
-    if (arg.kind === RVKind.Array) {
-      for (const row of arg.rows) {
-        for (const cell of row) {
-          result.push(cell);
-        }
-      }
-    } else {
-      result.push(topLeft(arg));
-    }
-  }
-  return result;
-}
-
-/**
- * Find the first error in a list of NumberValue | ErrorValue.
- */
-function firstError(values: (NumberValue | ErrorValue)[]): ErrorValue | null {
-  for (const v of values) {
-    if (v.kind === RVKind.Error) {
-      return v;
-    }
-  }
-  return null;
-}
-
-/**
- * Coerce a single argument to a number. For scalars, applies topLeft then toNumberRV.
- */
-function argToNumber(arg: RuntimeValue): NumberValue | ErrorValue {
-  const s = topLeft(arg);
-  if (s.kind === RVKind.Error) {
-    return s;
-  }
-  return toNumberRV(s);
+function roundHalfAwayFromZero(n: number): number {
+  return n < 0 ? -Math.round(-n) : Math.round(n);
 }
 
 // ============================================================================
 // Trigonometric Functions
 // ============================================================================
 
-export const fnSIN: NativeFunction = args => {
+export const fnSIN: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.sin(n.value));
 };
 
-export const fnCOS: NativeFunction = args => {
+export const fnCOS: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.cos(n.value));
 };
 
-export const fnTAN: NativeFunction = args => {
+export const fnTAN: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.tan(n.value));
 };
 
-export const fnASIN: NativeFunction = args => {
+export const fnASIN: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -139,7 +110,7 @@ export const fnASIN: NativeFunction = args => {
   return rvNumber(Math.asin(n.value));
 };
 
-export const fnACOS: NativeFunction = args => {
+export const fnACOS: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -150,12 +121,12 @@ export const fnACOS: NativeFunction = args => {
   return rvNumber(Math.acos(n.value));
 };
 
-export const fnATAN: NativeFunction = args => {
+export const fnATAN: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.atan(n.value));
 };
 
-export const fnATAN2: NativeFunction = args => {
+export const fnATAN2: NativeFn = args => {
   const x = argToNumber(args[0]);
   if (isError(x)) {
     return x;
@@ -170,27 +141,37 @@ export const fnATAN2: NativeFunction = args => {
   return rvNumber(Math.atan2(y.value, x.value));
 };
 
-export const fnSINH: NativeFunction = args => {
+export const fnSINH: NativeFn = args => {
   const n = argToNumber(args[0]);
-  return isError(n) ? n : rvNumber(Math.sinh(n.value));
+  if (isError(n)) {
+    return n;
+  }
+  // sinh(x) overflows double for |x| > ~710. Excel returns #NUM! rather
+  // than a silent Infinity (which would poison downstream arithmetic).
+  const r = Math.sinh(n.value);
+  return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
 };
 
-export const fnCOSH: NativeFunction = args => {
+export const fnCOSH: NativeFn = args => {
   const n = argToNumber(args[0]);
-  return isError(n) ? n : rvNumber(Math.cosh(n.value));
+  if (isError(n)) {
+    return n;
+  }
+  const r = Math.cosh(n.value);
+  return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
 };
 
-export const fnTANH: NativeFunction = args => {
+export const fnTANH: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.tanh(n.value));
 };
 
-export const fnASINH: NativeFunction = args => {
+export const fnASINH: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.asinh(n.value));
 };
 
-export const fnACOSH: NativeFunction = args => {
+export const fnACOSH: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -201,7 +182,7 @@ export const fnACOSH: NativeFunction = args => {
   return rvNumber(Math.acosh(n.value));
 };
 
-export const fnATANH: NativeFunction = args => {
+export const fnATANH: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -212,11 +193,108 @@ export const fnATANH: NativeFunction = args => {
   return rvNumber(Math.atanh(n.value));
 };
 
+/**
+ * Secondary trigonometric family (SEC / CSC / COT and hyperbolic /
+ * inverse variants). None of these exist on the JavaScript Math object
+ * so we derive them from the standard sin / cos / tan primitives, with
+ * explicit guards at the discontinuities (π/2 for SEC, multiples of π
+ * for CSC / COT, zero for the H variants).
+ */
+export const fnSEC: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  const c = Math.cos(n.value);
+  return c === 0 ? ERRORS.DIV0 : rvNumber(1 / c);
+};
+
+export const fnCSC: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  const s = Math.sin(n.value);
+  return s === 0 ? ERRORS.DIV0 : rvNumber(1 / s);
+};
+
+export const fnCOT: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  const s = Math.sin(n.value);
+  if (s === 0) {
+    return ERRORS.DIV0;
+  }
+  return rvNumber(Math.cos(n.value) / s);
+};
+
+export const fnSECH: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  // sech(x) = 1/cosh(x); cosh is never zero for real x, but it does
+  // overflow to Infinity for |x| > ~710 — return 0 (the mathematical
+  // limit) rather than dividing and producing NaN.
+  const c = Math.cosh(n.value);
+  return Number.isFinite(c) ? rvNumber(1 / c) : rvNumber(0);
+};
+
+export const fnCSCH: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  if (n.value === 0) {
+    return ERRORS.DIV0;
+  }
+  const s = Math.sinh(n.value);
+  if (!Number.isFinite(s)) {
+    return rvNumber(0);
+  }
+  return rvNumber(1 / s);
+};
+
+export const fnCOTH: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  if (n.value === 0) {
+    return ERRORS.DIV0;
+  }
+  return rvNumber(1 / Math.tanh(n.value));
+};
+
+export const fnACOT: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  // Excel's ACOT returns values in (0, π), not (-π/2, π/2) like
+  // Math.atan. Map: ACOT(x) = π/2 − atan(x).
+  return rvNumber(Math.PI / 2 - Math.atan(n.value));
+};
+
+export const fnACOTH: NativeFn = args => {
+  const n = argToNumber(args[0]);
+  if (isError(n)) {
+    return n;
+  }
+  // Defined only for |x| > 1.
+  if (n.value >= -1 && n.value <= 1) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(0.5 * Math.log((n.value + 1) / (n.value - 1)));
+};
+
 // ============================================================================
 // Math / Aggregate Functions
 // ============================================================================
 
-export const fnSUM: NativeFunction = args => {
+export const fnSUM: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -226,10 +304,13 @@ export const fnSUM: NativeFunction = args => {
   for (const n of nums) {
     sum += (n as NumberValue).value;
   }
-  return rvNumber(sum);
+  // Fail fast on overflow to Infinity; otherwise the result leaks into
+  // any formula that aggregates it (AVERAGE, STDEV, etc.) and those
+  // downstream callers would then fan #NUM! out across the graph.
+  return Number.isFinite(sum) ? rvNumber(sum) : ERRORS.NUM;
 };
 
-export const fnAVERAGE: NativeFunction = args => {
+export const fnAVERAGE: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -242,10 +323,11 @@ export const fnAVERAGE: NativeFunction = args => {
   for (const n of nums) {
     sum += (n as NumberValue).value;
   }
-  return rvNumber(sum / nums.length);
+  const avg = sum / nums.length;
+  return Number.isFinite(avg) ? rvNumber(avg) : ERRORS.NUM;
 };
 
-export const fnMIN: NativeFunction = args => {
+export const fnMIN: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -263,7 +345,7 @@ export const fnMIN: NativeFunction = args => {
   return rvNumber(min);
 };
 
-export const fnMAX: NativeFunction = args => {
+export const fnMAX: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -281,7 +363,7 @@ export const fnMAX: NativeFunction = args => {
   return rvNumber(max);
 };
 
-export const fnCOUNT: NativeFunction = args => {
+export const fnCOUNT: NativeFn = args => {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
@@ -292,7 +374,7 @@ export const fnCOUNT: NativeFunction = args => {
   return rvNumber(count);
 };
 
-export const fnCOUNTA: NativeFunction = args => {
+export const fnCOUNTA: NativeFn = args => {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
@@ -304,7 +386,7 @@ export const fnCOUNTA: NativeFunction = args => {
   return rvNumber(count);
 };
 
-export const fnCOUNTBLANK: NativeFunction = args => {
+export const fnCOUNTBLANK: NativeFn = args => {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
@@ -315,7 +397,7 @@ export const fnCOUNTBLANK: NativeFunction = args => {
   return rvNumber(count);
 };
 
-export const fnPRODUCT: NativeFunction = args => {
+export const fnPRODUCT: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -328,14 +410,19 @@ export const fnPRODUCT: NativeFunction = args => {
   for (const n of nums) {
     product *= (n as NumberValue).value;
   }
-  return rvNumber(product);
+  // Excel surfaces an overflow as #NUM! rather than letting Infinity
+  // propagate into subsequent arithmetic.
+  return isFinite(product) ? rvNumber(product) : ERRORS.NUM;
 };
 
-export const fnSUMPRODUCT: NativeFunction = args => {
+export const fnSUMPRODUCT: NativeFn = args => {
   if (args.length === 0) {
     return ERRORS.VALUE;
   }
-  // Promote scalar args to 1x1 arrays (Excel behavior)
+  // Promote scalar args to 1x1 arrays. Excel allows a scalar (or 1x1 array)
+  // to broadcast to the surrounding array's shape, e.g. SUMPRODUCT(1, A1:A10)
+  // is equivalent to SUMPRODUCT(A1:A10). All non-broadcast arrays must share
+  // the same height/width — only 1x1 may be broadcast.
   const arrays: ArrayValue[] = [];
   for (const a of args) {
     if (isArray(a)) {
@@ -344,12 +431,19 @@ export const fnSUMPRODUCT: NativeFunction = args => {
       arrays.push(rvArray([[topLeft(a)]]));
     }
   }
-  const rows = arrays[0].height;
-  const cols = arrays[0].width;
-  // Verify all same dimensions
+  // Find the target dimensions: the max height/width across all non-1x1 arrays.
+  // 1x1 arrays are eligible to broadcast to whatever size is chosen.
+  let rows = 1;
+  let cols = 1;
   for (const arr of arrays) {
-    if (arr.height !== rows || arr.width !== cols) {
-      return ERRORS.VALUE;
+    if (arr.height !== 1 || arr.width !== 1) {
+      if (rows === 1 && cols === 1) {
+        rows = arr.height;
+        cols = arr.width;
+      } else if (arr.height !== rows || arr.width !== cols) {
+        // Two different non-1x1 shapes — incompatible.
+        return ERRORS.VALUE;
+      }
     }
   }
   let sum = 0;
@@ -357,7 +451,8 @@ export const fnSUMPRODUCT: NativeFunction = args => {
     for (let c = 0; c < cols; c++) {
       let product = 1;
       for (const arr of arrays) {
-        const val = arr.rows[r][c];
+        // Broadcast 1x1 arrays to the target cell position.
+        const val = arr.height === 1 && arr.width === 1 ? arr.rows[0][0] : arr.rows[r][c];
         if (val.kind === RVKind.Error) {
           return val;
         }
@@ -374,6 +469,9 @@ export const fnSUMPRODUCT: NativeFunction = args => {
       sum += product;
     }
   }
+  if (!Number.isFinite(sum)) {
+    return ERRORS.NUM;
+  }
   return rvNumber(sum);
 };
 
@@ -381,12 +479,12 @@ export const fnSUMPRODUCT: NativeFunction = args => {
 // Math Functions
 // ============================================================================
 
-export const fnABS: NativeFunction = args => {
+export const fnABS: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.abs(n.value));
 };
 
-export const fnCEILING: NativeFunction = args => {
+export const fnCEILING: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -399,10 +497,16 @@ export const fnCEILING: NativeFunction = args => {
   if (sig === 0) {
     return rvNumber(0);
   }
+  // CEILING (the non-MATH variant) requires number and significance to share
+  // a sign. `CEILING(2, -1)` in Excel is #NUM!; only `CEILING.MATH` tolerates
+  // a negative significance with a positive number.
+  if (num.value !== 0 && Math.sign(num.value) !== Math.sign(sig)) {
+    return ERRORS.NUM;
+  }
   return rvNumber(Math.ceil(num.value / sig) * sig);
 };
 
-export const fnFLOOR: NativeFunction = args => {
+export const fnFLOOR: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -415,15 +519,18 @@ export const fnFLOOR: NativeFunction = args => {
   if (sig === 0) {
     return ERRORS.DIV0;
   }
+  if (num.value !== 0 && Math.sign(num.value) !== Math.sign(sig)) {
+    return ERRORS.NUM;
+  }
   return rvNumber(Math.floor(num.value / sig) * sig);
 };
 
-export const fnINT: NativeFunction = args => {
+export const fnINT: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.floor(n.value));
 };
 
-export const fnMOD: NativeFunction = args => {
+export const fnMOD: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -438,7 +545,7 @@ export const fnMOD: NativeFunction = args => {
   return rvNumber(num.value - div.value * Math.floor(num.value / div.value));
 };
 
-export const fnPOWER: NativeFunction = args => {
+export const fnPOWER: NativeFn = args => {
   const base = argToNumber(args[0]);
   if (isError(base)) {
     return base;
@@ -447,11 +554,26 @@ export const fnPOWER: NativeFunction = args => {
   if (isError(exp)) {
     return exp;
   }
+  // Distinguish the two degenerate-base cases Excel handles separately:
+  //   POWER(0, 0)       → 1 (by convention, matches Excel)
+  //   POWER(0, <0)      → #DIV/0!
+  //   POWER(<0, non-int) → #NUM! (complex result; Math.pow returns NaN)
+  if (base.value === 0) {
+    if (exp.value < 0) {
+      return ERRORS.DIV0;
+    }
+    if (exp.value === 0) {
+      return rvNumber(1);
+    }
+  }
   const result = Math.pow(base.value, exp.value);
+  if (Number.isNaN(result)) {
+    return ERRORS.NUM;
+  }
   return !isFinite(result) ? ERRORS.NUM : rvNumber(result);
 };
 
-export const fnROUND: NativeFunction = args => {
+export const fnROUND: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -460,11 +582,10 @@ export const fnROUND: NativeFunction = args => {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  const factor = Math.pow(10, digitsRV.value);
-  return rvNumber(Math.round(num.value * factor) / factor);
+  return rvNumber(applyRounding(num.value, digitsRV.value, roundHalfAwayFromZero));
 };
 
-export const fnROUNDDOWN: NativeFunction = args => {
+export const fnROUNDDOWN: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -473,11 +594,10 @@ export const fnROUNDDOWN: NativeFunction = args => {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  const factor = Math.pow(10, digitsRV.value);
-  return rvNumber(Math.trunc(num.value * factor) / factor);
+  return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
 };
 
-export const fnROUNDUP: NativeFunction = args => {
+export const fnROUNDUP: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -486,14 +606,15 @@ export const fnROUNDUP: NativeFunction = args => {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  const factor = Math.pow(10, digitsRV.value);
-  const truncated = Math.trunc(num.value * factor);
-  return rvNumber(
-    (num.value * factor === truncated ? truncated : truncated + (num.value >= 0 ? 1 : -1)) / factor
-  );
+  // ROUNDUP rounds away from zero for the fractional part at the requested
+  // precision. We emulate this by ceiling the scaled absolute value and
+  // restoring the sign.
+  const sign = num.value >= 0 ? 1 : -1;
+  const rounded = applyRounding(Math.abs(num.value), digitsRV.value, Math.ceil);
+  return rvNumber(sign * rounded);
 };
 
-export const fnSQRT: NativeFunction = args => {
+export const fnSQRT: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -504,7 +625,7 @@ export const fnSQRT: NativeFunction = args => {
   return rvNumber(Math.sqrt(n.value));
 };
 
-export const fnLN: NativeFunction = args => {
+export const fnLN: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -515,7 +636,7 @@ export const fnLN: NativeFunction = args => {
   return rvNumber(Math.log(n.value));
 };
 
-export const fnLOG: NativeFunction = args => {
+export const fnLOG: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -533,7 +654,7 @@ export const fnLOG: NativeFunction = args => {
   return rvNumber(Math.log(n.value) / Math.log(baseRV.value));
 };
 
-export const fnLOG10: NativeFunction = args => {
+export const fnLOG10: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -544,16 +665,22 @@ export const fnLOG10: NativeFunction = args => {
   return rvNumber(Math.log10(n.value));
 };
 
-export const fnEXP: NativeFunction = args => {
+export const fnEXP: NativeFn = args => {
   const n = argToNumber(args[0]);
-  return isError(n) ? n : rvNumber(Math.exp(n.value));
+  if (isError(n)) {
+    return n;
+  }
+  // EXP(~710) overflows double to Infinity. Excel returns #NUM! in that
+  // regime rather than letting the non-finite result propagate.
+  const r = Math.exp(n.value);
+  return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
 };
 
-export const fnPI: NativeFunction = () => rvNumber(Math.PI);
+export const fnPI: NativeFn = () => rvNumber(Math.PI);
 
-export const fnRAND: NativeFunction = () => rvNumber(Math.random());
+export const fnRAND: NativeFn = () => rvNumber(Math.random());
 
-export const fnRANDBETWEEN: NativeFunction = args => {
+export const fnRANDBETWEEN: NativeFn = args => {
   const bottom = argToNumber(args[0]);
   if (isError(bottom)) {
     return bottom;
@@ -564,19 +691,31 @@ export const fnRANDBETWEEN: NativeFunction = args => {
   }
   const lo = Math.ceil(bottom.value);
   const hi = Math.floor(top.value);
+  // Excel returns #NUM! when bottom > top; otherwise the formula below would
+  // produce a garbage integer from a negative range.
+  if (lo > hi) {
+    return ERRORS.NUM;
+  }
   return rvNumber(Math.floor(Math.random() * (hi - lo + 1)) + lo);
 };
 
-export const fnSIGN: NativeFunction = args => {
+export const fnSIGN: NativeFn = args => {
   const n = argToNumber(args[0]);
-  return isError(n) ? n : rvNumber(Math.sign(n.value));
+  if (isError(n)) {
+    return n;
+  }
+  // `Math.sign(-0)` returns `-0` (preserving IEEE-754 sign bit). Excel's
+  // SIGN normalises zero to +0 (since the documented result for a zero
+  // input is 0, not distinguishing signed zero). The `|| 0` collapses
+  // both ±0 into `+0` while leaving ±1 untouched.
+  return rvNumber(Math.sign(n.value) || 0);
 };
 
 // ============================================================================
 // Additional Math Functions
 // ============================================================================
 
-export const fnTRUNC: NativeFunction = args => {
+export const fnTRUNC: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -585,11 +724,10 @@ export const fnTRUNC: NativeFunction = args => {
   if (isError(digitsRV)) {
     return digitsRV;
   }
-  const factor = Math.pow(10, digitsRV.value);
-  return rvNumber(Math.trunc(num.value * factor) / factor);
+  return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
 };
 
-export const fnSUMSQ: NativeFunction = args => {
+export const fnSUMSQ: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -599,10 +737,10 @@ export const fnSUMSQ: NativeFunction = args => {
   for (const n of nums) {
     sum += (n as NumberValue).value ** 2;
   }
-  return rvNumber(sum);
+  return isFinite(sum) ? rvNumber(sum) : ERRORS.NUM;
 };
 
-export const fnGCD: NativeFunction = args => {
+export const fnGCD: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -611,9 +749,26 @@ export const fnGCD: NativeFunction = args => {
   if (nums.length === 0) {
     return rvNumber(0);
   }
-  let result = Math.abs(Math.floor((nums[0] as NumberValue).value));
+  // Excel rejects any negative argument with #NUM!; truncate toward zero
+  // for non-integer positives (previous `Math.floor(-5.5) = -6` then
+  // `Math.abs` produced 6 instead of #NUM!).
+  const coerce = (v: number): number | ErrorValue => {
+    if (v < 0) {
+      return ERRORS.NUM;
+    }
+    return Math.trunc(v);
+  };
+  const first = coerce((nums[0] as NumberValue).value);
+  if (typeof first !== "number") {
+    return first;
+  }
+  let result = first;
   for (let i = 1; i < nums.length; i++) {
-    let b = Math.abs(Math.floor((nums[i] as NumberValue).value));
+    const bi = coerce((nums[i] as NumberValue).value);
+    if (typeof bi !== "number") {
+      return bi;
+    }
+    let b = bi;
     while (b) {
       const t = b;
       b = result % b;
@@ -623,7 +778,7 @@ export const fnGCD: NativeFunction = args => {
   return rvNumber(result);
 };
 
-export const fnLCM: NativeFunction = args => {
+export const fnLCM: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -632,9 +787,23 @@ export const fnLCM: NativeFunction = args => {
   if (nums.length === 0) {
     return rvNumber(0);
   }
-  let result = Math.abs(Math.floor((nums[0] as NumberValue).value));
+  const coerce = (v: number): number | ErrorValue => {
+    if (v < 0) {
+      return ERRORS.NUM;
+    }
+    return Math.trunc(v);
+  };
+  const first = coerce((nums[0] as NumberValue).value);
+  if (typeof first !== "number") {
+    return first;
+  }
+  let result = first;
   for (let i = 1; i < nums.length; i++) {
-    const b = Math.abs(Math.floor((nums[i] as NumberValue).value));
+    const bi = coerce((nums[i] as NumberValue).value);
+    if (typeof bi !== "number") {
+      return bi;
+    }
+    const b = bi;
     if (result === 0 && b === 0) {
       result = 0;
     } else {
@@ -655,7 +824,7 @@ export const fnLCM: NativeFunction = args => {
 // More Math Functions
 // ============================================================================
 
-export const fnEVEN: NativeFunction = args => {
+export const fnEVEN: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -666,7 +835,7 @@ export const fnEVEN: NativeFunction = args => {
   return rvNumber(sign * (ceil % 2 === 0 ? ceil : ceil + 1));
 };
 
-export const fnODD: NativeFunction = args => {
+export const fnODD: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -680,7 +849,7 @@ export const fnODD: NativeFunction = args => {
   return rvNumber(sign * (ceil % 2 === 1 ? ceil : ceil + 1));
 };
 
-export const fnMROUND: NativeFunction = args => {
+export const fnMROUND: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -695,10 +864,10 @@ export const fnMROUND: NativeFunction = args => {
   if ((num.value > 0 && multiple.value < 0) || (num.value < 0 && multiple.value > 0)) {
     return ERRORS.NUM;
   }
-  return rvNumber(Math.round(num.value / multiple.value) * multiple.value);
+  return rvNumber(roundHalfAwayFromZero(num.value / multiple.value) * multiple.value);
 };
 
-export const fnQUOTIENT: NativeFunction = args => {
+export const fnQUOTIENT: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -713,7 +882,7 @@ export const fnQUOTIENT: NativeFunction = args => {
   return rvNumber(Math.trunc(num.value / den.value));
 };
 
-export const fnBASE: NativeFunction = args => {
+export const fnBASE: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -733,7 +902,7 @@ export const fnBASE: NativeFunction = args => {
   return rvString(minLenRV.value > 0 ? result.padStart(minLenRV.value, "0") : result);
 };
 
-export const fnDECIMAL: NativeFunction = args => {
+export const fnDECIMAL: NativeFn = args => {
   const e = topLeft(args[0]);
   if (e.kind === RVKind.Error) {
     return e;
@@ -746,14 +915,35 @@ export const fnDECIMAL: NativeFunction = args => {
   if (radix.value < 2 || radix.value > 36) {
     return ERRORS.NUM;
   }
-  const result = parseInt(text, Math.floor(radix.value));
+  // `parseInt("1G", 16)` returns 1 because JavaScript silently stops at
+  // the first invalid digit. Excel's DECIMAL requires every character in
+  // the input to be a valid digit for the given radix, so we validate
+  // strictly before delegating.
+  const base = Math.floor(radix.value);
+  const trimmed = text.trim();
+  if (trimmed === "") {
+    return ERRORS.NUM;
+  }
+  // Digit alphabet up to base 36: 0-9, A-Z (case-insensitive).
+  const match = /^[+-]?([0-9A-Za-z]+)$/.exec(trimmed);
+  if (!match) {
+    return ERRORS.NUM;
+  }
+  const digits = match[1].toUpperCase();
+  for (const ch of digits) {
+    const d = ch >= "0" && ch <= "9" ? ch.charCodeAt(0) - 48 : ch.charCodeAt(0) - 55;
+    if (d < 0 || d >= base) {
+      return ERRORS.NUM;
+    }
+  }
+  const result = parseInt(trimmed, base);
   if (isNaN(result)) {
     return ERRORS.NUM;
   }
   return rvNumber(result);
 };
 
-export const fnROMAN: NativeFunction = args => {
+export const fnROMAN: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -765,19 +955,80 @@ export const fnROMAN: NativeFunction = args => {
   if (n === 0) {
     return rvString("");
   }
+  // The optional `form` argument (0=classic through 4=simplified) controls
+  // how far Excel will collapse repeated characters into subtractive pairs.
+  // Higher forms introduce additional patterns beyond the classic IV/IX/
+  // XL/XC/CD/CM pairs — e.g. form 1 allows LM for 950, form 4 uses the
+  // maximally short forms. A value of TRUE (1) / FALSE (0) maps to form 0
+  // / 4 the way Excel does.
+  let form = 0;
+  if (args.length > 1 && args[1].kind !== RVKind.Blank) {
+    const f = argToNumber(args[1]);
+    if (isError(f)) {
+      return f;
+    }
+    if (f.value === 1 && (f as NumberValue).value === 1) {
+      // Boolean inputs flow through argToNumber as 0/1 already.
+    }
+    form = Math.floor(f.value);
+    if (form < 0 || form > 4) {
+      return ERRORS.VALUE;
+    }
+  }
+  // Classic table (form 0) — subtractive pairs IV, IX, XL, XC, CD, CM.
   const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
   const syms = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"];
+  // Forms 1-4 progressively introduce aggressive subtractive pairs
+  // (LM=950, VC=95, IC=99, etc.). Each extra must only trigger at its
+  // `minForm` or higher — and must NOT duplicate a value the classic
+  // table already covers, or we'd emit the same subtractive pair twice
+  // per occurrence (e.g. 1999 would become "CMCMCXCIX" instead of
+  // "MCMXCIX").
+  const extraByForm: { value: number; sym: string; minForm: number }[] = [
+    { value: 995, sym: "VM", minForm: 4 },
+    { value: 990, sym: "XM", minForm: 3 },
+    { value: 950, sym: "LM", minForm: 1 },
+    { value: 495, sym: "VD", minForm: 4 },
+    { value: 490, sym: "XD", minForm: 3 },
+    { value: 450, sym: "LD", minForm: 1 },
+    { value: 99, sym: "IC", minForm: 2 },
+    { value: 95, sym: "VC", minForm: 1 },
+    { value: 49, sym: "IL", minForm: 2 },
+    { value: 45, sym: "VL", minForm: 1 }
+  ];
   let result = "";
-  for (let i = 0; i < vals.length; i++) {
-    while (n >= vals[i]) {
-      result += syms[i];
-      n -= vals[i];
+  // Merge: walk from largest remainder, trying any applicable extra then
+  // the classic table entry.
+  while (n > 0) {
+    let matched = false;
+    for (const ex of extraByForm) {
+      if (form >= ex.minForm && n >= ex.value) {
+        result += ex.sym;
+        n -= ex.value;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) {
+      continue;
+    }
+    for (let i = 0; i < vals.length; i++) {
+      if (n >= vals[i]) {
+        result += syms[i];
+        n -= vals[i];
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      // Safety net — should not happen since the classic table covers 1.
+      break;
     }
   }
   return rvString(result);
 };
 
-export const fnARABIC: NativeFunction = args => {
+export const fnARABIC: NativeFn = args => {
   const s = topLeft(args[0]);
   if (s.kind === RVKind.Error) {
     return s;
@@ -803,30 +1054,37 @@ export const fnARABIC: NativeFunction = args => {
   return rvNumber(result);
 };
 
-export const fnDEGREES: NativeFunction = args => {
+export const fnDEGREES: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber((n.value * 180) / Math.PI);
 };
 
-export const fnRADIANS: NativeFunction = args => {
+export const fnRADIANS: NativeFn = args => {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber((n.value * Math.PI) / 180);
 };
 
-export const fnSUMX2MY2: NativeFunction = args => {
-  const a0 = args[0],
-    a1 = args[1];
+/**
+ * Shared driver for SUMX2MY2 / SUMX2PY2 / SUMXMY2. Walks two arrays in
+ * lock-step and reduces `combine(x, y)` across matching numeric cells.
+ * Non-numeric cells are skipped (Excel behaviour) and errors propagate.
+ */
+function sumPairedArrays(
+  args: RuntimeValue[],
+  combine: (x: number, y: number) => number
+): RuntimeValue {
+  const a0 = args[0];
+  const a1 = args[1];
   if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
+  const h = Math.min(a0.height, a1.height);
+  const w = Math.min(a0.width, a1.width);
   let sum = 0;
-  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
-    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
-      const x = a0.rows[r]?.[c];
-      const y = a1.rows[r]?.[c];
-      if (!x || !y) {
-        continue;
-      }
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const x = a0.rows[r][c];
+      const y = a1.rows[r][c];
       if (x.kind === RVKind.Error) {
         return x;
       }
@@ -836,78 +1094,30 @@ export const fnSUMX2MY2: NativeFunction = args => {
       if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
         continue;
       }
-      sum += x.value * x.value - y.value * y.value;
+      sum += combine(x.value, y.value);
     }
   }
   return rvNumber(sum);
-};
+}
 
-export const fnSUMX2PY2: NativeFunction = args => {
-  const a0 = args[0],
-    a1 = args[1];
-  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
-    return ERRORS.VALUE;
-  }
-  let sum = 0;
-  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
-    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
-      const x = a0.rows[r]?.[c];
-      const y = a1.rows[r]?.[c];
-      if (!x || !y) {
-        continue;
-      }
-      if (x.kind === RVKind.Error) {
-        return x;
-      }
-      if (y.kind === RVKind.Error) {
-        return y;
-      }
-      if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
-        continue;
-      }
-      sum += x.value * x.value + y.value * y.value;
-    }
-  }
-  return rvNumber(sum);
-};
+export const fnSUMX2MY2: NativeFn = args => sumPairedArrays(args, (x, y) => x * x - y * y);
 
-export const fnSUMXMY2: NativeFunction = args => {
-  const a0 = args[0],
-    a1 = args[1];
-  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
-    return ERRORS.VALUE;
-  }
-  let sum = 0;
-  for (let r = 0; r < Math.min(a0.height, a1.height); r++) {
-    for (let c = 0; c < Math.min(a0.width, a1.width); c++) {
-      const x = a0.rows[r]?.[c];
-      const y = a1.rows[r]?.[c];
-      if (!x || !y) {
-        continue;
-      }
-      if (x.kind === RVKind.Error) {
-        return x;
-      }
-      if (y.kind === RVKind.Error) {
-        return y;
-      }
-      if (x.kind !== RVKind.Number || y.kind !== RVKind.Number) {
-        continue;
-      }
-      sum += (x.value - y.value) ** 2;
-    }
-  }
-  return rvNumber(sum);
-};
+export const fnSUMX2PY2: NativeFn = args => sumPairedArrays(args, (x, y) => x * x + y * y);
 
-export const fnMULTINOMIAL: NativeFunction = args => {
+export const fnSUMXMY2: NativeFn = args => sumPairedArrays(args, (x, y) => (x - y) ** 2);
+
+export const fnMULTINOMIAL: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
     return err;
   }
+  // Work in log space so the numerator (sum! ≈ up to ~1e307 around sum = 170)
+  // doesn't overflow before we divide. Summing logs avoids the NaN case
+  // `Infinity / Infinity` that the direct product formulation would hit
+  // for large inputs.
   let sum = 0;
-  let denom = 1;
+  let lnDenom = 0;
   for (const n of nums) {
     const ni = Math.floor((n as NumberValue).value);
     if (ni < 0) {
@@ -915,17 +1125,23 @@ export const fnMULTINOMIAL: NativeFunction = args => {
     }
     sum += ni;
     for (let i = 2; i <= ni; i++) {
-      denom *= i;
+      lnDenom += Math.log(i);
     }
   }
-  let numer = 1;
+  let lnNumer = 0;
   for (let i = 2; i <= sum; i++) {
-    numer *= i;
+    lnNumer += Math.log(i);
   }
-  return rvNumber(numer / denom);
+  const result = Math.exp(lnNumer - lnDenom);
+  if (!isFinite(result)) {
+    return ERRORS.NUM;
+  }
+  // Round to the nearest integer — the log-exp round-trip introduces sub-ulp
+  // noise that would otherwise leave us with things like `20.0000000001`.
+  return rvNumber(Math.round(result));
 };
 
-export const fnFACT: NativeFunction = args => {
+export const fnFACT: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -944,7 +1160,7 @@ export const fnFACT: NativeFunction = args => {
   return rvNumber(result);
 };
 
-export const fnFACTDOUBLE: NativeFunction = args => {
+export const fnFACTDOUBLE: NativeFn = args => {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -959,11 +1175,14 @@ export const fnFACTDOUBLE: NativeFunction = args => {
   let result = 1;
   for (let i = num; i > 0; i -= 2) {
     result *= i;
+    if (!isFinite(result)) {
+      return ERRORS.NUM;
+    }
   }
   return rvNumber(result);
 };
 
-export const fnCOMBIN: NativeFunction = args => {
+export const fnCOMBIN: NativeFn = args => {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;
@@ -977,14 +1196,27 @@ export const fnCOMBIN: NativeFunction = args => {
   if (ni < 0 || ki < 0 || ki > ni) {
     return ERRORS.NUM;
   }
+  // Use the `C(n, k) = C(n, k-1) * (n-k+1)/k` recurrence and pick the
+  // smaller of k / (n-k) so the loop runs at most n/2 iterations. The
+  // interleaved divide keeps the running value bounded and preserves
+  // near-full double precision until the final product overflows
+  // magnitude ~1e308 (at which point we surface #NUM!).
+  const kEff = Math.min(ki, ni - ki);
   let result = 1;
-  for (let i = 0; i < ki; i++) {
+  for (let i = 0; i < kEff; i++) {
     result = (result * (ni - i)) / (i + 1);
+    if (!isFinite(result)) {
+      return ERRORS.NUM;
+    }
   }
-  return rvNumber(Math.round(result));
+  // Excel returns an integer for COMBIN when the value fits in a double
+  // exactly (≤ 2^53); beyond that (e.g. COMBIN(100, 50) ≈ 1e29) the
+  // result is fundamentally approximate, so rounding only makes sense
+  // below 2^53.
+  return rvNumber(result < 9.007199254740992e15 ? Math.round(result) : result);
 };
 
-export const fnCOMBINA: NativeFunction = args => {
+export const fnCOMBINA: NativeFn = args => {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;
@@ -993,10 +1225,15 @@ export const fnCOMBINA: NativeFunction = args => {
   if (isError(kRV)) {
     return kRV;
   }
+  // Special case: Excel's COMBINA(0, 0) is 1 even though the delegated
+  // `COMBIN(-1, 0)` would flag #NUM! under our generic validation.
+  if (nRV.value === 0 && kRV.value === 0) {
+    return rvNumber(1);
+  }
   return fnCOMBIN([rvNumber(nRV.value + kRV.value - 1), kRV]);
 };
 
-export const fnPERMUT: NativeFunction = args => {
+export const fnPERMUT: NativeFn = args => {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;

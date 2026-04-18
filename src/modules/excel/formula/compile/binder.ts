@@ -47,6 +47,16 @@ export interface BindingContext {
   readonly snapshot: WorkbookSnapshot;
   /** The current sheet name (for relative references). */
   readonly currentSheet: string;
+  /**
+   * Identifier names that are bound locally (uppercase). Populated by
+   * LAMBDA when descending into its body; prevents local parameter names
+   * from being shadowed by same-named workbook-level defined names at
+   * compile time. LET uses a different mechanism (it keeps the body
+   * bound as-is and resolves names at runtime via `localBindings`), but
+   * LAMBDA's body is pre-bound when the lambda is constructed so we have
+   * to inject scope info up front.
+   */
+  readonly localNames?: ReadonlySet<string>;
 }
 
 // ============================================================================
@@ -158,17 +168,17 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
     case NodeType.StructuredRef:
       return bindStructuredRef(node.tableName, node.columns, node.specials, ctx);
 
-    case NodeType.ExternalRef:
-      // External workbook references (e.g. [Book1]Sheet1!A1) are recognised
-      // but unsupported — lower to `#REF!` at compile time so the runtime
-      // simply surfaces the error.
-      return boundErrorLiteral("#REF!");
-
-    default: {
-      const _: never = node;
-      return boundErrorLiteral("#VALUE!");
-    }
+    default:
+      return assertNever(node);
   }
+}
+
+/**
+ * Exhaustiveness helper: triggers a compile-time error if `bind` misses a
+ * discriminated-union variant. At runtime, this path is unreachable.
+ */
+function assertNever(x: never): never {
+  throw new Error(`unexpected AST node: ${JSON.stringify(x)}`);
 }
 
 // ============================================================================
@@ -179,6 +189,15 @@ function bindCellRef(node: CellRefNode, ctx: BindingContext): BoundExpr {
   const sheet = node.sheet ?? ctx.currentSheet;
   const row = parseInt(node.row, 10);
   const col = colLetterToNumber(node.col);
+
+  // Excel's cell coordinate range is 1..1048576 for rows, 1..16384 for
+  // columns. The tokenizer enforces these when recognising cell refs,
+  // but we re-check here because the same binder runs on defined-name
+  // range strings that bypass the tokenizer and could carry arbitrary
+  // large values.
+  if (row < 1 || row > 1_048_576 || col < 1 || col > 16_384) {
+    return boundErrorLiteral("#REF!");
+  }
 
   // 3D cell reference: Sheet1:Sheet3!A1
   if (node.endSheet) {
@@ -309,6 +328,15 @@ function bindRowRangeRef(
 // ============================================================================
 
 function bindName(name: string, ctx: BindingContext): BoundExpr {
+  // A lambda parameter (or other compile-time local) shadows any
+  // workbook-level defined name. Without this short-circuit,
+  // `LAMBDA(x, x*2)(10)` would pick up a defined name called `x` that
+  // resolves to a cell reference, computing the cell's value × 2
+  // instead of the lambda argument × 2.
+  if (ctx.localNames && ctx.localNames.has(name.toUpperCase())) {
+    return boundNameExpr(name);
+  }
+
   // Try to resolve as a defined name that maps to a cell/range.
   // Respects scope precedence: sheet-local > workbook-global.
   const dn = resolveDefinedNameFromSnapshot(ctx.snapshot.definedNames, name, ctx.currentSheet);
@@ -481,6 +509,15 @@ function bindFunctionCall(name: string, args: AstNode[], ctx: BindingContext): B
     if (specialName === "LAMBDA" && args.length >= 1) {
       return bindLambda(args, ctx);
     }
+    // LET has the shape LET(name, value, name, value, …, body). The
+    // `name` slots must be treated as pure locals, not resolved against
+    // workbook defined names, or e.g. a defined-name `X` pointing at
+    // `$A$1` would hijack `LET(X, 5, X+1)` and route the final body to
+    // `A1+1` instead of `5+1`. We extend `localNames` to cover every
+    // name slot before recursively binding the rest.
+    if (specialName === "LET" && args.length >= 3) {
+      return bindLet(args, ctx);
+    }
     // All other special forms: bind args recursively but wrap as BoundSpecialCall
     const boundArgs = args.map(arg => bind(arg, ctx));
     return boundSpecialCall(specialName, boundArgs);
@@ -495,6 +532,48 @@ function bindFunctionCall(name: string, args: AstNode[], ctx: BindingContext): B
   return boundCall(upperName, boundArgs);
 }
 
+/**
+ * Bind `LET(name1, value1, …, nameN, valueN, body)` with lexical scoping.
+ *
+ * Even-indexed slots (0, 2, 4, …) are Name AST nodes that introduce new
+ * locals. We add each such name to `localNames` progressively — Excel
+ * allows later `value_i` expressions to reference earlier LET-bound
+ * variables, but NOT the variable being defined on the same slot. The
+ * `body` (last arg) sees every local.
+ */
+function bindLet(args: AstNode[], ctx: BindingContext): BoundExpr {
+  // args = [name1, value1, name2, value2, …, body]; length must be odd.
+  if (args.length < 3 || args.length % 2 === 0) {
+    return boundErrorLiteral("#VALUE!");
+  }
+  const locals = ctx.localNames ? new Set(ctx.localNames) : new Set<string>();
+  const boundArgs: BoundExpr[] = [];
+  for (let i = 0; i + 1 < args.length; i += 2) {
+    const nameNode = args[i];
+    if (nameNode.type !== NodeType.Name) {
+      // Not a Name-shaped slot: preserve whatever the user wrote so the
+      // evaluator's own LET implementation can report the error with
+      // better context.
+      boundArgs.push(bind(nameNode, ctx));
+    } else {
+      // Bind the name slot as a runtime-resolved NameExpr rather than
+      // letting `bindName` eagerly pick up a workbook-level defined name.
+      boundArgs.push(boundNameExpr(nameNode.name));
+    }
+    // Bind the value expression with locals-so-far in scope.
+    const valueCtx: BindingContext = { ...ctx, localNames: new Set(locals) };
+    boundArgs.push(bind(args[i + 1], valueCtx));
+    // The just-bound name is now available to subsequent value slots
+    // and to the body.
+    if (nameNode.type === NodeType.Name) {
+      locals.add(nameNode.name.toUpperCase());
+    }
+  }
+  const bodyCtx: BindingContext = { ...ctx, localNames: locals };
+  boundArgs.push(bind(args[args.length - 1], bodyCtx));
+  return boundSpecialCall("LET", boundArgs);
+}
+
 function bindLambda(args: AstNode[], ctx: BindingContext): BoundExpr {
   if (args.length < 1) {
     return boundErrorLiteral("#VALUE!");
@@ -503,18 +582,36 @@ function bindLambda(args: AstNode[], ctx: BindingContext): BoundExpr {
   const paramNodes = args.slice(0, -1);
   const bodyNode = args[args.length - 1];
   const params: string[] = [];
+  // Detect duplicate parameter names up front. Excel rejects
+  // `LAMBDA(x, x, x*2)` with #VALUE! rather than silently letting the
+  // second occurrence shadow the first.
+  const seen = new Set<string>();
 
   for (const pNode of paramNodes) {
     if (pNode.type !== NodeType.Name) {
       return boundErrorLiteral("#VALUE!");
     }
-    params.push(pNode.name.toUpperCase());
+    const upper = pNode.name.toUpperCase();
+    if (seen.has(upper)) {
+      return boundErrorLiteral("#VALUE!");
+    }
+    seen.add(upper);
+    params.push(upper);
   }
+
+  // Extend the local-name scope with the lambda's parameters so nested
+  // name lookups inside the body bind to runtime locals rather than
+  // same-named workbook defined names.
+  const mergedLocals = ctx.localNames ? new Set(ctx.localNames) : new Set<string>();
+  for (const p of params) {
+    mergedLocals.add(p);
+  }
+  const bodyCtx: BindingContext = { ...ctx, localNames: mergedLocals };
 
   return {
     kind: BoundExprKind.Lambda,
     params,
-    body: bind(bodyNode, ctx)
+    body: bind(bodyNode, bodyCtx)
   };
 }
 

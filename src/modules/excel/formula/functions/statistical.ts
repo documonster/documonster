@@ -15,87 +15,13 @@ import {
   topLeft,
   isError
 } from "../runtime/values";
+import { argToNumber, flattenAll, flattenNumbers, firstError } from "./_shared";
 
 // ============================================================================
 // Local Helpers
 // ============================================================================
 
-type NF = (args: RuntimeValue[]) => RuntimeValue;
-
-/**
- * Flatten args to numbers (RuntimeValue equivalent of flattenNumbers).
- * For Array args: iterate rows/cells, keep only RVKind.Number (skip booleans/strings/blanks).
- * For direct scalars: coerce via toNumberRV.
- * Errors are always propagated.
- */
-function flattenNumbers(args: RuntimeValue[]): (number | ErrorValue)[] {
-  const result: (number | ErrorValue)[] = [];
-  for (const arg of args) {
-    if (arg.kind === RVKind.Array) {
-      for (const row of arg.rows) {
-        for (const cell of row) {
-          if (cell.kind === RVKind.Error) {
-            result.push(cell);
-          } else if (cell.kind === RVKind.Number) {
-            result.push(cell.value);
-          }
-          // skip booleans, strings, blanks in ranges
-        }
-      }
-    } else {
-      const sv = topLeft(arg);
-      if (sv.kind === RVKind.Error) {
-        result.push(sv);
-      } else if (sv.kind === RVKind.Blank) {
-        // skip blank direct args (Excel behavior for aggregates)
-      } else {
-        const n = toNumberRV(sv);
-        if (n.kind === RVKind.Error) {
-          result.push(n);
-        } else {
-          result.push(n.value);
-        }
-      }
-    }
-  }
-  return result;
-}
-
-/**
- * Flatten all scalar values from args (RuntimeValue equivalent of flattenAll).
- */
-function flattenAll(args: RuntimeValue[]): ScalarValue[] {
-  const result: ScalarValue[] = [];
-  for (const arg of args) {
-    if (arg.kind === RVKind.Array) {
-      for (const row of arg.rows) {
-        for (const cell of row) {
-          result.push(cell);
-        }
-      }
-    } else {
-      result.push(topLeft(arg));
-    }
-  }
-  return result;
-}
-
-/** Return the first error in a list, or null. */
-function firstError(values: (number | ErrorValue)[]): ErrorValue | null {
-  for (const v of values) {
-    if (typeof v !== "number") {
-      return v;
-    }
-  }
-  return null;
-}
-
-/**
- * Extract a number from a single arg (with coercion). Returns NumberValue or ErrorValue.
- */
-function numArg(args: RuntimeValue[], idx: number): NumberValue | ErrorValue {
-  return toNumberRV(topLeft(args[idx]));
-}
+type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 
 /**
  * Extract a boolean from a single arg. Returns the boolean or ErrorValue.
@@ -122,7 +48,55 @@ function isArrayArg(arg: RuntimeValue): boolean {
 // MEDIAN, LARGE, SMALL, RANK
 // ============================================================================
 
-export const fnMEDIAN: NF = args => {
+/**
+ * Quickselect: returns the k-th smallest element (0-indexed) of `arr`
+ * in-place, in expected O(n) time.
+ *
+ * Uses Hoare partitioning with a "median of three" pivot choice for
+ * resilience against already-sorted and adversarial inputs. The input
+ * array is reorganised around the pivot — callers that need the original
+ * order must pass a copy.
+ */
+function quickselect(arr: number[], k: number): number {
+  let lo = 0;
+  let hi = arr.length - 1;
+  while (lo < hi) {
+    // median-of-three pivot
+    const mid = (lo + hi) >> 1;
+    const a = arr[lo];
+    const b = arr[mid];
+    const c = arr[hi];
+    const pivot = a < b ? (b < c ? b : a < c ? c : a) : a < c ? a : b < c ? c : b;
+    let i = lo;
+    let j = hi;
+    while (i <= j) {
+      while (arr[i] < pivot) {
+        i++;
+      }
+      while (arr[j] > pivot) {
+        j--;
+      }
+      if (i <= j) {
+        const t = arr[i];
+        arr[i] = arr[j];
+        arr[j] = t;
+        i++;
+        j--;
+      }
+    }
+    if (k <= j) {
+      hi = j;
+    } else if (k >= i) {
+      lo = i;
+    } else {
+      // pivot settled at k
+      return arr[k];
+    }
+  }
+  return arr[k];
+}
+
+export const fnMEDIAN: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -131,69 +105,146 @@ export const fnMEDIAN: NF = args => {
   if (nums.length === 0) {
     return ERRORS.NUM;
   }
-  const sorted = (nums as number[]).slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return rvNumber(sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]);
+  const values = (nums as NumberValue[]).map(n => n.value);
+  const n = values.length;
+  const mid = n >> 1;
+  if (n % 2 !== 0) {
+    return rvNumber(quickselect(values, mid));
+  }
+  // Even count: average of (n/2 − 1)-th and (n/2)-th smallest. Use
+  // quickselect twice — but the second search can be limited to the upper
+  // half produced by the first call, since quickselect leaves that region
+  // sorted w.r.t. the pivot.
+  const hi = quickselect(values, mid);
+  // After selecting index `mid`, every element at position < mid is ≤ hi.
+  // The lower of the two middle values is the max of that prefix.
+  let lo = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < mid; i++) {
+    if (values[i] > lo) {
+      lo = values[i];
+    }
+  }
+  return rvNumber((lo + hi) / 2);
 };
 
-export const fnLARGE: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
+export const fnLARGE: NativeFn = args => {
   const nums = flattenNumbers([args[0]]);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const k = numArg(args, 1);
+  const values = (nums as NumberValue[]).map(n => n.value);
+  // k can be an array (Excel broadcasts); when it is, return an array
+  // with the same shape where each cell holds LARGE at that k.
+  if (args[1].kind === RVKind.Array) {
+    const kArr = args[1];
+    const outRows: ScalarValue[][] = [];
+    for (const row of kArr.rows) {
+      const outRow: ScalarValue[] = [];
+      for (const cell of row) {
+        if (cell.kind === RVKind.Error) {
+          outRow.push(cell);
+          continue;
+        }
+        const kn = toNumberRV(cell);
+        if (kn.kind === RVKind.Error) {
+          outRow.push(kn);
+          continue;
+        }
+        const kInt = Math.floor(kn.value);
+        if (kInt < 1 || kInt > values.length) {
+          outRow.push(ERRORS.NUM);
+          continue;
+        }
+        // k-th largest == (n − k)-th smallest. Use a copy — quickselect
+        // mutates the array it works on, and we need a fresh view for
+        // every cell in the output.
+        outRow.push(rvNumber(quickselect(values.slice(), values.length - kInt)));
+      }
+      outRows.push(outRow);
+    }
+    return rvArray(outRows);
+  }
+  const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
   }
-  const sorted = (nums as number[]).slice().sort((a, b) => b - a);
-  const idx = Math.floor(k.value) - 1;
-  return idx >= 0 && idx < sorted.length ? rvNumber(sorted[idx]) : ERRORS.NUM;
+  const kInt = Math.floor(k.value);
+  if (kInt < 1 || kInt > values.length) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(quickselect(values, values.length - kInt));
 };
 
-export const fnSMALL: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
+export const fnSMALL: NativeFn = args => {
   const nums = flattenNumbers([args[0]]);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const k = numArg(args, 1);
+  const values = (nums as NumberValue[]).map(n => n.value);
+  if (args[1].kind === RVKind.Array) {
+    const kArr = args[1];
+    const outRows: ScalarValue[][] = [];
+    for (const row of kArr.rows) {
+      const outRow: ScalarValue[] = [];
+      for (const cell of row) {
+        if (cell.kind === RVKind.Error) {
+          outRow.push(cell);
+          continue;
+        }
+        const kn = toNumberRV(cell);
+        if (kn.kind === RVKind.Error) {
+          outRow.push(kn);
+          continue;
+        }
+        const kInt = Math.floor(kn.value);
+        if (kInt < 1 || kInt > values.length) {
+          outRow.push(ERRORS.NUM);
+          continue;
+        }
+        outRow.push(rvNumber(quickselect(values.slice(), kInt - 1)));
+      }
+      outRows.push(outRow);
+    }
+    return rvArray(outRows);
+  }
+  const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
   }
-  const sorted = (nums as number[]).slice().sort((a, b) => a - b);
-  const idx = Math.floor(k.value) - 1;
-  return idx >= 0 && idx < sorted.length ? rvNumber(sorted[idx]) : ERRORS.NUM;
+  const kInt = Math.floor(k.value);
+  if (kInt < 1 || kInt > values.length) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(quickselect(values, kInt - 1));
 };
 
-export const fnRANK: NF = args => {
-  const num = numArg(args, 0);
+export const fnRANK: NativeFn = args => {
+  const num = argToNumber(args[0]);
   if (num.kind === RVKind.Error) {
     return num;
-  }
-  if (!isArrayArg(args[1])) {
-    return ERRORS.VALUE;
   }
   const nums = flattenNumbers([args[1]]);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const orderRV = args.length > 2 ? numArg(args, 2) : rvNumber(0);
+  const orderRV = args.length > 2 ? argToNumber(args[2]) : rvNumber(0);
   if (orderRV.kind === RVKind.Error) {
     return orderRV;
   }
   const order = orderRV.value;
   const sorted =
     order === 0
-      ? (nums as number[]).slice().sort((a, b) => b - a)
-      : (nums as number[]).slice().sort((a, b) => a - b);
+      ? (nums as NumberValue[])
+          .map(n => n.value)
+          .slice()
+          .sort((a, b) => b - a)
+      : (nums as NumberValue[])
+          .map(n => n.value)
+          .slice()
+          .sort((a, b) => a - b);
   const idx = sorted.indexOf(num.value);
   return idx === -1 ? ERRORS.NA : rvNumber(idx + 1);
 };
@@ -202,92 +253,87 @@ export const fnRANK: NF = args => {
 // STDEV, STDEVP, VAR, VARP
 // ============================================================================
 
-export const fnSTDEV: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
-  }
-  if (nums.length < 2) {
-    return ERRORS.DIV0;
-  }
+/**
+ * Compute mean and sum of squared deviations from mean. Used by the
+ * STDEV/STDEVP/VAR/VARP family to share a single pass through the data.
+ * Returns `null` when there is no data at all (callers decide whether that
+ * should be `#DIV/0!` or zero given the sample/population convention).
+ */
+function computeMeanAndSumSq(
+  nums: readonly number[]
+): { n: number; mean: number; sumSq: number } | null {
   const n = nums.length;
+  if (n === 0) {
+    return null;
+  }
   let sum = 0;
   for (const v of nums) {
-    sum += v as number;
+    sum += v;
   }
   const mean = sum / n;
   let sumSq = 0;
   for (const v of nums) {
-    sumSq += ((v as number) - mean) ** 2;
+    sumSq += (v - mean) ** 2;
   }
-  return rvNumber(Math.sqrt(sumSq / (n - 1)));
+  return { n, mean, sumSq };
+}
+
+/** Resolve {args} to `number[]` or an error. Shared by STDEV/VAR family. */
+function toNumberArray(args: RuntimeValue[]): number[] | ErrorValue {
+  const rawNums = flattenNumbers(args);
+  const err = firstError(rawNums);
+  if (err) {
+    return err;
+  }
+  return (rawNums as NumberValue[]).map(n => n.value);
+}
+
+export const fnSTDEV: NativeFn = args => {
+  const nums = toNumberArray(args);
+  if (!Array.isArray(nums)) {
+    return nums;
+  }
+  const stats = computeMeanAndSumSq(nums);
+  if (!stats || stats.n < 2) {
+    return ERRORS.DIV0;
+  }
+  return rvNumber(Math.sqrt(stats.sumSq / (stats.n - 1)));
 };
 
-export const fnSTDEVP: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+export const fnSTDEVP: NativeFn = args => {
+  const nums = toNumberArray(args);
+  if (!Array.isArray(nums)) {
+    return nums;
   }
-  if (nums.length === 0) {
+  const stats = computeMeanAndSumSq(nums);
+  if (!stats) {
     return ERRORS.DIV0;
   }
-  const n = nums.length;
-  let sum = 0;
-  for (const v of nums) {
-    sum += v as number;
-  }
-  const mean = sum / n;
-  let sumSq = 0;
-  for (const v of nums) {
-    sumSq += ((v as number) - mean) ** 2;
-  }
-  return rvNumber(Math.sqrt(sumSq / n));
+  return rvNumber(Math.sqrt(stats.sumSq / stats.n));
 };
 
-export const fnVAR: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+export const fnVAR: NativeFn = args => {
+  const nums = toNumberArray(args);
+  if (!Array.isArray(nums)) {
+    return nums;
   }
-  if (nums.length < 2) {
+  const stats = computeMeanAndSumSq(nums);
+  if (!stats || stats.n < 2) {
     return ERRORS.DIV0;
   }
-  const n = nums.length;
-  let sum = 0;
-  for (const v of nums) {
-    sum += v as number;
-  }
-  const mean = sum / n;
-  let sumSq = 0;
-  for (const v of nums) {
-    sumSq += ((v as number) - mean) ** 2;
-  }
-  return rvNumber(sumSq / (n - 1));
+  return rvNumber(stats.sumSq / (stats.n - 1));
 };
 
-export const fnVARP: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+export const fnVARP: NativeFn = args => {
+  const nums = toNumberArray(args);
+  if (!Array.isArray(nums)) {
+    return nums;
   }
-  if (nums.length === 0) {
+  const stats = computeMeanAndSumSq(nums);
+  if (!stats) {
     return ERRORS.DIV0;
   }
-  const n = nums.length;
-  let sum = 0;
-  for (const v of nums) {
-    sum += v as number;
-  }
-  const mean = sum / n;
-  let sumSq = 0;
-  for (const v of nums) {
-    sumSq += ((v as number) - mean) ** 2;
-  }
-  return rvNumber(sumSq / n);
+  return rvNumber(stats.sumSq / stats.n);
 };
 
 // ============================================================================
@@ -357,8 +403,15 @@ function normSInv(p: number): number {
   );
 }
 
-// Standard normal CDF approximation (Abramowitz & Stegun)
+// Standard normal CDF approximation (Abramowitz & Stegun 7.1.26). The
+// approximation has max error ~7.5e-8 — good enough for GAUSS/NORM.S.DIST
+// but it does NOT evaluate to exactly 0.5 at x = 0 (the erf kernel leaves
+// a residual ≈ 5e-10). Excel-facing callers expect symmetry around 0, so
+// we short-circuit that single point.
 function normSDist(x: number): number {
+  if (x === 0) {
+    return 0.5;
+  }
   const a1 = 0.254829592;
   const a2 = -0.284496736;
   const a3 = 1.421413741;
@@ -381,8 +434,8 @@ function normSPdf(x: number): number {
 // Normal Distribution Functions
 // ============================================================================
 
-export const fnNORMSDIST: NF = args => {
-  const z = numArg(args, 0);
+export const fnNORMSDIST: NativeFn = args => {
+  const z = argToNumber(args[0]);
   if (z.kind === RVKind.Error) {
     return z;
   }
@@ -397,16 +450,16 @@ export const fnNORMSDIST: NF = args => {
   return rvNumber(normSDist(z.value));
 };
 
-export const fnNORMDIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnNORMDIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
-  const stddev = numArg(args, 2);
+  const stddev = argToNumber(args[2]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
@@ -424,8 +477,8 @@ export const fnNORMDIST: NF = args => {
   return rvNumber(normSPdf(zVal) / stddev.value);
 };
 
-export const fnNORMSINV: NF = args => {
-  const p = numArg(args, 0);
+export const fnNORMSINV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
@@ -435,16 +488,16 @@ export const fnNORMSINV: NF = args => {
   return rvNumber(normSInv(p.value));
 };
 
-export const fnNORMINV: NF = args => {
-  const p = numArg(args, 0);
+export const fnNORMINV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
-  const stddev = numArg(args, 2);
+  const stddev = argToNumber(args[2]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
@@ -458,12 +511,11 @@ export const fnNORMINV: NF = args => {
 // PERCENTILE, QUARTILE, MODE
 // ============================================================================
 
-export const fnPERCENTILE: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
-  const nums = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const k = numArg(args, 1);
+export const fnPERCENTILE: NativeFn = args => {
+  const nums = flattenNumbers([args[0]])
+    .filter((v): v is NumberValue => v.kind === RVKind.Number)
+    .map(n => n.value);
+  const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
   }
@@ -482,12 +534,11 @@ export const fnPERCENTILE: NF = args => {
   return rvNumber(nums[lower] + frac * (nums[upper] - nums[lower]));
 };
 
-export const fnPERCENTILEEXC: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
-  const nums = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const k = numArg(args, 1);
+export const fnPERCENTILEEXC: NativeFn = args => {
+  const nums = flattenNumbers([args[0]])
+    .filter((v): v is NumberValue => v.kind === RVKind.Number)
+    .map(n => n.value);
+  const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
   }
@@ -508,8 +559,8 @@ export const fnPERCENTILEEXC: NF = args => {
   );
 };
 
-export const fnQUARTILE: NF = args => {
-  const quart = numArg(args, 1);
+export const fnQUARTILE: NativeFn = args => {
+  const quart = argToNumber(args[1]);
   if (quart.kind === RVKind.Error) {
     return quart;
   }
@@ -519,8 +570,8 @@ export const fnQUARTILE: NF = args => {
   return fnPERCENTILE([args[0], rvNumber(quart.value / 4)]);
 };
 
-export const fnQUARTILEEXC: NF = args => {
-  const quart = numArg(args, 1);
+export const fnQUARTILEEXC: NativeFn = args => {
+  const quart = argToNumber(args[1]);
   if (quart.kind === RVKind.Error) {
     return quart;
   }
@@ -530,13 +581,13 @@ export const fnQUARTILEEXC: NF = args => {
   return fnPERCENTILEEXC([args[0], rvNumber(quart.value / 4)]);
 };
 
-export const fnMODE: NF = args => {
+export const fnMODE: NativeFn = args => {
   const all = flattenNumbers(args);
   const err = firstError(all);
   if (err) {
     return err;
   }
-  const nums = all as number[];
+  const nums = (all as NumberValue[]).map(n => n.value);
   if (nums.length === 0) {
     return ERRORS.NA;
   }
@@ -554,19 +605,96 @@ export const fnMODE: NF = args => {
   return maxCount > 1 ? rvNumber(mode) : ERRORS.NA;
 };
 
+/**
+ * MODE.MULT — returns a vertical array of every mode (dynamic array).
+ * When the dataset is multimodal Excel spills all of them; for a single
+ * mode it behaves like MODE.SNGL.
+ */
+export const fnMODE_MULT: NativeFn = args => {
+  const all = flattenNumbers(args);
+  const err = firstError(all);
+  if (err) {
+    return err;
+  }
+  const nums = (all as NumberValue[]).map(n => n.value);
+  if (nums.length === 0) {
+    return ERRORS.NA;
+  }
+  const counts = new Map<number, number>();
+  for (const n of nums) {
+    counts.set(n, (counts.get(n) ?? 0) + 1);
+  }
+  let maxCount = 0;
+  for (const c of counts.values()) {
+    if (c > maxCount) {
+      maxCount = c;
+    }
+  }
+  if (maxCount < 2) {
+    return ERRORS.NA;
+  }
+  // Preserve first-occurrence order as Excel does (not sorted).
+  const seen = new Set<number>();
+  const modes: number[] = [];
+  for (const n of nums) {
+    if (!seen.has(n) && counts.get(n) === maxCount) {
+      seen.add(n);
+      modes.push(n);
+    }
+  }
+  return rvArray(modes.map(m => [rvNumber(m)]));
+};
+
 // ============================================================================
 // Paired-array functions: CORREL, SLOPE, INTERCEPT, RSQ, FORECAST
 // ============================================================================
 
-export const fnCORREL: NF = args => {
-  if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
-    return ERRORS.VALUE;
+/**
+ * Extract matching pairs of numbers from two array arguments, filtering to
+ * numeric cells only (matching Excel's CORREL/SLOPE/INTERCEPT conventions).
+ * Returns the shorter prefix-length pair aligned by position.
+ */
+function pairedNumbers(
+  args: RuntimeValue[],
+  aIdx: number,
+  bIdx: number
+): { xs: number[]; ys: number[] } | ErrorValue {
+  const flatA = flattenNumbers([args[aIdx]]);
+  const errA = firstError(flatA);
+  if (errA) {
+    return errA;
   }
-  const xs = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const ys = flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number");
+  const flatB = flattenNumbers([args[bIdx]]);
+  const errB = firstError(flatB);
+  if (errB) {
+    return errB;
+  }
+  const xs = flatA.filter((v): v is NumberValue => v.kind === RVKind.Number).map(n => n.value);
+  const ys = flatB.filter((v): v is NumberValue => v.kind === RVKind.Number).map(n => n.value);
   const n = Math.min(xs.length, ys.length);
-  if (n < 2) {
-    return ERRORS.DIV0;
+  return { xs: xs.slice(0, n), ys: ys.slice(0, n) };
+}
+
+/**
+ * Compute paired-array sums used by the simple linear regression family.
+ * Returns null when either input is empty. Callers determine whether
+ * n < 2 is #DIV/0! or acceptable.
+ */
+interface PairedSums {
+  n: number;
+  meanX: number;
+  meanY: number;
+  /** Σ (xᵢ − x̄)(yᵢ − ȳ) */
+  sxy: number;
+  /** Σ (xᵢ − x̄)² */
+  sxx: number;
+  /** Σ (yᵢ − ȳ)² */
+  syy: number;
+}
+function pairedSums(xs: readonly number[], ys: readonly number[]): PairedSums | null {
+  const n = xs.length;
+  if (n === 0) {
+    return null;
   }
   let sumX = 0;
   let sumY = 0;
@@ -576,74 +704,65 @@ export const fnCORREL: NF = args => {
   }
   const meanX = sumX / n;
   const meanY = sumY / n;
-  let num = 0;
-  let denomX = 0;
-  let denomY = 0;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
   for (let i = 0; i < n; i++) {
     const dx = xs[i] - meanX;
     const dy = ys[i] - meanY;
-    num += dx * dy;
-    denomX += dx * dx;
-    denomY += dy * dy;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
   }
-  const denom = Math.sqrt(denomX * denomY);
-  return denom === 0 ? ERRORS.DIV0 : rvNumber(num / denom);
-};
+  return { n, meanX, meanY, sxy, sxx, syy };
+}
 
-export const fnSLOPE: NF = args => {
-  if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
-    return ERRORS.VALUE;
+export const fnCORREL: NativeFn = args => {
+  const paired = pairedNumbers(args, 0, 1);
+  if ("code" in paired) {
+    return paired;
   }
-  const ys = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const xs = flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number");
-  const n = Math.min(xs.length, ys.length);
-  if (n < 2) {
+  const { xs, ys } = paired;
+  const s = pairedSums(xs, ys);
+  if (!s || s.n < 2) {
     return ERRORS.DIV0;
   }
-  let sumX = 0;
-  let sumY = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += xs[i];
-    sumY += ys[i];
-  }
-  const meanX = sumX / n;
-  const meanY = sumY / n;
-  let num = 0;
-  let denom = 0;
-  for (let i = 0; i < n; i++) {
-    num += (xs[i] - meanX) * (ys[i] - meanY);
-    denom += (xs[i] - meanX) ** 2;
-  }
-  return denom === 0 ? ERRORS.DIV0 : rvNumber(num / denom);
+  const denom = Math.sqrt(s.sxx * s.syy);
+  return denom === 0 ? ERRORS.DIV0 : rvNumber(s.sxy / denom);
 };
 
-export const fnINTERCEPT: NF = args => {
-  if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
-    return ERRORS.VALUE;
+export const fnSLOPE: NativeFn = args => {
+  // SLOPE(known_y, known_x) — note the argument order (y first, x second).
+  const paired = pairedNumbers(args, 0, 1);
+  if ("code" in paired) {
+    return paired;
   }
-  const ys = flattenNumbers([args[0]]).filter((v): v is number => typeof v === "number");
-  const xs = flattenNumbers([args[1]]).filter((v): v is number => typeof v === "number");
-  const n = Math.min(xs.length, ys.length);
-  if (n < 2) {
+  const { xs: ys, ys: xs } = paired;
+  const s = pairedSums(xs, ys);
+  if (!s || s.n < 2) {
     return ERRORS.DIV0;
   }
-  let sumX = 0;
-  let sumY = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += xs[i];
-    sumY += ys[i];
-  }
-  const meanX = sumX / n;
-  const meanY = sumY / n;
-  const slopeResult = fnSLOPE(args);
-  if (isError(slopeResult)) {
-    return slopeResult;
-  }
-  const slope = (slopeResult as NumberValue).value;
-  return rvNumber(meanY - slope * meanX);
+  return s.sxx === 0 ? ERRORS.DIV0 : rvNumber(s.sxy / s.sxx);
 };
 
-export const fnRSQ: NF = args => {
+export const fnINTERCEPT: NativeFn = args => {
+  const paired = pairedNumbers(args, 0, 1);
+  if ("code" in paired) {
+    return paired;
+  }
+  const { xs: ys, ys: xs } = paired;
+  const s = pairedSums(xs, ys);
+  if (!s || s.n < 2) {
+    return ERRORS.DIV0;
+  }
+  if (s.sxx === 0) {
+    return ERRORS.DIV0;
+  }
+  const slope = s.sxy / s.sxx;
+  return rvNumber(s.meanY - slope * s.meanX);
+};
+
+export const fnRSQ: NativeFn = args => {
   const r = fnCORREL(args);
   if (isError(r)) {
     return r;
@@ -651,20 +770,27 @@ export const fnRSQ: NF = args => {
   return rvNumber((r as NumberValue).value ** 2);
 };
 
-export const fnFORECAST: NF = args => {
-  const x = numArg(args, 0);
+export const fnFORECAST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const slope = fnSLOPE([args[1], args[2]]);
-  if (isError(slope)) {
-    return slope;
+  // FORECAST(x, known_y, known_x) — same y-first argument order as SLOPE.
+  const paired = pairedNumbers(args, 1, 2);
+  if ("code" in paired) {
+    return paired;
   }
-  const intercept = fnINTERCEPT([args[1], args[2]]);
-  if (isError(intercept)) {
-    return intercept;
+  const { xs: ys, ys: xs } = paired;
+  const s = pairedSums(xs, ys);
+  if (!s || s.n < 2) {
+    return ERRORS.DIV0;
   }
-  return rvNumber((intercept as NumberValue).value + (slope as NumberValue).value * x.value);
+  if (s.sxx === 0) {
+    return ERRORS.DIV0;
+  }
+  const slope = s.sxy / s.sxx;
+  const intercept = s.meanY - slope * s.meanX;
+  return rvNumber(intercept + slope * x.value);
 };
 
 // ============================================================================
@@ -678,55 +804,54 @@ export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "./math";
 // GEOMEAN, HARMEAN, TRIMMEAN, DEVSQ, AVEDEV
 // ============================================================================
 
-export const fnGEOMEAN: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+export const fnGEOMEAN: NativeFn = args => {
+  const rawNums = flattenNumbers(args);
+  const err = firstError(rawNums);
   if (err) {
     return err;
   }
+  const nums = rawNums as NumberValue[];
   if (nums.length === 0) {
     return ERRORS.NUM;
   }
   let logSum = 0;
   for (const n of nums) {
-    if ((n as number) <= 0) {
+    if (n.value <= 0) {
       return ERRORS.NUM;
     }
-    logSum += Math.log(n as number);
+    logSum += Math.log(n.value);
   }
   return rvNumber(Math.exp(logSum / nums.length));
 };
 
-export const fnHARMEAN: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+export const fnHARMEAN: NativeFn = args => {
+  const rawNums = flattenNumbers(args);
+  const err = firstError(rawNums);
   if (err) {
     return err;
   }
+  const nums = rawNums as NumberValue[];
   if (nums.length === 0) {
     return ERRORS.NUM;
   }
   let recipSum = 0;
   for (const n of nums) {
-    if ((n as number) <= 0) {
+    if (n.value <= 0) {
       return ERRORS.NUM;
     }
-    recipSum += 1 / (n as number);
+    recipSum += 1 / n.value;
   }
   return rvNumber(nums.length / recipSum);
 };
 
-export const fnTRIMMEAN: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
+export const fnTRIMMEAN: NativeFn = args => {
   const all = flattenNumbers([args[0]]);
   const err = firstError(all);
   if (err) {
     return err;
   }
-  const nums = all as number[];
-  const pct = numArg(args, 1);
+  const nums = (all as NumberValue[]).map(n => n.value);
+  const pct = argToNumber(args[1]);
   if (pct.kind === RVKind.Error) {
     return pct;
   }
@@ -742,44 +867,46 @@ export const fnTRIMMEAN: NF = args => {
   return rvNumber(trimmed.reduce((a, b) => a + b, 0) / trimmed.length);
 };
 
-export const fnDEVSQ: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+export const fnDEVSQ: NativeFn = args => {
+  const rawNums = flattenNumbers(args);
+  const err = firstError(rawNums);
   if (err) {
     return err;
   }
+  const nums = rawNums as NumberValue[];
   if (nums.length === 0) {
     return rvNumber(0);
   }
   let sum = 0;
   for (const n of nums) {
-    sum += n as number;
+    sum += n.value;
   }
   const mean = sum / nums.length;
   let result = 0;
   for (const n of nums) {
-    result += ((n as number) - mean) ** 2;
+    result += (n.value - mean) ** 2;
   }
   return rvNumber(result);
 };
 
-export const fnAVEDEV: NF = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+export const fnAVEDEV: NativeFn = args => {
+  const rawNums = flattenNumbers(args);
+  const err = firstError(rawNums);
   if (err) {
     return err;
   }
+  const nums = rawNums as NumberValue[];
   if (nums.length === 0) {
     return ERRORS.NUM;
   }
   let sum = 0;
   for (const n of nums) {
-    sum += n as number;
+    sum += n.value;
   }
   const mean = sum / nums.length;
   let result = 0;
   for (const n of nums) {
-    result += Math.abs((n as number) - mean);
+    result += Math.abs(n.value - mean);
   }
   return rvNumber(result / nums.length);
 };
@@ -788,16 +915,16 @@ export const fnAVEDEV: NF = args => {
 // CONFIDENCE, FISHER, AVERAGEA, MAXA, MINA
 // ============================================================================
 
-export const fnCONFIDENCENORM: NF = args => {
-  const alpha = numArg(args, 0);
+export const fnCONFIDENCENORM: NativeFn = args => {
+  const alpha = argToNumber(args[0]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const stddev = numArg(args, 1);
+  const stddev = argToNumber(args[1]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
-  const size = numArg(args, 2);
+  const size = argToNumber(args[2]);
   if (size.kind === RVKind.Error) {
     return size;
   }
@@ -807,8 +934,164 @@ export const fnCONFIDENCENORM: NF = args => {
   return rvNumber((normSInv(1 - alpha.value / 2) * stddev.value) / Math.sqrt(size.value));
 };
 
-export const fnFISHER: NF = args => {
-  const x = numArg(args, 0);
+/**
+ * CONFIDENCE.T — confidence interval half-width for the mean using the
+ * Student's t distribution (small sample / unknown population variance).
+ */
+export const fnCONFIDENCE_T: NativeFn = args => {
+  const alpha = argToNumber(args[0]);
+  if (alpha.kind === RVKind.Error) {
+    return alpha;
+  }
+  const stddev = argToNumber(args[1]);
+  if (stddev.kind === RVKind.Error) {
+    return stddev;
+  }
+  const size = argToNumber(args[2]);
+  if (size.kind === RVKind.Error) {
+    return size;
+  }
+  if (alpha.value <= 0 || alpha.value >= 1 || stddev.value <= 0 || size.value < 2) {
+    return ERRORS.NUM;
+  }
+  // Reuse the engine's existing T.INV.2T to pull the two-tailed critical
+  // value; avoids duplicating the Newton search. Excel uses df = n − 1.
+  const tCrit = fnT_INV_2T([rvNumber(alpha.value), rvNumber(size.value - 1)]);
+  if (isError(tCrit)) {
+    return tCrit;
+  }
+  const t = (tCrit as NumberValue).value;
+  return rvNumber((t * stddev.value) / Math.sqrt(size.value));
+};
+
+/**
+ * Shared helper: walk two numeric arrays element-wise, filtering to
+ * matching-position numeric pairs only (Excel skips rows where either
+ * side is non-numeric).
+ */
+function pairedNumericValues(
+  a: RuntimeValue,
+  b: RuntimeValue
+): { xs: number[]; ys: number[] } | ErrorValue {
+  const xsAll = flattenNumbers([a]);
+  const xsErr = firstError(xsAll);
+  if (xsErr) {
+    return xsErr;
+  }
+  const ysAll = flattenNumbers([b]);
+  const ysErr = firstError(ysAll);
+  if (ysErr) {
+    return ysErr;
+  }
+  const n = Math.min(xsAll.length, ysAll.length);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = xsAll[i];
+    const y = ysAll[i];
+    if (x.kind === RVKind.Number && y.kind === RVKind.Number) {
+      xs.push(x.value);
+      ys.push(y.value);
+    }
+  }
+  return { xs, ys };
+}
+
+/** COVARIANCE.P — population covariance. */
+export const fnCOVARIANCE_P: NativeFn = args => {
+  const pairs = pairedNumericValues(args[0], args[1]);
+  if ((pairs as ErrorValue).kind === RVKind.Error) {
+    return pairs as ErrorValue;
+  }
+  const { xs, ys } = pairs as { xs: number[]; ys: number[] };
+  const n = xs.length;
+  if (n === 0) {
+    return ERRORS.DIV0;
+  }
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    s += (xs[i] - mx) * (ys[i] - my);
+  }
+  return rvNumber(s / n);
+};
+
+/** COVARIANCE.S — sample covariance (divide by n-1). */
+export const fnCOVARIANCE_S: NativeFn = args => {
+  const pairs = pairedNumericValues(args[0], args[1]);
+  if ((pairs as ErrorValue).kind === RVKind.Error) {
+    return pairs as ErrorValue;
+  }
+  const { xs, ys } = pairs as { xs: number[]; ys: number[] };
+  const n = xs.length;
+  if (n < 2) {
+    return ERRORS.DIV0;
+  }
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    s += (xs[i] - mx) * (ys[i] - my);
+  }
+  return rvNumber(s / (n - 1));
+};
+
+/**
+ * RANK.AVG — average-tie rank. Identical to RANK.EQ except that tied
+ * positions return the average of the ranks they would otherwise span.
+ */
+export const fnRANK_AVG: NativeFn = args => {
+  const numberRV = argToNumber(args[0]);
+  if (numberRV.kind === RVKind.Error) {
+    return numberRV;
+  }
+  const rawArr = flattenNumbers([args[1]]);
+  const arrErr = firstError(rawArr);
+  if (arrErr) {
+    return arrErr;
+  }
+  const nums = (rawArr as NumberValue[]).map(n => n.value);
+  const orderRV = args.length > 2 ? argToNumber(args[2]) : rvNumber(0);
+  if (orderRV.kind === RVKind.Error) {
+    return orderRV;
+  }
+  const ascending = orderRV.value !== 0;
+  const sorted = nums.slice().sort((a, b) => (ascending ? a - b : b - a));
+  // Find the range of indices that equal `number`; RANK.AVG returns the
+  // average rank over that range.
+  const target = numberRV.value;
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i] === target) {
+      if (first === -1) {
+        first = i;
+      }
+      last = i;
+    }
+  }
+  if (first === -1) {
+    return ERRORS.NA;
+  }
+  // Ranks are 1-based; average of first+1 .. last+1.
+  return rvNumber((first + last + 2) / 2);
+};
+
+export const fnFISHER: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
@@ -818,8 +1101,8 @@ export const fnFISHER: NF = args => {
   return rvNumber(0.5 * Math.log((1 + x.value) / (1 - x.value)));
 };
 
-export const fnFISHERINV: NF = args => {
-  const y = numArg(args, 0);
+export const fnFISHERINV: NativeFn = args => {
+  const y = argToNumber(args[0]);
   if (y.kind === RVKind.Error) {
     return y;
   }
@@ -827,7 +1110,7 @@ export const fnFISHERINV: NF = args => {
   return rvNumber((e2y - 1) / (e2y + 1));
 };
 
-export const fnAVERAGEA: NF = args => {
+export const fnAVERAGEA: NativeFn = args => {
   const all = flattenAll(args);
   if (all.length === 0) {
     return ERRORS.DIV0;
@@ -852,7 +1135,7 @@ export const fnAVERAGEA: NF = args => {
   return count === 0 ? ERRORS.DIV0 : rvNumber(sum / count);
 };
 
-export const fnMAXA: NF = args => {
+export const fnMAXA: NativeFn = args => {
   const all = flattenAll(args);
   let max = -Infinity;
   let found = false;
@@ -879,7 +1162,7 @@ export const fnMAXA: NF = args => {
   return rvNumber(found ? max : 0);
 };
 
-export const fnMINA: NF = args => {
+export const fnMINA: NativeFn = args => {
   const all = flattenAll(args);
   let min = Infinity;
   let found = false;
@@ -945,6 +1228,16 @@ function betaIncomplete(x: number, a: number, b: number): number {
   }
   const lbeta = lnGamma(a) + lnGamma(b) - lnGamma(a + b);
   const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lbeta) / a;
+  // For extreme (a, b) the front factor underflows to 0 or overflows to
+  // Infinity (e.g. T.DIST.2T at df >= 300 computes betaIncomplete with
+  // a around 150 and x near 0.004; Math.log(x)*a dips below -650, so
+  // Math.exp returns 0 and subsequent `f *= c * d` multiplications can
+  // produce 0 * Infinity = NaN in the continued-fraction loop). Short-
+  // circuit those pathological inputs: a zero front dominates the
+  // series, so the integrated value is effectively 0.
+  if (!Number.isFinite(front) || front === 0) {
+    return 0;
+  }
   let f = 1;
   let c = 1;
   let d = 1 - ((a + b) * x) / (a + 1);
@@ -1033,12 +1326,12 @@ function gammaIncomplete(a: number, x: number): number {
 // More Statistical Distribution Functions
 // ============================================================================
 
-export const fnPOISSON_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnPOISSON_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
@@ -1050,22 +1343,31 @@ export const fnPOISSON_DIST: NF = args => {
   if (k < 0 || mean.value < 0) {
     return ERRORS.NUM;
   }
+  // Degenerate mean = 0: the Poisson distribution concentrates all mass at
+  // k = 0. The textbook PMF formula evaluates `k * log(0) = -Infinity`
+  // multiplied by `k = 0`, yielding `NaN`, so we short-circuit.
+  if (mean.value === 0) {
+    if (!cum.value) {
+      return rvNumber(k === 0 ? 1 : 0);
+    }
+    return rvNumber(1); // CDF is 1 at every k >= 0
+  }
   if (!cum.value) {
     return rvNumber(Math.exp(-mean.value + k * Math.log(mean.value) - lnGamma(k + 1)));
   }
   return rvNumber(1 - gammaIncomplete(k + 1, mean.value));
 };
 
-export const fnBINOM_DIST: NF = args => {
-  const numS = numArg(args, 0);
+export const fnBINOM_DIST: NativeFn = args => {
+  const numS = argToNumber(args[0]);
   if (numS.kind === RVKind.Error) {
     return numS;
   }
-  const trials = numArg(args, 1);
+  const trials = argToNumber(args[1]);
   if (trials.kind === RVKind.Error) {
     return trials;
   }
-  const probS = numArg(args, 2);
+  const probS = argToNumber(args[2]);
   if (probS.kind === RVKind.Error) {
     return probS;
   }
@@ -1079,6 +1381,16 @@ export const fnBINOM_DIST: NF = args => {
     return ERRORS.NUM;
   }
   const pmf = (ki: number): number => {
+    // Degenerate p = 0 or p = 1 edges: the textbook formula multiplies
+    // the log of 0 by 0 (for the absent term), producing NaN. Handle
+    // these analytically — all mass is at k = 0 when p = 0, or at k = n
+    // when p = 1.
+    if (probS.value === 0) {
+      return ki === 0 ? 1 : 0;
+    }
+    if (probS.value === 1) {
+      return ki === n ? 1 : 0;
+    }
     const lnC = lnGamma(n + 1) - lnGamma(ki + 1) - lnGamma(n - ki + 1);
     return Math.exp(lnC + ki * Math.log(probS.value) + (n - ki) * Math.log(1 - probS.value));
   };
@@ -1092,16 +1404,16 @@ export const fnBINOM_DIST: NF = args => {
   return rvNumber(sum);
 };
 
-export const fnBINOM_INV: NF = args => {
-  const trials = numArg(args, 0);
+export const fnBINOM_INV: NativeFn = args => {
+  const trials = argToNumber(args[0]);
   if (trials.kind === RVKind.Error) {
     return trials;
   }
-  const probS = numArg(args, 1);
+  const probS = argToNumber(args[1]);
   if (probS.kind === RVKind.Error) {
     return probS;
   }
-  const alpha = numArg(args, 2);
+  const alpha = argToNumber(args[2]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
@@ -1120,20 +1432,20 @@ export const fnBINOM_INV: NF = args => {
   return rvNumber(n);
 };
 
-export const fnHYPGEOM_DIST: NF = args => {
-  const sampleS = numArg(args, 0);
+export const fnHYPGEOM_DIST: NativeFn = args => {
+  const sampleS = argToNumber(args[0]);
   if (sampleS.kind === RVKind.Error) {
     return sampleS;
   }
-  const numberSample = numArg(args, 1);
+  const numberSample = argToNumber(args[1]);
   if (numberSample.kind === RVKind.Error) {
     return numberSample;
   }
-  const popS = numArg(args, 2);
+  const popS = argToNumber(args[2]);
   if (popS.kind === RVKind.Error) {
     return popS;
   }
-  const numberPop = numArg(args, 3);
+  const numberPop = argToNumber(args[3]);
   if (numberPop.kind === RVKind.Error) {
     return numberPop;
   }
@@ -1167,16 +1479,16 @@ export const fnHYPGEOM_DIST: NF = args => {
   return rvNumber(sum);
 };
 
-export const fnNEGBINOM_DIST: NF = args => {
-  const numF = numArg(args, 0);
+export const fnNEGBINOM_DIST: NativeFn = args => {
+  const numF = argToNumber(args[0]);
   if (numF.kind === RVKind.Error) {
     return numF;
   }
-  const numS = numArg(args, 1);
+  const numS = argToNumber(args[1]);
   if (numS.kind === RVKind.Error) {
     return numS;
   }
-  const probS = numArg(args, 2);
+  const probS = argToNumber(args[2]);
   if (probS.kind === RVKind.Error) {
     return probS;
   }
@@ -1203,12 +1515,12 @@ export const fnNEGBINOM_DIST: NF = args => {
   return rvNumber(sum);
 };
 
-export const fnCHISQ_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnCHISQ_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
@@ -1219,25 +1531,36 @@ export const fnCHISQ_DIST: NF = args => {
   if (x.value < 0 || df.value < 1) {
     return ERRORS.NUM;
   }
-  const k = Math.floor(df.value);
+  // Excel's CHISQ.DIST accepts non-integer degrees of freedom; the
+  // incomplete-gamma formula is defined for any positive `df/2`. We used
+  // to Math.floor() df, which silently returned the chi-square for the
+  // nearest smaller integer df and produced visibly wrong densities for
+  // fractional inputs.
   if (cum.value) {
-    return rvNumber(gammaIncomplete(k / 2, x.value / 2));
+    return rvNumber(gammaIncomplete(df.value / 2, x.value / 2));
   }
-  const halfK = k / 2;
+  const halfK = df.value / 2;
   return rvNumber(Math.exp((halfK - 1) * Math.log(x.value / 2) - x.value / 2 - lnGamma(halfK)) / 2);
 };
 
-export const fnCHISQ_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnCHISQ_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
   if (p.value < 0 || p.value >= 1 || df.value < 1) {
     return ERRORS.NUM;
+  }
+  // P = 0 → x = 0 exactly. Without the short-circuit, Newton from x = df
+  // would compute `(0 - 0) / pdf` = 0 on the first iteration (fine), but
+  // rounding drift can push x negative, triggering the clamp to 0.001 and
+  // returning a non-zero result.
+  if (p.value === 0) {
+    return rvNumber(0);
   }
   let x = df.value;
   for (let iter = 0; iter < 100; iter++) {
@@ -1259,31 +1582,31 @@ export const fnCHISQ_INV: NF = args => {
   return rvNumber(x);
 };
 
-export const fnCHISQ_DIST_RT: NF = args => {
-  const x = numArg(args, 0);
+export const fnCHISQ_DIST_RT: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
   if (x.value < 0 || df.value < 1) {
     return ERRORS.NUM;
   }
-  return rvNumber(1 - gammaIncomplete(Math.floor(df.value) / 2, x.value / 2));
+  return rvNumber(1 - gammaIncomplete(df.value / 2, x.value / 2));
 };
 
-export const fnF_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnF_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df1 = numArg(args, 1);
+  const df1 = argToNumber(args[1]);
   if (df1.kind === RVKind.Error) {
     return df1;
   }
-  const df2 = numArg(args, 2);
+  const df2 = argToNumber(args[2]);
   if (df2.kind === RVKind.Error) {
     return df2;
   }
@@ -1294,8 +1617,11 @@ export const fnF_DIST: NF = args => {
   if (x.value < 0 || df1.value < 1 || df2.value < 1) {
     return ERRORS.NUM;
   }
-  const d1 = Math.floor(df1.value);
-  const d2 = Math.floor(df2.value);
+  // Accept fractional df. See CHISQ.DIST comment — the betaIncomplete/lnGamma
+  // formulas below are defined for any positive df, so there is no reason
+  // to truncate.
+  const d1 = df1.value;
+  const d2 = df2.value;
   if (cum.value) {
     return rvNumber(betaIncomplete((d1 * x.value) / (d1 * x.value + d2), d1 / 2, d2 / 2));
   }
@@ -1306,24 +1632,24 @@ export const fnF_DIST: NF = args => {
   return rvNumber(denom === 0 ? 0 : num / denom);
 };
 
-export const fnF_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnF_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const df1 = numArg(args, 1);
+  const df1 = argToNumber(args[1]);
   if (df1.kind === RVKind.Error) {
     return df1;
   }
-  const df2 = numArg(args, 2);
+  const df2 = argToNumber(args[2]);
   if (df2.kind === RVKind.Error) {
     return df2;
   }
   if (p.value < 0 || p.value >= 1 || df1.value < 1 || df2.value < 1) {
     return ERRORS.NUM;
   }
-  const d1 = Math.floor(df1.value);
-  const d2 = Math.floor(df2.value);
+  const d1 = df1.value;
+  const d2 = df2.value;
   let lo = 0;
   let hi = 1000;
   for (let i = 0; i < 100; i++) {
@@ -1341,12 +1667,12 @@ export const fnF_INV: NF = args => {
   return rvNumber((lo + hi) / 2);
 };
 
-export const fnT_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnT_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
@@ -1357,7 +1683,7 @@ export const fnT_DIST: NF = args => {
   if (df.value < 1) {
     return ERRORS.NUM;
   }
-  const v = Math.floor(df.value);
+  const v = df.value;
   if (cum.value) {
     const t = v / (v + x.value * x.value);
     const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
@@ -1369,12 +1695,12 @@ export const fnT_DIST: NF = args => {
   );
 };
 
-export const fnT_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnT_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
@@ -1382,7 +1708,7 @@ export const fnT_INV: NF = args => {
     return ERRORS.NUM;
   }
   let x = normSInv(p.value);
-  const v = Math.floor(df.value);
+  const v = df.value;
   for (let iter = 0; iter < 100; iter++) {
     const t = v / (v + x * x);
     const halfBeta = 0.5 * betaIncomplete(t, v / 2, 0.5);
@@ -1402,35 +1728,35 @@ export const fnT_INV: NF = args => {
   return rvNumber(x);
 };
 
-export const fnT_DIST_2T: NF = args => {
-  const x = numArg(args, 0);
+export const fnT_DIST_2T: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
   if (x.value < 0 || df.value < 1) {
     return ERRORS.NUM;
   }
-  const v = Math.floor(df.value);
+  const v = df.value;
   return rvNumber(betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5));
 };
 
-export const fnT_DIST_RT: NF = args => {
-  const x = numArg(args, 0);
+export const fnT_DIST_RT: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
   if (df.value < 1) {
     return ERRORS.NUM;
   }
-  const v = Math.floor(df.value);
+  const v = df.value;
   const halfBeta = 0.5 * betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5);
   // T.DIST.RT(x, df) = right-tail = 1 - CDF(x)
   // For x >= 0: right-tail = halfBeta
@@ -1438,12 +1764,12 @@ export const fnT_DIST_RT: NF = args => {
   return rvNumber(x.value >= 0 ? halfBeta : 1 - halfBeta);
 };
 
-export const fnT_INV_2T: NF = args => {
-  const p = numArg(args, 0);
+export const fnT_INV_2T: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const df = numArg(args, 1);
+  const df = argToNumber(args[1]);
   if (df.kind === RVKind.Error) {
     return df;
   }
@@ -1461,16 +1787,16 @@ export const fnT_INV_2T: NF = args => {
 // BETA, GAMMA, EXPON, WEIBULL, LOGNORM distributions
 // ============================================================================
 
-export const fnBETA_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnBETA_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const alpha = numArg(args, 1);
+  const alpha = argToNumber(args[1]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const beta = numArg(args, 2);
+  const beta = argToNumber(args[2]);
   if (beta.kind === RVKind.Error) {
     return beta;
   }
@@ -1484,7 +1810,7 @@ export const fnBETA_DIST: NF = args => {
   }
   let A = 0;
   if (args.length > 4) {
-    const aRV = numArg(args, 4);
+    const aRV = argToNumber(args[4]);
     if (aRV.kind === RVKind.Error) {
       return aRV;
     }
@@ -1492,7 +1818,7 @@ export const fnBETA_DIST: NF = args => {
   }
   let B = 1;
   if (args.length > 5) {
-    const bRV = numArg(args, 5);
+    const bRV = argToNumber(args[5]);
     if (bRV.kind === RVKind.Error) {
       return bRV;
     }
@@ -1520,22 +1846,22 @@ export const fnBETA_DIST: NF = args => {
   );
 };
 
-export const fnBETA_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnBETA_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const alpha = numArg(args, 1);
+  const alpha = argToNumber(args[1]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const beta = numArg(args, 2);
+  const beta = argToNumber(args[2]);
   if (beta.kind === RVKind.Error) {
     return beta;
   }
   let A = 0;
   if (args.length > 3) {
-    const aRV = numArg(args, 3);
+    const aRV = argToNumber(args[3]);
     if (aRV.kind === RVKind.Error) {
       return aRV;
     }
@@ -1543,7 +1869,7 @@ export const fnBETA_INV: NF = args => {
   }
   let B = 1;
   if (args.length > 4) {
-    const bRV = numArg(args, 4);
+    const bRV = argToNumber(args[4]);
     if (bRV.kind === RVKind.Error) {
       return bRV;
     }
@@ -1568,8 +1894,8 @@ export const fnBETA_INV: NF = args => {
   return rvNumber(A + ((lo + hi) / 2) * (B - A));
 };
 
-export const fnGAMMA: NF = args => {
-  const n = numArg(args, 0);
+export const fnGAMMA: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (n.kind === RVKind.Error) {
     return n;
   }
@@ -1579,8 +1905,8 @@ export const fnGAMMA: NF = args => {
   return rvNumber(gammaFn(n.value));
 };
 
-export const fnGAMMALN: NF = args => {
-  const n = numArg(args, 0);
+export const fnGAMMALN: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (n.kind === RVKind.Error) {
     return n;
   }
@@ -1590,16 +1916,16 @@ export const fnGAMMALN: NF = args => {
   return rvNumber(lnGamma(n.value));
 };
 
-export const fnGAMMA_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnGAMMA_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const alpha = numArg(args, 1);
+  const alpha = argToNumber(args[1]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const beta = numArg(args, 2);
+  const beta = argToNumber(args[2]);
   if (beta.kind === RVKind.Error) {
     return beta;
   }
@@ -1623,16 +1949,16 @@ export const fnGAMMA_DIST: NF = args => {
   );
 };
 
-export const fnGAMMA_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnGAMMA_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const alpha = numArg(args, 1);
+  const alpha = argToNumber(args[1]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const beta = numArg(args, 2);
+  const beta = argToNumber(args[2]);
   if (beta.kind === RVKind.Error) {
     return beta;
   }
@@ -1655,12 +1981,12 @@ export const fnGAMMA_INV: NF = args => {
   return rvNumber((lo + hi) / 2);
 };
 
-export const fnEXPON_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnEXPON_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const lambda = numArg(args, 1);
+  const lambda = argToNumber(args[1]);
   if (lambda.kind === RVKind.Error) {
     return lambda;
   }
@@ -1678,16 +2004,16 @@ export const fnEXPON_DIST: NF = args => {
   );
 };
 
-export const fnWEIBULL_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnWEIBULL_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const alpha = numArg(args, 1);
+  const alpha = argToNumber(args[1]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
   }
-  const beta = numArg(args, 2);
+  const beta = argToNumber(args[2]);
   if (beta.kind === RVKind.Error) {
     return beta;
   }
@@ -1708,16 +2034,16 @@ export const fnWEIBULL_DIST: NF = args => {
   );
 };
 
-export const fnLOGNORM_DIST: NF = args => {
-  const x = numArg(args, 0);
+export const fnLOGNORM_DIST: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
-  const stddev = numArg(args, 2);
+  const stddev = argToNumber(args[2]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
@@ -1735,16 +2061,16 @@ export const fnLOGNORM_DIST: NF = args => {
   return rvNumber(normSPdf(z) / (x.value * stddev.value));
 };
 
-export const fnLOGNORM_INV: NF = args => {
-  const p = numArg(args, 0);
+export const fnLOGNORM_INV: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
-  const stddev = numArg(args, 2);
+  const stddev = argToNumber(args[2]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
@@ -1754,13 +2080,13 @@ export const fnLOGNORM_INV: NF = args => {
   return rvNumber(Math.exp(mean.value + stddev.value * normSInv(p.value)));
 };
 
-export const fnPHI: NF = args => {
-  const x = numArg(args, 0);
+export const fnPHI: NativeFn = args => {
+  const x = argToNumber(args[0]);
   return x.kind === RVKind.Error ? x : rvNumber(normSPdf(x.value));
 };
 
-export const fnGAUSS: NF = args => {
-  const z = numArg(args, 0);
+export const fnGAUSS: NativeFn = args => {
+  const z = argToNumber(args[0]);
   return z.kind === RVKind.Error ? z : rvNumber(normSDist(z.value) - 0.5);
 };
 
@@ -1769,6 +2095,12 @@ export const fnGAUSS: NF = args => {
 // ============================================================================
 
 function erfFn(x: number): number {
+  // Exact at 0 — the rational approximation below leaves a ~7e-10 drift at
+  // t = 1 / (1 + p·0) = 1, which is visible to callers that expect
+  // `ERF(0) === 0` (and especially to `ERFC(0) === 1`).
+  if (x === 0) {
+    return 0;
+  }
   const a1 = 0.254829592;
   const a2 = -0.284496736;
   const a3 = 1.421413741;
@@ -1782,13 +2114,13 @@ function erfFn(x: number): number {
   return sign * y;
 }
 
-export const fnERF: NF = args => {
-  const lower = numArg(args, 0);
+export const fnERF: NativeFn = args => {
+  const lower = argToNumber(args[0]);
   if (lower.kind === RVKind.Error) {
     return lower;
   }
   if (args.length > 1) {
-    const upper = numArg(args, 1);
+    const upper = argToNumber(args[1]);
     if (upper.kind === RVKind.Error) {
       return upper;
     }
@@ -1797,21 +2129,21 @@ export const fnERF: NF = args => {
   return rvNumber(erfFn(lower.value));
 };
 
-export const fnERFC: NF = args => {
-  const x = numArg(args, 0);
+export const fnERFC: NativeFn = args => {
+  const x = argToNumber(args[0]);
   return x.kind === RVKind.Error ? x : rvNumber(1 - erfFn(x.value));
 };
 
-export const fnSTANDARDIZE: NF = args => {
-  const x = numArg(args, 0);
+export const fnSTANDARDIZE: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const mean = numArg(args, 1);
+  const mean = argToNumber(args[1]);
   if (mean.kind === RVKind.Error) {
     return mean;
   }
-  const stddev = numArg(args, 2);
+  const stddev = argToNumber(args[2]);
   if (stddev.kind === RVKind.Error) {
     return stddev;
   }
@@ -1825,7 +2157,7 @@ export const fnSTANDARDIZE: NF = args => {
 // Array-returning functions: FREQUENCY, GROWTH, TREND, LINEST, LOGEST
 // ============================================================================
 
-export const fnFREQUENCY: NF = args => {
+export const fnFREQUENCY: NativeFn = args => {
   if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
     return ERRORS.VALUE;
   }
@@ -1834,235 +2166,668 @@ export const fnFREQUENCY: NF = args => {
   if (dataErr) {
     return dataErr;
   }
-  const data = rawData as number[];
+  const data = (rawData as NumberValue[]).map(n => n.value);
   const rawBins = flattenNumbers([args[1]]);
   const binsErr = firstError(rawBins);
   if (binsErr) {
     return binsErr;
   }
-  const bins = rawBins as number[];
-  bins.sort((a, b) => a - b);
+  const bins = (rawBins as NumberValue[]).map(n => n.value);
+  // IMPORTANT: do NOT sort `bins`. Excel's FREQUENCY bucketises data into
+  // the bins as the user supplied them — both the output count order and
+  // the bucket boundaries follow the original sequence. Sorting would
+  // silently reshuffle the result array, which is a common historical
+  // implementation mistake.
+  //
+  // For each datum we assign it to the first bin `i` whose upper bound
+  // satisfies `data <= bins[i]`; if no such bin exists the datum falls
+  // into the overflow bucket at index `bins.length`. This matches Excel's
+  // semantics for any bin order (monotonic or not).
   const result: ScalarValue[][] = [];
-  for (let i = 0; i <= bins.length; i++) {
-    let count = 0;
-    for (const d of data) {
-      if (i === 0 && d <= bins[0]) {
-        count++;
-      } else if (i === bins.length && d > bins[bins.length - 1]) {
-        count++;
-      } else if (i > 0 && i < bins.length && d > bins[i - 1] && d <= bins[i]) {
-        count++;
+  const counts = new Array<number>(bins.length + 1).fill(0);
+  for (const d of data) {
+    let assigned = false;
+    for (let i = 0; i < bins.length; i++) {
+      if (d <= bins[i]) {
+        counts[i]++;
+        assigned = true;
+        break;
       }
     }
-    result.push([rvNumber(count)]);
+    if (!assigned) {
+      counts[bins.length]++;
+    }
+  }
+  for (const c of counts) {
+    result.push([rvNumber(c)]);
   }
   return rvArray(result);
 };
 
-export const fnGROWTH: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
-  }
-  const rawY = flattenNumbers([args[0]]);
-  const yErr = firstError(rawY);
-  if (yErr) {
-    return yErr;
-  }
-  const knownY = rawY as number[];
-  let knownX: number[];
-  if (args.length > 1 && isArrayArg(args[1])) {
-    const rawX = flattenNumbers([args[1]]);
-    const xErr = firstError(rawX);
-    if (xErr) {
-      return xErr;
+// ============================================================================
+// Multivariate regression helpers (LINEST / LOGEST / TREND / GROWTH)
+// ============================================================================
+
+/**
+ * Extract a numeric matrix from an ArrayValue and preserve orientation.
+ *
+ * Excel's regression family accepts both row vectors and column vectors for the
+ * dependent variable `y` and for each independent variable column in `X`. We
+ * preserve whether the input was laid out by rows (one observation per row) or
+ * by columns (one observation per column) so we can match the output shape.
+ *
+ * Returns:
+ *   - `rows` / `cols`: the numeric matrix as a row-major 2D array of numbers
+ *   - `orientation`: "row" if the original array had one row (shape 1×N),
+ *                    "col" if one column (shape M×1),
+ *                    "matrix" otherwise
+ *   - `err`: the first #-error encountered, if any (non-numeric cells → #VALUE!)
+ */
+type Matrix = { data: number[][]; rows: number; cols: number };
+type Orientation = "row" | "col" | "matrix";
+
+/** Narrow `T | ErrorValue` to `ErrorValue`. */
+function isErr<T extends object>(v: T | ErrorValue): v is ErrorValue {
+  return (v as { kind?: number }).kind === RVKind.Error;
+}
+
+function extractMatrix(arg: RuntimeValue): { m: Matrix; orient: Orientation } | ErrorValue {
+  if (arg.kind !== RVKind.Array) {
+    const sv = topLeft(arg);
+    if (sv.kind === RVKind.Error) {
+      return sv;
     }
-    knownX = rawX as number[];
-  } else {
-    knownX = knownY.map((_, i) => i + 1);
-  }
-  let newX: number[];
-  if (args.length > 2 && isArrayArg(args[2])) {
-    const rawNewX = flattenNumbers([args[2]]);
-    const newXErr = firstError(rawNewX);
-    if (newXErr) {
-      return newXErr;
+    const n = toNumberRV(sv);
+    if (n.kind === RVKind.Error) {
+      return n;
     }
-    newX = rawNewX as number[];
+    return { m: { data: [[n.value]], rows: 1, cols: 1 }, orient: "row" };
+  }
+  const data: number[][] = [];
+  for (const row of arg.rows) {
+    const out: number[] = [];
+    for (const cell of row) {
+      if (cell.kind === RVKind.Error) {
+        return cell;
+      }
+      if (cell.kind === RVKind.Number) {
+        out.push(cell.value);
+      } else if (cell.kind === RVKind.Blank) {
+        return ERRORS.VALUE;
+      } else {
+        const n = toNumberRV(cell);
+        if (n.kind === RVKind.Error) {
+          return n;
+        }
+        out.push(n.value);
+      }
+    }
+    data.push(out);
+  }
+  const rows = arg.height;
+  const cols = arg.width;
+  const orient: Orientation = rows === 1 ? "row" : cols === 1 ? "col" : "matrix";
+  return { m: { data, rows, cols }, orient };
+}
+
+/**
+ * Normalize the `known_x's` argument to a design matrix X of shape [n, k],
+ * where n is the number of observations and k is the number of predictor
+ * variables. Excel infers k from the orientation of known_x's: when y is a
+ * column vector (or square), each column of known_x's is one predictor; when
+ * y is a row vector, each row of known_x's is one predictor.
+ */
+function buildDesignMatrix(
+  m: Matrix,
+  nObs: number,
+  yOrient: Orientation
+): { X: number[][]; k: number; xOrient: Orientation } | ErrorValue {
+  // Decide orientation of predictors based on y's orientation and matrix shape
+  let byRows: boolean;
+  let xOrient: Orientation;
+  if (m.rows === 1) {
+    // Row vector of length n: single predictor, one observation per column
+    byRows = false;
+    xOrient = "row";
+  } else if (m.cols === 1) {
+    // Column vector of length n: single predictor, one observation per row
+    byRows = true;
+    xOrient = "col";
+  } else if (yOrient === "row") {
+    // y is a row vector: predictors are rows of known_x's
+    byRows = false;
+    xOrient = "row";
   } else {
-    newX = knownX;
+    // y is a column/matrix: predictors are columns of known_x's
+    byRows = true;
+    xOrient = "col";
   }
-  const n = Math.min(knownX.length, knownY.length);
-  if (n < 1) {
-    return ERRORS.VALUE;
+  const n = byRows ? m.rows : m.cols;
+  const k = byRows ? m.cols : m.rows;
+  if (n !== nObs) {
+    return ERRORS.REF;
   }
-  let sumX = 0,
-    sumLnY = 0,
-    sumXLnY = 0,
-    sumX2 = 0;
+  const X: number[][] = [];
   for (let i = 0; i < n; i++) {
-    if (knownY[i] <= 0) {
-      return ERRORS.NUM;
+    const row: number[] = [];
+    for (let j = 0; j < k; j++) {
+      row.push(byRows ? m.data[i][j] : m.data[j][i]);
     }
-    sumX += knownX[i];
-    sumLnY += Math.log(knownY[i]);
-    sumXLnY += knownX[i] * Math.log(knownY[i]);
-    sumX2 += knownX[i] * knownX[i];
+    X.push(row);
   }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) {
-    return ERRORS.DIV0;
+  return { X, k, xOrient };
+}
+
+/** Solve (A^T A) β = A^T b via Gauss–Jordan on the augmented matrix. */
+function solveNormalEquations(A: number[][], b: number[]): number[] | null {
+  const n = A.length;
+  const k = A[0]?.length ?? 0;
+  // Build augmented [AᵀA | Aᵀb]
+  const aug: number[][] = Array.from({ length: k }, () => new Array<number>(k + 1).fill(0));
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j < k; j++) {
+      let s = 0;
+      for (let r = 0; r < n; r++) {
+        s += A[r][i] * A[r][j];
+      }
+      aug[i][j] = s;
+    }
+    let sb = 0;
+    for (let r = 0; r < n; r++) {
+      sb += A[r][i] * b[r];
+    }
+    aug[i][k] = sb;
   }
-  const lnM = (n * sumXLnY - sumX * sumLnY) / denom;
-  const lnB = (sumLnY - lnM * sumX) / n;
-  const rows: ScalarValue[][] = newX.map(x => [rvNumber(Math.exp(lnB + lnM * x))]);
-  return rvArray(rows);
+  // Gauss–Jordan with partial pivoting
+  for (let i = 0; i < k; i++) {
+    let piv = i;
+    for (let r = i + 1; r < k; r++) {
+      if (Math.abs(aug[r][i]) > Math.abs(aug[piv][i])) {
+        piv = r;
+      }
+    }
+    if (Math.abs(aug[piv][i]) < 1e-12) {
+      return null;
+    }
+    if (piv !== i) {
+      [aug[i], aug[piv]] = [aug[piv], aug[i]];
+    }
+    const d = aug[i][i];
+    for (let j = i; j <= k; j++) {
+      aug[i][j] /= d;
+    }
+    for (let r = 0; r < k; r++) {
+      if (r === i) {
+        continue;
+      }
+      const f = aug[r][i];
+      if (f === 0) {
+        continue;
+      }
+      for (let j = i; j <= k; j++) {
+        aug[r][j] -= f * aug[i][j];
+      }
+    }
+  }
+  return aug.map(row => row[k]);
+}
+
+/** Compute inverse of k×k symmetric positive-definite matrix via Gauss–Jordan. */
+function invertSquareMatrix(M: number[][]): number[][] | null {
+  const k = M.length;
+  const aug: number[][] = Array.from({ length: k }, (_, i) => {
+    const row = new Array<number>(2 * k).fill(0);
+    for (let j = 0; j < k; j++) {
+      row[j] = M[i][j];
+    }
+    row[k + i] = 1;
+    return row;
+  });
+  for (let i = 0; i < k; i++) {
+    let piv = i;
+    for (let r = i + 1; r < k; r++) {
+      if (Math.abs(aug[r][i]) > Math.abs(aug[piv][i])) {
+        piv = r;
+      }
+    }
+    if (Math.abs(aug[piv][i]) < 1e-12) {
+      return null;
+    }
+    if (piv !== i) {
+      [aug[i], aug[piv]] = [aug[piv], aug[i]];
+    }
+    const d = aug[i][i];
+    for (let j = 0; j < 2 * k; j++) {
+      aug[i][j] /= d;
+    }
+    for (let r = 0; r < k; r++) {
+      if (r === i) {
+        continue;
+      }
+      const f = aug[r][i];
+      if (f === 0) {
+        continue;
+      }
+      for (let j = 0; j < 2 * k; j++) {
+        aug[r][j] -= f * aug[i][j];
+      }
+    }
+  }
+  return aug.map(row => row.slice(k));
+}
+
+/**
+ * Common least-squares core used by LINEST / LOGEST / TREND / GROWTH.
+ *
+ * Builds the design matrix (optionally augmented with an intercept column),
+ * solves the normal equations for the coefficient vector, and — when stats are
+ * requested — also computes the regression statistics block that Excel emits
+ * as a 5×(k+1) matrix.
+ *
+ * `logMode` indicates a LOGEST/GROWTH call: `y` must be positive and is
+ * replaced by `ln(y)` before regression. Coefficients are kept in log space
+ * and reported back un-exponentiated (the callers exp them where needed).
+ */
+interface LeastSquaresInput {
+  /** y values as a flat vector of length n (in the original domain). */
+  y: number[];
+  /** Design matrix of regressor columns [n, k] (without intercept column). */
+  X: number[][];
+  /** Whether an intercept column (all-ones) should be included. */
+  includeIntercept: boolean;
+  logMode: boolean;
+}
+interface LeastSquaresResult {
+  /** Coefficients ordered as [mk, m(k-1), ..., m1, b] to match Excel's output. */
+  coeffs: number[];
+  /** SE of each coefficient, same order as `coeffs`. Undefined when stats not computed. */
+  seCoeffs?: number[];
+  /** R² */
+  r2?: number;
+  /** Standard error of the y estimate (sey). */
+  sey?: number;
+  /** F statistic. */
+  fStat?: number;
+  /** Residual degrees of freedom. */
+  df?: number;
+  /** Regression sum of squares. */
+  ssReg?: number;
+  /** Residual sum of squares. */
+  ssResid?: number;
+}
+function runLeastSquares(
+  input: LeastSquaresInput,
+  withStats: boolean
+): LeastSquaresResult | ErrorValue {
+  const { includeIntercept, logMode } = input;
+  const n = input.y.length;
+  const k = input.X[0]?.length ?? 0;
+  if (n < 1 || k < 1) {
+    return ERRORS.VALUE;
+  }
+
+  // y in log domain for LOGEST/GROWTH
+  const y = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const yi = input.y[i];
+    if (logMode) {
+      if (yi <= 0) {
+        return ERRORS.NUM;
+      }
+      y[i] = Math.log(yi);
+    } else {
+      y[i] = yi;
+    }
+  }
+
+  // Augment X with intercept column (as the last column → Excel puts b at the end)
+  const kAug = includeIntercept ? k + 1 : k;
+  const A: number[][] = new Array<number[]>(n);
+  for (let i = 0; i < n; i++) {
+    const row = new Array<number>(kAug);
+    for (let j = 0; j < k; j++) {
+      row[j] = input.X[i][j];
+    }
+    if (includeIntercept) {
+      row[k] = 1;
+    }
+    A[i] = row;
+  }
+
+  const beta = solveNormalEquations(A, y);
+  if (beta === null) {
+    return ERRORS.NUM;
+  }
+
+  // Excel orders coefficients as [mk, m(k-1), ..., m1, b] — reverse the slope
+  // portion but keep the intercept last.
+  const coeffs: number[] = [];
+  for (let j = k - 1; j >= 0; j--) {
+    coeffs.push(beta[j]);
+  }
+  if (includeIntercept) {
+    coeffs.push(beta[k]);
+  } else {
+    coeffs.push(0);
+  }
+
+  if (!withStats) {
+    return { coeffs };
+  }
+
+  // Residuals, sums of squares
+  const yhat = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let j = 0; j < kAug; j++) {
+      s += A[i][j] * beta[j];
+    }
+    yhat[i] = s;
+  }
+  let ybar = 0;
+  if (includeIntercept) {
+    for (const v of y) {
+      ybar += v;
+    }
+    ybar /= n;
+  }
+  let ssResid = 0,
+    ssTot = 0,
+    ssReg = 0;
+  for (let i = 0; i < n; i++) {
+    ssResid += (y[i] - yhat[i]) ** 2;
+    ssTot += (y[i] - ybar) ** 2;
+    ssReg += (yhat[i] - ybar) ** 2;
+  }
+  const df = n - kAug;
+  const r2 = ssTot === 0 ? 1 : 1 - ssResid / ssTot;
+  const sey = df > 0 ? Math.sqrt(ssResid / df) : 0;
+  const fStat = df > 0 && ssResid > 0 ? ssReg / k / (ssResid / df) : Number.POSITIVE_INFINITY;
+
+  // Standard errors: diag(sey² · (AᵀA)⁻¹)
+  const AtA: number[][] = Array.from({ length: kAug }, () => new Array<number>(kAug).fill(0));
+  for (let i = 0; i < kAug; i++) {
+    for (let j = 0; j < kAug; j++) {
+      let s = 0;
+      for (let r = 0; r < n; r++) {
+        s += A[r][i] * A[r][j];
+      }
+      AtA[i][j] = s;
+    }
+  }
+  const inv = invertSquareMatrix(AtA);
+  const seCoeffs: number[] = [];
+  if (inv) {
+    for (let j = k - 1; j >= 0; j--) {
+      const v = sey * sey * inv[j][j];
+      seCoeffs.push(v >= 0 ? Math.sqrt(v) : 0);
+    }
+    if (includeIntercept) {
+      const v = sey * sey * inv[k][k];
+      seCoeffs.push(v >= 0 ? Math.sqrt(v) : 0);
+    } else {
+      seCoeffs.push(0);
+    }
+  } else {
+    // Cannot invert — fill with NaN per Excel behavior (but we use 0 since
+    // downstream consumers expect numbers).
+    for (let j = 0; j <= k; j++) {
+      seCoeffs.push(0);
+    }
+  }
+
+  return { coeffs, seCoeffs, r2, sey, fStat, df, ssReg, ssResid };
+}
+
+/** Build Excel's 5×(k+1) LINEST stats block. */
+function buildStatsBlock(res: LeastSquaresResult): ScalarValue[][] {
+  const kPlus1 = res.coeffs.length;
+  const row1 = res.coeffs.map(v => rvNumber(v));
+  const row2: ScalarValue[] = (res.seCoeffs ?? []).map(v => rvNumber(v));
+  // Row 3: r² in col 0, sey in col 1, then #N/A for k+1 ≥ 3
+  const row3: ScalarValue[] = new Array<ScalarValue>(kPlus1).fill(ERRORS.NA);
+  row3[0] = rvNumber(res.r2 ?? 0);
+  if (kPlus1 >= 2) {
+    row3[1] = rvNumber(res.sey ?? 0);
+  }
+  // Row 4: F in col 0, df in col 1, then #N/A
+  const row4: ScalarValue[] = new Array<ScalarValue>(kPlus1).fill(ERRORS.NA);
+  row4[0] = rvNumber(res.fStat ?? 0);
+  if (kPlus1 >= 2) {
+    row4[1] = rvNumber(res.df ?? 0);
+  }
+  // Row 5: ssReg in col 0, ssResid in col 1, then #N/A
+  const row5: ScalarValue[] = new Array<ScalarValue>(kPlus1).fill(ERRORS.NA);
+  row5[0] = rvNumber(res.ssReg ?? 0);
+  if (kPlus1 >= 2) {
+    row5[1] = rvNumber(res.ssResid ?? 0);
+  }
+  return [row1, row2, row3, row4, row5];
+}
+
+/** Parse known_y / known_x from args, returning design matrix and orientation info. */
+function parseRegressionInputs(
+  args: RuntimeValue[]
+):
+  | { y: number[]; X: number[][]; k: number; yOrient: Orientation; xOrient: Orientation }
+  | ErrorValue {
+  if (!args[0]) {
+    return ERRORS.VALUE;
+  }
+  const yInfo = extractMatrix(args[0]);
+  if (isErr(yInfo)) {
+    return yInfo;
+  }
+  const y: number[] = [];
+  for (const row of yInfo.m.data) {
+    for (const v of row) {
+      y.push(v);
+    }
+  }
+  const nObs = y.length;
+  if (nObs < 1) {
+    return ERRORS.VALUE;
+  }
+  if (args.length > 1 && args[1].kind !== RVKind.Blank) {
+    const xInfo = extractMatrix(args[1]);
+    if (isErr(xInfo)) {
+      return xInfo;
+    }
+    const built = buildDesignMatrix(xInfo.m, nObs, yInfo.orient);
+    if (isErr(built)) {
+      return built;
+    }
+    return { y, X: built.X, k: built.k, yOrient: yInfo.orient, xOrient: built.xOrient };
+  }
+  // Default known_x's = 1..n as a column vector
+  const X: number[][] = y.map((_, i) => [i + 1]);
+  return { y, X, k: 1, yOrient: yInfo.orient, xOrient: yInfo.orient };
+}
+
+/** Parse new_x (third arg of TREND/GROWTH). Returns new-X matrix [m, k] and output orientation. */
+function parseNewX(
+  arg: RuntimeValue | undefined,
+  fallback: number[][],
+  k: number,
+  xOrient: Orientation
+): { X: number[][]; outOrient: Orientation } | ErrorValue {
+  if (!arg || arg.kind === RVKind.Blank) {
+    return { X: fallback, outOrient: xOrient };
+  }
+  const info = extractMatrix(arg);
+  if (isErr(info)) {
+    return info;
+  }
+  const m = info.m;
+  // Determine orientation: need one of the dimensions to equal k (the number of predictors)
+  if (k === 1) {
+    // Single predictor → flatten whatever shape was given
+    const X: number[][] = [];
+    for (const row of m.data) {
+      for (const v of row) {
+        X.push([v]);
+      }
+    }
+    const outOrient: Orientation = m.rows === 1 ? "row" : "col";
+    return { X, outOrient };
+  }
+  // Multi-predictor: match orientation with known_x's
+  if (xOrient === "col" || xOrient === "matrix") {
+    // Each row is one observation with k columns of predictors
+    if (m.cols !== k) {
+      return ERRORS.REF;
+    }
+    return { X: m.data.map(r => r.slice()), outOrient: "col" };
+  }
+  // xOrient === "row": each column is one observation
+  if (m.rows !== k) {
+    return ERRORS.REF;
+  }
+  const X: number[][] = [];
+  for (let c = 0; c < m.cols; c++) {
+    const row: number[] = [];
+    for (let r = 0; r < k; r++) {
+      row.push(m.data[r][c]);
+    }
+    X.push(row);
+  }
+  return { X, outOrient: "row" };
+}
+
+/** Emit an array of predictions matching the requested output orientation. */
+function emitPredictions(values: number[], outOrient: Orientation): RuntimeValue {
+  if (outOrient === "row") {
+    return rvArray([values.map(v => rvNumber(v))]);
+  }
+  return rvArray(values.map(v => [rvNumber(v)]));
+}
+
+export const fnGROWTH: NativeFn = args => {
+  const parsed = parseRegressionInputs(args);
+  if (isErr(parsed)) {
+    return parsed;
+  }
+  const { y, X, k, xOrient } = parsed;
+  const lsq = runLeastSquares({ y, X, includeIntercept: true, logMode: true }, false);
+  if (isErr(lsq)) {
+    return lsq;
+  }
+  // coeffs order: [mk, ..., m1, b]; slopes in log space correspond to positions [0..k-1]
+  const b = lsq.coeffs[k];
+  const slopes: number[] = new Array<number>(k);
+  for (let j = 0; j < k; j++) {
+    slopes[j] = lsq.coeffs[k - 1 - j];
+  } // m1..mk
+  const newInfo = parseNewX(args[2], X, k, xOrient);
+  if (isErr(newInfo)) {
+    return newInfo;
+  }
+  const preds: number[] = newInfo.X.map(row => {
+    let lp = b;
+    for (let j = 0; j < k; j++) {
+      lp += slopes[j] * row[j];
+    }
+    return Math.exp(lp);
+  });
+  return emitPredictions(preds, newInfo.outOrient);
 };
 
-export const fnTREND: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
+export const fnTREND: NativeFn = args => {
+  const parsed = parseRegressionInputs(args);
+  if (isErr(parsed)) {
+    return parsed;
   }
-  const rawY = flattenNumbers([args[0]]);
-  const yErr = firstError(rawY);
-  if (yErr) {
-    return yErr;
+  const { y, X, k, xOrient } = parsed;
+  const lsq = runLeastSquares({ y, X, includeIntercept: true, logMode: false }, false);
+  if (isErr(lsq)) {
+    return lsq;
   }
-  const knownY = rawY as number[];
-  let knownX: number[];
-  if (args.length > 1 && isArrayArg(args[1])) {
-    const rawX = flattenNumbers([args[1]]);
-    const xErr = firstError(rawX);
-    if (xErr) {
-      return xErr;
+  const b = lsq.coeffs[k];
+  const slopes: number[] = new Array<number>(k);
+  for (let j = 0; j < k; j++) {
+    slopes[j] = lsq.coeffs[k - 1 - j];
+  }
+  const newInfo = parseNewX(args[2], X, k, xOrient);
+  if (isErr(newInfo)) {
+    return newInfo;
+  }
+  const preds: number[] = newInfo.X.map(row => {
+    let p = b;
+    for (let j = 0; j < k; j++) {
+      p += slopes[j] * row[j];
     }
-    knownX = rawX as number[];
-  } else {
-    knownX = knownY.map((_, i) => i + 1);
-  }
-  let newX: number[];
-  if (args.length > 2 && isArrayArg(args[2])) {
-    const rawNewX = flattenNumbers([args[2]]);
-    const newXErr = firstError(rawNewX);
-    if (newXErr) {
-      return newXErr;
-    }
-    newX = rawNewX as number[];
-  } else {
-    newX = knownX;
-  }
-  const n = Math.min(knownX.length, knownY.length);
-  if (n < 1) {
-    return ERRORS.VALUE;
-  }
-  let sumX = 0,
-    sumY = 0,
-    sumXY = 0,
-    sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += knownX[i];
-    sumY += knownY[i];
-    sumXY += knownX[i] * knownY[i];
-    sumX2 += knownX[i] * knownX[i];
-  }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) {
-    return ERRORS.DIV0;
-  }
-  const m = (n * sumXY - sumX * sumY) / denom;
-  const b = (sumY - m * sumX) / n;
-  const rows: ScalarValue[][] = newX.map(x => [rvNumber(b + m * x)]);
-  return rvArray(rows);
+    return p;
+  });
+  return emitPredictions(preds, newInfo.outOrient);
 };
 
-export const fnLINEST: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
+export const fnLINEST: NativeFn = args => {
+  const parsed = parseRegressionInputs(args);
+  if (isErr(parsed)) {
+    return parsed;
   }
-  const rawY = flattenNumbers([args[0]]);
-  const yErr = firstError(rawY);
-  if (yErr) {
-    return yErr;
-  }
-  const knownY = rawY as number[];
-  let knownX: number[];
-  if (args.length > 1 && isArrayArg(args[1])) {
-    const rawX = flattenNumbers([args[1]]);
-    const xErr = firstError(rawX);
-    if (xErr) {
-      return xErr;
+  const { y, X } = parsed;
+  // 3rd arg: const (default TRUE — include intercept). FALSE → force intercept = 0.
+  let includeIntercept = true;
+  if (args.length > 2 && args[2].kind !== RVKind.Blank) {
+    const b = toBooleanRV(topLeft(args[2]));
+    if (b.kind === RVKind.Error) {
+      return b;
     }
-    knownX = rawX as number[];
-  } else {
-    knownX = knownY.map((_, i) => i + 1);
+    includeIntercept = b.value;
   }
-  const n = Math.min(knownX.length, knownY.length);
-  if (n < 1) {
-    return ERRORS.VALUE;
+  // 4th arg: stats (default FALSE).
+  let withStats = false;
+  if (args.length > 3 && args[3].kind !== RVKind.Blank) {
+    const b = toBooleanRV(topLeft(args[3]));
+    if (b.kind === RVKind.Error) {
+      return b;
+    }
+    withStats = b.value;
   }
-  let sumX = 0,
-    sumY = 0,
-    sumXY = 0,
-    sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += knownX[i];
-    sumY += knownY[i];
-    sumXY += knownX[i] * knownY[i];
-    sumX2 += knownX[i] * knownX[i];
+  const lsq = runLeastSquares({ y, X, includeIntercept, logMode: false }, withStats);
+  if (isErr(lsq)) {
+    return lsq;
   }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) {
-    return ERRORS.DIV0;
+  if (withStats) {
+    return rvArray(buildStatsBlock(lsq));
   }
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const intercept = (sumY - slope * sumX) / n;
-  return rvArray([[rvNumber(slope), rvNumber(intercept)]]);
+  return rvArray([lsq.coeffs.map(v => rvNumber(v))]);
 };
 
-export const fnLOGEST: NF = args => {
-  if (!isArrayArg(args[0])) {
-    return ERRORS.VALUE;
+export const fnLOGEST: NativeFn = args => {
+  const parsed = parseRegressionInputs(args);
+  if (isErr(parsed)) {
+    return parsed;
   }
-  const rawY = flattenNumbers([args[0]]);
-  const yErr = firstError(rawY);
-  if (yErr) {
-    return yErr;
-  }
-  const knownY = rawY as number[];
-  let knownX: number[];
-  if (args.length > 1 && isArrayArg(args[1])) {
-    const rawX = flattenNumbers([args[1]]);
-    const xErr = firstError(rawX);
-    if (xErr) {
-      return xErr;
+  const { y, X } = parsed;
+  let includeIntercept = true;
+  if (args.length > 2 && args[2].kind !== RVKind.Blank) {
+    const b = toBooleanRV(topLeft(args[2]));
+    if (b.kind === RVKind.Error) {
+      return b;
     }
-    knownX = rawX as number[];
-  } else {
-    knownX = knownY.map((_, i) => i + 1);
+    includeIntercept = b.value;
   }
-  const n = Math.min(knownX.length, knownY.length);
-  if (n < 1) {
-    return ERRORS.VALUE;
-  }
-  let sumX = 0,
-    sumLnY = 0,
-    sumXLnY = 0,
-    sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    if (knownY[i] <= 0) {
-      return ERRORS.NUM;
+  let withStats = false;
+  if (args.length > 3 && args[3].kind !== RVKind.Blank) {
+    const b = toBooleanRV(topLeft(args[3]));
+    if (b.kind === RVKind.Error) {
+      return b;
     }
-    sumX += knownX[i];
-    sumLnY += Math.log(knownY[i]);
-    sumXLnY += knownX[i] * Math.log(knownY[i]);
-    sumX2 += knownX[i] * knownX[i];
+    withStats = b.value;
   }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) {
-    return ERRORS.DIV0;
+  const lsq = runLeastSquares({ y, X, includeIntercept, logMode: true }, withStats);
+  if (isErr(lsq)) {
+    return lsq;
   }
-  const lnM = (n * sumXLnY - sumX * sumLnY) / denom;
-  const lnB = (sumLnY - lnM * sumX) / n;
-  return rvArray([[rvNumber(Math.exp(lnM)), rvNumber(Math.exp(lnB))]]);
+  if (withStats) {
+    // LOGEST reports exp-transformed slopes/intercept in row 1 but keeps rows 2-5 as LINEST
+    const block = buildStatsBlock(lsq);
+    block[0] = lsq.coeffs.map(v => rvNumber(Math.exp(v)));
+    return rvArray(block);
+  }
+  return rvArray([lsq.coeffs.map(v => rvNumber(Math.exp(v)))]);
 };
 
 // ============================================================================
@@ -2077,24 +2842,28 @@ export const fnLOGEST: NF = args => {
  * `I(d2/(d2 + d1*x), d2/2, d1/2)`, which avoids subtracting from 1 and
  * is numerically stable in the upper tail.
  */
-export const fnF_DIST_RT: NF = args => {
-  const x = numArg(args, 0);
+export const fnF_DIST_RT: NativeFn = args => {
+  const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
   }
-  const df1 = numArg(args, 1);
+  const df1 = argToNumber(args[1]);
   if (df1.kind === RVKind.Error) {
     return df1;
   }
-  const df2 = numArg(args, 2);
+  const df2 = argToNumber(args[2]);
   if (df2.kind === RVKind.Error) {
     return df2;
   }
-  if (x.value <= 0 || df1.value < 1 || df2.value < 1) {
+  if (x.value < 0 || df1.value < 1 || df2.value < 1) {
     return ERRORS.NUM;
   }
-  const d1 = Math.floor(df1.value);
-  const d2 = Math.floor(df2.value);
+  // At x=0 the right tail equals 1 (entire distribution above 0).
+  if (x.value === 0) {
+    return rvNumber(1);
+  }
+  const d1 = df1.value;
+  const d2 = df2.value;
   // Right tail via symmetry: I(d2/(d2 + d1*x), d2/2, d1/2).
   return rvNumber(betaIncomplete(d2 / (d2 + d1 * x.value), d2 / 2, d1 / 2));
 };
@@ -2104,24 +2873,24 @@ export const fnF_DIST_RT: NF = args => {
  * Returns x such that P(F > x) = p. Implemented via binary search on the
  * right-tail CDF (monotonically decreasing from 1 at x=0 to 0 at x=∞).
  */
-export const fnF_INV_RT: NF = args => {
-  const p = numArg(args, 0);
+export const fnF_INV_RT: NativeFn = args => {
+  const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
   }
-  const df1 = numArg(args, 1);
+  const df1 = argToNumber(args[1]);
   if (df1.kind === RVKind.Error) {
     return df1;
   }
-  const df2 = numArg(args, 2);
+  const df2 = argToNumber(args[2]);
   if (df2.kind === RVKind.Error) {
     return df2;
   }
   if (p.value <= 0 || p.value > 1 || df1.value < 1 || df2.value < 1) {
     return ERRORS.NUM;
   }
-  const d1 = Math.floor(df1.value);
-  const d2 = Math.floor(df2.value);
+  const d1 = df1.value;
+  const d2 = df2.value;
   // Right-tail CDF at x: I(d2/(d2 + d1*x), d2/2, d1/2), decreases with x.
   let lo = 0;
   let hi = 1e6;
@@ -2148,13 +2917,13 @@ export const fnF_INV_RT: NF = args => {
  * SKEW — sample skewness.
  * Formula: n / ((n-1)(n-2)) * Σ((xi-mean)/s)^3, where s is the sample stdev.
  */
-export const fnSKEW: NF = args => {
+export const fnSKEW: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const xs = nums as number[];
+  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 3) {
     return ERRORS.DIV0;
@@ -2183,13 +2952,13 @@ export const fnSKEW: NF = args => {
  * SKEW.P — population skewness.
  * Formula: (1/n) * Σ((xi-mean)/σ)^3, where σ is the population stdev.
  */
-export const fnSKEW_P: NF = args => {
+export const fnSKEW_P: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const xs = nums as number[];
+  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 1) {
     return ERRORS.DIV0;
@@ -2218,13 +2987,13 @@ export const fnSKEW_P: NF = args => {
  * KURT — sample excess kurtosis.
  * Formula: n(n+1) / ((n-1)(n-2)(n-3)) * Σ((xi-mean)/s)^4 - 3(n-1)^2 / ((n-2)(n-3)).
  */
-export const fnKURT: NF = args => {
+export const fnKURT: NativeFn = args => {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
     return err;
   }
-  const xs = nums as number[];
+  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 4) {
     return ERRORS.DIV0;

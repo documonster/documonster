@@ -1728,6 +1728,36 @@ describe("calculateFormulas", () => {
       // Single result — no spill needed
       expect(ws.getCell("D1").result).toBe("OnlyOne");
     });
+
+    it("should drop stale spill ghosts when source changes to non-dynamic formula", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("X1").value = 10;
+      ws.getCell("X2").value = 20;
+      ws.getCell("X3").value = 30;
+      // First: A1 is a dynamic array that spills to A1:A3
+      ws.getCell("A1").value = {
+        formula: "_xlfn._xlws.SORT(X1:X3)",
+        result: 0,
+        shareType: "array",
+        ref: "A1",
+        isDynamicArray: true
+      };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toBe(10);
+      // Ghost cells populated
+      expect(ws.getCell("A2").value).toBe(20);
+      expect(ws.getCell("A3").value).toBe(30);
+
+      // Replace A1 with a non-dynamic formula
+      ws.getCell("A1").value = { formula: "SUM(X1:X3)", result: 0 };
+      wb.calculateFormulas();
+
+      expect(ws.getCell("A1").result).toBe(60);
+      // Ghost cells should be cleared
+      expect(ws.findCell(2, 1)?.value ?? null).toBeNull();
+      expect(ws.findCell(3, 1)?.value ?? null).toBeNull();
+    });
   });
 
   // ==========================================================================
@@ -2682,6 +2712,16 @@ describe("calculateFormulas", () => {
       wb.calculateFormulas();
       expect(ws.getCell("C1").result).toBe(10);
     });
+
+    it("should handle Unicode characters in defined name identifiers", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 100;
+      wb.definedNames.add("Sheet1!A1", "销售额");
+      ws.getCell("B1").value = { formula: "销售额*2", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(200);
+    });
   });
 
   // ==========================================================================
@@ -3124,12 +3164,18 @@ describe("calculateFormulas", () => {
       expect(ws.getCell("C1").result).toBe(15);
     });
 
-    it.skip("should handle structured ref #This Row (parser does not yet support this syntax)", () => {
+    it("should handle structured ref [#This Row]", () => {
+      // Regression: `#This Row` is supported end-to-end. The original
+      // variant of this test used `"T1"` as the table name, which the
+      // library's Table constructor sanitises to `"_T1"` because
+      // bare-letter+digit names collide with cell refs — the formula
+      // then referenced a non-existent table. Using an unambiguous
+      // table name (`MyTable`) exercises the intended path.
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
 
       ws.addTable({
-        name: "T1",
+        name: "MyTable",
         ref: "A1",
         headerRow: true,
         totalsRow: false,
@@ -3142,9 +3188,9 @@ describe("calculateFormulas", () => {
       });
 
       // Formulas in the Double column reference [#This Row]
-      ws.getCell("B2").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
-      ws.getCell("B3").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
-      ws.getCell("B4").value = { formula: "T1[[#This Row],[Val]]*2", result: 0 };
+      ws.getCell("B2").value = { formula: "MyTable[[#This Row],[Val]]*2", result: 0 };
+      ws.getCell("B3").value = { formula: "MyTable[[#This Row],[Val]]*2", result: 0 };
+      ws.getCell("B4").value = { formula: "MyTable[[#This Row],[Val]]*2", result: 0 };
 
       wb.calculateFormulas();
 
@@ -3287,6 +3333,207 @@ describe("calculateFormulas", () => {
       // ACCRINT on a 30/360 half-year → $25.
       expect(ws.getCell("H2").result as number).toBeCloseTo(25, 6);
     });
+
+    it("should handle F.DIST.RT at x=0 boundary", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = { formula: "F.DIST.RT(0,5,10)", result: 0 };
+      ws.getCell("A2").value = { formula: "F.DIST.RT(-1,5,10)", result: 0 };
+      wb.calculateFormulas();
+      // x=0 → entire distribution above 0 → probability = 1
+      expect(ws.getCell("A1").result).toBe(1);
+      // x<0 → #NUM! (F-distribution only defined for x ≥ 0)
+      expect(ws.getCell("A2").result).toEqual({ error: "#NUM!" });
+    });
+  });
+
+  // ==========================================================================
+  // CELL — information about a referenced cell.
+  // Covers the implemented info-type subset: address/row/col/contents/type/
+  // width/filename, plus the #N/A fallback for unsupported info types.
+  // ==========================================================================
+  describe("CELL function", () => {
+    it("should return $A$1-style absolute address strings", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: 'CELL("address",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("address",Z99)', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("address",AA1)', result: 0 };
+      ws.getCell("B4").value = { formula: 'CELL("address",XFD1048576)', result: 0 };
+      // Area ref → top-left.
+      ws.getCell("B5").value = { formula: 'CELL("address",C3:D4)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe("$A$1");
+      expect(ws.getCell("B2").result).toBe("$Z$99");
+      expect(ws.getCell("B3").result).toBe("$AA$1");
+      expect(ws.getCell("B4").result).toBe("$XFD$1048576");
+      expect(ws.getCell("B5").result).toBe("$C$3");
+    });
+
+    it("should return row and column numbers", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: 'CELL("row",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("row",B5)', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("col",A1)', result: 0 };
+      ws.getCell("B4").value = { formula: 'CELL("col",Z7)', result: 0 };
+      // Area ref top-left wins.
+      ws.getCell("B5").value = { formula: 'CELL("row",D3:E4)', result: 0 };
+      ws.getCell("B6").value = { formula: 'CELL("col",D3:E4)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(1);
+      expect(ws.getCell("B2").result).toBe(5);
+      expect(ws.getCell("B3").result).toBe(1);
+      expect(ws.getCell("B4").result).toBe(26);
+      expect(ws.getCell("B5").result).toBe(3);
+      expect(ws.getCell("B6").result).toBe(4);
+    });
+
+    it("should return cell contents for various value kinds", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 42;
+      ws.getCell("A2").value = "hello";
+      ws.getCell("A3").value = true;
+      // A4 is intentionally empty.
+      ws.getCell("B1").value = { formula: 'CELL("contents",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("contents",A2)', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("contents",A3)', result: 0 };
+      ws.getCell("B4").value = { formula: 'CELL("contents",A4)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(42);
+      expect(ws.getCell("B2").result).toBe("hello");
+      expect(ws.getCell("B3").result).toBe(true);
+      // Excel represents empty contents as 0 in numeric contexts, but
+      // our writeback path preserves BLANK as `undefined` so that
+      // downstream consumers can distinguish "empty" from "literal
+      // zero" (see R5-P1-2).
+      const b4 = ws.getCell("B4").result;
+      expect(b4 === undefined || b4 === 0).toBe(true);
+    });
+
+    it('should classify cell type as "b"/"l"/"v"', () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 10; // number → "v"
+      ws.getCell("A2").value = "text"; // string → "l"
+      // A3 blank → "b"
+      ws.getCell("A4").value = true; // boolean → "v"
+      ws.getCell("B1").value = { formula: 'CELL("type",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("type",A2)', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("type",A3)', result: 0 };
+      ws.getCell("B4").value = { formula: 'CELL("type",A4)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe("v");
+      expect(ws.getCell("B2").result).toBe("l");
+      expect(ws.getCell("B3").result).toBe("b");
+      expect(ws.getCell("B4").result).toBe("v");
+    });
+
+    it("should return default width=8 and empty filename", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: 'CELL("width",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("filename",A1)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(8);
+      expect(ws.getCell("B2").result).toBe("");
+    });
+
+    it("should return #N/A for unsupported info types", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: 'CELL("format",A1)', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("color",A1)', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("parentheses",A1)', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toEqual({ error: "#N/A" });
+      expect(ws.getCell("B2").result).toEqual({ error: "#N/A" });
+      expect(ws.getCell("B3").result).toEqual({ error: "#N/A" });
+    });
+
+    it("should resolve the reference produced by INDIRECT", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 99;
+      ws.getCell("B1").value = { formula: 'CELL("address",INDIRECT("A1"))', result: 0 };
+      ws.getCell("B2").value = { formula: 'CELL("row",INDIRECT("B5"))', result: 0 };
+      ws.getCell("B3").value = { formula: 'CELL("contents",INDIRECT("A1"))', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe("$A$1");
+      expect(ws.getCell("B2").result).toBe(5);
+      expect(ws.getCell("B3").result).toBe(99);
+    });
+
+    it("should default to the current cell when reference is omitted", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("C5").value = { formula: 'CELL("address")', result: 0 };
+      ws.getCell("C6").value = { formula: 'CELL("row")', result: 0 };
+      ws.getCell("C7").value = { formula: 'CELL("col")', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("C5").result).toBe("$C$5");
+      expect(ws.getCell("C6").result).toBe(6);
+      expect(ws.getCell("C7").result).toBe(3);
+    });
+  });
+
+  // ==========================================================================
+  // ISREF — reference detection at the evaluator level.
+  // ==========================================================================
+  describe("ISREF function", () => {
+    it("should return TRUE for direct cell and range references", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: "ISREF(A1)", result: 0 };
+      ws.getCell("B2").value = { formula: "ISREF(A1:B3)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(true);
+      expect(ws.getCell("B2").result).toBe(true);
+    });
+
+    it("should return FALSE for literals and computed scalars", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: "ISREF(1)", result: 0 };
+      ws.getCell("B2").value = { formula: 'ISREF("text")', result: 0 };
+      ws.getCell("B3").value = { formula: "ISREF(1+2)", result: 0 };
+      ws.getCell("B4").value = { formula: "ISREF(TRUE)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(false);
+      expect(ws.getCell("B2").result).toBe(false);
+      expect(ws.getCell("B3").result).toBe(false);
+      expect(ws.getCell("B4").result).toBe(false);
+    });
+
+    it("should return TRUE when INDIRECT produces a valid reference", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+      // INDIRECT yields a ReferenceValue at runtime.
+      ws.getCell("B1").value = { formula: 'ISREF(INDIRECT("A1"))', result: 0 };
+      ws.getCell("B2").value = { formula: 'ISREF(INDIRECT("A1:B2"))', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(true);
+      expect(ws.getCell("B2").result).toBe(true);
+    });
+
+    it("should return FALSE when INDIRECT cannot resolve a reference", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      // INDIRECT on an invalid address yields #REF! — ISREF suppresses to FALSE.
+      ws.getCell("B1").value = { formula: 'ISREF(INDIRECT("not a ref"))', result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(false);
+    });
+
+    it("should return #VALUE! for wrong arity", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("B1").value = { formula: "ISREF(A1,A2)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toEqual({ error: "#VALUE!" });
+    });
   });
 
   // ==========================================================================
@@ -3337,6 +3584,95 @@ describe("calculateFormulas", () => {
       wb.calculateFormulas();
 
       expect(ws.getCell("A1").result).toEqual({ error: "#REF!" });
+    });
+
+    it("should return #REF! for OFFSET beyond sheet upper bound", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+      // Row overflow
+      ws.getCell("B1").value = { formula: "OFFSET(A1,1048577,0)", result: 0 };
+      // Column overflow
+      ws.getCell("B2").value = { formula: "OFFSET(A1,0,16384)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toEqual({ error: "#REF!" });
+      expect(ws.getCell("B2").result).toEqual({ error: "#REF!" });
+    });
+
+    it("should return #NULL! for cross-sheet intersection", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      const ws2 = wb.addWorksheet("Sheet2");
+      ws1.getCell("A1").value = 1;
+      ws1.getCell("A2").value = 2;
+      ws1.getCell("A3").value = 3;
+      ws2.getCell("A1").value = 10;
+      ws2.getCell("A2").value = 20;
+      ws2.getCell("A3").value = 30;
+      // Intersection across different sheets should be #NULL!
+      ws1.getCell("B1").value = {
+        formula: "SUM(Sheet1!A1:A2 Sheet2!A1:A3)",
+        result: 0
+      };
+      wb.calculateFormulas();
+      expect(ws1.getCell("B1").result).toEqual({ error: "#NULL!" });
+    });
+
+    it("should detect all nodes in a diamond dependency cycle", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      // Diamond: A→B→C→A, plus A→D→C
+      // All four cells should be in the cycle (not just A, B, C)
+      ws.getCell("A1").value = { formula: "B1+D1", result: 0 };
+      ws.getCell("B1").value = { formula: "C1+1", result: 0 };
+      ws.getCell("C1").value = { formula: "A1*0.5", result: 0 };
+      ws.getCell("D1").value = { formula: "C1+2", result: 0 };
+      wb.calculateFormulas();
+      // All four should resolve to numbers (circular fallback = 0, then one pass)
+      expect(typeof ws.getCell("A1").result).toBe("number");
+      expect(typeof ws.getCell("B1").result).toBe("number");
+      expect(typeof ws.getCell("C1").result).toBe("number");
+      expect(typeof ws.getCell("D1").result).toBe("number");
+    });
+
+    it("should return #VALUE! when coercing empty string to number", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = { formula: '1+""', result: 0 };
+      // Empty cell should coerce to 0
+      ws.getCell("A2").value = { formula: "1+B1", result: 0 };
+      // Explicit empty string should error
+      ws.getCell("B1").value = "";
+      ws.getCell("A3").value = { formula: "1+B1", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toEqual({ error: "#VALUE!" });
+      // A2 references B1 which is empty string; A3 references B1 too.
+      // Depending on whether empty cell and empty string are distinguished,
+      // the behavior differs. If B1 reads as empty string, expect #VALUE!
+      expect(ws.getCell("A3").result).toEqual({ error: "#VALUE!" });
+    });
+
+    it("should return #REF! for external reference nested in a function", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = { formula: "SUM([Book1]Sheet1!A1:A5)", result: 0 };
+      ws.getCell("A2").value = { formula: "[Book1]Sheet1!A1 + 1", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toEqual({ error: "#REF!" });
+      expect(ws.getCell("A2").result).toEqual({ error: "#REF!" });
+    });
+
+    it("should return #NULL! for rectangles disjoint in column axis", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = 1;
+      ws.getCell("B1").value = 2;
+      ws.getCell("C1").value = 3;
+      ws.getCell("D1").value = 4;
+      // A1:B2 and C1:D2 share no cells
+      ws.getCell("E1").value = { formula: "SUM(A1:B2 C1:D2)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("E1").result).toEqual({ error: "#NULL!" });
     });
   });
 });

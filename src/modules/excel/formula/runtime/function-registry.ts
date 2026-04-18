@@ -2,8 +2,8 @@
  * Function Registry — Declarative function descriptors and native implementations.
  *
  * Each function is described by a `FunctionDescriptor` that carries metadata
- * about arity, evaluation strategy, return type, and the implementation itself.
- * The evaluator uses this metadata to validate arguments and invoke functions.
+ * about arity and the implementation itself. The evaluator uses this metadata
+ * to validate arguments and invoke functions.
  *
  * Special forms (IF, LET, LAMBDA, etc.) are NOT registered here — they
  * are handled directly by the evaluator's special-form dispatch.
@@ -18,21 +18,6 @@ import { RVKind, BLANK, ERRORS, rvBoolean, rvNumber, rvString, topLeft } from ".
 // ============================================================================
 
 /**
- * The kind of function.
- * - `"eager"` — all arguments are evaluated before the function is called.
- *   This is the vast majority of functions.
- */
-export type FunctionKind = "eager";
-
-/**
- * What the function returns.
- * - `"scalar"` — always returns a scalar
- * - `"array"` — may return an array (dynamic array function)
- * - `"any"` — depends on inputs
- */
-export type FunctionReturns = "scalar" | "array" | "any";
-
-/**
  * A function descriptor with metadata and implementation.
  */
 export interface FunctionDescriptor {
@@ -42,12 +27,6 @@ export interface FunctionDescriptor {
   readonly minArity: number;
   /** Maximum number of arguments. Infinity for variadic. */
   readonly maxArity: number;
-  /** Evaluation strategy. */
-  readonly fnKind: FunctionKind;
-  /** Whether this function is volatile (re-evaluated every calc cycle). */
-  readonly volatile: boolean;
-  /** What the function returns. */
-  readonly returns: FunctionReturns;
   /**
    * The function implementation.
    * Receives eagerly evaluated arguments as `RuntimeValue[]`.
@@ -69,30 +48,23 @@ export interface FunctionDescriptor {
 const registryMap = new Map<string, FunctionDescriptor>();
 
 /**
- * Register a function descriptor.
+ * Register a function descriptor. The descriptor is stored under its
+ * canonical (unprefixed) name only — `_XLFN.` / `_XLFN._XLWS.` prefix
+ * variants are resolved dynamically in `lookupFunction`. This keeps the
+ * registry small and avoids triple-entry bookkeeping for 200+ functions.
  */
 export function registerFunction(desc: FunctionDescriptor): void {
   registryMap.set(desc.name, desc);
-
-  // Auto-register prefixed variants for the canonical (unprefixed) name.
-  const canonical = stripFunctionPrefix(desc.name);
-  if (canonical === desc.name) {
-    const xlfnKey = `_XLFN.${desc.name}`;
-    const xlwsKey = `_XLFN._XLWS.${desc.name}`;
-    if (!registryMap.has(xlfnKey)) {
-      registryMap.set(xlfnKey, desc);
-    }
-    if (!registryMap.has(xlwsKey)) {
-      registryMap.set(xlwsKey, desc);
-    }
-  }
 }
 
 /**
- * Look up a function by uppercase name.
+ * Look up a function by uppercase name. Accepts `_XLFN.` and
+ * `_XLFN._XLWS.` prefixed variants by stripping the prefix before lookup
+ * (a no-op for plain names, so plain lookups also go through a single
+ * Map.get call — avoiding the double-lookup pattern used previously).
  */
 export function lookupFunction(name: string): FunctionDescriptor | undefined {
-  return registryMap.get(name);
+  return registryMap.get(stripFunctionPrefix(name));
 }
 
 /**
@@ -102,19 +74,12 @@ export function defineEager(
   name: string,
   minArity: number,
   maxArity: number,
-  invoke: (args: RuntimeValue[]) => RuntimeValue,
-  options?: {
-    volatile?: boolean;
-    returns?: FunctionReturns;
-  }
+  invoke: (args: RuntimeValue[]) => RuntimeValue
 ): FunctionDescriptor {
   const desc: FunctionDescriptor = {
     name,
     minArity,
     maxArity,
-    fnKind: "eager",
-    volatile: options?.volatile ?? false,
-    returns: options?.returns ?? "scalar",
     invoke
   };
   registerFunction(desc);
@@ -247,12 +212,54 @@ function registerNativeInformationAndLogical(): void {
   defineEager("NA", 0, 0, () => ERRORS.NA);
 
   // ── Stubs — limited implementations for functions that need runtime context ──
-  // INFO: would need OS/environment info — always returns #N/A
-  defineEager("INFO", 1, 1, () => ERRORS.NA);
-  // CELL: would need live cell metadata (format, address, etc.) — always returns #N/A
+  // INFO returns a handful of environment-describing strings. We implement
+  // the subset that's meaningful in a headless engine: `"release"` (engine
+  // version — we use "16.0" to pretend to be a modern Excel), `"system"`
+  // (the host OS string — the platform that loaded the workbook), and
+  // `"numfile"` / `"origin"` (which require UI context and are always
+  // `#N/A`).
+  defineEager("INFO", 1, 1, args => {
+    if (args.length === 0) {
+      return ERRORS.NA;
+    }
+    const t = args[0];
+    if (t.kind === RVKind.Error) {
+      return t;
+    }
+    const info = (t.kind === RVKind.String ? t.value : "").toLowerCase();
+    switch (info) {
+      case "release":
+        return rvString("16.0");
+      case "osversion":
+        return rvString(
+          `${typeof process !== "undefined" && process.platform ? process.platform : "browser"}`
+        );
+      case "system":
+        // Excel reports "pcdos" or "mac"; we map Node's platform string so
+        // tests that grep for these values behave consistently.
+        if (typeof process !== "undefined" && process.platform) {
+          return rvString(process.platform === "darwin" ? "mac" : "pcdos");
+        }
+        return rvString("pcdos");
+      case "recalc":
+        return rvString("Automatic");
+      case "directory":
+      case "numfile":
+      case "origin":
+        return ERRORS.NA;
+      default:
+        return ERRORS.VALUE;
+    }
+  });
+  // CELL: the evaluator intercepts CELL before this point and handles the
+  // supported info-type subset (address, row, col, contents, type, width,
+  // filename). This fallback only fires if an argument arrangement bypasses
+  // the interception — in which case #N/A matches Excel for unsupported info.
   defineEager("CELL", 1, 2, () => ERRORS.NA);
-  // ISREF: requires reference-type checking which is done at evaluator level
-  // for special forms; the eager function always sees dereferenced values → false
+  // ISREF: the evaluator intercepts ISREF before this point and decides
+  // based on the raw BoundExpr / runtime ReferenceValue. This fallback only
+  // fires if an argument arrangement bypasses the interception — after
+  // dereferencing the answer is always false.
   defineEager("ISREF", 1, 1, () => rvBoolean(false));
   // SHEET/SHEETS: would need full workbook context — returns 1 as default
   defineEager("SHEET", 0, 1, () => rvNumber(1));
@@ -312,6 +319,11 @@ function registerNativeInformationAndLogical(): void {
     let found = false;
     for (const arg of args) {
       const r = walkBoolArg(arg, v => {
+        // `found` must only flip when `walkBoolArg` actually visits a
+        // boolean-like cell. The previous code set it after every
+        // argument (even BLANK/empty ranges), so `XOR(A1, B1)` on two
+        // empty cells returned FALSE; Excel returns #VALUE!.
+        found = true;
         if (v) {
           count++;
         }
@@ -319,7 +331,6 @@ function registerNativeInformationAndLogical(): void {
       if (r) {
         return r;
       }
-      found = true;
     }
     return found ? rvBoolean(count % 2 === 1) : ERRORS.VALUE;
   });
@@ -472,7 +483,7 @@ function registerNativeTextFunctions(): void {
   defineEager("NUMBERVALUE", 1, 3, fnNUMBERVALUE);
   defineEager("TEXTBEFORE", 2, 6, fnTEXTBEFORE);
   defineEager("TEXTAFTER", 2, 6, fnTEXTAFTER);
-  defineEager("TEXTSPLIT", 2, 6, fnTEXTSPLIT, { returns: "array" });
+  defineEager("TEXTSPLIT", 2, 6, fnTEXTSPLIT);
 }
 
 // ============================================================================
@@ -508,8 +519,8 @@ import {
 } from "../functions/date";
 
 function registerNativeDateFunctions(): void {
-  defineEager("TODAY", 0, 0, fnTODAY, { volatile: true });
-  defineEager("NOW", 0, 0, fnNOW, { volatile: true });
+  defineEager("TODAY", 0, 0, fnTODAY);
+  defineEager("NOW", 0, 0, fnNOW);
   defineEager("YEAR", 1, 1, fnYEAR);
   defineEager("MONTH", 1, 1, fnMONTH);
   defineEager("DAY", 1, 1, fnDAY);
@@ -566,6 +577,26 @@ import {
   fnIMEXP,
   fnIMSIN,
   fnIMCOS,
+  fnIMTAN,
+  fnIMCSC,
+  fnIMSEC,
+  fnIMCOT,
+  fnIMSINH,
+  fnIMCOSH,
+  fnIMTANH,
+  fnIMCSCH,
+  fnIMSECH,
+  fnIMCOTH,
+  fnBIN2HEX,
+  fnBIN2OCT,
+  fnHEX2BIN,
+  fnHEX2OCT,
+  fnOCT2BIN,
+  fnOCT2HEX,
+  fnBESSELJ,
+  fnBESSELI,
+  fnBESSELK,
+  fnBESSELY,
   fnBITAND,
   fnBITOR,
   fnBITXOR,
@@ -600,6 +631,26 @@ function registerNativeEngineeringFunctions(): void {
   defineEager("IMEXP", 1, 1, fnIMEXP);
   defineEager("IMSIN", 1, 1, fnIMSIN);
   defineEager("IMCOS", 1, 1, fnIMCOS);
+  defineEager("IMTAN", 1, 1, fnIMTAN);
+  defineEager("IMCSC", 1, 1, fnIMCSC);
+  defineEager("IMSEC", 1, 1, fnIMSEC);
+  defineEager("IMCOT", 1, 1, fnIMCOT);
+  defineEager("IMSINH", 1, 1, fnIMSINH);
+  defineEager("IMCOSH", 1, 1, fnIMCOSH);
+  defineEager("IMTANH", 1, 1, fnIMTANH);
+  defineEager("IMCSCH", 1, 1, fnIMCSCH);
+  defineEager("IMSECH", 1, 1, fnIMSECH);
+  defineEager("IMCOTH", 1, 1, fnIMCOTH);
+  defineEager("BIN2HEX", 1, 2, fnBIN2HEX);
+  defineEager("BIN2OCT", 1, 2, fnBIN2OCT);
+  defineEager("HEX2BIN", 1, 2, fnHEX2BIN);
+  defineEager("HEX2OCT", 1, 2, fnHEX2OCT);
+  defineEager("OCT2BIN", 1, 2, fnOCT2BIN);
+  defineEager("OCT2HEX", 1, 2, fnOCT2HEX);
+  defineEager("BESSELJ", 2, 2, fnBESSELJ);
+  defineEager("BESSELI", 2, 2, fnBESSELI);
+  defineEager("BESSELK", 2, 2, fnBESSELK);
+  defineEager("BESSELY", 2, 2, fnBESSELY);
   defineEager("BITAND", 2, 2, fnBITAND);
   defineEager("BITOR", 2, 2, fnBITOR);
   defineEager("BITXOR", 2, 2, fnBITXOR);
@@ -620,6 +671,11 @@ import {
   fnNPER,
   fnRATE,
   fnSLN,
+  fnSYD,
+  fnVDB,
+  fnFVSCHEDULE,
+  fnPDURATION,
+  fnRRI,
   fnDB,
   fnDDB,
   fnIPMT,
@@ -655,6 +711,11 @@ function registerNativeFinancialFunctions(): void {
   defineEager("NPER", 3, 5, fnNPER);
   defineEager("RATE", 3, 6, fnRATE);
   defineEager("SLN", 3, 3, fnSLN);
+  defineEager("SYD", 4, 4, fnSYD);
+  defineEager("VDB", 5, 7, fnVDB);
+  defineEager("FVSCHEDULE", 2, 2, fnFVSCHEDULE);
+  defineEager("PDURATION", 3, 3, fnPDURATION);
+  defineEager("RRI", 3, 3, fnRRI);
   defineEager("DB", 4, 5, fnDB);
   defineEager("DDB", 4, 5, fnDDB);
   defineEager("IPMT", 4, 6, fnIPMT);
@@ -714,6 +775,11 @@ import {
   fnDEVSQ,
   fnAVEDEV,
   fnCONFIDENCENORM,
+  fnCONFIDENCE_T,
+  fnCOVARIANCE_P,
+  fnCOVARIANCE_S,
+  fnRANK_AVG,
+  fnMODE_MULT,
   fnFISHER,
   fnFISHERINV,
   fnAVERAGEA,
@@ -803,6 +869,11 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("DEVSQ", 1, 255, fnDEVSQ);
   defineEager("AVEDEV", 1, 255, fnAVEDEV);
   defineEager("CONFIDENCE.NORM", 3, 3, fnCONFIDENCENORM);
+  defineEager("CONFIDENCE.T", 3, 3, fnCONFIDENCE_T);
+  defineEager("COVARIANCE.P", 2, 2, fnCOVARIANCE_P);
+  defineEager("COVARIANCE.S", 2, 2, fnCOVARIANCE_S);
+  defineEager("RANK.AVG", 2, 3, fnRANK_AVG);
+  defineEager("MODE.MULT", 1, 255, fnMODE_MULT);
   defineEager("CONFIDENCE", 3, 3, fnCONFIDENCENORM);
   defineEager("FISHER", 1, 1, fnFISHER);
   defineEager("FISHERINV", 1, 1, fnFISHERINV);
@@ -847,11 +918,11 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("ERFC", 1, 1, fnERFC);
   defineEager("ERFC.PRECISE", 1, 1, fnERFC);
   defineEager("STANDARDIZE", 3, 3, fnSTANDARDIZE);
-  defineEager("FREQUENCY", 2, 2, fnFREQUENCY, { returns: "array" });
-  defineEager("GROWTH", 1, 4, fnGROWTH, { returns: "array" });
-  defineEager("TREND", 1, 4, fnTREND, { returns: "array" });
-  defineEager("LINEST", 1, 4, fnLINEST, { returns: "array" });
-  defineEager("LOGEST", 1, 4, fnLOGEST, { returns: "array" });
+  defineEager("FREQUENCY", 2, 2, fnFREQUENCY);
+  defineEager("GROWTH", 1, 4, fnGROWTH);
+  defineEager("TREND", 1, 4, fnTREND);
+  defineEager("LINEST", 1, 4, fnLINEST);
+  defineEager("LOGEST", 1, 4, fnLOGEST);
 }
 
 // ============================================================================
@@ -921,7 +992,15 @@ import {
   fnTANH,
   fnASINH,
   fnACOSH,
-  fnATANH
+  fnATANH,
+  fnSEC,
+  fnCSC,
+  fnCOT,
+  fnSECH,
+  fnCSCH,
+  fnCOTH,
+  fnACOT,
+  fnACOTH
 } from "../functions/math";
 
 function registerNativeMathFunctions(): void {
@@ -954,8 +1033,8 @@ function registerNativeMathFunctions(): void {
   defineEager("LOG10", 1, 1, fnLOG10);
   defineEager("EXP", 1, 1, fnEXP);
   defineEager("PI", 0, 0, fnPI);
-  defineEager("RAND", 0, 0, fnRAND, { volatile: true });
-  defineEager("RANDBETWEEN", 2, 2, fnRANDBETWEEN, { volatile: true });
+  defineEager("RAND", 0, 0, fnRAND);
+  defineEager("RANDBETWEEN", 2, 2, fnRANDBETWEEN);
   defineEager("SIGN", 1, 1, fnSIGN);
   defineEager("TRUNC", 1, 2, fnTRUNC);
   defineEager("SUMSQ", 1, 255, fnSUMSQ);
@@ -993,6 +1072,14 @@ function registerNativeMathFunctions(): void {
   defineEager("ASINH", 1, 1, fnASINH);
   defineEager("ACOSH", 1, 1, fnACOSH);
   defineEager("ATANH", 1, 1, fnATANH);
+  defineEager("SEC", 1, 1, fnSEC);
+  defineEager("CSC", 1, 1, fnCSC);
+  defineEager("COT", 1, 1, fnCOT);
+  defineEager("SECH", 1, 1, fnSECH);
+  defineEager("CSCH", 1, 1, fnCSCH);
+  defineEager("COTH", 1, 1, fnCOTH);
+  defineEager("ACOT", 1, 1, fnACOT);
+  defineEager("ACOTH", 1, 1, fnACOTH);
 }
 
 // ============================================================================
@@ -1047,15 +1134,15 @@ function registerNativeLookupFunctions(): void {
   defineEager("COLUMN", 0, 1, fnCOLUMN);
   defineEager("ROWS", 1, 1, fnROWS);
   defineEager("COLUMNS", 1, 1, fnCOLUMNS);
-  defineEager("INDEX", 2, 4, fnINDEX, { returns: "any" });
+  defineEager("INDEX", 2, 4, fnINDEX);
   defineEager("MATCH", 2, 3, fnMATCH);
   defineEager("VLOOKUP", 3, 4, fnVLOOKUP);
   defineEager("HLOOKUP", 3, 4, fnHLOOKUP);
-  defineEager("XLOOKUP", 3, 6, fnXLOOKUP, { returns: "any" });
+  defineEager("XLOOKUP", 3, 6, fnXLOOKUP);
   defineEager("XMATCH", 2, 4, fnXMATCH);
   defineEager("ADDRESS", 2, 5, fnADDRESS);
   defineEager("LOOKUP", 2, 3, fnLOOKUP);
-  defineEager("TRANSPOSE", 1, 1, fnTRANSPOSE, { returns: "array" });
+  defineEager("TRANSPOSE", 1, 1, fnTRANSPOSE);
   defineEager("AREAS", 1, 1, fnAREAS);
 }
 
@@ -1086,23 +1173,23 @@ import {
 } from "../functions/dynamic-array";
 
 function registerNativeDynamicArrayFunctions(): void {
-  defineEager("FILTER", 2, 3, fnFILTER, { returns: "array" });
-  defineEager("SORT", 1, 4, fnSORT, { returns: "array" });
-  defineEager("UNIQUE", 1, 3, fnUNIQUE, { returns: "array" });
-  defineEager("SORTBY", 2, 255, fnSORTBY, { returns: "array" });
-  defineEager("SEQUENCE", 1, 4, fnSEQUENCE, { returns: "array" });
-  defineEager("RANDARRAY", 0, 5, fnRA, { volatile: true, returns: "array" });
-  defineEager("TOCOL", 1, 3, fnTOCOL, { returns: "array" });
-  defineEager("TOROW", 1, 3, fnTOROW, { returns: "array" });
-  defineEager("CHOOSEROWS", 2, 255, fnCHOOSEROWS, { returns: "array" });
-  defineEager("CHOOSECOLS", 2, 255, fnCHOOSECOLS, { returns: "array" });
-  defineEager("VSTACK", 1, 255, fnVSTACK, { returns: "array" });
-  defineEager("HSTACK", 1, 255, fnHSTACK, { returns: "array" });
-  defineEager("WRAPROWS", 2, 3, fnWRAPROWS, { returns: "array" });
-  defineEager("WRAPCOLS", 2, 3, fnWRAPCOLS, { returns: "array" });
-  defineEager("EXPAND", 2, 4, fnEXPAND, { returns: "array" });
-  defineEager("TAKE", 2, 3, fnTAKE, { returns: "array" });
-  defineEager("DROP", 2, 3, fnDROP, { returns: "array" });
+  defineEager("FILTER", 2, 3, fnFILTER);
+  defineEager("SORT", 1, 4, fnSORT);
+  defineEager("UNIQUE", 1, 3, fnUNIQUE);
+  defineEager("SORTBY", 2, 255, fnSORTBY);
+  defineEager("SEQUENCE", 1, 4, fnSEQUENCE);
+  defineEager("RANDARRAY", 0, 5, fnRA);
+  defineEager("TOCOL", 1, 3, fnTOCOL);
+  defineEager("TOROW", 1, 3, fnTOROW);
+  defineEager("CHOOSEROWS", 2, 255, fnCHOOSEROWS);
+  defineEager("CHOOSECOLS", 2, 255, fnCHOOSECOLS);
+  defineEager("VSTACK", 1, 255, fnVSTACK);
+  defineEager("HSTACK", 1, 255, fnHSTACK);
+  defineEager("WRAPROWS", 2, 3, fnWRAPROWS);
+  defineEager("WRAPCOLS", 2, 3, fnWRAPCOLS);
+  defineEager("EXPAND", 2, 4, fnEXPAND);
+  defineEager("TAKE", 2, 3, fnTAKE);
+  defineEager("DROP", 2, 3, fnDROP);
   defineEager("SUBTOTAL", 2, 255, fnSUBTOTAL);
   defineEager("AGGREGATE", 3, 255, fnAGGREGATE);
 }

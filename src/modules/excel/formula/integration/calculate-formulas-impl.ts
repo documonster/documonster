@@ -23,7 +23,6 @@
 
 import { parseRefRange } from "../compile/address-utils";
 import { bind, type BindingContext } from "../compile/binder";
-import type { BoundExpr } from "../compile/bound-ast";
 import {
   extractStaticDeps,
   analyzeExpr,
@@ -34,8 +33,10 @@ import {
 import {
   buildDependencyGraphFromDeps,
   topologicalSort,
-  mergeDynamicDeps
+  mergeDynamicDeps,
+  type DependencyGraph
 } from "../compile/dependency-analysis";
+import { setDate1904 } from "../functions/_date-context";
 import { buildWritebackPlan } from "../materialize/build-writeback-plan";
 import { getPersistentSpillMap, getGhostSnapshots } from "../materialize/spill-engine";
 import type { WorkbookLike } from "../materialize/types";
@@ -64,7 +65,14 @@ import { formulaCellKey, resolveDefinedName, type WorkbookSnapshot } from "./wor
  * Persistent AST cache: formula text → parsed AstNode.
  * Since AST is a pure function of formula text, this is safe to cache
  * across calculation cycles. Keyed by workbook to allow GC.
+ *
+ * The inner `Map` is bounded by `AST_CACHE_MAX_ENTRIES` using simple LRU
+ * eviction (least-recently-used key removed when full). This prevents a
+ * long-lived workbook that churns through unique formula texts — e.g.
+ * templated generation that embeds timestamps — from growing the cache
+ * without bound. See `parseFormulaText` for the hit-path bookkeeping.
  */
+const AST_CACHE_MAX_ENTRIES = 10000;
 const persistentAstCache = new WeakMap<WeakKey, Map<string, AstNode>>();
 
 function getPersistentAstCache(workbook: WorkbookLike): Map<string, AstNode> {
@@ -89,6 +97,14 @@ function getPersistentAstCache(workbook: WorkbookLike): Map<string, AstNode> {
 export function calculateFormulasImpl(workbook: WorkbookLike): void {
   // ── Step 1: Snapshot ──
   const snapshot = buildWorkbookSnapshot(workbook);
+
+  // Propagate the workbook-wide `date1904` mode to the module-local date
+  // context used by date/time/financial/text formula functions. Those
+  // functions have a context-free `NativeFn` signature and cannot receive
+  // the flag through an argument, so we thread it via a setter instead.
+  // See functions/_date-context.ts for the threading rationale and the
+  // concurrency caveat.
+  setDate1904(snapshot.properties.date1904 ?? false);
 
   // ── Step 2: Normalize ──
   const instances = collectFormulaInstances(snapshot);
@@ -147,9 +163,10 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
     }
   }
 
-  // Dynamic array spill: use previous-cycle spill regions as static hint.
-  // The actual spill may differ this cycle, but this covers the common case
-  // of a formula that reads a stable spill target.
+  // Dynamic array spill: use previous-cycle spill regions as static hint
+  // for dependency ordering. The actual spill may differ this cycle — if the
+  // master formula is no longer a dynamic-array producer, skip it so stale
+  // ghost cells don't introduce false edges.
   const persistentSpills = getPersistentSpillMap(workbook);
   for (const [, region] of persistentSpills) {
     const ws = snapshot.worksheetsById.get(region.worksheetId);
@@ -157,8 +174,14 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
       continue;
     }
     const masterKey = formulaCellKey(ws.name, region.sourceRow, region.sourceCol);
-    if (!compiledMap.has(masterKey)) {
+    const masterCf = compiledMap.get(masterKey);
+    if (!masterCf) {
       continue; // source formula no longer exists
+    }
+    // Only remap if the master is still a dynamic-array formula this cycle
+    const isStillDynamic = masterCf.instance.isDynamicArray || masterCf.isDynamicArrayFunction;
+    if (!isStillDynamic) {
+      continue;
     }
     for (let r = 0; r < region.rows; r++) {
       for (let c = 0; c < region.cols; c++) {
@@ -179,11 +202,9 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
 
   // ── Step 6: Evaluate ──
   const session = new EvalSession();
-  const indirectCache = new Map<string, BoundExpr>();
   const ctx: EvalContext = {
     snapshot,
     compiledFormulas: compiledMap,
-    astCache: indirectCache,
     currentSheet: snapshot.worksheets[0]?.name ?? ""
   };
 
@@ -248,93 +269,8 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
   // ── Iterative Calculation for Circular References ──
   const iterateEnabled = snapshot.calcProperties.iterate === true;
   if (iterateEnabled && graph.circularKeys.size > 0) {
-    const maxIter = snapshot.calcProperties.iterateCount ?? 100;
-    const delta = snapshot.calcProperties.iterateDelta ?? 0.001;
-
-    const circularKeys: string[] = [];
-    for (const key of evalOrder) {
-      if (graph.circularKeys.has(key)) {
-        circularKeys.push(key);
-      }
-    }
-
-    for (let iter = 0; iter < maxIter; iter++) {
-      let maxChange = 0;
-
-      // Clear ALL cached values — non-circular cells may depend on circular
-      // cells and must be re-evaluated with updated values each iteration.
-      session.resultCache.clear();
-      session.nameCache.clear();
-
-      // Seed fallback from previous results
-      for (const key of circularKeys) {
-        const compiled = compiledMap.get(key);
-        if (!compiled) {
-          continue;
-        }
-        const prev = results.get(key);
-        if (prev !== undefined && prev.kind !== RVKind.Error) {
-          session.circularFallback.set(key, prev);
-        } else {
-          session.circularFallback.set(key, rvNumber(0));
-        }
-      }
-
-      for (const key of circularKeys) {
-        const compiled = compiledMap.get(key);
-        if (!compiled) {
-          continue;
-        }
-
-        try {
-          const oldResult = results.get(key);
-          const newResult = evaluateFormula(compiled, ctx, session);
-          results.set(key, newResult);
-          session.circularFallback.set(key, newResult);
-
-          if (oldResult && oldResult.kind === RVKind.Number && newResult.kind === RVKind.Number) {
-            maxChange = Math.max(maxChange, Math.abs(newResult.value - oldResult.value));
-          }
-        } catch {
-          // Iterative evaluation threw — set error and continue convergence
-          results.set(key, ERRORS.CALC);
-        }
-      }
-
-      if (maxChange <= delta) {
-        break;
-      }
-    }
-
-    session.circularFallback.clear();
-
-    // Re-evaluate non-circular cells that depend (transitively) on circular cells,
-    // since they were initially computed with stale fallback values.
-    const circularKeySet = new Set(circularKeys);
-    const affectedDownstream = new Set<string>();
-    const queue: string[] = [...circularKeys];
-    let head = 0;
-    while (head < queue.length) {
-      const key = queue[head++];
-      const deps = graph.dependedBy.get(key);
-      if (deps) {
-        for (const depKey of deps) {
-          if (!circularKeySet.has(depKey) && !affectedDownstream.has(depKey)) {
-            affectedDownstream.add(depKey);
-            queue.push(depKey);
-          }
-        }
-      }
-    }
-    if (affectedDownstream.size > 0) {
-      for (const key of affectedDownstream) {
-        session.resultCache.delete(key);
-        results.delete(key);
-      }
-      // Clear name cache — formula-based names may depend on circular cell values
-      session.nameCache.clear();
-      evaluateInOrder(evalOrder, compiledMap, results, ctx, session);
-    }
+    runIterativeCalc(evalOrder, graph, compiledMap, results, ctx, session, snapshot);
+    reevaluateDownstreamOfCircular(evalOrder, graph, compiledMap, results, ctx, session);
   }
 
   // ── Step 7: Materialize (Build Writeback Plan) ──
@@ -425,17 +361,59 @@ function evaluateInOrder(
 // Helper: Parse Formula Text
 // ============================================================================
 
+// Sentinel cached in the AST map to record a failed parse. Using a distinct
+// object means callers that do an explicit identity check against this value
+// can short-circuit before any truthy branch; it is never exposed outside the
+// cache so cannot be mistaken for a real AST by downstream consumers.
+const PARSE_FAILED_SENTINEL = {} as AstNode;
+
+/**
+ * Touch a cache entry to move it to the MRU (most-recently-used) position.
+ * Relies on `Map`'s guaranteed insertion-order iteration: delete + re-set
+ * pushes the entry to the end of the iteration order without changing its
+ * value identity. Only called on cache hits.
+ */
+function touchAstCacheEntry(astCache: Map<string, AstNode>, formula: string, ast: AstNode): void {
+  astCache.delete(formula);
+  astCache.set(formula, ast);
+}
+
+/**
+ * Insert a new entry into the AST cache, evicting the least-recently-used
+ * entry if the cache is at capacity. The LRU entry is the first key returned
+ * by `Map.keys()` iteration, which corresponds to the oldest insertion/touch.
+ */
+function insertAstCacheEntry(astCache: Map<string, AstNode>, formula: string, ast: AstNode): void {
+  if (astCache.size >= AST_CACHE_MAX_ENTRIES) {
+    // Evict one entry before adding the new one. `Map.keys().next().value`
+    // is the least-recently-inserted (or -touched) key — O(1) access.
+    const oldestKey = astCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      astCache.delete(oldestKey);
+    }
+  }
+  astCache.set(formula, ast);
+}
+
 function parseFormulaText(formula: string, astCache: Map<string, AstNode>): AstNode | null {
   const cached = astCache.get(formula);
+  if (cached === PARSE_FAILED_SENTINEL) {
+    // Touch so that a repeatedly-evaluated failing formula doesn't get
+    // evicted and re-parsed (and re-failed) every cycle.
+    touchAstCacheEntry(astCache, formula, PARSE_FAILED_SENTINEL);
+    return null;
+  }
   if (cached) {
+    touchAstCacheEntry(astCache, formula, cached);
     return cached;
   }
   try {
     const tokens = tokenize(formula);
     const ast = parse(tokens);
-    astCache.set(formula, ast);
+    insertAstCacheEntry(astCache, formula, ast);
     return ast;
   } catch {
+    insertAstCacheEntry(astCache, formula, PARSE_FAILED_SENTINEL);
     return null;
   }
 }
@@ -498,7 +476,14 @@ function compileFormula(
         const nameBound = bind(nameAst, { snapshot, currentSheet: inst.sheetName });
         const nameDeps = extractStaticDeps(nameBound, snapshot, nameResolver);
         const nameAnalysis = analyzeExpr(nameBound, nameResolver);
-        const result = { deps: nameDeps, hasDynamicRefs: nameAnalysis.hasDynamicRefs };
+        const result = {
+          deps: nameDeps,
+          hasDynamicRefs: nameAnalysis.hasDynamicRefs,
+          // Propagate volatility so a defined-name body containing NOW()/
+          // RAND() correctly invalidates the outer formula's session
+          // cache on every calculation pass.
+          isVolatile: nameAnalysis.isVolatile
+        };
         nameDepCache.set(cacheKey, result);
         return result;
       } catch {
@@ -511,7 +496,6 @@ function compileFormula(
 
     return {
       instance: inst,
-      ast,
       bound,
       staticDeps,
       isVolatile: analysis.isVolatile,
@@ -595,4 +579,158 @@ function populateCSECache(inst: FormulaInstance, result: RuntimeValue, session: 
       }
     }
   }
+}
+
+// ============================================================================
+// Iterative calculation (for circular references)
+// ============================================================================
+
+/**
+ * Drive the iterative-calculation loop for the cells that participate in
+ * cycles. Pre-computes the transitive downstream set once, then on each
+ * iteration:
+ *   1. invalidates the cached result of circular cells and their descendants;
+ *   2. seeds `circularFallback` from the previous iteration's numbers;
+ *   3. re-evaluates each circular cell and tracks the maximum absolute change.
+ *
+ * Exits early when all cells converge within `iterateDelta`, or after
+ * `iterateCount` iterations. The `circularFallback` map is cleared on exit
+ * so subsequent (non-iterative) evaluation paths revert to the zero-seed
+ * fallback behaviour.
+ */
+function runIterativeCalc(
+  evalOrder: readonly string[],
+  graph: DependencyGraph,
+  compiledMap: Map<string, CompiledFormula>,
+  results: Map<string, RuntimeValue>,
+  ctx: EvalContext,
+  session: EvalSession,
+  snapshot: WorkbookSnapshot
+): void {
+  const maxIter = snapshot.calcProperties.iterateCount ?? 100;
+  const delta = snapshot.calcProperties.iterateDelta ?? 0.001;
+
+  const circularKeys: string[] = [];
+  for (const key of evalOrder) {
+    if (graph.circularKeys.has(key)) {
+      circularKeys.push(key);
+    }
+  }
+
+  // Transitive downstream of circularKeys — cells upstream of every cycle
+  // are stable across iterations, so their cached values remain valid.
+  const circularAndDownstream = new Set<string>(graph.circularKeys);
+  const downstreamQueue: string[] = [...graph.circularKeys];
+  let downstreamHead = 0;
+  while (downstreamHead < downstreamQueue.length) {
+    const key = downstreamQueue[downstreamHead++];
+    const deps = graph.dependedBy.get(key);
+    if (!deps) {
+      continue;
+    }
+    for (const depKey of deps) {
+      if (!circularAndDownstream.has(depKey)) {
+        circularAndDownstream.add(depKey);
+        downstreamQueue.push(depKey);
+      }
+    }
+  }
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    let maxChange = 0;
+
+    // Clear only circular cells and their transitive downstream.
+    for (const key of circularAndDownstream) {
+      session.resultCache.delete(key);
+    }
+    // Defined-name cache: cleared wholesale because formula-based names may
+    // indirectly reference circular cells, and tracking which names touch
+    // which cells would complicate the engine substantially.
+    session.nameCache.clear();
+
+    // Seed fallback from previous results
+    for (const key of circularKeys) {
+      const compiled = compiledMap.get(key);
+      if (!compiled) {
+        continue;
+      }
+      const prev = results.get(key);
+      if (prev !== undefined && prev.kind !== RVKind.Error) {
+        session.circularFallback.set(key, prev);
+      } else {
+        session.circularFallback.set(key, rvNumber(0));
+      }
+    }
+
+    for (const key of circularKeys) {
+      const compiled = compiledMap.get(key);
+      if (!compiled) {
+        continue;
+      }
+      try {
+        const oldResult = results.get(key);
+        const newResult = evaluateFormula(compiled, ctx, session);
+        results.set(key, newResult);
+        session.circularFallback.set(key, newResult);
+
+        if (oldResult && oldResult.kind === RVKind.Number && newResult.kind === RVKind.Number) {
+          maxChange = Math.max(maxChange, Math.abs(newResult.value - oldResult.value));
+        }
+      } catch {
+        // Iterative evaluation threw — set error and continue convergence.
+        results.set(key, ERRORS.CALC);
+      }
+    }
+
+    if (maxChange <= delta) {
+      break;
+    }
+  }
+
+  session.circularFallback.clear();
+}
+
+/**
+ * After iterative calculation has converged, cells that sit on the non-
+ * circular side but depend transitively on a circular cell still hold stale
+ * values from the first pass (which used the fallback zero-seed). Find them
+ * and re-evaluate, preserving topological order.
+ */
+function reevaluateDownstreamOfCircular(
+  evalOrder: readonly string[],
+  graph: DependencyGraph,
+  compiledMap: Map<string, CompiledFormula>,
+  results: Map<string, RuntimeValue>,
+  ctx: EvalContext,
+  session: EvalSession
+): void {
+  const affected = new Set<string>();
+  const queue: string[] = [...graph.circularKeys];
+  let head = 0;
+  while (head < queue.length) {
+    const key = queue[head++];
+    const deps = graph.dependedBy.get(key);
+    if (!deps) {
+      continue;
+    }
+    for (const depKey of deps) {
+      if (!graph.circularKeys.has(depKey) && !affected.has(depKey)) {
+        affected.add(depKey);
+        queue.push(depKey);
+      }
+    }
+  }
+  if (affected.size === 0) {
+    return;
+  }
+  for (const key of affected) {
+    session.resultCache.delete(key);
+    results.delete(key);
+  }
+  session.nameCache.clear();
+  // Only re-evaluate the affected subset; filtering preserves the
+  // topological ordering within that subset while skipping the (already
+  // computed) non-affected cells entirely.
+  const filteredOrder = evalOrder.filter(k => affected.has(k));
+  evaluateInOrder(filteredOrder, compiledMap, results, ctx, session);
 }

@@ -260,7 +260,30 @@ function convertCellValue(value: unknown, date1904: boolean): SnapshotCellValue 
     return dateToExcel(value, date1904);
   }
   if (typeof value === "object" && "error" in value) {
-    return { error: (value as { error: string }).error } as SnapshotErrorValue;
+    // Gate the error code through the known set so user-supplied values
+    // like `{ error: "anything" }` can't pollute the snapshot. Unknown
+    // strings fall back to #VALUE! — matches Excel's default diagnostic
+    // when it reads an unrecognised error value from a persisted file.
+    const raw = (value as { error: string }).error;
+    const KNOWN_ERRORS = new Set([
+      "#N/A",
+      "#NULL!",
+      "#DIV/0!",
+      "#VALUE!",
+      "#REF!",
+      "#NAME?",
+      "#NUM!",
+      "#GETTING_DATA",
+      "#CALC!",
+      "#SPILL!",
+      "#CONNECT!",
+      "#BLOCKED!",
+      "#UNKNOWN!",
+      "#FIELD!",
+      "#BUSY!"
+    ]);
+    const code = KNOWN_ERRORS.has(raw) ? raw : "#VALUE!";
+    return { error: code } as SnapshotErrorValue;
   }
   // Rich text → plain string
   if (typeof value === "object" && "richText" in value) {
@@ -329,10 +352,22 @@ function buildDefinedNames(workbook: WorkbookLike): ReadonlyMap<string, DefinedN
     return map;
   }
 
-  // Build a sheet-id-to-name lookup for resolving localSheetId → sheet name
+  // Build a sheet-id-to-name lookup for resolving localSheetId → sheet name.
+  //
+  // `localSheetId` stores the 0-based position in the XLSX-model sheet list,
+  // which in this library corresponds to the index in `workbook.worksheets`
+  // (the filtered+ordered view, see `workbook.xlsx/xform/book/workbook-xform.ts`
+  // line 50-94 where `index` is incremented per rendered sheet).
+  //
+  // Iterate the array exactly once and capture the position directly — avoids
+  // an O(n²) `indexOf` over a fresh array each call. Any caller that has
+  // deleted sheets after creating scoped names is responsible for updating
+  // `localSheetId` to match the new positions; this layer just reflects the
+  // workbook's current state.
   const sheetIdToName = new Map<number, string>();
-  for (const ws of workbook.worksheets) {
-    sheetIdToName.set(workbook.worksheets.indexOf(ws), ws.name);
+  const liveSheets = workbook.worksheets;
+  for (let idx = 0; idx < liveSheets.length; idx++) {
+    sheetIdToName.set(idx, liveSheets[idx].name);
   }
 
   // getAllEntries() returns self-contained entries — no second lookup needed.

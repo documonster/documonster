@@ -15,8 +15,6 @@
  *    through the evaluator and be passed to functions.
  * 4. **Error codes are strict** — `ErrorValue` uses a typed code enum.
  * 5. **Lambda is a value** — `LambdaValue` is part of the value union.
- * 6. **Blank and MissingArg are distinct** — blank means "empty cell",
- *    MissingArg means "omitted function argument".
  */
 
 import type { BoundExpr } from "../compile/bound-ast";
@@ -42,9 +40,7 @@ export const enum RVKind {
   /** A cell or area reference (lazy — not yet resolved to values). */
   Reference = 6,
   /** A lambda (closure). */
-  Lambda = 7,
-  /** An omitted function argument (different from blank). */
-  MissingArg = 8
+  Lambda = 7
 }
 
 // ============================================================================
@@ -147,14 +143,6 @@ export interface LambdaValue {
 }
 
 // ============================================================================
-// Missing Argument Value
-// ============================================================================
-
-export interface MissingArgValue {
-  readonly kind: RVKind.MissingArg;
-}
-
-// ============================================================================
 // Discriminated Unions
 // ============================================================================
 
@@ -174,8 +162,7 @@ export type RuntimeValue =
   | ErrorValue
   | ArrayValue
   | ReferenceValue
-  | LambdaValue
-  | MissingArgValue;
+  | LambdaValue;
 
 // ============================================================================
 // Singleton Constants
@@ -183,9 +170,6 @@ export type RuntimeValue =
 
 /** The singleton blank value. */
 export const BLANK: BlankValue = { kind: RVKind.Blank };
-
-/** The singleton missing argument value. */
-export const MISSING_ARG: MissingArgValue = { kind: RVKind.MissingArg };
 
 /** Common error values. */
 export const ERRORS = {
@@ -222,27 +206,49 @@ export function rvError(code: ErrorCode): ErrorValue {
 
 export function rvArray(rows: ScalarValue[][], originRow?: number, originCol?: number): ArrayValue {
   const height = rows.length;
-  // Determine max width across all rows for rectangular normalization
+  // Determine max width across all rows for rectangular normalisation.
   let width = 0;
   for (const row of rows) {
     if (row.length > width) {
       width = row.length;
     }
   }
-  // Normalize: pad short rows with BLANK to ensure rectangular shape
+  // Pad short rows with BLANK so the resulting ArrayValue is rectangular.
+  // The old implementation did `row.push(BLANK)` directly — mutating the
+  // caller's arrays. Callers that shared row references across multiple
+  // `rvArray` calls could observe surprise modifications; we now copy any
+  // row that needs padding and leave the caller's arrays untouched.
+  let normalisedRows: ScalarValue[][] = rows;
   if (height > 0 && width > 0) {
-    for (let r = 0; r < height; r++) {
-      const row = rows[r];
+    let anyNeedPadding = false;
+    for (const row of rows) {
       if (row.length < width) {
-        for (let c = row.length; c < width; c++) {
-          row.push(BLANK);
+        anyNeedPadding = true;
+        break;
+      }
+    }
+    if (anyNeedPadding) {
+      normalisedRows = new Array<ScalarValue[]>(height);
+      for (let r = 0; r < height; r++) {
+        const row = rows[r];
+        if (row.length === width) {
+          normalisedRows[r] = row;
+          continue;
         }
+        const padded = new Array<ScalarValue>(width);
+        for (let c = 0; c < row.length; c++) {
+          padded[c] = row[c];
+        }
+        for (let c = row.length; c < width; c++) {
+          padded[c] = BLANK;
+        }
+        normalisedRows[r] = padded;
       }
     }
   }
   return originRow !== undefined
-    ? { kind: RVKind.Array, rows, height, width, originRow, originCol }
-    : { kind: RVKind.Array, rows, height, width };
+    ? { kind: RVKind.Array, rows: normalisedRows, height, width, originRow, originCol }
+    : { kind: RVKind.Array, rows: normalisedRows, height, width };
 }
 
 export function rvRef(
@@ -282,16 +288,8 @@ export function isError(v: RuntimeValue): v is ErrorValue {
   return v.kind === RVKind.Error;
 }
 
-export function isBlank(v: RuntimeValue): v is BlankValue {
-  return v.kind === RVKind.Blank;
-}
-
 export function isArray(v: RuntimeValue): v is ArrayValue {
   return v.kind === RVKind.Array;
-}
-
-export function isRef(v: RuntimeValue): v is ReferenceValue {
-  return v.kind === RVKind.Reference;
 }
 
 export function isLambda(v: RuntimeValue): v is LambdaValue {
@@ -313,29 +311,70 @@ export function isScalar(v: RuntimeValue): v is ScalarValue {
 // ============================================================================
 
 /**
+ * Parse a user-facing numeric string the way Excel does.
+ *
+ * Accepts:
+ *   - plain decimals: `"1"`, `"-1.5"`, `"+.25"`
+ *   - scientific notation: `"1.2e3"`, `"2E-4"`
+ *   - percentage suffix: `"50%"` → 0.5
+ *   - leading/trailing whitespace around the above
+ *
+ * Rejects (unlike JavaScript's `Number()`):
+ *   - empty strings and whitespace-only (`" "` would become 0)
+ *   - `"Infinity"`, `"-Infinity"`, `"NaN"` (Excel treats as text)
+ *   - hexadecimal (`"0x10"`), octal, binary literals
+ *   - currency symbols, thousands separators, locale-specific formats
+ *     (these are out of scope for the engine; callers should strip before
+ *     calling)
+ *
+ * Returns `#VALUE!` on any rejection so the error bubbles naturally
+ * through formula evaluation.
+ */
+function parseNumericString(raw: string): NumberValue | ErrorValue {
+  const s = raw.trim();
+  if (s === "") {
+    return ERRORS.VALUE;
+  }
+  let body = s;
+  let percentFactor = 1;
+  if (body.endsWith("%")) {
+    percentFactor = 0.01;
+    body = body.slice(0, -1).trim();
+    if (body === "") {
+      return ERRORS.VALUE;
+    }
+  }
+  // Require at least one digit somewhere; this shuts the door on
+  // "Infinity", "NaN", "0x10", "1e" (Excel's own lexer refuses these).
+  // The strict decimal grammar below also rejects "1_000" etc.
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(body)) {
+    return ERRORS.VALUE;
+  }
+  const n = Number(body);
+  if (!Number.isFinite(n)) {
+    return ERRORS.VALUE;
+  }
+  return rvNumber(n * percentFactor);
+}
+
+/**
  * Coerce a runtime value to a number.
  * - Blank → 0
  * - Number → itself
  * - Boolean → 1 / 0
  * - String → parse or #VALUE!
  * - Error → propagate
- * - MissingArg → 0
  */
 export function toNumberRV(v: RuntimeValue): NumberValue | ErrorValue {
   switch (v.kind) {
     case RVKind.Number:
       return v;
     case RVKind.Blank:
-    case RVKind.MissingArg:
       return rvNumber(0);
     case RVKind.Boolean:
       return rvNumber(v.value ? 1 : 0);
     case RVKind.String: {
-      if (v.value === "") {
-        return ERRORS.VALUE;
-      }
-      const n = Number(v.value);
-      return isNaN(n) ? ERRORS.VALUE : rvNumber(n);
+      return parseNumericString(v.value);
     }
     case RVKind.Error:
       return v;
@@ -356,7 +395,6 @@ export function toStringRV(v: RuntimeValue): string {
     case RVKind.Boolean:
       return v.value ? "TRUE" : "FALSE";
     case RVKind.Blank:
-    case RVKind.MissingArg:
       return "";
     case RVKind.Error:
       return v.code;
@@ -375,7 +413,6 @@ export function toBooleanRV(v: RuntimeValue): BooleanValue | ErrorValue {
     case RVKind.Number:
       return rvBoolean(v.value !== 0);
     case RVKind.Blank:
-    case RVKind.MissingArg:
       return rvBoolean(false);
     case RVKind.String: {
       const u = v.value.toUpperCase();
@@ -395,6 +432,64 @@ export function toBooleanRV(v: RuntimeValue): BooleanValue | ErrorValue {
 }
 
 /**
+ * Structural equality of scalar values.
+ *
+ * - Different kinds → false
+ * - Number / Boolean / Blank → strict value equality (Blank always equal)
+ * - String → case-insensitive comparison (Excel semantics)
+ * - Error → not equal (errors do not compare equal to each other)
+ */
+/**
+ * Three-way compare two scalars that share a kind.
+ *
+ * Returns a negative number if `a < b`, zero if equal, positive if `a > b`.
+ * Returns `NaN` when the kinds differ or cannot be ordered (e.g. errors);
+ * callers decide how to surface the incomparability — sort helpers usually
+ * skip NaN pairs, while comparison operators route to a kind-priority
+ * tiebreak. Strings are compared case-insensitively to match Excel.
+ */
+export function compareScalarsSameKind(a: ScalarValue, b: ScalarValue): number {
+  if (a.kind !== b.kind) {
+    return Number.NaN;
+  }
+  switch (a.kind) {
+    case RVKind.Number:
+      return a.value - (b as NumberValue).value;
+    case RVKind.String: {
+      const al = a.value.toLowerCase();
+      const bl = (b as StringValue).value.toLowerCase();
+      return al < bl ? -1 : al > bl ? 1 : 0;
+    }
+    case RVKind.Boolean: {
+      const bv = (b as BooleanValue).value;
+      return a.value === bv ? 0 : a.value ? 1 : -1;
+    }
+    case RVKind.Blank:
+      return 0;
+    default:
+      return Number.NaN;
+  }
+}
+
+export function scalarEquals(a: ScalarValue, b: ScalarValue): boolean {
+  if (a.kind !== b.kind) {
+    return false;
+  }
+  switch (a.kind) {
+    case RVKind.Number:
+      return a.value === (b as NumberValue).value;
+    case RVKind.String:
+      return a.value.toLowerCase() === (b as StringValue).value.toLowerCase();
+    case RVKind.Boolean:
+      return a.value === (b as BooleanValue).value;
+    case RVKind.Blank:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * Get the top-left scalar from any value (for implicit intersection fallback).
  */
 export function topLeft(v: RuntimeValue): ScalarValue {
@@ -406,9 +501,6 @@ export function topLeft(v: RuntimeValue): ScalarValue {
       return BLANK;
     }
     return v.rows[0][0];
-  }
-  if (v.kind === RVKind.MissingArg) {
-    return BLANK;
   }
   // Reference, Lambda → need context to resolve
   return ERRORS.VALUE;

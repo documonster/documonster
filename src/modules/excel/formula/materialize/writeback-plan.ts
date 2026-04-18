@@ -26,6 +26,7 @@
  */
 
 import type { SnapshotCellValue } from "../integration/workbook-snapshot";
+import type { SpillRegion } from "./types";
 
 // ============================================================================
 // Individual Write Operations
@@ -176,16 +177,7 @@ export interface SpillStateDelta {
    * Key: `"ws:<id>!row:col"` of the source formula cell.
    * Value: the spill region dimensions.
    */
-  readonly spillRegions: ReadonlyMap<
-    string,
-    {
-      readonly worksheetId: number;
-      readonly sourceRow: number;
-      readonly sourceCol: number;
-      readonly rows: number;
-      readonly cols: number;
-    }
-  >;
+  readonly spillRegions: ReadonlyMap<string, SpillRegion>;
 
   /**
    * Ghost cell value snapshots for modification detection.

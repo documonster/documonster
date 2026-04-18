@@ -1,10 +1,24 @@
 /**
  * Date / Time Functions — Native RuntimeValue implementation.
+ *
+ * All Date objects returned by `excelToDate()` represent an Excel serial on
+ * the UTC timeline (midnight UTC for the corresponding date). Consequently
+ * every field accessor must be the UTC variant (`getUTCFullYear`,
+ * `getUTCMonth`, …) and every `Date` constructed from y/m/d components must
+ * be built with `Date.UTC(...)`. Using local-time accessors would make
+ * results depend on the host timezone — e.g. `YEAR(DATE(2024,1,1))` would
+ * return 2023 when evaluated on a machine west of UTC at midnight UTC.
+ *
+ * Exceptions (intentionally use local time):
+ * - `TODAY` / `NOW` — read the user's wall clock, which is genuinely in the
+ *   local timezone. The Excel serial is then constructed using
+ *   `Date.UTC(year, month, day)` so that the resulting serial round-trips
+ *   correctly through `excelToDate()`.
  */
 
 import { dateToExcel, excelToDate } from "@utils/utils.base";
 
-import type { RuntimeValue, NumberValue, ErrorValue } from "../runtime/values";
+import type { RuntimeValue } from "../runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -13,33 +27,30 @@ import {
   toNumberRV,
   toStringRV,
   toBooleanRV,
-  topLeft,
   rvNumber,
   rvBoolean
 } from "../runtime/values";
+import { isDate1904 } from "./_date-context";
+import { argToNumber, checkError } from "./_shared";
 
 // ============================================================================
 // Type alias for native function signature
 // ============================================================================
 
-type NativeFunction = (args: RuntimeValue[]) => RuntimeValue;
+type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function checkError(v: RuntimeValue): ErrorValue | null {
-  const s = topLeft(v);
-  return s.kind === RVKind.Error ? s : null;
+/** Convert an Excel serial to a UTC `Date`, honouring the active date1904 mode. */
+function toDate(serial: number): Date {
+  return excelToDate(serial, isDate1904());
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/** Extract a number from a RuntimeValue, returning the raw number or an ErrorValue. */
-function numArg(v: RuntimeValue): NumberValue | ErrorValue {
-  return toNumberRV(v);
+/** Convert a UTC `Date` back to an Excel serial, honouring the active date1904 mode. */
+function fromDate(d: Date): number {
+  return dateToExcel(d, isDate1904());
 }
 
 /** Collect holiday serial numbers from a RuntimeValue argument (array or scalar). */
@@ -66,124 +77,179 @@ function collectHolidays(arg: RuntimeValue): Set<number> {
 // Date Functions
 // ============================================================================
 
-export const fnTODAY: NativeFunction = () => {
+/**
+ * TODAY — today's date (at the user's local timezone).
+ *
+ * The user's concept of "today" is based on their wall clock, so we read
+ * local-time fields from `new Date()`. The resulting y/m/d components are
+ * then packed into a UTC serial so downstream date arithmetic is consistent.
+ */
+export const fnTODAY: NativeFn = () => {
   const now = new Date();
-  return rvNumber(
-    dateToExcel(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())))
-  );
+  return rvNumber(fromDate(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))));
 };
 
-export const fnNOW: NativeFunction = () => {
+/**
+ * NOW — current date and time.
+ *
+ * Excel stores the result as an untimezoned serial, but the user expects
+ * their local wall-clock reading. `dateToExcel(new Date())` effectively
+ * takes `Date.now()` in UTC-ms; any conversion to the user's timezone
+ * would require tz metadata we do not have. We therefore keep the current
+ * UTC-ms based conversion, matching historical behaviour.
+ */
+export const fnNOW: NativeFn = () => {
   const now = new Date();
-  return rvNumber(dateToExcel(now));
+  return rvNumber(fromDate(now));
 };
 
-export const fnYEAR: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnYEAR: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  return rvNumber(excelToDate(n.value).getFullYear());
+  return rvNumber(toDate(n.value).getUTCFullYear());
 };
 
-export const fnMONTH: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnMONTH: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  return rvNumber(excelToDate(n.value).getMonth() + 1);
+  return rvNumber(toDate(n.value).getUTCMonth() + 1);
 };
 
-export const fnDAY: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnDAY: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  return rvNumber(excelToDate(n.value).getDate());
+  return rvNumber(toDate(n.value).getUTCDate());
 };
 
-export const fnDATE: NativeFunction = args => {
-  const year = numArg(args[0]);
+export const fnDATE: NativeFn = args => {
+  const year = argToNumber(args[0]);
   if (isError(year)) {
     return year;
   }
-  const month = numArg(args[1]);
+  const month = argToNumber(args[1]);
   if (isError(month)) {
     return month;
   }
-  const day = numArg(args[2]);
+  const day = argToNumber(args[2]);
   if (isError(day)) {
     return day;
   }
 
+  // Excel's DATE interprets a year in [0, 1899] as (year + 1900). JavaScript's
+  // Date constructor already applies this convention for [0, 99], but it does
+  // NOT apply it for [100, 1899] — we have to do it ourselves. Years below 0
+  // or above 9999 are rejected as #NUM! (Excel's documented range).
+  let y = Math.trunc(year.value);
+  if (y < 0 || y > 9999) {
+    return ERRORS.NUM;
+  }
+  if (y < 1900) {
+    y += 1900;
+    // Excel rejects years outside [1900, 9999] after this coercion.
+    if (y > 9999) {
+      return ERRORS.NUM;
+    }
+  }
+
   // Lotus 1-2-3 bug: DATE(1900,2,29) should return serial 60 even though
   // 1900 is not a leap year. JavaScript's Date constructor rolls Feb 29, 1900
-  // forward to March 1, 1900, so we handle this specially.
-  if (year.value === 1900 && month.value === 2 && day.value === 29) {
+  // forward to March 1, 1900, so we handle this specially. Run this check
+  // *after* the `y < 1900 → y + 1900` coercion so that `DATE(0, 2, 29)` and
+  // `DATE(1900, 2, 29)` resolve to the same serial (R6-P1-1).
+  if (y === 1900 && month.value === 2 && day.value === 29) {
     return rvNumber(60); // The fictitious Feb 29, 1900
   }
 
-  const d = new Date(Date.UTC(year.value, month.value - 1, day.value));
-  if (year.value >= 0 && year.value < 100) {
-    d.setUTCFullYear(year.value);
+  const d = new Date(Date.UTC(y, month.value - 1, day.value));
+  // The `Date.UTC` constructor maps two-digit years through its own legacy
+  // rule (+1900), so for `y` in [0, 99] we end up with the same value we
+  // already coerced above. Force the full year to be safe — but preserve
+  // month/day carry-over from out-of-range values (Excel allows DATE(2024,
+  // 13, 1) → 2025-01-01).
+  if (y < 100) {
+    d.setUTCFullYear(y);
   }
-  return rvNumber(dateToExcel(d));
+  return rvNumber(fromDate(d));
 };
 
-export const fnTIME: NativeFunction = args => {
-  const hour = numArg(args[0]);
+export const fnTIME: NativeFn = args => {
+  const hour = argToNumber(args[0]);
   if (isError(hour)) {
     return hour;
   }
-  const minute = numArg(args[1]);
+  const minute = argToNumber(args[1]);
   if (isError(minute)) {
     return minute;
   }
-  const second = numArg(args[2]);
+  const second = argToNumber(args[2]);
   if (isError(second)) {
     return second;
   }
-  return rvNumber((hour.value * 3600 + minute.value * 60 + second.value) / 86400);
+  // Excel's TIME rejects negative arguments outright and wraps anything >= 24
+  // hours back into the [0, 1) fraction-of-day range. Without the modulo,
+  // `TIME(25, 0, 0)` would produce a value > 1, which breaks downstream
+  // date-time arithmetic that expects a pure time fraction.
+  if (hour.value < 0 || minute.value < 0 || second.value < 0) {
+    return ERRORS.NUM;
+  }
+  const total = (hour.value * 3600 + minute.value * 60 + second.value) / 86400;
+  // total could still be >= 1 if e.g. hour=25; wrap into [0, 1).
+  return rvNumber(total - Math.floor(total));
 };
 
-export const fnHOUR: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnHOUR: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
+  }
+  if (n.value < 0) {
+    return ERRORS.NUM;
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(Math.floor(totalSeconds / 3600) % 24);
 };
 
-export const fnMINUTE: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnMINUTE: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
+  }
+  if (n.value < 0) {
+    return ERRORS.NUM;
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(Math.floor(totalSeconds / 60) % 60);
 };
 
-export const fnSECOND: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnSECOND: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
+  }
+  if (n.value < 0) {
+    return ERRORS.NUM;
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(totalSeconds % 60);
 };
 
-export const fnWEEKDAY: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnWEEKDAY: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  const d = excelToDate(n.value);
-  const returnType = args.length > 1 ? numArg(args[1]) : rvNumber(1);
+  const d = toDate(n.value);
+  const returnType = args.length > 1 ? argToNumber(args[1]) : rvNumber(1);
   if (isError(returnType)) {
     return returnType;
   }
-  const day = d.getDay(); // 0=Sun, 6=Sat
+  const day = d.getUTCDay(); // 0=Sun, 6=Sat
   switch (returnType.value) {
     case 1:
       return rvNumber(day + 1); // 1=Sun, 7=Sat
@@ -204,52 +270,58 @@ export const fnWEEKDAY: NativeFunction = args => {
   }
 };
 
-export const fnEOMONTH: NativeFunction = args => {
-  const startDate = numArg(args[0]);
+export const fnEOMONTH: NativeFn = args => {
+  const startDate = argToNumber(args[0]);
   if (isError(startDate)) {
     return startDate;
   }
-  const months = numArg(args[1]);
+  const months = argToNumber(args[1]);
   if (isError(months)) {
     return months;
   }
-  const d = excelToDate(startDate.value);
-  const result = new Date(Date.UTC(d.getFullYear(), d.getMonth() + months.value + 1, 0));
-  return rvNumber(dateToExcel(result));
+  const d = toDate(startDate.value);
+  const result = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months.value + 1, 0));
+  return rvNumber(fromDate(result));
 };
 
-export const fnEDATE: NativeFunction = args => {
-  const startDate = numArg(args[0]);
+export const fnEDATE: NativeFn = args => {
+  const startDate = argToNumber(args[0]);
   if (isError(startDate)) {
     return startDate;
   }
-  const months = numArg(args[1]);
+  const months = argToNumber(args[1]);
   if (isError(months)) {
     return months;
   }
-  const d = excelToDate(startDate.value);
-  const result = new Date(Date.UTC(d.getFullYear(), d.getMonth() + months.value, d.getDate()));
-  return rvNumber(dateToExcel(result));
+  const d = toDate(startDate.value);
+  const result = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months.value, d.getUTCDate())
+  );
+  return rvNumber(fromDate(result));
 };
 
-export const fnDATEDIF: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnDATEDIF: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const endN = numArg(args[1]);
+  const endN = argToNumber(args[1]);
   if (isError(endN)) {
     return endN;
   }
+  // DATEDIF requires end >= start; otherwise #NUM! per Excel.
+  if (endN.value < startN.value) {
+    return ERRORS.NUM;
+  }
   const unit = toStringRV(args[2]).toUpperCase();
-  const startD = excelToDate(startN.value);
-  const endD = excelToDate(endN.value);
-  const sy = startD.getFullYear();
-  const sm = startD.getMonth();
-  const sd = startD.getDate();
-  const ey = endD.getFullYear();
-  const em = endD.getMonth();
-  const ed = endD.getDate();
+  const startD = toDate(startN.value);
+  const endD = toDate(endN.value);
+  const sy = startD.getUTCFullYear();
+  const sm = startD.getUTCMonth();
+  const sd = startD.getUTCDate();
+  const ey = endD.getUTCFullYear();
+  const em = endD.getUTCMonth();
+  const ed = endD.getUTCDate();
   switch (unit) {
     case "Y":
       return rvNumber(ey - sy - (em < sm || (em === sm && ed < sd) ? 1 : 0));
@@ -257,60 +329,130 @@ export const fnDATEDIF: NativeFunction = args => {
       return rvNumber((ey - sy) * 12 + em - sm - (ed < sd ? 1 : 0));
     case "D":
       return rvNumber(Math.floor((endD.getTime() - startD.getTime()) / 86400000));
+    case "MD": {
+      // Days between the dates, ignoring months and years.
+      // If end.day >= start.day → ed - sd; otherwise borrow days from the
+      // previous month of endD (last-day-of-prev-month - start.day + end.day).
+      if (ed >= sd) {
+        return rvNumber(ed - sd);
+      }
+      // days in the month before endD's month
+      const daysInPrevMonth = new Date(Date.UTC(ey, em, 0)).getUTCDate();
+      return rvNumber(daysInPrevMonth - sd + ed);
+    }
+    case "YM": {
+      // Months between the dates, ignoring days and years.
+      let months = em - sm;
+      if (ed < sd) {
+        months -= 1;
+      }
+      if (months < 0) {
+        months += 12;
+      }
+      return rvNumber(months);
+    }
+    case "YD": {
+      // Days between the dates as though they were in the same year, ignoring years.
+      // Align endD to startD's year (or next year if end < start in same-year terms).
+      const sameYearEnd = Date.UTC(sy, em, ed);
+      const startUTC = Date.UTC(sy, sm, sd);
+      let diff = sameYearEnd - startUTC;
+      if (diff < 0) {
+        // end falls earlier in the year than start → roll forward one year
+        const nextYearEnd = Date.UTC(sy + 1, em, ed);
+        diff = nextYearEnd - startUTC;
+      }
+      return rvNumber(Math.floor(diff / 86400000));
+    }
     default:
       return ERRORS.NUM;
   }
 };
 
-export const fnDAYS: NativeFunction = args => {
-  const end = numArg(args[0]);
+export const fnDAYS: NativeFn = args => {
+  const end = argToNumber(args[0]);
   if (isError(end)) {
     return end;
   }
-  const start = numArg(args[1]);
+  const start = argToNumber(args[1]);
   if (isError(start)) {
     return start;
   }
   return rvNumber(Math.floor(end.value) - Math.floor(start.value));
 };
 
-export const fnISOWEEKNUM: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnISOWEEKNUM: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  const d = excelToDate(n.value);
+  const d = toDate(n.value);
   const temp = new Date(d.getTime());
-  temp.setDate(temp.getDate() + 3 - ((temp.getDay() + 6) % 7));
-  const week1 = new Date(temp.getFullYear(), 0, 4);
+  temp.setUTCDate(temp.getUTCDate() + 3 - ((temp.getUTCDay() + 6) % 7));
+  const week1 = new Date(Date.UTC(temp.getUTCFullYear(), 0, 4));
   return rvNumber(
     1 +
       Math.round(
-        ((temp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
+        ((temp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getUTCDay() + 6) % 7)) / 7
       )
   );
 };
 
-export const fnWEEKNUM: NativeFunction = args => {
-  const n = numArg(args[0]);
+export const fnWEEKNUM: NativeFn = args => {
+  const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
-  const d = excelToDate(n.value);
-  const returnType = args.length > 1 ? numArg(args[1]) : rvNumber(1);
+  const d = toDate(n.value);
+  const returnType = args.length > 1 ? argToNumber(args[1]) : rvNumber(1);
   if (isError(returnType)) {
     return returnType;
   }
-  // For returnType 21, use ISO week
-  if (returnType.value === 21) {
+  const rt = returnType.value;
+  // Type 21 is ISO 8601 week.
+  if (rt === 21) {
     return fnISOWEEKNUM(args);
   }
-  // Simple: week starts on Sunday (type 1) or Monday (type 2)
-  const startDay = returnType.value === 2 ? 1 : 0; // 0=Sun, 1=Mon
-  const jan1 = new Date(d.getFullYear(), 0, 1);
-  const jan1Day = jan1.getDay();
+  // Excel maps `return_type` to the day-of-week that starts the week:
+  //   1  (default) → Sunday
+  //   2  or 11     → Monday
+  //   12 → Tuesday, 13 → Wednesday, … 17 → Saturday
+  //   (16 → Friday, 17 → Saturday)
+  // Any other value is #NUM!.
+  let startDay: number; // 0 = Sunday … 6 = Saturday
+  switch (rt) {
+    case 1:
+      startDay = 0;
+      break;
+    case 2:
+    case 11:
+      startDay = 1;
+      break;
+    case 12:
+      startDay = 2;
+      break;
+    case 13:
+      startDay = 3;
+      break;
+    case 14:
+      startDay = 4;
+      break;
+    case 15:
+      startDay = 5;
+      break;
+    case 16:
+      startDay = 6;
+      break;
+    case 17:
+      startDay = 0;
+      break;
+    default:
+      return ERRORS.NUM;
+  }
+  const jan1 = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const jan1Day = jan1.getUTCDay();
   const dayOfYear = Math.floor((d.getTime() - jan1.getTime()) / 86400000);
-  return rvNumber(Math.floor((dayOfYear + jan1Day - startDay + 7) / 7));
+  return rvNumber(Math.floor((dayOfYear + ((jan1Day - startDay + 7) % 7)) / 7) + 1);
 };
 
 function networkdaysHelper(startN: number, endN: number, holidays: Set<number>): number {
@@ -319,8 +461,8 @@ function networkdaysHelper(startN: number, endN: number, holidays: Set<number>):
   const sign = startN <= endN ? 1 : -1;
   let count = 0;
   for (let d = s; d <= e; d++) {
-    const dt = excelToDate(d);
-    const dow = dt.getDay();
+    const dt = toDate(d);
+    const dow = dt.getUTCDay();
     if (dow !== 0 && dow !== 6 && !holidays.has(d)) {
       count++;
     }
@@ -328,12 +470,12 @@ function networkdaysHelper(startN: number, endN: number, holidays: Set<number>):
   return count * sign;
 }
 
-export const fnNETWORKDAYS: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnNETWORKDAYS: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const endN = numArg(args[1]);
+  const endN = argToNumber(args[1]);
   if (isError(endN)) {
     return endN;
   }
@@ -341,12 +483,12 @@ export const fnNETWORKDAYS: NativeFunction = args => {
   return rvNumber(networkdaysHelper(startN.value, endN.value, holidays));
 };
 
-export const fnWORKDAY: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnWORKDAY: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const days = numArg(args[1]);
+  const days = argToNumber(args[1]);
   if (isError(days)) {
     return days;
   }
@@ -356,8 +498,8 @@ export const fnWORKDAY: NativeFunction = args => {
   let remaining = Math.abs(days.value);
   while (remaining > 0) {
     current += step;
-    const dt = excelToDate(current);
-    const dow = dt.getDay();
+    const dt = toDate(current);
+    const dow = dt.getUTCDay();
     if (dow !== 0 && dow !== 6 && !holidays.has(current)) {
       remaining--;
     }
@@ -365,32 +507,32 @@ export const fnWORKDAY: NativeFunction = args => {
   return rvNumber(current);
 };
 
-export const fnYEARFRAC: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnYEARFRAC: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const endN = numArg(args[1]);
+  const endN = argToNumber(args[1]);
   if (isError(endN)) {
     return endN;
   }
-  const basis = args.length > 2 ? numArg(args[2]) : rvNumber(0);
+  const basis = args.length > 2 ? argToNumber(args[2]) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
-  const sd = excelToDate(Math.min(startN.value, endN.value));
-  const ed = excelToDate(Math.max(startN.value, endN.value));
+  const sd = toDate(Math.min(startN.value, endN.value));
+  const ed = toDate(Math.max(startN.value, endN.value));
   const diffDays = Math.abs(Math.floor(endN.value) - Math.floor(startN.value));
 
   switch (basis.value) {
     case 0: {
       // US (NASD) 30/360
-      let d1 = sd.getDate();
-      const m1 = sd.getMonth() + 1;
-      const y1 = sd.getFullYear();
-      let d2 = ed.getDate();
-      const m2 = ed.getMonth() + 1;
-      const y2 = ed.getFullYear();
+      let d1 = sd.getUTCDate();
+      const m1 = sd.getUTCMonth() + 1;
+      const y1 = sd.getUTCFullYear();
+      let d2 = ed.getUTCDate();
+      const m2 = ed.getUTCMonth() + 1;
+      const y2 = ed.getUTCFullYear();
       // NASD adjustment rules
       if (d1 === 31) {
         d1 = 30;
@@ -399,11 +541,11 @@ export const fnYEARFRAC: NativeFunction = args => {
         d2 = 30;
       }
       // Handle end-of-Feb for start date
-      const feb1 = new Date(y1, 1, 29).getMonth() === 1 ? 29 : 28;
+      const feb1 = new Date(Date.UTC(y1, 1, 29)).getUTCMonth() === 1 ? 29 : 28;
       if (m1 === 2 && d1 === feb1) {
         d1 = 30;
         if (m2 === 2) {
-          const feb2 = new Date(y2, 1, 29).getMonth() === 1 ? 29 : 28;
+          const feb2 = new Date(Date.UTC(y2, 1, 29)).getUTCMonth() === 1 ? 29 : 28;
           if (d2 === feb2) {
             d2 = 30;
           }
@@ -413,19 +555,40 @@ export const fnYEARFRAC: NativeFunction = args => {
       return rvNumber(days30_360 / 360);
     }
     case 1: {
-      // Actual/actual
-      const y1 = sd.getFullYear();
-      const y2 = ed.getFullYear();
+      // Actual/Actual (ISDA convention, matches Excel's behaviour).
+      //
+      // Same-year is easy: divide by the length of that calendar year.
+      // Across years we split the interval into its leap-year portion and
+      // non-leap-year portion, then sum `leapDays/366 + nonLeapDays/365`.
+      // This is the ISDA "Act/Act" rule; simple averaging of year lengths
+      // (the previous implementation) produces visibly wrong answers like
+      // `YEARFRAC("2020-01-01","2021-01-01",1) ≈ 1.001368` where Excel
+      // returns exactly 1.
+      const y1 = sd.getUTCFullYear();
+      const y2 = ed.getUTCFullYear();
       if (y1 === y2) {
-        const yearDays =
-          (new Date(y1 + 1, 0, 1).getTime() - new Date(y1, 0, 1).getTime()) / 86400000;
+        const yearDays = (Date.UTC(y1 + 1, 0, 1) - Date.UTC(y1, 0, 1)) / 86400000;
         return rvNumber(diffDays / yearDays);
       }
-      // Span across years: average the year lengths
-      const totalYearDays =
-        (new Date(y2 + 1, 0, 1).getTime() - new Date(y1, 0, 1).getTime()) / 86400000;
-      const avgYear = totalYearDays / (y2 - y1 + 1);
-      return rvNumber(diffDays / avgYear);
+      let leapDays = 0;
+      let nonLeapDays = 0;
+      const sdMs = sd.getTime();
+      const edMs = ed.getTime();
+      for (let y = y1; y <= y2; y++) {
+        const yStart = Math.max(sdMs, Date.UTC(y, 0, 1));
+        const yEnd = Math.min(edMs, Date.UTC(y + 1, 0, 1));
+        if (yEnd <= yStart) {
+          continue;
+        }
+        const d = (yEnd - yStart) / 86400000;
+        const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+        if (isLeap) {
+          leapDays += d;
+        } else {
+          nonLeapDays += d;
+        }
+      }
+      return rvNumber(leapDays / 366 + nonLeapDays / 365);
     }
     case 2: // Actual/360
       return rvNumber(diffDays / 360);
@@ -433,12 +596,12 @@ export const fnYEARFRAC: NativeFunction = args => {
       return rvNumber(diffDays / 365);
     case 4: {
       // European 30/360
-      const d1 = Math.min(sd.getDate(), 30);
-      const d2 = Math.min(ed.getDate(), 30);
-      const m1 = sd.getMonth() + 1;
-      const m2 = ed.getMonth() + 1;
-      const y1 = sd.getFullYear();
-      const y2 = ed.getFullYear();
+      const d1 = Math.min(sd.getUTCDate(), 30);
+      const d2 = Math.min(ed.getUTCDate(), 30);
+      const m1 = sd.getUTCMonth() + 1;
+      const m2 = ed.getUTCMonth() + 1;
+      const y1 = sd.getUTCFullYear();
+      const y2 = ed.getUTCFullYear();
       const days30_360 = (y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1);
       return rvNumber(days30_360 / 360);
     }
@@ -447,53 +610,192 @@ export const fnYEARFRAC: NativeFunction = args => {
   }
 };
 
-export const fnDATEVALUE: NativeFunction = args => {
+export const fnDATEVALUE: NativeFn = args => {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(args[0]).trim();
 
   // Lotus 1-2-3 bug: "2/29/1900" or "February 29, 1900" etc. should return 60
   const lotus29 =
     /^(2[/-]29[/-]1900|1900[/-]2[/-]29|1900[/-]02[/-]29|02[/-]29[/-]1900|Feb(ruary)?\s+29[,]?\s+1900)$/i;
-  if (lotus29.test(text.trim())) {
+  if (lotus29.test(text)) {
     return rvNumber(60);
   }
 
-  const d = new Date(text);
-  if (isNaN(d.getTime())) {
+  const parsed = parseDateOnly(text);
+  if (!parsed) {
     return ERRORS.VALUE;
   }
-  return rvNumber(dateToExcel(new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))));
+  return rvNumber(fromDate(new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d))));
 };
 
-export const fnTIMEVALUE: NativeFunction = args => {
+export const fnTIMEVALUE: NativeFn = args => {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
-  const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(text);
-  if (!m) {
+  const text = toStringRV(args[0]).trim();
+  const parsed = parseTimeOnly(text);
+  if (parsed === null) {
     return ERRORS.VALUE;
   }
-  const h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  const sec = m[3] ? parseInt(m[3], 10) : 0;
-  return rvNumber((h * 3600 + min * 60 + sec) / 86400);
+  return rvNumber(parsed);
 };
+
+// ============================================================================
+// Date / Time parsing (deterministic, independent of host locale)
+//
+// `new Date(text)` is unreliable across engines (Chrome parses "1/2/3" as
+// US MDY, Node varies by version, and locale influences both). We hand-
+// roll a small parser that accepts the formats Excel's DATEVALUE does and
+// rejects everything else.
+// ============================================================================
+
+const MONTH_NAMES: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12
+};
+
+/** Parse a date-only string into `{y, m, d}` or `null` on rejection. */
+function parseDateOnly(raw: string): { y: number; m: number; d: number } | null {
+  const s = raw.trim();
+  // Strip a trailing time component (e.g. "2024-01-15 14:30") — but only
+  // split at a space that is followed by a digit, so a spelled-out date
+  // like "Jan 15, 2024" (which has month-name and day-number separated
+  // by spaces) survives for the "Mmm D, YYYY" matcher below.
+  // A naive `indexOf(" ")` truncated "Jan 15, 2024" to just "Jan".
+  const trailingTime = /^(.+?)\s(\d{1,2}:[\d:]+(?:\s*[AaPp]\.?[Mm]\.?)?)$/.exec(s);
+  const datePart = trailingTime ? trailingTime[1].trim() : s;
+
+  // ISO YYYY-MM-DD or YYYY/MM/DD
+  let m = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(datePart);
+  if (m) {
+    return validateYmd(+m[1], +m[2], +m[3]);
+  }
+  // US M/D/YYYY or M-D-YYYY
+  m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/.exec(datePart);
+  if (m) {
+    let y = +m[3];
+    if (y < 100) {
+      // Excel's pivot: 00-29 → 2000s, 30-99 → 1900s
+      y += y < 30 ? 2000 : 1900;
+    }
+    return validateYmd(y, +m[1], +m[2]);
+  }
+  // D-Mmm-YY or D-Mmm-YYYY
+  m = /^(\d{1,2})[ /-]([A-Za-z]{3,9})[ /-]?(\d{2,4})?$/.exec(datePart);
+  if (m) {
+    const month = MONTH_NAMES[m[2].toLowerCase()];
+    if (!month) {
+      return null;
+    }
+    // Excel's DATEVALUE substitutes the host's current calendar year when
+    // the input omits a year (e.g. "15-Jan"). This matches Excel on the
+    // desktop, but note that the return value is not stable across time
+    // zones or years — tests that exercise this branch should freeze the
+    // clock (or supply a year) if they need reproducibility.
+    let y = m[3] ? +m[3] : new Date().getFullYear();
+    if (y < 100) {
+      y += y < 30 ? 2000 : 1900;
+    }
+    return validateYmd(y, month, +m[1]);
+  }
+  // "Mmm D, YYYY" or "Month D, YYYY"
+  m = /^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})$/.exec(datePart);
+  if (m) {
+    const month = MONTH_NAMES[m[1].toLowerCase()];
+    if (!month) {
+      return null;
+    }
+    let y = +m[3];
+    if (y < 100) {
+      y += y < 30 ? 2000 : 1900;
+    }
+    return validateYmd(y, month, +m[2]);
+  }
+  return null;
+}
+
+/** Validate a calendar date and return null for out-of-range components. */
+function validateYmd(y: number, mo: number, d: number): { y: number; m: number; d: number } | null {
+  if (y < 0 || y > 9999 || mo < 1 || mo > 12 || d < 1 || d > 31) {
+    return null;
+  }
+  // Day-of-month range check using UTC (leap years included).
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+    return null;
+  }
+  return { y, m: mo, d };
+}
+
+/** Parse a time-only string into a fraction-of-day in [0, 1). */
+function parseTimeOnly(raw: string): number | null {
+  // Optional AM/PM suffix; captured case-insensitively.
+  const m = /^(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}(?:\.\d+)?))?(?:\s*([AaPp])\.?\s*[Mm]\.?)?$/.exec(
+    raw
+  );
+  if (!m) {
+    return null;
+  }
+  let h = +m[1];
+  const min = m[2] ? +m[2] : 0;
+  const sec = m[3] ? +m[3] : 0;
+  if (min >= 60 || sec >= 60 || min < 0 || sec < 0) {
+    return null;
+  }
+  if (m[4]) {
+    const pm = m[4].toLowerCase() === "p";
+    if (h < 1 || h > 12) {
+      return null;
+    }
+    if (pm && h < 12) {
+      h += 12;
+    } else if (!pm && h === 12) {
+      h = 0;
+    }
+  } else {
+    if (h < 0 || h > 23) {
+      return null;
+    }
+  }
+  return (h * 3600 + min * 60 + sec) / 86400;
+}
 
 // ============================================================================
 // More Date/Time Functions
 // ============================================================================
 
-export const fnDAYS360: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnDAYS360: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const endN = numArg(args[1]);
+  const endN = argToNumber(args[1]);
   if (isError(endN)) {
     return endN;
   }
@@ -502,14 +804,14 @@ export const fnDAYS360: NativeFunction = args => {
     return methodRV;
   }
   const method = methodRV.value;
-  const sd = excelToDate(startN.value);
-  const ed = excelToDate(endN.value);
-  let d1 = sd.getDate();
-  let d2 = ed.getDate();
-  const m1 = sd.getMonth() + 1;
-  const m2 = ed.getMonth() + 1;
-  const y1 = sd.getFullYear();
-  const y2 = ed.getFullYear();
+  const sd = toDate(startN.value);
+  const ed = toDate(endN.value);
+  let d1 = sd.getUTCDate();
+  let d2 = ed.getUTCDate();
+  const m1 = sd.getUTCMonth() + 1;
+  const m2 = ed.getUTCMonth() + 1;
+  const y1 = sd.getUTCFullYear();
+  const y2 = ed.getUTCFullYear();
   if (method) {
     if (d1 === 31) {
       d1 = 30;
@@ -564,16 +866,16 @@ function getWeekendDays(weekendType: number): Set<number> {
   }
 }
 
-export const fnNETWORKDAYS_INTL: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnNETWORKDAYS_INTL: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const endN = numArg(args[1]);
+  const endN = argToNumber(args[1]);
   if (isError(endN)) {
     return endN;
   }
-  const weekendArg = args.length > 2 ? numArg(args[2]) : rvNumber(1);
+  const weekendArg = args.length > 2 ? argToNumber(args[2]) : rvNumber(1);
   if (isError(weekendArg)) {
     return weekendArg;
   }
@@ -584,24 +886,24 @@ export const fnNETWORKDAYS_INTL: NativeFunction = args => {
   const sign = startN.value <= endN.value ? 1 : -1;
   let count = 0;
   for (let d = s; d <= e; d++) {
-    const dt = excelToDate(d);
-    if (!weekendDays.has(dt.getDay()) && !holidays.has(d)) {
+    const dt = toDate(d);
+    if (!weekendDays.has(dt.getUTCDay()) && !holidays.has(d)) {
       count++;
     }
   }
   return rvNumber(count * sign);
 };
 
-export const fnWORKDAY_INTL: NativeFunction = args => {
-  const startN = numArg(args[0]);
+export const fnWORKDAY_INTL: NativeFn = args => {
+  const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
   }
-  const days = numArg(args[1]);
+  const days = argToNumber(args[1]);
   if (isError(days)) {
     return days;
   }
-  const weekendArg = args.length > 2 ? numArg(args[2]) : rvNumber(1);
+  const weekendArg = args.length > 2 ? argToNumber(args[2]) : rvNumber(1);
   if (isError(weekendArg)) {
     return weekendArg;
   }
@@ -612,8 +914,8 @@ export const fnWORKDAY_INTL: NativeFunction = args => {
   let remaining = Math.abs(days.value);
   while (remaining > 0) {
     current += step;
-    const dt = excelToDate(current);
-    if (!weekendDays.has(dt.getDay()) && !holidays.has(current)) {
+    const dt = toDate(current);
+    if (!weekendDays.has(dt.getUTCDay()) && !holidays.has(current)) {
       remaining--;
     }
   }

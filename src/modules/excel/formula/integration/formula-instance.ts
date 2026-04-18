@@ -21,7 +21,6 @@ import type {
   WorkbookSnapshot,
   WorksheetSnapshot
 } from "./workbook-snapshot";
-import { snapshotCellKey } from "./workbook-snapshot";
 
 // ============================================================================
 // FormulaInstance
@@ -133,35 +132,4 @@ function normalizeCell(ws: WorksheetSnapshot, cell: CellSnapshot): FormulaInstan
     targetRef: cell.ref,
     isDynamicArray: cell.isDynamicArray ?? false
   };
-}
-
-// ============================================================================
-// Lookup Helpers
-// ============================================================================
-
-/**
- * Build a lookup map from formula cell key to FormulaInstance.
- * Key format: `"SheetName!row:col"`.
- */
-export function buildFormulaInstanceMap(
-  instances: readonly FormulaInstance[]
-): Map<string, FormulaInstance> {
-  const map = new Map<string, FormulaInstance>();
-  for (const inst of instances) {
-    const key = `${inst.sheetName}!${inst.row}:${inst.col}`;
-    map.set(key, inst);
-  }
-  return map;
-}
-
-/**
- * Get a cell's value from the snapshot.
- * Returns `null` for cells that don't exist in the snapshot.
- */
-export function getSnapshotCellValue(
-  ws: WorksheetSnapshot,
-  row: number,
-  col: number
-): CellSnapshot | undefined {
-  return ws.cells.get(snapshotCellKey(row, col));
 }

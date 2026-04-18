@@ -89,10 +89,30 @@ class Parser {
   private pendingSheet: string | undefined;
   /** Pending end sheet name for 3D references */
   private pendingEndSheet: string | undefined;
+  /**
+   * Current recursion depth for parseExpr / parsePrefix. Excel caps
+   * formula nesting at 64; we allow a generous 256 to tolerate legitimate
+   * LAMBDA bodies, deeply nested IF chains, etc., while still refusing
+   * adversarial `((((..(A1)..))))` patterns that would otherwise blow
+   * V8's JS call stack.
+   */
+  private depth: number;
+  private readonly MAX_DEPTH = 256;
 
   constructor(tokens: Token[]) {
     this.tokens = tokens;
     this.pos = 0;
+    this.depth = 0;
+  }
+
+  private enter(): void {
+    if (++this.depth > this.MAX_DEPTH) {
+      throw new Error(`Formula nested too deep (> ${this.MAX_DEPTH} levels)`);
+    }
+  }
+
+  private leave(): void {
+    this.depth--;
   }
 
   peek(): Token | undefined {
@@ -125,6 +145,15 @@ class Parser {
   }
 
   parseExpr(minBp: number): AstNode {
+    this.enter();
+    try {
+      return this.parseExprInner(minBp);
+    } finally {
+      this.leave();
+    }
+  }
+
+  private parseExprInner(minBp: number): AstNode {
     let left = this.parsePrefix();
 
     while (true) {
@@ -173,18 +202,23 @@ class Parser {
   }
 
   parsePrefix(): AstNode {
-    const result = this.parsePrefixInner();
-    // If the SheetRef consumer below set pendingSheet but the prefix that
-    // followed wasn't a ref (CellRef / Range / ColRange / RowRange), the
-    // sheet qualifier would leak into the next parse and silently attach
-    // itself to an unrelated node. Detect it here.
-    if (this.pendingSheet !== undefined) {
-      const sheet = this.pendingSheet;
-      this.pendingSheet = undefined;
-      this.pendingEndSheet = undefined;
-      throw new Error(`Sheet reference '${sheet}' not followed by a cell or range`);
+    this.enter();
+    try {
+      const result = this.parsePrefixInner();
+      // If the SheetRef consumer below set pendingSheet but the prefix that
+      // followed wasn't a ref (CellRef / Range / ColRange / RowRange), the
+      // sheet qualifier would leak into the next parse and silently attach
+      // itself to an unrelated node. Detect it here.
+      if (this.pendingSheet !== undefined) {
+        const sheet = this.pendingSheet;
+        this.pendingSheet = undefined;
+        this.pendingEndSheet = undefined;
+        throw new Error(`Sheet reference '${sheet}' not followed by a cell or range`);
+      }
+      return result;
+    } finally {
+      this.leave();
     }
-    return result;
   }
 
   private parsePrefixInner(): AstNode {
@@ -219,7 +253,16 @@ class Parser {
     // Number literal
     if (t.type === TokenType.Number) {
       this.next();
-      return { type: NodeType.Number, value: parseFloat(t.value) };
+      const n = parseFloat(t.value);
+      // Reject non-finite literals at parse time. `1e400` would otherwise
+      // become `Infinity` and flow through arithmetic, requiring every
+      // downstream consumer to guard. Surfacing the overflow as a #NUM!
+      // error node keeps the engine's invariant that numeric values are
+      // always finite.
+      if (!Number.isFinite(n)) {
+        return { type: NodeType.Error, value: "#NUM!" };
+      }
+      return { type: NodeType.Number, value: n };
     }
 
     // String literal
@@ -322,13 +365,6 @@ class Parser {
         columns: t.columns,
         specials: t.specials
       };
-    }
-
-    // External workbook reference (e.g. [Book1]Sheet1!A1). Cross-workbook
-    // references are not supported — the binder lowers this to `#REF!`.
-    if (t.type === TokenType.ExternalRef) {
-      this.next();
-      return { type: NodeType.ExternalRef, text: t.value };
     }
 
     throw new Error(`Unexpected token: ${t.type}`);

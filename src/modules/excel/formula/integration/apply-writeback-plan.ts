@@ -121,9 +121,18 @@ function applyCSEWrite(workbook: WorkbookLike, op: CSEWrite): void {
     for (let c = 0; c < numCols; c++) {
       const targetRow = op.top + r;
       const targetCol = op.left + c;
-      const targetCell = ws.getCell(targetRow, targetCol);
+      // Use `findCell` (non-creating) rather than `getCell`. Only cells
+      // that are already CSE array slaves — i.e., existing formula cells
+      // sharing the master's array `ref` — receive results. Calling
+      // `getCell` would lazily materialise every blank position in the
+      // target range, which for a 1000×1000 CSE region would bloat the
+      // workbook with a million empty cells (and force every subsequent
+      // row iterator to walk them). The type check on the next line
+      // already implied this intent; we now match it with a matching
+      // lookup that has no side effects.
+      const targetCell = ws.findCell(targetRow, targetCol);
 
-      if (targetCell.type === Enums.ValueType.Formula) {
+      if (targetCell && targetCell.type === Enums.ValueType.Formula) {
         if (op.scalarFill !== undefined) {
           targetCell.result = snapshotValueToResult(op.scalarFill);
         } else {
@@ -195,10 +204,17 @@ function applyCleanupWrite(workbook: WorkbookLike, op: CleanupWrite): void {
 
 /**
  * Convert a snapshot cell value to a `FormulaResult` suitable for `cell.result`.
+ *
+ * `null` represents a BLANK — the formula produced no value (e.g.
+ * `=IF(FALSE, 1, )` or an empty reference). Returning literal `0` for
+ * that case conflates "formula returned 0" with "formula returned
+ * nothing", which breaks downstream consumers that distinguish the two
+ * (for instance, `ISBLANK(A1)` on a cell that holds `=B1` where B1 is
+ * empty should stay TRUE, not flip to FALSE because we injected 0).
  */
-function snapshotValueToResult(val: SnapshotCellValue): FormulaResult {
+function snapshotValueToResult(val: SnapshotCellValue): FormulaResult | undefined {
   if (val === null) {
-    return 0;
+    return undefined;
   }
   if (typeof val === "number" || typeof val === "string" || typeof val === "boolean") {
     return val;
@@ -206,7 +222,7 @@ function snapshotValueToResult(val: SnapshotCellValue): FormulaResult {
   if (isSnapshotError(val)) {
     return val as unknown as FormulaResult;
   }
-  return 0;
+  return undefined;
 }
 
 /**

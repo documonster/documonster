@@ -87,7 +87,7 @@ function isRange(ref: DepRef): ref is RangeCoord {
 function expandRefsToKeys(
   refs: DepRef[],
   formulaKeySet: ReadonlySet<string>,
-  formulaCellCoords: ReadonlyMap<string, CellCoord>
+  formulaCellCoordsBySheet: ReadonlyMap<string, ReadonlyArray<readonly [string, CellCoord]>>
 ): Set<string> {
   const keys = new Set<string>();
 
@@ -95,24 +95,27 @@ function expandRefsToKeys(
     if (isRange(ref)) {
       const rangeSize = (ref.bottom - ref.top + 1) * (ref.right - ref.left + 1);
 
-      if (rangeSize <= 500) {
-        // Small range: enumerate every cell
+      if (rangeSize <= 10000) {
+        // Small-to-medium range: enumerate every cell
         for (let r = ref.top; r <= ref.bottom; r++) {
           for (let c = ref.left; c <= ref.right; c++) {
             keys.add(makeKey(ref.sheet, r, c));
           }
         }
       } else {
-        // Large range (e.g. whole column A:A): scan formula cells and check containment
-        for (const [fKey, coord] of formulaCellCoords) {
-          if (
-            coord.sheet === ref.sheet &&
-            coord.row >= ref.top &&
-            coord.row <= ref.bottom &&
-            coord.col >= ref.left &&
-            coord.col <= ref.right
-          ) {
-            keys.add(fKey);
+        // Large range (e.g. whole column A:A): scan formula cells in the
+        // referenced sheet only and check containment.
+        const sheetCoords = formulaCellCoordsBySheet.get(ref.sheet);
+        if (sheetCoords) {
+          for (const [fKey, coord] of sheetCoords) {
+            if (
+              coord.row >= ref.top &&
+              coord.row <= ref.bottom &&
+              coord.col >= ref.left &&
+              coord.col <= ref.right
+            ) {
+              keys.add(fKey);
+            }
           }
         }
       }
@@ -147,6 +150,20 @@ export function buildDependencyGraphFromDeps(
   compiled: ReadonlyMap<
     string,
     {
+      instance: {
+        sheetName: string;
+        row: number;
+        col: number;
+        isDynamicArray?: boolean;
+      };
+      /**
+       * Whether this formula's top-level function is a known dynamic-
+       * array producer (SEQUENCE / FILTER / SORT / …). Used to collapse
+       * downstream `A1:A5`-style range dependencies into a single edge
+       * on the master so dependency ordering stays correct on the first
+       * calc pass (before ghost cells exist in the snapshot).
+       */
+      isDynamicArrayFunction?: boolean;
       staticDeps: {
         cells: readonly { sheet: string; row: number; col: number }[];
         areas: readonly {
@@ -161,22 +178,26 @@ export function buildDependencyGraphFromDeps(
   >,
   producerMap?: ReadonlyMap<string, string>
 ): DependencyGraph {
-  // Build a lookup of all formula cell coordinates for range intersection
+  // Build a lookup of all formula cell coordinates for range intersection.
+  // We group by sheet so that large-range containment scans only visit the
+  // relevant sheet's formula cells instead of the entire workbook.
   const formulaKeySet = new Set<string>();
-  const formulaCellCoords = new Map<string, CellCoord>();
+  const formulaCellCoordsBySheet = new Map<string, Array<[string, CellCoord]>>();
   const formulaKeys: string[] = [];
 
-  for (const [key] of compiled) {
+  for (const [key, cf] of compiled) {
     formulaKeySet.add(key);
-    // Parse the key back to coordinates (format: "sheet!row:col")
-    const bangIdx = key.lastIndexOf("!");
-    const colonIdx = key.lastIndexOf(":");
-    if (bangIdx !== -1 && colonIdx !== -1) {
-      const sheet = key.slice(0, bangIdx);
-      const row = parseInt(key.slice(bangIdx + 1, colonIdx), 10);
-      const col = parseInt(key.slice(colonIdx + 1), 10);
-      formulaCellCoords.set(key, { sheet, row, col });
+    // Use the instance's already-known coordinates instead of reverse-parsing
+    // the key string — saves two lastIndexOf calls and two parseInt calls
+    // per formula on cold-start.
+    const inst = cf.instance;
+    const coord: CellCoord = { sheet: inst.sheetName, row: inst.row, col: inst.col };
+    let list = formulaCellCoordsBySheet.get(inst.sheetName);
+    if (!list) {
+      list = [];
+      formulaCellCoordsBySheet.set(inst.sheetName, list);
     }
+    list.push([key, coord]);
     formulaKeys.push(key);
   }
 
@@ -190,10 +211,29 @@ export function buildDependencyGraphFromDeps(
 
     // Convert StaticDependencySet to DepRef[]
     const refs: DepRef[] = [];
+    // Direct cell deps always pass through verbatim.
     for (const cell of deps.cells) {
       refs.push({ sheet: cell.sheet, row: cell.row, col: cell.col });
     }
+    // Area deps normally expand into every cell in the range. For areas
+    // that start at a dynamic-array master (e.g. the `A1:A5` in
+    // `SUM(A1:A5)` where A1 is a live `=SEQUENCE(5)`), we replace the
+    // expansion with a single dependency on the master. Evaluator-time
+    // `getCellValue` then reads the master's cached array result for
+    // the ghost positions, so downstream formulas see the full spill
+    // in the same calc pass. Without this, A2..A5 aren't yet in the
+    // snapshot on the first run and the SUM only picks up A1.
+    const dynMasterDeps: string[] = [];
     for (const area of deps.areas) {
+      const topLeftKey = makeKey(area.sheet, area.top, area.left);
+      const masterCf = compiled.get(topLeftKey);
+      const isDynMaster =
+        masterCf !== undefined &&
+        (masterCf.instance.isDynamicArray || masterCf.isDynamicArrayFunction);
+      if (isDynMaster) {
+        dynMasterDeps.push(topLeftKey);
+        continue;
+      }
       refs.push({
         sheet: area.sheet,
         top: area.top,
@@ -204,7 +244,10 @@ export function buildDependencyGraphFromDeps(
     }
 
     // Expand to concrete cell keys
-    const depKeys = expandRefsToKeys(refs, formulaKeySet, formulaCellCoords);
+    const depKeys = expandRefsToKeys(refs, formulaKeySet, formulaCellCoordsBySheet);
+    for (const mk of dynMasterDeps) {
+      depKeys.add(mk);
+    }
 
     // Remap producer keys: if a dep points to a cell that's not a formula
     // but IS produced by another formula (CSE target or spill target),
@@ -279,7 +322,25 @@ export function mergeDynamicDeps(
     return { graph, changed: false };
   }
 
-  let changed = false;
+  // First pass: detect whether any new edges would actually be added.
+  // Cloning the full dependsOn/dependedBy maps is expensive for large
+  // workbooks; skip it entirely when there's no real work to do.
+  let needsClone = false;
+  for (const [formulaKey, accessedKeys] of dynamicDeps) {
+    const existing = graph.dependsOn.get(formulaKey);
+    for (const k of accessedKeys) {
+      if (!existing || !existing.has(k)) {
+        needsClone = true;
+        break;
+      }
+    }
+    if (needsClone) {
+      break;
+    }
+  }
+  if (!needsClone) {
+    return { graph, changed: false };
+  }
 
   // Clone forward and reverse edges
   const newDependsOn = new Map<string, Set<string>>();
@@ -301,7 +362,6 @@ export function mergeDynamicDeps(
     for (const accessedKey of accessedKeys) {
       if (!deps.has(accessedKey)) {
         deps.add(accessedKey);
-        changed = true;
         // Update reverse edge
         let rev = newDependedBy.get(accessedKey);
         if (!rev) {
@@ -311,10 +371,6 @@ export function mergeDynamicDeps(
         rev.add(formulaKey);
       }
     }
-  }
-
-  if (!changed) {
-    return { graph, changed: false };
   }
 
   // Re-detect cycles with the augmented graph

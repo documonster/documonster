@@ -133,6 +133,14 @@ export function resolveStructuredRefRows(
   specials: readonly string[],
   geo: TableGeometry
 ): StructuredRefRowRange {
+  // Tokenizer stashes unknown `[#Something]` tokens with a sentinel
+  // prefix. Surface them as errors rather than let them alias to the
+  // default-data-range path below.
+  for (const s of specials) {
+    if (s.startsWith("#__INVALID__")) {
+      return "error";
+    }
+  }
   const hasAll = specials.includes("#All");
   const hasHeaders = specials.includes("#Headers");
   const hasTotals = specials.includes("#Totals");
@@ -170,8 +178,10 @@ export function resolveStructuredRefRows(
     if (geo.hasHeaderRow) {
       return { rowTop: geo.topLeftRow, rowBottom: geo.topLeftRow };
     }
-    // Table without header — headers special returns data start
-    return { rowTop: geo.dataRowStart, rowBottom: geo.dataRowStart };
+    // Table without a header row: Excel reports #REF! rather than silently
+    // aliasing to the first data row. Returning the data row here would
+    // route `Table1[#Headers]` to real data values, masking user mistakes.
+    return "error";
   }
   if (hasTotals) {
     if (geo.hasTotalsRow) {

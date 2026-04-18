@@ -948,7 +948,7 @@ describe("Formula Engine E2E Verification", () => {
   // 30. Empty/Omitted Arguments (Round 3 — CRITICAL fix)
   // ==========================================================================
   describe("empty/omitted arguments", () => {
-    it("IF(TRUE,,0) should return null (omitted second arg)", () => {
+    it("IF(TRUE,,0) should return blank (omitted second arg)", () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
 
@@ -956,9 +956,13 @@ describe("Formula Engine E2E Verification", () => {
 
       wb.calculateFormulas();
 
-      // Omitted argument → null; in Excel this displays as 0 in numeric context
+      // Omitted argument → BLANK. In R5 we changed the writeback path to
+      // surface BLANK as `undefined` (previously it was coerced to 0,
+      // which collapsed "blank" and "literal zero"). Either representation
+      // is acceptable — Excel itself displays it as an empty cell when
+      // formatted as text and as 0 in numeric contexts.
       const result = ws.getCell("A1").result;
-      expect(result === null || result === 0).toBe(true);
+      expect(result === null || result === undefined || result === 0).toBe(true);
     });
 
     it("IF(FALSE,,5) should return 5", () => {

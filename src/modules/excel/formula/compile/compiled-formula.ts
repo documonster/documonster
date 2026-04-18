@@ -3,7 +3,6 @@
  *
  * A `CompiledFormula` packages together:
  * - The original `FormulaInstance` metadata
- * - The raw AST (from the parser)
  * - The bound expression tree (from the binder)
  * - Static dependency information
  * - Metadata flags (volatile, dynamic refs, etc.)
@@ -17,7 +16,9 @@
  *
  * Runtime-dependent references (INDIRECT, OFFSET) cannot be captured
  * statically — the `hasDynamicRefs` flag marks formulas that may have
- * additional runtime dependencies.
+ * additional runtime dependencies. Those functions re-parse their dynamic
+ * arguments at evaluation time using their own parser invocation (the raw
+ * AST is not retained on the CompiledFormula).
  */
 
 import type { FormulaInstance } from "../integration/formula-instance";
@@ -43,8 +44,6 @@ import {
 export interface CompiledFormula {
   /** The original formula instance metadata. */
   readonly instance: FormulaInstance;
-  /** The raw AST (kept for INDIRECT/OFFSET that re-parse at runtime). */
-  readonly ast: AstNode;
   /** The bound expression tree (the evaluator executes this). */
   readonly bound: BoundExpr;
   /** Statically extractable dependencies. */
@@ -111,6 +110,13 @@ export type NameDepResolver = (name: string) =>
   | {
       deps: StaticDependencySet;
       hasDynamicRefs: boolean;
+      /**
+       * Whether the defined-name's formula (transitively) uses a volatile
+       * function like NOW/RAND/OFFSET/INDIRECT. The resolver must propagate
+       * this so the OUTER formula inherits volatility — otherwise the
+       * session result cache would hold stale values across calc runs.
+       */
+      isVolatile: boolean;
     }
   | undefined;
 
@@ -129,7 +135,47 @@ export function extractStaticDeps(
   const cells: CellDep[] = [];
   const areas: AreaDep[] = [];
   walkDeps(expr, cells, areas, snapshot?.tablesByName, nameResolver, new Set());
-  return { cells, areas };
+  // Deduplicate — a formula like `=A1+A1+A1` would otherwise add three
+  // copies of A1 to the dep list, bloating both the dependency graph's
+  // intermediate storage and the `expandRefsToKeys` pass downstream. We
+  // use positional keys that mirror the Set<string> dedup logic that the
+  // graph builder already applies, so we can pay the cost here once
+  // instead of in every consumer. (R6 architectural note #5)
+  return { cells: dedupeCells(cells), areas: dedupeAreas(areas) };
+}
+
+function dedupeCells(cells: CellDep[]): CellDep[] {
+  if (cells.length < 2) {
+    return cells;
+  }
+  const seen = new Set<string>();
+  const out: CellDep[] = [];
+  for (const c of cells) {
+    const key = `${c.sheet}\u0000${c.row}\u0001${c.col}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
+}
+
+function dedupeAreas(areas: AreaDep[]): AreaDep[] {
+  if (areas.length < 2) {
+    return areas;
+  }
+  const seen = new Set<string>();
+  const out: AreaDep[] = [];
+  for (const a of areas) {
+    const key = `${a.sheet}\u0000${a.top}\u0001${a.left}\u0002${a.bottom}\u0003${a.right}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
 }
 
 function walkDeps(
@@ -296,7 +342,26 @@ function walkDeps(
 // Volatility / Dynamic Ref / Dynamic Array Detection
 // ============================================================================
 
-const VOLATILE_FUNCTIONS = new Set(["RAND", "RANDBETWEEN", "NOW", "TODAY", "RANDARRAY"]);
+// Excel's volatile-function list: any formula containing one of these
+// must be re-evaluated on every calc pass, because the result can change
+// without any explicit input change. INDIRECT / OFFSET are additionally
+// flagged as "dynamic ref" (their dependency set isn't known at compile
+// time), but they're also volatile in the usual sense — the target
+// cell's value may change even when the INDIRECT string itself is
+// constant. INFO and CELL with the "row"/"col" info-type also qualify
+// but those require per-invocation arg inspection; the coarse opt-in
+// below is intentionally conservative.
+const VOLATILE_FUNCTIONS = new Set([
+  "RAND",
+  "RANDBETWEEN",
+  "RANDARRAY",
+  "NOW",
+  "TODAY",
+  "INDIRECT",
+  "OFFSET",
+  "INFO",
+  "CELL"
+]);
 
 const DYNAMIC_REF_FUNCTIONS = new Set(["INDIRECT", "OFFSET"]);
 
@@ -400,12 +465,18 @@ export function analyzeExpr(
         break;
 
       case BoundExprKind.NameExpr:
-        // If the name resolves to a formula that contains dynamic refs,
-        // the outer formula inherits hasDynamicRefs.
+        // If the name resolves to a formula that contains dynamic refs
+        // or volatile functions, the outer formula inherits both flags.
+        // Forgetting to propagate `isVolatile` meant that a defined name
+        // pointing at `NOW()` stayed cached between calculations — the
+        // bug drove R5-P0-5.
         if (nameResolver) {
           const resolved = nameResolver(e.upperName);
           if (resolved?.hasDynamicRefs) {
             hasDynamicRefs = true;
+          }
+          if (resolved?.isVolatile) {
+            isVolatile = true;
           }
         }
         break;

@@ -6,33 +6,66 @@ import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
 import {
   RVKind,
   ERRORS,
-  BLANK,
+  compareScalarsSameKind,
   rvNumber,
   rvArray,
   toNumberRV,
   toBooleanRV,
-  toStringRV,
   topLeft,
   isError,
   isArray
 } from "../runtime/values";
+import { asArray, getCell } from "./_shared";
 import { fnSUM, fnAVERAGE, fnMIN, fnMAX, fnCOUNT, fnCOUNTA, fnPRODUCT } from "./math";
 import { fnSTDEV, fnSTDEVP, fnVAR, fnVARP, fnMEDIAN, fnLARGE, fnSMALL } from "./statistical";
 
-function asArray(v: RuntimeValue): ArrayValue | null {
-  return v.kind === RVKind.Array ? v : null;
-}
-function getCell(arr: ArrayValue, r: number, c: number): ScalarValue {
-  return r < arr.height && c < arr.width ? arr.rows[r][c] : BLANK;
-}
-function scalarToString(v: ScalarValue): string {
-  return toStringRV(v);
-}
 function isScalarError(v: ScalarValue): boolean {
   return v.kind === RVKind.Error;
 }
 function isScalarBlankOrEmpty(v: ScalarValue): boolean {
   return v.kind === RVKind.Blank || (v.kind === RVKind.String && v.value === "");
+}
+
+/**
+ * Kind-priority ordering for cross-type sorting.
+ *
+ * `compareScalarsSameKind` returns `NaN` when the two operands have
+ * different kinds, so SORT/SORTBY need a deterministic tiebreak. Excel's
+ * workbook-grade sort groups values by kind — Numbers before Strings,
+ * Strings before Booleans, Booleans before Blanks/Errors — which is the
+ * priority we encode here.
+ */
+function kindPriority(k: RVKind): number {
+  switch (k) {
+    case RVKind.Number:
+      return 0;
+    case RVKind.String:
+      return 1;
+    case RVKind.Boolean:
+      return 2;
+    case RVKind.Blank:
+      return 3;
+    case RVKind.Error:
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+/**
+ * Locale-independent comparator for SORT / SORTBY.
+ *
+ * Uses `compareScalarsSameKind` for same-kind ordering (strings compared
+ * case-insensitively, not via `localeCompare`, so results are stable
+ * across machines) and falls back to `kindPriority` when the operands
+ * differ in kind.
+ */
+function compareForSort(a: ScalarValue, b: ScalarValue): number {
+  if (a.kind !== b.kind) {
+    return kindPriority(a.kind) - kindPriority(b.kind);
+  }
+  const cmp = compareScalarsSameKind(a, b);
+  return Number.isNaN(cmp) ? 0 : cmp;
 }
 
 export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
@@ -41,10 +74,17 @@ export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
   if (!dataArr || !includeArr) {
     return ERRORS.VALUE;
   }
+  // Excel requires `include` to be a 1-column vector matching data's
+  // height (the common row-filter shape). A mismatched shape previously
+  // let rows slip through silently because `getCell` out-of-bounds
+  // returns BLANK, which reads as FALSE.
+  if (includeArr.width !== 1 || includeArr.height !== dataArr.height) {
+    return ERRORS.VALUE;
+  }
   const ifEmpty = args.length > 2 ? topLeft(args[2]) : null;
   const resultRows: ScalarValue[][] = [];
   for (let r = 0; r < dataArr.height; r++) {
-    const inc = r < includeArr.height ? getCell(includeArr, r, 0) : BLANK;
+    const inc = getCell(includeArr, r, 0);
     if (inc.kind === RVKind.Error) {
       return inc;
     }
@@ -60,7 +100,7 @@ export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
     }
   }
   if (resultRows.length === 0) {
-    return ifEmpty !== null ? rvArray([[ifEmpty]]) : ERRORS.VALUE;
+    return ifEmpty !== null ? rvArray([[ifEmpty]]) : ERRORS.CALC;
   }
   return rvArray(resultRows);
 }
@@ -91,28 +131,29 @@ export function fnSORT(args: RuntimeValue[]): RuntimeValue {
   if (isError(byColV)) {
     return byColV;
   }
+  // Truncate the index so fractional inputs don't silently become NaN
+  // when used as array subscripts. Then bounds-check against the axis
+  // SORT will actually walk — this turns `SORT(arr, 0)` / out-of-range
+  // values into the documented #VALUE! instead of a soft-fail.
+  const sortIndex = Math.trunc(sortIndexV.value);
   if (byColV.value) {
+    if (sortIndex < 1 || sortIndex > dataArr.height) {
+      return ERRORS.VALUE;
+    }
     const colIndices = Array.from({ length: dataArr.width }, (_, i) => i);
-    const rowIdx = sortIndexV.value - 1;
+    const rowIdx = sortIndex - 1;
     colIndices.sort((a, b) => {
       const va = getCell(dataArr, rowIdx, a);
       const vb = getCell(dataArr, rowIdx, b);
-      if (va.kind === RVKind.Number && vb.kind === RVKind.Number) {
-        return (va.value - vb.value) * sortOrderV.value;
-      }
-      return scalarToString(va).localeCompare(scalarToString(vb)) * sortOrderV.value;
+      return compareForSort(va, vb) * sortOrderV.value;
     });
     return rvArray(rows.map(row => colIndices.map(c => row[c])));
   }
-  const col = sortIndexV.value - 1;
-  rows.sort((a, b) => {
-    const va = a[col];
-    const vb = b[col];
-    if (va.kind === RVKind.Number && vb.kind === RVKind.Number) {
-      return (va.value - vb.value) * sortOrderV.value;
-    }
-    return scalarToString(va).localeCompare(scalarToString(vb)) * sortOrderV.value;
-  });
+  if (sortIndex < 1 || sortIndex > dataArr.width) {
+    return ERRORS.VALUE;
+  }
+  const col = sortIndex - 1;
+  rows.sort((a, b) => compareForSort(a[col], b[col]) * sortOrderV.value);
   return rvArray(rows);
 }
 
@@ -168,7 +209,11 @@ function applyUnique(rows: ScalarValue[][], exactlyOnce: boolean): ScalarValue[]
   const keyToRows = new Map<string, ScalarValue[]>();
   const order: string[] = [];
   for (const row of rows) {
-    const key = row.map(c => scalarToString(c)).join("\0");
+    // Key the row by (kind, textual form) per cell so that UNIQUE preserves
+    // Excel's type-aware equality: the number `1` and the string `"1"` are
+    // distinct entries. Without the kind prefix they would collide because
+    // `toStringRV` renders both as `"1"`.
+    const key = row.map(c => `${c.kind}\u0001${scalarUniqueKey(c)}`).join("\u0002");
     if (!keyCount.has(key)) {
       order.push(key);
       keyToRows.set(key, row);
@@ -183,6 +228,29 @@ function applyUnique(rows: ScalarValue[][], exactlyOnce: boolean): ScalarValue[]
     result.push(keyToRows.get(key)!);
   }
   return result;
+}
+
+/**
+ * Produce a string that fully identifies a scalar for equality purposes,
+ * distinguishing kinds that stringify identically but must not merge.
+ */
+function scalarUniqueKey(v: ScalarValue): string {
+  if (v.kind === RVKind.Number) {
+    // Using `toString` instead of localised formatting keeps NaN/Infinity
+    // / -0 distinguishable from `0`, which matters for exact duplication
+    // detection.
+    return Object.is(v.value, -0) ? "-0" : String(v.value);
+  }
+  if (v.kind === RVKind.Boolean) {
+    return v.value ? "1" : "0";
+  }
+  if (v.kind === RVKind.Error) {
+    return v.code;
+  }
+  if (v.kind === RVKind.Blank) {
+    return "";
+  }
+  return v.value.toLowerCase();
 }
 
 export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
@@ -214,12 +282,7 @@ export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
     for (const sk of sortKeys) {
       const va = getCell(sk.arr, a.idx, 0);
       const vb = getCell(sk.arr, b.idx, 0);
-      let cmp: number;
-      if (va.kind === RVKind.Number && vb.kind === RVKind.Number) {
-        cmp = va.value - vb.value;
-      } else {
-        cmp = scalarToString(va).localeCompare(scalarToString(vb));
-      }
+      const cmp = compareForSort(va, vb);
       if (cmp !== 0) {
         return cmp * sk.order;
       }
@@ -235,7 +298,11 @@ export function fnSUBTOTAL(args: RuntimeValue[]): RuntimeValue {
     return funcNumV;
   }
   const dataArgs = args.slice(1);
-  const fn = funcNumV.value > 100 ? funcNumV.value - 100 : funcNumV.value;
+  // Truncate toward zero: Excel rejects non-integer function codes, so
+  // `SUBTOTAL(9.5, …)` should behave as `SUBTOTAL(9, …)` rather than
+  // slipping through the switch and returning #VALUE!. (R6-P1-9)
+  const rawFn = Math.trunc(funcNumV.value);
+  const fn = rawFn > 100 ? rawFn - 100 : rawFn;
   switch (fn) {
     case 1:
       return fnAVERAGE(dataArgs);
@@ -321,11 +388,26 @@ export function fnSEQUENCE(args: RuntimeValue[]): RuntimeValue {
   if (isError(stepV)) {
     return stepV;
   }
+  // Excel truncates row/col counts toward zero and rejects anything
+  // below 1. Without this guard `SEQUENCE(-3)` would produce an empty
+  // ArrayValue which breaks downstream rectangularisation, and
+  // `SEQUENCE(2.5, 2)` would generate 3 rows instead of Excel's 2.
+  const rowCount = Math.trunc(rowsV.value);
+  const colCount = Math.trunc(colsV.value);
+  if (!Number.isFinite(rowCount) || !Number.isFinite(colCount) || rowCount < 1 || colCount < 1) {
+    return ERRORS.NUM;
+  }
+  // Bound the output to the same 10M-cell budget the rest of the array
+  // pipeline uses. SEQUENCE(1e9, 1e9) would otherwise try to allocate
+  // 1e18 scalars before OOM-ing (R6-P1-4).
+  if (rowCount * colCount > 10_000_000) {
+    return ERRORS.NUM;
+  }
   const result: ScalarValue[][] = [];
   let val = startV.value;
-  for (let r = 0; r < rowsV.value; r++) {
+  for (let r = 0; r < rowCount; r++) {
     const row: ScalarValue[] = [];
-    for (let c = 0; c < colsV.value; c++) {
+    for (let c = 0; c < colCount; c++) {
       row.push(rvNumber(val));
       val += stepV.value;
     }
@@ -356,12 +438,40 @@ export function fnRANDARRAY(args: RuntimeValue[]): RuntimeValue {
   if (isError(wholeV)) {
     return wholeV;
   }
+  const rowCount = Math.trunc(rowsV.value);
+  const colCount = Math.trunc(colsV.value);
+  // Excel rejects rows/cols < 1 and min > max with #VALUE!, and when the
+  // `whole` flag is TRUE it additionally requires integer min/max.
+  if (
+    !Number.isFinite(rowCount) ||
+    !Number.isFinite(colCount) ||
+    rowCount < 1 ||
+    colCount < 1 ||
+    minV.value > maxV.value
+  ) {
+    return ERRORS.VALUE;
+  }
+  if (wholeV.value && (!Number.isInteger(minV.value) || !Number.isInteger(maxV.value))) {
+    return ERRORS.VALUE;
+  }
+  // Same 10M-cell budget as SEQUENCE / MAKEARRAY / broadcastBinaryOp —
+  // otherwise `RANDARRAY(1e6, 1e6)` OOMs the host. (R6-P1-4)
+  if (rowCount * colCount > 10_000_000) {
+    return ERRORS.NUM;
+  }
   const result: ScalarValue[][] = [];
-  for (let r = 0; r < rowsV.value; r++) {
+  for (let r = 0; r < rowCount; r++) {
     const row: ScalarValue[] = [];
-    for (let c = 0; c < colsV.value; c++) {
-      const v = minV.value + Math.random() * (maxV.value - minV.value);
-      row.push(rvNumber(wholeV.value ? Math.floor(v) : v));
+    for (let c = 0; c < colCount; c++) {
+      if (wholeV.value) {
+        // Draw a uniform integer in [min, max] inclusive. The old code
+        // did `Math.floor(min + random() * (max - min))` which excluded
+        // `max` almost always.
+        const span = maxV.value - minV.value + 1;
+        row.push(rvNumber(minV.value + Math.floor(Math.random() * span)));
+      } else {
+        row.push(rvNumber(minV.value + Math.random() * (maxV.value - minV.value)));
+      }
     }
     result.push(row);
   }
@@ -503,7 +613,8 @@ export function fnCHOOSECOLS(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnVSTACK(args: RuntimeValue[]): RuntimeValue {
-  const result: ScalarValue[][] = [];
+  const rows: ScalarValue[][] = [];
+  let maxWidth = 0;
   for (const a of args) {
     if (a.kind === RVKind.Array) {
       for (let r = 0; r < a.height; r++) {
@@ -511,13 +622,31 @@ export function fnVSTACK(args: RuntimeValue[]): RuntimeValue {
         for (let c = 0; c < a.width; c++) {
           row.push(a.rows[r][c]);
         }
-        result.push(row);
+        rows.push(row);
+        if (a.width > maxWidth) {
+          maxWidth = a.width;
+        }
       }
     } else {
-      result.push([topLeft(a)]);
+      rows.push([topLeft(a)]);
+      if (maxWidth < 1) {
+        maxWidth = 1;
+      }
     }
   }
-  return result.length > 0 ? rvArray(result) : ERRORS.VALUE;
+  if (rows.length === 0) {
+    return ERRORS.VALUE;
+  }
+  // Pad with #N/A (not BLANK) to match Excel, and to stay symmetric with
+  // HSTACK's existing behaviour. The previous code left short rows to be
+  // rectangularised by `rvArray`, which used BLANK — visually wrong and
+  // inconsistent with how HSTACK reports "missing" cells.
+  for (const row of rows) {
+    while (row.length < maxWidth) {
+      row.push(ERRORS.NA);
+    }
+  }
+  return rvArray(rows);
 }
 
 export function fnHSTACK(args: RuntimeValue[]): RuntimeValue {
@@ -688,11 +817,30 @@ export function fnEXPAND(args: RuntimeValue[]): RuntimeValue {
   if (isError(colsV)) {
     return colsV;
   }
+  // Excel requires the target to be at least as large as the source, and
+  // both dimensions to be positive. Without Math.trunc the inner loop
+  // runs `c < rowsV.value` comparisons against a float, which produces
+  // an off-by-one depending on the fractional part (R6-P1-5).
+  const rowCount = Math.trunc(rowsV.value);
+  const colCount = Math.trunc(colsV.value);
+  if (
+    !Number.isFinite(rowCount) ||
+    !Number.isFinite(colCount) ||
+    rowCount < d.height ||
+    colCount < d.width
+  ) {
+    return ERRORS.VALUE;
+  }
+  // Cap the output size to the same 10M-cell budget the other dynamic
+  // array producers use (see MAKEARRAY, broadcastBinaryOp).
+  if (rowCount * colCount > 10_000_000) {
+    return ERRORS.NUM;
+  }
   const pad: ScalarValue = args.length > 3 ? topLeft(args[3]) : ERRORS.NA;
   const result: ScalarValue[][] = [];
-  for (let r = 0; r < rowsV.value; r++) {
+  for (let r = 0; r < rowCount; r++) {
     const row: ScalarValue[] = [];
-    for (let c = 0; c < colsV.value; c++) {
+    for (let c = 0; c < colCount; c++) {
       row.push(r < d.height && c < d.width ? getCell(d, r, c) : pad);
     }
     result.push(row);
