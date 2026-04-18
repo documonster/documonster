@@ -29,7 +29,7 @@ Create, read, and modify Excel spreadsheets with full styling, formulas, images,
 
 ### Formula — Excel-Compatible Calculation Engine
 
-Standalone 433-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Ships as a separate subpath so it stays out of bundles that only need to read/write XLSX.
+Standalone 433-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Ships as a separate subpath so it stays out of bundles that only need to read/write XLSX. **Works in two modes**: paired with `Workbook` via `installFormulaEngine()`, or standalone on any `WorkbookLike` host via `calculateFormulas()` — the engine itself has zero excel runtime dependencies.
 
 - [Documentation](src/modules/formula/README.md) | [中文](src/modules/formula/README_zh.md)
 - [Examples](src/modules/formula/examples/)
@@ -151,10 +151,16 @@ import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown"
 const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Formula — opt-in calculation engine (kept out of the base bundle)
+//
+// Mode A: paired with Workbook — enables wb.calculateFormulas()
 import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
 installFormulaEngine(); // once at startup
 sheet.getCell("A4").value = { formula: "SUM(A1:A3)" };
 workbook.calculateFormulas(); // now populates cell.result
+
+// Mode B: standalone — pure function, zero excel runtime, any WorkbookLike
+import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+calculateFormulas(anyWorkbookLikeObject);
 ```
 
 ## Browser Support
