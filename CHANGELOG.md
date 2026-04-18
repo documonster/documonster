@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.3.0](https://github.com/cjnoname/excelts/compare/v9.2.1...v9.3.0) (2026-04-18)
+
+
+### Features
+
+* **excel:** Add COUP family + BINOM.DIST.RANGE ([a7e3e54](https://github.com/cjnoname/excelts/commit/a7e3e54b19fcf6927cc85f74c04aa56ecfad7892))
+* **excel:** Add Excel 365 dynamic array formula support (FILTER/SORT/UNIQUE/XLOOKUP/SEQUENCE) ([17e6c22](https://github.com/cjnoname/excelts/commit/17e6c22e9f3f394610f2705c06f666e025edcaed))
+* **excel:** Add external workbook link support ([Book]Sheet!Ref) ([8d0d046](https://github.com/cjnoname/excelts/commit/8d0d0467658e32a609ca72e062fc8b216b0c6cae))
+* **excel:** Add formula calculation engine with tokenizer, parser, evaluator, dependency graph, and 220+ Excel functions ([6b6c9a8](https://github.com/cjnoname/excelts/commit/6b6c9a84394becf658d4db3e2e1de17676197aeb))
+* **excel:** Add ignoredErrors support, absoluteAnchor images, and reconcilePicture null guard ([da34761](https://github.com/cjnoname/excelts/commit/da3476107efe52dd95bf91db3df8bb1b77ed17e3))
+* **excel:** Add matrix + series math functions (MMULT, MDETERM, MINVERSE, MUNIT, SERIESSUM) ([ee6a094](https://github.com/cjnoname/excelts/commit/ee6a09499d4f1f269369e78875ae767d7a702b88))
+* **excel:** Add REGEX, VALUETOTEXT, ARRAYTOTEXT, PERCENTRANK, PROB functions ([03913e5](https://github.com/cjnoname/excelts/commit/03913e52d41c9e9d4d38e2634486c34329bb9c01))
+* **excel:** Add SQRTPI, ENCODEURL, ACCRINTM, TBILL*, PRICEMAT, YIELDMAT ([96813b8](https://github.com/cjnoname/excelts/commit/96813b81a14ad2c413a8ffad171e38d949c015cf))
+* **excel:** Add workbook structure protection and public defaultFont API ([7f15a58](https://github.com/cjnoname/excelts/commit/7f15a583aa4dcb2abda25b0152a561ca9ecc212b))
+* **excel:** Cast-free hyperlink + formula+hyperlink cell input ([86340a0](https://github.com/cjnoname/excelts/commit/86340a0586846218447b869b457c3923fe194feb))
+* **excel:** Harden formula engine — +5000 tests, 30+ bug fixes, 34 new functions, 3D ref + dynamic-array dependency fixes ([06b0cf4](https://github.com/cjnoname/excelts/commit/06b0cf462e936f4646313467cdf5af089d2a7c0f))
+
+
+### Bug Fixes
+
+* **excel:** Fix 21 formula engine bugs, add 13 functions, 2 language features ([487079a](https://github.com/cjnoname/excelts/commit/487079a2136f8f84e4e4b0a6e7edfbfe1e727293))
+* **excel:** Fix data validation sort, empty border truthy, and table name uniqueness ([59f24cf](https://github.com/cjnoname/excelts/commit/59f24cfa4dd840e40c97fb672b029a798daa224c))
+* **excel:** Preserve formula+hyperlink and rich-text on round-trip ([#142](https://github.com/cjnoname/excelts/issues/142)) ([fa350f7](https://github.com/cjnoname/excelts/commit/fa350f7ffc18deacad5088311e033c846b4a1606))
+* **excel:** SUBTOTAL/AGGREGATE full Excel semantics, totals-row SUBTOTAL codes, multi-area mask merging ([128c54c](https://github.com/cjnoname/excelts/commit/128c54cf4f4ae84d422ec1b2677b27ce30b62ad4))
+* **excel:** Support range operator ':' with dynamic refs, add 50+ functions, fix SUBTOTAL/AGGREGATE semantics ([f912857](https://github.com/cjnoname/excelts/commit/f9128570091d0bd6ab566a528f923c27657e5763))
+* Update TypeScript linting rules — add no-misused-spread and no-useless-default-assignment ([480b7c0](https://github.com/cjnoname/excelts/commit/480b7c083ad84e9c7518d9cabd38186f0c6ba5fa))
+
+
+### Code Refactoring
+
+* **excel:** Replace old formula engine with new compile→evaluate→materialize pipeline ([b747df7](https://github.com/cjnoname/excelts/commit/b747df7f2a78174fdfcf7d83e3e273e46371a6a8))
+* **formula:** Promote to top-level module with standalone entry + strict defined-name classification ([b34fe81](https://github.com/cjnoname/excelts/commit/b34fe818f3d7cd4d8a8514cbcba9e800cf20eae7))
+
 ## [9.2.1](https://github.com/cjnoname/excelts/compare/v9.2.0...v9.2.1) (2026-04-14)
 
 
