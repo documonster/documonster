@@ -1670,3 +1670,303 @@ export const fnTEXTSPLIT: NativeFn = args => {
   }
   return rvArray(result);
 };
+
+// ============================================================================
+// REGEX family (Excel 365, 2024)
+// ============================================================================
+
+/**
+ * Convert an Excel REGEX pattern to a JavaScript RegExp. Excel's regex
+ * dialect is close to PCRE; JavaScript's RegExp is close enough for the
+ * vast majority of practical patterns, but a few constructs (named
+ * captures, look-behind, some Unicode classes) behave slightly
+ * differently. We pass patterns through as-is and let JavaScript's
+ * parser surface #VALUE! on the rare incompatibility.
+ */
+function compileExcelRegex(
+  pattern: string,
+  caseSensitive: boolean,
+  global: boolean
+): RegExp | null {
+  try {
+    let flags = "u";
+    if (!caseSensitive) {
+      flags += "i";
+    }
+    if (global) {
+      flags += "g";
+    }
+    return new RegExp(pattern, flags);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the optional `case_sensitivity` argument used by every REGEX
+ * function. `0`/FALSE/omitted → case-insensitive (Excel default),
+ * any other value → case-sensitive. Errors propagate.
+ */
+function resolveCaseSensitivity(
+  arg: RuntimeValue | undefined
+): { caseSensitive: boolean } | ErrorValue {
+  if (arg === undefined) {
+    return { caseSensitive: false };
+  }
+  // Accept boolean or number; anything else coerced via toBooleanRV.
+  const b = toBooleanRV(arg);
+  if (isError(b)) {
+    return b;
+  }
+  return { caseSensitive: b.value };
+}
+
+/**
+ * REGEXTEST(text, pattern, [case_sensitivity]) — returns TRUE iff the
+ * regex matches any substring of `text`.
+ */
+export const fnREGEXTEST: NativeFn = args => {
+  const textV = toStringRV(topLeft(args[0]));
+  const patternV = toStringRV(topLeft(args[1]));
+  const cs = resolveCaseSensitivity(args[2]);
+  if ("kind" in cs) {
+    return cs; // error
+  }
+  const errCheck = checkError(args[0]) ?? checkError(args[1]);
+  if (errCheck) {
+    return errCheck;
+  }
+  const re = compileExcelRegex(patternV, cs.caseSensitive, false);
+  if (!re) {
+    return ERRORS.VALUE;
+  }
+  return rvBoolean(re.test(textV));
+};
+
+/**
+ * REGEXEXTRACT(text, pattern, [return_mode], [case_sensitivity]) —
+ *   return_mode = 0 (default) → first match as a string
+ *   return_mode = 1 → all matches as a 1-column array
+ *   return_mode = 2 → capture groups of the first match as a 1-row array
+ */
+export const fnREGEXEXTRACT: NativeFn = args => {
+  const textV = toStringRV(topLeft(args[0]));
+  const patternV = toStringRV(topLeft(args[1]));
+  const errCheck = checkError(args[0]) ?? checkError(args[1]);
+  if (errCheck) {
+    return errCheck;
+  }
+  const modeV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(0);
+  if (isError(modeV)) {
+    return modeV;
+  }
+  const mode = Math.trunc(modeV.value);
+  if (mode !== 0 && mode !== 1 && mode !== 2) {
+    return ERRORS.VALUE;
+  }
+  const cs = resolveCaseSensitivity(args[3]);
+  if ("kind" in cs) {
+    return cs;
+  }
+  const needGlobal = mode === 1;
+  const re = compileExcelRegex(patternV, cs.caseSensitive, needGlobal);
+  if (!re) {
+    return ERRORS.VALUE;
+  }
+  if (mode === 0) {
+    const m = re.exec(textV);
+    if (!m) {
+      return ERRORS.NA;
+    }
+    return rvString(m[0]);
+  }
+  if (mode === 1) {
+    const matches: string[] = [];
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(textV)) !== null) {
+      matches.push(m[0]);
+      // Guard against zero-length matches causing an infinite loop.
+      if (m.index === re.lastIndex) {
+        re.lastIndex++;
+      }
+    }
+    if (matches.length === 0) {
+      return ERRORS.NA;
+    }
+    return rvArray(matches.map(s => [rvString(s)]));
+  }
+  // mode === 2 — capture groups of first match as a row array.
+  const m = re.exec(textV);
+  if (!m) {
+    return ERRORS.NA;
+  }
+  // Exclude the full-match element (index 0) — only capture groups.
+  if (m.length <= 1) {
+    // No capture groups defined in the pattern — return the full match.
+    return rvArray([[rvString(m[0])]]);
+  }
+  const row: ScalarValue[] = [];
+  for (let i = 1; i < m.length; i++) {
+    row.push(rvString(m[i] ?? ""));
+  }
+  return rvArray([row]);
+};
+
+/**
+ * REGEXREPLACE(text, pattern, replacement, [occurrence], [case_sensitivity]) —
+ *   occurrence = 0 (default) → replace all
+ *   occurrence = n (positive) → replace only the n-th match
+ *   occurrence = n (negative) → replace only the n-th-last match
+ */
+export const fnREGEXREPLACE: NativeFn = args => {
+  const textV = toStringRV(topLeft(args[0]));
+  const patternV = toStringRV(topLeft(args[1]));
+  const replacementV = toStringRV(topLeft(args[2]));
+  const errCheck = checkError(args[0]) ?? checkError(args[1]) ?? checkError(args[2]);
+  if (errCheck) {
+    return errCheck;
+  }
+  const occurrenceV = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
+  if (isError(occurrenceV)) {
+    return occurrenceV;
+  }
+  const occurrence = Math.trunc(occurrenceV.value);
+  const cs = resolveCaseSensitivity(args[4]);
+  if ("kind" in cs) {
+    return cs;
+  }
+  // Always compile with the global flag — we need to enumerate matches
+  // to apply the occurrence filter; `String.replace` without `/g` would
+  // only see the first match and we wouldn't be able to address later
+  // hits for `occurrence > 1`.
+  const re = compileExcelRegex(patternV, cs.caseSensitive, true);
+  if (!re) {
+    return ERRORS.VALUE;
+  }
+
+  if (occurrence === 0) {
+    // Replace all.
+    return rvString(textV.replace(re, replacementV));
+  }
+
+  // Collect every match's range so we can address them by index.
+  const ranges: Array<{ start: number; end: number }> = [];
+  let m: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = re.exec(textV)) !== null) {
+    ranges.push({ start: m.index, end: m.index + m[0].length });
+    if (m.index === re.lastIndex) {
+      re.lastIndex++;
+    }
+  }
+  if (ranges.length === 0) {
+    return rvString(textV); // no match → unchanged (Excel behavior)
+  }
+  // Negative index counts from the end; -1 is the last match.
+  const idx = occurrence > 0 ? occurrence - 1 : ranges.length + occurrence;
+  if (idx < 0 || idx >= ranges.length) {
+    // Out-of-range occurrence → unchanged (Excel behavior).
+    return rvString(textV);
+  }
+  const { start, end } = ranges[idx];
+  return rvString(textV.slice(0, start) + replacementV + textV.slice(end));
+};
+
+// ============================================================================
+// VALUETOTEXT / ARRAYTOTEXT (Excel 365)
+// ============================================================================
+
+/**
+ * Format a single scalar for VALUETOTEXT / ARRAYTOTEXT.
+ *
+ * Format 0 (concise, default):
+ *   - Number → plain number string
+ *   - String → the string itself (no quotes)
+ *   - Boolean → "TRUE" / "FALSE"
+ *   - Error → error text (e.g. "#N/A")
+ *   - Blank → ""
+ *
+ * Format 1 (strict):
+ *   - String → wrapped in double quotes with `""` escapes
+ *   - Everything else → same as format 0
+ */
+function scalarToText(v: ScalarValue, strict: boolean): string {
+  switch (v.kind) {
+    case RVKind.Number:
+      return String(v.value);
+    case RVKind.String:
+      if (strict) {
+        return `"${v.value.replace(/"/g, '""')}"`;
+      }
+      return v.value;
+    case RVKind.Boolean:
+      return v.value ? "TRUE" : "FALSE";
+    case RVKind.Error:
+      return v.code;
+    case RVKind.Blank:
+      return "";
+  }
+}
+
+/**
+ * VALUETOTEXT(value, [format]) — format a scalar or 1×1 array as text.
+ * For multi-cell arrays, this applies implicit intersection at the
+ * evaluator layer — so by the time we see args[0] it is already scalar.
+ */
+export const fnVALUETOTEXT: NativeFn = args => {
+  const formatV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
+  if (isError(formatV)) {
+    return formatV;
+  }
+  const fmt = Math.trunc(formatV.value);
+  if (fmt !== 0 && fmt !== 1) {
+    return ERRORS.VALUE;
+  }
+  const strict = fmt === 1;
+  return rvString(scalarToText(topLeft(args[0]), strict));
+};
+
+/**
+ * ARRAYTOTEXT(array, [format]) — flatten an array to a delimited text
+ * representation.
+ *
+ * Format 0 (concise, default): row-major join with ", ".
+ * Format 1 (strict): wraps output in `{…}`, rows separated by `;`,
+ *   cells by `,`; strings inside quoted.
+ */
+export const fnARRAYTOTEXT: NativeFn = args => {
+  const formatV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
+  if (isError(formatV)) {
+    return formatV;
+  }
+  const fmt = Math.trunc(formatV.value);
+  if (fmt !== 0 && fmt !== 1) {
+    return ERRORS.VALUE;
+  }
+  const strict = fmt === 1;
+  const arg = args[0];
+  if (arg.kind !== RVKind.Array) {
+    return rvString(scalarToText(topLeft(arg), strict));
+  }
+  if (!strict) {
+    // Concise: flatten row-major, join with ", ".
+    const parts: string[] = [];
+    for (const row of arg.rows) {
+      for (const cell of row) {
+        parts.push(scalarToText(cell, false));
+      }
+    }
+    return rvString(parts.join(", "));
+  }
+  // Strict: `{row1;row2;...}` with rows as `a,b,c` and strings quoted.
+  const rowStrs: string[] = [];
+  for (const row of arg.rows) {
+    const cellStrs: string[] = [];
+    for (const cell of row) {
+      cellStrs.push(scalarToText(cell, true));
+    }
+    rowStrs.push(cellStrs.join(","));
+  }
+  return rvString(`{${rowStrs.join(";")}}`);
+};

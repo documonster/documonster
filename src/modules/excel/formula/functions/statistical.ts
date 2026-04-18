@@ -3019,3 +3019,221 @@ export const fnKURT: NativeFn = args => {
   const term2 = (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
   return rvNumber(term1 * sumQuad - term2);
 };
+
+// ============================================================================
+// PERCENTRANK family
+// ============================================================================
+
+/**
+ * Compute PERCENTRANK's significance-truncated result.
+ *
+ * Excel's `significance` truncates the return value to that many
+ * digits — `significance=3` (default) yields 0.123 rather than
+ * 0.12345. It is a display truncation, not a rounding, so we
+ * implement it by `floor(value * 10^n) / 10^n`.
+ */
+function truncateToSignificance(value: number, significance: number): number {
+  if (significance < 1) {
+    return Number.NaN;
+  }
+  // Significance must be an integer; Excel truncates toward zero.
+  const n = Math.trunc(significance);
+  const scale = Math.pow(10, n);
+  return Math.floor(value * scale) / scale;
+}
+
+/**
+ * Compute the PERCENTRANK.INC or PERCENTRANK.EXC value.
+ *
+ * For PERCENTRANK.INC (inclusive):
+ *   rank = i / (n - 1) when x is at sorted index i (0-based, exact match),
+ *   or linear interpolation between the two bracketing values.
+ *   x < min or x > max → #N/A.
+ *
+ * For PERCENTRANK.EXC (exclusive):
+ *   rank = (i + 1) / (n + 1) when x is at sorted index i (0-based, exact match).
+ *   x outside [min, max] or rank outside [1/(n+1), n/(n+1)] → #N/A.
+ */
+function computePercentRank(sorted: number[], x: number, inclusive: boolean): number | null {
+  const n = sorted.length;
+  if (n === 0) {
+    return null;
+  }
+
+  // Exact match: find the first index where sorted[i] === x.
+  // Binary search for lower bound.
+  let lo = 0;
+  let hi = n - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sorted[mid] === x) {
+      // Find first occurrence (ties go to earliest index).
+      let i = mid;
+      while (i > 0 && sorted[i - 1] === x) {
+        i--;
+      }
+      found = i;
+      break;
+    }
+    if (sorted[mid] < x) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (found >= 0) {
+    if (inclusive) {
+      return n === 1 ? 1 : found / (n - 1);
+    }
+    return (found + 1) / (n + 1);
+  }
+
+  // Interpolation case — x is strictly between sorted[hi] and sorted[lo].
+  // After the loop, lo = insertion point; hi = lo - 1.
+  if (hi < 0 || lo >= n) {
+    return null; // out of range
+  }
+  // Linear interpolation between the two neighbors.
+  const lower = sorted[hi];
+  const upper = sorted[lo];
+  if (upper === lower) {
+    // Degenerate — shouldn't happen given the exact-match check above.
+    return null;
+  }
+  const fraction = (x - lower) / (upper - lower);
+  if (inclusive) {
+    if (n === 1) {
+      return 1;
+    }
+    return (hi + fraction) / (n - 1);
+  }
+  const rank = (hi + 1 + fraction) / (n + 1);
+  // PERCENTRANK.EXC return range is [1/(n+1), n/(n+1)].
+  const minR = 1 / (n + 1);
+  const maxR = n / (n + 1);
+  if (rank < minR || rank > maxR) {
+    return null;
+  }
+  return rank;
+}
+
+function fnPercentRankImpl(args: RuntimeValue[], inclusive: boolean): RuntimeValue {
+  if (args.length < 2) {
+    return ERRORS.VALUE;
+  }
+  const vals = flattenNumbers([args[0]]);
+  const err = firstError(vals);
+  if (err) {
+    return err;
+  }
+  const xV = toNumberRV(topLeft(args[1]));
+  if (isError(xV)) {
+    return xV;
+  }
+
+  const significanceV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(3);
+  if (isError(significanceV)) {
+    return significanceV;
+  }
+  const significance = significanceV.value;
+  if (significance < 1) {
+    return ERRORS.NUM;
+  }
+
+  const nums = vals.map(v => (v as NumberValue).value);
+  if (nums.length === 0) {
+    return ERRORS.NUM;
+  }
+  const sorted = [...nums].sort((a, b) => a - b);
+
+  const rank = computePercentRank(sorted, xV.value, inclusive);
+  if (rank === null) {
+    return ERRORS.NA;
+  }
+  const truncated = truncateToSignificance(rank, significance);
+  if (Number.isNaN(truncated)) {
+    return ERRORS.NUM;
+  }
+  return rvNumber(truncated);
+}
+
+export const fnPERCENTRANK: NativeFn = args => fnPercentRankImpl(args, true);
+export const fnPERCENTRANK_INC: NativeFn = args => fnPercentRankImpl(args, true);
+export const fnPERCENTRANK_EXC: NativeFn = args => fnPercentRankImpl(args, false);
+
+// ============================================================================
+// PROB — probability that values in X-range are between two limits
+// ============================================================================
+
+/**
+ * PROB(x_range, prob_range, lower_limit, [upper_limit]) — probability that
+ * values in x_range are between lower_limit and upper_limit inclusive.
+ *
+ * Excel rules:
+ *   - x_range and prob_range must have the same dimensions
+ *   - prob_range entries must sum to 1 (±ε); otherwise #NUM!
+ *   - Any prob entry ≤ 0 or > 1 → #NUM!
+ *   - upper_limit omitted → probability that x = lower_limit
+ *   - Result is the sum of prob_range entries for which
+ *     lower_limit ≤ x_range value ≤ upper_limit
+ */
+export const fnPROB: NativeFn = args => {
+  if (args.length < 3 || args.length > 4) {
+    return ERRORS.VALUE;
+  }
+  const xVals = flattenNumbers([args[0]]);
+  const xErr = firstError(xVals);
+  if (xErr) {
+    return xErr;
+  }
+  const pVals = flattenNumbers([args[1]]);
+  const pErr = firstError(pVals);
+  if (pErr) {
+    return pErr;
+  }
+  if (xVals.length !== pVals.length) {
+    return ERRORS.NA;
+  }
+  if (xVals.length === 0) {
+    return ERRORS.NUM;
+  }
+
+  const lowerV = toNumberRV(topLeft(args[2]));
+  if (isError(lowerV)) {
+    return lowerV;
+  }
+  const upperV = args.length > 3 ? toNumberRV(topLeft(args[3])) : lowerV;
+  if (isError(upperV)) {
+    return upperV;
+  }
+
+  const lower = lowerV.value;
+  const upper = upperV.value;
+  if (lower > upper) {
+    return ERRORS.NUM;
+  }
+
+  // Probabilities must be in (0, 1] and sum to 1.
+  let total = 0;
+  for (const p of pVals) {
+    const pv = (p as NumberValue).value;
+    if (pv <= 0 || pv > 1) {
+      return ERRORS.NUM;
+    }
+    total += pv;
+  }
+  // Excel's tolerance is fairly loose — well within float noise.
+  if (Math.abs(total - 1) > 1e-9) {
+    return ERRORS.NUM;
+  }
+
+  let result = 0;
+  for (let i = 0; i < xVals.length; i++) {
+    const xv = (xVals[i] as NumberValue).value;
+    if (xv >= lower && xv <= upper) {
+      result += (pVals[i] as NumberValue).value;
+    }
+  }
+  return rvNumber(result);
+};

@@ -78,8 +78,33 @@ describe("lookupFunction: sample of each family", () => {
   // generic descriptor dispatch can't do.
   const FAMILIES: Record<string, string[]> = {
     math: ["SUM", "ABS", "ROUND", "POWER", "CEILING", "MOD", "COMBIN"],
-    stats: ["AVERAGE", "MEDIAN", "STDEV", "VAR", "NORM.S.DIST", "CORREL"],
-    text: ["LEN", "LEFT", "UPPER", "LOWER", "TRIM", "CONCAT", "SUBSTITUTE", "TEXT"],
+    stats: [
+      "AVERAGE",
+      "MEDIAN",
+      "STDEV",
+      "VAR",
+      "NORM.S.DIST",
+      "CORREL",
+      "PERCENTRANK",
+      "PERCENTRANK.INC",
+      "PERCENTRANK.EXC",
+      "PROB"
+    ],
+    text: [
+      "LEN",
+      "LEFT",
+      "UPPER",
+      "LOWER",
+      "TRIM",
+      "CONCAT",
+      "SUBSTITUTE",
+      "TEXT",
+      "REGEXTEST",
+      "REGEXEXTRACT",
+      "REGEXREPLACE",
+      "VALUETOTEXT",
+      "ARRAYTOTEXT"
+    ],
     date: ["DATE", "YEAR", "MONTH", "DAY", "TODAY", "NOW", "WEEKDAY", "EDATE", "DATEDIF"],
     lookup: ["VLOOKUP", "HLOOKUP", "XLOOKUP", "MATCH", "INDEX", "ADDRESS"],
     logical: ["AND", "OR", "NOT", "XOR"],

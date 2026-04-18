@@ -61,7 +61,12 @@ import {
   fnPHONETIC,
   fnASC,
   fnDBCS,
-  fnJIS
+  fnJIS,
+  fnREGEXTEST,
+  fnREGEXEXTRACT,
+  fnREGEXREPLACE,
+  fnVALUETOTEXT,
+  fnARRAYTOTEXT
 } from "../text";
 
 function asString(v: RuntimeValue): string {
@@ -2997,5 +3002,265 @@ describe("LOWER / BAHTTEXT extras (R9 saturation)", () => {
   });
   it("BAHTTEXT on error propagates", () => {
     expect(fnBAHTTEXT([ERRORS.REF])).toEqual(ERRORS.REF);
+  });
+});
+
+// ============================================================================
+// REGEX family (Excel 365, 2024)
+// ============================================================================
+
+describe("REGEXTEST", () => {
+  it("returns TRUE when the pattern matches", () => {
+    expect(fnREGEXTEST([rvString("abc123"), rvString("\\d+")])).toEqual(rvBoolean(true));
+  });
+
+  it("returns FALSE when the pattern does not match", () => {
+    expect(fnREGEXTEST([rvString("abc"), rvString("\\d+")])).toEqual(rvBoolean(false));
+  });
+
+  it("is case-insensitive by default", () => {
+    expect(fnREGEXTEST([rvString("HELLO"), rvString("hello")])).toEqual(rvBoolean(true));
+  });
+
+  it("case-sensitive when 3rd arg is TRUE", () => {
+    expect(fnREGEXTEST([rvString("HELLO"), rvString("hello"), rvBoolean(true)])).toEqual(
+      rvBoolean(false)
+    );
+  });
+
+  it("returns #VALUE! for invalid regex", () => {
+    expect(fnREGEXTEST([rvString("abc"), rvString("[unclosed")])).toEqual(ERRORS.VALUE);
+  });
+
+  it("propagates errors from text or pattern args", () => {
+    expect(fnREGEXTEST([ERRORS.NA, rvString(".")])).toEqual(ERRORS.NA);
+    expect(fnREGEXTEST([rvString("a"), ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("matches anchors and character classes", () => {
+    expect(fnREGEXTEST([rvString("Email: foo@bar.com"), rvString("^Email:")])).toEqual(
+      rvBoolean(true)
+    );
+    expect(fnREGEXTEST([rvString("abc123xyz"), rvString("\\d{3}")])).toEqual(rvBoolean(true));
+  });
+});
+
+describe("REGEXEXTRACT", () => {
+  it("returns the first match string by default (mode 0)", () => {
+    expect(fnREGEXEXTRACT([rvString("abc123def456"), rvString("\\d+")])).toEqual(rvString("123"));
+  });
+
+  it("returns #N/A when no match found", () => {
+    expect(fnREGEXEXTRACT([rvString("abc"), rvString("\\d+")])).toEqual(ERRORS.NA);
+  });
+
+  it("mode 1 returns all matches as a column array", () => {
+    const r = fnREGEXEXTRACT([rvString("abc123def456ghi"), rvString("\\d+"), rvNumber(1)]);
+    expect(r.kind).toBe(RVKind.Array);
+    const arr = r as ArrayValue;
+    expect(arr.height).toBe(2);
+    expect(arr.width).toBe(1);
+    expect(asString(arr.rows[0][0])).toBe("123");
+    expect(asString(arr.rows[1][0])).toBe("456");
+  });
+
+  it("mode 2 returns capture groups as a row array", () => {
+    const r = fnREGEXEXTRACT([
+      rvString("2024-01-15"),
+      rvString("(\\d{4})-(\\d{2})-(\\d{2})"),
+      rvNumber(2)
+    ]);
+    expect(r.kind).toBe(RVKind.Array);
+    const arr = r as ArrayValue;
+    expect(arr.height).toBe(1);
+    expect(arr.width).toBe(3);
+    expect(asString(arr.rows[0][0])).toBe("2024");
+    expect(asString(arr.rows[0][1])).toBe("01");
+    expect(asString(arr.rows[0][2])).toBe("15");
+  });
+
+  it("mode 2 with no capture groups returns the full match", () => {
+    const r = fnREGEXEXTRACT([rvString("abc123"), rvString("\\d+"), rvNumber(2)]);
+    const arr = r as ArrayValue;
+    expect(arr.height).toBe(1);
+    expect(arr.width).toBe(1);
+    expect(asString(arr.rows[0][0])).toBe("123");
+  });
+
+  it("rejects unknown return mode with #VALUE!", () => {
+    expect(fnREGEXEXTRACT([rvString("abc"), rvString("."), rvNumber(5)])).toEqual(ERRORS.VALUE);
+  });
+
+  it("returns #VALUE! for invalid regex", () => {
+    expect(fnREGEXEXTRACT([rvString("abc"), rvString("[")])).toEqual(ERRORS.VALUE);
+  });
+
+  it("honors case_sensitivity flag", () => {
+    expect(asString(fnREGEXEXTRACT([rvString("Hello"), rvString("hello")]))).toBe("Hello");
+    expect(
+      fnREGEXEXTRACT([rvString("Hello"), rvString("hello"), rvNumber(0), rvBoolean(true)])
+    ).toEqual(ERRORS.NA);
+  });
+});
+
+describe("REGEXREPLACE", () => {
+  it("replaces all matches by default (occurrence 0)", () => {
+    expect(asString(fnREGEXREPLACE([rvString("a1b2c3"), rvString("\\d"), rvString("X")]))).toBe(
+      "aXbXcX"
+    );
+  });
+
+  it("replaces only the n-th match when occurrence is positive", () => {
+    // Replace only the 2nd digit.
+    expect(
+      asString(fnREGEXREPLACE([rvString("a1b2c3"), rvString("\\d"), rvString("X"), rvNumber(2)]))
+    ).toBe("a1bXc3");
+  });
+
+  it("replaces the n-th-last match when occurrence is negative", () => {
+    // -1 = last match.
+    expect(
+      asString(fnREGEXREPLACE([rvString("a1b2c3"), rvString("\\d"), rvString("X"), rvNumber(-1)]))
+    ).toBe("a1b2cX");
+  });
+
+  it("out-of-range occurrence leaves the text unchanged", () => {
+    expect(
+      asString(fnREGEXREPLACE([rvString("a1b2"), rvString("\\d"), rvString("X"), rvNumber(5)]))
+    ).toBe("a1b2");
+  });
+
+  it("no match → text unchanged", () => {
+    expect(asString(fnREGEXREPLACE([rvString("abc"), rvString("\\d"), rvString("X")]))).toBe("abc");
+  });
+
+  it("returns #VALUE! for invalid regex", () => {
+    expect(fnREGEXREPLACE([rvString("abc"), rvString("["), rvString("X")])).toEqual(ERRORS.VALUE);
+  });
+
+  it("propagates argument errors", () => {
+    expect(fnREGEXREPLACE([ERRORS.NA, rvString("a"), rvString("b")])).toEqual(ERRORS.NA);
+    expect(fnREGEXREPLACE([rvString("a"), ERRORS.NA, rvString("b")])).toEqual(ERRORS.NA);
+    expect(fnREGEXREPLACE([rvString("a"), rvString("a"), ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("case-sensitive when 5th arg is TRUE", () => {
+    expect(
+      asString(
+        fnREGEXREPLACE([
+          rvString("Hello"),
+          rvString("hello"),
+          rvString("HI"),
+          rvNumber(0),
+          rvBoolean(true)
+        ])
+      )
+    ).toBe("Hello"); // no match → unchanged
+    expect(
+      asString(
+        fnREGEXREPLACE([
+          rvString("Hello"),
+          rvString("hello"),
+          rvString("HI"),
+          rvNumber(0),
+          rvBoolean(false)
+        ])
+      )
+    ).toBe("HI"); // case-insensitive match → replaced
+  });
+});
+
+// ============================================================================
+// VALUETOTEXT / ARRAYTOTEXT (Excel 365)
+// ============================================================================
+
+describe("VALUETOTEXT", () => {
+  it("concise (format 0) returns plain number as string", () => {
+    expect(asString(fnVALUETOTEXT([rvNumber(42)]))).toBe("42");
+  });
+
+  it("concise returns string without quotes", () => {
+    expect(asString(fnVALUETOTEXT([rvString("hello")]))).toBe("hello");
+  });
+
+  it("concise returns TRUE/FALSE for booleans", () => {
+    expect(asString(fnVALUETOTEXT([rvBoolean(true)]))).toBe("TRUE");
+    expect(asString(fnVALUETOTEXT([rvBoolean(false)]))).toBe("FALSE");
+  });
+
+  it("concise returns error code as text", () => {
+    expect(asString(fnVALUETOTEXT([ERRORS.NA]))).toBe("#N/A");
+  });
+
+  it("concise returns empty string for blank", () => {
+    expect(asString(fnVALUETOTEXT([BLANK]))).toBe("");
+  });
+
+  it("strict (format 1) wraps strings in quotes", () => {
+    expect(asString(fnVALUETOTEXT([rvString("hello"), rvNumber(1)]))).toBe('"hello"');
+  });
+
+  it("strict escapes embedded quotes with double quotes", () => {
+    expect(asString(fnVALUETOTEXT([rvString('say "hi"'), rvNumber(1)]))).toBe('"say ""hi"""');
+  });
+
+  it("strict preserves numbers unchanged", () => {
+    expect(asString(fnVALUETOTEXT([rvNumber(3.14), rvNumber(1)]))).toBe("3.14");
+  });
+
+  it("rejects unknown format code", () => {
+    expect(fnVALUETOTEXT([rvString("x"), rvNumber(5)])).toEqual(ERRORS.VALUE);
+  });
+
+  it("propagates format arg error", () => {
+    expect(fnVALUETOTEXT([rvString("x"), ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+});
+
+describe("ARRAYTOTEXT", () => {
+  it("concise joins cells with ', '", () => {
+    const arr = rvArray([[rvNumber(1), rvString("a"), rvBoolean(true)]]);
+    expect(asString(fnARRAYTOTEXT([arr]))).toBe("1, a, TRUE");
+  });
+
+  it("concise with multi-row array flattens row-major", () => {
+    const arr = rvArray([
+      [rvNumber(1), rvNumber(2)],
+      [rvNumber(3), rvNumber(4)]
+    ]);
+    expect(asString(fnARRAYTOTEXT([arr]))).toBe("1, 2, 3, 4");
+  });
+
+  it("strict wraps in {…}, rows by ';', cells by ','", () => {
+    const arr = rvArray([
+      [rvNumber(1), rvString("a")],
+      [rvNumber(2), rvString("b")]
+    ]);
+    expect(asString(fnARRAYTOTEXT([arr, rvNumber(1)]))).toBe('{1,"a";2,"b"}');
+  });
+
+  it("scalar arg behaves like VALUETOTEXT", () => {
+    expect(asString(fnARRAYTOTEXT([rvNumber(42)]))).toBe("42");
+    expect(asString(fnARRAYTOTEXT([rvString("x"), rvNumber(1)]))).toBe('"x"');
+  });
+
+  it("rejects unknown format code", () => {
+    const arr = rvArray([[rvNumber(1)]]);
+    expect(fnARRAYTOTEXT([arr, rvNumber(9)])).toEqual(ERRORS.VALUE);
+  });
+
+  it("format arg error propagates", () => {
+    const arr = rvArray([[rvNumber(1)]]);
+    expect(fnARRAYTOTEXT([arr, ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("embedded error cells appear as their error text", () => {
+    const arr = rvArray([[rvNumber(1), ERRORS.NA, rvNumber(3)]]);
+    expect(asString(fnARRAYTOTEXT([arr]))).toBe("1, #N/A, 3");
+  });
+
+  it("blank cells in concise produce empty strings", () => {
+    const arr = rvArray([[rvNumber(1), BLANK, rvNumber(3)]]);
+    expect(asString(fnARRAYTOTEXT([arr]))).toBe("1, , 3");
   });
 });

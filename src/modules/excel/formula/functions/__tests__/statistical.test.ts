@@ -100,7 +100,11 @@ import {
   fnLINEST,
   fnLOGEST,
   fnTREND,
-  fnGROWTH
+  fnGROWTH,
+  fnPERCENTRANK,
+  fnPERCENTRANK_INC,
+  fnPERCENTRANK_EXC,
+  fnPROB
 } from "../statistical";
 
 function asNumber(v: RuntimeValue): number {
@@ -5417,5 +5421,144 @@ describe("GROWTH extras / PHI saturation", () => {
 
   it("PHI error propagation", () => {
     expect(fnPHI([ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+});
+
+// ============================================================================
+// PERCENTRANK family
+// ============================================================================
+
+describe("PERCENTRANK.INC (and alias PERCENTRANK)", () => {
+  const data = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4), rvNumber(5)]]);
+
+  it("rank of min value is 0", () => {
+    expect(asNumber(fnPERCENTRANK_INC([data, rvNumber(1)]))).toBe(0);
+  });
+
+  it("rank of max value is 1", () => {
+    expect(asNumber(fnPERCENTRANK_INC([data, rvNumber(5)]))).toBe(1);
+  });
+
+  it("rank of median is 0.5", () => {
+    expect(asNumber(fnPERCENTRANK_INC([data, rvNumber(3)]))).toBe(0.5);
+  });
+
+  it("interpolates between values", () => {
+    // x=2.5 → between rank 0.25 (idx 1) and 0.5 (idx 2), halfway → 0.375
+    expect(asNumber(fnPERCENTRANK_INC([data, rvNumber(2.5)]))).toBeCloseTo(0.375, 3);
+  });
+
+  it("x outside array range → #N/A", () => {
+    expect(fnPERCENTRANK_INC([data, rvNumber(0)])).toEqual(ERRORS.NA);
+    expect(fnPERCENTRANK_INC([data, rvNumber(10)])).toEqual(ERRORS.NA);
+  });
+
+  it("default significance is 3 digits", () => {
+    // For 1/3 ≈ 0.3333... → truncated to 0.333 at significance=3.
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+    // x=2 → rank 1/3 ≈ 0.333333
+    expect(asNumber(fnPERCENTRANK_INC([arr, rvNumber(2)]))).toBe(0.333);
+  });
+
+  it("custom significance truncates further", () => {
+    const arr = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+    expect(asNumber(fnPERCENTRANK_INC([arr, rvNumber(2), rvNumber(2)]))).toBe(0.33);
+    expect(asNumber(fnPERCENTRANK_INC([arr, rvNumber(2), rvNumber(5)]))).toBe(0.33333);
+  });
+
+  it("significance < 1 → #NUM!", () => {
+    expect(fnPERCENTRANK_INC([data, rvNumber(3), rvNumber(0)])).toEqual(ERRORS.NUM);
+  });
+
+  it("PERCENTRANK is alias for PERCENTRANK.INC", () => {
+    expect(asNumber(fnPERCENTRANK([data, rvNumber(3)]))).toBe(0.5);
+  });
+
+  it("error in data propagates", () => {
+    expect(fnPERCENTRANK_INC([rvArray([[ERRORS.NA]]), rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+});
+
+describe("PERCENTRANK.EXC", () => {
+  const data = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+
+  it("exclusive rank uses (i+1)/(n+1)", () => {
+    // x=1 → (0+1)/(4+1) = 0.2
+    expect(asNumber(fnPERCENTRANK_EXC([data, rvNumber(1)]))).toBe(0.2);
+    // x=4 → (3+1)/(4+1) = 0.8
+    expect(asNumber(fnPERCENTRANK_EXC([data, rvNumber(4)]))).toBe(0.8);
+  });
+
+  it("x outside array range → #N/A", () => {
+    expect(fnPERCENTRANK_EXC([data, rvNumber(0)])).toEqual(ERRORS.NA);
+    expect(fnPERCENTRANK_EXC([data, rvNumber(10)])).toEqual(ERRORS.NA);
+  });
+
+  it("returns within [1/(n+1), n/(n+1)] range", () => {
+    // For n=4, the valid .EXC range is [0.2, 0.8].
+    const r = asNumber(fnPERCENTRANK_EXC([data, rvNumber(2)]));
+    expect(r).toBeGreaterThanOrEqual(0.2);
+    expect(r).toBeLessThanOrEqual(0.8);
+  });
+});
+
+// ============================================================================
+// PROB
+// ============================================================================
+
+describe("PROB", () => {
+  const xRange = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
+  const pRange = rvArray([[rvNumber(0.1), rvNumber(0.2), rvNumber(0.3), rvNumber(0.4)]]);
+
+  it("single lower_limit returns probability at that value", () => {
+    // P(X=2) = 0.2
+    expect(asNumber(fnPROB([xRange, pRange, rvNumber(2)]))).toBe(0.2);
+  });
+
+  it("range [lower, upper] sums probabilities", () => {
+    // P(2 <= X <= 3) = 0.2 + 0.3 = 0.5
+    expect(asNumber(fnPROB([xRange, pRange, rvNumber(2), rvNumber(3)]))).toBeCloseTo(0.5, 10);
+  });
+
+  it("range covers all → 1", () => {
+    expect(asNumber(fnPROB([xRange, pRange, rvNumber(1), rvNumber(4)]))).toBeCloseTo(1, 10);
+  });
+
+  it("range below → 0", () => {
+    expect(asNumber(fnPROB([xRange, pRange, rvNumber(-1), rvNumber(0)]))).toBe(0);
+  });
+
+  it("mismatched dimensions → #N/A", () => {
+    const shorter = rvArray([[rvNumber(1), rvNumber(2)]]);
+    expect(fnPROB([xRange, shorter, rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+
+  it("probabilities not summing to 1 → #NUM!", () => {
+    const badP = rvArray([[rvNumber(0.3), rvNumber(0.3), rvNumber(0.3), rvNumber(0.3)]]);
+    expect(fnPROB([xRange, badP, rvNumber(1), rvNumber(4)])).toEqual(ERRORS.NUM);
+  });
+
+  it("negative probability → #NUM!", () => {
+    const badP = rvArray([[rvNumber(-0.1), rvNumber(0.3), rvNumber(0.4), rvNumber(0.4)]]);
+    expect(fnPROB([xRange, badP, rvNumber(1), rvNumber(4)])).toEqual(ERRORS.NUM);
+  });
+
+  it("probability > 1 → #NUM!", () => {
+    const badP = rvArray([[rvNumber(1.5), rvNumber(0), rvNumber(0), rvNumber(0)]]);
+    expect(fnPROB([xRange, badP, rvNumber(1), rvNumber(4)])).toEqual(ERRORS.NUM);
+  });
+
+  it("lower > upper → #NUM!", () => {
+    expect(fnPROB([xRange, pRange, rvNumber(3), rvNumber(2)])).toEqual(ERRORS.NUM);
+  });
+
+  it("error in x_range propagates", () => {
+    const errX = rvArray([[ERRORS.NA]]);
+    expect(fnPROB([errX, rvArray([[rvNumber(1)]]), rvNumber(1)])).toEqual(ERRORS.NA);
+  });
+
+  it("error in prob_range propagates", () => {
+    const errP = rvArray([[ERRORS.NA]]);
+    expect(fnPROB([rvArray([[rvNumber(1)]]), errP, rvNumber(1)])).toEqual(ERRORS.NA);
   });
 });

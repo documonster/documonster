@@ -444,7 +444,12 @@ import {
   fnNUMBERVALUE,
   fnTEXTBEFORE,
   fnTEXTAFTER,
-  fnTEXTSPLIT
+  fnTEXTSPLIT,
+  fnREGEXTEST,
+  fnREGEXEXTRACT,
+  fnREGEXREPLACE,
+  fnVALUETOTEXT,
+  fnARRAYTOTEXT
 } from "../functions/text";
 
 function registerNativeTextFunctions(): void {
@@ -484,6 +489,11 @@ function registerNativeTextFunctions(): void {
   defineEager("TEXTBEFORE", 2, 6, fnTEXTBEFORE);
   defineEager("TEXTAFTER", 2, 6, fnTEXTAFTER);
   defineEager("TEXTSPLIT", 2, 6, fnTEXTSPLIT);
+  defineEager("REGEXTEST", 2, 3, fnREGEXTEST);
+  defineEager("REGEXEXTRACT", 2, 4, fnREGEXEXTRACT);
+  defineEager("REGEXREPLACE", 3, 5, fnREGEXREPLACE);
+  defineEager("VALUETOTEXT", 1, 2, fnVALUETOTEXT);
+  defineEager("ARRAYTOTEXT", 1, 2, fnARRAYTOTEXT);
 }
 
 // ============================================================================
@@ -763,6 +773,10 @@ import {
   fnPERCENTILEEXC,
   fnQUARTILE,
   fnQUARTILEEXC,
+  fnPERCENTRANK,
+  fnPERCENTRANK_INC,
+  fnPERCENTRANK_EXC,
+  fnPROB,
   fnMODE,
   fnCORREL,
   fnSLOPE,
@@ -855,6 +869,10 @@ function registerNativeStatisticalFunctions(): void {
   defineEager("QUARTILE", 2, 2, fnQUARTILE);
   defineEager("QUARTILE.INC", 2, 2, fnQUARTILE);
   defineEager("QUARTILE.EXC", 2, 2, fnQUARTILEEXC);
+  defineEager("PERCENTRANK", 2, 3, fnPERCENTRANK);
+  defineEager("PERCENTRANK.INC", 2, 3, fnPERCENTRANK_INC);
+  defineEager("PERCENTRANK.EXC", 2, 3, fnPERCENTRANK_EXC);
+  defineEager("PROB", 3, 4, fnPROB);
   defineEager("MODE", 1, 255, fnMODE);
   defineEager("MODE.SNGL", 1, 255, fnMODE);
   defineEager("CORREL", 2, 2, fnCORREL);
