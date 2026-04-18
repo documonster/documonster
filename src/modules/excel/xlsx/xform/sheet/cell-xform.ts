@@ -571,10 +571,20 @@ class CellXform extends BaseXform {
       case Enums.ValueType.String:
         if (typeof model.value === "number") {
           if (options.sharedStrings) {
-            model.value = options.sharedStrings.getString(model.value);
+            const ssIndex = model.value;
+            model.value = options.sharedStrings.getString(ssIndex);
+            // Malformed xlsx: shared-string index points past the end of the
+            // sharedStrings table. Fail loudly so the caller sees a typed
+            // ExcelError (with file address context) instead of a later
+            // TypeError on `model.value.richText`.
+            if (model.value === undefined) {
+              throw new ExcelError(
+                `Invalid shared string index ${ssIndex} in cell ${model.address}: the xlsx file appears to be corrupted`
+              );
+            }
           }
         }
-        if (model.value.richText) {
+        if (model.value && model.value.richText) {
           model.type = Enums.ValueType.RichText;
         }
         break;

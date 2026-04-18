@@ -31,6 +31,15 @@ This document describes user-facing breaking changes and recommended migrations.
 23. [Package: new subpath exports](#package-new-subpath-exports)
 24. [PDF: `pdf()`, `readPdf()`, `excelToPdf()` are now async](#pdf-pdf-readpdf-exceltopdf-are-now-async)
 
+### Since v9.2.1
+
+25. [Excel: `CellModel.richText` union widened — branch on cell `type` before accessing](#excel-cellmodel-richtext-union-widened)
+26. [Excel: `{ richText: [] }` no longer classifies as `RichText`](#excel-empty-richtext-no-longer-classifies-as-richtext)
+27. [Excel: `HyperlinkValue.text` setter now drops `richText` to preserve invariants](#excel-hyperlinkvalue-text-setter-drops-richtext)
+28. [Excel: `TableProperties.rows` tightened from `any[][]` to typed cell values](#excel-tableproperties-rows-tightened)
+29. [Excel: empty `<border>` now parses to `undefined` instead of `{}`](#excel-empty-border-now-parses-to-undefined)
+30. [Excel: table names must be unique across the workbook (case-insensitive)](#excel-table-names-must-be-unique-across-workbook)
+
 ---
 
 ## CSV: `workbook.csv` accessor removed
@@ -797,4 +806,216 @@ const result = await readPdf(pdfBytes);
 - The function signatures (parameters and return shape) are unchanged — only the return type is wrapped in `Promise`.
 - The containing function must be `async`, or you must use `.then()`.
 - Top-level `await` works in ESM modules (Node.js 14.8+, all modern browsers).
+
+---
+
+# Since v9.2.1
+
+The changes below were introduced after the v9.2.1 release. Consumers upgrading from v9.2.1 or later should review these entries.
+
+Also introduced in this window (**purely additive — no migration needed**, included here for awareness):
+
+- **Formula calculation engine** at the `@cj-tech-master/excelts/formula` subpath — 433 Excel functions, tokenizer/parser, dependency graph, dynamic-array spill. Opt-in via `installFormulaEngine()` or used functionally via `calculateFormulas(workbookLike)`. The engine has zero excel runtime dependencies and can drive any `WorkbookLike` host.
+- **`Workbook.calculateFormulas()`** — requires `installFormulaEngine()` from the formula subpath first; throws with a pointer to the installer otherwise.
+- **Dynamic-array formulas** — `FILTER`, `SORT`, `UNIQUE`, `XLOOKUP`, `SEQUENCE`, spill-error detection, ghost cells.
+- **External workbook links** — `[Book.xlsx]Sheet!A1` now round-trips through load/save.
+- **Workbook structure protection**, public `Workbook.defaultFont`, `absoluteAnchor` image positioning, `ignoredErrors` support.
+
+The breaking changes follow.
+
+---
+
+## <a id="excel-cellmodel-richtext-union-widened"></a>Excel: `CellModel.richText` union widened — branch on cell `type` before accessing
+
+### What changed
+
+`CellModel.richText` used to be `CellRichTextValue | undefined` (always the `{ richText: RichText[] }` wrapper shape). It is now `CellRichTextValue | RichText[] | undefined`:
+
+- When `model.type === Cell.Types.RichText`, the wrapper shape is used (unchanged).
+- When `model.type === Cell.Types.Hyperlink`, a bare `RichText[]` array is used to carry the hyperlink's formatted display runs.
+
+This lets formula + hyperlink and rich-text hyperlink cells round-trip without data loss.
+
+### How to migrate
+
+If you read `cell.model.richText` directly, branch on the shape first.
+
+```ts
+// Before
+const runs = cell.model.richText?.richText;
+
+// After
+const rt = cell.model.richText;
+const runs = Array.isArray(rt) ? rt : rt?.richText;
+
+// or branch on cell type
+const runs =
+  cell.model.type === Cell.Types.Hyperlink
+    ? (cell.model.richText as RichText[] | undefined)
+    : (cell.model.richText as CellRichTextValue | undefined)?.richText;
+```
+
+Reading `cell.value` (the public getter) is unaffected — it still returns the wrapper shape for `RichText` cells and the `CellHyperlinkValue` shape for `Hyperlink` cells.
+
+---
+
+## <a id="excel-empty-richtext-no-longer-classifies-as-richtext"></a>Excel: `{ richText: [] }` no longer classifies as `RichText`
+
+### What changed
+
+`Cell.Value.getType` previously returned `Cell.Types.RichText` for `{ richText: [] }` (empty array is truthy in JavaScript). It now requires `richText.length > 0`. An empty-runs object now falls through to `Cell.Types.JSON`.
+
+### How to migrate
+
+If you previously used `{ richText: [] }` to represent an empty rich-text cell, switch to one of:
+
+```ts
+// Before
+cell.value = { richText: [] }; // classified as RichText
+
+// After — options:
+cell.value = null; // empty cell
+cell.value = ""; // empty string
+cell.value = { richText: [{ text: "" }] }; // RichText with a single empty run
+```
+
+---
+
+## <a id="excel-hyperlinkvalue-text-setter-drops-richtext"></a>Excel: `HyperlinkValue.text` setter now drops `richText` to preserve invariants
+
+### What changed
+
+A hyperlink cell now enforces the invariant `text === flatten(richText)`. Assigning to `cell.value.text` on a hyperlink cell clears any previously-set `richText` runs. Previously, `text` and `richText` could drift out of sync silently.
+
+### How to migrate
+
+Set the whole `value` object in one go, or set `richText` (which auto-derives `text`):
+
+```ts
+// Before — could produce inconsistent text/richText state
+cell.value = { text: "old", hyperlink: "https://example.com" };
+(cell.value as CellHyperlinkValue).text = "new";
+// richText (if any) was preserved even though text diverged
+
+// After — option 1: set the whole value at once
+cell.value = {
+  text: "new",
+  hyperlink: "https://example.com",
+  richText: [{ text: "new" }]
+};
+
+// After — option 2: drive via richText (text is derived)
+cell.value = {
+  richText: [{ text: "new", font: { bold: true } }],
+  hyperlink: "https://example.com"
+};
+```
+
+---
+
+## <a id="excel-tableproperties-rows-tightened"></a>Excel: `TableProperties.rows` tightened from `any[][]` to typed cell values
+
+### What changed
+
+`TableProperties.rows` was typed as `any[][]`. It is now `Array<Array<CellValue | CellFormulaValue>>`. This is a TypeScript-level tightening only — runtime behaviour is unchanged — but code passing non-cell-value shapes (plain objects, custom class instances) will now fail to type-check.
+
+### How to migrate
+
+Ensure table row values conform to `CellValue` (scalars, dates, rich text, hyperlinks, errors) or `CellFormulaValue`:
+
+```ts
+// Before — any[][] accepted anything
+worksheet.addTable({
+  name: "T1",
+  ref: "A1",
+  columns: [{ name: "A" }, { name: "B" }],
+  rows: [[customObject, "text"]] // compiled, even though customObject was invalid
+});
+
+// After — narrow the value shape, or cast if you know what you're doing
+worksheet.addTable({
+  name: "T1",
+  ref: "A1",
+  columns: [{ name: "A" }, { name: "B" }],
+  rows: [[42, "text"]] // all cells are CellValue
+});
+
+// Escape hatch if custom payloads are intentional:
+worksheet.addTable({
+  name: "T1",
+  ref: "A1",
+  columns: [{ name: "A" }, { name: "B" }],
+  rows: [[customObject, "text"]] as unknown as Array<Array<CellValue | CellFormulaValue>>
+});
+```
+
+---
+
+## <a id="excel-empty-border-now-parses-to-undefined"></a>Excel: empty `<border>` now parses to `undefined` instead of `{}`
+
+### What changed
+
+Reading an XLSX that referenced `borderId=0` (the default empty border `<border><left/><right/><top/><bottom/><diagonal/></border>`) used to populate `cell.border` with an empty object `{}`. It now parses to `undefined`, matching the declared type and the semantic "no border".
+
+### Impact
+
+Code that used `cell.border` as a truthiness check will now see `undefined` (falsy) for no-border cells where previously it saw `{}` (truthy).
+
+### How to migrate
+
+```ts
+// Before — worked accidentally because {} is truthy
+if (cell.border) {
+  // always ran for every parsed cell, even ones without any border
+}
+
+// After — use optional chaining or explicit shape check
+if (cell.border?.top || cell.border?.right || cell.border?.bottom || cell.border?.left) {
+  // runs only for cells that actually have a border
+}
+```
+
+If you iterate border edges, the safer pattern is:
+
+```ts
+const { top, right, bottom, left } = cell.border ?? {};
+```
+
+---
+
+## <a id="excel-table-names-must-be-unique-across-workbook"></a>Excel: table names must be unique across the workbook (case-insensitive)
+
+### What changed
+
+`Worksheet.addTable({ name, ... })` now throws when another table in the same workbook (any worksheet) already uses that name, compared case-insensitively. Excel itself requires workbook-wide table name uniqueness; previously the library silently allowed duplicates, which produced files that Excel refused to open.
+
+The check also catches:
+
+- Sanitize collisions (`"My Table"` and `"My_Table"` both normalise to `"My_Table"`).
+- Same-worksheet duplicates.
+
+### How to migrate
+
+Ensure table names are unique per workbook. If your code was relying on duplicate names being silently accepted, rename so every `addTable` call uses a distinct identifier:
+
+```ts
+// Before — silently accepted, produced a broken XLSX
+const ws1 = wb.addWorksheet("Sheet1");
+const ws2 = wb.addWorksheet("Sheet2");
+ws1.addTable({ name: "Data", ref: "A1", columns: [...], rows: [...] });
+ws2.addTable({ name: "Data", ref: "A1", columns: [...], rows: [...] }); // now throws
+
+// After — use distinct names
+ws1.addTable({ name: "Sheet1Data", ref: "A1", columns: [...], rows: [...] });
+ws2.addTable({ name: "Sheet2Data", ref: "A1", columns: [...], rows: [...] });
+```
+
+If you do not control the name (e.g. you are importing user data), check uniqueness before calling `addTable`:
+
+```ts
+const existing = wb.worksheets.flatMap(ws => ws.tables.map(t => t.name.toLowerCase()));
+const unique = existing.includes(name.toLowerCase()) ? `${name}_${Date.now()}` : name;
+ws.addTable({ name: unique, ... });
+```
+
 - Error handling is the same — errors are thrown (rejected) with the same `PdfError` / `PdfStructureError` types. Use `try/catch` or `.catch()`.
