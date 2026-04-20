@@ -571,6 +571,17 @@ describe("DEC2BIN comprehensive", () => {
     expect(fnDEC2BIN([rvNumber(5), rvNumber(-1)])).toEqual(ERRORS.NUM);
   });
 
+  it("places smaller than the natural width → #NUM! (regression)", () => {
+    // Excel: DEC2BIN(100, 2) → #NUM! because 100 = 1100100₂ (7 digits)
+    // can't fit in 2 places. `padStart` alone silently emits the wider
+    // form; Excel rejects instead.
+    expect(fnDEC2BIN([rvNumber(100), rvNumber(2)])).toEqual(ERRORS.NUM);
+    // Equal width still succeeds.
+    expect(asString(fnDEC2BIN([rvNumber(100), rvNumber(7)]))).toBe("1100100");
+    // Wider-than-needed places pads with zeros.
+    expect(asString(fnDEC2BIN([rvNumber(5), rvNumber(8)]))).toBe("00000101");
+  });
+
   it("places ignored for negative numbers", () => {
     expect(asString(fnDEC2BIN([rvNumber(-1), rvNumber(4)]))).toBe("1111111111");
   });

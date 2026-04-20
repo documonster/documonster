@@ -25,7 +25,8 @@ export const enum NodeType {
   ColRangeRef = 13,
   RowRangeRef = 14,
   StructuredRef = 15,
-  Missing = 16
+  Missing = 16,
+  UnionRef = 17
 }
 
 // ============================================================================
@@ -152,6 +153,18 @@ export interface MissingNode {
   type: NodeType.Missing;
 }
 
+/**
+ * A reference union produced by the comma operator inside
+ * parentheses — `(A1:B2, D4:E5)`. Each member is itself a
+ * reference-producing sub-expression. INDEX's `area_num` parameter
+ * selects which element of the union to read.
+ */
+export interface UnionRefNode {
+  type: NodeType.UnionRef;
+  /** The union members, in syntactic order. */
+  areas: AstNode[];
+}
+
 // ============================================================================
 // Discriminated Union
 // ============================================================================
@@ -172,4 +185,5 @@ export type AstNode =
   | ColRangeRefNode
   | RowRangeRefNode
   | StructuredRefNode
-  | MissingNode;
+  | MissingNode
+  | UnionRefNode;

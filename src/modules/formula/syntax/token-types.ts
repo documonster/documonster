@@ -186,8 +186,17 @@ export interface IntersectToken {
  * The input may or may not already be uppercased — this helper does not
  * alter case; callers that compare against an uppercase table should
  * uppercase first (or compare case-insensitively).
+ *
+ * Fast path: plain names (99%+ of call sites) start with a letter, so
+ * checking the first code unit before the `startsWith` machinery lets
+ * those lookups skip the allocation.
  */
 export function stripFunctionPrefix(name: string): string {
+  // `_` is code unit 95 — ASCII letters are 65..90 / 97..122. The XLFN
+  // prefix is the only legitimate name shape that begins with `_`.
+  if (name.length === 0 || name.charCodeAt(0) !== 95) {
+    return name;
+  }
   if (name.startsWith("_XLFN._XLWS.")) {
     return name.slice(12);
   }

@@ -932,6 +932,25 @@ describe("NETWORKDAYS comprehensive", () => {
     expect(fnNETWORKDAYS([ERRORS.NA, rvNumber(0)])).toEqual(ERRORS.NA);
     expect(fnNETWORKDAYS([rvNumber(0), ERRORS.DIV0])).toEqual(ERRORS.DIV0);
   });
+
+  it("computes a multi-year range in closed form (regression)", () => {
+    // 2020-01-01 (Wed) to 2024-12-31 (Tue): 5 years, 1827 days total.
+    // Weekday count matches Excel's result (1305) via the analytic
+    // whole-weeks-plus-tail decomposition; a per-day loop would take
+    // 1827 Date allocations.
+    const jan1_2020 = 43831; // Wednesday
+    const dec31_2024 = 45657; // Tuesday
+    expect(asNumber(fnNETWORKDAYS([rvNumber(jan1_2020), rvNumber(dec31_2024)]))).toBe(1305);
+  });
+
+  it("span divisible by 7 has no tail — whole weeks only", () => {
+    // Mon→Sun (7 days) → exactly 5 weekdays regardless of tail.
+    const mon0 = 45306;
+    const sun0 = mon0 + 6;
+    expect(asNumber(fnNETWORKDAYS([rvNumber(mon0), rvNumber(sun0)]))).toBe(5);
+    // 14 days (2 weeks) → 10 weekdays.
+    expect(asNumber(fnNETWORKDAYS([rvNumber(mon0), rvNumber(mon0 + 13)]))).toBe(10);
+  });
 });
 
 describe("NETWORKDAYS_INTL comprehensive", () => {
@@ -1358,13 +1377,37 @@ describe("HOUR / MINUTE / SECOND saturation", () => {
 describe("EDATE saturation", () => {
   const jan31 = asNumber(fnDATE([rvNumber(2024), rvNumber(1), rvNumber(31)]));
 
-  it("adds months (engine uses JS month arithmetic; day-31 may roll)", () => {
-    // Strict Excel semantics clamp to last day of target month (Jan 31 + 1 →
-    // Feb 29 in a leap year). The engine's month arithmetic inherits JS
-    // Date's rollover, so Feb 31 becomes Mar 2. Accept either outcome.
+  it("Jan 31 + 1 clamps to last day of February (Excel behaviour)", () => {
+    // Regression: Excel's EDATE clamps the day-of-month to the last
+    // day of the target month rather than letting the JS Date roll
+    // forward into the following month. `EDATE(2024-01-31, 1)` →
+    // 2024-02-29 (2024 is a leap year), not 2024-03-02.
     const r = asNumber(fnEDATE([rvNumber(jan31), rvNumber(1)]));
     const mm = asNumber(fnMONTH([rvNumber(r)]));
-    expect([2, 3]).toContain(mm);
+    const dd = asNumber(fnDAY([rvNumber(r)]));
+    expect(mm).toBe(2);
+    expect(dd).toBe(29);
+  });
+
+  it("Jan 31 + 1 in a non-leap year clamps to Feb 28", () => {
+    // Non-leap fallback: 2023 has 28 days in February.
+    const jan31_2023 = 44957; // 2023-01-31
+    const r = asNumber(fnEDATE([rvNumber(jan31_2023), rvNumber(1)]));
+    const mm = asNumber(fnMONTH([rvNumber(r)]));
+    const dd = asNumber(fnDAY([rvNumber(r)]));
+    expect(mm).toBe(2);
+    expect(dd).toBe(28);
+  });
+
+  it("Mar 31 − 1 clamps to Feb 29 (leap year backwards)", () => {
+    // Reverse direction: EDATE(2024-03-31, -1) → 2024-02-29 (not Feb 31 /
+    // March 2). Clamp must apply for negative month shifts too.
+    const mar31_2024 = 45382; // 2024-03-31
+    const r = asNumber(fnEDATE([rvNumber(mar31_2024), rvNumber(-1)]));
+    const mm = asNumber(fnMONTH([rvNumber(r)]));
+    const dd = asNumber(fnDAY([rvNumber(r)]));
+    expect(mm).toBe(2);
+    expect(dd).toBe(29);
   });
   it("subtracts negative months", () => {
     const r = asNumber(fnEDATE([rvNumber(jan31), rvNumber(-1)]));

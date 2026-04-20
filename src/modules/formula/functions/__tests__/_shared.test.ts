@@ -26,6 +26,7 @@ import {
   firstError,
   flattenAll,
   flattenNumbers,
+  forEachNumber,
   getCell,
   hasUnescapedWildcard,
   stripErrorCells,
@@ -140,6 +141,84 @@ describe("flattenNumbers", () => {
   it("surfaces direct-scalar error", () => {
     const r = flattenNumbers([ERRORS.NA, rvNumber(3)]);
     expect(r[0]).toEqual(ERRORS.NA);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forEachNumber
+// ---------------------------------------------------------------------------
+
+describe("forEachNumber", () => {
+  it("streams numeric cells from arrays without allocating an intermediate", () => {
+    const out: number[] = [];
+    const r = forEachNumber([rvArray([[rvNumber(1), rvNumber(2)], [rvNumber(3)]])], n =>
+      out.push(n)
+    );
+    expect(r).toBeNull();
+    expect(out).toEqual([1, 2, 3]);
+  });
+
+  it("skips booleans / strings / blanks inside arrays (Excel behaviour)", () => {
+    const out: number[] = [];
+    const r = forEachNumber(
+      [
+        rvArray([
+          [rvNumber(1), rvString("skip"), rvBoolean(true)],
+          [BLANK, rvNumber(2)]
+        ])
+      ],
+      n => out.push(n)
+    );
+    expect(r).toBeNull();
+    expect(out).toEqual([1, 2]);
+  });
+
+  it("aborts on the first error encountered inside an array", () => {
+    const out: number[] = [];
+    const r = forEachNumber([rvArray([[rvNumber(1), ERRORS.DIV0], [rvNumber(99)]])], n =>
+      out.push(n)
+    );
+    expect(r).toEqual(ERRORS.DIV0);
+    // onNumber was called before the abort, but never for cells after it.
+    expect(out).toEqual([1]);
+  });
+
+  it("direct-scalar args are coerced via toNumberRV", () => {
+    const out: number[] = [];
+    const r = forEachNumber([rvBoolean(true), rvString("5"), rvNumber(7)], n => out.push(n));
+    expect(r).toBeNull();
+    expect(out).toEqual([1, 5, 7]);
+  });
+
+  it("direct-scalar Blank is skipped, not coerced to 0", () => {
+    const out: number[] = [];
+    forEachNumber([BLANK, rvNumber(9)], n => out.push(n));
+    expect(out).toEqual([9]);
+  });
+
+  it("direct-scalar that fails coercion surfaces as an error", () => {
+    const out: number[] = [];
+    const r = forEachNumber([rvString("not-a-number"), rvNumber(9)], n => out.push(n));
+    expect(r?.kind).toBe(RVKind.Error);
+    expect(out).toEqual([]);
+  });
+
+  it("direct-scalar error argument aborts the scan immediately", () => {
+    const out: number[] = [];
+    const r = forEachNumber([ERRORS.NA, rvNumber(9)], n => out.push(n));
+    expect(r).toEqual(ERRORS.NA);
+    expect(out).toEqual([]);
+  });
+
+  it("matches flattenNumbers + firstError on mixed inputs", () => {
+    const args = [rvArray([[rvNumber(1), rvString("x"), rvNumber(2)]]), rvBoolean(true)];
+    const out: number[] = [];
+    const err = forEachNumber(args, n => out.push(n));
+    const flat = flattenNumbers(args);
+    const flatErr = firstError(flat);
+    expect(err).toBe(flatErr);
+    // flattenNumbers(args) → [1, 2, boolean→1]
+    expect(out).toEqual([1, 2, 1]);
   });
 });
 

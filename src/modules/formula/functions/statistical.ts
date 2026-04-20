@@ -21,7 +21,7 @@ import {
   topLeft,
   isError
 } from "../runtime/values";
-import { argToNumber, flattenAll, flattenNumbers, firstError } from "./_shared";
+import { argToNumber, flattenAll, flattenNumbers, firstError, forEachNumber } from "./_shared";
 
 // ============================================================================
 // Local Helpers
@@ -103,16 +103,14 @@ function quickselect(arr: number[], k: number): number {
 }
 
 export const fnMEDIAN: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+  const values = toNumberArray(args);
+  if (!Array.isArray(values)) {
+    return values;
   }
-  if (nums.length === 0) {
+  const n = values.length;
+  if (n === 0) {
     return ERRORS.NUM;
   }
-  const values = (nums as NumberValue[]).map(n => n.value);
-  const n = values.length;
   const mid = n >> 1;
   if (n % 2 !== 0) {
     return rvNumber(quickselect(values, mid));
@@ -144,6 +142,12 @@ export const fnLARGE: NativeFn = args => {
   // with the same shape where each cell holds LARGE at that k.
   if (args[1].kind === RVKind.Array) {
     const kArr = args[1];
+    // Sort once when the array contains more than a single cell — k is
+    // O(1) afterwards. quickselect per-cell would allocate a fresh
+    // `values.slice()` for every k, which quickly becomes quadratic
+    // when LARGE(A1:A100, {1;2;3;…}) evaluates over long ranges.
+    const totalCells = kArr.height * kArr.width;
+    const sortedDesc = totalCells > 1 ? values.slice().sort((a, b) => b - a) : null;
     const outRows: ScalarValue[][] = [];
     for (const row of kArr.rows) {
       const outRow: ScalarValue[] = [];
@@ -162,10 +166,12 @@ export const fnLARGE: NativeFn = args => {
           outRow.push(ERRORS.NUM);
           continue;
         }
-        // k-th largest == (n − k)-th smallest. Use a copy — quickselect
-        // mutates the array it works on, and we need a fresh view for
-        // every cell in the output.
-        outRow.push(rvNumber(quickselect(values.slice(), values.length - kInt)));
+        if (sortedDesc) {
+          outRow.push(rvNumber(sortedDesc[kInt - 1]));
+        } else {
+          // Single-cell k — quickselect is cheaper than a full sort.
+          outRow.push(rvNumber(quickselect(values.slice(), values.length - kInt)));
+        }
       }
       outRows.push(outRow);
     }
@@ -191,6 +197,10 @@ export const fnSMALL: NativeFn = args => {
   const values = (nums as NumberValue[]).map(n => n.value);
   if (args[1].kind === RVKind.Array) {
     const kArr = args[1];
+    // Multi-cell k → sort once ascending, index in O(1). See LARGE for
+    // the same optimisation and rationale.
+    const totalCells = kArr.height * kArr.width;
+    const sortedAsc = totalCells > 1 ? values.slice().sort((a, b) => a - b) : null;
     const outRows: ScalarValue[][] = [];
     for (const row of kArr.rows) {
       const outRow: ScalarValue[] = [];
@@ -209,7 +219,11 @@ export const fnSMALL: NativeFn = args => {
           outRow.push(ERRORS.NUM);
           continue;
         }
-        outRow.push(rvNumber(quickselect(values.slice(), kInt - 1)));
+        if (sortedAsc) {
+          outRow.push(rvNumber(sortedAsc[kInt - 1]));
+        } else {
+          outRow.push(rvNumber(quickselect(values.slice(), kInt - 1)));
+        }
       }
       outRows.push(outRow);
     }
@@ -265,6 +279,16 @@ export const fnRANK: NativeFn = args => {
  * Returns `null` when there is no data at all (callers decide whether that
  * should be `#DIV/0!` or zero given the sample/population convention).
  */
+/**
+ * Single-pass mean + sum-of-squared-deviations using Welford's online
+ * algorithm. Returns `null` when the array is empty.
+ *
+ * Welford's recurrence keeps the sum of squared deviations numerically
+ * stable (avoids the catastrophic cancellation that bites
+ * `Σx² - (Σx)²/n` for datasets with a large mean and small variance).
+ * Costs one pass rather than two — meaningful on multi-thousand-cell
+ * ranges feeding STDEV / VAR / their variants.
+ */
 function computeMeanAndSumSq(
   nums: readonly number[]
 ): { n: number; mean: number; sumSq: number } | null {
@@ -272,26 +296,25 @@ function computeMeanAndSumSq(
   if (n === 0) {
     return null;
   }
-  let sum = 0;
-  for (const v of nums) {
-    sum += v;
-  }
-  const mean = sum / n;
+  let mean = 0;
   let sumSq = 0;
-  for (const v of nums) {
-    sumSq += (v - mean) ** 2;
+  for (let i = 0; i < n; i++) {
+    const x = nums[i];
+    const delta = x - mean;
+    mean += delta / (i + 1);
+    // `x - mean` uses the *updated* mean — this product form is the
+    // identity that makes Welford's recurrence equal the second-pass
+    // `(x - final_mean)²` sum exactly.
+    sumSq += delta * (x - mean);
   }
   return { n, mean, sumSq };
 }
 
 /** Resolve {args} to `number[]` or an error. Shared by STDEV/VAR family. */
 function toNumberArray(args: RuntimeValue[]): number[] | ErrorValue {
-  const rawNums = flattenNumbers(args);
-  const err = firstError(rawNums);
-  if (err) {
-    return err;
-  }
-  return (rawNums as NumberValue[]).map(n => n.value);
+  const out: number[] = [];
+  const err = forEachNumber(args, n => out.push(n));
+  return err ?? out;
 }
 
 export const fnSTDEV: NativeFn = args => {
@@ -518,9 +541,16 @@ export const fnNORMINV: NativeFn = args => {
 // ============================================================================
 
 export const fnPERCENTILE: NativeFn = args => {
-  const nums = flattenNumbers([args[0]])
-    .filter((v): v is NumberValue => v.kind === RVKind.Number)
-    .map(n => n.value);
+  // Propagate errors from within the range — `flattenNumbers` returns
+  // both numbers and errors, and previously we silently filtered errors
+  // out by `.kind === Number`, producing a bogus percentile on ranges
+  // that contained `#N/A`. Surface the error like AVERAGE / SUM do.
+  const raw = flattenNumbers([args[0]]);
+  const err = firstError(raw);
+  if (err) {
+    return err;
+  }
+  const nums = (raw as NumberValue[]).map(n => n.value);
   const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
@@ -541,9 +571,12 @@ export const fnPERCENTILE: NativeFn = args => {
 };
 
 export const fnPERCENTILEEXC: NativeFn = args => {
-  const nums = flattenNumbers([args[0]])
-    .filter((v): v is NumberValue => v.kind === RVKind.Number)
-    .map(n => n.value);
+  const raw = flattenNumbers([args[0]]);
+  const err = firstError(raw);
+  if (err) {
+    return err;
+  }
+  const nums = (raw as NumberValue[]).map(n => n.value);
   const k = argToNumber(args[1]);
   if (k.kind === RVKind.Error) {
     return k;
@@ -665,20 +698,48 @@ function pairedNumbers(
   aIdx: number,
   bIdx: number
 ): { xs: number[]; ys: number[] } | ErrorValue {
-  const flatA = flattenNumbers([args[aIdx]]);
-  const errA = firstError(flatA);
-  if (errA) {
-    return errA;
+  // Walk both ranges in lockstep so the x/y pairing preserves the
+  // source position. Excel's CORREL / SLOPE / INTERCEPT skip any pair
+  // where either side is non-numeric (text, blank, boolean) — they do
+  // NOT drop the non-numeric cells from one side and then pair by
+  // surviving position, which would realign unrelated values.
+  const aArg = args[aIdx];
+  const bArg = args[bIdx];
+  const aCells: ScalarValue[] = [];
+  const bCells: ScalarValue[] = [];
+  collectCells(aArg, aCells);
+  collectCells(bArg, bCells);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const n = Math.min(aCells.length, bCells.length);
+  for (let i = 0; i < n; i++) {
+    const a = aCells[i];
+    const b = bCells[i];
+    if (a.kind === RVKind.Error) {
+      return a;
+    }
+    if (b.kind === RVKind.Error) {
+      return b;
+    }
+    if (a.kind === RVKind.Number && b.kind === RVKind.Number) {
+      xs.push(a.value);
+      ys.push(b.value);
+    }
   }
-  const flatB = flattenNumbers([args[bIdx]]);
-  const errB = firstError(flatB);
-  if (errB) {
-    return errB;
+  return { xs, ys };
+}
+
+/** Walk a runtime value and push every scalar cell (in row-major order). */
+function collectCells(arg: RuntimeValue, out: ScalarValue[]): void {
+  if (arg.kind === RVKind.Array) {
+    for (const row of arg.rows) {
+      for (const cell of row) {
+        out.push(cell);
+      }
+    }
+  } else if (arg.kind !== RVKind.Reference && arg.kind !== RVKind.Lambda) {
+    out.push(arg);
   }
-  const xs = flatA.filter((v): v is NumberValue => v.kind === RVKind.Number).map(n => n.value);
-  const ys = flatB.filter((v): v is NumberValue => v.kind === RVKind.Number).map(n => n.value);
-  const n = Math.min(xs.length, ys.length);
-  return { xs: xs.slice(0, n), ys: ys.slice(0, n) };
 }
 
 /**
@@ -839,43 +900,45 @@ export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "./math";
 // ============================================================================
 
 export const fnGEOMEAN: NativeFn = args => {
-  const rawNums = flattenNumbers(args);
-  const err = firstError(rawNums);
+  let logSum = 0;
+  let count = 0;
+  let outOfRange = false;
+  const err = forEachNumber(args, n => {
+    if (n <= 0) {
+      outOfRange = true;
+      return;
+    }
+    logSum += Math.log(n);
+    count++;
+  });
   if (err) {
     return err;
   }
-  const nums = rawNums as NumberValue[];
-  if (nums.length === 0) {
+  if (outOfRange || count === 0) {
     return ERRORS.NUM;
   }
-  let logSum = 0;
-  for (const n of nums) {
-    if (n.value <= 0) {
-      return ERRORS.NUM;
-    }
-    logSum += Math.log(n.value);
-  }
-  return rvNumber(Math.exp(logSum / nums.length));
+  return rvNumber(Math.exp(logSum / count));
 };
 
 export const fnHARMEAN: NativeFn = args => {
-  const rawNums = flattenNumbers(args);
-  const err = firstError(rawNums);
+  let recipSum = 0;
+  let count = 0;
+  let outOfRange = false;
+  const err = forEachNumber(args, n => {
+    if (n <= 0) {
+      outOfRange = true;
+      return;
+    }
+    recipSum += 1 / n;
+    count++;
+  });
   if (err) {
     return err;
   }
-  const nums = rawNums as NumberValue[];
-  if (nums.length === 0) {
+  if (outOfRange || count === 0) {
     return ERRORS.NUM;
   }
-  let recipSum = 0;
-  for (const n of nums) {
-    if (n.value <= 0) {
-      return ERRORS.NUM;
-    }
-    recipSum += 1 / n.value;
-  }
-  return rvNumber(nums.length / recipSum);
+  return rvNumber(count / recipSum);
 };
 
 export const fnTRIMMEAN: NativeFn = args => {
@@ -1007,22 +1070,27 @@ function pairedNumericValues(
   a: RuntimeValue,
   b: RuntimeValue
 ): { xs: number[]; ys: number[] } | ErrorValue {
-  const xsAll = flattenNumbers([a]);
-  const xsErr = firstError(xsAll);
-  if (xsErr) {
-    return xsErr;
-  }
-  const ysAll = flattenNumbers([b]);
-  const ysErr = firstError(ysAll);
-  if (ysErr) {
-    return ysErr;
-  }
-  const n = Math.min(xsAll.length, ysAll.length);
+  // Walk both ranges in lockstep so pair alignment survives non-numeric
+  // cells. Previously `flattenNumbers` dropped text / blanks before the
+  // zip, which silently shifted the rest of the pairs and produced a
+  // spurious covariance. Excel's COVARIANCE.P / .S pair cells by
+  // position and skip only the pairs where either side is non-numeric.
+  const aCells: ScalarValue[] = [];
+  const bCells: ScalarValue[] = [];
+  collectCells(a, aCells);
+  collectCells(b, bCells);
   const xs: number[] = [];
   const ys: number[] = [];
+  const n = Math.min(aCells.length, bCells.length);
   for (let i = 0; i < n; i++) {
-    const x = xsAll[i];
-    const y = ysAll[i];
+    const x = aCells[i];
+    const y = bCells[i];
+    if (x.kind === RVKind.Error) {
+      return x;
+    }
+    if (y.kind === RVKind.Error) {
+      return y;
+    }
     if (x.kind === RVKind.Number && y.kind === RVKind.Number) {
       xs.push(x.value);
       ys.push(y.value);
@@ -1169,37 +1237,32 @@ export const fnAVERAGEA: NativeFn = args => {
   return count === 0 ? ERRORS.DIV0 : rvNumber(sum / count);
 };
 
-export const fnMAXA: NativeFn = args => {
-  const all = flattenAll(args);
-  let max = -Infinity;
-  let found = false;
-  for (const v of all) {
-    if (v.kind === RVKind.Blank) {
-      continue;
-    }
-    if (v.kind === RVKind.Error) {
-      return v;
-    }
-    let n: number;
-    if (v.kind === RVKind.Number) {
-      n = v.value;
-    } else if (v.kind === RVKind.Boolean) {
-      n = v.value ? 1 : 0;
-    } else {
-      n = 0;
-    }
-    if (n > max) {
-      max = n;
-    }
-    found = true;
-  }
-  return rvNumber(found ? max : 0);
-};
+export const fnMAXA: NativeFn = args =>
+  reduceAValue(args, -Infinity, (best, n) => (n > best ? n : best));
 
-export const fnMINA: NativeFn = args => {
-  const all = flattenAll(args);
-  let min = Infinity;
+export const fnMINA: NativeFn = args =>
+  reduceAValue(args, Infinity, (best, n) => (n < best ? n : best));
+
+/**
+ * Shared MAXA / MINA reducer. Excel's `*A` variants differ from MAX / MIN
+ * only in how they treat text and booleans inside ranges:
+ *   - Number → its value
+ *   - Boolean → 1 / 0
+ *   - String → 0 (NOT skipped like MAX / MIN)
+ *   - Blank  → skipped
+ *   - Error  → propagated
+ *
+ * When no non-blank cells are seen, both return 0 (the untouched
+ * identity fallback matches Excel's historical behaviour).
+ */
+function reduceAValue(
+  args: RuntimeValue[],
+  identity: number,
+  fold: (best: number, v: number) => number
+): RuntimeValue {
+  let best = identity;
   let found = false;
+  const all = flattenAll(args);
   for (const v of all) {
     if (v.kind === RVKind.Blank) {
       continue;
@@ -1207,21 +1270,13 @@ export const fnMINA: NativeFn = args => {
     if (v.kind === RVKind.Error) {
       return v;
     }
-    let n: number;
-    if (v.kind === RVKind.Number) {
-      n = v.value;
-    } else if (v.kind === RVKind.Boolean) {
-      n = v.value ? 1 : 0;
-    } else {
-      n = 0;
-    }
-    if (n < min) {
-      min = n;
-    }
+    const n =
+      v.kind === RVKind.Number ? v.value : v.kind === RVKind.Boolean ? (v.value ? 1 : 0) : 0; // text counts as 0 for MAXA / MINA.
+    best = fold(best, n);
     found = true;
   }
-  return rvNumber(found ? min : 0);
-};
+  return rvNumber(found ? best : 0);
+}
 
 // ============================================================================
 // Private helpers for distributions (pure number → number, unchanged)
@@ -2227,7 +2282,10 @@ export const fnERF: NativeFn = args => {
   if (lower.kind === RVKind.Error) {
     return lower;
   }
-  if (args.length > 1) {
+  // Blank 2nd arg → behave like an omitted upper bound, i.e. return
+  // `erf(lower)`. Previously a blank coerced to 0 and flipped the sign
+  // of the result via `erf(0) − erf(lower)`.
+  if (args.length > 1 && args[1].kind !== RVKind.Blank) {
     const upper = argToNumber(args[1]);
     if (upper.kind === RVKind.Error) {
       return upper;
@@ -3026,34 +3084,36 @@ export const fnF_INV_RT: NativeFn = args => {
  * Formula: n / ((n-1)(n-2)) * Σ((xi-mean)/s)^3, where s is the sample stdev.
  */
 export const fnSKEW: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+  const xs = toNumberArray(args);
+  if (!Array.isArray(xs)) {
+    return xs;
   }
-  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 3) {
     return ERRORS.DIV0;
   }
+  // Single pass 1: mean.
   let sum = 0;
-  for (const v of xs) {
-    sum += v;
+  for (let i = 0; i < n; i++) {
+    sum += xs[i];
   }
   const mean = sum / n;
+  // Single pass 2: accumulate Σ(x−μ)² and Σ(x−μ)³ together. Computing
+  // the cubed normalisation after the loop (dividing by stdev³) is
+  // algebraically equivalent to Σ((x−μ)/s)³ and avoids the third pass.
   let sumSq = 0;
-  for (const v of xs) {
-    sumSq += (v - mean) ** 2;
+  let sumCube = 0;
+  for (let i = 0; i < n; i++) {
+    const d = xs[i] - mean;
+    const d2 = d * d;
+    sumSq += d2;
+    sumCube += d2 * d;
   }
   const sampleStd = Math.sqrt(sumSq / (n - 1));
   if (sampleStd === 0) {
     return ERRORS.DIV0;
   }
-  let sumCubed = 0;
-  for (const v of xs) {
-    sumCubed += ((v - mean) / sampleStd) ** 3;
-  }
-  return rvNumber((n / ((n - 1) * (n - 2))) * sumCubed);
+  return rvNumber((n / ((n - 1) * (n - 2))) * (sumCube / (sampleStd * sampleStd * sampleStd)));
 };
 
 /**
@@ -3061,34 +3121,32 @@ export const fnSKEW: NativeFn = args => {
  * Formula: (1/n) * Σ((xi-mean)/σ)^3, where σ is the population stdev.
  */
 export const fnSKEW_P: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+  const xs = toNumberArray(args);
+  if (!Array.isArray(xs)) {
+    return xs;
   }
-  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 1) {
     return ERRORS.DIV0;
   }
   let sum = 0;
-  for (const v of xs) {
-    sum += v;
+  for (let i = 0; i < n; i++) {
+    sum += xs[i];
   }
   const mean = sum / n;
   let sumSq = 0;
-  for (const v of xs) {
-    sumSq += (v - mean) ** 2;
+  let sumCube = 0;
+  for (let i = 0; i < n; i++) {
+    const d = xs[i] - mean;
+    const d2 = d * d;
+    sumSq += d2;
+    sumCube += d2 * d;
   }
   const popStd = Math.sqrt(sumSq / n);
   if (popStd === 0) {
     return ERRORS.DIV0;
   }
-  let sumCubed = 0;
-  for (const v of xs) {
-    sumCubed += ((v - mean) / popStd) ** 3;
-  }
-  return rvNumber(sumCubed / n);
+  return rvNumber(sumCube / n / (popStd * popStd * popStd));
 };
 
 /**
@@ -3096,36 +3154,38 @@ export const fnSKEW_P: NativeFn = args => {
  * Formula: n(n+1) / ((n-1)(n-2)(n-3)) * Σ((xi-mean)/s)^4 - 3(n-1)^2 / ((n-2)(n-3)).
  */
 export const fnKURT: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
-  if (err) {
-    return err;
+  const xs = toNumberArray(args);
+  if (!Array.isArray(xs)) {
+    return xs;
   }
-  const xs = (nums as NumberValue[]).map(n => n.value);
   const n = xs.length;
   if (n < 4) {
     return ERRORS.DIV0;
   }
   let sum = 0;
-  for (const v of xs) {
-    sum += v;
+  for (let i = 0; i < n; i++) {
+    sum += xs[i];
   }
   const mean = sum / n;
+  // Single pass for Σ(x−μ)² and Σ(x−μ)⁴ — the `(x−μ)/s` normalisation
+  // is factored out after the loop (divide by stdev⁴) so we don't need
+  // to know `s` ahead of time.
   let sumSq = 0;
-  for (const v of xs) {
-    sumSq += (v - mean) ** 2;
+  let sumQuad = 0;
+  for (let i = 0; i < n; i++) {
+    const d = xs[i] - mean;
+    const d2 = d * d;
+    sumSq += d2;
+    sumQuad += d2 * d2;
   }
   const sampleStd = Math.sqrt(sumSq / (n - 1));
   if (sampleStd === 0) {
     return ERRORS.DIV0;
   }
-  let sumQuad = 0;
-  for (const v of xs) {
-    sumQuad += ((v - mean) / sampleStd) ** 4;
-  }
+  const s4 = sampleStd * sampleStd;
   const term1 = (n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3));
   const term2 = (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
-  return rvNumber(term1 * sumQuad - term2);
+  return rvNumber(term1 * (sumQuad / (s4 * s4)) - term2);
 };
 
 // ============================================================================

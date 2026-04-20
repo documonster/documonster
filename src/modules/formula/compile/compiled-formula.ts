@@ -343,6 +343,14 @@ function walkDeps(
         }
       }
       break;
+
+    case BoundExprKind.UnionRef:
+      // Each member of a `(a1, a2, ...)` union contributes its own
+      // dependencies — downstream reads target cells in every area.
+      for (const area of expr.areas) {
+        walkDeps(area, cells, areas, tablesByName, nameResolver, visitedNames);
+      }
+      break;
   }
 }
 
@@ -414,9 +422,15 @@ export function detectDynamicArrayFunction(ast: AstNode, bound: BoundExpr): bool
       return true;
     }
   }
-  // Check bound expression level
-  if (bound.kind === BoundExprKind.Call && DYNAMIC_ARRAY_FUNCTION_NAMES.has(bound.name)) {
-    return true;
+  // Check bound expression level. Strip `_XLFN.` prefix here too —
+  // `boundCall` preserves the prefix on the bound name, so without the
+  // strip a synthesised bound call (e.g. from INDIRECT re-parse) would
+  // miss detection.
+  if (bound.kind === BoundExprKind.Call) {
+    const canonical = stripFunctionPrefix(bound.name);
+    if (DYNAMIC_ARRAY_FUNCTION_NAMES.has(canonical)) {
+      return true;
+    }
   }
   return false;
 }
@@ -438,11 +452,15 @@ export function detectSubtotalOutput(ast: AstNode, bound: BoundExpr): boolean {
       return true;
     }
   }
-  if (
-    bound.kind === BoundExprKind.Call &&
-    (bound.name === "SUBTOTAL" || bound.name === "AGGREGATE")
-  ) {
-    return true;
+  if (bound.kind === BoundExprKind.Call) {
+    // Strip `_XLFN.` / `_XLFN._XLWS.` prefixes before matching — otherwise
+    // `_XLFN.AGGREGATE(...)` silently wouldn't be marked as a subtotal
+    // output, so an outer SUBTOTAL / AGGREGATE over its cell would
+    // double-count the aggregated value.
+    const canonical = stripFunctionPrefix(bound.name);
+    if (canonical === "SUBTOTAL" || canonical === "AGGREGATE") {
+      return true;
+    }
   }
   return false;
 }
@@ -472,16 +490,25 @@ export function analyzeExpr(
 
   function walkAnalyze(e: BoundExpr): void {
     switch (e.kind) {
-      case BoundExprKind.Call:
-        if (VOLATILE_FUNCTIONS.has(e.name)) {
+      case BoundExprKind.Call: {
+        // `boundCall` stores the function name uppercased but preserves
+        // any `_XLFN.` / `_XLFN._XLWS.` prefix the source text contained.
+        // Strip the prefix before VOLATILE_FUNCTIONS lookup so e.g.
+        // `_XLFN.RANDARRAY()` (an XLFN-prefixed volatile) correctly
+        // invalidates the session cache across calc cycles.
+        const canonical = stripFunctionPrefix(e.name);
+        if (VOLATILE_FUNCTIONS.has(canonical)) {
           isVolatile = true;
         }
         for (const arg of e.args) {
           walkAnalyze(arg);
         }
         break;
+      }
 
       case BoundExprKind.SpecialCall:
+        // Special-call names are already stripped of any `_XLFN.` prefix
+        // by `canonicalSpecialForm` in the binder, so no re-strip here.
         if (DYNAMIC_REF_FUNCTIONS.has(e.name)) {
           hasDynamicRefs = true;
         }
@@ -533,6 +560,12 @@ export function analyzeExpr(
           for (const elem of row) {
             walkAnalyze(elem);
           }
+        }
+        break;
+
+      case BoundExprKind.UnionRef:
+        for (const area of e.areas) {
+          walkAnalyze(area);
         }
         break;
 

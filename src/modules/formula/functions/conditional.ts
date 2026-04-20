@@ -59,35 +59,58 @@ export function buildCriteriaPredicateRV(criteria: ScalarValue): (v: ScalarValue
     // blank (→0); numeric strings are NOT coerced (COUNTIF stays textual
     // for those). Only real Number / Boolean / Blank cells participate in
     // numeric comparisons; everything else falls back to string compare.
-    const numericOf = (v: ScalarValue): number => {
-      if (v.kind === RVKind.Number) {
-        return v.value;
-      }
-      if (v.kind === RVKind.Boolean) {
-        return v.value ? 1 : 0;
-      }
-      if (v.kind === RVKind.Blank) {
-        return 0;
-      }
-      return Number.NaN;
-    };
+    if (isNum) {
+      // Specialised numeric-comparison path — avoids per-cell string
+      // coercion allocations that dominate the hot loop otherwise.
+      // Non-numeric cells produce NaN and fall through to the switch,
+      // where only `<>` evaluates NaN-relations to TRUE (Excel semantics).
+      return (v: ScalarValue) => {
+        const vn =
+          v.kind === RVKind.Number
+            ? v.value
+            : v.kind === RVKind.Boolean
+              ? v.value
+                ? 1
+                : 0
+              : v.kind === RVKind.Blank
+                ? 0
+                : Number.NaN;
+        switch (op) {
+          case "=":
+            return vn === numVal;
+          case "<>":
+            return vn !== numVal;
+          case ">":
+            return vn > numVal;
+          case "<":
+            return vn < numVal;
+          case ">=":
+            return vn >= numVal;
+          case "<=":
+            return vn <= numVal;
+          default:
+            return false;
+        }
+      };
+    }
+    // String-comparison path — lowercase the criterion once outside the
+    // closure so every cell only pays a single `toStringRV().toLowerCase()`.
+    const cs = valStr.toLowerCase();
     return (v: ScalarValue) => {
-      const vn = numericOf(v);
       const vs = toStringRV(v).toLowerCase();
-      const cs = valStr.toLowerCase();
       switch (op) {
         case "=":
-          return isNum ? vn === numVal : vs === cs;
+          return vs === cs;
         case "<>":
-          return isNum ? vn !== numVal : vs !== cs;
+          return vs !== cs;
         case ">":
-          return isNum ? vn > numVal : vs > cs;
+          return vs > cs;
         case "<":
-          return isNum ? vn < numVal : vs < cs;
+          return vs < cs;
         case ">=":
-          return isNum ? vn >= numVal : vs >= cs;
+          return vs >= cs;
         case "<=":
-          return isNum ? vn <= numVal : vs <= cs;
+          return vs <= cs;
         default:
           return false;
       }
@@ -98,13 +121,18 @@ export function buildCriteriaPredicateRV(criteria: ScalarValue): (v: ScalarValue
   // literal `*`, `?`, `~` and everything else as a regex special character
   // that must be escaped. Only an unescaped `*` or `?` triggers the wildcard
   // path; a pattern like `~*` matches a literal asterisk.
+  //
+  // Excel restricts wildcard matching to TEXT cells — a criterion like
+  // `"1*"` must not match the number 1 even though `String(1) === "1"`.
+  // Without this guard, `COUNTIF({1, 15, "15"}, "1*")` would return 3
+  // instead of the correct `1` (only the string `"15"` matches).
   if (hasUnescapedWildcard(s)) {
     try {
       const re = new RegExp("^" + excelWildcardToRegex(s) + "$", "i");
-      return v => re.test(toStringRV(v));
+      return v => v.kind === RVKind.String && re.test(v.value);
     } catch {
       const literal = unescapeExcelWildcard(s).toLowerCase();
-      return v => toStringRV(v).toLowerCase() === literal;
+      return v => v.kind === RVKind.String && v.value.toLowerCase() === literal;
     }
   }
   // No wildcards: strip any `~` escapes and do a literal case-insensitive compare.
@@ -149,6 +177,12 @@ export function fnSUMIF(args: RuntimeValue[]): RuntimeValue {
     for (let c = 0; c < rangeArr.width; c++) {
       if (pred(getCell(rangeArr, r, c))) {
         const sv = getCell(sumArr, r, c);
+        // Excel propagates errors from the sum-range; previously we
+        // silently skipped them, masking `#DIV/0!` / `#VALUE!` cells
+        // under the aggregation.
+        if (sv.kind === RVKind.Error) {
+          return sv;
+        }
         if (sv.kind === RVKind.Number) {
           sum += sv.value;
         }
@@ -241,12 +275,23 @@ export function fnSUMIFS(args: RuntimeValue[]): RuntimeValue {
     return pairs.error;
   }
   let sum = 0;
+  let sumErr: ErrorValue | null = null;
   iterateMultiCriteria(sumArr, pairs.pairs, (r, c) => {
+    if (sumErr) {
+      return;
+    }
     const sv = getCell(sumArr, r, c);
+    if (sv.kind === RVKind.Error) {
+      sumErr = sv;
+      return;
+    }
     if (sv.kind === RVKind.Number) {
       sum += sv.value;
     }
   });
+  if (sumErr) {
+    return sumErr;
+  }
   return rvNumber(sum);
 }
 
@@ -307,6 +352,10 @@ export function fnAVERAGEIF(args: RuntimeValue[]): RuntimeValue {
     for (let c = 0; c < rangeArr.width; c++) {
       if (pred(getCell(rangeArr, r, c))) {
         const sv = getCell(avgArr, r, c);
+        // Propagate errors from the average-range — see SUMIF for rationale.
+        if (sv.kind === RVKind.Error) {
+          return sv;
+        }
         if (sv.kind === RVKind.Number) {
           sum += sv.value;
           count++;
@@ -328,13 +377,24 @@ export function fnAVERAGEIFS(args: RuntimeValue[]): RuntimeValue {
   }
   let sum = 0;
   let count = 0;
+  let avgErr: ErrorValue | null = null;
   iterateMultiCriteria(avgArr, pairs.pairs, (r, c) => {
+    if (avgErr) {
+      return;
+    }
     const sv = getCell(avgArr, r, c);
+    if (sv.kind === RVKind.Error) {
+      avgErr = sv;
+      return;
+    }
     if (sv.kind === RVKind.Number) {
       sum += sv.value;
       count++;
     }
   });
+  if (avgErr) {
+    return avgErr;
+  }
   return count === 0 ? ERRORS.DIV0 : rvNumber(sum / count);
 }
 
@@ -349,8 +409,16 @@ export function fnMAXIFS(args: RuntimeValue[]): RuntimeValue {
   }
   let result = -Infinity;
   let found = false;
+  let maxErr: ErrorValue | null = null;
   iterateMultiCriteria(maxArr, pairs.pairs, (r, c) => {
+    if (maxErr) {
+      return;
+    }
     const sv = getCell(maxArr, r, c);
+    if (sv.kind === RVKind.Error) {
+      maxErr = sv;
+      return;
+    }
     if (sv.kind === RVKind.Number) {
       if (sv.value > result) {
         result = sv.value;
@@ -358,6 +426,9 @@ export function fnMAXIFS(args: RuntimeValue[]): RuntimeValue {
       found = true;
     }
   });
+  if (maxErr) {
+    return maxErr;
+  }
   return rvNumber(found ? result : 0);
 }
 
@@ -372,8 +443,16 @@ export function fnMINIFS(args: RuntimeValue[]): RuntimeValue {
   }
   let result = Infinity;
   let found = false;
+  let minErr: ErrorValue | null = null;
   iterateMultiCriteria(minArr, pairs.pairs, (r, c) => {
+    if (minErr) {
+      return;
+    }
     const sv = getCell(minArr, r, c);
+    if (sv.kind === RVKind.Error) {
+      minErr = sv;
+      return;
+    }
     if (sv.kind === RVKind.Number) {
       if (sv.value < result) {
         result = sv.value;
@@ -381,5 +460,8 @@ export function fnMINIFS(args: RuntimeValue[]): RuntimeValue {
       found = true;
     }
   });
+  if (minErr) {
+    return minErr;
+  }
   return rvNumber(found ? result : 0);
 }

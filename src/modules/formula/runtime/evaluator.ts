@@ -34,6 +34,7 @@ import { parse } from "../syntax/parser";
 import { stripFunctionPrefix } from "../syntax/token-types";
 import { tokenize } from "../syntax/tokenizer";
 import { lookupFunction } from "./function-registry";
+import type { FunctionDescriptor } from "./function-registry";
 import type {
   RuntimeValue,
   ScalarValue,
@@ -51,6 +52,7 @@ import {
   rvBoolean,
   rvError,
   rvArray,
+  rvArrayRect,
   rvRef,
   rvCellRef,
   rvLambda,
@@ -195,6 +197,13 @@ export interface EvalContext {
   currentAddress?: { sheet: string; row: number; col: number };
   /** Local variable bindings from LET expressions. */
   localBindings?: Map<string, RuntimeValue>;
+  /**
+   * User-registered functions that take precedence over the built-in
+   * registry. Lookup happens in `evaluateCall` — a matching
+   * descriptor here shadows any built-in of the same name. Keys are
+   * canonical uppercase names (prefix-stripped on register).
+   */
+  readonly userFunctions?: ReadonlyMap<string, FunctionDescriptor>;
 }
 
 // ============================================================================
@@ -219,10 +228,14 @@ export function evaluate(expr: BoundExpr, ctx: EvalContext, session: EvalSession
       return evaluateLiteral(expr);
 
     case BoundExprKind.CellRef:
-      return evaluateCellRef(expr, ctx, session);
+      // Inlined: the wrapper function did nothing beyond forwarding.
+      // Cell refs are the hottest AST node in the evaluator; saving one
+      // call frame per reference meaningfully shortens the trace for
+      // workbooks with tens of thousands of cells.
+      return rvCellRef(expr.sheet, expr.row, expr.col);
 
     case BoundExprKind.AreaRef:
-      return evaluateAreaRef(expr, ctx, session);
+      return rvRef(expr.sheet, expr.top, expr.left, expr.bottom, expr.right);
 
     case BoundExprKind.ColRangeRef:
       return evaluateColRange(expr, ctx, session);
@@ -260,6 +273,9 @@ export function evaluate(expr: BoundExpr, ctx: EvalContext, session: EvalSession
     case BoundExprKind.StructuredRef:
       return evaluateStructuredRef(expr, ctx, session);
 
+    case BoundExprKind.UnionRef:
+      return evaluateUnionRef(expr, ctx, session);
+
     default:
       return assertNever(expr);
   }
@@ -295,17 +311,13 @@ function evaluateLiteral(expr: {
 // Cell Reference
 // ============================================================================
 
-function evaluateCellRef(expr: BoundCellRef, ctx: EvalContext, session: EvalSession): RuntimeValue {
-  return rvCellRef(expr.sheet, expr.row, expr.col);
-}
-
 // ============================================================================
-// Area Reference → ReferenceValue
+// Cell / Area Reference — inlined at the `evaluate` switch above.
 // ============================================================================
-
-function evaluateAreaRef(expr: BoundAreaRef, ctx: EvalContext, session: EvalSession): RuntimeValue {
-  return rvRef(expr.sheet, expr.top, expr.left, expr.bottom, expr.right);
-}
+// Single-arg wrappers used to exist here (`evaluateCellRef` / `evaluateAreaRef`);
+// they did nothing beyond forwarding to `rvCellRef` / `rvRef`. Since the
+// evaluator dispatches these on every cell in every formula, we inline
+// them at the caller to shave one call frame.
 
 function evaluateColRange(
   expr: { sheet: string; leftCol: number; rightCol: number },
@@ -399,24 +411,50 @@ function buildRangeArray(
   const ws = ctx.snapshot.worksheetsByName.get(sheet.toLowerCase());
   const cells = ws?.cells;
   const wsHiddenRows = ws?.hiddenRows;
+  // Use the canonical sheet name for cache-key computation so that a
+  // mis-cased sheet identifier (e.g. `sheet1` when the workbook has
+  // `Sheet1`) doesn't bypass the compiled-formula / result caches. The
+  // map is keyed by snapshot.worksheets[].name, so any divergence would
+  // cause spurious re-compilation.
+  const canonicalSheet = ws?.name ?? sheet;
   const compiledFormulas = ctx.compiledFormulas;
   const resultCache = session.resultCache;
   // Hoist the recording guard — when not recording, skip recordAccess
   // entirely in the loop instead of paying the function-call overhead.
   const recording = session.recordingKey !== null;
 
-  const rows: ScalarValue[][] = [];
+  const height = bottom - top + 1;
+  const width = right - left + 1;
+
+  // Missing worksheet: emit an all-BLANK rectangle without entering the
+  // hot path. The tokenizer and binder usually report these as #REF! at
+  // compile time, but `evaluateRef3D` and runtime INDIRECT can still
+  // synthesise refs into non-existent sheets.
+  if (!cells) {
+    const rows: ScalarValue[][] = new Array<ScalarValue[]>(height);
+    for (let r = 0; r < height; r++) {
+      rows[r] = new Array<ScalarValue>(width).fill(BLANK);
+    }
+    if (recording) {
+      for (let r = top; r <= bottom; r++) {
+        for (let c = left; c <= right; c++) {
+          session.recordAccess(sheet, r, c);
+        }
+      }
+    }
+    return rvArrayRect(rows, height, width, top, left);
+  }
+
+  const rows: ScalarValue[][] = new Array<ScalarValue[]>(height);
   // Lazily-allocated masks: only materialized once we encounter a
   // SUBTOTAL/AGGREGATE cell or a hidden row inside the range. For the
   // common case (plain data range, no hidden rows) we never touch these
   // and emit an ArrayValue without extra metadata.
   let subtotalMask: boolean[][] | undefined;
   let hiddenRowMask: boolean[] | undefined;
-  const height = bottom - top + 1;
-  const width = right - left + 1;
   for (let r = top; r <= bottom; r++) {
-    const row: ScalarValue[] = [];
     const ri = r - top;
+    const row = new Array<ScalarValue>(width);
     // Record row visibility — SUBTOTAL 1xx / AGGREGATE opt 5/7 use it.
     if (wsHiddenRows?.has(r)) {
       if (!hiddenRowMask) {
@@ -425,14 +463,9 @@ function buildRangeArray(
       hiddenRowMask[ri] = true;
     }
     for (let c = left; c <= right; c++) {
+      const ci = c - left;
       if (recording) {
-        session.recordAccess(sheet, r, c);
-      }
-
-      // Missing worksheet: matches getCellValue's BLANK fallback.
-      if (!cells) {
-        row.push(BLANK);
-        continue;
+        session.recordAccess(canonicalSheet, r, c);
       }
 
       const cell = cells.get(snapshotCellKey(r, c));
@@ -440,13 +473,13 @@ function buildRangeArray(
         // No snapshot cell yet — might still be inside a live spill
         // (e.g. reading A2..A5 while A1 = SEQUENCE(5) is still being
         // materialized). See `readLiveSpill` for the lookup path.
-        const live = readLiveSpill(sheet, r, c, session);
-        row.push(live ? topLeft(live) : BLANK);
+        const live = readLiveSpill(canonicalSheet, r, c, session);
+        row[ci] = live ? topLeft(live) : BLANK;
         continue;
       }
 
       if (cell.formulaKind !== "none" && cell.formula) {
-        const fKey = formulaCellKey(sheet, r, c);
+        const fKey = formulaCellKey(canonicalSheet, r, c);
         const compiled = compiledFormulas.get(fKey);
         // Mark SUBTOTAL/AGGREGATE output cells so an outer SUBTOTAL /
         // AGGREGATE over this range knows to skip them (Excel's
@@ -458,15 +491,15 @@ function buildRangeArray(
               subtotalMask[i] = new Array<boolean>(width).fill(false);
             }
           }
-          subtotalMask[ri][c - left] = true;
+          subtotalMask[ri][ci] = true;
         }
         const cached = resultCache.get(fKey);
         if (cached !== undefined) {
-          row.push(topLeft(cached.scalar));
+          row[ci] = topLeft(cached.scalar);
           continue;
         }
         if (compiled) {
-          row.push(topLeft(evaluateFormula(compiled, ctx, session)));
+          row[ci] = topLeft(evaluateFormula(compiled, ctx, session));
           continue;
         }
       }
@@ -475,16 +508,16 @@ function buildRangeArray(
       // that a fresh dynamic-array spill is about to overwrite. Prefer
       // the live value when a master is registered so this-pass SUM /
       // LOOKUP / etc. see the new spill immediately.
-      const live = readLiveSpill(sheet, r, c, session);
+      const live = readLiveSpill(canonicalSheet, r, c, session);
       if (live) {
-        row.push(topLeft(live));
+        row[ci] = topLeft(live);
         continue;
       }
-      row.push(topLeft(fromSnapshotValue(cell.value)));
+      row[ci] = topLeft(fromSnapshotValue(cell.value));
     }
-    rows.push(row);
+    rows[ri] = row;
   }
-  return rvArray(rows, top, left, subtotalMask, hiddenRowMask);
+  return rvArrayRect(rows, height, width, top, left, subtotalMask, hiddenRowMask);
 }
 
 // ============================================================================
@@ -598,16 +631,25 @@ function getCellValue(
   ctx: EvalContext,
   session: EvalSession
 ): RuntimeValue {
+  const ws = ctx.snapshot.worksheetsByName.get(sheetName.toLowerCase());
+  if (!ws) {
+    // Record the access before returning — still a valid dependency
+    // edge even if the sheet is missing (it'll surface as BLANK
+    // downstream, but an INDIRECT-produced read should still register).
+    if (session.recordingKey !== null) {
+      session.recordAccess(sheetName, row, col);
+    }
+    return BLANK;
+  }
+  // Normalise to the canonical sheet name so downstream cache keys
+  // (compiled formulas, result cache, spill map) all hit the same
+  // entries regardless of how the caller cased the input.
+  const canonicalSheet = ws.name;
   // Record this access for runtime dependency tracking. Inline guard
   // avoids the function call overhead in the common case where no
   // recording is active (formulas without dynamic refs).
   if (session.recordingKey !== null) {
-    session.recordAccess(sheetName, row, col);
-  }
-
-  const ws = ctx.snapshot.worksheetsByName.get(sheetName.toLowerCase());
-  if (!ws) {
-    return BLANK;
+    session.recordAccess(canonicalSheet, row, col);
   }
 
   const cellKey = snapshotCellKey(row, col);
@@ -618,12 +660,19 @@ function getCellValue(
     // right array element. Matters when a downstream formula like
     // `SUM(A1:A5)` runs before materialize writes the ghost cells for
     // `A1 = SEQUENCE(5)` into the snapshot.
-    return readLiveSpill(sheetName, row, col, session) ?? BLANK;
+    return readLiveSpill(canonicalSheet, row, col, session) ?? BLANK;
   }
 
   // If this cell has a formula, evaluate it
   if (cell.formulaKind !== "none" && cell.formula) {
-    const fKey = formulaCellKey(sheetName, row, col);
+    // Use `ws.name` (the snapshot's canonical case) rather than the
+    // caller's `sheetName`, which could arrive mis-cased (e.g. the
+    // user wrote `sheet1!A1` but the workbook has `Sheet1`). The
+    // compiled-formula map is keyed by the canonical form, so a
+    // mis-cased key would produce a spurious cache-miss + re-compile
+    // per read — and worse, a different key than the one the
+    // write-back cycle will later upsert.
+    const fKey = formulaCellKey(canonicalSheet, row, col);
 
     // Check cache — return scalar form for dependency resolution
     const cached = session.resultCache.get(fKey);
@@ -642,7 +691,7 @@ function getCellValue(
   // (e.g. a value that exists in the snapshot from a previous calc
   // cycle but is about to be overwritten by a fresh spill). Prefer the
   // live value when a master is registered.
-  const spill = readLiveSpill(sheetName, row, col, session);
+  const spill = readLiveSpill(canonicalSheet, row, col, session);
   if (spill) {
     return spill;
   }
@@ -1033,47 +1082,47 @@ function applyScalarBinaryOp(op: string, left: ScalarValue, right: ScalarValue):
 }
 
 function compareScalars(left: ScalarValue, right: ScalarValue, op: string): boolean {
-  // Normalize blanks to a neutral form of the opposing kind so formulas like
-  // `"" = A1` (where A1 is blank) compare equal. Without this normalisation
-  // Excel would route us to the cross-type tiebreak below.
-  const l =
-    left.kind === RVKind.Blank
-      ? right.kind === RVKind.String
-        ? rvString("")
-        : right.kind === RVKind.Boolean
-          ? rvBoolean(false)
-          : rvNumber(0)
-      : left;
-  const r =
-    right.kind === RVKind.Blank
-      ? left.kind === RVKind.String
-        ? rvString("")
-        : left.kind === RVKind.Boolean
-          ? rvBoolean(false)
-          : rvNumber(0)
-      : right;
-
   let cmp: number;
-  if (l.kind === r.kind) {
-    cmp = compareScalarsSameKind(l, r);
+
+  // Fast path — same kind, no blanks. Covers the vast majority of
+  // comparisons and avoids the blank-normalisation allocation dance
+  // below. compareScalarsSameKind handles Number/String/Boolean/Blank
+  // intrinsically; the NaN case only arises for Error kinds.
+  if (left.kind === right.kind && left.kind !== RVKind.Blank) {
+    cmp = compareScalarsSameKind(left, right);
     if (!Number.isFinite(cmp)) {
       cmp = 0;
     }
   } else {
-    // Excel orders scalar kinds: Number < String < Boolean < Error/Blank.
-    const order = (v: ScalarValue): number => {
-      if (v.kind === RVKind.Number) {
-        return 0;
+    // Normalize blanks to a neutral form of the opposing kind so formulas like
+    // `"" = A1` (where A1 is blank) compare equal. Without this normalisation
+    // Excel would route us to the cross-type tiebreak below.
+    const l =
+      left.kind === RVKind.Blank
+        ? right.kind === RVKind.String
+          ? rvString("")
+          : right.kind === RVKind.Boolean
+            ? rvBoolean(false)
+            : rvNumber(0)
+        : left;
+    const r =
+      right.kind === RVKind.Blank
+        ? left.kind === RVKind.String
+          ? rvString("")
+          : left.kind === RVKind.Boolean
+            ? rvBoolean(false)
+            : rvNumber(0)
+        : right;
+
+    if (l.kind === r.kind) {
+      cmp = compareScalarsSameKind(l, r);
+      if (!Number.isFinite(cmp)) {
+        cmp = 0;
       }
-      if (v.kind === RVKind.String) {
-        return 1;
-      }
-      if (v.kind === RVKind.Boolean) {
-        return 2;
-      }
-      return 3;
-    };
-    cmp = order(l) - order(r);
+    } else {
+      // Excel orders scalar kinds: Number < String < Boolean < Error/Blank.
+      cmp = scalarKindOrder(l) - scalarKindOrder(r);
+    }
   }
 
   switch (op) {
@@ -1091,6 +1140,20 @@ function compareScalars(left: ScalarValue, right: ScalarValue, op: string): bool
       return cmp >= 0;
     default:
       return false;
+  }
+}
+
+/** Kind-priority used by Excel when comparing scalars of different kinds. */
+function scalarKindOrder(v: ScalarValue): number {
+  switch (v.kind) {
+    case RVKind.Number:
+      return 0;
+    case RVKind.String:
+      return 1;
+    case RVKind.Boolean:
+      return 2;
+    default:
+      return 3; // Error / Blank — callers rarely reach this branch.
   }
 }
 
@@ -1126,31 +1189,40 @@ function broadcastBinaryOp(op: string, left: RuntimeValue, right: RuntimeValue):
   const lScalarFallback: ScalarValue | undefined = lArr ? undefined : topLeft(left);
   const rScalarFallback: ScalarValue | undefined = rArr ? undefined : topLeft(right);
 
-  const rows: ScalarValue[][] = [];
+  // Hoist broadcast-flag checks outside the hot loop. The four flags are
+  // constant for the entire operation; JS engines usually fold these, but
+  // turning them into `const` locals lets the inner loop read bools rather
+  // than recomputing `=== 1` each cell.
+  const lRowBroadcast = lRows === 1;
+  const lColBroadcast = lCols === 1;
+  const rRowBroadcast = rRows === 1;
+  const rColBroadcast = rCols === 1;
+
+  const rows: ScalarValue[][] = new Array<ScalarValue[]>(outRows);
   for (let r = 0; r < outRows; r++) {
-    const row: ScalarValue[] = [];
+    // Cache the row handle once per output row — avoids `arr.rows[lR]`
+    // double-indexing per cell. When the left operand broadcasts along
+    // rows (height 1) we read the same row handle every iteration.
+    const lRow = lArr ? lArr.rows[lRowBroadcast ? 0 : r] : undefined;
+    const rRow = rArr ? rArr.rows[rRowBroadcast ? 0 : r] : undefined;
+
+    const outRow = new Array<ScalarValue>(outCols);
     for (let c = 0; c < outCols; c++) {
-      const lR = lRows === 1 ? 0 : r;
-      const lC = lCols === 1 ? 0 : c;
-      const rR = rRows === 1 ? 0 : r;
-      const rC = rCols === 1 ? 0 : c;
-
-      // Array values are rectangular (normalised by rvArray) so direct
-      // indexing is safe; the previous `?? BLANK` fallback was defensive
-      // code that never triggered in practice but cost an optional chain
-      // per cell in a hot loop.
-      const lVal: ScalarValue = lArr ? lArr.rows[lR][lC] : (lScalarFallback as ScalarValue);
-      const rVal: ScalarValue = rArr ? rArr.rows[rR][rC] : (rScalarFallback as ScalarValue);
-
-      row.push(applyScalarBinaryOp(op, lVal, rVal));
+      const lVal: ScalarValue = lRow
+        ? lRow[lColBroadcast ? 0 : c]
+        : (lScalarFallback as ScalarValue);
+      const rVal: ScalarValue = rRow
+        ? rRow[rColBroadcast ? 0 : c]
+        : (rScalarFallback as ScalarValue);
+      outRow[c] = applyScalarBinaryOp(op, lVal, rVal);
     }
-    rows.push(row);
+    rows[r] = outRow;
   }
 
   // Propagate origin metadata
   const originRow = lArr?.originRow ?? rArr?.originRow;
   const originCol = lArr?.originCol ?? rArr?.originCol;
-  return rvArray(rows, originRow, originCol);
+  return rvArrayRect(rows, outRows, outCols, originRow, originCol);
 }
 
 // ============================================================================
@@ -1265,16 +1337,43 @@ function evaluateCall(expr: BoundCall, ctx: EvalContext, session: EvalSession): 
   if (expr.args.length === 1 && isSimpleRefFunction(canonical)) {
     const raw = evaluate(expr.args[0], ctx, session);
     if (raw.kind === RVKind.Reference && raw.areas.length > 0) {
-      const area = raw.areas[0];
+      // ROW / COLUMN pick the top-left coordinate of the first area —
+      // matches Excel's reference-position rule for multi-area refs.
+      // ROWS / COLUMNS match the flattened shape that `dereferenceValue`
+      // would produce: for a multi-area union we stack all areas
+      // vertically, so ROWS sums every area's height and COLUMNS takes
+      // the max width. This keeps `ROWS(union)` consistent with
+      // `SUMPRODUCT(–(union=union))` / `SUM(union)` — all of which see
+      // the stacked view — instead of silently dropping the tail areas.
+      const areas = raw.areas;
       switch (canonical) {
         case "ROW":
-          return rvNumber(area.top);
+          return rvNumber(areas[0].top);
         case "COLUMN":
-          return rvNumber(area.left);
-        case "ROWS":
-          return rvNumber(area.bottom - area.top + 1);
-        case "COLUMNS":
-          return rvNumber(area.right - area.left + 1);
+          return rvNumber(areas[0].left);
+        case "ROWS": {
+          if (areas.length === 1) {
+            return rvNumber(areas[0].bottom - areas[0].top + 1);
+          }
+          let total = 0;
+          for (const a of areas) {
+            total += a.bottom - a.top + 1;
+          }
+          return rvNumber(total);
+        }
+        case "COLUMNS": {
+          if (areas.length === 1) {
+            return rvNumber(areas[0].right - areas[0].left + 1);
+          }
+          let maxW = 0;
+          for (const a of areas) {
+            const w = a.right - a.left + 1;
+            if (w > maxW) {
+              maxW = w;
+            }
+          }
+          return rvNumber(maxW);
+        }
       }
     }
   }
@@ -1289,13 +1388,70 @@ function evaluateCall(expr: BoundCall, ctx: EvalContext, session: EvalSession): 
     return evaluateCELL(expr.args, ctx, session);
   }
 
+  // ── INDEX reference-aware path ──
+  // Excel's INDEX takes an optional fourth `area_num` that selects
+  // which member of a multi-area reference to index into, e.g.
+  // `INDEX((A1:B2, D4:E5), 1, 1, 2) = D4`. We need to see the raw
+  // ReferenceValue (not its flattened deref array) to support this.
+  if (canonical === "INDEX") {
+    const result = tryEvaluateINDEX(expr.args, ctx, session);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  // ── AREAS reference-aware path ──
+  // `AREAS((A1:B2, D4:E5))` should return 2, not 1. The standard
+  // eager-dereference path flattens multi-area references into a single
+  // stacked ArrayValue, losing the area count. Intercept here so we
+  // see the raw ReferenceValue.
+  if (canonical === "AREAS" && expr.args.length === 1) {
+    const raw = evaluate(expr.args[0], ctx, session);
+    if (isError(raw)) {
+      return raw;
+    }
+    if (raw.kind === RVKind.Reference) {
+      return rvNumber(raw.areas.length);
+    }
+    // AREAS expects a reference-producing argument. Non-references
+    // (literals, scalars, arrays) are rejected with #VALUE! in Excel,
+    // not silently coerced to `1`. Previously we returned 1 which hid
+    // caller bugs like `AREAS(42)` that should surface as errors.
+    return ERRORS.VALUE;
+  }
+
   // Evaluate all arguments eagerly and dereference references
   const args: RuntimeValue[] = expr.args.map(arg =>
     dereferenceValue(evaluate(arg, ctx, session), ctx, session)
   );
 
-  // Look up function
-  const desc = lookupFunction(expr.name);
+  // Look up function via the canonical (prefix-stripped) name computed
+  // above. Previously we passed `expr.name`, forcing `lookupFunction`
+  // to re-strip the prefix on every call; reusing `canonical` skips
+  // that redundant check.
+  //
+  // User-registered functions take precedence over the built-in
+  // registry — this lets callers shadow a built-in (e.g. replace
+  // `IRR` with a domain-specific variant) or register entirely new
+  // names (`MYFN`). The resulting descriptor still goes through the
+  // same arity check.
+  const userDesc = ctx.userFunctions?.get(canonical);
+  if (userDesc) {
+    // Validate arity first — same rule as built-ins.
+    if (args.length < userDesc.minArity || args.length > userDesc.maxArity) {
+      return ERRORS.VALUE;
+    }
+    // User-supplied code can throw; catch at the boundary so a buggy
+    // custom function surfaces as `#VALUE!` rather than tearing down
+    // the whole calculation pass. Any RuntimeValue return (including
+    // error values the user constructed intentionally) passes through.
+    try {
+      return userDesc.invoke(args);
+    } catch {
+      return ERRORS.VALUE;
+    }
+  }
+  const desc = lookupFunction(canonical);
   if (desc) {
     // Validate arity — produce #VALUE! for wrong argument count
     if (args.length < desc.minArity || args.length > desc.maxArity) {
@@ -1320,60 +1476,10 @@ function evaluateCall(expr: BoundCall, ctx: EvalContext, session: EvalSession): 
         }
         return desc.invoke(args);
       }
-      case "ISFORMULA": {
-        // ISFORMULA requires a reference argument. When the raw argument is
-        // a CellRef/AreaRef we can look up the underlying cell's formulaKind.
-        // Any other shape (literal, computed value, etc.) yields #N/A per
-        // Excel's behavior for non-reference arguments.
-        const raw = expr.args[0];
-        if (raw && raw.kind === BoundExprKind.CellRef) {
-          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
-          if (!ws) {
-            return ERRORS.REF;
-          }
-          const cell = ws.cells.get(snapshotCellKey(raw.row, raw.col));
-          return rvBoolean(cell !== undefined && cell.formulaKind !== "none");
-        }
-        if (raw && raw.kind === BoundExprKind.AreaRef) {
-          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
-          if (!ws) {
-            return ERRORS.REF;
-          }
-          // ISFORMULA on an area ref inspects the top-left cell.
-          const cell = ws.cells.get(snapshotCellKey(raw.top, raw.left));
-          return rvBoolean(cell !== undefined && cell.formulaKind !== "none");
-        }
-        return ERRORS.NA;
-      }
-      case "FORMULATEXT": {
-        // FORMULATEXT returns the formula source text at the referenced cell,
-        // or #N/A if the cell has no formula. Non-reference arguments also
-        // yield #N/A.
-        const raw = expr.args[0];
-        if (raw && raw.kind === BoundExprKind.CellRef) {
-          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
-          if (!ws) {
-            return ERRORS.REF;
-          }
-          const cell = ws.cells.get(snapshotCellKey(raw.row, raw.col));
-          if (cell && cell.formulaKind !== "none" && cell.formula !== undefined) {
-            return rvString(`=${cell.formula}`);
-          }
-          return ERRORS.NA;
-        }
-        if (raw && raw.kind === BoundExprKind.AreaRef) {
-          const ws = ctx.snapshot.worksheetsByName.get(raw.sheet.toLowerCase());
-          if (!ws) {
-            return ERRORS.REF;
-          }
-          const cell = ws.cells.get(snapshotCellKey(raw.top, raw.left));
-          if (cell && cell.formulaKind !== "none" && cell.formula !== undefined) {
-            return rvString(`=${cell.formula}`);
-          }
-          return ERRORS.NA;
-        }
-        return ERRORS.NA;
-      }
+      case "ISFORMULA":
+        return evaluateISFORMULA(expr.args, ctx, session);
+      case "FORMULATEXT":
+        return evaluateFORMULATEXT(expr.args, ctx, session);
       default:
         return desc.invoke(args);
     }
@@ -1796,7 +1902,23 @@ function evaluateOFFSET(
     baseHeight = refExpr.bottom - refExpr.top + 1;
     baseWidth = refExpr.right - refExpr.left + 1;
   } else {
-    return ERRORS.VALUE;
+    // Evaluate — the base might be produced at runtime (INDIRECT, a
+    // chained OFFSET, a defined name that bound to a reference, etc.).
+    // Only accept single-area references; multi-area refs (3D / union)
+    // are rejected by Excel too.
+    const evaluated = evaluate(refExpr, ctx, session);
+    if (isError(evaluated)) {
+      return evaluated;
+    }
+    if (evaluated.kind !== RVKind.Reference || evaluated.areas.length !== 1) {
+      return ERRORS.VALUE;
+    }
+    const area = evaluated.areas[0];
+    baseRow = area.top;
+    baseCol = area.left;
+    baseSheet = area.sheet;
+    baseHeight = area.bottom - area.top + 1;
+    baseWidth = area.right - area.left + 1;
   }
 
   const rowsVal = topLeft(evalDeref(args[1], ctx, session));
@@ -1942,19 +2064,52 @@ function evaluateMAP(
   if (args.length < 2) {
     return ERRORS.VALUE;
   }
-  const arrVal = evalDeref(args[0], ctx, session);
+  // Excel's MAP accepts N source arrays + 1 lambda; the lambda must take
+  // exactly N parameters. Previously this implementation only read the
+  // first array and ignored args[1..N-1], so `MAP(A1:A3, B1:B3,
+  // LAMBDA(a,b, a+b))` silently behaved as `MAP(A1:A3, LAMBDA(a, a))`.
   const lambdaVal = evalDeref(args[args.length - 1], ctx, session);
   if (!isLambda(lambdaVal)) {
     return ERRORS.VALUE;
   }
-  if (arrVal.kind !== RVKind.Array) {
-    return invokeLambda(lambdaVal, [arrVal], ctx, session);
+  const arrayArgs: RuntimeValue[] = [];
+  for (let i = 0; i < args.length - 1; i++) {
+    arrayArgs.push(evalDeref(args[i], ctx, session));
+  }
+  if (lambdaVal.params.length !== arrayArgs.length) {
+    return ERRORS.VALUE;
+  }
+  // Determine shape — all arrays must agree. Scalar args broadcast to
+  // the majority shape. If every arg is a scalar, invoke the lambda
+  // once with them all.
+  let height = 1;
+  let width = 1;
+  for (const a of arrayArgs) {
+    if (a.kind === RVKind.Array) {
+      height = Math.max(height, a.height);
+      width = Math.max(width, a.width);
+    }
+  }
+  const allScalar = arrayArgs.every(a => a.kind !== RVKind.Array);
+  if (allScalar) {
+    return invokeLambda(lambdaVal, arrayArgs, ctx, session);
+  }
+  // Shape-mismatch rejection for arrays that neither broadcast nor
+  // agree: each non-scalar array must match the target shape exactly
+  // (Excel does not broadcast beyond scalar).
+  for (const a of arrayArgs) {
+    if (a.kind === RVKind.Array && (a.height !== height || a.width !== width)) {
+      return ERRORS.VALUE;
+    }
   }
   const rows: ScalarValue[][] = [];
-  for (const row of arrVal.rows) {
+  for (let r = 0; r < height; r++) {
     const outRow: ScalarValue[] = [];
-    for (const cell of row) {
-      outRow.push(topLeft(invokeLambda(lambdaVal, [cell], ctx, session)));
+    for (let c = 0; c < width; c++) {
+      const callArgs: RuntimeValue[] = arrayArgs.map(a =>
+        a.kind === RVKind.Array ? a.rows[r][c] : a
+      );
+      outRow.push(topLeft(invokeLambda(lambdaVal, callArgs, ctx, session)));
     }
     rows.push(outRow);
   }
@@ -1975,17 +2130,27 @@ function evaluateREDUCE(
   if (!isLambda(lambdaVal)) {
     return ERRORS.VALUE;
   }
+  // REDUCE's reducer takes exactly 2 parameters: the accumulator and
+  // the current value. A mismatched arity silently bound `acc` but
+  // left `value` undefined (or silently dropped extra params).
+  if (lambdaVal.params.length !== 2) {
+    return ERRORS.VALUE;
+  }
   if (arrVal.kind === RVKind.Array) {
     for (const row of arrVal.rows) {
       for (const cell of row) {
-        acc = invokeLambda(lambdaVal, [topLeft(acc), cell], ctx, session);
+        // `acc` may legitimately be an array (the lambda returning one
+        // is allowed — VSTACK inside the reducer, etc.). Only flatten
+        // scalars when passing to the lambda; keeping the array shape
+        // means subsequent iterations see the lambda's full output.
+        acc = invokeLambda(lambdaVal, [acc, cell], ctx, session);
       }
     }
   } else {
     // Scalar input: Excel treats the scalar as a 1×1 array and invokes the
     // reducer exactly once. Previously we returned `init` unchanged, which
     // silently broke `REDUCE(0, some_scalar, lambda)` callers.
-    acc = invokeLambda(lambdaVal, [topLeft(acc), topLeft(arrVal)], ctx, session);
+    acc = invokeLambda(lambdaVal, [acc, topLeft(arrVal)], ctx, session);
   }
   return acc;
 }
@@ -2004,12 +2169,20 @@ function evaluateSCAN(
   if (!isLambda(lambdaVal)) {
     return ERRORS.VALUE;
   }
+  // SCAN's reducer takes (acc, value) — same arity rule as REDUCE.
+  if (lambdaVal.params.length !== 2) {
+    return ERRORS.VALUE;
+  }
   const rows: ScalarValue[][] = [];
   if (arrVal.kind === RVKind.Array) {
     for (const row of arrVal.rows) {
       const outRow: ScalarValue[] = [];
       for (const cell of row) {
-        acc = invokeLambda(lambdaVal, [topLeft(acc), cell], ctx, session);
+        // Pass `acc` through without topLeft so the lambda sees the full
+        // previous result (matches the REDUCE fix). Each output cell
+        // still captures the scalar top-left of `acc` so the result
+        // grid stays rectangular.
+        acc = invokeLambda(lambdaVal, [acc, cell], ctx, session);
         outRow.push(topLeft(acc));
       }
       rows.push(outRow);
@@ -2019,7 +2192,7 @@ function evaluateSCAN(
   // Scalar input: emit a single-cell array containing the one accumulated
   // value. Previously we returned #CALC! here, which was an artefact of the
   // array-only implementation path.
-  const result = invokeLambda(lambdaVal, [topLeft(acc), topLeft(arrVal)], ctx, session);
+  const result = invokeLambda(lambdaVal, [acc, topLeft(arrVal)], ctx, session);
   return rvArray([[topLeft(result)]]);
 }
 
@@ -2041,6 +2214,14 @@ function evaluateMAKEARRAY(
   }
   const lambdaVal = evalDeref(args[2], ctx, session);
   if (!isLambda(lambdaVal)) {
+    return ERRORS.VALUE;
+  }
+  // Excel's MAKEARRAY requires a 2-parameter lambda (row, col).
+  // A 0 / 1 / 3+ param lambda is rejected at call time — previously we
+  // invoked with 2 args regardless, which silently extended the lambda's
+  // bindings past its declared parameter list (or left declared params
+  // undefined).
+  if (lambdaVal.params.length !== 2) {
     return ERRORS.VALUE;
   }
   // Truncate toward zero and reject non-positive / overflow sizes.
@@ -2079,8 +2260,20 @@ function evaluateBYROW(
   if (!isLambda(lambdaVal)) {
     return ERRORS.VALUE;
   }
+  // BYROW requires a single-parameter lambda (the row). Mismatched arity
+  // is rejected by Excel at call time — our previous impl silently left
+  // extra params undefined.
+  if (lambdaVal.params.length !== 1) {
+    return ERRORS.VALUE;
+  }
   if (arrVal.kind !== RVKind.Array) {
     return invokeLambda(lambdaVal, [rvArray([[topLeft(arrVal)]])], ctx, session);
+  }
+  // Empty array (height 0) → Excel's BYROW reports `#CALC!` because
+  // there is nothing to iterate over. Previously we returned an empty
+  // array value which downstream arithmetic could not use.
+  if (arrVal.height === 0 || arrVal.width === 0) {
+    return ERRORS.CALC;
   }
   const rows: ScalarValue[][] = [];
   for (const row of arrVal.rows) {
@@ -2103,8 +2296,16 @@ function evaluateBYCOL(
   if (!isLambda(lambdaVal)) {
     return ERRORS.VALUE;
   }
+  // BYCOL requires a single-parameter lambda (the column). See BYROW.
+  if (lambdaVal.params.length !== 1) {
+    return ERRORS.VALUE;
+  }
   if (arrVal.kind !== RVKind.Array) {
     return invokeLambda(lambdaVal, [rvArray([[topLeft(arrVal)]])], ctx, session);
+  }
+  // Empty array → `#CALC!` (see BYROW).
+  if (arrVal.height === 0 || arrVal.width === 0) {
+    return ERRORS.CALC;
   }
   const numCols = arrVal.width;
   const outRow: ScalarValue[] = [];
@@ -2176,6 +2377,209 @@ function tryEvaluateRefFunction(
 // ============================================================================
 // Reference-aware: ISREF
 // ============================================================================
+
+/**
+ * Resolve the top-left cell targeted by an ISFORMULA / FORMULATEXT argument.
+ *
+ * Unlike `resolveCellRefArg` (used by CELL), these two functions must return
+ * `#N/A` for non-reference arguments (arithmetic, literals, ...) rather than
+ * `#VALUE!`. We support:
+ *   - purely syntactic reference nodes (CellRef / AreaRef / ColRangeRef /
+ *     RowRangeRef / Ref3D) — cheapest path, no evaluation needed
+ *   - runtime-produced references (INDIRECT, OFFSET) — we evaluate without
+ *     dereferencing and inspect the resulting ReferenceValue
+ *
+ * Anything else — including errors from INDIRECT("xx") — collapses to
+ * `#N/A`, matching Excel's tolerant behaviour for these two functions.
+ */
+function resolveFormulaRefArg(
+  arg: BoundExpr | undefined,
+  ctx: EvalContext,
+  session: EvalSession
+): { sheet: string; row: number; col: number } | null {
+  if (!arg) {
+    return null;
+  }
+  // Syntactic reference forms — extract top-left directly, no evaluation.
+  if (arg.kind === BoundExprKind.CellRef) {
+    return { sheet: arg.sheet, row: arg.row, col: arg.col };
+  }
+  if (arg.kind === BoundExprKind.AreaRef) {
+    return { sheet: arg.sheet, row: arg.top, col: arg.left };
+  }
+  if (arg.kind === BoundExprKind.ColRangeRef) {
+    const ws = ctx.snapshot.worksheetsByName.get(arg.sheet.toLowerCase());
+    const top = ws?.dimensions?.top ?? 1;
+    return { sheet: arg.sheet, row: top, col: arg.leftCol };
+  }
+  if (arg.kind === BoundExprKind.RowRangeRef) {
+    const ws = ctx.snapshot.worksheetsByName.get(arg.sheet.toLowerCase());
+    const left = ws?.dimensions?.left ?? 1;
+    return { sheet: arg.sheet, row: arg.topRow, col: left };
+  }
+  if (arg.kind === BoundExprKind.Ref3D) {
+    const first = arg.sheets[0];
+    if (first === undefined) {
+      return null;
+    }
+    if (arg.inner.kind === BoundExprKind.CellRef) {
+      return { sheet: first, row: arg.inner.row, col: arg.inner.col };
+    }
+    return { sheet: first, row: arg.inner.top, col: arg.inner.left };
+  }
+  // Evaluate without dereferencing — INDIRECT/OFFSET may yield a
+  // ReferenceValue. Errors or non-references collapse to null (→ #N/A).
+  const raw = evaluate(arg, ctx, session);
+  if (raw.kind === RVKind.Reference && raw.areas.length > 0) {
+    const area = raw.areas[0];
+    return { sheet: area.sheet, row: area.top, col: area.left };
+  }
+  return null;
+}
+
+function evaluateISFORMULA(
+  args: readonly BoundExpr[],
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  if (args.length !== 1) {
+    return ERRORS.NA;
+  }
+  const target = resolveFormulaRefArg(args[0], ctx, session);
+  if (!target) {
+    return ERRORS.NA;
+  }
+  const ws = ctx.snapshot.worksheetsByName.get(target.sheet.toLowerCase());
+  if (!ws) {
+    return ERRORS.REF;
+  }
+  const cell = ws.cells.get(snapshotCellKey(target.row, target.col));
+  return rvBoolean(cell !== undefined && cell.formulaKind !== "none");
+}
+
+function evaluateFORMULATEXT(
+  args: readonly BoundExpr[],
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  if (args.length !== 1) {
+    return ERRORS.NA;
+  }
+  const target = resolveFormulaRefArg(args[0], ctx, session);
+  if (!target) {
+    return ERRORS.NA;
+  }
+  const ws = ctx.snapshot.worksheetsByName.get(target.sheet.toLowerCase());
+  if (!ws) {
+    return ERRORS.REF;
+  }
+  const cell = ws.cells.get(snapshotCellKey(target.row, target.col));
+  if (cell && cell.formulaKind !== "none" && cell.formula !== undefined) {
+    return rvString(`=${cell.formula}`);
+  }
+  return ERRORS.NA;
+}
+
+/**
+ * INDEX reference-aware path.
+ *
+ * Standard INDEX takes `(array, row, col)` and returns a value or
+ * sub-range. When the first argument is a multi-area UnionRef, INDEX
+ * also accepts a fourth `area_num` argument to select which area to
+ * index into — e.g. `INDEX((A1:B2, D4:E5), 1, 1, 2) = D4`.
+ *
+ * We intercept INDEX here (before the normal eager-dereference path)
+ * because dereferencing a multi-area ReferenceValue flattens its
+ * areas into a single stacked array, losing the per-area boundary
+ * needed for `area_num`. For the common single-area case we return
+ * `undefined` so the eager path runs and delegates to `fnINDEX`.
+ */
+function tryEvaluateINDEX(
+  args: readonly BoundExpr[],
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue | undefined {
+  if (args.length < 2 || args.length > 4) {
+    return undefined; // Fall through — eager fnINDEX reports arity errors.
+  }
+  // Fast path: 2- and 3-arg INDEX has no area_num, so we can skip the
+  // union-aware logic entirely for the common single-array case. Only
+  // INDEX with an explicit area_num (4 args) OR a multi-area first
+  // operand needs the reference-aware route.
+  const first = evaluate(args[0], ctx, session);
+  if (isError(first)) {
+    // Errors from the source expression propagate regardless of arity.
+    return first;
+  }
+  const isMultiArea = first.kind === RVKind.Reference && first.areas.length > 1;
+  if (!isMultiArea && args.length < 4) {
+    return undefined;
+  }
+  // Single-area reference with an explicit 4th arg still needs
+  // area_num validation — Excel rejects `INDEX(A1:B2, 1, 1, 2)` as
+  // #REF! since the source only has one area.
+  if (first.kind !== RVKind.Reference || first.areas.length === 0) {
+    // Non-reference first arg (array literal, number, etc.) — only
+    // valid when args.length < 4. Let the eager path handle it.
+    if (args.length < 4) {
+      return undefined;
+    }
+    // With an explicit area_num on a non-reference, Excel returns #REF!.
+    return ERRORS.REF;
+  }
+  const areas = first.areas;
+
+  // Resolve `area_num` (1-based). Omitted / Blank → area 1. Truncate
+  // toward zero and bounds-check against the union's cardinality.
+  let areaNum = 1;
+  if (args.length === 4) {
+    const rawArea = dereferenceValue(evaluate(args[3], ctx, session), ctx, session);
+    if (isError(rawArea)) {
+      return rawArea;
+    }
+    const s = topLeft(rawArea);
+    // Treat a blank / missing 4th argument as the default (area 1) —
+    // matches Excel's tolerance for `INDEX(ref, r, c, )` and avoids the
+    // surprise where a trailing comma would silently produce #REF!
+    // (blank → toNumberRV = 0 → out-of-range).
+    if (s.kind !== RVKind.Blank) {
+      const aRV = toNumberRV(s);
+      if (isError(aRV)) {
+        return aRV;
+      }
+      areaNum = Math.trunc(aRV.value);
+      if (areaNum < 1 || areaNum > areas.length) {
+        return ERRORS.REF;
+      }
+    }
+  }
+  const area = areas[areaNum - 1];
+
+  // Build a single-area ArrayValue for the selected region, then
+  // delegate to `fnINDEX` using the row/col args. This keeps the
+  // actual indexing logic in one place.
+  const selectedArr = buildRangeArray(
+    ctx,
+    session,
+    area.sheet,
+    area.top,
+    area.left,
+    area.bottom,
+    area.right
+  );
+  const indexArgs: RuntimeValue[] = [selectedArr];
+  for (let i = 1; i < Math.min(args.length, 3); i++) {
+    indexArgs.push(dereferenceValue(evaluate(args[i], ctx, session), ctx, session));
+  }
+  // Delegate to the registered INDEX implementation — keeps the actual
+  // indexing logic (fractional truncation, single-col collapse, row=0
+  // / col=0 semantics) in one place rather than reimplementing here.
+  const indexFn = lookupFunction("INDEX");
+  if (!indexFn) {
+    return ERRORS.VALUE;
+  }
+  return indexFn.invoke(indexArgs);
+}
 
 /**
  * ISREF(value) → TRUE if `value` is a reference; FALSE otherwise.
@@ -2340,7 +2744,23 @@ function evaluateCELL(
 
   switch (info) {
     case "address": {
-      return rvString(`$${colNumberToLetter(target.col)}$${target.row}`);
+      // Excel qualifies the address with the sheet name when the target
+      // sheet differs from the formula-cell's own sheet (e.g.
+      // `CELL("address", Sheet2!A1)` → `"Sheet2!$A$1"`). Same-sheet
+      // refs stay unqualified. Without the qualifier, callers that
+      // parse the result (INDIRECT(CELL("address", ref))) lose the
+      // sheet context and misread remote cells.
+      const addr = `$${colNumberToLetter(target.col)}$${target.row}`;
+      const sameSheet = ctx.currentSheet.toLowerCase() === target.sheet.toLowerCase();
+      if (sameSheet) {
+        return rvString(addr);
+      }
+      // Quote sheet names that need it (spaces, special chars, starts
+      // with digit). The same rule the tokenizer uses when parsing
+      // quoted sheet refs on the way in.
+      const needsQuote = !/^[A-Za-z_][A-Za-z0-9_]*$/.test(target.sheet);
+      const sheetPrefix = needsQuote ? `'${target.sheet.replace(/'/g, "''")}'` : target.sheet;
+      return rvString(`${sheetPrefix}!${addr}`);
     }
     case "row":
       return rvNumber(target.row);
@@ -2396,6 +2816,18 @@ function evaluateNameExpr(
     const rangeStr = dn.ranges[0];
     const parsed = parseDefinedNameRange(rangeStr);
     if (parsed) {
+      // Validate against Excel's sheet coordinate limits before we pass
+      // the values to `getCellValue` / `buildRangeArray`. An invalid
+      // defined-name string (e.g. a range exceeding column XFD) should
+      // surface as #REF! rather than silently reading BLANK cells.
+      if (
+        parsed.startRow < 1 ||
+        parsed.endRow > 1_048_576 ||
+        parsed.startCol < 1 ||
+        parsed.endCol > 16_384
+      ) {
+        return ERRORS.REF;
+      }
       if (parsed.startRow === parsed.endRow && parsed.startCol === parsed.endCol) {
         return getCellValue(parsed.sheet, parsed.startRow, parsed.startCol, ctx, session);
       }
@@ -2474,6 +2906,44 @@ function evaluateLambdaExpr(expr: BoundLambda, ctx: EvalContext): RuntimeValue {
     expr.body,
     ctx.localBindings ? new Map(ctx.localBindings) : undefined
   );
+}
+
+// ============================================================================
+// Union Reference `(A1:B2, D4:E5)` — yields a multi-area ReferenceValue
+// ============================================================================
+
+/**
+ * Evaluate a reference union syntactically formed by `(area1, area2, …)`.
+ *
+ * Each member must resolve to a reference-producing value. The resulting
+ * `ReferenceValue` carries every area in order so that `INDEX(union, r,
+ * c, area_num)` can pick the right one. Any non-reference member
+ * (scalar / array literal / error) short-circuits to `#VALUE!`.
+ */
+function evaluateUnionRef(
+  expr: { areas: readonly BoundExpr[] },
+  ctx: EvalContext,
+  session: EvalSession
+): RuntimeValue {
+  const areas: RefArea[] = [];
+  for (const member of expr.areas) {
+    const val = evaluate(member, ctx, session);
+    if (isError(val)) {
+      return val;
+    }
+    if (val.kind !== RVKind.Reference || val.areas.length === 0) {
+      // Excel rejects non-reference members of a union outright —
+      // `(A1, "text")` is `#VALUE!`, not a silent coerce to 1-cell.
+      return ERRORS.VALUE;
+    }
+    for (const a of val.areas) {
+      areas.push(a);
+    }
+  }
+  if (areas.length === 0) {
+    return ERRORS.VALUE;
+  }
+  return { kind: RVKind.Reference, areas };
 }
 
 // ============================================================================

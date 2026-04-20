@@ -21,7 +21,7 @@ import {
   isError,
   isArray
 } from "../runtime/values";
-import { argToNumber, flattenAll, flattenNumbers, firstError } from "./_shared";
+import { argToNumber, flattenAll, flattenNumbers, firstError, forEachNumber } from "./_shared";
 
 // ============================================================================
 // Native Function Type
@@ -302,14 +302,12 @@ export const fnACOTH: NativeFn = args => {
 // ============================================================================
 
 export const fnSUM: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let sum = 0;
+  const err = forEachNumber(args, n => {
+    sum += n;
+  });
   if (err) {
     return err;
-  }
-  let sum = 0;
-  for (const n of nums) {
-    sum += (n as NumberValue).value;
   }
   // Fail fast on overflow to Infinity; otherwise the result leaks into
   // any formula that aggregates it (AVERAGE, STDEV, etc.) and those
@@ -318,64 +316,86 @@ export const fnSUM: NativeFn = args => {
 };
 
 export const fnAVERAGE: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let sum = 0;
+  let count = 0;
+  const err = forEachNumber(args, n => {
+    sum += n;
+    count++;
+  });
   if (err) {
     return err;
   }
-  if (nums.length === 0) {
+  if (count === 0) {
     return ERRORS.DIV0;
   }
-  let sum = 0;
-  for (const n of nums) {
-    sum += (n as NumberValue).value;
-  }
-  const avg = sum / nums.length;
+  const avg = sum / count;
   return Number.isFinite(avg) ? rvNumber(avg) : ERRORS.NUM;
 };
 
 export const fnMIN: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let min = Infinity;
+  let seen = false;
+  const err = forEachNumber(args, n => {
+    seen = true;
+    if (n < min) {
+      min = n;
+    }
+  });
   if (err) {
     return err;
   }
-  if (nums.length === 0) {
-    return rvNumber(0);
-  }
-  let min = Infinity;
-  for (const n of nums) {
-    if ((n as NumberValue).value < min) {
-      min = (n as NumberValue).value;
-    }
-  }
-  return rvNumber(min);
+  return seen ? rvNumber(min) : rvNumber(0);
 };
 
 export const fnMAX: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let max = -Infinity;
+  let seen = false;
+  const err = forEachNumber(args, n => {
+    seen = true;
+    if (n > max) {
+      max = n;
+    }
+  });
   if (err) {
     return err;
   }
-  if (nums.length === 0) {
-    return rvNumber(0);
-  }
-  let max = -Infinity;
-  for (const n of nums) {
-    if ((n as NumberValue).value > max) {
-      max = (n as NumberValue).value;
-    }
-  }
-  return rvNumber(max);
+  return seen ? rvNumber(max) : rvNumber(0);
 };
 
 export const fnCOUNT: NativeFn = args => {
+  // Excel's rules — intentionally asymmetric:
+  //   - Number cell / scalar → counted (direct + inside array).
+  //   - Numeric-string DIRECT scalar (`COUNT("5")`) → counted. Inside
+  //     an array, numeric strings are NOT counted.
+  //   - Boolean / non-numeric string / blank / error → NOT counted in
+  //     any context (diverges from COUNTA which counts booleans).
+  // Previously the engine flattened everything through `topLeft` and
+  // only accepted `Number` — which meant `COUNT("5")` returned 0.
   let count = 0;
-  const all = flattenAll(args);
-  for (const v of all) {
-    if (v.kind === RVKind.Number) {
-      count++;
+  for (const arg of args) {
+    if (arg.kind === RVKind.Array) {
+      for (const row of arg.rows) {
+        for (const cell of row) {
+          if (cell.kind === RVKind.Number) {
+            count++;
+          }
+        }
+      }
+    } else {
+      const s = topLeft(arg);
+      if (s.kind === RVKind.Number) {
+        count++;
+      } else if (s.kind === RVKind.String) {
+        // Numeric strings (including `"5"`, `"3.14"`, `"1e3"`) are
+        // counted when supplied as direct scalars. Non-numeric text
+        // is silently skipped. Route through `toNumberRV` so the same
+        // parser that `VALUE()` uses decides.
+        const nr = toNumberRV(s);
+        if (nr.kind === RVKind.Number) {
+          count++;
+        }
+      }
+      // Blank, Boolean, Error, Reference, Lambda → skipped.
     }
   }
   return rvNumber(count);
@@ -385,8 +405,12 @@ export const fnCOUNTA: NativeFn = args => {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
-    // Count everything that is not blank and not empty string
-    if (v.kind !== RVKind.Blank && !(v.kind === RVKind.String && v.value === "")) {
+    // Excel: COUNTA counts every non-blank cell, INCLUDING cells that
+    // hold an empty string (e.g. a formula that returned `=""`). Only
+    // the fully-blank kind is excluded. Previously we also excluded
+    // empty strings — that matched Google Sheets but diverged from
+    // Excel's documented behaviour.
+    if (v.kind !== RVKind.Blank) {
       count++;
     }
   }
@@ -397,6 +421,11 @@ export const fnCOUNTBLANK: NativeFn = args => {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
+    // Excel: COUNTBLANK counts both truly-blank cells and cells
+    // containing an empty string result (e.g. `=""`). This is
+    // intentionally asymmetric with COUNTA — COUNTA+COUNTBLANK can
+    // legitimately exceed the total cell count when `=""` formulas
+    // are present, matching Excel's documented behaviour.
     if (v.kind === RVKind.Blank || (v.kind === RVKind.String && v.value === "")) {
       count++;
     }
@@ -405,17 +434,17 @@ export const fnCOUNTBLANK: NativeFn = args => {
 };
 
 export const fnPRODUCT: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let product = 1;
+  let seen = false;
+  const err = forEachNumber(args, n => {
+    product *= n;
+    seen = true;
+  });
   if (err) {
     return err;
   }
-  if (nums.length === 0) {
+  if (!seen) {
     return rvNumber(0);
-  }
-  let product = 1;
-  for (const n of nums) {
-    product *= (n as NumberValue).value;
   }
   // Excel surfaces an overflow as #NUM! rather than letting Infinity
   // propagate into subsequent arithmetic.
@@ -453,13 +482,23 @@ export const fnSUMPRODUCT: NativeFn = args => {
       }
     }
   }
+  // Hoist per-array broadcast classification and row-shape out of the
+  // hot (r, c) loop — the shape is constant across all cells, but the
+  // previous code re-inspected `arr.height === 1 && arr.width === 1`
+  // per cell (arrays.length × rows × cols times).
+  const arrayCount = arrays.length;
+  const broadcasts: boolean[] = new Array<boolean>(arrayCount);
+  for (let i = 0; i < arrayCount; i++) {
+    const arr = arrays[i];
+    broadcasts[i] = arr.height === 1 && arr.width === 1;
+  }
   let sum = 0;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       let product = 1;
-      for (const arr of arrays) {
-        // Broadcast 1x1 arrays to the target cell position.
-        const val = arr.height === 1 && arr.width === 1 ? arr.rows[0][0] : arr.rows[r][c];
+      for (let i = 0; i < arrayCount; i++) {
+        const arr = arrays[i];
+        const val = broadcasts[i] ? arr.rows[0][0] : arr.rows[r][c];
         if (val.kind === RVKind.Error) {
           return val;
         }
@@ -513,6 +552,71 @@ export const fnCEILING: NativeFn = args => {
   return rvNumber(Math.ceil(num.value / sig) * sig);
 };
 
+/**
+ * CEILING.MATH(number, [significance], [mode]) — rounds away from zero
+ * by default, or toward zero when `mode` is non-zero AND `number` is
+ * negative. Significance is always interpreted by absolute value.
+ *
+ * Different from CEILING: negative numbers with positive significance
+ * are valid (Excel does NOT require same sign), and there is an extra
+ * `mode` switch that flips the rounding direction for negatives.
+ */
+export const fnCEILING_MATH: NativeFn = args => {
+  const num = argToNumber(args[0]);
+  if (isError(num)) {
+    return num;
+  }
+  // Blank `significance` → Excel default 1 (for positive num) or -1
+  // (for negative num); either way |sig| = 1. Use 1 explicitly since
+  // the algorithm below works on `Math.abs(sig)`.
+  const sigRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
+  if (isError(sigRV)) {
+    return sigRV;
+  }
+  const sigAbs = Math.abs(sigRV.value);
+  if (sigAbs === 0) {
+    return rvNumber(0);
+  }
+  const modeRV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? argToNumber(args[2]) : rvNumber(0);
+  if (isError(modeRV)) {
+    return modeRV;
+  }
+  // Round away from zero by default; toward zero when `mode` is non-zero
+  // AND the number is negative. For positive numbers `mode` has no effect.
+  if (num.value >= 0) {
+    return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
+  }
+  if (modeRV.value !== 0) {
+    // Round away from zero (toward −∞) for negatives: use `Math.floor`.
+    return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
+  }
+  // Default: round toward zero for negatives.
+  return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
+};
+
+/**
+ * CEILING.PRECISE / ISO.CEILING — always rounds toward +∞ (irrespective
+ * of sign), using the absolute value of significance.
+ */
+export const fnCEILING_PRECISE: NativeFn = args => {
+  const num = argToNumber(args[0]);
+  if (isError(num)) {
+    return num;
+  }
+  const sigRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
+  if (isError(sigRV)) {
+    return sigRV;
+  }
+  const sigAbs = Math.abs(sigRV.value);
+  if (sigAbs === 0) {
+    return rvNumber(0);
+  }
+  return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
+};
+
 export const fnFLOOR: NativeFn = args => {
   const num = argToNumber(args[0]);
   if (isError(num)) {
@@ -530,6 +634,63 @@ export const fnFLOOR: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.floor(num.value / sig) * sig);
+};
+
+/**
+ * FLOOR.MATH(number, [significance], [mode]) — rounds toward zero by
+ * default, or away from zero when `mode` is non-zero AND `number` is
+ * negative. Uses `|significance|` so negative significance never
+ * produces #NUM!.
+ */
+export const fnFLOOR_MATH: NativeFn = args => {
+  const num = argToNumber(args[0]);
+  if (isError(num)) {
+    return num;
+  }
+  const sigRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
+  if (isError(sigRV)) {
+    return sigRV;
+  }
+  const sigAbs = Math.abs(sigRV.value);
+  if (sigAbs === 0) {
+    return rvNumber(0);
+  }
+  const modeRV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? argToNumber(args[2]) : rvNumber(0);
+  if (isError(modeRV)) {
+    return modeRV;
+  }
+  // Positive numbers always round toward zero (down). Negative numbers
+  // default to rounding away from zero (down = further negative); `mode`
+  // non-zero flips to rounding toward zero.
+  if (num.value >= 0) {
+    return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
+  }
+  if (modeRV.value !== 0) {
+    return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
+  }
+  return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
+};
+
+/**
+ * FLOOR.PRECISE — always rounds toward −∞ using `|significance|`.
+ */
+export const fnFLOOR_PRECISE: NativeFn = args => {
+  const num = argToNumber(args[0]);
+  if (isError(num)) {
+    return num;
+  }
+  const sigRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
+  if (isError(sigRV)) {
+    return sigRV;
+  }
+  const sigAbs = Math.abs(sigRV.value);
+  if (sigAbs === 0) {
+    return rvNumber(0);
+  }
+  return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
 };
 
 export const fnINT: NativeFn = args => {
@@ -666,7 +827,12 @@ export const fnLOG: NativeFn = args => {
   if (n.value <= 0) {
     return ERRORS.NUM;
   }
-  const baseRV = args.length > 1 ? argToNumber(args[1]) : rvNumber(10);
+  // Blank 2nd arg → default base 10. Without this guard, `LOG(100, )`
+  // coerces blank → 0 via argToNumber and falls into the `<= 0` branch,
+  // incorrectly returning #NUM!. Excel treats the omitted / blank slot
+  // as "use the default".
+  const baseRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(10);
   if (isError(baseRV)) {
     return baseRV;
   }
@@ -750,14 +916,12 @@ export const fnTRUNC: NativeFn = args => {
 };
 
 export const fnSUMSQ: NativeFn = args => {
-  const nums = flattenNumbers(args);
-  const err = firstError(nums);
+  let sum = 0;
+  const err = forEachNumber(args, n => {
+    sum += n * n;
+  });
   if (err) {
     return err;
-  }
-  let sum = 0;
-  for (const n of nums) {
-    sum += (n as NumberValue).value ** 2;
   }
   return isFinite(sum) ? rvNumber(sum) : ERRORS.NUM;
 };
@@ -916,12 +1080,24 @@ export const fnBASE: NativeFn = args => {
   if (radix.value < 2 || radix.value > 36) {
     return ERRORS.NUM;
   }
+  // Excel's BASE requires `num` in `[0, 2^53)`. Negative inputs produce
+  // a `-` prefix via JS `.toString(radix)` — Excel rejects them. Very
+  // large inputs exceed the precise integer range and would corrupt the
+  // lower digits; Excel reports #NUM! there too.
+  if (num.value < 0 || num.value >= 2 ** 53) {
+    return ERRORS.NUM;
+  }
   const minLenRV = args.length > 2 ? argToNumber(args[2]) : rvNumber(0);
   if (isError(minLenRV)) {
     return minLenRV;
   }
+  // `minLen` must be in `[0, 255]`; Excel rejects larger widths.
+  const minLen = Math.trunc(minLenRV.value);
+  if (minLen < 0 || minLen > 255) {
+    return ERRORS.NUM;
+  }
   const result = Math.floor(num.value).toString(Math.floor(radix.value)).toUpperCase();
-  return rvString(minLenRV.value > 0 ? result.padStart(minLenRV.value, "0") : result);
+  return rvString(minLen > 0 ? result.padStart(minLen, "0") : result);
 };
 
 export const fnDECIMAL: NativeFn = args => {
@@ -989,10 +1165,10 @@ export const fnROMAN: NativeFn = args => {
     if (isError(f)) {
       return f;
     }
-    if (f.value === 1 && (f as NumberValue).value === 1) {
-      // Boolean inputs flow through argToNumber as 0/1 already.
-    }
-    form = Math.floor(f.value);
+    // Excel accepts TRUE/FALSE and 0..4 for `form`. argToNumber already
+    // coerces booleans to 0/1, so nothing extra is needed here — we
+    // just truncate toward zero and bounds-check.
+    form = Math.trunc(f.value);
     if (form < 0 || form > 4) {
       return ERRORS.VALUE;
     }
@@ -1100,8 +1276,15 @@ function sumPairedArrays(
   if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
-  const h = Math.min(a0.height, a1.height);
-  const w = Math.min(a0.width, a1.width);
+  // Excel requires matching shapes — `SUMX2MY2`/`SUMX2PY2`/`SUMXMY2`
+  // return `#N/A` when the two arrays have different cell counts.
+  // Previously we silently clamped to the min, producing a numeric
+  // result that quietly dropped the tail of the longer array.
+  if (a0.height !== a1.height || a0.width !== a1.width) {
+    return ERRORS.NA;
+  }
+  const h = a0.height;
+  const w = a0.width;
   let sum = 0;
   for (let r = 0; r < h; r++) {
     for (let c = 0; c < w; c++) {
@@ -1272,6 +1455,12 @@ export const fnPERMUT: NativeFn = args => {
   let result = 1;
   for (let i = 0; i < ki; i++) {
     result *= ni - i;
+    // Excel surfaces an overflow as #NUM! rather than silently persisting
+    // Infinity. Without this guard `PERMUT(200, 50)` returns Infinity
+    // which then poisons every formula that references the cell.
+    if (!Number.isFinite(result)) {
+      return ERRORS.NUM;
+    }
   }
   return rvNumber(result);
 };

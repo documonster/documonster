@@ -327,12 +327,18 @@ describe("COUNT / COUNTA / COUNTBLANK", () => {
     expect(asNumber(fnCOUNT([mixed]))).toBe(2);
   });
 
-  it("COUNTA counts everything except blank and empty string", () => {
-    // 1, "hi", TRUE, 2, #N/A → 5
-    expect(asNumber(fnCOUNTA([mixed]))).toBe(5);
+  it("COUNTA counts everything non-blank — INCLUDING empty string (Excel behaviour)", () => {
+    // Regression: Excel's documented behaviour is that COUNTA counts
+    // every non-blank cell, including empty strings produced by e.g.
+    // `=""`. Mixed array has 1, "hi", TRUE, 2, #N/A, "", BLANK → the
+    // six non-blanks plus the one real BLANK, so COUNTA=6.
+    expect(asNumber(fnCOUNTA([mixed]))).toBe(6);
   });
 
   it("COUNTBLANK counts blanks and empty strings", () => {
+    // Mirror of COUNTA above — note that COUNTA + COUNTBLANK can exceed
+    // the total cell count because empty strings count toward both
+    // (Excel's documented asymmetry).
     expect(asNumber(fnCOUNTBLANK([mixed]))).toBe(2);
   });
 });
@@ -1812,11 +1818,13 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2 extra", () => {
   it("SUMX2MY2 scalar first arg → #VALUE!", () => {
     expect(fnSUMX2MY2([rvNumber(1), rvArray([[rvNumber(2)]])])).toEqual(ERRORS.VALUE);
   });
-  it("SUMXMY2 different-shape arrays uses min of both dims", () => {
+  it("SUMXMY2 different-shape arrays return #N/A (Excel behaviour)", () => {
+    // Regression: previously silently clamped to the min dim, hiding
+    // the user's shape mismatch. Excel rejects mismatched shapes with
+    // `#N/A` — see the `SUMXMY2` docs.
     const a = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3), rvNumber(4)]]);
     const b = rvArray([[rvNumber(1), rvNumber(2)]]);
-    // Compares only first 2 cells: (1-1)^2 + (2-2)^2 = 0
-    expect(asNumber(fnSUMXMY2([a, b]))).toBe(0);
+    expect(fnSUMXMY2([a, b])).toEqual(ERRORS.NA);
   });
 });
 
@@ -1877,13 +1885,56 @@ describe("FLOOR.MATH / FLOOR.PRECISE aliases", () => {
   it("FLOOR.MATH(0,5) returns 0", () => {
     expect(runFormula("FLOOR.MATH(0,5)")).toBe(0);
   });
-  it("FLOOR.MATH with significance=0 → shared-impl #DIV/0!", () => {
-    // fnFLOOR returns #DIV/0! for significance 0; the alias routes to the
-    // same implementation.
-    expect(runFormula("FLOOR.MATH(5,0)")).toEqual({ error: "#DIV/0!" });
+  it("FLOOR.MATH with significance=0 returns 0 (Excel behaviour, diverges from FLOOR)", () => {
+    // Regression: previously all FLOOR variants delegated to the same
+    // implementation, so `FLOOR.MATH(5, 0)` incorrectly surfaced #DIV/0!.
+    // Excel's FLOOR.MATH / CEILING.MATH / FLOOR.PRECISE / CEILING.PRECISE
+    // return 0 for significance=0 (they don't perform division — they
+    // only scale). Only the classic `FLOOR` returns #DIV/0!.
+    expect(runFormula("FLOOR.MATH(5,0)")).toBe(0);
+    expect(runFormula("FLOOR.PRECISE(5,0)")).toBe(0);
+    expect(runFormula("CEILING.MATH(5,0)")).toBe(0);
+    expect(runFormula("CEILING.PRECISE(5,0)")).toBe(0);
+    // Classic FLOOR still diverges.
+    expect(runFormula("FLOOR(5,0)")).toEqual({ error: "#DIV/0!" });
   });
   it("FLOOR.PRECISE propagates errors", () => {
     expect(runFormula('FLOOR.PRECISE("abc",1)')).toEqual({ error: "#VALUE!" });
+  });
+
+  it("CEILING.MATH(-5, 2) returns -4 (rounds toward zero by default)", () => {
+    // Regression: previously CEILING.MATH delegated to CEILING and
+    // rejected negative num with positive sig as #NUM!. Excel's
+    // CEILING.MATH permits mixed signs and rounds toward zero for
+    // negatives by default.
+    expect(runFormula("CEILING.MATH(-5, 2)")).toBe(-4);
+    // With mode=1, round AWAY from zero for negatives → -6.
+    expect(runFormula("CEILING.MATH(-5, 2, 1)")).toBe(-6);
+  });
+
+  it("FLOOR.MATH(-5, 2) returns -6 (rounds away from zero by default)", () => {
+    expect(runFormula("FLOOR.MATH(-5, 2)")).toBe(-6);
+    // With mode=1, round TOWARD zero for negatives → -4.
+    expect(runFormula("FLOOR.MATH(-5, 2, 1)")).toBe(-4);
+  });
+
+  it("CEILING.PRECISE always rounds toward +∞", () => {
+    // Positive sig / negative num: round toward +∞ → -4.
+    expect(runFormula("CEILING.PRECISE(-5, 2)")).toBe(-4);
+    // Negative sig is normalised to |sig|; result stays toward +∞.
+    expect(runFormula("CEILING.PRECISE(-5, -2)")).toBe(-4);
+    expect(runFormula("CEILING.PRECISE(5, -2)")).toBe(6);
+  });
+
+  it("FLOOR.PRECISE always rounds toward −∞", () => {
+    expect(runFormula("FLOOR.PRECISE(-5, 2)")).toBe(-6);
+    expect(runFormula("FLOOR.PRECISE(-5, -2)")).toBe(-6);
+    expect(runFormula("FLOOR.PRECISE(5, -2)")).toBe(4);
+  });
+
+  it("CEILING (classic) rejects mixed signs as #NUM! — unchanged", () => {
+    expect(runFormula("CEILING(-5, 2)")).toEqual({ error: "#NUM!" });
+    expect(runFormula("CEILING(5, -2)")).toEqual({ error: "#NUM!" });
   });
 });
 
@@ -2198,8 +2249,14 @@ describe("MAX (extra coverage)", () => {
 });
 
 describe("COUNT (extra coverage)", () => {
-  it("counts numeric scalars only", () => {
+  it("counts numbers and numeric-string direct scalars (Excel)", () => {
+    // Regression: Excel counts a direct numeric-string arg like `"5"`
+    // as a number (same rule `VALUE` uses), but the engine previously
+    // filtered every non-Number scalar kind → `COUNT("5")` returned 0.
+    // Booleans stay excluded to match the Excel reference table.
     expect(asNumber(fnCOUNT([rvNumber(1), rvString("x"), rvBoolean(true), rvNumber(2)]))).toBe(2);
+    expect(asNumber(fnCOUNT([rvNumber(1), rvString("5"), rvNumber(2)]))).toBe(3);
+    expect(asNumber(fnCOUNT([rvString("3.14"), rvString("not a num")]))).toBe(1);
   });
   it("counts numbers inside arrays", () => {
     const arr = rvArray([[rvNumber(1), rvString("x"), rvNumber(2)]]);
@@ -2228,11 +2285,10 @@ describe("COUNTA (extra coverage)", () => {
   it("skips BLANK", () => {
     expect(asNumber(fnCOUNTA([rvArray([[BLANK, rvNumber(1), BLANK, rvString("x")]])]))).toBe(2);
   });
-  it("treats scalar empty string as blank (engine convention, excludes from count)", () => {
-    // Note: the engine's COUNTA excludes "" to match how blank cells loaded
-    // from XML can arrive as empty strings. A user-visible literal "" also
-    // gets this treatment.
-    expect(asNumber(fnCOUNTA([rvString(""), rvNumber(1)]))).toBe(1);
+  it("counts empty string (Excel docs: empty text is NOT blank)", () => {
+    // Regression: engine used to swallow `""` as blank, but Excel's
+    // documented behaviour counts empty strings. COUNTA(["", 1]) = 2.
+    expect(asNumber(fnCOUNTA([rvString(""), rvNumber(1)]))).toBe(2);
   });
   it("returns 0 for empty input", () => {
     expect(asNumber(fnCOUNTA([rvArray([[]])]))).toBe(0);
@@ -4367,11 +4423,14 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2 saturation", () => {
     const bad = rvArray([[rvNumber(1), ERRORS.REF]]);
     expect(fnSUMX2PY2([good, bad])).toEqual(ERRORS.REF);
   });
-  it("SUMXMY2 on mismatched shapes uses min dimensions", () => {
-    // {[1,2,3]} paired with {[4,5]} → compute over 2 cols: (1-4)²+(2-5)² = 9+9=18
+  it("SUMXMY2 on mismatched shapes returns #N/A (Excel)", () => {
+    // Regression matching the earlier behaviour-fix test in the
+    // SUMX2 family's main block. Excel's documentation: "The two
+    // arrays must have the same number of values. If they do not,
+    // SUMXMY2 returns the #N/A error value."
     const a = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
     const b = rvArray([[rvNumber(4), rvNumber(5)]]);
-    expect(asNumber(fnSUMXMY2([a, b]))).toBe(18);
+    expect(fnSUMXMY2([a, b])).toEqual(ERRORS.NA);
   });
   it("SUMX2MY2 on 1×1 arrays", () => {
     const a = rvArray([[rvNumber(3)]]);
@@ -4677,12 +4736,13 @@ describe("COUNTA / COUNTBLANK saturation", () => {
   it("COUNTA counts scalar error as a value", () => {
     expect(asNumber(fnCOUNTA([rvError("#N/A")]))).toBe(1);
   });
-  it("COUNTA counts booleans and numeric strings", () => {
+  it("COUNTA counts booleans, numeric strings, and empty strings (Excel)", () => {
+    // Excel: COUNTA(TRUE, FALSE, "hi", 1, "") → 5 (every non-blank cell).
     expect(
       asNumber(
         fnCOUNTA([rvBoolean(true), rvBoolean(false), rvString("hi"), rvNumber(1), rvString("")])
       )
-    ).toBe(4);
+    ).toBe(5);
   });
   it("COUNTA empty args → 0", () => {
     expect(asNumber(fnCOUNTA([]))).toBe(0);
@@ -4697,8 +4757,9 @@ describe("COUNTA / COUNTBLANK saturation", () => {
     const arr = rvArray([
       [rvString("Hello"), BLANK, rvNumber(5), rvString(""), rvBoolean(false), ERRORS.NA]
     ]);
-    // Non-blank non-empty-string = 4 ("Hello", 5, FALSE, #N/A)
-    expect(asNumber(fnCOUNTA([arr]))).toBe(4);
+    // Excel: every non-blank cell counts, including empty string — 5.
+    // "Hello", 5, "", FALSE, #N/A = 5; one BLANK excluded.
+    expect(asNumber(fnCOUNTA([arr]))).toBe(5);
   });
   it("COUNTA multiple scalar args", () => {
     expect(asNumber(fnCOUNTA([rvNumber(1), rvNumber(2), rvString("x"), BLANK]))).toBe(3);

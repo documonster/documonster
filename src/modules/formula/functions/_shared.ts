@@ -89,6 +89,55 @@ export function flattenNumbers(args: RuntimeValue[]): (NumberValue | ErrorValue)
 }
 
 /**
+ * Streaming fold over numeric arguments.
+ *
+ * Same selection rules as `flattenNumbers` (array cells contribute only
+ * Number/Error; direct scalar coercion via `toNumberRV`; blanks dropped),
+ * but the caller's `onNumber` callback fires inline — no intermediate
+ * array is allocated. On the first error encountered the scan short-
+ * circuits and returns that error.
+ *
+ * Returns:
+ *   - `null` when iteration finished without encountering an error, or
+ *   - the `ErrorValue` that aborted the scan.
+ *
+ * Prefer this over `flattenNumbers` + `firstError` + manual loop in hot
+ * aggregates (SUM / AVERAGE / MIN / MAX / …). The allocation saved is
+ * one `NumberValue | ErrorValue` array per invocation — meaningful
+ * when the engine sums tens of thousands of cells.
+ */
+export function forEachNumber(
+  args: readonly RuntimeValue[],
+  onNumber: (n: number) => void
+): ErrorValue | null {
+  for (const arg of args) {
+    if (arg.kind === RVKind.Array) {
+      for (const row of arg.rows) {
+        for (const cell of row) {
+          if (cell.kind === RVKind.Error) {
+            return cell;
+          }
+          if (cell.kind === RVKind.Number) {
+            onNumber(cell.value);
+          }
+          // Booleans, strings, blanks inside arrays are skipped.
+        }
+      }
+    } else if (arg.kind === RVKind.Error) {
+      return arg;
+    } else if (arg.kind !== RVKind.Blank) {
+      const n = toNumberRV(arg);
+      if (n.kind === RVKind.Error) {
+        return n;
+      }
+      onNumber(n.value);
+    }
+    // Direct blank scalars are dropped.
+  }
+  return null;
+}
+
+/**
  * Flatten all cells from the arguments into a flat list of ScalarValue,
  * preserving every cell (including blanks, errors, booleans, strings).
  * Direct scalar arguments are projected via `topLeft`.

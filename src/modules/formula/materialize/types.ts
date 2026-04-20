@@ -182,6 +182,24 @@ export interface WorkbookLike {
   properties?: {
     date1904?: boolean;
   };
+  /**
+   * User-registered custom functions exposed to the formula engine.
+   * Keys are uppercase canonical names; values are arity + invoke
+   * descriptors. When the evaluator encounters a call it consults this
+   * map before the global built-in registry, so users can shadow a
+   * built-in (e.g. replace `IRR` with a domain-specific variant) or
+   * add entirely new names.
+   */
+  userFunctions?: ReadonlyMap<
+    string,
+    {
+      minArity: number;
+      maxArity: number;
+      invoke: (args: unknown[]) => unknown;
+      /** Reserved for future volatile-function wiring. */
+      volatile?: boolean;
+    }
+  >;
 }
 
 // ============================================================================

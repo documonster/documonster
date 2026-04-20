@@ -793,6 +793,21 @@ describe("evaluator: OFFSET", () => {
     expect(ws.getCell("D1").result).toBe(60);
   });
 
+  it("accepts a runtime-produced reference (INDIRECT) as base (regression)", () => {
+    // Previously OFFSET rejected anything other than a literal CellRef /
+    // AreaRef with #VALUE!. Excel accepts any reference-producing
+    // expression as the base (INDIRECT, defined names, chained OFFSET).
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("B2").value = 42;
+    ws.getCell("D1").value = {
+      formula: 'OFFSET(INDIRECT("A1"), 1, 1)',
+      result: 0
+    };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(42);
+  });
+
   it("supports negative height (range extends upward)", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
@@ -1429,6 +1444,41 @@ describe("evaluator: MAP extra", () => {
     expect(ws.getCell("D1").result).toBe(21);
   });
 
+  it("MAP supports multiple input arrays (Excel allows up to 254)", () => {
+    // Regression: previously MAP only read the first array and passed
+    // single-element lambda invocations; the other arrays silently
+    // became no-ops. Excel's MAP(arr1, ..., arrN, lambda) invokes the
+    // lambda with N values per position — the lambda must have N
+    // parameters matching.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A2").value = 2;
+    ws.getCell("A3").value = 3;
+    ws.getCell("B1").value = 10;
+    ws.getCell("B2").value = 20;
+    ws.getCell("B3").value = 30;
+    ws.getCell("D1").value = {
+      formula: "SUM(MAP(A1:A3, B1:B3, LAMBDA(a,b, a+b)))",
+      result: 0
+    };
+    wb.calculateFormulas();
+    // (1+10)+(2+20)+(3+30) = 11+22+33 = 66
+    expect(ws.getCell("D1").result).toBe(66);
+  });
+
+  it("MAP rejects mismatched lambda arity", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("D1").value = {
+      // 2 arrays, lambda takes 1 param → #VALUE!.
+      formula: "MAP({1,2},{3,4},LAMBDA(x,x))",
+      result: 0
+    };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toEqual({ error: "#VALUE!" });
+  });
+
   it("MAP with a lambda returning errors propagates them into the result", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
@@ -1627,5 +1677,170 @@ describe("evaluator: SCAN / BYROW / BYCOL / MAKEARRAY extra", () => {
     };
     wb.calculateFormulas();
     expect(ws.getCell("B1").result).toEqual({ error: "#DIV/0!" });
+  });
+});
+
+describe("evaluator: multi-area reference unions", () => {
+  it("INDEX with area_num picks from the specified area (Excel)", () => {
+    // Regression: previously `(A1:B2, D4:E5)` either failed to parse or
+    // silently stacked both ranges into one flat array — INDEX's
+    // area_num had no way to address the second area. Now the
+    // parenthesised union produces a multi-area ReferenceValue that
+    // INDEX's reference-aware path (tryEvaluateINDEX) can route on.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 11;
+    ws.getCell("B1").value = 12;
+    ws.getCell("A2").value = 13;
+    ws.getCell("B2").value = 14;
+    ws.getCell("D4").value = 21;
+    ws.getCell("E4").value = 22;
+    ws.getCell("D5").value = 23;
+    ws.getCell("E5").value = 24;
+    ws.getCell("G1").value = { formula: "INDEX((A1:B2,D4:E5), 1, 1, 1)", result: 0 };
+    ws.getCell("G2").value = { formula: "INDEX((A1:B2,D4:E5), 1, 1, 2)", result: 0 };
+    ws.getCell("G3").value = { formula: "INDEX((A1:B2,D4:E5), 2, 2, 2)", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("G1").result).toBe(11); // area 1 top-left
+    expect(ws.getCell("G2").result).toBe(21); // area 2 top-left
+    expect(ws.getCell("G3").result).toBe(24); // area 2 bottom-right
+  });
+
+  it("INDEX with out-of-range area_num returns #REF!", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("D1").value = 2;
+    ws.getCell("G1").value = { formula: "INDEX((A1,D1), 1, 1, 3)", result: 0 };
+    ws.getCell("G2").value = { formula: "INDEX((A1,D1), 1, 1, 0)", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("G1").result).toEqual({ error: "#REF!" });
+    expect(ws.getCell("G2").result).toEqual({ error: "#REF!" });
+  });
+
+  it("AREAS counts members of a reference union (Excel)", () => {
+    // Regression: the standard dereference path would flatten a
+    // multi-area reference into a single array, collapsing AREAS to 1.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("B1").value = { formula: "AREAS((A1:B2,D4:E5,G7))", result: 0 };
+    ws.getCell("B2").value = { formula: "AREAS(A1:B2)", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("B1").result).toBe(3);
+    expect(ws.getCell("B2").result).toBe(1);
+  });
+
+  it("union of non-references surfaces as #VALUE!", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    // `1` is a literal, not a reference.
+    ws.getCell("A1").value = { formula: "INDEX((1,B1), 1, 1, 1)", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("A1").result).toEqual({ error: "#VALUE!" });
+  });
+
+  it("SUM over a reference union flattens all areas (Excel)", () => {
+    // SUM receives dereferenced args — the evaluator flattens multi-area
+    // references into a single stacked array. Total should include every
+    // cell from every area.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A2").value = 2;
+    ws.getCell("B1").value = 10;
+    ws.getCell("B2").value = 20;
+    ws.getCell("D1").value = { formula: "SUM((A1:A2, B1:B2))", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(33);
+  });
+
+  it("ROWS on a reference union flattens areas into a stacked array", () => {
+    // ROWS over `(A1:A3, B1:B2)` — the dereferenceValue pipeline stacks
+    // all areas into a single ArrayValue (see the multi-area branch in
+    // `dereferenceValue`), so ROWS(count) equals the sum of each area's
+    // heights: 3 + 2 = 5. This documents our engine's behaviour (Excel
+    // actually reports #REF! for ROWS on a union; we chose to flatten).
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A2").value = 2;
+    ws.getCell("A3").value = 3;
+    ws.getCell("B1").value = 4;
+    ws.getCell("B2").value = 5;
+    ws.getCell("D1").value = { formula: "ROWS((A1:A3, B1:B2))", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(5);
+  });
+
+  it("single-area source with area_num=1 works; area_num>1 is #REF!", () => {
+    // Regression: a single-area reference is a 1-area union for
+    // INDEX purposes. `INDEX(A1:B2, 1, 1, 1)` should work; any
+    // area_num > 1 on a single area must surface as #REF! rather
+    // than being silently ignored.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 42;
+    ws.getCell("D1").value = { formula: "INDEX(A1:B2, 1, 1, 1)", result: 0 };
+    ws.getCell("D2").value = { formula: "INDEX(A1:B2, 1, 1, 2)", result: 0 };
+    ws.getCell("D3").value = { formula: "INDEX(A1:B2, 1, 1,)", result: 0 }; // blank area_num → 1
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(42);
+    expect(ws.getCell("D2").result).toEqual({ error: "#REF!" });
+    expect(ws.getCell("D3").result).toBe(42);
+  });
+
+  it("nested union inside IF selects the correct branch", () => {
+    // Regression: UnionRef should pass through special forms unchanged —
+    // IF / LET / SWITCH just forward the value. The outer SUM then
+    // dereferences the selected union into a stacked array.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("A2").value = 2;
+    ws.getCell("B1").value = 10;
+    ws.getCell("B2").value = 20;
+    ws.getCell("C1").value = 100;
+    ws.getCell("C2").value = 200;
+    // Condition=TRUE → (A1, B1) → 11
+    ws.getCell("D1").value = {
+      formula: "SUM(IF(TRUE, (A1, B1), (C1, C2)))",
+      result: 0
+    };
+    // Condition=FALSE → (C1, C2) → 300
+    ws.getCell("D2").value = {
+      formula: "SUM(IF(FALSE, (A1, B1), (C1, C2)))",
+      result: 0
+    };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(11);
+    expect(ws.getCell("D2").result).toBe(300);
+  });
+
+  it("error in any union member propagates (Excel-compliant)", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("B1").value = { formula: "1/0", result: 0 }; // #DIV/0!
+    ws.getCell("D1").value = { formula: "SUM((A1, B1))", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toEqual({ error: "#DIV/0!" });
+  });
+
+  it("dependency graph tracks all areas of a union (regression)", () => {
+    // Without union-aware dep extraction, editing B1 wouldn't
+    // invalidate a formula that reads `(A1:A2, B1:B2)`.
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = 1;
+    ws.getCell("B1").value = 10;
+    ws.getCell("D1").value = { formula: "SUM((A1, B1))", result: 0 };
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(11);
+    // Edit B1 and recalc; the union's B1 area should be picked up by
+    // the dep graph so D1 gets recomputed.
+    ws.getCell("B1").value = 100;
+    wb.calculateFormulas();
+    expect(ws.getCell("D1").result).toBe(101);
   });
 });

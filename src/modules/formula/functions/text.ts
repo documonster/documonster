@@ -76,8 +76,8 @@ export const fnTEXTJOIN: NativeFn = args => {
   if (e0) {
     return e0;
   }
-  const delimiter = toStringRV(args[0]);
-  const ignoreEmptyRV = toBooleanRV(args[1]);
+  const delimiter = toStringRV(topLeft(args[0]));
+  const ignoreEmptyRV = toBooleanRV(topLeft(args[1]));
   if (isError(ignoreEmptyRV)) {
     return ignoreEmptyRV;
   }
@@ -123,7 +123,8 @@ export const fnLEFT: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  // Implicit intersection on the text arg (see MID for rationale).
+  const text = toStringRV(topLeft(args[0]));
   let n: number;
   if (args.length > 1) {
     // Use `argToNumber` so array arguments get implicit-intersection to
@@ -151,7 +152,7 @@ export const fnRIGHT: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   let n: number;
   if (args.length > 1) {
     // Implicit intersection via `argToNumber` — see LEFT for rationale.
@@ -178,9 +179,11 @@ export const fnMID: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
-  // Implicit intersection on both numeric arguments so array inputs
-  // collapse to their top-left cells before coercion.
+  // Implicit intersection on the text arg — without topLeft, passing
+  // an array would route through `toStringRV`'s default branch and
+  // silently return the empty string, making `MID(A1:A2, 1, 3)` look
+  // like an empty cell instead of a 3-char prefix of the first cell.
+  const text = toStringRV(topLeft(args[0]));
   const startNumRV = argToNumber(args[1]);
   if (isError(startNumRV)) {
     return startNumRV;
@@ -286,7 +289,7 @@ export const fnSUBSTITUTE: NativeFn = args => {
     return rvString(text);
   }
   if (args.length > 3) {
-    const instanceNumRV = toNumberRV(args[3]);
+    const instanceNumRV = toNumberRV(topLeft(args[3]));
     if (isError(instanceNumRV)) {
       return instanceNumRV;
     }
@@ -313,7 +316,7 @@ export const fnREPLACE: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   // Implicit intersection on the numeric arguments — see LEFT.
   const startNumRV = argToNumber(args[1]);
   if (isError(startNumRV)) {
@@ -335,7 +338,7 @@ export const fnREPLACE: NativeFn = args => {
   if (e3) {
     return e3;
   }
-  const newText = toStringRV(args[3]);
+  const newText = toStringRV(topLeft(args[3]));
   return rvString(text.slice(0, startNum - 1) + newText + text.slice(startNum - 1 + numChars));
 };
 
@@ -352,8 +355,9 @@ export const fnFIND: NativeFn = args => {
   if (err1) {
     return err1;
   }
-  const findText = toStringRV(args[0]);
-  const withinText = toStringRV(args[1]);
+  // Implicit intersection on text args so arrays collapse to top-left.
+  const findText = toStringRV(topLeft(args[0]));
+  const withinText = toStringRV(topLeft(args[1]));
   let startNum: number;
   if (args.length > 2) {
     // Implicit intersection so an array supplied as start_num collapses
@@ -383,8 +387,9 @@ export const fnSEARCH: NativeFn = args => {
   if (err1) {
     return err1;
   }
-  let findText = toStringRV(args[0]);
-  const withinText = toStringRV(args[1]);
+  // Implicit intersection on text args (see FIND for rationale).
+  let findText = toStringRV(topLeft(args[0]));
+  const withinText = toStringRV(topLeft(args[1]));
   let startNum: number;
   if (args.length > 2) {
     const startNumRV = argToNumber(args[2]);
@@ -424,7 +429,7 @@ export const fnREPT: NativeFn = args => {
     return err;
   }
   const text = toStringRV(topLeft(args[0]));
-  const timesRV = toNumberRV(args[1]);
+  const timesRV = toNumberRV(topLeft(args[1]));
   if (isError(timesRV)) {
     return timesRV;
   }
@@ -455,7 +460,7 @@ export const fnTEXT: NativeFn = args => {
   if (e1) {
     return e1;
   }
-  const fmt = toStringRV(args[1]);
+  const fmt = toStringRV(topLeft(args[1]));
 
   // "@" format = return text as-is
   if (fmt === "@") {
@@ -654,10 +659,52 @@ function formatNumber(val: number, fmt: string): string {
   }
 
   // Count integer/fraction digit slots and decide whether to group.
+  // Trailing commas after the last integer digit token — before the
+  // decimal point or end of pattern — act as a "scale by 1/1000^k"
+  // multiplier (Excel's "thousands scaling"), not thousand separators.
+  // Example: `#,##0,` → 1,234,567 → "1,235" (divide by 1000).
+  // Example: `#,##0,,` → 1,234,567,890 → "1,234" (divide by 1,000,000).
   let sawDot = false;
   const intDigitSlots: ("0" | "#")[] = [];
   const fracDigitSlots: ("0" | "#")[] = [];
   let hasGrouping = false;
+  // Scan for trailing commas that sit strictly after the last integer
+  // digit slot but before any dot or fractional slot. Each such comma
+  // divides the value by 1000. Scan from end-of-pattern backward to
+  // locate them.
+  let scalingFactor = 1;
+  {
+    // Find the last integer digit-slot index.
+    let lastIntDigitIdx = -1;
+    let dotIdx = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.kind === "dot") {
+        dotIdx = i;
+        break;
+      }
+      if (t.kind === "digit") {
+        lastIntDigitIdx = i;
+      }
+    }
+    // Trailing commas live after `lastIntDigitIdx` and strictly before
+    // `dotIdx` (if present). They must be adjacent — only run-of-commas
+    // directly abutting the last integer digit count as scaling.
+    if (lastIntDigitIdx !== -1) {
+      const stopBefore = dotIdx === -1 ? tokens.length : dotIdx;
+      let k = lastIntDigitIdx + 1;
+      while (k < stopBefore && tokens[k].kind === "comma") {
+        scalingFactor *= 1000;
+        // Remove this comma so later logic doesn't treat it as a
+        // thousand-separator or literal artefact. We mutate the token
+        // to a no-op literal with empty text.
+        tokens[k] = { kind: "literal", text: "" };
+        k++;
+      }
+    }
+  }
+  // Apply the scaling before any other formatting work.
+  const scaledVal = val / scalingFactor;
   for (const t of tokens) {
     if (t.kind === "dot") {
       sawDot = true;
@@ -681,7 +728,7 @@ function formatNumber(val: number, fmt: string): string {
   }
 
   // Round to the requested fractional precision.
-  const rounded = roundHalfAwayFromZeroFmt(val, fracDigitSlots.length);
+  const rounded = roundHalfAwayFromZeroFmt(scaledVal, fracDigitSlots.length);
   const sign = rounded < 0 ? "-" : "";
   const absStr = Math.abs(rounded).toFixed(fracDigitSlots.length);
   const [intPartRaw, fracPart = ""] = absStr.split(".");
@@ -763,11 +810,19 @@ function formatNumber(val: number, fmt: string): string {
       emittedOverflow = true;
     }
     const slotIdx = intCursor;
-    // Integer slots map right-to-left onto `groupedInt`'s right-to-left
-    // ordering. We'll compute the source character for this slot from
-    // the right edge.
-    const srcIdx = overflowDigits + slotIdx;
-    if (srcIdx < groupedInt.length) {
+    // Right-align the integer into the digit slots: leading `#` slots
+    // emit nothing when the value is shorter than the pattern, and
+    // leading `0` slots pad with a zero. Previously the logic treated
+    // every slot as if the integer started at slot 0 (left-align),
+    // which made `TEXT(0, "#,##0")` produce "00" instead of "0".
+    //
+    // The number of "padding" slots that must appear before the first
+    // real digit equals `totalIntSlots − groupedInt.length` when that
+    // value is positive (overflow path zeroes it out since we already
+    // prepended the overflow digits before the first slot).
+    const paddingSlots = overflowDigits > 0 ? 0 : Math.max(0, totalIntSlots - groupedInt.length);
+    const srcIdx = overflowDigits + slotIdx - paddingSlots;
+    if (srcIdx >= 0 && srcIdx < groupedInt.length) {
       out += groupedInt[srcIdx];
     } else if (t.char === "0") {
       out += "0";
@@ -1122,7 +1177,7 @@ export const fnEXACT: NativeFn = args => {
   if (err1) {
     return err1;
   }
-  return rvBoolean(toStringRV(args[0]) === toStringRV(args[1]));
+  return rvBoolean(toStringRV(topLeft(args[0])) === toStringRV(topLeft(args[1])));
 };
 
 // ============================================================================
@@ -1190,7 +1245,7 @@ export const fnUNICHAR: NativeFn = args => {
   if (err) {
     return err;
   }
-  const nRV = toNumberRV(args[0]);
+  const nRV = toNumberRV(topLeft(args[0]));
   if (isError(nRV)) {
     return nRV;
   }
@@ -1210,7 +1265,7 @@ export const fnUNICODE: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   if (text.length === 0) {
     return ERRORS.VALUE;
   }
@@ -1223,18 +1278,18 @@ export const fnBAHTTEXT: NativeFn = args => {
   if (err) {
     return err;
   }
-  return rvString(toStringRV(args[0]));
+  return rvString(toStringRV(topLeft(args[0])));
 };
 
 export const fnDOLLAR: NativeFn = args => {
-  const numRV = toNumberRV(args[0]);
+  const numRV = toNumberRV(topLeft(args[0]));
   if (isError(numRV)) {
     return numRV;
   }
   const num = numRV.value;
   let decimals: number;
   if (args.length > 1) {
-    const decRV = toNumberRV(args[1]);
+    const decRV = toNumberRV(topLeft(args[1]));
     if (isError(decRV)) {
       return decRV;
     }
@@ -1258,14 +1313,14 @@ export const fnDOLLAR: NativeFn = args => {
 };
 
 export const fnFIXED: NativeFn = args => {
-  const numRV = toNumberRV(args[0]);
+  const numRV = toNumberRV(topLeft(args[0]));
   if (isError(numRV)) {
     return numRV;
   }
   const num = numRV.value;
   let decimals: number;
   if (args.length > 1) {
-    const decRV = toNumberRV(args[1]);
+    const decRV = toNumberRV(topLeft(args[1]));
     if (isError(decRV)) {
       return decRV;
     }
@@ -1275,7 +1330,7 @@ export const fnFIXED: NativeFn = args => {
   }
   let noCommas: boolean;
   if (args.length > 2) {
-    const ncRV = toBooleanRV(args[2]);
+    const ncRV = toBooleanRV(topLeft(args[2]));
     if (isError(ncRV)) {
       return ncRV;
     }
@@ -1305,7 +1360,7 @@ export const fnASC: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   return rvString(
     text.replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
   );
@@ -1316,7 +1371,7 @@ export const fnDBCS: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   return rvString(text.replace(/[!-~]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0xfee0)));
 };
 
@@ -1337,14 +1392,15 @@ export const fnNUMBERVALUE: NativeFn = args => {
   if (e0) {
     return e0;
   }
-  let text = toStringRV(args[0]);
+  // Implicit intersection on every text arg.
+  let text = toStringRV(topLeft(args[0]));
   let decSep = ".";
   if (args.length > 1) {
     const e1 = checkError(args[1]);
     if (e1) {
       return e1;
     }
-    decSep = toStringRV(args[1]);
+    decSep = toStringRV(topLeft(args[1]));
   }
   let grpSep = ",";
   if (args.length > 2) {
@@ -1352,15 +1408,19 @@ export const fnNUMBERVALUE: NativeFn = args => {
     if (e2) {
       return e2;
     }
-    grpSep = toStringRV(args[2]);
+    grpSep = toStringRV(topLeft(args[2]));
   }
   text = text.split(grpSep).join("");
   if (decSep !== ".") {
     text = text.replace(decSep, ".");
   }
-  // Handle percentage
-  const isPct = text.endsWith("%");
-  if (isPct) {
+  // Handle percentage. Excel divides by 100 for EACH trailing `%`, so
+  // `NUMBERVALUE("50%%")` = 50 / 10000 = 0.005. Previously we only
+  // recognised the first `%` and treated `50%%` as the literal string
+  // "50%" → NaN → #VALUE!.
+  let pctCount = 0;
+  while (text.endsWith("%")) {
+    pctCount++;
     text = text.slice(0, -1);
   }
   // `Number("")` is 0, not NaN — reject empty / whitespace-only inputs
@@ -1372,7 +1432,7 @@ export const fnNUMBERVALUE: NativeFn = args => {
   if (isNaN(n)) {
     return ERRORS.VALUE;
   }
-  return rvNumber(isPct ? n / 100 : n);
+  return rvNumber(pctCount > 0 ? n / Math.pow(100, pctCount) : n);
 };
 
 // ============================================================================
@@ -1396,7 +1456,7 @@ function parseTextBeforeAfterTail(
   | ErrorValue {
   let inst = 1;
   if (args.length > 2) {
-    const instRV = toNumberRV(args[2]);
+    const instRV = toNumberRV(topLeft(args[2]));
     if (isError(instRV)) {
       return instRV;
     }
@@ -1404,7 +1464,7 @@ function parseTextBeforeAfterTail(
   }
   let matchMode: 0 | 1 = 0;
   if (args.length > 3) {
-    const mmRV = toNumberRV(args[3]);
+    const mmRV = toNumberRV(topLeft(args[3]));
     if (isError(mmRV)) {
       return mmRV;
     }
@@ -1416,7 +1476,7 @@ function parseTextBeforeAfterTail(
   }
   let matchEnd: 0 | 1 = 0;
   if (args.length > 4) {
-    const meRV = toNumberRV(args[4]);
+    const meRV = toNumberRV(topLeft(args[4]));
     if (isError(meRV)) {
       return meRV;
     }
@@ -1439,8 +1499,8 @@ export const fnTEXTBEFORE: NativeFn = args => {
   if (e1) {
     return e1;
   }
-  const text = toStringRV(args[0]);
-  const delimiter = toStringRV(args[1]);
+  const text = toStringRV(topLeft(args[0]));
+  const delimiter = toStringRV(topLeft(args[1]));
   const tail = parseTextBeforeAfterTail(args);
   if ("kind" in tail && tail.kind === RVKind.Error) {
     return tail;
@@ -1494,8 +1554,8 @@ export const fnTEXTAFTER: NativeFn = args => {
   if (e1) {
     return e1;
   }
-  const text = toStringRV(args[0]);
-  const delimiter = toStringRV(args[1]);
+  const text = toStringRV(topLeft(args[0]));
+  const delimiter = toStringRV(topLeft(args[1]));
   const tail = parseTextBeforeAfterTail(args);
   if ("kind" in tail && tail.kind === RVKind.Error) {
     return tail;
@@ -1541,22 +1601,23 @@ export const fnTEXTSPLIT: NativeFn = args => {
   if (e0) {
     return e0;
   }
-  const text = toStringRV(args[0]);
+  const text = toStringRV(topLeft(args[0]));
   let colDelimiter = "";
   if (args.length > 1) {
     const e1 = checkError(args[1]);
     if (e1) {
       return e1;
     }
-    colDelimiter = toStringRV(args[1]);
+    colDelimiter = toStringRV(topLeft(args[1]));
   }
-  const rowDelimiter = args.length > 2 && args[2].kind !== RVKind.Blank ? toStringRV(args[2]) : "";
+  const rowDelimiter =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toStringRV(topLeft(args[2])) : "";
 
   // `ignore_empty` (4th arg, default FALSE) — when TRUE, suppress empty
   // fragments produced by consecutive delimiters.
   let ignoreEmpty = false;
   if (args.length > 3 && args[3].kind !== RVKind.Blank) {
-    const ieRV = toBooleanRV(args[3]);
+    const ieRV = toBooleanRV(topLeft(args[3]));
     if (isError(ieRV)) {
       return ieRV;
     }
@@ -1569,7 +1630,7 @@ export const fnTEXTSPLIT: NativeFn = args => {
   // consistent with Excel's specification for TEXTSPLIT.
   let matchMode = 0;
   if (args.length > 4 && args[4].kind !== RVKind.Blank) {
-    const mmRV = toNumberRV(args[4]);
+    const mmRV = toNumberRV(topLeft(args[4]));
     if (isError(mmRV)) {
       return mmRV;
     }

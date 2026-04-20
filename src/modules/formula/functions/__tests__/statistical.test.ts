@@ -1938,9 +1938,15 @@ describe("error propagation across statistical family", () => {
   it("GEOMEAN propagates scalar error", () => {
     expect(fnGEOMEAN([rvError("#N/A")])).toEqual({ kind: RVKind.Error, code: "#N/A" });
   });
-  it("PERCENTILE propagates error in source array", () => {
-    expect(fnPERCENTILE([rvArray([[ERRORS.NA]]), rvNumber(0.5)])).toEqual(ERRORS.NUM);
-    // Note: PERCENTILE filters non-numeric cells (including errors) and sees empty → #NUM!.
+  it("PERCENTILE propagates errors from the source array (Excel behaviour)", () => {
+    // Regression: previously the engine filtered non-numeric cells
+    // (including errors) then reported `#NUM!` for an empty sample,
+    // masking the real error. Excel propagates errors from statistical
+    // aggregators the same way AVERAGE / SUM do.
+    expect(fnPERCENTILE([rvArray([[ERRORS.NA]]), rvNumber(0.5)])).toEqual(ERRORS.NA);
+    expect(
+      fnPERCENTILE([rvArray([[rvNumber(1), ERRORS.DIV0, rvNumber(3)]]), rvNumber(0.5)])
+    ).toEqual(ERRORS.DIV0);
   });
 });
 
@@ -2896,6 +2902,18 @@ describe("CORREL boundary conditions", () => {
     const y = rvArray([[rvNumber(2)]]);
     expect(fnCORREL([x, y])).toEqual(ERRORS.DIV0);
   });
+
+  it("mis-aligned non-numeric cells skip the pair positionally (regression)", () => {
+    // Previously the engine flattened each side to numbers-only then
+    // paired by prefix length, so {1, 2, "text", 4, 5} ↔ {10, 20, 30,
+    // 40, 50} would misalign as (1,10),(2,20),(4,30),(5,40) — the
+    // "text" on the left shifted the rest of the pairing by one. Excel
+    // skips the entire pair when either side is non-numeric.
+    const x = rvArray([[rvNumber(1), rvNumber(2), rvString("text"), rvNumber(4), rvNumber(5)]]);
+    const y = rvArray([[rvNumber(10), rvNumber(20), rvNumber(30), rvNumber(40), rvNumber(50)]]);
+    // Surviving pairs: (1,10), (2,20), (4,40), (5,50) — correlation = 1.
+    expect(asNumber(fnCORREL([x, y]))).toBeCloseTo(1, 10);
+  });
 });
 
 describe("BINOM.DIST boundary", () => {
@@ -3611,6 +3629,20 @@ describe("STDEV / STDEVP / VAR / VARP saturation", () => {
     const v = asNumber(fnVAR([arr]));
     const vp = asNumber(fnVARP([arr]));
     expect(v).toBeCloseTo((n / (n - 1)) * vp, 10);
+  });
+
+  it("Welford recurrence is numerically stable for a large mean + tiny spread", () => {
+    // Naive `Σx² - (Σx)²/n` catastrophically cancels here — the squared
+    // sum is ~1e18 while the true variance is ~0.0833. Welford's
+    // algorithm keeps the sum-of-squared-deviations as an online
+    // aggregate so the result stays bounded.
+    const big = 1e9;
+    const arr2 = rvArray([
+      [rvNumber(big + 1), rvNumber(big + 2), rvNumber(big + 3), rvNumber(big + 4)]
+    ]);
+    // Variance of {1,2,3,4} is 5/3 ≈ 1.6666..., stdev ≈ 1.29
+    expect(asNumber(fnVAR([arr2]))).toBeCloseTo(5 / 3, 8);
+    expect(asNumber(fnSTDEV([arr2]))).toBeCloseTo(Math.sqrt(5 / 3), 8);
   });
   it("STDEV / STDEVP relationship: STDEV² = VAR", () => {
     const s = asNumber(fnSTDEV([arr]));

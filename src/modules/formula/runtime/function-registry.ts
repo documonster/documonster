@@ -11,7 +11,17 @@
 
 import { stripFunctionPrefix } from "../syntax/token-types";
 import type { RuntimeValue, ScalarValue } from "./values";
-import { RVKind, BLANK, ERRORS, rvBoolean, rvNumber, rvString, topLeft } from "./values";
+import {
+  RVKind,
+  BLANK,
+  ERRORS,
+  rvBoolean,
+  rvNumber,
+  rvString,
+  toNumberRV,
+  toStringRV,
+  topLeft
+} from "./values";
 
 // ============================================================================
 // Function Descriptor
@@ -62,8 +72,17 @@ export function registerFunction(desc: FunctionDescriptor): void {
  * `_XLFN._XLWS.` prefixed variants by stripping the prefix before lookup
  * (a no-op for plain names, so plain lookups also go through a single
  * Map.get call — avoiding the double-lookup pattern used previously).
+ *
+ * Fast-path: the overwhelming majority of lookups use plain names
+ * (`SUM`, `IF`, `VLOOKUP`, …). Checking the prefix sentinel byte up
+ * front lets those callers skip the `slice`/`startsWith` machinery in
+ * `stripFunctionPrefix` entirely.
  */
 export function lookupFunction(name: string): FunctionDescriptor | undefined {
+  // Plain names don't start with `_` — skip the prefix-strip call.
+  if (name.length === 0 || name.charCodeAt(0) !== 95 /* `_` */) {
+    return registryMap.get(name);
+  }
   return registryMap.get(stripFunctionPrefix(name));
 }
 
@@ -146,20 +165,26 @@ function registerNativeInformationAndLogical(): void {
     if (v.kind === RVKind.Error) {
       return v;
     }
-    if (v.kind !== RVKind.Number) {
+    // Excel coerces numeric strings and booleans for ISEVEN / ISODD
+    // (e.g. `ISEVEN("3")` → FALSE, `ISODD(TRUE)` → TRUE). Only genuine
+    // non-numeric text falls through to #VALUE!. Previously we rejected
+    // every non-Number kind outright.
+    const n = toNumberRV(v);
+    if (n.kind === RVKind.Error) {
       return ERRORS.VALUE;
     }
-    return rvBoolean(Math.floor(Math.abs(v.value)) % 2 === 0);
+    return rvBoolean(Math.floor(Math.abs(n.value)) % 2 === 0);
   });
   defineEager("ISODD", 1, 1, args => {
     const v = scalar(args);
     if (v.kind === RVKind.Error) {
       return v;
     }
-    if (v.kind !== RVKind.Number) {
+    const n = toNumberRV(v);
+    if (n.kind === RVKind.Error) {
       return ERRORS.VALUE;
     }
-    return rvBoolean(Math.floor(Math.abs(v.value)) % 2 === 1);
+    return rvBoolean(Math.floor(Math.abs(n.value)) % 2 === 1);
   });
   defineEager("N", 1, 1, args => {
     const v = scalar(args);
@@ -210,6 +235,11 @@ function registerNativeInformationAndLogical(): void {
     return map[v.code] !== undefined ? rvNumber(map[v.code]) : ERRORS.NA;
   });
   defineEager("NA", 0, 0, () => ERRORS.NA);
+  // TRUE() and FALSE() — Excel accepts both the literal and the
+  // zero-arg function form. The tokenizer routes `TRUE(` to a Function
+  // token, so we need to register these so the call binds.
+  defineEager("TRUE", 0, 0, () => rvBoolean(true));
+  defineEager("FALSE", 0, 0, () => rvBoolean(false));
 
   // ── Stubs — limited implementations for functions that need runtime context ──
   // INFO returns a handful of environment-describing strings. We implement
@@ -222,7 +252,10 @@ function registerNativeInformationAndLogical(): void {
     if (args.length === 0) {
       return ERRORS.NA;
     }
-    const t = args[0];
+    // Implicit intersection — without topLeft, passing an array would
+    // route through the default `.value = ""` branch and silently
+    // surface #VALUE! instead of using the first cell.
+    const t = topLeft(args[0]);
     if (t.kind === RVKind.Error) {
       return t;
     }
@@ -283,7 +316,10 @@ function registerNativeInformationAndLogical(): void {
       if (url.kind === RVKind.Error) {
         return url;
       }
-      return rvString(url.kind === RVKind.String ? url.value : String(url));
+      // Previously `String(url)` stringified a RuntimeValue object to
+      // the literal `"[object Object]"`. Route through `toStringRV`
+      // so numbers / booleans / blanks produce the expected text.
+      return rvString(toStringRV(url));
     }
     if (display.kind === RVKind.String) {
       return display;
@@ -308,6 +344,21 @@ function registerNativeInformationAndLogical(): void {
     }
     if (v.kind === RVKind.Number) {
       return rvBoolean(v.value === 0);
+    }
+    // Excel accepts "TRUE" / "FALSE" strings (case-insensitive) and
+    // Blank cells (treated as FALSE). Previously any non-boolean,
+    // non-numeric kind fell through to #VALUE!.
+    if (v.kind === RVKind.Blank) {
+      return rvBoolean(true);
+    }
+    if (v.kind === RVKind.String) {
+      const upper = v.value.toUpperCase();
+      if (upper === "TRUE") {
+        return rvBoolean(false);
+      }
+      if (upper === "FALSE") {
+        return rvBoolean(true);
+      }
     }
     return ERRORS.VALUE;
   });
@@ -471,6 +522,11 @@ function registerNativeTextFunctions(): void {
   defineEager("PROPER", 1, 1, fnPROPER);
   defineEager("SUBSTITUTE", 3, 4, fnSUBSTITUTE);
   defineEager("REPLACE", 4, 4, fnREPLACE);
+  // REPLACEB is REPLACE's double-byte alias. In non-DBCS locales Excel
+  // treats them identically, so aliasing to the same implementation
+  // matches behaviour without duplicating logic (matches the existing
+  // LEFTB / RIGHTB / MIDB / LENB / FINDB / SEARCHB wiring below).
+  defineEager("REPLACEB", 4, 4, fnREPLACE);
   defineEager("FIND", 2, 3, fnFIND);
   defineEager("FINDB", 2, 3, fnFIND);
   defineEager("SEARCH", 2, 3, fnSEARCH);
@@ -1009,7 +1065,11 @@ import {
   fnSUMPRODUCT,
   fnABS,
   fnCEILING,
+  fnCEILING_MATH,
+  fnCEILING_PRECISE,
   fnFLOOR,
+  fnFLOOR_MATH,
+  fnFLOOR_PRECISE,
   fnINT,
   fnMOD,
   fnPOWER,
@@ -1094,12 +1154,12 @@ function registerNativeMathFunctions(): void {
   defineEager("SERIESSUM", 4, 4, fnSERIESSUM);
   defineEager("ABS", 1, 1, fnABS);
   defineEager("CEILING", 2, 2, fnCEILING);
-  defineEager("CEILING.MATH", 1, 3, fnCEILING);
-  defineEager("CEILING.PRECISE", 1, 2, fnCEILING);
-  defineEager("ISO.CEILING", 1, 2, fnCEILING);
+  defineEager("CEILING.MATH", 1, 3, fnCEILING_MATH);
+  defineEager("CEILING.PRECISE", 1, 2, fnCEILING_PRECISE);
+  defineEager("ISO.CEILING", 1, 2, fnCEILING_PRECISE);
   defineEager("FLOOR", 2, 2, fnFLOOR);
-  defineEager("FLOOR.MATH", 1, 3, fnFLOOR);
-  defineEager("FLOOR.PRECISE", 1, 2, fnFLOOR);
+  defineEager("FLOOR.MATH", 1, 3, fnFLOOR_MATH);
+  defineEager("FLOOR.PRECISE", 1, 2, fnFLOOR_PRECISE);
   defineEager("INT", 1, 1, fnINT);
   defineEager("MOD", 2, 2, fnMOD);
   defineEager("POWER", 2, 2, fnPOWER);

@@ -220,6 +220,15 @@ describe("binder — sheet existence checks", () => {
     expect(out.errorCode).toBe("#REF!");
   });
 
+  it("lowers an A1:B2-style range on a non-existent sheet to #REF! (regression)", () => {
+    // Parity with the other sheet-existence checks: previously
+    // `bindRangeRef` silently produced an AreaRef pointing at a missing
+    // sheet, so consumers saw BLANK instead of a compile-time #REF!.
+    const out = bindFormula("NoSuch!A1:B2", snapshot, "Sheet1") as BoundLiteral;
+    expect(out.kind).toBe(BoundExprKind.Literal);
+    expect(out.errorCode).toBe("#REF!");
+  });
+
   it("lowers a whole-column range on a non-existent sheet to #REF!", () => {
     const out = bindFormula("NoSuch!A:B", snapshot, "Sheet1") as BoundLiteral;
     expect(out.errorCode).toBe("#REF!");

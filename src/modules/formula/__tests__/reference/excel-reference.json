@@ -12,6 +12,8 @@
     { "formula": "=10-3", "expected": 7 },
     { "formula": "=10/4", "expected": 2.5 },
     { "formula": "=2^10", "expected": 1024 },
+    { "formula": "=-2^2", "expected": 4 },
+    { "formula": "=2^3^2", "expected": 64 },
     { "formula": "=\"Hello\" & \" \" & \"World\"", "expected": "Hello World" },
     { "formula": "=5=5", "expected": true },
     { "formula": "=5<>5", "expected": false },

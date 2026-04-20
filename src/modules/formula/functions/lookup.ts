@@ -35,33 +35,11 @@ function sameType(a: ScalarValue, b: ScalarValue): boolean {
   return a.kind === b.kind;
 }
 
-function scalarIsNumber(
-  v: ScalarValue
-): v is { readonly kind: RVKind.Number; readonly value: number } {
-  return v.kind === RVKind.Number;
-}
-
 function scalarIsString(
   v: ScalarValue
 ): v is { readonly kind: RVKind.String; readonly value: string } {
   return v.kind === RVKind.String;
 }
-
-function scalarStringEquals(a: ScalarValue, b: ScalarValue): boolean {
-  return scalarIsString(a) && scalarIsString(b) && a.value.toLowerCase() === b.value.toLowerCase();
-}
-
-/**
- * Ordered comparison of two scalars. Numbers compared by value; strings by
- * case-insensitive lexical order. Returns NaN when the two operands have
- * incompatible types (e.g. number vs string) so callers can skip them.
- */
-/**
- * @deprecated Use `compareScalarsSameKind` from `runtime/values` directly —
- * the two are identical. Retained only as a local alias to keep the diff
- * small; callers inside this file are free to migrate.
- */
-const compareScalar = compareScalarsSameKind;
 
 // ============================================================================
 // Functions
@@ -100,7 +78,7 @@ export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
     return topLeft(args[0]);
   }
   const arr = args[0] as ArrayValue;
-  const rowNumV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const rowNumV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(rowNumV)) {
     return rowNumV;
   }
@@ -108,7 +86,7 @@ export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
   // Without this, `INDEX(a, 1.5, 1)` would index into `arr.rows[0.5]`, which
   // in V8 silently returns `undefined` and corrupts downstream values.
   const rowNum = Math.trunc(rowNumV.value);
-  const colNumV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(0);
+  const colNumV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(0);
   if (isError(colNumV)) {
     return colNumV;
   }
@@ -128,6 +106,10 @@ export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
     if (c < 0 || c >= arr.width) {
       return ERRORS.REF;
     }
+    // Single-row source: a whole-column extract collapses to the one cell.
+    if (arr.height === 1) {
+      return arr.rows[0][c];
+    }
     const rows: ScalarValue[][] = [];
     for (let r = 0; r < arr.height; r++) {
       rows.push([getCell(arr, r, c)]);
@@ -140,6 +122,12 @@ export function fnINDEX(args: RuntimeValue[]): RuntimeValue {
     const r = rowNum - 1;
     if (r < 0 || r >= arr.height) {
       return ERRORS.REF;
+    }
+    // Single-column source: a whole-row extract collapses to the one cell.
+    // Matches Excel's convention — `INDEX(A1:A5, 2)` yields the scalar A2,
+    // not a 1×1 array that downstream arithmetic has to implicit-intersect.
+    if (arr.width === 1) {
+      return arr.rows[r][0];
     }
     return rvArray([[...arr.rows[r]]]);
   }
@@ -162,7 +150,12 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NA;
   }
   const lookupArr = args[1] as ArrayValue;
-  const matchTypeV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(1);
+  // Blank `match_type` → Excel default 1 (largest value ≤ lookup, ascending sort).
+  // Previously a blank coerced to 0 via toNumberRV and silently flipped the
+  // function to exact-match mode — a behaviour gap vs. Excel's documented
+  // default.
+  const matchTypeV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(1);
   if (isError(matchTypeV)) {
     return matchTypeV;
   }
@@ -191,6 +184,13 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
         wildcardRe = null;
       }
     }
+    // Pre-compute the literal (unescaped + lowercased) lookup string
+    // once. The old code called `unescapeExcelWildcard(lookupValue.value).toLowerCase()`
+    // inside the hot per-cell loop, paying O(n) per cell for what is
+    // a constant expression. (For ranges without strings the literal
+    // is never consulted — `scalarIsString(fi)` short-circuits first.)
+    const lookupLiteralLc =
+      lookupStr !== null && !hasWildcard ? unescapeExcelWildcard(lookupStr).toLowerCase() : null;
     for (let i = 0; i < flat.length; i++) {
       if (scalarEquals(flat[i], lookupValue)) {
         return rvNumber(i + 1);
@@ -201,7 +201,7 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
           if (wildcardRe.test(fi.value)) {
             return rvNumber(i + 1);
           }
-        } else {
+        } else if (lookupLiteralLc !== null) {
           // No unescaped wildcard — but the pattern may still contain
           // `~*` / `~?` / `~~` escape sequences that should reduce to
           // their literal character before comparison. Calling
@@ -209,8 +209,7 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
           // SEARCH and the criteria predicate use; without it,
           // `MATCH("a~*b", ...)` would literally look for `"a~*b"`
           // instead of `"a*b"`.
-          const literal = unescapeExcelWildcard(lookupValue.value).toLowerCase();
-          if (fi.value.toLowerCase() === literal) {
+          if (fi.value.toLowerCase() === lookupLiteralLc) {
             return rvNumber(i + 1);
           }
         }
@@ -224,20 +223,17 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
     let bestIdx = -1;
     for (let i = 0; i < flat.length; i++) {
       const v = flat[i];
-      if (sameType(v, lookupValue)) {
-        if (scalarIsNumber(v) && scalarIsNumber(lookupValue)) {
-          if (v.value <= lookupValue.value) {
-            bestIdx = i;
-          } else {
-            break;
-          }
-        } else if (scalarIsString(v) && scalarIsString(lookupValue)) {
-          if (v.value.toLowerCase() <= lookupValue.value.toLowerCase()) {
-            bestIdx = i;
-          } else {
-            break;
-          }
-        }
+      if (v.kind !== lookupValue.kind) {
+        continue;
+      }
+      const cmp = compareScalarsSameKind(v, lookupValue);
+      if (!Number.isFinite(cmp)) {
+        continue;
+      }
+      if (cmp <= 0) {
+        bestIdx = i;
+      } else {
+        break;
       }
     }
     return bestIdx >= 0 ? rvNumber(bestIdx + 1) : ERRORS.NA;
@@ -247,20 +243,17 @@ export function fnMATCH(args: RuntimeValue[]): RuntimeValue {
   let bestIdx = -1;
   for (let i = 0; i < flat.length; i++) {
     const v = flat[i];
-    if (sameType(v, lookupValue)) {
-      if (scalarIsNumber(v) && scalarIsNumber(lookupValue)) {
-        if (v.value >= lookupValue.value) {
-          bestIdx = i;
-        } else {
-          break;
-        }
-      } else if (scalarIsString(v) && scalarIsString(lookupValue)) {
-        if (v.value.toLowerCase() >= lookupValue.value.toLowerCase()) {
-          bestIdx = i;
-        } else {
-          break;
-        }
-      }
+    if (v.kind !== lookupValue.kind) {
+      continue;
+    }
+    const cmp = compareScalarsSameKind(v, lookupValue);
+    if (!Number.isFinite(cmp)) {
+      continue;
+    }
+    if (cmp >= 0) {
+      bestIdx = i;
+    } else {
+      break;
     }
   }
   return bestIdx >= 0 ? rvNumber(bestIdx + 1) : ERRORS.NA;
@@ -275,14 +268,19 @@ export function fnVLOOKUP(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NA;
   }
   const table = args[1] as ArrayValue;
-  const colIndexV = toNumberRV(args[2]);
+  const colIndexV = toNumberRV(topLeft(args[2]));
   if (isError(colIndexV)) {
     return colIndexV;
   }
   // VLOOKUP truncates the column index toward zero before bounds checks.
   const colIndex = Math.trunc(colIndexV.value);
+  // Blank `range_lookup` → Excel default TRUE. A blank coerces through
+  // `toBooleanRV` to FALSE which silently flips to exact match —
+  // opposite of Excel's documented default.
   const rangeLookupV =
-    args.length > 3 ? toBooleanRV(args[3]) : { kind: RVKind.Boolean as const, value: true };
+    args.length > 3 && args[3].kind !== RVKind.Blank
+      ? toBooleanRV(topLeft(args[3]))
+      : { kind: RVKind.Boolean as const, value: true };
   if (isError(rangeLookupV)) {
     return rangeLookupV;
   }
@@ -293,37 +291,65 @@ export function fnVLOOKUP(args: RuntimeValue[]): RuntimeValue {
   }
 
   if (!rangeLookup) {
-    // Exact match
+    // Exact match — `scalarEquals` already handles case-insensitive string
+    // comparison (see runtime/values.ts), so the earlier `scalarStringEquals`
+    // fallback was dead code.
+    //
+    // Excel's VLOOKUP supports wildcards (`*`, `?`, `~*`, `~?`, `~~`) in
+    // the exact-match mode (range_lookup=FALSE). Three paths, chosen by
+    // what the lookup string contains:
+    //   - unescaped wildcard (`*` or `?`) → regex match
+    //   - only escape sequences (`~*`, `~?`, `~~`) → unescape then
+    //     literal case-insensitive compare (so `"a~*b"` matches `"a*b"`)
+    //   - neither → plain `scalarEquals`
+    const lookupStr = lookupValue.kind === RVKind.String ? lookupValue.value : null;
+    let wildcardRe: RegExp | null = null;
+    let literalLc: string | null = null;
+    if (lookupStr !== null && hasUnescapedWildcard(lookupStr)) {
+      try {
+        wildcardRe = new RegExp("^" + excelWildcardToRegex(lookupStr) + "$", "i");
+      } catch {
+        wildcardRe = null;
+      }
+    } else if (lookupStr !== null && /~[*?~]/.test(lookupStr)) {
+      literalLc = unescapeExcelWildcard(lookupStr).toLowerCase();
+    }
     for (let r = 0; r < table.height; r++) {
       const cell = getCell(table, r, 0);
       if (scalarEquals(cell, lookupValue)) {
         return getCell(table, r, colIndex - 1);
       }
-      if (scalarStringEquals(cell, lookupValue)) {
+      if (wildcardRe && cell.kind === RVKind.String && wildcardRe.test(cell.value)) {
+        return getCell(table, r, colIndex - 1);
+      }
+      if (
+        literalLc !== null &&
+        cell.kind === RVKind.String &&
+        cell.value.toLowerCase() === literalLc
+      ) {
         return getCell(table, r, colIndex - 1);
       }
     }
     return ERRORS.NA;
   }
 
-  // Approximate match: sorted ascending by first column.
+  // Approximate match: sorted ascending by first column. Binary-search
+  // style isn't safe here (Excel allows mixed-type entries which break
+  // monotonicity), so walk until we overshoot.
   let bestRow = -1;
   for (let r = 0; r < table.height; r++) {
     const v = getCell(table, r, 0);
-    if (sameType(v, lookupValue)) {
-      if (scalarIsNumber(v) && scalarIsNumber(lookupValue)) {
-        if (v.value <= lookupValue.value) {
-          bestRow = r;
-        } else {
-          break;
-        }
-      } else if (scalarIsString(v) && scalarIsString(lookupValue)) {
-        if (v.value.toLowerCase() <= lookupValue.value.toLowerCase()) {
-          bestRow = r;
-        } else {
-          break;
-        }
-      }
+    if (v.kind !== lookupValue.kind) {
+      continue;
+    }
+    const cmp = compareScalarsSameKind(v, lookupValue);
+    if (!Number.isFinite(cmp)) {
+      continue;
+    }
+    if (cmp <= 0) {
+      bestRow = r;
+    } else {
+      break;
     }
   }
   return bestRow >= 0 ? getCell(table, bestRow, colIndex - 1) : ERRORS.NA;
@@ -338,14 +364,17 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NA;
   }
   const table = args[1] as ArrayValue;
-  const rowIndexV = toNumberRV(args[2]);
+  const rowIndexV = toNumberRV(topLeft(args[2]));
   if (isError(rowIndexV)) {
     return rowIndexV;
   }
   // HLOOKUP truncates the row index toward zero before bounds checks.
   const rowIndex = Math.trunc(rowIndexV.value);
+  // Blank `range_lookup` → Excel default TRUE (see VLOOKUP rationale).
   const rangeLookupV =
-    args.length > 3 ? toBooleanRV(args[3]) : { kind: RVKind.Boolean as const, value: true };
+    args.length > 3 && args[3].kind !== RVKind.Blank
+      ? toBooleanRV(topLeft(args[3]))
+      : { kind: RVKind.Boolean as const, value: true };
   if (isError(rangeLookupV)) {
     return rangeLookupV;
   }
@@ -356,8 +385,33 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
   }
 
   if (!rangeLookup) {
+    // Exact match — supports wildcards on string lookups (see VLOOKUP
+    // for full rationale; the paths mirror one another).
+    const lookupStr = lookupValue.kind === RVKind.String ? lookupValue.value : null;
+    let wildcardRe: RegExp | null = null;
+    let literalLc: string | null = null;
+    if (lookupStr !== null && hasUnescapedWildcard(lookupStr)) {
+      try {
+        wildcardRe = new RegExp("^" + excelWildcardToRegex(lookupStr) + "$", "i");
+      } catch {
+        wildcardRe = null;
+      }
+    } else if (lookupStr !== null && /~[*?~]/.test(lookupStr)) {
+      literalLc = unescapeExcelWildcard(lookupStr).toLowerCase();
+    }
     for (let c = 0; c < table.width; c++) {
-      if (scalarEquals(getCell(table, 0, c), lookupValue)) {
+      const cell = getCell(table, 0, c);
+      if (scalarEquals(cell, lookupValue)) {
+        return getCell(table, rowIndex - 1, c);
+      }
+      if (wildcardRe && cell.kind === RVKind.String && wildcardRe.test(cell.value)) {
+        return getCell(table, rowIndex - 1, c);
+      }
+      if (
+        literalLc !== null &&
+        cell.kind === RVKind.String &&
+        cell.value.toLowerCase() === literalLc
+      ) {
         return getCell(table, rowIndex - 1, c);
       }
     }
@@ -367,17 +421,18 @@ export function fnHLOOKUP(args: RuntimeValue[]): RuntimeValue {
   let bestCol = -1;
   for (let c = 0; c < table.width; c++) {
     const hv = getCell(table, 0, c);
-    if (sameType(hv, lookupValue)) {
-      // For approximate match, find largest <= lookupValue
-      if (scalarIsNumber(hv) && scalarIsNumber(lookupValue)) {
-        if (hv.value <= lookupValue.value) {
-          bestCol = c;
-        }
-      } else if (scalarIsString(hv) && scalarIsString(lookupValue)) {
-        if (hv.value.toLowerCase() <= lookupValue.value.toLowerCase()) {
-          bestCol = c;
-        }
-      }
+    if (hv.kind !== lookupValue.kind) {
+      continue;
+    }
+    const cmp = compareScalarsSameKind(hv, lookupValue);
+    if (!Number.isFinite(cmp)) {
+      continue;
+    }
+    // Approximate match: pick the largest value <= lookupValue. We don't
+    // break early when we overshoot because HLOOKUP's legacy behaviour
+    // scans the whole row even for unsorted data.
+    if (cmp <= 0) {
+      bestCol = c;
     }
   }
   return bestCol >= 0 ? getCell(table, rowIndex - 1, bestCol) : ERRORS.NA;
@@ -396,17 +451,32 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.VALUE;
   }
   const returnArr = args[2] as ArrayValue;
-  const ifNotFound = args.length > 3 ? topLeft(args[3]) : null;
-  const matchModeV = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  // Blank `if_not_found` → treat as omitted (default #N/A). Without
+  // this guard, an explicitly-blank fourth slot would produce BLANK as
+  // the fallback, which differs from Excel's "omitted → #N/A" default
+  // and from what a user intuitively expects.
+  const ifNotFound = args.length > 3 && args[3].kind !== RVKind.Blank ? topLeft(args[3]) : null;
+  // Blank `match_mode` → 0 (exact); any non-{-1, 0, 1, 2} is rejected.
+  const matchModeV =
+    args.length > 4 && args[4].kind !== RVKind.Blank ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(matchModeV)) {
     return matchModeV;
   }
   const matchMode = matchModeV.value;
-  const searchModeV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(1);
+  if (matchMode !== 0 && matchMode !== -1 && matchMode !== 1 && matchMode !== 2) {
+    return ERRORS.VALUE;
+  }
+  // Blank `search_mode` → 1 (first-to-last). Previously a blank coerced
+  // to 0 which silently passed through but is not a valid search mode.
+  const searchModeV =
+    args.length > 5 && args[5].kind !== RVKind.Blank ? toNumberRV(topLeft(args[5])) : rvNumber(1);
   if (isError(searchModeV)) {
     return searchModeV;
   }
   const searchMode = searchModeV.value;
+  if (searchMode !== 1 && searchMode !== -1 && searchMode !== 2 && searchMode !== -2) {
+    return ERRORS.VALUE;
+  }
 
   // Flatten lookup array to 1D
   const flat: ScalarValue[] = [];
@@ -504,10 +574,6 @@ export function fnXLOOKUP(args: RuntimeValue[]): RuntimeValue {
     const step = searchMode === -1 ? -1 : 1;
     for (let i = start; i !== end; i += step) {
       if (scalarEquals(flat[i], lookupValue)) {
-        foundIdx = i;
-        break;
-      }
-      if (scalarStringEquals(flat[i], lookupValue)) {
         foundIdx = i;
         break;
       }
@@ -612,16 +678,25 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.VALUE;
   }
   const lookupArr = args[1] as ArrayValue;
-  const matchModeV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(0);
+  // Blank `match_mode` → 0 (exact). Same validation as XLOOKUP.
+  const matchModeV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(0);
   if (isError(matchModeV)) {
     return matchModeV;
   }
   const matchMode = matchModeV.value;
-  const searchModeV = args.length > 3 ? toNumberRV(args[3]) : rvNumber(1);
+  if (matchMode !== 0 && matchMode !== -1 && matchMode !== 1 && matchMode !== 2) {
+    return ERRORS.VALUE;
+  }
+  const searchModeV =
+    args.length > 3 && args[3].kind !== RVKind.Blank ? toNumberRV(topLeft(args[3])) : rvNumber(1);
   if (isError(searchModeV)) {
     return searchModeV;
   }
   const searchMode = searchModeV.value;
+  if (searchMode !== 1 && searchMode !== -1 && searchMode !== 2 && searchMode !== -2) {
+    return ERRORS.VALUE;
+  }
 
   const flat: ScalarValue[] = [];
   if (lookupArr.height === 1) {
@@ -640,9 +715,6 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
     const step = searchMode === -1 ? -1 : 1;
     for (let i = start; i !== end; i += step) {
       if (scalarEquals(flat[i], lookupValue)) {
-        return rvNumber(i + 1);
-      }
-      if (scalarStringEquals(flat[i], lookupValue)) {
         return rvNumber(i + 1);
       }
     }
@@ -693,11 +765,11 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
     // Next-smaller-or-equal: largest item <= lookupValue.
     let best = -1;
     for (let i = 0; i < flat.length; i++) {
-      const cmp = compareScalar(flat[i], lookupValue);
+      const cmp = compareScalarsSameKind(flat[i], lookupValue);
       if (Number.isNaN(cmp)) {
         continue;
       }
-      if (cmp <= 0 && (best === -1 || compareScalar(flat[i], flat[best]) > 0)) {
+      if (cmp <= 0 && (best === -1 || compareScalarsSameKind(flat[i], flat[best]) > 0)) {
         best = i;
       }
     }
@@ -708,11 +780,11 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
     // Next-larger-or-equal: smallest item >= lookupValue.
     let best = -1;
     for (let i = 0; i < flat.length; i++) {
-      const cmp = compareScalar(flat[i], lookupValue);
+      const cmp = compareScalarsSameKind(flat[i], lookupValue);
       if (Number.isNaN(cmp)) {
         continue;
       }
-      if (cmp >= 0 && (best === -1 || compareScalar(flat[i], flat[best]) < 0)) {
+      if (cmp >= 0 && (best === -1 || compareScalarsSameKind(flat[i], flat[best]) < 0)) {
         best = i;
       }
     }
@@ -723,12 +795,12 @@ export function fnXMATCH(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnADDRESS(args: RuntimeValue[]): RuntimeValue {
-  const rowNumV = toNumberRV(args[0]);
+  const rowNumV = toNumberRV(topLeft(args[0]));
   if (isError(rowNumV)) {
     return rowNumV;
   }
   const rowNum = Math.trunc(rowNumV.value);
-  const colNumV = toNumberRV(args[1]);
+  const colNumV = toNumberRV(topLeft(args[1]));
   if (isError(colNumV)) {
     return colNumV;
   }
@@ -739,7 +811,11 @@ export function fnADDRESS(args: RuntimeValue[]): RuntimeValue {
   if (!Number.isFinite(rowNum) || !Number.isFinite(colNum) || rowNum < 1 || colNum < 1) {
     return ERRORS.VALUE;
   }
-  const absNumV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(1);
+  // Blank `abs_num` → Excel default 1 (fully absolute). Without the
+  // blank guard, `toNumberRV(BLANK)` coerces to 0 which falls outside
+  // the 1..4 range and surfaces a spurious #VALUE!.
+  const absNumV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(1);
   if (isError(absNumV)) {
     return absNumV;
   }
@@ -751,7 +827,7 @@ export function fnADDRESS(args: RuntimeValue[]): RuntimeValue {
   // a1 style (true/default) vs r1c1 (false)
   const a1Arg = args.length > 3 ? topLeft(args[3]) : { kind: RVKind.Boolean as const, value: true };
   const a1 = a1Arg.kind === RVKind.Boolean ? a1Arg.value : true;
-  const sheetText = args.length > 4 ? toStringRV(args[4]) : "";
+  const sheetText = args.length > 4 ? toStringRV(topLeft(args[4])) : "";
 
   if (!a1) {
     // R1C1 style
@@ -830,21 +906,7 @@ export function fnLOOKUP(args: RuntimeValue[]): RuntimeValue {
         flat.push(getCell(lookupArr, r, 0));
       }
     }
-    let bestIdx = -1;
-    for (let i = 0; i < flat.length; i++) {
-      const v = flat[i];
-      if (sameType(v, lookupValue)) {
-        if (scalarIsNumber(v) && scalarIsNumber(lookupValue) && v.value <= lookupValue.value) {
-          bestIdx = i;
-        } else if (
-          scalarIsString(v) &&
-          scalarIsString(lookupValue) &&
-          v.value.toLowerCase() <= lookupValue.value.toLowerCase()
-        ) {
-          bestIdx = i;
-        }
-      }
-    }
+    const bestIdx = findLastLessEqual(flat, lookupValue);
     if (bestIdx === -1) {
       return ERRORS.NA;
     }
@@ -866,39 +928,48 @@ export function fnLOOKUP(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.NA;
   }
   if (cols >= rows) {
-    let bestIdx = -1;
+    // Array-form LOOKUP, horizontal orientation: lookup runs along first
+    // row; result is pulled from the last row of the same column.
+    const firstRow: ScalarValue[] = [];
     for (let c = 0; c < cols; c++) {
-      const v = getCell(lookupArr, 0, c);
-      if (sameType(v, lookupValue)) {
-        if (scalarIsNumber(v) && scalarIsNumber(lookupValue) && v.value <= lookupValue.value) {
-          bestIdx = c;
-        } else if (
-          scalarIsString(v) &&
-          scalarIsString(lookupValue) &&
-          v.value.toLowerCase() <= lookupValue.value.toLowerCase()
-        ) {
-          bestIdx = c;
-        }
-      }
+      firstRow.push(getCell(lookupArr, 0, c));
     }
+    const bestIdx = findLastLessEqual(firstRow, lookupValue);
     return bestIdx >= 0 ? getCell(lookupArr, rows - 1, bestIdx) : ERRORS.NA;
   }
-  let bestIdx = -1;
+  // Array-form LOOKUP, vertical orientation: lookup runs down first column;
+  // result is pulled from the last column of the same row.
+  const firstCol: ScalarValue[] = [];
   for (let r = 0; r < rows; r++) {
-    const v = getCell(lookupArr, r, 0);
-    if (sameType(v, lookupValue)) {
-      if (scalarIsNumber(v) && scalarIsNumber(lookupValue) && v.value <= lookupValue.value) {
-        bestIdx = r;
-      } else if (
-        scalarIsString(v) &&
-        scalarIsString(lookupValue) &&
-        v.value.toLowerCase() <= lookupValue.value.toLowerCase()
-      ) {
-        bestIdx = r;
-      }
+    firstCol.push(getCell(lookupArr, r, 0));
+  }
+  const bestIdx = findLastLessEqual(firstCol, lookupValue);
+  return bestIdx >= 0 ? getCell(lookupArr, bestIdx, cols - 1) : ERRORS.NA;
+}
+
+/**
+ * Linear scan for the largest same-kind value that is `<= target`.
+ * Returns the flat-index of that value, or `-1` when no same-kind
+ * value qualifies. Uses `compareScalarsSameKind` so numbers compare by
+ * value, strings case-insensitively — the same ordering Excel uses
+ * for legacy LOOKUP / VLOOKUP / HLOOKUP approximate matches.
+ */
+function findLastLessEqual(flat: readonly ScalarValue[], target: ScalarValue): number {
+  let bestIdx = -1;
+  for (let i = 0; i < flat.length; i++) {
+    const v = flat[i];
+    if (v.kind !== target.kind) {
+      continue;
+    }
+    const cmp = compareScalarsSameKind(v, target);
+    if (!Number.isFinite(cmp)) {
+      continue;
+    }
+    if (cmp <= 0) {
+      bestIdx = i;
     }
   }
-  return bestIdx >= 0 ? getCell(lookupArr, bestIdx, cols - 1) : ERRORS.NA;
+  return bestIdx;
 }
 
 export function fnTRANSPOSE(args: RuntimeValue[]): RuntimeValue {
@@ -930,10 +1001,13 @@ export function fnAREAS(args: RuntimeValue[]): RuntimeValue {
   if (args.length === 0) {
     return ERRORS.VALUE;
   }
-  // Error in the argument propagates (Excel parity). A reference value
-  // counts as one area; the engine does not yet build multi-area
-  // references via `(A1, B1)` union syntax — when that lands, the arity
-  // should be `v.areas.length`, not a hardcoded 1.
+  // Normally unreachable — the evaluator's reference-aware path in
+  // `evaluateCall` intercepts AREAS before eager dereference happens,
+  // so by the time this fallback runs the reference has already been
+  // flattened into a dereferenced array (losing the area count).
+  // Keep the fallback behaviour aligned with the intercept path:
+  // arrays and scalars that reach here are not references and should
+  // surface as `#VALUE!`.
   const a = args[0];
   if (a.kind === RVKind.Error) {
     return a;
@@ -941,5 +1015,5 @@ export function fnAREAS(args: RuntimeValue[]): RuntimeValue {
   if (a.kind === RVKind.Reference) {
     return rvNumber(a.areas.length);
   }
-  return rvNumber(1);
+  return ERRORS.VALUE;
 }

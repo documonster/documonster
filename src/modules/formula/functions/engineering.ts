@@ -25,152 +25,104 @@ type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 // Base Conversion Functions
 // ============================================================================
 
-export const fnBIN2DEC: NativeFn = args => {
-  const err = checkError(args[0]);
-  if (err) {
-    return err;
-  }
-  const s = toStringRV(args[0]);
-  if (!/^[01]{1,10}$/.test(s)) {
-    return ERRORS.NUM;
-  }
-  // 10-bit two's complement
-  if (s.length === 10 && s[0] === "1") {
-    return rvNumber(parseInt(s.slice(1), 2) - 512);
-  }
-  return rvNumber(parseInt(s, 2));
-};
+export const fnBIN2DEC: NativeFn = args => baseToDec(args, 2, /^[01]{1,10}$/);
 
-export const fnDEC2BIN: NativeFn = args => {
-  const nRV = toNumberRV(args[0]);
+export const fnDEC2BIN: NativeFn = args => decToBase(args, 2, -512, 511);
+
+export const fnDEC2HEX: NativeFn = args => decToBase(args, 16, -549_755_813_888, 549_755_813_887);
+
+export const fnDEC2OCT: NativeFn = args => decToBase(args, 8, -536_870_912, 536_870_911);
+
+/**
+ * Shared implementation of `DEC2BIN`, `DEC2HEX`, `DEC2OCT`.
+ *
+ * Excel's three numeric-to-base converters differ only in the target
+ * base, the signed range they accept, and whether the output is
+ * uppercased (hex). The `places` semantics (1..10, validated only when
+ * supplied and the input is non-negative) are identical across all three.
+ *
+ * Factored here so the three converters share a single source of truth —
+ * when the Excel rules are refined (e.g. additional validations or a new
+ * `places` upper bound), all three stay in lockstep.
+ */
+function decToBase(
+  args: RuntimeValue[],
+  base: number,
+  minValue: number,
+  maxValue: number
+): RuntimeValue {
+  const nRV = toNumberRV(topLeft(args[0]));
   if (isError(nRV)) {
     return nRV;
   }
   // Excel's DEC→BASE family truncates toward zero, so negative fractions
   // become `0`, not `-1` as `Math.floor` would produce.
   const n = Math.trunc(nRV.value);
-  if (n < -512 || n > 511) {
+  if (n < minValue || n > maxValue) {
     return ERRORS.NUM;
   }
   // `places` is only meaningful when supplied and the input is non-negative.
-  // Excel restricts it to the [1, 10] range and returns #NUM! otherwise.
-  // For negative inputs Excel ignores `places` entirely, so we validate it
-  // only on the non-negative branch below.
+  // Excel restricts it to [1, 10] and returns #NUM! outside that range.
+  // Negative inputs ignore `places` entirely — we validate it only when
+  // we've confirmed the input is non-negative.
   const hasPlaces = args.length > 1 && args[1].kind !== RVKind.Blank;
-  const placesRV = hasPlaces ? toNumberRV(args[1]) : rvNumber(0);
+  const placesRV = hasPlaces ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(placesRV)) {
     return placesRV;
   }
   const places = Math.trunc(placesRV.value);
+  const toUpper = base === 16;
   if (n < 0) {
-    return rvString((n + 1024).toString(2));
+    const raw = (n + Math.pow(base, 10)).toString(base);
+    return rvString(toUpper ? raw.toUpperCase() : raw);
   }
   if (hasPlaces && (places < 1 || places > 10)) {
     return ERRORS.NUM;
   }
-  const result = n.toString(2);
+  const raw = n.toString(base);
+  const result = toUpper ? raw.toUpperCase() : raw;
+  // When `places` is supplied but smaller than the natural representation,
+  // Excel returns `#NUM!` rather than silently ignoring the width. `padStart`
+  // alone would leave the wider result unchanged — a soft deviation.
+  if (hasPlaces && places > 0 && result.length > places) {
+    return ERRORS.NUM;
+  }
   return rvString(places > 0 ? result.padStart(places, "0") : result);
-};
+}
 
-export const fnHEX2DEC: NativeFn = args => {
+export const fnHEX2DEC: NativeFn = args => baseToDec(args, 16, /^[0-9A-Fa-f]{1,10}$/);
+
+export const fnOCT2DEC: NativeFn = args => baseToDec(args, 8, /^[0-7]{1,10}$/);
+
+/**
+ * Shared implementation of `BIN2DEC`, `OCT2DEC`, `HEX2DEC`.
+ *
+ * Each source base has the same "string of up to 10 digits, 10th digit
+ * sets the sign bit for two's-complement" semantics. The only
+ * differences are the allowed digit alphabet (passed as `pattern`) and
+ * the base (passed as `base`). The `isNegativeMsd` helper detects the
+ * sign bit by re-parsing the top digit; it works for binary (MSD=1),
+ * octal (MSD>=4) and hex (MSD>=8).
+ */
+function baseToDec(args: RuntimeValue[], base: number, pattern: RegExp): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
-  const s = toStringRV(args[0]);
-  if (!/^[0-9A-Fa-f]{1,10}$/.test(s)) {
+  const s = toStringRV(topLeft(args[0]));
+  if (!pattern.test(s)) {
     return ERRORS.NUM;
   }
-  const num = parseInt(s, 16);
-  // 10-digit hex: 40-bit two's complement
-  if (s.length === 10 && parseInt(s[0], 16) >= 8) {
-    return rvNumber(num - Math.pow(16, 10));
+  const num = parseInt(s, base);
+  // 10-digit form triggers two's-complement interpretation. The sign bit
+  // is the top bit of the top digit — for binary that's the literal MSD,
+  // for octal it's `>= 4`, for hex it's `>= 8`. We compute the threshold
+  // from the base instead of hard-coding it.
+  if (s.length === 10 && parseInt(s[0], base) >= base / 2) {
+    return rvNumber(num - Math.pow(base, 10));
   }
   return rvNumber(num);
-};
-
-export const fnDEC2HEX: NativeFn = args => {
-  const nRV = toNumberRV(args[0]);
-  if (isError(nRV)) {
-    return nRV;
-  }
-  // Excel's DEC→BASE family truncates toward zero, so negative fractions
-  // become `0`, not `-1` as `Math.floor` would produce.
-  const n = Math.trunc(nRV.value);
-  // Excel rejects anything outside the 40-bit signed range.
-  // Without this check, inputs like 1e14 produce a 13-digit hex string
-  // and inputs below -2^39 wrap into spurious positive values prefixed
-  // with `-`. See R6-P0-1.
-  if (n < -549_755_813_888 || n > 549_755_813_887) {
-    return ERRORS.NUM;
-  }
-  // Same places semantics as DEC2BIN: validate only when `places` is
-  // supplied and the input is non-negative; Excel ignores `places` for
-  // negative numbers.
-  const hasPlaces = args.length > 1 && args[1].kind !== RVKind.Blank;
-  const placesRV = hasPlaces ? toNumberRV(args[1]) : rvNumber(0);
-  if (isError(placesRV)) {
-    return placesRV;
-  }
-  const places = Math.trunc(placesRV.value);
-  if (n < 0) {
-    return rvString((n + Math.pow(16, 10)).toString(16).toUpperCase());
-  }
-  if (hasPlaces && (places < 1 || places > 10)) {
-    return ERRORS.NUM;
-  }
-  const result = n.toString(16).toUpperCase();
-  return rvString(places > 0 ? result.padStart(places, "0") : result);
-};
-
-export const fnOCT2DEC: NativeFn = args => {
-  const err = checkError(args[0]);
-  if (err) {
-    return err;
-  }
-  const s = toStringRV(args[0]);
-  if (!/^[0-7]{1,10}$/.test(s)) {
-    return ERRORS.NUM;
-  }
-  const num = parseInt(s, 8);
-  if (s.length === 10 && parseInt(s[0]) >= 4) {
-    return rvNumber(num - Math.pow(8, 10));
-  }
-  return rvNumber(num);
-};
-
-export const fnDEC2OCT: NativeFn = args => {
-  const nRV = toNumberRV(args[0]);
-  if (isError(nRV)) {
-    return nRV;
-  }
-  // Excel's DEC→BASE family truncates toward zero, so negative fractions
-  // become `0`, not `-1` as `Math.floor` would produce.
-  const n = Math.trunc(nRV.value);
-  // Excel's DEC2OCT range is the 30-bit signed range (-2^29 .. 2^29-1).
-  // Values outside this range are #NUM! in Excel; we silently wrapped
-  // into bogus sign-prefixed strings without this guard. See R6-P0-1.
-  if (n < -536_870_912 || n > 536_870_911) {
-    return ERRORS.NUM;
-  }
-  // Same places semantics as DEC2BIN: validate only when `places` is
-  // supplied and the input is non-negative; Excel ignores `places` for
-  // negative numbers.
-  const hasPlaces = args.length > 1 && args[1].kind !== RVKind.Blank;
-  const placesRV = hasPlaces ? toNumberRV(args[1]) : rvNumber(0);
-  if (isError(placesRV)) {
-    return placesRV;
-  }
-  const places = Math.trunc(placesRV.value);
-  if (n < 0) {
-    return rvString((n + Math.pow(8, 10)).toString(8));
-  }
-  if (hasPlaces && (places < 1 || places > 10)) {
-    return ERRORS.NUM;
-  }
-  const result = n.toString(8);
-  return rvString(places > 0 ? result.padStart(places, "0") : result);
-};
+}
 
 /**
  * Generic helper for the X2Y conversion family (BIN2HEX, HEX2BIN, …).
@@ -191,13 +143,13 @@ function convertBase(
   if (err) {
     return err;
   }
-  const s = toStringRV(args[0]);
+  const s = toStringRV(topLeft(args[0]));
   const n = parseNInput(s);
   if (typeof n !== "number") {
     return n;
   }
   const hasPlaces = args.length > 1 && args[1].kind !== RVKind.Blank;
-  const placesRV = hasPlaces ? toNumberRV(args[1]) : rvNumber(0);
+  const placesRV = hasPlaces ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(placesRV)) {
     return placesRV;
   }
@@ -244,6 +196,11 @@ function formatToBase(
     return ERRORS.NUM;
   }
   const result = n.toString(base).toUpperCase();
+  // `places` smaller than the natural representation is a #NUM! in Excel —
+  // `padStart` alone would silently emit the wider form.
+  if (hasPlaces && places > 0 && result.length > places) {
+    return ERRORS.NUM;
+  }
   return rvString(places > 0 ? result.padStart(places, "0") : result);
 }
 
@@ -547,11 +504,11 @@ function bessel(
   compute: (n: number, x: number) => number,
   allowZeroX: boolean
 ): RuntimeValue {
-  const xRV = toNumberRV(args[0]);
+  const xRV = toNumberRV(topLeft(args[0]));
   if (isError(xRV)) {
     return xRV;
   }
-  const nRV = toNumberRV(args[1]);
+  const nRV = toNumberRV(topLeft(args[1]));
   if (isError(nRV)) {
     return nRV;
   }
@@ -578,11 +535,11 @@ export const fnBESSELK: NativeFn = args => bessel(args, besselK, false);
 export const fnBESSELY: NativeFn = args => bessel(args, besselY, false);
 
 export const fnDELTA: NativeFn = args => {
-  const n1 = toNumberRV(args[0]);
+  const n1 = toNumberRV(topLeft(args[0]));
   if (isError(n1)) {
     return n1;
   }
-  const n2 = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const n2 = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(n2)) {
     return n2;
   }
@@ -590,11 +547,11 @@ export const fnDELTA: NativeFn = args => {
 };
 
 export const fnGESTEP: NativeFn = args => {
-  const n = toNumberRV(args[0]);
+  const n = toNumberRV(topLeft(args[0]));
   if (isError(n)) {
     return n;
   }
-  const step = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const step = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(step)) {
     return step;
   }
@@ -683,22 +640,24 @@ function formatComplex(re: number, im: number, suffix: string = "i"): string {
 }
 
 export const fnCOMPLEX: NativeFn = args => {
-  const re = toNumberRV(args[0]);
+  const re = toNumberRV(topLeft(args[0]));
   if (isError(re)) {
     return re;
   }
-  const im = toNumberRV(args[1]);
+  const im = toNumberRV(topLeft(args[1]));
   if (isError(im)) {
     return im;
   }
   let suffix = "i";
-  if (args.length > 2) {
+  if (args.length > 2 && args[2].kind !== RVKind.Blank) {
     const e2 = checkError(args[2]);
     if (e2) {
       return e2;
     }
-    suffix = toStringRV(args[2]);
+    suffix = toStringRV(topLeft(args[2]));
   }
+  // Blank 3rd arg → default "i". Previously a blank coerced to empty
+  // string then tripped the `suffix !== "i"` validation.
   if (suffix !== "i" && suffix !== "j") {
     return ERRORS.VALUE;
   }
@@ -710,7 +669,7 @@ export const fnIMREAL: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   return c ? rvNumber(c[0]) : ERRORS.NUM;
 };
 
@@ -719,7 +678,7 @@ export const fnIMAGINARY: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   return c ? rvNumber(c[1]) : ERRORS.NUM;
 };
 
@@ -728,7 +687,7 @@ export const fnIMABS: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -740,7 +699,7 @@ export const fnIMARGUMENT: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -755,7 +714,7 @@ export const fnIMCONJUGATE: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -841,8 +800,8 @@ export const fnIMSUB: NativeFn = args => {
   if (e1) {
     return e1;
   }
-  const c1 = parseComplex(toStringRV(args[0]));
-  const c2 = parseComplex(toStringRV(args[1]));
+  const c1 = parseComplex(toStringRV(topLeft(args[0])));
+  const c2 = parseComplex(toStringRV(topLeft(args[1])));
   if (!c1 || !c2) {
     return ERRORS.NUM;
   }
@@ -879,8 +838,8 @@ export const fnIMDIV: NativeFn = args => {
   if (e1) {
     return e1;
   }
-  const c1 = parseComplex(toStringRV(args[0]));
-  const c2 = parseComplex(toStringRV(args[1]));
+  const c1 = parseComplex(toStringRV(topLeft(args[0])));
+  const c2 = parseComplex(toStringRV(topLeft(args[1])));
   if (!c1 || !c2) {
     return ERRORS.NUM;
   }
@@ -903,11 +862,11 @@ export const fnIMPOWER: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
-  const n = toNumberRV(args[1]);
+  const n = toNumberRV(topLeft(args[1]));
   if (isError(n)) {
     return n;
   }
@@ -922,7 +881,7 @@ export const fnIMSQRT: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -937,7 +896,7 @@ export const fnIMLN: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -953,7 +912,7 @@ export const fnIMLOG2: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -970,7 +929,7 @@ export const fnIMLOG10: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -987,7 +946,7 @@ export const fnIMEXP: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -1000,7 +959,7 @@ export const fnIMSIN: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -1014,7 +973,7 @@ export const fnIMCOS: NativeFn = args => {
   if (err) {
     return err;
   }
-  const c = parseComplex(toStringRV(args[0]));
+  const c = parseComplex(toStringRV(topLeft(args[0])));
   if (!c) {
     return ERRORS.NUM;
   }
@@ -1174,11 +1133,11 @@ function validateBitOperand(v: number): number | ErrorValue {
 }
 
 export const fnBITAND: NativeFn = args => {
-  const a = toNumberRV(args[0]);
+  const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
   }
-  const b = toNumberRV(args[1]);
+  const b = toNumberRV(topLeft(args[1]));
   if (isError(b)) {
     return b;
   }
@@ -1194,11 +1153,11 @@ export const fnBITAND: NativeFn = args => {
 };
 
 export const fnBITOR: NativeFn = args => {
-  const a = toNumberRV(args[0]);
+  const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
   }
-  const b = toNumberRV(args[1]);
+  const b = toNumberRV(topLeft(args[1]));
   if (isError(b)) {
     return b;
   }
@@ -1214,11 +1173,11 @@ export const fnBITOR: NativeFn = args => {
 };
 
 export const fnBITXOR: NativeFn = args => {
-  const a = toNumberRV(args[0]);
+  const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
   }
-  const b = toNumberRV(args[1]);
+  const b = toNumberRV(topLeft(args[1]));
   if (isError(b)) {
     return b;
   }
@@ -1234,11 +1193,11 @@ export const fnBITXOR: NativeFn = args => {
 };
 
 export const fnBITLSHIFT: NativeFn = args => {
-  const num = toNumberRV(args[0]);
+  const num = toNumberRV(topLeft(args[0]));
   if (isError(num)) {
     return num;
   }
-  const shift = toNumberRV(args[1]);
+  const shift = toNumberRV(topLeft(args[1]));
   if (isError(shift)) {
     return shift;
   }
@@ -1258,11 +1217,11 @@ export const fnBITLSHIFT: NativeFn = args => {
 };
 
 export const fnBITRSHIFT: NativeFn = args => {
-  const num = toNumberRV(args[0]);
+  const num = toNumberRV(topLeft(args[0]));
   if (isError(num)) {
     return num;
   }
-  const shift = toNumberRV(args[1]);
+  const shift = toNumberRV(topLeft(args[1]));
   if (isError(shift)) {
     return shift;
   }

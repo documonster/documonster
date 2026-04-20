@@ -1604,6 +1604,85 @@ class Workbook {
   }
 
   // ===========================================================================
+  // User-registered formula functions
+  // ===========================================================================
+
+  /**
+   * Per-workbook registry of user-defined functions. The formula engine
+   * consults this map before the built-in 433-function registry, so a
+   * registered name either adds a new function (`MYFN`) or shadows a
+   * built-in (`IRR` → project-specific variant).
+   *
+   * Populated by {@link registerFunction}; read by the formula engine
+   * when the host calls `calculateFormulas()` — see
+   * `@formula/runtime/evaluator.ts::evaluateCall`.
+   */
+  userFunctions?: Map<
+    string,
+    {
+      minArity: number;
+      maxArity: number;
+      invoke: (args: unknown[]) => unknown;
+      volatile?: boolean;
+    }
+  >;
+
+  /**
+   * Register (or replace) a custom formula function on this workbook.
+   *
+   * The function becomes visible to `calculateFormulas()` on this
+   * workbook only — the built-in registry stays untouched. Names are
+   * case-insensitive (normalised to uppercase) and must not include
+   * the `_XLFN.` prefix — the engine strips that automatically.
+   *
+   * @param name    Function name (case-insensitive).
+   * @param fn      Implementation. Receives already-evaluated RuntimeValue
+   *                arguments; return a RuntimeValue. Wrap failures with
+   *                `rvError("#VALUE!")` rather than throwing — throws are
+   *                caught at the evaluator boundary and surface as
+   *                `#VALUE!` so a buggy custom function doesn't tear
+   *                down the whole calculation pass.
+   * @param options Optional arity bounds. Defaults to `minArity=0`,
+   *                `maxArity=255` (Excel's universal argument cap), so
+   *                simple variadic functions work without extra config.
+   *                Set `volatile: true` when the function should be
+   *                re-evaluated on every calc cycle (analogous to
+   *                built-in `RAND`, `NOW`). Currently reserved for
+   *                future use; the engine recomputes every formula on
+   *                each `calculateFormulas()` call regardless.
+   *
+   * ```ts
+   * import { rvNumber } from "@cj-tech-master/excelts/formula";
+   * workbook.registerFunction("DOUBLE", ([x]) => {
+   *   return rvNumber((x as any).value * 2);
+   * }, { minArity: 1, maxArity: 1 });
+   * ```
+   */
+  registerFunction(
+    name: string,
+    fn: (args: unknown[]) => unknown,
+    options?: { minArity?: number; maxArity?: number; volatile?: boolean }
+  ): void {
+    if (!this.userFunctions) {
+      this.userFunctions = new Map();
+    }
+    this.userFunctions.set(name.toUpperCase(), {
+      minArity: options?.minArity ?? 0,
+      maxArity: options?.maxArity ?? 255,
+      invoke: fn,
+      volatile: options?.volatile ?? false
+    });
+  }
+
+  /**
+   * Remove a user-registered function. No-op when the name isn't
+   * registered; returns `true` when an entry was removed.
+   */
+  unregisterFunction(name: string): boolean {
+    return this.userFunctions?.delete(name.toUpperCase()) ?? false;
+  }
+
+  // ===========================================================================
   // Themes
   // ===========================================================================
 

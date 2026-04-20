@@ -335,6 +335,42 @@ describe("LOOKUP", () => {
     // Looking up 4 — largest ≤ 4 is 3 → "b"
     expect(asString(fnLOOKUP([rvNumber(4), lookup, ret]))).toBe("b");
   });
+
+  it("picks the LAST equal key on duplicates (Excel legacy behaviour)", () => {
+    // Regression: a `findLastLessEqual`-style scan must never break
+    // early on the first `cmp === 0` — Excel LOOKUP returns the
+    // result corresponding to the last equal key in the lookup vector.
+    const lookup = rvArray([[rvNumber(1), rvNumber(3), rvNumber(3), rvNumber(3), rvNumber(5)]]);
+    const ret = rvArray([
+      [rvString("a"), rvString("b1"), rvString("b2"), rvString("b3"), rvString("c")]
+    ]);
+    expect(asString(fnLOOKUP([rvNumber(3), lookup, ret]))).toBe("b3");
+  });
+
+  it("approximate match with strings compares case-insensitively", () => {
+    const lookup = rvArray([[rvString("apple"), rvString("Cherry"), rvString("mango")]]);
+    const ret = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    // Looking up "cherry" (lowercase) should match "Cherry" (capital C).
+    expect(fnLOOKUP([rvString("cherry"), lookup, ret])).toEqual(rvNumber(2));
+  });
+
+  it("returns #N/A when the lookup value is smaller than every key", () => {
+    const lookup = rvArray([[rvNumber(10), rvNumber(20), rvNumber(30)]]);
+    const ret = rvArray([[rvString("a"), rvString("b"), rvString("c")]]);
+    expect(fnLOOKUP([rvNumber(5), lookup, ret])).toEqual(ERRORS.NA);
+  });
+
+  it("skips entries of a different kind rather than matching them (regression)", () => {
+    // When the lookup vector is mixed-type, LOOKUP must only consider
+    // same-kind entries. Previously the Number→String combinations fell
+    // into the `compareScalarsSameKind` NaN case and we skipped — the
+    // refactored helper preserves that, but a regression test guards it.
+    const lookup = rvArray([[rvString("alpha"), rvNumber(1), rvString("zeta"), rvNumber(5)]]);
+    const ret = rvArray([[rvString("sa"), rvString("n1"), rvString("sz"), rvString("n5")]]);
+    // Look up 3 — only the numeric entries count (1 and 5). Largest
+    // ≤ 3 is 1 → "n1".
+    expect(asString(fnLOOKUP([rvNumber(3), lookup, ret]))).toBe("n1");
+  });
 });
 
 describe("TRANSPOSE", () => {
@@ -363,8 +399,14 @@ describe("TRANSPOSE", () => {
 });
 
 describe("AREAS", () => {
-  it("returns 1 for any single argument", () => {
-    expect(asNumber(fnAREAS([rvNumber(1)]))).toBe(1);
+  it("returns #VALUE! for a non-reference argument (Excel)", () => {
+    // Regression: previously returned 1 for any kind of argument. Excel
+    // requires a reference and rejects literals with #VALUE!. The unit
+    // test exercises the fallback path in `fnAREAS`; end-to-end tests
+    // (runtime/__tests__/evaluator.test.ts) cover the reference-aware
+    // intercept path.
+    expect(fnAREAS([rvNumber(1)])).toEqual(ERRORS.VALUE);
+    expect(fnAREAS([rvString("a")])).toEqual(ERRORS.VALUE);
   });
 
   it("returns #VALUE! for no arguments", () => {
@@ -454,6 +496,18 @@ describe("INDEX comprehensive", () => {
     expect(r.height).toBe(1);
     expect(r.width).toBe(3);
     expect((r.rows[0][0] as NumberValue).value).toBe(4);
+  });
+
+  it("INDEX(single-col-range, n) collapses to the scalar cell (Excel behaviour)", () => {
+    // Regression: previously returned a 1×1 ArrayValue which forced
+    // every caller to implicit-intersect. Excel's INDEX returns the
+    // single cell as a plain scalar when the source is already a
+    // single column (or single row).
+    const col = rvArray([[rvNumber(10)], [rvNumber(20)], [rvNumber(30)]]);
+    expect(asNumber(fnINDEX([col, rvNumber(2)]))).toBe(20);
+    // Single-row source: omit row, pass col-index.
+    const row = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    expect(asNumber(fnINDEX([row, rvNumber(0), rvNumber(2)]))).toBe(2);
   });
 
   it("INDEX on a scalar returns the scalar", () => {
@@ -550,6 +604,30 @@ describe("VLOOKUP comprehensive", () => {
 
   it("col_index_num fractional truncation (2.9 → 2)", () => {
     expect(asString(fnVLOOKUP([rvNumber(2), table, rvNumber(2.9), rvBoolean(false)]))).toBe("b");
+  });
+
+  it("exact match supports wildcards (Excel: VLOOKUP wildcards in range_lookup=FALSE)", () => {
+    // Regression: previously VLOOKUP's exact path only did `scalarEquals`
+    // and missed Excel's documented wildcard support. `"a*"` should
+    // match "alpha" and "apricot", returning the first hit.
+    const wordTable = rvArray([
+      [rvString("zebra"), rvNumber(1)],
+      [rvString("alpha"), rvNumber(2)],
+      [rvString("apricot"), rvNumber(3)]
+    ]);
+    expect(asNumber(fnVLOOKUP([rvString("a*"), wordTable, rvNumber(2), rvBoolean(false)]))).toBe(2);
+    // Second wildcard with `?` matches exactly one char.
+    expect(asNumber(fnVLOOKUP([rvString("?ebra"), wordTable, rvNumber(2), rvBoolean(false)]))).toBe(
+      1
+    );
+    // Tilde-escaped wildcard matches literal `*`.
+    const litTable = rvArray([
+      [rvString("a*b"), rvNumber(10)],
+      [rvString("aXb"), rvNumber(20)]
+    ]);
+    expect(asNumber(fnVLOOKUP([rvString("a~*b"), litTable, rvNumber(2), rvBoolean(false)]))).toBe(
+      10
+    );
   });
 
   it("rangeLookup defaults to TRUE (approximate)", () => {
@@ -673,9 +751,21 @@ describe("XMATCH comprehensive", () => {
     expect(asNumber(fnXMATCH([rvString("banana"), arr]))).toBe(1);
   });
 
-  it("unsupported matchMode returns #N/A (value outside {-1,0,1,2})", () => {
+  it("unsupported matchMode returns #VALUE! (only -1, 0, 1, 2 valid; Excel behaviour)", () => {
+    // Regression: previously an invalid matchMode silently fell through
+    // an `if / else if` chain and produced #N/A from the "nothing
+    // matched" branch. Excel rejects any value outside the documented
+    // set up-front with #VALUE!, so early validation is the correct
+    // behaviour.
     const arr = rvArray([[rvNumber(1)], [rvNumber(2)]]);
-    expect(fnXMATCH([rvNumber(1), arr, rvNumber(99)])).toEqual(ERRORS.NA);
+    expect(fnXMATCH([rvNumber(1), arr, rvNumber(99)])).toEqual(ERRORS.VALUE);
+    expect(fnXMATCH([rvNumber(1), arr, rvNumber(-2)])).toEqual(ERRORS.VALUE);
+  });
+
+  it("unsupported searchMode returns #VALUE! (only ±1, ±2 valid)", () => {
+    const arr = rvArray([[rvNumber(1)], [rvNumber(2)]]);
+    expect(fnXMATCH([rvNumber(1), arr, rvNumber(0), rvNumber(0)])).toEqual(ERRORS.VALUE);
+    expect(fnXMATCH([rvNumber(1), arr, rvNumber(0), rvNumber(3)])).toEqual(ERRORS.VALUE);
   });
 
   it("matchMode 1 returns smallest ≥ lookup", () => {
@@ -863,11 +953,14 @@ describe("TRANSPOSE comprehensive", () => {
 });
 
 describe("AREAS comprehensive", () => {
-  it("always returns 1 regardless of argument kind", () => {
-    expect(asNumber(fnAREAS([rvString("x")]))).toBe(1);
-    expect(asNumber(fnAREAS([rvBoolean(true)]))).toBe(1);
-    expect(asNumber(fnAREAS([rvArray([[rvNumber(1)]])]))).toBe(1);
-    expect(asNumber(fnAREAS([BLANK]))).toBe(1);
+  it("rejects non-reference kinds with #VALUE! (Excel)", () => {
+    // Regression: previously returned 1 for any non-error scalar/array.
+    // Excel requires a reference-producing argument and rejects
+    // literals/arrays/booleans with #VALUE!.
+    expect(fnAREAS([rvString("x")])).toEqual(ERRORS.VALUE);
+    expect(fnAREAS([rvBoolean(true)])).toEqual(ERRORS.VALUE);
+    expect(fnAREAS([rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+    expect(fnAREAS([BLANK])).toEqual(ERRORS.VALUE);
   });
 
   it("error argument propagates (Excel parity)", () => {
@@ -1388,12 +1481,12 @@ describe("ROWS / COLUMNS deep coverage", () => {
 // ============================================================================
 
 describe("AREAS comprehensive", () => {
-  it("returns 1 for a single area (array or scalar)", () => {
-    expect(asNumber(fnAREAS([rvArray([[rvNumber(1)]])]))).toBe(1);
+  it("rejects array literals with #VALUE! (Excel)", () => {
+    expect(fnAREAS([rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
   });
 
-  it("returns 1 for scalar", () => {
-    expect(asNumber(fnAREAS([rvNumber(42)]))).toBe(1);
+  it("rejects scalar literals with #VALUE! (Excel)", () => {
+    expect(fnAREAS([rvNumber(42)])).toEqual(ERRORS.VALUE);
   });
 
   it("requires at least one argument", () => {

@@ -19,6 +19,7 @@ import {
   isLambda,
   isScalar,
   rvArray,
+  rvArrayRect,
   rvBoolean,
   rvCellRef,
   rvError,
@@ -391,5 +392,52 @@ describe("rvArray — hiddenRowMask", () => {
     expect(a.originCol).toBe(4);
     expect(a.subtotalMask).toBe(subMask);
     expect(a.hiddenRowMask).toBe(hiddenMask);
+  });
+});
+
+describe("rvArrayRect — fast-path constructor", () => {
+  it("builds an ArrayValue without scanning rows for width", () => {
+    // Trust the caller's `width` parameter — this saves the two passes
+    // `rvArray` does (max-width scan + padding detection).
+    const rows: ScalarValue[][] = [
+      [rvNumber(1), rvNumber(2), rvNumber(3)],
+      [rvNumber(4), rvNumber(5), rvNumber(6)]
+    ];
+    const a = rvArrayRect(rows, 2, 3);
+    expect(a.kind).toBe(RVKind.Array);
+    expect(a.height).toBe(2);
+    expect(a.width).toBe(3);
+    // Rows are stored by reference — no defensive copy.
+    expect(a.rows).toBe(rows);
+  });
+
+  it("attaches origin metadata when supplied", () => {
+    const a = rvArrayRect([[rvNumber(1)]], 1, 1, 5, 7);
+    expect(a.originRow).toBe(5);
+    expect(a.originCol).toBe(7);
+  });
+
+  it("supports both masks", () => {
+    const subMask = [[true, false]];
+    const hiddenMask = [false];
+    const a = rvArrayRect(
+      [[rvNumber(1), rvNumber(2)]],
+      1,
+      2,
+      undefined,
+      undefined,
+      subMask,
+      hiddenMask
+    );
+    expect(a.subtotalMask).toBe(subMask);
+    expect(a.hiddenRowMask).toBe(hiddenMask);
+  });
+
+  it("does not mutate the caller's rows (no padding path)", () => {
+    const row1 = [rvNumber(1), rvNumber(2)];
+    const row2 = [rvNumber(3), rvNumber(4)];
+    const a = rvArrayRect([row1, row2], 2, 2);
+    expect(a.rows[0]).toBe(row1);
+    expect(a.rows[1]).toBe(row2);
   });
 });

@@ -18,7 +18,7 @@
 
 import { dateToExcel, excelToDate } from "@utils/utils.base";
 
-import type { RuntimeValue } from "../runtime/values";
+import type { RuntimeValue, ErrorValue } from "../runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -27,6 +27,7 @@ import {
   toNumberRV,
   toStringRV,
   toBooleanRV,
+  topLeft,
   rvNumber,
   rvBoolean
 } from "../runtime/values";
@@ -54,17 +55,25 @@ function fromDate(d: Date): number {
 }
 
 /** Collect holiday serial numbers from a RuntimeValue argument (array or scalar). */
-function collectHolidays(arg: RuntimeValue): Set<number> {
+function collectHolidays(arg: RuntimeValue): Set<number> | ErrorValue {
   const set = new Set<number>();
   if (isArray(arg)) {
     for (const row of arg.rows) {
       for (const cell of row) {
+        // Propagate errors from the holidays list rather than silently
+        // skipping them — Excel surfaces `#N/A` from a holiday cell.
+        if (cell.kind === RVKind.Error) {
+          return cell;
+        }
         if (cell.kind === RVKind.Number) {
           set.add(Math.floor(cell.value));
         }
       }
     }
   } else {
+    if (arg.kind === RVKind.Error) {
+      return arg;
+    }
     const n = toNumberRV(arg);
     if (n.kind === RVKind.Number) {
       set.add(Math.floor(n.value));
@@ -243,7 +252,11 @@ export const fnWEEKDAY: NativeFn = args => {
     return n;
   }
   const d = toDate(n.value);
-  const returnType = args.length > 1 ? argToNumber(args[1]) : rvNumber(1);
+  // Blank `return_type` → Excel default 1 (Sun=1..Sat=7). Without the
+  // blank guard, `argToNumber(BLANK)` coerces to 0 which falls to the
+  // default branch and yields a spurious #NUM! for `WEEKDAY(date, )`.
+  const returnType =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
   if (isError(returnType)) {
     return returnType;
   }
@@ -277,8 +290,14 @@ export const fnEOMONTH: NativeFn = args => {
   if (isError(months)) {
     return months;
   }
+  // Excel truncates `months` toward zero before doing month arithmetic.
+  // `Date.UTC` happens to truncate too, but the explicit `Math.trunc`
+  // makes the contract visible and protects against engines that might
+  // not (or against a future refactor that routes through a different
+  // date constructor).
+  const m = Math.trunc(months.value);
   const d = toDate(startDate.value);
-  const result = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months.value + 1, 0));
+  const result = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + m + 1, 0));
   return rvNumber(fromDate(result));
 };
 
@@ -291,9 +310,22 @@ export const fnEDATE: NativeFn = args => {
   if (isError(months)) {
     return months;
   }
+  const m = Math.trunc(months.value);
   const d = toDate(startDate.value);
+  // Excel clamps to the last day of the target month when the source day
+  // would overflow (e.g. `EDATE(2024-01-31, 1)` → 2024-02-29, not rolling
+  // forward into March). JS Date.UTC rolls over by default, so we detect
+  // the overflow and clamp explicitly. To do so we first construct the
+  // 1st of the target month, read `daysInMonth` via the "day 0 of next
+  // month" trick, and cap the original day at that.
+  const targetYearMonth = d.getUTCMonth() + m;
+  const firstOfTarget = new Date(Date.UTC(d.getUTCFullYear(), targetYearMonth, 1));
+  const lastDayOfTarget = new Date(
+    Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const clampedDay = Math.min(d.getUTCDate(), lastDayOfTarget);
   const result = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months.value, d.getUTCDate())
+    Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth(), clampedDay)
   );
   return rvNumber(fromDate(result));
 };
@@ -311,7 +343,7 @@ export const fnDATEDIF: NativeFn = args => {
   if (endN.value < startN.value) {
     return ERRORS.NUM;
   }
-  const unit = toStringRV(args[2]).toUpperCase();
+  const unit = toStringRV(topLeft(args[2])).toUpperCase();
   const startD = toDate(startN.value);
   const endD = toDate(endN.value);
   const sy = startD.getUTCFullYear();
@@ -402,7 +434,10 @@ export const fnWEEKNUM: NativeFn = args => {
     return n;
   }
   const d = toDate(n.value);
-  const returnType = args.length > 1 ? argToNumber(args[1]) : rvNumber(1);
+  // Blank `return_type` → Excel default 1 (Sunday start). See WEEKDAY
+  // for the same rationale.
+  const returnType =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? argToNumber(args[1]) : rvNumber(1);
   if (isError(returnType)) {
     return returnType;
   }
@@ -457,15 +492,43 @@ function networkdaysHelper(startN: number, endN: number, holidays: Set<number>):
   const s = Math.floor(Math.min(startN, endN));
   const e = Math.floor(Math.max(startN, endN));
   const sign = startN <= endN ? 1 : -1;
-  let count = 0;
-  for (let d = s; d <= e; d++) {
-    const dt = toDate(d);
-    const dow = dt.getUTCDay();
-    if (dow !== 0 && dow !== 6 && !holidays.has(d)) {
-      count++;
+  // Closed-form weekday count: partition `[s, e]` into whole weeks plus
+  // a tail. Each whole week contributes 5 weekdays, regardless of its
+  // starting day-of-week. The tail contributes however many of its
+  // remaining days fall on Monday..Friday.
+  //
+  // `getUTCDay()`: Sun=0, Mon=1, …, Sat=6. We compute `dow` once for
+  // the start date and then just walk the `tail` days forward by
+  // modular arithmetic — no Date allocations in the loop.
+  const totalDays = e - s + 1;
+  const weeks = Math.floor(totalDays / 7);
+  const tail = totalDays % 7;
+  let weekdays = weeks * 5;
+  if (tail > 0) {
+    const startDow = toDate(s).getUTCDay();
+    for (let i = 0; i < tail; i++) {
+      const dow = (startDow + i) % 7;
+      if (dow !== 0 && dow !== 6) {
+        weekdays++;
+      }
+    }
+  } else {
+    // When `totalDays` is an exact multiple of 7 the start DOW still
+    // governs whether any holidays from the caller's list fall on a
+    // weekday, so we stop here — no tail to walk.
+  }
+  // Subtract holidays that land on a weekday and fall within [s, e].
+  if (holidays.size > 0) {
+    for (const h of holidays) {
+      if (h >= s && h <= e) {
+        const dow = toDate(h).getUTCDay();
+        if (dow !== 0 && dow !== 6) {
+          weekdays--;
+        }
+      }
     }
   }
-  return count * sign;
+  return weekdays * sign;
 }
 
 export const fnNETWORKDAYS: NativeFn = args => {
@@ -478,7 +541,10 @@ export const fnNETWORKDAYS: NativeFn = args => {
     return endN;
   }
   const holidays = args.length > 2 ? collectHolidays(args[2]) : new Set<number>();
-  return rvNumber(networkdaysHelper(startN.value, endN.value, holidays));
+  if (holidays instanceof Set) {
+    return rvNumber(networkdaysHelper(startN.value, endN.value, holidays));
+  }
+  return holidays;
 };
 
 export const fnWORKDAY: NativeFn = args => {
@@ -491,9 +557,16 @@ export const fnWORKDAY: NativeFn = args => {
     return days;
   }
   const holidays = args.length > 2 ? collectHolidays(args[2]) : new Set<number>();
+  if (!(holidays instanceof Set)) {
+    return holidays;
+  }
   let current = Math.floor(startN.value);
-  const step = days.value >= 0 ? 1 : -1;
-  let remaining = Math.abs(days.value);
+  // Excel truncates `days` toward zero. Without this, a fractional input
+  // like 2.7 would walk extra iterations until the fractional remainder
+  // underflowed past zero, silently producing a wrong result.
+  const daysInt = Math.trunc(days.value);
+  const step = daysInt >= 0 ? 1 : -1;
+  let remaining = Math.abs(daysInt);
   while (remaining > 0) {
     current += step;
     const dt = toDate(current);
@@ -613,7 +686,7 @@ export const fnDATEVALUE: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]).trim();
+  const text = toStringRV(topLeft(args[0])).trim();
 
   // Lotus 1-2-3 bug: "2/29/1900" or "February 29, 1900" etc. should return 60
   const lotus29 =
@@ -634,7 +707,7 @@ export const fnTIMEVALUE: NativeFn = args => {
   if (err) {
     return err;
   }
-  const text = toStringRV(args[0]).trim();
+  const text = toStringRV(topLeft(args[0])).trim();
   const parsed = parseTimeOnly(text);
   if (parsed === null) {
     return ERRORS.VALUE;
@@ -797,7 +870,7 @@ export const fnDAYS360: NativeFn = args => {
   if (isError(endN)) {
     return endN;
   }
-  const methodRV = args.length > 2 ? toBooleanRV(args[2]) : rvBoolean(false);
+  const methodRV = args.length > 2 ? toBooleanRV(topLeft(args[2])) : rvBoolean(false);
   if (isError(methodRV)) {
     return methodRV;
   }
@@ -873,11 +946,17 @@ export const fnNETWORKDAYS_INTL: NativeFn = args => {
   if (isError(endN)) {
     return endN;
   }
-  const weekendArg = args.length > 2 ? argToNumber(args[2]) : rvNumber(1);
+  // Blank `weekend` → Excel default 1 (Sat+Sun). See getWeekendDays
+  // default fallback.
+  const weekendArg =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? argToNumber(args[2]) : rvNumber(1);
   if (isError(weekendArg)) {
     return weekendArg;
   }
   const holidays = args.length > 3 ? collectHolidays(args[3]) : new Set<number>();
+  if (!(holidays instanceof Set)) {
+    return holidays;
+  }
   const weekendDays = getWeekendDays(weekendArg.value);
   const s = Math.floor(Math.min(startN.value, endN.value));
   const e = Math.floor(Math.max(startN.value, endN.value));
@@ -901,15 +980,24 @@ export const fnWORKDAY_INTL: NativeFn = args => {
   if (isError(days)) {
     return days;
   }
-  const weekendArg = args.length > 2 ? argToNumber(args[2]) : rvNumber(1);
+  // Blank `weekend` → Excel default 1 (Sat+Sun).
+  const weekendArg =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? argToNumber(args[2]) : rvNumber(1);
   if (isError(weekendArg)) {
     return weekendArg;
   }
   const holidays = args.length > 3 ? collectHolidays(args[3]) : new Set<number>();
+  if (!(holidays instanceof Set)) {
+    return holidays;
+  }
   const weekendDays = getWeekendDays(weekendArg.value);
   let current = Math.floor(startN.value);
-  const step = days.value >= 0 ? 1 : -1;
-  let remaining = Math.abs(days.value);
+  // Truncate `days` toward zero before stepping — see WORKDAY for the
+  // same rationale. A fractional input like 2.7 would otherwise walk
+  // extra iterations and silently produce the wrong result.
+  const daysInt = Math.trunc(days.value);
+  const step = daysInt >= 0 ? 1 : -1;
+  let remaining = Math.abs(daysInt);
   while (remaining > 0) {
     current += step;
     const dt = toDate(current);

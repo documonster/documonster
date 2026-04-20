@@ -38,9 +38,15 @@ function prefixBindingPower(op: string): number {
   switch (op) {
     case "+":
     case "-":
-      // Must be lower than ^ (60/61) so that -2^3 parses as -(2^3), not (-2)^3.
-      // Excel: -2^2 = -4, not 4.
-      return 55;
+      // Excel's unary `-` binds TIGHTER than `^` — unique among
+      // spreadsheets and most programming languages. Microsoft's
+      // published precedence table places "Negation (as in –1)" at
+      // rank 1 (highest) and "Exponentiation" at rank 4.
+      //   =-2^2  →  (-2)^2  →  4    (NOT -(2^2) = -4)
+      //   =-2^3  →  (-2)^3  →  -8
+      // Previously we used 55 which routed via `^` (60/61) and produced
+      // `-(2^3)` — matching most languages but not Excel.
+      return 70;
     default:
       return 0;
   }
@@ -66,7 +72,11 @@ function infixBindingPower(op: string): [number, number] {
     case "/":
       return [40, 41];
     case "^":
-      return [61, 60]; // right-associative
+      // Excel is unusual: `^` is LEFT-associative (not right-associative
+      // like the math convention). `=2^3^2` evaluates to `(2^3)^2 = 64`,
+      // not `2^(3^2) = 512`. Using right-associative precedence silently
+      // diverged from Excel for any stacked exponent.
+      return [60, 61];
     // Intersection operator — whitespace between two refs. In Excel
     // precedence this sits between `:` (range, already handled at the
     // tokenizer level) and unary +/-. Left-associative, binds tighter
@@ -303,12 +313,24 @@ class Parser {
       return { type: NodeType.Error, value: t.value };
     }
 
-    // Parenthesized expression
+    // Parenthesized expression — also the syntactic entry point for
+    // reference unions: `(A1:B2, D4:E5)` is a multi-area reference
+    // that `INDEX(..., area_num)` can index into. A single expression
+    // inside parens is just an expression group (no UnionRef wrapper).
     if (t.type === TokenType.OpenParen) {
       this.next();
-      const expr = this.parseExpr(0);
+      const first = this.parseExpr(0);
+      if (this.peek()?.type === TokenType.Comma) {
+        const areas: AstNode[] = [first];
+        while (this.peek()?.type === TokenType.Comma) {
+          this.next(); // consume ','
+          areas.push(this.parseExpr(0));
+        }
+        this.expect(TokenType.CloseParen);
+        return { type: NodeType.UnionRef, areas };
+      }
       this.expect(TokenType.CloseParen);
-      return expr;
+      return first;
     }
 
     // Array constant: {1,2;3,4}

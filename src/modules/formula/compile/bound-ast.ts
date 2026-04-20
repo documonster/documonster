@@ -51,7 +51,8 @@ export const enum BoundExprKind {
   Array = 12,
   NameExpr = 13,
   Lambda = 14,
-  StructuredRef = 15
+  StructuredRef = 15,
+  UnionRef = 16
 }
 
 // ============================================================================
@@ -262,6 +263,20 @@ export interface BoundStructuredRef {
   readonly specials: readonly string[];
 }
 
+/**
+ * A union of reference-producing sub-expressions — `(A1:B2, D4:E5)`.
+ *
+ * Produced only by parenthesised comma lists, and only used by callers
+ * that explicitly know how to consume a multi-area reference (INDEX's
+ * `area_num`, AREAS, union-operator arithmetic). Evaluating a
+ * UnionRef in any other context surfaces as `#VALUE!` since Excel
+ * forbids arithmetic / coercion on disjoint areas.
+ */
+export interface BoundUnionRef {
+  readonly kind: BoundExprKind.UnionRef;
+  readonly areas: readonly BoundExpr[];
+}
+
 // ============================================================================
 // Discriminated Union
 // ============================================================================
@@ -281,7 +296,8 @@ export type BoundExpr =
   | BoundArray
   | BoundNameExpr
   | BoundLambda
-  | BoundStructuredRef;
+  | BoundStructuredRef
+  | BoundUnionRef;
 
 // ============================================================================
 // Constructor Helpers

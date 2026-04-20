@@ -271,10 +271,54 @@ export function rvArray(
       }
     }
   }
+  return buildArrayValue(
+    normalisedRows,
+    height,
+    width,
+    originRow,
+    originCol,
+    subtotalMask,
+    hiddenRowMask
+  );
+}
+
+/**
+ * Fast-path rectangular ArrayValue constructor.
+ *
+ * Callers that have already produced strictly-rectangular `rows` (every
+ * row is the same length — the length they explicitly `new Array(width)`
+ * allocated) can skip the two-pass width-scan + padding loop in
+ * `rvArray`. Examples: `buildRangeArray`, `broadcastBinaryOp`,
+ * `evaluateArrayLiteral`, `TRANSPOSE` — they all know `width` up front.
+ *
+ * Rows MUST be rectangular; passing ragged data will silently surface as
+ * `undefined` cells downstream.
+ */
+export function rvArrayRect(
+  rows: ScalarValue[][],
+  height: number,
+  width: number,
+  originRow?: number,
+  originCol?: number,
+  subtotalMask?: readonly (readonly boolean[])[],
+  hiddenRowMask?: readonly boolean[]
+): ArrayValue {
+  return buildArrayValue(rows, height, width, originRow, originCol, subtotalMask, hiddenRowMask);
+}
+
+function buildArrayValue(
+  rows: ScalarValue[][],
+  height: number,
+  width: number,
+  originRow: number | undefined,
+  originCol: number | undefined,
+  subtotalMask: readonly (readonly boolean[])[] | undefined,
+  hiddenRowMask: readonly boolean[] | undefined
+): ArrayValue {
   return originRow !== undefined
     ? {
         kind: RVKind.Array,
-        rows: normalisedRows,
+        rows,
         height,
         width,
         originRow,
@@ -284,7 +328,7 @@ export function rvArray(
       }
     : {
         kind: RVKind.Array,
-        rows: normalisedRows,
+        rows,
         height,
         width,
         ...(subtotalMask ? { subtotalMask } : {}),

@@ -168,6 +168,9 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
     case NodeType.StructuredRef:
       return bindStructuredRef(node.tableName, node.columns, node.specials, ctx);
 
+    case NodeType.UnionRef:
+      return bindUnionRef(node, ctx);
+
     default:
       return assertNever(node);
   }
@@ -233,6 +236,12 @@ function bindRangeRef(node: RangeRefNode, ctx: BindingContext): BoundExpr {
   const left = Math.min(startCol, endCol);
   const right = Math.max(startCol, endCol);
 
+  // Bounds-check the rectangle against Excel's sheet limits. Defined-name
+  // strings that bypass the tokenizer can carry arbitrary addresses.
+  if (top < 1 || bottom > 1_048_576 || left < 1 || right > 16_384) {
+    return boundErrorLiteral("#REF!");
+  }
+
   // 3D range reference: Sheet1:Sheet3!A1:B2
   if (node.endSheet) {
     const sheets = getSheetsInRange(ctx.snapshot, sheet, node.endSheet);
@@ -247,6 +256,14 @@ function bindRangeRef(node: RangeRefNode, ctx: BindingContext): BoundExpr {
     };
   }
 
+  // Validate sheet exists — matches the parity check `bindCellRef` and
+  // `bindColRangeRef` / `bindRowRangeRef` perform. Without this, a range
+  // like `NoSuchSheet!A1:B2` would silently bind to an empty-read at
+  // runtime instead of surfacing as `#REF!` at compile time.
+  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+    return boundErrorLiteral("#REF!");
+  }
+
   return boundAreaRef(sheet, top, left, bottom, right);
 }
 
@@ -259,6 +276,13 @@ function bindColRangeRef(
   const endCol = colLetterToNumber(node.endCol);
   const leftCol = Math.min(startCol, endCol);
   const rightCol = Math.max(startCol, endCol);
+
+  // Excel's maximum column is 16384 (XFD). The tokenizer enforces this
+  // for plain refs, but defined-name range strings that bypass the
+  // tokenizer could carry larger letter sequences (e.g. `ZZZ`).
+  if (leftCol < 1 || rightCol > 16_384) {
+    return boundErrorLiteral("#REF!");
+  }
 
   // Validate sheet exists
   if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
@@ -296,6 +320,12 @@ function bindRowRangeRef(
   const topRow = Math.min(node.startRow, node.endRow);
   const bottomRow = Math.max(node.startRow, node.endRow);
 
+  // Excel's maximum row is 1048576. Re-check here because defined-name
+  // strings can bypass the tokenizer.
+  if (topRow < 1 || bottomRow > 1_048_576) {
+    return boundErrorLiteral("#REF!");
+  }
+
   // Validate sheet exists
   if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
     return boundErrorLiteral("#REF!");
@@ -320,6 +350,26 @@ function bindRowRangeRef(
     sheet,
     topRow,
     bottomRow
+  };
+}
+
+// ============================================================================
+// Union Reference Binding — `(A1:B2, D4:E5)`
+// ============================================================================
+
+function bindUnionRef(node: { areas: AstNode[] }, ctx: BindingContext): BoundExpr {
+  // Each area must bind to a reference-producing expression. If any
+  // member is a non-reference literal, the whole union collapses to
+  // `#REF!` — Excel rejects things like `(1, A1)` outright. We defer
+  // the runtime-reference check (INDIRECT/OFFSET) to the evaluator.
+  const bounds: BoundExpr[] = [];
+  for (const area of node.areas) {
+    const bound = bind(area, ctx);
+    bounds.push(bound);
+  }
+  return {
+    kind: BoundExprKind.UnionRef,
+    areas: bounds
   };
 }
 
@@ -451,12 +501,11 @@ function findTable(snapshot: WorkbookSnapshot, tableName: string): TableWithShee
   if (!tableName) {
     return null;
   }
-  // Use the pre-built tablesByName index for O(1) lookup
-  const resolved = snapshot.tablesByName.get(tableName.toLowerCase());
-  if (resolved) {
-    return { table: resolved.table, sheetName: resolved.sheetName };
-  }
-  return null;
+  // Use the pre-built tablesByName index for O(1) lookup. The snapshot's
+  // `ResolvedTable` already matches our `TableWithSheet` shape (same
+  // `{ table, sheetName }` pair), so we can return it directly instead
+  // of wrapping every hit in a fresh object.
+  return snapshot.tablesByName.get(tableName.toLowerCase()) ?? null;
 }
 
 function resolveStructuredRefBounds(

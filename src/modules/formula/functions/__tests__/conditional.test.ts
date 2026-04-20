@@ -74,6 +74,46 @@ describe("buildCriteriaPredicateRV — operator parsing", () => {
     expect(pred(rvNumber(7))).toBe(false);
   });
 
+  it("`<>5` matches non-numeric cells (Excel: NaN !== numVal is true)", () => {
+    // Regression: a specialised numeric fast-path must NOT early-return
+    // `false` for NaN-coerced cells. Excel counts text cells against a
+    // numeric `<>` criterion.
+    const pred = buildCriteriaPredicateRV(rvString("<>5"));
+    expect(pred(rvNumber(5))).toBe(false);
+    expect(pred(rvNumber(7))).toBe(true);
+    expect(pred(rvString("abc"))).toBe(true);
+    expect(pred(BLANK)).toBe(true);
+  });
+
+  it("`=5` with text cells returns false (NaN === 5 is false)", () => {
+    const pred = buildCriteriaPredicateRV(rvString("=5"));
+    expect(pred(rvNumber(5))).toBe(true);
+    expect(pred(rvString("abc"))).toBe(false);
+    expect(pred(rvString("5"))).toBe(false); // string "5" stays textual
+  });
+
+  it("`>5` against text returns false (NaN > 5 is false)", () => {
+    const pred = buildCriteriaPredicateRV(rvString(">5"));
+    expect(pred(rvNumber(10))).toBe(true);
+    expect(pred(rvString("zzz"))).toBe(false);
+    expect(pred(BLANK)).toBe(false); // 0 > 5 is false
+  });
+
+  it("`>=0` matches blanks (blank coerces to 0)", () => {
+    const pred = buildCriteriaPredicateRV(rvString(">=0"));
+    expect(pred(BLANK)).toBe(true);
+    expect(pred(rvNumber(-1))).toBe(false);
+    expect(pred(rvBoolean(true))).toBe(true); // TRUE → 1
+    expect(pred(rvBoolean(false))).toBe(true); // FALSE → 0
+  });
+
+  it("`>abc` with string criterion does a string comparison", () => {
+    const pred = buildCriteriaPredicateRV(rvString(">abc"));
+    expect(pred(rvString("abd"))).toBe(true);
+    expect(pred(rvString("abc"))).toBe(false);
+    expect(pred(rvString("ABD"))).toBe(true); // case-insensitive
+  });
+
   it("=TEXT matches case-insensitively", () => {
     const pred = buildCriteriaPredicateRV(rvString("=abc"));
     expect(pred(rvString("ABC"))).toBe(true);
@@ -130,6 +170,24 @@ describe("buildCriteriaPredicateRV — wildcards", () => {
     const pred = buildCriteriaPredicateRV(rvString("A*"));
     expect(pred(rvString("apple"))).toBe(true);
   });
+
+  it("wildcard criteria only match text cells, not numbers (Excel behaviour)", () => {
+    // Regression: Excel's COUNTIF / SUMIF wildcards operate on text cells
+    // only. A criterion like `"1*"` must NOT match the number 1 (even
+    // though its string form is `"1"`); Excel would simply return 0.
+    const pred = buildCriteriaPredicateRV(rvString("1*"));
+    expect(pred(rvNumber(1))).toBe(false);
+    expect(pred(rvNumber(15))).toBe(false);
+    expect(pred(rvString("15"))).toBe(true);
+    expect(pred(rvString("1abc"))).toBe(true);
+  });
+
+  it("`?` wildcard also excludes numeric cells", () => {
+    const pred = buildCriteriaPredicateRV(rvString("?"));
+    expect(pred(rvNumber(5))).toBe(false);
+    expect(pred(rvString("x"))).toBe(true);
+    expect(pred(rvBoolean(true))).toBe(false);
+  });
 });
 
 describe("SUMIF", () => {
@@ -146,6 +204,16 @@ describe("SUMIF", () => {
   it("supports `<>` criterion (regression)", () => {
     // not "apple" → qty[1]+qty[2]+qty[4] = 2+3+5 = 10
     expect(asNumber(fnSUMIF([fruits, rvString("<>apple"), quantities]))).toBe(10);
+  });
+
+  it("propagates errors from the sum_range (Excel behaviour)", () => {
+    // Regression: previously silently skipped error cells in the
+    // sum-range, hiding `#DIV/0!` / `#VALUE!` under the aggregation.
+    // Excel propagates errors.
+    const range = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
+    const sumRange = rvArray([[rvNumber(10), ERRORS.DIV0, rvNumber(30)]]);
+    // Criterion `>0` matches all three cells; the middle one is #DIV/0!.
+    expect(fnSUMIF([range, rvString(">0"), sumRange])).toEqual(ERRORS.DIV0);
   });
 
   it("returns 0 when no cells match", () => {
@@ -365,12 +433,15 @@ describe("COUNTIF comprehensive", () => {
     expect(asNumber(fnCOUNTIF([arr, rvString(">0")]))).toBe(2);
   });
 
-  it("COUNTIF with '*' wildcard matches any stringified cell", () => {
-    // "*" matches 0+ of any char; per toStringRV() a number like 1 stringifies to "1"
-    // (matches), and blanks stringify to "" (also matches). This documents
-    // the current behaviour rather than Excel's stricter string-only rule.
+  it("COUNTIF with '*' wildcard matches only text cells (Excel behaviour)", () => {
+    // `*` matches 0+ of any character — but Excel restricts wildcard
+    // matching to TEXT cells. Numbers, blanks, booleans are not matched
+    // by `*` even though their stringified forms would be non-empty.
+    // Previously we stringified every cell through `toStringRV` which
+    // made `*` match numbers and emptied cells — a soft deviation from
+    // Excel. The tightened semantics match Excel's documented rule.
     const arr = rvArray([[rvString("a"), rvNumber(1), rvString(""), BLANK]]);
-    expect(asNumber(fnCOUNTIF([arr, rvString("*")]))).toBe(4);
+    expect(asNumber(fnCOUNTIF([arr, rvString("*")]))).toBe(2); // "a" + ""
   });
 
   it("empty result -> 0", () => {

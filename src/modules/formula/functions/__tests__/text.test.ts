@@ -917,6 +917,141 @@ describe("TEXT comprehensive", () => {
     const result = asString(fnTEXT([rvNumber(serial), rvString("hh:mm:ss")]));
     expect(result).toMatch(/^14:30:4[45]$/); // tolerate 1s rounding
   });
+
+  it("currency prefix — `$#,##0.00` renders a dollar amount", () => {
+    expect(asString(fnTEXT([rvNumber(1234.5), rvString("$#,##0.00")]))).toBe("$1,234.50");
+  });
+
+  it("currency with negative section wraps in parentheses", () => {
+    expect(asString(fnTEXT([rvNumber(-1234.5), rvString("$#,##0.00;($#,##0.00)")]))).toBe(
+      "($1,234.50)"
+    );
+  });
+
+  it('text literal prefix `"Result: "0` prepends the literal', () => {
+    expect(asString(fnTEXT([rvNumber(5), rvString('"Result: "0')]))).toBe("Result: 5");
+  });
+
+  it("backslash-escaped literal character", () => {
+    // `\$` produces a literal `$` exactly once, without triggering
+    // the built-in currency heuristics.
+    expect(asString(fnTEXT([rvNumber(5), rvString("\\$0")]))).toBe("$5");
+  });
+
+  it("percent with custom decimals `0.00%`", () => {
+    expect(asString(fnTEXT([rvNumber(0.1234), rvString("0.00%")]))).toBe("12.34%");
+  });
+
+  it("color tag `[Red]` is stripped before formatting", () => {
+    // Excel uses `[Red]` / `[Blue]` as a layout hint for the
+    // spreadsheet renderer. The TEXT function itself doesn't emit
+    // colour codes — the tag is stripped and the rest of the pattern
+    // formats normally.
+    expect(asString(fnTEXT([rvNumber(-5), rvString("[Red]0;[Red](0)")]))).toBe("(5)");
+  });
+
+  it("zero padding in integer section — `00000`", () => {
+    // Common zip-code style pattern.
+    expect(asString(fnTEXT([rvNumber(123), rvString("00000")]))).toBe("00123");
+  });
+
+  it("phone-number style `(###) ###-####`", () => {
+    // Layout-preserving digit placeholders with literal punctuation.
+    expect(asString(fnTEXT([rvNumber(1234567890), rvString("(###) ###-####")]))).toBe(
+      "(123) 456-7890"
+    );
+  });
+
+  it("date format with Chinese weekday text — `yyyy年m月d日`", () => {
+    // Non-ASCII literals between date tokens must pass through.
+    // 44927 = 2023-01-01.
+    expect(asString(fnTEXT([rvNumber(44927), rvString("yyyy年m月d日")]))).toBe("2023年1月1日");
+  });
+
+  it("fraction `# ?/?`", () => {
+    // 0.5 renders as `1/2` (or similar, implementation-dependent).
+    // We only check that a fraction marker appears in the result.
+    expect(asString(fnTEXT([rvNumber(0.5), rvString("# ?/?")]))).toMatch(/1\/2|0 1\/2/);
+  });
+
+  it("`m/d/yyyy h:mm AM/PM` renders 12-hour clock", () => {
+    // 44927 + 0.5625 = 2023-01-01 13:30 → "1/1/2023 1:30 PM"
+    const serial = 44927 + (13 * 3600 + 30 * 60) / 86400;
+    const out = asString(fnTEXT([rvNumber(serial), rvString("m/d/yyyy h:mm AM/PM")]));
+    expect(out).toBe("1/1/2023 1:30 PM");
+  });
+
+  it("`h:mm AM/PM` midnight and noon", () => {
+    expect(asString(fnTEXT([rvNumber(0), rvString("h:mm AM/PM")]))).toBe("12:00 AM");
+    expect(asString(fnTEXT([rvNumber(0.5), rvString("h:mm AM/PM")]))).toBe("12:00 PM");
+  });
+
+  it("thousands-scaling comma in format — `0,` divides by 1000", () => {
+    // Trailing commas after digit slots but before the decimal point
+    // act as a "divide by 1000" scaling factor in Excel. Each trailing
+    // comma multiplies the divisor by 1000.
+    // 1,234,567 → "1,235" (divide by 1000, round half away from zero)
+    expect(asString(fnTEXT([rvNumber(1234567), rvString("#,##0,")]))).toBe("1,235");
+    // 1,234,567,890 → "1,235" (divide by 1,000,000)
+    expect(asString(fnTEXT([rvNumber(1234567890), rvString("#,##0,,")]))).toBe("1,235");
+    // No trailing comma — full number with thousands grouping.
+    expect(asString(fnTEXT([rvNumber(1234567), rvString("#,##0")]))).toBe("1,234,567");
+  });
+
+  it("thousands-scaling with negative section", () => {
+    // Negative section should also apply scaling: -1,234,567 with
+    // `#,##0,;(#,##0,)` → `(1,235)` (negative, scaled by 1000,
+    // wrapped in parentheses).
+    expect(asString(fnTEXT([rvNumber(-1234567), rvString("#,##0,;(#,##0,)")]))).toBe("(1,235)");
+  });
+
+  it("thousands-scaling of zero and small values", () => {
+    // Regression: `TEXT(0, "#,##0")` previously emitted "00" — the
+    // integer's single "0" was left-aligned into the pattern's first
+    // `#` slot AND the rightmost mandatory `0` slot also padded with
+    // "0", producing a duplicated leading zero. The fix right-aligns
+    // the integer: leading `#` slots now emit nothing and only the
+    // rightmost mandatory slot pads.
+    expect(asString(fnTEXT([rvNumber(0), rvString("#,##0")]))).toBe("0");
+    expect(asString(fnTEXT([rvNumber(0), rvString("#,##0,")]))).toBe("0");
+    // 500 / 1000 = 0.5 → rounded to 1.
+    expect(asString(fnTEXT([rvNumber(500), rvString("#,##0,")]))).toBe("1");
+    // 400 / 1000 = 0.4 → rounded to 0.
+    expect(asString(fnTEXT([rvNumber(400), rvString("#,##0,")]))).toBe("0");
+    // Verify right-alignment into `0000` (all mandatory slots):
+    // 5 → "0005", not "5000".
+    expect(asString(fnTEXT([rvNumber(5), rvString("0000")]))).toBe("0005");
+    // `#000` — 1 optional leading + 3 mandatory: 5 → "005".
+    expect(asString(fnTEXT([rvNumber(5), rvString("#000")]))).toBe("005");
+  });
+
+  it("zero-padding edge cases for `0000`-style formats", () => {
+    // Right-alignment / overflow combinations.
+    expect(asString(fnTEXT([rvNumber(12345), rvString("000")]))).toBe("12345");
+    expect(asString(fnTEXT([rvNumber(123), rvString("0000")]))).toBe("0123");
+    expect(asString(fnTEXT([rvNumber(12345), rvString("0000")]))).toBe("12345");
+    // Negative preserves sign outside the padded form.
+    expect(asString(fnTEXT([rvNumber(-42), rvString("0000")]))).toBe("-0042");
+  });
+
+  it("decimal format with more fraction slots than input digits pads zeros", () => {
+    // 1.5 with `.00` → "1.50", not "1.5".
+    expect(asString(fnTEXT([rvNumber(1.5), rvString("0.00")]))).toBe("1.50");
+    // 0.1 with `0.0000` → "0.1000".
+    expect(asString(fnTEXT([rvNumber(0.1), rvString("0.0000")]))).toBe("0.1000");
+  });
+
+  it("decimal format with more digits than fraction slots rounds (not truncates)", () => {
+    // 1.999 with `0.0` → "2.0" (half-away-from-zero rounds up).
+    expect(asString(fnTEXT([rvNumber(1.999), rvString("0.0")]))).toBe("2.0");
+    // 0.125 with `0.00` → "0.13" (round half away from zero; 0.125 → 0.13).
+    expect(asString(fnTEXT([rvNumber(0.125), rvString("0.00")]))).toBe("0.13");
+  });
+
+  it("percent with negative input preserves sign", () => {
+    expect(asString(fnTEXT([rvNumber(-0.5), rvString("0%")]))).toBe("-50%");
+    expect(asString(fnTEXT([rvNumber(-0.1234), rvString("0.00%")]))).toBe("-12.34%");
+  });
 });
 
 describe("VALUE comprehensive", () => {
@@ -2428,8 +2563,13 @@ describe("NUMBERVALUE deep coverage", () => {
   it("NUMBERVALUE rejects whitespace-only", () => {
     expect(fnNUMBERVALUE([rvString("   ")])).toEqual(ERRORS.VALUE);
   });
-  it("NUMBERVALUE rejects repeated percent suffixes", () => {
-    expect(fnNUMBERVALUE([rvString("50%%")])).toEqual(ERRORS.VALUE);
+  it("NUMBERVALUE divides by 100 once per trailing percent (Excel docs)", () => {
+    // Regression: engine used to accept only a single trailing `%` and
+    // report `#VALUE!` for repeated ones. Excel's docs explicitly say
+    // "divides Text by 100 once for each % character", so `"50%%"` =
+    // 50 / 100 / 100 = 0.005.
+    expect(asNumber(fnNUMBERVALUE([rvString("50%%")]))).toBe(0.005);
+    expect(asNumber(fnNUMBERVALUE([rvString("100%%%")]))).toBe(0.0001);
   });
   it("NUMBERVALUE with semicolon decimal separator", () => {
     expect(asNumber(fnNUMBERVALUE([rvString("1;5"), rvString(";")]))).toBe(1.5);

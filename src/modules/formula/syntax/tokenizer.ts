@@ -486,23 +486,51 @@ export function tokenize(formula: string): Token[] {
     // String literals
     if (ch === '"') {
       i++; // skip opening quote
-      let str = "";
+      // Fast path: walk forward looking for a closing quote. In the common
+      // case (no escaped quotes) we emit a single `slice` rather than
+      // growing a string byte by byte. The slow path falls back to the
+      // explicit escape-aware concat when we actually see `""`.
+      const start = i;
       let closed = false;
+      let firstEscape = -1;
       while (i < len) {
         if (formula[i] === '"') {
           if (i + 1 < len && formula[i + 1] === '"') {
-            // Escaped quote
-            str += '"';
-            i += 2;
-          } else {
-            i++; // skip closing quote
-            closed = true;
+            firstEscape = i;
             break;
           }
-        } else {
-          str += formula[i];
-          i++;
+          closed = true;
+          break;
         }
+        i++;
+      }
+      let str: string;
+      if (firstEscape !== -1) {
+        // At least one escaped quote — use the classic byte-by-byte loop
+        // starting from the first escape so the prefix can still come
+        // from `slice`.
+        str = formula.slice(start, firstEscape);
+        i = firstEscape;
+        while (i < len) {
+          if (formula[i] === '"') {
+            if (i + 1 < len && formula[i + 1] === '"') {
+              str += '"';
+              i += 2;
+            } else {
+              i++;
+              closed = true;
+              break;
+            }
+          } else {
+            str += formula[i];
+            i++;
+          }
+        }
+      } else if (closed) {
+        str = formula.slice(start, i);
+        i++; // consume closing quote
+      } else {
+        str = formula.slice(start, i);
       }
       if (!closed) {
         // Unterminated string literal — reject at tokenize time so we
@@ -773,19 +801,45 @@ export function tokenize(formula: string): Token[] {
     // Quoted sheet name: 'Sheet Name'! or 3D ref 'Sheet1:Sheet3'!
     if (ch === "'") {
       i++; // skip opening quote
-      let sheetName = "";
+      // Fast path: scan to the first `'` — most sheet names don't contain
+      // an escaped quote, so we can slice the prefix verbatim instead of
+      // growing a string byte-by-byte.
+      const start = i;
+      let firstEscape = -1;
       while (i < len) {
         if (formula[i] === "'") {
           if (i + 1 < len && formula[i + 1] === "'") {
-            sheetName += "'";
-            i += 2;
-          } else {
-            i++; // skip closing quote
+            firstEscape = i;
             break;
           }
-        } else {
-          sheetName += formula[i];
-          i++;
+          break;
+        }
+        i++;
+      }
+      let sheetName: string;
+      if (firstEscape !== -1) {
+        sheetName = formula.slice(start, firstEscape);
+        i = firstEscape;
+        // Slow path from the first escape: consume `''` pairs and
+        // literal characters until the terminating single `'`.
+        while (i < len) {
+          if (formula[i] === "'") {
+            if (i + 1 < len && formula[i + 1] === "'") {
+              sheetName += "'";
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            sheetName += formula[i];
+            i++;
+          }
+        }
+      } else {
+        sheetName = formula.slice(start, i);
+        if (i < len && formula[i] === "'") {
+          i++; // consume closing quote
         }
       }
       // Expect ! after

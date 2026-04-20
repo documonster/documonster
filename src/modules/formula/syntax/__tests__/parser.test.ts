@@ -88,25 +88,34 @@ describe("parser — arithmetic precedence", () => {
     expect((right.right as NumberNode).value).toBe(3);
   });
 
-  it("parses '^' as right-associative", () => {
-    // 2^3^2 → 2^(3^2)
+  it("parses '^' as left-associative (Excel behaviour)", () => {
+    // Regression: Excel evaluates multiple `^` left-to-right, so
+    // `=2^3^2` is `(2^3)^2 = 64`, NOT `2^(3^2) = 512`. Previous
+    // precedence (61/60, right-assoc) produced 512 — matching the
+    // math convention but not Excel.
     const ast = compile("2^3^2") as BinaryOpNode;
     expect(ast.op).toBe("^");
-    expect((ast.left as NumberNode).value).toBe(2);
-    const right = ast.right as BinaryOpNode;
-    expect(right.op).toBe("^");
-    expect((right.left as NumberNode).value).toBe(3);
-    expect((right.right as NumberNode).value).toBe(2);
+    // Left side is (2^3), right side is literal 2
+    const left = ast.left as BinaryOpNode;
+    expect(left.op).toBe("^");
+    expect((left.left as NumberNode).value).toBe(2);
+    expect((left.right as NumberNode).value).toBe(3);
+    expect((ast.right as NumberNode).value).toBe(2);
   });
 
-  it("parses unary minus with lower precedence than '^'", () => {
-    // Excel: -2^2 = -4 (i.e. parsed as -(2^2)).
-    const ast = compile("-2^2") as UnaryOpNode;
-    expect(ast.type).toBe(NodeType.UnaryOp);
-    expect(ast.op).toBe("-");
-    const inner = ast.operand as BinaryOpNode;
-    expect(inner.type).toBe(NodeType.BinaryOp);
-    expect(inner.op).toBe("^");
+  it("parses unary minus with HIGHER precedence than '^' (Excel quirk)", () => {
+    // Regression: Excel's precedence table ranks negation (1) higher
+    // than exponentiation (4). So `=-2^2 = 4` (= (-2)^2), NOT -4.
+    // Previously unary minus was parsed at precedence 55 below `^`'s
+    // 60/61, producing `-(2^2)`. The behaviour now matches Excel.
+    const ast = compile("-2^2") as BinaryOpNode;
+    expect(ast.type).toBe(NodeType.BinaryOp);
+    expect(ast.op).toBe("^");
+    const left = ast.left as UnaryOpNode;
+    expect(left.type).toBe(NodeType.UnaryOp);
+    expect(left.op).toBe("-");
+    expect((left.operand as NumberNode).value).toBe(2);
+    expect((ast.right as NumberNode).value).toBe(2);
   });
 
   it("parses unary plus as a UnaryOp", () => {

@@ -213,10 +213,20 @@ describe("lookupFunction: alias equivalence", () => {
     sameImpl("RANK.EQ", "RANK");
   });
 
-  it("CEILING.MATH / CEILING.PRECISE / ISO.CEILING share CEILING impl", () => {
-    sameImpl("CEILING.MATH", "CEILING");
-    sameImpl("CEILING.PRECISE", "CEILING");
-    sameImpl("ISO.CEILING", "CEILING");
+  it("CEILING.MATH / CEILING.PRECISE / ISO.CEILING use dedicated variant impls", () => {
+    // Regression: Excel's CEILING.MATH and CEILING.PRECISE have different
+    // semantics from classic CEILING (mixed-sign tolerance, |significance|,
+    // mode argument). They used to delegate to fnCEILING, which silently
+    // emitted #NUM! for negative num + positive sig — a soft divergence
+    // from Excel. Each variant now has its own implementation; ISO.CEILING
+    // aliases CEILING.PRECISE.
+    const ceiling = lookupFunction("CEILING");
+    const ceilingMath = lookupFunction("CEILING.MATH");
+    const ceilingPrecise = lookupFunction("CEILING.PRECISE");
+    const isoCeiling = lookupFunction("ISO.CEILING");
+    expect(ceiling?.invoke).not.toBe(ceilingMath?.invoke);
+    expect(ceiling?.invoke).not.toBe(ceilingPrecise?.invoke);
+    expect(ceilingPrecise?.invoke).toBe(isoCeiling?.invoke);
   });
 
   it("FORECAST.LINEAR aliases FORECAST", () => {
@@ -236,6 +246,7 @@ describe("lookupFunction: alias equivalence", () => {
     sameImpl("LENB", "LEN");
     sameImpl("FINDB", "FIND");
     sameImpl("SEARCHB", "SEARCH");
+    sameImpl("REPLACEB", "REPLACE");
   });
 
   it("ZTEST / Z.TEST share impl", () => {

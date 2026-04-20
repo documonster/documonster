@@ -93,33 +93,76 @@ export function fnFILTER(args: RuntimeValue[]): RuntimeValue {
   if (!dataArr || !includeArr) {
     return ERRORS.VALUE;
   }
-  // Excel requires `include` to be a 1-column vector matching data's
-  // height (the common row-filter shape). A mismatched shape previously
-  // let rows slip through silently because `getCell` out-of-bounds
-  // returns BLANK, which reads as FALSE.
-  if (includeArr.width !== 1 || includeArr.height !== dataArr.height) {
+  const ifEmpty = args.length > 2 && args[2].kind !== RVKind.Blank ? topLeft(args[2]) : null;
+
+  // Decide filter orientation from the include vector's shape:
+  //   - N×1 vector matching data.height → ROW filter (classic).
+  //   - 1×N vector matching data.width  → COL filter (Excel supports
+  //     both; previously we hard-required the row shape and silently
+  //     rejected column filters with #VALUE!).
+  // A 1×1 include vector is treated as a row filter over 1 row.
+  const isRowFilter = includeArr.width === 1 && includeArr.height === dataArr.height;
+  const isColFilter = !isRowFilter && includeArr.height === 1 && includeArr.width === dataArr.width;
+  if (!isRowFilter && !isColFilter) {
     return ERRORS.VALUE;
   }
-  const ifEmpty = args.length > 2 ? topLeft(args[2]) : null;
-  const resultRows: ScalarValue[][] = [];
-  for (let r = 0; r < dataArr.height; r++) {
-    const inc = getCell(includeArr, r, 0);
-    if (inc.kind === RVKind.Error) {
-      return inc;
+
+  const cellIsTruthy = (cell: ScalarValue): RuntimeValue | boolean => {
+    if (cell.kind === RVKind.Error) {
+      return cell;
     }
-    if (
-      (inc.kind === RVKind.Boolean && inc.value) ||
-      (inc.kind === RVKind.Number && inc.value !== 0)
-    ) {
-      const row: ScalarValue[] = [];
-      for (let c = 0; c < dataArr.width; c++) {
-        row.push(getCell(dataArr, r, c));
+    if (cell.kind === RVKind.Boolean) {
+      return cell.value;
+    }
+    if (cell.kind === RVKind.Number) {
+      return cell.value !== 0;
+    }
+    // Blank / String / anything else → treated as FALSE.
+    return false;
+  };
+
+  if (isRowFilter) {
+    const resultRows: ScalarValue[][] = [];
+    for (let r = 0; r < dataArr.height; r++) {
+      const truthy = cellIsTruthy(getCell(includeArr, r, 0));
+      if (typeof truthy !== "boolean") {
+        return truthy;
       }
-      resultRows.push(row);
+      if (truthy) {
+        const row: ScalarValue[] = [];
+        for (let c = 0; c < dataArr.width; c++) {
+          row.push(getCell(dataArr, r, c));
+        }
+        resultRows.push(row);
+      }
+    }
+    if (resultRows.length === 0) {
+      return ifEmpty !== null ? rvArray([[ifEmpty]]) : ERRORS.CALC;
+    }
+    return rvArray(resultRows);
+  }
+
+  // Column filter — pick a subset of columns across every row.
+  const keepCols: number[] = [];
+  for (let c = 0; c < dataArr.width; c++) {
+    const truthy = cellIsTruthy(getCell(includeArr, 0, c));
+    if (typeof truthy !== "boolean") {
+      return truthy;
+    }
+    if (truthy) {
+      keepCols.push(c);
     }
   }
-  if (resultRows.length === 0) {
+  if (keepCols.length === 0) {
     return ifEmpty !== null ? rvArray([[ifEmpty]]) : ERRORS.CALC;
+  }
+  const resultRows: ScalarValue[][] = [];
+  for (let r = 0; r < dataArr.height; r++) {
+    const row: ScalarValue[] = new Array<ScalarValue>(keepCols.length);
+    for (let i = 0; i < keepCols.length; i++) {
+      row[i] = getCell(dataArr, r, keepCols[i]);
+    }
+    resultRows.push(row);
   }
   return rvArray(resultRows);
 }
@@ -137,16 +180,29 @@ export function fnSORT(args: RuntimeValue[]): RuntimeValue {
     }
     rows.push(row);
   }
-  const sortIndexV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(1);
+  const sortIndexV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? toNumberRV(topLeft(args[1])) : rvNumber(1);
   if (isError(sortIndexV)) {
     return sortIndexV;
   }
-  const sortOrderV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(1);
+  // Blank `sort_order` → Excel's default 1 (ascending). Without this
+  // guard the blank coerces through `toNumberRV` to 0, which multiplies
+  // the comparator output and produces a no-op sort — every pair is
+  // treated as equal and the output order is engine-defined noise.
+  const sortOrderV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(1);
   if (isError(sortOrderV)) {
     return sortOrderV;
   }
+  // Excel restricts `sort_order` to exactly 1 or -1; any other integer
+  // (0, 2, 3, …) is #VALUE!. Previously zero silently disabled the sort.
+  if (sortOrderV.value !== 1 && sortOrderV.value !== -1) {
+    return ERRORS.VALUE;
+  }
   const byColV =
-    args.length > 3 ? toBooleanRV(args[3]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 3
+      ? toBooleanRV(topLeft(args[3]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(byColV)) {
     return byColV;
   }
@@ -182,12 +238,16 @@ export function fnUNIQUE(args: RuntimeValue[]): RuntimeValue {
     return ERRORS.VALUE;
   }
   const byColV =
-    args.length > 1 ? toBooleanRV(args[1]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 1
+      ? toBooleanRV(topLeft(args[1]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(byColV)) {
     return byColV;
   }
   const exactlyOnceV =
-    args.length > 2 ? toBooleanRV(args[2]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 2
+      ? toBooleanRV(topLeft(args[2]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(exactlyOnceV)) {
     return exactlyOnceV;
   }
@@ -291,9 +351,18 @@ export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
     if (!keyArr) {
       return ERRORS.VALUE;
     }
-    const orderV = i + 1 < args.length ? toNumberRV(args[i + 1]) : rvNumber(1);
+    // Blank order → default 1 (ascending); anything other than ±1 is
+    // #VALUE!. Mirrors the SORT validation — a blank used to produce
+    // 0 via `toNumberRV`, silently disabling the sort key.
+    const orderV =
+      i + 1 < args.length && args[i + 1].kind !== RVKind.Blank
+        ? toNumberRV(topLeft(args[i + 1]))
+        : rvNumber(1);
     if (isError(orderV)) {
       return orderV;
+    }
+    if (orderV.value !== 1 && orderV.value !== -1) {
+      return ERRORS.VALUE;
     }
     sortKeys.push({ arr: keyArr, order: orderV.value });
   }
@@ -312,7 +381,7 @@ export function fnSORTBY(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnSUBTOTAL(args: RuntimeValue[]): RuntimeValue {
-  const funcNumV = toNumberRV(args[0]);
+  const funcNumV = toNumberRV(topLeft(args[0]));
   if (isError(funcNumV)) {
     return funcNumV;
   }
@@ -365,7 +434,7 @@ export function fnSUBTOTAL(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnAGGREGATE(args: RuntimeValue[]): RuntimeValue {
-  const funcNumV = toNumberRV(args[0]);
+  const funcNumV = toNumberRV(topLeft(args[0]));
   if (isError(funcNumV)) {
     return funcNumV;
   }
@@ -379,7 +448,7 @@ export function fnAGGREGATE(args: RuntimeValue[]): RuntimeValue {
   //   5 → ignore hidden rows (keep nested)
   //   6 → ignore errors (keep nested)
   //   7 → ignore hidden rows + errors (keep nested)
-  const optV = args[1] !== undefined ? toNumberRV(args[1]) : undefined;
+  const optV = args[1] !== undefined ? toNumberRV(topLeft(args[1])) : undefined;
   if (optV && isError(optV)) {
     return optV;
   }
@@ -445,19 +514,25 @@ export function fnAGGREGATE(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnSEQUENCE(args: RuntimeValue[]): RuntimeValue {
-  const rowsV = toNumberRV(args[0]);
+  const rowsV = toNumberRV(topLeft(args[0]));
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(1);
+  // Blank `cols` / `start` / `step` → Excel defaults 1 / 1 / 1. Without
+  // the blank guards, `SEQUENCE(5, )` coerces blank → 0 → `colCount < 1`
+  // → #NUM! instead of Excel's single-column sequence.
+  const colsV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? toNumberRV(topLeft(args[1])) : rvNumber(1);
   if (isError(colsV)) {
     return colsV;
   }
-  const startV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(1);
+  const startV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(1);
   if (isError(startV)) {
     return startV;
   }
-  const stepV = args.length > 3 ? toNumberRV(args[3]) : rvNumber(1);
+  const stepV =
+    args.length > 3 && args[3].kind !== RVKind.Blank ? toNumberRV(topLeft(args[3])) : rvNumber(1);
   if (isError(stepV)) {
     return stepV;
   }
@@ -490,24 +565,34 @@ export function fnSEQUENCE(args: RuntimeValue[]): RuntimeValue {
 }
 
 export function fnRANDARRAY(args: RuntimeValue[]): RuntimeValue {
-  const rowsV = args.length > 0 ? toNumberRV(args[0]) : rvNumber(1);
+  // Each arg has a distinct Excel default; blank must be distinguished
+  // from an explicit 0, which would cause rows/cols validation to
+  // reject the call. Blanks → engine defaults (rows=1, cols=1, min=0,
+  // max=1, whole=FALSE).
+  const rowsV =
+    args.length > 0 && args[0].kind !== RVKind.Blank ? toNumberRV(topLeft(args[0])) : rvNumber(1);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(1);
+  const colsV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? toNumberRV(topLeft(args[1])) : rvNumber(1);
   if (isError(colsV)) {
     return colsV;
   }
-  const minV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(0);
+  const minV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(0);
   if (isError(minV)) {
     return minV;
   }
-  const maxV = args.length > 3 ? toNumberRV(args[3]) : rvNumber(1);
+  const maxV =
+    args.length > 3 && args[3].kind !== RVKind.Blank ? toNumberRV(topLeft(args[3])) : rvNumber(1);
   if (isError(maxV)) {
     return maxV;
   }
   const wholeV =
-    args.length > 4 ? toBooleanRV(args[4]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 4 && args[4].kind !== RVKind.Blank
+      ? toBooleanRV(topLeft(args[4]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(wholeV)) {
     return wholeV;
   }
@@ -556,12 +641,14 @@ export function fnTOCOL(args: RuntimeValue[]): RuntimeValue {
     return rvArray([[topLeft(args[0])]]);
   }
   const arr = args[0] as ArrayValue;
-  const ignoreV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const ignoreV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(ignoreV)) {
     return ignoreV;
   }
   const scanV =
-    args.length > 2 ? toBooleanRV(args[2]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 2
+      ? toBooleanRV(topLeft(args[2]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(scanV)) {
     return scanV;
   }
@@ -599,12 +686,14 @@ export function fnTOROW(args: RuntimeValue[]): RuntimeValue {
     return rvArray([[topLeft(args[0])]]);
   }
   const arr = args[0] as ArrayValue;
-  const ignoreV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const ignoreV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(ignoreV)) {
     return ignoreV;
   }
   const scanV =
-    args.length > 2 ? toBooleanRV(args[2]) : { kind: RVKind.Boolean as const, value: false };
+    args.length > 2
+      ? toBooleanRV(topLeft(args[2]))
+      : { kind: RVKind.Boolean as const, value: false };
   if (isError(scanV)) {
     return scanV;
   }
@@ -644,11 +733,18 @@ export function fnCHOOSEROWS(args: RuntimeValue[]): RuntimeValue {
   }
   const result: ScalarValue[][] = [];
   for (let i = 1; i < args.length; i++) {
-    const nV = toNumberRV(args[i]);
+    const nV = toNumberRV(topLeft(args[i]));
     if (isError(nV)) {
       return nV;
     }
-    const idx = nV.value > 0 ? nV.value - 1 : d.height + nV.value;
+    // Excel truncates toward zero before the bounds check; without this,
+    // `CHOOSEROWS(A1:A5, 2.5)` would compute `idx = 1.5` and end up
+    // reading `d.rows[1.5]` (= undefined), throwing on the next index.
+    const raw = Math.trunc(nV.value);
+    if (raw === 0) {
+      return ERRORS.VALUE;
+    }
+    const idx = raw > 0 ? raw - 1 : d.height + raw;
     if (idx < 0 || idx >= d.height) {
       return ERRORS.VALUE;
     }
@@ -668,11 +764,17 @@ export function fnCHOOSECOLS(args: RuntimeValue[]): RuntimeValue {
   }
   const ci: number[] = [];
   for (let i = 1; i < args.length; i++) {
-    const nV = toNumberRV(args[i]);
+    const nV = toNumberRV(topLeft(args[i]));
     if (isError(nV)) {
       return nV;
     }
-    const idx = nV.value > 0 ? nV.value - 1 : d.width + nV.value;
+    // Truncate fractional indices before the bounds check — see CHOOSEROWS
+    // for the rationale (fractional indices silently crash getCell).
+    const raw = Math.trunc(nV.value);
+    if (raw === 0) {
+      return ERRORS.VALUE;
+    }
+    const idx = raw > 0 ? raw - 1 : d.width + raw;
     if (idx < 0 || idx >= d.width) {
       return ERRORS.VALUE;
     }
@@ -762,18 +864,24 @@ export function fnTAKE(args: RuntimeValue[]): RuntimeValue {
   if (!d) {
     return ERRORS.VALUE;
   }
-  const rowsV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(d.height);
+  const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(d.width);
+  const colsV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(d.width);
   if (isError(colsV)) {
     return colsV;
   }
-  const rS = rowsV.value >= 0 ? 0 : Math.max(0, d.height + rowsV.value);
-  const rE = rowsV.value >= 0 ? Math.min(rowsV.value, d.height) : d.height;
-  const cS = colsV.value >= 0 ? 0 : Math.max(0, d.width + colsV.value);
-  const cE = colsV.value >= 0 ? Math.min(colsV.value, d.width) : d.width;
+  // Truncate toward zero before using these as array indices. Without
+  // it, `TAKE(A1:A5, 2.7)` lands `rE = 2.7` in the slice bounds; V8
+  // silently walks the integer range `0..2` but a misuse of the value
+  // elsewhere (`d.rows[r]` with `r` fractional) would return undefined.
+  const rows = Math.trunc(rowsV.value);
+  const cols = Math.trunc(colsV.value);
+  const rS = rows >= 0 ? 0 : Math.max(0, d.height + rows);
+  const rE = rows >= 0 ? Math.min(rows, d.height) : d.height;
+  const cS = cols >= 0 ? 0 : Math.max(0, d.width + cols);
+  const cE = cols >= 0 ? Math.min(cols, d.width) : d.width;
   const result: ScalarValue[][] = [];
   for (let r = rS; r < rE; r++) {
     const row: ScalarValue[] = [];
@@ -790,18 +898,21 @@ export function fnDROP(args: RuntimeValue[]): RuntimeValue {
   if (!d) {
     return ERRORS.VALUE;
   }
-  const rowsV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0);
+  const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(0);
+  const colsV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(0);
   if (isError(colsV)) {
     return colsV;
   }
-  const rS = rowsV.value >= 0 ? rowsV.value : 0;
-  const rE = rowsV.value >= 0 ? d.height : d.height + rowsV.value;
-  const cS = colsV.value >= 0 ? colsV.value : 0;
-  const cE = colsV.value >= 0 ? d.width : d.width + colsV.value;
+  // Truncate — see TAKE for rationale.
+  const rows = Math.trunc(rowsV.value);
+  const cols = Math.trunc(colsV.value);
+  const rS = rows >= 0 ? rows : 0;
+  const rE = rows >= 0 ? d.height : d.height + rows;
+  const cS = cols >= 0 ? cols : 0;
+  const cE = cols >= 0 ? d.width : d.width + cols;
   const result: ScalarValue[][] = [];
   for (let r = rS; r < rE; r++) {
     const row: ScalarValue[] = [];
@@ -826,18 +937,22 @@ export function fnWRAPROWS(args: RuntimeValue[]): RuntimeValue {
       flat.push(getCell(arr, r, c));
     }
   }
-  const wcV = toNumberRV(args[1]);
+  const wcV = toNumberRV(topLeft(args[1]));
   if (isError(wcV)) {
     return wcV;
   }
-  if (wcV.value < 1) {
+  // Truncate toward zero before using as a stride — `i += 2.5` and
+  // `row.length < 2.5` work by accidental float coercion in V8, but the
+  // intent is an integer wrap width; encode it explicitly.
+  const wc = Math.trunc(wcV.value);
+  if (wc < 1) {
     return ERRORS.VALUE;
   }
   const pad: ScalarValue = args.length > 2 ? topLeft(args[2]) : ERRORS.NA;
   const result: ScalarValue[][] = [];
-  for (let i = 0; i < flat.length; i += wcV.value) {
-    const row = flat.slice(i, i + wcV.value);
-    while (row.length < wcV.value) {
+  for (let i = 0; i < flat.length; i += wc) {
+    const row = flat.slice(i, i + wc);
+    while (row.length < wc) {
       row.push(pad);
     }
     result.push(row);
@@ -856,20 +971,21 @@ export function fnWRAPCOLS(args: RuntimeValue[]): RuntimeValue {
       flat.push(getCell(arr, r, c));
     }
   }
-  const wcV = toNumberRV(args[1]);
+  const wcV = toNumberRV(topLeft(args[1]));
   if (isError(wcV)) {
     return wcV;
   }
-  if (wcV.value < 1) {
+  const wc = Math.trunc(wcV.value);
+  if (wc < 1) {
     return ERRORS.VALUE;
   }
   const pad: ScalarValue = args.length > 2 ? topLeft(args[2]) : ERRORS.NA;
-  const numCols = Math.ceil(flat.length / wcV.value);
+  const numCols = Math.ceil(flat.length / wc);
   const result: ScalarValue[][] = [];
-  for (let r = 0; r < wcV.value; r++) {
+  for (let r = 0; r < wc; r++) {
     const row: ScalarValue[] = [];
     for (let c = 0; c < numCols; c++) {
-      const idx = c * wcV.value + r;
+      const idx = c * wc + r;
       row.push(idx < flat.length ? flat[idx] : pad);
     }
     result.push(row);
@@ -882,11 +998,11 @@ export function fnEXPAND(args: RuntimeValue[]): RuntimeValue {
   if (!d) {
     return ERRORS.VALUE;
   }
-  const rowsV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(d.height);
+  const rowsV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(d.height);
   if (isError(rowsV)) {
     return rowsV;
   }
-  const colsV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(d.width);
+  const colsV = args.length > 2 ? toNumberRV(topLeft(args[2])) : rvNumber(d.width);
   if (isError(colsV)) {
     return colsV;
   }

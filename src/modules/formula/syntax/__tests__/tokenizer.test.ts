@@ -124,6 +124,41 @@ describe("tokenizer — strings and booleans", () => {
     expect((toks[0] as StringToken).value).toBe("");
   });
 
+  it("handles a long string without embedded quotes (slice fast path)", () => {
+    // Regression: the fast-path `slice`-based string tokenizer must yield
+    // the same value as the escape-aware slow path. A long run with
+    // 1000+ characters exercises the path where the old `str +=` loop
+    // produced O(n²) allocation.
+    const long = "a".repeat(2000);
+    const toks = tokenize(`"${long}"`);
+    expect(toks).toHaveLength(1);
+    expect((toks[0] as StringToken).value).toBe(long);
+  });
+
+  it("handles a string with only escape sequences", () => {
+    // `""""` → three runs of two quotes each → literal `"` + `"` = `""`
+    const toks = tokenize('""""""');
+    expect(toks).toHaveLength(1);
+    expect((toks[0] as StringToken).value).toBe('""');
+  });
+
+  it("handles a string that starts with an escape sequence", () => {
+    // `"""abc"` — opening `"`, escaped `""` → literal `"`, then `abc`,
+    // closing `"` → content `"abc`.
+    const toks = tokenize('"""abc"');
+    expect(toks).toHaveLength(1);
+    expect((toks[0] as StringToken).value).toBe('"abc');
+  });
+
+  it("throws on unterminated string literals", () => {
+    expect(() => tokenize('"unterminated')).toThrow(/Unterminated string literal/);
+  });
+
+  it("throws on a string with trailing escape (unterminated)", () => {
+    // `"abc""` — after the escaped pair we're still open
+    expect(() => tokenize('"abc""')).toThrow(/Unterminated string literal/);
+  });
+
   it("recognises TRUE and FALSE as booleans, upper-cased", () => {
     const t1 = tokenize("TRUE");
     expect(t1).toHaveLength(1);

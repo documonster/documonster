@@ -641,6 +641,18 @@ describe("IRR comprehensive", () => {
     const cf = rvArray([[rvNumber(-100), rvNumber(50), rvNumber(60)]]);
     expect(fnIRR([cf, ERRORS.DIV0])).toEqual(ERRORS.DIV0);
   });
+
+  it("BLANK guess falls back to Excel's default 0.1 (regression)", () => {
+    // Previously `IRR(cf, <blank>)` coerced blank → 0 via toNumberRV and
+    // started Newton at g=0, which sits exactly at several discount-
+    // factor singularities; for certain flows this caused #NUM! even
+    // though Excel itself returns a converged root. Blank arguments
+    // must behave identically to an omitted third parameter.
+    const cf = rvArray([[rvNumber(-1000), rvNumber(500), rvNumber(400), rvNumber(300)]]);
+    const omitted = asNumber(fnIRR([cf]));
+    const blankGuess = asNumber(fnIRR([cf, BLANK]));
+    expect(blankGuess).toBeCloseTo(omitted, 6);
+  });
 });
 
 describe("XIRR comprehensive", () => {

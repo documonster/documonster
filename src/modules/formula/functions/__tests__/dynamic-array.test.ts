@@ -316,10 +316,45 @@ describe("FILTER comprehensive", () => {
     expect(fnFILTER([data, inc])).toEqual(ERRORS.VALUE);
   });
 
-  it("include height mismatch -> #VALUE!", () => {
-    const data = rvArray([[rvNumber(1)], [rvNumber(2)]]);
-    const inc = rvArray([[rvBoolean(true)]]);
+  it("include that doesn't match either row or column shape → #VALUE!", () => {
+    // Regression: previously we rejected any include that wasn't exactly
+    // N×1 (the classic row-filter shape), so column filters produced
+    // #VALUE! even though Excel supports them. The new rule: include
+    // must be either N×1 matching data.height (row filter) OR 1×N
+    // matching data.width (column filter); anything else is rejected.
+    const data = rvArray([
+      [rvNumber(1), rvNumber(2)],
+      [rvNumber(3), rvNumber(4)]
+    ]);
+    // 3×1 doesn't match data's 2×2
+    const inc = rvArray([[rvBoolean(true)], [rvBoolean(false)], [rvBoolean(true)]]);
     expect(fnFILTER([data, inc])).toEqual(ERRORS.VALUE);
+  });
+
+  it("supports column-filter mode with a 1×N include (Excel)", () => {
+    // Regression: previously only row filters (N×1 include) worked. A
+    // 1×N include of the same width as `data` now selects matching
+    // columns, mirroring Excel's documented behaviour.
+    const data = rvArray([
+      [rvNumber(1), rvNumber(2), rvNumber(3)],
+      [rvNumber(4), rvNumber(5), rvNumber(6)]
+    ]);
+    const inc = rvArray([[rvBoolean(true), rvBoolean(false), rvBoolean(true)]]);
+    const r = asArray(fnFILTER([data, inc]));
+    expect(r.height).toBe(2);
+    expect(r.width).toBe(2);
+    expect((r.rows[0][0] as NumberValue).value).toBe(1);
+    expect((r.rows[0][1] as NumberValue).value).toBe(3);
+    expect((r.rows[1][0] as NumberValue).value).toBe(4);
+    expect((r.rows[1][1] as NumberValue).value).toBe(6);
+  });
+
+  it("column-filter with no keeps falls back to if_empty or #CALC!", () => {
+    const data = rvArray([[rvNumber(1), rvNumber(2)]]);
+    const inc = rvArray([[rvBoolean(false), rvBoolean(false)]]);
+    expect(fnFILTER([data, inc])).toEqual(ERRORS.CALC);
+    const r = asArray(fnFILTER([data, inc, rvString("none")]));
+    expect((r.rows[0][0] as StringValue).value).toBe("none");
   });
 
   it("accepts numeric include (non-zero → keep)", () => {
@@ -661,6 +696,16 @@ describe("CHOOSEROWS comprehensive", () => {
 
   it("error index propagates", () => {
     expect(fnCHOOSEROWS([data, ERRORS.NA])).toEqual(ERRORS.NA);
+  });
+
+  it("fractional index truncates toward zero (regression)", () => {
+    // Previously an index of 2.5 bypassed Math.trunc and then
+    // `d.rows[1.5]` (undefined) crashed on the next `[c]` lookup.
+    const r = asArray(fnCHOOSEROWS([data, rvNumber(2.9), rvNumber(-1.9)]));
+    expect(r.height).toBe(2);
+    // 2.9 → row 2 (idx 1 after 1-based → 0-based); -1.9 → row -1 (last)
+    expect((r.rows[0][0] as NumberValue).value).toBe(3);
+    expect((r.rows[1][0] as NumberValue).value).toBe(5);
   });
 
   it("negative counts from end", () => {

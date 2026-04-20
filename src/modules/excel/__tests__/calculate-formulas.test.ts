@@ -1244,21 +1244,27 @@ describe("calculateFormulas", () => {
   // Unary minus vs exponentiation precedence
   // ==========================================================================
   describe("unary minus vs exponentiation", () => {
-    it("should parse -1^2 as -(1^2) = -1, not (-1)^2 = 1", () => {
+    it("should parse -1^2 as (-1)^2 = 1 (Excel's unique precedence)", () => {
+      // Regression: Excel's precedence table ranks "Negation (as in –1)"
+      // at rank 1 — tighter than exponentiation (rank 4). So `=-1^2` is
+      // `(-1)^2 = 1`, not `-(1^2) = -1`. The engine used to parse
+      // unary-minus at precedence 55 (below `^`'s 60/61), producing
+      // `-(1^2)` — matching Python/C but not Excel.
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
 
       ws.getCell("A1").value = { formula: "-1^2", result: 0 };
       ws.getCell("A2").value = { formula: "-2^3", result: 0 };
+      ws.getCell("A3").value = { formula: "-2^2", result: 0 };
 
       wb.calculateFormulas();
 
-      // Excel: unary minus binds looser than ^
-      expect(ws.getCell("A1").result).toBe(-1); // -(1^2) = -1
-      expect(ws.getCell("A2").result).toBe(-8); // -(2^3) = -8
+      expect(ws.getCell("A1").result).toBe(1); // (-1)^2 = 1
+      expect(ws.getCell("A2").result).toBe(-8); // (-2)^3 = -8 (happens to match either way)
+      expect(ws.getCell("A3").result).toBe(4); // (-2)^2 = 4 — key case
     });
 
-    it("should parse -A1^2 correctly", () => {
+    it("should parse -A1^2 as (-A1)^2 (Excel)", () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
 
@@ -1267,7 +1273,7 @@ describe("calculateFormulas", () => {
 
       wb.calculateFormulas();
 
-      expect(ws.getCell("B1").result).toBe(-9); // -(3^2) = -9
+      expect(ws.getCell("B1").result).toBe(9); // (-3)^2 = 9
     });
   });
 
@@ -3673,6 +3679,123 @@ describe("calculateFormulas", () => {
       ws.getCell("E1").value = { formula: "SUM(A1:B2 C1:D2)", result: 0 };
       wb.calculateFormulas();
       expect(ws.getCell("E1").result).toEqual({ error: "#NULL!" });
+    });
+  });
+
+  // ==========================================================================
+  // User-registered custom functions
+  // ==========================================================================
+  describe("registerFunction", () => {
+    it("invokes a simple user function inside a formula", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction(
+        "DOUBLE",
+        args => {
+          const v = args[0] as { kind: number; value: number };
+          return { kind: 1 /* Number */, value: v.value * 2 };
+        },
+        { minArity: 1, maxArity: 1 }
+      );
+      ws.getCell("A1").value = 7;
+      ws.getCell("B1").value = { formula: "DOUBLE(A1)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(14);
+    });
+
+    it("is case-insensitive and accepts _XLFN. prefixed names", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("answer", () => ({ kind: 1, value: 42 }));
+      ws.getCell("A1").value = { formula: "ANSWER()", result: 0 };
+      ws.getCell("A2").value = { formula: "_xlfn.ANSWER()", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toBe(42);
+      expect(ws.getCell("A2").result).toBe(42);
+    });
+
+    it("shadows built-in functions of the same name", () => {
+      // Registering `SUM` as a custom always-returns-99 function should
+      // override the built-in aggregator for this workbook only.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("SUM", () => ({ kind: 1, value: 99 }));
+      ws.getCell("A1").value = 1;
+      ws.getCell("A2").value = 2;
+      ws.getCell("B1").value = { formula: "SUM(A1:A2)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(99);
+    });
+
+    it("arity validation rejects wrong arg count with #VALUE!", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("TWO", () => ({ kind: 1, value: 0 }), {
+        minArity: 2,
+        maxArity: 2
+      });
+      ws.getCell("A1").value = { formula: "TWO(1)", result: 0 };
+      ws.getCell("A2").value = { formula: "TWO(1,2)", result: 0 };
+      ws.getCell("A3").value = { formula: "TWO(1,2,3)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toEqual({ error: "#VALUE!" });
+      expect(ws.getCell("A2").result).toBe(0);
+      expect(ws.getCell("A3").result).toEqual({ error: "#VALUE!" });
+    });
+
+    it("unregisterFunction removes the entry", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("TMP", () => ({ kind: 1, value: 42 }));
+      // With TMP registered, the formula evaluates to 42.
+      ws.getCell("A1").value = { formula: "TMP()", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toBe(42);
+
+      // Remove the registration; subsequent calculate should surface
+      // #NAME? via the engine's unknown-function path.
+      expect(wb.unregisterFunction("TMP")).toBe(true);
+      expect(wb.unregisterFunction("TMP")).toBe(false);
+      // Reset the cached result so the engine has no prior value to
+      // preserve (the "preserve cached result on #NAME?" path would
+      // otherwise hide the behaviour we're testing).
+      ws.getCell("A1").value = { formula: "TMP()" };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toEqual({ error: "#NAME?" });
+    });
+
+    it("throwing user function surfaces as #VALUE! (doesn't tear down calc)", () => {
+      // Regression: without a try/catch boundary a buggy custom
+      // function would throw through the evaluator and leave the
+      // whole calculation pass half-done.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("BOOM", () => {
+        throw new Error("boom");
+      });
+      ws.getCell("A1").value = { formula: "BOOM()", result: 0 };
+      // Other formulas should still complete successfully.
+      ws.getCell("A2").value = 5;
+      ws.getCell("A3").value = { formula: "A2 * 2", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("A1").result).toEqual({ error: "#VALUE!" });
+      expect(ws.getCell("A3").result).toBe(10);
+    });
+
+    it("user function composes with built-ins (IF, SUM, etc.)", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      wb.registerFunction("NEGATE", args => {
+        const v = args[0] as { kind: number; value: number };
+        return { kind: 1, value: -v.value };
+      });
+      ws.getCell("A1").value = 5;
+      ws.getCell("A2").value = 3;
+      ws.getCell("B1").value = { formula: "IF(A1>0, NEGATE(A1), A2)", result: 0 };
+      ws.getCell("B2").value = { formula: "SUM(NEGATE(A1), A2)", result: 0 };
+      wb.calculateFormulas();
+      expect(ws.getCell("B1").result).toBe(-5); // IF true branch runs NEGATE
+      expect(ws.getCell("B2").result).toBe(-2); // -5 + 3 = -2
     });
   });
 });

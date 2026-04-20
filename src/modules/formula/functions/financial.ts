@@ -12,6 +12,7 @@ import {
   isArray,
   toNumberRV,
   toBooleanRV,
+  topLeft,
   rvNumber,
   rvBoolean
 } from "../runtime/values";
@@ -41,23 +42,23 @@ type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 // ============================================================================
 
 export const fnPMT: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const nper = toNumberRV(args[1]);
+  const nper = toNumberRV(topLeft(args[1]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[2]);
+  const pv = toNumberRV(topLeft(args[2]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const fv = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const type = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -86,23 +87,23 @@ export const fnPMT: NativeFn = args => {
 };
 
 export const fnFV: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const nper = toNumberRV(args[1]);
+  const nper = toNumberRV(topLeft(args[1]));
   if (isError(nper)) {
     return nper;
   }
-  const pmt = toNumberRV(args[2]);
+  const pmt = toNumberRV(topLeft(args[2]));
   if (isError(pmt)) {
     return pmt;
   }
-  const pv = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const pv = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(pv)) {
     return pv;
   }
-  const type = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const type = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -124,23 +125,23 @@ export const fnFV: NativeFn = args => {
 };
 
 export const fnPV: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const nper = toNumberRV(args[1]);
+  const nper = toNumberRV(topLeft(args[1]));
   if (isError(nper)) {
     return nper;
   }
-  const pmt = toNumberRV(args[2]);
+  const pmt = toNumberRV(topLeft(args[2]));
   if (isError(pmt)) {
     return pmt;
   }
-  const fv = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const fv = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const type = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -161,7 +162,7 @@ export const fnPV: NativeFn = args => {
 };
 
 export const fnNPV: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
@@ -178,6 +179,12 @@ export const fnNPV: NativeFn = args => {
     if (isArray(a)) {
       for (const row of a.rows) {
         for (const cell of row) {
+          // Propagate errors encountered inside the cash-flow range —
+          // previously silently filtered, hiding `#N/A` / `#DIV/0!`
+          // that should surface as the NPV result.
+          if (cell.kind === RVKind.Error) {
+            return cell;
+          }
           if (cell.kind === RVKind.Number) {
             values.push(cell.value);
           }
@@ -236,7 +243,14 @@ export const fnIRR: NativeFn = args => {
   if (!hasPos || !hasNeg) {
     return ERRORS.NUM;
   }
-  const guessRV = args.length > 1 ? toNumberRV(args[1]) : rvNumber(0.1);
+  // Excel's `guess` argument defaults to 0.1 when omitted. A user-supplied
+  // BLANK (e.g. `IRR(B2:B6, )` with an empty second slot) should also fall
+  // back to 0.1 — without this the Newton scan starts at `g = 0`, which
+  // sits exactly at the discount-factor singularity of several cash-flow
+  // shapes and can fail to converge. Genuine numeric guesses (including 0
+  // explicitly supplied as a number) are honoured as given.
+  const guessRV =
+    args.length > 1 && args[1].kind !== RVKind.Blank ? toNumberRV(topLeft(args[1])) : rvNumber(0.1);
   if (isError(guessRV)) {
     return guessRV;
   }
@@ -313,23 +327,23 @@ export const fnIRR: NativeFn = args => {
 };
 
 export const fnNPER: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const pmt = toNumberRV(args[1]);
+  const pmt = toNumberRV(topLeft(args[1]));
   if (isError(pmt)) {
     return pmt;
   }
-  const pv = toNumberRV(args[2]);
+  const pv = toNumberRV(topLeft(args[2]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const fv = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const type = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -360,27 +374,31 @@ export const fnNPER: NativeFn = args => {
 };
 
 export const fnRATE: NativeFn = args => {
-  const nper = toNumberRV(args[0]);
+  const nper = toNumberRV(topLeft(args[0]));
   if (isError(nper)) {
     return nper;
   }
-  const pmt = toNumberRV(args[1]);
+  const pmt = toNumberRV(topLeft(args[1]));
   if (isError(pmt)) {
     return pmt;
   }
-  const pv = toNumberRV(args[2]);
+  const pv = toNumberRV(topLeft(args[2]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const fv = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const type = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
-  const guess = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0.1);
+  // Blank → default 0.1 (see IRR / XIRR for rationale). For `fv` and
+  // `type` a blank coerces to 0 via `toNumberRV`, which matches Excel's
+  // documented defaults, so those are left as-is.
+  const guess =
+    args.length > 5 && args[5].kind !== RVKind.Blank ? toNumberRV(topLeft(args[5])) : rvNumber(0.1);
   if (isError(guess)) {
     return guess;
   }
@@ -445,15 +463,15 @@ export const fnRATE: NativeFn = args => {
 };
 
 export const fnSLN: NativeFn = args => {
-  const cost = toNumberRV(args[0]);
+  const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
   }
-  const salvage = toNumberRV(args[1]);
+  const salvage = toNumberRV(topLeft(args[1]));
   if (isError(salvage)) {
     return salvage;
   }
-  const life = toNumberRV(args[2]);
+  const life = toNumberRV(topLeft(args[2]));
   if (isError(life)) {
     return life;
   }
@@ -473,19 +491,19 @@ export const fnSLN: NativeFn = args => {
  * Excel rejects `life = 0` and period outside [1, life] with #NUM!.
  */
 export const fnSYD: NativeFn = args => {
-  const cost = toNumberRV(args[0]);
+  const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
   }
-  const salvage = toNumberRV(args[1]);
+  const salvage = toNumberRV(topLeft(args[1]));
   if (isError(salvage)) {
     return salvage;
   }
-  const life = toNumberRV(args[2]);
+  const life = toNumberRV(topLeft(args[2]));
   if (isError(life)) {
     return life;
   }
-  const per = toNumberRV(args[3]);
+  const per = toNumberRV(topLeft(args[3]));
   if (isError(per)) {
     return per;
   }
@@ -511,31 +529,35 @@ export const fnSYD: NativeFn = args => {
  * periods.
  */
 export const fnVDB: NativeFn = args => {
-  const cost = toNumberRV(args[0]);
+  const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
   }
-  const salvage = toNumberRV(args[1]);
+  const salvage = toNumberRV(topLeft(args[1]));
   if (isError(salvage)) {
     return salvage;
   }
-  const life = toNumberRV(args[2]);
+  const life = toNumberRV(topLeft(args[2]));
   if (isError(life)) {
     return life;
   }
-  const start = toNumberRV(args[3]);
+  const start = toNumberRV(topLeft(args[3]));
   if (isError(start)) {
     return start;
   }
-  const end = toNumberRV(args[4]);
+  const end = toNumberRV(topLeft(args[4]));
   if (isError(end)) {
     return end;
   }
-  const factorRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(2);
+  const factorRV =
+    args.length > 5 && args[5].kind !== RVKind.Blank ? toNumberRV(topLeft(args[5])) : rvNumber(2);
   if (isError(factorRV)) {
     return factorRV;
   }
-  const noSwitchRV = args.length > 6 ? toBooleanRV(args[6]) : rvBoolean(false);
+  const noSwitchRV =
+    args.length > 6 && args[6].kind !== RVKind.Blank
+      ? toBooleanRV(topLeft(args[6]))
+      : rvBoolean(false);
   if (isError(noSwitchRV)) {
     return noSwitchRV;
   }
@@ -597,23 +619,28 @@ export const fnVDB: NativeFn = args => {
 };
 
 export const fnDB: NativeFn = args => {
-  const cost = toNumberRV(args[0]);
+  const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
   }
-  const salvage = toNumberRV(args[1]);
+  const salvage = toNumberRV(topLeft(args[1]));
   if (isError(salvage)) {
     return salvage;
   }
-  const life = toNumberRV(args[2]);
+  const life = toNumberRV(topLeft(args[2]));
   if (isError(life)) {
     return life;
   }
-  const period = toNumberRV(args[3]);
+  const period = toNumberRV(topLeft(args[3]));
   if (isError(period)) {
     return period;
   }
-  const month = args.length > 4 ? toNumberRV(args[4]) : rvNumber(12);
+  // Blank `month` → Excel default 12 (full first year). Without the
+  // blank guard, `toNumberRV(BLANK)` coerces to 0 which then trips the
+  // `month < 1` validation below, silently surfacing #NUM! for
+  // `DB(cost, salvage, life, period, )`.
+  const month =
+    args.length > 4 && args[4].kind !== RVKind.Blank ? toNumberRV(topLeft(args[4])) : rvNumber(12);
   if (isError(month)) {
     return month;
   }
@@ -658,23 +685,26 @@ export const fnDB: NativeFn = args => {
 };
 
 export const fnDDB: NativeFn = args => {
-  const cost = toNumberRV(args[0]);
+  const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
   }
-  const salvage = toNumberRV(args[1]);
+  const salvage = toNumberRV(topLeft(args[1]));
   if (isError(salvage)) {
     return salvage;
   }
-  const life = toNumberRV(args[2]);
+  const life = toNumberRV(topLeft(args[2]));
   if (isError(life)) {
     return life;
   }
-  const period = toNumberRV(args[3]);
+  const period = toNumberRV(topLeft(args[3]));
   if (isError(period)) {
     return period;
   }
-  const factor = args.length > 4 ? toNumberRV(args[4]) : rvNumber(2);
+  // Blank `factor` → Excel default 2 (double declining). See DB/IRR for
+  // why blank must be distinguished from an explicit 0.
+  const factor =
+    args.length > 4 && args[4].kind !== RVKind.Blank ? toNumberRV(topLeft(args[4])) : rvNumber(2);
   if (isError(factor)) {
     return factor;
   }
@@ -744,27 +774,27 @@ function ipmtRaw(
 }
 
 export const fnIPMT: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const per = toNumberRV(args[1]);
+  const per = toNumberRV(topLeft(args[1]));
   if (isError(per)) {
     return per;
   }
-  const nper = toNumberRV(args[2]);
+  const nper = toNumberRV(topLeft(args[2]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[3]);
+  const pv = toNumberRV(topLeft(args[3]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const fv = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  const type = args.length > 5 ? toNumberRV(topLeft(args[5])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -772,27 +802,27 @@ export const fnIPMT: NativeFn = args => {
 };
 
 export const fnPPMT: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const per = toNumberRV(args[1]);
+  const per = toNumberRV(topLeft(args[1]));
   if (isError(per)) {
     return per;
   }
-  const nper = toNumberRV(args[2]);
+  const nper = toNumberRV(topLeft(args[2]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[3]);
+  const pv = toNumberRV(topLeft(args[3]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const fv = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(fv)) {
     return fv;
   }
-  const type = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  const type = args.length > 5 ? toNumberRV(topLeft(args[5])) : rvNumber(0);
   if (isError(type)) {
     return type;
   }
@@ -813,7 +843,7 @@ export const fnPPMT: NativeFn = args => {
  * propagates any error it encounters. Text values produce #VALUE!.
  */
 export const fnFVSCHEDULE: NativeFn = args => {
-  const principal = toNumberRV(args[0]);
+  const principal = toNumberRV(topLeft(args[0]));
   if (isError(principal)) {
     return principal;
   }
@@ -864,15 +894,15 @@ export const fnFVSCHEDULE: NativeFn = args => {
  * Excel requires `rate > 0` and `pv, fv > 0`.
  */
 export const fnPDURATION: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const pv = toNumberRV(args[1]);
+  const pv = toNumberRV(topLeft(args[1]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = toNumberRV(args[2]);
+  const fv = toNumberRV(topLeft(args[2]));
   if (isError(fv)) {
     return fv;
   }
@@ -890,15 +920,15 @@ export const fnPDURATION: NativeFn = args => {
  * Excel requires `nper > 0`, `pv > 0`, `fv >= 0`.
  */
 export const fnRRI: NativeFn = args => {
-  const nper = toNumberRV(args[0]);
+  const nper = toNumberRV(topLeft(args[0]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[1]);
+  const pv = toNumberRV(topLeft(args[1]));
   if (isError(pv)) {
     return pv;
   }
-  const fv = toNumberRV(args[2]);
+  const fv = toNumberRV(topLeft(args[2]));
   if (isError(fv)) {
     return fv;
   }
@@ -909,11 +939,11 @@ export const fnRRI: NativeFn = args => {
 };
 
 export const fnEFFECT: NativeFn = args => {
-  const nomRate = toNumberRV(args[0]);
+  const nomRate = toNumberRV(topLeft(args[0]));
   if (isError(nomRate)) {
     return nomRate;
   }
-  const npery = toNumberRV(args[1]);
+  const npery = toNumberRV(topLeft(args[1]));
   if (isError(npery)) {
     return npery;
   }
@@ -926,11 +956,11 @@ export const fnEFFECT: NativeFn = args => {
 };
 
 export const fnNOMINAL: NativeFn = args => {
-  const effRate = toNumberRV(args[0]);
+  const effRate = toNumberRV(topLeft(args[0]));
   if (isError(effRate)) {
     return effRate;
   }
-  const npery = toNumberRV(args[1]);
+  const npery = toNumberRV(topLeft(args[1]));
   if (isError(npery)) {
     return npery;
   }
@@ -942,7 +972,7 @@ export const fnNOMINAL: NativeFn = args => {
 };
 
 export const fnXNPV: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
@@ -1013,7 +1043,9 @@ export const fnXIRR: NativeFn = args => {
   if (!xHasPos || !xHasNeg) {
     return ERRORS.NUM;
   }
-  const guessRV = args.length > 2 ? toNumberRV(args[2]) : rvNumber(0.1);
+  // Blank third slot → default 0.1, same rationale as IRR above.
+  const guessRV =
+    args.length > 2 && args[2].kind !== RVKind.Blank ? toNumberRV(topLeft(args[2])) : rvNumber(0.1);
   if (isError(guessRV)) {
     return guessRV;
   }
@@ -1099,11 +1131,11 @@ export const fnMIRR: NativeFn = args => {
     return valuesErr;
   }
   const values = (rawValues as NumberValue[]).map(n => n.value);
-  const financeRate = toNumberRV(args[1]);
+  const financeRate = toNumberRV(topLeft(args[1]));
   if (isError(financeRate)) {
     return financeRate;
   }
-  const reinvestRate = toNumberRV(args[2]);
+  const reinvestRate = toNumberRV(topLeft(args[2]));
   if (isError(reinvestRate)) {
     return reinvestRate;
   }
@@ -1132,19 +1164,19 @@ export const fnMIRR: NativeFn = args => {
 };
 
 export const fnISPMT: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const per = toNumberRV(args[1]);
+  const per = toNumberRV(topLeft(args[1]));
   if (isError(per)) {
     return per;
   }
-  const nper = toNumberRV(args[2]);
+  const nper = toNumberRV(topLeft(args[2]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[3]);
+  const pv = toNumberRV(topLeft(args[3]));
   if (isError(pv)) {
     return pv;
   }
@@ -1157,27 +1189,27 @@ export const fnISPMT: NativeFn = args => {
 };
 
 export const fnCUMPRINC: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const nper = toNumberRV(args[1]);
+  const nper = toNumberRV(topLeft(args[1]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[2]);
+  const pv = toNumberRV(topLeft(args[2]));
   if (isError(pv)) {
     return pv;
   }
-  const startPeriod = toNumberRV(args[3]);
+  const startPeriod = toNumberRV(topLeft(args[3]));
   if (isError(startPeriod)) {
     return startPeriod;
   }
-  const endPeriod = toNumberRV(args[4]);
+  const endPeriod = toNumberRV(topLeft(args[4]));
   if (isError(endPeriod)) {
     return endPeriod;
   }
-  const type = toNumberRV(args[5]);
+  const type = toNumberRV(topLeft(args[5]));
   if (isError(type)) {
     return type;
   }
@@ -1195,8 +1227,10 @@ export const fnCUMPRINC: NativeFn = args => {
     return ERRORS.NUM;
   }
   let cumPrinc = 0;
+  // PMT is constant across all periods — hoist it out of the loop
+  // rather than recomputing the same value `e - s + 1` times.
+  const pmtVal = pmtRaw(rate.value, nper.value, pv.value, 0, type.value);
   for (let p = s; p <= e; p++) {
-    const pmtVal = pmtRaw(rate.value, nper.value, pv.value, 0, type.value);
     const ipmtVal = ipmtRaw(rate.value, p, nper.value, pv.value, 0, type.value);
     cumPrinc += pmtVal - ipmtVal;
   }
@@ -1204,27 +1238,27 @@ export const fnCUMPRINC: NativeFn = args => {
 };
 
 export const fnCUMIPMT: NativeFn = args => {
-  const rate = toNumberRV(args[0]);
+  const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
   }
-  const nper = toNumberRV(args[1]);
+  const nper = toNumberRV(topLeft(args[1]));
   if (isError(nper)) {
     return nper;
   }
-  const pv = toNumberRV(args[2]);
+  const pv = toNumberRV(topLeft(args[2]));
   if (isError(pv)) {
     return pv;
   }
-  const startPeriod = toNumberRV(args[3]);
+  const startPeriod = toNumberRV(topLeft(args[3]));
   if (isError(startPeriod)) {
     return startPeriod;
   }
-  const endPeriod = toNumberRV(args[4]);
+  const endPeriod = toNumberRV(topLeft(args[4]));
   if (isError(endPeriod)) {
     return endPeriod;
   }
-  const type = toNumberRV(args[5]);
+  const type = toNumberRV(topLeft(args[5]));
   if (isError(type)) {
     return type;
   }
@@ -1248,11 +1282,11 @@ export const fnCUMIPMT: NativeFn = args => {
 };
 
 export const fnDOLLARDE: NativeFn = args => {
-  const fractionalDollar = toNumberRV(args[0]);
+  const fractionalDollar = toNumberRV(topLeft(args[0]));
   if (isError(fractionalDollar)) {
     return fractionalDollar;
   }
-  const fraction = toNumberRV(args[1]);
+  const fraction = toNumberRV(topLeft(args[1]));
   if (isError(fraction)) {
     return fraction;
   }
@@ -1276,11 +1310,11 @@ export const fnDOLLARDE: NativeFn = args => {
 };
 
 export const fnDOLLARFR: NativeFn = args => {
-  const decimalDollar = toNumberRV(args[0]);
+  const decimalDollar = toNumberRV(topLeft(args[0]));
   if (isError(decimalDollar)) {
     return decimalDollar;
   }
-  const fraction = toNumberRV(args[1]);
+  const fraction = toNumberRV(topLeft(args[1]));
   if (isError(fraction)) {
     return fraction;
   }
@@ -1318,23 +1352,23 @@ function validateBasis(basis: number): ErrorValue | null {
 }
 
 export const fnDISC: NativeFn = args => {
-  const settlement = toNumberRV(args[0]);
+  const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
   }
-  const maturity = toNumberRV(args[1]);
+  const maturity = toNumberRV(topLeft(args[1]));
   if (isError(maturity)) {
     return maturity;
   }
-  const pr = toNumberRV(args[2]);
+  const pr = toNumberRV(topLeft(args[2]));
   if (isError(pr)) {
     return pr;
   }
-  const redemption = toNumberRV(args[3]);
+  const redemption = toNumberRV(topLeft(args[3]));
   if (isError(redemption)) {
     return redemption;
   }
-  const basis = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basis = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
@@ -1356,23 +1390,23 @@ export const fnDISC: NativeFn = args => {
 };
 
 export const fnPRICEDISC: NativeFn = args => {
-  const settlement = toNumberRV(args[0]);
+  const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
   }
-  const maturity = toNumberRV(args[1]);
+  const maturity = toNumberRV(topLeft(args[1]));
   if (isError(maturity)) {
     return maturity;
   }
-  const disc = toNumberRV(args[2]);
+  const disc = toNumberRV(topLeft(args[2]));
   if (isError(disc)) {
     return disc;
   }
-  const redemption = toNumberRV(args[3]);
+  const redemption = toNumberRV(topLeft(args[3]));
   if (isError(redemption)) {
     return redemption;
   }
-  const basis = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basis = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
@@ -1388,23 +1422,23 @@ export const fnPRICEDISC: NativeFn = args => {
 };
 
 export const fnYIELDDISC: NativeFn = args => {
-  const settlement = toNumberRV(args[0]);
+  const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
   }
-  const maturity = toNumberRV(args[1]);
+  const maturity = toNumberRV(topLeft(args[1]));
   if (isError(maturity)) {
     return maturity;
   }
-  const pr = toNumberRV(args[2]);
+  const pr = toNumberRV(topLeft(args[2]));
   if (isError(pr)) {
     return pr;
   }
-  const redemption = toNumberRV(args[3]);
+  const redemption = toNumberRV(topLeft(args[3]));
   if (isError(redemption)) {
     return redemption;
   }
-  const basis = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basis = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
@@ -1423,23 +1457,23 @@ export const fnYIELDDISC: NativeFn = args => {
 };
 
 export const fnRECEIVED: NativeFn = args => {
-  const settlement = toNumberRV(args[0]);
+  const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
   }
-  const maturity = toNumberRV(args[1]);
+  const maturity = toNumberRV(topLeft(args[1]));
   if (isError(maturity)) {
     return maturity;
   }
-  const investment = toNumberRV(args[2]);
+  const investment = toNumberRV(topLeft(args[2]));
   if (isError(investment)) {
     return investment;
   }
-  const disc = toNumberRV(args[3]);
+  const disc = toNumberRV(topLeft(args[3]));
   if (isError(disc)) {
     return disc;
   }
-  const basis = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basis = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
@@ -1459,23 +1493,23 @@ export const fnRECEIVED: NativeFn = args => {
 };
 
 export const fnINTRATE: NativeFn = args => {
-  const settlement = toNumberRV(args[0]);
+  const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
   }
-  const maturity = toNumberRV(args[1]);
+  const maturity = toNumberRV(topLeft(args[1]));
   if (isError(maturity)) {
     return maturity;
   }
-  const investment = toNumberRV(args[2]);
+  const investment = toNumberRV(topLeft(args[2]));
   if (isError(investment)) {
     return investment;
   }
-  const redemption = toNumberRV(args[3]);
+  const redemption = toNumberRV(topLeft(args[3]));
   if (isError(redemption)) {
     return redemption;
   }
-  const basis = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basis = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basis)) {
     return basis;
   }
@@ -1701,31 +1735,31 @@ function validateBondBasis(frequency: number, basis: number): ErrorValue | null 
  *   A   = days from beginning of coupon period to settlement
  */
 export const fnPRICE: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const rateRV = toNumberRV(args[2]);
+  const rateRV = toNumberRV(topLeft(args[2]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const yieldRV = toNumberRV(args[3]);
+  const yieldRV = toNumberRV(topLeft(args[3]));
   if (isError(yieldRV)) {
     return yieldRV;
   }
-  const redemptionRV = toNumberRV(args[4]);
+  const redemptionRV = toNumberRV(topLeft(args[4]));
   if (isError(redemptionRV)) {
     return redemptionRV;
   }
-  const frequencyRV = toNumberRV(args[5]);
+  const frequencyRV = toNumberRV(topLeft(args[5]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  const basisRV = args.length > 6 ? toNumberRV(topLeft(args[6])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -1781,31 +1815,31 @@ export const fnPRICE: NativeFn = args => {
  * realistic bond scenarios) followed by a light Newton polish.
  */
 export const fnYIELD: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const rateRV = toNumberRV(args[2]);
+  const rateRV = toNumberRV(topLeft(args[2]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const prRV = toNumberRV(args[3]);
+  const prRV = toNumberRV(topLeft(args[3]));
   if (isError(prRV)) {
     return prRV;
   }
-  const redemptionRV = toNumberRV(args[4]);
+  const redemptionRV = toNumberRV(topLeft(args[4]));
   if (isError(redemptionRV)) {
     return redemptionRV;
   }
-  const frequencyRV = toNumberRV(args[5]);
+  const frequencyRV = toNumberRV(topLeft(args[5]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  const basisRV = args.length > 6 ? toNumberRV(topLeft(args[6])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -1871,27 +1905,27 @@ export const fnYIELD: NativeFn = args => {
  * weighted by present value. Expressed in years.
  */
 export const fnDURATION: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const couponRV = toNumberRV(args[2]);
+  const couponRV = toNumberRV(topLeft(args[2]));
   if (isError(couponRV)) {
     return couponRV;
   }
-  const yieldRV = toNumberRV(args[3]);
+  const yieldRV = toNumberRV(topLeft(args[3]));
   if (isError(yieldRV)) {
     return yieldRV;
   }
-  const frequencyRV = toNumberRV(args[4]);
+  const frequencyRV = toNumberRV(topLeft(args[4]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  const basisRV = args.length > 5 ? toNumberRV(topLeft(args[5])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -1943,11 +1977,11 @@ export const fnMDURATION: NativeFn = args => {
   if (dur.kind !== RVKind.Number) {
     return dur;
   }
-  const yieldRV = toNumberRV(args[3]);
+  const yieldRV = toNumberRV(topLeft(args[3]));
   if (isError(yieldRV)) {
     return yieldRV;
   }
-  const frequencyRV = toNumberRV(args[4]);
+  const frequencyRV = toNumberRV(topLeft(args[4]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
@@ -1962,28 +1996,28 @@ export const fnMDURATION: NativeFn = args => {
  * accrued interest from issue to settlement as par * rate * dcf(issue, settlement, basis).
  */
 export const fnACCRINT: NativeFn = args => {
-  const issueRV = toNumberRV(args[0]);
+  const issueRV = toNumberRV(topLeft(args[0]));
   if (isError(issueRV)) {
     return issueRV;
   }
   // first_interest (args[1]) is unused in the simplified implementation.
-  const settlementRV = toNumberRV(args[2]);
+  const settlementRV = toNumberRV(topLeft(args[2]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const rateRV = toNumberRV(args[3]);
+  const rateRV = toNumberRV(topLeft(args[3]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const parRV = toNumberRV(args[4]);
+  const parRV = toNumberRV(topLeft(args[4]));
   if (isError(parRV)) {
     return parRV;
   }
-  const frequencyRV = toNumberRV(args[5]);
+  const frequencyRV = toNumberRV(topLeft(args[5]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 6 ? toNumberRV(args[6]) : rvNumber(0);
+  const basisRV = args.length > 6 ? toNumberRV(topLeft(args[6])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -2013,23 +2047,23 @@ export const fnACCRINT: NativeFn = args => {
  *   result = par × rate × dayCountFraction(issue, settlement, basis)
  */
 export const fnACCRINTM: NativeFn = args => {
-  const issueRV = toNumberRV(args[0]);
+  const issueRV = toNumberRV(topLeft(args[0]));
   if (isError(issueRV)) {
     return issueRV;
   }
-  const settlementRV = toNumberRV(args[1]);
+  const settlementRV = toNumberRV(topLeft(args[1]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const rateRV = toNumberRV(args[2]);
+  const rateRV = toNumberRV(topLeft(args[2]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const parRV = toNumberRV(args[3]);
+  const parRV = toNumberRV(topLeft(args[3]));
   if (isError(parRV)) {
     return parRV;
   }
-  const basisRV = args.length > 4 ? toNumberRV(args[4]) : rvNumber(0);
+  const basisRV = args.length > 4 ? toNumberRV(topLeft(args[4])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -2054,15 +2088,15 @@ export const fnACCRINTM: NativeFn = args => {
  * where DSM is days from settlement to maturity.
  */
 export const fnTBILLPRICE: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const discountRV = toNumberRV(args[2]);
+  const discountRV = toNumberRV(topLeft(args[2]));
   if (isError(discountRV)) {
     return discountRV;
   }
@@ -2091,15 +2125,15 @@ export const fnTBILLPRICE: NativeFn = args => {
  *   yield = (100 - pr) / pr × (360 / DSM)
  */
 export const fnTBILLYIELD: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const prRV = toNumberRV(args[2]);
+  const prRV = toNumberRV(topLeft(args[2]));
   if (isError(prRV)) {
     return prRV;
   }
@@ -2123,15 +2157,15 @@ export const fnTBILLYIELD: NativeFn = args => {
  *   TBILLEQ = (365 × discount) / (360 - discount × DSM)
  */
 export const fnTBILLEQ: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const discountRV = toNumberRV(args[2]);
+  const discountRV = toNumberRV(topLeft(args[2]));
   if (isError(discountRV)) {
     return discountRV;
   }
@@ -2164,27 +2198,27 @@ export const fnTBILLEQ: NativeFn = args => {
  *   price = (100 + DIM × rate × 100) / (1 + DSM × yld) - A × rate × 100
  */
 export const fnPRICEMAT: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const issueRV = toNumberRV(args[2]);
+  const issueRV = toNumberRV(topLeft(args[2]));
   if (isError(issueRV)) {
     return issueRV;
   }
-  const rateRV = toNumberRV(args[3]);
+  const rateRV = toNumberRV(topLeft(args[3]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const yldRV = toNumberRV(args[4]);
+  const yldRV = toNumberRV(topLeft(args[4]));
   if (isError(yldRV)) {
     return yldRV;
   }
-  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  const basisRV = args.length > 5 ? toNumberRV(topLeft(args[5])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -2223,27 +2257,27 @@ export const fnPRICEMAT: NativeFn = args => {
  *   yield = ((1 + DIM × rate) / (pr/100 + A × rate) - 1) / DSM
  */
 export const fnYIELDMAT: NativeFn = args => {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const issueRV = toNumberRV(args[2]);
+  const issueRV = toNumberRV(topLeft(args[2]));
   if (isError(issueRV)) {
     return issueRV;
   }
-  const rateRV = toNumberRV(args[3]);
+  const rateRV = toNumberRV(topLeft(args[3]));
   if (isError(rateRV)) {
     return rateRV;
   }
-  const prRV = toNumberRV(args[4]);
+  const prRV = toNumberRV(topLeft(args[4]));
   if (isError(prRV)) {
     return prRV;
   }
-  const basisRV = args.length > 5 ? toNumberRV(args[5]) : rvNumber(0);
+  const basisRV = args.length > 5 ? toNumberRV(topLeft(args[5])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }
@@ -2289,19 +2323,19 @@ export const fnYIELDMAT: NativeFn = args => {
 function parseCoupArgs(
   args: RuntimeValue[]
 ): { settlement: number; maturity: number; frequency: number; basis: number } | ErrorValue {
-  const settlementRV = toNumberRV(args[0]);
+  const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
   }
-  const maturityRV = toNumberRV(args[1]);
+  const maturityRV = toNumberRV(topLeft(args[1]));
   if (isError(maturityRV)) {
     return maturityRV;
   }
-  const frequencyRV = toNumberRV(args[2]);
+  const frequencyRV = toNumberRV(topLeft(args[2]));
   if (isError(frequencyRV)) {
     return frequencyRV;
   }
-  const basisRV = args.length > 3 ? toNumberRV(args[3]) : rvNumber(0);
+  const basisRV = args.length > 3 ? toNumberRV(topLeft(args[3])) : rvNumber(0);
   if (isError(basisRV)) {
     return basisRV;
   }

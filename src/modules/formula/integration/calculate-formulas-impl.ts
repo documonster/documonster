@@ -47,6 +47,7 @@ import {
   evaluateFormulaRaw,
   type EvalContext
 } from "../runtime/evaluator";
+import type { FunctionDescriptor } from "../runtime/function-registry";
 import type { RuntimeValue } from "../runtime/values";
 import { RVKind, rvNumber, BLANK, ERRORS } from "../runtime/values";
 import type { AstNode } from "../syntax/ast";
@@ -203,10 +204,29 @@ export function calculateFormulasImpl(workbook: WorkbookLike): void {
 
   // ── Step 6: Evaluate ──
   const session = new EvalSession();
+  // Convert user-registered functions (keyed opaquely on WorkbookLike)
+  // into the evaluator's typed `FunctionDescriptor` shape. We take a
+  // snapshot up front so later mutations to the workbook's map during
+  // evaluation can't observe a half-built state.
+  let userFunctions: ReadonlyMap<string, FunctionDescriptor> | undefined;
+  if (workbook.userFunctions && workbook.userFunctions.size > 0) {
+    const adapted = new Map<string, FunctionDescriptor>();
+    for (const [name, desc] of workbook.userFunctions) {
+      const upperName = name.toUpperCase();
+      adapted.set(upperName, {
+        name: upperName,
+        minArity: desc.minArity,
+        maxArity: desc.maxArity,
+        invoke: desc.invoke as FunctionDescriptor["invoke"]
+      });
+    }
+    userFunctions = adapted;
+  }
   const ctx: EvalContext = {
     snapshot,
     compiledFormulas: compiledMap,
-    currentSheet: snapshot.worksheets[0]?.name ?? ""
+    currentSheet: snapshot.worksheets[0]?.name ?? "",
+    userFunctions
   };
 
   // Evaluate in topological order

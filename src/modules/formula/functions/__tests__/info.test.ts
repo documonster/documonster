@@ -306,6 +306,19 @@ describe("ISEVEN", () => {
     expect(iseven([rvString("abc")])).toEqual(ERRORS.VALUE);
     expect(iseven([ERRORS.NA])).toEqual(ERRORS.NA);
   });
+
+  it("coerces numeric strings and booleans (Excel behaviour)", () => {
+    // Regression: previously the `v.kind !== Number` check rejected
+    // every non-Number kind outright, so `ISEVEN("4")` reported #VALUE!
+    // even though Excel coerces the text to 4 and returns TRUE.
+    expect(asBool(iseven([rvString("4")]))).toBe(true);
+    expect(asBool(iseven([rvString("3")]))).toBe(false);
+    // Blank coerces to 0 (even).
+    expect(asBool(iseven([BLANK]))).toBe(true);
+    // Booleans: TRUE → 1 (odd), FALSE → 0 (even).
+    expect(asBool(iseven([rvBoolean(true)]))).toBe(false);
+    expect(asBool(iseven([rvBoolean(false)]))).toBe(true);
+  });
 });
 
 describe("ISODD", () => {
@@ -678,6 +691,29 @@ describe("CELL (via evaluator)", () => {
     expect(ws.getCell("B2").result).toBe("$C$5");
   });
 
+  it('"address" qualifies cross-sheet targets with the sheet name (Excel)', () => {
+    // Regression: previously dropped the sheet prefix, so
+    // `INDIRECT(CELL("address", Sheet2!A1))` misread the same cell on
+    // the formula's own sheet. Excel always qualifies when the target
+    // sheet differs from the formula cell's sheet.
+    const wb = new Workbook();
+    const ws1 = wb.addWorksheet("Sheet1");
+    wb.addWorksheet("Sheet2");
+    ws1.getCell("B2").value = { formula: 'CELL("address", Sheet2!C5)', result: "" };
+    wb.calculateFormulas();
+    expect(ws1.getCell("B2").result).toBe("Sheet2!$C$5");
+  });
+
+  it('"address" quotes sheet names that need quoting', () => {
+    // Sheet name with a space requires `'...'` around it.
+    const wb = new Workbook();
+    const ws1 = wb.addWorksheet("Sheet1");
+    wb.addWorksheet("My Sheet");
+    ws1.getCell("B2").value = { formula: "CELL(\"address\", 'My Sheet'!A1)", result: "" };
+    wb.calculateFormulas();
+    expect(ws1.getCell("B2").result).toBe("'My Sheet'!$A$1");
+  });
+
   it('"row" and "col" return 1-based coordinates', () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
@@ -750,9 +786,16 @@ describe("NOT", () => {
     expect(asBool(not([rvNumber(0)]))).toBe(true);
   });
 
-  it("returns #VALUE! for non-numeric, non-boolean values", () => {
+  it("coerces numeric-string / boolean-string / blank (Excel behaviour)", () => {
+    // Regression: Excel accepts text "TRUE" / "FALSE" (case-insensitive)
+    // and blank cells (→ FALSE) for NOT; previously we rejected every
+    // non-Number/Boolean with #VALUE!.
+    expect(asBool(not([rvString("TRUE")]))).toBe(false);
+    expect(asBool(not([rvString("false")]))).toBe(true);
+    // Blank → FALSE → NOT → TRUE
+    expect(asBool(not([BLANK]))).toBe(true);
+    // True non-boolean text still rejected.
     expect(not([rvString("abc")])).toEqual(ERRORS.VALUE);
-    expect(not([BLANK])).toEqual(ERRORS.VALUE);
   });
 
   it("propagates errors", () => {
@@ -979,6 +1022,70 @@ describe("ISFORMULA / FORMULATEXT (reference path via evaluator)", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.getCell("A1").value = { formula: "ISFORMULA(1+1)", result: false };
+    wb.calculateFormulas();
+    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+  });
+
+  it('ISFORMULA(INDIRECT("A1")) resolves through a runtime reference', () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: "1+1", result: 0 };
+    ws.getCell("B1").value = { formula: 'ISFORMULA(INDIRECT("A1"))', result: false };
+    ws.getCell("B2").value = 5;
+    ws.getCell("C2").value = { formula: 'ISFORMULA(INDIRECT("B2"))', result: false };
+    wb.calculateFormulas();
+    expect(ws.getCell("B1").result).toBe(true);
+    expect(ws.getCell("C2").result).toBe(false);
+  });
+
+  it('ISFORMULA(INDIRECT("xx")) returns #N/A — invalid ref collapses to N/A', () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: 'ISFORMULA(INDIRECT("xx"))', result: false };
+    wb.calculateFormulas();
+    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+  });
+
+  it("ISFORMULA on an area reference inspects the top-left cell", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: "1+1", result: 0 };
+    ws.getCell("B2").value = 5;
+    ws.getCell("C1").value = { formula: "ISFORMULA(A1:B2)", result: false };
+    wb.calculateFormulas();
+    expect(ws.getCell("C1").result).toBe(true);
+  });
+
+  it('FORMULATEXT(INDIRECT("A1")) returns the formula text', () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: "SUM(1,2)", result: 0 };
+    ws.getCell("B1").value = { formula: 'FORMULATEXT(INDIRECT("A1"))', result: "" };
+    wb.calculateFormulas();
+    expect(ws.getCell("B1").result).toBe("=SUM(1,2)");
+  });
+
+  it("FORMULATEXT on an area reference inspects the top-left cell", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: "1*2", result: 0 };
+    ws.getCell("B1").value = { formula: "FORMULATEXT(A1:B2)", result: "" };
+    wb.calculateFormulas();
+    expect(ws.getCell("B1").result).toBe("=1*2");
+  });
+
+  it("FORMULATEXT on a missing cell returns #N/A", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("B1").value = { formula: "FORMULATEXT(Z99)", result: "" };
+    wb.calculateFormulas();
+    expect(ws.getCell("B1").result).toEqual({ error: "#N/A" });
+  });
+
+  it('FORMULATEXT(INDIRECT("xx")) returns #N/A', () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.getCell("A1").value = { formula: 'FORMULATEXT(INDIRECT("xx"))', result: "" };
     wb.calculateFormulas();
     expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
   });

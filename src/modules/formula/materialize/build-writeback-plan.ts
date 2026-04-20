@@ -91,6 +91,13 @@ export function buildWritebackPlan(
   // Build ghost map from previous spills (validated against snapshot)
   const ghostMap: GhostMap = new Map();
   for (const [srcKey, region] of previousSpills) {
+    // Hoist the worksheet lookup once per region — the previous code did
+    // `snapshot.worksheetsById.get(…)` inside the inner cell loop,
+    // paying the Map lookup cost `region.rows × region.cols` times.
+    const ws = snapshot.worksheetsById.get(region.worksheetId);
+    if (!ws) {
+      continue;
+    }
     for (let r = 0; r < region.rows; r++) {
       for (let c = 0; c < region.cols; c++) {
         if (r === 0 && c === 0) {
@@ -100,12 +107,9 @@ export function buildWritebackPlan(
         const targetCol = region.sourceCol + c;
         const targetKey = spillCellKeyFromId(region.worksheetId, targetRow, targetCol);
         // Validate ghost cell is still unmodified
-        const ws = snapshot.worksheetsById.get(region.worksheetId);
-        if (ws) {
-          const cell = ws.cells.get(snapshotCellKey(targetRow, targetCol));
-          if (isGhostUnmodified(cell, targetKey, previousGhosts)) {
-            ghostMap.set(targetKey, srcKey);
-          }
+        const cell = ws.cells.get(snapshotCellKey(targetRow, targetCol));
+        if (isGhostUnmodified(cell, targetKey, previousGhosts)) {
+          ghostMap.set(targetKey, srcKey);
         }
       }
     }

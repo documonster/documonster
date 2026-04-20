@@ -199,6 +199,21 @@ describe("analyzeExpr", () => {
     expect(analyzeExpr(bound).isVolatile).toBe(true);
   });
 
+  it("_XLFN.RANDARRAY is flagged volatile via canonical name (regression)", () => {
+    // Regression: `boundCall` preserves the `_XLFN.` prefix on regular
+    // function names, so VOLATILE_FUNCTIONS.has("_XLFN.RANDARRAY") used
+    // to return false and the outer formula's session cache held stale
+    // values across calc passes. analyzeExpr must strip the prefix
+    // before doing the lookup.
+    const { bound } = compile("_XLFN.RANDARRAY(3, 3)");
+    expect(analyzeExpr(bound).isVolatile).toBe(true);
+  });
+
+  it("_XLFN._XLWS.RANDARRAY double-prefixed form is also flagged volatile", () => {
+    const { bound } = compile("_XLFN._XLWS.RANDARRAY(3, 3)");
+    expect(analyzeExpr(bound).isVolatile).toBe(true);
+  });
+
   it("LAMBDA is flagged", () => {
     // LAMBDA can only appear as a top-level call of a higher-order fn
     // like REDUCE / MAP / LET, not as an immediately-invoked prefix.
