@@ -10,12 +10,14 @@ body:
       label: "Module"
       options:
         - "Excel"
+        - "Formula"
         - "PDF"
         - "CSV"
         - "Markdown"
         - "XML"
         - "Archive"
         - "Stream"
+        - "Utils"
         - "Other"
     validations:
       required: true

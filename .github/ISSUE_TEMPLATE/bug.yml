@@ -10,12 +10,14 @@ body:
       label: "Module"
       options:
         - "Excel"
+        - "Formula"
         - "PDF"
         - "CSV"
         - "Markdown"
         - "XML"
         - "Archive"
         - "Stream"
+        - "Utils"
         - "Other"
     validations:
       required: true
@@ -35,6 +37,12 @@ body:
       options:
         - "Node.js"
         - "Browser"
+        - "Deno"
+        - "Bun"
+        - "Cloudflare Workers"
+        - "Edge Runtime (Vercel/Netlify)"
+        - "Electron"
+        - "Other"
     validations:
       required: true
 
