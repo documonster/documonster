@@ -743,4 +743,120 @@ describe("Cell", () => {
     expect(ws.getCell("B1").font!.bold).toBe(false);
     expect(ws.getCell("A1").font!.bold).toBe(true);
   });
+
+  // ===========================================================================
+  // displayText — formatted value (applies numFmt)
+  // ===========================================================================
+
+  describe("displayText", () => {
+    it("returns empty string for null / empty cell", () => {
+      const a1 = sheetMock.getCell("A1");
+      expect(a1.displayText).toBe("");
+    });
+
+    it("returns the string value for string cells (no numFmt)", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = "hello";
+      expect(a1.displayText).toBe("hello");
+    });
+
+    it("applies numFmt to number cells", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = 1234.5;
+      a1.numFmt = "#,##0.00";
+      expect(a1.displayText).toBe("1,234.50");
+    });
+
+    it("formats number as percentage", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = 0.125;
+      a1.numFmt = "0.00%";
+      expect(a1.displayText).toBe("12.50%");
+    });
+
+    it("formats a Date using the cell's numFmt, not Date.toString()", () => {
+      // Repro for issue #144: a date cell with numFmt "mm-dd-yy" should render
+      // as "04-12-19", not the JS Date.prototype.toString() output that cell.text
+      // would produce.
+      const a1 = sheetMock.getCell("A1");
+      a1.value = new Date(Date.UTC(2019, 3, 12));
+      a1.numFmt = "mm-dd-yy";
+      expect(a1.displayText).toBe("04-12-19");
+
+      // cell.text still returns the JS Date toString() for backwards compat.
+      expect(a1.text).not.toBe("04-12-19");
+    });
+
+    it("applies alternate date numFmt (dd.mm.yyyy)", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = new Date(Date.UTC(2019, 3, 12));
+      a1.numFmt = "dd.mm.yyyy";
+      expect(a1.displayText).toBe("12.04.2019");
+    });
+
+    it("falls back to yyyy-mm-dd for a Date cell with no numFmt", () => {
+      // Without a numFmt, Excel uses a locale-dependent short date; we emit
+      // an ISO-like default instead of the raw serial number.
+      const a1 = sheetMock.getCell("A1");
+      a1.value = new Date(Date.UTC(2019, 3, 12));
+      expect(a1.displayText).toBe("2019-04-12");
+    });
+
+    it("falls back to yyyy-mm-dd hh:mm:ss for a Date-with-time cell with no numFmt", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = new Date(Date.UTC(2019, 3, 12, 15, 30, 45));
+      expect(a1.displayText).toBe("2019-04-12 15:30:45");
+    });
+
+    it("resolves month vs minute per-mm-occurrence in mixed date-time formats", () => {
+      // Regression: previously a global `hasTimeContext` flag classified every
+      // `mm` in "yyyy-mm-dd hh:mm:ss" as minutes, producing "2019-30-12 15:30:45".
+      const a1 = sheetMock.getCell("A1");
+      a1.value = new Date(Date.UTC(2019, 3, 12, 15, 30, 45));
+      a1.numFmt = "yyyy-mm-dd hh:mm:ss";
+      expect(a1.displayText).toBe("2019-04-12 15:30:45");
+    });
+
+    it("uses the formula result for formula cells", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = { formula: "A2*2", result: 42.5 };
+      a1.numFmt = "0.0";
+      expect(a1.displayText).toBe("42.5");
+    });
+
+    it("uses the formula result Date with numFmt", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = { formula: "TODAY()", result: new Date(Date.UTC(2019, 3, 12)) };
+      a1.numFmt = "yyyy-mm-dd";
+      expect(a1.displayText).toBe("2019-04-12");
+    });
+
+    it("returns empty string for a formula without a result", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = { formula: "A2" };
+      expect(a1.displayText).toBe("");
+    });
+
+    it("falls back to cell.text for hyperlinks", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = { hyperlink: "http://www.link.com", text: "click me" };
+      expect(a1.displayText).toBe("click me");
+    });
+
+    it("accepts a NumFmt object (formatCode on style)", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = 1234;
+      // NumFmt object form
+      a1.style.numFmt = { id: 3, formatCode: "#,##0" };
+      expect(a1.displayText).toBe("1,234");
+    });
+
+    it("renders booleans as TRUE/FALSE", () => {
+      const a1 = sheetMock.getCell("A1");
+      a1.value = true;
+      expect(a1.displayText).toBe("TRUE");
+      a1.value = false;
+      expect(a1.displayText).toBe("FALSE");
+    });
+  });
 });

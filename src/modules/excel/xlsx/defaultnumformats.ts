@@ -26,7 +26,7 @@ const defaultNumFormats: { [key: number]: NumFormat } = {
   19: { f: "h:mm:ss AM/PM" },
   20: { f: "h:mm" },
   21: { f: "h:mm:ss" },
-  22: { f: 'm/d/yy "h":mm' },
+  22: { f: "m/d/yy h:mm" },
 
   27: {
     "zh-tw": "[$-404]e/m/d",
@@ -86,8 +86,8 @@ const defaultNumFormats: { [key: number]: NumFormat } = {
 
   37: { f: "#,##0 ;(#,##0)" },
   38: { f: "#,##0 ;[Red](#,##0)" },
-  39: { f: "#,##0.00 ;(#,##0.00)" },
-  40: { f: "#,##0.00 ;[Red](#,##0.00)" },
+  39: { f: "#,##0.00;(#,##0.00)" },
+  40: { f: "#,##0.00;[Red](#,##0.00)" },
   45: { f: "mm:ss" },
   46: { f: "[h]:mm:ss" },
   47: { f: "mmss.0" },

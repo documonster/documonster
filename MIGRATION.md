@@ -40,6 +40,13 @@ This document describes user-facing breaking changes and recommended migrations.
 29. [Excel: empty `<border>` now parses to `undefined` instead of `{}`](#excel-empty-border-now-parses-to-undefined)
 30. [Excel: table names must be unique across the workbook (case-insensitive)](#excel-table-names-must-be-unique-across-workbook)
 
+### Since v9.3.1
+
+31. [Excel: new `Cell.displayText` getter and exported `getCellDisplayText` / `formatCellValue`](#excel-cell-displaytext)
+32. [Excel: built-in `numFmtId` 14 and 22 now match the OOXML spec](#excel-numfmtid-14-22-corrected)
+33. [Excel: `mm` in mixed date-time formats now resolves month vs minute per occurrence](#excel-mm-disambiguation-fix)
+34. [Excel: Date cells with `General` / no `numFmt` now render as a date, not the raw Excel serial](#excel-date-general-default)
+
 ---
 
 ## CSV: `workbook.csv` accessor removed
@@ -1025,3 +1032,108 @@ ws.addTable({ name: unique, ... });
 ```
 
 - Error handling is the same — errors are thrown (rejected) with the same `PdfError` / `PdfStructureError` types. Use `try/catch` or `.catch()`.
+
+---
+
+# Since v9.3.1
+
+The changes below were introduced after the v9.3.1 release.
+
+## <a id="excel-cell-displaytext"></a>Excel: new `Cell.displayText` getter and exported `getCellDisplayText` / `formatCellValue`
+
+### What changed
+
+Previously the only public way to read a cell's value as a formatted string was `cell.text`, which for date cells returned `Date.prototype.toString()` (e.g. `"Fri Apr 12 2019 00:00:00 GMT+1000 ..."`) — not the Excel-style rendering consumers typically want. The numFmt-aware formatter existed internally but was not exported.
+
+This release adds:
+
+- `Cell.displayText` — a new getter returning the cell's value formatted through its `numFmt`. For primitives, dates, and formula results it applies the format code; for rich text, hyperlinks, and errors it falls back to `cell.text`.
+- Named exports `getCellDisplayText`, `formatCellValue`, `isDateDisplayFormat` from the package root — call them on any cell-like object or raw value without going through a worksheet.
+
+`cell.text` is **unchanged** for backwards compatibility.
+
+### How to use
+
+```ts
+// Before — no clean way to get Excel-style display text per cell.
+// cell.text returned "Fri Apr 12 2019 00:00:00 GMT+..." for Date cells.
+// The only workaround was worksheet.toJSON({ raw: false }).
+
+// After
+const cell = worksheet.getCell("A1");
+cell.value = new Date(Date.UTC(2019, 3, 12));
+cell.numFmt = "mm-dd-yy";
+
+cell.text; // "Fri Apr 12 2019 ..." (unchanged)
+cell.displayText; // "04-12-19" (new)
+```
+
+Or format a raw value without a cell:
+
+```ts
+import { formatCellValue, getCellDisplayText } from "@cj-tech-master/excelts";
+
+formatCellValue(new Date(Date.UTC(2019, 3, 12)), "dd.mm.yyyy"); // "12.04.2019"
+getCellDisplayText(cell, "dd.mm.yyyy"); // applies override only when numFmt is a date format
+```
+
+### Caveat: Excel's locale-dependent built-in formats
+
+Excel's built-in `numFmtId` 14 is stored in XLSX as `mm-dd-yy` but **rendered locale-dependently** — a German-locale Excel displays it as `dd.mm.yyyy`. excelts applies the format code literally; it does not perform Excel's locale substitution. If you need a consistent date style regardless of the per-cell `numFmt`, pass a format override:
+
+```ts
+// Force dd.mm.yyyy across the sheet
+worksheet.toJSON({ raw: false, dateFormat: "dd.mm.yyyy" });
+// Or for a single cell
+getCellDisplayText(cell, "dd.mm.yyyy");
+```
+
+## <a id="excel-numfmtid-14-22-corrected"></a>Excel: built-in `numFmtId` 14 and 22 now match the OOXML spec
+
+### What changed
+
+Two built-in number-format tables in the library were inconsistent with the OOXML spec (ECMA-376 § 18.8.30) and with each other:
+
+- **`numFmtId` 14** — the internal `TABLE_FMT` (used by the public `getFormat(id)` helper) returned `"m/d/yy"`. The spec — and the reader's `defaultNumFormats` table — say `"mm-dd-yy"`. Fixed to `"mm-dd-yy"` everywhere.
+- **`numFmtId` 22** — the reader's `defaultNumFormats` had `'m/d/yy "h":mm'`, which quotes a literal `h` character and produces garbled output like `"4/12/19 h:30"`. Spec is `"m/d/yy h:mm"`. Fixed.
+
+### Impact
+
+- Files whose style references `numFmtId="22"` with no explicit `formatCode` now render their time component correctly.
+- Any code calling `getFormat(14)` (exported via `cellFormat.getFormat`) now gets `"mm-dd-yy"` instead of `"m/d/yy"`. This is a one-character-field change for downstream formatters; most consumers pass the format string straight to our own formatter, which handles both spellings identically.
+- No action required unless you had code explicitly asserting the old strings.
+
+## <a id="excel-mm-disambiguation-fix"></a>Excel: `mm` in mixed date-time formats now resolves month vs minute per occurrence
+
+### What changed
+
+Excel's format code `mm` means either zero-padded month or zero-padded minutes, depending on whether it's adjacent to an hour/seconds token. The previous implementation used a single global flag per format string, which meant a mixed format like `"yyyy-mm-dd hh:mm:ss"` classified **every** `mm` as minutes — producing `"2019-30-12 15:30:45"` for April 12 2019 15:30:45.
+
+The formatter now decides per `mm` occurrence by inspecting neighboring tokens. Same-format-string mixes now render correctly:
+
+| Format                | April 12 2019, 15:30:45 |
+| --------------------- | ----------------------- |
+| `yyyy-mm-dd hh:mm:ss` | `2019-04-12 15:30:45`   |
+| `mm-yyyy`             | `04-2019`               |
+| `h:mm`                | `15:30`                 |
+| `mm-dd-yy`            | `04-12-19`              |
+| `m/d/yyyy h:mm AM/PM` | `4/12/2019 3:30 PM`     |
+
+No API change. This is a correctness fix — no action required.
+
+## <a id="excel-date-general-default"></a>Excel: Date cells with `General` / no `numFmt` now render as a date, not the raw Excel serial
+
+### What changed
+
+`formatCellValue(new Date(...), "General")` (and by extension `getCellDisplayText` / `Cell.displayText` / `worksheet.toJSON({ raw: false })`) previously emitted the raw Excel serial number (e.g. `"43567"`) when the value was a `Date` and the format was `"General"` or empty. That's never what callers want.
+
+The formatter now substitutes a sensible default when a `Date` meets a `General`/empty format:
+
+- Date-only values (midnight UTC) → `yyyy-mm-dd` (e.g. `"2019-04-12"`)
+- Date + time values → `yyyy-mm-dd hh:mm:ss` (e.g. `"2019-04-12 15:30:45"`)
+
+Excel itself substitutes a locale-dependent short date (`m/d/yyyy` under US locale). excelts picks an ISO-like format instead — it's unambiguous across locales and matches what consumers typically write when they want a machine-readable date.
+
+If you need a different default, set `cell.numFmt` explicitly or pass a `dateFormat` to `worksheet.toJSON({ raw: false, dateFormat })` / `getCellDisplayText(cell, dateFormat)`.
+
+No action required for most callers — `"2019-04-12"` is a strict improvement over `"43567"`. Only update if you had code explicitly parsing the serial-number string out of a `Date` cell's display text.

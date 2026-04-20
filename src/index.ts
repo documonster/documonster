@@ -148,6 +148,9 @@ export type { CellAddress, SheetRange, Origin } from "@excel/utils/address";
 // Worksheet data conversion option types
 export type { SheetToJSONOptions, AddJSONOptions, AddAOAOptions } from "@excel/worksheet";
 
+// Cell display-text helpers (apply numFmt to produce an Excel-style string)
+export { getCellDisplayText, formatCellValue, isDateDisplayFormat } from "@excel/utils/cell-format";
+
 // Date conversion (Excel serial dates <-> JS Date)
 export { dateToExcel, excelToDate } from "@utils/utils.base";
 

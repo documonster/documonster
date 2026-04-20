@@ -24,7 +24,7 @@ const TABLE_FMT: Record<number, string> = {
   11: "0.00E+00",
   12: "# ?/?",
   13: "# ??/??",
-  14: "m/d/yy",
+  14: "mm-dd-yy",
   15: "d-mmm-yy",
   16: "d-mmm",
   17: "mmm-yy",
@@ -228,6 +228,61 @@ const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /**
+ * Disambiguate each `mm` occurrence in a format string that has already been
+ * placeholder-substituted for the other date/time tokens.
+ *
+ * Excel's rule: `mm` is minutes when it's adjacent to an hour or seconds
+ * token (with no intervening date tokens); otherwise it's a zero-padded
+ * month. This must be decided per occurrence — a single format string can
+ * contain both roles (e.g. `"yyyy-mm-dd hh:mm:ss"`).
+ *
+ * The caller has already replaced `yyyy`/`yy` → `Y4/Y2`, month-name tokens
+ * `mmmmm/mmmm/mmm` → `MN5/MN4/MN3`, `dd`/`d` → `D2/D1`, `hh`/`h` → `H2/H1`,
+ * `ss`/`s` → `S2/S1`. So any remaining literal `mm` substrings here are
+ * ambiguous between minute and month.
+ *
+ * Returns the input with each `mm` replaced by either `\x00MI2\x00` (minutes)
+ * or `\x00M2\x00` (month, zero-padded).
+ */
+function resolveMonthOrMinute(s: string): string {
+  // Tokens that, when present between an `mm` and a time anchor, break the
+  // "adjacent time context" chain and push the `mm` back into month-land.
+  const DATE_TOKEN = /\x00(?:Y[24]|D[12]|MN[345])\x00/;
+  const HOUR_TOKEN = /\x00H[12]\x00/g;
+  const SEC_TOKEN = /\x00S[12]\x00/g;
+
+  let out = "";
+  let work = s;
+  let idx = work.search(/mm/i);
+  while (idx !== -1) {
+    const before = work.slice(0, idx);
+    const after = work.slice(idx + 2);
+
+    // Find the *nearest* hour token preceding this `mm` (scan from the right).
+    let nearestHourIdx = -1;
+    let m: RegExpExecArray | null;
+    HOUR_TOKEN.lastIndex = 0;
+    while ((m = HOUR_TOKEN.exec(before)) !== null) {
+      nearestHourIdx = m.index;
+    }
+    // Find the *nearest* seconds token following this `mm`.
+    SEC_TOKEN.lastIndex = 0;
+    const secMatch = SEC_TOKEN.exec(after);
+    const nearestSecIdx = secMatch ? secMatch.index : -1;
+
+    const hourInRange = nearestHourIdx !== -1 && !DATE_TOKEN.test(before.slice(nearestHourIdx));
+    const secInRange = nearestSecIdx !== -1 && !DATE_TOKEN.test(after.slice(0, nearestSecIdx));
+
+    const isMinutes = hourInRange || secInRange;
+    out += before + (isMinutes ? "\x00MI2\x00" : "\x00M2\x00");
+    work = after;
+    idx = work.search(/mm/i);
+  }
+  out += work;
+  return out;
+}
+
+/**
  * Format a date value using Excel date format
  * @param serial Excel serial number (days since 1900-01-01)
  * @param fmt Format string
@@ -301,15 +356,14 @@ function formatDate(serial: number, fmt: string): string {
   result = result.replace(/ss/gi, "\x00S2\x00");
   result = result.replace(/\bs\b/gi, "\x00S1\x00");
 
-  // Minutes/Month mm - context dependent
-  // If near h or s, it's minutes; otherwise month
-  // For simplicity, check if we already have hour tokens nearby
-  const hasTimeContext = /\x00H[12]\x00.*mm|mm.*\x00S[12]\x00/i.test(result);
-  if (hasTimeContext) {
-    result = result.replace(/mm/gi, "\x00MI2\x00");
-  } else {
-    result = result.replace(/mm/gi, "\x00M2\x00");
-  }
+  // Minutes/Month `mm` — position-dependent. Excel treats `mm` as minutes
+  // when the nearest neighboring time-token is an hour (before) or a
+  // seconds token (after); otherwise it's month. This must be decided **per
+  // occurrence**, because a single format string can contain both roles —
+  // e.g. in `"yyyy-mm-dd hh:mm:ss"` the first `mm` is month and the second
+  // is minutes. A single global `hasTimeContext` flag would miscategorise
+  // all `mm` as minutes in such mixed formats.
+  result = resolveMonthOrMinute(result);
   result = result.replace(/\bm\b/gi, "\x00M1\x00");
 
   // AM/PM
@@ -1022,6 +1076,17 @@ export function isDateDisplayFormat(fmt: string): boolean {
 }
 
 /**
+ * Default format applied to Date values whose numFmt is `General` or empty.
+ *
+ * Excel itself substitutes a locale-dependent short date in this case (US:
+ * `m/d/yyyy`). We pick an ISO-like `yyyy-mm-dd` so consumers who never set a
+ * `numFmt` still get a sensible, unambiguous rendering instead of the raw
+ * Excel serial number.
+ */
+const DEFAULT_DATE_FORMAT = "yyyy-mm-dd";
+const DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd hh:mm:ss";
+
+/**
  * Format a value according to the given format string.
  * Handles Date objects with timezone-independent Excel serial conversion.
  */
@@ -1039,8 +1104,20 @@ export function formatCellValue(
       }
       return format(fmt, serial);
     }
-    const actualFmt = dateFormat && isDateDisplayFormat(fmt) ? dateFormat : fmt;
-    return format(actualFmt, serial);
+    // For Date values whose numFmt is missing or General, Excel substitutes a
+    // default short-date format. Without this, `format("General", serial)`
+    // would emit the raw Excel serial (e.g. "43567") — almost never what the
+    // caller wants. Pick a datetime-aware default based on whether the value
+    // carries a non-midnight time component.
+    let effectiveFmt: string;
+    if (dateFormat && isDateDisplayFormat(fmt)) {
+      effectiveFmt = dateFormat;
+    } else if (!fmt || isGeneral(fmt)) {
+      effectiveFmt = serial % 1 === 0 ? DEFAULT_DATE_FORMAT : DEFAULT_DATETIME_FORMAT;
+    } else {
+      effectiveFmt = fmt;
+    }
+    return format(effectiveFmt, serial);
   }
   return format(fmt, value);
 }

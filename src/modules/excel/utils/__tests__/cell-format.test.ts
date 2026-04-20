@@ -317,7 +317,9 @@ describe("cell-format", () => {
       expect(cellFormat.getFormat(1)).toBe("0");
       expect(cellFormat.getFormat(2)).toBe("0.00");
       expect(cellFormat.getFormat(9)).toBe("0%");
-      expect(cellFormat.getFormat(14)).toBe("m/d/yy");
+      // numFmtId 14 is "mm-dd-yy" per ECMA-376 § 18.8.30 (locale-dependent
+      // substitution is an Excel runtime concern, not a spec mapping).
+      expect(cellFormat.getFormat(14)).toBe("mm-dd-yy");
     });
 
     it("should return General for unknown numFmtId", () => {
@@ -328,7 +330,7 @@ describe("cell-format", () => {
       // 5-8 map to 37-40
       expect(cellFormat.getFormat(5)).toBe("#,##0 ;(#,##0)");
       // 27-31 map to 14
-      expect(cellFormat.getFormat(27)).toBe("m/d/yy");
+      expect(cellFormat.getFormat(27)).toBe("mm-dd-yy");
       // 59-62 map to 1-4
       expect(cellFormat.getFormat(59)).toBe("0");
     });

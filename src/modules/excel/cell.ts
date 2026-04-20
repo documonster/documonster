@@ -24,6 +24,7 @@ import type {
   CellCheckboxValue,
   RichText
 } from "@excel/types";
+import { getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
 import { slideFormula } from "@excel/utils/shared-formula";
@@ -496,6 +497,27 @@ class Cell {
 
   get text(): string {
     return this._value.toString();
+  }
+
+  /**
+   * The cell's display text — the value formatted the way Excel would render
+   * it, applying the cell's `numFmt`. For a Date cell with `numFmt` `"mm-dd-yy"`,
+   * this returns e.g. `"04-12-19"` rather than the JS `Date.prototype.toString()`
+   * output you'd get from `cell.text`.
+   *
+   * Handles primitive values, dates, and formula results. For rich text,
+   * hyperlinks, errors, and other complex types, falls back to `cell.text`.
+   *
+   * Note: numFmt codes that are locale-dependent in Excel (e.g. built-in
+   * numFmtId 14 renders as `dd.mm.yyyy` under German locale but is stored
+   * as `mm-dd-yy`) are applied literally — excelts does not perform
+   * Excel's locale-based format substitution. If you need a specific date
+   * style across cells regardless of per-cell numFmts, call the exported
+   * {@link getCellDisplayText} helper with a `dateFormat` argument, or use
+   * `worksheet.toJSON({ dateFormat })`.
+   */
+  get displayText(): string {
+    return getCellDisplayText(this);
   }
 
   get html(): string {
