@@ -11,6 +11,7 @@ export { Range } from "@excel/range";
 export { Image } from "@excel/image";
 export * from "@excel/anchor";
 export { Table } from "@excel/table";
+export { Note } from "@excel/note";
 export { DataValidations } from "@excel/data-validations";
 export { FormCheckbox } from "@excel/form-control";
 // Note: the formula engine lives at the `./formula` subpath so it stays

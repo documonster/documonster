@@ -1,32 +1,9 @@
-import type { Font } from "@excel/types";
+import type { NoteConfig, NoteModel } from "@excel/cell";
 import { deepMerge } from "@excel/utils/under-dash";
-
-interface NoteText {
-  text: string;
-  font?: Partial<Font>;
-}
-
-interface NoteConfig {
-  margins?: {
-    insetmode?: string;
-    inset?: number[];
-  };
-  protection?: {
-    locked?: string;
-    lockText?: string;
-  };
-  editAs?: string;
-  texts?: NoteText[];
-  anchor?: string;
-}
-
-interface NoteModel {
-  type: string;
-  note: NoteConfig;
-}
 
 class Note {
   note: string | NoteConfig | undefined;
+  author: string | undefined;
 
   static readonly DEFAULT_CONFIGS: NoteModel = {
     note: {
@@ -43,8 +20,9 @@ class Note {
     type: "note"
   };
 
-  constructor(note?: string | NoteConfig) {
+  constructor(note?: string | NoteConfig, author?: string) {
     this.note = note;
+    this.author = author;
   }
 
   get model(): NoteModel {
@@ -70,7 +48,11 @@ class Note {
         break;
     }
     // Suitable for all cell comments
-    return deepMerge<NoteModel>({}, Note.DEFAULT_CONFIGS, value);
+    const result = deepMerge<NoteModel>({}, Note.DEFAULT_CONFIGS, value);
+    if (this.author !== undefined) {
+      result.author = this.author;
+    }
+    return result;
   }
 
   set model(value: NoteModel) {
@@ -81,6 +63,7 @@ class Note {
     } else {
       this.note = note;
     }
+    this.author = value.author;
   }
 
   static fromModel(model: NoteModel): Note {

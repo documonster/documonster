@@ -14,6 +14,8 @@ interface ClientDataModel {
   anchor: any;
   protection: Protection;
   editAs: string;
+  row?: number;
+  col?: number;
 }
 
 interface RenderModel {
@@ -30,6 +32,10 @@ interface RenderModel {
 class VmlClientDataXform extends BaseXform<ClientDataModel> {
   declare public map: { [key: string]: any };
   declare public parser: any;
+  /** Name of the current simple leaf element being parsed (e.g. "x:Row"). */
+  private _leafName: string | undefined;
+  /** Accumulated text for the current leaf element. */
+  private _leafText = "";
 
   constructor() {
     super();
@@ -71,6 +77,11 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
           editAs: ""
         };
         break;
+      case "x:Row":
+      case "x:Column":
+        this._leafName = node.name;
+        this._leafText = "";
+        break;
       default:
         this.parser = this.map[node.name];
         if (this.parser) {
@@ -82,12 +93,29 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
   }
 
   parseText(text: string): void {
-    if (this.parser) {
+    if (this._leafName) {
+      this._leafText += text;
+    } else if (this.parser) {
       this.parser.parseText(text);
     }
   }
 
   parseClose(name: string): boolean {
+    if (this._leafName) {
+      if (name === this._leafName) {
+        const value = parseInt(this._leafText, 10);
+        if (name === "x:Row") {
+          // VML uses 0-based row; convert to 1-based to match comment ref
+          this.model!.row = value + 1;
+        } else if (name === "x:Column") {
+          // VML uses 0-based col; convert to 1-based to match comment ref
+          this.model!.col = value + 1;
+        }
+        this._leafName = undefined;
+        this._leafText = "";
+      }
+      return true;
+    }
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
         this.parser = undefined;

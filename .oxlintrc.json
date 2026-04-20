@@ -18,7 +18,8 @@
             "ignoreClassWithStaticInitBlock": true,
             "reportUsedIgnorePattern": false,
             "reportVarsOnlyUsedAsTypes": false,
-            "varsIgnorePattern": "^_"
+            "varsIgnorePattern": "^_",
+            "fix": { "imports": "safe-fix", "variables": "off" }
           }
         ],
         "no-sparse-arrays": 0,

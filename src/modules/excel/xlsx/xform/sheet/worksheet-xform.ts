@@ -5,6 +5,7 @@ import {
   ctrlPropRelTargetFromWorksheet,
   drawingRelTargetFromWorksheet,
   pivotTableRelTargetFromWorksheet,
+  resolveRelTarget,
   tableRelTargetFromWorksheet,
   vmlDrawingRelTargetFromWorksheet,
   vmlDrawingHFRelTargetFromWorksheet
@@ -792,25 +793,65 @@ class WorkSheetXform extends BaseXform {
   reconcile(model, options) {
     // options.merges = new Merges();
     // options.merges.reconcile(model.mergeCells, model.rows);
-    const rels = (model.relationships ?? []).reduce((h, rel) => {
+    // Build rel index first, then process comments and VML in two passes so
+    // that the result is independent of the order rels appear in the file.
+    const relList = model.relationships ?? [];
+    const rels = relList.reduce((h, rel) => {
       h[rel.Id] = rel;
+      return h;
+    }, {});
+
+    // Pass 1: resolve comments
+    for (const rel of relList) {
       if (rel.Type === RelType.Comments) {
-        const commentEntry = options.comments?.[rel.Target];
+        const resolvedPath = resolveRelTarget("xl/worksheets/", rel.Target);
+        const commentEntry = options.comments?.[resolvedPath];
         if (commentEntry) {
           model.comments = commentEntry.comments;
         }
       }
-      if (rel.Type === RelType.VmlDrawing && model.comments && model.comments.length) {
-        const vmlEntry = options.vmlDrawings?.[rel.Target];
-        if (vmlEntry) {
-          const vmlComment = vmlEntry.comments;
-          model.comments.forEach((comment, index) => {
-            comment.note = Object.assign({}, comment.note, vmlComment[index]);
-          });
+    }
+
+    // Pass 2: merge VML note metadata (requires model.comments from pass 1)
+    if (model.comments && model.comments.length) {
+      for (const rel of relList) {
+        if (rel.Type === RelType.VmlDrawing) {
+          const resolvedVmlPath = resolveRelTarget("xl/worksheets/", rel.Target);
+          const vmlEntry = options.vmlDrawings?.[resolvedVmlPath];
+          if (vmlEntry) {
+            // Build a ref-keyed map from VML comments for order-independent merge.
+            // Fall back to index-based merge if VML entries lack row/col.
+            const vmlComments = vmlEntry.comments;
+            const vmlByRef: Record<string, any> = {};
+            let hasRefInfo = false;
+            for (const vc of vmlComments) {
+              if (vc.row != null && vc.col != null) {
+                const ref = colCache.encodeAddress(vc.row, vc.col);
+                vmlByRef[ref] = vc;
+                hasRefInfo = true;
+              }
+            }
+
+            if (hasRefInfo) {
+              // Merge by cell reference (robust against order differences)
+              for (const comment of model.comments) {
+                const vml = vmlByRef[comment.ref];
+                if (vml) {
+                  comment.note = Object.assign({}, comment.note, vml);
+                }
+              }
+            } else {
+              // Fallback: index-based merge for VML files without row/col
+              model.comments.forEach((comment, index) => {
+                if (index < vmlComments.length) {
+                  comment.note = Object.assign({}, comment.note, vmlComments[index]);
+                }
+              });
+            }
+          }
         }
       }
-      return h;
-    }, {});
+    }
     options.commentsMap = (model.comments ?? []).reduce((h, comment) => {
       if (comment.ref) {
         h[comment.ref] = comment;
@@ -922,7 +963,8 @@ class WorkSheetXform extends BaseXform {
     model.tables = (model.tables ?? []).reduce((acc, tablePart) => {
       const rel = rels[tablePart.rId];
       if (rel) {
-        const table = options.tables[rel.Target];
+        const resolvedPath = resolveRelTarget("xl/worksheets/", rel.Target);
+        const table = options.tables[resolvedPath];
         if (table) {
           acc.push(table);
         }
@@ -935,7 +977,8 @@ class WorkSheetXform extends BaseXform {
     model.pivotTables = [];
     (model.relationships ?? []).forEach(rel => {
       if (rel.Type === RelType.PivotTable && options.pivotTables) {
-        const pivotTable = options.pivotTables[rel.Target];
+        const resolvedPath = resolveRelTarget("xl/worksheets/", rel.Target);
+        const pivotTable = options.pivotTables[resolvedPath];
         if (pivotTable) {
           model.pivotTables.push(pivotTable);
         }

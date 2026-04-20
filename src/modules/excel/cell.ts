@@ -76,6 +76,7 @@ export interface NoteConfig {
 export interface NoteModel {
   type: string;
   note: NoteConfig;
+  author?: string;
 }
 
 export interface CellModel {

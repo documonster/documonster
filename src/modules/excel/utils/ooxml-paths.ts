@@ -23,7 +23,9 @@ const drawingXmlRegex = /^xl\/drawings\/(drawing\d+)[.]xml$/;
 const drawingRelsXmlRegex = /^xl\/drawings\/_rels\/(drawing\d+)[.]xml[.]rels$/;
 const vmlDrawingRegex = /^xl\/drawings\/(vmlDrawing\d+)[.]vml$/;
 const vmlDrawingHFRegex = /^xl\/drawings\/(vmlDrawingHF\d+)[.]vml$/;
-const commentsXmlRegex = /^xl\/comments(\d+)[.]xml$/;
+// Matches both flat layout (xl/comments1.xml) and subdirectory layout (xl/comments/comment1.xml).
+// Both are valid OOXML — the actual path is determined by .rels, not by convention.
+const commentsXmlRegex = /^xl\/(?:comments(\d+)|comments\/comment(\d+))[.]xml$/;
 const tableXmlRegex = /^xl\/tables\/(table\d+)[.]xml$/;
 
 const pivotTableXmlRegex = /^xl\/pivotTables\/(pivotTable\d+)[.]xml$/;
@@ -101,9 +103,12 @@ export function getVmlDrawingHFNameFromPath(path: string): string | undefined {
   return match ? match[1] : undefined;
 }
 
-export function getCommentsIndexFromPath(path: string): string | undefined {
-  const match = commentsXmlRegex.exec(path);
-  return match ? match[1] : undefined;
+/**
+ * Check if a zip entry path is a comments XML file.
+ * Works for both `xl/comments1.xml` and `xl/comments/comment1.xml`.
+ */
+export function isCommentsPath(path: string): boolean {
+  return commentsXmlRegex.test(path);
 }
 
 export function getTableNameFromPath(path: string): string | undefined {
@@ -232,6 +237,10 @@ export function pivotTablePath(n: number | string): string {
   return `xl/pivotTables/pivotTable${n}.xml`;
 }
 
+export function pivotTablePathFromName(name: string): string {
+  return `xl/pivotTables/${name}.xml`;
+}
+
 export function pivotTableRelsPath(n: number | string): string {
   return `xl/pivotTables/_rels/pivotTable${n}.xml.rels`;
 }
@@ -291,33 +300,14 @@ export function drawingRelTargetFromWorksheet(drawingName: string): string {
   return `../drawings/${drawingName}.xml`;
 }
 
-export function vmlDrawingRelTargetFromWorksheetName(vmlName: string): string {
-  // For VML drawings when the caller already has the logical name (e.g. "vmlDrawing1").
-  return `../drawings/${vmlName}.vml`;
-}
-
-export function commentsRelTargetFromWorksheetName(commentName: string): string {
-  // For comments when the caller already has the logical name (e.g. "comments1").
-  return `../${commentName}.xml`;
-}
-
 export function pivotTableRelTargetFromWorksheet(n: number | string): string {
   // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
   return `../pivotTables/pivotTable${n}.xml`;
 }
 
-export function pivotTableRelTargetFromWorksheetName(pivotName: string): string {
-  // For pivot tables when the caller already has the logical name (e.g. "pivotTable1").
-  return `../pivotTables/${pivotName}.xml`;
-}
-
 export function tableRelTargetFromWorksheet(target: string): string {
   // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
   return `../tables/${target}`;
-}
-
-export function tableRelTargetFromWorksheetName(name: string): string {
-  return `../tables/${name}.xml`;
 }
 
 export function mediaRelTargetFromRels(filename: string): string {
@@ -333,4 +323,37 @@ export function ctrlPropPath(id: number | string): string {
 export function ctrlPropRelTargetFromWorksheet(id: number | string): string {
   // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
   return `../ctrlProps/ctrlProp${id}.xml`;
+}
+
+/**
+ * Resolve a relationship Target (relative or absolute) to a normalized zip path.
+ *
+ * OOXML relationship targets may be:
+ *   - Relative: `../comments1.xml` (resolved against `baseDir`)
+ *   - Absolute: `/xl/comments/comment1.xml` (leading slash stripped)
+ *
+ * @param baseDir  The directory containing the source part (e.g. `xl/worksheets/`)
+ * @param target   The raw Target value from the .rels file
+ */
+export function resolveRelTarget(baseDir: string, target: string): string {
+  // Absolute target — strip leading slash to get the zip path.
+  if (target.startsWith("/")) {
+    return target.slice(1);
+  }
+  // Ensure baseDir ends with "/" so the join works correctly.
+  const base = baseDir.endsWith("/") ? baseDir : baseDir + "/";
+  // Relative target — resolve against baseDir.
+  // Simple resolution: join base + target, then resolve `.` and `..` segments.
+  const parts = (base + target).split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (part === "." || part === "") {
+      continue;
+    } else if (part === "..") {
+      resolved.pop();
+    } else {
+      resolved.push(part);
+    }
+  }
+  return resolved.join("/");
 }

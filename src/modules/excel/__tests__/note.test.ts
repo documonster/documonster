@@ -199,6 +199,47 @@ describe("Note", () => {
   });
 
   // ===========================================================================
+  // Author Round-trip Tests
+  // ===========================================================================
+
+  describe("author round-trip", () => {
+    it("preserves author through model getter", () => {
+      const note = new Note("x", "Alice");
+      expect(note.model.author).toBe("Alice");
+    });
+
+    it("preserves author through fromModel", () => {
+      const note = Note.fromModel({
+        type: "note",
+        note: { texts: [{ text: "x" }] },
+        author: "Bob"
+      });
+      expect(note.author).toBe("Bob");
+    });
+
+    it("preserves author through full model cycle", () => {
+      const original = new Note("Hello", "Alice");
+      const restored = Note.fromModel(original.model);
+      expect(restored.author).toBe("Alice");
+    });
+
+    it("preserves empty string author", () => {
+      const note = new Note("x", "");
+      const model = note.model;
+      expect(model.author).toBe("");
+
+      const restored = Note.fromModel(model);
+      expect(restored.author).toBe("");
+    });
+
+    it("omits author from model when undefined", () => {
+      const note = new Note("x");
+      expect(note.model.author).toBeUndefined();
+      expect("author" in note.model).toBe(false);
+    });
+  });
+
+  // ===========================================================================
   // Round-trip Tests
   // ===========================================================================
 

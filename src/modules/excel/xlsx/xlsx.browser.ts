@@ -25,7 +25,6 @@ import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
   commentsPath,
-  commentsRelTargetFromWorksheetName,
   ctrlPropPath,
   drawingPath,
   drawingRelsPath,
@@ -33,9 +32,9 @@ import {
   externalLinkRelsPath,
   externalLinkRelTargetFromWorkbook,
   OOXML_REL_TARGETS,
-  pivotTableRelTargetFromWorksheetName,
   pivotCacheDefinitionRelTargetFromWorkbook,
-  getCommentsIndexFromPath,
+  pivotTablePathFromName,
+  isCommentsPath,
   getDrawingNameFromPath,
   getDrawingNameFromRelsPath,
   getExternalLinkIndexFromPath,
@@ -56,7 +55,6 @@ import {
   pivotTableRelsPath,
   getTableNameFromPath,
   tablePath,
-  tableRelTargetFromWorksheetName,
   themePath,
   getThemeNameFromPath,
   getVmlDrawingNameFromPath,
@@ -66,7 +64,6 @@ import {
   isBinaryEntryPath,
   normalizeZipPath,
   OOXML_PATHS,
-  vmlDrawingRelTargetFromWorksheetName,
   vmlDrawingPath,
   vmlDrawingHFPath,
   vmlDrawingHFRelsPath,
@@ -1408,9 +1405,8 @@ class XLSX {
       };
 
       loadedPivotTables.push(completePivotTable);
-      // Key format (e.g., "../pivotTables/pivotTable1.xml") matches worksheet .rels Target values,
-      // allowing worksheet reconciliation to look up pivot tables by their relationship target path.
-      pivotTablesIndexed[pivotTableRelTargetFromWorksheetName(pivotName)] = completePivotTable;
+      // Key by absolute zip path so reconcile can match any rel target layout.
+      pivotTablesIndexed[pivotTablePathFromName(pivotName)] = completePivotTable;
     });
 
     loadedPivotTables.sort((a, b) => a.tableNumber - b.tableNumber);
@@ -1490,16 +1486,18 @@ class XLSX {
     model.worksheets.push(worksheet);
   }
 
-  async _processCommentEntry(stream: IParseStream, model: any, name: string): Promise<void> {
+  async _processCommentEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
     const xform = new CommentsXform();
     const comments = await xform.parseStream(stream);
-    model.comments[commentsRelTargetFromWorksheetName(name)] = comments;
+    // Key by absolute zip path so reconcile can match any rel target layout.
+    model.comments[zipPath] = comments;
   }
 
-  async _processTableEntry(stream: IParseStream, model: any, name: string): Promise<void> {
+  async _processTableEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
     const xform = new TableXform();
     const table = await xform.parseStream(stream);
-    model.tables[tableRelTargetFromWorksheetName(name)] = table;
+    // Key by absolute zip path so reconcile can match any rel target layout.
+    model.tables[zipPath] = table;
   }
 
   async _processWorksheetRelsEntry(
@@ -1588,10 +1586,11 @@ class XLSX {
     model.drawingRels[name] = relationships;
   }
 
-  async _processVmlDrawingEntry(entry: any, model: any, name: string): Promise<void> {
+  async _processVmlDrawingEntry(entry: any, model: any, zipPath: string): Promise<void> {
     const xform = new VmlDrawingXform();
     const vmlDrawing = await xform.parseStream(entry);
-    model.vmlDrawings[vmlDrawingRelTargetFromWorksheetName(name)] = vmlDrawing;
+    // Key by absolute zip path so reconcile can match any rel target layout.
+    model.vmlDrawings[zipPath] = vmlDrawing;
   }
 
   async _processVmlDrawingHFEntry(entry: any, model: any, _name: string): Promise<void> {
@@ -1782,7 +1781,7 @@ class XLSX {
 
     const vmlDrawingName = getVmlDrawingNameFromPath(entryName);
     if (vmlDrawingName) {
-      await this._processVmlDrawingEntry(stream, model, vmlDrawingName);
+      await this._processVmlDrawingEntry(stream, model, entryName);
       return true;
     }
 
@@ -1794,15 +1793,14 @@ class XLSX {
       return true;
     }
 
-    const commentsIndex = getCommentsIndexFromPath(entryName);
-    if (commentsIndex) {
-      await this._processCommentEntry(stream, model, `comments${commentsIndex}`);
+    if (isCommentsPath(entryName)) {
+      await this._processCommentEntry(stream, model, entryName);
       return true;
     }
 
     const tableName = getTableNameFromPath(entryName);
     if (tableName) {
-      await this._processTableEntry(stream, model, tableName);
+      await this._processTableEntry(stream, model, entryName);
       return true;
     }
 

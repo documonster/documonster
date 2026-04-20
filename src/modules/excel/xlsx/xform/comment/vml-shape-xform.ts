@@ -89,6 +89,10 @@ class VmlShapeXform extends BaseXform {
           this.map["x:ClientData"].model && this.map["x:ClientData"].model.protection;
         this.model.anchor = this.map["x:ClientData"].model && this.map["x:ClientData"].model.anchor;
         this.model.editAs = this.map["x:ClientData"].model && this.map["x:ClientData"].model.editAs;
+        if (this.map["x:ClientData"].model) {
+          this.model.row = this.map["x:ClientData"].model.row;
+          this.model.col = this.map["x:ClientData"].model.col;
+        }
         return false;
       default:
         return true;

@@ -42,7 +42,7 @@ class CommentXform extends BaseXform<CommentModel> {
 
     xmlStream.openNode("comment", {
       ref: renderModel!.ref,
-      authorId: 0
+      authorId: renderModel!.authorId ?? 0
     });
     xmlStream.openNode("text");
     if (renderModel && renderModel.note && renderModel.note.texts) {
@@ -66,7 +66,8 @@ class CommentXform extends BaseXform<CommentModel> {
           note: {
             texts: []
           },
-          ...node.attributes
+          ref: node.attributes.ref,
+          authorId: node.attributes.authorId != null ? Number(node.attributes.authorId) : undefined
         };
         return true;
       case "r":
