@@ -14,7 +14,7 @@
           {
             "args": "none",
             "ignoreRestSiblings": true,
-            "caughtErrors": false,
+            "caughtErrors": "none",
             "ignoreClassWithStaticInitBlock": true,
             "reportUsedIgnorePattern": false,
             "reportVarsOnlyUsedAsTypes": false,

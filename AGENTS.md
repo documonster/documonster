@@ -33,9 +33,8 @@
 
 ```bash
 pnpm install                  # Install (use pnpm, not npm/yarn)
-pnpm run check                # Type check + lint — run before commit
+pnpm run check                # Type check + lint + format check — run before commit (do not run lint separately)
 pnpm run format               # Prettier format — run before commit
-pnpm run lint:fix             # Auto-fix lint issues
 pnpm run test                 # All tests
 pnpm run build                # Production build
 
