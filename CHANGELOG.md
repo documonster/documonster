@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.4.1](https://github.com/cjnoname/excelts/compare/v9.4.0...v9.4.1) (2026-04-21)
+
+
+### Features
+
+* **issue-templates:** Add "Formula" and "Utils" options to module dropdowns ([71f4c32](https://github.com/cjnoname/excelts/commit/71f4c32cd3d671006612a0b3d733cea7c447eee5))
+
+
+### Bug Fixes
+
+* **excel:** Support comments subdirectory layout and author round-trip ([#148](https://github.com/cjnoname/excelts/issues/148)) ([480d108](https://github.com/cjnoname/excelts/commit/480d108c9296bafa45148b80a8085ac853478f23))
+
+
+### Miscellaneous Chores
+
+* Release 9.4.1 ([0cf74c7](https://github.com/cjnoname/excelts/commit/0cf74c7574b2e8e503e326b00814d5ab79357de0))
+
 ## [9.4.0](https://github.com/cjnoname/excelts/compare/v9.3.1...v9.4.0) (2026-04-20)
 
 
