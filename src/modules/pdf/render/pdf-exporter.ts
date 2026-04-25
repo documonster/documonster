@@ -13,13 +13,15 @@ import { yieldToEventLoop } from "@utils/utils.base";
 import { writeImageXObject } from "../builder/image-utils";
 import { initEncryption } from "../core/encryption";
 import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "../core/pdf-object";
-import { PdfContentStream } from "../core/pdf-stream";
+import { PdfContentStream, isWinAnsiCodePoint } from "../core/pdf-stream";
 import { PdfWriter } from "../core/pdf-writer";
 import { PdfError, PdfRenderError } from "../errors";
 import { FontManager, resolvePdfFontName } from "../font/font-manager";
+import { discoverSystemFontCandidates } from "../font/system-fonts";
 import { parseTtf } from "../font/ttf-parser";
 import {
   PageSizes,
+  PdfCellType,
   type PdfWorkbook,
   type PdfSheetData,
   type PdfExportOptions,
@@ -87,12 +89,39 @@ function prepareExport(workbook: PdfWorkbook, options?: PdfExportOptions): Expor
   const fontManager = new FontManager();
   const writer = new PdfWriter();
 
-  if (options?.font) {
+  // Determine font data: user-provided > auto-discovered system font
+  let fontData = options?.font ?? null;
+
+  if (!fontData) {
+    // Collect non-WinAnsi code points from the document (single pass)
+    const nonWinAnsi = collectNonWinAnsiCodePoints(sheets);
+    if (nonWinAnsi.size > 0) {
+      // Try system font candidates in preference order until one covers all chars
+      for (const candidate of discoverSystemFontCandidates()) {
+        try {
+          const testTtf = parseTtf(candidate);
+          const allCovered = [...nonWinAnsi].every(cp => testTtf.cmap.has(cp));
+          if (allCovered) {
+            fontData = candidate;
+            break;
+          }
+        } catch {
+          // Parse failed — try next candidate
+        }
+      }
+    }
+  }
+
+  if (fontData) {
     try {
-      const ttf = parseTtf(options.font);
+      const ttf = parseTtf(fontData);
       fontManager.registerEmbeddedFont(ttf);
     } catch (err) {
-      throw new PdfRenderError("Failed to parse TrueType font", { cause: err });
+      if (options?.font) {
+        // Only throw if the user explicitly provided a font
+        throw new PdfRenderError("Failed to parse TrueType font", { cause: err });
+      }
+      // Auto-discovered font failed to parse — silently fall back to Type1 + Type3
     }
   }
 
@@ -683,4 +712,50 @@ function isWatermarkApplicable(watermark: PdfWatermark, page: LayoutPage): boole
     }
   }
   return true;
+}
+
+// =============================================================================
+// Non-WinAnsi Detection
+// =============================================================================
+
+/**
+ * Collect all non-WinAnsi code points from sheet text (single pass).
+ * Returns an empty set if all text is WinAnsi-representable.
+ */
+function collectNonWinAnsiCodePoints(sheets: PdfSheetData[]): Set<number> {
+  const result = new Set<number>();
+  for (const sheet of sheets) {
+    for (const row of sheet.rows.values()) {
+      for (const cell of row.cells.values()) {
+        collectFromText(cell.text, result);
+        if (
+          cell.type === PdfCellType.RichText &&
+          cell.value &&
+          typeof cell.value === "object" &&
+          "richText" in cell.value
+        ) {
+          const runs = (cell.value as { richText: Array<{ text?: string }> }).richText;
+          for (const run of runs) {
+            collectFromText(run.text, result);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function collectFromText(text: string | undefined, out: Set<number>): void {
+  if (!text) {
+    return;
+  }
+  for (let i = 0; i < text.length; i++) {
+    const cp = text.codePointAt(i)!;
+    if (cp > 0xffff) {
+      i++;
+    }
+    if (!isWinAnsiCodePoint(cp)) {
+      out.add(cp);
+    }
+  }
 }

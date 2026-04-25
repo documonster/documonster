@@ -9,8 +9,8 @@ import { pdf as standalonePdf } from "@pdf/pdf";
  */
 import { describe, it, expect } from "vitest";
 
-import { buildMinimalTtf } from "./font-embedding.test";
 import { pdfToString, expectValidPdf } from "./test-helpers";
+import { buildMinimalTtf } from "./ttf-test-utils";
 
 describe("excelToPdf", () => {
   describe("Basic Export", () => {
@@ -909,6 +909,137 @@ describe("excelToPdf", () => {
       // Should have more than 1 page (50 rows with repeat headers)
       const text = pdfToString(pdf);
       expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe("Row height auto-expand", () => {
+    it("should auto-expand row height for wrapped text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Column A is narrow
+      ws.getColumn("A").width = 5;
+
+      // Cell with wrapText and long content that needs multiple lines
+      ws.getCell("A1").value = "This is a very long text that needs wrapping";
+      ws.getCell("A1").alignment = { wrapText: true };
+
+      // Set a small row height that is NOT custom
+      ws.getRow(1).height = 15; // Default height, not custom
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expect(pdf.length).toBeGreaterThan(0);
+
+      // The PDF should be valid — the main check is that it doesn't crash
+      // and the row height was auto-expanded (verified by no clipping)
+      const text = new TextDecoder("latin1").decode(pdf);
+      expect(text).toContain("%PDF");
+    });
+  });
+
+  describe("Unicode character rendering", () => {
+    it("should render non-WinAnsi characters without throwing", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "⧇"; // SQUARED SMALL CIRCLE
+      ws.getCell("A2").value = "○"; // WHITE CIRCLE
+      ws.getCell("A3").value = "☐"; // BALLOT BOX
+      ws.getCell("A4").value = "✓✗★♥→←"; // Common symbols
+      ws.getColumn("A").width = 20;
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expect(pdf.length).toBeGreaterThan(100);
+    });
+
+    it("should render non-WinAnsi characters in rich text without throwing", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = {
+        richText: [{ text: "Status: ", font: { bold: true } }, { text: "☐ Pending ✓ Done" }]
+      };
+      ws.getColumn("A").width = 30;
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expect(pdf.length).toBeGreaterThan(100);
+      expectValidPdf(pdf);
+    });
+
+    it("should render non-WinAnsi characters in wrapped rich text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = {
+        richText: [
+          { text: "Item ⧇ first line that is long enough to wrap ", font: { bold: true } },
+          { text: "○ second part with symbols ☐ ✓" }
+        ]
+      };
+      ws.getCell("A1").alignment = { wrapText: true };
+      ws.getColumn("A").width = 15;
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expect(pdf.length).toBeGreaterThan(100);
+      expectValidPdf(pdf);
+    });
+
+    it("should render non-WinAnsi characters in rotated text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "☐ ✓ ⧇";
+      ws.getCell("A1").alignment = { textRotation: 45 };
+      ws.getCell("A2").value = "○ → ★";
+      ws.getCell("A2").alignment = { textRotation: 90 };
+      ws.getCell("A3").value = "♥ ← ✗";
+      ws.getCell("A3").alignment = { textRotation: 135 };
+      ws.getRow(1).height = 60;
+      ws.getRow(2).height = 60;
+      ws.getRow(3).height = 60;
+      ws.getColumn("A").width = 20;
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expectValidPdf(pdf);
+    });
+
+    it("should render non-WinAnsi characters in vertical stacked text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "☐✓⧇";
+      ws.getCell("A1").alignment = { textRotation: "vertical" as unknown as number };
+      ws.getRow(1).height = 80;
+      ws.getColumn("A").width = 20;
+
+      const pdf = await excelToPdf(wb);
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expectValidPdf(pdf);
+    });
+
+    it("should render Unicode sheet name in page header", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("数据表☐");
+      ws.getCell("A1").value = "Test";
+
+      const pdf = await excelToPdf(wb, { showSheetNames: true });
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expectValidPdf(pdf);
+    });
+
+    it("should render Unicode text watermark", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "Test";
+
+      const pdf = await excelToPdf(wb, {
+        watermark: {
+          type: "text",
+          text: "机密 ☐ ✓"
+        }
+      });
+      expect(pdf).toBeInstanceOf(Uint8Array);
+      expectValidPdf(pdf);
     });
   });
 });

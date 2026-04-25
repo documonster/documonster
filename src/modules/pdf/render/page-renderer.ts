@@ -407,8 +407,8 @@ function drawCellText(
   );
 
   stream.setFillColor(cell.textColor);
-  stream.beginText();
-  stream.setFont(resourceName, fontSize);
+
+  const useType3 = fontManager.hasType3Fonts() && !isEmbedded;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -416,16 +416,8 @@ function drawCellText(
     const textWidth = measure(line);
     const textX = computeTextX(horizontalAlign, rect, textWidth, indentPts, pad.left, pad.right);
 
-    stream.setTextMatrix(1, 0, 0, 1, textX, lineY);
-    const hexEncoded = fontManager.encodeText(line, resourceName);
-    if (hexEncoded) {
-      stream.showTextHex(hexEncoded);
-    } else {
-      stream.showText(line);
-    }
+    emitTextWithType3(stream, line, textX, lineY, resourceName, fontSize, fontManager, useType3);
   }
-
-  stream.endText();
 
   drawTextDecorations(
     stream,
@@ -550,21 +542,21 @@ function drawRichText(
       }
 
       let textX = computeTextX(horizontalAlign, rect, lineWidth, indentPts, pad.left, pad.right);
+      const useType3 = fontManager.hasType3Fonts() && !isEmbedded;
       for (const seg of segments) {
         const { run, text, resourceName } = seg;
-        const segWidth = fontManager.measureText(text, resourceName, run.fontSize);
 
         stream.setFillColor(run.textColor);
-        stream.beginText();
-        stream.setFont(resourceName, run.fontSize);
-        stream.setTextMatrix(1, 0, 0, 1, textX, lineY);
-        const hex = fontManager.encodeText(text, resourceName);
-        if (hex) {
-          stream.showTextHex(hex);
-        } else {
-          stream.showText(text);
-        }
-        stream.endText();
+        const segWidth = emitTextWithType3(
+          stream,
+          text,
+          textX,
+          lineY,
+          resourceName,
+          run.fontSize,
+          fontManager,
+          useType3
+        );
 
         if (run.strike) {
           const descent = fontManager.getFontDescent(resourceName, run.fontSize);
@@ -605,27 +597,25 @@ function drawRichText(
     pad.bottom
   );
   let textX = computeTextX(horizontalAlign, rect, totalWidth, indentPts, pad.left, pad.right);
+  const useType3 = fontManager.hasType3Fonts() && !isEmbedded;
 
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
     const { resourceName } = runMetrics[i];
 
     stream.setFillColor(run.textColor);
-    stream.beginText();
-    stream.setFont(resourceName, run.fontSize);
-    stream.setTextMatrix(1, 0, 0, 1, textX, textStartY);
-
-    const hexEncoded = fontManager.encodeText(run.text, resourceName);
-    if (hexEncoded) {
-      stream.showTextHex(hexEncoded);
-    } else {
-      stream.showText(run.text);
-    }
-
-    stream.endText();
+    const runWidth = emitTextWithType3(
+      stream,
+      run.text,
+      textX,
+      textStartY,
+      resourceName,
+      run.fontSize,
+      fontManager,
+      useType3
+    );
 
     // Draw per-run decorations (strikethrough, underline)
-    const runWidth = runMetrics[i].width;
     if (run.strike) {
       const descent = fontManager.getFontDescent(resourceName, run.fontSize);
       const y = textStartY + descent + run.fontSize * 0.3;
@@ -637,7 +627,7 @@ function drawRichText(
       stream.drawLine(textX, y, textX + runWidth, y, run.textColor, 0.5);
     }
 
-    textX += runMetrics[i].width;
+    textX += runWidth;
   }
 }
 
@@ -792,6 +782,8 @@ function drawRotated90(
     startX = rect.x + pad.left + ascent;
   }
 
+  const useType3 = fontManager.hasType3Fonts() && !fontManager.hasEmbeddedFont();
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineWidth = fontManager.measureText(line, resourceName, fontSize);
@@ -811,11 +803,20 @@ function drawRotated90(
     }
     ty = Math.max(ty, rect.y + pad.bottom);
 
-    stream.beginText();
-    stream.setFont(resourceName, fontSize);
-    stream.setTextMatrix(0, 1, -1, 0, colX, ty);
-    emitText(stream, fontManager, line, resourceName);
-    stream.endText();
+    emitTextWithMatrix(
+      stream,
+      line,
+      0,
+      1,
+      -1,
+      0,
+      colX,
+      ty,
+      resourceName,
+      fontSize,
+      fontManager,
+      useType3
+    );
   }
 }
 
@@ -845,6 +846,8 @@ function drawRotatedMinus90(
     startX = rect.x + pad.left + totalColumnsWidth - lineHeight + ascent;
   }
 
+  const useType3 = fontManager.hasType3Fonts() && !fontManager.hasEmbeddedFont();
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineWidth = fontManager.measureText(line, resourceName, fontSize);
@@ -864,11 +867,20 @@ function drawRotatedMinus90(
     }
     ty = Math.min(ty, rect.y + rect.height - pad.top);
 
-    stream.beginText();
-    stream.setFont(resourceName, fontSize);
-    stream.setTextMatrix(0, -1, 1, 0, colX, ty);
-    emitText(stream, fontManager, line, resourceName);
-    stream.endText();
+    emitTextWithMatrix(
+      stream,
+      line,
+      0,
+      -1,
+      1,
+      0,
+      colX,
+      ty,
+      resourceName,
+      fontSize,
+      fontManager,
+      useType3
+    );
   }
 }
 
@@ -937,6 +949,8 @@ function drawRotatedGeneral(
     cx = rect.x + rect.width / 2 + indentOffset + slantAtCy;
   }
 
+  const useType3 = fontManager.hasType3Fonts() && !fontManager.hasEmbeddedFont();
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineWidth = fontManager.measureText(line, resourceName, fontSize);
@@ -946,11 +960,20 @@ function drawRotatedGeneral(
     const tx = cx + offsetX * cos - offsetY * sin;
     const ty = cy + offsetX * sin + offsetY * cos;
 
-    stream.beginText();
-    stream.setFont(resourceName, fontSize);
-    stream.setTextMatrix(cos, sin, -sin, cos, tx, ty);
-    emitText(stream, fontManager, line, resourceName);
-    stream.endText();
+    emitTextWithMatrix(
+      stream,
+      line,
+      cos,
+      sin,
+      -sin,
+      cos,
+      tx,
+      ty,
+      resourceName,
+      fontSize,
+      fontManager,
+      useType3
+    );
   }
 }
 
@@ -967,6 +990,153 @@ function emitText(
   } else {
     stream.showText(text);
   }
+}
+
+/**
+ * Render a text string with a custom text matrix, using Type3-aware splitting
+ * when needed.  For each sub-run the matrix origin is advanced along the
+ * text direction (cos, sin) by the rendered width.
+ *
+ * When `useType3` is false this collapses to a single BT/ET pair — identical
+ * to the old `emitText()` path but wrapped in begin/end for convenience.
+ */
+export function emitTextWithMatrix(
+  stream: PdfContentStream,
+  text: string,
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  tx: number,
+  ty: number,
+  type1ResourceName: string,
+  fontSize: number,
+  fontManager: FontManager,
+  useType3: boolean
+): void {
+  if (!useType3) {
+    stream.beginText();
+    stream.setFont(type1ResourceName, fontSize);
+    stream.setTextMatrix(a, b, c, d, tx, ty);
+    emitText(stream, fontManager, text, type1ResourceName);
+    stream.endText();
+    return;
+  }
+
+  // Type3 path: split into runs and advance origin along text direction
+  const runs = splitTextRuns(text, fontManager);
+  let curTx = tx;
+  let curTy = ty;
+  for (const run of runs) {
+    stream.beginText();
+    if (run.type3) {
+      stream.setFont(run.type3.resourceName, fontSize);
+      stream.setTextMatrix(a, b, c, d, curTx, curTy);
+      stream.showTextHex(run.type3.hex);
+    } else {
+      stream.setFont(type1ResourceName, fontSize);
+      stream.setTextMatrix(a, b, c, d, curTx, curTy);
+      emitText(stream, fontManager, run.text, type1ResourceName);
+    }
+    stream.endText();
+    const w = fontManager.measureText(
+      run.text,
+      run.type3?.resourceName ?? type1ResourceName,
+      fontSize
+    );
+    // Advance along the text direction (first column of the matrix)
+    curTx += a * w;
+    curTy += b * w;
+  }
+}
+
+// =============================================================================
+// Mixed-Font Text Run Splitting
+// =============================================================================
+
+/** A segment of text that uses either a Type1 or Type3 font. */
+interface TextRun {
+  /** The text content of this run. */
+  text: string;
+  /** Non-null if this run should be rendered with a Type3 font. */
+  type3: { resourceName: string; hex: string } | null;
+}
+
+/**
+ * Split a line of text into runs of consecutive WinAnsi and non-WinAnsi
+ * characters.  Each non-WinAnsi character becomes its own Type3 run (since
+ * different code points may map to different Type3 fonts).  Consecutive
+ * WinAnsi characters are merged into a single Type1 run.
+ */
+function splitTextRuns(text: string, fontManager: FontManager): TextRun[] {
+  const runs: TextRun[] = [];
+  let winAnsiBuffer = "";
+
+  const flushWinAnsi = () => {
+    if (winAnsiBuffer) {
+      runs.push({ text: winAnsiBuffer, type3: null });
+      winAnsiBuffer = "";
+    }
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const cp = text.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    if (cp > 0xffff) {
+      i++; // skip low surrogate
+    }
+
+    if (fontManager.needsType3(cp)) {
+      flushWinAnsi();
+      const t3 = fontManager.resolveType3(cp);
+      if (t3) {
+        const hex = fontManager.encodeType3Char(cp);
+        runs.push({
+          text: ch,
+          type3: { resourceName: t3.resourceName, hex: hex ?? "<00>" }
+        });
+      } else {
+        // Character tracked but Type3 not yet written — render as space
+        runs.push({ text: ch, type3: null });
+      }
+    } else {
+      winAnsiBuffer += ch;
+    }
+  }
+
+  flushWinAnsi();
+  return runs;
+}
+
+/**
+ * Render a text string at (textX, textY) using Type3-aware splitting when needed.
+ * Returns the rendered width so the caller can advance textX.
+ */
+function emitTextWithType3(
+  stream: PdfContentStream,
+  text: string,
+  textX: number,
+  textY: number,
+  type1ResourceName: string,
+  fontSize: number,
+  fontManager: FontManager,
+  useType3: boolean
+): number {
+  emitTextWithMatrix(
+    stream,
+    text,
+    1,
+    0,
+    0,
+    1,
+    textX,
+    textY,
+    type1ResourceName,
+    fontSize,
+    fontManager,
+    useType3
+  );
+  return fontManager.measureText(text, type1ResourceName, fontSize);
 }
 
 /**
@@ -1007,6 +1177,7 @@ function drawVerticalStackedText(
   }
 
   stream.setFillColor(cell.textColor);
+  const useType3 = fontManager.hasType3Fonts() && !isEmbedded;
 
   for (let colIdx = 0; colIdx < columns.length; colIdx++) {
     const colText = columns[colIdx];
@@ -1030,11 +1201,20 @@ function drawVerticalStackedText(
       }
       const charWidth = fontManager.measureText(ch, resourceName, fontSize);
 
-      stream.beginText();
-      stream.setFont(resourceName, fontSize);
-      stream.setTextMatrix(1, 0, 0, 1, colX - charWidth / 2, currentY);
-      emitText(stream, fontManager, ch, resourceName);
-      stream.endText();
+      emitTextWithMatrix(
+        stream,
+        ch,
+        1,
+        0,
+        0,
+        1,
+        colX - charWidth / 2,
+        currentY,
+        resourceName,
+        fontSize,
+        fontManager,
+        useType3
+      );
       currentY -= charHeight;
     }
   }
@@ -1241,16 +1421,21 @@ function drawPageHeader(
 
   stream.save();
   stream.setFillColor({ r: 0.3, g: 0.3, b: 0.3 });
-  stream.beginText();
-  stream.setFont(resourceName, headerFontSize);
-  stream.setTextMatrix(1, 0, 0, 1, x, y);
-  const hex = fontManager.encodeText(headerText, resourceName);
-  if (hex) {
-    stream.showTextHex(hex);
-  } else {
-    stream.showText(headerText);
-  }
-  stream.endText();
+  const useType3 = fontManager.hasType3Fonts() && !fontManager.hasEmbeddedFont();
+  emitTextWithMatrix(
+    stream,
+    headerText,
+    1,
+    0,
+    0,
+    1,
+    x,
+    y,
+    resourceName,
+    headerFontSize,
+    fontManager,
+    useType3
+  );
   stream.restore();
 }
 
@@ -1414,6 +1599,8 @@ function renderTextWatermark(
   const needsAlpha = opacity < 1;
   const gsName = needsAlpha ? alphaGsName(opacity) : "";
 
+  const useType3 = fontManager.hasType3Fonts() && !isEmbedded;
+
   const drawSingleWatermark = (cx: number, cy: number) => {
     // Center the text at (cx, cy), compensating for both width and ascent height
     const halfW = textWidth / 2;
@@ -1426,16 +1613,20 @@ function renderTextWatermark(
       stream.setGraphicsState(gsName);
     }
     stream.setFillColor(color);
-    stream.beginText();
-    stream.setFont(resourceName, fontSize);
-    stream.setTextMatrix(cos, sin, -sin, cos, tx, ty);
-    const hex = fontManager.encodeText(watermark.text, resourceName);
-    if (hex) {
-      stream.showTextHex(hex);
-    } else {
-      stream.showText(watermark.text);
-    }
-    stream.endText();
+    emitTextWithMatrix(
+      stream,
+      watermark.text,
+      cos,
+      sin,
+      -sin,
+      cos,
+      tx,
+      ty,
+      resourceName,
+      fontSize,
+      fontManager,
+      useType3
+    );
     stream.restore();
   };
 

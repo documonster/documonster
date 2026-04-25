@@ -1,21 +1,24 @@
 /**
  * Font manager for PDF generation.
  *
- * Manages two kinds of fonts:
+ * Manages three kinds of fonts:
  * 1. **Standard Type1 fonts** (Helvetica, Times, Courier) — always available,
- *    used as fallback for Latin text when no embedded font is provided.
+ *    used for Latin text (WinAnsi repertoire) when no embedded font is provided.
  * 2. **Embedded TrueType fonts** — user-provided .ttf files for full
  *    Unicode support (CJK, Arabic, Hindi, etc.)
+ * 3. **Type3 fallback fonts** — auto-generated vector-drawn glyphs for
+ *    Unicode characters outside WinAnsi when no embedded font is provided.
  *
  * When an embedded font is registered, ALL text uses the embedded font.
- * When no embedded font is provided, the system falls back to standard fonts
- * exactly as before (mapping Calibri→Helvetica, etc.)
+ * When no embedded font is provided, the system uses Type1 for WinAnsi
+ * characters and Type3 for everything else.
  *
  * The manager tracks which Unicode code points are used so the font embedder
- * can create a minimal subset when writing the PDF.
+ * and Type3 builder can create minimal subsets when writing the PDF.
  */
 
 import { PdfDict, pdfName, pdfRef } from "../core/pdf-object";
+import { hasNonWinAnsiChars, isWinAnsiCodePoint } from "../core/pdf-stream";
 import type { PdfWriter } from "../core/pdf-writer";
 import { PdfFontError } from "../errors";
 import { embedTtfFont, type EmbeddedFont } from "./font-embedder";
@@ -26,6 +29,7 @@ import {
   getLineHeight as getType1LineHeight
 } from "./metrics";
 import type { TtfFont } from "./ttf-parser";
+import { writeType3Fonts, type Type3FontResult } from "./type3-font";
 
 // =============================================================================
 // Font Name Mapping (Type1 fallback)
@@ -122,7 +126,8 @@ export function resolvePdfFontName(fontFamily: string, bold: boolean, italic: bo
 
 /**
  * Manages PDF font resources for a document.
- * Supports both standard Type1 fonts and embedded TrueType fonts.
+ * Supports standard Type1 fonts, embedded TrueType fonts, and auto-generated
+ * Type3 fallback fonts for non-WinAnsi Unicode characters.
  */
 export class FontManager {
   // --- Standard Type1 font tracking ---
@@ -135,6 +140,10 @@ export class FontManager {
   private embeddedResourceName = "";
   private usedCodePoints = new Set<number>();
   private nextEmbeddedId = 1;
+
+  // --- Type3 fallback font tracking ---
+  private type3CodePoints = new Set<number>();
+  private _type3Result: Type3FontResult | null = null;
 
   // ==========================================================================
   // Embedded Font Registration
@@ -169,14 +178,24 @@ export class FontManager {
    * Must be called for every text string before writing the PDF.
    */
   trackText(text: string): void {
-    if (!this.embeddedFont) {
-      return;
-    }
-    for (let i = 0; i < text.length; i++) {
-      const cp = text.codePointAt(i)!;
-      this.usedCodePoints.add(cp);
-      if (cp > 0xffff) {
-        i++; // skip low surrogate
+    if (this.embeddedFont) {
+      for (let i = 0; i < text.length; i++) {
+        const cp = text.codePointAt(i)!;
+        this.usedCodePoints.add(cp);
+        if (cp > 0xffff) {
+          i++; // skip low surrogate
+        }
+      }
+    } else {
+      // No embedded font — track non-WinAnsi chars for Type3 fallback
+      for (let i = 0; i < text.length; i++) {
+        const cp = text.codePointAt(i)!;
+        if (cp > 0xffff) {
+          i++;
+        }
+        if (!isWinAnsiCodePoint(cp)) {
+          this.type3CodePoints.add(cp);
+        }
       }
     }
   }
@@ -219,18 +238,77 @@ export class FontManager {
   }
 
   // ==========================================================================
+  // Type3 Fallback Font
+  // ==========================================================================
+
+  /**
+   * Check if Type3 fallback fonts are available (after writeFontResources).
+   */
+  hasType3Fonts(): boolean {
+    return this._type3Result !== null && this._type3Result.fontObjects.size > 0;
+  }
+
+  /**
+   * Resolve the Type3 font resource name and char code for a code point.
+   * Returns null if the code point is not in the Type3 encoding.
+   */
+  resolveType3(codePoint: number): { resourceName: string; charCode: number } | null {
+    if (!this._type3Result) {
+      return null;
+    }
+    return this._type3Result.encoding.get(codePoint) ?? null;
+  }
+
+  /**
+   * Check if a code point needs Type3 rendering (non-WinAnsi, no embedded font).
+   */
+  needsType3(codePoint: number): boolean {
+    return !this.embeddedFont && !isWinAnsiCodePoint(codePoint);
+  }
+
+  // ==========================================================================
   // Text Measurement
   // ==========================================================================
 
   /**
    * Measure text width using the correct font metrics.
+   * For mixed Type1/Type3 text, measures each character with the right font.
    */
   measureText(text: string, resourceName: string, fontSize: number): number {
     if (this.embeddedFont && resourceName === this.embeddedResourceName) {
       return measureEmbeddedText(text, this.embeddedFont, fontSize);
     }
+
+    // If no Type3 fonts or text has no non-WinAnsi chars, use Type1 directly
+    if (!this._type3Result || !hasNonWinAnsiChars(text)) {
+      const pdfFontName = this.getPdfFontName(resourceName);
+      return measureType1Text(text, pdfFontName, fontSize);
+    }
+
+    // Mixed text: measure char by char
+    let totalWidth = 0;
     const pdfFontName = this.getPdfFontName(resourceName);
-    return measureType1Text(text, pdfFontName, fontSize);
+    for (let i = 0; i < text.length; i++) {
+      const cp = text.codePointAt(i)!;
+      if (cp > 0xffff) {
+        i++;
+      }
+      if (isWinAnsiCodePoint(cp)) {
+        totalWidth += measureType1Text(String.fromCodePoint(cp), pdfFontName, fontSize);
+      } else {
+        // Type3 character width
+        const t3 = this._type3Result.encoding.get(cp);
+        if (t3) {
+          const widthMap = this._type3Result.widths.get(t3.resourceName);
+          const glyphWidth = widthMap?.get(t3.charCode) ?? 600;
+          totalWidth += (glyphWidth / 1000) * fontSize;
+        } else {
+          // Notdef width
+          totalWidth += (600 / 1000) * fontSize;
+        }
+      }
+    }
+    return totalWidth;
   }
 
   /**
@@ -240,7 +318,11 @@ export class FontManager {
     if (this.embeddedFont && resourceName === this.embeddedResourceName) {
       return (this.embeddedFont.ascent / this.embeddedFont.unitsPerEm) * fontSize;
     }
-    return getType1Ascent(this.getPdfFontName(resourceName), fontSize);
+    // Type3 fonts use the same metrics as the base Type1 font
+    const base = this.isType3Resource(resourceName)
+      ? "Helvetica"
+      : this.getPdfFontName(resourceName);
+    return getType1Ascent(base, fontSize);
   }
 
   /**
@@ -250,7 +332,10 @@ export class FontManager {
     if (this.embeddedFont && resourceName === this.embeddedResourceName) {
       return (this.embeddedFont.descent / this.embeddedFont.unitsPerEm) * fontSize;
     }
-    return getType1Descent(this.getPdfFontName(resourceName), fontSize);
+    const base = this.isType3Resource(resourceName)
+      ? "Helvetica"
+      : this.getPdfFontName(resourceName);
+    return getType1Descent(base, fontSize);
   }
 
   /**
@@ -261,7 +346,10 @@ export class FontManager {
       const f = this.embeddedFont;
       return ((f.ascent - f.descent) / f.unitsPerEm) * fontSize;
     }
-    return getType1LineHeight(this.getPdfFontName(resourceName), fontSize);
+    const base = this.isType3Resource(resourceName)
+      ? "Helvetica"
+      : this.getPdfFontName(resourceName);
+    return getType1LineHeight(base, fontSize);
   }
 
   // ==========================================================================
@@ -273,6 +361,13 @@ export class FontManager {
    */
   isEmbeddedFont(resourceName: string): boolean {
     return this.embeddedFont !== null && resourceName === this.embeddedResourceName;
+  }
+
+  /**
+   * Check if a resource name refers to a Type3 fallback font.
+   */
+  isType3Resource(resourceName: string): boolean {
+    return this._type3Result?.fontObjects.has(resourceName) ?? false;
   }
 
   /**
@@ -298,6 +393,22 @@ export class FontManager {
     throw new PdfFontError(
       "encodeText called before writeFontResources — subset mapping not available"
     );
+  }
+
+  /**
+   * Encode a single character for a Type3 font.
+   * Returns a hex string `<XX>` suitable for the Tj operator.
+   */
+  encodeType3Char(codePoint: number): string | null {
+    if (!this._type3Result) {
+      return null;
+    }
+    const entry = this._type3Result.encoding.get(codePoint);
+    if (!entry) {
+      return null;
+    }
+    const hex = entry.charCode.toString(16).toUpperCase().padStart(2, "0");
+    return `<${hex}>`;
   }
 
   // ==========================================================================
@@ -334,6 +445,14 @@ export class FontManager {
       fontObjectMap.set(this.embeddedResourceName, embedded.fontObjNum);
       // Store the embedding result for text re-encoding
       this._embeddedResult = embedded;
+    }
+
+    // Write Type3 fallback fonts (only when no embedded font)
+    if (!this.embeddedFont && this.type3CodePoints.size > 0) {
+      this._type3Result = writeType3Fonts(writer, this.type3CodePoints);
+      for (const [resourceName, objNum] of this._type3Result.fontObjects) {
+        fontObjectMap.set(resourceName, objNum);
+      }
     }
 
     return fontObjectMap;

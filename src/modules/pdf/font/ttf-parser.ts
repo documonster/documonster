@@ -205,8 +205,39 @@ class BEReader {
 export function parseTtf(data: Uint8Array): TtfFont {
   const r = new BEReader(data);
 
+  // --- Check for TTC (TrueType Collection) ---
+  const magic = r.u32();
+  if (magic === 0x74746366) {
+    // 'ttcf' — TrueType Collection
+    // Read the offset of the first font and restart parsing from there
+    r.skip(4); // majorVersion, minorVersion
+    const numFonts = r.u32();
+    if (numFonts === 0) {
+      throw new PdfFontError("TrueType Collection is empty (0 fonts)");
+    }
+    const firstFontOffset = r.u32();
+    return parseTtfAtOffset(data, firstFontOffset);
+  }
+
+  // Not TTC — parse as regular TTF starting from the magic we already read
+  return parseTtfFromMagic(data, r, magic);
+}
+
+/**
+ * Parse a TTF font starting at a given byte offset within the data.
+ * Used for TTC collections where each font starts at a different offset.
+ */
+function parseTtfAtOffset(data: Uint8Array, offset: number): TtfFont {
+  const r = new BEReader(data, offset);
+  const magic = r.u32();
+  return parseTtfFromMagic(data, r, magic);
+}
+
+/**
+ * Core TTF parsing after the first 4 bytes (sfVersion) have been read.
+ */
+function parseTtfFromMagic(data: Uint8Array, r: BEReader, sfVersion: number): TtfFont {
   // --- Offset table ---
-  const sfVersion = r.u32();
   // TrueType: 0x00010000 or 'true' (0x74727565)
   // OpenType with CFF: 'OTTO' (0x4F54544F) — not supported for subsetting
   if (sfVersion !== 0x00010000 && sfVersion !== 0x74727565) {

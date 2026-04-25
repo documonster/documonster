@@ -1,4 +1,4 @@
-import { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfContentStream, isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
 /**
  * Tests for PDF content stream builder.
  */
@@ -197,11 +197,11 @@ describe("PdfContentStream", () => {
       expect(stream.toString()).toBe("<803130> Tj");
     });
 
-    it("should replace unmappable chars with ?", () => {
+    it("should replace unmappable chars with space", () => {
       const stream = new PdfContentStream();
-      // Chinese char not in WinAnsi → should become 0x3F (?)
+      // Chinese char not in WinAnsi → should become 0x20 (space)
       stream.showText("A\u4e2dB");
-      expect(stream.toString()).toBe("<413f42> Tj");
+      expect(stream.toString()).toBe("<412042> Tj");
     });
 
     it("should handle ü ñ ö correctly", () => {
@@ -224,5 +224,28 @@ describe("PdfContentStream", () => {
       stream.nextLineShowText("Hello");
       expect(stream.toString()).toBe("(Hello) '");
     });
+  });
+});
+
+describe("isWinAnsiCodePoint", () => {
+  it("should return true for ASCII", () => {
+    expect(isWinAnsiCodePoint(0x41)).toBe(true); // 'A'
+    expect(isWinAnsiCodePoint(0x20)).toBe(true); // space
+  });
+
+  it("should return true for Latin-1 supplement", () => {
+    expect(isWinAnsiCodePoint(0xe9)).toBe(true); // é
+    expect(isWinAnsiCodePoint(0xfc)).toBe(true); // ü
+  });
+
+  it("should return true for WinAnsi special range", () => {
+    expect(isWinAnsiCodePoint(0x20ac)).toBe(true); // €
+    expect(isWinAnsiCodePoint(0x2122)).toBe(true); // ™
+  });
+
+  it("should return false for non-WinAnsi", () => {
+    expect(isWinAnsiCodePoint(0x4e2d)).toBe(false); // 中
+    expect(isWinAnsiCodePoint(0x25cb)).toBe(false); // ○
+    expect(isWinAnsiCodePoint(0x2713)).toBe(false); // ✓
   });
 });

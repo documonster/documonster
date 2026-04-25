@@ -29,6 +29,19 @@ export class PdfContentStream {
   private parts: string[] = [];
 
   // ===========================================================================
+  // Raw Operator
+  // ===========================================================================
+
+  /**
+   * Append a raw PDF operator string to the content stream.
+   * Use this for operators not covered by the typed API (e.g. `d1` for Type3 glyphs).
+   */
+  raw(operator: string): this {
+    this.parts.push(operator);
+    return this;
+  }
+
+  // ===========================================================================
   // Graphics State
   // ===========================================================================
 
@@ -587,7 +600,9 @@ const UNICODE_TO_WINANSI = new Map<number, number>([
 
 /**
  * Convert a Unicode code point to a WinAnsi byte value.
- * Returns 0x3F ('?') for unmappable characters.
+ * Returns 0x20 (space) for unmappable characters — standard Type1 fonts
+ * do not contain glyphs outside the WinAnsi repertoire, so a space is
+ * less misleading than a literal '?'.
  */
 function unicodeToWinAnsi(cp: number): number {
   // Direct mapping for Latin-1 range (0x00-0xFF), excluding 0x80-0x9F
@@ -602,6 +617,39 @@ function unicodeToWinAnsi(cp: number): number {
   if (mapped !== undefined) {
     return mapped;
   }
-  // Unmappable — use '?'
-  return 0x3f;
+  // Unmappable — use space instead of '?' to avoid misleading output.
+  // Full Unicode support requires an embedded TrueType font (the `font`
+  // option in PdfExportOptions).
+  return 0x20;
+}
+
+/**
+ * Check whether a single code point is representable in WinAnsi encoding.
+ */
+export function isWinAnsiCodePoint(cp: number): boolean {
+  if (cp < 0x80) {
+    return true;
+  }
+  if (cp >= 0xa0 && cp <= 0xff) {
+    return true;
+  }
+  return UNICODE_TO_WINANSI.has(cp);
+}
+
+/**
+ * Check whether a string contains characters outside the WinAnsi repertoire.
+ * When true, standard Type1 fonts cannot render those characters and an
+ * embedded TrueType font is required for correct output.
+ */
+export function hasNonWinAnsiChars(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const cp = text.codePointAt(i)!;
+    if (cp > 0xffff) {
+      i++;
+    }
+    if (!isWinAnsiCodePoint(cp)) {
+      return true;
+    }
+  }
+  return false;
 }

@@ -26,7 +26,7 @@ import { PdfWriter } from "../core/pdf-writer";
 import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
 import { FontManager } from "../font/font-manager";
 import { parseTtf } from "../font/ttf-parser";
-import { wrapTextLines } from "../render/page-renderer";
+import { wrapTextLines, emitTextWithMatrix } from "../render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "../types";
 import { writeImageXObject } from "./image-utils";
 
@@ -496,9 +496,10 @@ export class PdfPageBuilder {
 
     // Resolve font
     const resourceName = this._fontManager.resolveFont(fontFamily, bold, italic);
-    const encodedText = this._fontManager.encodeText(text, resourceName);
 
     this._fontManager.trackText(text);
+
+    const useType3 = this._fontManager.hasType3Fonts() && !this._fontManager.hasEmbeddedFont();
 
     if (options.maxWidth) {
       // Word-wrap (reuses the shared wrapTextLines from page-renderer)
@@ -508,38 +509,44 @@ export class PdfPageBuilder {
 
       this._stream.save();
       this._stream.setFillColor(color);
-      this._stream.beginText();
-      this._stream.setFont(resourceName, fontSize);
 
       for (let i = 0; i < lines.length; i++) {
         const lineY = options.y - i * leading;
-        this._stream.setTextMatrix(1, 0, 0, 1, options.x, lineY);
-
-        const lineEncoded = this._fontManager.encodeText(lines[i], resourceName);
-        if (lineEncoded) {
-          this._stream.showTextHex(lineEncoded);
-        } else {
-          this._stream.showText(lines[i]);
-        }
+        emitTextWithMatrix(
+          this._stream,
+          lines[i],
+          1,
+          0,
+          0,
+          1,
+          options.x,
+          lineY,
+          resourceName,
+          fontSize,
+          this._fontManager,
+          useType3
+        );
       }
 
-      this._stream.endText();
       this._stream.restore();
     } else {
       // Single line
       this._stream.save();
       this._stream.setFillColor(color);
-      this._stream.beginText();
-      this._stream.setFont(resourceName, fontSize);
-      this._stream.setTextMatrix(1, 0, 0, 1, options.x, options.y);
-
-      if (encodedText) {
-        this._stream.showTextHex(encodedText);
-      } else {
-        this._stream.showText(text);
-      }
-
-      this._stream.endText();
+      emitTextWithMatrix(
+        this._stream,
+        text,
+        1,
+        0,
+        0,
+        1,
+        options.x,
+        options.y,
+        resourceName,
+        fontSize,
+        this._fontManager,
+        useType3
+      );
       this._stream.restore();
     }
 

@@ -25,6 +25,7 @@ import type {
   PdfSheetData,
   PdfCellData,
   PdfCellStyle,
+  PdfRowData,
   PdfRichTextRunData,
   PdfSheetImage,
   PdfAlignmentData,
@@ -596,39 +597,14 @@ function computeRowHeights(
       // Custom height explicitly set by user — use as-is
       height = row.height;
     } else if (row?.height) {
-      // Excel auto-calculated height — trust it as-is
-      height = row.height;
+      // Excel auto-calculated height — use it as a baseline, but ensure
+      // the row is tall enough for wrapped text.  The stored height may be
+      // stale when columns are narrower in the PDF layout or when the PDF
+      // uses different font metrics than the original Excel file.
+      height = Math.max(row.height, autoRowHeight(row, scaleFactor, sheet, fontManager, options));
     } else {
       // No height info: auto-size based on cell content
-      height = DEFAULT_ROW_HEIGHT;
-      if (row) {
-        for (const cell of row.cells.values()) {
-          const fontSize = getCellFontSize(cell);
-          const wrapLineCount = countWrapLines(
-            cell,
-            fontSize,
-            scaleFactor,
-            sheet,
-            fontManager,
-            options
-          );
-          const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
-          // Account for border width: half of each border extends inward
-          const borderTop = cell.style?.border?.top?.style
-            ? borderStyleToLineWidth(cell.style.border.top.style) / 2
-            : 0;
-          const borderBottom = cell.style?.border?.bottom?.style
-            ? borderStyleToLineWidth(cell.style.border.bottom.style) / 2
-            : 0;
-          const neededHeight =
-            fontSize +
-            (wrapLineCount - 1) * lineHeight +
-            (CELL_PADDING_V + borderTop + borderBottom) * 2;
-          if (neededHeight > height) {
-            height = neededHeight;
-          }
-        }
-      }
+      height = autoRowHeight(row, scaleFactor, sheet, fontManager, options);
     }
 
     rowHeights.push(height * scaleFactor);
@@ -636,6 +612,49 @@ function computeRowHeights(
   }
 
   return { rowHeights, visibleRows };
+}
+
+/**
+ * Compute the minimum row height required to display wrapped cell content.
+ * Returns at least `DEFAULT_ROW_HEIGHT`.
+ */
+function autoRowHeight(
+  row: PdfRowData | undefined,
+  scaleFactor: number,
+  sheet: PdfSheetData,
+  fontManager: FontManager,
+  options: ResolvedPdfOptions
+): number {
+  let height = DEFAULT_ROW_HEIGHT;
+  if (row) {
+    for (const cell of row.cells.values()) {
+      const fontSize = getCellFontSize(cell);
+      const wrapLineCount = countWrapLines(
+        cell,
+        fontSize,
+        scaleFactor,
+        sheet,
+        fontManager,
+        options
+      );
+      const lineHeight = fontSize * LINE_HEIGHT_FACTOR;
+      // Account for border width: half of each border extends inward
+      const borderTop = cell.style?.border?.top?.style
+        ? borderStyleToLineWidth(cell.style.border.top.style) / 2
+        : 0;
+      const borderBottom = cell.style?.border?.bottom?.style
+        ? borderStyleToLineWidth(cell.style.border.bottom.style) / 2
+        : 0;
+      const neededHeight =
+        fontSize +
+        (wrapLineCount - 1) * lineHeight +
+        (CELL_PADDING_V + borderTop + borderBottom) * 2;
+      if (neededHeight > height) {
+        height = neededHeight;
+      }
+    }
+  }
+  return height;
 }
 
 /**
@@ -957,6 +976,8 @@ function buildLayoutCell(
   } else {
     const pdfFontName = resolvePdfFontName(fontProps.fontFamily, fontProps.bold, fontProps.italic);
     fontManager.ensureFont(pdfFontName);
+    // Track non-WinAnsi code points for Type3 fallback font generation
+    fontManager.trackText(text);
   }
 
   // Rich text runs
