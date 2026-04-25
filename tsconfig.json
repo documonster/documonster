@@ -11,6 +11,8 @@
       "@markdown/*": ["./src/modules/markdown/*"],
       "@xml": ["./src/modules/xml/index.ts"],
       "@xml/*": ["./src/modules/xml/*"],
+      "@word": ["./src/modules/word/index.ts"],
+      "@word/*": ["./src/modules/word/*"],
       "@pdf": ["./src/modules/pdf/index.ts"],
       "@pdf/*": ["./src/modules/pdf/*"],
       "@formula": ["./src/modules/formula/index.ts"],

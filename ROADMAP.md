@@ -52,40 +52,52 @@
 
 ---
 
-## DOCX Module (Future)
+## Word Module ✅ Completed
 
-### 🔥 P1: High Priority
+### Core Reading ✅
 
-#### Core Reading
+- [x] Parse DOCX documents (Open XML WordprocessingML)
+- [x] Extract text content with formatting (bold, italic, underline, colors, highlights, shading)
+- [x] Extract paragraphs, headings, and sections
+- [x] Extract tables with cell styles, borders, merges (vMerge/gridSpan), nested tables
+- [x] Extract images (inline + floating) and embedded objects (opaque preservation)
 
-- [ ] Parse DOCX documents (Open XML WordprocessingML)
-- [ ] Extract text content with formatting (bold, italic, underline, colors)
-- [ ] Extract paragraphs, headings, and sections
-- [ ] Extract tables with cell styles and merges
-- [ ] Extract images and embedded objects
+### Core Writing ✅
 
-#### Core Writing
+- [x] Create DOCX documents from structured data (DocumentBuilder fluent API)
+- [x] Paragraph styling (fonts, colors, alignment, spacing, indentation, borders, shading)
+- [x] Table creation with styles, borders, merges (horizontal + vertical)
+- [x] Image embedding (JPEG, PNG, GIF, BMP, TIFF, SVG with raster fallback)
+- [x] Header/footer support (default, first, even)
 
-- [ ] Create DOCX documents from structured data
-- [ ] Paragraph styling (fonts, colors, alignment, spacing)
-- [ ] Table creation with styles and merges
-- [ ] Image embedding (JPEG, PNG)
-- [ ] Header/footer support
+### Advanced Features ✅
 
-### 🟡 P2: Medium Priority
+- [x] Lists (numbered, bulleted, multi-level, picture bullets, mail-merge-compatible)
+- [x] Table of contents with field switches (headingStyleRange, captionLabel, stylesWithLevels)
+- [x] Page setup (size, orientation, margins, columns, borders including art borders)
+- [x] Section breaks and page breaks
+- [x] Footnotes, endnotes, and comments (with commentsExtended/done/parentId)
+- [x] Hyperlinks (external + internal bookmarks, with history/tgtFrame)
+- [x] Document metadata (core/app/custom properties)
+- [x] Track changes (insertedRun/deletedRun/movedRun + pPrChange/rPrChange/sectPrChange/tblPrChange/trPrChange/tcPrChange/cellIns/cellDel/cellMerge)
+- [x] Mail merge (MERGEFIELD + removeUnmatched option)
+- [x] Template patching (patchDocument API)
+- [x] Drawing shapes (wsp:wsp) with preset geometries
+- [x] Math equations (OMML: fraction, sub/sup, radical, matrix, nary, phantom, groupChar, borderBox, etc.)
+- [x] Ruby (phonetic annotations for CJK text)
+- [x] East Asian support (kinsoku, topLinePunct, autoSpaceDN)
+- [x] Theme support (color scheme + font scheme + format scheme)
+- [x] Font embedding (ODTTF with obfuscation)
+- [x] Charts (opaque preservation + from-scratch builder for bar/line/pie/area/scatter)
+- [x] Watermarks (text + image)
+- [x] SDT/Content controls with data binding + Custom XML parts
+- [x] Document encryption (agile encryption primitives)
+- [x] Digital signatures (metadata extraction)
+- [x] AltChunk (embedded HTML/RTF content)
 
-#### Advanced Features
+### Conversion ✅
 
-- [ ] Lists (numbered, bulleted, multi-level)
-- [ ] Table of contents generation
-- [ ] Page setup (size, orientation, margins)
-- [ ] Section breaks and page breaks
-- [ ] Footnotes and endnotes
-- [ ] Hyperlinks
-- [ ] Document metadata
-
-#### Conversion
-
-- [ ] DOCX to PDF conversion
+- [x] DOCX to HTML conversion (semantic HTML5 with CSS)
+- [x] DOCX to PDF conversion (flow-based layout)
 - [ ] DOCX to Markdown conversion
 - [ ] Excel to DOCX table embedding

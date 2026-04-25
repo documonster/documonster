@@ -1,0 +1,921 @@
+/**
+ * DOCX Module - HTML Renderer
+ *
+ * Converts a DocxDocument model to semantic HTML5.
+ * Supports paragraphs, runs with formatting, tables, lists, images, hyperlinks,
+ * headings, comments, footnotes/endnotes, and more.
+ */
+
+import { resolveThemeColor } from "./document";
+import { bytesToBase64 } from "./internal-utils";
+import type {
+  DocxDocument,
+  Paragraph,
+  Run,
+  RunContent,
+  ParagraphChild,
+  Table,
+  TableCell,
+  TableRow,
+  BodyContent,
+  Hyperlink,
+  FloatingImage,
+  InlineImageContent,
+  ImageDef,
+  Border,
+  TextBox,
+  StructuredDocumentTag,
+  DocumentTheme
+} from "./types";
+
+/** Options for HTML rendering. */
+export interface HtmlRenderOptions {
+  /** Include CSS inline in a <style> tag. Default: true. */
+  readonly includeStyles?: boolean;
+  /** Wrap output in complete HTML document. Default: true. */
+  readonly fullDocument?: boolean;
+  /** Page title for full document. Default: core property "title" or "Document". */
+  readonly title?: string;
+  /** Base URL for image data: URLs vs file references. "dataUrl" embeds images as base64. */
+  readonly imageMode?: "dataUrl" | "filename" | "none";
+  /** Convert comments to HTML. Default: false. */
+  readonly includeComments?: boolean;
+  /** Render footnotes/endnotes as anchored references. Default: true. */
+  readonly includeNotes?: boolean;
+  /** Custom CSS class prefix (default: "docx-"). */
+  readonly classPrefix?: string;
+}
+
+/** The result of HTML rendering. */
+export interface HtmlRenderResult {
+  /** Generated HTML string. */
+  readonly html: string;
+  /** Warnings encountered during rendering. */
+  readonly warnings: readonly string[];
+  /** Image map: file name → data URL or reference. */
+  readonly images: ReadonlyMap<string, string>;
+}
+
+/** Internal rendering state. */
+interface RenderState {
+  options: Required<HtmlRenderOptions>;
+  doc: DocxDocument;
+  imageMap: Map<string, string>;
+  rIdToImage: Map<string, ImageDef>;
+  warnings: string[];
+  /** Current list state per numId. */
+  listStack: Array<{ numId: number; level: number; format: string }>;
+  /** HTML output buffer. */
+  html: string[];
+  /** Footnote numbering state. */
+  footnoteRefs: Map<number, number>;
+  endnoteRefs: Map<number, number>;
+}
+
+/**
+ * Convert a DocxDocument to HTML.
+ */
+export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): HtmlRenderResult {
+  const opts: Required<HtmlRenderOptions> = {
+    includeStyles: options?.includeStyles ?? true,
+    fullDocument: options?.fullDocument ?? true,
+    title: options?.title ?? doc.coreProperties?.title ?? "Document",
+    imageMode: options?.imageMode ?? "dataUrl",
+    includeComments: options?.includeComments ?? false,
+    includeNotes: options?.includeNotes ?? true,
+    classPrefix: options?.classPrefix ?? "docx-"
+  };
+
+  const state: RenderState = {
+    options: opts,
+    doc,
+    imageMap: new Map(),
+    rIdToImage: new Map(),
+    warnings: [],
+    listStack: [],
+    html: [],
+    footnoteRefs: new Map(),
+    endnoteRefs: new Map()
+  };
+
+  // Build image map
+  if (doc.images) {
+    for (const img of doc.images) {
+      if (img.rId) {
+        state.rIdToImage.set(img.rId, img);
+      }
+      if (opts.imageMode === "dataUrl") {
+        state.imageMap.set(img.fileName, imageToDataUrl(img));
+      } else if (opts.imageMode === "filename") {
+        state.imageMap.set(img.fileName, img.fileName);
+      }
+    }
+  }
+
+  if (opts.fullDocument) {
+    state.html.push("<!DOCTYPE html>");
+    state.html.push(`<html lang="en">`);
+    state.html.push("<head>");
+    state.html.push(`<meta charset="UTF-8">`);
+    state.html.push(`<title>${escapeHtml(opts.title)}</title>`);
+    if (opts.includeStyles) {
+      state.html.push(`<style>${generateCss(opts.classPrefix, doc.theme)}</style>`);
+    }
+    state.html.push("</head>");
+    state.html.push("<body>");
+  }
+
+  state.html.push(`<div class="${opts.classPrefix}document">`);
+
+  // Render body content
+  for (const item of doc.body) {
+    renderBodyContent(state, item);
+  }
+  closeOpenLists(state);
+
+  // Footnotes
+  if (opts.includeNotes && doc.footnotes && doc.footnotes.length > 0) {
+    state.html.push(`<hr class="${opts.classPrefix}footnote-separator"/>`);
+    state.html.push(`<aside class="${opts.classPrefix}footnotes">`);
+    state.html.push("<h2>Footnotes</h2>");
+    state.html.push("<ol>");
+    for (const note of doc.footnotes) {
+      if (note.id <= 0) {
+        continue;
+      }
+      state.html.push(`<li id="footnote-${note.id}">`);
+      for (const p of note.content) {
+        renderBodyContent(state, p);
+      }
+      state.html.push("</li>");
+    }
+    state.html.push("</ol>");
+    state.html.push("</aside>");
+  }
+
+  // Endnotes
+  if (opts.includeNotes && doc.endnotes && doc.endnotes.length > 0) {
+    state.html.push(`<hr class="${opts.classPrefix}endnote-separator"/>`);
+    state.html.push(`<aside class="${opts.classPrefix}endnotes">`);
+    state.html.push("<h2>Endnotes</h2>");
+    state.html.push("<ol>");
+    for (const note of doc.endnotes) {
+      if (note.id <= 0) {
+        continue;
+      }
+      state.html.push(`<li id="endnote-${note.id}">`);
+      for (const p of note.content) {
+        renderBodyContent(state, p);
+      }
+      state.html.push("</li>");
+    }
+    state.html.push("</ol>");
+    state.html.push("</aside>");
+  }
+
+  state.html.push("</div>");
+
+  if (opts.fullDocument) {
+    state.html.push("</body>");
+    state.html.push("</html>");
+  }
+
+  return {
+    html: state.html.join("\n"),
+    warnings: state.warnings,
+    images: state.imageMap
+  };
+}
+
+// =============================================================================
+// Body Content
+// =============================================================================
+
+function renderBodyContent(state: RenderState, item: BodyContent): void {
+  if (!("type" in item)) {
+    return;
+  }
+  switch (item.type) {
+    case "paragraph":
+      renderParagraph(state, item);
+      break;
+    case "table":
+      closeOpenLists(state);
+      renderTable(state, item);
+      break;
+    case "floatingImage":
+      closeOpenLists(state);
+      renderFloatingImageHtml(state, item);
+      break;
+    case "textBox":
+      closeOpenLists(state);
+      renderTextBoxHtml(state, item);
+      break;
+    case "sdt":
+      renderSdtHtml(state, item);
+      break;
+    case "math":
+      closeOpenLists(state);
+      state.warnings.push("Math content not fully supported in HTML output");
+      state.html.push(
+        `<span class="${state.options.classPrefix}math" aria-label="equation">[equation]</span>`
+      );
+      break;
+    case "tableOfContents":
+      // Render TOC as placeholder - user would regenerate
+      closeOpenLists(state);
+      state.html.push(`<nav class="${state.options.classPrefix}toc">`);
+      if (item.cachedParagraphs) {
+        for (const p of item.cachedParagraphs) {
+          renderBodyContent(state, p);
+        }
+      }
+      state.html.push("</nav>");
+      break;
+    case "drawingShape":
+      closeOpenLists(state);
+      state.warnings.push("DrawingML shapes rendered as placeholder");
+      state.html.push(`<div class="${state.options.classPrefix}shape">[${item.shapeType}]</div>`);
+      break;
+    case "chart":
+      closeOpenLists(state);
+      state.html.push(`<figure class="${state.options.classPrefix}chart">`);
+      if (item.chart.title) {
+        state.html.push(`<figcaption>${escapeHtml(item.chart.title)}</figcaption>`);
+      }
+      state.html.push(
+        `<div class="${state.options.classPrefix}chart-placeholder">[${item.chart.type} chart: ${item.chart.series.length} series]</div>`
+      );
+      state.html.push("</figure>");
+      break;
+    case "checkBox":
+      closeOpenLists(state);
+      state.html.push(`<input type="checkbox" ${item.checked ? "checked" : ""} disabled />`);
+      break;
+    case "opaqueDrawing":
+      // Skip opaque drawings in HTML
+      break;
+  }
+}
+
+// =============================================================================
+// Paragraph
+// =============================================================================
+
+function renderParagraph(state: RenderState, para: Paragraph): void {
+  const props = para.properties;
+  const prefix = state.options.classPrefix;
+
+  // Check if this is a list item
+  if (props?.numbering) {
+    const listInfo = getListInfo(state.doc, props.numbering.numId, props.numbering.level);
+    if (listInfo) {
+      openListIfNeeded(state, props.numbering.numId, props.numbering.level, listInfo.format);
+      state.html.push(`<li>`);
+      renderParagraphInline(state, para);
+      state.html.push("</li>");
+      return;
+    }
+  }
+
+  closeOpenLists(state);
+
+  // Determine tag based on style/outline
+  let tag = "p";
+  if (props?.style) {
+    const styleId = props.style.toLowerCase();
+    if (styleId === "heading1" || styleId === "heading 1" || styleId === "title") {
+      tag = "h1";
+    } else if (styleId === "heading2" || styleId === "heading 2") {
+      tag = "h2";
+    } else if (styleId === "heading3" || styleId === "heading 3") {
+      tag = "h3";
+    } else if (styleId === "heading4" || styleId === "heading 4") {
+      tag = "h4";
+    } else if (styleId === "heading5" || styleId === "heading 5") {
+      tag = "h5";
+    } else if (styleId === "heading6" || styleId === "heading 6") {
+      tag = "h6";
+    }
+  }
+  if (props?.outlineLevel !== undefined && props.outlineLevel >= 0 && props.outlineLevel < 6) {
+    tag = `h${props.outlineLevel + 1}`;
+  }
+
+  // Build inline style
+  const styles: string[] = [];
+  if (props?.alignment) {
+    const alignMap: Record<string, string> = {
+      left: "left",
+      right: "right",
+      center: "center",
+      both: "justify",
+      justify: "justify",
+      distribute: "justify"
+    };
+    const ta = alignMap[props.alignment];
+    if (ta) {
+      styles.push(`text-align:${ta}`);
+    }
+  }
+  if (props?.indent) {
+    if (props.indent.left !== undefined) {
+      styles.push(`margin-left:${twipsToPx(props.indent.left)}px`);
+    }
+    if (props.indent.right !== undefined) {
+      styles.push(`margin-right:${twipsToPx(props.indent.right)}px`);
+    }
+    if (props.indent.firstLine !== undefined) {
+      styles.push(`text-indent:${twipsToPx(props.indent.firstLine)}px`);
+    }
+    if (props.indent.hanging !== undefined) {
+      styles.push(`text-indent:-${twipsToPx(props.indent.hanging)}px`);
+    }
+  }
+  if (props?.spacing) {
+    if (props.spacing.before !== undefined) {
+      styles.push(`margin-top:${twipsToPx(props.spacing.before)}px`);
+    }
+    if (props.spacing.after !== undefined) {
+      styles.push(`margin-bottom:${twipsToPx(props.spacing.after)}px`);
+    }
+    if (props.spacing.line !== undefined) {
+      styles.push(`line-height:${props.spacing.line / 240}`);
+    }
+  }
+  if (props?.shading?.fill) {
+    styles.push(`background-color:#${props.shading.fill}`);
+  }
+  if (props?.bidi) {
+    styles.push(`direction:rtl`);
+  }
+
+  const styleAttr = styles.length > 0 ? ` style="${styles.join(";")}"` : "";
+  const classAttr = props?.style ? ` class="${prefix}style-${escapeClassName(props.style)}"` : "";
+
+  state.html.push(`<${tag}${classAttr}${styleAttr}>`);
+  renderParagraphInline(state, para);
+  state.html.push(`</${tag}>`);
+}
+
+function renderParagraphInline(state: RenderState, para: Paragraph): void {
+  for (const child of para.children) {
+    renderParagraphChild(state, child);
+  }
+}
+
+function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
+  if ("type" in child) {
+    switch (child.type) {
+      case "hyperlink":
+        renderHyperlinkHtml(state, child);
+        return;
+      case "bookmarkStart":
+        state.html.push(`<a id="bookmark-${child.id}" data-name="${escapeHtml(child.name)}"></a>`);
+        return;
+      case "bookmarkEnd":
+        return;
+      case "commentRangeStart":
+      case "commentRangeEnd":
+      case "commentReference":
+        return;
+      case "insertedRun":
+        state.html.push(
+          `<ins data-author="${escapeHtml(child.revision.author)}" data-date="${escapeHtml(child.revision.date ?? "")}">`
+        );
+        renderRun(state, child.run);
+        state.html.push("</ins>");
+        return;
+      case "deletedRun":
+        state.html.push(
+          `<del data-author="${escapeHtml(child.revision.author)}" data-date="${escapeHtml(child.revision.date ?? "")}">`
+        );
+        renderRun(state, child.run);
+        state.html.push("</del>");
+        return;
+      case "movedFromRun":
+        state.html.push(`<del class="${state.options.classPrefix}move-from">`);
+        renderRun(state, child.run);
+        state.html.push("</del>");
+        return;
+      case "movedToRun":
+        state.html.push(`<ins class="${state.options.classPrefix}move-to">`);
+        renderRun(state, child.run);
+        state.html.push("</ins>");
+        return;
+    }
+  }
+  // Run (no type discriminator)
+  if ("content" in child && !("type" in child)) {
+    renderRun(state, child as Run);
+  }
+}
+
+function renderHyperlinkHtml(state: RenderState, link: Hyperlink): void {
+  let href = "";
+  if (link.url) {
+    href = link.url;
+  } else if (link.anchor) {
+    href = `#bookmark-${link.anchor}`;
+  }
+  const attrs: string[] = [];
+  if (href) {
+    attrs.push(`href="${escapeHtml(href)}"`);
+  }
+  if (link.tooltip) {
+    attrs.push(`title="${escapeHtml(link.tooltip)}"`);
+  }
+  state.html.push(`<a ${attrs.join(" ")}>`);
+  for (const ch of link.children) {
+    renderParagraphChild(state, ch);
+  }
+  state.html.push("</a>");
+}
+
+// =============================================================================
+// Run
+// =============================================================================
+
+function renderRun(state: RenderState, run: Run): void {
+  const rPr = run.properties;
+
+  // Build tag stack based on formatting
+  const tags: string[] = [];
+  const styles: string[] = [];
+
+  if (rPr) {
+    if (rPr.bold) {
+      tags.push("strong");
+    }
+    if (rPr.italic) {
+      tags.push("em");
+    }
+    if (rPr.underline) {
+      const uStyle = typeof rPr.underline === "object" ? rPr.underline.style : rPr.underline;
+      if (uStyle !== "none") {
+        tags.push("u");
+      }
+    }
+    if (rPr.strike) {
+      tags.push("s");
+    }
+    if (rPr.vertAlign === "superscript") {
+      tags.push("sup");
+    } else if (rPr.vertAlign === "subscript") {
+      tags.push("sub");
+    }
+    if (rPr.smallCaps) {
+      styles.push("font-variant:small-caps");
+    }
+    if (rPr.caps) {
+      styles.push("text-transform:uppercase");
+    }
+    if (rPr.color) {
+      const color = resolveColor(rPr.color, state.doc.theme);
+      if (color) {
+        styles.push(`color:#${color}`);
+      }
+    }
+    if (rPr.highlight && rPr.highlight !== "none") {
+      styles.push(`background-color:${highlightToColor(rPr.highlight)}`);
+    }
+    if (rPr.shading?.fill) {
+      styles.push(`background-color:#${rPr.shading.fill}`);
+    }
+    if (rPr.size !== undefined) {
+      // size is half-points
+      styles.push(`font-size:${rPr.size / 2}pt`);
+    }
+    if (rPr.font) {
+      const fontName =
+        typeof rPr.font === "string" ? rPr.font : (rPr.font.ascii ?? rPr.font.eastAsia);
+      if (fontName) {
+        styles.push(`font-family:"${fontName}"`);
+      }
+    }
+  }
+
+  // Outermost <span> if styles, inner tags for semantic markup
+  if (styles.length > 0) {
+    state.html.push(`<span style="${styles.join(";")}">`);
+  }
+  for (const t of tags) {
+    state.html.push(`<${t}>`);
+  }
+
+  // Render run content
+  for (const content of run.content) {
+    renderRunContentHtml(state, content);
+  }
+
+  // Close tags in reverse
+  for (let i = tags.length - 1; i >= 0; i--) {
+    state.html.push(`</${tags[i]}>`);
+  }
+  if (styles.length > 0) {
+    state.html.push("</span>");
+  }
+}
+
+function renderRunContentHtml(state: RenderState, content: RunContent): void {
+  switch (content.type) {
+    case "text":
+      state.html.push(escapeHtml(content.text));
+      break;
+    case "break":
+      if (content.breakType === "page") {
+        state.html.push(
+          `<span class="${state.options.classPrefix}page-break" style="page-break-before:always"></span>`
+        );
+      } else if (content.breakType === "column") {
+        state.html.push(`<span class="${state.options.classPrefix}column-break"></span>`);
+      } else {
+        state.html.push("<br>");
+      }
+      break;
+    case "tab":
+      state.html.push('<span class="docx-tab" style="display:inline-block;min-width:2em"></span>');
+      break;
+    case "ptab":
+      state.html.push('<span class="docx-ptab"></span>');
+      break;
+    case "carriageReturn":
+      state.html.push("<br>");
+      break;
+    case "noBreakHyphen":
+      state.html.push("\u2011");
+      break;
+    case "softHyphen":
+      state.html.push("\u00AD");
+      break;
+    case "symbol":
+      // Convert hex char code to Unicode
+      try {
+        const code = parseInt(content.char, 16);
+        state.html.push(
+          `<span style="font-family:${escapeHtml(content.font)}">${String.fromCodePoint(code)}</span>`
+        );
+      } catch {
+        state.html.push(escapeHtml(content.char));
+      }
+      break;
+    case "footnoteRef": {
+      const num = state.footnoteRefs.size + 1;
+      state.footnoteRefs.set(content.id, num);
+      state.html.push(
+        `<sup><a href="#footnote-${content.id}" id="footnote-ref-${content.id}">${num}</a></sup>`
+      );
+      break;
+    }
+    case "endnoteRef": {
+      const num = state.endnoteRefs.size + 1;
+      state.endnoteRefs.set(content.id, num);
+      state.html.push(
+        `<sup><a href="#endnote-${content.id}" id="endnote-ref-${content.id}">${num}</a></sup>`
+      );
+      break;
+    }
+    case "image":
+      renderInlineImageHtml(state, content);
+      break;
+    case "field":
+      // Use cached value if present
+      if (content.cachedValue) {
+        state.html.push(escapeHtml(content.cachedValue));
+      }
+      break;
+    case "ruby":
+      state.html.push("<ruby>");
+      for (const r of content.baseText) {
+        renderRun(state, r);
+      }
+      state.html.push("<rt>");
+      for (const r of content.rubyText) {
+        renderRun(state, r);
+      }
+      state.html.push("</rt></ruby>");
+      break;
+    case "lastRenderedPageBreak":
+    case "annotationReference":
+      break;
+  }
+}
+
+function renderInlineImageHtml(state: RenderState, img: InlineImageContent): void {
+  const imgDef = state.rIdToImage.get(img.rId);
+  if (!imgDef) {
+    state.warnings.push(`Image rId ${img.rId} not found`);
+    return;
+  }
+  const src = state.imageMap.get(imgDef.fileName) ?? imgDef.fileName;
+  const w = emuToPx(img.width);
+  const h = emuToPx(img.height);
+  state.html.push(
+    `<img src="${escapeHtml(src)}" width="${w}" height="${h}"${img.altText ? ` alt="${escapeHtml(img.altText)}"` : ""}/>`
+  );
+}
+
+function renderFloatingImageHtml(state: RenderState, img: FloatingImage): void {
+  const imgDef = state.rIdToImage.get(img.rId);
+  if (!imgDef) {
+    return;
+  }
+  const src = state.imageMap.get(imgDef.fileName) ?? imgDef.fileName;
+  const w = emuToPx(img.width);
+  const h = emuToPx(img.height);
+  const style =
+    img.wrap?.style === "square" ? "float:right;margin:10px" : "display:block;margin:10px 0";
+  state.html.push(
+    `<img src="${escapeHtml(src)}" width="${w}" height="${h}" style="${style}"${img.altText ? ` alt="${escapeHtml(img.altText)}"` : ""}/>`
+  );
+}
+
+// =============================================================================
+// Table
+// =============================================================================
+
+function renderTable(state: RenderState, table: Table): void {
+  const prefix = state.options.classPrefix;
+  state.html.push(`<table class="${prefix}table">`);
+  for (const row of table.rows) {
+    renderTableRow(state, row);
+  }
+  state.html.push("</table>");
+}
+
+function renderTableRow(state: RenderState, row: TableRow): void {
+  const isHeader = row.properties?.tableHeader;
+  state.html.push(`<tr>`);
+  for (const cell of row.cells) {
+    renderTableCell(state, cell, isHeader ?? false);
+  }
+  state.html.push("</tr>");
+}
+
+function renderTableCell(state: RenderState, cell: TableCell, isHeader: boolean): void {
+  const tag = isHeader ? "th" : "td";
+  const attrs: string[] = [];
+  const props = cell.properties;
+
+  if (props?.gridSpan && props.gridSpan > 1) {
+    attrs.push(`colspan="${props.gridSpan}"`);
+  }
+  if (props?.verticalMerge === "restart") {
+    // For rowspan detection, we would need to scan ahead; omitted for simplicity
+  }
+
+  const styles: string[] = [];
+  if (props?.shading?.fill) {
+    styles.push(`background-color:#${props.shading.fill}`);
+  }
+  if (props?.width) {
+    if (props.width.type === "dxa") {
+      styles.push(`width:${twipsToPx(props.width.value)}px`);
+    } else if (props.width.type === "pct") {
+      styles.push(`width:${props.width.value / 50}%`);
+    }
+  }
+  if (props?.borders) {
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      const border = (props.borders as any)[side] as Border | undefined;
+      if (border) {
+        const bstyle = borderToCss(border);
+        if (bstyle) {
+          styles.push(`border-${side}:${bstyle}`);
+        }
+      }
+    }
+  }
+  if (props?.verticalAlign) {
+    const vaMap: Record<string, string> = {
+      top: "top",
+      center: "middle",
+      bottom: "bottom"
+    };
+    const va = vaMap[props.verticalAlign];
+    if (va) {
+      styles.push(`vertical-align:${va}`);
+    }
+  }
+
+  if (styles.length > 0) {
+    attrs.push(`style="${styles.join(";")}"`);
+  }
+
+  state.html.push(`<${tag}${attrs.length > 0 ? " " + attrs.join(" ") : ""}>`);
+  for (const item of cell.content) {
+    renderBodyContent(state, item as BodyContent);
+  }
+  closeOpenLists(state);
+  state.html.push(`</${tag}>`);
+}
+
+// =============================================================================
+// TextBox
+// =============================================================================
+
+function renderTextBoxHtml(state: RenderState, textBox: TextBox): void {
+  const prefix = state.options.classPrefix;
+  state.html.push(`<aside class="${prefix}textbox">`);
+  for (const p of textBox.content) {
+    renderParagraph(state, p);
+  }
+  state.html.push("</aside>");
+}
+
+// =============================================================================
+// SDT
+// =============================================================================
+
+function renderSdtHtml(state: RenderState, sdt: StructuredDocumentTag): void {
+  for (const child of sdt.content) {
+    if ("type" in child) {
+      if (child.type === "paragraph") {
+        renderParagraph(state, child);
+      } else if (child.type === "table") {
+        renderTable(state, child);
+      }
+    } else if ("content" in child) {
+      // Run
+      state.html.push(`<span class="${state.options.classPrefix}sdt">`);
+      renderRun(state, child as Run);
+      state.html.push("</span>");
+    }
+  }
+}
+
+// =============================================================================
+// List Management
+// =============================================================================
+
+function getListInfo(
+  doc: DocxDocument,
+  numId: number,
+  level: number
+): { format: string } | undefined {
+  const instance = doc.numberingInstances?.find(n => n.numId === numId);
+  if (!instance) {
+    return undefined;
+  }
+  const abstractNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
+  if (!abstractNum) {
+    return undefined;
+  }
+  const levelDef = abstractNum.levels.find(l => l.level === level);
+  if (!levelDef) {
+    return undefined;
+  }
+  return { format: levelDef.format };
+}
+
+function openListIfNeeded(state: RenderState, numId: number, level: number, format: string): void {
+  // Close lists that are too deep
+  while (state.listStack.length > 0) {
+    const top = state.listStack[state.listStack.length - 1];
+    if (top.level > level || (top.level === level && top.numId !== numId)) {
+      state.html.push(top.format === "bullet" ? "</ul>" : "</ol>");
+      state.listStack.pop();
+    } else {
+      break;
+    }
+  }
+  // Open new lists if needed
+  const currentLevel =
+    state.listStack.length > 0 ? state.listStack[state.listStack.length - 1].level : -1;
+  if (currentLevel < level || state.listStack.length === 0) {
+    while (
+      state.listStack.length === 0 ||
+      state.listStack[state.listStack.length - 1].level < level
+    ) {
+      const newLevel =
+        state.listStack.length === 0 ? 0 : state.listStack[state.listStack.length - 1].level + 1;
+      const tag = format === "bullet" ? "ul" : "ol";
+      state.html.push(`<${tag}>`);
+      state.listStack.push({ numId, level: newLevel, format });
+    }
+  }
+}
+
+function closeOpenLists(state: RenderState): void {
+  while (state.listStack.length > 0) {
+    const top = state.listStack.pop()!;
+    state.html.push(top.format === "bullet" ? "</ul>" : "</ol>");
+  }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeClassName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function twipsToPx(twips: number): number {
+  // 1 twip = 1/1440 inch, assuming 96 DPI => 1 inch = 96 px
+  return Math.round((twips / 1440) * 96);
+}
+
+function emuToPx(emu: number): number {
+  // 1 inch = 914400 EMU, 96 DPI
+  return Math.round((emu / 914400) * 96);
+}
+
+function imageToDataUrl(img: ImageDef): string {
+  const mime: Record<string, string> = {
+    png: "image/png",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    svg: "image/svg+xml",
+    webp: "image/webp",
+    tiff: "image/tiff"
+  };
+  const mediaType = mime[img.mediaType] ?? "application/octet-stream";
+  const base64 = bytesToBase64(img.data);
+  return `data:${mediaType};base64,${base64}`;
+}
+
+function resolveColor(color: any, theme: DocumentTheme | undefined): string | undefined {
+  if (typeof color === "string") {
+    return color === "auto" ? undefined : color;
+  }
+  if (typeof color === "object" && color !== null) {
+    if (typeof color.value === "string") {
+      return color.value === "auto" ? undefined : color.value;
+    }
+    if (color.themeColor && theme) {
+      return resolveThemeColor(color, theme);
+    }
+  }
+  return undefined;
+}
+
+function highlightToColor(highlight: string): string {
+  const map: Record<string, string> = {
+    black: "#000000",
+    blue: "#0000FF",
+    cyan: "#00FFFF",
+    green: "#00FF00",
+    magenta: "#FF00FF",
+    red: "#FF0000",
+    yellow: "#FFFF00",
+    white: "#FFFFFF",
+    darkBlue: "#000080",
+    darkCyan: "#008080",
+    darkGreen: "#008000",
+    darkMagenta: "#800080",
+    darkRed: "#800000",
+    darkYellow: "#808000",
+    darkGray: "#808080",
+    lightGray: "#C0C0C0"
+  };
+  return map[highlight] ?? "transparent";
+}
+
+function borderToCss(border: Border): string | undefined {
+  if (border.style === "none" || border.style === "nil") {
+    return "none";
+  }
+  const sizePt = border.size !== undefined ? border.size / 8 : 0.5;
+  const styleMap: Record<string, string> = {
+    single: "solid",
+    double: "double",
+    dashed: "dashed",
+    dotted: "dotted",
+    thick: "solid"
+  };
+  const cssStyle = styleMap[border.style] ?? "solid";
+  const color = border.color === "auto" || !border.color ? "#000" : `#${border.color}`;
+  return `${sizePt}pt ${cssStyle} ${color}`;
+}
+
+function generateCss(prefix: string, theme: DocumentTheme | undefined): string {
+  return `
+.${prefix}document { font-family: 'Calibri', 'Segoe UI', sans-serif; line-height: 1.15; max-width: 8.5in; margin: 1in auto; padding: 0 1in; }
+.${prefix}document p { margin: 0 0 8pt 0; }
+.${prefix}document h1, .${prefix}document h2, .${prefix}document h3 { margin-top: 12pt; margin-bottom: 8pt; font-weight: 600; }
+.${prefix}table { border-collapse: collapse; margin: 8pt 0; }
+.${prefix}table th, .${prefix}table td { padding: 4pt 8pt; }
+.${prefix}textbox { border: 1px solid #ccc; padding: 8pt; margin: 8pt 0; }
+.${prefix}footnotes, .${prefix}endnotes { font-size: 0.9em; margin-top: 2em; }
+.${prefix}footnote-separator, .${prefix}endnote-separator { width: 30%; margin-left: 0; border: none; border-top: 1px solid #000; margin-top: 2em; }
+.${prefix}tab { display: inline-block; min-width: 36pt; }
+.${prefix}chart { margin: 12pt 0; }
+.${prefix}move-from { text-decoration: line-through; color: #a00; }
+.${prefix}move-to { text-decoration: underline; color: #0a0; }
+ins { text-decoration: underline; color: #060; }
+del { text-decoration: line-through; color: #600; }
+ruby rt { font-size: 0.5em; }
+  `.trim();
+}
