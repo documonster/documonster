@@ -678,8 +678,9 @@ class WorksheetWriter {
   ): void {
     if (typeof filter === "number") {
       this.conditionalFormatting.splice(filter, 1);
-    } else if (filter instanceof Function) {
-      this.conditionalFormatting = this.conditionalFormatting.filter(filter);
+    } else if (typeof filter === "function") {
+      // Predicate selects rules to drop, not rules to keep.
+      this.conditionalFormatting = this.conditionalFormatting.filter(cf => !filter(cf));
     } else {
       this.conditionalFormatting = [];
     }

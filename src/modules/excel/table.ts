@@ -170,7 +170,10 @@ class Column {
     return this.column.style;
   }
   set style(value: Partial<Style> | undefined) {
-    this.column.style = value;
+    // Use _set so commit() will replay store() and propagate the new style
+    // to the on-sheet cells; a bare assignment leaves _cache empty and
+    // commit() returns early.
+    this._set("style", value);
   }
 
   get totalsRowLabel(): string | undefined {
@@ -609,7 +612,34 @@ class Table {
   }
   set name(value: string) {
     this.cacheState();
-    this.table.name = sanitizeTableName(value);
+    const newName = sanitizeTableName(value);
+    const oldName = this.table.name;
+    if (newName === oldName) {
+      return;
+    }
+    // Synchronise the worksheet's table map and the workbook-wide name set
+    // so subsequent getTable(newName)/duplicate-name checks remain correct.
+    // Falls back to a bare assignment if the worksheet hasn't registered
+    // this table (e.g. transient instances built by Worksheet.set model).
+    const ws = this.worksheet;
+    const tables = ws?.tables;
+    const tableNames = ws?.workbook?._tableNames;
+    if (tables && tables[oldName] === this) {
+      const newKey = newName.toLowerCase();
+      const oldKey = oldName.toLowerCase();
+      if (newKey !== oldKey && tableNames?.has(newKey)) {
+        throw new TableError(
+          `Table name "${newName}" already exists in the workbook (case-insensitive).`
+        );
+      }
+      delete tables[oldName];
+      tables[newName] = this;
+      if (tableNames) {
+        tableNames.delete(oldKey);
+        tableNames.add(newKey);
+      }
+    }
+    this.table.name = newName;
   }
 
   get displayName(): string {

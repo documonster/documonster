@@ -467,6 +467,45 @@ describe("WorksheetWriter", () => {
       ws.removeConditionalFormatting();
       expect(ws.conditionalFormatting.length).toBe(0);
     });
+
+    it("removeConditionalFormatting(predicate) deletes matching rules and keeps the rest", () => {
+      const { ws } = createRealWriter();
+      ws.addConditionalFormatting({
+        ref: "A1:A10",
+        rules: [{ type: "cellIs", operator: "greaterThan", formulae: [5], priority: 1 }]
+      });
+      ws.addConditionalFormatting({
+        ref: "B1:B10",
+        rules: [{ type: "cellIs", operator: "lessThan", formulae: [3], priority: 2 }]
+      });
+      ws.addConditionalFormatting({
+        ref: "C1:C10",
+        rules: [{ type: "cellIs", operator: "greaterThan", formulae: [9], priority: 3 }]
+      });
+
+      expect(ws.conditionalFormatting.length).toBe(3);
+      // Predicate selects the rules to DROP (cf.ref starting with "B")
+      ws.removeConditionalFormatting(cf => cf.ref.startsWith("B"));
+
+      expect(ws.conditionalFormatting.length).toBe(2);
+      expect(ws.conditionalFormatting.map(cf => cf.ref).sort()).toEqual(["A1:A10", "C1:C10"]);
+    });
+
+    it("removeConditionalFormatting(index) deletes only that index", () => {
+      const { ws } = createRealWriter();
+      ws.addConditionalFormatting({
+        ref: "A1:A10",
+        rules: [{ type: "cellIs", operator: "greaterThan", formulae: [5], priority: 1 }]
+      });
+      ws.addConditionalFormatting({
+        ref: "B1:B10",
+        rules: [{ type: "cellIs", operator: "lessThan", formulae: [3], priority: 2 }]
+      });
+
+      ws.removeConditionalFormatting(0);
+      expect(ws.conditionalFormatting.length).toBe(1);
+      expect(ws.conditionalFormatting[0].ref).toBe("B1:B10");
+    });
   });
 
   // ===========================================================================

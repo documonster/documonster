@@ -40,7 +40,13 @@ const RelType = {
    * expect from `=[测试.xlsx]Sheet1!A1`.
    */
   ExternalLinkPath:
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath"
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath",
+  Chart: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+  ChartEx: "http://schemas.microsoft.com/office/2014/relationships/chartEx",
+  ChartStyle: "http://schemas.microsoft.com/office/2011/relationships/chartStyle",
+  ChartColors: "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle",
+  Drawing: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+  Chartsheet: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
 };
 
 export { RelType };

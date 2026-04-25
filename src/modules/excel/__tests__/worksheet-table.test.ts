@@ -594,4 +594,136 @@ describe("Worksheet", () => {
       expect(formula).not.toContain("sales data");
     });
   });
+
+  // ===========================================================================
+  // Table name lifecycle: rename and delete must keep worksheet.tables and
+  // workbook._tableNames in sync, otherwise getTable / duplicate-name checks
+  // and cross-sheet name reuse silently break.
+  // ===========================================================================
+
+  describe("table name lifecycle", () => {
+    it("renaming a table updates worksheet.tables and releases the old name", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      const table = ws.addTable({
+        name: "Original",
+        ref: "A1",
+        columns: [{ name: "Col1" }],
+        rows: [["v1"]]
+      });
+
+      table.name = "Renamed";
+
+      expect(table.name).toBe("Renamed");
+      expect(ws.getTable("Renamed")).toBe(table);
+      expect(ws.getTable("Original")).toBeUndefined();
+
+      // The old name must be free for reuse on another sheet.
+      const ws2 = wb.addWorksheet("Sheet2");
+      expect(() =>
+        ws2.addTable({
+          name: "Original",
+          ref: "A1",
+          columns: [{ name: "Col1" }],
+          rows: [["v1"]]
+        })
+      ).not.toThrow();
+    });
+
+    it("renaming to an existing workbook-wide name throws", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addTable({
+        name: "Existing",
+        ref: "A1",
+        columns: [{ name: "Col1" }],
+        rows: [["v1"]]
+      });
+      const t2 = ws.addTable({
+        name: "Other",
+        ref: "C1",
+        columns: [{ name: "Col1" }],
+        rows: [["v1"]]
+      });
+
+      expect(() => {
+        t2.name = "Existing";
+      }).toThrow(/already exists/i);
+      // After the failed rename the table must still be reachable by its old name.
+      expect(t2.name).toBe("Other");
+      expect(ws.getTable("Other")).toBe(t2);
+    });
+
+    it("removeTable releases the workbook-wide name", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.addTable({
+        name: "Temp",
+        ref: "A1",
+        columns: [{ name: "Col1" }],
+        rows: [["v1"]]
+      });
+      ws.removeTable("Temp");
+
+      const ws2 = wb.addWorksheet("Sheet2");
+      expect(() =>
+        ws2.addTable({
+          name: "Temp",
+          ref: "A1",
+          columns: [{ name: "Col1" }],
+          rows: [["v1"]]
+        })
+      ).not.toThrow();
+    });
+
+    it("removing a worksheet releases all of its table names", () => {
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("Sheet1");
+      ws1.addTable({
+        name: "Releasable",
+        ref: "A1",
+        columns: [{ name: "Col1" }],
+        rows: [["v1"]]
+      });
+
+      wb.removeWorksheet(ws1.id);
+
+      // The name must be reusable on a brand-new sheet.
+      const ws2 = wb.addWorksheet("Sheet2");
+      expect(() =>
+        ws2.addTable({
+          name: "Releasable",
+          ref: "A1",
+          columns: [{ name: "Col1" }],
+          rows: [["v1"]]
+        })
+      ).not.toThrow();
+    });
+
+    it("setting column.style triggers commit() to propagate to cells", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      const table = ws.addTable({
+        name: "Styled",
+        ref: "A1",
+        headerRow: true,
+        columns: [{ name: "Col1" }, { name: "Col2" }],
+        rows: [
+          ["a", "b"],
+          ["c", "d"]
+        ]
+      });
+
+      const col = table.getColumn(1);
+      col.style = { font: { bold: true } };
+
+      // Without cacheState() being called, commit() returns early and the
+      // newly-applied style never reaches the data cells.
+      table.commit();
+
+      // Data cells in the second column (B2..B3) should now carry the bold font.
+      expect((ws.getCell("B2").style as any).font?.bold).toBe(true);
+      expect((ws.getCell("B3").style as any).font?.bold).toBe(true);
+    });
+  });
 });

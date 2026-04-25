@@ -1,5 +1,6 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
+import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
@@ -12,6 +13,8 @@ interface TwoCellModel {
   };
   picture?: any;
   shape?: any;
+  /** Graphic frame model (for charts and other embedded objects) */
+  graphicFrame?: any;
   /** Wrap the anchor in mc:AlternateContent for modern drawing clients */
   alternateContent?: { requires: string };
 }
@@ -25,6 +28,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       "xdr:to": new CellPositionXform({ tag: "xdr:to" }),
       "xdr:pic": new PicXform(),
       "xdr:sp": new SpXform(),
+      "xdr:graphicFrame": new GraphicFrameXform(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -36,6 +40,8 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
   prepare(model: TwoCellModel, options: { index: number }): void {
     if (model.picture) {
       this.map["xdr:pic"].prepare(model.picture, options);
+    } else if (model.graphicFrame) {
+      this.map["xdr:graphicFrame"].prepare(model.graphicFrame, options);
     }
   }
 
@@ -51,16 +57,24 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
           ? {
               "xmlns:a14": "http://schemas.microsoft.com/office/drawing/2010/main"
             }
+          : {}),
+        ...(model.alternateContent?.requires === "cx"
+          ? {
+              "xmlns:cx": "http://schemas.microsoft.com/office/drawing/2014/chartex"
+            }
           : {})
       });
     }
 
-    xmlStream.openNode(this.tag, { editAs: model.range.editAs ?? "oneCell" });
+    const editAs = model.range.editAs ?? (model.graphicFrame ? undefined : "oneCell");
+    xmlStream.openNode(this.tag, editAs ? { editAs } : {});
 
     this.map["xdr:from"].render(xmlStream, model.range.tl);
     this.map["xdr:to"].render(xmlStream, model.range.br);
     if (model.picture) {
       this.map["xdr:pic"].render(xmlStream, model.picture);
+    } else if (model.graphicFrame) {
+      this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
     } else if (model.shape) {
       this.map["xdr:sp"].render(xmlStream, model.shape);
     }
@@ -87,6 +101,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
         this.model.range.tl = this.map["xdr:from"].model;
         this.model.range.br = this.map["xdr:to"].model;
         this.model.picture = this.map["xdr:pic"].model;
+        this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
         return false;
       default:
         // could be some unrecognised tags
@@ -95,7 +110,10 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
   }
 
   reconcile(model: any, options: any): void {
-    model.medium = this.reconcilePicture(model.picture, options);
+    if (model.picture) {
+      model.medium = this.reconcilePicture(model.picture, options);
+    }
+    // graphicFrame reconciliation handled at DrawingXform level
   }
 }
 

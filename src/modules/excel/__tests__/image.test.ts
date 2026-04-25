@@ -407,4 +407,49 @@ describe("Image", () => {
       expect(clonedModel).toEqual(originalModel);
     });
   });
+
+  // ===========================================================================
+  // Object range with string tl/br: must produce the same 0-based nativeCol/Row
+  // as the equivalent string-only range. Regression for off-by-one bug where
+  // `{ tl: "A1", br: "C3" }` resolved to nativeCol=1/nativeRow=1.
+  // ===========================================================================
+  describe("object range with string tl/br", () => {
+    it("object {tl: 'B2', br: 'D4'} matches string range 'B2:D4'", () => {
+      const stringImage = new Image(worksheet, {
+        type: "image",
+        imageId: "str-range",
+        range: "B2:D4"
+      });
+      const objectImage = new Image(worksheet, {
+        type: "image",
+        imageId: "obj-range",
+        range: { tl: "B2", br: "D4" }
+      });
+
+      expect(objectImage.range!.tl.nativeCol).toBe(stringImage.range!.tl.nativeCol);
+      expect(objectImage.range!.tl.nativeRow).toBe(stringImage.range!.tl.nativeRow);
+      expect(objectImage.range!.br!.nativeCol).toBe(stringImage.range!.br!.nativeCol);
+      expect(objectImage.range!.br!.nativeRow).toBe(stringImage.range!.br!.nativeRow);
+    });
+
+    it("object {tl: 'A1'} resolves to 0-based native col/row", () => {
+      const image = new Image(worksheet, {
+        type: "image",
+        imageId: "tl-string",
+        range: { tl: "A1", ext: { width: 100, height: 100 } }
+      });
+      expect(image.range!.tl.nativeCol).toBe(0);
+      expect(image.range!.tl.nativeRow).toBe(0);
+    });
+
+    it("object {tl: {col, row}} keeps 0-based native col/row", () => {
+      const image = new Image(worksheet, {
+        type: "image",
+        imageId: "tl-object",
+        range: { tl: { col: 0, row: 0 }, ext: { width: 100, height: 100 } }
+      });
+      expect(image.range!.tl.nativeCol).toBe(0);
+      expect(image.range!.tl.nativeRow).toBe(0);
+    });
+  });
 });

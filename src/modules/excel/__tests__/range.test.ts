@@ -366,4 +366,35 @@ describe("Range", () => {
     expect(otherC3F6.contains("blort!$A$1")).toBe(false);
     expect(otherC3F6.contains("blort!$D$5")).toBe(false);
   });
+
+  describe("sheet name serialisation", () => {
+    it("emits a bareword for plain ASCII sheet names", () => {
+      const r = new Range("A1", "B2", "Sheet1");
+      expect(r.range).toBe("Sheet1!A1:B2");
+    });
+
+    it("quotes sheet names with non-bareword characters", () => {
+      const r = new Range("A1", "B2", "My Sheet");
+      expect(r.range).toBe("'My Sheet'!A1:B2");
+    });
+
+    it("doubles single quotes inside quoted sheet names", () => {
+      // O'Brien must serialise as 'O''Brien'!A1:B2 per Excel formula syntax,
+      // not the malformed 'O'Brien'!A1:B2 produced by naive quoting.
+      const r = new Range("A1", "B2", "O'Brien");
+      expect(r.range).toBe("'O''Brien'!A1:B2");
+    });
+
+    it("escapes multiple apostrophes", () => {
+      const r = new Range("A1", "B2", "It's a 'test'");
+      expect(r.range).toBe("'It''s a ''test'''!A1:B2");
+    });
+
+    it("absolute and short range variants also escape apostrophes", () => {
+      const r = new Range("A1", "B2", "O'Brien");
+      expect(r.$range).toBe("'O''Brien'!$A$1:$B$2");
+      expect(r.shortRange).toBe("'O''Brien'!A1:B2");
+      expect(r.$shortRange).toBe("'O''Brien'!$A$1:$B$2");
+    });
+  });
 });

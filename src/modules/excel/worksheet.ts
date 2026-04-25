@@ -1,4 +1,10 @@
 import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
+import { fillChartCaches } from "@excel/chart/cache-populator";
+import { Chart, buildChartModel, type ChartAnchorModel } from "@excel/chart/chart";
+import { buildComboChartModel } from "@excel/chart/chart-builder";
+import { buildChartExModel } from "@excel/chart/chart-ex-builder";
+import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
+import type { AddChartOptions, AddChartRange, AddComboChartOptions } from "@excel/chart/types";
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
 import { Enums } from "@excel/enums";
@@ -13,6 +19,8 @@ import { Image, type ImageModel } from "@excel/image";
 import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
 import { Range, type RangeInput } from "@excel/range";
 import { Row, type RowModel } from "@excel/row";
+import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
+import { buildSparklineGroup } from "@excel/sparkline";
 import { Table, type TableModel } from "@excel/table";
 import type {
   AddImageRange,
@@ -157,6 +165,10 @@ interface WorksheetModel {
   mergeCells?: string[];
   /** Loaded drawing data (for charts, etc.) - preserved for round-trip */
   drawing?: unknown;
+  /** Chart anchor models for worksheet charts */
+  charts?: ChartAnchorModel[];
+  /** Sparkline groups (x14:sparklineGroups) */
+  sparklineGroups?: SparklineGroup[];
 }
 
 // Worksheet requirements
@@ -185,6 +197,8 @@ class Worksheet {
   declare public views: Partial<WorksheetView>[];
   declare public autoFilter: AutoFilter | null;
   declare private _media: Image[];
+  declare private _charts: Chart[];
+  declare private _sparklineGroups: SparklineGroup[];
   declare public sheetProtection: SheetProtection | null;
   declare public tables: { [key: string]: Table };
   declare public pivotTables: PivotTable[];
@@ -289,6 +303,10 @@ class Worksheet {
 
     // for images, etc
     this._media = [];
+
+    // for charts
+    this._charts = [];
+    this._sparklineGroups = [];
 
     // worksheet protection
     this.sheetProtection = null;
@@ -548,6 +566,9 @@ class Worksheet {
           }
         }
       }
+
+      // account for chart anchors in drawing and programmatic chart objects
+      this._shiftChartAnchors("col", start - 1, nExpand);
     }
 
     // account for merges
@@ -923,6 +944,9 @@ class Worksheet {
           }
         }
       }
+
+      // account for chart anchors in drawing and programmatic chart objects
+      this._shiftChartAnchors("row", start - 1, nExpand);
     }
 
     // account for merges
@@ -1064,6 +1088,42 @@ class Worksheet {
         }
       }
       delete this._merges[master.address];
+    }
+  }
+
+  /**
+   * Shift all chart anchors (drawing anchors + programmatic charts) by delta along an axis.
+   * @param axis "row" or "col"
+   * @param threshold 0-based index; anchors at or beyond this are shifted
+   * @param delta number of positions to shift (positive = expand, negative = shrink)
+   */
+  private _shiftChartAnchors(axis: "row" | "col", threshold: number, delta: number): void {
+    const prop = axis === "row" ? "nativeRow" : "nativeCol";
+
+    // Drawing anchors (from loaded file)
+    const drawing = this._drawing as any;
+    if (drawing?.anchors) {
+      for (const anchor of drawing.anchors) {
+        const tl = anchor.range?.tl;
+        const br = anchor.range?.br;
+        if (tl && tl[prop] >= threshold) {
+          tl[prop] = Math.max(0, tl[prop] + delta);
+        }
+        if (br && br[prop] >= threshold) {
+          br[prop] = Math.max(0, br[prop] + delta);
+        }
+      }
+    }
+
+    // Programmatic chart objects
+    for (const chart of this._charts) {
+      const { tl, br } = chart.range;
+      if (tl[prop] >= threshold) {
+        tl[prop] = Math.max(0, tl[prop] + delta);
+      }
+      if (br && br[prop] >= threshold) {
+        br[prop] = Math.max(0, br[prop] + delta);
+      }
     }
   }
 
@@ -1266,6 +1326,139 @@ class Worksheet {
 
   getImages(): Image[] {
     return this._media.filter(m => m.type === "image");
+  }
+
+  // ===========================================================================
+  // Charts
+  // ===========================================================================
+
+  /**
+   * Add a chart to the worksheet, positioned at the given range.
+   * Returns the chart number (1-based) that identifies this chart in the workbook.
+   */
+  addChart(options: AddChartOptions, range: AddChartRange): number {
+    return this._registerChart(buildChartModel(options), range);
+  }
+
+  /**
+   * Add a combo chart (multiple chart type groups) to the worksheet.
+   * Returns the chart number (1-based) that identifies this chart in the workbook.
+   */
+  addComboChart(options: AddComboChartOptions, range: AddChartRange): number {
+    return this._registerChart(buildComboChartModel(options), range);
+  }
+
+  /**
+   * Add a ChartEx (Office 2016+ extended chart) to the worksheet.
+   *
+   * Supported types: `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`,
+   * `pareto`, `boxWhisker`, `regionMap`.
+   *
+   * Returns the chartEx number (1-based) that identifies this chart in the workbook.
+   */
+  addChartEx(options: AddChartExOptions, range: AddChartRange): number {
+    const model = buildChartExModel(options);
+    return this._registerChartEx(model, range);
+  }
+
+  /** @internal Register a built chartEx model into the workbook and this worksheet. */
+  private _registerChartEx(model: ChartExModel, range: AddChartRange): number {
+    const chartExNumber = this._workbook.nextChartExNumber();
+    this._workbook.addChartExStructuredEntry({ chartExNumber, model });
+    const chart = new Chart(this, { chartExNumber }, range);
+    this._charts.push(chart);
+    return chartExNumber;
+  }
+
+  /** @internal Register a built chart model into the workbook and this worksheet. */
+  private _registerChart(chartModel: any, range: AddChartRange): number {
+    const chartNumber = this._workbook.nextChartNumber();
+    // Auto-populate caches so headless consumers see non-empty charts.
+    // Excel itself will recompute on open; this is a best-effort enrichment.
+    try {
+      fillChartCaches(chartModel, this._workbook);
+    } catch {
+      // Cache population is best-effort; never let it break chart creation.
+    }
+    this._workbook.addChartEntry({ chartNumber, model: chartModel });
+    const chart = new Chart(this, { chartNumber }, range);
+    this._charts.push(chart);
+    return chartNumber;
+  }
+
+  /**
+   * Get all charts embedded in this worksheet.
+   */
+  getCharts(): Chart[] {
+    return [...this._charts];
+  }
+
+  /**
+   * Remove a chart from this worksheet.
+   *
+   * @param chart - Either the chart object or its 0-based index in the worksheet.
+   * @returns `true` if a chart was removed, `false` otherwise.
+   */
+  removeChart(chart: Chart | number): boolean {
+    const idx = typeof chart === "number" ? chart : this._charts.indexOf(chart);
+    if (idx < 0 || idx >= this._charts.length) {
+      return false;
+    }
+    const removed = this._charts.splice(idx, 1)[0];
+    if (removed.chartNumber > 0) {
+      this._workbook.removeChartEntry?.(removed.chartNumber);
+    }
+    return true;
+  }
+
+  // ===========================================================================
+  // Sparklines (x14:sparklineGroups)
+  // ===========================================================================
+
+  /**
+   * Add a sparkline group to this worksheet.
+   *
+   * A sparkline group is a collection of small in-cell charts sharing common
+   * styling. Sparklines are rendered via `x14:sparklineGroups` inside the
+   * worksheet extension list.
+   *
+   * @returns The newly added SparklineGroup for further modification.
+   */
+  addSparklineGroup(options: AddSparklineGroupOptions): SparklineGroup {
+    const group = buildSparklineGroup(options);
+    this._sparklineGroups.push(group);
+    return group;
+  }
+
+  /** Get all sparkline groups on this worksheet. */
+  getSparklineGroups(): SparklineGroup[] {
+    return [...this._sparklineGroups];
+  }
+
+  /** @internal Used by the worksheet xform to access raw storage. */
+  get sparklineGroups(): SparklineGroup[] {
+    return this._sparklineGroups;
+  }
+
+  /** @internal Used when rebuilding from a parsed model. */
+  set sparklineGroups(value: SparklineGroup[]) {
+    this._sparklineGroups = value ?? [];
+  }
+
+  /**
+   * Remove a sparkline group.
+   *
+   * @param groupOrIndex - The group object or its 0-based index.
+   * @returns `true` if removed, `false` otherwise.
+   */
+  removeSparklineGroup(groupOrIndex: SparklineGroup | number): boolean {
+    const idx =
+      typeof groupOrIndex === "number" ? groupOrIndex : this._sparklineGroups.indexOf(groupOrIndex);
+    if (idx < 0 || idx >= this._sparklineGroups.length) {
+      return false;
+    }
+    this._sparklineGroups.splice(idx, 1);
+    return true;
   }
 
   /**
@@ -1490,10 +1683,15 @@ class Worksheet {
   }
 
   /**
-   * Delete conditional formatting rules
+   * Delete conditional formatting rules.
+   *
+   * - When `filter` is a number, removes the rule at that index.
+   * - When `filter` is a function, removes every rule for which it returns `true`
+   *   (i.e. the predicate selects the rules to delete, not the ones to keep).
+   * - When `filter` is omitted/falsy, removes all rules.
    */
   removeConditionalFormatting(
-    filter:
+    filter?:
       | number
       | ((
           value: ConditionalFormattingOptions,
@@ -1503,8 +1701,11 @@ class Worksheet {
   ): void {
     if (typeof filter === "number") {
       this.conditionalFormattings.splice(filter, 1);
-    } else if (filter instanceof Function) {
-      this.conditionalFormattings = this.conditionalFormattings.filter(filter);
+    } else if (typeof filter === "function") {
+      // Keep entries for which the predicate returns false; drop the matches.
+      this.conditionalFormattings = this.conditionalFormattings.filter(
+        (value, index, array) => !filter(value, index, array)
+      );
     } else {
       this.conditionalFormattings = [];
     }
@@ -1749,7 +1950,9 @@ class Worksheet {
       formControls: this.formControls.map(fc => fc.model),
       ignoredErrors: this.ignoredErrors,
       watermark: this._watermark,
-      drawing: this._drawing
+      drawing: this._drawing,
+      charts: this._charts.map(c => c.model),
+      sparklineGroups: this._sparklineGroups
     };
 
     // =================================================
@@ -1845,10 +2048,35 @@ class Worksheet {
     this.pivotTables = value.pivotTables;
     this.conditionalFormattings = value.conditionalFormattings;
     this.ignoredErrors = value.ignoredErrors ?? [];
-    // Form controls are currently write-only (not parsed from XLSX)
-    this.formControls = [];
+    // Rebuild form controls from the serialised model so importSheet() and any
+    // other model round-trip preserves checkbox state, position, and links.
+    this.formControls = (value.formControls ?? []).map(fcModel =>
+      FormCheckbox.fromModel(this, fcModel)
+    );
     // Preserve loaded drawing data (charts, etc.)
     this._drawing = value.drawing;
+    // Restore chart objects from model (explicit charts array) or from drawing anchors
+    if (value.charts && value.charts.length > 0) {
+      this._charts = value.charts.map(
+        (c: ChartAnchorModel) =>
+          new Chart(this, { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber }, c.range)
+      );
+    } else if ((value.drawing as any)?.anchors) {
+      // Extract chart anchors from drawing (loaded from XLSX)
+      this._charts = ((value.drawing as any).anchors as any[])
+        .filter((a: any) => a.chartNumber || a.chartExNumber)
+        .map(
+          (a: any) =>
+            new Chart(
+              this,
+              { chartNumber: a.chartNumber ?? 0, chartExNumber: a.chartExNumber ?? 0 },
+              a.range
+            )
+        );
+    } else {
+      this._charts = [];
+      this._sparklineGroups = [];
+    }
   }
 
   // ===========================================================================

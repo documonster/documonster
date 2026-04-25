@@ -49,7 +49,14 @@ class WorkbookXform extends BaseXform {
   }
 
   prepare(model: any): void {
-    model.sheets = model.worksheets;
+    // Build the sheets list from worksheets + chartsheets.
+    // Chartsheets are appended after worksheets.
+    model.sheets = [...model.worksheets];
+    if (model.chartsheets) {
+      for (const cs of model.chartsheets) {
+        model.sheets.push(cs);
+      }
+    }
 
     // collate all the print areas from all of the sheets and add them to the defined names
     const printAreas: any[] = [];
@@ -215,6 +222,7 @@ class WorkbookXform extends BaseXform {
 
     // reconcile sheet ids, rIds and names
     const worksheets: any[] = [];
+    const chartsheetsList: any[] = [];
     let worksheet: any;
     let index = 0;
 
@@ -223,14 +231,24 @@ class WorkbookXform extends BaseXform {
       if (!rel) {
         return;
       }
-      // if rel.Target start with `[space]/xl/` or `/xl/` , then it will be replaced with `''` and spliced behind `xl/`,
-      // otherwise it will be spliced directly behind `xl/`. i.g.
-      worksheet = model.worksheetHash[`xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`];
-      // If there are "chartsheets" in the file, rel.Target will
-      // come out as chartsheets/sheet1.xml or similar here, and
-      // that won't be in model.worksheetHash.
-      // As we don't have the infrastructure to support chartsheets,
-      // we will ignore them for now:
+      const target = `xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`;
+
+      // Check if this is a chartsheet
+      const chartsheetMatch = /xl\/chartsheets\/sheet(\d+)\.xml/.exec(target);
+      if (chartsheetMatch) {
+        const csNo = parseInt(chartsheetMatch[1], 10);
+        const chartsheet = model.chartsheets?.[csNo];
+        if (chartsheet) {
+          chartsheet.name = sheet.name;
+          chartsheet.id = sheet.id;
+          chartsheet.state = sheet.state;
+          chartsheet.rId = sheet.rId;
+          chartsheetsList.push(chartsheet);
+        }
+        return;
+      }
+
+      worksheet = model.worksheetHash[target];
       if (worksheet) {
         worksheet.name = sheet.name;
         worksheet.id = sheet.id;
@@ -238,6 +256,9 @@ class WorkbookXform extends BaseXform {
         worksheets[index++] = worksheet;
       }
     });
+
+    // Store reconciled chartsheets on the model
+    model.chartsheetsList = chartsheetsList;
 
     // reconcile print areas
     const definedNames: any[] = [];

@@ -17,7 +17,7 @@ abstract class BaseCellAnchorXform extends BaseXform {
         this.reset();
         this.model = {
           range: {
-            editAs: node.attributes.editAs ?? "oneCell"
+            editAs: node.attributes.editAs
           }
         };
         break;

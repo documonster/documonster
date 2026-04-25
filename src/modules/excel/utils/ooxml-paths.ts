@@ -320,6 +320,117 @@ export function ctrlPropPath(id: number | string): string {
   return `xl/ctrlProps/ctrlProp${id}.xml`;
 }
 
+// -------- Charts --------
+
+const chartXmlRegex = /^xl\/charts\/chart(\d+)[.]xml$/;
+const chartRelsXmlRegex = /^xl\/charts\/_rels\/chart(\d+)[.]xml[.]rels$/;
+const chartStyleXmlRegex = /^xl\/charts\/style(\d+)[.]xml$/;
+const chartColorsXmlRegex = /^xl\/charts\/colors(\d+)[.]xml$/;
+
+export function getChartNumberFromPath(path: string): number | undefined {
+  const match = chartXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartNumberFromRelsPath(path: string): number | undefined {
+  const match = chartRelsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartStyleNumberFromPath(path: string): number | undefined {
+  const match = chartStyleXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartColorsNumberFromPath(path: string): number | undefined {
+  const match = chartColorsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function chartPath(n: number | string): string {
+  return `xl/charts/chart${n}.xml`;
+}
+
+export function chartRelsPath(n: number | string): string {
+  return `xl/charts/_rels/chart${n}.xml.rels`;
+}
+
+export function chartStylePath(n: number | string): string {
+  return `xl/charts/style${n}.xml`;
+}
+
+export function chartColorsPath(n: number | string): string {
+  return `xl/charts/colors${n}.xml`;
+}
+
+export function chartRelTargetFromDrawing(n: number | string): string {
+  // Target inside xl/drawings/_rels/drawingN.xml.rels (base: xl/drawings/)
+  return `../charts/chart${n}.xml`;
+}
+
+export function chartStyleRelTarget(n: number | string): string {
+  // Target inside xl/charts/_rels/chartN.xml.rels (base: xl/charts/)
+  return `style${n}.xml`;
+}
+
+export function chartColorsRelTarget(n: number | string): string {
+  // Target inside xl/charts/_rels/chartN.xml.rels (base: xl/charts/)
+  return `colors${n}.xml`;
+}
+
+export function isChartPath(path: string): boolean {
+  return chartXmlRegex.test(path);
+}
+
+export function isChartStylePath(path: string): boolean {
+  return chartStyleXmlRegex.test(path);
+}
+
+export function isChartColorsPath(path: string): boolean {
+  return chartColorsXmlRegex.test(path);
+}
+
+export function isChartRelsPath(path: string): boolean {
+  return chartRelsXmlRegex.test(path);
+}
+
+// ============================================================================
+// Chart Ex (Office 2016+ extended charts: treemap, sunburst, waterfall, etc.)
+// ============================================================================
+
+const chartExXmlRegex = /^xl\/charts\/chartEx(\d+)[.]xml$/;
+const chartExRelsXmlRegex = /^xl\/charts\/_rels\/chartEx(\d+)[.]xml[.]rels$/;
+
+export function getChartExNumberFromPath(path: string): number | undefined {
+  const match = chartExXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartExNumberFromRelsPath(path: string): number | undefined {
+  const match = chartExRelsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function chartExPath(n: number | string): string {
+  return `xl/charts/chartEx${n}.xml`;
+}
+
+export function chartExRelsPath(n: number | string): string {
+  return `xl/charts/_rels/chartEx${n}.xml.rels`;
+}
+
+export function chartExRelTargetFromDrawing(n: number | string): string {
+  return `../charts/chartEx${n}.xml`;
+}
+
+export function isChartExPath(path: string): boolean {
+  return chartExXmlRegex.test(path);
+}
+
+export function isChartExRelsPath(path: string): boolean {
+  return chartExRelsXmlRegex.test(path);
+}
+
 export function ctrlPropRelTargetFromWorksheet(id: number | string): string {
   // Target inside xl/worksheets/_rels/sheetN.xml.rels (base: xl/worksheets/)
   return `../ctrlProps/ctrlProp${id}.xml`;
@@ -356,4 +467,37 @@ export function resolveRelTarget(baseDir: string, target: string): string {
     }
   }
   return resolved.join("/");
+}
+
+// ============================================================================
+// Chartsheet paths
+// ============================================================================
+
+const chartsheetXmlRegex = /^xl\/chartsheets\/sheet(\d+)[.]xml$/;
+const chartsheetRelsXmlRegex = /^xl\/chartsheets\/_rels\/sheet(\d+)[.]xml[.]rels$/;
+
+export function getChartsheetNoFromPath(path: string): number | undefined {
+  const match = chartsheetXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartsheetNoFromRelsPath(path: string): number | undefined {
+  const match = chartsheetRelsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function chartsheetPath(n: number | string): string {
+  return `xl/chartsheets/sheet${n}.xml`;
+}
+
+export function chartsheetRelsPath(n: number | string): string {
+  return `xl/chartsheets/_rels/sheet${n}.xml.rels`;
+}
+
+export function isChartsheetPath(path: string): boolean {
+  return chartsheetXmlRegex.test(path);
+}
+
+export function isChartsheetRelsPath(path: string): boolean {
+  return chartsheetRelsXmlRegex.test(path);
 }

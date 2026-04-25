@@ -460,4 +460,51 @@ describe("Form Control Checkbox", () => {
       expect(checkbox.model.text).toBe("测试复选框 🔲");
     });
   });
+
+  // ===========================================================================
+  // Model round-trip via importSheet (regression for form controls being
+  // silently dropped on the deserialise path).
+  // ===========================================================================
+  describe("worksheet model round-trip", () => {
+    it("preserves form controls through worksheet.model getter+setter", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Source");
+      ws.addFormCheckbox("B2:C3", {
+        text: "Round trip",
+        link: "A1",
+        checked: true,
+        noThreeD: false,
+        print: true
+      });
+
+      const wb2 = new Workbook();
+      const ws2 = wb2.addWorksheet("Target");
+      ws2.model = ws.model;
+
+      expect(ws2.formControls.length).toBe(1);
+      const fc = ws2.formControls[0];
+      expect(fc).toBeInstanceOf(FormCheckbox);
+      expect(fc.model.text).toBe("Round trip");
+      expect(fc.model.link).toBe("$A$1");
+      expect(fc.model.checked).toBe("Checked");
+      expect(fc.model.noThreeD).toBe(false);
+      expect(fc.model.print).toBe(true);
+      expect(fc.model.tl.col).toBe(1);
+      expect(fc.model.br.col).toBe(2);
+    });
+
+    it("workbook.importSheet copies form controls to the new sheet", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Source");
+      ws.addFormCheckbox("D4:E5", { text: "Imported", checked: false });
+
+      const imported = wb.importSheet(ws, "ImportedSheet");
+      expect(imported.formControls.length).toBe(1);
+      expect(imported.formControls[0].model.text).toBe("Imported");
+      expect(imported.formControls[0]).toBeInstanceOf(FormCheckbox);
+      // Mutating the imported control must not bleed back to the source.
+      imported.formControls[0].text = "Mutated";
+      expect(ws.formControls[0].model.text).toBe("Imported");
+    });
+  });
 });

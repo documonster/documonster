@@ -1,9 +1,9 @@
 /**
- * Integration tests for chart and drawing passthrough preservation.
+ * Integration tests for chart round-trip preservation.
  *
  * These tests verify that Excel files containing charts and drawings
- * are correctly preserved during read/write cycles, even though the
- * library doesn't fully parse these features.
+ * are correctly preserved during read/write cycles using native
+ * chart parsing and rendering (no raw XML passthrough).
  *
  * Related issue: https://github.com/nickmessing/excelts/issues/41
  */
@@ -57,7 +57,7 @@ async function performRoundTrip(): Promise<{
   return { inputEntries, outputEntries };
 }
 
-describe("Chart Passthrough Preservation", () => {
+describe("Chart Round-Trip Preservation", () => {
   // Load sample buffer once before all tests
   beforeAll(() => {
     sampleBuffer = fs.readFileSync(SAMPLE_FILE);
@@ -99,21 +99,41 @@ describe("Chart Passthrough Preservation", () => {
         expect(outputFiles).toContain(drawingFile);
       }
 
-      // Verify chart content is identical
-      for (const chartFile of chartFiles) {
-        const inputContent = getEntryContent(inputEntries, chartFile);
-        const outputContent = getEntryContent(outputEntries, chartFile);
+      // Verify chart content is preserved
+      // Chart XML is now parsed and re-rendered (not byte-for-byte passthrough),
+      // so we verify structural correctness instead of exact match.
+      const outputChartXml = getEntryContent(outputEntries, "xl/charts/chart1.xml");
+      expect(outputChartXml).toContain("c:chartSpace");
+      expect(outputChartXml).toContain("c:barChart");
+      expect(outputChartXml).toContain('c:barDir val="col"');
+      expect(outputChartXml).toContain('c:grouping val="clustered"');
+      expect(outputChartXml).toContain("Pivot!$B$1");
+      expect(outputChartXml).toContain("Pivot!$A$2:$A$6");
+      expect(outputChartXml).toContain("c:catAx");
+      expect(outputChartXml).toContain("c:valAx");
+      expect(outputChartXml).toContain("c:legend");
+      expect(outputChartXml).toContain("c:printSettings");
+
+      // Style and colors are raw byte passthrough — should match exactly
+      for (const file of ["xl/charts/style1.xml", "xl/charts/colors1.xml"]) {
+        const inputContent = getEntryContent(inputEntries, file);
+        const outputContent = getEntryContent(outputEntries, file);
         expect(outputContent).toBe(inputContent);
       }
 
-      // Verify drawing XML is identical (preserves graphicFrame for charts)
-      const inputDrawing = getEntryContent(inputEntries, "xl/drawings/drawing1.xml");
-      const outputDrawing = getEntryContent(outputEntries, "xl/drawings/drawing1.xml");
-      expect(outputDrawing).toBe(inputDrawing);
+      // Chart rels should be structurally correct
+      const outputChartRels = getEntryContent(outputEntries, "xl/charts/_rels/chart1.xml.rels");
+      expect(outputChartRels).toContain("Relationship");
+      expect(outputChartRels).toContain("chartStyle");
+      expect(outputChartRels).toContain("chartColorStyle");
 
       // Verify drawing XML contains graphicFrame (chart reference)
-      expect(inputDrawing).toContain("xdr:graphicFrame");
+      // Drawing XML is regenerated, so verify structure rather than exact match
+      const outputDrawing = getEntryContent(outputEntries, "xl/drawings/drawing1.xml");
       expect(outputDrawing).toContain("xdr:graphicFrame");
+      expect(outputDrawing).toContain("xdr:wsDr");
+      const inputDrawing = getEntryContent(inputEntries, "xl/drawings/drawing1.xml");
+      expect(inputDrawing).toContain("xdr:graphicFrame");
     });
 
     it("should preserve pivot tables during read/write cycle", async () => {
@@ -223,6 +243,47 @@ describe("Chart Passthrough Preservation", () => {
   });
 
   describe("data integrity", () => {
+    it("should access charts via high-level API after load", async () => {
+      const workbook = await loadSampleWorkbook();
+
+      // Find the worksheet that contains the chart (Pivot sheet)
+      const pivotSheet = workbook.getWorksheet("Pivot");
+      expect(pivotSheet).toBeDefined();
+
+      const charts = pivotSheet!.getCharts();
+      expect(charts.length).toBe(1);
+
+      const chart = charts[0];
+      expect(chart.chartNumber).toBe(1);
+
+      // This chart has an auto-generated title (no explicit c:tx), so title is undefined
+      expect(chart.title).toBeUndefined();
+
+      // Verify chart model is accessible
+      expect(chart.chartModel).toBeDefined();
+      expect(chart.chartTypes.length).toBeGreaterThan(0);
+      expect(chart.chartTypes[0].type).toBe("bar");
+      expect(chart.axes.length).toBeGreaterThan(0);
+    });
+
+    it("should read chart title after setting it programmatically", async () => {
+      const workbook = await loadSampleWorkbook();
+      const pivotSheet = workbook.getWorksheet("Pivot");
+      const chart = pivotSheet!.getCharts()[0];
+
+      // Set a title
+      chart.title = "Revenue by Region";
+      expect(chart.title).toBe("Revenue by Region");
+
+      // Round-trip and verify
+      const outputBuffer = await workbook.xlsx.writeBuffer();
+      const workbook2 = new Workbook();
+      await workbook2.xlsx.load(outputBuffer);
+
+      const chart2 = workbook2.getWorksheet("Pivot")!.getCharts()[0];
+      expect(chart2.title).toBe("Revenue by Region");
+    });
+
     it("should preserve cell data in Data sheet", async () => {
       const workbook = await loadSampleWorkbook();
 

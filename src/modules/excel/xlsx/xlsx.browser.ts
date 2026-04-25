@@ -12,6 +12,8 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
+import type { ChartExEntry } from "@excel/chart/chart";
+import { renderChartEx } from "@excel/chart/chart-ex-renderer";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -25,6 +27,10 @@ import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
   commentsPath,
+  chartsheetPath,
+  chartsheetRelsPath,
+  getChartsheetNoFromPath,
+  getChartsheetNoFromRelsPath,
   ctrlPropPath,
   drawingPath,
   drawingRelsPath,
@@ -35,6 +41,22 @@ import {
   pivotCacheDefinitionRelTargetFromWorkbook,
   pivotTablePathFromName,
   isCommentsPath,
+  chartPath,
+  chartRelsPath,
+  chartStylePath,
+  chartColorsPath,
+  chartStyleRelTarget,
+  chartExPath,
+  chartExRelsPath,
+  getChartExNumberFromPath,
+  getChartExNumberFromRelsPath,
+  chartColorsRelTarget,
+  chartRelTargetFromDrawing,
+  chartExRelTargetFromDrawing,
+  getChartNumberFromPath,
+  getChartNumberFromRelsPath,
+  getChartStyleNumberFromPath,
+  getChartColorsNumberFromPath,
   getDrawingNameFromPath,
   getDrawingNameFromRelsPath,
   getExternalLinkIndexFromPath,
@@ -71,7 +93,6 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { PassthroughManager } from "@excel/utils/passthrough-manager";
 import { StreamBuf } from "@excel/utils/stream-buf";
 import type { Workbook } from "@excel/workbook";
 import type { ExternalLinkModel } from "@excel/workbook.browser";
@@ -81,6 +102,7 @@ import {
   type ParsedExternalLink
 } from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
+import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
@@ -97,6 +119,7 @@ import {
   PivotTableXform,
   type ParsedPivotTableModel
 } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
+import { ChartsheetXform } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
@@ -617,12 +640,14 @@ class XLSX {
     // processing worksheet entries.
     await this.addWorkbook(zip, model);
     await this.addWorksheets(zip, model);
+    await this.addChartsheets(zip, model);
     await this.addSharedStrings(zip, model);
     await this.addDrawings(zip, model);
+    await this.addCharts(zip, model);
+    await this.addChartExEntries(zip, model);
     await this.addTables(zip, model);
     await this.addPivotTables(zip, model);
     await this.addExternalLinks(zip, model);
-    this.addPassthrough(zip, model);
     await this.addThemes(zip, model);
     await this.addStyles(zip, model);
     await this.addFeaturePropertyBag(zip, model);
@@ -778,8 +803,6 @@ class XLSX {
       mediaIndex: {},
       drawings: {},
       drawingRels: {},
-      // Raw drawing XML data for passthrough (when drawing contains chart references)
-      rawDrawings: {} as Record<string, Uint8Array>,
       comments: {},
       tables: {},
       vmlDrawings: {},
@@ -787,8 +810,20 @@ class XLSX {
       pivotTableRels: {},
       pivotCacheDefinitions: {},
       pivotCacheRecords: {},
-      // Passthrough storage for unknown/unsupported files (charts, etc.)
-      passthrough: {} as Record<string, Uint8Array>,
+      // Parsed chart entries keyed by chart number
+      chartEntries: {} as Record<number, any>,
+      // Parsed chart rels keyed by chart number
+      chartRels: {} as Record<number, any>,
+      // Raw chart style bytes keyed by style number
+      chartStyles: {} as Record<number, Uint8Array>,
+      // Raw chart colors bytes keyed by colors number
+      chartColors: {} as Record<number, Uint8Array>,
+      // Raw chartEx entries (Office 2016+ extended charts) keyed by chartEx number
+      chartExEntries: {} as Record<number, Uint8Array>,
+      // Parsed chartEx rels keyed by chartEx number
+      chartExRels: {} as Record<number, any[]>,
+      // Structured chartEx entries (built via addChartEx) keyed by chartEx number
+      chartExStructuredEntries: {} as Record<number, ChartExEntry>,
       // External workbook links — parsed from xl/externalLinks/externalLinkN.xml
       // during _processDefaultEntry, then reconciled into a dense
       // ExternalLinkModel[] by reconcile() using workbookRels + <externalReferences>.
@@ -796,7 +831,10 @@ class XLSX {
       // Raw rels from each externalLinkN.rels file, keyed by index.
       // Contains the actual Target path (e.g. "测试.xlsx", "file:///...")
       // and TargetMode ("External" / "Internal").
-      externalLinkRelsByIndex: {} as Record<number, ExternalLinkRelsEntry[]>
+      externalLinkRelsByIndex: {} as Record<number, ExternalLinkRelsEntry[]>,
+      // Chartsheets keyed by sheet number
+      chartsheets: {} as Record<number, any>,
+      chartsheetRels: {} as Record<number, any[]>
     };
   }
 
@@ -823,26 +861,6 @@ class XLSX {
   }
 
   /**
-   * Check if a drawing has chart references in its relationships
-   */
-  private drawingHasChartReference(drawing: any): boolean {
-    return (
-      drawing.rels && drawing.rels.some((rel: any) => rel.Target && rel.Target.includes("/charts/"))
-    );
-  }
-
-  /**
-   * Check if a drawing rels list references charts.
-   * Used to decide whether we need to keep raw drawing XML for passthrough.
-   */
-  private drawingRelsHasChartReference(drawingRels: any[] | undefined): boolean {
-    return (
-      Array.isArray(drawingRels) &&
-      drawingRels.some(rel => typeof rel?.Target === "string" && rel.Target.includes("/charts/"))
-    );
-  }
-
-  /**
    * Process a known OOXML entry (workbook, styles, shared strings, etc.)
    * Returns true if handled, false if should be passed to _processDefaultEntry
    */
@@ -855,6 +873,12 @@ class XLSX {
     const sheetNo = getWorksheetNoFromWorksheetPath(entryName);
     if (sheetNo !== undefined) {
       await this._processWorksheetEntry(stream, model, sheetNo, options, entryName);
+      return true;
+    }
+
+    const chartsheetNo = getChartsheetNoFromPath(entryName);
+    if (chartsheetNo !== undefined) {
+      await this._processChartsheetEntry(stream, model, chartsheetNo);
       return true;
     }
 
@@ -1086,15 +1110,35 @@ class XLSX {
       }
     });
 
-    // Trim raw drawings for non-chart drawings to avoid bloating the serialized workbook model.
-    if (model.rawDrawings && model.drawingRels) {
-      for (const name of Object.keys(model.rawDrawings)) {
-        const drawingRel = model.drawingRels[name];
-        if (drawingRel && !this.drawingRelsHasChartReference(drawingRel)) {
-          delete model.rawDrawings[name];
+    // Reconcile chart references in drawing anchors
+    Object.keys(model.drawings).forEach(name => {
+      const drawing = model.drawings[name];
+      const drawingRel = model.drawingRels[name];
+      if (!drawingRel) {
+        return;
+      }
+      const relMap: Record<string, any> = {};
+      for (const rel of drawingRel) {
+        relMap[rel.Id] = rel;
+      }
+      for (const anchor of drawing.anchors ?? []) {
+        if (anchor.graphicFrame?.rId) {
+          const rel = relMap[anchor.graphicFrame.rId];
+          if (rel?.Target) {
+            // Extract chart number from target like "../charts/chart1.xml"
+            const match = /chart(\d+)\.xml/.exec(rel.Target);
+            if (match) {
+              anchor.chartNumber = parseInt(match[1], 10);
+            }
+            // Extract chartEx number from target like "../charts/chartEx1.xml"
+            const matchEx = /chartEx(\d+)\.xml/.exec(rel.Target);
+            if (matchEx) {
+              anchor.chartExNumber = parseInt(matchEx[1], 10);
+            }
+          }
         }
       }
-    }
+    });
 
     // reconcile tables with the default styles
     const tableOptions = {
@@ -1127,6 +1171,38 @@ class XLSX {
       worksheetXform.reconcile(worksheet, sheetOptions);
     });
 
+    // Reconcile chartsheets — link their drawing references
+    const chartsheetsList = model.chartsheetsList || [];
+    for (const cs of chartsheetsList) {
+      const csRels = model.chartsheetRels[cs.sheetNo];
+      if (cs.drawing && csRels) {
+        const drawingRel = csRels.find((r: any) => r.Id === cs.drawing.rId);
+        if (drawingRel) {
+          const match = drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
+          if (match) {
+            cs.drawingName = match[1];
+            // Resolve drawing → chart number from drawing rels
+            const drawingRelArr = model.drawingRels[cs.drawingName];
+            if (drawingRelArr) {
+              for (const dr of drawingRelArr) {
+                const chartMatch = /chart(\d+)\.xml/.exec(dr.Target);
+                if (chartMatch) {
+                  cs.chartNumber = parseInt(chartMatch[1], 10);
+                  break;
+                }
+                const chartExMatch = /chartEx(\d+)\.xml/.exec(dr.Target);
+                if (chartExMatch) {
+                  cs.chartExNumber = parseInt(chartExMatch[1], 10);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    model.chartsheets = chartsheetsList;
+
     // Reconcile external workbook links before workbookRels / externalReferences
     // are dropped. Joins 3 sources:
     //   1. model.externalReferences  — ordered list of { rId } from workbook.xml
@@ -1134,6 +1210,9 @@ class XLSX {
     //   3. model.externalLinksByIndex — parsed externalLinkN.xml parts
     //   4. model.externalLinkRelsByIndex — parsed externalLinkN.xml.rels parts
     this._reconcileExternalLinks(model);
+
+    // Preserve parsed chart data through to the workbook model.
+    // chartEntries, chartRels, chartStyles, chartColors are kept as-is.
 
     // delete unnecessary parts
     delete model.worksheetHash;
@@ -1155,6 +1234,8 @@ class XLSX {
     delete model.externalReferences;
     delete model.externalLinksByIndex;
     delete model.externalLinkRelsByIndex;
+    delete model.chartsheetRels;
+    delete model.chartsheetsList;
   }
 
   /**
@@ -1486,6 +1567,15 @@ class XLSX {
     model.worksheets.push(worksheet);
   }
 
+  async _processChartsheetEntry(stream: IParseStream, model: any, sheetNo: number): Promise<void> {
+    const xform = new ChartsheetXform();
+    const chartsheet = await xform.parseStream(stream);
+    if (chartsheet) {
+      chartsheet.sheetNo = sheetNo;
+      model.chartsheets[sheetNo] = chartsheet;
+    }
+  }
+
   async _processCommentEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
     const xform = new CommentsXform();
     const comments = await xform.parseStream(stream);
@@ -1575,9 +1665,6 @@ class XLSX {
     const xmlString = this.bufferToString(data);
     const drawing = await xform.parseStream(this.createTextStream(xmlString));
     model.drawings[name] = drawing;
-
-    // Store raw data; reconcile() may later drop it if charts are not referenced.
-    model.rawDrawings[name] = data;
   }
 
   async _processDrawingRelsEntry(entry: any, model: any, name: string): Promise<void> {
@@ -1705,6 +1792,54 @@ class XLSX {
     model.externalLinkRelsByIndex[index] = relationships ?? [];
   }
 
+  async _processChartEntry(
+    stream: IParseStream,
+    model: any,
+    chartNumber: number,
+    rawData?: Uint8Array
+  ): Promise<void> {
+    const data = rawData ?? (await this.collectStreamData(stream));
+
+    // Parse into model for high-level API access
+    const xform = new ChartSpaceXform();
+    const xmlString = this.bufferToString(data);
+    const chart = await xform.parseStream(this.createTextStream(xmlString));
+    if (chart) {
+      model.chartEntries[chartNumber] = {
+        chartNumber,
+        model: chart
+      };
+    }
+  }
+
+  async _processChartRelsEntry(
+    stream: IParseStream,
+    model: any,
+    chartNumber: number
+  ): Promise<void> {
+    const xform = new RelationshipsXform();
+    const relationships = await xform.parseStream(stream);
+    model.chartRels[chartNumber] = relationships;
+  }
+
+  async _processChartStyleEntry(
+    stream: IParseStream,
+    model: any,
+    styleNumber: number
+  ): Promise<void> {
+    const data = await this.collectStreamData(stream);
+    model.chartStyles[styleNumber] = data;
+  }
+
+  async _processChartColorsEntry(
+    stream: IParseStream,
+    model: any,
+    colorsNumber: number
+  ): Promise<void> {
+    const data = await this.collectStreamData(stream);
+    model.chartColors[colorsNumber] = data;
+  }
+
   // ===========================================================================
   // loadFromFiles - shared logic for loading from pre-extracted ZIP data
   // ===========================================================================
@@ -1733,7 +1868,6 @@ class XLSX {
 
         const handled = await this._processKnownEntry(stream, model, entryName, options);
         if (!handled) {
-          // Pass raw entry data for drawings to enable passthrough
           await this._processDefaultEntry(stream, model, entryName, entry.data);
         }
       }
@@ -1760,6 +1894,13 @@ class XLSX {
       return true;
     }
 
+    const chartsheetRelsNo = getChartsheetNoFromRelsPath(entryName);
+    if (chartsheetRelsNo !== undefined) {
+      const rels = await this.parseRels(stream);
+      model.chartsheetRels[chartsheetRelsNo] = rels;
+      return true;
+    }
+
     const mediaFilename = getMediaFilenameFromPath(entryName);
     if (mediaFilename) {
       await this._processMediaEntry(stream, model, mediaFilename);
@@ -1769,7 +1910,6 @@ class XLSX {
     const drawingName = getDrawingNameFromPath(entryName);
     if (drawingName) {
       await this._processDrawingEntry(stream, model, drawingName, rawData);
-      // rawData is now stored inside _processDrawingEntry
       return true;
     }
 
@@ -1860,31 +2000,59 @@ class XLSX {
       return true;
     }
 
-    // Store passthrough files (charts, etc.) for preservation
-    if (PassthroughManager.isPassthroughPath(entryName)) {
-      // If raw data is available (loadFromFiles path), use it directly
+    // Chart files — parse natively before the passthrough catch-all
+    const chartNumber = getChartNumberFromPath(entryName);
+    if (chartNumber !== undefined) {
+      await this._processChartEntry(stream, model, chartNumber, rawData);
+      return true;
+    }
+
+    const chartRelsNumber = getChartNumberFromRelsPath(entryName);
+    if (chartRelsNumber !== undefined) {
+      await this._processChartRelsEntry(stream, model, chartRelsNumber);
+      return true;
+    }
+
+    const chartStyleNumber = getChartStyleNumberFromPath(entryName);
+    if (chartStyleNumber !== undefined) {
       if (rawData) {
-        model.passthrough[entryName] = rawData;
+        model.chartStyles[chartStyleNumber] = rawData;
       } else {
-        await this._processPassthroughEntry(stream, model, entryName);
+        await this._processChartStyleEntry(stream, model, chartStyleNumber);
       }
       return true;
     }
 
-    return false;
-  }
+    const chartColorsNumber = getChartColorsNumberFromPath(entryName);
+    if (chartColorsNumber !== undefined) {
+      if (rawData) {
+        model.chartColors[chartColorsNumber] = rawData;
+      } else {
+        await this._processChartColorsEntry(stream, model, chartColorsNumber);
+      }
+      return true;
+    }
 
-  /**
-   * Store a passthrough file for preservation during read/write cycles.
-   * These files are not parsed but stored as raw bytes to be written back unchanged.
-   */
-  async _processPassthroughEntry(
-    stream: IParseStream,
-    model: any,
-    entryName: string
-  ): Promise<void> {
-    const data = await this.collectStreamData(stream);
-    model.passthrough[entryName] = data;
+    // ChartEx files (Office 2016+ extended charts) — stored as raw bytes
+    const chartExNumber = getChartExNumberFromPath(entryName);
+    if (chartExNumber !== undefined) {
+      if (rawData) {
+        model.chartExEntries[chartExNumber] = rawData;
+      } else {
+        model.chartExEntries[chartExNumber] = await this.collectStreamData(stream);
+      }
+      return true;
+    }
+
+    const chartExRelsNumber = getChartExNumberFromRelsPath(entryName);
+    if (chartExRelsNumber !== undefined) {
+      const relsXform = new RelationshipsXform();
+      const relationships = await relsXform.parseStream(stream);
+      model.chartExRels[chartExRelsNumber] = relationships;
+      return true;
+    }
+
+    return false;
   }
 
   // ===========================================================================
@@ -1994,6 +2162,16 @@ class XLSX {
         Id: worksheet.rId,
         Type: XLSX.RelType.Worksheet,
         Target: worksheetRelTarget(worksheet.fileIndex)
+      });
+    });
+
+    // Add chartsheet relationships
+    (model.chartsheets || []).forEach((cs: any) => {
+      cs.rId = `rId${count++}`;
+      relationships.push({
+        Id: cs.rId,
+        Type: RelType.Chartsheet,
+        Target: `chartsheets/sheet${cs.sheetNo}.xml`
       });
     });
 
@@ -2148,31 +2326,174 @@ class XLSX {
     }
   }
 
+  async addChartsheets(zip: IZipWriter, model: any): Promise<void> {
+    const chartsheetXform = new ChartsheetXform();
+    const relsXform = new RelationshipsXform();
+
+    for (const cs of model.chartsheets || []) {
+      await this._renderToZip(zip, chartsheetPath(cs.sheetNo), chartsheetXform, cs);
+
+      // Write chartsheet rels if there's a drawing
+      if (cs.drawing) {
+        const rels = [
+          {
+            Id: cs.drawing.rId,
+            Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+            Target: `../drawings/${cs.drawingName}.xml`
+          }
+        ];
+        await this._renderToZip(zip, chartsheetRelsPath(cs.sheetNo), relsXform, rels);
+      }
+    }
+  }
+
   async addDrawings(zip: IZipWriter, model: any): Promise<void> {
     const drawingXform = new DrawingXform();
     const relsXform = new RelationshipsXform();
-    const rawDrawings = model.rawDrawings || {};
 
     for (const worksheet of model.worksheets) {
       const { drawing } = worksheet;
       if (drawing) {
-        // Check if drawing rels contain chart references using helper
-        const hasChartReference = this.drawingHasChartReference(drawing);
-
-        if (hasChartReference && rawDrawings[drawing.name]) {
-          // Use raw data for drawings with chart references (passthrough)
-          zip.append(rawDrawings[drawing.name], { name: drawingPath(drawing.name) });
-        } else {
-          // Use regenerated XML for normal drawings (images, shapes)
-          const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
-          const drawingForWrite = drawing.anchors
-            ? { ...drawing, anchors: filteredAnchors }
-            : drawing;
-          drawingXform.prepare(drawingForWrite);
-          await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
-        }
+        const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
+        const drawingForWrite = drawing.anchors
+          ? { ...drawing, anchors: filteredAnchors }
+          : drawing;
+        drawingXform.prepare(drawingForWrite);
+        await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
 
         await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
+      }
+    }
+
+    // Chartsheet drawings — each chartsheet references a drawing containing a chart
+    for (const cs of model.chartsheets || []) {
+      if (cs.drawingName && (cs.chartNumber || cs.chartExNumber)) {
+        const chartRId = "rId1";
+        const isChartEx = !cs.chartNumber && !!cs.chartExNumber;
+        const drawingModel = {
+          anchors: [
+            {
+              range: { tl: { col: 0, row: 0 }, br: { col: 10, row: 15 } },
+              graphicFrame: {
+                rId: chartRId,
+                isChartEx,
+                name: isChartEx ? `Chart ${cs.chartExNumber}` : `Chart ${cs.chartNumber}`
+              },
+              ...(isChartEx ? { alternateContent: { requires: "cx" } } : {})
+            }
+          ]
+        };
+        const drawingRels = [
+          {
+            Id: chartRId,
+            Type: isChartEx ? RelType.ChartEx : RelType.Chart,
+            Target: isChartEx
+              ? chartExRelTargetFromDrawing(cs.chartExNumber)
+              : chartRelTargetFromDrawing(cs.chartNumber)
+          }
+        ];
+        drawingXform.prepare(drawingModel);
+        await this._renderToZip(zip, drawingPath(cs.drawingName), drawingXform, drawingModel);
+        await this._renderToZip(zip, drawingRelsPath(cs.drawingName), relsXform, drawingRels);
+      }
+    }
+  }
+
+  async addCharts(zip: IZipWriter, model: any): Promise<void> {
+    const relsXform = new RelationshipsXform();
+
+    for (const [n, chartEntry] of Object.entries(model.chartEntries || {})) {
+      // Write chart XML — fully native parse→render
+      await this._renderToZip(zip, chartPath(n), new ChartSpaceXform(), (chartEntry as any).model);
+
+      // Write chart style (raw bytes)
+      if (model.chartStyles?.[n]) {
+        zip.append(model.chartStyles[n], { name: chartStylePath(n) });
+      }
+
+      // Write chart colors (raw bytes)
+      if (model.chartColors?.[n]) {
+        zip.append(model.chartColors[n], { name: chartColorsPath(n) });
+      }
+
+      // Build chart rels
+      const rels: any[] = [];
+
+      // Collect original rels first (excluding style/colors which we regenerate)
+      // We keep their original Ids to avoid breaking r:id references inside chart XML
+      const originalRels = model.chartRels?.[n];
+      const usedIds = new Set<string>();
+      if (Array.isArray(originalRels)) {
+        for (const rel of originalRels) {
+          if (rel.Type !== RelType.ChartStyle && rel.Type !== RelType.ChartColors) {
+            rels.push(rel);
+            usedIds.add(rel.Id);
+          }
+        }
+      }
+
+      // Allocate new rIds for style/colors that don't conflict with existing ones
+      let rIdCount = 1;
+      const nextRId = (): string => {
+        let id = `rId${rIdCount++}`;
+        while (usedIds.has(id)) {
+          id = `rId${rIdCount++}`;
+        }
+        usedIds.add(id);
+        return id;
+      };
+
+      // Add style rel if style exists
+      if (model.chartStyles?.[n]) {
+        rels.push({
+          Id: nextRId(),
+          Type: RelType.ChartStyle,
+          Target: chartStyleRelTarget(n)
+        });
+      }
+
+      // Add colors rel if colors exist
+      if (model.chartColors?.[n]) {
+        rels.push({
+          Id: nextRId(),
+          Type: RelType.ChartColors,
+          Target: chartColorsRelTarget(n)
+        });
+      }
+
+      // Write chart rels if any
+      if (rels.length > 0) {
+        await this._renderToZip(zip, chartRelsPath(n), relsXform, rels);
+      }
+    }
+  }
+
+  async addChartExEntries(zip: IZipWriter, model: any): Promise<void> {
+    const relsXform = new RelationshipsXform();
+
+    // 1. Raw-bytes (round-trip) chartEx entries — byte-preserved from load
+    for (const [n, rawBytes] of Object.entries(model.chartExEntries || {})) {
+      // Write chartEx XML (raw bytes — passthrough for round-trip)
+      zip.append(rawBytes as Uint8Array, { name: chartExPath(n) });
+
+      // Write chartEx rels if present
+      const rels = model.chartExRels?.[n];
+      if (Array.isArray(rels) && rels.length > 0) {
+        await this._renderToZip(zip, chartExRelsPath(n), relsXform, rels);
+      }
+    }
+
+    // 2. Structured chartEx entries — built programmatically via addChartEx()
+    const structured = model.chartExStructuredEntries ?? {};
+    for (const [n, entry] of Object.entries(structured) as Array<[string, ChartExEntry]>) {
+      // Skip if this number is already in raw bytes (raw takes precedence)
+      if (model.chartExEntries?.[n]) {
+        continue;
+      }
+      const xml = renderChartEx(entry.model);
+      zip.append(xml, { name: chartExPath(n) });
+      if (entry.rels && entry.rels.length > 0) {
+        await this._renderToZip(zip, chartExRelsPath(n), relsXform, entry.rels);
       }
     }
   }
@@ -2225,16 +2546,6 @@ class XLSX {
         }
       ]);
     }
-  }
-
-  /**
-   * Write passthrough files (charts, etc.) that were preserved during read.
-   * These files are written back unchanged to preserve unsupported features.
-   */
-  addPassthrough(zip: IZipWriter, model: any): void {
-    const passthroughManager = new PassthroughManager();
-    passthroughManager.fromRecord(model.passthrough || {});
-    passthroughManager.writeToZip(zip);
   }
 
   async addPivotTables(zip: IZipWriter, model: any): Promise<void> {
@@ -2436,12 +2747,6 @@ class XLSX {
     if (worksheetOptions.hasHeaderWatermark) {
       model.hasHeaderWatermark = true;
     }
-
-    // Build passthroughContentTypes for ContentTypesXform using PassthroughManager
-    const passthrough = model.passthrough || {};
-    const passthroughManager = new PassthroughManager();
-    passthroughManager.fromRecord(passthrough);
-    model.passthroughContentTypes = passthroughManager.getContentTypes();
   }
 }
 

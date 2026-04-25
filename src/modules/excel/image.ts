@@ -203,9 +203,19 @@ class Image {
           pos: range.pos
         };
       } else if (range) {
+        // Anchor inputs:
+        //   - string addresses ("A1") are 1-based; the internal Anchor uses
+        //     0-based nativeCol/nativeRow, so the top-left address is shifted
+        //     by -1. The bottom-right address is intentionally NOT shifted —
+        //     this matches the string-range path (e.g. "A1:B2") where br
+        //     anchors the cell *past* the address (i.e. its right/bottom edge).
+        //   - object inputs ({ col, row } / AnchorModel) already use the
+        //     0-based convention and are passed through as-is.
+        const tlInput = range.tl;
+        const brInput = range.br;
         this.range = {
-          tl: new Anchor(this.worksheet, range.tl, 0),
-          br: range.br ? new Anchor(this.worksheet, range.br, 0) : undefined,
+          tl: new Anchor(this.worksheet, tlInput, typeof tlInput === "string" ? -1 : 0),
+          br: brInput ? new Anchor(this.worksheet, brInput, 0) : undefined,
           ext: range.ext,
           editAs: range.editAs,
           hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined)

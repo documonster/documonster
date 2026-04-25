@@ -15,6 +15,7 @@ import { parseCsv } from "@csv/parse";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
+import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 import { ExcelDownloadError, ExcelNotSupportedError } from "@excel/errors";
 import type { PivotTable } from "@excel/pivot-table";
@@ -89,12 +90,24 @@ export interface WorkbookModel {
   /** Loaded pivot tables from file - used during reconciliation */
   loadedPivotTables?: PivotTable[];
   calcProperties: Partial<CalculationProperties>;
-  /** Passthrough files (charts, etc.) preserved for round-trip */
-  passthrough?: Record<string, Uint8Array>;
-  /** Raw drawing XML data for passthrough (when drawing contains chart references) */
-  rawDrawings?: Record<string, Uint8Array>;
   /** Default font preserved from the original file for round-trip fidelity */
   defaultFont?: Partial<Font>;
+  /** Chart entries indexed by 1-based chart number */
+  chartEntries?: Record<number, ChartEntry>;
+  /** Chart rels indexed by chart number — preserved for round-trip */
+  chartRels?: Record<number, any[]>;
+  /** Chart style XML raw bytes indexed by style number — preserved for round-trip */
+  chartStyles?: Record<number, Uint8Array>;
+  /** Chart colors XML raw bytes indexed by colors number — preserved for round-trip */
+  chartColors?: Record<number, Uint8Array>;
+  /** ChartEx raw bytes (Office 2016+ extended charts) indexed by chartEx number */
+  chartExEntries?: Record<number, Uint8Array>;
+  /** ChartEx rels indexed by chartEx number */
+  chartExRels?: Record<number, any[]>;
+  /** Structured chartEx entries (programmatically built) indexed by chartEx number */
+  chartExStructuredEntries?: Record<number, ChartExEntry>;
+  /** Chartsheets parsed from the XLSX file — preserved for round-trip */
+  chartsheets?: any[];
   /**
    * External workbook references in declaration order. Matches the on-disk
    * `[N]Sheet!Ref` indexing (1-based). Empty or undefined when the workbook
@@ -654,10 +667,6 @@ class Workbook {
   declare protected _worksheets: Worksheet[];
   declare protected _definedNames: DefinedNames;
   declare protected _themes?: unknown;
-  /** Passthrough files (charts, etc.) preserved for round-trip */
-  declare protected _passthrough: Record<string, Uint8Array>;
-  /** Raw drawing XML data for passthrough (when drawing contains chart references) */
-  declare protected _rawDrawings: Record<string, Uint8Array>;
   /** Default font preserved from original file for round-trip fidelity */
   declare protected _defaultFont?: Partial<Font>;
   /**
@@ -675,6 +684,26 @@ class Workbook {
   declare protected _writerExternalLinkCache: Map<string, ExternalLinkModel>;
   /** Global registry of table names (lowercase) for cross-worksheet uniqueness checks. */
   readonly _tableNames = new Set<string>();
+  /** Chart entries indexed by 1-based chart number */
+  declare protected _chartEntries: Record<number, ChartEntry>;
+  /** Chart rels indexed by chart number — preserved for round-trip */
+  declare protected _chartRels: Record<number, any[]>;
+  /** Chart style XML raw bytes indexed by style number — preserved for round-trip */
+  declare protected _chartStyles: Record<number, Uint8Array>;
+  /** Chart colors XML raw bytes indexed by colors number — preserved for round-trip */
+  declare protected _chartColors: Record<number, Uint8Array>;
+  /** ChartEx raw bytes (Office 2016+ extended charts) indexed by chartEx number */
+  declare protected _chartExEntries: Record<number, Uint8Array>;
+  /** ChartEx rels indexed by chartEx number */
+  declare protected _chartExRels: Record<number, any[]>;
+  /**
+   * ChartEx structured entries (built programmatically via addChartEx).
+   * Parallel to _chartExEntries (raw bytes). Serialised on write via the
+   * chart-ex-renderer.
+   */
+  declare protected _chartExStructuredEntries: Record<number, ChartExEntry>;
+  /** Chartsheets parsed from the XLSX file — preserved for round-trip */
+  declare protected _chartsheets: any[];
   private _xlsx?: XLSX;
 
   // ===========================================================================
@@ -707,8 +736,14 @@ class Workbook {
     this.media = [];
     this.pivotTables = [];
     this.externalLinks = [];
-    this._passthrough = {};
-    this._rawDrawings = {};
+    this._chartEntries = {};
+    this._chartRels = {};
+    this._chartStyles = {};
+    this._chartColors = {};
+    this._chartExEntries = {};
+    this._chartExRels = {};
+    this._chartExStructuredEntries = {};
+    this._chartsheets = [];
     this._writerExternalLinkCache = new Map();
     this._definedNames = new DefinedNames(options?.formulaSyntaxProbe);
   }
@@ -1499,6 +1534,15 @@ class Workbook {
   }
 
   removeWorksheetEx(worksheet: Worksheet): void {
+    // Release any workbook-wide table names this sheet held so the names can
+    // be reused by future tables on other sheets without spurious "name
+    // already exists" errors.
+    const tables = worksheet.tables;
+    if (tables) {
+      for (const tableName of Object.keys(tables)) {
+        this._tableNames.delete(tableName.toLowerCase());
+      }
+    }
     this._worksheets[worksheet.id] = undefined!;
   }
 
@@ -1709,6 +1753,75 @@ class Workbook {
   }
 
   // ===========================================================================
+  // Charts
+  // ===========================================================================
+
+  /**
+   * Return the next available 1-based chart number.
+   */
+  nextChartNumber(): number {
+    const existing = Object.keys(this._chartEntries).map(Number);
+    return existing.length > 0 ? Math.max(...existing) + 1 : 1;
+  }
+
+  /**
+   * Store a chart entry in the workbook (keyed by chartNumber).
+   */
+  addChartEntry(entry: ChartEntry): void {
+    this._chartEntries[entry.chartNumber] = entry;
+  }
+
+  /**
+   * Retrieve a chart entry by its 1-based chart number.
+   */
+  getChartEntry(chartNumber: number): ChartEntry | undefined {
+    return this._chartEntries[chartNumber];
+  }
+
+  /**
+   * Remove a chart entry from the workbook.
+   * Safe to call even if the chart number doesn't exist.
+   */
+  removeChartEntry(chartNumber: number): void {
+    delete this._chartEntries[chartNumber];
+  }
+
+  // ===========================================================================
+  // ChartEx (Office 2016+) structured entries
+  // ===========================================================================
+
+  /** Return the next available 1-based chartEx number. */
+  nextChartExNumber(): number {
+    const rawKeys = Object.keys(this._chartExEntries ?? {}).map(Number);
+    const structKeys = Object.keys(this._chartExStructuredEntries ?? {}).map(Number);
+    const combined = [...rawKeys, ...structKeys];
+    return combined.length > 0 ? Math.max(...combined) + 1 : 1;
+  }
+
+  /**
+   * Store a structured chartEx entry.
+   * Uses a parallel map so round-tripped raw-bytes entries are not clobbered.
+   */
+  addChartExStructuredEntry(entry: ChartExEntry): void {
+    if (!this._chartExStructuredEntries) {
+      this._chartExStructuredEntries = {};
+    }
+    this._chartExStructuredEntries[entry.chartExNumber] = entry;
+  }
+
+  /** Get a structured chartEx entry by number. */
+  getChartExStructuredEntry(chartExNumber: number): ChartExEntry | undefined {
+    return this._chartExStructuredEntries?.[chartExNumber];
+  }
+
+  /** Remove a structured chartEx entry. */
+  removeChartExStructuredEntry(chartExNumber: number): void {
+    if (this._chartExStructuredEntries) {
+      delete this._chartExStructuredEntries[chartExNumber];
+    }
+  }
+
+  // ===========================================================================
   // External Workbook Links
   // ===========================================================================
 
@@ -1888,10 +2001,16 @@ class Workbook {
       media: this.media,
       pivotTables: this.pivotTables,
       calcProperties: this.calcProperties,
-      passthrough: this._passthrough,
-      rawDrawings: this._rawDrawings,
       defaultFont: this._defaultFont,
-      externalLinks: this.externalLinks
+      externalLinks: this.externalLinks,
+      chartEntries: this._chartEntries,
+      chartRels: this._chartRels,
+      chartStyles: this._chartStyles,
+      chartColors: this._chartColors,
+      chartExEntries: this._chartExEntries,
+      chartExRels: this._chartExRels,
+      chartExStructuredEntries: this._chartExStructuredEntries,
+      chartsheets: this._chartsheets
     };
   }
 
@@ -1939,12 +2058,18 @@ class Workbook {
     // Loaded pivot tables come from loadedPivotTables after reconciliation
     this.pivotTables = value.pivotTables || value.loadedPivotTables || [];
 
-    // Preserve passthrough files (charts, etc.) for round-trip preservation
-    this._passthrough = value.passthrough || {};
-    // Preserve raw drawing data for drawings with chart references
-    this._rawDrawings = value.rawDrawings || {};
     // Preserve default font for round-trip fidelity
     this._defaultFont = value.defaultFont;
+    // Restore chart entries
+    this._chartEntries = value.chartEntries || {};
+    this._chartRels = value.chartRels || {};
+    this._chartStyles = value.chartStyles || {};
+    this._chartColors = value.chartColors || {};
+    this._chartExEntries = value.chartExEntries || {};
+    this._chartExRels = value.chartExRels || {};
+    this._chartExStructuredEntries = value.chartExStructuredEntries || {};
+    // Restore chartsheets
+    this._chartsheets = value.chartsheets || [];
     // Preserve external workbook references (empty array if none)
     this.externalLinks = value.externalLinks ? [...value.externalLinks] : [];
     // Reset the writer-scoped auto-discovery cache — loading a fresh

@@ -156,6 +156,24 @@ class FormCheckbox {
   }
 
   /**
+   * Rebuild a FormCheckbox from a previously-serialised model (e.g. round-tripped
+   * via `worksheet.model`). The model is adopted as-is; no range parsing or shape
+   * id reassignment is performed.
+   */
+  static fromModel(worksheet: Worksheet, model: FormCheckboxModel): FormCheckbox {
+    const cb = Object.create(FormCheckbox.prototype) as FormCheckbox;
+    cb.worksheet = worksheet;
+    // Defensive shallow clone: the caller should not be able to mutate the
+    // underlying anchor objects through the original reference.
+    cb.model = {
+      ...model,
+      tl: { ...model.tl },
+      br: { ...model.br }
+    };
+    return cb;
+  }
+
+  /**
    * Get the checked state
    */
   get checked(): boolean {

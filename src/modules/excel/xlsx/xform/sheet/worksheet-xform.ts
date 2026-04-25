@@ -1,6 +1,8 @@
 import { colCache } from "@excel/utils/col-cache";
 import { buildDrawingAnchorsAndRels, resolveMediaTarget } from "@excel/utils/drawing-utils";
 import {
+  chartRelTargetFromDrawing,
+  chartExRelTargetFromDrawing,
   commentsRelTargetFromWorksheet,
   ctrlPropRelTargetFromWorksheet,
   drawingRelTargetFromWorksheet,
@@ -241,12 +243,8 @@ class WorkSheetXform extends BaseXform {
     }
 
     // Handle pre-loaded drawing (from file read) that may contain charts or other non-image content.
-    // Reset anchors and rels so they are rebuilt cleanly from model.media (images) and
-    // model.formControls (shapes) below.  Without this reset, every read-write cycle would
-    // duplicate image anchors because the same images exist in both model.drawing.anchors
-    // (preserved for round-trip) and model.media (the canonical image list).
-    // For chart drawings, rels are preserved because the raw XML passthrough references
-    // original rIds; anchors are still cleared since they are unused for chart drawings.
+    // Chart anchors (with chartNumber from reconcile) are preserved and get fresh rels.
+    // Non-chart anchors are discarded — images are rebuilt from model.media below.
     if (model.drawing && model.drawing.anchors) {
       const drawing = model.drawing;
       drawing.rId = nextRid(rels);
@@ -254,18 +252,46 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      const hasChartRels = (drawing.rels ?? []).some(
-        (rel: any) => rel.Target && rel.Target.includes("/charts/")
-      );
-      // Anchors are always reset: for chart drawings they are unused (raw XML passthrough),
-      // for normal drawings they are rebuilt from model.media below.
+      // Separate chart anchors from non-chart anchors
+      const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
+
+      // Reset anchors — chart anchors will be re-added, image anchors rebuilt below
       drawing.anchors = [];
-      if (!hasChartRels) {
-        // Non-chart drawings: clear rels so image rels are rebuilt from scratch.
-        drawing.rels = [];
+      drawing.rels = [];
+
+      // Re-add chart anchors and build their rels
+      for (const anchor of chartAnchors) {
+        const chartRId = nextRid(drawing.rels);
+        if (anchor.chartExNumber) {
+          // Office 2016+ cx chart
+          drawing.rels.push({
+            Id: chartRId,
+            Type: RelType.ChartEx,
+            Target: chartExRelTargetFromDrawing(anchor.chartExNumber)
+          });
+          anchor.graphicFrame = {
+            ...anchor.graphicFrame,
+            rId: chartRId,
+            isChartEx: true,
+            index: anchor.graphicFrame?.index,
+            name: anchor.graphicFrame?.name ?? `Chart ${anchor.chartExNumber}`
+          };
+        } else {
+          // Traditional c: chart
+          drawing.rels.push({
+            Id: chartRId,
+            Type: RelType.Chart,
+            Target: chartRelTargetFromDrawing(anchor.chartNumber)
+          });
+          anchor.graphicFrame = {
+            ...anchor.graphicFrame,
+            rId: chartRId,
+            index: anchor.graphicFrame?.index,
+            name: anchor.graphicFrame?.name ?? `Chart ${anchor.chartNumber}`
+          };
+        }
+        drawing.anchors.push(anchor);
       }
-      // Chart drawings keep their original rels intact since the raw drawing XML
-      // references those rIds directly.
 
       options.drawings.push(drawing);
       rels.push({
@@ -273,6 +299,88 @@ class WorkSheetXform extends BaseXform {
         Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
         Target: drawingRelTargetFromWorksheet(drawing.name)
       });
+    }
+
+    // Handle programmatic charts (from worksheet.addChart API) that are NOT already
+    // in the drawing. Charts loaded from XLSX are already in drawing.anchors with
+    // chartNumber — only add truly new charts.
+    if (model.charts && model.charts.length > 0) {
+      // Collect chartNumbers already present in the drawing
+      const existingChartNumbers = new Set<number>();
+      const existingChartExNumbers = new Set<number>();
+      if (model.drawing?.anchors) {
+        for (const a of model.drawing.anchors) {
+          if (a.chartNumber) {
+            existingChartNumbers.add(a.chartNumber);
+          }
+          if (a.chartExNumber) {
+            existingChartExNumbers.add(a.chartExNumber);
+          }
+        }
+      }
+
+      const newCharts = model.charts.filter((c: any) => {
+        if (c.chartNumber && !existingChartNumbers.has(c.chartNumber)) {
+          return true;
+        }
+        if (c.chartExNumber && !existingChartExNumbers.has(c.chartExNumber)) {
+          return true;
+        }
+        return false;
+      });
+
+      if (newCharts.length > 0) {
+        // Ensure a drawing exists
+        if (!model.drawing) {
+          model.drawing = {
+            anchors: [],
+            rels: [],
+            rId: nextRid(rels),
+            name: `drawing${++options.drawingsCount}`
+          };
+          options.drawings.push(model.drawing);
+          rels.push({
+            Id: model.drawing.rId,
+            Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+            Target: drawingRelTargetFromWorksheet(model.drawing.name)
+          });
+        }
+
+        const drawing = model.drawing;
+        for (const chartAnchor of newCharts) {
+          const chartRId = nextRid(drawing.rels);
+          if (chartAnchor.chartExNumber) {
+            drawing.rels.push({
+              Id: chartRId,
+              Type: RelType.ChartEx,
+              Target: chartExRelTargetFromDrawing(chartAnchor.chartExNumber)
+            });
+            drawing.anchors.push({
+              range: chartAnchor.range,
+              chartExNumber: chartAnchor.chartExNumber,
+              graphicFrame: {
+                rId: chartRId,
+                isChartEx: true,
+                name: `Chart ${chartAnchor.chartExNumber}`
+              }
+            });
+          } else {
+            drawing.rels.push({
+              Id: chartRId,
+              Type: RelType.Chart,
+              Target: chartRelTargetFromDrawing(chartAnchor.chartNumber)
+            });
+            drawing.anchors.push({
+              range: chartAnchor.range,
+              chartNumber: chartAnchor.chartNumber,
+              graphicFrame: {
+                rId: chartRId,
+                name: `Chart ${chartAnchor.chartNumber}`
+              }
+            });
+          }
+        }
+      }
     }
 
     // Process background and image media entries

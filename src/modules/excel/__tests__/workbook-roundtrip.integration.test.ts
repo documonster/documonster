@@ -398,16 +398,14 @@ describe("Workbook Round-trip Preservation", () => {
   });
 
   describe("Chart Files (must be byte-identical)", () => {
-    // Charts are passed through without modification
-    const chartFiles = [
-      "xl/charts/chart1.xml",
+    // Style, colors and theme are passed through without modification
+    const passthroughFiles = [
       "xl/charts/colors1.xml",
       "xl/charts/style1.xml",
-      "xl/drawings/drawing1.xml",
       "xl/theme/theme1.xml"
     ];
 
-    for (const chartFile of chartFiles) {
+    for (const chartFile of passthroughFiles) {
       it(`should preserve ${chartFile} exactly`, () => {
         const inputContent = inputZip[chartFile];
         const outputContent = outputZip[chartFile];
@@ -424,6 +422,48 @@ describe("Workbook Round-trip Preservation", () => {
         expect(outputStr, `${chartFile} should be byte-identical`).toBe(inputStr);
       });
     }
+  });
+
+  describe("Chart XML (regenerated, newline-normalized check)", () => {
+    it("should preserve xl/charts/chart1.xml after newline normalization", () => {
+      const inputContent = inputZip["xl/charts/chart1.xml"];
+      const outputContent = outputZip["xl/charts/chart1.xml"];
+
+      if (!inputContent) {
+        return;
+      }
+
+      expect(outputContent, "Missing file: xl/charts/chart1.xml").toBeDefined();
+
+      // Normalize line endings for comparison (writer uses LF, source may use CRLF)
+      const inputStr = new TextDecoder().decode(inputContent).replace(/\r\n/g, "\n");
+      const outputStr = new TextDecoder().decode(outputContent).replace(/\r\n/g, "\n");
+
+      expect(outputStr, "xl/charts/chart1.xml should match after newline normalization").toBe(
+        inputStr
+      );
+    });
+  });
+
+  describe("Drawing Files (regenerated, structural check)", () => {
+    it("should preserve xl/drawings/drawing1.xml structure", () => {
+      const inputContent = inputZip["xl/drawings/drawing1.xml"];
+      const outputContent = outputZip["xl/drawings/drawing1.xml"];
+
+      if (!inputContent) {
+        return;
+      }
+
+      expect(outputContent, "Missing file: xl/drawings/drawing1.xml").toBeDefined();
+
+      // Normalize line endings for comparison (writer uses LF, source may use CRLF)
+      const inputStr = new TextDecoder().decode(inputContent).replace(/\r\n/g, "\n");
+      const outputStr = new TextDecoder().decode(outputContent).replace(/\r\n/g, "\n");
+
+      expect(outputStr, "xl/drawings/drawing1.xml should match after newline normalization").toBe(
+        inputStr
+      );
+    });
   });
 
   describe("Pivot Table Structure", () => {

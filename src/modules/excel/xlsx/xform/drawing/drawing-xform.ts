@@ -22,6 +22,16 @@ class DrawingXform extends BaseXform<DrawingModel> {
   declare public map: { [key: string]: any };
   declare public parser: any;
 
+  // mc:AlternateContent parse state
+  private _inAlternateContent = false;
+  private _acDepth = 0;
+  private _inChoice = false;
+  private _inFallback = false;
+  private _fallbackDepth = 0;
+  private _choiceRequires: string | undefined = undefined;
+  /** Number of anchors before entering mc:AlternateContent — used to tag new anchors */
+  private _anchorCountBeforeAC = 0;
+
   constructor() {
     super();
 
@@ -59,18 +69,48 @@ class DrawingXform extends BaseXform<DrawingModel> {
   }
 
   parseOpen(node: any): boolean {
+    // Inside mc:Fallback — skip everything
+    if (this._inFallback) {
+      this._fallbackDepth++;
+      return true;
+    }
+
+    // Delegate to active parser
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
     }
+
     switch (node.name) {
       case this.tag:
         this.reset();
-        this.model = {
-          anchors: []
-        };
+        this.model = { anchors: [] };
         break;
+
+      case "mc:AlternateContent":
+        this._acDepth = (this._acDepth ?? 0) + 1;
+        if (this._acDepth === 1) {
+          this._inAlternateContent = true;
+          this._anchorCountBeforeAC = this.model!.anchors.length;
+        }
+        break;
+
+      case "mc:Choice":
+        if (this._inAlternateContent) {
+          this._inChoice = true;
+          this._choiceRequires = node.attributes?.Requires;
+        }
+        break;
+
+      case "mc:Fallback":
+        if (this._inAlternateContent) {
+          this._inFallback = true;
+          this._fallbackDepth = 1;
+        }
+        break;
+
       default:
+        // Normal anchor dispatch (works both inside mc:Choice and at top level)
         this.parser = this.map[node.name];
         if (this.parser) {
           this.parser.parseOpen(node);
@@ -81,12 +121,24 @@ class DrawingXform extends BaseXform<DrawingModel> {
   }
 
   parseText(text: string): void {
+    if (this._inFallback) {
+      return;
+    }
     if (this.parser) {
       this.parser.parseText(text);
     }
   }
 
   parseClose(name: string): boolean {
+    // Inside mc:Fallback — skip until closed
+    if (this._inFallback) {
+      this._fallbackDepth--;
+      if (this._fallbackDepth === 0) {
+        this._inFallback = false;
+      }
+      return true;
+    }
+
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
         this.model!.anchors.push(this.parser.model);
@@ -94,11 +146,33 @@ class DrawingXform extends BaseXform<DrawingModel> {
       }
       return true;
     }
+
     switch (name) {
       case this.tag:
         return false;
+
+      case "mc:AlternateContent":
+        this._acDepth = (this._acDepth ?? 0) - 1;
+        if (this._acDepth <= 0) {
+          // Tag any anchors added during this mc:AlternateContent with alternateContent info
+          if (this._inAlternateContent && this._choiceRequires) {
+            const anchors = this.model!.anchors;
+            for (let i = this._anchorCountBeforeAC; i < anchors.length; i++) {
+              anchors[i].alternateContent = { requires: this._choiceRequires };
+            }
+          }
+          this._inAlternateContent = false;
+          this._inChoice = false;
+          this._choiceRequires = undefined;
+          this._acDepth = 0;
+        }
+        return true;
+
+      case "mc:Choice":
+        this._inChoice = false;
+        return true;
+
       default:
-        // could be some unrecognised tags
         return true;
     }
   }

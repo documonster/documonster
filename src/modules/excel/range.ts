@@ -235,10 +235,14 @@ class Range {
   private get _serialisedSheetName(): string {
     const { sheetName } = this.model;
     if (sheetName) {
+      // Plain ASCII identifiers (and the empty string) need no quoting.
       if (/^[a-zA-Z0-9]*$/.test(sheetName)) {
         return `${sheetName}!`;
       }
-      return `'${sheetName}'!`;
+      // Per OOXML / Excel formula syntax, sheet names containing characters
+      // outside the bareword set are wrapped in single quotes, and any
+      // embedded apostrophes are doubled (e.g. `O'Brien` -> `'O''Brien'`).
+      return `'${sheetName.replace(/'/g, "''")}'!`;
     }
     return "";
   }

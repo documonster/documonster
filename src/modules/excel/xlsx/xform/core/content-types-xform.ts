@@ -1,9 +1,14 @@
 import {
   OOXML_PATHS,
+  chartsheetPath,
   commentsPathFromName,
   ctrlPropPath,
   drawingPath,
   externalLinkPath,
+  chartPath,
+  chartExPath,
+  chartStylePath,
+  chartColorsPath,
   pivotCacheDefinitionPath,
   pivotCacheRecordsPath,
   pivotTablePath,
@@ -53,6 +58,15 @@ class ContentTypesXform extends BaseXform {
         ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
       });
     });
+
+    if (model.chartsheets) {
+      model.chartsheets.forEach((cs: any) => {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartsheetPath(cs.sheetNo)),
+          ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
+        });
+      });
+    }
 
     if ((model.pivotTables ?? []).length) {
       // R9-B6: Deduplicate cache content types by cacheId. When multiple pivot tables
@@ -156,6 +170,54 @@ class ContentTypesXform extends BaseXform {
       });
     }
 
+    if (model.chartEntries) {
+      for (const [n, _entry] of Object.entries(model.chartEntries)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartPath(n)),
+          ContentType: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+        });
+      }
+    }
+
+    if (model.chartExEntries) {
+      for (const n of Object.keys(model.chartExEntries)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartExPath(n)),
+          ContentType: "application/vnd.ms-office.chartEx+xml"
+        });
+      }
+    }
+
+    if (model.chartExStructuredEntries) {
+      for (const n of Object.keys(model.chartExStructuredEntries)) {
+        // Skip if already emitted for raw bytes with same number
+        if (model.chartExEntries?.[n]) {
+          continue;
+        }
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartExPath(n)),
+          ContentType: "application/vnd.ms-office.chartEx+xml"
+        });
+      }
+    }
+
+    if (model.chartStyles) {
+      for (const n of Object.keys(model.chartStyles)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartStylePath(n)),
+          ContentType: "application/vnd.ms-office.chartstyle+xml"
+        });
+      }
+    }
+    if (model.chartColors) {
+      for (const n of Object.keys(model.chartColors)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartColorsPath(n)),
+          ContentType: "application/vnd.ms-office.chartcolorstyle+xml"
+        });
+      }
+    }
+
     // VML extension is needed for comments, form controls, or header watermarks
     const hasComments = model.commentRefs && model.commentRefs.length > 0;
     const hasFormControls = model.formControlRefs && model.formControlRefs.length > 0;
@@ -181,16 +243,6 @@ class ContentTypesXform extends BaseXform {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(ctrlPropPath(ctrlPropId)),
           ContentType: "application/vnd.ms-excel.controlproperties+xml"
-        });
-      }
-    }
-
-    // Add passthrough content types (charts, etc.)
-    if (model.passthroughContentTypes) {
-      for (const { partName, contentType } of model.passthroughContentTypes) {
-        xmlStream.leafNode("Override", {
-          PartName: toContentTypesPartName(partName),
-          ContentType: contentType
         });
       }
     }

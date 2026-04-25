@@ -174,12 +174,12 @@ export function filterDrawingAnchors(anchors: any[]): any[] {
     if (a.range?.br && a.shape) {
       return true;
     }
-    // One-cell anchors need a valid picture
-    if (!a.range?.br && !a.picture) {
+    // One-cell anchors need a valid picture or graphicFrame (charts)
+    if (!a.range?.br && !a.picture && !a.graphicFrame) {
       return false;
     }
-    // Two-cell anchors need either picture or shape
-    if (a.range?.br && !a.picture && !a.shape) {
+    // Two-cell anchors need either picture, shape, or graphicFrame (charts)
+    if (a.range?.br && !a.picture && !a.shape && !a.graphicFrame) {
       return false;
     }
     return true;
