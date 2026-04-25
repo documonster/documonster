@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.4.2](https://github.com/cjnoname/excelts/compare/v9.4.1...v9.4.2) (2026-04-25)
+
+
+### Bug Fixes
+
+* **pdf:** Unicode text rendering and long text clipping in PDF export ([#150](https://github.com/cjnoname/excelts/issues/150)) ([6b6aea9](https://github.com/cjnoname/excelts/commit/6b6aea94a6d51f2f41155a34f3627329d620e317))
+
 ## [9.4.1](https://github.com/cjnoname/excelts/compare/v9.4.0...v9.4.1) (2026-04-21)
 
 
