@@ -9,7 +9,15 @@
  * with shared formatting primitives (spPr/txPr) but very different data model.
  */
 
-import type { ChartLayout, ChartLegend, ChartTitle, ShapeProperties } from "./types";
+import type {
+  ChartColorsModel,
+  ChartLayout,
+  ChartLegend,
+  ChartStyleModel,
+  ChartTextProperties,
+  ChartTitle,
+  ShapeProperties
+} from "./types";
 
 // ============================================================================
 // Top-level chartEx model
@@ -25,6 +33,34 @@ export interface ChartExModel {
   rawXml?: string;
   /** Chart rels — preserved for round-trip */
   rels?: unknown[];
+  /** Referenced external workbook/package parts used by cx:externalData relationships. */
+  externalParts?: Record<string, Uint8Array>;
+  /** Optional structured style sidecar metadata for chartEx consumers. */
+  style?: ChartStyleModel;
+  /** Optional structured colors sidecar metadata for chartEx consumers. */
+  colors?: ChartColorsModel;
+  /**
+   * Child elements the parser did not recognise at well-known locations.
+   *
+   * Populated by {@link parseChartEx} when walking a loaded chartEx part. Each
+   * entry records a `parent/child` breadcrumb so `strict` template mode can
+   * refuse to silently drop extension/vendor XML when the structured writer
+   * has to rebuild the part (i.e. no raw XML passthrough and no safe raw
+   * patch available). Purely informational in the default `preserve` mode.
+   */
+  unknownElements?: ChartExUnknownElement[];
+}
+
+/**
+ * Describes one unstructured child element discovered while parsing a
+ * chartEx part. `path` uses `/` as the separator and is relative to the
+ * `cx:chartSpace` root.
+ */
+export interface ChartExUnknownElement {
+  /** Fully-qualified element name (e.g. `cx:unknownTag`). */
+  name: string;
+  /** Slash-separated breadcrumb, e.g. `cx:chartSpace/cx:chart/cx:unknownTag`. */
+  path: string;
 }
 
 /**
@@ -104,6 +140,8 @@ export interface ChartExChart {
   legend?: ChartLegend;
   /** Whether the chart has an automatic title */
   autoTitleDeleted?: boolean;
+  /** Shape/style for the chart frame. */
+  spPr?: ShapeProperties;
 }
 
 export interface ChartExPlotArea {
@@ -172,28 +210,36 @@ export interface ChartExDataLabels {
   separator?: string;
   numFmt?: string;
   spPr?: ShapeProperties;
-  txPr?: unknown;
+  txPr?: ChartTextProperties;
 }
 
 /**
  * Per-series layout properties. Only fields relevant to the series type are used.
  */
 export interface ChartExLayoutProperties {
+  /** Raw cx:layoutPr XML preserved from loaded files. */
+  _rawXml?: string;
   // Sunburst / Treemap
   parentLabelLayout?: "banner" | "overlapping" | "none";
   // Waterfall
   subtotals?: Array<{ idx: number }>;
+  connectorLines?: boolean;
+  increaseSpPr?: ShapeProperties;
+  decreaseSpPr?: ShapeProperties;
+  totalSpPr?: ShapeProperties;
   // Funnel
   // (funnel has no extra layout props at this level — uses plot area)
   // Histogram / Pareto
   binning?: {
     binSize?: number;
     binCount?: number;
-    binType?: "binCount" | "binSize" | "categories" | "manual";
+    binType?: "auto" | "binCount" | "binSize" | "categories" | "manual";
     intervalClosed?: "l" | "r";
     underflow?: number;
     overflow?: number;
   };
+  /** Pareto charts render a cumulative line over histogram columns. */
+  paretoLine?: boolean;
   // BoxWhisker
   quartileMethod?: "inclusive" | "exclusive";
   showMeanLine?: boolean;
@@ -232,7 +278,7 @@ export interface ChartExAxis {
   /** Shape properties */
   spPr?: ShapeProperties;
   /** Text properties */
-  txPr?: unknown;
+  txPr?: ChartTextProperties;
   /** Hidden */
   hidden?: boolean;
   /** Label alignment */
@@ -269,6 +315,34 @@ export interface AddChartExOptions {
   legendPosition?: "b" | "l" | "r" | "t" | "tr";
   /** Type-specific layout overrides */
   layout?: ChartExLayoutProperties;
+  /** Histogram/pareto binning shortcut; merged into `layout.binning`. */
+  binning?: ChartExLayoutProperties["binning"];
+  /** ChartEx chart frame styling. */
+  spPr?: ShapeProperties;
+  /** Optional sidecar-style metadata retained on the structured model. */
+  chartStyle?: ChartStyleModel;
+  /** Optional sidecar-color metadata retained on the structured model. */
+  chartColors?: ChartColorsModel;
+}
+
+export interface AddChartExHistogramOptions extends Omit<AddChartExOptions, "type"> {
+  /** `histogram` for frequency columns, `pareto` for frequency columns plus cumulative line. */
+  type?: "histogram" | "pareto";
+  binning?: ChartExLayoutProperties["binning"];
+  layout?: Pick<ChartExLayoutProperties, "binning">;
+}
+
+export interface AddChartExWaterfallOptions extends Omit<AddChartExOptions, "type"> {
+  type?: "waterfall";
+  layout?: Pick<ChartExLayoutProperties, "subtotals">;
+}
+
+export interface AddChartExBoxWhiskerOptions extends Omit<AddChartExOptions, "type"> {
+  type?: "boxWhisker";
+  layout?: Pick<
+    ChartExLayoutProperties,
+    "quartileMethod" | "showMeanLine" | "showMeanMarker" | "showInnerPoints" | "showOutlierPoints"
+  >;
 }
 
 /**
@@ -288,6 +362,10 @@ export interface AddChartExSeriesOptions {
   name?: string;
   /** Values reference (e.g. "Sheet1!$B$2:$B$10") */
   values: string;
+  /** Literal cached values for headless charts that are not backed by worksheet formulas. */
+  literalValues?: number[];
+  /** Literal cached categories for headless charts that are not backed by worksheet formulas. */
+  literalCategories?: string[];
   /** Per-type extra references:
    *  - histogram: not used (categories carries the bin source)
    *  - waterfall: subtotal indices
@@ -295,8 +373,12 @@ export interface AddChartExSeriesOptions {
    */
   /** Sub-category hierarchy levels (sunburst/treemap) */
   hierarchy?: string[];
+  /** Literal cached hierarchy levels for headless sunburst/treemap previews. */
+  literalHierarchy?: string[][];
   /** Waterfall subtotal indices (0-based) */
   subtotals?: number[];
+  /** Waterfall subtotal marker objects, useful when callers already use OOXML-shaped config. */
+  subtotalPoints?: Array<{ idx: number }>;
   /** Fill color (hex) */
   fill?: string;
   /** Border color (hex) */

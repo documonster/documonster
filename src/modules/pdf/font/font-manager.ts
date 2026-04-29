@@ -145,6 +145,17 @@ export class FontManager {
   private type3CodePoints = new Set<number>();
   private _type3Result: Type3FontResult | null = null;
 
+  // --- Diagnostic tracking (consumed by writers that surface warnings) ---
+  /**
+   * Every distinct unknown font family passed to `resolveFont` since this
+   * manager was constructed. A "family" counts as unknown when it isn't
+   * in `FONT_FAMILY_MAP` and isn't the canonical "helvetica"/"times"/
+   * "courier" identifier. Populated as a set so a document that repeats
+   * the same missing family across hundreds of text runs still produces
+   * a single diagnostic.
+   */
+  private _unknownFontFamilies = new Set<string>();
+
   // ==========================================================================
   // Embedded Font Registration
   // ==========================================================================
@@ -164,6 +175,28 @@ export class FontManager {
    */
   hasEmbeddedFont(): boolean {
     return this.embeddedFont !== null;
+  }
+
+  /**
+   * Read-only view of the non-WinAnsi code points encountered so far when
+   * no font is embedded. Used by callers (`PdfDocumentBuilder.build()`)
+   * to decide whether to auto-discover a system font before the Type3
+   * fallback kicks in. Returns a defensive copy so consumers cannot
+   * mutate the internal set.
+   */
+  getType3CodePoints(): Set<number> {
+    return new Set(this.type3CodePoints);
+  }
+
+  /**
+   * Read-only view of the font families `resolveFont` saw but could not
+   * map to a standard Type1 (Helvetica/Times/Courier) base. Consumers
+   * use this to emit one diagnostic per distinct missing family at
+   * build time rather than one per text run. The set is deduplicated
+   * and preserves the exact casing the caller supplied.
+   */
+  getUnknownFontFamilies(): Set<string> {
+    return new Set(this._unknownFontFamilies);
   }
 
   /**
@@ -225,6 +258,15 @@ export class FontManager {
   resolveFont(fontFamily: string, bold: boolean, italic: boolean): string {
     if (this.embeddedFont) {
       return this.embeddedResourceName;
+    }
+    // Record unknown families so writers can emit a single diagnostic
+    // at build time instead of spamming one warning per text run.
+    // The canonical base-name keys are kept in FONT_FAMILY_MAP; anything
+    // not present will `?? "Helvetica"` in `resolveBaseFont` — that's the
+    // trigger for a "family not recognised" diagnostic.
+    const lowerKey = fontFamily.toLowerCase().trim();
+    if (lowerKey && FONT_FAMILY_MAP[lowerKey] === undefined) {
+      this._unknownFontFamilies.add(fontFamily);
     }
     const pdfFontName = resolvePdfFontName(fontFamily, bold, italic);
     return this.ensureFont(pdfFontName);

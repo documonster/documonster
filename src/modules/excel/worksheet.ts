@@ -1,10 +1,38 @@
 import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
-import { fillChartCaches } from "@excel/chart/cache-populator";
+import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator";
 import { Chart, buildChartModel, type ChartAnchorModel } from "@excel/chart/chart";
+import {
+  chartExOptionsFromRows,
+  chartExOptionsFromTable,
+  chartOptionsFromRows,
+  chartOptionsFromTable,
+  seriesFromColumns,
+  type AddChartExFromRowsOptions,
+  type AddChartExFromTableOptions,
+  type AddChartFromRowsOptions,
+  type AddChartFromTableOptions,
+  type SeriesFromColumnsOptions
+} from "@excel/chart/chart-api";
 import { buildComboChartModel } from "@excel/chart/chart-builder";
 import { buildChartExModel } from "@excel/chart/chart-ex-builder";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
-import type { AddChartOptions, AddChartRange, AddComboChartOptions } from "@excel/chart/types";
+import { resolvePendingChartImages } from "@excel/chart/chart-images";
+import {
+  applyChartExPreset,
+  applyChartPreset,
+  type ExcelChartExPreset,
+  type ExcelChartPreset
+} from "@excel/chart/chart-presets";
+import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
+import type {
+  AddBarChartOptions,
+  AddChartOptions,
+  AddChartRange,
+  AddComboChartOptions,
+  AddPieChartOptions,
+  AddScatterChartOptions,
+  AddSurfaceChartOptions
+} from "@excel/chart/types";
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
 import { Enums } from "@excel/enums";
@@ -16,6 +44,7 @@ import {
   type FormControlRange
 } from "@excel/form-control";
 import { Image, type ImageModel } from "@excel/image";
+import { withPivotChartSource } from "@excel/pivot-chart";
 import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
 import { Range, type RangeInput } from "@excel/range";
 import { Row, type RowModel } from "@excel/row";
@@ -34,6 +63,7 @@ import type {
   RowValues,
   Style,
   TableProperties,
+  ThreadedComment,
   WatermarkOptions,
   WorksheetProperties,
   WorksheetState,
@@ -169,6 +199,12 @@ interface WorksheetModel {
   charts?: ChartAnchorModel[];
   /** Sparkline groups (x14:sparklineGroups) */
   sparklineGroups?: SparklineGroup[];
+  /**
+   * Office 365 threaded comments for this worksheet. Rendered as a
+   * separate `xl/threadedComments/threadedComment{N}.xml` part. Empty
+   * when the sheet has no modern comments.
+   */
+  threadedComments?: Array<{ ref: string; comment: ThreadedComment }>;
 }
 
 // Worksheet requirements
@@ -205,6 +241,20 @@ class Worksheet {
   declare public conditionalFormattings: ConditionalFormattingOptions[];
   declare public formControls: FormCheckbox[];
   declare public ignoredErrors: IgnoredError[];
+  /**
+   * Office 365 threaded comments attached to this sheet, keyed by
+   * cell reference. Each cell may carry a linear conversation (a
+   * top-level comment followed by replies whose `parentId` points at
+   * the top-level entry). Round-tripped verbatim on load; mutating
+   * the array triggers a fresh `xl/threadedComments/threadedComment{N}.xml`
+   * on save.
+   *
+   * Distinct from (and can coexist with) classic VML notes — modern
+   * Excel shows threaded comments in the conversation pane, classic
+   * VML in the tooltip. When both are present the threaded text is
+   * authoritative.
+   */
+  declare public threadedComments: Array<{ ref: string; comment: ThreadedComment }>;
   declare private _headerRowCount?: number;
   /** Loaded drawing data (for charts, etc.) - preserved for round-trip */
   declare private _drawing: unknown;
@@ -323,6 +373,9 @@ class Worksheet {
 
     // ignored errors (suppress green triangles in Excel)
     this.ignoredErrors = [];
+
+    // Office 365 threaded comments (separate from classic VML notes).
+    this.threadedComments = [];
 
     // watermark configuration
     this._watermark = null;
@@ -1337,7 +1390,187 @@ class Worksheet {
    * Returns the chart number (1-based) that identifies this chart in the workbook.
    */
   addChart(options: AddChartOptions, range: AddChartRange): number {
-    return this._registerChart(buildChartModel(options), range);
+    return this._registerChart(buildChartModel(options), range, options);
+  }
+
+  addColumnChart(
+    options: Omit<AddBarChartOptions, "type" | "barDir">,
+    range: AddChartRange
+  ): number {
+    return this.addChart({ ...options, type: "bar", barDir: "col" }, range);
+  }
+
+  addBarChart(options: Omit<AddBarChartOptions, "type" | "barDir">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "bar", barDir: "bar" }, range);
+  }
+
+  addLineChart(options: Omit<AddChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "line" }, range);
+  }
+
+  addAreaChart(options: Omit<AddChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "area" }, range);
+  }
+
+  addPieChart(options: Omit<AddPieChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "pie" }, range);
+  }
+
+  addDoughnutChart(options: Omit<AddPieChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "doughnut" }, range);
+  }
+
+  addScatterChart(options: Omit<AddScatterChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "scatter" }, range);
+  }
+
+  addBubbleChart(options: Omit<AddChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "bubble" }, range);
+  }
+
+  addRadarChart(options: Omit<AddChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "radar" }, range);
+  }
+
+  addStockChart(options: Omit<AddChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "stock" }, range);
+  }
+
+  addSurfaceChart(options: Omit<AddSurfaceChartOptions, "type">, range: AddChartRange): number {
+    return this.addChart({ ...options, type: "surface" }, range);
+  }
+
+  addHistogramChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "histogram" }, range);
+  }
+
+  addParetoChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "pareto" }, range);
+  }
+
+  addWaterfallChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "waterfall" }, range);
+  }
+
+  addFunnelChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "funnel" }, range);
+  }
+
+  addTreemapChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "treemap" }, range);
+  }
+
+  addSunburstChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "sunburst" }, range);
+  }
+
+  addBoxWhiskerChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "boxWhisker" }, range);
+  }
+
+  addRegionMapChart(options: Omit<AddChartExOptions, "type">, range: AddChartRange): number {
+    return this.addChartEx({ ...options, type: "regionMap" }, range);
+  }
+
+  addPresetChart(
+    preset: ExcelChartPreset,
+    options: Omit<AddChartOptions, "type"> & Partial<Pick<AddChartOptions, "type">>,
+    range: AddChartRange
+  ): number {
+    return this.addChart(applyChartPreset(preset, options), range);
+  }
+
+  addPresetChartEx(
+    preset: ExcelChartExPreset,
+    options: Omit<AddChartExOptions, "type"> & Partial<Pick<AddChartExOptions, "type">>,
+    range: AddChartRange
+  ): number {
+    return this.addChartEx(applyChartExPreset(preset, options), range);
+  }
+
+  seriesFromColumns(options: SeriesFromColumnsOptions): ReturnType<typeof seriesFromColumns> {
+    return seriesFromColumns(this.name, options);
+  }
+
+  addChartFromTable(
+    table: Table | string,
+    options: AddChartFromTableOptions,
+    range: AddChartRange
+  ): number {
+    return this.addChart(chartOptionsFromTable(this, table, options), range);
+  }
+
+  addChartFromRows<T extends Record<string, unknown>>(
+    rows: T[],
+    options: AddChartFromRowsOptions<T>,
+    range: AddChartRange
+  ): number {
+    return this.addChart(chartOptionsFromRows(this, rows, options), range);
+  }
+
+  addColumnChartFromRows<T extends Record<string, unknown>>(
+    rows: T[],
+    options: Omit<AddChartFromRowsOptions<T>, "type" | "barDir">,
+    range: AddChartRange
+  ): number {
+    return this.addChart(
+      chartOptionsFromRows(this, rows, { ...options, type: "bar", barDir: "col" }),
+      range
+    );
+  }
+
+  /**
+   * Add a chartEx chart whose data references come from a worksheet Table.
+   * Mirrors {@link addChartFromTable} for the modern `cx:` chart types
+   * (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker).
+   * `regionMap` is not supported through this helper because its data
+   * model expects geographic labels — use {@link addChartEx} directly.
+   */
+  addChartExFromTable(
+    table: Table | string,
+    options: AddChartExFromTableOptions & {
+      type: Exclude<AddChartExOptions["type"], "regionMap">;
+    },
+    range: AddChartRange
+  ): number {
+    return this.addChartEx(chartExOptionsFromTable(this, table, options), range);
+  }
+
+  /**
+   * Add a chartEx chart whose rows come from a plain object-array, staged
+   * into the worksheet before being referenced by absolute range. Mirrors
+   * {@link addChartFromRows} for the modern `cx:` chart types.
+   */
+  addChartExFromRows<T extends Record<string, unknown>>(
+    rows: T[],
+    options: AddChartExFromRowsOptions<T> & {
+      type: Exclude<AddChartExOptions["type"], "regionMap">;
+    },
+    range: AddChartRange
+  ): number {
+    return this.addChartEx(chartExOptionsFromRows(this, rows, options), range);
+  }
+
+  /**
+   * Add a classic pivot chart linked to an existing pivot table.
+   * Returns the chart number (1-based) that identifies this chart in the workbook.
+   */
+  addPivotChart(pivotTable: PivotTable, options: AddChartOptions, range: AddChartRange): number {
+    const pivotChartOptions = withPivotChartSource(pivotTable, options);
+    return this._registerChart(buildChartModel(pivotChartOptions), range, pivotChartOptions);
+  }
+
+  /**
+   * Add a combo pivot chart linked to an existing pivot table.
+   * Returns the chart number (1-based) that identifies this chart in the workbook.
+   */
+  addPivotComboChart(
+    pivotTable: PivotTable,
+    options: AddComboChartOptions,
+    range: AddChartRange
+  ): number {
+    const pivotChartOptions = withPivotChartSource(pivotTable, options);
+    return this._registerChart(buildComboChartModel(pivotChartOptions), range, pivotChartOptions);
   }
 
   /**
@@ -1345,7 +1578,7 @@ class Worksheet {
    * Returns the chart number (1-based) that identifies this chart in the workbook.
    */
   addComboChart(options: AddComboChartOptions, range: AddChartRange): number {
-    return this._registerChart(buildComboChartModel(options), range);
+    return this._registerChart(buildComboChartModel(options), range, options);
   }
 
   /**
@@ -1364,6 +1597,14 @@ class Worksheet {
   /** @internal Register a built chartEx model into the workbook and this worksheet. */
   private _registerChartEx(model: ChartExModel, range: AddChartRange): number {
     const chartExNumber = this._workbook.nextChartExNumber();
+    try {
+      // Pass `this` as context worksheet so sheet-scoped defined names on
+      // this sheet take precedence over workbook-scoped names of the same
+      // bare name (matches Excel resolution order).
+      fillChartExCaches(model, this._workbook, this);
+    } catch {
+      // Cache population is best-effort; never let it break chart creation.
+    }
     this._workbook.addChartExStructuredEntry({ chartExNumber, model });
     const chart = new Chart(this, { chartExNumber }, range);
     this._charts.push(chart);
@@ -1371,19 +1612,57 @@ class Worksheet {
   }
 
   /** @internal Register a built chart model into the workbook and this worksheet. */
-  private _registerChart(chartModel: any, range: AddChartRange): number {
+  private _registerChart(
+    chartModel: any,
+    range: AddChartRange,
+    options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
+  ): number {
     const chartNumber = this._workbook.nextChartNumber();
     // Auto-populate caches so headless consumers see non-empty charts.
     // Excel itself will recompute on open; this is a best-effort enrichment.
+    // Pass `this` as context worksheet so sheet-scoped defined names on
+    // this sheet take precedence over workbook-scoped names of the same
+    // bare name (matches Excel resolution order).
     try {
-      fillChartCaches(chartModel, this._workbook);
+      fillChartCaches(chartModel, this._workbook, this);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
-    this._workbook.addChartEntry({ chartNumber, model: chartModel });
+    const entry = { chartNumber, model: chartModel };
+    // Resolve any staged `pictureFill.image` payloads into real workbook
+    // media entries + chart relationships. Safe to call before
+    // `addChartEntry` so the entry we store already carries the final
+    // `entry.rels` array.
+    try {
+      resolvePendingChartImages(entry, this._workbook);
+    } catch {
+      // Image resolution is best-effort; a broken image payload should
+      // never take down chart creation — the series keeps its
+      // `pictureOptions`, just without the blipFill.
+    }
+    this._workbook.addChartEntry(entry);
+    this._applyChartSidecars(chartNumber, options);
     const chart = new Chart(this, { chartNumber }, range);
     this._charts.push(chart);
     return chartNumber;
+  }
+
+  private _applyChartSidecars(
+    chartNumber: number,
+    options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
+  ): void {
+    if (options?.chartStyle) {
+      this._workbook.setChartStyle(
+        chartNumber,
+        new TextEncoder().encode(buildChartStyle(options.chartStyle))
+      );
+    }
+    if (options?.chartColors) {
+      this._workbook.setChartColors(
+        chartNumber,
+        new TextEncoder().encode(buildChartColors(options.chartColors))
+      );
+    }
   }
 
   /**
@@ -1407,6 +1686,9 @@ class Worksheet {
     const removed = this._charts.splice(idx, 1)[0];
     if (removed.chartNumber > 0) {
       this._workbook.removeChartEntry?.(removed.chartNumber);
+    }
+    if (removed.chartExNumber > 0) {
+      this._workbook.removeChartExStructuredEntry?.(removed.chartExNumber);
     }
     return true;
   }
@@ -1952,7 +2234,8 @@ class Worksheet {
       watermark: this._watermark,
       drawing: this._drawing,
       charts: this._charts.map(c => c.model),
-      sparklineGroups: this._sparklineGroups
+      sparklineGroups: this._sparklineGroups,
+      threadedComments: this.threadedComments
     };
 
     // =================================================
@@ -2046,8 +2329,13 @@ class Worksheet {
       return tables;
     }, {});
     this.pivotTables = value.pivotTables;
+    for (const pivotTable of this.pivotTables ?? []) {
+      pivotTable.worksheetName ??= this.name;
+      pivotTable.name ??= `PivotTable${pivotTable.tableNumber}`;
+    }
     this.conditionalFormattings = value.conditionalFormattings;
     this.ignoredErrors = value.ignoredErrors ?? [];
+    this.threadedComments = value.threadedComments ?? [];
     // Rebuild form controls from the serialised model so importSheet() and any
     // other model round-trip preserves checkbox state, position, and links.
     this.formControls = (value.formControls ?? []).map(fcModel =>

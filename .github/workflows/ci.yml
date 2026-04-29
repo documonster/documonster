@@ -161,6 +161,57 @@ jobs:
         env:
           CI: true
 
+  chart-oracle:
+    # Opt-in real-file validation: install LibreOffice on Linux and run
+    # the `chart-oracle.integration.test.ts` suite with the env flags
+    # that enable real binary round-trips. The test file skips every
+    # `it` when the flags are unset, so the rest of the matrix (which
+    # doesn't install LibreOffice) keeps working unchanged.
+    #
+    # We gate on a single Linux runner — LibreOffice is slow to install
+    # (~200MB of apt packages) and the goal is catching open-validation
+    # regressions, not multiplying across OS/Node variants.
+    needs: should-run
+    timeout-minutes: 20
+    name: Chart real-file oracle (LibreOffice)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install LibreOffice (headless)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-core libreoffice-calc
+          soffice --headless --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run chart-oracle tests
+        run: pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts src/modules/excel/__tests__/workbook-chart-roundtrip.integration.test.ts
+        env:
+          CI: true
+          LIBREOFFICE_BIN: soffice
+          EXCELTS_LIBREOFFICE_VISUAL_ORACLE: "1"
+          EXCELTS_LIBREOFFICE_OPEN_VALIDATION: "1"
+          # Optional enterprise corpus — only fires when the private
+          # directory is mounted into the runner (via repository
+          # secret + setup action). Safe to leave unset on public PRs.
+          EXCELTS_ENTERPRISE_CORPUS_DIR: ${{ vars.EXCELTS_ENTERPRISE_CORPUS_DIR }}
+          EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION: "1"
+
   codeql:
     needs: should-run
     timeout-minutes: 10

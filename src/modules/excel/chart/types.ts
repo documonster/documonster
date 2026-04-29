@@ -244,6 +244,55 @@ export interface ChartFill {
     /** Linear, circle, rect, shape */
     type?: "linear" | "circle" | "rect" | "shape";
   };
+  /**
+   * Picture (blip) fill — `<a:blipFill>/<a:blip r:embed="rIdN"/>`.
+   *
+   * {@link ChartBlipFill.relationshipId} is the final wire value; when
+   * the caller has not yet registered the image with the chart part,
+   * `_pendingImage` carries the raw data until the worksheet-side
+   * `_registerChart` path wires up the media entry and chart rel.
+   */
+  blip?: ChartBlipFill;
+}
+
+/**
+ * Picture fill for chart shapes — serialises as `<a:blipFill>`.
+ *
+ * `relationshipId` is the authoritative output: once present, the
+ * writer emits `<a:blip r:embed="rIdN"/>`. `_pendingImage` is a
+ * construction-time staging slot consumed by the worksheet registration
+ * path — after `_registerChart` runs, it is removed and
+ * `relationshipId` is set.
+ */
+export interface ChartBlipFill {
+  /** Chart-part relationship id referring to the image. */
+  relationshipId?: string;
+  /**
+   * Stretch rectangle (`<a:srcRect l t r b>`) with fractional
+   * (per-mille, 0-100000) insets. Absent for a full-bleed fill.
+   */
+  sourceRectangle?: { left?: number; top?: number; right?: number; bottom?: number };
+  /**
+   * Tile or stretch mode. `stretch` maps to `<a:stretch><a:fillRect/></a:stretch>`;
+   * `tile` maps to `<a:tile/>` with the given tiling parameters; `none`
+   * emits neither child (which Excel treats as stretch).
+   */
+  fillMode?: "stretch" | "tile" | "none";
+  /** Tile options, honoured only when {@link fillMode} is `"tile"`. */
+  tile?: {
+    tx?: number;
+    ty?: number;
+    sx?: number;
+    sy?: number;
+    flip?: "none" | "x" | "y" | "xy";
+    alignment?: string;
+  };
+  /**
+   * @internal Staging payload consumed by the worksheet-side chart
+   * registration path. Never serialised directly; see
+   * {@link AddChartSeriesOptions.pictureFill.image}.
+   */
+  _pendingImage?: AddChartPictureFillImage;
 }
 
 /**
@@ -258,8 +307,123 @@ export interface ShapeProperties {
   scene3d?: Scene3D;
   /** 3D shape properties (bevel / extrusion / material) */
   sp3d?: ShapeProperties3D;
+  /**
+   * `a:xfrm` — position / size / rotation / flip. Structured version
+   * of the transform Excel emits on shapes that have been manually
+   * positioned on the chart. When absent the shape uses its parent's
+   * automatic layout.
+   */
+  transform?: ShapeTransform;
+  /**
+   * `a:prstGeom` — the preset shape geometry (rectangle, roundRect,
+   * ellipse, arrow, callout, etc.) used by non-rectangular chart
+   * shapes. Present on `c:shapeGroupSprite`-style chart decorations;
+   * charts themselves default to `rect` and omit this element.
+   */
+  presetGeometry?: PresetGeometry;
+  /**
+   * `a:custGeom` — freeform geometry for fully custom shapes. Only
+   * meaningful for shapes the user drew with the Excel freeform tool.
+   * Structured access covers path segments; the `paths` array mirrors
+   * the OOXML `<a:pathLst>` container.
+   */
+  customGeometry?: CustomGeometry;
   /** @internal Raw XML string for perfect round-trip fidelity */
   _rawXml?: string;
+}
+
+/**
+ * `a:xfrm` — shape transform: origin, extent, rotation, flip.
+ *
+ * OOXML coordinates are in EMUs (1/914400 inch) for position/extent and
+ * in 1/60000 of a degree for `rotation`. excelts exposes the raw units
+ * so round-trip is lossless; helpers in `shape-properties.ts` convert
+ * to / from points and degrees when a caller prefers friendlier units.
+ */
+export interface ShapeTransform {
+  /** `<a:off x y>` — top-left origin in EMU. */
+  offsetX?: number;
+  offsetY?: number;
+  /** `<a:ext cx cy>` — width / height in EMU. */
+  width?: number;
+  height?: number;
+  /**
+   * `@rot` on `a:xfrm` — rotation in 1/60000 of a degree (positive
+   * values rotate clockwise). Absent means "not rotated".
+   */
+  rotation?: number;
+  /** `@flipH="1"` — horizontal flip. */
+  flipHorizontal?: boolean;
+  /** `@flipV="1"` — vertical flip. */
+  flipVertical?: boolean;
+}
+
+/**
+ * `a:prstGeom` — preset shape geometry.
+ *
+ * `preset` is one of the ~180 DrawingML preset shape names
+ * (`"rect"`, `"roundRect"`, `"ellipse"`, `"rightArrow"`, `"cloud"`…).
+ * `adjustments` are the shape-specific `gd` parameters Excel exposes
+ * as the little yellow diamond handles on interactive shapes; each
+ * entry has the symbolic name (e.g. `"adj1"`) and a per-mille
+ * integer value.
+ */
+export interface PresetGeometry {
+  preset: string;
+  adjustments?: Array<{ name: string; fmla: string }>;
+}
+
+/**
+ * `a:custGeom` — custom freeform geometry.
+ *
+ * Represented at path granularity: each path carries its own bounding
+ * box (`w` / `h`) and the ordered list of drawing commands. This
+ * matches Excel's serialisation closely — a preview renderer can walk
+ * `commands` linearly and emit SVG `<path d="…">` data.
+ */
+export interface CustomGeometry {
+  /**
+   * `a:pathLst/a:path` — one or more subpaths. Each subpath declares
+   * its own logical coordinate space via {@link CustomGeometryPath.w}
+   * and {@link CustomGeometryPath.h}; command coordinates are
+   * relative to that space.
+   */
+  paths?: CustomGeometryPath[];
+  /**
+   * `a:avLst` — adjustment values, as on {@link PresetGeometry}. Very
+   * rare on custom geometry but retained for byte-preserving round
+   * trip.
+   */
+  adjustments?: Array<{ name: string; fmla: string }>;
+}
+
+export interface CustomGeometryPath {
+  /** Width of the path's local coordinate space in EMU. */
+  w?: number;
+  /** Height of the path's local coordinate space in EMU. */
+  h?: number;
+  /** Fill mode — maps to `a:path/@fill`. */
+  fill?: "none" | "norm" | "lighten" | "darken" | "lightenLess" | "darkenLess";
+  /** Stroke flag — `a:path/@stroke="1"`. */
+  stroke?: boolean;
+  /**
+   * Drawing commands in order: `moveTo`, `lnTo`, `arcTo`, `cubicBezTo`,
+   * `quadBezTo`, `close`. Each command's `points` array carries the
+   * 0-2 control points in local path coordinates.
+   */
+  commands: CustomGeometryCommand[];
+}
+
+export interface CustomGeometryCommand {
+  type: "moveTo" | "lnTo" | "arcTo" | "cubicBezTo" | "quadBezTo" | "close";
+  /** Points consumed by the command (empty for `close`). */
+  points?: Array<{ x: number; y: number }>;
+  /**
+   * For `arcTo`: `wR`, `hR`, `stAng`, `swAng`. OOXML keeps arc
+   * parameters as explicit named attributes rather than as points, so
+   * they ride here to preserve the original shape.
+   */
+  arcParams?: { wR: number; hR: number; stAng: number; swAng: number };
 }
 
 /**
@@ -704,8 +868,44 @@ export interface DataLabels {
   txPr?: ChartTextProperties;
   /** Individual data label overrides */
   entries?: DataLabelEntry[];
+  /**
+   * Excel 2013+ "Value From Cells" — corresponds to the
+   * `c15:datalabelsRange` extension emitted inside
+   * `c:dLbls/c:extLst/c:ext[uri={CE6537A1-…}]`.
+   *
+   * When set, each data label displays the text from the corresponding
+   * cell in {@link DataLabelsRange.formula} instead of (or in addition
+   * to) the series/category/value drawn from the point itself. This is
+   * the feature Excel surfaces as the "Value From Cells" checkbox in
+   * the Format Data Labels pane.
+   *
+   * The matching per-point `<c:dLbl>` entries use `<c:tx><c:rich>…`
+   * holding the cached label string so viewers that don't understand
+   * the extension still render something sensible; the writer builds
+   * those placeholders automatically from the range cache when a
+   * `dataLabelsRange` is present.
+   */
+  dataLabelsRange?: DataLabelsRange;
   /** Extension list (raw XML for round-trip) */
   extLst?: string;
+}
+
+/**
+ * "Value From Cells" range for a data-label series. Points at a worksheet
+ * range whose values are used as the text of each data label, matching
+ * the `c15:datalabelsRange` extension (Office 2013+).
+ */
+export interface DataLabelsRange {
+  /** Excel formula referring to the cells whose values become labels. */
+  formula: string;
+  /**
+   * Optional cached values — one entry per source point, parallel to the
+   * series' data. Writers that want byte-preserving round-trip should
+   * populate this from the worksheet before serialising so readers
+   * without a formula engine still see the right labels; the
+   * cache-populator auto-fills it when left empty.
+   */
+  cache?: { pointCount?: number; points: Array<{ index: number; value: string }> };
 }
 
 export interface DataLabelEntry {
@@ -936,6 +1136,12 @@ export interface BarChartGroup {
   series: BarSeries[];
   dataLabels?: DataLabels;
   gapWidth?: number;
+  /**
+   * Depth-direction gap for 3D bar charts (`c:gapDepth`). Expressed as
+   * a percentage (0-500) — 150 is Excel's default. Ignored for 2D
+   * bar charts.
+   */
+  gapDepth?: number;
   overlap?: number;
   serLines?: ShapeProperties;
   axisIds: number[];
@@ -957,6 +1163,8 @@ export interface LineChartGroup {
   upDownBars?: UpDownBars;
   dropLines?: ShapeProperties;
   axisIds: number[];
+  /** Depth-direction gap for 3D line charts (`c:gapDepth`, 0-500). */
+  gapDepth?: number;
   extLst?: string;
 }
 
@@ -989,6 +1197,8 @@ export interface AreaChartGroup {
   dataLabels?: DataLabels;
   dropLines?: ShapeProperties;
   axisIds: number[];
+  /** Depth-direction gap for 3D area charts (`c:gapDepth`, 0-500). */
+  gapDepth?: number;
   extLst?: string;
 }
 
@@ -1361,8 +1571,87 @@ export interface PivotFormat {
   txPr?: ChartTextProperties;
   marker?: ChartMarker;
   dataLabels?: DataLabels;
-  /** Raw XML for a single c:dLbl inside pivotFmt (not wrapped in c:dLbls) */
+  /**
+   * Structured representation of the single `c:dLbl` that pivot-chart
+   * samples from Excel emit directly inside `c:pivotFmt` (without the
+   * enclosing `c:dLbls` wrapper). Most callers will leave this
+   * undefined — the field exists so editors can mutate pivot-series
+   * label styling without dropping into raw XML.
+   */
+  dLbl?: DataLabelEntry;
+  /**
+   * @deprecated Use {@link dLbl} for structured access. Retained so
+   * files parsed before the structured slot landed continue to
+   * round-trip. Writers prefer `dLbl` when both are present.
+   */
   rawDLbl?: string;
+}
+
+/**
+ * Structured metadata for a pivot chart, corresponding to MS Office 2010+
+ * `c14:pivotOptions` extension (ECMA-376 MS-XLSX §2.3.11, namespace
+ * `http://schemas.microsoft.com/office/drawing/2007/8/2/chart`).
+ *
+ * Written as `c:chartSpace/c:extLst/c:ext/c14:pivotOptions`, so Excel
+ * recognises the metadata on load; prior versions of excelts wrote this
+ * data under a private `excelts:` namespace that Excel silently discarded.
+ *
+ * All `dropZone*` fields are boolean flags controlling whether the
+ * corresponding family of PivotTable fields gets drop-zone controls on
+ * the chart when {@link dropZonesVisible} is enabled. Granularity is
+ * per-axis-category, not per-field — this matches the OOXML schema. The
+ * earlier `fieldButtons[]` / `filters[]` array shape never matched any
+ * part of the OOXML grammar and has been removed in this release.
+ */
+export interface PivotChartOptions {
+  /**
+   * Whether any drop-zone controls can appear on the pivot chart. When
+   * `false`, none of the other `dropZone*` flags have any visual effect.
+   * Absent (`undefined`) means Excel uses its default (typically `true`).
+   */
+  dropZonesVisible?: boolean;
+  /**
+   * Whether a control for each PivotTable field on the Filter (page) axis
+   * of the source PivotTable appears on the chart when
+   * {@link dropZonesVisible} is `true`.
+   */
+  dropZoneFilter?: boolean;
+  /**
+   * Whether a control for each PivotTable field on the Row axis of the
+   * source PivotTable appears on the chart when {@link dropZonesVisible}
+   * is `true`.
+   */
+  dropZoneCategories?: boolean;
+  /**
+   * Whether a control for each PivotTable field on the Data (values) axis
+   * of the source PivotTable appears on the chart when
+   * {@link dropZonesVisible} is `true`.
+   */
+  dropZoneData?: boolean;
+  /**
+   * Whether a control for each PivotTable field on the Column axis of the
+   * source PivotTable appears on the chart when {@link dropZonesVisible}
+   * is `true`.
+   */
+  dropZoneSeries?: boolean;
+  /**
+   * Whether Excel should refresh the linked pivot cache when opening the
+   * workbook. Mapped onto `pivotCacheDefinition/@refreshOnLoad` in the
+   * sheet parts, not into `c14:pivotOptions`.
+   */
+  refreshOnOpen?: boolean;
+  /**
+   * Whether the pivot chart shows the expand/collapse field buttons
+   * introduced in Office 2014+. Serialised as the
+   * `c16:showExpandCollapseFieldButtons` child inside the
+   * `c:chartSpace/c:extLst/c:ext[uri={E28EC0CA-…}]/c16:pivotOptions16`
+   * extension — a separate extension from the 2010 `c14:pivotOptions`.
+   *
+   * Both extensions can coexist on the same chart: the c14 block
+   * controls the drop-zone visibility, the c16 block controls the
+   * expand/collapse affordances on field buttons.
+   */
+  showExpandCollapseFieldButtons?: boolean;
 }
 
 // ============================================================================
@@ -1394,8 +1683,33 @@ export interface ChartModel {
   lang?: string;
   /** Whether the chart uses the 1904 date system */
   date1904?: boolean;
+  /**
+   * `c:userShapes` — user-drawn annotation shapes overlaid on the chart.
+   *
+   * OOXML models these as a reference to a separate drawing part
+   * (`drawings/drawingN.xml`). Full structural support would require
+   * reproducing the entire DrawingML shape subsystem inside the chart
+   * pipeline; for now we keep the `r:id` so the reference survives
+   * round-trip, and the referenced part is preserved alongside the
+   * chart rels.
+   *
+   * The target drawing part itself is carried through untouched via
+   * the standard chart rels mechanism — this field only captures the
+   * relationship id so we know it's there.
+   */
+  userShapesRelId?: string;
   /** Pivot source information (raw XML for round-trip) */
   pivotSource?: string;
+  /**
+   * Structured pivot chart options corresponding to the MS Office 2010+
+   * `c14:pivotOptions` extension. Parsed from and serialised into
+   * `c:chartSpace/c:extLst/c:ext[uri=…chart]/c14:pivotOptions` — the only
+   * location Excel recognises for these settings.
+   *
+   * Exists only on pivot charts (i.e. when {@link pivotSource} is set);
+   * writers emit nothing when `pivotSource` is absent.
+   */
+  pivotOptions?: PivotChartOptions;
   /** Color map override (raw XML for round-trip) */
   clrMapOvr?: string;
   /** Chart protection settings (raw XML for round-trip) */
@@ -1404,6 +1718,28 @@ export interface ChartModel {
   extLst?: string;
   /** Extra namespace declarations for round-trip fidelity */
   extraNamespaces?: Record<string, string>;
+  /**
+   * Vendor-extension elements observed while parsing that are not part of
+   * the `c:` / `a:` / `r:` OOXML namespaces and are not already captured
+   * via `extLst` / raw XML targets. Mirrors
+   * {@link ChartExModel.unknownElements} so `strictTemplateMode` can warn
+   * when a structural rebuild would drop them. Purely informational in
+   * the default `preserve` mode.
+   */
+  unknownElements?: ChartUnknownElement[];
+}
+
+/**
+ * Describes one unstructured child element discovered while parsing a
+ * classic chart part. `path` uses `/` as the separator relative to the
+ * nearest `c:` ancestor that was already recognised, matching the format
+ * of {@link ChartExUnknownElement}.
+ */
+export interface ChartUnknownElement {
+  /** Fully-qualified element name (e.g. `c15:customTag`). */
+  name: string;
+  /** Slash-separated breadcrumb, e.g. `c:chartSpace/c15:customTag`. */
+  path: string;
 }
 
 export interface PrintSettings {
@@ -1435,6 +1771,58 @@ export interface ChartStyleModel {
   rawXml?: string;
   /** @internal Structured style ID (from cs:chartStyle/@id) */
   id?: number;
+  /**
+   * Structured per-element style definitions (Office 2013+).
+   *
+   * Each key is one of the ~25 well-known `cs:*` children of
+   * `cs:chartStyle` — `categoryAxis`, `chartArea`, `dataLabel`,
+   * `dataPoint`, `dataPointLine`, `dataPointMarker`, `gridlineMajor`,
+   * `legend`, `plotArea`, `title`, `trendline` and so on (see
+   * ECMA-376 Part 1 §21.2). Each definition carries structured slots
+   * for the `cs:*Ref` indices that Excel looks up from the chart's
+   * theme, plus verbatim raw XML for `spPr` / `defRPr` / `bodyPr` /
+   * `fontRef` so the DrawingML sub-tree survives round-trip without
+   * this module needing to model every DrawingML child.
+   *
+   * When absent, the writer falls back to `rawXml` (for round-trip
+   * fidelity of files loaded with an unrecognised style) or to the
+   * legacy id-only form (`<cs:chartStyle id="N"/>`).
+   */
+  elements?: Record<string, ChartStyleElement>;
+}
+
+/**
+ * Per-element entry inside `<cs:chartStyle>`. The four `*RefIdx`
+ * fields mirror Excel's theme indices for lines (`cs:lnRef`), fills
+ * (`cs:fillRef`), effects (`cs:effectRef`), and the meta slot that
+ * governs font (`cs:fontRef`). Everything else is kept as raw XML so
+ * callers can round-trip unfamiliar DrawingML without losing bytes.
+ */
+export interface ChartStyleElement {
+  /** `cs:lnRef/@idx` — theme line index. */
+  lnRefIdx?: number;
+  /** `cs:fillRef/@idx` — theme fill index. */
+  fillRefIdx?: number;
+  /** `cs:effectRef/@idx` — theme effect index. */
+  effectRefIdx?: number;
+  /**
+   * `cs:fontRef/@idx` — either `minor`, `major`, or `none` for the
+   * theme font slot.
+   */
+  fontRefIdx?: "minor" | "major" | "none";
+  /** Verbatim `cs:fontRef` inner XML (colour reference + modifiers). */
+  fontRefBody?: string;
+  /** Verbatim `cs:spPr` XML (lines/fill/effects on the element). */
+  spPrXml?: string;
+  /** Verbatim `cs:defRPr` XML (default run properties for text). */
+  defRPrXml?: string;
+  /** Verbatim `cs:bodyPr` XML (text-body properties). */
+  bodyPrXml?: string;
+  /**
+   * Attributes on the element itself other than the structured ones
+   * above, preserved as a key/value map (e.g. `mods` on `chartArea`).
+   */
+  attributes?: Record<string, string>;
 }
 
 /**
@@ -1449,6 +1837,40 @@ export interface ChartColorsModel {
   id?: number;
   /** Color palette — each entry is either a theme reference or sRGB color */
   colors?: ChartColorsEntry[];
+  /**
+   * `cs:variation` blocks — structured per-index colour modifiers that
+   * Excel uses to generate a gradient of related colours from the main
+   * palette. Each variation carries a list of DrawingML modifiers
+   * (tint / shade / satMod / lumMod / alpha …) that apply on top of
+   * the `colors` palette at the matching index.
+   *
+   * Variations are emitted after the palette entries inside
+   * `<cs:colorStyle>`. When this array is absent the writer falls back
+   * to preserving anything present in {@link rawXml} so legacy round
+   * trips are not disturbed.
+   */
+  variations?: ChartColorVariation[];
+}
+
+/**
+ * A single `<cs:variation>` block — a list of colour modifiers applied
+ * at the matching palette index. The modifier names mirror the DrawingML
+ * schemeClr / srgbClr children and are stored as raw integer values in
+ * the OOXML per-mille scale (0-100000).
+ */
+export interface ChartColorVariation {
+  /** `<a:lumMod val="…"/>` — luminance modulation. */
+  lumMod?: number;
+  /** `<a:lumOff val="…"/>` — luminance offset. */
+  lumOff?: number;
+  /** `<a:tint val="…"/>`. */
+  tint?: number;
+  /** `<a:shade val="…"/>`. */
+  shade?: number;
+  /** `<a:satMod val="…"/>`. */
+  satMod?: number;
+  /** `<a:alpha val="…"/>`. */
+  alpha?: number;
 }
 
 /**
@@ -1472,6 +1894,18 @@ export interface ChartColorsEntry {
   /** Alpha (0-100000) */
   alpha?: number;
 }
+
+/** Pivot source information written as c:pivotSource for classic pivot charts. */
+export type PivotChartSource =
+  | string
+  | {
+      /** Pivot table name, e.g. `PivotTable1` or `[Book.xlsx]Pivot!PivotTable1`. */
+      name: string;
+      /** Pivot chart format id. Defaults to 0. */
+      fmtId?: number;
+      /** Structured pivot chart metadata emitted as a chart-space extension. */
+      options?: PivotChartOptions;
+    };
 
 // ============================================================================
 // Chart Anchor (Drawing Integration)
@@ -1532,6 +1966,14 @@ export interface AddChartOptions {
   holeSize?: number;
   /** Style index */
   style?: number;
+  /** Modern chart style sidecar written to xl/charts/styleN.xml */
+  chartStyle?: ChartStyleModel;
+  /** Modern chart colors sidecar written to xl/charts/colorsN.xml */
+  chartColors?: ChartColorsModel;
+  /** Pivot table source for creating a classic pivot chart. */
+  pivotSource?: PivotChartSource;
+  /** Pivot chart field buttons, filters, and refresh metadata. */
+  pivotChartOptions?: PivotChartOptions;
   /** Wireframe mode for surface charts */
   wireframe?: boolean;
   /** Surface band formats (per level colouring) */
@@ -1611,6 +2053,93 @@ export interface AddChartOptions {
   sideWall?: ShapeProperties | AddShapeFillOptions;
   /** 3D chart: back wall background */
   backWall?: ShapeProperties | AddShapeFillOptions;
+}
+
+type CommonAddChartOptions = Omit<
+  AddChartOptions,
+  | "type"
+  | "series"
+  | "barDir"
+  | "grouping"
+  | "scatterStyle"
+  | "radarStyle"
+  | "ofPieType"
+  | "holeSize"
+  | "wireframe"
+  | "bandFormats"
+  | "bubbleScale"
+  | "showNegBubbles"
+  | "sizeRepresents"
+  | "splitType"
+  | "splitPos"
+  | "secondPieSize"
+  | "shape"
+  | "firstSliceAng"
+  | "gapWidth"
+  | "overlap"
+  | "dataLabels"
+  | "showMarker"
+  | "smooth"
+>;
+
+export type AddBarChartSeriesOptions = Omit<
+  AddChartSeriesOptions,
+  "xValues" | "bubbleSize" | "bubble3D" | "explosion"
+>;
+
+export interface AddBarChartOptions extends CommonAddChartOptions {
+  type?: "bar" | "bar3D";
+  series?: AddBarChartSeriesOptions[];
+  grouping?: BarGrouping;
+  barDir?: BarDirection;
+  dataLabels?: AddDataLabelsOptions;
+  gapWidth?: number;
+  overlap?: number;
+  shape?: BarShape;
+}
+
+export type AddPieChartSeriesOptions = Omit<
+  AddChartSeriesOptions,
+  "xValues" | "bubbleSize" | "bubble3D" | "trendline" | "errorBars" | "pictureFill"
+>;
+
+export interface AddPieChartOptions extends CommonAddChartOptions {
+  type?: "pie" | "pie3D" | "doughnut" | "ofPie";
+  series?: AddPieChartSeriesOptions[];
+  holeSize?: number;
+  firstSliceAng?: number;
+  dataLabels?: AddDataLabelsOptions;
+  gapWidth?: number;
+  ofPieType?: OfPieType;
+  splitType?: SplitType;
+  splitPos?: number;
+  secondPieSize?: number;
+}
+
+export type AddScatterChartSeriesOptions = Omit<
+  AddChartSeriesOptions,
+  "categories" | "bubbleSize" | "bubble3D" | "pictureFill" | "explosion"
+>;
+
+export interface AddScatterChartOptions extends CommonAddChartOptions {
+  type?: "scatter";
+  series?: AddScatterChartSeriesOptions[];
+  scatterStyle?: ScatterStyle;
+  dataLabels?: AddDataLabelsOptions;
+  showMarker?: boolean;
+  smooth?: boolean;
+}
+
+export type AddSurfaceChartSeriesOptions = Omit<
+  AddChartSeriesOptions,
+  "dataLabels" | "trendline" | "errorBars" | "marker" | "bubbleSize" | "bubble3D"
+>;
+
+export interface AddSurfaceChartOptions extends CommonAddChartOptions {
+  type?: "surface" | "surface3D";
+  series?: AddSurfaceChartSeriesOptions[];
+  wireframe?: boolean;
+  bandFormats?: AddChartOptions["bandFormats"];
 }
 
 /**
@@ -1721,6 +2250,14 @@ export interface AddComboChartOptions {
   displayBlanksAs?: DisplayBlanksAs;
   /** Style index */
   style?: number;
+  /** Modern chart style sidecar written to xl/charts/styleN.xml */
+  chartStyle?: ChartStyleModel;
+  /** Modern chart colors sidecar written to xl/charts/colorsN.xml */
+  chartColors?: ChartColorsModel;
+  /** Pivot table source for creating a classic pivot chart. */
+  pivotSource?: PivotChartSource;
+  /** Pivot chart field buttons, filters, and refresh metadata. */
+  pivotChartOptions?: PivotChartOptions;
   /** Plot visible cells only */
   plotVisOnly?: boolean;
   /** Show data labels over max */
@@ -1750,15 +2287,71 @@ export interface AddComboChartOptions {
   backWall?: ShapeProperties | AddShapeFillOptions;
 }
 
+/**
+ * High-level image source for {@link AddChartSeriesOptions.pictureFill}'s
+ * `image` field.
+ *
+ * The various shapes exist so callers don't have to marshal their native
+ * data just to fill a bar:
+ *
+ *   - `Uint8Array` — raw binary; extension is sniffed from magic bytes
+ *     (PNG / JPEG / GIF) with PNG as fallback.
+ *   - `string` — either a `data:image/<type>;base64,…` URL or a bare
+ *     base64 payload (extension inferred from the data URL prefix when
+ *     present, else PNG).
+ *   - `ChartPictureFillImageData` — structured object with explicit
+ *     `extension` + either buffer or base64.
+ *   - `{ workbookImageId: number }` — points at an image previously
+ *     registered via {@link Workbook.addImage}; no new media entry is
+ *     allocated, just a new chart rel.
+ */
+export type AddChartPictureFillImage =
+  | Uint8Array
+  | string
+  | ChartPictureFillImageData
+  | { workbookImageId: number };
+
+/**
+ * Structured variant of {@link AddChartPictureFillImage} that mirrors
+ * the worksheet `ImageData` shape but keeps this types module independent
+ * of the worksheet image types. The worksheet-side registration path
+ * accepts both shapes interchangeably.
+ */
+export interface ChartPictureFillImageData {
+  /** Image extension — used for media filename and content type. */
+  extension: "png" | "jpeg" | "gif";
+  /** Raw binary payload (preferred). */
+  buffer?: Uint8Array;
+  /** Bare base64 (no data: URL prefix). */
+  base64?: string;
+}
+
 export interface AddChartSeriesOptions {
   /** Series name or reference */
   name?: string | { formula: string };
-  /** Category values reference */
-  categories?: string;
+  /** Category values reference or structured category data source. */
+  categories?: string | AxisDataSource;
   /** Values reference */
   values: string;
-  /** X values for scatter/bubble */
-  xValues?: string;
+  /** X values for scatter/bubble. */
+  xValues?: string | AxisDataSource;
+  /**
+   * Semantic type of {@link xValues} — controls whether a `string`
+   * reference is wrapped as a `numRef` (default, matches OOXML scatter
+   * regular usage) or a `strRef` (text-categorical x axis, produces a
+   * cat axis even on a scatter chart).
+   *
+   * - `"number"` (default): `xValues` is a numeric range; Excel plots
+   *   `(x, y)` pairs.
+   * - `"text"`: `xValues` points at text cells; Excel treats them as
+   *   evenly-spaced categorical labels — useful when the natural x
+   *   dimension is names/dates-as-strings rather than measurements.
+   *
+   * Ignored when {@link xValues} is already a structured
+   * {@link AxisDataSource} (the caller has already picked strRef vs
+   * numRef explicitly).
+   */
+  xValueType?: "number" | "text";
   /** Bubble size for bubble charts */
   bubbleSize?: string;
   /** Fill color (hex, e.g. "#FF0000" or "FF0000") */
@@ -1789,8 +2382,33 @@ export interface AddChartSeriesOptions {
   bubble3D?: boolean;
   /** Picture fill options (bar charts only) */
   pictureFill?: {
-    /** Rel ID for a picture blip */
+    /**
+     * Rel ID for a pre-registered chart-part image relationship.
+     * Callers that already manage the image rel by hand can pass the
+     * existing `rId…` string here. Most callers should prefer
+     * {@link image} — the builder wires up the media entry, chart rel
+     * and correct r:id automatically.
+     */
     relationshipId?: string;
+    /**
+     * High-level image source: either a raw payload ({@link Buffer} /
+     * {@link Uint8Array} / base64 string), a structured
+     * `ImageData`-shaped object, or a `{ workbookImageId }` pointing at
+     * a previously registered {@link Workbook.addImage} result.
+     *
+     * When set, the worksheet-side `_registerChart` path stores the
+     * image in the workbook's media collection, allocates a new
+     * relationship on the chart part (`rIdN` — non-conflicting with
+     * style/colors rels), and populates {@link relationshipId}
+     * automatically. Subsequent writes emit the correct `<a:blipFill>`
+     * with the matching `r:embed` reference.
+     *
+     * `extension` is inferred from the buffer's magic bytes when not
+     * supplied; PNG / JPEG / GIF are recognised. Unknown binary data
+     * defaults to PNG — the caller can override by passing a structured
+     * `ImageData` with an explicit `extension`.
+     */
+    image?: AddChartPictureFillImage;
     /** How to stretch: stretch (whole bar) or stack (per unit) */
     fillMode?: "stretch" | "stack" | "stackScale";
     /** Picture scale (for stackScale) */
@@ -1852,6 +2470,20 @@ export interface AddDataLabelsOptions {
   txPr?: ChartTextProperties;
   /** Per-entry overrides (keyed by 0-based point index) */
   entries?: AddDataLabelEntryOptions[];
+  /**
+   * Excel 2013+ "Value From Cells". When set, each data label's text is
+   * read from the given worksheet range instead of the series/value.
+   *
+   * Accepts either a plain formula string (most common) or a structured
+   * {@link DataLabelsRange} for callers who want to pre-populate the
+   * cache. The builder wires the value up as the MS `c15:datalabelsRange`
+   * extension and generates placeholder per-point `<c:dLbl>` entries
+   * carrying the cached strings so viewers that don't understand the
+   * extension still show the right labels.
+   *
+   * Typical usage: `valueFromCells: "Sheet1!$C$2:$C$10"`.
+   */
+  valueFromCells?: string | DataLabelsRange;
 }
 
 /**

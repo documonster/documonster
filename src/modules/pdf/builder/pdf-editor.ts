@@ -42,6 +42,7 @@ import {
   decodePdfStringBytes
 } from "../reader/pdf-parser";
 import type { PdfDictValue, PdfObject, PdfRef } from "../reader/pdf-parser";
+import { alphaGsName } from "../render/page-renderer";
 import { PdfPageBuilder } from "./document-builder";
 import type {
   DrawTextOptions,
@@ -542,9 +543,18 @@ export class PdfEditor {
         writer.addStreamObject(overlayObjNum, new PdfDict(), editorPage._overlay._stream);
         allContentRefs.push(overlayObjNum);
 
-        // Build overlay-specific resources (fonts, images) as structured dict
+        // Build overlay-specific resources (fonts, images, ExtGState) as
+        // structured dict. ExtGState is required whenever the overlay
+        // page builder captured non-opaque colours via `_applyAlpha`;
+        // without it the emitted `gs` operators would reference
+        // undefined resources.
         const imageXObjectMap = this._writeOverlayImages(writer, editorPage._overlay);
-        const overlayDict = this._buildOverlayResourceDict(fontDictStr, imageXObjectMap);
+        const overlayDict = this._buildOverlayResourceDict(
+          writer,
+          editorPage._overlay,
+          fontDictStr,
+          imageXObjectMap
+        );
         overlayResourcesStr = serializeResourceDict(overlayDict);
       }
 
@@ -725,6 +735,25 @@ export class PdfEditor {
       const contentObjNum = writer.allocObject();
       writer.addStreamObject(contentObjNum, new PdfDict(), page._stream);
 
+      // Materialise the page's alpha ExtGState entries. The builder
+      // captured them via `_applyAlpha` while painting; without this
+      // block the `gs` operators in the content stream would reference
+      // undefined resources. Matches `document-builder.ts:1417-1430`.
+      let gsDictStr = "";
+      if (page._alphaValues.size > 0) {
+        const gsEntries: string[] = [];
+        for (const alpha of page._alphaValues) {
+          const gsObjNum = writer.allocObject();
+          const gsDict = new PdfDict()
+            .set("Type", "/ExtGState")
+            .set("ca", pdfNumber(alpha))
+            .set("CA", pdfNumber(alpha));
+          writer.addObject(gsObjNum, gsDict);
+          gsEntries.push(`/${alphaGsName(alpha)} ${pdfRef(gsObjNum)}`);
+        }
+        gsDictStr = `<< ${gsEntries.join(" ")} >>`;
+      }
+
       const resourcesObjNum = writer.allocObject();
       let resStr = "<< ";
       if (fontDictStr) {
@@ -732,6 +761,9 @@ export class PdfEditor {
       }
       if (xobjDictStr) {
         resStr += `/XObject ${xobjDictStr} `;
+      }
+      if (gsDictStr) {
+        resStr += `/ExtGState ${gsDictStr} `;
       }
       resStr += ">>";
       writer.addObject(resourcesObjNum, resStr);
@@ -1590,6 +1622,8 @@ export class PdfEditor {
 
   /** @internal - Build overlay resources as a structured PdfResourceDict. */
   private _buildOverlayResourceDict(
+    writer: PdfWriter,
+    overlay: PdfPageBuilder | undefined,
     fontDictStr: string,
     imageXObjectMap: Map<string, number>
   ): PdfResourceDict {
@@ -1614,6 +1648,26 @@ export class PdfEditor {
         xobjMap.set(name, pdfRef(objNum));
       }
       dict.set("XObject", xobjMap);
+    }
+
+    // Serialise `PdfPageBuilder._alphaValues` into an `/ExtGState` sub-dict.
+    // Previously this path only wrote `/Font` + `/XObject`, so any alpha
+    // emitted by `_applyAlpha` (e.g. a chart with filled radar / translucent
+    // area rendered via `drawChartPdf`) left the `gs` operator pointing at
+    // an undefined resource. The scheme matches `pdf-exporter.ts:377-389`
+    // and `document-builder.ts` so the three pipelines stay name-compatible.
+    if (overlay && overlay._alphaValues.size > 0) {
+      const gsMap = new Map<string, string>();
+      for (const alpha of overlay._alphaValues) {
+        const gsObjNum = writer.allocObject();
+        const gsDict = new PdfDict()
+          .set("Type", "/ExtGState")
+          .set("ca", pdfNumber(alpha))
+          .set("CA", pdfNumber(alpha));
+        writer.addObject(gsObjNum, gsDict);
+        gsMap.set(alphaGsName(alpha), pdfRef(gsObjNum));
+      }
+      dict.set("ExtGState", gsMap);
     }
 
     return dict;

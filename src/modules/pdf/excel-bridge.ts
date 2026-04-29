@@ -15,6 +15,14 @@
  * ```
  */
 
+import type { Chart, RegionMapDataOptions } from "@excel/chart";
+import {
+  canRenderChartExAsVectorPdf,
+  drawChartExPdf,
+  drawChartPdf,
+  renderChartExPng,
+  renderChartPng
+} from "@excel/chart";
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
 import type { Workbook } from "@excel/workbook";
@@ -22,6 +30,7 @@ import type { Worksheet } from "@excel/worksheet";
 import { tryInvokeFormulaEngine } from "@formula/host-registry";
 import { base64ToUint8Array } from "@utils/utils.base";
 
+import { PdfDocumentBuilder } from "./builder/document-builder";
 import { exportPdf } from "./render/pdf-exporter";
 import {
   PdfCellType,
@@ -73,6 +82,155 @@ export async function excelToPdf(
 
   const pdfWorkbook = excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);
+}
+
+/**
+ * Options for {@link chartToPdf}.
+ */
+export interface ChartToPdfOptions {
+  /** PDF page width in points. Default: max(chart width + 72, 400). */
+  pageWidth?: number;
+  /** PDF page height in points. Default: max(chart height + 72, 300). */
+  pageHeight?: number;
+  /** Chart render width in points. Default: 520. */
+  width?: number;
+  /** Chart render height in points. Default: 360. */
+  height?: number;
+  /**
+   * Left margin in points between the chart and the page edge. Default: 36.
+   * Used as top margin too so the chart sits in a 36-pt gutter.
+   */
+  margin?: number;
+  /**
+   * Force rasterisation even for classic charts. Default: `false`
+   * (classic charts render as vector PDF content; ChartEx always
+   * rasterises because there is no vector renderer — see the
+   * "ChartEx PDF" note in `src/modules/excel/README.md`).
+   */
+  forceRaster?: boolean;
+  /** PNG raster scale multiplier when rasterising. Default: 2 (for crisp text). */
+  rasterScale?: number;
+  /** Document metadata forwarded to the resulting PDF. */
+  title?: string;
+  author?: string;
+  /**
+   * ChartEx `regionMap` data. When supplied, the vector PDF path
+   * uses the TopoJSON polygons (matched via `match` rules) instead
+   * of the centroid preview. Ignored for non-regionMap layouts and
+   * when the chart rasterises. Mirrors `renderChartExSvg`'s
+   * `regionMap` option so a single caller-side object works for
+   * both backends.
+   */
+  regionMap?: RegionMapDataOptions;
+}
+
+/**
+ * Render a single {@link Chart} to a standalone one-page PDF.
+ *
+ * The output is a **zero-dependency deterministic preview**, not an
+ * Excel-pixel-perfect rendering. Use this for server-side reports,
+ * thumbnails, and CI artefacts where the goal is a recognisable chart
+ * without a headless Office dependency. When pixel-identical output
+ * matters (publication-grade reports, Excel/LibreOffice-compatible
+ * formatting), round-trip the `.xlsx` through
+ * `soffice --convert-to pdf` — the byte-preserving round-trip in this
+ * library makes that a safe handoff. See `src/modules/excel/README.md`
+ * → "Rendering scope" for the complete boundary list.
+ *
+ * Classic charts take the **vector** path: the chart is drawn directly
+ * onto the page via `drawChartPdf`, so text stays selectable and shapes
+ * remain resolution-independent. ChartEx charts take the **raster**
+ * path: they are rendered to PNG through the SVG pipeline and embedded
+ * as an image XObject, because the library intentionally does not ship
+ * a vector `drawChartExPdf` (see README "ChartEx PDF note"). The raster
+ * path is also available for classic charts via `forceRaster: true` for
+ * cases where pixel-level fidelity with the SVG/PNG preview matters
+ * more than selectable text.
+ *
+ * Lives in `excel-bridge.ts` because invoking the PDF builder from the
+ * chart module would cross the Layer 4 → Layer 5 import boundary
+ * documented in `AGENTS.md`. Consumers import it from
+ * `@cj-tech-master/excelts/pdf` alongside `excelToPdf`.
+ */
+export async function chartToPdf(
+  chart: Chart,
+  options: ChartToPdfOptions = {}
+): Promise<Uint8Array> {
+  const width = options.width ?? 520;
+  const height = options.height ?? 360;
+  const margin = options.margin ?? 36;
+  const pageWidth = options.pageWidth ?? Math.max(width + margin * 2, 400);
+  const pageHeight = options.pageHeight ?? Math.max(height + margin * 2, 300);
+
+  const doc = new PdfDocumentBuilder();
+  if (options.title || options.author) {
+    doc.setMetadata({
+      title: options.title,
+      author: options.author
+    });
+  }
+  const page = doc.addPage({ width: pageWidth, height: pageHeight });
+
+  const isChartEx = chart.chartExModel !== undefined;
+  // ChartEx charts whose every series has a layoutId the renderer
+  // can express as PDF geometry (currently sunburst + treemap) take
+  // the vector route alongside classic charts. Anything else — or
+  // any chart the caller explicitly asks to rasterise via
+  // `forceRaster` — falls through to the SVG → PNG → image-XObject
+  // pipeline.
+  const chartExModel = chart.chartExModel;
+  const chartExVectorable =
+    isChartEx && chartExModel !== undefined && canRenderChartExAsVectorPdf(chartExModel);
+  const useRaster = options.forceRaster === true || (isChartEx && !chartExVectorable);
+
+  if (!useRaster) {
+    if (isChartEx && chartExModel !== undefined) {
+      drawChartExPdf(
+        page,
+        chartExModel,
+        {
+          x: margin,
+          y: pageHeight - margin - height,
+          width,
+          height
+        },
+        { title: options.title, regionMap: options.regionMap }
+      );
+      return doc.build();
+    }
+    // Vector path for classic charts.
+    const model = chart.chartModel;
+    if (!model) {
+      throw new Error(
+        "chartToPdf: Chart has neither a classic model nor a ChartEx model to render"
+      );
+    }
+    drawChartPdf(page, model, {
+      x: margin,
+      y: pageHeight - margin - height,
+      width,
+      height
+    });
+    return doc.build();
+  }
+
+  // Raster path: produce a PNG, then embed it on the page. Uses scale
+  // 2× by default so the PDF viewer shows crisp text even when zoomed
+  // into a 150 % magnification. Callers who need larger prints can
+  // bump `rasterScale`; anything above 4 rapidly grows the PDF size.
+  const scale = options.rasterScale ?? 2;
+  const pngBytes = isChartEx
+    ? await renderChartExPng(chart.chartExModel!, { width, height, scale })
+    : await renderChartPng(chart.chartModel!, { width, height, scale });
+  page.drawImage({
+    data: pngBytes,
+    format: "png",
+    x: margin,
+    y: pageHeight - margin - height,
+    width,
+    height
+  });
+  return doc.build();
 }
 
 /**

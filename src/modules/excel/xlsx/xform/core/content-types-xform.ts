@@ -6,9 +6,12 @@ import {
   drawingPath,
   externalLinkPath,
   chartPath,
+  chartUserShapesPath,
   chartExPath,
   chartStylePath,
   chartColorsPath,
+  chartExStylePath,
+  chartExColorsPath,
   pivotCacheDefinitionPath,
   pivotCacheRecordsPath,
   pivotTablePath,
@@ -171,11 +174,22 @@ class ContentTypesXform extends BaseXform {
     }
 
     if (model.chartEntries) {
-      for (const [n, _entry] of Object.entries(model.chartEntries)) {
+      for (const [n, entry] of Object.entries(model.chartEntries) as Array<
+        [string, { userShapesXml?: Uint8Array }]
+      >) {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(chartPath(n)),
           ContentType: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
         });
+        if (entry?.userShapesXml) {
+          // `c:userShapes` overlay drawings use the same DrawingML
+          // content type as worksheet drawings — Excel distinguishes
+          // them via the relationship type, not the content-type.
+          xmlStream.leafNode("Override", {
+            PartName: toContentTypesPartName(chartUserShapesPath(n)),
+            ContentType: "application/vnd.openxmlformats-officedocument.drawing+xml"
+          });
+        }
       }
     }
 
@@ -217,6 +231,22 @@ class ContentTypesXform extends BaseXform {
         });
       }
     }
+    if (model.chartExStyles) {
+      for (const n of Object.keys(model.chartExStyles)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartExStylePath(n)),
+          ContentType: "application/vnd.ms-office.chartstyle+xml"
+        });
+      }
+    }
+    if (model.chartExColors) {
+      for (const n of Object.keys(model.chartExColors)) {
+        xmlStream.leafNode("Override", {
+          PartName: toContentTypesPartName(chartExColorsPath(n)),
+          ContentType: "application/vnd.ms-office.chartcolorstyle+xml"
+        });
+      }
+    }
 
     // VML extension is needed for comments, form controls, or header watermarks
     const hasComments = model.commentRefs && model.commentRefs.length > 0;
@@ -245,6 +275,54 @@ class ContentTypesXform extends BaseXform {
           ContentType: "application/vnd.ms-excel.controlproperties+xml"
         });
       }
+    }
+
+    // Office 365 threaded comments: each worksheet that has them gets
+    // its own override, and the workbook-level person directory gets
+    // one more. Writers populate `model.threadedCommentSheetIds` with
+    // the worksheet ids that need parts; absent entry means no
+    // threaded comments on that sheet.
+    const threadedCommentSheetIds: Array<number | string> = model.threadedCommentSheetIds ?? [];
+    for (const sheetId of threadedCommentSheetIds) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(`xl/threadedComments/threadedComment${sheetId}.xml`),
+        ContentType: "application/vnd.ms-excel.threadedcomments+xml"
+      });
+    }
+    if (model.hasPersons) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName("xl/persons/person.xml"),
+        ContentType: "application/vnd.ms-excel.person+xml"
+      });
+    }
+
+    // Raw-passthrough parts for slicers / timelines. The path lists
+    // were populated in `prepareModel` from the workbook's captured
+    // raw parts. Content type URIs come from MS-XLSX §2.1.32 and the
+    // 2011 timeline extension addendum.
+    for (const path of model.slicerPartPaths ?? []) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(path),
+        ContentType: "application/vnd.ms-excel.slicer+xml"
+      });
+    }
+    for (const path of model.slicerCachePartPaths ?? []) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(path),
+        ContentType: "application/vnd.ms-excel.slicerCache+xml"
+      });
+    }
+    for (const path of model.timelinePartPaths ?? []) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(path),
+        ContentType: "application/vnd.ms-excel.timeline+xml"
+      });
+    }
+    for (const path of model.timelineCachePartPaths ?? []) {
+      xmlStream.leafNode("Override", {
+        PartName: toContentTypesPartName(path),
+        ContentType: "application/vnd.ms-excel.timelineCache+xml"
+      });
     }
 
     xmlStream.leafNode("Override", {

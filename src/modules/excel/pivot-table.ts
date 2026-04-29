@@ -1,3 +1,4 @@
+import type { PivotChartOptions } from "@excel/chart/types";
 import { PivotTableError } from "@excel/errors";
 import type { Table } from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
@@ -232,10 +233,28 @@ export interface DataField {
 }
 
 /**
+ * A pivot table chart format entry used by pivot charts.
+ */
+export interface PivotTableChartFormat {
+  /** Chart index within the pivot chart formatting collection. */
+  chart: number;
+  /** Format ID referenced by c:pivotSource/c:fmtId. */
+  format: number;
+  /** Whether this format applies to a series. */
+  series?: boolean;
+  /** Preserved or generated pivotArea XML. */
+  pivotAreaXml?: string;
+}
+
+/**
  * Internal pivot table representation used by the library.
  * This is the processed model after calling makePivotTable().
  */
 export interface PivotTable {
+  /** Pivot table display name, defaults to `PivotTable${tableNumber}` for new tables. */
+  name?: string;
+  /** Worksheet containing the pivot table. */
+  worksheetName?: string;
   /** Source data adapter (always present for new pivot tables) */
   source?: PivotTableSource;
   /** Field indices for row fields */
@@ -268,6 +287,12 @@ export interface PivotTable {
   cacheDefinition?: ParsedCacheDefinition;
   /** Cache records for loaded pivot tables */
   cacheRecords?: ParsedCacheRecords;
+  /** Root chartFormat attribute used by pivot charts. */
+  chartFormat?: number;
+  /** Chart format entries used by pivot charts. */
+  chartFormats?: PivotTableChartFormat[];
+  /** Structured pivot chart metadata attached by addPivotChart/addPivotChartsheet. */
+  pivotChartOptions?: PivotChartOptions;
 }
 
 /**
@@ -461,7 +486,7 @@ function resolveValueMetric(v: string | PivotTableValue): PivotTableSubtotal | u
 }
 
 function makePivotTable(
-  worksheet: { workbook: { pivotTables: PivotTable[] } },
+  worksheet: { workbook: { pivotTables: PivotTable[] }; name: string },
   model: PivotTableModel
 ): PivotTable {
   // Resolve source (validates exactly one source is provided)
@@ -518,6 +543,8 @@ function makePivotTable(
 
   // form pivot table object
   return {
+    name: `PivotTable${tableNumber}`,
+    worksheetName: worksheet.name,
     source,
     rows: rowIndices,
     columns: columnIndices,

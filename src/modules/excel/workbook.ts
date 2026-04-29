@@ -139,3 +139,9 @@ export type {
   ExternalLinkModel,
   ExternalLinkCachedSheet
 } from "@excel/workbook.browser";
+export type {
+  AddChartsheetOptions,
+  AddPivotChartsheetOptions,
+  ChartsheetOptions,
+  ChartsheetViewOptions
+} from "@excel/chartsheet";

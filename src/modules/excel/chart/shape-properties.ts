@@ -19,10 +19,15 @@ import type {
   ChartColor,
   ChartFill,
   ChartLine,
+  CustomGeometry,
+  CustomGeometryCommand,
+  CustomGeometryPath,
   EffectList,
+  PresetGeometry,
   Shadow,
   Scene3D,
   ShapeProperties3D,
+  ShapeTransform,
   Bevel
 } from "./types";
 
@@ -316,12 +321,230 @@ export function parseSpPr(spPr: ShapeProperties): ShapeProperties {
     }
   }
 
+  // Transform (`a:xfrm`) — position, size, rotation, flips. The regex
+  // approach is a deliberate trade-off: a full XML walk would be more
+  // robust but also ~4x the code for a field Excel writes in a very
+  // constrained shape. If Excel ever nests `a:xfrm` with variants the
+  // round-trip raw-XML path still carries them.
+  if (rawXml.includes("<a:xfrm")) {
+    const transform = parseXfrm(rawXml);
+    if (transform) {
+      result.transform = transform;
+    }
+  }
+
+  if (rawXml.includes("<a:prstGeom")) {
+    const prst = parsePrstGeom(rawXml);
+    if (prst) {
+      result.presetGeometry = prst;
+    }
+  }
+
+  if (rawXml.includes("<a:custGeom")) {
+    const cust = parseCustGeom(rawXml);
+    if (cust) {
+      result.customGeometry = cust;
+    }
+  }
+
   return result;
 }
 
 // ============================================================================
 // Effect list parsing
 // ============================================================================
+
+// ============================================================================
+
+/**
+ * Parse a single `<a:xfrm>` element out of the shape-properties raw
+ * XML blob. Returns `undefined` when the element is absent so callers
+ * can simply drop the result into a structural field.
+ *
+ * Shape: `<a:xfrm rot="…" flipH="1" flipV="1"><a:off x="…" y="…"/><a:ext cx="…" cy="…"/></a:xfrm>`.
+ * All five attributes and both children are optional; Excel omits
+ * `a:off`/`a:ext` when a shape inherits its parent's automatic
+ * layout.
+ */
+function parseXfrm(xml: string): ShapeTransform | undefined {
+  const match = /<a:xfrm\b([^>]*)(?:\/>|>([\s\S]*?)<\/a:xfrm>)/.exec(xml);
+  if (!match) {
+    return undefined;
+  }
+  const attrs = match[1] ?? "";
+  const inner = match[2] ?? "";
+  const result: ShapeTransform = {};
+  const rotAttr = /\brot="(-?\d+)"/.exec(attrs);
+  if (rotAttr) {
+    result.rotation = parseInt(rotAttr[1], 10);
+  }
+  if (/\bflipH="1"/.test(attrs)) {
+    result.flipHorizontal = true;
+  }
+  if (/\bflipV="1"/.test(attrs)) {
+    result.flipVertical = true;
+  }
+  const off = /<a:off\b([^/>]*)\/>/.exec(inner);
+  if (off) {
+    const x = /\bx="(-?\d+)"/.exec(off[1]);
+    const y = /\by="(-?\d+)"/.exec(off[1]);
+    if (x) {
+      result.offsetX = parseInt(x[1], 10);
+    }
+    if (y) {
+      result.offsetY = parseInt(y[1], 10);
+    }
+  }
+  const ext = /<a:ext\b([^/>]*)\/>/.exec(inner);
+  if (ext) {
+    const cx = /\bcx="(\d+)"/.exec(ext[1]);
+    const cy = /\bcy="(\d+)"/.exec(ext[1]);
+    if (cx) {
+      result.width = parseInt(cx[1], 10);
+    }
+    if (cy) {
+      result.height = parseInt(cy[1], 10);
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Parse `<a:prstGeom prst="…"><a:avLst>…</a:avLst></a:prstGeom>`.
+ * The `preset` name is mandatory; `adjustments` come from the
+ * optional `<a:avLst>` container whose children are `<a:gd name fmla>`
+ * triples. We read the raw `fmla` strings because they're a small
+ * OOXML sub-language (`"val 10000"` etc.) that callers rarely edit
+ * and would need a dedicated parser to structure further.
+ */
+function parsePrstGeom(xml: string): PresetGeometry | undefined {
+  const match = /<a:prstGeom\b([^>]*)(?:\/>|>([\s\S]*?)<\/a:prstGeom>)/.exec(xml);
+  if (!match) {
+    return undefined;
+  }
+  const attrs = match[1] ?? "";
+  const inner = match[2] ?? "";
+  const prstMatch = /\bprst="([^"]+)"/.exec(attrs);
+  if (!prstMatch) {
+    return undefined;
+  }
+  const result: PresetGeometry = { preset: prstMatch[1] };
+  const adjustments = parseAdjustmentList(inner);
+  if (adjustments.length > 0) {
+    result.adjustments = adjustments;
+  }
+  return result;
+}
+
+/**
+ * Parse `<a:custGeom>` into a {@link CustomGeometry}. The path-data
+ * parser is the focal effort: `<a:pathLst><a:path w h fill stroke>…</a:path></a:pathLst>`
+ * children enumerate moveTo / lnTo / arcTo / cubicBezTo / quadBezTo /
+ * close commands in OOXML's drawing-language flavour.
+ */
+function parseCustGeom(xml: string): CustomGeometry | undefined {
+  const match = /<a:custGeom\b[^>]*>([\s\S]*?)<\/a:custGeom>/.exec(xml);
+  if (!match) {
+    return undefined;
+  }
+  const body = match[1];
+  const result: CustomGeometry = {};
+  const adjustments = parseAdjustmentList(body);
+  if (adjustments.length > 0) {
+    result.adjustments = adjustments;
+  }
+  const paths: CustomGeometryPath[] = [];
+  const pathRe = /<a:path\b([^>]*)>([\s\S]*?)<\/a:path>/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = pathRe.exec(body)) !== null) {
+    const pAttrs = pm[1] ?? "";
+    const pBody = pm[2] ?? "";
+    const path: CustomGeometryPath = { commands: [] };
+    const wMatch = /\bw="(\d+)"/.exec(pAttrs);
+    const hMatch = /\bh="(\d+)"/.exec(pAttrs);
+    if (wMatch) {
+      path.w = parseInt(wMatch[1], 10);
+    }
+    if (hMatch) {
+      path.h = parseInt(hMatch[1], 10);
+    }
+    const fillMatch = /\bfill="([^"]+)"/.exec(pAttrs);
+    if (fillMatch) {
+      path.fill = fillMatch[1] as CustomGeometryPath["fill"];
+    }
+    if (/\bstroke="1"/.test(pAttrs)) {
+      path.stroke = true;
+    } else if (/\bstroke="0"/.test(pAttrs)) {
+      path.stroke = false;
+    }
+    path.commands = parseCustGeomCommands(pBody);
+    paths.push(path);
+  }
+  if (paths.length > 0) {
+    result.paths = paths;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function parseAdjustmentList(xml: string): Array<{ name: string; fmla: string }> {
+  const avMatch = /<a:avLst\b[^>]*>([\s\S]*?)<\/a:avLst>/.exec(xml);
+  if (!avMatch) {
+    return [];
+  }
+  const out: Array<{ name: string; fmla: string }> = [];
+  const gdRe = /<a:gd\b[^>]*\bname="([^"]+)"[^>]*\bfmla="([^"]+)"[^>]*\/>/g;
+  let m: RegExpExecArray | null;
+  while ((m = gdRe.exec(avMatch[1])) !== null) {
+    out.push({ name: m[1], fmla: m[2] });
+  }
+  return out;
+}
+
+function parseCustGeomCommands(body: string): CustomGeometryCommand[] {
+  const commands: CustomGeometryCommand[] = [];
+  // Walk commands in order — each `<a:moveTo>`/`<a:lnTo>`/… carries
+  // one or two `<a:pt x y>` children; `<a:arcTo>` carries explicit
+  // attributes instead. A greedy regex + lookahead captures the
+  // command block including the closing tag.
+  const cmdRe =
+    /<a:(moveTo|lnTo|cubicBezTo|quadBezTo|arcTo|close)\b([^/>]*)(?:\/>|>([\s\S]*?)<\/a:\1>)/g;
+  let cm: RegExpExecArray | null;
+  while ((cm = cmdRe.exec(body)) !== null) {
+    const kind = cm[1] as CustomGeometryCommand["type"];
+    const cmdAttrs = cm[2] ?? "";
+    const cmdBody = cm[3] ?? "";
+    if (kind === "close") {
+      commands.push({ type: "close" });
+      continue;
+    }
+    if (kind === "arcTo") {
+      const wR = /\bwR="(-?\d+)"/.exec(cmdAttrs)?.[1];
+      const hR = /\bhR="(-?\d+)"/.exec(cmdAttrs)?.[1];
+      const stAng = /\bstAng="(-?\d+)"/.exec(cmdAttrs)?.[1];
+      const swAng = /\bswAng="(-?\d+)"/.exec(cmdAttrs)?.[1];
+      if (wR && hR && stAng && swAng) {
+        commands.push({
+          type: "arcTo",
+          arcParams: {
+            wR: parseInt(wR, 10),
+            hR: parseInt(hR, 10),
+            stAng: parseInt(stAng, 10),
+            swAng: parseInt(swAng, 10)
+          }
+        });
+      }
+      continue;
+    }
+    const points: Array<{ x: number; y: number }> = [];
+    const ptRe = /<a:pt\b[^>]*\bx="(-?\d+)"\s+y="(-?\d+)"[^/>]*\/>/g;
+    let pt: RegExpExecArray | null;
+    while ((pt = ptRe.exec(cmdBody)) !== null) {
+      points.push({ x: parseInt(pt[1], 10), y: parseInt(pt[2], 10) });
+    }
+    commands.push({ type: kind, points });
+  }
+  return commands;
+}
 
 function parseEffectList(xml: string): EffectList | undefined {
   const effStart = xml.indexOf("<a:effectLst");
@@ -716,6 +939,33 @@ export function getTxPrFontSize(txPr: ChartTextProperties): number | undefined {
 export function getTxPrColor(txPr: ChartTextProperties): ChartColor | undefined {
   const parsed = isRawXml(txPr) ? parseTxPr(txPr) : txPr;
   return parsed.color;
+}
+
+/**
+ * Get the font family (typeface) declared on `<a:latin>` / `<a:cs>`
+ * within a `txPr` raw or structured object. Returns `undefined` if the
+ * properties do not carry a typeface, in which case renderers should
+ * use their own default.
+ */
+export function getTxPrFontFamily(txPr: ChartTextProperties): string | undefined {
+  const parsed = isRawXml(txPr) ? parseTxPr(txPr) : txPr;
+  return parsed.fontFamily;
+}
+
+/**
+ * Get the boolean bold flag from a `txPr`'s first `a:defRPr`/`a:rPr`.
+ */
+export function getTxPrBold(txPr: ChartTextProperties): boolean | undefined {
+  const parsed = isRawXml(txPr) ? parseTxPr(txPr) : txPr;
+  return parsed.bold;
+}
+
+/**
+ * Get the boolean italic flag from a `txPr`'s first `a:defRPr`/`a:rPr`.
+ */
+export function getTxPrItalic(txPr: ChartTextProperties): boolean | undefined {
+  const parsed = isRawXml(txPr) ? parseTxPr(txPr) : txPr;
+  return parsed.italic;
 }
 
 // ============================================================================

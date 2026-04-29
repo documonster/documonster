@@ -75,7 +75,10 @@ import type {
   Scene3D,
   ShapeProperties3D,
   PrintSettings,
+  PivotChartOptions,
   PivotFormat,
+  DataLabelsRange,
+  ChartBlipFill,
   UpDownBars,
   DisplayUnits,
   LegendEntry,
@@ -207,6 +210,178 @@ const CHART_TYPE_TAGS = new Set([
 // Axis element tags
 const AXIS_TAGS = new Set(["c:catAx", "c:valAx", "c:dateAx", "c:serAx"]);
 
+// MS Office 2010 pivot chart options extension — ECMA-376 MS-XLSX §2.3.11.
+// The URI is a literal GUID-ish identifier Excel looks for when routing the
+// `<c:ext>` element back to the `c14:pivotOptions` parser. Confirmed by
+// inspecting Excel-authored xlsx test fixtures
+// (`src/modules/excel/__tests__/data/chart-pivot-sample.xlsx`) — Excel 2019
+// emits this exact GUID.
+const C14_PIVOT_OPTIONS_EXT_URI = "{781A3756-C4B2-4CAC-9D66-4F8BD8637D16}";
+const C14_CHART_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2007/8/2/chart";
+// Office 2014 pivot chart options16 extension — sibling to c14:pivotOptions.
+// URI confirmed from an Excel-authored pivot chart sample.
+const C16_PIVOT_OPTIONS16_EXT_URI = "{E28EC0CA-F0BB-4C9C-879D-F8772B89E7AC}";
+const C16_CHART_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2014/chart";
+// Excel 2013+ "Value From Cells" / dataLabelsRange extension. The URI is
+// fixed by the MS schema and appears verbatim in every Excel-authored
+// file that uses the feature (see `tmp/pivot-sample/xl/charts/chart1.xml`).
+const C15_DATA_LABELS_RANGE_EXT_URI = "{CE6537A1-D6FC-4f65-9D91-7224C49458BB}";
+const C15_CHART_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2012/chart";
+
+/**
+ * Escape text content for safe XML embedding. Mirrors the implementation
+ * used by chart-builder / chart-ex-renderer so emitted XML is consistent
+ * across all writer paths.
+ */
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Parse the contents of a `<c:ext uri="{781A…}">` element that wraps a
+ * `<c14:pivotOptions>` child into a structured {@link PivotChartOptions}.
+ *
+ * Accepts the full `<c:ext …>…</c:ext>` string (including the outer
+ * wrapper). Returns `undefined` when the wrapper does not contain a
+ * `c14:pivotOptions` element (defensive — the caller already matched the
+ * URI, so this should never happen for well-formed Excel output).
+ *
+ * Boolean children use OOXML `CT_BooleanFalse` semantics: the `val`
+ * attribute is `"0"` / `"1"` / `"true"` / `"false"`; absence of the
+ * attribute defaults to `true`. Missing child elements themselves remain
+ * undefined in the structured model, not `false`, so the writer does not
+ * have to re-emit noise for fields Excel didn't originally include.
+ */
+function parseC14PivotOptions(extXml: string): PivotChartOptions | undefined {
+  const pivotMatch = /<c14:pivotOptions\b[^>]*>([\s\S]*?)<\/c14:pivotOptions>/.exec(extXml);
+  if (!pivotMatch) {
+    return undefined;
+  }
+  const body = pivotMatch[1];
+  const readBool = (tag: string): boolean | undefined => {
+    const re = new RegExp(`<c14:${tag}\\b([^/>]*)(?:/>|>\\s*</c14:${tag}>)`, "i");
+    const m = re.exec(body);
+    if (!m) {
+      return undefined;
+    }
+    const valMatch = /\bval\s*=\s*"([^"]*)"/.exec(m[1]);
+    // CT_BooleanFalse default is true when @val is omitted.
+    if (!valMatch) {
+      return true;
+    }
+    return valMatch[1] === "1" || valMatch[1].toLowerCase() === "true";
+  };
+  const options: PivotChartOptions = {};
+  const f = readBool("dropZoneFilter");
+  if (f !== undefined) {
+    options.dropZoneFilter = f;
+  }
+  const c = readBool("dropZoneCategories");
+  if (c !== undefined) {
+    options.dropZoneCategories = c;
+  }
+  const d = readBool("dropZoneData");
+  if (d !== undefined) {
+    options.dropZoneData = d;
+  }
+  const s = readBool("dropZoneSeries");
+  if (s !== undefined) {
+    options.dropZoneSeries = s;
+  }
+  const v = readBool("dropZonesVisible");
+  if (v !== undefined) {
+    options.dropZonesVisible = v;
+  }
+  // `refreshOnOpen` is not a child of c14:pivotOptions — it lives on the
+  // PivotCacheDefinition part. Leaving it undefined here lets the caller
+  // merge it from the cache side if needed.
+  return Object.keys(options).length > 0 ? options : undefined;
+}
+
+/**
+ * Parse the Office 2014+ `c16:pivotOptions16` extension into a
+ * structured {@link PivotChartOptions} slice. Currently captures the
+ * `showExpandCollapseFieldButtons` flag only — the extension has room
+ * for more fields but this is the only one Excel emits in our sample
+ * corpus.
+ */
+function parseC16PivotOptions16(extXml: string): PivotChartOptions | undefined {
+  const match = /<c16:pivotOptions16\b[^>]*>([\s\S]*?)<\/c16:pivotOptions16>/.exec(extXml);
+  if (!match) {
+    return undefined;
+  }
+  const body = match[1];
+  const toggleMatch = /<c16:showExpandCollapseFieldButtons\b[^/]*\bval\s*=\s*"([^"]*)"/i.exec(body);
+  if (!toggleMatch) {
+    return undefined;
+  }
+  const v = toggleMatch[1];
+  return { showExpandCollapseFieldButtons: v === "1" || v.toLowerCase() === "true" };
+}
+
+/**
+ * Parse the contents of a `<c:ext uri="{CE6537A1…}">` wrapper around a
+ * `<c15:datalabelsRange>` child into a structured {@link DataLabelsRange}.
+ * Accepts the full wrapper string (including the outer `<c:ext>` tag).
+ *
+ * Shape expected (matches real Excel output, see
+ * `tmp/pivot-sample/xl/charts/chart1.xml`):
+ *
+ * ```xml
+ * <c:ext uri="{CE6537A1-D6FC-4f65-9D91-7224C49458BB}" xmlns:c15="…">
+ *   <c15:datalabelsRange>
+ *     <c15:f>Sheet1!$A$1:$A$5</c15:f>
+ *     <c15:dlblRangeCache>
+ *       <c15:ptCount val="5"/>
+ *       <c15:pt idx="0"><c15:v>Label 1</c15:v></c15:pt>
+ *       …
+ *     </c15:dlblRangeCache>
+ *   </c15:datalabelsRange>
+ * </c:ext>
+ * ```
+ */
+function parseC15DataLabelsRange(extXml: string): DataLabelsRange | undefined {
+  const rangeMatch = /<c15:datalabelsRange\b[^>]*>([\s\S]*?)<\/c15:datalabelsRange>/.exec(extXml);
+  if (!rangeMatch) {
+    return undefined;
+  }
+  const body = rangeMatch[1];
+  const fMatch = /<c15:f\b[^>]*>([\s\S]*?)<\/c15:f>/.exec(body);
+  if (!fMatch) {
+    return undefined;
+  }
+  const result: DataLabelsRange = { formula: decodeXmlText(fMatch[1]) };
+
+  const cacheMatch = /<c15:dlblRangeCache\b[^>]*>([\s\S]*?)<\/c15:dlblRangeCache>/.exec(body);
+  if (cacheMatch) {
+    const cacheBody = cacheMatch[1];
+    const ptCountMatch = /<c15:ptCount\b[^>]*\bval\s*=\s*"(\d+)"/.exec(cacheBody);
+    const pts: Array<{ index: number; value: string }> = [];
+    const ptRe =
+      /<c15:pt\b[^>]*\bidx\s*=\s*"(\d+)"[^>]*>\s*<c15:v>([\s\S]*?)<\/c15:v>\s*<\/c15:pt>/g;
+    let m: RegExpExecArray | null;
+    while ((m = ptRe.exec(cacheBody)) !== null) {
+      pts.push({ index: parseInt(m[1], 10), value: decodeXmlText(m[2]) });
+    }
+    if (pts.length > 0 || ptCountMatch) {
+      result.cache = {
+        pointCount: ptCountMatch ? parseInt(ptCountMatch[1], 10) : undefined,
+        points: pts
+      };
+    }
+  }
+  return result;
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 // ============================================================================
 // ChartSpaceXform
 // ============================================================================
@@ -321,6 +496,13 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (m.clrMapOvr) {
       xmlStream.writeRaw(m.clrMapOvr);
     }
+    // `<c:userShapes r:id="…"/>` — optional reference to a separate
+    // drawing part holding user-drawn annotations on the chart. The
+    // part itself rides along via the chart rels; here we emit the
+    // reference so Excel knows where to find it.
+    if (m.userShapesRelId) {
+      xmlStream.leafNode("c:userShapes", { "r:id": m.userShapesRelId });
+    }
     if (m.spPr) {
       this._renderSpPr(xmlStream, m.spPr);
     }
@@ -337,11 +519,137 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       }
       xmlStream.closeNode();
     }
-    if (m.extLst) {
-      xmlStream.writeRaw(m.extLst);
+    if (m.extLst || m.pivotOptions) {
+      this._renderChartSpaceExtLst(xmlStream, m);
     }
 
     xmlStream.closeNode();
+  }
+
+  /**
+   * Render the chart-space-level `<c:extLst>` element, merging the raw XML
+   * captured at parse time (`m.extLst`) with any structured pivot chart
+   * metadata (`m.pivotOptions`).
+   *
+   * The two inputs live side by side for good reason:
+   *   - `m.extLst` holds extensions we do not structurally understand
+   *     (c15 filtered series, c16r2 markup, c16r5 axis-title rich text…).
+   *     These are byte-preserved verbatim for round-trip safety.
+   *   - `m.pivotOptions` is the structured view of the MS Office 2010+
+   *     `c14:pivotOptions` extension. The parser extracts it out of the
+   *     raw extLst precisely so editors can read/mutate it programmatically
+   *     without string surgery.
+   *
+   * Merge strategy: if `m.extLst` is present, splice the new c14 ext
+   * element before its closing `</c:extLst>`; otherwise create a fresh
+   * `<c:extLst>` wrapper containing just the c14 ext.
+   */
+  private _renderChartSpaceExtLst(xml: XmlSink, m: ChartModel): void {
+    // Combine every chartSpace-level extension we know how to emit. Each
+    // piece is optional; we only emit a `<c:extLst>` wrapper when at
+    // least one piece is present.
+    const extPieces: string[] = [];
+    if (m.pivotSource && m.pivotOptions) {
+      const c14 = this._buildC14PivotOptionsExt(m.pivotOptions);
+      if (c14) {
+        extPieces.push(c14);
+      }
+      const c16 = this._buildC16PivotOptions16Ext(m.pivotOptions);
+      if (c16) {
+        extPieces.push(c16);
+      }
+    }
+    const extraExt = extPieces.join("");
+    if (m.extLst) {
+      if (!extraExt) {
+        xml.writeRaw(m.extLst);
+        return;
+      }
+      // Splice the new ext(s) before `</c:extLst>`. We look for the
+      // closing tag; the raw XML was produced by our own parser which
+      // always emits a closing tag on its own.
+      const close = m.extLst.lastIndexOf("</c:extLst");
+      if (close >= 0) {
+        xml.writeRaw(m.extLst.slice(0, close) + extraExt + m.extLst.slice(close));
+      } else {
+        // Malformed raw extLst (shouldn't happen from our parser) — emit
+        // both independently so we don't lose information.
+        xml.writeRaw(m.extLst);
+        xml.writeRaw(`<c:extLst>${extraExt}</c:extLst>`);
+      }
+    } else if (extraExt) {
+      xml.writeRaw(`<c:extLst>${extraExt}</c:extLst>`);
+    }
+  }
+
+  /**
+   * Serialise the Office 2014+ `c16:pivotOptions16` extension
+   * (`c:chartSpace/c:extLst/c:ext[uri={E28EC0CA-…}]`). Only the
+   * `showExpandCollapseFieldButtons` toggle is modelled here — Excel
+   * adds this block alongside {@link _buildC14PivotOptionsExt} to
+   * control the newer expand/collapse field-button affordances.
+   *
+   * Returns `""` when nothing needs to be written so the caller can
+   * omit the extension entirely.
+   */
+  private _buildC16PivotOptions16Ext(options: PivotChartOptions): string {
+    if (options.showExpandCollapseFieldButtons === undefined) {
+      return "";
+    }
+    return (
+      `<c:ext uri="${C16_PIVOT_OPTIONS16_EXT_URI}" xmlns:c16="${C16_CHART_NAMESPACE}">` +
+      `<c16:pivotOptions16>` +
+      `<c16:showExpandCollapseFieldButtons val="${
+        options.showExpandCollapseFieldButtons ? "1" : "0"
+      }"/>` +
+      `</c16:pivotOptions16>` +
+      `</c:ext>`
+    );
+  }
+
+  /**
+   * Serialise a {@link PivotChartOptions} as the `c:ext` wrapper Excel
+   * expects:
+   *
+   * ```xml
+   * <c:ext uri="{…}" xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart">
+   *   <c14:pivotOptions>
+   *     <c14:dropZoneFilter val="0"/>
+   *     …
+   *   </c14:pivotOptions>
+   * </c:ext>
+   * ```
+   *
+   * The `uri` attribute is the well-known identifier for the c14 pivot
+   * options extension (see MS-XLSX §2.3.11). Excel 2010+ uses this URI as
+   * the key when deciding whether to honour the extension.
+   */
+  private _buildC14PivotOptionsExt(options: PivotChartOptions): string {
+    const children: string[] = [];
+    // MS-XLSX schema order: filter, categories, data, series, dropZonesVisible.
+    if (options.dropZoneFilter !== undefined) {
+      children.push(`<c14:dropZoneFilter val="${options.dropZoneFilter ? "1" : "0"}"/>`);
+    }
+    if (options.dropZoneCategories !== undefined) {
+      children.push(`<c14:dropZoneCategories val="${options.dropZoneCategories ? "1" : "0"}"/>`);
+    }
+    if (options.dropZoneData !== undefined) {
+      children.push(`<c14:dropZoneData val="${options.dropZoneData ? "1" : "0"}"/>`);
+    }
+    if (options.dropZoneSeries !== undefined) {
+      children.push(`<c14:dropZoneSeries val="${options.dropZoneSeries ? "1" : "0"}"/>`);
+    }
+    if (options.dropZonesVisible !== undefined) {
+      children.push(`<c14:dropZonesVisible val="${options.dropZonesVisible ? "1" : "0"}"/>`);
+    }
+    if (children.length === 0) {
+      return "";
+    }
+    return (
+      `<c:ext uri="${C14_PIVOT_OPTIONS_EXT_URI}" xmlns:c14="${C14_CHART_NAMESPACE}">` +
+      `<c14:pivotOptions>${children.join("")}</c14:pivotOptions>` +
+      `</c:ext>`
+    );
   }
 
   private _renderChart(xml: XmlSink, chart: ChartData): void {
@@ -364,7 +672,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         if (pf.marker) {
           this._renderMarker(xml, pf.marker);
         }
-        if (pf.rawDLbl) {
+        // `c:pivotFmt` may carry a bare `c:dLbl` (no `c:dLbls` wrapper).
+        // Prefer the structured representation when present so callers
+        // can mutate label attributes programmatically; fall back to
+        // the captured raw bytes for files parsed before the structured
+        // slot existed.
+        if (pf.dLbl) {
+          this._renderDataLabelEntry(xml, pf.dLbl);
+        } else if (pf.rawDLbl) {
           xml.writeRaw(pf.rawDLbl);
         } else if (pf.dataLabels) {
           this._renderDataLabels(xml, pf.dataLabels);
@@ -560,6 +875,12 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (g.shape) {
       xml.leafNode("c:shape", { val: g.shape });
     }
+    // `gapDepth` is only valid for bar3D but Excel tolerates it being
+    // absent on 2D too; we emit it whenever the user set it so the
+    // type system remains a loose union.
+    if (g.gapDepth !== undefined) {
+      xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
+    }
     for (const id of g.axisIds) {
       xml.leafNode("c:axId", { val: String(id) });
     }
@@ -594,6 +915,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     }
     if (g.smooth !== undefined) {
       xml.leafNode("c:smooth", { val: g.smooth ? "1" : "0" });
+    }
+    // Only line3DChart uses gapDepth; we emit it whenever set to keep
+    // the type shape simple and let Excel ignore it on 2D line charts.
+    if (g.gapDepth !== undefined) {
+      xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
     }
     for (const id of g.axisIds) {
       xml.leafNode("c:axId", { val: String(id) });
@@ -648,6 +974,10 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       xml.openNode("c:dropLines");
       this._renderSpPr(xml, g.dropLines);
       xml.closeNode();
+    }
+    // Only area3DChart uses gapDepth — emitted whenever set.
+    if (g.gapDepth !== undefined) {
+      xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
     }
     for (const id of g.axisIds) {
       xml.leafNode("c:axId", { val: String(id) });
@@ -1279,67 +1609,77 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     xml.closeNode();
   }
 
+  /**
+   * Serialise a single {@link DataLabelEntry} as `<c:dLbl>…</c:dLbl>`.
+   * Shared between the series-level `<c:dLbls><c:dLbl/>` loop and
+   * pivot-format containers that emit a bare `<c:dLbl/>` without the
+   * enclosing `<c:dLbls>` wrapper.
+   */
+  private _renderDataLabelEntry(xml: XmlSink, e: DataLabelEntry): void {
+    xml.openNode("c:dLbl");
+    xml.leafNode("c:idx", { val: String(e.index) });
+    if (e.layout) {
+      this._renderLayout(xml, e.layout);
+    }
+    if (e.rawTx) {
+      xml.writeRaw(e.rawTx);
+    } else if (e.text) {
+      this._renderRichText(xml, e.text, "c:tx");
+    }
+    if (e.numFmt) {
+      xml.leafNode("c:numFmt", {
+        formatCode: e.numFmt.formatCode,
+        ...(e.numFmt.sourceLinked !== undefined
+          ? { sourceLinked: e.numFmt.sourceLinked ? "1" : "0" }
+          : {})
+      });
+    }
+    if (e.spPr) {
+      this._renderSpPr(xml, e.spPr);
+    }
+    if (e.txPr) {
+      this._renderTxPr(xml, e.txPr);
+    }
+    if (e.position) {
+      xml.leafNode("c:dLblPos", { val: e.position });
+    }
+    if (e.showLegendKey !== undefined) {
+      xml.leafNode("c:showLegendKey", { val: e.showLegendKey ? "1" : "0" });
+    }
+    if (e.showVal !== undefined) {
+      xml.leafNode("c:showVal", { val: e.showVal ? "1" : "0" });
+    }
+    if (e.showCatName !== undefined) {
+      xml.leafNode("c:showCatName", { val: e.showCatName ? "1" : "0" });
+    }
+    if (e.showSerName !== undefined) {
+      xml.leafNode("c:showSerName", { val: e.showSerName ? "1" : "0" });
+    }
+    if (e.showPercent !== undefined) {
+      xml.leafNode("c:showPercent", { val: e.showPercent ? "1" : "0" });
+    }
+    if (e.showBubbleSize !== undefined) {
+      xml.leafNode("c:showBubbleSize", { val: e.showBubbleSize ? "1" : "0" });
+    }
+    if (e.separator) {
+      xml.openNode("c:separator");
+      xml.writeText(e.separator);
+      xml.closeNode();
+    }
+    if (e.delete !== undefined) {
+      xml.leafNode("c:delete", { val: e.delete ? "1" : "0" });
+    }
+    if (e.extLst) {
+      xml.writeRaw(e.extLst);
+    }
+    xml.closeNode();
+  }
+
   private _renderDataLabels(xml: XmlSink, dl: DataLabels): void {
     xml.openNode("c:dLbls");
     if (dl.entries) {
       for (const e of dl.entries) {
-        xml.openNode("c:dLbl");
-        xml.leafNode("c:idx", { val: String(e.index) });
-        if (e.layout) {
-          this._renderLayout(xml, e.layout);
-        }
-        if (e.rawTx) {
-          xml.writeRaw(e.rawTx);
-        } else if (e.text) {
-          this._renderRichText(xml, e.text, "c:tx");
-        }
-        if (e.numFmt) {
-          xml.leafNode("c:numFmt", {
-            formatCode: e.numFmt.formatCode,
-            ...(e.numFmt.sourceLinked !== undefined
-              ? { sourceLinked: e.numFmt.sourceLinked ? "1" : "0" }
-              : {})
-          });
-        }
-        if (e.spPr) {
-          this._renderSpPr(xml, e.spPr);
-        }
-        if (e.txPr) {
-          this._renderTxPr(xml, e.txPr);
-        }
-        if (e.position) {
-          xml.leafNode("c:dLblPos", { val: e.position });
-        }
-        if (e.showLegendKey !== undefined) {
-          xml.leafNode("c:showLegendKey", { val: e.showLegendKey ? "1" : "0" });
-        }
-        if (e.showVal !== undefined) {
-          xml.leafNode("c:showVal", { val: e.showVal ? "1" : "0" });
-        }
-        if (e.showCatName !== undefined) {
-          xml.leafNode("c:showCatName", { val: e.showCatName ? "1" : "0" });
-        }
-        if (e.showSerName !== undefined) {
-          xml.leafNode("c:showSerName", { val: e.showSerName ? "1" : "0" });
-        }
-        if (e.showPercent !== undefined) {
-          xml.leafNode("c:showPercent", { val: e.showPercent ? "1" : "0" });
-        }
-        if (e.showBubbleSize !== undefined) {
-          xml.leafNode("c:showBubbleSize", { val: e.showBubbleSize ? "1" : "0" });
-        }
-        if (e.separator) {
-          xml.openNode("c:separator");
-          xml.writeText(e.separator);
-          xml.closeNode();
-        }
-        if (e.delete !== undefined) {
-          xml.leafNode("c:delete", { val: e.delete ? "1" : "0" });
-        }
-        if (e.extLst) {
-          xml.writeRaw(e.extLst);
-        }
-        xml.closeNode();
+        this._renderDataLabelEntry(xml, e);
       }
     }
     if (dl.numFmt) {
@@ -1385,10 +1725,71 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       xml.writeText(dl.separator);
       xml.closeNode();
     }
-    if (dl.extLst) {
+    // `dataLabelsRange` (Excel 2013+ "Value From Cells") serialises as a
+    // `c15:datalabelsRange` element inside `c:dLbls/c:extLst/c:ext`. When
+    // both `dataLabelsRange` and `extLst` are set, splice the ext into
+    // the existing rawXml so other extensions already captured there are
+    // preserved. When only `dataLabelsRange` is set, emit a fresh wrapper.
+    const dlRangeExt = dl.dataLabelsRange
+      ? this._buildC15DataLabelsRangeExt(dl.dataLabelsRange)
+      : "";
+    if (dlRangeExt && dl.extLst) {
+      const close = dl.extLst.lastIndexOf("</c:extLst");
+      if (close >= 0) {
+        xml.writeRaw(dl.extLst.slice(0, close) + dlRangeExt + dl.extLst.slice(close));
+      } else {
+        xml.writeRaw(dl.extLst);
+        xml.writeRaw(`<c:extLst>${dlRangeExt}</c:extLst>`);
+      }
+    } else if (dl.extLst) {
       xml.writeRaw(dl.extLst);
+    } else if (dlRangeExt) {
+      xml.writeRaw(`<c:extLst>${dlRangeExt}</c:extLst>`);
     }
     xml.closeNode();
+  }
+
+  /**
+   * Serialise a {@link DataLabelsRange} as the `c:ext` wrapper Excel
+   * 2013+ expects:
+   *
+   * ```xml
+   * <c:ext uri="{CE6537A1-D6FC-4f65-9D91-7224C49458BB}"
+   *        xmlns:c15="http://schemas.microsoft.com/office/drawing/2012/chart">
+   *   <c15:datalabelsRange>
+   *     <c15:f>Sheet1!$A$1:$A$5</c15:f>
+   *     <c15:dlblRangeCache>
+   *       <c15:ptCount val="5"/>
+   *       <c15:pt idx="0"><c15:v>Label 1</c15:v></c15:pt>
+   *       …
+   *     </c15:dlblRangeCache>
+   *   </c15:datalabelsRange>
+   * </c:ext>
+   * ```
+   *
+   * The URI and child-element names are exactly what Excel emits —
+   * verified against a user-authored xlsx via
+   * `tmp/pivot-sample/xl/charts/chart1.xml` (the extension URI also
+   * appears as a placeholder inside `c:pivotFmt/c:dLbl`).
+   */
+  private _buildC15DataLabelsRangeExt(range: DataLabelsRange): string {
+    const parts: string[] = [];
+    parts.push(`<c:ext uri="${C15_DATA_LABELS_RANGE_EXT_URI}" xmlns:c15="${C15_CHART_NAMESPACE}">`);
+    parts.push(`<c15:datalabelsRange>`);
+    parts.push(`<c15:f>${escapeXmlText(range.formula)}</c15:f>`);
+    if (range.cache && range.cache.points.length > 0) {
+      parts.push(`<c15:dlblRangeCache>`);
+      if (range.cache.pointCount !== undefined) {
+        parts.push(`<c15:ptCount val="${range.cache.pointCount}"/>`);
+      }
+      for (const pt of range.cache.points) {
+        parts.push(`<c15:pt idx="${pt.index}"><c15:v>${escapeXmlText(pt.value)}</c15:v></c15:pt>`);
+      }
+      parts.push(`</c15:dlblRangeCache>`);
+    }
+    parts.push(`</c15:datalabelsRange>`);
+    parts.push(`</c:ext>`);
+    return parts.join("");
   }
 
   // ---- Trendline, ErrorBars ----
@@ -2096,6 +2497,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           xml.closeNode();
         }
         xml.closeNode();
+      } else if (spPr.fill.blip?.relationshipId) {
+        // Picture fill. The rel id was allocated during
+        // worksheet._registerChart (see chart-images.ts); by the time
+        // the writer runs it is always a concrete `rIdN`. When the id
+        // is missing we skip the element entirely rather than emit a
+        // broken `<a:blip r:embed="">` — the caller kept their
+        // pictureOptions, so the chart still opens correctly.
+        this._renderBlipFill(xml, spPr.fill.blip);
       }
     }
     if (spPr.line) {
@@ -2139,6 +2548,67 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     }
     if (spPr.sp3d) {
       this._renderSp3D(xml, spPr.sp3d);
+    }
+    xml.closeNode();
+  }
+
+  /**
+   * Render an `<a:blipFill>` element for a picture fill. The element is
+   * `<a:blipFill><a:blip r:embed="rIdN"/>[<a:srcRect …/>]<a:stretch …>
+   * or <a:tile …></a:blipFill>` matching the OOXML shape-fill subschema
+   * (DrawingML §20.1.8.14).
+   *
+   * Callers are responsible for making sure `blip.relationshipId` is
+   * populated — the writer no-ops when it is missing (see the comment
+   * at the call site in `_renderSpPr`).
+   */
+  private _renderBlipFill(xml: XmlSink, blip: ChartBlipFill): void {
+    xml.openNode("a:blipFill");
+    xml.leafNode("a:blip", { "r:embed": blip.relationshipId! });
+    if (blip.sourceRectangle) {
+      const sr = blip.sourceRectangle;
+      const attrs: Record<string, string> = {};
+      if (sr.left !== undefined) {
+        attrs.l = String(sr.left);
+      }
+      if (sr.top !== undefined) {
+        attrs.t = String(sr.top);
+      }
+      if (sr.right !== undefined) {
+        attrs.r = String(sr.right);
+      }
+      if (sr.bottom !== undefined) {
+        attrs.b = String(sr.bottom);
+      }
+      xml.leafNode("a:srcRect", Object.keys(attrs).length > 0 ? attrs : undefined);
+    }
+    if (blip.fillMode === "tile") {
+      const t = blip.tile ?? {};
+      const tileAttrs: Record<string, string> = {};
+      if (t.tx !== undefined) {
+        tileAttrs.tx = String(t.tx);
+      }
+      if (t.ty !== undefined) {
+        tileAttrs.ty = String(t.ty);
+      }
+      if (t.sx !== undefined) {
+        tileAttrs.sx = String(t.sx);
+      }
+      if (t.sy !== undefined) {
+        tileAttrs.sy = String(t.sy);
+      }
+      if (t.flip) {
+        tileAttrs.flip = t.flip;
+      }
+      if (t.alignment) {
+        tileAttrs.algn = t.alignment;
+      }
+      xml.leafNode("a:tile", Object.keys(tileAttrs).length > 0 ? tileAttrs : undefined);
+    } else if (blip.fillMode !== "none") {
+      // Default and "stretch" produce a fillRect-stretch.
+      xml.openNode("a:stretch");
+      xml.leafNode("a:fillRect");
+      xml.closeNode();
     }
     xml.closeNode();
   }
@@ -2711,6 +3181,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       case "c:date1904":
         this.chartModel.date1904 = attrs.val === "1";
         break;
+      case "c:userShapes":
+        // `<c:userShapes r:id="rIdN"/>` — reference to a sibling drawing
+        // part holding freehand annotations. The part itself travels
+        // with the chart rels, we only preserve the reference.
+        if (attrs["r:id"]) {
+          this.chartModel.userShapesRelId = attrs["r:id"];
+        }
+        break;
       case "c:style":
         this.chartModel.style = parseInt(attrs.val, 10);
         break;
@@ -2971,6 +3449,28 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this._parseSeriesElement(name, attrs);
         // Axis elements
         this._parseAxisElement(name, attrs);
+        // Non-c: namespaced elements at chart-space top level (not already
+        // captured via rawXmlTarget and not c:/a:/r: native) are vendor
+        // extensions; surface them on the model so `strict` template mode
+        // can warn when a structural rebuild would drop them. This
+        // mirrors ChartExModel.unknownElements and uses the same shape
+        // (ChartExUnknownElement-compatible { name, path }).
+        if (
+          this.rawXmlTarget === null &&
+          name.includes(":") &&
+          !name.startsWith("c:") &&
+          !name.startsWith("a:") &&
+          !name.startsWith("r:") &&
+          !name.startsWith("mc:") &&
+          !name.startsWith("xsi:") &&
+          !name.startsWith("xml:")
+        ) {
+          const parent = this.stateStack[this.stateStack.length - 1]?.tag ?? "c:chartSpace";
+          if (!this.chartModel.unknownElements) {
+            this.chartModel.unknownElements = [];
+          }
+          this.chartModel.unknownElements.push({ name, path: `${parent}/${name}` });
+        }
         break;
     }
 
@@ -3554,6 +4054,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           this.currentUpDownBars.gapWidth = parseInt(attrs.val, 10);
         } else if (this.currentChartTypeGroup) {
           this.currentChartTypeGroup.gapWidth = parseInt(attrs.val, 10);
+        }
+        break;
+      case "c:gapDepth":
+        if (this.currentChartTypeGroup) {
+          (this.currentChartTypeGroup as { gapDepth?: number }).gapDepth = parseInt(attrs.val, 10);
         }
         break;
       case "c:overlap":
@@ -4400,7 +4905,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           break;
         case "dLbls":
           if (this.currentDataLabels) {
-            this.currentDataLabels.extLst = rawXml;
+            // Strip the c15:datalabelsRange extension out into a structured
+            // slot so editors can mutate "Value From Cells" without string
+            // surgery; keep the rest of the extLst raw for round-trip of
+            // other extensions.
+            this.currentDataLabels.extLst = this._extractDataLabelsExtLst(
+              rawXml,
+              this.currentDataLabels
+            );
           }
           break;
         case "trendlineLbl":
@@ -4474,11 +4986,113 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           }
           break;
         default:
-          this.chartModel.extLst = rawXml;
+          // chartSpace-level extLst: Parse and strip the MS `c14:pivotOptions`
+          // extension into the structured `pivotOptions` slot so editors can
+          // mutate it, and keep the remaining raw XML for everything else
+          // (c15/c16 extensions we don't model structurally, vendor ext, …).
+          this.chartModel.extLst = this._extractChartSpaceExtLst(rawXml);
           break;
       }
       this.rawCaptureContext = null;
     }
+  }
+
+  /**
+   * Parse the MS `c14:pivotOptions` extension out of a captured
+   * chartSpace-level `<c:extLst>` raw XML blob and populate
+   * {@link ChartModel.pivotOptions} with the structured view.
+   *
+   * Returns the raw XML with the matching `<c:ext uri="{781A…}" …/>`
+   * element removed so the writer does not emit it twice when it
+   * reconstructs the extLst from the merged (raw + structured) state.
+   * If the extension is absent, the input is returned unchanged.
+   *
+   * This function uses regex rather than a full XML parse because the
+   * raw blob is already guaranteed well-formed (it was emitted by our
+   * own raw-capture path) and we need to preserve byte exactness of the
+   * surviving `<c:ext>` elements for round-trip of extensions we do not
+   * understand.
+   */
+  private _extractChartSpaceExtLst(rawXml: string): string {
+    // Match a single `<c:ext ... uri="{781A3756-C4B2-4CAC-9D66-4F8BD8637D16}" ... >…</c:ext>`
+    // in a case-insensitive way (Excel has been seen to emit mixed case
+    // GUIDs historically). The URI must appear anywhere in the opening
+    // tag's attributes, so we anchor the regex to the opening `<c:ext`
+    // and look for the URI attribute inside the same tag.
+    let stripped = rawXml;
+    stripped = this._extractAndStripPivotExt(stripped, C14_PIVOT_OPTIONS_EXT_URI, match => {
+      const options = parseC14PivotOptions(match);
+      if (options) {
+        // Merge into any options already harvested from a sibling ext.
+        this.chartModel.pivotOptions = { ...this.chartModel.pivotOptions, ...options };
+      }
+    });
+    stripped = this._extractAndStripPivotExt(stripped, C16_PIVOT_OPTIONS16_EXT_URI, match => {
+      const options = parseC16PivotOptions16(match);
+      if (options) {
+        this.chartModel.pivotOptions = { ...this.chartModel.pivotOptions, ...options };
+      }
+    });
+
+    // If stripping left an empty `<c:extLst></c:extLst>` or
+    // `<c:extLst/>`, drop the entire wrapper so the writer doesn't emit
+    // a noise element.
+    const emptyExtLst = /^\s*<c:extLst\b[^>]*>\s*<\/c:extLst>\s*$|^\s*<c:extLst\b[^/]*\/>\s*$/;
+    return emptyExtLst.test(stripped) ? "" : stripped;
+  }
+
+  /**
+   * Locate and remove a single `<c:ext uri="{…}">…</c:ext>` element
+   * whose `uri` matches `extUri`, passing the captured XML to
+   * `handler`. Returns the source string with the ext removed. When the
+   * ext is absent the input is returned unchanged.
+   */
+  private _extractAndStripPivotExt(
+    rawXml: string,
+    extUri: string,
+    handler: (match: string) => void
+  ): string {
+    const uriEscaped = extUri.replace(/[{}]/g, ch => `\\${ch}`);
+    const extRegex = new RegExp(
+      `<c:ext\\b[^>]*\\buri="${uriEscaped}"[^>]*>[\\s\\S]*?</c:ext>`,
+      "i"
+    );
+    const match = extRegex.exec(rawXml);
+    if (!match) {
+      return rawXml;
+    }
+    handler(match[0]);
+    return rawXml.slice(0, match.index) + rawXml.slice(match.index + match[0].length);
+  }
+
+  /**
+   * Parse and strip the MS `c15:datalabelsRange` extension (Excel 2013+
+   * "Value From Cells") from a captured `<c:dLbls>/<c:extLst>` raw XML
+   * blob, populating the structured {@link DataLabels.dataLabelsRange}
+   * slot on the given DataLabels object.
+   *
+   * Returns the raw XML with the matching ext element removed so the
+   * writer does not emit it twice when it reconstructs the extLst from
+   * the merged (raw + structured) state. If the extension is absent the
+   * input is returned unchanged.
+   */
+  private _extractDataLabelsExtLst(rawXml: string, dl: DataLabels): string {
+    const uriEscaped = C15_DATA_LABELS_RANGE_EXT_URI.replace(/[{}]/g, ch => `\\${ch}`);
+    const extRegex = new RegExp(
+      `<c:ext\\b[^>]*\\buri="${uriEscaped}"[^>]*>[\\s\\S]*?</c:ext>`,
+      "i"
+    );
+    const match = extRegex.exec(rawXml);
+    if (!match) {
+      return rawXml;
+    }
+    const range = parseC15DataLabelsRange(match[0]);
+    if (range) {
+      dl.dataLabelsRange = range;
+    }
+    const stripped = rawXml.slice(0, match.index) + rawXml.slice(match.index + match[0].length);
+    const emptyExtLst = /^\s*<c:extLst\b[^>]*>\s*<\/c:extLst>\s*$|^\s*<c:extLst\b[^/]*\/>\s*$/;
+    return emptyExtLst.test(stripped) ? "" : stripped;
   }
 
   private _setBoolOnLabels(key: string, value: boolean): void {

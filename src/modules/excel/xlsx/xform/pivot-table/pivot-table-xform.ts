@@ -1,6 +1,7 @@
 import type {
   CacheField,
   DataField,
+  PivotTableChartFormat,
   PivotTableSubtotal,
   SharedItemValue
 } from "@excel/pivot-table";
@@ -47,6 +48,9 @@ interface PivotTableRenderModel {
   cacheId: string | number;
   tableNumber: number;
   applyWidthHeightFormats: "0" | "1";
+  name?: string;
+  chartFormat?: number;
+  chartFormats?: PivotTableChartFormat[];
 }
 
 /**
@@ -220,7 +224,7 @@ interface RowColItem {
 /**
  * Chart format item for pivot charts
  */
-interface ChartFormatItem {
+interface ChartFormatItem extends PivotTableChartFormat {
   chart: number;
   format: number;
   series?: boolean;
@@ -379,7 +383,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...PivotTableXform.PIVOT_TABLE_ATTRIBUTES,
-      name: `PivotTable${tableNumber}`,
+      name: model.name ?? `PivotTable${tableNumber}`,
       cacheId,
       applyNumberFormats: "0",
       applyBorderFormats: "0",
@@ -396,7 +400,8 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       indent: "0",
       compact: "0",
       compactData: "0",
-      multipleFieldFilters: "0"
+      multipleFieldFilters: "0",
+      chartFormat: model.chartFormat !== undefined ? String(model.chartFormat) : undefined
     });
 
     // Location
@@ -484,6 +489,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
     // Data fields
     renderDataFields(xmlStream, cacheFields, values, model.valueMetrics);
+
+    if (model.chartFormats && model.chartFormats.length > 0) {
+      this.renderChartFormats(xmlStream, model.chartFormats);
+    }
 
     // Pivot table style info
     xmlStream.leafNode("pivotTableStyleInfo", {

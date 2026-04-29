@@ -1,0 +1,39 @@
+{
+  "$schema": "./manifest.schema.json",
+  "entries": [
+    {
+      "path": "excel-365/revenue-dashboard.xlsx",
+      "source": "Excel 365 (Windows, build 2412)",
+      "tags": ["classic", "combo", "pivotChart"],
+      "expectCharts": true,
+      "expectPivotTables": true,
+      "openValidation": true
+    },
+    {
+      "path": "libreoffice/sales-funnel.xlsx",
+      "source": "LibreOffice Calc 24.2",
+      "tags": ["chartEx", "funnel"],
+      "expectChartEx": true,
+      "openValidation": true
+    },
+    {
+      "path": "wps/kpi-waterfall.xlsx",
+      "source": "WPS Office 2024 / Kingsoft",
+      "tags": ["chartEx", "waterfall", "wps-origin"],
+      "expectChartEx": true,
+      "openValidation": true
+    },
+    {
+      "path": "aspose/exported-boxplot.xlsx",
+      "source": "Aspose.Cells for Java 24.8",
+      "tags": ["chartEx", "boxWhisker"],
+      "expectChartEx": true
+    },
+    {
+      "path": "templates/chart-styles-1-48.xlsx",
+      "source": "Manually authored with every c:style 1..48",
+      "tags": ["classic", "style-catalogue"],
+      "expectCharts": true
+    }
+  ]
+}

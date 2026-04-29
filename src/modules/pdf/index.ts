@@ -49,7 +49,7 @@
 export { pdf } from "./pdf";
 
 /** Excel-to-PDF conversion — accepts an Excel Workbook instance. */
-export { excelToPdf } from "./excel-bridge";
+export { excelToPdf, chartToPdf, type ChartToPdfOptions } from "./excel-bridge";
 
 /** Word-to-PDF conversion — accepts a DocxDocument. */
 export { docxToPdf } from "./word-bridge";
@@ -120,6 +120,7 @@ export type { PdfTable, PdfTableRow, PdfTableCell } from "./reader/table-extract
 
 export type {
   PageOptions,
+  DrawSvgOptions,
   DrawTextOptions,
   DrawRectOptions,
   DrawCircleOptions,

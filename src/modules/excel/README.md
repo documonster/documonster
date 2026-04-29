@@ -19,6 +19,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Images** — JPEG, PNG, GIF with one-cell and two-cell anchors
 - **Hyperlinks** — internal, external, email
 - **Pivot tables** — read and preserve pivot table definitions
+- **Charts** — create/read/edit classic charts, ChartEx modern charts, combo charts, pivot charts, chartsheets, and zero-dependency SVG/PNG/PDF previews (deterministic, not Excel-pixel-perfect — see [Rendering scope](#rendering-scope))
 - **Tables** — auto-filters, totals row, structured references
 - **Comments and notes** — threaded comments, legacy notes
 - **Checkboxes** — form controls and cell-level checkboxes
@@ -282,6 +283,336 @@ worksheet.columns.forEach(column => {
     : 10;
 });
 ```
+
+## Charts
+
+ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
+
+### Rendering scope
+
+The built-in `chart.toSVG()` / `chart.toPNG()` / `chartToPdf(chart)` helpers produce a **zero-dependency deterministic preview** — not an Excel-pixel-perfect compositor. The same `ChartScene` intermediate representation drives all three backends, so what you see in SVG is what the PDF emits (modulo rasterisation) and what the Node PNG rasteriser paints. The preview is well-suited to:
+
+- Server-side thumbnails, email attachments, and README images
+- CI sanity checks ("does this chart render without crashing")
+- Quick dashboard previews before the user opens Excel
+
+It is **not** a replacement for Excel / LibreOffice rendering when pixel-identical output matters. Specific scope boundaries:
+
+- Excel-internal text layout heuristics, font hinting, and kerning are approximated, not reproduced
+- 3D rendering is limited to `bar3D` axonometric projection; other 3D variants fall back to 2D (see the 3D note below)
+- DrawingML effect filters (shadow / glow / soft-edge / blur / reflection) emit as SVG `<filter>` but are silently dropped by the Node PNG rasteriser
+- Pivot chart field buttons and drop-zone UI are metadata-only — the host application still draws them
+
+**For production-grade rendering**, round-trip the `.xlsx` through headless LibreOffice (`soffice --convert-to pdf`). The byte-preserving round-trip + `templateMode: "strict"` guarantees in this library make that a safe handoff.
+
+### Classic Chart
+
+```typescript
+const ws = workbook.addWorksheet("Sales");
+ws.addRows([
+  ["Month", "Revenue", "Profit"],
+  ["Jan", 120, 32],
+  ["Feb", 180, 49],
+  ["Mar", 160, 41]
+]);
+
+ws.addChart(
+  {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Revenue",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$4",
+        values: "Sales!$B$2:$B$4",
+        dataLabels: { showVal: true },
+        trendline: { type: "linear", lineDash: "dash" },
+        errorBars: { type: "fixedVal", value: 5 }
+      }
+    ],
+    categoryAxis: { title: "Month" },
+    valueAxis: { title: "USD", min: 0 }
+  },
+  "E1:M16"
+);
+```
+
+### Presets And Convenience APIs
+
+```typescript
+import { EXCEL_CHART_PRESETS } from "@cj-tech-master/excelts";
+
+ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
+ws.addColumnChart(
+  { series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] },
+  "E18:M32"
+);
+ws.addPieChart(
+  { series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] },
+  "E34:M48"
+);
+
+console.log(EXCEL_CHART_PRESETS); // 70+ Excel UI aliases
+```
+
+### Combo, ChartEx, Pivot Chart, And Chartsheet
+
+```typescript
+ws.addComboChart(
+  {
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        series: [{ name: "Revenue", categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }]
+      },
+      {
+        type: "line",
+        useSecondaryAxis: true,
+        series: [{ name: "Profit", categories: "Sales!$A$2:$A$4", values: "Sales!$C$2:$C$4" }]
+      }
+    ],
+    title: "Revenue vs Profit"
+  },
+  "N1:V16"
+);
+
+ws.addHistogramChart(
+  { series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }], binning: { binType: "auto" } },
+  "N18:V32"
+);
+
+workbook.addChartsheet("Revenue Chart", {
+  chart: { type: "bar", series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] }
+});
+```
+
+### Preview Export
+
+```typescript
+const chart = ws.getCharts()[0];
+
+const svg = chart.toSVG({ width: 800, height: 450, backgroundColor: "transparent" });
+const png = await chart.toPNG({ width: 800, height: 450, scale: 2, dpi: 192 });
+```
+
+Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel/Aspose pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
+
+### Template Preservation
+
+Loaded chart XML is preserved byte-for-byte when not modified. For safe high-level mutations, ExcelTS patches only known XML blocks and keeps unsupported extensions intact:
+
+- classic charts: title, legend, series references, series formatting, markers, data points, data labels, trendlines, error bars, axes, plot layout
+- ChartEx charts: chart data, title, legend, auto-title deletion, chart/plot shapes, plot-region layout, series visibility/name/axis bindings, series data references, layout properties (including `extLst` passthrough), data labels, data points, and axes
+- unsafe structural mutations fall back to structured re-rendering
+
+Use `chart.mutate(model => { ... }, { preferRawPatch: true })` when you want local XML patching after editing a loaded template chart.
+
+For strict template workflows, use `requireRawPatch: true` to fail instead of falling back to structured re-rendering when a mutation cannot be safely patched:
+
+```typescript
+chart.mutate(
+  model => {
+    model.chart.plotArea.chartTypes[0].series[0].val = {
+      numRef: { formula: "Sales!$B$2:$B$100", cache: { points: [] } }
+    };
+  },
+  { preferRawPatch: true, requireRawPatch: true }
+);
+```
+
+This gives a hard guarantee of "preserve the raw template XML or throw" for supported patch classes. It does not claim arbitrary unknown OOXML can be mutated safely; unsupported structural edits are rejected when `requireRawPatch` is set.
+
+You can also enforce that rule for every loaded chart/chartEx part during a write:
+
+```typescript
+await workbook.xlsx.writeBuffer({ templateMode: "strict" });
+// or
+await workbook.xlsx.writeBuffer({ strictTemplateMode: true });
+```
+
+Strict template mode affects edited chart parts loaded from an existing workbook. Newly created charts still render structurally.
+
+### Oracle And Corpus Testing
+
+The repository includes optional harnesses for real-application validation. They are disabled by default because they require external binaries or private fixture corpora.
+
+Every generated workbook in these harnesses also runs an OOXML package audit before external conversion. The audit checks required part content types, relationship targets, duplicate relationship IDs, chart/ChartEx/drawing/chartsheet structure, ChartEx data/axis references, and ChartEx external-data relationship IDs so common Excel "repaired records" issues fail early in CI. When an enabled Office/LibreOffice open-validation command logs repair/corruption/error text, the test treats it as a hard validation failure.
+
+```bash
+# LibreOffice visual/PDF export oracle
+EXCELTS_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
+  pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
+
+# LibreOffice open/convert validation for generated workbooks
+EXCELTS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+  pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
+
+# Proprietary Office/Aspose-style CLI validation hook. The command must accept
+# {input} and {outDir} placeholders via EXCELTS_OFFICE_OPEN_ARGS.
+EXCELTS_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
+EXCELTS_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
+  pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
+
+# Enterprise corpus round-trip harness
+EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+  pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
+
+# Enterprise corpus plus LibreOffice open validation
+EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+  pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
+```
+
+An optional `manifest.json` in the corpus directory can mark expected structures:
+
+```json
+{
+  "entries": [
+    {
+      "path": "charts/sales-dashboard.xlsx",
+      "source": "Excel 365",
+      "expectCharts": true,
+      "expectChartEx": true,
+      "openValidation": true
+    },
+    {
+      "path": "pivot/pivot-chart.xlsx",
+      "source": "Excel 365",
+      "expectCharts": true,
+      "expectPivotTables": true
+    }
+  ]
+}
+```
+
+Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. ExcelTS itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
+
+### Compatibility Matrix
+
+#### High-level capability map
+
+| Area                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Classic charts          | bar, bar3D, line, line3D, pie, pie3D, doughnut, area, area3D, scatter, bubble, radar, stock, surface, surface3D, ofPie (see 3D note)                                                                                                                                                                                                                                                                                                                                                                                               |
+| ChartEx                 | sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap (see regionMap note)                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement)                                                                                                                                                                                                 |
+| Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Presets                 | 70+ Excel UI aliases including cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ChartEx helpers         | `chartExOptionsFromTable` / `chartExOptionsFromRows` (+ `worksheet.addChartExFromTable/FromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                |
+| Template fidelity       | byte-preserving round-trip, raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.unknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                                                                      |
+| Rendering scope         | **zero-dependency deterministic preview** — not an Excel-identical compositor. Same `ChartScene` IR drives SVG, Node/browser PNG, PDF. For pixel-perfect output, round-trip the `.xlsx` through `soffice --convert-to pdf`                                                                                                                                                                                                                                                                                                         |
+| Rendering features      | deterministic SVG, browser PNG, Node PNG fallback (honours text `rotate`), PDF drawing bridge at full SVG feature parity: labels/markers/errorBars/trendlines/leader lines/data tables; text anchor+rotation+color+fontFamily (`bold`/`italic` from `txPr/a:latin`); radar/area/bubble true alpha via `PdfColor.a` → `/ExtGState`; bar3D true axonometric projection (`view3D.rotX` / `rotY` / `rAngAx`) with three shaded faces; text sized via `@excel/utils/text-metrics` (Calibri/Arial/Times/9 fonts + ~230 category factors) |
+| Commercial-grade gaps   | Excel-perfect rendering, true 3D for line3D/pie3D/area3D/surface3D, arbitrary unknown XML mutation, and full real-file compatibility matrices require external oracle testing                                                                                                                                                                                                                                                                                                                                                      |
+
+#### Per-type capability grid
+
+Rows are chart types. Columns mean:
+
+- **Create** — programmatic `addChart` / `addChartEx` (structured API, no template needed)
+- **Read** — parse an existing `chartN.xml` / `chartExN.xml` into a structured model
+- **Edit** — `chart.mutate(fn, { preferRawPatch })` works for this type (raw-patch for narrow edits, structured rebuild for the rest)
+- **Round-trip** — load → write → load yields an equivalent model + package audit passes
+- **Raw preserve** — loaded bytes are preserved verbatim when the chart is not edited (and via raw-patch for narrow edits)
+- **SVG** — content-asserting test (not just "does not throw"): text / path / colour / hash
+- **PNG** — content-asserting test (IHDR / IDAT signature or value-level hash)
+- **PDF** — type-specific PDF surface test beyond the generic `drawChartPdf` smoke
+- **LibreOffice** — opt-in `chart-oracle` integration run opens the exported xlsx via LibreOffice without error
+
+Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan loop (no value-level assert) · ➖ not implemented / not applicable
+
+##### Classic charts
+
+| Type      | Create | Read | Edit | Round-trip | Raw preserve | SVG | PNG | PDF | LibreOffice |
+| --------- | :----: | :--: | :--: | :--------: | :----------: | :-: | :-: | :-: | :---------: |
+| bar       |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| bar3D     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| line      |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ✅      |
+| line3D    |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| pie       |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| pie3D     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| doughnut  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| area      |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| area3D    |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| scatter   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| bubble    |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| radar     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| stock     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| surface   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| surface3D |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| ofPie     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+
+##### ChartEx types
+
+| Type       | Create | Read | Edit | Round-trip | Raw preserve | SVG | PNG | PDF | LibreOffice |
+| ---------- | :----: | :--: | :--: | :--------: | :----------: | :-: | :-: | :-: | :---------: |
+| sunburst   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| treemap    |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| waterfall  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| funnel     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| histogram  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| pareto     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| boxWhisker |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| regionMap  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+
+🟨 = (no longer used in this table) — as of the regionMap vector port every ChartEx layout takes the vector path through `drawChartExPdf`. Callers can still opt into raster per call with `chartToPdf(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text. See the "ChartEx PDF note" below.
+
+##### Capability gaps that are known but intentional
+
+- **Classic PNG content assertions** are generic: every type hits the PNG pipeline, but only `bar` has a hash golden because binary-level stability across chart types would over-couple tests to renderer internals.
+- **Classic PDF content assertions** exist only where the PDF path diverges meaningfully from SVG (alpha via `/ExtGState`, pie leader lines, marker geometry). Other types re-use the same call graph, so one SVG assertion and the generic `drawChartPdf` smoke are considered sufficient.
+- **LibreOffice visual oracle** is gated on `EXCELTS_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `EXCELTS_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
+- **ChartEx PDF vector path** (`drawChartExPdf`) covers every ChartEx layout the builder currently emits; see the dedicated note.
+
+**3D note:** `bar3D` renders as a **true extruded box** whose axonometric projection is driven by `view3D.rotX` / `view3D.rotY` / `view3D.rAngAx` — three shaded faces (top + front + right) per bar, with depth scaled to bar width so the 3D effect stays readable across chart sizes. The default fallback (`rotX=15°, rotY=20°, rAngAx=true`) matches Excel's new-chart defaults. `line3D`, `pie3D`, `area3D`, `surface3D` and the richer `view3D` / `Scene3D` / `ShapeProperties3D` metadata are **preserved in XML** so clean round-trips and Excel re-opens survive intact, but the preview still renders those types as their 2D equivalents — there is no projection matrix, no light rig, no depth sort for non-bar 3D. This is a preview-grade renderer, not a 3D engine; use Excel or LibreOffice for commercial-grade 3D output.
+
+**Fonts & CJK:** `PdfDocumentBuilder` auto-discovers a system font (same mechanism as `excelToPdf`) whenever a page contains non-WinAnsi characters and no font was explicitly embedded. Pass `disableFontAutoDiscovery()` for byte-stable output across hosts, or `embedFont(ttfBytes)` for a deterministic typeface. Register `onWarning(handler)` to receive one diagnostic per distinct unknown `fontFamily` (e.g. non-standard names that fall back to Helvetica metrics) and one diagnostic per build when non-WinAnsi characters land on a page with no covering font (Type3 NOTDEF boxes render).
+
+**Minimal PDF surfaces:** `ChartPdfDrawingSurface.drawPath?` and `drawCircle?` are optional. When a surface lacks `drawPath`, pie/doughnut/ofPie slice outlines degrade to `drawLine` polyline strokes (shape preserved, fill lost); area and radar-filled fills are dropped but the surrounding strokes are still emitted; markers fall back to circle→rect→line chains. `PdfPageBuilder` / `PdfEditorPage` both provide the full interface, so this only matters for custom surfaces.
+
+**regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `chartToPdf` will pass the same `regionMap` option through to `drawChartExPdf`. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
+
+**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, matching the semantics of xlsxwriter's `chart.set_style(N)`. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
+
+**3D rendering boundaries (non-goals):** Beyond the axonometric box used for `bar3D`, we intentionally do **not** render:
+
+- true 3D projection (rotX/rotY/perspective → matrix + depth sort + light rig) for `line3D`, `pie3D`, `area3D`, `surface3D`
+- surface3D as a triangle mesh / wireframe / band-contour
+
+These features would require multi-week investments with a low payoff for a preview-grade renderer; users who need Excel-identical 3D output should round-trip through Excel or LibreOffice. All metadata needed to do so (`Scene3D`, `View3D`, `ShapeProperties3D`) already round-trips through XML.
+
+**ChartEx PDF note:** Classic charts render as vector PDF content via `drawChartPdf` (text stays selectable, shapes stay resolution-independent). ChartEx charts now all render as vector PDF content via `drawChartExPdf`:
+
+- **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all go through `drawChartExPdf`, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
+- **Raster opt-in** — any ChartEx type can be rasterised on demand with `chartToPdf(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text or vector scalability.
+
+Use `chartToPdf(chart, options)` from `@cj-tech-master/excelts/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
+
+**Pivot chart note:** ExcelTS supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
+
+**Strict template mode:** Writers accept `{ templateMode: "strict" }` (or `{ strictTemplateMode: true }`) to refuse any chart/ChartEx edit that would force a structural rebuild. When a rebuild is unavoidable the error message now lists any unstructured XML elements the parser observed (available as `ChartExModel.unknownElements`) so vendor extensions can never disappear silently from a loaded template.
+
+**Testing scope boundaries (what this library does _not_ test):**
+
+- **No pixel-level visual diff.** Preview output is tested through SVG-structure assertions and PNG header/signature hashes — a true RMS/SSIM pixel diff would require bundling a PNG decoder and a diff algorithm, and the preview is explicitly not pixel-perfect anyway (see the rendering notes above). If your workflow needs pixel parity with Excel, run `chartToPdf(chart)` through LibreOffice's headless PDF export and compare there.
+- **No in-tree Excel/WPS/Aspose-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by ExcelTS itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `EXCELTS_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape and `scripts/compatibility-report.ts` (`pnpm run compatibility:report`) for the report generator.
+- **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `EXCELTS_OFFICE_OPEN_VALIDATION` + `EXCELTS_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
+
+Compared with ExcelJS, ExcelTS has native chart creation and editing. Compared with xlsx-populate, ExcelTS adds structured chart APIs while still preserving template XML where safe. Compared with XlsxWriter/openpyxl/excelize, ExcelTS adds TypeScript/browser support, ChartEx, pivot chart metadata, chartsheets, and preview renderers.
+
+### Migrating from another library
+
+Full API mapping tables are in dedicated docs, one per library:
+
+- **[`docs/FROM_EXCELJS.md`](../../../docs/FROM_EXCELJS.md)** — ExcelJS had no native chart creation API; this guide shows how to convert "export template unchanged" and "hand-edited chart XML" flows into structured `addChart` / `mutate` calls, plus the preview-render helpers ExcelJS lacks. Now covers chartsheet, pivot chart, user shapes, ChartEx, `unknownElements`, data table, and a migration checklist.
+- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — XlsxWriter (Python) is the reference for ergonomic chart options; ExcelTS models its option shapes after XlsxWriter's with additions for reading, editing, ChartEx, and preview rendering. 6 end-to-end translation examples.
+- **[`docs/FROM_OPENPYXL.md`](../../../docs/FROM_OPENPYXL.md)** — openpyxl (Python) uses class-based chart construction (`BarChart()`, `Reference()`); this guide translates 6 example workflows into ExcelTS' options-object style and covers loaded-chart editing, which openpyxl does unreliably.
+- **[`docs/FROM_EXCELIZE.md`](../../../docs/FROM_EXCELIZE.md)** — excelize (Go) has a JSON-ish chart API close in spirit to ExcelTS; this guide covers the `Chart{...}` → `addChart({...})` translation, per-point colours, combo charts, and the modern ChartEx types excelize cannot author.
+- **[`docs/FROM_POI.md`](../../../docs/FROM_POI.md)** — Apache POI (Java) is the deepest open-source chart library before ExcelTS; this guide maps `XSSFChart` / `XDDFChartData` / `CTPlotArea` / `XDDFDataSourcesFactory` onto ExcelTS' options objects, with ChartEx authoring as the main capability expansion.
+- **Compatibility matrix:** [`docs/COMPATIBILITY.md`](../../../docs/COMPATIBILITY.md) — per-type support grid + cross-cutting features + side-by-side comparison against ExcelJS / SheetJS / xlsxwriter / openpyxl / excelize / POI / EPPlus / ClosedXML / Aspose.Cells.
+- Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
 
 ## PDF Export
 

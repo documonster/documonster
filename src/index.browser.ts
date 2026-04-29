@@ -48,6 +48,7 @@ export type {
   CacheField,
   SharedItemValue,
   DataField,
+  PivotTableChartFormat,
   PivotTableSubtotal,
   RecordValue,
   ParsedCacheDefinition,
@@ -108,6 +109,13 @@ export type {
 // =============================================================================
 
 export { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
+export { Chartsheet } from "@excel/chartsheet";
+export type {
+  AddChartsheetOptions,
+  AddPivotChartsheetOptions,
+  ChartsheetOptions,
+  ChartsheetViewOptions
+} from "@excel/chartsheet";
 export type { CheckboxState } from "@excel/form-control";
 export type { ColumnDefn, ColumnHeaderValue } from "@excel/column";
 export type { RangeInput } from "@excel/range";
@@ -139,6 +147,43 @@ export type { CellAddress, SheetRange, Origin } from "@excel/utils/address";
 // Worksheet data conversion option types
 export type { SheetToJSONOptions, AddJSONOptions, AddAOAOptions } from "@excel/worksheet";
 
+// Chart helpers and types
+export {
+  applyChartExPreset,
+  applyChartPreset,
+  buildChartExModel,
+  buildChartScene,
+  CHART_EX_PRESETS,
+  chartOptionsFromRows,
+  chartOptionsFromTable,
+  CHART_PRESETS,
+  drawChartPdf,
+  EXCEL_CHART_EX_PRESETS,
+  EXCEL_CHART_PRESETS,
+  parseChartEx,
+  renderChartPng,
+  renderChartSvg,
+  renderChartEx,
+  renderChartExPng,
+  renderChartExSvg,
+  seriesFromColumns,
+  type AddChartFromRowsOptions,
+  type AddChartFromTableOptions,
+  type ChartPdfDrawingSurface,
+  type ChartPdfPathOp,
+  type ChartRenderOptions,
+  type ChartScene,
+  type ChartSceneLegend,
+  type ChartSceneSeries,
+  type ChartSceneText,
+  type ChartExType,
+  type AddChartExOptions,
+  type ExcelChartExPreset,
+  type ExcelChartPreset,
+  type PdfChartRenderOptions,
+  type SeriesFromColumnsOptions
+} from "@excel/chart/index";
+
 // Date conversion (Excel serial dates <-> JS Date)
 export { dateToExcel, excelToDate } from "@utils/utils.base";
 
@@ -146,7 +191,7 @@ export { dateToExcel, excelToDate } from "@utils/utils.base";
 export { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils.base";
 
 // XML utilities
-export { xmlEncode, xmlDecode } from "@xml/encode";
+export { xmlEncode, xmlDecode, xmlEncodeAttr, validateXmlName } from "@xml/encode";
 
 // Date parsing/formatting (high-performance, zero-dep)
 export { DateParser, DateFormatter, getSupportedFormats, type DateFormat } from "@utils/datetime";

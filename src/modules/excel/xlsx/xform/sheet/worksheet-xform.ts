@@ -242,6 +242,20 @@ class WorkSheetXform extends BaseXform {
       });
     }
 
+    // Office 365 threaded comments — a separate rel pointing at the
+    // per-sheet `xl/threadedComments/threadedComment{N}.xml` part.
+    // Excel requires the rel to exist even when the sheet already has
+    // a classic comments rel (the two are independent — legacy VML
+    // carries the fallback text, threaded comments carry the modern
+    // conversation tree).
+    if (model.threadedComments && model.threadedComments.length > 0) {
+      rels.push({
+        Id: nextRid(rels),
+        Type: RelType.ThreadedComments,
+        Target: `../threadedComments/threadedComment${fileIndex}.xml`
+      });
+    }
+
     // Handle pre-loaded drawing (from file read) that may contain charts or other non-image content.
     // Chart anchors (with chartNumber from reconcile) are preserved and get fresh rels.
     // Non-chart anchors are discarded — images are rebuilt from model.media below.
@@ -358,6 +372,7 @@ class WorkSheetXform extends BaseXform {
             drawing.anchors.push({
               range: chartAnchor.range,
               chartExNumber: chartAnchor.chartExNumber,
+              alternateContent: { requires: "cx" },
               graphicFrame: {
                 rId: chartRId,
                 isChartEx: true,

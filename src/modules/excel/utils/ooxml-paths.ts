@@ -21,6 +21,7 @@ const themeXmlRegex = /^xl\/theme\/[a-zA-Z0-9]+[.]xml$/;
 const mediaFilenameRegex = /^xl\/media\/([a-zA-Z0-9]+[.][a-zA-Z0-9]{3,4})$/;
 const drawingXmlRegex = /^xl\/drawings\/(drawing\d+)[.]xml$/;
 const drawingRelsXmlRegex = /^xl\/drawings\/_rels\/(drawing\d+)[.]xml[.]rels$/;
+const chartUserShapesXmlRegex = /^xl\/drawings\/(chartUserShape\d+)[.]xml$/;
 const vmlDrawingRegex = /^xl\/drawings\/(vmlDrawing\d+)[.]vml$/;
 const vmlDrawingHFRegex = /^xl\/drawings\/(vmlDrawingHF\d+)[.]vml$/;
 // Matches both flat layout (xl/comments1.xml) and subdirectory layout (xl/comments/comment1.xml).
@@ -90,6 +91,18 @@ export function getDrawingNameFromPath(path: string): string | undefined {
 
 export function getDrawingNameFromRelsPath(path: string): string | undefined {
   const match = drawingRelsXmlRegex.exec(path);
+  return match ? match[1] : undefined;
+}
+
+/**
+ * Canonical filename stem for a chart-overlay drawing part — used by
+ * the reader to recognise `xl/drawings/chartUserShapeN.xml` entries
+ * and stash their bytes for post-load reconciliation onto the owning
+ * chart. Returns `undefined` for any other path, including regular
+ * worksheet drawings (those go through {@link getDrawingNameFromPath}).
+ */
+export function getChartUserShapesNameFromPath(path: string): string | undefined {
+  const match = chartUserShapesXmlRegex.exec(path);
   return match ? match[1] : undefined;
 }
 
@@ -191,6 +204,31 @@ export function commentsPath(sheetId: number | string): string {
 export function commentsPathFromName(commentName: string): string {
   // For comments when the caller already has the logical name (e.g. "comments1").
   return `xl/${commentName}.xml`;
+}
+
+/**
+ * Modern Office 365 "threaded comments" — separate from classic VML
+ * comments. Each worksheet that uses threaded comments has its own
+ * `xl/threadedComments/threadedComment{N}.xml` part alongside the
+ * legacy `xl/comments{N}.xml` (classic comments carry a fallback text
+ * representation, threaded comments carry the conversation tree).
+ */
+export function threadedCommentsPath(sheetId: number | string): string {
+  return `xl/threadedComments/threadedComment${sheetId}.xml`;
+}
+
+export function threadedCommentsPathFromName(name: string): string {
+  return `xl/threadedComments/${name}.xml`;
+}
+
+/**
+ * Modern Office 365 "persons" list — the directory of commenters
+ * referenced by `threadedComment/@personId`. Workbook-level single
+ * part (`xl/persons/person.xml` is the conventional filename for the
+ * primary, rarely-duplicated list).
+ */
+export function personsPath(): string {
+  return "xl/persons/person.xml";
 }
 
 export function vmlDrawingPath(sheetId: number | string): string {
@@ -326,6 +364,8 @@ const chartXmlRegex = /^xl\/charts\/chart(\d+)[.]xml$/;
 const chartRelsXmlRegex = /^xl\/charts\/_rels\/chart(\d+)[.]xml[.]rels$/;
 const chartStyleXmlRegex = /^xl\/charts\/style(\d+)[.]xml$/;
 const chartColorsXmlRegex = /^xl\/charts\/colors(\d+)[.]xml$/;
+const chartExStyleXmlRegex = /^xl\/charts\/styleEx(\d+)[.]xml$/;
+const chartExColorsXmlRegex = /^xl\/charts\/colorsEx(\d+)[.]xml$/;
 
 export function getChartNumberFromPath(path: string): number | undefined {
   const match = chartXmlRegex.exec(path);
@@ -347,6 +387,16 @@ export function getChartColorsNumberFromPath(path: string): number | undefined {
   return match ? parseInt(match[1], 10) : undefined;
 }
 
+export function getChartExStyleNumberFromPath(path: string): number | undefined {
+  const match = chartExStyleXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+export function getChartExColorsNumberFromPath(path: string): number | undefined {
+  const match = chartExColorsXmlRegex.exec(path);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
 export function chartPath(n: number | string): string {
   return `xl/charts/chart${n}.xml`;
 }
@@ -363,9 +413,39 @@ export function chartColorsPath(n: number | string): string {
   return `xl/charts/colors${n}.xml`;
 }
 
+export function chartExStylePath(n: number | string): string {
+  return `xl/charts/styleEx${n}.xml`;
+}
+
+export function chartExColorsPath(n: number | string): string {
+  return `xl/charts/colorsEx${n}.xml`;
+}
+
 export function chartRelTargetFromDrawing(n: number | string): string {
   // Target inside xl/drawings/_rels/drawingN.xml.rels (base: xl/drawings/)
   return `../charts/chart${n}.xml`;
+}
+
+/**
+ * Path of the DrawingML overlay part backing a chart's `c:userShapes`
+ * reference. Placed under `xl/drawings/` with a `chartUserShape` prefix
+ * (rather than sharing the regular `drawingN` pool) so the writer can
+ * allocate it by chart number without colliding with worksheet
+ * drawings. Excel itself is indifferent to the part path — only the
+ * rel target matters — so files loaded with a different original
+ * path are renamed on write.
+ */
+export function chartUserShapesPath(n: number | string): string {
+  return `xl/drawings/chartUserShape${n}.xml`;
+}
+
+/**
+ * Target path emitted inside `xl/charts/_rels/chartN.xml.rels` for the
+ * user-shapes drawing part. Resolved relative to the rels file's
+ * base directory (`xl/charts/`).
+ */
+export function chartUserShapesRelTarget(n: number | string): string {
+  return `../drawings/chartUserShape${n}.xml`;
 }
 
 export function chartStyleRelTarget(n: number | string): string {
@@ -376,6 +456,14 @@ export function chartStyleRelTarget(n: number | string): string {
 export function chartColorsRelTarget(n: number | string): string {
   // Target inside xl/charts/_rels/chartN.xml.rels (base: xl/charts/)
   return `colors${n}.xml`;
+}
+
+export function chartExStyleRelTarget(n: number | string): string {
+  return `styleEx${n}.xml`;
+}
+
+export function chartExColorsRelTarget(n: number | string): string {
+  return `colorsEx${n}.xml`;
 }
 
 export function isChartPath(path: string): boolean {

@@ -3,10 +3,71 @@
  */
 export { Chart, buildChartModel } from "./chart";
 export { buildComboChartModel } from "./chart-builder";
-export { fillChartCaches, fillNumRef, fillStrRef } from "./cache-populator";
-export { parseChartColors, buildChartColors, parseChartStyle } from "./chart-sidecar";
+export { fillChartCaches, fillChartExCaches, fillNumRef, fillStrRef } from "./cache-populator";
+export {
+  parseChartColors,
+  buildChartColors,
+  parseChartStyle,
+  buildChartStyle
+} from "./chart-sidecar";
 export { buildChartExModel } from "./chart-ex-builder";
-export { renderChartEx } from "./chart-ex-renderer";
+export { parseChartEx } from "./chart-ex-parser";
+export {
+  canRenderChartExAsVectorPdf,
+  drawChartExPdf,
+  renderChartEx,
+  renderChartExPng,
+  renderChartExSvg,
+  VECTOR_PDF_CHART_EX_LAYOUT_IDS
+} from "./chart-ex-renderer";
+export {
+  applyChartExPreset,
+  applyChartPreset,
+  CHART_EX_PRESETS,
+  CHART_PRESETS,
+  EXCEL_CHART_EX_PRESETS,
+  EXCEL_CHART_PRESETS
+} from "./chart-presets";
+export {
+  chartExOptionsFromRows,
+  chartExOptionsFromTable,
+  chartOptionsFromRows,
+  chartOptionsFromTable,
+  seriesFromColumns
+} from "./chart-api";
+export type {
+  AddChartExFromRowsOptions,
+  AddChartExFromTableOptions,
+  AddChartFromRowsOptions,
+  AddChartFromTableOptions,
+  SeriesFromColumnsOptions
+} from "./chart-api";
+export type { ExcelChartExPreset, ExcelChartPreset } from "./chart-presets";
+export {
+  applyAxisTransform,
+  buildChartScene,
+  buildEffectFilter,
+  drawChartPdf,
+  renderChartPng,
+  renderChartSvg
+} from "./chart-renderer";
+export type {
+  ChartPdfDrawingSurface,
+  ChartPdfPathOp,
+  ChartRenderOptions,
+  ChartScene,
+  ChartSceneLegend,
+  ChartSceneLine,
+  ChartScenePieSlice,
+  ChartSceneSeries,
+  ChartSceneText,
+  PdfChartRenderOptions,
+  PdfColor,
+  RegionMapDataOptions,
+  RegionMapMatchRule
+} from "./chart-renderer";
+export { resolveTopologyObject } from "./topojson";
+export type { ResolvedRing, TopoGeometry, TopoGeometryCollection, TopologyLike } from "./topojson";
 export type {
   ChartExModel,
   ChartExSpace,
@@ -23,6 +84,9 @@ export type {
   ChartExLayoutProperties,
   ChartExAxis,
   AddChartExOptions,
+  AddChartExHistogramOptions,
+  AddChartExWaterfallOptions,
+  AddChartExBoxWhiskerOptions,
   AddChartExSeriesOptions,
   ChartExType
 } from "./chart-ex-types";
@@ -38,6 +102,14 @@ export type {
   ChartTitle,
   ChartLegend,
   AddChartOptions,
+  AddBarChartOptions,
+  AddBarChartSeriesOptions,
+  AddPieChartOptions,
+  AddPieChartSeriesOptions,
+  AddScatterChartOptions,
+  AddScatterChartSeriesOptions,
+  AddSurfaceChartOptions,
+  AddSurfaceChartSeriesOptions,
   AddChartSeriesOptions,
   AddChartRange,
   AddComboChartOptions,
@@ -50,6 +122,7 @@ export type {
   ChartColor,
   ChartFill,
   ChartLine,
+  PivotChartSource,
   SeriesBase,
   AddChartMarkerOptions,
   AddDataLabelsOptions,

@@ -219,6 +219,7 @@
   "scripts": {
     "example": "node scripts/run-examples.ts",
     "generate:csv-worker": "node scripts/generate-csv-worker-script.ts",
+    "compatibility:report": "node scripts/compatibility-report.ts",
     "check": "concurrently --raw \"pnpm run type\" \"pnpm run lint\" \"pnpm run format\"",
     "test": "vitest run && pnpm run test:browser --",
     "test:browser": "pnpm run generate:csv-worker && rimraf dist && pnpm run build:browser:bundle && vitest run --config vitest.browser.config.ts",

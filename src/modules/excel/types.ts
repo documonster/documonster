@@ -555,6 +555,81 @@ export interface Comment {
   margins?: Partial<CommentMargins>;
   protection?: Partial<CommentProtection>;
   editAs?: CommentEditAs;
+  /**
+   * Office 365 threaded-comment conversation anchored at the same
+   * cell. When present, Excel surfaces the modern reply UI; the
+   * classic VML note still renders as a fallback for older viewers.
+   *
+   * The first entry in the list is the top-level comment; subsequent
+   * entries with `parentId === first.id` are replies to it. Nested
+   * threads beyond two levels are not supported by Excel itself.
+   */
+  threadedComments?: ThreadedComment[];
+}
+
+/**
+ * A single entry in a threaded-comment conversation
+ * (`xl/threadedComments/threadedComment{N}.xml` →
+ * `<threadedComment ref="…" personId="…" id="…" parentId="…">`).
+ *
+ * `id` is a GUID-braced string Excel expects to uniquely identify the
+ * comment within the sheet; callers may omit it and let the writer
+ * synthesise one. `personId` must reference an entry in the
+ * workbook-level {@link ThreadedCommentPerson} list — the writer
+ * enforces this by adding any dangling `personId` to the list with a
+ * placeholder displayName.
+ */
+export interface ThreadedComment {
+  /** `{GUID}`-style id; auto-generated if absent. */
+  id?: string;
+  /**
+   * Id of the parent comment when this entry is a reply. Absent for
+   * top-level comments.
+   */
+  parentId?: string;
+  /** Reference to the author in the workbook persons list. */
+  personId: string;
+  /** Creation timestamp as an ISO-8601 string. */
+  date?: string;
+  /** Plain-text body. @mentions are expressed separately via {@link mentions}. */
+  text: string;
+  /**
+   * Structured `@mention` markers inside `text`. `startIndex`/`length`
+   * point at the substring Excel shows as a clickable mention.
+   */
+  mentions?: ThreadedCommentMention[];
+  /**
+   * Whether Excel marks this comment as "resolved". Corresponds to
+   * `done="1"` on the commentExt element. When undefined, Excel treats
+   * the thread as open.
+   */
+  done?: boolean;
+}
+
+export interface ThreadedCommentMention {
+  mentionId?: string;
+  mentionPersonId: string;
+  startIndex: number;
+  length: number;
+}
+
+/**
+ * Workbook-level person directory referenced by threaded comments.
+ * Written as `xl/persons/person.xml`; one `<person>` element per
+ * unique commenter.
+ */
+export interface ThreadedCommentPerson {
+  /** `{GUID}`-style id referenced by `threadedComment/@personId`. */
+  id: string;
+  /** Display name shown in the UI (e.g. "Jane Doe"). */
+  displayName: string;
+  /** Provider user id (e.g. "jane@example.com", "S-1-5-…"). */
+  userId?: string;
+  /**
+   * Identity provider — "AD" (Active Directory), "PeoplePicker",
+   * "None". Excel preserves unknown values verbatim.
+   */
+  providerId?: string;
 }
 
 // ============================================================================

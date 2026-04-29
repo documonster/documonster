@@ -125,6 +125,17 @@ export interface AddSparklineGroupOptions {
   lineColor?: string;
   /** Negative bar color */
   negativeColor?: string;
+  /**
+   * Colour for the reference line drawn when {@link displayXAxis} is
+   * enabled. Maps to `<x14:colorAxis>` — the horizontal rule that
+   * separates positive from negative values on a sparkline.
+   */
+  axisColor?: string;
+  /**
+   * Colour applied to ordinary marker dots (those that are neither
+   * first/last/high/low/negative). Maps to `<x14:colorMarkers>`.
+   */
+  markerColor?: string;
   /** High marker color */
   highColor?: string;
   /** Low marker color */
@@ -185,6 +196,12 @@ export function buildSparklineGroup(opts: AddSparklineGroupOptions): SparklineGr
   }
   if (opts.negativeColor) {
     group.colorNegative = hexToSparklineColor(opts.negativeColor);
+  }
+  if (opts.axisColor) {
+    group.colorAxis = hexToSparklineColor(opts.axisColor);
+  }
+  if (opts.markerColor) {
+    group.colorMarkers = hexToSparklineColor(opts.markerColor);
   }
   if (opts.highColor) {
     group.colorHigh = hexToSparklineColor(opts.highColor);
@@ -519,4 +536,322 @@ function decodeXml(s: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'");
+}
+
+// =====================================================================
+// SVG rendering
+// =====================================================================
+
+/**
+ * Options for {@link renderSparklineSvg}.
+ */
+export interface SparklineRenderOptions {
+  /** Output width in px (default 120). */
+  width?: number;
+  /** Output height in px (default 30). */
+  height?: number;
+  /** Background fill colour. When absent, the SVG has a transparent background. */
+  background?: string;
+  /** Inner padding in px so markers don't clip against the SVG edges. */
+  padding?: number;
+}
+
+/**
+ * Render a sparkline group to a single SVG string given explicit data
+ * values for each sparkline in the group. This is a preview-grade
+ * renderer suitable for PDF/PNG embedding — Excel ultimately renders
+ * sparklines natively from the formula references.
+ *
+ * Why take `values: number[][]` rather than walk the workbook: the
+ * caller already has a worksheet in scope when it wants a preview,
+ * and decoupling the renderer from the worksheet keeps this module
+ * free of upstream dependencies. When no per-sparkline data is
+ * supplied the SVG is rendered empty (just the background) so the
+ * function never throws.
+ *
+ * Respects the group's `type` (`line` / `column` / `stacked`),
+ * `displayXAxis`, `minAxisType` / `maxAxisType` / `manualMin` /
+ * `manualMax`, markers (`markers`, `first`, `last`, `high`, `low`,
+ * `negative`), `rightToLeft`, and all structural colours
+ * (`colorSeries`, `colorNegative`, `colorAxis`, `colorMarkers`,
+ * `colorHigh`, `colorLow`, `colorFirst`, `colorLast`).
+ *
+ * The individual sparkline's `cellRef` is not consulted — the caller
+ * controls layout at a higher level and this function returns a
+ * standalone SVG per sparkline when passed a group with a single
+ * member, or a grid-stacked SVG when given multiple members.
+ */
+export function renderSparklineSvg(
+  group: SparklineGroup,
+  values: number[][],
+  options: SparklineRenderOptions = {}
+): string {
+  const width = Math.max(1, options.width ?? 120);
+  const height = Math.max(1, options.height ?? 30);
+  const padding = Math.max(0, options.padding ?? 2);
+  const rowCount = Math.max(group.sparklines.length, values.length, 1);
+  const rowHeight = height / rowCount;
+
+  const lineColor = resolveSparklineColor(group.colorSeries) ?? "#376091";
+  const negativeColor = resolveSparklineColor(group.colorNegative) ?? "#D00000";
+  const axisColor = resolveSparklineColor(group.colorAxis) ?? "#000000";
+  const markerColor = resolveSparklineColor(group.colorMarkers) ?? lineColor;
+  const highColor = resolveSparklineColor(group.colorHigh) ?? markerColor;
+  const lowColor = resolveSparklineColor(group.colorLow) ?? markerColor;
+  const firstColor = resolveSparklineColor(group.colorFirst) ?? markerColor;
+  const lastColor = resolveSparklineColor(group.colorLast) ?? markerColor;
+
+  const parts: string[] = [];
+  parts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+  );
+  if (options.background) {
+    parts.push(
+      `<rect x="0" y="0" width="${width}" height="${height}" fill="${escapeAttr(options.background)}"/>`
+    );
+  }
+
+  // Per-group axis range: group means all sparklines share min/max;
+  // individual means each uses its own; custom uses manualMin/Max.
+  const groupMin = minOrNaN(values);
+  const groupMax = maxOrNaN(values);
+
+  for (let row = 0; row < rowCount; row++) {
+    const data = values[row] ?? [];
+    if (data.length === 0) {
+      continue;
+    }
+    const { min, max } = axisRangeFor(group, data, groupMin, groupMax);
+    const rowTop = rowHeight * row;
+    const innerX = padding;
+    const innerY = rowTop + padding;
+    const innerW = width - padding * 2;
+    const innerH = rowHeight - padding * 2;
+    if (innerW <= 0 || innerH <= 0) {
+      continue;
+    }
+
+    const span = max === min ? 1 : max - min;
+    const rtl = group.rightToLeft === true;
+    const xAt = (i: number, n: number): number => {
+      const t = n <= 1 ? 0 : i / (n - 1);
+      const shifted = rtl ? 1 - t : t;
+      return innerX + shifted * innerW;
+    };
+    const yAt = (v: number): number => {
+      if (!Number.isFinite(v)) {
+        return innerY + innerH;
+      }
+      const t = (v - min) / span;
+      return innerY + innerH - t * innerH;
+    };
+
+    if (group.type === "column" || group.type === "stacked") {
+      // Bar / win-loss sparkline. Stacked (a.k.a. win/loss) collapses
+      // magnitude so positives are full-height up, negatives full-height
+      // down, zeros disappear.
+      const n = data.length;
+      const barW = Math.max(1, (innerW / Math.max(n, 1)) * 0.8);
+      for (let i = 0; i < n; i++) {
+        const v = data[i];
+        if (!Number.isFinite(v) || v === 0) {
+          continue;
+        }
+        const centre = xAt(i, n);
+        const x = centre - barW / 2;
+        const color = v < 0 && group.negative !== false ? negativeColor : lineColor;
+        let y: number;
+        let h: number;
+        if (group.type === "stacked") {
+          const half = innerH / 2;
+          if (v >= 0) {
+            y = innerY + half - half;
+            h = half;
+          } else {
+            y = innerY + half;
+            h = half;
+          }
+        } else {
+          const base = min <= 0 && max >= 0 ? yAt(0) : innerY + innerH;
+          const top = yAt(v);
+          y = Math.min(base, top);
+          h = Math.abs(base - top);
+        }
+        parts.push(
+          `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(h, 1)}" fill="${color}"/>`
+        );
+      }
+    } else {
+      // Line sparkline.
+      const pointsFinite: Array<{ x: number; y: number; v: number }> = [];
+      for (let i = 0; i < data.length; i++) {
+        const v = data[i];
+        if (Number.isFinite(v)) {
+          pointsFinite.push({ x: xAt(i, data.length), y: yAt(v), v });
+        }
+      }
+      if (pointsFinite.length >= 2) {
+        const d = pointsFinite.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ");
+        parts.push(
+          `<path d="${d}" fill="none" stroke="${lineColor}" stroke-width="${
+            group.lineWeight ? group.lineWeight * 0.75 : 1
+          }"/>`
+        );
+      }
+      if (group.markers) {
+        for (const p of pointsFinite) {
+          parts.push(`<circle cx="${p.x}" cy="${p.y}" r="1.5" fill="${markerColor}"/>`);
+        }
+      }
+      // Special markers override the regular marker above.
+      if (pointsFinite.length > 0) {
+        if (group.first) {
+          const p = pointsFinite[0];
+          parts.push(`<circle cx="${p.x}" cy="${p.y}" r="1.8" fill="${firstColor}"/>`);
+        }
+        if (group.last) {
+          const p = pointsFinite[pointsFinite.length - 1];
+          parts.push(`<circle cx="${p.x}" cy="${p.y}" r="1.8" fill="${lastColor}"/>`);
+        }
+        if (group.high) {
+          const hi = pointsFinite.reduce((acc, p) => (p.v > acc.v ? p : acc), pointsFinite[0]);
+          parts.push(`<circle cx="${hi.x}" cy="${hi.y}" r="1.8" fill="${highColor}"/>`);
+        }
+        if (group.low) {
+          const lo = pointsFinite.reduce((acc, p) => (p.v < acc.v ? p : acc), pointsFinite[0]);
+          parts.push(`<circle cx="${lo.x}" cy="${lo.y}" r="1.8" fill="${lowColor}"/>`);
+        }
+        if (group.negative) {
+          for (const p of pointsFinite) {
+            if (p.v < 0) {
+              parts.push(`<circle cx="${p.x}" cy="${p.y}" r="1.8" fill="${negativeColor}"/>`);
+            }
+          }
+        }
+      }
+    }
+
+    if (group.displayXAxis && min <= 0 && max >= 0) {
+      const axisY = yAt(0);
+      parts.push(
+        `<line x1="${innerX}" y1="${axisY}" x2="${innerX + innerW}" y2="${axisY}" stroke="${axisColor}" stroke-width="0.5"/>`
+      );
+    }
+  }
+
+  parts.push(`</svg>`);
+  return parts.join("");
+}
+
+function axisRangeFor(
+  group: SparklineGroup,
+  row: number[],
+  groupMin: number,
+  groupMax: number
+): { min: number; max: number } {
+  let min: number;
+  let max: number;
+  if (group.minAxisType === "group") {
+    min = groupMin;
+  } else if (group.minAxisType === "custom" && group.manualMin !== undefined) {
+    min = group.manualMin;
+  } else {
+    min = finiteMin(row);
+  }
+  if (group.maxAxisType === "group") {
+    max = groupMax;
+  } else if (group.maxAxisType === "custom" && group.manualMax !== undefined) {
+    max = group.manualMax;
+  } else {
+    max = finiteMax(row);
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: 0, max: 1 };
+  }
+  if (min === max) {
+    // Flat line — pad so the point renders in the middle.
+    return { min: min - 1, max: max + 1 };
+  }
+  return { min, max };
+}
+
+function finiteMin(row: number[]): number {
+  let r = Infinity;
+  for (const v of row) {
+    if (Number.isFinite(v) && v < r) {
+      r = v;
+    }
+  }
+  return r;
+}
+function finiteMax(row: number[]): number {
+  let r = -Infinity;
+  for (const v of row) {
+    if (Number.isFinite(v) && v > r) {
+      r = v;
+    }
+  }
+  return r;
+}
+function minOrNaN(rows: number[][]): number {
+  let r = Infinity;
+  for (const row of rows) {
+    const m = finiteMin(row);
+    if (m < r) {
+      r = m;
+    }
+  }
+  return Number.isFinite(r) ? r : NaN;
+}
+function maxOrNaN(rows: number[][]): number {
+  let r = -Infinity;
+  for (const row of rows) {
+    const m = finiteMax(row);
+    if (m > r) {
+      r = m;
+    }
+  }
+  return Number.isFinite(r) ? r : NaN;
+}
+
+function resolveSparklineColor(color: SparklineColor | undefined): string | undefined {
+  if (!color) {
+    return undefined;
+  }
+  if (color.rgb) {
+    // Excel sparkline RGB hex is ARGB (8 chars) or RGB (6 chars); we
+    // normalise to a 6-char hex for SVG consumption, discarding alpha.
+    const hex = color.rgb.length === 8 ? color.rgb.slice(2) : color.rgb;
+    return `#${hex}`;
+  }
+  // Theme colours require the workbook theme to resolve precisely; for
+  // preview purposes fall back to a stable palette that roughly tracks
+  // Office defaults. Callers who need pixel-perfect theme resolution
+  // can supply a structured `rgb` instead.
+  if (color.theme !== undefined) {
+    const palette = [
+      "#000000",
+      "#FFFFFF",
+      "#1F497D",
+      "#EEECE1",
+      "#4F81BD",
+      "#C0504D",
+      "#9BBB59",
+      "#8064A2",
+      "#4BACC6",
+      "#F79646",
+      "#0000FF",
+      "#800080"
+    ];
+    return palette[color.theme] ?? "#000000";
+  }
+  return undefined;
+}
+
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

@@ -25,8 +25,9 @@ import { PdfContentStream } from "../core/pdf-stream";
 import { PdfWriter } from "../core/pdf-writer";
 import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
 import { FontManager } from "../font/font-manager";
+import { discoverSystemFontCandidates } from "../font/system-fonts";
 import { parseTtf } from "../font/ttf-parser";
-import { wrapTextLines, emitTextWithMatrix } from "../render/page-renderer";
+import { wrapTextLines, emitTextWithMatrix, alphaGsName } from "../render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "../types";
 import { writeImageXObject } from "./image-utils";
 
@@ -62,6 +63,26 @@ export interface DrawTextOptions {
   maxWidth?: number;
   /** Line height multiplier. Default: 1.2. */
   lineHeight?: number;
+  /**
+   * Rotation in degrees, counter-clockwise in the PDF coordinate system
+   * (which has +Y pointing up, so visually clockwise on a page viewer).
+   * The rotation pivot is `(x, y)`. Default: `0` (no rotation).
+   *
+   * Incompatible with `maxWidth` (word-wrapping + rotation requires per-
+   * line matrix transforms that the current implementation does not
+   * support — supplying both leaves the wrap ignoring rotation so the
+   * text remains readable). If you need rotated wrapped text, break it
+   * into lines yourself and call `drawText` per line.
+   */
+  rotation?: number;
+  /**
+   * Horizontal alignment of the text around `x`. Default: `"start"`
+   * (the conventional PDF behaviour where `x` is the baseline left
+   * edge). Implemented by pre-shifting `x` using the chosen font's
+   * measured width — no deferred layout, so the computed position is
+   * stable across font subsetting.
+   */
+  anchor?: "start" | "middle" | "end";
 }
 
 /** Rectangle drawing options. */
@@ -173,6 +194,20 @@ export interface DrawImageOptions {
   width: number;
   /** Display height in points. */
   height: number;
+}
+
+/** Options for drawing a simple SVG document onto a PDF page. */
+export interface DrawSvgOptions {
+  /** Raw SVG markup. */
+  svg: string;
+  /** Destination X position in points. */
+  x: number;
+  /** Destination Y position in points. */
+  y: number;
+  /** Destination width in points. If omitted, uses the SVG width/viewBox width. */
+  width?: number;
+  /** Destination height in points. If omitted, uses the SVG height/viewBox height. */
+  height?: number;
 }
 
 /** Document metadata. */
@@ -458,6 +493,15 @@ export class PdfPageBuilder {
   readonly _formFields: BuilderFormField[] = [];
   /** @internal */
   readonly _fontManager: FontManager;
+  /**
+   * Alpha values < 1 encountered during painting; each is materialised as
+   * one `/ExtGState` object in the page resource dictionary and applied
+   * via `setGraphicsState` before the corresponding colour draw. Empty
+   * set = no ExtGState entry needed in Resources (keeps the common
+   * opacity-1 case byte-identical with the pre-alpha implementation).
+   * @internal
+   */
+  readonly _alphaValues = new Set<number>();
 
   /** @internal */
   constructor(width: number, height: number, fontManager: FontManager) {
@@ -501,6 +545,19 @@ export class PdfPageBuilder {
 
     const useType3 = this._fontManager.hasType3Fonts() && !this._fontManager.hasEmbeddedFont();
 
+    // Resolve anchor into an adjusted x before any matrix math. We use the
+    // same font/size combination the stream will render with, so the
+    // alignment is correct for the actual glyphs (not a fallback
+    // estimate). Single-line drawing only — wrapped text ignores anchor
+    // because the wrapper re-splits by the caller's supplied x.
+    const anchor = options.anchor ?? "start";
+    const resolvedX =
+      anchor === "start" || options.maxWidth
+        ? options.x
+        : options.x -
+          this._fontManager.measureText(text, resourceName, fontSize) *
+            (anchor === "middle" ? 0.5 : 1);
+
     if (options.maxWidth) {
       // Word-wrap (reuses the shared wrapTextLines from page-renderer)
       const measure = (s: string) => this._fontManager.measureText(s, resourceName, fontSize);
@@ -508,6 +565,7 @@ export class PdfPageBuilder {
       const leading = fontSize * lineHeightFactor;
 
       this._stream.save();
+      this._applyAlpha(color.a);
       this._stream.setFillColor(color);
 
       for (let i = 0; i < lines.length; i++) {
@@ -532,21 +590,47 @@ export class PdfPageBuilder {
     } else {
       // Single line
       this._stream.save();
+      this._applyAlpha(color.a);
       this._stream.setFillColor(color);
-      emitTextWithMatrix(
-        this._stream,
-        text,
-        1,
-        0,
-        0,
-        1,
-        options.x,
-        options.y,
-        resourceName,
-        fontSize,
-        this._fontManager,
-        useType3
-      );
+      const rotation = options.rotation ?? 0;
+      if (rotation === 0) {
+        emitTextWithMatrix(
+          this._stream,
+          text,
+          1,
+          0,
+          0,
+          1,
+          resolvedX,
+          options.y,
+          resourceName,
+          fontSize,
+          this._fontManager,
+          useType3
+        );
+      } else {
+        // Build the rotation matrix around (x, y). `emitTextWithMatrix`
+        // accepts the full 2×3 text matrix, so we pre-multiply the
+        // rotation with the translation so one call positions and
+        // rotates the glyph sequence in a single Tm op.
+        const theta = (rotation * Math.PI) / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        emitTextWithMatrix(
+          this._stream,
+          text,
+          cos,
+          sin,
+          -sin,
+          cos,
+          resolvedX,
+          options.y,
+          resourceName,
+          fontSize,
+          this._fontManager,
+          useType3
+        );
+      }
       this._stream.restore();
     }
 
@@ -630,6 +714,7 @@ export class PdfPageBuilder {
     const lineWidth = options.lineWidth ?? 1;
 
     this._stream.save();
+    this._applyAlpha(color.a);
     this._stream.setStrokeColor(color);
     this._stream.setLineWidth(lineWidth);
     if (options.dashPattern && options.dashPattern.length > 0) {
@@ -822,6 +907,93 @@ export class PdfPageBuilder {
     return this.drawPath(ops, options);
   }
 
+  /**
+   * Draw a simple SVG document onto this page.
+   *
+   * Supports the SVG primitives emitted by ExcelTS chart rendering:
+   * `rect`, `line`, `circle`, `polyline`, `polygon`, `path`, and `text`.
+   */
+  drawSvg(options: DrawSvgOptions): this {
+    const parsed = parseSimpleSvg(options.svg);
+    const scaleX = (options.width ?? parsed.width) / parsed.width;
+    const scaleY = (options.height ?? parsed.height) / parsed.height;
+    const mapX = (x: number) => options.x + x * scaleX;
+    const mapY = (y: number) => options.y + (options.height ?? parsed.height) - y * scaleY;
+    // `opacity` applies to both fill and stroke per SVG spec; multiply it
+    // in alongside the channel-specific `fill-opacity` / `stroke-opacity`
+    // so every SVG form authors emit (inline rgba, channel opacity, or
+    // element-wide opacity) ends up driving `/ExtGState` consistently.
+    const fillColor = (attrs: Record<string, string>): PdfColor | undefined => {
+      const base = attrs.fill ? svgColorToPdf(attrs.fill) : undefined;
+      return withSvgOpacity(withSvgOpacity(base, attrs["fill-opacity"]), attrs.opacity);
+    };
+    const strokeColor = (attrs: Record<string, string>): PdfColor | undefined => {
+      const base = attrs.stroke ? svgColorToPdf(attrs.stroke) : undefined;
+      return withSvgOpacity(withSvgOpacity(base, attrs["stroke-opacity"]), attrs.opacity);
+    };
+
+    for (const element of parsed.elements) {
+      if (element.name === "rect") {
+        const rectWidth = lengthAttr(element, "width", parsed.width, 0);
+        const rectHeight = lengthAttr(element, "height", parsed.height, 0);
+        this.drawRect({
+          x: mapX(lengthAttr(element, "x", parsed.width, 0)),
+          y: mapY(lengthAttr(element, "y", parsed.height, 0) + rectHeight),
+          width: rectWidth * scaleX,
+          height: rectHeight * scaleY,
+          fill: fillColor(element.attrs),
+          stroke: strokeColor(element.attrs)
+        });
+      } else if (element.name === "line") {
+        this.drawLine({
+          x1: mapX(numAttr(element, "x1", 0)),
+          y1: mapY(numAttr(element, "y1", 0)),
+          x2: mapX(numAttr(element, "x2", 0)),
+          y2: mapY(numAttr(element, "y2", 0)),
+          color: strokeColor(element.attrs)
+        });
+      } else if (element.name === "circle") {
+        this.drawCircle({
+          cx: mapX(numAttr(element, "cx", 0)),
+          cy: mapY(numAttr(element, "cy", 0)),
+          r: numAttr(element, "r", 0) * Math.max(scaleX, scaleY),
+          fill: fillColor(element.attrs),
+          stroke: strokeColor(element.attrs)
+        });
+      } else if (element.name === "polyline" || element.name === "polygon") {
+        const ops = svgPointsToPath(element.attrs.points ?? "", element.name === "polygon").map(
+          op => transformPathOp(op, mapX, mapY)
+        );
+        const stroke =
+          strokeColor(element.attrs) ?? (element.name === "polyline" ? BLACK : undefined);
+        this.drawPath(ops, {
+          fill: element.name === "polygon" ? fillColor(element.attrs) : undefined,
+          stroke,
+          closePath: element.name === "polygon"
+        });
+      } else if (element.name === "path" && element.attrs.d) {
+        const ops = parseSvgPath(element.attrs.d).map(op => transformPathOp(op, mapX, mapY));
+        const fill = fillColor(element.attrs);
+        const stroke = strokeColor(element.attrs);
+        if (!fill && !stroke) {
+          continue;
+        }
+        this.drawPath(ops, {
+          fill,
+          stroke
+        });
+      } else if (element.name === "text") {
+        this.drawText(xmlDecodeBasic(element.text), {
+          x: mapX(numAttr(element, "x", 0)),
+          y: mapY(numAttr(element, "y", 0)),
+          fontSize: numAttr(element, "font-size", 12) * Math.max(scaleX, scaleY),
+          color: fillColor(element.attrs)
+        });
+      }
+    }
+    return this;
+  }
+
   // ===========================================================================
   // Raw content stream access
   // ===========================================================================
@@ -847,6 +1019,19 @@ export class PdfPageBuilder {
     const hasFill = fill !== undefined;
     const hasStroke = stroke !== undefined;
 
+    // Apply alpha ExtGState before setting colours. `_paintPath` callers
+    // all wrap this in save()/restore(), so the graphics state mutation is
+    // local to this path. When fill and stroke carry different alphas,
+    // the second `setGraphicsState` overrides the first — this matches
+    // pdf-exporter's behaviour and real-world use (alpha parity across
+    // fill/stroke for the same object is overwhelmingly common).
+    if (hasFill) {
+      this._applyAlpha(fill.a);
+    }
+    if (hasStroke) {
+      this._applyAlpha(stroke.a);
+    }
+
     if (hasFill) {
       this._stream.setFillColor(fill);
     }
@@ -867,6 +1052,28 @@ export class PdfPageBuilder {
       this._stream.setLineWidth(1);
       this._stream.stroke();
     }
+  }
+
+  /**
+   * Register a colour alpha on this page so `build()` can emit the
+   * matching `<< /Type /ExtGState /ca n /CA n >>` resource, and issue
+   * the content-stream `gs` operator pointing at that resource. `alpha
+   * === undefined` or `alpha >= 1` is a no-op, so opaque draws produce
+   * byte-identical output to the pre-alpha implementation.
+   *
+   * Callers must already have issued `save()` so `restore()` scopes the
+   * ExtGState change to the current draw — mirroring the pattern used by
+   * `page-renderer.drawCellFill` (see `render/page-renderer.ts:178-194`).
+   *
+   * @internal
+   */
+  private _applyAlpha(alpha: number | undefined): void {
+    if (alpha === undefined || alpha >= 1) {
+      return;
+    }
+    const clamped = Math.max(0, Math.min(1, alpha));
+    this._alphaValues.add(clamped);
+    this._stream.setGraphicsState(alphaGsName(clamped));
   }
 }
 
@@ -889,6 +1096,21 @@ export class PdfDocumentBuilder {
   private _embeddedFont: Uint8Array | null = null;
   private _pdfA = false;
   private _signatureOptions: PdfSignatureOptions | null = null;
+  /**
+   * Sink for non-fatal diagnostics produced during `build()`. Populated by
+   * {@link onWarning}; defaults to undefined so unaware consumers see
+   * pre-diagnostic behaviour unchanged. Fires for every warning in a
+   * single build, not just the first.
+   */
+  private _onWarning: ((message: string) => void) | undefined;
+  /**
+   * Set via {@link disableFontAutoDiscovery} — opts out of the system-font
+   * auto-embed path in `build()`. Authors who need byte-stable output
+   * across machines (golden tests, reproducible build pipelines) should
+   * enable this so a host-only CJK font doesn't sneak into one run but
+   * not another.
+   */
+  private _disableFontAutoDiscovery = false;
 
   /**
    * Add a new blank page to the document.
@@ -928,6 +1150,38 @@ export class PdfDocumentBuilder {
   embedFont(fontBytes: Uint8Array): this {
     this._embeddedFont = fontBytes;
     return this;
+  }
+
+  /**
+   * Register a callback invoked once per non-fatal diagnostic during
+   * `build()`. Currently raised for:
+   *
+   * - auto-embedded system fonts (`'Auto-embedded system font ...'`)
+   * - non-WinAnsi characters with no covering font (`'...non-WinAnsi character(s) present...'`)
+   *
+   * The callback is synchronous and runs inside `build()`; throwing
+   * from it will abort the build. Return value is ignored.
+   */
+  onWarning(handler: (message: string) => void): this {
+    this._onWarning = handler;
+    return this;
+  }
+
+  /**
+   * Opt out of the best-effort system-font auto-discovery that `build()`
+   * performs when the document contains non-WinAnsi characters and no
+   * font was explicitly embedded. Use this to keep output byte-stable
+   * across hosts: one machine may have SimSun installed while another
+   * does not.
+   */
+  disableFontAutoDiscovery(): this {
+    this._disableFontAutoDiscovery = true;
+    return this;
+  }
+
+  /** @internal */
+  private _warn(message: string): void {
+    this._onWarning?.(message);
   }
 
   /**
@@ -1146,6 +1400,70 @@ export class PdfDocumentBuilder {
     if (this._embeddedFont) {
       const ttfFont = parseTtf(this._embeddedFont);
       this._fontManager.registerEmbeddedFont(ttfFont);
+    } else {
+      // Auto-discover a system font when the document contains non-WinAnsi
+      // characters (CJK, accented code points beyond WinAnsi, etc.) and
+      // the caller did not supply one via `embedFont`. Mirrors the
+      // `pdf-exporter` pipeline so `drawChartPdf`-style overlays, ad-hoc
+      // `drawText` usage, and the spreadsheet exporter all reach for the
+      // same system fonts before falling back to Type3 NOTDEF glyphs.
+      // Failures are non-fatal: discovery is best-effort and users who
+      // need guaranteed rendering should still call `embedFont` with a
+      // font they control.
+      const nonWinAnsi = this._fontManager.getType3CodePoints();
+      if (nonWinAnsi.size > 0) {
+        // Try auto-discovery unless the caller opted out.
+        if (!this._disableFontAutoDiscovery) {
+          for (const candidate of discoverSystemFontCandidates()) {
+            try {
+              const testTtf = parseTtf(candidate);
+              const allCovered = [...nonWinAnsi].every(cp => testTtf.cmap.has(cp));
+              if (allCovered) {
+                this._fontManager.registerEmbeddedFont(testTtf);
+                this._warn(
+                  `Auto-embedded system font '${testTtf.familyName}' to render ${nonWinAnsi.size} non-WinAnsi character(s). ` +
+                    `Call embedFont(bytes) explicitly for deterministic output.`
+                );
+                break;
+              }
+            } catch {
+              // Parse failed — try next candidate
+            }
+          }
+        }
+        if (!this._fontManager.hasEmbeddedFont()) {
+          // Either discovery was disabled, every candidate failed to
+          // parse, or no candidate covered these code points. Type3
+          // NOTDEF glyphs (tofu boxes) will appear for any cp
+          // `type3-glyphs.ts` does not map. Surface a warning so the
+          // author knows rendering will degrade, and list up to 5
+          // sample code points to help them debug.
+          const sample = [...nonWinAnsi]
+            .slice(0, 5)
+            .map(cp => `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`)
+            .join(", ");
+          this._warn(
+            `${nonWinAnsi.size} non-WinAnsi character(s) present but no TrueType font is embedded and no system font candidate covered them ` +
+              `(e.g. ${sample}). Call embedFont(bytes) with a font that covers these code points; otherwise Type3 NOTDEF boxes will render.`
+          );
+        }
+      }
+    }
+
+    // Surface any unknown font families the FontManager saw during
+    // resolveFont (one diagnostic per distinct family, independent of
+    // how many text runs used it). An embedded font shadows everything
+    // anyway, so skip the warning in that case to avoid noise.
+    if (!this._fontManager.hasEmbeddedFont()) {
+      const unknown = this._fontManager.getUnknownFontFamilies();
+      if (unknown.size > 0) {
+        const list = [...unknown].slice(0, 5).join(", ");
+        const more = unknown.size > 5 ? ` (and ${unknown.size - 5} more)` : "";
+        this._warn(
+          `Font family ${unknown.size > 1 ? "names" : "name"} '${list}'${more} not recognised; ` +
+            `falling back to Helvetica metrics. Add the typeface to the font-family map or call embedFont(bytes).`
+        );
+      }
     }
 
     // Write font resources
@@ -1202,6 +1520,25 @@ export class PdfDocumentBuilder {
       }
       if (xobjDictStr) {
         resourcesStr += `/XObject ${xobjDictStr} `;
+      }
+      // Emit an /ExtGState entry for every distinct page-level alpha. Mirrors
+      // the scheme used by `pdf-exporter.ts:377-390` so viewers see the
+      // same construct regardless of which rendering path produced the
+      // PDF. Empty set → no entry (and byte-identical with the old
+      // implementation for fully-opaque documents).
+      if (page._alphaValues.size > 0) {
+        const gsParts = ["<<"];
+        for (const alpha of page._alphaValues) {
+          const gsObjNum = writer.allocObject();
+          const gsDict = new PdfDict()
+            .set("Type", "/ExtGState")
+            .set("ca", pdfNumber(alpha))
+            .set("CA", pdfNumber(alpha));
+          writer.addObject(gsObjNum, gsDict);
+          gsParts.push(`/${alphaGsName(alpha)} ${pdfRef(gsObjNum)}`);
+        }
+        gsParts.push(">>");
+        resourcesStr += `/ExtGState ${gsParts.join("\n")} `;
       }
       resourcesStr += ">>";
       writer.addObject(resourcesObjNum, resourcesStr);
@@ -2034,6 +2371,238 @@ export function parseSvgPath(d: string): PathOp[] {
   }
 
   return ops;
+}
+
+interface SimpleSvgElement {
+  name: string;
+  attrs: Record<string, string>;
+  text: string;
+}
+
+interface SimpleSvgDocument {
+  width: number;
+  height: number;
+  elements: SimpleSvgElement[];
+}
+
+function parseSimpleSvg(svg: string): SimpleSvgDocument {
+  const svgTag = /<svg\b([^>]*)>/i.exec(svg);
+  const svgAttrs = parseSvgAttrs(svgTag?.[1] ?? "");
+  const viewBox = svgAttrs.viewBox?.split(/[\s,]+/).map(Number) ?? [];
+  const width = svgRootLength(svgAttrs.width, viewBox[2], 300);
+  const height = svgRootLength(svgAttrs.height, viewBox[3], 150);
+  const elements: SimpleSvgElement[] = [];
+  const elementRe =
+    /<(rect|line|circle|polyline|polygon|path)\b([^>]*)\/?>|<text\b([^>]*)>([\s\S]*?)<\/text>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = elementRe.exec(svg)) !== null) {
+    if (match[1]) {
+      elements.push({ name: match[1], attrs: parseSvgAttrs(match[2] ?? ""), text: "" });
+    } else {
+      elements.push({ name: "text", attrs: parseSvgAttrs(match[3] ?? ""), text: match[4] ?? "" });
+    }
+  }
+  return { width, height, elements };
+}
+
+function parseSvgAttrs(raw: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const attrRe = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = attrRe.exec(raw)) !== null) {
+    attrs[match[1]] = match[2];
+  }
+  return attrs;
+}
+
+function numAttr(element: SimpleSvgElement, name: string, fallback: number): number {
+  const value = parseFloat(element.attrs[name] ?? "");
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function lengthAttr(
+  element: SimpleSvgElement,
+  name: string,
+  axisLength: number,
+  fallback: number
+): number {
+  const raw = element.attrs[name];
+  if (!raw) {
+    return fallback;
+  }
+  if (raw.trim().endsWith("%")) {
+    const pct = parseFloat(raw);
+    return Number.isFinite(pct) ? (axisLength * pct) / 100 : fallback;
+  }
+  const value = parseFloat(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function svgRootLength(
+  raw: string | undefined,
+  viewBoxLength: number | undefined,
+  fallback: number
+): number {
+  if (!raw || raw.trim().endsWith("%")) {
+    return viewBoxLength || fallback;
+  }
+  const value = parseFloat(raw);
+  return Number.isFinite(value) && value > 0 ? value : viewBoxLength || fallback;
+}
+
+/**
+ * Parse an SVG color token (`#rgb` / `#rrggbb` / `rgb(...)` / `rgba(...)`)
+ * into a {@link PdfColor}. Named colours and functional forms beyond
+ * `rgb`/`rgba` are deliberately out of scope — chart SVG output sticks
+ * to these forms, and the `drawSvg` consumer should pass-through
+ * `undefined` (i.e. "no fill") rather than silently guess.
+ *
+ * `rgba(r, g, b, a)` populates `.a` so the caller can thread the alpha
+ * through `PdfPageBuilder._applyAlpha` → `/ExtGState`. Percentage values
+ * are accepted (e.g. `rgb(100%, 0%, 0%)` ≡ red).
+ */
+function svgColorToPdf(value: string): PdfColor | undefined {
+  if (!value || value === "none") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  // rgb(r,g,b) / rgba(r,g,b,a) — whitespace tolerant, supports 0..255 and 0..100%
+  const fnMatch = /^rgba?\(([^)]+)\)$/i.exec(trimmed);
+  if (fnMatch) {
+    const parts = fnMatch[1]
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .map(part => {
+        if (part.endsWith("%")) {
+          const pct = Number.parseFloat(part);
+          return Number.isFinite(pct) ? pct / 100 : undefined;
+        }
+        const num = Number.parseFloat(part);
+        return Number.isFinite(num) ? num : undefined;
+      });
+    if (parts.length < 3 || parts.slice(0, 3).some(p => p === undefined)) {
+      return undefined;
+    }
+    // The first three values are RGB in 0..255 when integer, already-0..1
+    // when expressed as percentages above. Detect by the original token
+    // to avoid mis-normalising `rgb(0.5, 0.5, 0.5)` as 0..255.
+    const rawTokens = fnMatch[1].split(/[\s,]+/).filter(Boolean);
+    const normaliseChannel = (v: number, idx: number): number => {
+      if (rawTokens[idx]?.endsWith("%")) {
+        return Math.max(0, Math.min(1, v));
+      }
+      return Math.max(0, Math.min(1, v / 255));
+    };
+    const color: PdfColor = {
+      r: normaliseChannel(parts[0]!, 0),
+      g: normaliseChannel(parts[1]!, 1),
+      b: normaliseChannel(parts[2]!, 2)
+    };
+    if (parts.length >= 4 && parts[3] !== undefined) {
+      // rgba's alpha is 0..1 by spec regardless of whether RGB used %.
+      color.a = Math.max(0, Math.min(1, parts[3]));
+    }
+    return color;
+  }
+  const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return {
+      r: parseInt(hex[0] + hex[0], 16) / 255,
+      g: parseInt(hex[1] + hex[1], 16) / 255,
+      b: parseInt(hex[2] + hex[2], 16) / 255
+    };
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return undefined;
+  }
+  return {
+    r: parseInt(hex.slice(0, 2), 16) / 255,
+    g: parseInt(hex.slice(2, 4), 16) / 255,
+    b: parseInt(hex.slice(4, 6), 16) / 255
+  };
+}
+
+/**
+ * Apply an `*-opacity` attribute to an already-parsed {@link PdfColor}.
+ *
+ * SVG lets authors specify opacity either inline on the colour (`rgba`)
+ * or as a separate `fill-opacity`/`stroke-opacity` attribute. When both
+ * are present the W3C spec multiplies them — `rgba(…,0.5)` with
+ * `fill-opacity="0.4"` yields effective alpha 0.2. We preserve that
+ * here so chart SVG output whose authors use either form surfaces the
+ * same alpha through to `/ExtGState`.
+ */
+function withSvgOpacity(
+  color: PdfColor | undefined,
+  opacityAttr: string | undefined
+): PdfColor | undefined {
+  if (!color) {
+    return color;
+  }
+  if (!opacityAttr) {
+    return color;
+  }
+  const parsed = Number.parseFloat(opacityAttr);
+  if (!Number.isFinite(parsed)) {
+    return color;
+  }
+  const clamped = Math.max(0, Math.min(1, parsed));
+  const combined = (color.a ?? 1) * clamped;
+  if (combined >= 1) {
+    return color;
+  }
+  return { ...color, a: combined };
+}
+
+function svgPointsToPath(points: string, close: boolean): PathOp[] {
+  const nums = points
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter(Number.isFinite);
+  const ops: PathOp[] = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) {
+    ops.push(
+      i === 0
+        ? { op: "move", x: nums[i], y: nums[i + 1] }
+        : { op: "line", x: nums[i], y: nums[i + 1] }
+    );
+  }
+  if (close && ops.length > 0) {
+    ops.push({ op: "close" });
+  }
+  return ops;
+}
+
+function transformPathOp(
+  op: PathOp,
+  mapX: (x: number) => number,
+  mapY: (y: number) => number
+): PathOp {
+  if (op.op === "move" || op.op === "line") {
+    return { ...op, x: mapX(op.x), y: mapY(op.y) };
+  }
+  if (op.op === "curve") {
+    return {
+      op: "curve",
+      x1: mapX(op.x1),
+      y1: mapY(op.y1),
+      x2: mapX(op.x2),
+      y2: mapY(op.y2),
+      x3: mapX(op.x3),
+      y3: mapY(op.y3)
+    };
+  }
+  return op;
+}
+
+function xmlDecodeBasic(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
 /**

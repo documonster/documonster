@@ -1,3 +1,4 @@
+import type { ChartExModel } from "@excel/chart/chart-ex-types";
 /**
  * Chart cache populator.
  *
@@ -15,11 +16,13 @@ import type {
   AxisDataSource,
   ChartModel,
   ChartTypeGroup,
+  DataLabelsRange,
   NumberCache,
   NumberReference,
   SeriesBase,
   StringCache,
-  StringReference
+  StringReference,
+  MultiLevelStringReference
 } from "@excel/chart/types";
 import { colCache } from "@excel/utils/col-cache";
 import type { Workbook } from "@excel/workbook";
@@ -31,57 +34,120 @@ import type { Worksheet } from "@excel/worksheet";
  *
  * @param model - The chart model to enrich
  * @param workbook - The workbook used to resolve sheet/cell references
+ * @param contextWorksheet - Optional worksheet providing the default scope for
+ *   defined-name resolution. When a defined name has a sheet-scoped entry
+ *   matching this worksheet's workbook index (`localSheetId`), that entry
+ *   wins over the workbook-scoped entry. Supplying this argument is required
+ *   to correctly resolve sheet-scoped names; omitting it falls back to
+ *   workbook-scoped names only.
  */
-export function fillChartCaches(model: ChartModel, workbook: Workbook): void {
+export function fillChartCaches(
+  model: ChartModel,
+  workbook: Workbook,
+  contextWorksheet?: Worksheet
+): void {
   const plotArea = model.chart?.plotArea;
   if (!plotArea) {
     return;
   }
   const date1904 = workbook.properties?.date1904;
+  const ctx = buildResolverContext(workbook, contextWorksheet);
   for (const group of plotArea.chartTypes) {
-    fillGroupCaches(group, workbook, date1904);
+    fillGroupCaches(group, ctx, date1904);
   }
 }
 
-function fillGroupCaches(group: ChartTypeGroup, workbook: Workbook, date1904?: boolean): void {
+export function fillChartExCaches(
+  model: ChartExModel,
+  workbook: Workbook,
+  contextWorksheet?: Worksheet
+): void {
+  const ctx = buildResolverContext(workbook, contextWorksheet);
+  for (const entry of model.chartSpace.chartData.data) {
+    if (entry.strDim?.formula && !hasChartExStringPoints(entry.strDim)) {
+      const resolved = resolveReference(entry.strDim.formula, ctx);
+      if (resolved) {
+        const points: Array<{ index: number; value: string }> = [];
+        let idx = 0;
+        for (const cell of resolved.cells) {
+          const value = toString(cell.value);
+          if (value !== undefined && value !== "") {
+            points.push({ index: idx, value });
+          }
+          idx++;
+        }
+        entry.strDim.levels = [{ ptCount: idx, points }];
+      }
+    }
+    if (entry.numDim?.formula && !hasChartExNumberPoints(entry.numDim)) {
+      const resolved = resolveReference(entry.numDim.formula, ctx);
+      if (resolved) {
+        const points: Array<{ index: number; value: number }> = [];
+        let idx = 0;
+        for (const cell of resolved.cells) {
+          const value = toNumber(cell.value, workbook.properties?.date1904);
+          if (value !== undefined) {
+            points.push({ index: idx, value });
+          }
+          idx++;
+        }
+        entry.numDim.levels = [{ ptCount: idx, points }];
+      }
+    }
+  }
+}
+
+function fillGroupCaches(group: ChartTypeGroup, ctx: ResolverContext, date1904?: boolean): void {
   const series = (group as { series?: SeriesBase[] }).series;
   if (!series) {
     return;
   }
   for (const s of series) {
-    fillSeriesCaches(s, workbook, date1904);
+    fillSeriesCaches(s, ctx, date1904);
   }
 }
 
-function fillSeriesCaches(series: SeriesBase, workbook: Workbook, date1904?: boolean): void {
+function hasChartExStringPoints(
+  dim: NonNullable<ChartExModel["chartSpace"]["chartData"]["data"][number]["strDim"]>
+): boolean {
+  return dim.levels?.some(level => level.points.length > 0) ?? false;
+}
+
+function hasChartExNumberPoints(
+  dim: NonNullable<ChartExModel["chartSpace"]["chartData"]["data"][number]["numDim"]>
+): boolean {
+  return dim.levels?.some(level => level.points.length > 0) ?? false;
+}
+
+function fillSeriesCaches(series: SeriesBase, ctx: ResolverContext, date1904?: boolean): void {
   // Series name (tx): may be strRef
   const tx = (series as { tx?: { strRef?: StringReference } }).tx;
   if (tx?.strRef) {
-    fillStrRef(tx.strRef, workbook);
+    fillStrRefInternal(tx.strRef, ctx);
   }
 
   // Category / X axis data source
   const cat = (series as { cat?: AxisDataSource }).cat;
   if (cat) {
-    fillAxisDataSource(cat, workbook, date1904);
+    fillAxisDataSource(cat, ctx, date1904);
   }
   const xVal = (series as { xVal?: AxisDataSource }).xVal;
   if (xVal) {
-    fillAxisDataSource(xVal, workbook, date1904);
+    fillAxisDataSource(xVal, ctx, date1904);
   }
 
   // Numeric values — val, yVal, bubbleSize
   const val = (series as { val?: { numRef?: NumberReference } }).val;
   if (val?.numRef) {
-    fillNumRef(val.numRef, workbook, date1904);
+    fillNumRefInternal(val.numRef, ctx, date1904);
   }
   const yVal = (series as { yVal?: { numRef?: NumberReference } }).yVal;
   if (yVal?.numRef) {
-    fillNumRef(yVal.numRef, workbook, date1904);
+    fillNumRefInternal(yVal.numRef, ctx, date1904);
   }
   const bubbleSize = (series as { bubbleSize?: { numRef?: NumberReference } }).bubbleSize;
   if (bubbleSize?.numRef) {
-    fillNumRef(bubbleSize.numRef, workbook, date1904);
+    fillNumRefInternal(bubbleSize.numRef, ctx, date1904);
   }
 
   // Error bars may have custom plus/minus references
@@ -93,37 +159,79 @@ function fillSeriesCaches(series: SeriesBase, workbook: Workbook, date1904?: boo
       minus?: { numRef?: NumberReference };
     }>) {
       if (eb.plus?.numRef) {
-        fillNumRef(eb.plus.numRef, workbook, date1904);
+        fillNumRefInternal(eb.plus.numRef, ctx, date1904);
       }
       if (eb.minus?.numRef) {
-        fillNumRef(eb.minus.numRef, workbook, date1904);
+        fillNumRefInternal(eb.minus.numRef, ctx, date1904);
       }
     }
   }
+
+  // "Value From Cells" data labels (Excel 2013+) — populate the
+  // `c15:datalabelsRange` cache so readers without a formula engine see
+  // the right labels and so the writer can emit `<c15:dlblRangeCache>`.
+  const dataLabels = (series as { dataLabels?: { dataLabelsRange?: DataLabelsRange } }).dataLabels;
+  if (dataLabels?.dataLabelsRange?.formula) {
+    fillDataLabelsRange(dataLabels.dataLabelsRange, ctx);
+  }
 }
 
-function fillAxisDataSource(src: AxisDataSource, workbook: Workbook, date1904?: boolean): void {
+function fillDataLabelsRange(range: DataLabelsRange, ctx: ResolverContext): void {
+  if (range.cache?.points && range.cache.points.length > 0) {
+    return;
+  }
+  const resolved = resolveReference(range.formula, ctx);
+  if (!resolved) {
+    return;
+  }
+  const points: Array<{ index: number; value: string }> = [];
+  let idx = 0;
+  for (const cell of resolved.cells) {
+    const s = toString(cell.value);
+    if (s !== undefined && s !== "") {
+      points.push({ index: idx, value: s });
+    }
+    idx++;
+  }
+  range.cache = { pointCount: idx, points };
+}
+
+function fillAxisDataSource(src: AxisDataSource, ctx: ResolverContext, date1904?: boolean): void {
   if (src.strRef) {
-    fillStrRef(src.strRef, workbook);
+    fillStrRefInternal(src.strRef, ctx);
   }
   if (src.numRef) {
-    fillNumRef(src.numRef, workbook, date1904);
+    fillNumRefInternal(src.numRef, ctx, date1904);
   }
-  // multiLvlStrRef — rare, skip
+  if (src.multiLvlStrRef) {
+    fillMultiLvlStrRefInternal(src.multiLvlStrRef, ctx);
+  }
 }
 
 /**
  * Populate a NumberReference cache from the workbook.
  * Only fills if `cache.points` is currently empty.
+ *
+ * @param contextWorksheet - Optional worksheet whose sheet-scoped defined
+ *   names take precedence over workbook-scoped ones.
  */
-export function fillNumRef(ref: NumberReference, workbook: Workbook, date1904?: boolean): void {
+export function fillNumRef(
+  ref: NumberReference,
+  workbook: Workbook,
+  date1904?: boolean,
+  contextWorksheet?: Worksheet
+): void {
+  fillNumRefInternal(ref, buildResolverContext(workbook, contextWorksheet), date1904);
+}
+
+function fillNumRefInternal(ref: NumberReference, ctx: ResolverContext, date1904?: boolean): void {
   if (!ref.formula) {
     return;
   }
   if (ref.cache?.points && ref.cache.points.length > 0) {
     return; // already populated
   }
-  const resolved = resolveReference(ref.formula, workbook);
+  const resolved = resolveReference(ref.formula, ctx);
   if (!resolved) {
     return;
   }
@@ -146,15 +254,26 @@ export function fillNumRef(ref: NumberReference, workbook: Workbook, date1904?: 
 /**
  * Populate a StringReference cache from the workbook.
  * Only fills if `cache.points` is currently empty.
+ *
+ * @param contextWorksheet - Optional worksheet whose sheet-scoped defined
+ *   names take precedence over workbook-scoped ones.
  */
-export function fillStrRef(ref: StringReference, workbook: Workbook): void {
+export function fillStrRef(
+  ref: StringReference,
+  workbook: Workbook,
+  contextWorksheet?: Worksheet
+): void {
+  fillStrRefInternal(ref, buildResolverContext(workbook, contextWorksheet));
+}
+
+function fillStrRefInternal(ref: StringReference, ctx: ResolverContext): void {
   if (!ref.formula) {
     return;
   }
   if (ref.cache?.points && ref.cache.points.length > 0) {
     return;
   }
-  const resolved = resolveReference(ref.formula, workbook);
+  const resolved = resolveReference(ref.formula, ctx);
   if (!resolved) {
     return;
   }
@@ -174,6 +293,40 @@ export function fillStrRef(ref: StringReference, workbook: Workbook): void {
   ref.cache.pointCount = idx;
 }
 
+export function fillMultiLvlStrRef(
+  ref: MultiLevelStringReference,
+  workbook: Workbook,
+  contextWorksheet?: Worksheet
+): void {
+  fillMultiLvlStrRefInternal(ref, buildResolverContext(workbook, contextWorksheet));
+}
+
+function fillMultiLvlStrRefInternal(ref: MultiLevelStringReference, ctx: ResolverContext): void {
+  if (!ref.formula) {
+    return;
+  }
+  if (ref.cache?.levels?.some(level => level.points.length > 0)) {
+    return;
+  }
+  const resolved = resolveReferenceMatrix(ref.formula, ctx);
+  if (!resolved) {
+    return;
+  }
+
+  const levels: StringCache[] = [];
+  for (let col = 0; col < resolved.columnCount; col++) {
+    const points: StringCache["points"] = [];
+    for (let row = 0; row < resolved.rowCount; row++) {
+      const value = toString(resolved.values[row]?.[col]);
+      if (value !== undefined && value !== "") {
+        points.push({ index: row, value });
+      }
+    }
+    levels.push({ pointCount: resolved.rowCount, points });
+  }
+  ref.cache = { pointCount: resolved.rowCount, levels };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -183,14 +336,73 @@ interface ResolvedReference {
   cells: Array<{ value: unknown }>;
 }
 
+interface ResolvedReferenceMatrix {
+  worksheet: Worksheet;
+  values: unknown[][];
+  rowCount: number;
+  columnCount: number;
+}
+
+/**
+ * Internal context carried through recursive reference resolution.
+ *
+ * `localSheetId` is the 0-based workbook position of {@link contextWorksheet}
+ * in `workbook.worksheets`, matching the semantics of OOXML's
+ * `definedName/@localSheetId`. It is used to give sheet-scoped defined names
+ * precedence over workbook-scoped names when both exist with the same bare
+ * name.
+ *
+ * `visitedDefinedNames` tracks the set of defined names currently being
+ * expanded in the call stack so that `A -> B -> A` cycles terminate.
+ * The set is mutated (added/deleted) rather than copied on each call; this
+ * is safe because resolution is single-threaded and each recursive call
+ * properly cleans up before returning.
+ */
+interface ResolverContext {
+  workbook: Workbook;
+  contextWorksheet?: Worksheet;
+  localSheetId?: number;
+  visitedDefinedNames: Set<string>;
+}
+
+function buildResolverContext(workbook: Workbook, contextWorksheet?: Worksheet): ResolverContext {
+  let localSheetId: number | undefined;
+  if (contextWorksheet) {
+    // workbook.worksheets is ordered/filtered the same way Excel lists sheets,
+    // which matches the `localSheetId` assigned at save time by
+    // workbook-xform.ts:63-108. Any other indexing (e.g. internal sparse _id)
+    // would not match defined names parsed from disk.
+    const idx = workbook.worksheets.indexOf(contextWorksheet);
+    if (idx >= 0) {
+      localSheetId = idx;
+    }
+  }
+  return { workbook, contextWorksheet, localSheetId, visitedDefinedNames: new Set() };
+}
+
 /**
  * Resolve a chart formula like `Sheet1!$A$1:$A$4` or `'My Sheet'!$B$2:$B$5`
  * into a sequence of cell values in row-major order.
  *
  * Multi-range unions (`Sheet1!A1:A3,Sheet1!A5:A7`) are flattened preserving order.
  * Returns undefined if the reference cannot be resolved.
+ *
+ * Resolution strategy (first match wins):
+ *   1. Structured table reference (`Table1[Column]`)
+ *   2. Defined name (workbook- or sheet-scoped), recursively expanded
+ *   3. Direct A1 cell/range references (possibly comma-separated union)
  */
-function resolveReference(formula: string, workbook: Workbook): ResolvedReference | undefined {
+function resolveReference(formula: string, ctx: ResolverContext): ResolvedReference | undefined {
+  const structured = resolveStructuredReference(formula, ctx.workbook);
+  if (structured) {
+    return structured;
+  }
+
+  const named = resolveDefinedNameReference(formula, ctx);
+  if (named) {
+    return named;
+  }
+
   // Multi-range support: Excel uses commas or semicolons between sub-refs.
   // Inside quoted sheet names, commas don't count — do a safe split.
   const parts = splitFormulaRanges(formula);
@@ -212,7 +424,7 @@ function resolveReference(formula: string, workbook: Workbook): ResolvedReferenc
     if (!sheetName) {
       return undefined;
     }
-    const ws = workbook.getWorksheet(sheetName);
+    const ws = ctx.workbook.getWorksheet(sheetName);
     if (!ws) {
       return undefined;
     }
@@ -246,6 +458,424 @@ function resolveReference(formula: string, workbook: Workbook): ResolvedReferenc
     return undefined;
   }
   return { worksheet, cells };
+}
+
+/**
+ * Regex matching a bare Excel defined name (no sheet prefix, no `$`, no `:`,
+ * no `!`, no `,`). Excel's grammar requires the first character to be a
+ * letter, underscore, or backslash, and disallows names that look like cell
+ * references; we don't try to validate name legality here — the final
+ * authority is whether `workbook.definedNames` has a matching entry.
+ *
+ * Allowing Unicode letters makes this work for CJK defined names, which are
+ * common in Chinese Excel files.
+ */
+const BARE_DEFINED_NAME_RE = /^[A-Za-z_\\\u00A0-\uFFFF][\w.?\\\u00A0-\uFFFF]*$/;
+
+/**
+ * Attempt to resolve {@link formula} as a defined name and expand to the
+ * underlying A1 ranges. Supports both bare names (`MyRange`) and qualified
+ * names (`Sheet1!MyRange`, `'My Sheet'!MyRange`).
+ *
+ * Name-scope resolution matches Excel semantics:
+ *   - Qualified `Sheet!Name` → sheet-scoped entry on `Sheet`, else
+ *     workbook-scoped
+ *   - Bare `Name` → sheet-scoped entry on the context worksheet (when
+ *     provided), else workbook-scoped
+ *
+ * The result of expanding the name is resolved recursively, so chart
+ * formulas that target a named formula (e.g. `OFFSET(...)` stored as a
+ * defined name) do not silently fall through — when the name resolves to
+ * another reference-like expression, we follow it.
+ */
+function resolveDefinedNameReference(
+  formula: string,
+  ctx: ResolverContext
+): ResolvedReference | undefined {
+  const resolution = findDefinedName(formula, ctx);
+  if (!resolution) {
+    return undefined;
+  }
+
+  // Cycle guard: A -> B -> A must terminate.
+  const visitKey = storageKey(resolution.name, resolution.localSheetId);
+  if (ctx.visitedDefinedNames.has(visitKey)) {
+    return undefined;
+  }
+  ctx.visitedDefinedNames.add(visitKey);
+
+  try {
+    // A defined name may expand to multiple ranges (comma-separated union).
+    // We recursively resolve each part through the full reference pipeline
+    // so that nested names, structured refs, and A1 refs all work.
+    const aggregated: Array<{ value: unknown }> = [];
+    let firstWorksheet: Worksheet | undefined;
+    for (const rangeStr of resolution.ranges) {
+      if (!rangeStr) {
+        continue;
+      }
+      const inner = resolveReference(rangeStr, ctx);
+      if (!inner) {
+        continue;
+      }
+      if (!firstWorksheet) {
+        firstWorksheet = inner.worksheet;
+      }
+      for (const cell of inner.cells) {
+        aggregated.push(cell);
+      }
+    }
+    if (!firstWorksheet) {
+      return undefined;
+    }
+    return { worksheet: firstWorksheet, cells: aggregated };
+  } finally {
+    ctx.visitedDefinedNames.delete(visitKey);
+  }
+}
+
+/**
+ * Look up a defined name in the workbook, honouring sheet-scoped vs
+ * workbook-scoped precedence. Returns `undefined` when the formula does not
+ * look like a defined-name reference at all, or when no entry matches.
+ */
+function findDefinedName(
+  formula: string,
+  ctx: ResolverContext
+): { name: string; localSheetId?: number; ranges: string[] } | undefined {
+  const trimmed = formula.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  // Qualified form: Sheet!Name or 'Sheet Name'!Name
+  const qualified = splitQualifiedName(trimmed);
+  if (qualified) {
+    // Sheet-scoped entry on the qualifying sheet wins; fall back to
+    // workbook-scoped if the sheet has no matching entry.
+    const qualifyingSheet = ctx.workbook.getWorksheet(qualified.sheetName);
+    if (qualifyingSheet) {
+      const sheetIdx = ctx.workbook.worksheets.indexOf(qualifyingSheet);
+      if (sheetIdx >= 0) {
+        const scoped = getDefinedNameRanges(ctx.workbook, qualified.name, sheetIdx);
+        if (scoped) {
+          return { name: qualified.name, localSheetId: sheetIdx, ranges: scoped };
+        }
+      }
+    }
+    const global = getDefinedNameRanges(ctx.workbook, qualified.name, undefined);
+    if (global) {
+      return { name: qualified.name, ranges: global };
+    }
+    return undefined;
+  }
+
+  // Bare form: must pass the name shape gate to avoid calling into the
+  // defined-names API for every failed cell reference.
+  if (!BARE_DEFINED_NAME_RE.test(trimmed)) {
+    return undefined;
+  }
+  // Sheet-scoped on the context worksheet wins, then workbook-scoped.
+  if (ctx.localSheetId !== undefined) {
+    const scoped = getDefinedNameRanges(ctx.workbook, trimmed, ctx.localSheetId);
+    if (scoped) {
+      return { name: trimmed, localSheetId: ctx.localSheetId, ranges: scoped };
+    }
+  }
+  const global = getDefinedNameRanges(ctx.workbook, trimmed, undefined);
+  if (global) {
+    return { name: trimmed, ranges: global };
+  }
+  return undefined;
+}
+
+/**
+ * Read the ranges (or formula expression) associated with a defined name at
+ * a specific scope. Returns `undefined` when no entry exists at that scope.
+ */
+function getDefinedNameRanges(
+  workbook: Workbook,
+  name: string,
+  localSheetId: number | undefined
+): string[] | undefined {
+  const definedNames = workbook.definedNames;
+  if (!definedNames) {
+    return undefined;
+  }
+  const model = definedNames.getRangesScoped(name, localSheetId);
+  if (!model.ranges || model.ranges.length === 0) {
+    return undefined;
+  }
+  // Verify the entry actually exists at the requested scope — getRangesScoped
+  // falls back to the bare name when the scoped key is missing, and we must
+  // not return workbook-scoped results from a sheet-scoped lookup.
+  const matrixMap = definedNames.matrixMap;
+  const formulaMap = definedNames.formulaMap;
+  const sKey = localSheetId !== undefined ? `${name}\0${localSheetId}` : name;
+  if (!matrixMap[sKey] && formulaMap[sKey] === undefined) {
+    return undefined;
+  }
+  return model.ranges;
+}
+
+function storageKey(name: string, localSheetId: number | undefined): string {
+  return localSheetId !== undefined ? `${name}\0${localSheetId}` : name;
+}
+
+/**
+ * Split `Sheet!Name` or `'Quoted Sheet'!Name` into its components. Returns
+ * `undefined` when the input is not of that shape or the right-hand side
+ * contains range punctuation (in which case it is a cell reference, not a
+ * defined-name reference).
+ */
+function splitQualifiedName(formula: string): { sheetName: string; name: string } | undefined {
+  let i = 0;
+  let sheetName = "";
+  if (formula[0] === "'") {
+    // Walk a quoted sheet name, treating '' as an escaped single quote.
+    i = 1;
+    while (i < formula.length) {
+      if (formula[i] === "'" && formula[i + 1] === "'") {
+        sheetName += "'";
+        i += 2;
+      } else if (formula[i] === "'") {
+        i++;
+        break;
+      } else {
+        sheetName += formula[i];
+        i++;
+      }
+    }
+  } else {
+    // Unquoted sheet name — ends at the first '!'.
+    const bang = formula.indexOf("!");
+    if (bang <= 0) {
+      return undefined;
+    }
+    sheetName = formula.slice(0, bang);
+    i = bang;
+  }
+  if (formula[i] !== "!") {
+    return undefined;
+  }
+  const name = formula.slice(i + 1);
+  if (!BARE_DEFINED_NAME_RE.test(name)) {
+    return undefined;
+  }
+  return { sheetName, name };
+}
+
+function resolveStructuredReference(
+  formula: string,
+  workbook: Workbook
+): ResolvedReference | undefined {
+  const parsed = parseStructuredReference(formula.trim());
+  if (!parsed) {
+    return undefined;
+  }
+  for (const worksheet of workbook.worksheets) {
+    const table = worksheet
+      .getTables()
+      .find(t => t.name === parsed.tableName || t.displayName === parsed.tableName);
+    if (!table) {
+      continue;
+    }
+    const model = table.model;
+    const columnIndex = model.columns.findIndex(column => column.name === parsed.columnName);
+    if (columnIndex < 0) {
+      return undefined;
+    }
+    const tableRef = colCache.decode(model.tableRef ?? model.ref);
+    if (!("top" in tableRef)) {
+      return undefined;
+    }
+    const dataStartRow = tableRef.top + (model.headerRow === false ? 0 : 1);
+    const dataEndRow = tableRef.bottom - (model.totalsRow ? 1 : 0);
+    const col = tableRef.left + columnIndex;
+    const cells: Array<{ value: unknown }> = [];
+    for (let row = dataStartRow; row <= dataEndRow; row++) {
+      cells.push({ value: extractCellValue(worksheet, row, col) });
+    }
+    return { worksheet, cells };
+  }
+  return undefined;
+}
+
+function parseStructuredReference(
+  formula: string
+): { tableName: string; columnName: string } | undefined {
+  const table = readStructuredTableName(formula);
+  if (!table || formula[table.end] !== "[" || !formula.endsWith("]")) {
+    return undefined;
+  }
+  const body = formula.slice(table.end + 1, -1);
+  if (body.length === 0) {
+    return undefined;
+  }
+  const columnName = extractStructuredReferenceColumn(body);
+  return columnName ? { tableName: table.name, columnName } : undefined;
+}
+
+function readStructuredTableName(formula: string): { name: string; end: number } | undefined {
+  if (formula.startsWith("'")) {
+    let name = "";
+    for (let i = 1; i < formula.length; i++) {
+      if (formula[i] === "'" && formula[i + 1] === "'") {
+        name += "'";
+        i++;
+      } else if (formula[i] === "'") {
+        return { name, end: i + 1 };
+      } else {
+        name += formula[i];
+      }
+    }
+    return undefined;
+  }
+  const bracket = formula.indexOf("[");
+  if (bracket <= 0) {
+    return undefined;
+  }
+  return { name: formula.slice(0, bracket), end: bracket };
+}
+
+function extractStructuredReferenceColumn(body: string): string | undefined {
+  if (body.startsWith("@")) {
+    const inner = body.slice(1).replace(/^\[(.*)\]$/, "$1");
+    const item = readStructuredReferenceItem(`${inner}]`, 0);
+    return item.value;
+  }
+  if (!body.startsWith("[")) {
+    if (body.startsWith("#")) {
+      return undefined;
+    }
+    const item = readStructuredReferenceItem(`${body}]`, 0);
+    return item.value;
+  }
+  const items: string[] = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "[") {
+      i++;
+      continue;
+    }
+    const item = readStructuredReferenceItem(body, i + 1);
+    items.push(item.value);
+    i = item.end;
+  }
+  return items.filter(item => item && !item.startsWith("#")).pop();
+}
+
+function readStructuredReferenceItem(value: string, start: number): { value: string; end: number } {
+  let i = start;
+  let result = "";
+  while (i < value.length) {
+    if (value[i] === "'" && i + 1 < value.length) {
+      result += value[i + 1];
+      i += 2;
+    } else if (value[i] === "]") {
+      i++;
+      break;
+    } else {
+      result += value[i];
+      i++;
+    }
+  }
+  return { value: result.trim(), end: i };
+}
+
+function resolveReferenceMatrix(
+  formula: string,
+  ctx: ResolverContext
+): ResolvedReferenceMatrix | undefined {
+  // Expand defined-name references up front so a named multi-area range can
+  // still drive a multi-level string cache.
+  const named = findDefinedName(formula, ctx);
+  if (named) {
+    const visitKey = storageKey(named.name, named.localSheetId);
+    if (ctx.visitedDefinedNames.has(visitKey)) {
+      return undefined;
+    }
+    ctx.visitedDefinedNames.add(visitKey);
+    try {
+      let firstWorksheet: Worksheet | undefined;
+      const mergedValues: unknown[][] = [];
+      let mergedColumnCount = 0;
+      for (const rangeStr of named.ranges) {
+        const inner = resolveReferenceMatrix(rangeStr, ctx);
+        if (!inner) {
+          continue;
+        }
+        if (!firstWorksheet) {
+          firstWorksheet = inner.worksheet;
+        }
+        mergedValues.push(...inner.values);
+        mergedColumnCount = Math.max(mergedColumnCount, inner.columnCount);
+      }
+      if (!firstWorksheet) {
+        return undefined;
+      }
+      return {
+        worksheet: firstWorksheet,
+        values: mergedValues,
+        rowCount: mergedValues.length,
+        columnCount: mergedColumnCount
+      };
+    } finally {
+      ctx.visitedDefinedNames.delete(visitKey);
+    }
+  }
+
+  const parts = splitFormulaRanges(formula);
+  let worksheet: Worksheet | undefined;
+  const rows: unknown[][] = [];
+  let columnCount = 0;
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      continue;
+    }
+    let decoded;
+    try {
+      decoded = colCache.decodeEx(trimmed);
+    } catch {
+      return undefined;
+    }
+    const sheetName = decoded.sheetName;
+    if (!sheetName) {
+      return undefined;
+    }
+    const ws = ctx.workbook.getWorksheet(sheetName);
+    if (!ws) {
+      return undefined;
+    }
+    if (!worksheet) {
+      worksheet = ws;
+    }
+
+    if ("top" in decoded && "left" in decoded) {
+      const top = decoded.top as number;
+      const left = decoded.left as number;
+      const bottom = decoded.bottom as number;
+      const right = decoded.right as number;
+      columnCount = Math.max(columnCount, right - left + 1);
+      for (let r = top; r <= bottom; r++) {
+        const row: unknown[] = [];
+        for (let c = left; c <= right; c++) {
+          row.push(extractCellValue(ws, r, c));
+        }
+        rows.push(row);
+      }
+    } else if ("row" in decoded && "col" in decoded) {
+      columnCount = Math.max(columnCount, 1);
+      rows.push([extractCellValue(ws, decoded.row as number, decoded.col as number)]);
+    }
+  }
+
+  if (!worksheet) {
+    return undefined;
+  }
+  return { worksheet, values: rows, rowCount: rows.length, columnCount };
 }
 
 /**

@@ -202,6 +202,13 @@ export class PivotTableError extends ExcelError {
 }
 
 /**
+ * Error thrown when chart configuration is invalid.
+ */
+export class ChartOptionsError extends ExcelError {
+  override name = "ChartOptionsError";
+}
+
+/**
  * Error thrown when table configuration or operation is invalid.
  */
 export class TableError extends ExcelError {

@@ -5,6 +5,8 @@
  * OOXML chart model that the XForm layer serialises.
  */
 
+import { ChartOptionsError } from "@excel/errors";
+
 import type {
   AddChartOptions,
   AddChartSeriesOptions,
@@ -32,6 +34,7 @@ import type {
   ChartMarker,
   ChartModel,
   ChartRichText,
+  ChartTextProperties,
   ChartTypeGroup,
   DataLabels,
   DataLabelEntry,
@@ -73,11 +76,41 @@ import type {
   BarGrouping,
   LineGrouping,
   LegendPosition,
+  PivotChartOptions,
+  PivotChartSource,
   SeriesAxis
 } from "./types";
 
 const EMU_PER_POINT = 12700;
 const DEFAULT_AXIS_START_ID = 100000000;
+const AXIS_CHART_TYPES = new Set<AddChartOptions["type"]>([
+  "bar",
+  "bar3D",
+  "line",
+  "line3D",
+  "area",
+  "area3D",
+  "scatter",
+  "bubble",
+  "radar",
+  "stock",
+  "surface",
+  "surface3D"
+]);
+const NO_TRENDLINE_CHART_TYPES = new Set<AddChartOptions["type"]>([
+  "pie",
+  "pie3D",
+  "doughnut",
+  "ofPie",
+  "surface",
+  "surface3D"
+]);
+const PIE_FAMILY_CHART_TYPES = new Set<AddChartOptions["type"]>([
+  "pie",
+  "pie3D",
+  "doughnut",
+  "ofPie"
+]);
 
 /**
  * Simple axis ID allocator — scoped per buildChartModel call.
@@ -109,8 +142,511 @@ function makeCatData(formula: string): AxisDataSource {
   return { strRef: makeStrRef(formula) };
 }
 
+function makeAxisData(input: string | AxisDataSource): AxisDataSource {
+  return typeof input === "string" ? makeCatData(input) : input;
+}
+
+function makeNumericAxisData(input: string | AxisDataSource): AxisDataSource {
+  return typeof input === "string" ? { numRef: makeNumRef(input) } : input;
+}
+
+/**
+ * Wrap a scatter/bubble `xValues` input as the appropriate
+ * {@link AxisDataSource}. `xValueType` disambiguates the two OOXML
+ * spellings:
+ *
+ *   - `"number"` (default) → `numRef` — standard scatter usage
+ *   - `"text"`             → `strRef` — labelled scatter / bubble with
+ *     categorical x axis (Excel renders it as evenly-spaced labels)
+ *
+ * When the caller passes a pre-built `AxisDataSource`, the hint is
+ * ignored — the structure already carries the intent.
+ */
+function makeXAxisData(
+  input: string | AxisDataSource,
+  xValueType: "number" | "text" | undefined
+): AxisDataSource {
+  if (typeof input !== "string") {
+    return input;
+  }
+  return xValueType === "text" ? makeCatData(input) : makeNumericAxisData(input);
+}
+
+function assertChartOptions(condition: unknown, message: string): void {
+  if (!condition) {
+    throw new ChartOptionsError(message);
+  }
+}
+
+function assertFiniteNumber(value: unknown, path: string): asserts value is number {
+  assertChartOptions(
+    typeof value === "number" && Number.isFinite(value),
+    `${path} must be a finite number.`
+  );
+}
+
+function assertIntegerInRange(
+  value: unknown,
+  path: string,
+  min: number,
+  max: number
+): asserts value is number {
+  assertFiniteNumber(value, path);
+  assertChartOptions(
+    Number.isInteger(value) && value >= min && value <= max,
+    `${path} must be an integer between ${min} and ${max}.`
+  );
+}
+
+function assertNumberInRange(
+  value: unknown,
+  path: string,
+  min: number,
+  max: number
+): asserts value is number {
+  assertFiniteNumber(value, path);
+  assertChartOptions(value >= min && value <= max, `${path} must be between ${min} and ${max}.`);
+}
+
+function validateChartOptions(opts: AddChartOptions, path = "chart"): void {
+  assertChartOptions(!!opts && typeof opts === "object", `${path} options are required.`);
+  assertChartOptions(!!opts.type, `${path}.type is required.`);
+  validateChartLevelOptions(opts, path);
+  const series = opts.series ?? [];
+  for (let i = 0; i < series.length; i++) {
+    validateSeriesOptions(opts.type, series[i], `${path}.series[${i}]`);
+  }
+}
+
+function validateComboChartOptions(opts: AddComboChartOptions): void {
+  assertChartOptions(!!opts && typeof opts === "object", "combo chart options are required.");
+  assertChartOptions(
+    Array.isArray(opts.groups) && opts.groups.length > 0,
+    "combo chart groups must contain at least one group."
+  );
+  for (let i = 0; i < opts.groups.length; i++) {
+    validateChartOptions(opts.groups[i], `groups[${i}]`);
+  }
+  validateSharedChartOptions(opts, "combo chart");
+}
+
+function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
+  validateSharedChartOptions(opts, path);
+  if (opts.grouping !== undefined) {
+    assertChartOptions(
+      opts.type === "bar" ||
+        opts.type === "bar3D" ||
+        opts.type === "line" ||
+        opts.type === "line3D" ||
+        opts.type === "area" ||
+        opts.type === "area3D",
+      `${path}.grouping is only valid for bar, line, and area charts.`
+    );
+  }
+  if (opts.barDir !== undefined) {
+    assertChartOptions(
+      opts.type === "bar" || opts.type === "bar3D",
+      `${path}.barDir is only valid for bar and bar3D charts.`
+    );
+  }
+  if (opts.scatterStyle !== undefined) {
+    assertChartOptions(
+      opts.type === "scatter",
+      `${path}.scatterStyle is only valid for scatter charts.`
+    );
+  }
+  if (opts.radarStyle !== undefined) {
+    assertChartOptions(opts.type === "radar", `${path}.radarStyle is only valid for radar charts.`);
+  }
+  if (opts.ofPieType !== undefined) {
+    assertChartOptions(opts.type === "ofPie", `${path}.ofPieType is only valid for ofPie charts.`);
+  }
+  if (opts.wireframe !== undefined) {
+    assertChartOptions(
+      opts.type === "surface" || opts.type === "surface3D",
+      `${path}.wireframe is only valid for surface and surface3D charts.`
+    );
+  }
+  if (opts.bandFormats !== undefined) {
+    assertChartOptions(
+      opts.type === "surface" || opts.type === "surface3D",
+      `${path}.bandFormats is only valid for surface and surface3D charts.`
+    );
+    for (let i = 0; i < opts.bandFormats.length; i++) {
+      assertIntegerInRange(
+        opts.bandFormats[i].index,
+        `${path}.bandFormats[${i}].index`,
+        0,
+        Number.MAX_SAFE_INTEGER
+      );
+    }
+  }
+  if (!AXIS_CHART_TYPES.has(opts.type)) {
+    assertChartOptions(
+      opts.categoryAxis === undefined,
+      `${path}.categoryAxis is not valid for ${opts.type} charts because they do not have axes.`
+    );
+    assertChartOptions(
+      opts.valueAxis === undefined,
+      `${path}.valueAxis is not valid for ${opts.type} charts because they do not have axes.`
+    );
+  }
+  if ((opts.type === "surface" || opts.type === "surface3D") && opts.dataLabels !== undefined) {
+    assertChartOptions(false, `${path}.dataLabels is not supported for surface charts.`);
+  }
+  if (opts.holeSize !== undefined) {
+    assertChartOptions(
+      opts.type === "doughnut",
+      `${path}.holeSize is only valid for doughnut charts.`
+    );
+    assertIntegerInRange(opts.holeSize, `${path}.holeSize`, 0, 90);
+  }
+  if (opts.firstSliceAng !== undefined) {
+    assertChartOptions(
+      PIE_FAMILY_CHART_TYPES.has(opts.type),
+      `${path}.firstSliceAng is only valid for pie, doughnut, and ofPie charts.`
+    );
+    assertIntegerInRange(opts.firstSliceAng, `${path}.firstSliceAng`, 0, 360);
+  }
+  if (opts.gapWidth !== undefined) {
+    assertChartOptions(
+      opts.type === "bar" || opts.type === "bar3D" || opts.type === "ofPie",
+      `${path}.gapWidth is only valid for bar, bar3D, and ofPie charts.`
+    );
+    assertIntegerInRange(opts.gapWidth, `${path}.gapWidth`, 0, 500);
+  }
+  if (opts.overlap !== undefined) {
+    assertChartOptions(
+      opts.type === "bar" || opts.type === "bar3D",
+      `${path}.overlap is only valid for bar and bar3D charts.`
+    );
+    assertIntegerInRange(opts.overlap, `${path}.overlap`, -100, 100);
+  }
+  if (opts.bubbleScale !== undefined) {
+    assertChartOptions(
+      opts.type === "bubble",
+      `${path}.bubbleScale is only valid for bubble charts.`
+    );
+    assertIntegerInRange(opts.bubbleScale, `${path}.bubbleScale`, 0, 300);
+  }
+  if (opts.showNegBubbles !== undefined) {
+    assertChartOptions(
+      opts.type === "bubble",
+      `${path}.showNegBubbles is only valid for bubble charts.`
+    );
+  }
+  if (opts.sizeRepresents !== undefined) {
+    assertChartOptions(
+      opts.type === "bubble",
+      `${path}.sizeRepresents is only valid for bubble charts.`
+    );
+  }
+  if (opts.splitPos !== undefined) {
+    assertChartOptions(opts.type === "ofPie", `${path}.splitPos is only valid for ofPie charts.`);
+    assertFiniteNumber(opts.splitPos, `${path}.splitPos`);
+  }
+  if (opts.secondPieSize !== undefined) {
+    assertChartOptions(
+      opts.type === "ofPie",
+      `${path}.secondPieSize is only valid for ofPie charts.`
+    );
+    assertIntegerInRange(opts.secondPieSize, `${path}.secondPieSize`, 5, 200);
+  }
+  if (opts.shape !== undefined) {
+    assertChartOptions(opts.type === "bar3D", `${path}.shape is only valid for bar3D charts.`);
+  }
+  if (opts.showMarker !== undefined) {
+    assertChartOptions(
+      opts.type === "line" || opts.type === "line3D" || opts.type === "radar",
+      `${path}.showMarker is only valid for line, line3D, and radar charts.`
+    );
+  }
+  if (opts.smooth !== undefined) {
+    assertChartOptions(
+      opts.type === "line" || opts.type === "line3D" || opts.type === "scatter",
+      `${path}.smooth is only valid for line, line3D, and scatter charts.`
+    );
+  }
+  if (opts.hiLowLines !== undefined) {
+    assertChartOptions(
+      opts.type === "line" || opts.type === "line3D" || opts.type === "stock",
+      `${path}.hiLowLines is only valid for line, line3D, and stock charts.`
+    );
+  }
+  if (opts.upDownBars !== undefined) {
+    assertChartOptions(
+      opts.type === "line" || opts.type === "line3D" || opts.type === "stock",
+      `${path}.upDownBars is only valid for line, line3D, and stock charts.`
+    );
+  }
+  if (opts.dropLines !== undefined) {
+    assertChartOptions(
+      opts.type === "line" ||
+        opts.type === "line3D" ||
+        opts.type === "area" ||
+        opts.type === "area3D" ||
+        opts.type === "stock",
+      `${path}.dropLines is only valid for line, area, and stock charts.`
+    );
+  }
+  if (opts.serLines !== undefined) {
+    assertChartOptions(
+      opts.type === "bar" || opts.type === "ofPie",
+      `${path}.serLines is only valid for bar and ofPie charts.`
+    );
+  }
+  validateAxisOptions(opts.categoryAxis, `${path}.categoryAxis`);
+  validateAxisOptions(opts.valueAxis, `${path}.valueAxis`);
+}
+
+function validateSharedChartOptions(opts: ChartModelOptions, path: string): void {
+  if (opts.style !== undefined) {
+    assertIntegerInRange(opts.style, `${path}.style`, 1, 48);
+  }
+}
+
+function validateSeriesOptions(
+  chartType: AddChartOptions["type"],
+  opts: AddChartSeriesOptions,
+  path: string
+): void {
+  assertChartOptions(!!opts && typeof opts === "object", `${path} must be an object.`);
+  assertChartOptions(
+    typeof opts.values === "string" && opts.values.length > 0,
+    `${path}.values is required and must be a non-empty formula string.`
+  );
+  if (opts.trendline !== undefined) {
+    assertChartOptions(
+      !NO_TRENDLINE_CHART_TYPES.has(chartType),
+      `${path}.trendline is not valid for ${chartType} charts.`
+    );
+    const trendlines = Array.isArray(opts.trendline) ? opts.trendline : [opts.trendline];
+    for (let i = 0; i < trendlines.length; i++) {
+      validateTrendlineOptions(
+        trendlines[i],
+        `${path}.trendline${trendlines.length > 1 ? `[${i}]` : ""}`
+      );
+    }
+  }
+  if (opts.marker?.size !== undefined) {
+    assertIntegerInRange(opts.marker.size, `${path}.marker.size`, 2, 72);
+  }
+  if (opts.explosion !== undefined) {
+    assertChartOptions(
+      PIE_FAMILY_CHART_TYPES.has(chartType),
+      `${path}.explosion is only valid for pie, doughnut, and ofPie charts.`
+    );
+    assertIntegerInRange(opts.explosion, `${path}.explosion`, 0, 400);
+  }
+  if (opts.bubble3D !== undefined) {
+    assertChartOptions(chartType === "bubble", `${path}.bubble3D is only valid for bubble charts.`);
+  }
+  if (opts.bubbleSize !== undefined) {
+    assertChartOptions(
+      chartType === "bubble",
+      `${path}.bubbleSize is only valid for bubble charts.`
+    );
+  }
+  if (chartType === "bubble") {
+    assertChartOptions(
+      opts.xValues !== undefined,
+      `${path}.xValues is required for bubble charts. Use a numeric range for x-values.`
+    );
+    assertChartOptions(
+      opts.bubbleSize !== undefined,
+      `${path}.bubbleSize is required for bubble charts. Use a numeric range for bubble sizes.`
+    );
+  }
+  if (chartType === "scatter") {
+    assertChartOptions(
+      opts.xValues !== undefined,
+      `${path}.xValues is required for scatter charts. Use a numeric range for x-values.`
+    );
+  }
+  if (opts.xValues !== undefined) {
+    assertChartOptions(
+      chartType === "scatter" || chartType === "bubble",
+      `${path}.xValues is only valid for scatter and bubble charts.`
+    );
+  }
+  if (opts.dataPoints) {
+    for (let i = 0; i < opts.dataPoints.length; i++) {
+      validateDataPointOptions(chartType, opts.dataPoints[i], `${path}.dataPoints[${i}]`);
+    }
+  }
+  if (opts.errorBars) {
+    assertChartOptions(
+      !PIE_FAMILY_CHART_TYPES.has(chartType),
+      `${path}.errorBars is not valid for ${chartType} charts.`
+    );
+    const errorBars = Array.isArray(opts.errorBars) ? opts.errorBars : [opts.errorBars];
+    for (let i = 0; i < errorBars.length; i++) {
+      validateErrorBarsOptions(
+        errorBars[i],
+        `${path}.errorBars${errorBars.length > 1 ? `[${i}]` : ""}`
+      );
+    }
+  }
+}
+
+function validateSeriesPatchOptions(
+  chartType: AddChartOptions["type"],
+  opts: Partial<AddChartSeriesOptions>,
+  path: string
+): void {
+  if (opts.values !== undefined) {
+    assertChartOptions(
+      typeof opts.values === "string" && opts.values.length > 0,
+      `${path}.values must be a non-empty formula string.`
+    );
+  }
+  const fullOpts: AddChartSeriesOptions = {
+    ...opts,
+    values: opts.values ?? "__excelts_placeholder__"
+  };
+  if (chartType === "scatter" && fullOpts.xValues === undefined) {
+    fullOpts.xValues = "__excelts_placeholder__";
+  }
+  if (chartType === "bubble") {
+    if (fullOpts.xValues === undefined) {
+      fullOpts.xValues = "__excelts_placeholder__";
+    }
+    if (fullOpts.bubbleSize === undefined) {
+      fullOpts.bubbleSize = "__excelts_placeholder__";
+    }
+  }
+  validateSeriesOptions(chartType, fullOpts, path);
+}
+
+function validateDataPointOptions(
+  chartType: AddChartOptions["type"],
+  opts: AddDataPointOptions,
+  path: string
+): void {
+  assertIntegerInRange(opts.index, `${path}.index`, 0, Number.MAX_SAFE_INTEGER);
+  if (opts.explosion !== undefined) {
+    assertChartOptions(
+      PIE_FAMILY_CHART_TYPES.has(chartType),
+      `${path}.explosion is only valid for pie, doughnut, and ofPie charts.`
+    );
+    assertIntegerInRange(opts.explosion, `${path}.explosion`, 0, 400);
+  }
+  if (opts.marker?.size !== undefined) {
+    assertIntegerInRange(opts.marker.size, `${path}.marker.size`, 2, 72);
+  }
+}
+
+function validateTrendlineOptions(opts: AddTrendlineOptions, path: string): void {
+  assertChartOptions(!!opts && typeof opts === "object", `${path} must be an object.`);
+  assertChartOptions(!!opts.type, `${path}.type is required.`);
+  if (opts.type === "poly") {
+    assertIntegerInRange(opts.order, `${path}.order`, 2, 6);
+  } else {
+    assertChartOptions(
+      opts.order === undefined,
+      `${path}.order is only valid for polynomial trendlines.`
+    );
+  }
+  if (opts.type === "movingAvg") {
+    assertIntegerInRange(opts.period, `${path}.period`, 2, Number.MAX_SAFE_INTEGER);
+  } else if (opts.period !== undefined) {
+    assertIntegerInRange(opts.period, `${path}.period`, 2, Number.MAX_SAFE_INTEGER);
+  }
+  if (opts.forward !== undefined) {
+    assertNumberInRange(opts.forward, `${path}.forward`, 0, Number.MAX_SAFE_INTEGER);
+  }
+  if (opts.backward !== undefined) {
+    assertNumberInRange(opts.backward, `${path}.backward`, 0, Number.MAX_SAFE_INTEGER);
+  }
+}
+
+function validateErrorBarsOptions(opts: AddErrorBarsOptions, path: string): void {
+  assertChartOptions(!!opts && typeof opts === "object", `${path} must be an object.`);
+  assertChartOptions(!!opts.type, `${path}.type is required.`);
+  if (opts.type === "cust") {
+    assertChartOptions(
+      !!opts.plus && !!opts.minus,
+      `${path}.plus and ${path}.minus are required when type is "cust".`
+    );
+  } else {
+    assertChartOptions(
+      opts.plus === undefined && opts.minus === undefined,
+      `${path}.plus and ${path}.minus are only valid when type is "cust".`
+    );
+  }
+  if (opts.value !== undefined) {
+    assertNumberInRange(opts.value, `${path}.value`, 0, Number.MAX_SAFE_INTEGER);
+  }
+}
+
+function validateAxisOptions(opts: AddAxisOptions | undefined, path: string): void {
+  if (!opts) {
+    return;
+  }
+  if (opts.min !== undefined) {
+    assertFiniteNumber(opts.min, `${path}.min`);
+  }
+  if (opts.max !== undefined) {
+    assertFiniteNumber(opts.max, `${path}.max`);
+  }
+  if (opts.min !== undefined && opts.max !== undefined) {
+    assertChartOptions(opts.min < opts.max, `${path}.min must be less than ${path}.max.`);
+  }
+  if (opts.majorUnit !== undefined) {
+    assertNumberInRange(opts.majorUnit, `${path}.majorUnit`, 0, Number.MAX_SAFE_INTEGER);
+    assertChartOptions(opts.majorUnit > 0, `${path}.majorUnit must be greater than 0.`);
+  }
+  if (opts.minorUnit !== undefined) {
+    assertNumberInRange(opts.minorUnit, `${path}.minorUnit`, 0, Number.MAX_SAFE_INTEGER);
+    assertChartOptions(opts.minorUnit > 0, `${path}.minorUnit must be greater than 0.`);
+  }
+  if (opts.logBase !== undefined) {
+    assertNumberInRange(opts.logBase, `${path}.logBase`, 2, 1000);
+  }
+  if (opts.textRotation !== undefined) {
+    assertIntegerInRange(opts.textRotation, `${path}.textRotation`, -90, 90);
+  }
+  if (opts.lblOffset !== undefined) {
+    assertIntegerInRange(opts.lblOffset, `${path}.lblOffset`, 0, 1000);
+  }
+  if (opts.tickLblSkip !== undefined) {
+    assertIntegerInRange(opts.tickLblSkip, `${path}.tickLblSkip`, 1, Number.MAX_SAFE_INTEGER);
+  }
+  if (opts.tickMarkSkip !== undefined) {
+    assertIntegerInRange(opts.tickMarkSkip, `${path}.tickMarkSkip`, 1, Number.MAX_SAFE_INTEGER);
+  }
+  if (opts.crossesAt !== undefined) {
+    assertFiniteNumber(opts.crossesAt, `${path}.crossesAt`);
+  }
+  if (opts.customUnit !== undefined) {
+    assertNumberInRange(opts.customUnit, `${path}.customUnit`, 0, Number.MAX_SAFE_INTEGER);
+    assertChartOptions(opts.customUnit > 0, `${path}.customUnit must be greater than 0.`);
+  }
+}
+
 function hexToColor(hex: string): ChartColor {
   return { srgb: hex.replace(/^#/, "").toUpperCase() };
+}
+
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function buildPivotSourceXml(source: PivotChartSource): string {
+  const name = typeof source === "string" ? source : source.name;
+  const fmtId = typeof source === "string" ? 0 : (source.fmtId ?? 0);
+  if (!name) {
+    throw new Error("Pivot chart source name is required.");
+  }
+  if (!Number.isInteger(fmtId) || fmtId < 0) {
+    throw new Error("Pivot chart source fmtId must be a non-negative integer.");
+  }
+  // Pivot chart options used to be embedded inside `<c:pivotSource>` under a
+  // private `xmlns:excelts` namespace; Excel never recognised that and the
+  // parser never read it back. Options are now routed into
+  // `ChartModel.pivotOptions` (see {@link ChartModel.pivotOptions}) and
+  // serialised as MS standard `c14:pivotOptions` inside chartSpace's extLst.
+  return `<c:pivotSource><c:name>${escapeXmlText(name)}</c:name><c:fmtId val="${fmtId}"/></c:pivotSource>`;
 }
 
 /**
@@ -283,6 +819,15 @@ function buildDataLabelsFromOpts(opts: AddDataLabelsOptions): DataLabels {
   }
   if (opts.entries && opts.entries.length > 0) {
     dl.entries = opts.entries.map(e => buildDataLabelEntryFromOpts(e));
+  }
+  if (opts.valueFromCells !== undefined) {
+    // "Value From Cells" (Excel 2013+). Accept either a bare formula or
+    // the full {formula, cache} shape. The cache is filled in later by
+    // `fillChartCaches` when the worksheet is available.
+    dl.dataLabelsRange =
+      typeof opts.valueFromCells === "string"
+        ? { formula: opts.valueFromCells }
+        : opts.valueFromCells;
   }
   return dl;
 }
@@ -499,6 +1044,26 @@ function applySeriesOptions(s: any, opts: AddChartSeriesOptions): void {
       pictureFormat: opts.pictureFill.fillMode,
       pictureStackUnit: opts.pictureFill.scale
     };
+    // Route the blipFill itself through spPr.fill.blip. The two halves
+    // of the OOXML "picture on bars" setting live in different places:
+    // `c:pictureOptions` (stretch/stack/scale/apply-to-*) and
+    // `a:blipFill` (the actual image rel) — we unify them under the
+    // single `pictureFill` option for ergonomics and split them back
+    // here.
+    if (opts.pictureFill.image !== undefined || opts.pictureFill.relationshipId) {
+      s.spPr = s.spPr ?? {};
+      s.spPr.fill = s.spPr.fill ?? {};
+      s.spPr.fill.blip = {
+        fillMode:
+          opts.pictureFill.fillMode === "stack" || opts.pictureFill.fillMode === "stackScale"
+            ? "tile"
+            : "stretch",
+        ...(opts.pictureFill.relationshipId
+          ? { relationshipId: opts.pictureFill.relationshipId }
+          : {}),
+        ...(opts.pictureFill.image !== undefined ? { _pendingImage: opts.pictureFill.image } : {})
+      };
+    }
   }
 }
 
@@ -506,7 +1071,7 @@ function buildBarSeries(opts: AddChartSeriesOptions, idx: number): BarSeries {
   const s: BarSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
@@ -527,7 +1092,7 @@ function buildLineSeries(opts: AddChartSeriesOptions, idx: number): LineSeries {
   const s: LineSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
@@ -548,7 +1113,7 @@ function buildPieSeries(opts: AddChartSeriesOptions, idx: number): PieSeries {
   const s: PieSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
@@ -564,7 +1129,7 @@ function buildAreaSeries(opts: AddChartSeriesOptions, idx: number): AreaSeries {
   const s: AreaSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
@@ -582,8 +1147,7 @@ function buildScatterSeries(opts: AddChartSeriesOptions, idx: number): ScatterSe
   const s: ScatterSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.xValues) {
-    // Scatter x-values are numeric per OOXML spec — use numRef inside AxisDataSource.
-    s.xVal = { numRef: makeNumRef(opts.xValues) };
+    s.xVal = makeXAxisData(opts.xValues, opts.xValueType);
   }
   if (opts.values) {
     s.yVal = makeNumData(opts.values);
@@ -603,8 +1167,7 @@ function buildBubbleSeries(opts: AddChartSeriesOptions, idx: number): BubbleSeri
   const s: BubbleSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.xValues) {
-    // Bubble x-values are numeric per OOXML spec — use numRef inside AxisDataSource.
-    s.xVal = { numRef: makeNumRef(opts.xValues) };
+    s.xVal = makeXAxisData(opts.xValues, opts.xValueType);
   }
   if (opts.values) {
     s.yVal = makeNumData(opts.values);
@@ -630,7 +1193,7 @@ function buildRadarSeries(opts: AddChartSeriesOptions, idx: number): RadarSeries
   const s: RadarSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
@@ -643,13 +1206,154 @@ function buildSurfaceSeries(opts: AddChartSeriesOptions, idx: number): SurfaceSe
   const s: SurfaceSeries = { index: idx, order: idx };
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
-    s.cat = makeCatData(opts.categories);
+    s.cat = makeAxisData(opts.categories);
   }
   if (opts.values) {
     s.val = makeNumData(opts.values);
   }
   applySeriesOptions(s, opts);
   return s;
+}
+
+export function buildChartSeriesForType(
+  chartType: AddChartOptions["type"],
+  options: AddChartSeriesOptions,
+  index: number
+): SeriesBase {
+  validateSeriesOptions(chartType, options, "series");
+  if (chartType === "bar" || chartType === "bar3D") {
+    return buildBarSeries(options, index);
+  }
+  if (chartType === "line" || chartType === "line3D" || chartType === "stock") {
+    return buildLineSeries(options, index);
+  }
+  if (
+    chartType === "pie" ||
+    chartType === "pie3D" ||
+    chartType === "doughnut" ||
+    chartType === "ofPie"
+  ) {
+    return buildPieSeries(options, index);
+  }
+  if (chartType === "area" || chartType === "area3D") {
+    return buildAreaSeries(options, index);
+  }
+  if (chartType === "scatter") {
+    return buildScatterSeries(options, index);
+  }
+  if (chartType === "bubble") {
+    return buildBubbleSeries(options, index);
+  }
+  if (chartType === "radar") {
+    return buildRadarSeries(options, index);
+  }
+  if (chartType === "surface" || chartType === "surface3D") {
+    return buildSurfaceSeries(options, index);
+  }
+  return buildBarSeries(options, index);
+}
+
+export function applyChartSeriesOptionsPatch(
+  series: SeriesBase,
+  options: Partial<AddChartSeriesOptions>,
+  chartType?: AddChartOptions["type"]
+): void {
+  if (chartType) {
+    validateSeriesPatchOptions(chartType, options, "series");
+  }
+  if (options.name !== undefined) {
+    series.tx = makeSeriesTx(options.name);
+  }
+  if (options.categories !== undefined) {
+    const target = series as SeriesBase & { cat?: AxisDataSource; xVal?: AxisDataSource };
+    if (target.xVal && !target.cat) {
+      target.xVal = makeNumericAxisData(options.categories);
+    } else {
+      target.cat = makeAxisData(options.categories);
+    }
+  }
+  if (options.xValues !== undefined) {
+    (series as SeriesBase & { xVal?: AxisDataSource }).xVal = makeXAxisData(
+      options.xValues,
+      options.xValueType
+    );
+  }
+  if (options.values !== undefined) {
+    const target = series as SeriesBase & { val?: NumberDataSource; yVal?: NumberDataSource };
+    if (target.yVal && !target.val) {
+      target.yVal = makeNumData(options.values);
+    } else {
+      target.val = makeNumData(options.values);
+    }
+  }
+  if (options.bubbleSize !== undefined) {
+    (series as SeriesBase & { bubbleSize?: NumberDataSource }).bubbleSize = makeNumData(
+      options.bubbleSize
+    );
+  }
+  if (hasSeriesShapePatch(options)) {
+    series.spPr = buildSeriesSpPr(options as AddChartSeriesOptions);
+  }
+  if (options.marker !== undefined) {
+    (series as SeriesBase & { marker?: ChartMarker }).marker = buildMarkerFromOpts(options.marker);
+  }
+  if (options.dataLabels !== undefined) {
+    (series as SeriesBase & { dataLabels?: DataLabels }).dataLabels = buildDataLabelsFromOpts(
+      options.dataLabels
+    );
+  }
+  if (options.trendline !== undefined) {
+    const trendlineOpts = Array.isArray(options.trendline)
+      ? options.trendline
+      : [options.trendline];
+    (series as SeriesBase & { trendlines?: Trendline[] }).trendlines =
+      trendlineOpts.map(buildTrendlineFromOpts);
+  }
+  if (options.dataPoints !== undefined) {
+    (series as SeriesBase & { dataPoints?: DataPoint[] }).dataPoints =
+      options.dataPoints.map(buildDataPointFromOpts);
+  }
+  if (options.errorBars !== undefined) {
+    const errorBars = Array.isArray(options.errorBars) ? options.errorBars : [options.errorBars];
+    const built = errorBars.map(buildErrorBarsFromOpts);
+    (series as SeriesBase & { errorBars?: ErrorBars | ErrorBars[] }).errorBars =
+      chartType === "scatter" || chartType === "bubble" ? built : built[0];
+  }
+  if (options.txPr !== undefined) {
+    (series as SeriesBase & { txPr?: ChartTextProperties }).txPr = options.txPr;
+  }
+  if (options.pictureFill !== undefined) {
+    (series as SeriesBase & { pictureOptions?: unknown }).pictureOptions = {
+      applyToFront: options.pictureFill.applyToFront,
+      applyToSides: options.pictureFill.applyToSides,
+      applyToEnd: options.pictureFill.applyToEnd,
+      pictureFormat: options.pictureFill.fillMode,
+      pictureStackUnit: options.pictureFill.scale
+    };
+  }
+  if (options.smooth !== undefined) {
+    (series as SeriesBase & { smooth?: boolean }).smooth = options.smooth;
+  }
+  if (options.invertIfNegative !== undefined) {
+    (series as SeriesBase & { invertIfNegative?: boolean }).invertIfNegative =
+      options.invertIfNegative;
+  }
+  if (options.explosion !== undefined) {
+    (series as SeriesBase & { explosion?: number }).explosion = options.explosion;
+  }
+  if (options.bubble3D !== undefined) {
+    (series as SeriesBase & { bubble3D?: boolean }).bubble3D = options.bubble3D;
+  }
+}
+
+function hasSeriesShapePatch(options: Partial<AddChartSeriesOptions>): boolean {
+  return (
+    options.spPr !== undefined ||
+    options.fill !== undefined ||
+    options.line !== undefined ||
+    options.lineWidth !== undefined ||
+    options.lineDash !== undefined
+  );
 }
 
 function buildTitle(input: string | { formula: string } | ChartRichText): ChartTitle {
@@ -1207,6 +1911,8 @@ interface ChartModelOptions {
   titleOptions?: AddTitleOptions;
   legendOptions?: AddLegendOptions;
   plotAreaOptions?: AddPlotAreaOptions;
+  pivotSource?: PivotChartSource;
+  pivotChartOptions?: PivotChartOptions;
   floor?: ShapeProperties | AddShapeFillOptions;
   sideWall?: ShapeProperties | AddShapeFillOptions;
   backWall?: ShapeProperties | AddShapeFillOptions;
@@ -1224,6 +1930,16 @@ function finalizeChartModel(plotArea: PlotArea, opts: ChartModelOptions): ChartM
 
   if (opts.showDLblsOverMax !== undefined) {
     chart.showDLblsOverMax = opts.showDLblsOverMax;
+  }
+  if (opts.pivotSource) {
+    if (
+      typeof opts.pivotSource === "object" &&
+      opts.pivotChartOptions &&
+      !opts.pivotSource.options
+    ) {
+      opts.pivotSource.options = opts.pivotChartOptions;
+    }
+    chart.pivotFormats = [{ index: 0 }];
   }
 
   if (opts.title) {
@@ -1282,8 +1998,37 @@ function finalizeChartModel(plotArea: PlotArea, opts: ChartModelOptions): ChartM
     chart,
     style: opts.style,
     roundedCorners: false,
-    lang: "en-US"
+    lang: "en-US",
+    pivotSource: opts.pivotSource ? buildPivotSourceXml(opts.pivotSource) : undefined,
+    pivotOptions: extractPivotOptions(opts.pivotSource, opts.pivotChartOptions)
   };
+}
+
+/**
+ * Resolve the effective {@link PivotChartOptions} for a model built from
+ * {@link AddChartOptions}.
+ *
+ * Accepts two redundant inputs so callers can pass the structured metadata
+ * via either the top-level `pivotChartOptions` field or the `pivotSource`
+ * object (its `options` sub-field, retained for ergonomic clustering).
+ * When both are set the top-level value wins — this matches the precedence
+ * used elsewhere in `chart-builder.ts` when the same setting has two
+ * spellings.
+ *
+ * Returns `undefined` when no options are provided so the writer can skip
+ * emitting an empty `c14:pivotOptions` element.
+ */
+function extractPivotOptions(
+  source: PivotChartSource | undefined,
+  explicit: PivotChartOptions | undefined
+): PivotChartOptions | undefined {
+  if (explicit) {
+    return explicit;
+  }
+  if (source && typeof source === "object" && source.options) {
+    return source.options;
+  }
+  return undefined;
 }
 
 function applyTitleOptions(title: ChartTitle, opts: AddTitleOptions): void {
@@ -1334,6 +2079,7 @@ function applyLegendOptions(legend: ChartLegend, opts: AddLegendOptions): void {
  * Build a full ChartModel from the simplified AddChartOptions.
  */
 export function buildChartModel(opts: AddChartOptions): ChartModel {
+  validateChartOptions(opts);
   const seriesOpts = opts.series ?? [];
   const axIds = new AxIdAllocator();
   const { group: chartTypeGroup, axes } = buildChartTypeGroup(opts, seriesOpts, axIds);
@@ -1355,6 +2101,7 @@ export function buildChartModel(opts: AddChartOptions): ChartModel {
  * them, and secondary axes for any group with `useSecondaryAxis: true`.
  */
 export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
+  validateComboChartOptions(opts);
   const axIds = new AxIdAllocator();
   const chartTypeGroups: ChartTypeGroup[] = [];
   const allAxes: ChartAxis[] = [];

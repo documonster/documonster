@@ -12,15 +12,18 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-import type { ChartExEntry } from "@excel/chart/chart";
+import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
+import { parseChartEx } from "@excel/chart/chart-ex-parser";
 import { renderChartEx } from "@excel/chart/chart-ex-renderer";
+import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
 import {
   ExcelStreamStateError,
   ExcelFileError,
   ImageError,
   ExcelNotSupportedError,
   XmlParseError,
-  TableError
+  TableError,
+  ChartOptionsError
 } from "@excel/errors";
 import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
 import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
@@ -45,19 +48,28 @@ import {
   chartRelsPath,
   chartStylePath,
   chartColorsPath,
+  chartExStylePath,
+  chartExColorsPath,
   chartStyleRelTarget,
+  chartExStyleRelTarget,
   chartExPath,
   chartExRelsPath,
   getChartExNumberFromPath,
   getChartExNumberFromRelsPath,
   chartColorsRelTarget,
+  chartExColorsRelTarget,
   chartRelTargetFromDrawing,
   chartExRelTargetFromDrawing,
+  chartUserShapesPath,
+  chartUserShapesRelTarget,
   getChartNumberFromPath,
   getChartNumberFromRelsPath,
   getChartStyleNumberFromPath,
   getChartColorsNumberFromPath,
+  getChartExStyleNumberFromPath,
+  getChartExColorsNumberFromPath,
   getDrawingNameFromPath,
+  getChartUserShapesNameFromPath,
   getDrawingNameFromRelsPath,
   getExternalLinkIndexFromPath,
   getExternalLinkIndexFromRelsPath,
@@ -104,6 +116,12 @@ import {
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
+import {
+  parsePersonList,
+  parseThreadedComments,
+  renderPersonList,
+  renderThreadedComments
+} from "@excel/xlsx/xform/comment/threaded-comments-xform";
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
 import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
@@ -129,6 +147,7 @@ import { PassThrough, type IEventEmitter } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { bufferToString, base64ToUint8Array } from "@utils/utils";
 import { XmlStreamWriter } from "@xml/stream-writer";
+import { XmlWriter } from "@xml/writer";
 
 type StreamListener = Parameters<IEventEmitter["on"]>[1];
 
@@ -455,6 +474,8 @@ export interface ZipWriterOptions {
   timestamps?: ZipTimestampMode;
 }
 
+export type XlsxTemplateMode = "preserve" | "strict";
+
 /**
  * Options for writing an XLSX workbook.
  *
@@ -478,6 +499,29 @@ export interface XlsxWriteOptions {
    * compatibility with minimal readers.
    */
   useStyles?: boolean;
+  /**
+   * Template fidelity strategy for loaded workbooks. The default `"preserve"`
+   * byte-preserves clean chart parts and may structurally re-render edited parts
+   * when no safe raw XML patch is available. `"strict"` fails the write instead
+   * of re-rendering any edited loaded chart/chartEx part that cannot be patched
+   * in-place, preventing silent loss of unknown template XML.
+   *
+   * When a strict write fails, the thrown error enumerates the unrecognised
+   * `c15:`/`cx14:` extension paths the parser observed, so authors can decide
+   * between relaxing the mode or reshaping the mutation into a patch-friendly
+   * path. To inspect those paths *before* writing (for example to decide
+   * whether to opt into strict mode at all), use {@link Chart.unknownElements}
+   * on each chart of interest.
+   */
+  templateMode?: XlsxTemplateMode;
+  /**
+   * Convenience alias for `templateMode: "strict"`. Strict mode refuses to
+   * silently drop vendor-extension XML (`c15:…`, `cx14:…`) that the
+   * structured parser does not understand. Use this when round-tripping
+   * Excel-authored template files where preserving exotic extension
+   * elements matters more than the ability to re-render modified charts.
+   */
+  strictTemplateMode?: boolean;
   /**
    * Forward-compatibility / subclass extension escape hatch. Unknown keys are
    * passed through to internal writers; unrecognised keys are ignored.
@@ -563,6 +607,3397 @@ type ExternalLinkRelsEntry = {
   TargetMode?: string;
 };
 
+function snapshotChartModel(model: unknown): string | undefined {
+  try {
+    return JSON.stringify(model);
+  } catch {
+    return undefined;
+  }
+}
+
+function shouldPassthroughChartEntry(
+  entry: ChartEntry
+): entry is ChartEntry & { rawData: Uint8Array } {
+  if (!entry.rawData || entry.dirty) {
+    return false;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return true;
+  }
+  return snapshotChartModel(entry.model) === entry.modelSnapshot;
+}
+
+function shouldPassthroughChartExEntry(
+  entry: ChartExEntry
+): entry is ChartExEntry & { rawData: Uint8Array } {
+  if (!entry.rawData || entry.dirty) {
+    return false;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return true;
+  }
+  return snapshotChartModel(entry.model) === entry.modelSnapshot;
+}
+
+function stripChartExRawXml(model: any): any {
+  return { ...model, rawXml: undefined };
+}
+
+function isStrictTemplateMode(options?: XlsxWriteOptions): boolean {
+  return options?.templateMode === "strict" || options?.strictTemplateMode === true;
+}
+
+function hasChartEntryChanged(entry: ChartEntry): boolean {
+  if (!entry.rawData) {
+    return false;
+  }
+  if (entry.dirty) {
+    return true;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return false;
+  }
+  return snapshotChartModel(entry.model) !== entry.modelSnapshot;
+}
+
+function hasChartExEntryChanged(entry: ChartExEntry): boolean {
+  if (!entry.rawData) {
+    return false;
+  }
+  if (entry.dirty) {
+    return true;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return false;
+  }
+  return snapshotChartModel(entry.model) !== entry.modelSnapshot;
+}
+
+function shouldRequireChartRawPatch(entry: ChartEntry, strictTemplateMode: boolean): boolean {
+  return !!entry.requireRawPatch || (strictTemplateMode && hasChartEntryChanged(entry));
+}
+
+function shouldRequireChartExRawPatch(entry: ChartExEntry, strictTemplateMode: boolean): boolean {
+  return !!entry.requireRawPatch || (strictTemplateMode && hasChartExEntryChanged(entry));
+}
+
+/**
+ * Assemble the error message thrown when a loaded chartEx part cannot be
+ * raw-patched but the caller required it (either `requireRawPatch` on the
+ * entry or `strictTemplateMode` at the writer). Surfaces any unknown XML
+ * elements the parser noticed so the author can decide whether to relax
+ * the requirement or adjust the mutation shape.
+ */
+function buildChartExStrictFailureMessage(entryName: string, model: ChartExEntry["model"]): string {
+  const base =
+    `ChartEx ${entryName} requires raw XML patching ` +
+    `(requireRawPatch/strict template mode), but the mutation cannot be safely applied as a raw XML patch.`;
+  const unknown = (model as { unknownElements?: Array<{ path: string }> })?.unknownElements;
+  return appendUnknownElementsSummary(base, unknown);
+}
+
+/**
+ * Classic-chart counterpart of {@link buildChartExStrictFailureMessage}.
+ * Pulls `unknownElements` off the {@link ChartModel} so the same
+ * "you are about to silently drop these vendor extensions" warning is
+ * surfaced when strict template mode refuses a re-render.
+ */
+function buildChartStrictFailureMessage(entryName: string, model: ChartEntry["model"]): string {
+  const base =
+    `Chart ${entryName} requires raw XML patching ` +
+    `(requireRawPatch/strict template mode), but the mutation cannot be safely applied as a raw XML patch.`;
+  const unknown = (model as { unknownElements?: Array<{ path: string }> })?.unknownElements;
+  return appendUnknownElementsSummary(base, unknown);
+}
+
+function appendUnknownElementsSummary(
+  base: string,
+  unknown: Array<{ path: string }> | undefined
+): string {
+  if (!unknown || unknown.length === 0) {
+    return base;
+  }
+  // De-duplicate by path; real files often repeat the same extension element
+  // across multiple series/axes and noise doesn't help diagnosis.
+  const uniquePaths = Array.from(new Set(unknown.map(entry => entry.path))).slice(0, 8);
+  const extra =
+    unknown.length > uniquePaths.length
+      ? ` (showing ${uniquePaths.length} of ${unknown.length})`
+      : "";
+  return (
+    `${base} The loaded part contains unstructured XML at: ${uniquePaths.join(", ")}${extra}. ` +
+    `Rebuilding the part would discard these extensions; adjust the mutation to a ` +
+    `patch-friendly shape or relax strictTemplateMode.`
+  );
+}
+
+function tryPatchChartExRawXml(entry: ChartExEntry, forceRawPatch = false): Uint8Array | undefined {
+  if (
+    !entry.rawData ||
+    (!entry.preferRawPatch && !forceRawPatch) ||
+    !hasChartExEntryChanged(entry)
+  ) {
+    return undefined;
+  }
+  const patchPlan = getChartExRawPatchPlan(entry);
+  if (patchPlan === undefined) {
+    return undefined;
+  }
+  const raw = new TextDecoder().decode(entry.rawData);
+  const chartRange = findXmlBlock(raw, "cx:chartSpace");
+  if (!chartRange) {
+    return undefined;
+  }
+  const chartBlock = raw.slice(chartRange.start, chartRange.end);
+  const patchedChartBlock = patchRawChartExChartBlock(chartBlock, entry.model, patchPlan);
+  if (patchedChartBlock === undefined) {
+    return undefined;
+  }
+  const patched = raw.slice(0, chartRange.start) + patchedChartBlock + raw.slice(chartRange.end);
+
+  return patched !== raw ? new TextEncoder().encode(patched) : undefined;
+}
+
+type RawPatchListPlan<T> = true | T[] | false;
+
+interface ChartExSeriesRawPatchPlan {
+  hidden: boolean;
+  ownerIdx: boolean;
+  tx: boolean;
+  dataRefs: boolean;
+  layoutPr: boolean;
+  axisId: boolean;
+  dataLabels: boolean;
+  spPr: boolean;
+  dataPoints: boolean;
+}
+
+interface ChartExAxisRawPatchPlan {
+  hidden: boolean;
+  majorTickMark: boolean;
+  minorTickMark: boolean;
+  numFmt: boolean;
+  title: boolean;
+  valScaling: boolean;
+  catScaling: boolean;
+  spPr: boolean;
+  txPr: boolean;
+}
+
+interface ChartExRawPatchPlan {
+  data: boolean;
+  title: boolean;
+  legend: boolean;
+  autoTitleDeleted: boolean;
+  chartSpPr: boolean;
+  plotAreaSpPr: boolean;
+  plotAreaRegionLayout: boolean;
+  plotSurface: boolean;
+  series: RawPatchListPlan<ChartExSeriesRawPatchPlan>;
+  axes: RawPatchListPlan<ChartExAxisRawPatchPlan>;
+}
+
+interface ChartSeriesRawPatchPlan {
+  tx: boolean;
+  spPr: boolean;
+  marker: boolean;
+  dataPoints: boolean;
+  trendlines: boolean;
+  errorBars: boolean;
+  cat: boolean;
+  val: boolean;
+  xVal: boolean;
+  yVal: boolean;
+  bubbleSize: boolean;
+  dataLabels: boolean;
+}
+
+interface ChartAxisRawPatchPlan {
+  scaling: boolean;
+  delete: boolean;
+  title: boolean;
+  numFmt: boolean;
+  majorGridlines: boolean;
+  minorGridlines: boolean;
+  majorTickMark: boolean;
+  minorTickMark: boolean;
+  tickLblPos: boolean;
+  spPr: boolean;
+  txPr: boolean;
+  crosses: boolean;
+  crossesAt: boolean;
+  auto: boolean;
+  lblAlgn: boolean;
+  lblOffset: boolean;
+  tickLblSkip: boolean;
+  tickMarkSkip: boolean;
+  noMultiLvlLbl: boolean;
+  crossBetween: boolean;
+  majorUnit: boolean;
+  minorUnit: boolean;
+  baseTimeUnit: boolean;
+  majorTimeUnit: boolean;
+  minorTimeUnit: boolean;
+}
+
+function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | undefined {
+  if (entry.modelSnapshot === undefined) {
+    return {
+      title: true,
+      data: true,
+      legend: true,
+      autoTitleDeleted: true,
+      chartSpPr: true,
+      plotAreaSpPr: true,
+      plotAreaRegionLayout: true,
+      plotSurface: true,
+      series: true,
+      axes: true
+    };
+  }
+  let previous: any;
+  try {
+    previous = JSON.parse(entry.modelSnapshot);
+  } catch {
+    return undefined;
+  }
+  const current = entry.model as any;
+  if (!sameJson(stripPatchableChartExFields(previous), stripPatchableChartExFields(current))) {
+    return undefined;
+  }
+  const prevChart = previous.chartSpace?.chart;
+  const curChart = current.chartSpace?.chart;
+  const series = buildChartExSeriesRawPatchPlan(previous, current);
+  const axes = buildChartExAxisRawPatchPlan(
+    prevChart?.plotArea?.axis ?? [],
+    curChart?.plotArea?.axis ?? []
+  );
+  const plan = {
+    data: !sameJson(previous.chartSpace?.chartData, current.chartSpace?.chartData),
+    title: !sameJson(prevChart?.title, curChart?.title),
+    legend: !sameJson(prevChart?.legend, curChart?.legend),
+    autoTitleDeleted: !sameJson(prevChart?.autoTitleDeleted, curChart?.autoTitleDeleted),
+    chartSpPr: !sameJson(prevChart?.spPr, curChart?.spPr),
+    plotAreaSpPr: !sameJson(prevChart?.plotArea?.spPr, curChart?.plotArea?.spPr),
+    plotAreaRegionLayout: !sameJson(
+      prevChart?.plotArea?.plotAreaRegion?.layout,
+      curChart?.plotArea?.plotAreaRegion?.layout
+    ),
+    plotSurface: !sameJson(
+      prevChart?.plotArea?.plotAreaRegion?.plotSurface,
+      curChart?.plotArea?.plotAreaRegion?.plotSurface
+    ),
+    series,
+    axes
+  };
+  return plan.data ||
+    plan.title ||
+    plan.legend ||
+    plan.autoTitleDeleted ||
+    plan.chartSpPr ||
+    plan.plotAreaSpPr ||
+    plan.plotAreaRegionLayout ||
+    plan.plotSurface ||
+    hasRawPatchListChanges(plan.series) ||
+    hasRawPatchListChanges(plan.axes)
+    ? plan
+    : undefined;
+}
+
+function buildChartExSeriesRawPatchPlan(previous: any, current: any): ChartExSeriesRawPatchPlan[] {
+  const previousSeries = extractChartExSeries(previous);
+  const currentSeries = extractChartExSeries(current);
+  return currentSeries.map((series, index) => {
+    const prev = previousSeries[index] ?? {};
+    return {
+      hidden: !sameJson(prev.hidden, series.hidden),
+      ownerIdx: !sameJson(prev.ownerIdx, series.ownerIdx),
+      tx: !sameJson(prev.tx, series.tx),
+      dataRefs: !sameJson(prev.dataRefs, series.dataRefs),
+      layoutPr: !sameJson(prev.layoutPr, series.layoutPr),
+      axisId: !sameJson(prev.axisId, series.axisId),
+      dataLabels: !sameJson(prev.dataLabels, series.dataLabels),
+      spPr: !sameJson(prev.spPr, series.spPr),
+      dataPoints: !sameJson(prev.dataPt, series.dataPt)
+    };
+  });
+}
+
+function buildChartExAxisRawPatchPlan(
+  previousAxes: any[],
+  currentAxes: any[]
+): ChartExAxisRawPatchPlan[] {
+  const previousById = new Map(previousAxes.map(axis => [axis.axisId, axis]));
+  return currentAxes.map(axis => {
+    const prev = previousById.get(axis.axisId) ?? {};
+    return {
+      hidden: !sameJson(prev.hidden, axis.hidden),
+      majorTickMark: !sameJson(prev.majorTickMark, axis.majorTickMark),
+      minorTickMark: !sameJson(prev.minorTickMark, axis.minorTickMark),
+      numFmt: !sameJson(prev.numFmt, axis.numFmt),
+      title: !sameJson(prev.title, axis.title),
+      valScaling: !sameJson(prev.valScaling, axis.valScaling),
+      catScaling: !sameJson(prev.catScaling, axis.catScaling),
+      spPr: !sameJson(prev.spPr, axis.spPr),
+      txPr: !sameJson(prev.txPr, axis.txPr)
+    };
+  });
+}
+
+function stripPatchableChartExFields(model: any): any {
+  const clone = JSON.parse(JSON.stringify(model));
+  clone.rawXml = undefined;
+  // Vendor / extension metadata the parser recorded but the raw patcher
+  // does not rewrite. Letting them differ in the diff keeps
+  // `getChartExRawPatchPlan` from giving up on fast-path patches for
+  // loaded templates that carry c14/c15/c16 extensions. The patcher
+  // never touches these bytes, so the raw XML already preserves them
+  // verbatim.
+  clone.unknownElements = undefined;
+  if (clone.chartSpace) {
+    clone.chartSpace.chartData = undefined;
+    clone.chartSpace.clrMapOvr = undefined;
+    clone.chartSpace.extLst = undefined;
+  }
+  if (clone.chartSpace?.chart) {
+    clone.chartSpace.chart.title = undefined;
+    clone.chartSpace.chart.legend = undefined;
+    clone.chartSpace.chart.autoTitleDeleted = undefined;
+    clone.chartSpace.chart.spPr = undefined;
+    if (clone.chartSpace.chart.plotArea) {
+      clone.chartSpace.chart.plotArea.spPr = undefined;
+      clone.chartSpace.chart.plotArea.axis = undefined;
+      if (clone.chartSpace.chart.plotArea.plotAreaRegion) {
+        clone.chartSpace.chart.plotArea.plotAreaRegion.layout = undefined;
+        clone.chartSpace.chart.plotArea.plotAreaRegion.plotSurface = undefined;
+        clone.chartSpace.chart.plotArea.plotAreaRegion.series = (
+          clone.chartSpace.chart.plotArea.plotAreaRegion.series ?? []
+        ).map(stripPatchableChartExSeriesFields);
+      }
+      if (clone.chartSpace.chart.plotArea.series) {
+        clone.chartSpace.chart.plotArea.series = clone.chartSpace.chart.plotArea.series.map(
+          stripPatchableChartExSeriesFields
+        );
+      }
+    }
+  }
+  return clone;
+}
+
+function stripPatchableChartExSeriesFields(series: any): any {
+  return {
+    ...series,
+    hidden: undefined,
+    ownerIdx: undefined,
+    tx: undefined,
+    spPr: undefined,
+    dataRefs: undefined,
+    layoutPr: undefined,
+    axisId: undefined,
+    dataLabels: undefined,
+    dataPt: undefined
+  };
+}
+
+function extractChartExSeries(model: any): any[] {
+  const plotArea = model.chartSpace?.chart?.plotArea;
+  return plotArea?.plotAreaRegion?.series ?? plotArea?.series ?? [];
+}
+
+function patchRawChartExChartBlock(
+  block: string,
+  model: any,
+  patchPlan: ChartExRawPatchPlan
+): string | undefined {
+  let patched = block;
+  const chart = model.chartSpace?.chart;
+  if (!chart) {
+    return undefined;
+  }
+  if (patchPlan.data) {
+    const dataRange = findXmlBlock(patched, "cx:chartData");
+    if (!dataRange) {
+      return undefined;
+    }
+    const dataXml = buildRawChartExDataXml(model.chartSpace?.chartData);
+    patched = patched.slice(0, dataRange.start) + dataXml + patched.slice(dataRange.end);
+  }
+  if (patchPlan.title) {
+    const titleText = chart.title?.text?.paragraphs?.[0]?.runs?.[0]?.text;
+    patched =
+      titleText !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:title",
+            buildRawChartExTitleXml(titleText),
+            ["cx:autoTitleDeleted", "cx:plotArea", "cx:legend", "cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:title");
+  }
+  if (patchPlan.autoTitleDeleted) {
+    patched =
+      chart.autoTitleDeleted !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:autoTitleDeleted",
+            `<cx:autoTitleDeleted val="${chart.autoTitleDeleted ? "1" : "0"}"/>`,
+            ["cx:plotArea", "cx:legend", "cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:autoTitleDeleted");
+  }
+  if (patchPlan.legend) {
+    patched =
+      chart.legend !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:legend",
+            buildRawChartExLegendXml(chart.legend),
+            ["cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:legend");
+  }
+  if (patchPlan.chartSpPr) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(chart.spPr, "cx"),
+      ["cx:extLst"],
+      "cx:chart"
+    );
+  }
+  if (patchPlan.plotAreaSpPr || patchPlan.plotAreaRegionLayout || patchPlan.plotSurface) {
+    const plotRange = findXmlBlock(patched, "cx:plotArea");
+    if (!plotRange) {
+      return undefined;
+    }
+    let plotBlock = patched.slice(plotRange.start, plotRange.end);
+    const plotArea = chart.plotArea;
+    if (patchPlan.plotAreaSpPr) {
+      plotBlock = patchGenericChild(
+        plotBlock,
+        "cx:spPr",
+        buildRawShapePropertiesXml(plotArea?.spPr, "cx"),
+        ["cx:plotAreaRegion", "cx:axis", "cx:extLst"],
+        "cx:plotArea"
+      );
+    }
+    if (patchPlan.plotAreaRegionLayout || patchPlan.plotSurface) {
+      const regionRange = findXmlBlock(plotBlock, "cx:plotAreaRegion");
+      if (!regionRange) {
+        return undefined;
+      }
+      let regionBlock = plotBlock.slice(regionRange.start, regionRange.end);
+      const region = plotArea?.plotAreaRegion;
+      if (patchPlan.plotAreaRegionLayout) {
+        regionBlock = patchGenericChild(
+          regionBlock,
+          "cx:layout",
+          buildRawChartExLayoutXml(region?.layout),
+          ["cx:spPr", "cx:series", "cx:extLst"],
+          "cx:plotAreaRegion"
+        );
+      }
+      if (patchPlan.plotSurface) {
+        regionBlock = patchGenericChild(
+          regionBlock,
+          "cx:spPr",
+          buildRawShapePropertiesXml(region?.plotSurface, "cx"),
+          ["cx:series", "cx:extLst"],
+          "cx:plotAreaRegion"
+        );
+      }
+      plotBlock =
+        plotBlock.slice(0, regionRange.start) + regionBlock + plotBlock.slice(regionRange.end);
+    }
+    patched = patched.slice(0, plotRange.start) + plotBlock + patched.slice(plotRange.end);
+  }
+  if (hasRawPatchListChanges(patchPlan.series)) {
+    const next = patchRawChartExSeries(patched, chart, patchPlan);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (hasRawPatchListChanges(patchPlan.axes)) {
+    const next = patchRawChartExAxes(patched, chart, patchPlan.axes);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  return patched;
+}
+
+function tryPatchChartRawXml(entry: ChartEntry, forceRawPatch = false): Uint8Array | undefined {
+  if (!entry.rawData || (!entry.preferRawPatch && !forceRawPatch) || !hasChartEntryChanged(entry)) {
+    return undefined;
+  }
+  const patchPlan = getChartRawPatchPlan(entry);
+  if (patchPlan === undefined) {
+    return undefined;
+  }
+  const raw = new TextDecoder().decode(entry.rawData);
+  let patched = raw;
+  if (patchPlan.title) {
+    const titleText = entry.model.chart?.title?.text?.paragraphs?.[0]?.runs?.[0]?.text;
+    const hasTitle = /<c:title>[\s\S]*?<\/c:title>/.test(patched);
+    if (titleText !== undefined && hasTitle) {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, buildRawChartTitleXml(titleText));
+    } else if (titleText === undefined && hasTitle) {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, "");
+    }
+  }
+  if (patchPlan.legend) {
+    const legend = entry.model.chart?.legend;
+    if (legend === undefined) {
+      patched = patched.replace(/<c:legend>[\s\S]*?<\/c:legend>/, "");
+    } else if (/<c:legend>[\s\S]*?<\/c:legend>/.test(patched)) {
+      patched = patched.replace(
+        /<c:legend>[\s\S]*?<\/c:legend>/,
+        buildRawChartLegendXml(legend.legendPos ?? "b")
+      );
+    }
+  }
+  if (hasRawPatchListChanges(patchPlan.series)) {
+    const next = patchRawSeries(patched, entry.model, patchPlan.series);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.groupDataLabels) {
+    const next = patchRawChartGroupDataLabels(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.groupSimpleFields) {
+    const next = patchRawChartGroupSimpleFields(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.plotAreaLayout) {
+    const next = patchRawPlotAreaLayout(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (hasRawPatchListChanges(patchPlan.axes)) {
+    const next = patchRawAxes(patched, entry.model, patchPlan.axes);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  return patched !== raw ? new TextEncoder().encode(patched) : undefined;
+}
+
+interface ChartRawPatchPlan {
+  title: boolean;
+  legend: boolean;
+  series: RawPatchListPlan<ChartSeriesRawPatchPlan>;
+  axes: RawPatchListPlan<ChartAxisRawPatchPlan>;
+  groupDataLabels: boolean;
+  /**
+   * Any chart-type group's simple leaf field (`gapWidth`, `overlap`,
+   * `varyColors`, `firstSliceAng`, `holeSize`, `gapDepth`,
+   * `radarStyle`, `scatterStyle`, `ofPieType`, `smooth`, and friends —
+   * see {@link SIMPLE_GROUP_FIELD_TAGS}) has changed. When true,
+   * `tryPatchChartRawXml` rewrites those leaves in place via
+   * `patchRawChartGroupSimpleFields` instead of falling through to a
+   * structural rebuild.
+   */
+  groupSimpleFields: boolean;
+  plotAreaLayout: boolean;
+}
+
+function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined {
+  if (entry.modelSnapshot === undefined) {
+    return {
+      title: true,
+      legend: true,
+      series: true,
+      axes: true,
+      groupDataLabels: true,
+      groupSimpleFields: true,
+      plotAreaLayout: true
+    };
+  }
+  let previous: any;
+  try {
+    previous = JSON.parse(entry.modelSnapshot);
+  } catch {
+    return undefined;
+  }
+  const current = entry.model as any;
+  const prevChart = previous.chart;
+  const curChart = current.chart;
+  const plan: ChartRawPatchPlan = {
+    title: false,
+    legend: false,
+    series: buildChartSeriesRawPatchPlan(previous, current),
+    axes: buildChartAxisRawPatchPlan(
+      prevChart?.plotArea?.axes ?? [],
+      curChart?.plotArea?.axes ?? []
+    ),
+    groupDataLabels: false,
+    groupSimpleFields: false,
+    plotAreaLayout: false
+  };
+  const curWithoutPatchable = stripPatchableChartFields(current);
+  const prevWithoutPatchable = stripPatchableChartFields(previous);
+  if (!sameJson(curWithoutPatchable, prevWithoutPatchable)) {
+    return undefined;
+  }
+  plan.title = plan.title || !sameJson(prevChart?.title, curChart?.title);
+  plan.legend = plan.legend || !sameJson(prevChart?.legend, curChart?.legend);
+  plan.groupDataLabels = !sameJson(
+    extractPatchableGroupDataLabels(previous),
+    extractPatchableGroupDataLabels(current)
+  );
+  plan.groupSimpleFields = !sameJson(
+    extractSimpleGroupFields(previous),
+    extractSimpleGroupFields(current)
+  );
+  plan.plotAreaLayout = !sameJson(prevChart?.plotArea?.layout, curChart?.plotArea?.layout);
+  return plan.title ||
+    plan.legend ||
+    hasRawPatchListChanges(plan.series) ||
+    hasRawPatchListChanges(plan.axes) ||
+    plan.groupDataLabels ||
+    plan.groupSimpleFields ||
+    plan.plotAreaLayout
+    ? plan
+    : undefined;
+}
+
+function stripPatchableChartFields(model: any): any {
+  const clone = JSON.parse(JSON.stringify(model));
+  // Top-level fields that tryPatchChartRawXml does not rewrite. Allowing
+  // them to differ between `previous` and `current` means a caller can
+  // load a template that carries c14/c15/c16 extension XML, edit a
+  // title or legend, and still take the fast raw-patch path — without
+  // this the extLst JSON shape shifts (e.g. empty string `""` vs
+  // `undefined` after a round-trip) and the plan gets rejected.
+  //
+  // We deliberately do NOT strip `pivotOptions`: it is structurally
+  // parsed, and the raw patcher has no branch to replay a mutation
+  // into the XML. Keeping it out of the whitelist forces a rebuild so
+  // the user's change is honoured.
+  clone.extLst = undefined;
+  clone.unknownElements = undefined;
+  clone.extraNamespaces = undefined;
+  clone.alternateContentStyle = undefined;
+  clone.clrMapOvr = undefined;
+  clone.protection = undefined;
+  if (clone.chart) {
+    clone.chart.title = undefined;
+    clone.chart.legend = undefined;
+    clone.chart.extLst = undefined;
+    if (clone.chart.plotArea) {
+      clone.chart.plotArea.axes = (clone.chart.plotArea.axes ?? []).map(stripPatchableAxisFields);
+      clone.chart.plotArea.layout = undefined;
+      clone.chart.plotArea.extLst = undefined;
+      for (const group of clone.chart.plotArea.chartTypes ?? []) {
+        group.dataLabels = undefined;
+        group.extLst = undefined;
+        // Simple leaf fields the `patchRawChartGroupSimpleFields`
+        // branch rewrites in place (see `SIMPLE_GROUP_FIELD_TAGS`).
+        // Stripping them from the baseline diff is what makes the
+        // "edit `overlap` then write" path take the fast raw-patch
+        // route instead of a full structural rebuild. Every field
+        // listed here must have a matching entry in
+        // `SIMPLE_GROUP_FIELD_TAGS` — the two are kept symmetric.
+        for (const field of SIMPLE_GROUP_FIELD_NAMES) {
+          group[field] = undefined;
+        }
+        group.series = (group.series ?? []).map((series: any) => ({
+          ...series,
+          tx: undefined,
+          spPr: undefined,
+          marker: undefined,
+          dataPoints: undefined,
+          trendlines: undefined,
+          errorBars: undefined,
+          cat: undefined,
+          val: undefined,
+          xVal: undefined,
+          yVal: undefined,
+          bubbleSize: undefined,
+          dataLabels: undefined,
+          extLst: undefined
+        }));
+      }
+    }
+  }
+  return clone;
+}
+
+function stripPatchableAxisFields(axis: any): any {
+  return {
+    ...axis,
+    scaling: undefined,
+    delete: undefined,
+    majorGridlines: undefined,
+    minorGridlines: undefined,
+    title: undefined,
+    numFmt: undefined,
+    majorTickMark: undefined,
+    minorTickMark: undefined,
+    tickLblPos: undefined,
+    spPr: undefined,
+    txPr: undefined,
+    crosses: undefined,
+    crossesAt: undefined,
+    auto: undefined,
+    lblAlgn: undefined,
+    lblOffset: undefined,
+    tickLblSkip: undefined,
+    tickMarkSkip: undefined,
+    noMultiLvlLbl: undefined,
+    crossBetween: undefined,
+    majorUnit: undefined,
+    minorUnit: undefined,
+    baseTimeUnit: undefined,
+    majorTimeUnit: undefined,
+    minorTimeUnit: undefined,
+    // `c:extLst` on an axis is always raw XML passthrough in the
+    // structural parser; freezing it out of the diff lets template
+    // edits (scaling / gridlines / title) take the fast raw-patch
+    // path when the template happens to carry c15:axisTitleExtLst or
+    // similar vendor ext markers.
+    extLst: undefined
+  };
+}
+
+function extractPatchableGroupDataLabels(model: any): any {
+  return (model.chart?.plotArea?.chartTypes ?? []).map((group: any) => group.dataLabels);
+}
+
+function buildChartSeriesRawPatchPlan(previous: any, current: any): ChartSeriesRawPatchPlan[] {
+  const previousSeries = flattenChartSeries(previous);
+  return flattenChartSeries(current).map((series, index) => {
+    const prev = previousSeries[index] ?? {};
+    return {
+      tx: !sameJson(prev.tx, series.tx),
+      spPr: !sameJson(prev.spPr, series.spPr),
+      marker: !sameJson(prev.marker, series.marker),
+      dataPoints: !sameJson(prev.dataPoints, series.dataPoints),
+      trendlines: !sameJson(prev.trendlines, series.trendlines),
+      errorBars: !sameJson(prev.errorBars, series.errorBars),
+      cat: !sameJson(prev.cat, series.cat),
+      val: !sameJson(prev.val, series.val),
+      xVal: !sameJson(prev.xVal, series.xVal),
+      yVal: !sameJson(prev.yVal, series.yVal),
+      bubbleSize: !sameJson(prev.bubbleSize, series.bubbleSize),
+      dataLabels: !sameJson(prev.dataLabels, series.dataLabels)
+    };
+  });
+}
+
+function buildChartAxisRawPatchPlan(
+  previousAxes: any[],
+  currentAxes: any[]
+): ChartAxisRawPatchPlan[] {
+  const previousById = new Map(previousAxes.map(axis => [axis.axId, axis]));
+  return currentAxes.map(axis => {
+    const prev = previousById.get(axis.axId) ?? {};
+    return {
+      scaling: !sameJson(prev.scaling, axis.scaling),
+      delete: !sameJson(prev.delete, axis.delete),
+      title: !sameJson(prev.title, axis.title),
+      numFmt: !sameJson(prev.numFmt, axis.numFmt),
+      majorGridlines: !sameJson(prev.majorGridlines, axis.majorGridlines),
+      minorGridlines: !sameJson(prev.minorGridlines, axis.minorGridlines),
+      majorTickMark: !sameJson(prev.majorTickMark, axis.majorTickMark),
+      minorTickMark: !sameJson(prev.minorTickMark, axis.minorTickMark),
+      tickLblPos: !sameJson(prev.tickLblPos, axis.tickLblPos),
+      spPr: !sameJson(prev.spPr, axis.spPr),
+      txPr: !sameJson(prev.txPr, axis.txPr),
+      crosses: !sameJson(prev.crosses, axis.crosses),
+      crossesAt: !sameJson(prev.crossesAt, axis.crossesAt),
+      auto: !sameJson(prev.auto, axis.auto),
+      lblAlgn: !sameJson(prev.lblAlgn, axis.lblAlgn),
+      lblOffset: !sameJson(prev.lblOffset, axis.lblOffset),
+      tickLblSkip: !sameJson(prev.tickLblSkip, axis.tickLblSkip),
+      tickMarkSkip: !sameJson(prev.tickMarkSkip, axis.tickMarkSkip),
+      noMultiLvlLbl: !sameJson(prev.noMultiLvlLbl, axis.noMultiLvlLbl),
+      crossBetween: !sameJson(prev.crossBetween, axis.crossBetween),
+      majorUnit: !sameJson(prev.majorUnit, axis.majorUnit),
+      minorUnit: !sameJson(prev.minorUnit, axis.minorUnit),
+      baseTimeUnit: !sameJson(prev.baseTimeUnit, axis.baseTimeUnit),
+      majorTimeUnit: !sameJson(prev.majorTimeUnit, axis.majorTimeUnit),
+      minorTimeUnit: !sameJson(prev.minorTimeUnit, axis.minorTimeUnit)
+    };
+  });
+}
+
+function flattenChartSeries(model: any): any[] {
+  return (model.chart?.plotArea?.chartTypes ?? []).flatMap((group: any) =>
+    (group.series ?? []).map((series: any) => ({
+      tx: series.tx,
+      spPr: series.spPr,
+      marker: series.marker,
+      dataPoints: series.dataPoints,
+      trendlines: series.trendlines,
+      errorBars: series.errorBars,
+      cat: series.cat,
+      val: series.val,
+      xVal: series.xVal,
+      yVal: series.yVal,
+      bubbleSize: series.bubbleSize,
+      dataLabels: series.dataLabels
+    }))
+  );
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasRawPatchListChanges<T extends object>(plan: RawPatchListPlan<T>): boolean {
+  return (
+    plan === true || (Array.isArray(plan) && plan.some(item => Object.values(item).some(Boolean)))
+  );
+}
+
+function getRawPatchListItem<T extends object>(
+  plan: RawPatchListPlan<T>,
+  index: number
+): T | true | false {
+  return plan === true ? true : Array.isArray(plan) ? (plan[index] ?? false) : false;
+}
+
+function rawPatchFlag<T extends object>(plan: T | true | false, key: keyof T): boolean {
+  if (plan === true) {
+    return true;
+  }
+  if (plan === false) {
+    return false;
+  }
+  return Boolean(plan[key]);
+}
+
+function buildRawChartTitleXml(text: string): string {
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escaped}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`;
+}
+
+function buildRawChartLegendXml(pos: string): string {
+  return `<c:legend><c:legendPos val="${pos}"/><c:overlay val="0"/></c:legend>`;
+}
+
+function buildRawChartExTitleXml(text: string): string {
+  return `<cx:title><cx:tx><cx:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(text)}</a:t></a:r></a:p></cx:rich></cx:tx><cx:overlay val="0"/></cx:title>`;
+}
+
+function buildRawChartExLegendXml(legend: any): string {
+  const attrs = [
+    legend.legendPos ? `pos="${escapeAttr(legend.legendPos)}"` : undefined,
+    legend.overlay !== undefined ? `overlay="${legend.overlay ? "1" : "0"}"` : undefined
+  ].filter((attr): attr is string => !!attr);
+  return `<cx:legend ${attrs.join(" ")}/>`;
+}
+
+function buildRawChartExDataXml(chartData: any): string {
+  const parts = ["<cx:chartData>"];
+  for (const externalData of chartData?.externalData ?? []) {
+    const attrs = [
+      `r:id="${escapeAttr(externalData.id ?? "")}"`,
+      externalData.autoUpdate !== undefined
+        ? `autoUpdate="${externalData.autoUpdate ? "1" : "0"}"`
+        : undefined
+    ].filter((attr): attr is string => !!attr);
+    parts.push(`<cx:externalData ${attrs.join(" ")}/>`);
+  }
+  for (const entry of chartData?.data ?? []) {
+    parts.push(`<cx:data id="${entry.id}">`);
+    if (entry.strDim) {
+      parts.push(buildRawChartExStringDimensionXml(entry.strDim));
+    }
+    if (entry.numDim) {
+      parts.push(buildRawChartExNumericDimensionXml(entry.numDim));
+    }
+    parts.push("</cx:data>");
+  }
+  parts.push("</cx:chartData>");
+  return parts.join("");
+}
+
+function buildRawChartExStringDimensionXml(dim: any): string {
+  const parts = [`<cx:strDim type="${escapeAttr(dim.type)}">`];
+  if (dim.formula) {
+    parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
+  }
+  for (const level of dim.levels ?? []) {
+    const ptCount = level.ptCount ?? level.points?.length ?? 0;
+    if (!level.points?.length) {
+      parts.push(`<cx:lvl ptCount="${ptCount}"/>`);
+    } else {
+      parts.push(`<cx:lvl ptCount="${ptCount}">`);
+      for (const point of level.points) {
+        parts.push(`<cx:pt idx="${point.index}">${escapeXml(String(point.value))}</cx:pt>`);
+      }
+      parts.push("</cx:lvl>");
+    }
+  }
+  parts.push("</cx:strDim>");
+  return parts.join("");
+}
+
+function buildRawChartExNumericDimensionXml(dim: any): string {
+  const parts = [`<cx:numDim type="${escapeAttr(dim.type)}">`];
+  if (dim.formula) {
+    parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
+  }
+  for (const level of dim.levels ?? []) {
+    const ptCount = level.ptCount ?? level.points?.length ?? 0;
+    const fmt = level.formatCode ? ` formatCode="${escapeAttr(level.formatCode)}"` : "";
+    if (!level.points?.length) {
+      parts.push(`<cx:lvl ptCount="${ptCount}"${fmt}/>`);
+    } else {
+      parts.push(`<cx:lvl ptCount="${ptCount}"${fmt}>`);
+      for (const point of level.points) {
+        parts.push(`<cx:pt idx="${point.index}">${escapeXml(String(point.value))}</cx:pt>`);
+      }
+      parts.push("</cx:lvl>");
+    }
+  }
+  parts.push("</cx:numDim>");
+  return parts.join("");
+}
+
+function patchRawSeries(
+  raw: string,
+  model: any,
+  patchPlan: RawPatchListPlan<ChartSeriesRawPatchPlan>
+): string | undefined {
+  const seriesModels = (model.chart?.plotArea?.chartTypes ?? []).flatMap(
+    (group: any) => group.series ?? []
+  );
+  let index = 0;
+  return replaceXmlBlocks(raw, "c:ser", block => {
+    const series = seriesModels[index++];
+    const seriesPlan = getRawPatchListItem(patchPlan, index - 1);
+    return series && seriesPlan ? patchRawSeriesBlock(block, series, seriesPlan) : block;
+  });
+}
+
+function patchRawSeriesBlock(
+  block: string,
+  series: any,
+  patchPlan: ChartSeriesRawPatchPlan | true
+): string | undefined {
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "tx") && series.tx) {
+    const txXml = buildRawSeriesTxXml(series.tx);
+    patched = replaceOrInsertBefore(patched, "c:tx", txXml, [
+      "c:spPr",
+      "c:cat",
+      "c:xVal",
+      "c:val",
+      "c:yVal",
+      "c:bubbleSize"
+    ]);
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:spPr",
+      buildRawShapePropertiesXml(series.spPr, "c"),
+      [
+        "c:marker",
+        "c:invertIfNegative",
+        "c:pictureOptions",
+        "c:dPt",
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "marker")) {
+    patched = patchGenericChild(
+      patched,
+      "c:marker",
+      buildRawMarkerXml(series.marker),
+      [
+        "c:dPt",
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  for (const [tag, source] of [
+    ["c:cat", series.cat],
+    ["c:val", series.val],
+    ["c:xVal", series.xVal],
+    ["c:yVal", series.yVal],
+    ["c:bubbleSize", series.bubbleSize]
+  ] as Array<[string, any]>) {
+    if (rawPatchFlag(patchPlan, chartSeriesPatchKeyForDataTag(tag))) {
+      if (!source) {
+        patched = removeXmlBlock(patched, tag);
+        continue;
+      }
+      const dataXml = buildRawDataSourceXml(tag, source);
+      if (!dataXml) {
+        return undefined;
+      }
+      patched = replaceOrInsertBefore(patched, tag, dataXml, ["c:smooth", "c:shape", "c:extLst"]);
+    }
+  }
+  if (rawPatchFlag(patchPlan, "dataPoints")) {
+    const dataPointsXml = buildRawDataPointsXml(series.dataPoints);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:dPt",
+      dataPointsXml,
+      [
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "trendlines")) {
+    const trendlinesXml = buildRawTrendlinesXml(series.trendlines);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:trendline",
+      trendlinesXml,
+      [
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "errorBars")) {
+    const errorBarsXml = buildRawErrorBarsXml(series.errorBars);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:errBars",
+      errorBarsXml,
+      ["c:cat", "c:xVal", "c:val", "c:yVal", "c:bubbleSize", "c:smooth", "c:shape", "c:extLst"],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataLabels")) {
+    if (series.dataLabels) {
+      patched = replaceOrInsertBefore(
+        patched,
+        "c:dLbls",
+        buildRawDataLabelsXml(series.dataLabels),
+        [
+          "c:trendline",
+          "c:errBars",
+          "c:cat",
+          "c:xVal",
+          "c:val",
+          "c:yVal",
+          "c:bubbleSize",
+          "c:smooth",
+          "c:shape",
+          "c:extLst"
+        ]
+      );
+    } else {
+      patched = patched.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, "");
+    }
+  }
+  return patched;
+}
+
+function chartSeriesPatchKeyForDataTag(tag: string): keyof ChartSeriesRawPatchPlan {
+  switch (tag) {
+    case "c:cat":
+      return "cat";
+    case "c:val":
+      return "val";
+    case "c:xVal":
+      return "xVal";
+    case "c:yVal":
+      return "yVal";
+    default:
+      return "bubbleSize";
+  }
+}
+
+/**
+ * Ordered child tag list for each `ChartTypeGroup` block in a classic
+ * chartN.xml, used by `replaceOrRemoveSimpleGroupField` to place a new
+ * leaf in the correct schema position. The ordering mirrors the
+ * `_renderXxxChart` functions in `chart-space-xform.ts` and is the
+ * "schema order" ECMA-376 requires — inserting `c:gapWidth` before
+ * `c:barDir` would produce XML Excel refuses to open.
+ *
+ * Tags not listed (e.g. `c:dLbls`, `c:ser`, `c:extLst`) are inserted
+ * by existing dedicated patchers. Anything in this map is a single
+ * `<c:… val="…"/>` leaf with no child elements.
+ */
+const CLASSIC_GROUP_CHILD_ORDER: readonly string[] = [
+  "c:barDir",
+  "c:grouping",
+  "c:varyColors",
+  "c:ofPieType",
+  "c:radarStyle",
+  "c:scatterStyle",
+  "c:wireframe",
+  "c:ser",
+  "c:dLbls",
+  "c:marker",
+  "c:smooth",
+  "c:dropLines",
+  "c:hiLowLines",
+  "c:upDownBars",
+  "c:bubbleScale",
+  "c:showNegBubbles",
+  "c:sizeRepresents",
+  "c:gapWidth",
+  "c:overlap",
+  "c:serLines",
+  "c:shape",
+  "c:firstSliceAng",
+  "c:holeSize",
+  "c:gapDepth",
+  "c:splitType",
+  "c:splitPos",
+  "c:custSplit",
+  "c:secondPieSize",
+  "c:axId",
+  "c:extLst"
+];
+
+/**
+ * The subset of {@link CLASSIC_GROUP_CHILD_ORDER} that
+ * `patchRawChartGroupSimpleFields` can rewrite in place. The field
+ * name on the left is the `ChartTypeGroup` model key; the right-hand
+ * value is the OOXML element name (sans `val=` attribute, which this
+ * patcher always uses). Boolean model fields are serialised as
+ * `"1"` / `"0"` to match the ECMA-376 convention.
+ *
+ * Kept in sync with `SIMPLE_GROUP_FIELD_NAMES` (used by
+ * `stripPatchableChartFields`) — every entry in this map must also be
+ * stripped from the baseline diff, otherwise a plain
+ * "previous === current after strip" check would see the mutated
+ * leaf and refuse the raw-patch plan.
+ */
+const SIMPLE_GROUP_FIELD_TAGS: Record<string, string> = {
+  barDir: "c:barDir",
+  grouping: "c:grouping",
+  varyColors: "c:varyColors",
+  gapWidth: "c:gapWidth",
+  overlap: "c:overlap",
+  firstSliceAng: "c:firstSliceAng",
+  holeSize: "c:holeSize",
+  gapDepth: "c:gapDepth",
+  scatterStyle: "c:scatterStyle",
+  radarStyle: "c:radarStyle",
+  ofPieType: "c:ofPieType",
+  splitType: "c:splitType",
+  splitPos: "c:splitPos",
+  secondPieSize: "c:secondPieSize",
+  bubbleScale: "c:bubbleScale",
+  showNegBubbles: "c:showNegBubbles",
+  sizeRepresents: "c:sizeRepresents",
+  shape: "c:shape",
+  smooth: "c:smooth",
+  wireframe: "c:wireframe"
+};
+
+const SIMPLE_GROUP_FIELD_NAMES: readonly string[] = Object.keys(SIMPLE_GROUP_FIELD_TAGS);
+
+/**
+ * Extract the simple-field projection of every chart-type group in a
+ * `ChartModel` for diffing. Produces a stable array of plain objects
+ * (one per group) keyed by field name so
+ * `sameJson(extractSimpleGroupFields(prev), extractSimpleGroupFields(curr))`
+ * answers "did any group simple field change?".
+ */
+function extractSimpleGroupFields(model: any): Array<Record<string, unknown>> {
+  const groups = model.chart?.plotArea?.chartTypes ?? [];
+  return groups.map((group: any) => {
+    const out: Record<string, unknown> = { type: group.type };
+    for (const key of SIMPLE_GROUP_FIELD_NAMES) {
+      if (group[key] !== undefined) {
+        out[key] = group[key];
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * Raw-XML patcher for the simple leaf fields of every chart-type
+ * group: `gapWidth`, `overlap`, `varyColors`, `firstSliceAng`,
+ * `holeSize`, `gapDepth`, `radarStyle`, `scatterStyle`, `ofPieType`,
+ * `smooth`, and the other `val="…"` leaves listed in
+ * {@link SIMPLE_GROUP_FIELD_TAGS}. Called by `tryPatchChartRawXml`
+ * when `plan.groupSimpleFields` is true so these common user edits
+ * (tightening bar overlap, rotating a pie, lowering bubble scale)
+ * keep the fast raw-patch path instead of rebuilding the chart XML
+ * structurally and losing any vendor extensions along the way.
+ *
+ * Returns `undefined` when a group block cannot be located or its
+ * type lacks a known tag — signalling to the caller that it should
+ * fall back to a structural rebuild.
+ */
+function patchRawChartGroupSimpleFields(raw: string, model: any): string | undefined {
+  let patched = raw;
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    const tag = chartGroupTagName(group);
+    if (!tag) {
+      return undefined;
+    }
+    const range = findXmlBlock(patched, tag);
+    if (!range) {
+      return undefined;
+    }
+    const block = patched.slice(range.start, range.end);
+    // Series blocks can themselves contain elements with the same
+    // tag names (e.g. a custom series dLbls might ship with a stale
+    // `c:smooth`); mask them out while we rewrite the group-level
+    // leaves so our regex replacements don't accidentally target a
+    // series-internal element.
+    const { xml: withoutSeries, seriesBlocks } = preserveSeriesBlocks(block, xml => xml);
+    let current = withoutSeries;
+    for (const fieldName of SIMPLE_GROUP_FIELD_NAMES) {
+      const xmlTag = SIMPLE_GROUP_FIELD_TAGS[fieldName];
+      const value = (group as Record<string, unknown>)[fieldName];
+      current = replaceOrRemoveSimpleGroupField(current, xmlTag, value);
+    }
+    const restored = restoreSeriesBlocks(current, seriesBlocks);
+    patched = patched.slice(0, range.start) + restored + patched.slice(range.end);
+  }
+  return patched;
+}
+
+/**
+ * Replace, insert, or remove a `<c:xxx val="…"/>` leaf inside a
+ * chart-type group block while keeping the block's child order
+ * schema-valid (see {@link CLASSIC_GROUP_CHILD_ORDER}).
+ *
+ * - `value === undefined` → element is removed if present, left
+ *   untouched otherwise.
+ * - `value !== undefined` → element is rewritten in place when it
+ *   already exists, or inserted before the first schema-later
+ *   sibling when it does not.
+ *
+ * Booleans are serialised as `"1"` / `"0"`; numbers use their string
+ * representation; strings pass through with attribute escaping. The
+ * schema only expects these three primitive shapes for simple leaves.
+ */
+function replaceOrRemoveSimpleGroupField(block: string, tag: string, value: unknown): string {
+  const leafRegex = new RegExp(`<${escapeRegExp(tag)}(?:\\s+[^/>]*)?/>`, "g");
+  if (value === undefined) {
+    // Strip the existing leaf if present, no-op otherwise.
+    return block.replace(leafRegex, "");
+  }
+  const serialised = serialiseSimpleGroupFieldValue(value);
+  const replacement = `<${tag} val="${serialised}"/>`;
+  if (leafRegex.test(block)) {
+    return block.replace(leafRegex, replacement);
+  }
+  // Insert in schema order: find the first sibling that comes after
+  // our tag in CLASSIC_GROUP_CHILD_ORDER and that exists in the
+  // current block.
+  const tagIndex = CLASSIC_GROUP_CHILD_ORDER.indexOf(tag);
+  if (tagIndex < 0) {
+    return block; // unknown tag — do not risk corrupting the XML
+  }
+  const laterSiblings = CLASSIC_GROUP_CHILD_ORDER.slice(tagIndex + 1);
+  for (const sibling of laterSiblings) {
+    const siblingIdx = block.indexOf(`<${sibling}`);
+    if (siblingIdx >= 0) {
+      return block.slice(0, siblingIdx) + replacement + block.slice(siblingIdx);
+    }
+  }
+  // No later sibling found — insert before the closing `</…Chart>`.
+  const closeMatch = /<\/c:\w+Chart>\s*$/.exec(block);
+  if (closeMatch) {
+    const insertAt = closeMatch.index;
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  return block;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function serialiseSimpleGroupFieldValue(value: unknown): string {
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function patchRawChartGroupDataLabels(raw: string, model: any): string | undefined {
+  let patched = raw;
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    const tag = chartGroupTagName(group);
+    if (!tag) {
+      return undefined;
+    }
+    const range = findXmlBlock(patched, tag);
+    if (!range) {
+      return undefined;
+    }
+    const block = patched.slice(range.start, range.end);
+    const replacement = patchRawChartGroupDataLabelsBlock(block, group);
+    patched = patched.slice(0, range.start) + replacement + patched.slice(range.end);
+  }
+  return patched;
+}
+
+function patchRawPlotAreaLayout(raw: string, model: any): string | undefined {
+  const plotArea = model.chart?.plotArea;
+  const range = findXmlBlock(raw, "c:plotArea");
+  if (!range || !plotArea) {
+    return undefined;
+  }
+  const block = raw.slice(range.start, range.end);
+  const layoutXml = plotArea.layout ? buildRawLayoutXml(plotArea.layout) : "";
+  const patched = layoutXml
+    ? replaceOrInsertBeforeGeneric(
+        block,
+        "c:layout",
+        layoutXml,
+        [
+          "c:areaChart",
+          "c:area3DChart",
+          "c:barChart",
+          "c:bar3DChart",
+          "c:lineChart",
+          "c:line3DChart",
+          "c:pieChart",
+          "c:pie3DChart",
+          "c:doughnutChart",
+          "c:scatterChart",
+          "c:bubbleChart",
+          "c:radarChart",
+          "c:stockChart",
+          "c:surfaceChart",
+          "c:surface3DChart",
+          "c:ofPieChart",
+          "c:catAx",
+          "c:valAx",
+          "c:serAx",
+          "c:dateAx",
+          "c:spPr"
+        ],
+        "c:plotArea"
+      )
+    : removeXmlBlock(block, "c:layout");
+  return raw.slice(0, range.start) + patched + raw.slice(range.end);
+}
+
+function buildRawLayoutXml(layout: any, namespace: "c" | "cx" = "c"): string {
+  if (!layout?.manualLayout) {
+    return `<${namespace}:layout/>`;
+  }
+  const ml = layout.manualLayout;
+  const parts = [`<${namespace}:layout><${namespace}:manualLayout>`];
+  for (const [name, value] of [
+    ["layoutTarget", ml.layoutTarget],
+    ["xMode", ml.xMode],
+    ["yMode", ml.yMode],
+    ["wMode", ml.wMode],
+    ["hMode", ml.hMode],
+    ["x", ml.x],
+    ["y", ml.y],
+    ["w", ml.w],
+    ["h", ml.h]
+  ] as const) {
+    if (value !== undefined) {
+      parts.push(`<${namespace}:${name} val="${escapeAttr(String(value))}"/>`);
+    }
+  }
+  parts.push(`</${namespace}:manualLayout></${namespace}:layout>`);
+  return parts.join("");
+}
+
+function buildRawChartExLayoutXml(layout: any): string {
+  if (!layout) {
+    return "";
+  }
+  if (layout._rawXml && !layout.manualLayout) {
+    return layout._rawXml;
+  }
+  return buildRawLayoutXml(layout, "cx");
+}
+
+function patchRawChartGroupDataLabelsBlock(block: string, group: any): string {
+  const withoutSeriesBlocks = preserveSeriesBlocks(block, xml => xml);
+  if (group.dataLabels) {
+    return restoreSeriesBlocks(
+      replaceOrInsertBefore(
+        withoutSeriesBlocks.xml,
+        "c:dLbls",
+        buildRawDataLabelsXml(group.dataLabels),
+        [
+          "c:gapWidth",
+          "c:overlap",
+          "c:serLines",
+          "c:axId",
+          "c:firstSliceAng",
+          "c:holeSize",
+          "c:extLst"
+        ]
+      ),
+      withoutSeriesBlocks.seriesBlocks
+    );
+  }
+  const stripped = withoutSeriesBlocks.xml.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, "");
+  return restoreSeriesBlocks(stripped, withoutSeriesBlocks.seriesBlocks);
+}
+
+function chartGroupTagName(group: any): string | undefined {
+  const tagByType: Record<string, string> = {
+    bar: "c:barChart",
+    bar3D: "c:bar3DChart",
+    line: "c:lineChart",
+    line3D: "c:line3DChart",
+    pie: "c:pieChart",
+    pie3D: "c:pie3DChart",
+    doughnut: "c:doughnutChart",
+    area: "c:areaChart",
+    area3D: "c:area3DChart",
+    scatter: "c:scatterChart",
+    bubble: "c:bubbleChart",
+    radar: "c:radarChart",
+    stock: "c:stockChart",
+    surface: "c:surfaceChart",
+    surface3D: "c:surface3DChart",
+    ofPie: "c:ofPieChart"
+  };
+  return tagByType[group.type];
+}
+
+function preserveSeriesBlocks(
+  block: string,
+  transform: (xml: string) => string
+): { xml: string; seriesBlocks: string[] } {
+  const seriesBlocks: string[] = [];
+  let cursor = 0;
+  let xml = "";
+  while (cursor < block.length) {
+    const range = findXmlBlock(block, "c:ser", cursor);
+    if (!range) {
+      xml += block.slice(cursor);
+      break;
+    }
+    xml += block.slice(cursor, range.start);
+    const placeholder = `__EXCELTS_SER_${seriesBlocks.length}__`;
+    seriesBlocks.push(transform(block.slice(range.start, range.end)));
+    xml += placeholder;
+    cursor = range.end;
+  }
+  return { xml, seriesBlocks };
+}
+
+function restoreSeriesBlocks(block: string, seriesBlocks: string[]): string {
+  return seriesBlocks.reduce(
+    (xml, seriesBlock, i) => xml.replace(`__EXCELTS_SER_${i}__`, seriesBlock),
+    block
+  );
+}
+
+function buildRawDataLabelsXml(dataLabels: any): string {
+  const parts = ["<c:dLbls>"];
+  if (Array.isArray(dataLabels.entries)) {
+    for (const entry of dataLabels.entries) {
+      parts.push(buildRawDataLabelEntryXml(entry));
+    }
+  }
+  if (dataLabels.numFmt?.formatCode) {
+    const sourceLinked =
+      dataLabels.numFmt.sourceLinked === undefined
+        ? "1"
+        : dataLabels.numFmt.sourceLinked
+          ? "1"
+          : "0";
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(dataLabels.numFmt.formatCode)}" sourceLinked="${sourceLinked}"/>`
+    );
+  }
+  const flags = [
+    ["showLegendKey", dataLabels.showLegendKey],
+    ["showVal", dataLabels.showVal],
+    ["showCatName", dataLabels.showCatName],
+    ["showSerName", dataLabels.showSerName],
+    ["showPercent", dataLabels.showPercent],
+    ["showBubbleSize", dataLabels.showBubbleSize],
+    ["showLeaderLines", dataLabels.showLeaderLines]
+  ] as const;
+  for (const [name, value] of flags) {
+    if (value !== undefined) {
+      parts.push(`<c:${name} val="${value ? "1" : "0"}"/>`);
+    }
+  }
+  if (dataLabels.separator !== undefined) {
+    parts.push(`<c:separator>${escapeXml(String(dataLabels.separator))}</c:separator>`);
+  }
+  if (dataLabels.position !== undefined) {
+    parts.push(`<c:dLblPos val="${escapeAttr(String(dataLabels.position))}"/>`);
+  }
+  if (dataLabels.spPr) {
+    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "c") ?? "");
+  }
+  if (dataLabels.txPr) {
+    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "c") ?? "");
+  }
+  if (dataLabels.extLst) {
+    parts.push(dataLabels.extLst);
+  }
+  parts.push("</c:dLbls>");
+  return parts.join("");
+}
+
+function buildRawDataLabelEntryXml(entry: any): string {
+  const parts = ["<c:dLbl>", `<c:idx val="${entry.index ?? 0}"/>`];
+  if (entry.layout) {
+    parts.push(buildRawLayoutXml(entry.layout));
+  }
+  if (entry.rawTx) {
+    parts.push(entry.rawTx);
+  } else if (entry.text?.paragraphs?.[0]?.runs?.[0]?.text !== undefined) {
+    parts.push(
+      `<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(String(entry.text.paragraphs[0].runs[0].text))}</a:t></a:r></a:p></c:rich></c:tx>`
+    );
+  }
+  if (entry.numFmt?.formatCode) {
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(entry.numFmt.formatCode)}" sourceLinked="${entry.numFmt.sourceLinked ? "1" : "0"}"/>`
+    );
+  }
+  if (entry.spPr) {
+    parts.push(buildRawShapePropertiesXml(entry.spPr, "c") ?? "");
+  }
+  if (entry.txPr) {
+    parts.push(buildRawTextPropertiesXml(entry.txPr, "c") ?? "");
+  }
+  if (entry.position !== undefined) {
+    parts.push(`<c:dLblPos val="${escapeAttr(String(entry.position))}"/>`);
+  }
+  for (const [name, value] of [
+    ["showLegendKey", entry.showLegendKey],
+    ["showVal", entry.showVal],
+    ["showCatName", entry.showCatName],
+    ["showSerName", entry.showSerName],
+    ["showPercent", entry.showPercent],
+    ["showBubbleSize", entry.showBubbleSize]
+  ] as const) {
+    if (value !== undefined) {
+      parts.push(`<c:${name} val="${value ? "1" : "0"}"/>`);
+    }
+  }
+  if (entry.separator !== undefined) {
+    parts.push(`<c:separator>${escapeXml(String(entry.separator))}</c:separator>`);
+  }
+  if (entry.delete !== undefined) {
+    parts.push(`<c:delete val="${entry.delete ? "1" : "0"}"/>`);
+  }
+  if (entry.extLst) {
+    parts.push(entry.extLst);
+  }
+  parts.push("</c:dLbl>");
+  return parts.join("");
+}
+
+function patchRawAxes(
+  raw: string,
+  model: any,
+  patchPlan: RawPatchListPlan<ChartAxisRawPatchPlan>
+): string | undefined {
+  let patched = raw;
+  for (const [index, axis] of (model.chart?.plotArea?.axes ?? []).entries()) {
+    const axisPlan = getRawPatchListItem(patchPlan, index);
+    if (!axisPlan) {
+      continue;
+    }
+    const tag =
+      axis.axisType === "cat"
+        ? "c:catAx"
+        : axis.axisType === "val"
+          ? "c:valAx"
+          : axis.axisType === "date"
+            ? "c:dateAx"
+            : "c:serAx";
+    const block = findAxisBlock(patched, tag, axis.axId);
+    if (!block) {
+      return undefined;
+    }
+    const axisXml = patchRawAxisBlock(block.xml, axis, axisPlan);
+    if (!axisXml) {
+      return undefined;
+    }
+    patched = patched.slice(0, block.start) + axisXml + patched.slice(block.end);
+  }
+  return patched;
+}
+
+function patchRawAxisBlock(
+  block: string,
+  axis: any,
+  patchPlan: ChartAxisRawPatchPlan | true
+): string | undefined {
+  let patched = block;
+  const axisTag = axisTagName(axis);
+  if (rawPatchFlag(patchPlan, "scaling")) {
+    patched = patchGenericChild(
+      patched,
+      "c:scaling",
+      buildRawScalingXml(axis.scaling),
+      ["c:delete", "c:axPos"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "delete")) {
+    patched = patchBooleanLeaf(patched, "c:delete", axis.delete, ["c:axPos"], axisTag);
+  }
+  if (rawPatchFlag(patchPlan, "title")) {
+    if (axis.title) {
+      const titleText = axis.title.text?.paragraphs?.[0]?.runs?.[0]?.text;
+      if (titleText !== undefined) {
+        patched = replaceOrInsertBefore(patched, "c:title", buildRawChartTitleXml(titleText), [
+          "c:numFmt",
+          "c:majorGridlines",
+          "c:minorGridlines",
+          "c:majorUnit",
+          "c:minorUnit",
+          "c:majorTickMark",
+          "c:minorTickMark",
+          "c:tickLblPos"
+        ]);
+      }
+    } else {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, "");
+    }
+  }
+  if (rawPatchFlag(patchPlan, "numFmt")) {
+    patched = patchGenericChild(
+      patched,
+      "c:numFmt",
+      buildRawNumFmtXml(axis.numFmt),
+      [
+        "c:majorGridlines",
+        "c:minorGridlines",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorGridlines")) {
+    patched = patchGridlines(
+      patched,
+      "c:majorGridlines",
+      axis.majorGridlines,
+      [
+        "c:minorGridlines",
+        "c:title",
+        "c:numFmt",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorGridlines")) {
+    patched = patchGridlines(
+      patched,
+      "c:minorGridlines",
+      axis.minorGridlines,
+      [
+        "c:title",
+        "c:numFmt",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorTickMark",
+      axis.majorTickMark,
+      ["c:minorTickMark", "c:tickLblPos", "c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:minorTickMark",
+      axis.minorTickMark,
+      ["c:tickLblPos", "c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickLblPos")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickLblPos",
+      axis.tickLblPos,
+      ["c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:spPr",
+      buildRawShapePropertiesXml(axis.spPr, "c"),
+      ["c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "txPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:txPr",
+      buildRawTextPropertiesXml(axis.txPr, "c"),
+      ["c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crosses")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crosses",
+      axis.crosses,
+      [
+        "c:crossesAt",
+        "c:auto",
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:crossBetween",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:baseTimeUnit",
+        "c:majorTimeUnit",
+        "c:minorTimeUnit",
+        "c:dispUnits",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crossesAt")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crossesAt",
+      axis.crossesAt,
+      [
+        "c:auto",
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:crossBetween",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:baseTimeUnit",
+        "c:majorTimeUnit",
+        "c:minorTimeUnit",
+        "c:dispUnits",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  patched = patchAxisTypeSpecificLeaves(patched, axis, patchPlan);
+  return patched;
+}
+
+function axisTagName(axis: any): string {
+  return axis.axisType === "cat"
+    ? "c:catAx"
+    : axis.axisType === "val"
+      ? "c:valAx"
+      : axis.axisType === "date"
+        ? "c:dateAx"
+        : "c:serAx";
+}
+
+function patchAxisTypeSpecificLeaves(
+  block: string,
+  axis: any,
+  patchPlan: ChartAxisRawPatchPlan | true
+): string {
+  const axisTag = axisTagName(axis);
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "auto")) {
+    patched = patchBooleanLeaf(
+      patched,
+      "c:auto",
+      axis.auto,
+      [
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "lblAlgn")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:lblAlgn",
+      axis.lblAlgn,
+      ["c:lblOffset", "c:tickLblSkip", "c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "lblOffset")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:lblOffset",
+      axis.lblOffset,
+      ["c:tickLblSkip", "c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickLblSkip")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickLblSkip",
+      axis.tickLblSkip,
+      ["c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickMarkSkip")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickMarkSkip",
+      axis.tickMarkSkip,
+      ["c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "noMultiLvlLbl")) {
+    patched = patchBooleanLeaf(
+      patched,
+      "c:noMultiLvlLbl",
+      axis.noMultiLvlLbl,
+      ["c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crossBetween")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crossBetween",
+      axis.crossBetween,
+      ["c:majorUnit", "c:minorUnit", "c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorUnit",
+      axis.majorUnit,
+      ["c:minorUnit", "c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:minorUnit",
+      axis.minorUnit,
+      ["c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "baseTimeUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:baseTimeUnit",
+      axis.baseTimeUnit,
+      ["c:majorUnit", "c:majorTimeUnit", "c:minorUnit", "c:minorTimeUnit", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorTimeUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorTimeUnit",
+      axis.majorTimeUnit,
+      ["c:minorUnit", "c:minorTimeUnit", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTimeUnit")) {
+    patched = patchValueLeaf(patched, "c:minorTimeUnit", axis.minorTimeUnit, ["c:extLst"], axisTag);
+  }
+  return patched;
+}
+
+function buildRawScalingXml(scaling: any): string {
+  if (!scaling) {
+    return "";
+  }
+  const parts = ["<c:scaling>"];
+  if (scaling.orientation !== undefined) {
+    parts.push(`<c:orientation val="${escapeAttr(scaling.orientation)}"/>`);
+  }
+  if (scaling.max !== undefined) {
+    parts.push(`<c:max val="${scaling.max}"/>`);
+  }
+  if (scaling.min !== undefined) {
+    parts.push(`<c:min val="${scaling.min}"/>`);
+  }
+  if (scaling.logBase !== undefined) {
+    parts.push(`<c:logBase val="${scaling.logBase}"/>`);
+  }
+  parts.push("</c:scaling>");
+  return parts.join("");
+}
+
+function buildRawNumFmtXml(numFmt: any): string {
+  if (!numFmt?.formatCode) {
+    return "";
+  }
+  const sourceLinked = numFmt.sourceLinked === undefined ? "1" : numFmt.sourceLinked ? "1" : "0";
+  return `<c:numFmt formatCode="${escapeAttr(numFmt.formatCode)}" sourceLinked="${sourceLinked}"/>`;
+}
+
+function patchGridlines(
+  block: string,
+  tag: string,
+  spPr: any,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = spPr ? `<${tag}>${buildRawShapePropertiesXml(spPr, "c") ?? ""}</${tag}>` : "";
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function patchValueLeaf(
+  block: string,
+  tag: string,
+  value: unknown,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = value === undefined ? "" : `<${tag} val="${escapeAttr(String(value))}"/>`;
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function patchBooleanLeaf(
+  block: string,
+  tag: string,
+  value: boolean | undefined,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = value === undefined ? "" : `<${tag} val="${value ? "1" : "0"}"/>`;
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function buildRawSeriesTxXml(tx: any): string {
+  if (tx.strRef?.formula) {
+    return `<c:tx>${buildRawStrRefXml(tx.strRef)}</c:tx>`;
+  }
+  return `<c:tx><c:v>${escapeXml(String(tx.value ?? ""))}</c:v></c:tx>`;
+}
+
+function buildRawMarkerXml(marker: any): string {
+  if (!marker) {
+    return "";
+  }
+  const parts = ["<c:marker>"];
+  if (marker.symbol) {
+    parts.push(`<c:symbol val="${escapeAttr(String(marker.symbol))}"/>`);
+  }
+  if (marker.size !== undefined) {
+    parts.push(`<c:size val="${marker.size}"/>`);
+  }
+  if (marker.spPr) {
+    parts.push(buildRawShapePropertiesXml(marker.spPr, "c") ?? "");
+  }
+  if (marker.extLst) {
+    parts.push(marker.extLst);
+  }
+  parts.push("</c:marker>");
+  return parts.join("");
+}
+
+function buildRawDataPointsXml(dataPoints: any): string {
+  if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+    return "";
+  }
+  return dataPoints.map(buildRawDataPointXml).join("");
+}
+
+function buildRawDataPointXml(point: any): string {
+  const parts = ["<c:dPt>", `<c:idx val="${point.index ?? 0}"/>`];
+  if (point.invertIfNegative !== undefined) {
+    parts.push(`<c:invertIfNegative val="${point.invertIfNegative ? "1" : "0"}"/>`);
+  }
+  if (point.marker) {
+    parts.push(buildRawMarkerXml(point.marker));
+  }
+  if (point.bubble3D !== undefined) {
+    parts.push(`<c:bubble3D val="${point.bubble3D ? "1" : "0"}"/>`);
+  }
+  if (point.explosion !== undefined) {
+    parts.push(`<c:explosion val="${point.explosion}"/>`);
+  }
+  if (point.spPr) {
+    parts.push(buildRawShapePropertiesXml(point.spPr, "c") ?? "");
+  }
+  if (point.extLst) {
+    parts.push(point.extLst);
+  }
+  parts.push("</c:dPt>");
+  return parts.join("");
+}
+
+function buildRawTrendlinesXml(trendlines: any): string {
+  if (!Array.isArray(trendlines) || trendlines.length === 0) {
+    return "";
+  }
+  return trendlines.map(buildRawTrendlineXml).join("");
+}
+
+function buildRawTrendlineXml(trendline: any): string {
+  const parts = ["<c:trendline>"];
+  if (trendline.name) {
+    parts.push(`<c:name>${escapeXml(String(trendline.name))}</c:name>`);
+  }
+  if (trendline.spPr) {
+    parts.push(buildRawShapePropertiesXml(trendline.spPr, "c") ?? "");
+  }
+  parts.push(`<c:trendlineType val="${escapeAttr(String(trendline.type ?? "linear"))}"/>`);
+  for (const tag of ["order", "period", "forward", "backward", "intercept"] as const) {
+    if (trendline[tag] !== undefined) {
+      parts.push(`<c:${tag} val="${trendline[tag]}"/>`);
+    }
+  }
+  if (trendline.displayRSqr !== undefined) {
+    parts.push(`<c:dispRSqr val="${trendline.displayRSqr ? "1" : "0"}"/>`);
+  }
+  if (trendline.displayEq !== undefined) {
+    parts.push(`<c:dispEq val="${trendline.displayEq ? "1" : "0"}"/>`);
+  }
+  if (trendline.trendlineLbl) {
+    parts.push(buildRawTrendlineLabelXml(trendline.trendlineLbl));
+  }
+  if (trendline.extLst) {
+    parts.push(trendline.extLst);
+  }
+  parts.push("</c:trendline>");
+  return parts.join("");
+}
+
+function buildRawTrendlineLabelXml(label: any): string {
+  const parts = ["<c:trendlineLbl>"];
+  if (label.layout) {
+    parts.push(buildRawLayoutXml(label.layout));
+  }
+  if (label.rawTx) {
+    parts.push(label.rawTx);
+  } else if (label.text?.paragraphs?.[0]?.runs?.[0]?.text !== undefined) {
+    parts.push(
+      `<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(String(label.text.paragraphs[0].runs[0].text))}</a:t></a:r></a:p></c:rich></c:tx>`
+    );
+  }
+  if (label.numFmt?.formatCode) {
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(label.numFmt.formatCode)}" sourceLinked="${label.numFmt.sourceLinked ? "1" : "0"}"/>`
+    );
+  }
+  if (label.spPr) {
+    parts.push(buildRawShapePropertiesXml(label.spPr, "c") ?? "");
+  }
+  if (label.txPr) {
+    parts.push(buildRawTextPropertiesXml(label.txPr, "c") ?? "");
+  }
+  if (label.extLst) {
+    parts.push(label.extLst);
+  }
+  parts.push("</c:trendlineLbl>");
+  return parts.join("");
+}
+
+function buildRawErrorBarsXml(errorBars: any): string {
+  const bars = Array.isArray(errorBars) ? errorBars : errorBars ? [errorBars] : [];
+  return bars.map(buildRawErrorBarXml).join("");
+}
+
+function buildRawErrorBarXml(errorBar: any): string {
+  const parts = ["<c:errBars>"];
+  if (errorBar.errDir) {
+    parts.push(`<c:errDir val="${escapeAttr(String(errorBar.errDir))}"/>`);
+  }
+  parts.push(`<c:errBarType val="${escapeAttr(String(errorBar.barDir ?? "both"))}"/>`);
+  parts.push(`<c:errValType val="${escapeAttr(String(errorBar.errValType ?? "fixedVal"))}"/>`);
+  if (errorBar.noEndCap !== undefined) {
+    parts.push(`<c:noEndCap val="${errorBar.noEndCap ? "1" : "0"}"/>`);
+  }
+  if (errorBar.val !== undefined) {
+    parts.push(`<c:val val="${errorBar.val}"/>`);
+  }
+  if (errorBar.plus) {
+    parts.push(buildRawDataSourceXml("c:plus", errorBar.plus) ?? "");
+  }
+  if (errorBar.minus) {
+    parts.push(buildRawDataSourceXml("c:minus", errorBar.minus) ?? "");
+  }
+  if (errorBar.spPr) {
+    parts.push(buildRawShapePropertiesXml(errorBar.spPr, "c") ?? "");
+  }
+  if (errorBar.extLst) {
+    parts.push(errorBar.extLst);
+  }
+  parts.push("</c:errBars>");
+  return parts.join("");
+}
+
+function buildRawDataSourceXml(tag: string, source: any): string | undefined {
+  if (source.strRef) {
+    return `<${tag}>${buildRawStrRefXml(source.strRef)}</${tag}>`;
+  }
+  if (source.numRef) {
+    return `<${tag}>${buildRawNumRefXml(source.numRef)}</${tag}>`;
+  }
+  return undefined;
+}
+
+function buildRawNumRefXml(ref: any): string {
+  return `<c:numRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawNumCacheXml(ref.cache)}</c:numRef>`;
+}
+
+function buildRawStrRefXml(ref: any): string {
+  return `<c:strRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawStrCacheXml(ref.cache)}</c:strRef>`;
+}
+
+function buildRawNumCacheXml(cache: any): string {
+  if (!cache) {
+    return "";
+  }
+  const parts = ["<c:numCache>"];
+  if (cache.formatCode) {
+    parts.push(`<c:formatCode>${escapeXml(cache.formatCode)}</c:formatCode>`);
+  }
+  if (cache.pointCount !== undefined) {
+    parts.push(`<c:ptCount val="${cache.pointCount}"/>`);
+  }
+  for (const point of cache.points ?? []) {
+    if (point.value !== null && point.value !== undefined) {
+      parts.push(`<c:pt idx="${point.index}"><c:v>${escapeXml(String(point.value))}</c:v></c:pt>`);
+    }
+  }
+  parts.push("</c:numCache>");
+  return parts.join("");
+}
+
+function buildRawStrCacheXml(cache: any): string {
+  if (!cache) {
+    return "";
+  }
+  const parts = ["<c:strCache>"];
+  if (cache.pointCount !== undefined) {
+    parts.push(`<c:ptCount val="${cache.pointCount}"/>`);
+  }
+  for (const point of cache.points ?? []) {
+    parts.push(`<c:pt idx="${point.index}"><c:v>${escapeXml(String(point.value))}</c:v></c:pt>`);
+  }
+  parts.push("</c:strCache>");
+  return parts.join("");
+}
+
+function buildRawShapePropertiesXml(spPr: any, namespace: "c" | "cx"): string | undefined {
+  if (!spPr) {
+    return "";
+  }
+  if (spPr._rawXml) {
+    return normalizeRawNamespace(spPr._rawXml, "spPr", namespace);
+  }
+  const writer = new XmlWriter();
+  const chartNamespace = namespace;
+  writer.openNode(`${chartNamespace}:spPr`);
+  if (spPr.fill?.noFill) {
+    writer.leafNode("a:noFill");
+  } else if (spPr.fill?.solid) {
+    writer.openNode("a:solidFill");
+    writeRawColor(writer, spPr.fill.solid);
+    writer.closeNode();
+  } else if (spPr.fill?.gradient) {
+    writeRawGradientFill(writer, spPr.fill.gradient);
+  } else if (spPr.fill?.pattern) {
+    const pattern = spPr.fill.pattern;
+    writer.openNode("a:pattFill", { prst: pattern.preset });
+    if (pattern.foreground) {
+      writer.openNode("a:fgClr");
+      writeRawColor(writer, pattern.foreground);
+      writer.closeNode();
+    }
+    if (pattern.background) {
+      writer.openNode("a:bgClr");
+      writeRawColor(writer, pattern.background);
+      writer.closeNode();
+    }
+    writer.closeNode();
+  }
+  if (spPr.line) {
+    const attrs: Record<string, string> = {};
+    if (spPr.line.width) {
+      attrs.w = String(spPr.line.width);
+    }
+    if (spPr.line.cap) {
+      attrs.cap = spPr.line.cap;
+    }
+    if (spPr.line.compound) {
+      attrs.cmpd = spPr.line.compound;
+    }
+    writer.openNode("a:ln", attrs);
+    if (spPr.line.noFill) {
+      writer.leafNode("a:noFill");
+    } else if (spPr.line.color) {
+      writer.openNode("a:solidFill");
+      writeRawColor(writer, spPr.line.color);
+      writer.closeNode();
+    }
+    if (spPr.line.dash) {
+      writer.leafNode("a:prstDash", { val: spPr.line.dash });
+    }
+    if (spPr.line.join === "round") {
+      writer.leafNode("a:round");
+    } else if (spPr.line.join === "bevel") {
+      writer.leafNode("a:bevel");
+    } else if (spPr.line.join === "miter") {
+      writer.leafNode("a:miter");
+    }
+    writer.closeNode();
+  }
+  if (spPr.effectList) {
+    writeRawEffectList(writer, spPr.effectList);
+  }
+  if (spPr.scene3d) {
+    writeRawScene3D(writer, spPr.scene3d);
+  }
+  if (spPr.sp3d) {
+    writeRawSp3D(writer, spPr.sp3d);
+  }
+  writer.closeNode();
+  return writer.toString();
+}
+
+function buildRawTextPropertiesXml(txPr: any, namespace: "c" | "cx"): string | undefined {
+  if (!txPr) {
+    return "";
+  }
+  if (typeof txPr === "string") {
+    return normalizeRawNamespace(txPr, "txPr", namespace);
+  }
+  if (txPr._rawXml) {
+    return normalizeRawNamespace(txPr._rawXml, "txPr", namespace);
+  }
+  const writer = new XmlWriter();
+  writer.openNode(`${namespace}:txPr`);
+  writer.leafNode(
+    "a:bodyPr",
+    txPr.rotation !== undefined ? { rot: String(txPr.rotation) } : undefined
+  );
+  writer.leafNode("a:lstStyle");
+  writer.openNode("a:p");
+  writer.openNode("a:pPr");
+  writeRawRunProperties(writer, txPr, "a:defRPr");
+  writer.closeNode();
+  writer.leafNode("a:endParaRPr");
+  writer.closeNode();
+  writer.closeNode();
+  return writer.toString();
+}
+
+function normalizeRawNamespace(rawXml: string, localName: string, namespace: "c" | "cx"): string {
+  return rawXml
+    .replace(new RegExp(`^<(?:c|cx):${localName}`), `<${namespace}:${localName}`)
+    .replace(new RegExp(`</(?:c|cx):${localName}>$`), `</${namespace}:${localName}>`);
+}
+
+function writeRawRunProperties(writer: XmlWriter, props: any, tag: string): void {
+  const attrs: Record<string, string> = {};
+  if (props.size !== undefined) {
+    attrs.sz = String(props.size);
+  }
+  if (props.bold !== undefined) {
+    attrs.b = props.bold ? "1" : "0";
+  }
+  if (props.italic !== undefined) {
+    attrs.i = props.italic ? "1" : "0";
+  }
+  if (props.underline !== undefined) {
+    attrs.u =
+      typeof props.underline === "boolean" ? (props.underline ? "sng" : "none") : props.underline;
+  }
+  if (props.strike) {
+    attrs.strike = props.strike;
+  }
+  if (props.rotation !== undefined) {
+    attrs.rot = String(props.rotation);
+  }
+  if (props.baseline !== undefined) {
+    attrs.baseline = String(props.baseline);
+  }
+  if (props.kern !== undefined) {
+    attrs.kern = String(props.kern);
+  }
+  if (props.spacing !== undefined) {
+    attrs.spc = String(props.spacing);
+  }
+  if (props.cap) {
+    attrs.cap = props.cap;
+  }
+  if (props.lang) {
+    attrs.lang = props.lang;
+  }
+  const hasChildren = !!(
+    props.color ||
+    props.fontFamily ||
+    props.eastAsianFamily ||
+    props.complexScriptFamily
+  );
+  if (!hasChildren) {
+    writer.leafNode(tag, attrs);
+    return;
+  }
+  writer.openNode(tag, attrs);
+  if (props.color) {
+    writer.openNode("a:solidFill");
+    writeRawColor(writer, props.color);
+    writer.closeNode();
+  }
+  if (props.fontFamily) {
+    writer.leafNode("a:latin", { typeface: props.fontFamily });
+  }
+  if (props.eastAsianFamily) {
+    writer.leafNode("a:ea", { typeface: props.eastAsianFamily });
+  }
+  if (props.complexScriptFamily) {
+    writer.leafNode("a:cs", { typeface: props.complexScriptFamily });
+  }
+  writer.closeNode();
+}
+
+function writeRawColor(writer: XmlWriter, color: any): void {
+  const modifiers = buildRawColorModifiersXml(color);
+  const writeColorNode = (tag: string, val: string) => {
+    if (!modifiers) {
+      writer.leafNode(tag, { val });
+      return;
+    }
+    writer.openNode(tag, { val });
+    writer.writeRaw(modifiers);
+    writer.closeNode();
+  };
+  if (color.srgb) {
+    writeColorNode("a:srgbClr", color.srgb);
+  } else if (color.theme !== undefined) {
+    const themeNames = [
+      "dk1",
+      "lt1",
+      "dk2",
+      "lt2",
+      "accent1",
+      "accent2",
+      "accent3",
+      "accent4",
+      "accent5",
+      "accent6",
+      "hlink",
+      "folHlink"
+    ];
+    writeColorNode("a:schemeClr", themeNames[color.theme] ?? "dk1");
+  } else if (color.sysClr) {
+    writeColorNode("a:sysClr", color.sysClr);
+  } else if (color.prstClr) {
+    writeColorNode("a:prstClr", color.prstClr);
+  }
+}
+
+function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
+  if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
+    return;
+  }
+  writer.openNode("a:gradFill");
+  writer.openNode("a:gsLst");
+  for (const stop of gradient.stops) {
+    writer.openNode("a:gs", { pos: String(Math.round(stop.position * 1000)) });
+    writeRawColor(writer, stop.color);
+    writer.closeNode();
+  }
+  writer.closeNode();
+  if (gradient.type === "circle" || gradient.type === "rect" || gradient.type === "shape") {
+    writer.openNode("a:path", { path: gradient.type });
+    writer.leafNode("a:fillToRect", { l: "50000", t: "50000", r: "50000", b: "50000" });
+    writer.closeNode();
+  } else {
+    writer.leafNode("a:lin", { ang: String((gradient.angle ?? 0) * 60000), scaled: "1" });
+  }
+  writer.closeNode();
+}
+
+function writeRawEffectList(writer: XmlWriter, effects: any): void {
+  writer.openNode("a:effectLst");
+  if (effects.blur) {
+    const attrs: Record<string, string> = {};
+    if (effects.blur.radius !== undefined) {
+      attrs.rad = String(effects.blur.radius);
+    }
+    if (effects.blur.grow !== undefined) {
+      attrs.grow = effects.blur.grow ? "1" : "0";
+    }
+    writer.leafNode("a:blur", attrs);
+  }
+  if (effects.outerShadow) {
+    writeRawShadow(writer, "a:outerShdw", effects.outerShadow);
+  }
+  if (effects.innerShadow) {
+    writeRawShadow(writer, "a:innerShdw", effects.innerShadow);
+  }
+  if (effects.presetShadow) {
+    const ps = effects.presetShadow;
+    const attrs: Record<string, string> = { prst: ps.preset };
+    if (ps.distance !== undefined) {
+      attrs.dist = String(ps.distance);
+    }
+    if (ps.direction !== undefined) {
+      attrs.dir = String(ps.direction);
+    }
+    writer.openNode("a:prstShdw", attrs);
+    if (ps.color) {
+      writeRawColor(writer, ps.color);
+    }
+    writer.closeNode();
+  }
+  if (effects.glow) {
+    writer.openNode("a:glow", { rad: String(effects.glow.radius) });
+    writeRawColor(writer, effects.glow.color);
+    writer.closeNode();
+  }
+  if (effects.softEdge) {
+    writer.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
+  }
+  if (effects.reflection) {
+    const reflection = effects.reflection;
+    const attrs: Record<string, string> = {};
+    for (const [key, value] of [
+      ["blurRad", reflection.blurRadius],
+      ["stA", reflection.startOpacity],
+      ["stPos", reflection.startPosition],
+      ["endA", reflection.endOpacity],
+      ["endPos", reflection.endPosition],
+      ["dist", reflection.distance],
+      ["dir", reflection.direction],
+      ["fadeDir", reflection.fadeDirection],
+      ["sx", reflection.scaleHorizontal],
+      ["sy", reflection.scaleVertical],
+      ["kx", reflection.skewHorizontal],
+      ["ky", reflection.skewVertical],
+      ["algn", reflection.alignment],
+      ["rotWithShape", reflection.rotateWithShape]
+    ] as const) {
+      if (value !== undefined) {
+        attrs[key] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
+      }
+    }
+    writer.leafNode("a:reflection", attrs);
+  }
+  writer.closeNode();
+}
+
+function writeRawShadow(writer: XmlWriter, tag: string, shadow: any): void {
+  const attrs: Record<string, string> = {};
+  for (const [key, value] of [
+    ["blurRad", shadow.blurRadius],
+    ["dist", shadow.distance],
+    ["dir", shadow.direction],
+    ["algn", shadow.alignment],
+    ["rotWithShape", shadow.rotateWithShape],
+    ["sx", shadow.scaleHorizontal],
+    ["sy", shadow.scaleVertical],
+    ["kx", shadow.skewHorizontal],
+    ["ky", shadow.skewVertical]
+  ] as const) {
+    if (value !== undefined) {
+      attrs[key] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
+    }
+  }
+  writer.openNode(tag, attrs);
+  writeRawColor(writer, shadow.color);
+  writer.closeNode();
+}
+
+function writeRawScene3D(writer: XmlWriter, scene: any): void {
+  writer.openNode("a:scene3d");
+  if (scene.camera) {
+    const camera = scene.camera;
+    const attrs: Record<string, string> = { prst: camera.preset };
+    if (camera.fov !== undefined) {
+      attrs.fov = String(camera.fov);
+    }
+    if (camera.zoom !== undefined) {
+      attrs.zoom = String(camera.zoom);
+    }
+    if (camera.rotation) {
+      writer.openNode("a:camera", attrs);
+      writer.leafNode("a:rot", {
+        lat: String(camera.rotation.lat),
+        lon: String(camera.rotation.lon),
+        rev: String(camera.rotation.rev)
+      });
+      writer.closeNode();
+    } else {
+      writer.leafNode("a:camera", attrs);
+    }
+  }
+  if (scene.lightRig) {
+    const lightRig = scene.lightRig;
+    const attrs: Record<string, string> = { rig: lightRig.rig, dir: lightRig.direction };
+    if (lightRig.rotation) {
+      writer.openNode("a:lightRig", attrs);
+      writer.leafNode("a:rot", {
+        lat: String(lightRig.rotation.lat),
+        lon: String(lightRig.rotation.lon),
+        rev: String(lightRig.rotation.rev)
+      });
+      writer.closeNode();
+    } else {
+      writer.leafNode("a:lightRig", attrs);
+    }
+  }
+  writer.closeNode();
+}
+
+function writeRawSp3D(writer: XmlWriter, sp3d: any): void {
+  const attrs: Record<string, string> = {};
+  if (sp3d.z !== undefined) {
+    attrs.z = String(sp3d.z);
+  }
+  if (sp3d.extrusionHeight !== undefined) {
+    attrs.extrusionH = String(sp3d.extrusionHeight);
+  }
+  if (sp3d.contourWidth !== undefined) {
+    attrs.contourW = String(sp3d.contourWidth);
+  }
+  if (sp3d.material) {
+    attrs.prstMaterial = sp3d.material;
+  }
+  const hasChildren = !!(
+    sp3d.bevelTop ||
+    sp3d.bevelBottom ||
+    sp3d.extrusionColor ||
+    sp3d.contourColor
+  );
+  if (!hasChildren) {
+    writer.leafNode("a:sp3d", attrs);
+    return;
+  }
+  writer.openNode("a:sp3d", attrs);
+  if (sp3d.bevelTop) {
+    writeRawBevel(writer, "a:bevelT", sp3d.bevelTop);
+  }
+  if (sp3d.bevelBottom) {
+    writeRawBevel(writer, "a:bevelB", sp3d.bevelBottom);
+  }
+  if (sp3d.extrusionColor) {
+    writer.openNode("a:extrusionClr");
+    writeRawColor(writer, sp3d.extrusionColor);
+    writer.closeNode();
+  }
+  if (sp3d.contourColor) {
+    writer.openNode("a:contourClr");
+    writeRawColor(writer, sp3d.contourColor);
+    writer.closeNode();
+  }
+  writer.closeNode();
+}
+
+function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
+  const attrs: Record<string, string> = {};
+  if (bevel.width !== undefined) {
+    attrs.w = String(bevel.width);
+  }
+  if (bevel.height !== undefined) {
+    attrs.h = String(bevel.height);
+  }
+  if (bevel.preset) {
+    attrs.prst = bevel.preset;
+  }
+  writer.leafNode(tag, attrs);
+}
+
+function buildRawColorModifiersXml(color: any): string {
+  const parts: string[] = [];
+  if (color.alpha !== undefined) {
+    parts.push(`<a:alpha val="${color.alpha}"/>`);
+  }
+  if (color.tint !== undefined) {
+    parts.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
+  }
+  if (color.lumMod !== undefined) {
+    parts.push(`<a:lumMod val="${color.lumMod}"/>`);
+  }
+  if (color.lumOff !== undefined) {
+    parts.push(`<a:lumOff val="${color.lumOff}"/>`);
+  }
+  if (color.shade !== undefined) {
+    parts.push(`<a:shade val="${color.shade}"/>`);
+  }
+  if (color.satMod !== undefined) {
+    parts.push(`<a:satMod val="${color.satMod}"/>`);
+  }
+  return parts.join("");
+}
+
+function patchRawChartExSeries(
+  raw: string,
+  chart: any,
+  patchPlan: ChartExRawPatchPlan
+): string | undefined {
+  const seriesModels = extractChartExSeries({ chartSpace: { chart } });
+  let index = 0;
+  return replaceXmlBlocks(raw, "cx:series", block => {
+    const series = seriesModels[index++];
+    const seriesPlan = getRawPatchListItem(patchPlan.series, index - 1);
+    return series && seriesPlan ? patchRawChartExSeriesBlock(block, series, seriesPlan) : block;
+  });
+}
+
+function patchRawChartExSeriesBlock(
+  block: string,
+  series: any,
+  patchPlan: ChartExSeriesRawPatchPlan | true
+): string {
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "hidden")) {
+    patched = patchOpeningTagBooleanAttribute(patched, "cx:series", "hidden", series.hidden);
+  }
+  if (rawPatchFlag(patchPlan, "ownerIdx")) {
+    patched = patchOpeningTagIntegerAttribute(patched, "cx:series", "ownerIdx", series.ownerIdx);
+  }
+  if (rawPatchFlag(patchPlan, "tx")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:tx",
+      buildRawChartExSeriesTxXml(series.tx),
+      [
+        "cx:spPr",
+        "cx:dataId",
+        "cx:layoutPr",
+        "cx:axisId",
+        "cx:dataLabels",
+        "cx:dataPt",
+        "cx:extLst"
+      ],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(series.spPr, "cx"),
+      ["cx:dataId", "cx:layoutPr", "cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataRefs")) {
+    const dataRefsXml = (series.dataRefs ?? [])
+      .map((ref: any) =>
+        ref.dataId !== undefined
+          ? `<cx:dataId val="${ref.dataId}"/>`
+          : ref.axisId !== undefined
+            ? `<cx:axisId val="${ref.axisId}"/>`
+            : ""
+      )
+      .join("");
+    patched = patchRepeatingChildren(
+      patched,
+      "cx:dataId",
+      dataRefsXml,
+      ["cx:layoutPr", "cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "layoutPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:layoutPr",
+      buildRawChartExLayoutPropertiesXml(series.layoutId, series.layoutPr),
+      ["cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "axisId")) {
+    const axisIdsXml = (series.axisId ?? [])
+      .map((id: number) => `<cx:axisId val="${id}"/>`)
+      .join("");
+    patched = patchRepeatingChildren(
+      patched,
+      "cx:axisId",
+      axisIdsXml,
+      ["cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataLabels")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:dataLabels",
+      buildRawChartExDataLabelsXml(series.dataLabels),
+      ["cx:dataPt", "cx:extLst"],
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataPoints")) {
+    const dataPointXml = (series.dataPt ?? [])
+      .map((point: any) => {
+        const spPrXml = buildRawShapePropertiesXml(point.spPr, "cx") ?? "";
+        return `<cx:dataPt idx="${point.idx}">${spPrXml}</cx:dataPt>`;
+      })
+      .join("");
+    patched = patchRepeatingChildren(
+      patched,
+      "cx:dataPt",
+      dataPointXml,
+      ["cx:extLst"],
+      "cx:series"
+    );
+  }
+  return patched;
+}
+
+function buildRawChartExSeriesTxXml(tx: any): string {
+  if (!tx) {
+    return "";
+  }
+  if (tx.value !== undefined) {
+    return `<cx:tx><cx:txData><cx:v>${escapeXml(String(tx.value))}</cx:v></cx:txData></cx:tx>`;
+  }
+  if (tx.strRef !== undefined) {
+    return `<cx:tx><cx:txData><cx:f>${escapeXml(String(tx.strRef))}</cx:f></cx:txData></cx:tx>`;
+  }
+  return "";
+}
+
+function buildRawChartExLayoutPropertiesXml(layoutId: string, layoutPr: any): string {
+  if (!layoutPr) {
+    return "";
+  }
+  if (layoutPr._rawXml && !hasStructuredChartExLayoutProperties(layoutPr)) {
+    return layoutPr._rawXml;
+  }
+  const parts = ["<cx:layoutPr>"];
+  if (layoutPr.parentLabelLayout && (layoutId === "sunburst" || layoutId === "treemap")) {
+    parts.push(`<cx:parentLabelLayout val="${escapeAttr(layoutPr.parentLabelLayout)}"/>`);
+  }
+  if (layoutPr.subtotals && layoutId === "waterfall") {
+    parts.push("<cx:subtotals>");
+    for (const subtotal of layoutPr.subtotals) {
+      parts.push(`<cx:subtotal idx="${subtotal.idx}"/>`);
+    }
+    parts.push("</cx:subtotals>");
+  }
+  if (layoutId === "waterfall" && layoutPr.connectorLines !== undefined) {
+    parts.push(`<cx:connectorLines val="${layoutPr.connectorLines ? "1" : "0"}"/>`);
+  }
+  if (layoutPr.binning) {
+    const binning = layoutPr.binning;
+    const attrs = [
+      binning.intervalClosed ? `intervalClosed="${escapeAttr(binning.intervalClosed)}"` : undefined,
+      binning.underflow !== undefined ? `underflow="${binning.underflow}"` : undefined,
+      binning.overflow !== undefined ? `overflow="${binning.overflow}"` : undefined
+    ].filter((attr): attr is string => !!attr);
+    parts.push(`<cx:binning${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}>`);
+    if (binning.binType === "auto") {
+      parts.push("<cx:auto/>");
+    }
+    if (binning.binSize !== undefined) {
+      parts.push(`<cx:binSize val="${binning.binSize}"/>`);
+    }
+    if (binning.binCount !== undefined) {
+      parts.push(`<cx:binCount val="${binning.binCount}"/>`);
+    }
+    if (binning.binType === "categories") {
+      parts.push("<cx:categories/>");
+    }
+    if (binning.binType === "manual") {
+      parts.push("<cx:manual/>");
+    }
+    parts.push("</cx:binning>");
+  }
+  if (layoutPr.paretoLine) {
+    parts.push('<cx:paretoLine val="1"/>');
+  }
+  if (layoutId === "boxWhisker") {
+    for (const [name, value] of [
+      ["quartileMethod", layoutPr.quartileMethod],
+      ["showMeanLine", layoutPr.showMeanLine],
+      ["showMeanMarker", layoutPr.showMeanMarker],
+      ["showInnerPoints", layoutPr.showInnerPoints],
+      ["showOutlierPoints", layoutPr.showOutlierPoints]
+    ] as const) {
+      if (value !== undefined) {
+        parts.push(
+          `<cx:${name} val="${typeof value === "boolean" ? (value ? "1" : "0") : escapeAttr(String(value))}"/>`
+        );
+      }
+    }
+  }
+  if (layoutId === "regionMap") {
+    for (const [name, value] of [
+      ["projection", layoutPr.projection],
+      ["regionLabels", layoutPr.regionLabels],
+      ["geoMappingLevel", layoutPr.geoMappingLevel]
+    ] as const) {
+      if (value !== undefined) {
+        parts.push(`<cx:${name} val="${escapeAttr(String(value))}"/>`);
+      }
+    }
+  }
+  if (layoutPr.extLst) {
+    parts.push(layoutPr.extLst);
+  }
+  parts.push("</cx:layoutPr>");
+  return parts.join("");
+}
+
+function hasStructuredChartExLayoutProperties(layoutPr: any): boolean {
+  return [
+    layoutPr.parentLabelLayout,
+    layoutPr.subtotals,
+    layoutPr.connectorLines,
+    layoutPr.increaseSpPr,
+    layoutPr.decreaseSpPr,
+    layoutPr.totalSpPr,
+    layoutPr.binning,
+    layoutPr.paretoLine,
+    layoutPr.quartileMethod,
+    layoutPr.showMeanLine,
+    layoutPr.showMeanMarker,
+    layoutPr.showInnerPoints,
+    layoutPr.showOutlierPoints,
+    layoutPr.projection,
+    layoutPr.regionLabels,
+    layoutPr.geoMappingLevel
+  ].some(value => value !== undefined);
+}
+
+function buildRawChartExDataLabelsXml(dataLabels: any): string {
+  if (!dataLabels) {
+    return "";
+  }
+  const parts = ["<cx:dataLabels>"];
+  if (dataLabels.visibility) {
+    const attrs = [
+      dataLabels.visibility.seriesName !== undefined
+        ? `seriesName="${dataLabels.visibility.seriesName ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.categoryName !== undefined
+        ? `categoryName="${dataLabels.visibility.categoryName ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.value !== undefined
+        ? `value="${dataLabels.visibility.value ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.numFmt !== undefined
+        ? `numFmt="${dataLabels.visibility.numFmt ? "1" : "0"}"`
+        : undefined
+    ].filter((attr): attr is string => !!attr);
+    parts.push(`<cx:visibility ${attrs.join(" ")}/>`);
+  }
+  if (dataLabels.position) {
+    parts.push(`<cx:dataLabel pos="${escapeAttr(dataLabels.position)}"/>`);
+  }
+  if (dataLabels.separator) {
+    parts.push(`<cx:separator>${escapeXml(String(dataLabels.separator))}</cx:separator>`);
+  }
+  if (dataLabels.numFmt) {
+    parts.push(`<cx:numFmt formatCode="${escapeAttr(String(dataLabels.numFmt))}"/>`);
+  }
+  if (dataLabels.spPr) {
+    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "cx") ?? "");
+  }
+  if (dataLabels.txPr) {
+    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "cx") ?? "");
+  }
+  parts.push("</cx:dataLabels>");
+  return parts.join("");
+}
+
+function patchRawChartExAxes(
+  raw: string,
+  chart: any,
+  patchPlan: RawPatchListPlan<ChartExAxisRawPatchPlan>
+): string | undefined {
+  let patched = raw;
+  for (const [index, axis] of (chart.plotArea?.axis ?? []).entries()) {
+    const axisPlan = getRawPatchListItem(patchPlan, index);
+    if (!axisPlan) {
+      continue;
+    }
+    const range = findChartExAxisBlock(patched, axis.axisId);
+    if (!range) {
+      return undefined;
+    }
+    const axisXml = patchRawChartExAxisBlock(range.xml, axis, axisPlan);
+    patched = patched.slice(0, range.start) + axisXml + patched.slice(range.end);
+  }
+  return patched;
+}
+
+function patchRawChartExAxisBlock(
+  block: string,
+  axis: any,
+  patchPlan: ChartExAxisRawPatchPlan | true
+): string {
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "hidden")) {
+    patched = patchBooleanLeaf(
+      patched,
+      "cx:hidden",
+      axis.hidden,
+      [
+        "cx:majorTickMark",
+        "cx:minorTickMark",
+        "cx:numFmt",
+        "cx:title",
+        "cx:valScaling",
+        "cx:catScaling",
+        "cx:spPr",
+        "cx:txPr",
+        "cx:extLst"
+      ],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "cx:majorTickMark",
+      axis.majorTickMark,
+      [
+        "cx:minorTickMark",
+        "cx:numFmt",
+        "cx:title",
+        "cx:valScaling",
+        "cx:catScaling",
+        "cx:spPr",
+        "cx:txPr",
+        "cx:extLst"
+      ],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "cx:minorTickMark",
+      axis.minorTickMark,
+      [
+        "cx:numFmt",
+        "cx:title",
+        "cx:valScaling",
+        "cx:catScaling",
+        "cx:spPr",
+        "cx:txPr",
+        "cx:extLst"
+      ],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "numFmt")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:numFmt",
+      buildRawChartExNumFmtXml(axis.numFmt),
+      ["cx:title", "cx:valScaling", "cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "title")) {
+    if (axis.title) {
+      const text = axis.title.text?.paragraphs?.[0]?.runs?.[0]?.text;
+      if (text !== undefined) {
+        patched = patchGenericChild(
+          patched,
+          "cx:title",
+          buildRawChartExTitleXml(text),
+          ["cx:valScaling", "cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+          "cx:axis"
+        );
+      }
+    } else {
+      patched = removeXmlBlock(patched, "cx:title");
+    }
+  }
+  if (rawPatchFlag(patchPlan, "valScaling")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:valScaling",
+      buildRawChartExScalingXml("valScaling", axis.valScaling),
+      ["cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "catScaling")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:catScaling",
+      buildRawChartExScalingXml("catScaling", axis.catScaling),
+      ["cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(axis.spPr, "cx"),
+      ["cx:txPr", "cx:extLst"],
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "txPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:txPr",
+      buildRawTextPropertiesXml(axis.txPr, "cx"),
+      ["cx:extLst"],
+      "cx:axis"
+    );
+  }
+  return patched;
+}
+
+function buildRawChartExNumFmtXml(numFmt: any): string {
+  if (!numFmt?.formatCode) {
+    return "";
+  }
+  const attrs = [`formatCode="${escapeAttr(numFmt.formatCode)}"`];
+  if (numFmt.sourceLinked !== undefined) {
+    attrs.push(`sourceLinked="${numFmt.sourceLinked ? "1" : "0"}"`);
+  }
+  return `<cx:numFmt ${attrs.join(" ")}/>`;
+}
+
+function buildRawChartExScalingXml(tag: "valScaling" | "catScaling", scaling: any): string {
+  if (!scaling) {
+    return "";
+  }
+  const attrs = Object.entries(scaling)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}="${escapeAttr(String(value))}"`);
+  return `<cx:${tag}${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}/>`;
+}
+
+function findChartExAxisBlock(
+  raw: string,
+  axisId: number
+): { start: number; end: number; xml: string } | undefined {
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, "cx:axis", cursor);
+    if (!range) {
+      return undefined;
+    }
+    const xml = raw.slice(range.start, range.end);
+    if (new RegExp(`<cx:axis\\s+[^>]*id=["']${axisId}["']`).test(xml)) {
+      return { ...range, xml };
+    }
+    cursor = range.end;
+  }
+  return undefined;
+}
+
+function replaceOrInsertBefore(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[]
+): string {
+  const range = findXmlBlock(block, tag);
+  if (range) {
+    return block.slice(0, range.start) + replacement + block.slice(range.end);
+  }
+  const insertAt = beforeTags
+    .map(t => block.indexOf(`<${t}`))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0];
+  if (insertAt !== undefined) {
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  const close =
+    block.lastIndexOf("</c:ser>") >= 0
+      ? block.lastIndexOf("</c:ser>")
+      : block.lastIndexOf("</c:catAx>");
+  return close >= 0 ? block.slice(0, close) + replacement + block.slice(close) : block;
+}
+
+function replaceOrInsertBeforeGeneric(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const range = findXmlBlock(block, tag);
+  if (range) {
+    return block.slice(0, range.start) + replacement + block.slice(range.end);
+  }
+  const insertAt = beforeTags
+    .map(t => block.indexOf(`<${t}`))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0];
+  if (insertAt !== undefined) {
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  const close = block.lastIndexOf(`</${parentTag}>`);
+  return close >= 0 ? block.slice(0, close) + replacement + block.slice(close) : block;
+}
+
+function patchGenericChild(
+  block: string,
+  tag: string,
+  replacement: string | undefined,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  if (replacement === undefined || replacement === "") {
+    return removeXmlBlock(block, tag);
+  }
+  return replaceOrInsertBeforeGeneric(block, tag, replacement, beforeTags, parentTag);
+}
+
+function patchOpeningTagBooleanAttribute(
+  block: string,
+  tag: string,
+  attr: string,
+  value: boolean | undefined
+): string {
+  const openEnd = block.indexOf(">");
+  if (openEnd < 0 || !block.startsWith(`<${tag}`)) {
+    return block;
+  }
+  let open = block
+    .slice(0, openEnd + 1)
+    .replace(new RegExp(`\\s${attr}=("[^"]*"|'[^']*')`, "g"), "");
+  if (value) {
+    open = open.replace(/>$/, ` ${attr}="1">`);
+  }
+  return open + block.slice(openEnd + 1);
+}
+
+/**
+ * Replace (or remove) a numeric attribute on the opening tag of `block`.
+ * Used to patch ChartEx series attributes such as `ownerIdx` that live on
+ * `<cx:series …>` rather than as structured children. Matches the element
+ * only when the block begins with `<{tag}` so nested tags with the same
+ * attribute name are left alone. Preserves the `/` on self-closing tags.
+ */
+function patchOpeningTagIntegerAttribute(
+  block: string,
+  tag: string,
+  attr: string,
+  value: number | undefined
+): string {
+  const openEnd = block.indexOf(">");
+  if (openEnd < 0 || !block.startsWith(`<${tag}`)) {
+    return block;
+  }
+  const head = block.slice(0, openEnd + 1);
+  const selfClosing = head.endsWith("/>");
+  const strippedHead = head.replace(new RegExp(`\\s${attr}=("[^"]*"|'[^']*')`, "g"), "");
+  if (value === undefined || !Number.isFinite(value)) {
+    return strippedHead + block.slice(openEnd + 1);
+  }
+  const insertion = ` ${attr}="${value}"`;
+  const rewritten = selfClosing
+    ? strippedHead.replace(/\/>$/, `${insertion}/>`)
+    : strippedHead.replace(/>$/, `${insertion}>`);
+  return rewritten + block.slice(openEnd + 1);
+}
+
+function patchRepeatingChildren(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const stripped = removeXmlBlocks(block, tag);
+  if (!replacement) {
+    return stripped;
+  }
+  return replaceOrInsertBeforeGeneric(stripped, tag, replacement, beforeTags, parentTag);
+}
+
+function removeXmlBlock(block: string, tag: string): string {
+  const range = findXmlBlock(block, tag);
+  return range ? block.slice(0, range.start) + block.slice(range.end) : block;
+}
+
+function removeXmlBlocks(block: string, tag: string): string {
+  let patched = block;
+  let range = findXmlBlock(patched, tag);
+  while (range) {
+    patched = patched.slice(0, range.start) + patched.slice(range.end);
+    range = findXmlBlock(patched, tag, range.start);
+  }
+  return patched;
+}
+
+function replaceXmlBlocks(
+  raw: string,
+  tag: string,
+  replace: (block: string) => string | undefined
+): string | undefined {
+  let cursor = 0;
+  let output = "";
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, tag, cursor);
+    if (!range) {
+      output += raw.slice(cursor);
+      return output;
+    }
+    output += raw.slice(cursor, range.start);
+    const replacement = replace(raw.slice(range.start, range.end));
+    if (replacement === undefined) {
+      return undefined;
+    }
+    output += replacement;
+    cursor = range.end;
+  }
+  return output;
+}
+
+function findAxisBlock(
+  raw: string,
+  tag: string,
+  axId: number
+): { start: number; end: number; xml: string } | undefined {
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, tag, cursor);
+    if (!range) {
+      return undefined;
+    }
+    const xml = raw.slice(range.start, range.end);
+    if (new RegExp(`<c:axId\\s+val=["']${axId}["']\\s*/>`).test(xml)) {
+      return { ...range, xml };
+    }
+    cursor = range.end;
+  }
+  return undefined;
+}
+
+function findXmlBlock(
+  raw: string,
+  tag: string,
+  offset = 0
+): { start: number; end: number } | undefined {
+  const open = raw.indexOf(`<${tag}`, offset);
+  if (open < 0) {
+    return undefined;
+  }
+  const openEnd = raw.indexOf(">", open);
+  if (openEnd < 0) {
+    return undefined;
+  }
+  if (raw[openEnd - 1] === "/") {
+    return { start: open, end: openEnd + 1 };
+  }
+  const closeToken = `</${tag}>`;
+  const close = raw.indexOf(closeToken, openEnd + 1);
+  return close >= 0 ? { start: open, end: close + closeToken.length } : undefined;
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(value: string): string {
+  return escapeXml(value).replace(/"/g, "&quot;");
+}
+
 /**
  * XLSX class - handles Excel file operations
  * Works in both Node.js and Browser environments
@@ -631,6 +4066,8 @@ class XLSX {
   protected async writeToZip(zip: IZipWriter, options?: XlsxWriteOptions): Promise<void> {
     const { model } = this.workbook;
     this.prepareModel(model, options);
+    this.prepareChartsheets(model);
+    this.prepareChartExSidecars(model);
 
     await this.addContentTypes(zip, model);
     await this.addOfficeRels(zip, model);
@@ -640,11 +4077,12 @@ class XLSX {
     // processing worksheet entries.
     await this.addWorkbook(zip, model);
     await this.addWorksheets(zip, model);
-    await this.addChartsheets(zip, model);
     await this.addSharedStrings(zip, model);
     await this.addDrawings(zip, model);
-    await this.addCharts(zip, model);
-    await this.addChartExEntries(zip, model);
+    await this.addChartsheets(zip, model);
+    const strictTemplateMode = isStrictTemplateMode(options);
+    await this.addCharts(zip, model, strictTemplateMode);
+    await this.addChartExEntries(zip, model, strictTemplateMode);
     await this.addTables(zip, model);
     await this.addPivotTables(zip, model);
     await this.addExternalLinks(zip, model);
@@ -655,6 +4093,46 @@ class XLSX {
     await this.addMedia(zip, model);
     await this.addApp(zip, model);
     await this.addCore(zip, model);
+    await this.addPersons(zip, model);
+    await this.addSlicerAndTimelineParts(zip, model);
+  }
+
+  /**
+   * Emit the raw slicer/timeline parts captured on load. Pure
+   * byte-copy — excelts does not modify these parts. The partner
+   * Content-Types and rels are covered separately (content types in
+   * `addContentTypes`, sheet/workbook rels by the corresponding
+   * xforms consuming the existing `xl/_rels/*.rels` captured on
+   * load).
+   */
+  async addSlicerAndTimelineParts(zip: IZipWriter, model: any): Promise<void> {
+    for (const source of [
+      model.slicerParts,
+      model.slicerCacheParts,
+      model.timelineParts,
+      model.timelineCacheParts
+    ] as Array<Record<string, Uint8Array> | undefined>) {
+      if (!source) {
+        continue;
+      }
+      for (const [path, bytes] of Object.entries(source)) {
+        zip.append(bytes, { name: path });
+      }
+    }
+  }
+
+  /**
+   * Write the workbook-level `xl/persons/person.xml` part when the
+   * model carries Office 365 threaded-comment authors. No-op when the
+   * persons list is empty so legacy files without threaded comments
+   * stay byte-identical.
+   */
+  async addPersons(zip: IZipWriter, model: any): Promise<void> {
+    const persons = model.persons as Array<unknown> | undefined;
+    if (!persons || persons.length === 0) {
+      return;
+    }
+    zip.append(renderPersonList(persons as any), { name: "xl/persons/person.xml" });
   }
 
   // ===========================================================================
@@ -818,6 +4296,8 @@ class XLSX {
       chartStyles: {} as Record<number, Uint8Array>,
       // Raw chart colors bytes keyed by colors number
       chartColors: {} as Record<number, Uint8Array>,
+      chartExStyles: {} as Record<number, Uint8Array>,
+      chartExColors: {} as Record<number, Uint8Array>,
       // Raw chartEx entries (Office 2016+ extended charts) keyed by chartEx number
       chartExEntries: {} as Record<number, Uint8Array>,
       // Parsed chartEx rels keyed by chartEx number
@@ -934,8 +4414,59 @@ class XLSX {
         }
         return true;
       }
-      default:
+      case "xl/persons/person.xml": {
+        // Office 365 threaded-comment person directory. Parsed here so
+        // reconcile can attach the list to the workbook. Silently
+        // ignored when malformed — threaded comments degrade to
+        // "unknown author" rather than breaking the whole load.
+        const data = await this.collectStreamData(stream);
+        const raw = new TextDecoder().decode(data);
+        model.persons = parsePersonList(raw);
+        return true;
+      }
+      default: {
+        // Catch threaded-comment per-sheet parts (the path contains a
+        // variable sheet index so they can't be matched in the switch).
+        const threadedMatch = /^xl\/threadedComments\/threadedComment(\d+)\.xml$/.exec(entryName);
+        if (threadedMatch) {
+          const sheetIndex = parseInt(threadedMatch[1], 10);
+          const data = await this.collectStreamData(stream);
+          const raw = new TextDecoder().decode(data);
+          model.threadedCommentsByIndex ??= {} as Record<
+            number,
+            Array<{ ref: string; comment: unknown }>
+          >;
+          model.threadedCommentsByIndex[sheetIndex] = parseThreadedComments(raw);
+          return true;
+        }
+        // Raw-passthrough capture for slicers and timelines — two
+        // coordinated Office dashboard features excelts does not
+        // structurally model but must not destroy on round-trip.
+        // Each family has two part types (the control itself + its
+        // cache); both are captured into maps on the workbook model
+        // so the writer can emit them verbatim later.
+        if (/^xl\/slicers\/slicer\d+\.xml$/.test(entryName)) {
+          model.slicerParts ??= {} as Record<string, Uint8Array>;
+          model.slicerParts[entryName] = await this.collectStreamData(stream);
+          return true;
+        }
+        if (/^xl\/slicerCaches\/slicerCache\d+\.xml$/.test(entryName)) {
+          model.slicerCacheParts ??= {} as Record<string, Uint8Array>;
+          model.slicerCacheParts[entryName] = await this.collectStreamData(stream);
+          return true;
+        }
+        if (/^xl\/timelines\/timeline\d+\.xml$/.test(entryName)) {
+          model.timelineParts ??= {} as Record<string, Uint8Array>;
+          model.timelineParts[entryName] = await this.collectStreamData(stream);
+          return true;
+        }
+        if (/^xl\/timelineCaches\/timelineCache\d+\.xml$/.test(entryName)) {
+          model.timelineCacheParts ??= {} as Record<string, Uint8Array>;
+          model.timelineCacheParts[entryName] = await this.collectStreamData(stream);
+          return true;
+        }
         return false;
+      }
     }
   }
 
@@ -1169,6 +4700,15 @@ class XLSX {
     model.worksheets.forEach((worksheet: any) => {
       worksheet.relationships = model.worksheetRels[worksheet.sheetNo];
       worksheetXform.reconcile(worksheet, sheetOptions);
+      // Attach any threaded comments that arrived in a separate
+      // `xl/threadedComments/threadedComment{N}.xml` part. The sheet
+      // index in that path maps to `worksheet.sheetNo`, not
+      // `worksheet.id` — Excel uses the package-relative file number,
+      // same as classic `xl/comments{N}.xml`.
+      const threaded = model.threadedCommentsByIndex?.[worksheet.sheetNo];
+      if (threaded) {
+        worksheet.threadedComments = threaded;
+      }
     });
 
     // Reconcile chartsheets — link their drawing references
@@ -1214,6 +4754,16 @@ class XLSX {
     // Preserve parsed chart data through to the workbook model.
     // chartEntries, chartRels, chartStyles, chartColors are kept as-is.
 
+    // Reconcile chart user-shapes drawing parts onto their owning
+    // ChartEntry. Each chart rels file may reference an overlay drawing
+    // via `RelType.ChartUserShapes`; we copy those bytes from
+    // `model.drawingRaw` (populated by `_processDrawingEntry`) onto the
+    // chart entry so writers can emit them back, and so the Chart API
+    // can expose them via `Chart.userShapesXml`. Regular worksheet
+    // drawings are untouched — this reconcile only moves bytes for
+    // chart-overlay parts.
+    this._reconcileChartUserShapes(model);
+
     // delete unnecessary parts
     delete model.worksheetHash;
     delete model.worksheetRels;
@@ -1227,6 +4777,7 @@ class XLSX {
     delete model.mediaIndex;
     delete model.drawings;
     delete model.drawingRels;
+    delete model.drawingRaw;
     delete model.vmlDrawings;
     delete model.pivotTableRels;
     delete model.metadata;
@@ -1236,6 +4787,56 @@ class XLSX {
     delete model.externalLinkRelsByIndex;
     delete model.chartsheetRels;
     delete model.chartsheetsList;
+  }
+
+  /**
+   * Copy the raw bytes of each chart's user-shapes drawing part onto
+   * the owning `ChartEntry.userShapesXml` so the writer can emit them
+   * back verbatim (and so {@link Chart.userShapesXml} can surface them
+   * to user code). Runs after all ZIP entries have been processed
+   * because chart rels and drawing bytes stream in independent order.
+   *
+   * Skips charts that have no `ChartUserShapes` rel. The bytes stay
+   * keyed by drawing name (e.g. `drawing3`) inside `model.drawingRaw`
+   * since a workbook may have many user-shape drawings across
+   * different charts; we look up each chart's target through its
+   * rels file.
+   */
+  protected _reconcileChartUserShapes(model: any): void {
+    const chartRelsMap = model.chartRels as Record<string, any[]> | undefined;
+    const drawingRaw = model.drawingRaw as Record<string, Uint8Array> | undefined;
+    const chartEntries = model.chartEntries as Record<string, ChartEntry> | undefined;
+    if (!chartRelsMap || !drawingRaw || !chartEntries) {
+      return;
+    }
+    for (const [chartNum, rels] of Object.entries(chartRelsMap)) {
+      if (!Array.isArray(rels)) {
+        continue;
+      }
+      const entry = chartEntries[chartNum];
+      if (!entry) {
+        continue;
+      }
+      const userShapesRel = rels.find(
+        rel => rel && typeof rel === "object" && rel.Type === RelType.ChartUserShapes
+      );
+      if (!userShapesRel?.Target) {
+        continue;
+      }
+      // Target like `../drawings/drawing3.xml` or `../drawings/chartUserShape2.xml`.
+      const match = /drawings\/([^/]+)\.xml$/i.exec(String(userShapesRel.Target));
+      if (!match) {
+        continue;
+      }
+      const drawingName = match[1];
+      const bytes = drawingRaw[drawingName];
+      if (bytes) {
+        entry.userShapesXml = bytes;
+        // Make sure the chart model carries the r:id so subsequent reads
+        // via Chart.userShapesXml can round-trip without extra setup.
+        entry.model.userShapesRelId ??= userShapesRel.Id;
+      }
+    }
   }
 
   /**
@@ -1471,6 +5072,7 @@ class XLSX {
       const defaultMetric = this._determineMetric(pt.dataFields);
       const completePivotTable: PivotTable = {
         ...pt,
+        name: pt.name ?? `PivotTable${tableNumber}`,
         tableNumber,
         cacheId: String(pt.cacheId),
         cacheDefinition: cacheData?.definition,
@@ -1665,6 +5267,36 @@ class XLSX {
     const xmlString = this.bufferToString(data);
     const drawing = await xform.parseStream(this.createTextStream(xmlString));
     model.drawings[name] = drawing;
+    // Also stash the original bytes — chart user-shape drawings use a
+    // distinct schema (`c:relSizeAnchor` / `c:userShapes` instead of
+    // `xdr:twoCellAnchor`) and are post-reconciled onto their owning
+    // ChartEntry so the bytes can be written back verbatim. Regular
+    // worksheet drawings don't read this map.
+    if (!model.drawingRaw) {
+      model.drawingRaw = {} as Record<string, Uint8Array>;
+    }
+    (model.drawingRaw as Record<string, Uint8Array>)[name] = data;
+  }
+
+  /**
+   * Stash raw bytes of a chart-overlay drawing part. `c:userShapes`
+   * parts live under `xl/drawings/chartUserShape{N}.xml` in files we
+   * write ourselves and can use arbitrary names in foreign files (the
+   * rel target is the only authoritative reference). The bytes are
+   * keyed by the stem so `_reconcileChartUserShapes` can match them
+   * against each chart's `ChartUserShapes` rel Target.
+   */
+  async _processChartUserShapesEntry(
+    _stream: IParseStream,
+    model: any,
+    name: string,
+    rawData?: Uint8Array
+  ): Promise<void> {
+    const data = rawData ?? (await this.collectStreamData(_stream));
+    if (!model.drawingRaw) {
+      model.drawingRaw = {} as Record<string, Uint8Array>;
+    }
+    (model.drawingRaw as Record<string, Uint8Array>)[name] = data;
   }
 
   async _processDrawingRelsEntry(entry: any, model: any, name: string): Promise<void> {
@@ -1807,7 +5439,9 @@ class XLSX {
     if (chart) {
       model.chartEntries[chartNumber] = {
         chartNumber,
-        model: chart
+        model: chart,
+        rawData: data,
+        modelSnapshot: snapshotChartModel(chart)
       };
     }
   }
@@ -1910,6 +5544,12 @@ class XLSX {
     const drawingName = getDrawingNameFromPath(entryName);
     if (drawingName) {
       await this._processDrawingEntry(stream, model, drawingName, rawData);
+      return true;
+    }
+
+    const chartUserShapesName = getChartUserShapesNameFromPath(entryName);
+    if (chartUserShapesName) {
+      await this._processChartUserShapesEntry(stream, model, chartUserShapesName, rawData);
       return true;
     }
 
@@ -2033,13 +5673,34 @@ class XLSX {
       return true;
     }
 
-    // ChartEx files (Office 2016+ extended charts) — stored as raw bytes
+    const chartExStyleNumber = getChartExStyleNumberFromPath(entryName);
+    if (chartExStyleNumber !== undefined) {
+      model.chartExStyles[chartExStyleNumber] = rawData ?? (await this.collectStreamData(stream));
+      return true;
+    }
+
+    const chartExColorsNumber = getChartExColorsNumberFromPath(entryName);
+    if (chartExColorsNumber !== undefined) {
+      model.chartExColors[chartExColorsNumber] = rawData ?? (await this.collectStreamData(stream));
+      return true;
+    }
+
+    // ChartEx files (Office 2016+ extended charts) — raw bytes plus best-effort structured model
     const chartExNumber = getChartExNumberFromPath(entryName);
     if (chartExNumber !== undefined) {
-      if (rawData) {
-        model.chartExEntries[chartExNumber] = rawData;
-      } else {
-        model.chartExEntries[chartExNumber] = await this.collectStreamData(stream);
+      const data = rawData ?? (await this.collectStreamData(stream));
+      const rawXml = this.bufferToString(data);
+      model.chartExEntries[chartExNumber] = data;
+      try {
+        const parsed = parseChartEx(rawXml);
+        model.chartExStructuredEntries[chartExNumber] = {
+          chartExNumber,
+          model: parsed,
+          rawData: data,
+          modelSnapshot: snapshotChartModel(parsed)
+        };
+      } catch {
+        // Keep legacy-safe passthrough if a third-party chartEx part is not parseable.
       }
       return true;
     }
@@ -2049,6 +5710,42 @@ class XLSX {
       const relsXform = new RelationshipsXform();
       const relationships = await relsXform.parseStream(stream);
       model.chartExRels[chartExRelsNumber] = relationships;
+      return true;
+    }
+
+    // Raw-passthrough catch-all for Office 2010+ slicer/timeline
+    // dashboard controls and their associated rels. excelts does not
+    // model these structurally yet; capturing the bytes here prevents
+    // silent data loss on round-trip when a dashboard workbook comes
+    // through. Same idea covers the two-level rels files produced by
+    // Excel (the `_rels` subfolder sits next to each part).
+    if (
+      /^xl\/slicers\/slicer\d+\.xml$/.test(entryName) ||
+      /^xl\/slicerCaches\/slicerCache\d+\.xml$/.test(entryName) ||
+      /^xl\/timelines\/timeline\d+\.xml$/.test(entryName) ||
+      /^xl\/timelineCaches\/timelineCache\d+\.xml$/.test(entryName) ||
+      /^xl\/slicers\/_rels\/slicer\d+\.xml\.rels$/.test(entryName) ||
+      /^xl\/slicerCaches\/_rels\/slicerCache\d+\.xml\.rels$/.test(entryName) ||
+      /^xl\/timelines\/_rels\/timeline\d+\.xml\.rels$/.test(entryName) ||
+      /^xl\/timelineCaches\/_rels\/timelineCache\d+\.xml\.rels$/.test(entryName)
+    ) {
+      const targetMap =
+        entryName.startsWith("xl/slicers/") && !entryName.includes("/_rels/")
+          ? (model.slicerParts ??= {} as Record<string, Uint8Array>)
+          : entryName.startsWith("xl/slicerCaches/") && !entryName.includes("/_rels/")
+            ? (model.slicerCacheParts ??= {} as Record<string, Uint8Array>)
+            : entryName.startsWith("xl/timelines/") && !entryName.includes("/_rels/")
+              ? (model.timelineParts ??= {} as Record<string, Uint8Array>)
+              : entryName.startsWith("xl/timelineCaches/") && !entryName.includes("/_rels/")
+                ? (model.timelineCacheParts ??= {} as Record<string, Uint8Array>)
+                : entryName.startsWith("xl/slicers/_rels/")
+                  ? (model.slicerParts ??= {} as Record<string, Uint8Array>)
+                  : entryName.startsWith("xl/slicerCaches/_rels/")
+                    ? (model.slicerCacheParts ??= {} as Record<string, Uint8Array>)
+                    : entryName.startsWith("xl/timelines/_rels/")
+                      ? (model.timelineParts ??= {} as Record<string, Uint8Array>)
+                      : (model.timelineCacheParts ??= {} as Record<string, Uint8Array>);
+      targetMap[entryName] = rawData ?? (await this.collectStreamData(stream));
       return true;
     }
 
@@ -2134,6 +5831,16 @@ class XLSX {
         Id: `rId${count++}`,
         Type: XLSX.RelType.SheetMetadata,
         Target: OOXML_REL_TARGETS.workbookMetadata
+      });
+    }
+    // Office 365 threaded comments need a workbook-level person
+    // directory. The rel Target is `persons/person.xml` (relative to
+    // the xl/ workbook home, matching how Excel writes it).
+    if (model.hasPersons) {
+      relationships.push({
+        Id: `rId${count++}`,
+        Type: XLSX.RelType.Person,
+        Target: "persons/person.xml"
       });
     }
     // R9-B6: Deduplicate pivot cache relationships by cacheId. When multiple pivot
@@ -2273,6 +5980,17 @@ class XLSX {
         await this._renderToZip(zip, commentsPath(fileIndex), commentsXform, worksheet);
       }
 
+      // Office 365 threaded comments sit in their own part tree
+      // alongside classic VML comments. Written straight from the
+      // structured model without going through an xform instance —
+      // the payload is small and the shape maps 1:1 onto the output.
+      if (worksheet.threadedComments && worksheet.threadedComments.length > 0) {
+        const xml = renderThreadedComments(worksheet.threadedComments);
+        zip.append(xml, {
+          name: `xl/threadedComments/threadedComment${fileIndex}.xml`
+        });
+      }
+
       // Generate unified VML drawing (contains both notes and form controls)
       const hasComments = worksheet.comments.length > 0;
       const hasFormControls = worksheet.formControls && worksheet.formControls.length > 0;
@@ -2399,12 +6117,26 @@ class XLSX {
     }
   }
 
-  async addCharts(zip: IZipWriter, model: any): Promise<void> {
+  async addCharts(zip: IZipWriter, model: any, strictTemplateMode = false): Promise<void> {
     const relsXform = new RelationshipsXform();
 
-    for (const [n, chartEntry] of Object.entries(model.chartEntries || {})) {
-      // Write chart XML — fully native parse→render
-      await this._renderToZip(zip, chartPath(n), new ChartSpaceXform(), (chartEntry as any).model);
+    for (const [n, chartEntry] of Object.entries(model.chartEntries || {}) as Array<
+      [string, ChartEntry]
+    >) {
+      if (shouldPassthroughChartEntry(chartEntry)) {
+        zip.append(chartEntry.rawData, { name: chartPath(n) });
+      } else {
+        const requireRawPatch = shouldRequireChartRawPatch(chartEntry, strictTemplateMode);
+        const patched = tryPatchChartRawXml(chartEntry, requireRawPatch);
+        if (patched) {
+          zip.append(patched, { name: chartPath(n) });
+        } else {
+          if (requireRawPatch) {
+            throw new ChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
+          }
+          await this._renderToZip(zip, chartPath(n), new ChartSpaceXform(), chartEntry.model);
+        }
+      }
 
       // Write chart style (raw bytes)
       if (model.chartStyles?.[n]) {
@@ -2429,6 +6161,23 @@ class XLSX {
             rels.push(rel);
             usedIds.add(rel.Id);
           }
+        }
+      }
+
+      // Fold in rels allocated during chart registration — notably the
+      // image relationships added by `resolvePendingChartImages` for
+      // `pictureFill.image`. The chart XML already embeds the `r:id`
+      // assigned during registration, so we must preserve those ids
+      // verbatim (don't rewrite) and only skip duplicates that were
+      // already round-tripped through `originalRels`.
+      const entryRels = (chartEntry as { rels?: any[] }).rels;
+      if (Array.isArray(entryRels)) {
+        for (const rel of entryRels) {
+          if (!rel?.Id || usedIds.has(rel.Id)) {
+            continue;
+          }
+          rels.push(rel);
+          usedIds.add(rel.Id);
         }
       }
 
@@ -2461,6 +6210,30 @@ class XLSX {
         });
       }
 
+      // Write c:userShapes overlay drawing part — preserves annotation
+      // shapes attached to the chart. Bytes can come from a loaded file
+      // (captured onto `chartEntry.userShapesXml` by
+      // `_reconcileChartUserShapes`) or from a programmatic call to
+      // `Chart.setUserShapesXml`. We always emit the bytes at a canonical
+      // path (`xl/drawings/chartUserShape{n}.xml`) and rewrite the rel
+      // Target accordingly so the chart XML's existing `r:id` still
+      // resolves.
+      if (chartEntry.userShapesXml) {
+        zip.append(chartEntry.userShapesXml, { name: chartUserShapesPath(n) });
+        const targetPath = chartUserShapesRelTarget(n);
+        const existingRel = rels.find(r => r?.Type === RelType.ChartUserShapes);
+        if (existingRel) {
+          existingRel.Target = targetPath;
+        } else {
+          // No existing rel — allocate one, preferring the r:id the model
+          // already embeds in `<c:userShapes r:id="…"/>` so the chart XML
+          // doesn't need a rewrite.
+          const relId = chartEntry.model.userShapesRelId ?? nextRId();
+          usedIds.add(relId);
+          rels.push({ Id: relId, Type: RelType.ChartUserShapes, Target: targetPath });
+        }
+      }
+
       // Write chart rels if any
       if (rels.length > 0) {
         await this._renderToZip(zip, chartRelsPath(n), relsXform, rels);
@@ -2468,34 +6241,106 @@ class XLSX {
     }
   }
 
-  async addChartExEntries(zip: IZipWriter, model: any): Promise<void> {
+  async addChartExEntries(zip: IZipWriter, model: any, strictTemplateMode = false): Promise<void> {
     const relsXform = new RelationshipsXform();
 
-    // 1. Raw-bytes (round-trip) chartEx entries — byte-preserved from load
-    for (const [n, rawBytes] of Object.entries(model.chartExEntries || {})) {
-      // Write chartEx XML (raw bytes — passthrough for round-trip)
-      zip.append(rawBytes as Uint8Array, { name: chartExPath(n) });
+    const rawEntries = model.chartExEntries || {};
+    const structured = (model.chartExStructuredEntries ?? {}) as Record<string, ChartExEntry>;
+    const written = new Set<string>();
+
+    // 1. Loaded chartEx entries — byte-preserve while clean, render structured XML once edited.
+    for (const [n, rawBytes] of Object.entries(rawEntries)) {
+      const structuredEntry = structured[n];
+      if (structuredEntry && !shouldPassthroughChartExEntry(structuredEntry)) {
+        const requireRawPatch = shouldRequireChartExRawPatch(structuredEntry, strictTemplateMode);
+        const patched = tryPatchChartExRawXml(structuredEntry, requireRawPatch);
+        if (patched) {
+          zip.append(patched, { name: chartExPath(n) });
+        } else {
+          if (requireRawPatch) {
+            throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
+          }
+          zip.append(renderChartEx(stripChartExRawXml(structuredEntry.model)), {
+            name: chartExPath(n)
+          });
+        }
+      } else {
+        zip.append(rawBytes as Uint8Array, { name: chartExPath(n) });
+      }
+      written.add(n);
 
       // Write chartEx rels if present
       const rels = model.chartExRels?.[n];
-      if (Array.isArray(rels) && rels.length > 0) {
-        await this._renderToZip(zip, chartExRelsPath(n), relsXform, rels);
+      const chartExRels = this._buildChartExRels(n, rels, model);
+      if (chartExRels.length > 0) {
+        await this._renderToZip(zip, chartExRelsPath(n), relsXform, chartExRels);
       }
+      this._appendChartExSidecars(zip, model, n, structuredEntry);
     }
 
     // 2. Structured chartEx entries — built programmatically via addChartEx()
-    const structured = model.chartExStructuredEntries ?? {};
     for (const [n, entry] of Object.entries(structured) as Array<[string, ChartExEntry]>) {
-      // Skip if this number is already in raw bytes (raw takes precedence)
-      if (model.chartExEntries?.[n]) {
+      if (written.has(n)) {
         continue;
       }
       const xml = renderChartEx(entry.model);
       zip.append(xml, { name: chartExPath(n) });
-      if (entry.rels && entry.rels.length > 0) {
-        await this._renderToZip(zip, chartExRelsPath(n), relsXform, entry.rels);
+      this._appendChartExSidecars(zip, model, n, entry);
+      const chartExRels = this._buildChartExRels(n, entry.rels, model, entry);
+      if (chartExRels.length > 0) {
+        await this._renderToZip(zip, chartExRelsPath(n), relsXform, chartExRels);
       }
     }
+  }
+
+  private _appendChartExSidecars(
+    zip: IZipWriter,
+    model: any,
+    n: string,
+    entry?: ChartExEntry
+  ): void {
+    if (entry?.model.style) {
+      zip.append(new TextEncoder().encode(buildChartStyle(entry.model.style)), {
+        name: chartExStylePath(n)
+      });
+    } else if (model.chartExStyles?.[n]) {
+      zip.append(model.chartExStyles[n], { name: chartExStylePath(n) });
+    }
+    if (entry?.model.colors) {
+      zip.append(new TextEncoder().encode(buildChartColors(entry.model.colors)), {
+        name: chartExColorsPath(n)
+      });
+    } else if (model.chartExColors?.[n]) {
+      zip.append(model.chartExColors[n], { name: chartExColorsPath(n) });
+    }
+  }
+
+  private _buildChartExRels(
+    n: string,
+    existing: any[] | undefined,
+    model: any,
+    entry?: ChartExEntry
+  ): any[] {
+    const rels = Array.isArray(existing) ? [...existing] : [];
+    const usedIds = new Set(rels.map(rel => rel.Id));
+    const nextRId = (): string => {
+      let i = 1;
+      while (usedIds.has(`rId${i}`)) {
+        i++;
+      }
+      const id = `rId${i}`;
+      usedIds.add(id);
+      return id;
+    };
+    const hasStyle = !!(model.chartExStyles?.[n] || entry?.model.style);
+    const hasColors = !!(model.chartExColors?.[n] || entry?.model.colors);
+    if (hasStyle && !rels.some(rel => rel.Type === RelType.ChartStyle)) {
+      rels.push({ Id: nextRId(), Type: RelType.ChartStyle, Target: chartExStyleRelTarget(n) });
+    }
+    if (hasColors && !rels.some(rel => rel.Type === RelType.ChartColors)) {
+      rels.push({ Id: nextRId(), Type: RelType.ChartColors, Target: chartExColorsRelTarget(n) });
+    }
+    return rels;
   }
 
   async addTables(zip: IZipWriter, model: any): Promise<void> {
@@ -2691,6 +6536,28 @@ class XLSX {
     worksheetOptions.drawings = model.drawings = [];
     worksheetOptions.commentRefs = model.commentRefs = [];
     worksheetOptions.formControlRefs = model.formControlRefs = [];
+    // Collect the list of worksheets that carry Office 365 threaded
+    // comments so the Content Types override list can include them
+    // and the ZIP writer knows which per-sheet parts to emit. Sheets
+    // with zero threaded comments are skipped entirely — Excel treats
+    // a missing part as "no threaded comments on this sheet".
+    model.threadedCommentSheetIds = [] as Array<number | string>;
+    model.hasPersons = (model.persons?.length ?? 0) > 0;
+    // Raw-passthrough parts captured on load. The Content-Types
+    // override list and the content-types writer need these path
+    // lists so the emitted bytes are registered in the package.
+    model.slicerPartPaths = Object.keys(model.slicerParts ?? {}).filter(
+      p => !p.includes("/_rels/")
+    );
+    model.slicerCachePartPaths = Object.keys(model.slicerCacheParts ?? {}).filter(
+      p => !p.includes("/_rels/")
+    );
+    model.timelinePartPaths = Object.keys(model.timelineParts ?? {}).filter(
+      p => !p.includes("/_rels/")
+    );
+    model.timelineCachePartPaths = Object.keys(model.timelineCacheParts ?? {}).filter(
+      p => !p.includes("/_rels/")
+    );
     model.hasHeaderWatermark = false;
     let tableCount = 0;
     model.tables = [];
@@ -2723,6 +6590,11 @@ class XLSX {
       });
 
       worksheetXform.prepare(worksheet, worksheetOptions);
+      // Register sheets that carry threaded comments so the Content
+      // Types override list and the zip emission loop find them.
+      if (worksheet.threadedComments && worksheet.threadedComments.length > 0) {
+        (model.threadedCommentSheetIds as Array<number | string>).push(worksheet.fileIndex);
+      }
     });
 
     // ContentTypesXform expects this flag
@@ -2746,6 +6618,61 @@ class XLSX {
     // Propagate header watermark flag from worksheet prepare options
     if (worksheetOptions.hasHeaderWatermark) {
       model.hasHeaderWatermark = true;
+    }
+  }
+
+  prepareChartExSidecars(model: any): void {
+    const structured = (model.chartExStructuredEntries ?? {}) as Record<string, ChartExEntry>;
+    for (const [n, entry] of Object.entries(structured)) {
+      if (entry.model.style && !model.chartExStyles?.[n]) {
+        model.chartExStyles ??= {};
+        model.chartExStyles[n] = new TextEncoder().encode(buildChartStyle(entry.model.style));
+      }
+      if (entry.model.colors && !model.chartExColors?.[n]) {
+        model.chartExColors ??= {};
+        model.chartExColors[n] = new TextEncoder().encode(buildChartColors(entry.model.colors));
+      }
+    }
+  }
+
+  prepareChartsheets(model: any): void {
+    if (!model.chartsheets || model.chartsheets.length === 0) {
+      return;
+    }
+
+    const usedDrawingNumbers = new Set<number>();
+    for (const drawing of model.drawings ?? []) {
+      const match = /^drawing(\d+)$/.exec(drawing.name ?? "");
+      if (match) {
+        usedDrawingNumbers.add(parseInt(match[1], 10));
+      }
+    }
+    for (const cs of model.chartsheets) {
+      const existingMatch = /^drawing(\d+)$/.exec(cs.drawingName ?? "");
+      if (existingMatch) {
+        usedDrawingNumbers.add(parseInt(existingMatch[1], 10));
+      }
+    }
+
+    const nextDrawingName = (): string => {
+      let n = 1;
+      while (usedDrawingNumbers.has(n)) {
+        n++;
+      }
+      usedDrawingNumbers.add(n);
+      return `drawing${n}`;
+    };
+
+    for (const cs of model.chartsheets) {
+      if (!cs.drawingName) {
+        cs.drawingName = nextDrawingName();
+      }
+      if (!cs.drawing) {
+        cs.drawing = { rId: "rId1" };
+      }
+      if (!model.drawings.some((drawing: any) => drawing.name === cs.drawingName)) {
+        model.drawings.push({ name: cs.drawingName });
+      }
     }
   }
 }
