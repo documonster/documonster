@@ -140,3 +140,33 @@ export function encodeRange(startOrRange: CellAddress | SheetRange, end?: CellAd
   const endStr = encodeCell(end);
   return startStr === endStr ? startStr : `${startStr}:${endStr}`;
 }
+
+// =============================================================================
+// Sheet name quoting (Excel formula references)
+// =============================================================================
+
+/**
+ * Excel allows unquoted sheet names only when they consist entirely of
+ * ASCII letters, digits, and underscores *and* do not start with a digit.
+ * Any sheet name with a space, dot, comma, bracket, `&`, CJK character,
+ * or any other non-trivial symbol must be wrapped in single quotes, with
+ * existing single quotes doubled.
+ *
+ * Shared helper so chart-api, pivot-chart, cache-populator, and the XForm
+ * layer all agree on the rule — before this was unified, three callers
+ * in the chart module used three different regexes, producing divergent
+ * formula strings for sheet names with punctuation.
+ *
+ * @example quoteSheetName("Sheet1") // "Sheet1"
+ * @example quoteSheetName("My Sheet") // "'My Sheet'"
+ * @example quoteSheetName("It's Fine") // "'It''s Fine'"
+ * @example quoteSheetName("2023 Data") // "'2023 Data'" (leading digit → quoted)
+ */
+export function quoteSheetName(sheetName: string): string {
+  // Leading digit forces quoting even with an otherwise clean name —
+  // Excel would otherwise parse `2023Data!A1` as a numeric literal.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(sheetName)) {
+    return `'${sheetName.replace(/'/g, "''")}'`;
+  }
+  return sheetName;
+}

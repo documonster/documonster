@@ -60,6 +60,7 @@ import {
   renderChartExSvg,
   renderChartExPng,
   buildChartScene,
+  buildEffectFilter,
   renderChartPng,
   renderChartSvg,
   applyChartPreset,
@@ -1536,14 +1537,12 @@ describe("Chart high-level API", () => {
 // ---------------------------------------------------------------------------
 
 describe("chart builder edge cases", () => {
-  it("handles empty series array", () => {
-    const m = buildChartModel({ type: "bar", series: [] });
-    expect(ctg(m).series.length).toBe(0);
+  it("rejects empty series array (Excel won't render a series-less chart)", () => {
+    expect(() => buildChartModel({ type: "bar", series: [] })).toThrow(/at least one series/);
   });
 
-  it("handles undefined series", () => {
-    const m = buildChartModel({ type: "bar" });
-    expect(ctg(m).series.length).toBe(0);
+  it("rejects undefined series (same reason)", () => {
+    expect(() => buildChartModel({ type: "bar" })).toThrow(/at least one series/);
   });
 
   it("multiple series with correct index/order", () => {
@@ -1699,7 +1698,10 @@ describe("chart builder edge cases", () => {
   });
 
   it("chart has roundedCorners=false and lang=en-US by default", () => {
-    const m = buildChartModel({ type: "bar", series: [] });
+    const m = buildChartModel({
+      type: "bar",
+      series: [{ categories: CATEGORIES, values: VALUES_A }]
+    });
     expect(m.roundedCorners).toBe(false);
     expect(m.lang).toBe("en-US");
   });
@@ -1898,6 +1900,106 @@ describe("builder chart-level options", () => {
       (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar"
     )!;
     expect(bar.projection3D).toBeDefined();
+  });
+
+  // Regression — stacked bar/area y-range used to ignore stacking and
+  // compute range from per-series maxes, so cumulative columns
+  // overflowed the plot rectangle. Verifies the column-sum term in
+  // `buildAxisContext`.
+  it("stacked column y-range includes the cumulative sum, not per-series max", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.addRows([
+      ["Q1", 10, 30],
+      ["Q2", 20, 40],
+      ["Q3", 30, 50]
+    ]);
+    ws.addChart(
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "stacked",
+        series: [
+          { categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" },
+          { categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$C$1:$C$3" }
+        ]
+      },
+      "D1:J10"
+    );
+    const scene = buildChartScene(ws.getCharts()[0].chartModel!, {
+      width: 500,
+      height: 300
+    });
+    const bar = scene.series.find(
+      (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar" && !!s.bars.length
+    )!;
+    // Every bar must sit inside the plot rectangle. Before the fix the
+    // cumulative stack (up to 80) blew past the top of the plot because
+    // axis max was pinned to the per-series max (50).
+    const plotTop = scene.plot.y;
+    const plotBottom = scene.plot.y + scene.plot.height;
+    for (const rect of bar.bars) {
+      expect(rect.y).toBeGreaterThanOrEqual(plotTop - 1);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(plotBottom + 1);
+    }
+  });
+
+  // Regression — `fmt(NaN)` used to emit the literal string `"NaN"` into
+  // SVG attributes, producing `x="NaN"` which is invalid SVG. The guard
+  // in `fmt()` now returns `"0"` for non-finite inputs so the emitted
+  // document stays parseable even if upstream filters are bypassed.
+  it("renderChartSvg never emits NaN or undefined in attribute values", () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Sheet1");
+    ws.addRow(["A"]);
+    ws.addRow(["Single"]);
+    ws.addChart(
+      {
+        type: "bar",
+        series: [{ categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$A$1:$A$1" }]
+      },
+      "C1:J10"
+    );
+    const svg = renderChartSvg(ws.getCharts()[0].chartModel!, {
+      width: 400,
+      height: 260
+    });
+    expect(svg).not.toMatch(/="NaN"/);
+    expect(svg).not.toMatch(/="undefined"/);
+  });
+
+  // Regression — the SVG effect filter chained `<feMerge>` primitives
+  // by setting `inLayer = "shadowOut-merged"` after the outer-shadow
+  // step, but that name did not exist as a `result` anywhere in the
+  // filter graph. Subsequent `glow` / `innerShadow` primitives then
+  // referenced a non-existent input layer, producing undefined SVG
+  // rendering. Each `feMerge` must now have a `result="<id>"` that the
+  // next step can reference.
+  it("buildEffectFilter chains layered effects with named merge results", () => {
+    const xml = buildEffectFilter("test-filter", {
+      outerShadow: {
+        blurRadius: 50800,
+        distance: 25400,
+        direction: 2700000,
+        color: { srgb: "000000" }
+      },
+      glow: {
+        radius: 50800,
+        color: { srgb: "FFFF00" }
+      },
+      innerShadow: {
+        blurRadius: 38100,
+        distance: 12700,
+        direction: 5400000,
+        color: { srgb: "000000" }
+      }
+    });
+    expect(xml).toContain('result="shadowMerged"');
+    expect(xml).toContain('result="glowMerged"');
+    // The inner shadow consumes the glow-merged output, not the phantom
+    // "shadowOut-merged" id that the buggy writer produced.
+    expect(xml).toContain('<feMergeNode in="glowMerged"/>');
+    expect(xml).not.toContain("shadowOut-merged");
   });
 
   it("plotVisOnly defaults to true", () => {
@@ -5442,6 +5544,46 @@ describe("TC2e: pivot chart creation", () => {
     expect(chart.chartModel!.pivotSource).toContain("'Pivot Sheet'!PivotTable1");
   });
 
+  // Regression — before fix, two `addPivotChart(pivotTable, …)` calls
+  // against the same pivot would both use `fmtId=0`: the second call
+  // hit the `exists` short-circuit in `ensurePivotChartFormat` and
+  // produced only one `chartFormat` entry, leaving both charts
+  // pointing at the same pivotArea declaration. Now `fmtId` auto-
+  // increments when not supplied.
+  it("multiple pivot charts against the same pivot get distinct fmtIds", async () => {
+    const { wb, pivot, pivotTable } = makePivotWorkbook();
+
+    pivot.addPivotChart(
+      pivotTable,
+      {
+        type: "bar",
+        series: [{ categories: "'Pivot Sheet'!$A$4:$A$5", values: "'Pivot Sheet'!$B$4:$B$5" }],
+        title: "First"
+      },
+      "D1:K12"
+    );
+    pivot.addPivotChart(
+      pivotTable,
+      {
+        type: "line",
+        series: [{ categories: "'Pivot Sheet'!$A$4:$A$5", values: "'Pivot Sheet'!$B$4:$B$5" }],
+        title: "Second"
+      },
+      "D14:K25"
+    );
+
+    expect(pivotTable.chartFormats).toHaveLength(2);
+    expect(pivotTable.chartFormats?.[0].format).toBe(0);
+    expect(pivotTable.chartFormats?.[1].format).toBe(1);
+
+    const buf = await wb.xlsx.writeBuffer();
+    const entries = await extractAll(new Uint8Array(buf));
+    const chart1Xml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
+    const chart2Xml = textDecoder.decode(entries.get("xl/charts/chart2.xml")!.data);
+    expect(chart1Xml).toContain('<c:fmtId val="0"/>');
+    expect(chart2Xml).toContain('<c:fmtId val="1"/>');
+  });
+
   it("writes structured pivot chart field buttons, filters, and refresh metadata", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
@@ -6669,6 +6811,25 @@ describe("P1: chart convenience APIs and presets", () => {
       const options = applyChartPreset(preset, { series: [baseSeries("S")] });
       expect(options).toMatchObject(expected);
     }
+  });
+
+  // Regression — `stockOHLC` preset previously omitted `hiLowLines`,
+  // producing an OHLC chart without the wick connectors that Excel's
+  // OHLC preset ships with. All stock variants now emit the
+  // appropriate feature combination.
+  it("stock presets enable hi-low lines by default; OHLC adds up-down bars too", () => {
+    const hlc = applyChartPreset("stockHLC", { series: [baseSeries("S")] });
+    expect(hlc).toMatchObject({ type: "stock", hiLowLines: true });
+    expect(hlc.upDownBars).toBeFalsy();
+
+    const ohlc = applyChartPreset("stockOHLC", { series: [baseSeries("S")] });
+    expect(ohlc).toMatchObject({ type: "stock", hiLowLines: true, upDownBars: true });
+
+    const vhlc = applyChartPreset("stockVHLC", { series: [baseSeries("S")] });
+    expect(vhlc).toMatchObject({ type: "stock", hiLowLines: true });
+
+    const vohlc = applyChartPreset("stockVOHLC", { series: [baseSeries("S")] });
+    expect(vohlc).toMatchObject({ type: "stock", hiLowLines: true, upDownBars: true });
   });
 
   it("applyChartPreset exposes a broad Excel UI preset alias matrix", () => {
@@ -8679,14 +8840,19 @@ describe("BUG-11: funnel chart has no axes", () => {
 });
 
 describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
-  it("dateToSerial accounts for Excel 1900 leap year bug", () => {
+  it("chart cache-populator uses the canonical Excel serial for Date cells", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.getCell("A1").value = "Cat";
-    // March 1, 1900 — Excel serial should be 61 (not 60) for the integer part.
-    // The Date constructor uses local time, so the serial may include a fractional
-    // time component depending on timezone. We check the floor is 61.
-    ws.getCell("B1").value = new Date(1900, 2, 1);
+    // `Date.UTC(1900, 2, 1)` pins the instant to midnight UTC so the
+    // computed serial is timezone-independent — a previous version
+    // used `new Date(1900, 2, 1)` (local time) which silently flipped
+    // between 61 and 62 depending on the CI runner's TZ.
+    // Excel's DATEVALUE("1900-03-01") is 61 (accounting for the
+    // fake Feb 29, 1900 the 1900 date system keeps for Lotus
+    // compatibility). We assert the integer part so accidental
+    // sub-day fractions from future refactors don't false-fail.
+    ws.getCell("B1").value = new Date(Date.UTC(1900, 2, 1));
     ws.addChart(
       {
         type: "line",
@@ -8696,7 +8862,6 @@ describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
     );
     const series = ws.getCharts()[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     const serial = series.val.numRef.cache.points[0].value;
-    // The integer part must be 61 (accounting for the 1900 leap year bug)
     expect(Math.floor(serial)).toBe(61);
   });
 });
@@ -8724,9 +8889,8 @@ describe("ROBUST-6: _renderTxPr includes rotation", () => {
 });
 
 describe("supplementary edge cases", () => {
-  it("buildChartModel handles empty series array", () => {
-    const m = buildChartModel({ type: "bar", series: [] });
-    expect(m.chart.plotArea.chartTypes[0].series).toHaveLength(0);
+  it("buildChartModel rejects empty series array", () => {
+    expect(() => buildChartModel({ type: "bar", series: [] })).toThrow(/at least one series/);
   });
 
   it("cache populator handles cells with null/undefined values", () => {

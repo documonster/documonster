@@ -213,6 +213,10 @@ function validateChartOptions(opts: AddChartOptions, path = "chart"): void {
   assertChartOptions(!!opts.type, `${path}.type is required.`);
   validateChartLevelOptions(opts, path);
   const series = opts.series ?? [];
+  // A chart with zero series is invalid — Excel will either refuse to
+  // open the file or render a broken chart area. Catch it at build
+  // time with a precise error instead of deferring to Excel.
+  assertChartOptions(series.length > 0, `${path}.series must contain at least one series.`);
   for (let i = 0; i < series.length; i++) {
     validateSeriesOptions(opts.type, series[i], `${path}.series[${i}]`);
   }

@@ -2311,6 +2311,13 @@ function formatDataTableValue(value: number | undefined): string {
  * `rAngAx=true` (right-angle axes) — stay in sync with this projection
  * when `view3D` is absent. Returns unit deltas (dx/dy per pixel of
  * depth) so callers can scale by their own bar-width heuristic.
+ *
+ * `rAngAx` does not kill horizontal extrusion — Excel's right-angle
+ * mode still projects the depth vector onto screen space via `rotY`,
+ * because without that `dx` a bar3D would collapse into a flat 2D
+ * bar. The flag only means "axes stay perpendicular in 3D world
+ * space" (vs. pivoting into a trimetric projection). We keep the
+ * `cos(rotY)` term regardless.
  */
 function resolveBar3DProjection(view3D: ChartModel["chart"]["view3D"] | undefined): {
   dx: number;
@@ -2318,15 +2325,8 @@ function resolveBar3DProjection(view3D: ChartModel["chart"]["view3D"] | undefine
 } {
   const rotX = toRad(view3D?.rotX ?? 15);
   const rotY = toRad(view3D?.rotY ?? 20);
-  // Cabinet-style: depth vector in screen space. Multiply by sign so
-  // a positive rotY pushes the back of the bar to the right and a
-  // positive rotX pushes the back upward. `rAngAx` (right-angle axes)
-  // skips Y rotation entirely; when it's explicitly off we keep the
-  // 3D spin.
-  const rAngAx = view3D?.rAngAx !== false;
-  const xFactor = rAngAx ? 0 : Math.cos(rotY);
   return {
-    dx: 0.6 * (rAngAx ? Math.cos(rotY) : xFactor),
+    dx: 0.6 * Math.cos(rotY),
     dy: 0.6 * Math.sin(rotX)
   };
 }
@@ -3640,15 +3640,68 @@ function buildAxisContext(model: ChartModel, normalized: NormalizedSeries[]): Ch
   );
   const yValuesByAxisId = new Map<number, number[][]>();
   const xValuesByAxisId = new Map<number, number[][]>();
+  // Group normalised series by their parent ChartTypeGroup so stacked
+  // groups contribute per-category stacked sums (rather than raw
+  // per-series values) to the axis range. Without this, a stacked
+  // column/bar/area chart whose cumulative height exceeds any single
+  // series' max would overflow the plot rectangle — `buildStackedBars`
+  // / `buildStackedAreaBand` compute positions from the full stacked
+  // total, but `getValueRange` was seeing only per-series maxima.
+  const seriesByGroup = new Map<ChartTypeGroup, NormalizedSeries[]>();
   for (const series of normalized) {
-    const ids = axisIdsByGroup.get(series.group) ?? [];
-    const yAxisId = getYAxisIdForGroup(series.group, ids, axesById);
-    const xAxisId = getXAxisIdForGroup(series.group, ids, axesById);
-    if (yAxisId !== undefined) {
-      addAxisValues(yValuesByAxisId, yAxisId, series.values);
+    const bucket = seriesByGroup.get(series.group);
+    if (bucket) {
+      bucket.push(series);
+    } else {
+      seriesByGroup.set(series.group, [series]);
     }
-    if (xAxisId !== undefined && isValueValueGroup(series.group)) {
-      addAxisValues(xValuesByAxisId, xAxisId, scatterXValues(series));
+  }
+  for (const [group, groupSeries] of seriesByGroup) {
+    const ids = axisIdsByGroup.get(group) ?? [];
+    const isStacked =
+      isStackableGroup(group) &&
+      "grouping" in group &&
+      (group.grouping === "stacked" || group.grouping === "percentStacked");
+    const isPercent = isStacked && "grouping" in group && group.grouping === "percentStacked";
+    for (const series of groupSeries) {
+      const yAxisId = getYAxisIdForGroup(series.group, ids, axesById);
+      const xAxisId = getXAxisIdForGroup(series.group, ids, axesById);
+      if (yAxisId !== undefined && !isStacked) {
+        addAxisValues(yValuesByAxisId, yAxisId, series.values);
+      }
+      if (xAxisId !== undefined && isValueValueGroup(series.group)) {
+        addAxisValues(xValuesByAxisId, xAxisId, scatterXValues(series));
+      }
+    }
+    if (isStacked) {
+      const yAxisId = getYAxisIdForGroup(groupSeries[0].group, ids, axesById);
+      if (yAxisId !== undefined) {
+        const pointCount = Math.max(1, ...groupSeries.map(s => s.values.length));
+        const columnSums: number[] = [];
+        for (let i = 0; i < pointCount; i++) {
+          let posSum = 0;
+          let negSum = 0;
+          for (const s of groupSeries) {
+            const v = s.values[i];
+            if (typeof v === "number" && Number.isFinite(v)) {
+              if (v >= 0) {
+                posSum += v;
+              } else {
+                negSum += v;
+              }
+            }
+          }
+          // Percent-stacked tops out at 1; column sums beyond that
+          // are irrelevant because `buildSceneSeries` passes
+          // `{min:0,max:1}` instead of consulting the axis range.
+          if (isPercent) {
+            columnSums.push(posSum === 0 ? 0 : 1, negSum === 0 ? 0 : -1);
+          } else {
+            columnSums.push(posSum, negSum);
+          }
+        }
+        addAxisValues(yValuesByAxisId, yAxisId, columnSums);
+      }
     }
   }
   const yRangesByAxisId = new Map<number, ValueRange>();
@@ -3767,6 +3820,18 @@ function getXAxisIdForGroup(
 
 function isValueValueGroup(group: ChartTypeGroup): boolean {
   return group.type === "scatter" || group.type === "bubble";
+}
+
+/** True when this group type supports `grouping = "stacked" | "percentStacked"`. */
+function isStackableGroup(group: ChartTypeGroup): boolean {
+  return (
+    group.type === "bar" ||
+    group.type === "bar3D" ||
+    group.type === "line" ||
+    group.type === "line3D" ||
+    group.type === "area" ||
+    group.type === "area3D"
+  );
 }
 
 function scatterXValues(series: NormalizedSeries): number[] {
@@ -4255,9 +4320,9 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       `<feOffset in="shadowBlur" dx="${dx}" dy="${dy}" result="shadowOffset"/>`,
       `<feFlood flood-color="${colour}" flood-opacity="${alpha}" result="shadowColour"/>`,
       `<feComposite in="shadowColour" in2="shadowOffset" operator="in" result="shadowOut"/>`,
-      `<feMerge><feMergeNode in="shadowOut"/><feMergeNode in="${inLayer}"/></feMerge>`
+      `<feMerge result="shadowMerged"><feMergeNode in="shadowOut"/><feMergeNode in="${inLayer}"/></feMerge>`
     );
-    inLayer = "shadowOut-merged";
+    inLayer = "shadowMerged";
   }
 
   if (effects.glow) {
@@ -4267,8 +4332,9 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       `<feGaussianBlur in="SourceAlpha" stdDeviation="${blur}" result="glowBlur"/>`,
       `<feFlood flood-color="${colour}" result="glowColour"/>`,
       `<feComposite in="glowColour" in2="glowBlur" operator="in" result="glowOut"/>`,
-      `<feMerge><feMergeNode in="glowOut"/><feMergeNode in="${inLayer}"/></feMerge>`
+      `<feMerge result="glowMerged"><feMergeNode in="glowOut"/><feMergeNode in="${inLayer}"/></feMerge>`
     );
+    inLayer = "glowMerged";
   }
 
   if (effects.innerShadow) {
@@ -4285,8 +4351,9 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       `<feComposite in="SourceAlpha" in2="innerOffset" operator="out" result="innerClipped"/>`,
       `<feFlood flood-color="${colour}" flood-opacity="${alpha}" result="innerColour"/>`,
       `<feComposite in="innerColour" in2="innerClipped" operator="in" result="innerOut"/>`,
-      `<feMerge><feMergeNode in="${inLayer}"/><feMergeNode in="innerOut"/></feMerge>`
+      `<feMerge result="innerMerged"><feMergeNode in="${inLayer}"/><feMergeNode in="innerOut"/></feMerge>`
     );
+    inLayer = "innerMerged";
   }
 
   if (prims.length === 0) {
@@ -4932,7 +4999,7 @@ function translateScene(
           borders: scene.dataTable.borders.map(mapLine)
         }
       : undefined,
-    series: scene.series.map(s => translateSeries(s, mapPoint, mapRect, mapLine, mapText))
+    series: scene.series.map(s => translateSeries(s, mapPoint, mapRect, mapLine, mapText, flipY))
   };
 }
 
@@ -4941,11 +5008,21 @@ function translateSeries(
   mapPoint: (point: ChartScenePoint) => ChartScenePoint,
   mapRect: (rect: ChartSceneRect) => ChartSceneRect,
   mapLine: (line: ChartSceneLine) => ChartSceneLine,
-  mapText: (text: ChartSceneText) => ChartSceneText
+  mapText: (text: ChartSceneText) => ChartSceneText,
+  flipY: boolean
 ): ChartSceneSeries {
   if (series.type === "bar") {
+    // `projection3D` is a pair of screen-space deltas, not positions,
+    // so `mapRect` doesn't touch it. When `flipY=true` (PDF y-up) the
+    // `dy` sign must be negated so the back face of each bar still
+    // extrudes "upward" relative to the front face in the flipped
+    // frame. Without this, PDF bar3D extrudes downward — the opposite
+    // of the SVG rendering.
+    const projection3D = series.projection3D
+      ? { dx: series.projection3D.dx, dy: flipY ? -series.projection3D.dy : series.projection3D.dy }
+      : undefined;
     return translateAdornments(
-      { ...series, bars: series.bars.map(mapRect) },
+      { ...series, bars: series.bars.map(mapRect), projection3D },
       mapPoint,
       mapLine,
       mapText
@@ -5319,5 +5396,14 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 function fmt(value: number): string {
+  // `Number.toFixed` serialises `NaN` as the literal string `"NaN"`,
+  // which the SVG emitters would paste into attribute values like
+  // `x="NaN"` — invalid SVG. When a value slips past the upstream
+  // `Number.isFinite` filters (degenerate inputs, axis range of
+  // `{min: NaN, max: NaN}`, etc.), fall back to `"0"` so the emitted
+  // SVG stays parseable.
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
   return value.toFixed(2).replace(/\.00$/, "");
 }

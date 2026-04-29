@@ -27,6 +27,7 @@ import type {
 import { colCache } from "@excel/utils/col-cache";
 import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
+import { dateToExcel } from "@utils/utils.base";
 
 /**
  * Populate all number/string caches in a ChartModel from the given workbook.
@@ -957,7 +958,14 @@ function toNumber(v: unknown, date1904?: boolean): number | undefined {
     return v ? 1 : 0;
   }
   if (v instanceof Date) {
-    return dateToSerial(v, date1904);
+    // Delegate to the canonical converter in `@utils/utils.base` so the
+    // epoch / date1904 offset stays consistent with the rest of the
+    // codebase (`cell-format`, formula engine, XML writer). A previous
+    // local implementation used a `Date.UTC(1899, 11, 30)` epoch with
+    // its own `serial >= 60 → +1` hack that was both off-by-one
+    // (canonical epoch is Dec 31 1899) AND timezone-dependent (since
+    // callers may pass local-time `Date`s whose UTC projection differs).
+    return dateToExcel(v, date1904);
   }
   if (typeof v === "string") {
     // Try to coerce numeric string
@@ -983,18 +991,4 @@ function toString(v: unknown): string | undefined {
     return v.toISOString();
   }
   return undefined;
-}
-
-/**
- * Convert a JS Date to an Excel serial number.
- * When date1904 is true, adjusts by 1462 days (the difference between
- * the 1900 and 1904 date systems).
- */
-function dateToSerial(d: Date, date1904?: boolean): number {
-  const epoch = Date.UTC(1899, 11, 30);
-  let serial = (d.getTime() - epoch) / 86400000;
-  if (!date1904 && serial >= 60) {
-    serial += 1;
-  }
-  return date1904 ? serial - 1462 : serial;
 }

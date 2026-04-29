@@ -1,3 +1,4 @@
+import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
 
 import type { Table } from "../table";
@@ -99,7 +100,21 @@ export function chartOptionsFromTable(
           )
         : tableColumnReference(model.name, model.columns[index]?.name)
   }));
-  return { ...options, series };
+  // Strip helper-only keys before spreading — they would ride through
+  // as excess properties on the returned `AddChartOptions` and any
+  // stricter downstream validator (e.g. `ChartOptionsError` gates)
+  // would flag them. The sibling `chartExOptionsFromTable` already
+  // does this; mirror the treatment here.
+  const {
+    categoryColumn: _catCol,
+    valueColumns: _valCols,
+    structuredReferences: _structured,
+    ...rest
+  } = options;
+  void _catCol;
+  void _valCols;
+  void _structured;
+  return { ...rest, series };
 }
 
 export function chartOptionsFromRows<T extends Record<string, unknown>>(
@@ -144,7 +159,20 @@ export function chartOptionsFromRows<T extends Record<string, unknown>>(
     categories: absoluteRange(sheetName, dataStartRow, startCol, dataEndRow, startCol),
     values: absoluteRange(sheetName, dataStartRow, startCol + i + 1, dataEndRow, startCol + i + 1)
   }));
-  return { ...options, series };
+  const {
+    x: _x,
+    y: _y,
+    sheetName: _sheet,
+    startCell: _startCell,
+    includeHeaders: _headers,
+    ...rest
+  } = options;
+  void _x;
+  void _y;
+  void _sheet;
+  void _startCell;
+  void _headers;
+  return { ...rest, series };
 }
 
 function tableColumnReference(tableName: string, columnName: string | undefined): string {
@@ -196,10 +224,6 @@ function absoluteA1Range(range: string): string {
     return `$${colCache.n2l(decoded.left)}$${decoded.top}:$${colCache.n2l(decoded.right)}$${decoded.bottom}`;
   }
   return `$${colCache.n2l(decoded.col)}$${decoded.row}`;
-}
-
-function quoteSheetName(sheetName: string): string {
-  return /^[A-Za-z0-9_]+$/.test(sheetName) ? sheetName : `'${sheetName.replace(/'/g, "''")}'`;
 }
 
 // ============================================================================

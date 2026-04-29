@@ -19,9 +19,9 @@ import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
 import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import type { AddChartExOptions } from "@excel/chart/chart-ex-types";
+import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
 import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
-import type { AddComboChartOptions } from "@excel/chart/types";
+import type { AddComboChartOptions, ChartModel } from "@excel/chart/types";
 import {
   Chartsheet,
   type AddChartsheetOptions,
@@ -1834,6 +1834,20 @@ class Workbook {
       return false;
     }
     const model = wrapper.model;
+    // Build the replacement first so a malformed options object throws
+    // *before* we remove the existing chart entry. Without this, a
+    // failed `buildChartExModel` / `buildChartModel` would leave the
+    // chartsheet empty (old chart nuked, new chart never registered).
+    let newChartExModel: ChartExModel | undefined;
+    let newChartModel: ChartModel | undefined;
+    if (isChartExOptions(chart)) {
+      newChartExModel = buildChartExModel(chart);
+    } else if (isComboChartOptions(chart)) {
+      newChartModel = buildComboChartModel(chart);
+    } else {
+      newChartModel = buildChartModel(chart);
+    }
+    // Remove existing entries only after the new model builds cleanly.
     if (model.chartNumber) {
       this.removeChartEntry?.(model.chartNumber);
       model.chartNumber = undefined;
@@ -1842,27 +1856,23 @@ class Workbook {
       this.removeChartExStructuredEntry?.(model.chartExNumber);
       model.chartExNumber = undefined;
     }
-    if (isChartExOptions(chart)) {
+    if (newChartExModel) {
       const chartExNumber = this.nextChartExNumber();
-      const chartModel = buildChartExModel(chart);
       try {
-        fillChartExCaches(chartModel, this as any);
+        fillChartExCaches(newChartExModel, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart replacement.
       }
-      this.addChartExStructuredEntry({ chartExNumber, model: chartModel });
+      this.addChartExStructuredEntry({ chartExNumber, model: newChartExModel });
       model.chartExNumber = chartExNumber;
-    } else {
+    } else if (newChartModel) {
       const chartNumber = this.nextChartNumber();
-      const chartModel = isComboChartOptions(chart)
-        ? buildComboChartModel(chart)
-        : buildChartModel(chart);
       try {
-        fillChartCaches(chartModel, this as any);
+        fillChartCaches(newChartModel, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart replacement.
       }
-      this.addChartEntry({ chartNumber, model: chartModel });
+      this.addChartEntry({ chartNumber, model: newChartModel });
       this._applyChartsheetSidecars(chartNumber, chart);
       model.chartNumber = chartNumber;
     }
