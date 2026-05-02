@@ -60,13 +60,51 @@ const ENCODE_ENTITIES: Record<number, string> = {
 // =============================================================================
 
 /**
+ * Is `code` a legal XML 1.0 character per §2.2?
+ *
+ *   Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+ *          | [#x10000-#x10FFFF]
+ *
+ * Rejects NULs, the forbidden C0 controls (`0x01`-`0x08`, `0x0B`,
+ * `0x0C`, `0x0E`-`0x1F`), lone surrogate halves (`0xD800`-`0xDFFF`),
+ * the noncharacters `0xFFFE` / `0xFFFF`, and anything above the
+ * Unicode ceiling.
+ *
+ * Used by both {@link xmlDecode} (to refuse malformed numeric
+ * character references) and {@link encodeCData} (to strip illegal
+ * bytes before wrapping user content in a CDATA section).
+ */
+function isLegalXmlChar(code: number): boolean {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) {
+    return false;
+  }
+  if (code === 0x9 || code === 0xa || code === 0xd) {
+    return true;
+  }
+  if (code < 0x20) {
+    return false;
+  }
+  if (code >= 0xd800 && code <= 0xdfff) {
+    return false;
+  }
+  if (code === 0xfffe || code === 0xffff) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Decode XML entities in a string.
  *
  * Handles named entities (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;`)
  * and numeric character references (`&#123;`, `&#x7B;`).
  *
- * Security: validates numeric code points are in range [1, 0x10FFFF]
- * and rejects surrogate halves (0xD800-0xDFFF).
+ * Security: validates numeric code points against the XML 1.0 `Char`
+ * production (rejects NUL, forbidden C0 controls, surrogates,
+ * noncharacters, and out-of-range code points). Malformed numeric
+ * refs are left untouched in the output so downstream layers (e.g. a
+ * re-encoder that strips them) can distinguish "author meant this" from
+ * "we couldn't decode this".
  *
  * Fast-path: returns the original string if no `&` is found.
  */
@@ -80,8 +118,11 @@ export function xmlDecode(text: string): string {
         entity[1] === "x" || entity[1] === "X"
           ? parseInt(entity.slice(2), 16)
           : parseInt(entity.slice(1), 10);
-      // Reject NaN, null char, surrogates, and out-of-range code points
-      if (Number.isNaN(code) || code < 1 || (code >= 0xd800 && code <= 0xdfff) || code > 0x10ffff) {
+      // Refuse everything outside the XML 1.0 Char range — NUL,
+      // forbidden controls, surrogates, noncharacters, and values
+      // above `0x10FFFF`. Leaving the ref untouched is safer than
+      // materialising an invalid character into the decoded string.
+      if (!isLegalXmlChar(code)) {
         return match;
       }
       return String.fromCodePoint(code);
@@ -196,14 +237,37 @@ export function xmlEncode(text: string): string {
 // =============================================================================
 
 /**
- * Encode a value for use in an XML attribute.
+ * Encode a value for use in a double-quoted XML attribute.
  *
- * Same as {@link xmlEncode} — provided as a semantic alias.
- * In the future this could apply attribute-specific normalisation
- * (e.g. collapsing whitespace per XML 1.0 §3.3.3).
+ * Does everything {@link xmlEncode} does (escape `<>&"'`, strip invalid
+ * control chars and lone surrogates) PLUS encodes `\t`, `\n`, `\r` as
+ * numeric character references (`&#x9;`, `&#xA;`, `&#xD;`).
+ *
+ * The extra whitespace handling is required by XML 1.0 §3.3.3
+ * (attribute-value normalisation), which replaces every literal
+ * whitespace character inside an attribute value with a single space
+ * at parse time. Without the numeric-ref encoding, `"foo\nbar"` written
+ * into an attribute round-trips as `"foo bar"` — the newline is gone.
+ * Parsers / validators never collapse numeric character references, so
+ * `&#xA;` survives verbatim.
+ *
+ * Use this for every attribute value in XML output that needs to
+ * round-trip exactly (OOXML chart / sidecar / pivot content, relationship
+ * targets, anything later re-parsed by another tool).
  */
 export function xmlEncodeAttr(value: string): string {
-  return xmlEncode(value);
+  // Fast path: common case has none of `\t \n \r` so the expensive
+  // replace chain doesn't run. `xmlEncode` handles `<>&"'` and invalid
+  // control chars; whitespace characters fall through it unchanged.
+  const encoded = xmlEncode(value);
+  if (
+    encoded.indexOf("\t") === -1 &&
+    encoded.indexOf("\n") === -1 &&
+    encoded.indexOf("\r") === -1
+  ) {
+    return encoded;
+  }
+  return encoded.replace(/\r/g, "&#xD;").replace(/\n/g, "&#xA;").replace(/\t/g, "&#x9;");
 }
 
 // =============================================================================
@@ -247,13 +311,102 @@ export function validateXmlName(name: string): void {
 // =============================================================================
 
 /**
- * Encode text for a CDATA section, splitting on `]]>` to produce valid output.
+ * Encode text for a CDATA section, stripping XML 1.0-illegal
+ * characters first and then splitting on `]]>` to produce valid
+ * output.
+ *
+ * CDATA is not a magic passthrough: only the five structural entities
+ * are skipped, but every other XML Char production rule still applies.
+ * A user string that carries `\x08` or a lone surrogate half wraps
+ * into a CDATA section that every conformant parser rejects. Strip
+ * them first (same sanitisation as {@link xmlEncode} / the chart
+ * module's `escapeXml`) so CDATA output stays well-formed.
  *
  * The sequence `]]>` cannot appear inside CDATA, so each occurrence is split
  * into adjacent CDATA sections: `<![CDATA[...]]]]><![CDATA[>...]]>`.
  */
 export function encodeCData(text: string): string {
-  return "<![CDATA[" + text.split("]]>").join("]]]]><![CDATA[>") + "]]>";
+  return "<![CDATA[" + stripIllegalXmlChars(text).split("]]>").join("]]]]><![CDATA[>") + "]]>";
+}
+
+/**
+ * Strip characters that XML 1.0 forbids from text / attribute /
+ * CDATA content, plus DEL (0x7F) as a project-policy extension.
+ *
+ * The XML 1.0 Char production allows: `#x9 | #xA | #xD |
+ * [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]`. So the
+ * disallowed ranges are:
+ *   - C0 controls other than `\t` `\n` `\r` (`0x00-0x08`, `0x0B`,
+ *     `0x0C`, `0x0E-0x1F`),
+ *   - lone UTF-16 surrogate halves (`0xD800-0xDFFF` not in a valid
+ *     pair),
+ *   - the noncharacters `0xFFFE` / `0xFFFF`.
+ *
+ * `0x7F` (DEL) is TECHNICALLY legal per the XML spec — it falls
+ * within the `[#x20-#xD7FF]` range — but some downstream consumers
+ * (older Excel versions, strict SAX libraries) choke on it. We strip
+ * it as a defence-in-depth measure; the comment that previously
+ * claimed "XML 1.0 forbids DEL" was incorrect.
+ *
+ * Exported so `chart-utils.ts` and any other module that needs the
+ * same sanitisation can share a single implementation instead of
+ * carrying a local copy that drifts on edge cases.
+ */
+export function stripXmlIllegalChars(text: string): string {
+  // Fast path: scan for any char that would fail the Char production.
+  // Most user input is plain ASCII in the legal range, so this
+  // returns the original string without allocation.
+  let needsStrip = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (
+      (code < 0x20 && code !== 9 && code !== 10 && code !== 13) ||
+      code === 0x7f ||
+      (code >= 0xd800 && code <= 0xdfff) ||
+      code === 0xfffe ||
+      code === 0xffff
+    ) {
+      needsStrip = true;
+      break;
+    }
+  }
+  if (!needsStrip) {
+    return text;
+  }
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20) {
+      if (code === 9 || code === 10 || code === 13) {
+        out.push(text[i]);
+      }
+      continue;
+    }
+    if (code === 0x7f) {
+      continue;
+    }
+    if (code === 0xfffe || code === 0xffff) {
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out.push(text[i], text[i + 1]);
+        i += 1;
+      }
+      // else: lone high surrogate — strip
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+    out.push(text[i]);
+  }
+  return out.join("");
+}
+
+function stripIllegalXmlChars(text: string): string {
+  return stripXmlIllegalChars(text);
 }
 
 /**

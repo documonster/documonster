@@ -1,13 +1,24 @@
+import { ChartOptionsError } from "@excel/errors";
+
 import type { AddChartExOptions, ChartExType } from "./chart-ex-types";
 import type { AddChartOptions, AddChartSeriesOptions } from "./types";
 
 type PresetSeriesDefaults = Partial<Pick<AddChartSeriesOptions, "bubble3D" | "explosion">>;
 
 interface PresetConfig {
-  options: Partial<AddChartOptions>;
+  /**
+   * Partial options merged on top of the caller-supplied options. `type` is
+   * mandatory so callers get a runtime-usable `AddChartOptions` even when
+   * they omit `type` from their own input; this is enforced by the type
+   * rather than by a non-null assertion in {@link applyChartPreset}.
+   */
+  options: Partial<AddChartOptions> & { type: AddChartOptions["type"] };
   seriesDefaults?: PresetSeriesDefaults;
 }
 
+// Shared factory for bar/column preset variants. Accepts 2-D direction,
+// grouping and an optional 3-D shape. When `shape` is passed the preset
+// automatically upgrades to `bar3D` (cone/cylinder/pyramid require 3D).
 const barPreset = (
   barDir: NonNullable<AddChartOptions["barDir"]>,
   grouping: Extract<
@@ -16,7 +27,7 @@ const barPreset = (
   >,
   shape?: NonNullable<AddChartOptions["shape"]>
 ): PresetConfig => ({
-  options: { type: shape ? "bar3D" : "bar", barDir, grouping, shape }
+  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type: "bar", barDir, grouping }
 });
 
 const bar3DPreset = (
@@ -27,13 +38,14 @@ const bar3DPreset = (
   >,
   shape?: NonNullable<AddChartOptions["shape"]>
 ): PresetConfig => ({
-  options: { type: "bar3D", barDir, grouping, shape }
+  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type: "bar3D", barDir, grouping }
 });
 
 export const CHART_PRESETS = {
   columnClustered: barPreset("col", "clustered"),
   columnStacked: barPreset("col", "stacked"),
   columnStacked100: barPreset("col", "percentStacked"),
+  columnPercentStacked: barPreset("col", "percentStacked"),
   colClustered: barPreset("col", "clustered"),
   colStacked: barPreset("col", "stacked"),
   colPercentStacked: barPreset("col", "percentStacked"),
@@ -128,35 +140,60 @@ export const CHART_PRESETS = {
   radarFilled: { options: { type: "radar", radarStyle: "filled" } },
   stockHLC: { options: { type: "stock", hiLowLines: true } },
   stockOHLC: { options: { type: "stock", upDownBars: true, hiLowLines: true } },
-  stockVHLC: { options: { type: "stock", hiLowLines: true } },
-  stockVOHLC: { options: { type: "stock", hiLowLines: true, upDownBars: true } },
+  // `stockVHLC` / `stockVOHLC` (Volume-HLC / Volume-OHLC) used to be
+  // accepted here, but they require a combo chart (a column chart for
+  // volume layered on top of an HLC / OHLC stock chart) that a
+  // single `AddChartOptions` cannot express. Quietly aliasing them to
+  // the non-volume variants produced a chart that looked wrong
+  // without telling the caller. Build the combo manually via
+  // `buildComboChartModel({ groups: [{ type: "bar", barDir: "col", ... },
+  // { type: "stock", hiLowLines: true, useSecondaryAxis: true, ... }] })`
+  // when you need the volume overlay.
   surface: { options: { type: "surface" } },
   surface3D: { options: { type: "surface3D" } },
-  surfaceTopView: { options: { type: "surface" } },
+  // "Top View" in Excel's surface submenu is just a `surface3D` chart
+  // rotated to look straight down — same chart type, same series
+  // layout, different `view3D` angles. Setting `rotX: 90` spins the
+  // camera down onto the XY plane; `rotY: 0` removes the side tilt
+  // so the grid reads as a flat mosaic instead of an oblique slab.
+  // The resulting chart opens in Excel with the correct camera, and
+  // our own renderer projects it via `resolveBar3DProjection` /
+  // surface cells without any preset-specific branching.
+  surfaceTopView: { options: { type: "surface3D", view3D: { rotX: 90, rotY: 0 } } },
+  // A flat 2-D surface (no `view3D`) IS Excel's "Contour" chart.
+  // Keeping the preset as `surface` matches Excel's own internal
+  // representation — `c:surfaceChart` without `c:view3D` is how
+  // Excel serialises a contour chart authored from the UI.
   contour: { options: { type: "surface" } },
   wireframeSurface: { options: { type: "surface3D", wireframe: true } },
   surface3DWireframe: { options: { type: "surface3D", wireframe: true } },
   surfaceWireframe: { options: { type: "surface3D", wireframe: true } },
   wireframeContour: { options: { type: "surface", wireframe: true } },
-  topViewWireframe: { options: { type: "surface", wireframe: true } }
+  topViewWireframe: {
+    options: { type: "surface3D", wireframe: true, view3D: { rotX: 90, rotY: 0 } }
+  }
 } satisfies Readonly<Record<string, PresetConfig>>;
 
 export type ExcelChartPreset = keyof typeof CHART_PRESETS;
 
 export const EXCEL_CHART_PRESETS = Object.keys(CHART_PRESETS) as ExcelChartPreset[];
 
+interface ChartExPresetConfig {
+  options: Partial<AddChartExOptions> & { type: ChartExType };
+}
+
 export const CHART_EX_PRESETS = {
-  histogram: { type: "histogram" },
-  pareto: { type: "pareto" },
-  waterfall: { type: "waterfall" },
-  funnel: { type: "funnel" },
-  treemap: { type: "treemap" },
-  sunburst: { type: "sunburst" },
-  boxWhisker: { type: "boxWhisker" },
-  boxAndWhisker: { type: "boxWhisker" },
-  regionMap: { type: "regionMap" },
-  map: { type: "regionMap" }
-} satisfies Readonly<Record<string, { type: ChartExType }>>;
+  histogram: { options: { type: "histogram" } },
+  pareto: { options: { type: "pareto" } },
+  waterfall: { options: { type: "waterfall" } },
+  funnel: { options: { type: "funnel" } },
+  treemap: { options: { type: "treemap" } },
+  sunburst: { options: { type: "sunburst" } },
+  boxWhisker: { options: { type: "boxWhisker" } },
+  boxAndWhisker: { options: { type: "boxWhisker" } },
+  regionMap: { options: { type: "regionMap" } },
+  map: { options: { type: "regionMap" } }
+} satisfies Readonly<Record<string, ChartExPresetConfig>>;
 
 export type ExcelChartExPreset = keyof typeof CHART_EX_PRESETS;
 
@@ -168,12 +205,14 @@ export function applyChartPreset(
 ): AddChartOptions {
   const config: PresetConfig | undefined = CHART_PRESETS[preset];
   if (!config) {
-    throw new Error(`Unknown chart preset: ${preset}`);
+    throw new ChartOptionsError(`Unknown chart preset: ${preset}.`);
   }
+  // `type` is required on `PresetConfig.options`, so this assignment is
+  // type-safe without a non-null assertion.
   const merged = {
     ...config.options,
     ...options,
-    type: options.type ?? config.options.type!
+    type: options.type ?? config.options.type
   } as AddChartOptions;
   if (config.seriesDefaults && merged.series) {
     merged.series = merged.series.map(series => ({ ...config.seriesDefaults, ...series }));
@@ -185,9 +224,13 @@ export function applyChartExPreset(
   preset: ExcelChartExPreset,
   options: Omit<AddChartExOptions, "type"> & Partial<Pick<AddChartExOptions, "type">>
 ): AddChartExOptions {
-  const config = CHART_EX_PRESETS[preset];
+  const config: ChartExPresetConfig | undefined = CHART_EX_PRESETS[preset];
   if (!config) {
-    throw new Error(`Unknown chartEx preset: ${preset}`);
+    throw new ChartOptionsError(`Unknown chartEx preset: ${preset}.`);
   }
-  return { ...options, type: options.type ?? config.type } as AddChartExOptions;
+  return {
+    ...config.options,
+    ...options,
+    type: options.type ?? config.options.type
+  } as AddChartExOptions;
 }

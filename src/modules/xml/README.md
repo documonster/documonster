@@ -361,14 +361,14 @@ Index filters use **per-parent semantics**: `a/b[0]` returns the first `b` under
 
 ### Encoding Utilities
 
-| Function                    | Description                                           |
-| --------------------------- | ----------------------------------------------------- |
-| `xmlEncode(text)`           | Encode text for XML content (`<`, `>`, `&`, `"`, `'`) |
-| `xmlDecode(text)`           | Decode XML entities back to text                      |
-| `xmlEncodeAttr(value)`      | Encode an attribute value (same as `xmlEncode`)       |
-| `validateXmlName(name)`     | Validate an XML element/attribute name                |
-| `validateCommentText(text)` | Validate text for XML comment content                 |
-| `encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)        |
+| Function                    | Description                                                   |
+| --------------------------- | ------------------------------------------------------------- |
+| `xmlEncode(text)`           | Encode text for XML content (`<`, `>`, `&`, `"`, `'`)         |
+| `xmlDecode(text)`           | Decode XML entities back to text                              |
+| `xmlEncodeAttr(value)`      | Encode an attribute value (adds `\t\n\r` → `&#x9;&#xA;&#xD;`) |
+| `validateXmlName(name)`     | Validate an XML element/attribute name                        |
+| `validateCommentText(text)` | Validate text for XML comment content                         |
+| `encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)                |
 
 ### Error Types
 

@@ -7,6 +7,7 @@
 
 import { ChartOptionsError } from "@excel/errors";
 
+import { escapeXml } from "./chart-utils";
 import type {
   AddChartOptions,
   AddChartSeriesOptions,
@@ -34,7 +35,6 @@ import type {
   ChartMarker,
   ChartModel,
   ChartRichText,
-  ChartTextProperties,
   ChartTypeGroup,
   DataLabels,
   DataLabelEntry,
@@ -78,6 +78,7 @@ import type {
   LegendPosition,
   PivotChartOptions,
   PivotChartSource,
+  PictureOptions,
   SeriesAxis
 } from "./types";
 
@@ -246,6 +247,22 @@ function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
         opts.type === "area3D",
       `${path}.grouping is only valid for bar, line, and area charts.`
     );
+    // `BarGrouping` and `LineGrouping` overlap on stacked/percentStacked but
+    // diverge on `clustered` (bar only) and `standard` (line/area only).
+    // Reject the wrong-family value up front instead of silently emitting
+    // invalid OOXML.
+    const g = opts.grouping;
+    if (opts.type === "bar" || opts.type === "bar3D") {
+      assertChartOptions(
+        g === "clustered" || g === "stacked" || g === "percentStacked",
+        `${path}.grouping=${JSON.stringify(g)} is not valid for bar charts (use "clustered" | "stacked" | "percentStacked").`
+      );
+    } else {
+      assertChartOptions(
+        g === "standard" || g === "stacked" || g === "percentStacked",
+        `${path}.grouping=${JSON.stringify(g)} is not valid for ${opts.type} charts (use "standard" | "stacked" | "percentStacked").`
+      );
+    }
   }
   if (opts.barDir !== undefined) {
     assertChartOptions(
@@ -319,10 +336,25 @@ function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
     );
     assertIntegerInRange(opts.gapWidth, `${path}.gapWidth`, 0, 500);
   }
-  if (opts.overlap !== undefined) {
+  if (opts.gapDepth !== undefined) {
+    // `c:gapDepth` is only declared on the 3-D chart types'
+    // `CT_*3DChart` definitions (bar3D, line3D, area3D). `pie3D`
+    // does NOT have it despite the type being 3-D.
     assertChartOptions(
-      opts.type === "bar" || opts.type === "bar3D",
-      `${path}.overlap is only valid for bar and bar3D charts.`
+      opts.type === "bar3D" || opts.type === "line3D" || opts.type === "area3D",
+      `${path}.gapDepth is only valid for bar3D, line3D, and area3D charts.`
+    );
+    assertIntegerInRange(opts.gapDepth, `${path}.gapDepth`, 0, 500);
+  }
+  if (opts.overlap !== undefined) {
+    // `c:overlap` belongs to `CT_BarChart` only — `CT_Bar3DChart`
+    // omits it. The writer rejects it on bar3D (see
+    // `buildChartTypeGroup:case "bar3D"`); keep the two in sync so
+    // the rejection surfaces here at authoring time with a
+    // consistent error.
+    assertChartOptions(
+      opts.type === "bar",
+      `${path}.overlap is only valid for 2-D bar charts (bar3D rejects overlap per CT_Bar3DChart).`
     );
     assertIntegerInRange(opts.overlap, `${path}.overlap`, -100, 100);
   }
@@ -412,13 +444,24 @@ function validateSharedChartOptions(opts: ChartModelOptions, path: string): void
 function validateSeriesOptions(
   chartType: AddChartOptions["type"],
   opts: AddChartSeriesOptions,
-  path: string
+  path: string,
+  flags: { allowMissingRefs?: boolean } = {}
 ): void {
+  const allowMissingRefs = flags.allowMissingRefs === true;
   assertChartOptions(!!opts && typeof opts === "object", `${path} must be an object.`);
-  assertChartOptions(
-    typeof opts.values === "string" && opts.values.length > 0,
-    `${path}.values is required and must be a non-empty formula string.`
-  );
+  if (allowMissingRefs) {
+    if (opts.values !== undefined) {
+      assertChartOptions(
+        typeof opts.values === "string" && opts.values.length > 0,
+        `${path}.values must be a non-empty formula string.`
+      );
+    }
+  } else {
+    assertChartOptions(
+      typeof opts.values === "string" && opts.values.length > 0,
+      `${path}.values is required and must be a non-empty formula string.`
+    );
+  }
   if (opts.trendline !== undefined) {
     assertChartOptions(
       !NO_TRENDLINE_CHART_TYPES.has(chartType),
@@ -451,7 +494,7 @@ function validateSeriesOptions(
       `${path}.bubbleSize is only valid for bubble charts.`
     );
   }
-  if (chartType === "bubble") {
+  if (chartType === "bubble" && !allowMissingRefs) {
     assertChartOptions(
       opts.xValues !== undefined,
       `${path}.xValues is required for bubble charts. Use a numeric range for x-values.`
@@ -461,7 +504,7 @@ function validateSeriesOptions(
       `${path}.bubbleSize is required for bubble charts. Use a numeric range for bubble sizes.`
     );
   }
-  if (chartType === "scatter") {
+  if (chartType === "scatter" && !allowMissingRefs) {
     assertChartOptions(
       opts.xValues !== undefined,
       `${path}.xValues is required for scatter charts. Use a numeric range for x-values.`
@@ -473,6 +516,17 @@ function validateSeriesOptions(
       `${path}.xValues is only valid for scatter and bubble charts.`
     );
   }
+  // Note on `categories` for scatter / bubble: the field has no direct
+  // home on `ScatterSeries` / `BubbleSeries`, which use `xVal` for the
+  // numeric X axis. `buildScatterSeries` / `buildBubbleSeries` silently
+  // ignore `opts.categories` at create time (the `xVal` slot is already
+  // populated from `opts.xValues`). On the patch path
+  // (`applyChartSeriesOptionsPatch`), `options.categories` is routed to
+  // `xVal` so callers can switch a scatter's X source to a text axis
+  // via `{ categories, xValueType: "text" }`. Accepting the field on
+  // creation preserves API symmetry (users can pass the same option
+  // bundle across chart types in test fixtures) at the cost of a silent
+  // drop for this specific combination.
   if (opts.dataPoints) {
     for (let i = 0; i < opts.dataPoints.length; i++) {
       validateDataPointOptions(chartType, opts.dataPoints[i], `${path}.dataPoints[${i}]`);
@@ -484,6 +538,20 @@ function validateSeriesOptions(
       `${path}.errorBars is not valid for ${chartType} charts.`
     );
     const errorBars = Array.isArray(opts.errorBars) ? opts.errorBars : [opts.errorBars];
+    // Non-scatter/bubble series only support a single error-bar configuration
+    // (`ErrorBars`, not an array). Fail fast rather than silently keep only
+    // `errorBars[0]` and discard the rest.
+    if (
+      Array.isArray(opts.errorBars) &&
+      opts.errorBars.length > 1 &&
+      chartType !== "scatter" &&
+      chartType !== "bubble"
+    ) {
+      assertChartOptions(
+        false,
+        `${path}.errorBars must be a single configuration for ${chartType} charts; arrays are only valid for scatter and bubble.`
+      );
+    }
     for (let i = 0; i < errorBars.length; i++) {
       validateErrorBarsOptions(
         errorBars[i],
@@ -498,28 +566,13 @@ function validateSeriesPatchOptions(
   opts: Partial<AddChartSeriesOptions>,
   path: string
 ): void {
-  if (opts.values !== undefined) {
-    assertChartOptions(
-      typeof opts.values === "string" && opts.values.length > 0,
-      `${path}.values must be a non-empty formula string.`
-    );
-  }
-  const fullOpts: AddChartSeriesOptions = {
-    ...opts,
-    values: opts.values ?? "__excelts_placeholder__"
-  };
-  if (chartType === "scatter" && fullOpts.xValues === undefined) {
-    fullOpts.xValues = "__excelts_placeholder__";
-  }
-  if (chartType === "bubble") {
-    if (fullOpts.xValues === undefined) {
-      fullOpts.xValues = "__excelts_placeholder__";
-    }
-    if (fullOpts.bubbleSize === undefined) {
-      fullOpts.bubbleSize = "__excelts_placeholder__";
-    }
-  }
-  validateSeriesOptions(chartType, fullOpts, path);
+  // Patch path: unlike series-creation validation we accept a partial
+  // options bag with no `values` / `xValues` / `bubbleSize`. The
+  // `allowMissingRefs` flag short-circuits the "required" assertions so we
+  // don't need to inject placeholder strings (previous implementation used
+  // an `__excelts_placeholder__` sentinel that would have triggered false
+  // positives if `values` ever gained a content-level check).
+  validateSeriesOptions(chartType, opts as AddChartSeriesOptions, path, { allowMissingRefs: true });
 }
 
 function validateDataPointOptions(
@@ -553,8 +606,14 @@ function validateTrendlineOptions(opts: AddTrendlineOptions, path: string): void
   }
   if (opts.type === "movingAvg") {
     assertIntegerInRange(opts.period, `${path}.period`, 2, Number.MAX_SAFE_INTEGER);
-  } else if (opts.period !== undefined) {
-    assertIntegerInRange(opts.period, `${path}.period`, 2, Number.MAX_SAFE_INTEGER);
+  } else {
+    // `period` is only meaningful for moving-average trendlines (Excel
+    // silently ignores it on other types, which quickly devolves into
+    // phantom config bugs). Match the stricter `order` handling above.
+    assertChartOptions(
+      opts.period === undefined,
+      `${path}.period is only valid for movingAvg trendlines.`
+    );
   }
   if (opts.forward !== undefined) {
     assertNumberInRange(opts.forward, `${path}.forward`, 0, Number.MAX_SAFE_INTEGER);
@@ -628,29 +687,57 @@ function validateAxisOptions(opts: AddAxisOptions | undefined, path: string): vo
   }
 }
 
-function hexToColor(hex: string): ChartColor {
-  return { srgb: hex.replace(/^#/, "").toUpperCase() };
+/**
+ * Normalise a user-facing hex colour into a structured {@link ChartColor}.
+ * Accepts `"#RRGGBB"` / `"RRGGBB"` and the optional 8-digit
+ * `"RRGGBBAA"` form. The alpha byte, when present, is decoded into
+ * `color.alpha` on the OOXML 0–100000 scale (0 = fully transparent,
+ * 100000 = fully opaque) rather than discarded. Throws
+ * `ChartOptionsError` when the input is not a valid hex triplet so the
+ * caller sees the mistake at the assignment site rather than via a
+ * downstream XML parser rejection.
+ */
+export function hexToColor(hex: string): ChartColor {
+  const cleaned = hex.replace(/^#/, "").toUpperCase();
+  if (!/^[0-9A-F]{6}([0-9A-F]{2})?$/.test(cleaned)) {
+    throw new ChartOptionsError(
+      `Invalid hex colour: ${JSON.stringify(hex)}. Expected 6-digit (or 8-digit with alpha) hex like "#FF0000".`
+    );
+  }
+  const color: ChartColor = { srgb: cleaned.slice(0, 6) };
+  if (cleaned.length === 8) {
+    // 8-digit form: trailing 2 bytes encode alpha on the 0–255 scale.
+    // `ChartColor.alpha` stores OOXML's 0–100000 integer; convert and
+    // round so the wire value is an integer, matching Excel's output.
+    const alphaByte = parseInt(cleaned.slice(6, 8), 16);
+    color.alpha = Math.round((alphaByte / 255) * 100000);
+  }
+  return color;
 }
 
-function escapeXmlText(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
+/**
+ * Escape XML text content while stripping characters forbidden by
+ * XML 1.0. Without the strip step, a chart built from user input
+ * containing `\b` / `\f` / other C0 control characters would produce
+ * an XML-invalid `<c:v>` or `<c:f>` payload that strict readers
+ * refuse to parse. Preserved: `\t`, `\n`, `\r` (the only C0 chars
+ * XML 1.0 allows in content).
+ */
 function buildPivotSourceXml(source: PivotChartSource): string {
   const name = typeof source === "string" ? source : source.name;
   const fmtId = typeof source === "string" ? 0 : (source.fmtId ?? 0);
   if (!name) {
-    throw new Error("Pivot chart source name is required.");
+    throw new ChartOptionsError("Pivot chart source name is required.");
   }
   if (!Number.isInteger(fmtId) || fmtId < 0) {
-    throw new Error("Pivot chart source fmtId must be a non-negative integer.");
+    throw new ChartOptionsError("Pivot chart source fmtId must be a non-negative integer.");
   }
   // Pivot chart options used to be embedded inside `<c:pivotSource>` under a
   // private `xmlns:excelts` namespace; Excel never recognised that and the
   // parser never read it back. Options are now routed into
   // `ChartModel.pivotOptions` (see {@link ChartModel.pivotOptions}) and
   // serialised as MS standard `c14:pivotOptions` inside chartSpace's extLst.
-  return `<c:pivotSource><c:name>${escapeXmlText(name)}</c:name><c:fmtId val="${fmtId}"/></c:pivotSource>`;
+  return `<c:pivotSource><c:name>${escapeXml(name)}</c:name><c:fmtId val="${fmtId}"/></c:pivotSource>`;
 }
 
 /**
@@ -658,16 +745,37 @@ function buildPivotSourceXml(source: PivotChartSource): string {
  * into a structured ShapeProperties object. Returns undefined when input is
  * undefined.
  */
-function toShapeProperties(
+/**
+ * Normalise a user-facing shape-fill option bundle (hex-string fill,
+ * hex-string border, borderWidth in points, gradient, pattern, …) into a
+ * structured {@link ShapeProperties}. Passes through already-structured
+ * shapes unchanged so callers can mix the two forms freely.
+ *
+ * Exported so `chart-ex-builder` can reuse the exact same normalisation
+ * for ChartEx `spPr` options — previously ChartEx only accepted the
+ * fully-structured form, which was an API asymmetry.
+ */
+export function toShapeProperties(
   input: ShapeProperties | AddShapeFillOptions | undefined
 ): ShapeProperties | undefined {
   if (!input) {
     return undefined;
   }
   // If it already looks like a ShapeProperties (has fill/line/effectList/_rawXml
-  // but no hex-string "fill" field), pass through.
+  // but no hex-string "fill" field), shallow-clone rather than return
+  // the caller's reference. Every downstream consumer treats the
+  // returned object as owned (e.g. `applyChartSeriesOptionsPatch`
+  // deletes `_rawXml` on it; combo-group builders overwrite inner
+  // fields), and leaking the caller's object into the model would
+  // mean subsequent patches on one chart silently mutate the
+  // caller's options blob — and if that blob was reused across
+  // multiple `addChart(...)` calls, every later chart would see the
+  // stripped / mutated state. The clone is shallow because `fill` /
+  // `line` sub-trees are themselves replaced wholesale by the
+  // downstream patchers when they change; deeper aliasing is not
+  // currently a hazard.
   if (isShapeProperties(input)) {
-    return input;
+    return { ...input };
   }
   const opts = input as AddShapeFillOptions;
   const spPr: ShapeProperties = {};
@@ -686,7 +794,18 @@ function toShapeProperties(
       spPr.line.color = hexToColor(opts.border);
     }
     if (opts.borderWidth !== undefined) {
-      spPr.line.width = opts.borderWidth * EMU_PER_POINT;
+      // OOXML `a:ln/@w` is `ST_LineWidth` = `xsd:int`. A fractional
+      // `borderWidth` (e.g. 0.825pt, or any point value that doesn't
+      // round-trip through `n / 12700` cleanly) would interpolate as
+      // `"10477.5"`, which strict readers reject. Rounding matches the
+      // sibling builders (`buildSeriesSpPr`, etc.).
+      spPr.line.width = Math.round(opts.borderWidth * EMU_PER_POINT);
+    } else if (opts.border) {
+      // Mirror chart-ex-builder: when the caller sets a border colour
+      // without an explicit width, fall back to 9525 EMU (0.75pt).
+      // Without this DrawingML readers treat `<a:ln>` as hairline,
+      // which typically disappears on screen.
+      spPr.line.width = 9525;
     }
   }
   return Object.keys(spPr).length > 0 ? spPr : undefined;
@@ -710,6 +829,19 @@ function isShapeProperties(v: unknown): v is ShapeProperties {
     return true;
   }
   if ("effectList" in o) {
+    return true;
+  }
+  // Check the remaining `ShapeProperties` fields that distinguish it
+  // from `AddShapeFillOptions`. `AddShapeFillOptions` has only
+  // `fill` (as hex-string) and `line` (as hex-string); anything else
+  // is a `ShapeProperties`-only field. Previously the sniffer missed
+  // the 3D/geometry fields entirely — a user passing
+  // `{ sp3d: {...} }` or `{ transform: {...} }` alone was
+  // misclassified and the fields silently dropped.
+  if ("scene3d" in o || "sp3d" in o) {
+    return true;
+  }
+  if ("transform" in o || "presetGeometry" in o || "customGeometry" in o) {
     return true;
   }
   return false;
@@ -745,13 +877,21 @@ function buildSeriesSpPr(opts: AddChartSeriesOptions): ShapeProperties | undefin
   if (opts.fill) {
     spPr = makeSolidFill(opts.fill);
   }
-  if (opts.line || opts.lineWidth || opts.lineDash) {
+  if (opts.line || opts.lineWidth !== undefined || opts.lineDash) {
     const line: ChartLine = {};
     if (opts.line) {
       line.color = hexToColor(opts.line);
     }
-    if (opts.lineWidth) {
+    if (opts.lineWidth !== undefined) {
       line.width = Math.round(opts.lineWidth * EMU_PER_POINT); // pt → EMU
+    } else if (opts.line) {
+      // Mirror chart-ex-builder: when the caller sets a line colour
+      // without an explicit width, fall back to 9525 EMU (0.75pt —
+      // Excel's default for chart series borders). Without this
+      // DrawingML readers treat `<a:ln>` as hairline, which disappears
+      // at typical screen DPI and is never what the user means by
+      // `line: "#FF0000"`.
+      line.width = 9525;
     }
     if (opts.lineDash) {
       line.dash = opts.lineDash;
@@ -775,7 +915,11 @@ function buildMarkerFromOpts(opts: AddChartMarkerOptions): ChartMarker {
       mSpPr.fill = { solid: hexToColor(opts.fill) };
     }
     if (opts.border) {
-      mSpPr.line = { color: hexToColor(opts.border) };
+      // Default to 9525 EMU (0.75pt) — without an explicit width
+      // DrawingML treats the outline as hairline and the marker ring
+      // typically vanishes at on-screen DPI. Matches the other
+      // builder paths that default to the same width.
+      mSpPr.line = { color: hexToColor(opts.border), width: 9525 };
     }
     m.spPr = mSpPr;
   }
@@ -813,6 +957,15 @@ function buildDataLabelsFromOpts(opts: AddDataLabelsOptions): DataLabels {
   }
   if (opts.numFmt) {
     dl.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
+  } else if (opts.numFmtLinked !== undefined) {
+    // Allow `numFmtLinked` without an explicit `numFmt` to re-link the
+    // data-label number format to the source cell. OOXML's `CT_NumFmt`
+    // requires `formatCode`, so default it to `General` (the Excel
+    // default when `sourceLinked="1"` is emitted without an author-
+    // specified format). Previously this branch silently dropped the
+    // flag: callers had no way to opt into source-linking on data
+    // labels without also supplying a redundant format code.
+    dl.numFmt = { formatCode: "General", sourceLinked: opts.numFmtLinked };
   }
   const spPr = toShapeProperties(opts.spPr);
   if (spPr) {
@@ -857,6 +1010,10 @@ function buildDataLabelEntryFromOpts(opts: AddDataLabelEntryOptions): DataLabelE
   }
   if (opts.numFmt) {
     entry.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
+  } else if (opts.numFmtLinked !== undefined) {
+    // Allow standalone `numFmtLinked` — see `buildDataLabelsFromOpts`
+    // for the matching semantics.
+    entry.numFmt = { formatCode: "General", sourceLinked: opts.numFmtLinked };
   }
   const spPr = toShapeProperties(opts.spPr);
   if (spPr) {
@@ -912,12 +1069,12 @@ function buildTrendlineFromOpts(opts: AddTrendlineOptions): Trendline {
   if (opts.displayEq !== undefined) {
     t.displayEq = opts.displayEq;
   }
-  if (opts.line || opts.lineWidth || opts.lineDash) {
+  if (opts.line || opts.lineWidth !== undefined || opts.lineDash) {
     const line: ChartLine = {};
     if (opts.line) {
       line.color = hexToColor(opts.line);
     }
-    if (opts.lineWidth) {
+    if (opts.lineWidth !== undefined) {
       line.width = Math.round(opts.lineWidth * EMU_PER_POINT);
     }
     if (opts.lineDash) {
@@ -938,6 +1095,10 @@ function buildTrendlineLabelFromOpts(opts: AddTrendlineLabelOptions): TrendlineL
   }
   if (opts.numFmt) {
     lbl.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
+  } else if (opts.numFmtLinked !== undefined) {
+    // Allow standalone `numFmtLinked` — see `buildDataLabelsFromOpts`
+    // for the matching semantics.
+    lbl.numFmt = { formatCode: "General", sourceLinked: opts.numFmtLinked };
   }
   if (opts.layout) {
     lbl.layout = opts.layout;
@@ -976,12 +1137,12 @@ function buildErrorBarsFromOpts(opts: AddErrorBarsOptions): ErrorBars {
   const customSpPr = toShapeProperties(opts.spPr);
   if (customSpPr) {
     eb.spPr = customSpPr;
-  } else if (opts.line || opts.lineWidth || opts.lineDash) {
+  } else if (opts.line || opts.lineWidth !== undefined || opts.lineDash) {
     const line: ChartLine = {};
     if (opts.line) {
       line.color = hexToColor(opts.line);
     }
-    if (opts.lineWidth) {
+    if (opts.lineWidth !== undefined) {
       line.width = Math.round(opts.lineWidth * EMU_PER_POINT);
     }
     if (opts.lineDash) {
@@ -1000,7 +1161,7 @@ function buildDataPointFromOpts(opts: AddDataPointOptions): DataPoint {
       spPr.fill = { solid: hexToColor(opts.fill) };
     }
     if (opts.border) {
-      spPr.line = { color: hexToColor(opts.border) };
+      spPr.line = { color: hexToColor(opts.border), width: 9525 };
     }
     dp.spPr = spPr;
   }
@@ -1022,7 +1183,29 @@ function buildDataPointFromOpts(opts: AddDataPointOptions): DataPoint {
 /**
  * Apply common series-level options from AddChartSeriesOptions to any series object.
  */
-function applySeriesOptions(s: any, opts: AddChartSeriesOptions): void {
+/**
+ * Structural super-type accepted by {@link applySeriesOptions}. All
+ * series types ({@link BarSeries}, {@link LineSeries}, …) satisfy this
+ * shape because the fields we set here are either common to every
+ * series (spPr / txPr / dataLabels / trendlines / dataPoints) or are
+ * only written when the caller opts in via the corresponding option
+ * key. Using this type instead of `any` keeps the common fields
+ * type-checked while still letting the concrete caller pass any of
+ * the series variants.
+ */
+type MutableSeriesWithOptions = SeriesBase & {
+  marker?: ChartMarker;
+  dataLabels?: DataLabels;
+  trendlines?: Trendline[];
+  dataPoints?: DataPoint[];
+  pictureOptions?: PictureOptions;
+};
+
+function applySeriesOptions(
+  s: MutableSeriesWithOptions,
+  opts: AddChartSeriesOptions,
+  context: { supportsPictureOptions?: boolean } = {}
+): void {
   s.spPr = buildSeriesSpPr(opts);
   if (opts.marker) {
     s.marker = buildMarkerFromOpts(opts.marker);
@@ -1037,37 +1220,101 @@ function applySeriesOptions(s: any, opts: AddChartSeriesOptions): void {
   if (opts.dataPoints) {
     s.dataPoints = opts.dataPoints.map(buildDataPointFromOpts);
   }
-  if (opts.txPr) {
-    s.txPr = opts.txPr;
-  }
+  // NOTE: classic chart series have no `txPr` slot in OOXML, so the
+  // field was removed from `AddChartSeriesOptions`. Trendline labels,
+  // axis labels, data labels, and titles all have their own `txPr`
+  // entry points — route run-level text styling through those.
   if (opts.pictureFill) {
-    s.pictureOptions = {
-      applyToFront: opts.pictureFill.applyToFront,
-      applyToSides: opts.pictureFill.applyToSides,
-      applyToEnd: opts.pictureFill.applyToEnd,
-      pictureFormat: opts.pictureFill.fillMode,
-      pictureStackUnit: opts.pictureFill.scale
+    applyPictureFillToSeries(s, opts.pictureFill, {
+      supportsPictureOptions: context.supportsPictureOptions
+    });
+  }
+}
+
+/**
+ * Split an `AddShapeFillOptions`-style `pictureFill` option bundle into the
+ * two OOXML artefacts that render the feature:
+ *   - `c:pictureOptions` (stretch/stack/apply-to-*) — stored on
+ *     `series.pictureOptions`
+ *   - `a:blipFill` (the actual image rel) — stored on
+ *     `series.spPr.fill.blip`
+ *
+ * Both are updated in a single place so the new-series path
+ * ({@link applySeriesOptions}) and the patch path
+ * ({@link applyChartSeriesOptionsPatch}) cannot diverge.
+ */
+function applyPictureFillToSeries(
+  series: SeriesBase,
+  pictureFill: NonNullable<AddChartSeriesOptions["pictureFill"]>,
+  options: { supportsPictureOptions?: boolean } = {}
+): void {
+  // `c:pictureOptions` (stretch/stack/applyTo*/scale) is only declared
+  // on `CT_BarSer` per ECMA-376 §21.2.2.162. Non-bar callers get the
+  // `<a:blipFill>` on their `spPr.fill.blip` (which is legal on every
+  // shape), but the caller-supplied `applyToFront` / `fillMode` /
+  // `scale` hints are silently dropped — we would otherwise emit a
+  // `<c:pictureOptions>` that schema validators reject. Surface the
+  // mismatch if the caller set bar-only fields on a non-bar series
+  // rather than letting the data quietly disappear.
+  const barOnlyFieldsUsed =
+    pictureFill.applyToFront !== undefined ||
+    pictureFill.applyToSides !== undefined ||
+    pictureFill.applyToEnd !== undefined ||
+    pictureFill.scale !== undefined;
+  if (options.supportsPictureOptions) {
+    (series as SeriesBase & { pictureOptions?: PictureOptions }).pictureOptions = {
+      applyToFront: pictureFill.applyToFront,
+      applyToSides: pictureFill.applyToSides,
+      applyToEnd: pictureFill.applyToEnd,
+      pictureFormat: pictureFill.fillMode,
+      pictureStackUnit: pictureFill.scale
     };
-    // Route the blipFill itself through spPr.fill.blip. The two halves
-    // of the OOXML "picture on bars" setting live in different places:
-    // `c:pictureOptions` (stretch/stack/scale/apply-to-*) and
-    // `a:blipFill` (the actual image rel) — we unify them under the
-    // single `pictureFill` option for ergonomics and split them back
-    // here.
-    if (opts.pictureFill.image !== undefined || opts.pictureFill.relationshipId) {
-      s.spPr = s.spPr ?? {};
-      s.spPr.fill = s.spPr.fill ?? {};
-      s.spPr.fill.blip = {
-        fillMode:
-          opts.pictureFill.fillMode === "stack" || opts.pictureFill.fillMode === "stackScale"
-            ? "tile"
-            : "stretch",
-        ...(opts.pictureFill.relationshipId
-          ? { relationshipId: opts.pictureFill.relationshipId }
-          : {}),
-        ...(opts.pictureFill.image !== undefined ? { _pendingImage: opts.pictureFill.image } : {})
-      };
+  } else if (barOnlyFieldsUsed) {
+    throw new ChartOptionsError(
+      "pictureFill.applyToFront / applyToSides / applyToEnd / scale are only valid for bar / bar3D series (mapped to c:pictureOptions in CT_BarSer). Use the plain `fill` / `spPr.fill.blip` form for other series types, or omit the bar-only hints."
+    );
+  }
+  if (pictureFill.image !== undefined || pictureFill.relationshipId) {
+    // Parsed-from-XML series carry their `spPr` as a dual
+    // representation: the structured `fill` / `line` slots are
+    // populated AND `_rawXml` holds the original DrawingML bytes.
+    // The writer short-circuits to `_rawXml` (see
+    // `chart-space-xform._renderSpPr`) whenever it's present, which
+    // means a downstream mutation like this one — which sets
+    // `series.spPr.fill.blip` but can't touch the raw bytes — gets
+    // silently overwritten at save time. The chart rel points at the
+    // new image, the chart XML still carries the old fill. Strip
+    // `_rawXml` here so the structured patch wins and the writer
+    // emits the fresh `<a:blipFill>`.
+    //
+    // We also need to repopulate enough of the structured model that
+    // the dropped `_rawXml` doesn't take authored line / geometry /
+    // effect properties down with it. `parseSpPr` is already called
+    // at load time and stores the structured fields alongside the
+    // raw bytes, so the structured slots still carry whatever the
+    // loaded file had. Nothing extra needed on the clone side.
+    if (series.spPr && typeof series.spPr === "object") {
+      delete (series.spPr as { _rawXml?: string })._rawXml;
     }
+    series.spPr = series.spPr ?? {};
+    series.spPr.fill = series.spPr.fill ?? {};
+    // Also clear a raw representation that might live on the
+    // existing `fill` object (rare — reserved for `<a:solidFill>`
+    // / `<a:gradFill>` raw captures some parsers produce). The
+    // writer emits a single `<a:*Fill>` child per `<a:spPr>`, so
+    // the new blip must be the only fill in play.
+    delete (series.spPr.fill as { solid?: unknown }).solid;
+    delete (series.spPr.fill as { gradient?: unknown }).gradient;
+    delete (series.spPr.fill as { pattern?: unknown }).pattern;
+    delete (series.spPr.fill as { noFill?: unknown }).noFill;
+    series.spPr.fill.blip = {
+      fillMode:
+        pictureFill.fillMode === "stack" || pictureFill.fillMode === "stackScale"
+          ? "tile"
+          : "stretch",
+      ...(pictureFill.relationshipId ? { relationshipId: pictureFill.relationshipId } : {}),
+      ...(pictureFill.image !== undefined ? { _pendingImage: pictureFill.image } : {})
+    };
   }
 }
 
@@ -1080,7 +1327,7 @@ function buildBarSeries(opts: AddChartSeriesOptions, idx: number): BarSeries {
   if (opts.values) {
     s.val = makeNumData(opts.values);
   }
-  applySeriesOptions(s, opts);
+  applySeriesOptions(s, opts, { supportsPictureOptions: true });
   if (opts.invertIfNegative !== undefined) {
     s.invertIfNegative = opts.invertIfNegative;
   }
@@ -1254,7 +1501,11 @@ export function buildChartSeriesForType(
   if (chartType === "surface" || chartType === "surface3D") {
     return buildSurfaceSeries(options, index);
   }
-  return buildBarSeries(options, index);
+  // Exhaustiveness check: every value of `AddChartOptions["type"]` must be
+  // handled above. Falling back to `buildBarSeries` silently would mis-map
+  // any new chart type introduced in the future.
+  const _exhaustive: never = chartType;
+  throw new ChartOptionsError(`Unsupported chart type: ${String(_exhaustive)}.`);
 }
 
 export function applyChartSeriesOptionsPatch(
@@ -1270,8 +1521,14 @@ export function applyChartSeriesOptionsPatch(
   }
   if (options.categories !== undefined) {
     const target = series as SeriesBase & { cat?: AxisDataSource; xVal?: AxisDataSource };
+    // Scatter / bubble series have no category axis — their X axis is
+    // `xVal`. When a patch targets such a series (identified by an
+    // already-populated `xVal` and no `cat`), route `categories`
+    // through `makeXAxisData` so `options.xValueType: "text"` flips
+    // the series from a numeric `xVal` to a labelled one. For every
+    // other series type the patch goes to the structural `cat` slot.
     if (target.xVal && !target.cat) {
-      target.xVal = makeNumericAxisData(options.categories);
+      target.xVal = makeXAxisData(options.categories, options.xValueType);
     } else {
       target.cat = makeAxisData(options.categories);
     }
@@ -1296,7 +1553,45 @@ export function applyChartSeriesOptionsPatch(
     );
   }
   if (hasSeriesShapePatch(options)) {
-    series.spPr = buildSeriesSpPr(options as AddChartSeriesOptions);
+    const patchShape = buildSeriesSpPr(options as AddChartSeriesOptions);
+    if (options.spPr !== undefined) {
+      // Explicit `spPr` replaces the whole shape — the caller opted in
+      // to a full structured override.
+      series.spPr = patchShape;
+    } else {
+      // Sugared patches (`fill` / `line` / `lineWidth` / `lineDash`)
+      // should update only the affected sub-object AND merge inside the
+      // sub-object so narrow patches (e.g. `lineDash` alone) don't wipe
+      // out the adjacent fields.
+      //
+      // Previously the merge stopped at the top level (`{ ...existing,
+      // line: patchShape.line }`) — so `updateSeries(0, { lineDash: "dash" })`
+      // on a series with `{ line: "#FF0000", lineWidth: 2 }` dropped the
+      // colour AND width because `buildSeriesSpPr({ lineDash: "dash" })`
+      // only sets `line.dash`, and the top-level spread replaced the
+      // whole `line` sub-object with `{ dash: "dash" }`. Deep-merge the
+      // sub-objects so each field survives until the caller explicitly
+      // overwrites it.
+      const existing = series.spPr ?? {};
+      const next: ShapeProperties = { ...existing };
+      if (patchShape?.fill !== undefined) {
+        next.fill = patchShape.fill;
+      }
+      if (patchShape?.line !== undefined) {
+        next.line = { ...(existing.line ?? {}), ...patchShape.line };
+      }
+      series.spPr = next;
+    }
+    // CRITICAL: clear `_rawXml` so the writer serialises from the
+    // structured fields we just patched. The chart-space writer emits
+    // `_rawXml` verbatim when present (`_renderSpPr` at the top of the
+    // function body in `chart-space-xform.ts`), which meant every
+    // structured mutation was silently overridden by the stale raw
+    // bytes captured at parse time. After this clear the next save
+    // re-serialises the full shape tree from the structured fields.
+    if (series.spPr && "_rawXml" in series.spPr) {
+      delete (series.spPr as { _rawXml?: string })._rawXml;
+    }
   }
   if (options.marker !== undefined) {
     (series as SeriesBase & { marker?: ChartMarker }).marker = buildMarkerFromOpts(options.marker);
@@ -1319,21 +1614,26 @@ export function applyChartSeriesOptionsPatch(
   }
   if (options.errorBars !== undefined) {
     const errorBars = Array.isArray(options.errorBars) ? options.errorBars : [options.errorBars];
+    // Validate each error-bar config independently. Previously the
+    // patch path relied on the outer `validateSeriesPatchOptions` call
+    // at the top of this function, but that skip when `chartType` is
+    // omitted. `CT_ErrBars` requires `errValType`, and without a
+    // validator an options object missing `type` would silently emit
+    // `<c:errValType/>` (no attribute) → schema-invalid output.
+    for (const eb of errorBars) {
+      validateErrorBarsOptions(eb, "series.errorBars");
+    }
     const built = errorBars.map(buildErrorBarsFromOpts);
     (series as SeriesBase & { errorBars?: ErrorBars | ErrorBars[] }).errorBars =
       chartType === "scatter" || chartType === "bubble" ? built : built[0];
   }
-  if (options.txPr !== undefined) {
-    (series as SeriesBase & { txPr?: ChartTextProperties }).txPr = options.txPr;
-  }
+  // NOTE: classic chart series have no `txPr` slot in OOXML — see the
+  // `AddChartSeriesOptions` type comment. The field was removed from
+  // the options bag so this patch branch is gone as well.
   if (options.pictureFill !== undefined) {
-    (series as SeriesBase & { pictureOptions?: unknown }).pictureOptions = {
-      applyToFront: options.pictureFill.applyToFront,
-      applyToSides: options.pictureFill.applyToSides,
-      applyToEnd: options.pictureFill.applyToEnd,
-      pictureFormat: options.pictureFill.fillMode,
-      pictureStackUnit: options.pictureFill.scale
-    };
+    applyPictureFillToSeries(series, options.pictureFill, {
+      supportsPictureOptions: chartType === "bar" || chartType === "bar3D"
+    });
   }
   if (options.smooth !== undefined) {
     (series as SeriesBase & { smooth?: boolean }).smooth = options.smooth;
@@ -1437,7 +1737,21 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
     return;
   }
   if (opts.title) {
-    axis.title = buildTitle(opts.title);
+    // Replace the title text but preserve any previously-applied
+    // `titleOptions` (layout, overlay, spPr, txPr) attached to
+    // `axis.title`. Combo charts call `applyAxisOptions` repeatedly on
+    // a shared axis (see `buildChartTypeGroup` reuse paths), and a
+    // wholesale replacement here discarded every field except the new
+    // text. We graft the new title runs onto the existing frame.
+    const fresh = buildTitle(opts.title);
+    axis.title = axis.title
+      ? {
+          ...axis.title,
+          strRef: fresh.strRef,
+          text: fresh.text,
+          rawTx: fresh.rawTx
+        }
+      : fresh;
   }
   if (opts.titleOptions) {
     if (!axis.title) {
@@ -1446,7 +1760,16 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
     applyTitleOptions(axis.title, opts.titleOptions);
   }
   if (opts.numFmt) {
-    axis.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
+    // Merge onto any prior `numFmt` so a later call that supplies
+    // `opts.numFmt` without `opts.numFmtLinked` doesn't reset
+    // `sourceLinked` back to `undefined`. Same class of bug as the
+    // title replacement above — triggered when combo-chart flows
+    // apply options to a shared axis in multiple passes.
+    axis.numFmt = {
+      ...axis.numFmt,
+      formatCode: opts.numFmt,
+      ...(opts.numFmtLinked !== undefined ? { sourceLinked: opts.numFmtLinked } : {})
+    };
   }
   if (opts.min !== undefined || opts.max !== undefined || opts.orientation || opts.logBase) {
     if (!axis.scaling) {
@@ -1480,18 +1803,29 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   if (opts.tickLblPos) {
     axis.tickLblPos = opts.tickLblPos;
   }
-  // Major gridlines: boolean toggle OR structured style
+  // Major gridlines: the explicit `majorGridlines` boolean is an on/off
+  // switch that must win over any `majorGridlinesStyle`. Callers who
+  // pass both `{ majorGridlines: false, majorGridlinesStyle: { … } }`
+  // mean "hide them, even though I've authored a style for the ON
+  // state" — dropping the style and emitting nothing is the right
+  // call. The previous code checked the boolean in an `else if`, so
+  // an explicit `false` was silently ignored whenever a style was
+  // supplied and the gridlines stayed drawn.
   const majorGridlinesStyle = toShapeProperties(opts.majorGridlinesStyle);
-  if (majorGridlinesStyle) {
+  if (opts.majorGridlines === false) {
+    axis.majorGridlines = undefined;
+  } else if (majorGridlinesStyle) {
     axis.majorGridlines = majorGridlinesStyle;
-  } else if (opts.majorGridlines !== undefined) {
-    axis.majorGridlines = opts.majorGridlines ? {} : undefined;
+  } else if (opts.majorGridlines === true) {
+    axis.majorGridlines = {};
   }
   const minorGridlinesStyle = toShapeProperties(opts.minorGridlinesStyle);
-  if (minorGridlinesStyle) {
+  if (opts.minorGridlines === false) {
+    axis.minorGridlines = undefined;
+  } else if (minorGridlinesStyle) {
     axis.minorGridlines = minorGridlinesStyle;
-  } else if (opts.minorGridlines !== undefined) {
-    axis.minorGridlines = opts.minorGridlines ? {} : undefined;
+  } else if (opts.minorGridlines === true) {
+    axis.minorGridlines = {};
   }
   if (opts.hidden !== undefined) {
     axis.delete = opts.hidden;
@@ -1503,7 +1837,11 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   if (opts.txPr) {
     axis.txPr = opts.txPr;
   } else if (opts.textRotation !== undefined) {
-    axis.txPr = { rotation: opts.textRotation * 60000 };
+    // `a:bodyPr/@rot` is `ST_Angle` = `xsd:int`. Round so a caller
+    // passing fractional degrees (or a value like 1.05° that IEEE 754
+    // turns into 63000.000000000004) doesn't inject `"NaN"` /
+    // `"63000.00000000001"` as an attribute value.
+    axis.txPr = { rotation: Math.round(opts.textRotation * 60000) };
   }
   if (opts.lblAlgn !== undefined && axis.axisType === "cat") {
     (axis as CategoryAxis).lblAlgn = opts.lblAlgn;
@@ -1559,12 +1897,12 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   const customSpPr = toShapeProperties(opts.spPr);
   if (customSpPr) {
     axis.spPr = customSpPr;
-  } else if (opts.lineColor || opts.lineWidth || opts.lineDash) {
+  } else if (opts.lineColor || opts.lineWidth !== undefined || opts.lineDash) {
     const line: ChartLine = {};
     if (opts.lineColor) {
       line.color = hexToColor(opts.lineColor);
     }
-    if (opts.lineWidth) {
+    if (opts.lineWidth !== undefined) {
       line.width = Math.round(opts.lineWidth * EMU_PER_POINT); // pt to EMU
     }
     if (opts.lineDash) {
@@ -1664,9 +2002,33 @@ function buildChartTypeGroup(
   switch (type) {
     case "bar": {
       const { catAx, valAx } = buildCatValAxes(axIds);
+      const barDir = opts.barDir ?? "col";
+      // Horizontal bar charts (`barDir="bar"`) swap the axis
+      // directions: the category axis is on the left (vertical),
+      // value axis at the bottom (horizontal). Excel itself emits
+      // `axPos="l"` / `axPos="b"` respectively in that case.
+      // `buildCatValAxes` produces the column-chart defaults
+      // (`catAx.axPos="b"`, `valAx.axPos="l"`), which were left
+      // unchanged for horizontal bar charts — the resulting XML
+      // still rendered in Excel because Excel infers orientation
+      // from `c:barDir`, but the renderer's `pickAxis` (position-
+      // based) picked the wrong axis for gridlines / tick labels on
+      // horizontal bars built via `addBarChart`.
+      //
+      // We deliberately do NOT move `majorGridlines` between axes —
+      // `<c:majorGridlines/>` on a value axis means "draw gridlines
+      // perpendicular to the value axis at every tick". When the
+      // value axis is horizontal (bottom), the renderer correctly
+      // projects those as vertical strokes because it picks up
+      // gridlines from the X-axis slot (by `axPos`), not by
+      // axis-type.
+      if (barDir === "bar") {
+        catAx.axPos = "l";
+        valAx.axPos = "b";
+      }
       const group: BarChartGroup = {
         type,
-        barDir: opts.barDir ?? "col",
+        barDir,
         grouping: (opts.grouping as BarGrouping) ?? "clustered",
         varyColors: opts.varyColors,
         series: seriesOpts.map(buildBarSeries),
@@ -1680,14 +2042,32 @@ function buildChartTypeGroup(
     }
     case "bar3D": {
       const { catAx, valAx, serAx } = buildCatValSerAxes(axIds);
+      const barDir = opts.barDir ?? "col";
+      if (barDir === "bar") {
+        catAx.axPos = "l";
+        valAx.axPos = "b";
+      }
+      // `CT_Bar3DChart` does NOT accept `overlap` or `serLines` — both
+      // are 2-D-only. Reject them loud here so the options validator
+      // catches the mistake before the writer silently drops them.
+      if (opts.overlap !== undefined) {
+        throw new ChartOptionsError(
+          'bar3D charts do not support `overlap` (valid only on 2-D `bar`). Remove the field or switch to `type: "bar"`.'
+        );
+      }
+      if (opts.serLines !== undefined) {
+        throw new ChartOptionsError(
+          'bar3D charts do not support `serLines` (valid only on 2-D `bar`). Remove the field or switch to `type: "bar"`.'
+        );
+      }
       const group: BarChartGroup = {
         type,
-        barDir: opts.barDir ?? "col",
+        barDir,
         grouping: (opts.grouping as BarGrouping) ?? "clustered",
         varyColors: opts.varyColors,
         series: seriesOpts.map(buildBarSeries),
         gapWidth: opts.gapWidth ?? 150,
-        overlap: opts.overlap,
+        gapDepth: opts.gapDepth,
         shape: opts.shape,
         axisIds: [catAx.axId, valAx.axId, serAx.axId]
       };
@@ -1713,16 +2093,36 @@ function buildChartTypeGroup(
     }
     case "line3D": {
       const { catAx, valAx, serAx } = buildCatValSerAxes(axIds);
+      // `CT_Line3DChart` does NOT accept `marker`, `smooth`,
+      // `hiLowLines`, or `upDownBars` — all 2-D-only. Reject them here
+      // rather than silently emit schema-invalid XML.
+      if (opts.showMarker !== undefined) {
+        throw new ChartOptionsError(
+          'line3D charts do not support `showMarker` (valid only on 2-D `line`). Remove the field or switch to `type: "line"`.'
+        );
+      }
+      if (opts.smooth !== undefined) {
+        throw new ChartOptionsError(
+          'line3D charts do not support `smooth` (valid only on 2-D `line`). Remove the field or switch to `type: "line"`.'
+        );
+      }
+      if (opts.hiLowLines !== undefined) {
+        throw new ChartOptionsError(
+          "line3D charts do not support `hiLowLines` (valid only on 2-D `line`)."
+        );
+      }
+      if (opts.upDownBars !== undefined) {
+        throw new ChartOptionsError(
+          "line3D charts do not support `upDownBars` (valid only on 2-D `line`)."
+        );
+      }
       const group: LineChartGroup = {
         type,
         grouping: (opts.grouping as LineGrouping) ?? "standard",
         varyColors: opts.varyColors,
         series: seriesOpts.map(buildLineSeries),
-        marker: opts.showMarker ?? true,
-        smooth: opts.smooth,
-        hiLowLines: opts.hiLowLines ? {} : undefined,
-        upDownBars: buildUpDownBarsFromOpts(opts.upDownBars),
         dropLines: opts.dropLines ? {} : undefined,
+        gapDepth: opts.gapDepth,
         axisIds: [catAx.axId, valAx.axId, serAx.axId]
       };
       result = { group, axes: [catAx, valAx, serAx] };
@@ -1771,6 +2171,10 @@ function buildChartTypeGroup(
         varyColors: opts.varyColors,
         series: seriesOpts.map(buildAreaSeries),
         dropLines: opts.dropLines ? {} : undefined,
+        // `CT_Area3DChart` carries `gapDepth`; pass it through from
+        // options. The equivalent lines for `bar3D` / `line3D` already
+        // did this — the omission here silently dropped the option.
+        gapDepth: opts.gapDepth,
         axisIds: [catAx.axId, valAx.axId, serAx.axId]
       };
       result = { group, axes: [catAx, valAx, serAx] };
@@ -1815,10 +2219,18 @@ function buildChartTypeGroup(
       break;
     }
     case "stock": {
+      // `CT_StockChart` has no `varyColors` attribute per schema — see
+      // `StockChartGroup` in types.ts. Reject the option here rather
+      // than silently dropping it at emit time so the mistake
+      // surfaces at authoring.
+      if (opts.varyColors !== undefined) {
+        throw new ChartOptionsError(
+          "stock charts do not support `varyColors` (not in CT_StockChart). Remove the field or switch to a line / bar / area chart."
+        );
+      }
       const { catAx, valAx } = buildCatValAxes(axIds);
       const group: StockChartGroup = {
         type: "stock",
-        varyColors: opts.varyColors,
         series: seriesOpts.map(buildLineSeries),
         hiLowLines: opts.hiLowLines ? {} : undefined,
         upDownBars: buildUpDownBarsFromOpts(opts.upDownBars),
@@ -1863,7 +2275,7 @@ function buildChartTypeGroup(
     }
     default: {
       const _exhaustive: never = type;
-      throw new Error(`Unsupported chart type: ${_exhaustive}`);
+      throw new ChartOptionsError(`Unsupported chart type: ${String(_exhaustive)}.`);
     }
   }
 
@@ -1904,7 +2316,7 @@ function buildChartTypeGroup(
  * Shared options for both single and combo chart builders.
  */
 interface ChartModelOptions {
-  title?: string | { formula: string } | ChartRichText;
+  title?: string | { formula: string } | ChartRichText | null;
   showLegend?: boolean;
   legendPosition?: LegendPosition;
   displayBlanksAs?: "gap" | "span" | "zero";
@@ -1936,19 +2348,37 @@ function finalizeChartModel(plotArea: PlotArea, opts: ChartModelOptions): ChartM
     chart.showDLblsOverMax = opts.showDLblsOverMax;
   }
   if (opts.pivotSource) {
-    if (
-      typeof opts.pivotSource === "object" &&
-      opts.pivotChartOptions &&
-      !opts.pivotSource.options
-    ) {
-      opts.pivotSource.options = opts.pivotChartOptions;
-    }
+    // Don't mutate caller-owned `opts.pivotSource` — `extractPivotOptions`
+    // already handles the merge priority between
+    // `opts.pivotChartOptions` (explicit) and `pivotSource.options`
+    // (embedded). Writing back here produced surprising side-effects
+    // when callers reused the same `pivotSource` object across charts.
     chart.pivotFormats = [{ index: 0 }];
   }
 
-  if (opts.title) {
+  // Title handling has three mutually exclusive shapes:
+  //
+  //   1. `title === null`       → explicit suppression. Emit
+  //      `autoTitleDeleted="1"` so Excel records the user removed the
+  //      auto-title. Do NOT build a title frame even if `titleOptions`
+  //      was also provided — the explicit `null` wins over layout /
+  //      style hints.
+  //   2. `title` truthy         → build the title, optionally apply
+  //      `titleOptions` on top.
+  //   3. `title` absent, `titleOptions` set → layout / style for the
+  //      auto-generated title. Uncommon but valid.
+  //   4. Everything else        → leave `autoTitleDeleted` undefined so
+  //      the writer omits it, matching Excel's behaviour for a fresh
+  //      unmodified chart.
+  //
+  // Checking `title === null` before `if (opts.title)` is important —
+  // `if (null)` is falsy, so reversing the order landed an explicit
+  // `null` in the `titleOptions`-only branch that built an empty title
+  // frame.
+  if (opts.title === null) {
+    chart.autoTitleDeleted = true;
+  } else if (opts.title) {
     chart.title = buildTitle(opts.title);
-    // Apply title options (layout, overlay, spPr, txPr) if provided
     if (opts.titleOptions) {
       applyTitleOptions(chart.title, opts.titleOptions);
     }
@@ -1958,9 +2388,10 @@ function finalizeChartModel(plotArea: PlotArea, opts: ChartModelOptions): ChartM
     chart.title = { overlay: false };
     applyTitleOptions(chart.title, opts.titleOptions);
     chart.autoTitleDeleted = false;
-  } else {
-    chart.autoTitleDeleted = true;
   }
+  // else: leave autoTitleDeleted undefined so the writer omits it,
+  // matching Excel's behaviour for a fresh unmodified chart — the
+  // automatic title appears unless the user explicitly removes it.
 
   const legend = buildLegend(opts);
   if (legend) {
@@ -2162,6 +2593,14 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
           };
           allAxes.push(secondaryCatAx, secondaryValAx);
         }
+        // Apply the group's axis options onto the shared secondary
+        // axes. Without this, the `categoryAxis` / `valueAxis` fields
+        // on a second (or third, …) secondary-axis group were silently
+        // discarded along with the auto-built axes — `numFmt`,
+        // `majorUnit`, `title`, `orientation`, etc. never reached the
+        // shared axis object.
+        applyAxisOptions(secondaryCatAx, groupOpts.categoryAxis);
+        applyAxisOptions(secondaryValAx!, groupOpts.valueAxis);
         if (hasSerAx) {
           // 3D secondary: create or reuse secondary serAx
           if (!secondarySerAx) {
@@ -2182,7 +2621,15 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
           group.axisIds = [secondaryCatAx!.axId, secondaryValAx!.axId];
         }
       } else {
-        // Scatter/bubble secondary axes (valAx + valAx)
+        // Scatter/bubble secondary axes (valAx + valAx).
+        //
+        // `crossBetween` is only valid when the value axis crosses a
+        // *category* axis — it specifies the tick-label alignment
+        // relative to category boundaries (`between` / `midCat`). On a
+        // val/val pair it has no defined meaning and strict OOXML
+        // validators flag it. The primary scatter axes in
+        // `buildValValAxes` deliberately omit it, so emit the secondary
+        // scatter axes the same way to stay round-trip consistent.
         if (!secondaryXAx) {
           const sXId = axIds.alloc();
           const sYId = axIds.alloc();
@@ -2193,8 +2640,7 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
             delete: true,
             axPos: "b",
             crossAx: sYId,
-            crosses: "autoZero",
-            crossBetween: "midCat"
+            crosses: "autoZero"
           };
           secondaryYAx = {
             axisType: "val",
@@ -2203,11 +2649,14 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
             delete: false,
             axPos: "r",
             crossAx: sXId,
-            crosses: "max",
-            crossBetween: "midCat"
+            crosses: "max"
           };
           allAxes.push(secondaryXAx, secondaryYAx);
         }
+        // `categoryAxis` / `valueAxis` map to scatter x / y respectively
+        // (mirroring the primary scatter path in `buildChartTypeGroup`).
+        applyAxisOptions(secondaryXAx, groupOpts.categoryAxis);
+        applyAxisOptions(secondaryYAx!, groupOpts.valueAxis);
         group.axisIds = [secondaryXAx!.axId, secondaryYAx!.axId];
       }
       // Don't add the auto-generated axes from buildChartTypeGroup
@@ -2224,7 +2673,14 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
             allAxes.push(primarySerAx);
           }
         } else {
-          // Reuse primary axes
+          // Reuse primary axes — but apply the current group's axis
+          // options onto the shared objects so its customisations
+          // aren't silently discarded with the throw-away auto-built
+          // axes. Previously only the FIRST group's `categoryAxis` /
+          // `valueAxis` reached the output; every subsequent group's
+          // overrides were dropped on the floor.
+          applyAxisOptions(primaryCatAx, groupOpts.categoryAxis);
+          applyAxisOptions(primaryValAx!, groupOpts.valueAxis);
           if (hasSerAx) {
             // 3D group needs serAx — create one if the primary set didn't have it
             if (!primarySerAx) {
@@ -2252,6 +2708,10 @@ export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
           primaryYAx = axes[1] as ValueAxis;
           allAxes.push(primaryXAx, primaryYAx);
         } else {
+          // Same rationale as the cat/val reuse path above — apply this
+          // group's scatter axis options onto the shared val/val pair.
+          applyAxisOptions(primaryXAx, groupOpts.categoryAxis);
+          applyAxisOptions(primaryYAx!, groupOpts.valueAxis);
           group.axisIds = [primaryXAx.axId, primaryYAx!.axId];
         }
       }

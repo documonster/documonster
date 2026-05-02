@@ -10,9 +10,11 @@
  */
 
 import type {
+  AddShapeFillOptions,
   ChartColorsModel,
   ChartLayout,
   ChartLegend,
+  ChartRichText,
   ChartStyleModel,
   ChartTextProperties,
   ChartTitle,
@@ -73,12 +75,44 @@ export interface ChartExSpace {
   chart: ChartExChart;
   /** Clr map override (optional) */
   clrMapOvr?: string;
+  /** ChartSpace-level shape properties (frame / background). */
+  spPr?: ShapeProperties;
+  /** ChartSpace-level default text properties. */
+  txPr?: ChartTextProperties;
+  /**
+   * `cx:protection` — raw XML preserved for round-trip. The structured
+   * model does not currently expose locking flags; consumers who need
+   * to edit protection should mutate the raw string.
+   */
+  protection?: string;
+  /**
+   * `cx:externalData` — references to external workbook / package
+   * parts. Per Chart2014 / `CT_ChartSpace` schema this is a child of
+   * `cx:chartSpace` (alongside `cx:chart`, `cx:spPr`, …), NOT a
+   * child of `cx:chartData`. Previous versions of this library placed
+   * it inside `cx:chartData` — the parser now accepts both locations
+   * (legacy on-disk shapes still load) and the writer always emits
+   * at the chartSpace level.
+   */
+  externalData?: Array<{ id: string; autoUpdate?: boolean }>;
+  /**
+   * `cx:printSettings` — raw XML preserved for round-trip (headerFooter,
+   * pageMargins, pageSetup). Same "raw-only" contract as `protection`.
+   */
+  printSettings?: string;
   /** Extension list */
   extLst?: string;
 }
 
 export interface ChartExData {
-  /** Externally referenced data (each entry has an id + data source) */
+  /**
+   * @deprecated Moved to {@link ChartExSpace.externalData} to match
+   * the Chart2014 schema (`cx:externalData` is a child of
+   * `cx:chartSpace`, not `cx:chartData`). The parser migrates legacy
+   * on-disk placements into `ChartExSpace.externalData`; this field
+   * remains on the type only to avoid breaking callers that read it
+   * directly. Write-side code no longer consults this slot.
+   */
   externalData?: Array<{ id: string; autoUpdate?: boolean }>;
   /** Chart data (numeric/string arrays referenced by series) */
   data: ChartExDataEntry[];
@@ -140,8 +174,11 @@ export interface ChartExChart {
   legend?: ChartLegend;
   /** Whether the chart has an automatic title */
   autoTitleDeleted?: boolean;
-  /** Shape/style for the chart frame. */
-  spPr?: ShapeProperties;
+  /**
+   * Extension list — raw XML preserved for round-trip of future
+   * `CT_Chart` extensions (e.g. `c15:` annotations).
+   */
+  extLst?: string;
 }
 
 export interface ChartExPlotArea {
@@ -151,12 +188,25 @@ export interface ChartExPlotArea {
     plotSurface?: ShapeProperties;
     /** Plot area series */
     series: ChartExSeries[];
+    /**
+     * `<cx:extLst>` inside `<cx:plotAreaRegion>` — preserved verbatim
+     * for round-trip of Chart2014 extension blocks (e.g. the
+     * `cx14:` markers Excel writes for pivot-backed charts). Parsed
+     * and re-emitted as raw XML; the library never synthesises this
+     * field.
+     */
+    extLst?: string;
   };
   /** Axes (value/category/etc.) */
   axis?: ChartExAxis[];
   /** Direct access to series (short-hand if no plotAreaRegion) */
   series?: ChartExSeries[];
   spPr?: ShapeProperties;
+  /**
+   * `<cx:extLst>` on the plot area itself (sibling of
+   * `plotAreaRegion`). Preserved for round-trip.
+   */
+  extLst?: string;
 }
 
 // ============================================================================
@@ -175,16 +225,61 @@ export type ChartExSeriesType =
 
 export interface ChartExSeries {
   layoutId: ChartExSeriesType;
-  /** 0-based series index */
-  seriesIndex?: number;
-  /** Display name (tx) — string or formula */
-  tx?: { rich?: unknown; strRef?: string; value?: string };
+  /**
+   * Original `@layoutId` attribute as it appeared in the source XML,
+   * when the value did not match any of the {@link ChartExSeriesType}
+   * enum members. The parser falls back to `"clusteredColumn"` so the
+   * renderer has a shape it understands, but the writer re-emits
+   * `rawLayoutId` verbatim when present so round-trips through
+   * Excel-authored files don't lose a future / vendor-extended
+   * layoutId the consumer never asked us to interpret.
+   *
+   * The renderer emits `rawLayoutId` only when `layoutId` is still
+   * the neutral `"clusteredColumn"` fallback; assigning any other
+   * structured layoutId causes the writer to use the new value and
+   * ignore `rawLayoutId`. This means a caller who wants to explicitly
+   * downgrade a vendor-extended series to the canonical
+   * `"clusteredColumn"` layout — and stop preserving the original
+   * raw attribute — must also clear `rawLayoutId` directly
+   * (`series.rawLayoutId = undefined`). Plain builders never set
+   * this field, so freshly created series always emit the canonical
+   * enum form.
+   * @internal
+   */
+  rawLayoutId?: string;
+  /**
+   * Display name (tx) — string literal, formula reference (strRef), or
+   * a structured rich-text block. `rich` is a {@link ChartRichText};
+   * when set, the writer emits `<cx:rich>…</cx:rich>` with one or more
+   * `<a:p>` paragraphs, matching what Excel produces for bold/coloured
+   * series labels.
+   *
+   * `strRef` mirrors the classic {@link StringReference} shape: the
+   * raw formula plus an optional cached resolved value. Previous
+   * versions stored only the formula string; that form is still
+   * accepted via the `string` alternate, but round-trip of Excel-
+   * authored files now preserves the `<cx:v>` cached label so
+   * re-opens display the series name without recalculation.
+   */
+  tx?: {
+    rich?: ChartRichText;
+    strRef?: string | { formula: string; cached?: string };
+    value?: string;
+  };
   /** Hidden attribute */
   hidden?: boolean;
   /** Ownership — "primary" or "standard" */
   ownerIdx?: number;
   /** Shape properties */
   spPr?: ShapeProperties;
+  /**
+   * Text properties (`<cx:txPr>`). Per `CT_Series` in the Chart2014
+   * schema, series can carry their own DrawingML text body properties
+   * which propagate to all series-level text (axis tick labels for the
+   * series, data-label defaults, legend entry text) unless overridden
+   * by a more specific `txPr` further down the tree.
+   */
+  txPr?: ChartTextProperties;
   /** Data references — each series references one or more cx:data entries */
   dataPt?: Array<{ idx: number; spPr?: ShapeProperties }>;
   /** Data labels */
@@ -195,6 +290,19 @@ export interface ChartExSeries {
   layoutPr?: ChartExLayoutProperties;
   /** Axis bindings */
   axisId?: number[];
+  /**
+   * `<cx:valueColors>` — raw XML preserved for round-trip. This
+   * sub-element carries a colour-by-value palette (gradient stops keyed
+   * to value buckets) used by region-map and treemap charts. The
+   * structured model does not yet interpret the stops.
+   */
+  valueColors?: string;
+  /**
+   * `<cx:valueColorPositions>` — raw XML preserved for round-trip.
+   * Companion to {@link valueColors}: lists the value/position pairs
+   * the palette maps onto.
+   */
+  valueColorPositions?: string;
   /** Extension list */
   extLst?: string;
 }
@@ -224,6 +332,15 @@ export interface ChartExLayoutProperties {
   // Waterfall
   subtotals?: Array<{ idx: number }>;
   connectorLines?: boolean;
+  /**
+   * Preview-only colour overrides for the three waterfall bar kinds.
+   * These are NOT part of the Chart2014 schema — Excel stores per-bar
+   * colours on `<cx:dataPt>` elements referenced by `subtotal` indices.
+   * Setting one affects only the SVG/PDF renderer; the XML writer
+   * does not emit them, so round-trip of a waterfall chart relies on
+   * `<cx:dataPt>` colours authored by Excel being preserved by the
+   * series-level `dataPt` path.
+   */
   increaseSpPr?: ShapeProperties;
   decreaseSpPr?: ShapeProperties;
   totalSpPr?: ShapeProperties;
@@ -264,15 +381,21 @@ export interface ChartExAxis {
   type: "cat" | "val";
   /** Axis title */
   title?: ChartTitle;
-  /** Scaling (for value axes) */
-  scaling?: { min?: number; max?: number; orientation?: "minMax" | "maxMin" };
   /** Major tick mark */
   majorTickMark?: "none" | "inside" | "outside" | "cross";
   /** Minor tick mark */
   minorTickMark?: "none" | "inside" | "outside" | "cross";
-  /** Major/minor unit */
-  majorUnit?: number;
-  minorUnit?: number;
+  /**
+   * `<cx:majorGridlines>` — styled gridlines drawn at each major
+   * tick. Per Chart2014 `CT_Axis`, the element wraps a single
+   * `<cx:spPr>` child; `undefined` means "no major gridlines" while
+   * an empty object means "default-styled gridlines". Previously
+   * this field was absent from the type, and Excel-authored charts
+   * with styled gridlines had them dropped on round-trip.
+   */
+  majorGridlines?: ShapeProperties;
+  /** `<cx:minorGridlines>` — same semantics at minor tick positions. */
+  minorGridlines?: ShapeProperties;
   /** Number format */
   numFmt?: { formatCode: string; sourceLinked?: boolean };
   /** Shape properties */
@@ -281,14 +404,17 @@ export interface ChartExAxis {
   txPr?: ChartTextProperties;
   /** Hidden */
   hidden?: boolean;
-  /** Label alignment */
-  lblAlgn?: "ctr" | "l" | "r";
-  /** Label offset */
-  lblOffset?: number;
   /** Category axis scaling */
   catScaling?: { gapWidth?: number };
-  /** Value axis scaling */
+  /** Value axis scaling — `min` / `max` / `majorUnit` / `minorUnit`. */
   valScaling?: { max?: number; min?: number; majorUnit?: number; minorUnit?: number };
+  /**
+   * `<cx:units>` — display-unit scaling for value axes (thousand /
+   * million / custom). Stored as the raw XML slice so it round-trips
+   * verbatim; the structured model doesn't yet interpret it, but the
+   * writer must not silently drop this element.
+   */
+  units?: string;
   /** Extension list */
   extLst?: string;
 }
@@ -307,8 +433,23 @@ export interface AddChartExOptions {
   series: AddChartExSeriesOptions[];
   /** Category values reference */
   categories?: string;
-  /** Chart title */
-  title?: string;
+  /**
+   * Chart title. Accepts the same three forms as classic charts:
+   *
+   *   - `string` — plain title text
+   *   - `{ formula: "Sheet1!$A$1" }` — a worksheet formula reference; the
+   *     rendered title is the live cell value
+   *   - {@link ChartRichText} — fully-structured rich text with per-run
+   *     formatting (colour / font / bold / italic)
+   *
+   * Pass `null` to explicitly suppress the title (sets
+   * `autoTitleDeleted="1"` so Excel will NOT auto-generate a
+   * single-series title). Omit the option entirely to let Excel
+   * decide whether to auto-title the chart — this is the default
+   * behaviour and produces the same output Excel would emit for a
+   * chart authored with no title via its UI.
+   */
+  title?: string | { formula: string } | ChartRichText | null;
   /** Show legend */
   showLegend?: boolean;
   /** Legend position */
@@ -317,8 +458,15 @@ export interface AddChartExOptions {
   layout?: ChartExLayoutProperties;
   /** Histogram/pareto binning shortcut; merged into `layout.binning`. */
   binning?: ChartExLayoutProperties["binning"];
-  /** ChartEx chart frame styling. */
-  spPr?: ShapeProperties;
+  /**
+   * ChartEx chart frame styling. Accepts either a fully-structured
+   * {@link ShapeProperties} (the OOXML-shape representation used
+   * throughout the chart module) or the ergonomic
+   * {@link AddShapeFillOptions} bag with hex colour / border / gradient /
+   * pattern shortcuts — matching the `floor` / `sideWall` / `backWall`
+   * options on classic `AddChartOptions` so the two APIs stay symmetric.
+   */
+  spPr?: ShapeProperties | AddShapeFillOptions;
   /** Optional sidecar-style metadata retained on the structured model. */
   chartStyle?: ChartStyleModel;
   /** Optional sidecar-color metadata retained on the structured model. */
@@ -359,7 +507,19 @@ export type ChartExType =
   | "regionMap";
 
 export interface AddChartExSeriesOptions {
-  name?: string;
+  /**
+   * Display name for the series. Accepts:
+   *   - `string` — literal caption (e.g. `"Quarterly sales"`).
+   *   - `{ formula: string }` — worksheet cell reference resolved at
+   *     read time (e.g. `{ formula: "Sheet1!$B$1" }`). Matches the
+   *     classic chart-builder `AddChartSeriesOptions.name` shape so
+   *     applications can share typings across the two builders.
+   *   - `ChartRichText` — structured rich-text for per-run formatting.
+   *
+   * Previously only the string form was accepted; the formula /
+   * rich-text forms were silently dropped via type narrowing.
+   */
+  name?: string | { formula: string } | ChartRichText;
   /** Values reference (e.g. "Sheet1!$B$2:$B$10") */
   values: string;
   /** Literal cached values for headless charts that are not backed by worksheet formulas. */
@@ -383,15 +543,47 @@ export interface AddChartExSeriesOptions {
   fill?: string;
   /** Border color (hex) */
   border?: string;
-  /** Series-level shape properties */
-  spPr?: ShapeProperties;
+  /**
+   * Series-level shape properties. Accepts either a structured
+   * {@link ShapeProperties} or the shorthand {@link AddShapeFillOptions}
+   * bag (same ergonomic hex-colour / gradient / pattern form classic
+   * charts already support). Takes precedence over the
+   * {@link AddChartExSeriesOptions.fill} / {@link AddChartExSeriesOptions.border}
+   * convenience fields when both are provided.
+   */
+  spPr?: ShapeProperties | AddShapeFillOptions;
   /** Data labels */
   dataLabels?: {
     showValue?: boolean;
     showCategory?: boolean;
     showSeriesName?: boolean;
+    /**
+     * Emit `<cx:visibility numFmt="1"/>` so the data label shows the
+     * formatted number alongside the other visibility flags. Maps to
+     * `ChartExDataLabels.visibility.numFmt`. Defaults to `undefined`
+     * (Excel's own behaviour: the attribute is omitted, readers pick
+     * a default based on the layout).
+     */
+    showNumFmt?: boolean;
     position?: string;
     separator?: string;
     numFmt?: string;
+    /**
+     * Shape properties for the data-label fills / borders. Accepts
+     * the same structured {@link ShapeProperties} form as other
+     * `spPr` slots in this file. Propagated to the internal
+     * `ChartExDataLabels.spPr` so the renderer's `<cx:spPr>` emit
+     * carries it. Previously the internal type exposed this slot but
+     * the public options dropped it, leaving programmatic ChartEx
+     * authors without a way to style data-label backgrounds.
+     */
+    spPr?: ShapeProperties | AddShapeFillOptions;
+    /**
+     * Run-level text properties for the label text. Routed to the
+     * internal `ChartExDataLabels.txPr`, which the renderer emits as
+     * `<cx:txPr>`. See {@link ChartTextProperties} for the field
+     * shape (font family, size, bold/italic, colour …).
+     */
+    txPr?: ChartTextProperties;
   };
 }

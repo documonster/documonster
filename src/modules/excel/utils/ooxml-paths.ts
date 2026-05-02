@@ -21,7 +21,17 @@ const themeXmlRegex = /^xl\/theme\/[a-zA-Z0-9]+[.]xml$/;
 const mediaFilenameRegex = /^xl\/media\/([a-zA-Z0-9]+[.][a-zA-Z0-9]{3,4})$/;
 const drawingXmlRegex = /^xl\/drawings\/(drawing\d+)[.]xml$/;
 const drawingRelsXmlRegex = /^xl\/drawings\/_rels\/(drawing\d+)[.]xml[.]rels$/;
-const chartUserShapesXmlRegex = /^xl\/drawings\/(chartUserShape\d+)[.]xml$/;
+// `chartUserShape` is the canonical stem Excel and this library emit,
+// but OOXML does not mandate any particular filename — the chart part
+// discovers its user-shape drawing via the `.rels` relationship type,
+// not by path. Widen the regex to also accept the plural form and
+// a common third-party variant so foreign packages round-trip without
+// silently dropping the overlay drawing. Packages that name the part
+// entirely differently (e.g. `drawing5.xml` referenced via the
+// `chartUserShapes` rel type) still require the relationship-based
+// discovery path; that's a separate fix tracked against the reader.
+const chartUserShapesXmlRegex =
+  /^xl\/drawings\/((?:chartUserShape|chartUserShapes|userDrawing)\d+)[.]xml$/;
 const vmlDrawingRegex = /^xl\/drawings\/(vmlDrawing\d+)[.]vml$/;
 const vmlDrawingHFRegex = /^xl\/drawings\/(vmlDrawingHF\d+)[.]vml$/;
 // Matches both flat layout (xl/comments1.xml) and subdirectory layout (xl/comments/comment1.xml).
@@ -535,15 +545,17 @@ export function ctrlPropRelTargetFromWorksheet(id: number | string): string {
  * @param target   The raw Target value from the .rels file
  */
 export function resolveRelTarget(baseDir: string, target: string): string {
-  // Absolute target — strip leading slash to get the zip path.
-  if (target.startsWith("/")) {
-    return target.slice(1);
-  }
-  // Ensure baseDir ends with "/" so the join works correctly.
-  const base = baseDir.endsWith("/") ? baseDir : baseDir + "/";
-  // Relative target — resolve against baseDir.
-  // Simple resolution: join base + target, then resolve `.` and `..` segments.
-  const parts = (base + target).split("/");
+  // Normalise every path through the same split / `.` / `..` collapse
+  // so absolute targets with `..` segments (legal per OPC, emitted by
+  // some third-party producers like LibreOffice for cross-folder rels
+  // such as `/xl/worksheets/../charts/chart1.xml`) resolve to a
+  // canonical zip path. Previously the absolute branch returned
+  // `target.slice(1)` verbatim — every downstream `_chartRels[path]`
+  // lookup then missed because the stored keys are canonical.
+  const rawPath = target.startsWith("/")
+    ? target.slice(1)
+    : `${baseDir.endsWith("/") ? baseDir : baseDir + "/"}${target}`;
+  const parts = rawPath.split("/");
   const resolved: string[] = [];
   for (const part of parts) {
     if (part === "." || part === "") {

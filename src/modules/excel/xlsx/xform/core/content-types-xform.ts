@@ -193,10 +193,23 @@ class ContentTypesXform extends BaseXform {
       }
     }
 
+    // Track every ChartEx PartName already emitted so the structured
+    // and raw entry loops can't duplicate an Override. Open Packaging
+    // mandates at most one `<Override>` per PartName — a duplicate
+    // surfaces as the "damaged workbook" dialog in Excel. Using an
+    // explicit Set also guards against any future drift in the key
+    // shape between `chartExEntries` and `chartExStructuredEntries`.
+    const chartExPartNamesEmitted = new Set<string>();
+
     if (model.chartExEntries) {
       for (const n of Object.keys(model.chartExEntries)) {
+        const partName = toContentTypesPartName(chartExPath(n));
+        if (chartExPartNamesEmitted.has(partName)) {
+          continue;
+        }
+        chartExPartNamesEmitted.add(partName);
         xmlStream.leafNode("Override", {
-          PartName: toContentTypesPartName(chartExPath(n)),
+          PartName: partName,
           ContentType: "application/vnd.ms-office.chartEx+xml"
         });
       }
@@ -204,12 +217,13 @@ class ContentTypesXform extends BaseXform {
 
     if (model.chartExStructuredEntries) {
       for (const n of Object.keys(model.chartExStructuredEntries)) {
-        // Skip if already emitted for raw bytes with same number
-        if (model.chartExEntries?.[n]) {
+        const partName = toContentTypesPartName(chartExPath(n));
+        if (chartExPartNamesEmitted.has(partName)) {
           continue;
         }
+        chartExPartNamesEmitted.add(partName);
         xmlStream.leafNode("Override", {
-          PartName: toContentTypesPartName(chartExPath(n)),
+          PartName: partName,
           ContentType: "application/vnd.ms-office.chartEx+xml"
         });
       }
@@ -248,11 +262,15 @@ class ContentTypesXform extends BaseXform {
       }
     }
 
-    // VML extension is needed for comments, form controls, or header watermarks
+    // VML extension is needed for comments, form controls, header
+    // watermarks, OR any chartsheet that carries a `<legacyDrawing>`
+    // reference — that last case pins a VML part body through the
+    // package without the worksheet loop declaring the extension.
     const hasComments = model.commentRefs && model.commentRefs.length > 0;
     const hasFormControls = model.formControlRefs && model.formControlRefs.length > 0;
     const hasHeaderWatermark = model.hasHeaderWatermark === true;
-    if (hasComments || hasFormControls || hasHeaderWatermark) {
+    const hasChartsheetVml = model.hasChartsheetVml === true;
+    if (hasComments || hasFormControls || hasHeaderWatermark || hasChartsheetVml) {
       xmlStream.leafNode("Default", {
         Extension: "vml",
         ContentType: "application/vnd.openxmlformats-officedocument.vmlDrawing"

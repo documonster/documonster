@@ -49,13 +49,44 @@ class WorkbookXform extends BaseXform {
   }
 
   prepare(model: any): void {
-    // Build the sheets list from worksheets + chartsheets.
-    // Chartsheets are appended after worksheets.
-    model.sheets = [...model.worksheets];
-    if (model.chartsheets) {
-      for (const cs of model.chartsheets) {
-        model.sheets.push(cs);
-      }
+    // Build the sheets list preserving the author's chosen sheet order.
+    // Each sheet (worksheet or chartsheet) carries an `orderNo` set
+    // during add / load; we sort the combined list by that field so a
+    // workbook with interleaved `[ws1, cs1, ws2, cs2]` round-trips in
+    // the same order the user authored. The previous implementation
+    // sorted by `sheetNo` — but `sheetNo` is the file-path number
+    // (independent per family), so a workbook where the author added
+    // worksheet A, chartsheet X, worksheet B got reshuffled to
+    // [A(1), X(1), B(2)] → [A, X, B] which is only correct by
+    // accident when worksheet and chartsheet numbering starts at the
+    // same value. `orderNo` is a unified counter and reflects true
+    // insertion / tab order.
+    const worksheets = [...(model.worksheets ?? [])];
+    const chartsheets = [...(model.chartsheets ?? [])];
+    if (chartsheets.length === 0) {
+      model.sheets = worksheets;
+    } else {
+      const combined: any[] = [...worksheets, ...chartsheets];
+      const withIndex = combined.map((sheet, originalIndex) => ({ sheet, originalIndex }));
+      withIndex.sort((a, b) => {
+        const aOrder =
+          typeof a.sheet.orderNo === "number"
+            ? a.sheet.orderNo
+            : typeof a.sheet.sheetNo === "number"
+              ? a.sheet.sheetNo
+              : Infinity;
+        const bOrder =
+          typeof b.sheet.orderNo === "number"
+            ? b.sheet.orderNo
+            : typeof b.sheet.sheetNo === "number"
+              ? b.sheet.sheetNo
+              : Infinity;
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder;
+        }
+        return a.originalIndex - b.originalIndex;
+      });
+      model.sheets = withIndex.map(entry => entry.sheet);
     }
 
     // collate all the print areas from all of the sheets and add them to the defined names
@@ -221,14 +252,26 @@ class WorkbookXform extends BaseXform {
     }, {});
 
     // reconcile sheet ids, rIds and names
+    //
+    // `worksheets` is indexed positionally across BOTH sheet kinds
+    // (worksheet and chartsheet). OOXML `definedName/@localSheetId`
+    // is a 0-based index into the workbook-level `<sheets>` element,
+    // which mixes both kinds — so a chartsheet occupying position 1
+    // in `<sheets>` shifts every subsequent worksheet's effective
+    // index by one. Compressing to a worksheets-only array (the
+    // previous implementation) made `localSheetId` resolve to the
+    // wrong worksheet whenever chartsheets were interleaved, so
+    // `_xlnm.Print_Area` / `_xlnm.Print_Titles` landed on an
+    // unrelated sheet.
     const worksheets: any[] = [];
     const chartsheetsList: any[] = [];
     let worksheet: any;
-    let index = 0;
+    let sheetPosition = 0;
 
     (model.sheets ?? []).forEach((sheet: any) => {
       const rel = rels[sheet.rId];
       if (!rel) {
+        sheetPosition += 1;
         return;
       }
       const target = `xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`;
@@ -243,8 +286,10 @@ class WorkbookXform extends BaseXform {
           chartsheet.id = sheet.id;
           chartsheet.state = sheet.state;
           chartsheet.rId = sheet.rId;
+          chartsheet.orderNo = sheetPosition;
           chartsheetsList.push(chartsheet);
         }
+        sheetPosition += 1;
         return;
       }
 
@@ -253,8 +298,13 @@ class WorkbookXform extends BaseXform {
         worksheet.name = sheet.name;
         worksheet.id = sheet.id;
         worksheet.state = sheet.state;
-        worksheets[index++] = worksheet;
+        worksheet.orderNo = sheetPosition;
+        // Index by the workbook `<sheets>` position — not the
+        // compressed worksheet counter — so `definedName.localSheetId`
+        // resolves correctly when chartsheets are interleaved.
+        worksheets[sheetPosition] = worksheet;
       }
+      sheetPosition += 1;
     });
 
     // Store reconciled chartsheets on the model
@@ -318,8 +368,15 @@ class WorkbookXform extends BaseXform {
     }
     model.definedNames = definedNames;
 
-    // used by sheets to build their image models
-    model.media.forEach((media: any, i: number) => {
+    // used by sheets to build their image models.
+    // Matches the `(model.media ?? []).forEach(...)` guard in
+    // `prepare` (line 144): `reconcile` may be called from code paths
+    // where `model.media` was never initialised (e.g. a programmatic
+    // workbook with no images; the xlsx reader populates this array,
+    // but builder-constructed workbooks do not). Without the guard,
+    // the forEach throws `TypeError: Cannot read properties of
+    // undefined (reading 'forEach')` and aborts the load/save cycle.
+    (model.media ?? []).forEach((media: any, i: number) => {
       media.index = i;
     });
   }

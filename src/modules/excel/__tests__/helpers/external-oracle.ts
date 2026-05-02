@@ -17,7 +17,16 @@ export interface ExternalOracleResult {
 }
 
 export interface ExternalOracleOptions {
-  envFlag: string;
+  /**
+   * Environment variable that gates the oracle. When set to `"1"` the
+   * oracle runs unconditionally (and fails the test if the executable
+   * cannot be located or the conversion errors).
+   *
+   * Pass `null` to use {@link autoMode} semantics instead — the oracle
+   * runs whenever the executable is auto-discovered, otherwise it
+   * gracefully reports `available: false` so callers can `expect(result.skipped).toBeTruthy()`.
+   */
+  envFlag: string | null;
   executableEnv: string;
   candidates: string[];
   args: string[];
@@ -27,13 +36,30 @@ export interface ExternalOracleOptions {
   timeoutMs?: number;
   /** Set to false for proprietary CLIs that do not support a cheap --version probe. */
   versionArgs?: string[] | false;
+  /**
+   * When true, run the oracle whenever the executable is discoverable,
+   * skipping otherwise. Useful for "default-on if installed, off in
+   * minimal CI" semantics that do not require an env flag opt-in.
+   *
+   * Ignored when {@link envFlag} is set to a non-null string and that
+   * env var explicitly equals `"1"` (the explicit opt-in always wins).
+   */
+  autoMode?: boolean;
 }
 
 export async function runExternalOracle(
   options: ExternalOracleOptions
 ): Promise<ExternalOracleResult> {
-  if (process.env[options.envFlag] !== "1") {
-    return { available: false, skipped: `Set ${options.envFlag}=1 to enable.`, outputs: [] };
+  const explicitOptIn = options.envFlag !== null && process.env[options.envFlag] === "1";
+  const auto = options.autoMode === true;
+  if (!explicitOptIn && !auto) {
+    return {
+      available: false,
+      skipped: options.envFlag
+        ? `Set ${options.envFlag}=1 to enable.`
+        : "autoMode disabled and no envFlag opt-in",
+      outputs: []
+    };
   }
   const executable = await resolveExecutable(
     options.executableEnv,
@@ -67,7 +93,8 @@ export async function runExternalOracle(
 }
 
 export interface OfficeOpenValidationOptions {
-  envFlag: string;
+  /** Pass `null` to rely on {@link autoMode} only. */
+  envFlag: string | null;
   executableEnv: string;
   candidates: string[];
   args?: string[];
@@ -76,6 +103,8 @@ export interface OfficeOpenValidationOptions {
   timeoutMs?: number;
   repairLogPatterns?: RegExp[];
   versionArgs?: string[] | false;
+  /** See {@link ExternalOracleOptions.autoMode}. */
+  autoMode?: boolean;
 }
 
 export async function runOfficeOpenValidation(
@@ -90,7 +119,8 @@ export async function runOfficeOpenValidation(
     inputName: options.inputName,
     outputGlob: /[.]xlsx$/i,
     timeoutMs: options.timeoutMs,
-    versionArgs: options.versionArgs
+    versionArgs: options.versionArgs,
+    autoMode: options.autoMode
   });
   if (!result.available) {
     return result;
@@ -134,6 +164,36 @@ async function resolveExecutable(
     }
   }
   return undefined;
+}
+
+/**
+ * Convenience wrapper that runs LibreOffice's `--convert-to xlsx`
+ * round-trip in auto mode: if `LIBREOFFICE_BIN` (or `soffice` /
+ * `libreoffice` on PATH) is discoverable the validation runs and
+ * `expect(exitCode).toBe(0)` passes; otherwise the result reports
+ * `available: false` and callers should `expect(skipped).toBeTruthy()`.
+ *
+ * Used by the synthetic chart corpus tests so the open-validation gate
+ * runs by default for everyone with LibreOffice installed, without
+ * forcing an explicit env-var opt-in or breaking minimal CI environments.
+ */
+export async function runLibreOfficeOpenValidationAuto(
+  input: Uint8Array,
+  inputName: string
+): Promise<ExternalOracleResult> {
+  return runOfficeOpenValidation({
+    envFlag: "EXCELTS_LIBREOFFICE_OPEN_VALIDATION",
+    executableEnv: "LIBREOFFICE_BIN",
+    candidates: [
+      "soffice",
+      "libreoffice",
+      // macOS app bundle install (default Homebrew Cask + manual install location).
+      "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+    ],
+    input,
+    inputName,
+    autoMode: true
+  });
 }
 
 async function collectOutputs(

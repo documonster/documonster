@@ -166,9 +166,14 @@ export function filterDrawingAnchors(anchors: any[]): any[] {
     if (a == null) {
       return false;
     }
-    // Absolute anchors need a valid picture
+    // Absolute anchors need either a picture (image with pos+ext) or a
+    // graphicFrame (chart placed via `{ pos, ext }`). The previous
+    // filter returned `!!a.picture` for every absolute anchor,
+    // silently dropping every chart anchored via `{ pos: { x, y },
+    // ext: { cx, cy } }` on write — the drawing XML came out empty
+    // and the chart disappeared from the saved file.
     if (a.range?.pos !== undefined) {
-      return !!a.picture;
+      return !!a.picture || !!a.graphicFrame || !!a.shape;
     }
     // Form controls have range.br and shape properties
     if (a.range?.br && a.shape) {

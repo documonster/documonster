@@ -9,6 +9,16 @@ export interface ChartsheetViewOptions {
   tabSelected?: boolean;
   /** Zoom scale percentage. */
   zoomScale?: number;
+  /**
+   * 0-based index into the workbook's `<bookViews>` list that this
+   * chartsheet view is bound to. Defaults to 0 (the primary view).
+   */
+  workbookViewId?: number;
+  /**
+   * When true the chartsheet scales to fill the window. Matches the
+   * OOXML `<sheetView zoomToFit="1"/>` attribute.
+   */
+  zoomToFit?: boolean;
 }
 
 export interface ChartsheetOptions extends ChartsheetViewOptions {
@@ -16,9 +26,7 @@ export interface ChartsheetOptions extends ChartsheetViewOptions {
   state?: "visible" | "hidden" | "veryHidden";
   /** Page margins for the chartsheet. */
   pageMargins?: ChartsheetModel["pageMargins"];
-  /** Print options for the chartsheet. */
-  printOptions?: ChartsheetModel["printOptions"];
-  /** Page setup for the chartsheet. */
+  /** Page setup for the chartsheet (CT_CsPageSetup). */
   pageSetup?: ChartsheetModel["pageSetup"];
 }
 
@@ -124,7 +132,17 @@ class Chartsheet {
   }
 
   set name(value: string) {
-    this._model.name = value;
+    // Go through the workbook's unified validator so a chartsheet can
+    // never silently land on a name that collides with a worksheet (or
+    // another chartsheet), includes illegal characters, or exceeds
+    // Excel's 31-char limit. Previously this setter just wrote
+    // `this._model.name = value` verbatim, letting callers corrupt the
+    // model into a state Excel would reject on reopen.
+    if (this._workbook) {
+      this._model.name = this._workbook.validateSheetName(value, this._model);
+    } else {
+      this._model.name = value;
+    }
   }
 
   get state(): ChartsheetModel["state"] {
@@ -197,14 +215,6 @@ class Chartsheet {
     this._model.pageMargins = value;
   }
 
-  get printOptions(): ChartsheetModel["printOptions"] {
-    return this._model.printOptions;
-  }
-
-  set printOptions(value: ChartsheetModel["printOptions"]) {
-    this._model.printOptions = value;
-  }
-
   get pageSetup(): ChartsheetModel["pageSetup"] {
     return this._model.pageSetup;
   }
@@ -227,6 +237,22 @@ class Chartsheet {
 
   set zoomScale(value: number | undefined) {
     this._model.zoomScale = value;
+  }
+
+  get workbookViewId(): number | undefined {
+    return this._model.workbookViewId;
+  }
+
+  set workbookViewId(value: number | undefined) {
+    this._model.workbookViewId = value;
+  }
+
+  get zoomToFit(): boolean | undefined {
+    return this._model.zoomToFit;
+  }
+
+  set zoomToFit(value: boolean | undefined) {
+    this._model.zoomToFit = value;
   }
 
   rename(name: string): boolean {
@@ -256,6 +282,14 @@ interface ChartsheetWorkbook {
     nameOrIndex: string | number,
     chart: AddChartsheetOptions["chart"]
   ): boolean;
+  /**
+   * Validate a sheet name against Excel's unified namespace (both
+   * worksheets and chartsheets). See `Workbook.validateSheetName` for
+   * the full contract. Declared here so `Chartsheet.name` setter can
+   * route through it without widening the narrow host interface to
+   * the full `Workbook` type.
+   */
+  validateSheetName(name: string, existing?: { name: string }): string;
 }
 
 export { Chartsheet };

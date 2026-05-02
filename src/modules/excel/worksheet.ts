@@ -36,7 +36,7 @@ import type {
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
 import { Enums } from "@excel/enums";
-import { WorksheetNameError, MergeConflictError, TableError } from "@excel/errors";
+import { MergeConflictError, TableError } from "@excel/errors";
 import {
   FormCheckbox,
   type FormCheckboxModel,
@@ -394,47 +394,15 @@ class Worksheet {
       return;
     }
 
-    if (typeof name !== "string") {
-      throw new WorksheetNameError("The name has to be a string.");
-    }
-
-    if (name === "") {
-      throw new WorksheetNameError("The name can't be empty.");
-    }
-
-    if (name === "History") {
-      throw new WorksheetNameError('The name "History" is protected. Please use a different name.');
-    }
-
-    // Illegal character in worksheet name: asterisk (*), question mark (?),
-    // colon (:), forward slash (/ \), or bracket ([])
-    if (/[*?:/\\[\]]/.test(name)) {
-      throw new WorksheetNameError(
-        `Worksheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`
-      );
-    }
-
-    if (/(^')|('$)/.test(name)) {
-      throw new WorksheetNameError(
-        `The first or last character of worksheet name cannot be a single quotation mark: ${name}`
-      );
-    }
-
-    if (name.length > 31) {
-      if (process.env.NODE_ENV !== "production") {
-        console.warn(`Worksheet name ${name} exceeds 31 chars. This will be truncated`);
-      }
-      name = name.substring(0, 31);
-    }
-
-    const nameLower = name.toLowerCase();
-    if (
-      this._workbook.worksheets.find(ws => ws && ws !== this && ws.name.toLowerCase() === nameLower)
-    ) {
-      throw new WorksheetNameError(`Worksheet name already exists: ${name}`);
-    }
-
-    this._name = name;
+    // Delegate to the workbook-level validator so both worksheets and
+    // chartsheets share a single naming namespace. Previously this
+    // setter only cross-checked against other worksheets, allowing a
+    // chartsheet named "S" to coexist with a worksheet named "S";
+    // Excel itself forbids that collision. `validateSheetName`
+    // performs the full type / empty / illegal-char / quote / length
+    // / case-insensitive duplicate checks and returns the sanitised
+    // name (truncated to 31 chars if needed).
+    this._name = this._workbook.validateSheetName(name, this);
   }
 
   /**
@@ -1634,7 +1602,7 @@ class Worksheet {
     // `addChartEntry` so the entry we store already carries the final
     // `entry.rels` array.
     try {
-      resolvePendingChartImages(entry, this._workbook);
+      resolvePendingChartImages(entry, this._workbook, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload should
       // never take down chart creation — the series keeps its
@@ -1689,6 +1657,26 @@ class Worksheet {
     }
     if (removed.chartExNumber > 0) {
       this._workbook.removeChartExStructuredEntry?.(removed.chartExNumber);
+    }
+    // Prune the matching anchor from the loaded drawing so the writer
+    // doesn't emit a dangling rel pointing at the now-removed chart
+    // part. The drawing xform regenerates rels from `drawing.anchors`
+    // on every write (see `worksheet-xform.ts` chart-anchor reconcile),
+    // so dropping the anchor here is sufficient — we don't need to
+    // hand-edit `drawing.rels` ourselves.
+    const drawing = this._drawing as
+      | { anchors?: Array<{ chartNumber?: number; chartExNumber?: number }> }
+      | undefined;
+    if (drawing?.anchors) {
+      drawing.anchors = drawing.anchors.filter(anchor => {
+        if (removed.chartNumber > 0 && anchor.chartNumber === removed.chartNumber) {
+          return false;
+        }
+        if (removed.chartExNumber > 0 && anchor.chartExNumber === removed.chartExNumber) {
+          return false;
+        }
+        return true;
+      });
     }
     return true;
   }

@@ -5,8 +5,17 @@
  */
 
 import { ExcelFileError } from "@excel/errors";
+import {
+  WorkbookReader,
+  type WorkbookReaderOptions,
+  type NodeInput
+} from "@excel/stream/workbook-reader";
+import type { WorkbookReader as WorkbookReaderBrowser } from "@excel/stream/workbook-reader.browser";
+import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer";
+import type { WorkbookWriter as WorkbookWriterBrowser } from "@excel/stream/workbook-writer.browser";
 import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
 import type { Worksheet } from "@excel/worksheet";
+import { XLSX } from "@excel/xlsx/xlsx";
 import type { MarkdownOptions } from "@markdown/types";
 import {
   fileExists,
@@ -21,6 +30,63 @@ import {
 // =============================================================================
 
 class Workbook extends WorkbookBrowser {
+  // Declare the overridden private slot so the getter below can stash
+  // the Node-typed XLSX instance without TS complaining that we're
+  // widening the base class's private member (which would be illegal
+  // anyway — the base declares `_xlsx?: XlsxBrowser`).
+  private _xlsxNode?: XLSX;
+
+  /**
+   * xlsx file format operations — Node.js variant. Exposes the
+   * `readFile` / `writeFile` / streaming `read` / `write` methods that
+   * the browser XLSX omits. Overriding here (rather than typing the
+   * base getter as Node XLSX directly) keeps the browser
+   * `Workbook.xlsx` type clean — browser consumers see only the
+   * operations the bundle actually supports and get a TS error if
+   * they accidentally reach for file-path APIs.
+   */
+  override get xlsx(): XLSX {
+    if (!this._xlsxNode) {
+      this._xlsxNode = new XLSX(this);
+    }
+    return this._xlsxNode;
+  }
+
+  /**
+   * Create a streaming workbook writer — Node.js variant. Accepts the
+   * Node-only `{ filename }` option for direct file-path output in
+   * addition to the cross-platform `{ stream }` option. Overriding
+   * here (rather than typing the base factory as the Node writer)
+   * keeps the browser bundle free of Node-only stream code.
+   *
+   * The return type is declared as the browser `WorkbookWriter` to
+   * preserve static-side Liskov compatibility with the base class;
+   * downcast at the call site if the Node subclass API is needed, or
+   * use `new WorkbookWriter()` directly.
+   */
+  static override createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriterBrowser {
+    return new WorkbookWriter(options) as unknown as WorkbookWriterBrowser;
+  }
+
+  /**
+   * Create a streaming workbook reader — Node.js variant. Accepts a
+   * Node-only file-path `string` in addition to the cross-platform
+   * `CommonInput` types (buffer / readable). Overriding here keeps the
+   * browser bundle free of Node-only `fs` imports.
+   *
+   * The return type is declared as the browser `WorkbookReader` to
+   * preserve static-side Liskov compatibility with the base class.
+   * The runtime instance is the Node `WorkbookReader` subclass and
+   * handles file-path inputs transparently; downcast if the subclass
+   * API is needed, or use `new WorkbookReader()` directly.
+   */
+  static override createStreamReader(
+    input: NodeInput,
+    options?: WorkbookReaderOptions
+  ): WorkbookReaderBrowser {
+    return new WorkbookReader(input, options) as unknown as WorkbookReaderBrowser;
+  }
+
   /**
    * Read CSV from file (Node.js only)
    *

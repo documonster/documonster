@@ -15,6 +15,7 @@ import type { ChartExModel } from "@excel/chart/chart-ex-types";
 import type {
   AxisDataSource,
   ChartModel,
+  ChartTitle,
   ChartTypeGroup,
   DataLabelsRange,
   NumberCache,
@@ -53,8 +54,68 @@ export function fillChartCaches(
   }
   const date1904 = workbook.properties?.date1904;
   const ctx = buildResolverContext(workbook, contextWorksheet);
+  // Fill the classic chart title's `<c:strRef>` cache when the title
+  // was authored as `{ formula: "..." }`. The writer already emits
+  // `<c:strCache>` for any `strRef.cache.points` it finds; without
+  // this fill a formula-bound title round-trips as
+  // `<c:strRef><c:f>…</c:f></c:strRef>` with no cache, so readers that
+  // don't recalculate formulas (preview tooling, headless converters)
+  // see a blank title frame. ChartEx has the same machinery in
+  // `fillChartExCaches`; keeping them symmetric.
+  fillClassicTitleCache(model.chart?.title, ctx);
+  // Axis titles follow the same shape — `ChartTitle` is the same type
+  // on `axis.title` and carries the same `strRef.cache`. Round-trip
+  // parity requires filling them too.
+  for (const axis of plotArea.axes ?? []) {
+    fillClassicTitleCache(axis.title, ctx);
+  }
   for (const group of plotArea.chartTypes) {
     fillGroupCaches(group, ctx, date1904);
+  }
+}
+
+/**
+ * Populate a classic `ChartTitle.strRef.cache` from its formula when
+ * the cache is empty. Shared between chart title and axis titles.
+ * No-ops for titles that were authored as rich text / rawTx / a
+ * literal string — only formula-bound titles carry a strRef.
+ */
+function fillClassicTitleCache(title: ChartTitle | undefined, ctx: ResolverContext): void {
+  const strRef = title?.strRef;
+  if (!strRef?.formula) {
+    return;
+  }
+  if (strRef.cache?.points && strRef.cache.points.length > 0) {
+    return;
+  }
+  const resolved = resolveReference(strRef.formula, ctx);
+  if (!resolved) {
+    return;
+  }
+  const points: Array<{ index: number; value: string }> = [];
+  let idx = 0;
+  for (const cell of resolved.cells) {
+    const s = toString(cell.value);
+    if (s !== undefined) {
+      points.push({ index: idx, value: s });
+    }
+    idx += 1;
+  }
+  // Gate on "any resolved cell", not "any non-empty stringified
+  // value". Sibling fillers (`fillNumRefInternal` / `fillStrRefInternal`)
+  // emit a sparse cache `{ pointCount: N, points: [] }` when the
+  // resolved range had no stringifiable cells — that's the whole
+  // reason the fill exists: readers that don't recalculate formulas
+  // still need the `pointCount` envelope to size sparse arrays
+  // correctly. The title filler was previously inconsistent: it
+  // tracked `idx` through empty cells but then dropped the cache
+  // entirely unless at least one cell yielded a non-empty string.
+  // That meant a formula-bound title whose source cell is currently
+  // blank round-tripped as `<c:strRef><c:f>…</c:f></c:strRef>` with
+  // no cache — exactly the failure mode the fill was written to
+  // prevent.
+  if (resolved.cells.length > 0) {
+    strRef.cache = { pointCount: idx, points };
   }
 }
 
@@ -63,11 +124,49 @@ export function fillChartExCaches(
   workbook: Workbook,
   contextWorksheet?: Worksheet
 ): void {
+  // Defensive guard — parseChartEx emits `chartData.data = []` even for
+  // malformed documents, but downstream callers (and unit fixtures) can
+  // construct partial models. Match the classic `fillChartCaches` which
+  // no-ops when `plotArea` is missing.
+  const data = model.chartSpace?.chartData?.data;
   const ctx = buildResolverContext(workbook, contextWorksheet);
-  for (const entry of model.chartSpace.chartData.data) {
+  // Fill the ChartEx title's `<cx:txData>` cache. The builder accepts a
+  // `{ formula: string }` title and parks `strRef: { formula, cache:
+  // { points: [] } }` on the model; the writer emits `<cx:v>` from the
+  // first cached point. Without this fill, a formula-linked title
+  // round-trips as `<cx:txData><cx:f>…</cx:f></cx:txData>` (no cached
+  // value), so readers without a formula engine see an empty title
+  // until Excel recalculates.
+  const title = model.chartSpace?.chart?.title;
+  const titleStrRef = (
+    title as
+      | {
+          strRef?: {
+            formula?: string;
+            cache?: { points: Array<{ index: number; value: string }> };
+          };
+        }
+      | undefined
+  )?.strRef;
+  if (titleStrRef?.formula && (titleStrRef.cache?.points?.length ?? 0) === 0) {
+    const resolved = resolveReference(titleStrRef.formula, ctx);
+    if (resolved) {
+      const first = resolved.cells.find(cell => toString(cell.value) !== undefined);
+      if (first) {
+        const value = toString(first.value);
+        if (value !== undefined) {
+          titleStrRef.cache = { points: [{ index: 0, value }] };
+        }
+      }
+    }
+  }
+  if (!data || data.length === 0) {
+    return;
+  }
+  for (const entry of data) {
     if (entry.strDim?.formula && !hasChartExStringPoints(entry.strDim)) {
       const resolved = resolveReference(entry.strDim.formula, ctx);
-      if (resolved) {
+      if (resolved && resolved.cells.length > 0) {
         const points: Array<{ index: number; value: string }> = [];
         let idx = 0;
         for (const cell of resolved.cells) {
@@ -77,12 +176,17 @@ export function fillChartExCaches(
           }
           idx++;
         }
+        // Write levels whenever we had resolvable cells: even all-empty
+        // resolves should emit `[{ ptCount: N, points: [] }]` so Excel
+        // sizes the sparse array correctly. This matches the classic
+        // `fillNumRefInternal` / `fillStrRefInternal` behaviour which
+        // the null-value-cell test explicitly depends on.
         entry.strDim.levels = [{ ptCount: idx, points }];
       }
     }
     if (entry.numDim?.formula && !hasChartExNumberPoints(entry.numDim)) {
       const resolved = resolveReference(entry.numDim.formula, ctx);
-      if (resolved) {
+      if (resolved && resolved.cells.length > 0) {
         const points: Array<{ index: number; value: number }> = [];
         let idx = 0;
         for (const cell of resolved.cells) {
@@ -92,13 +196,36 @@ export function fillChartExCaches(
           }
           idx++;
         }
-        entry.numDim.levels = [{ ptCount: idx, points }];
+        // Preserve any `formatCode` already attached to the original
+        // numeric level so a round-tripped `<cx:lvl formatCode="…">`
+        // keeps its numFmt — the old path blindly replaced `levels`
+        // with a freshly-built object and silently dropped the
+        // attribute on every save.
+        const existingLvl = entry.numDim.levels?.[0];
+        entry.numDim.levels = [
+          {
+            ptCount: idx,
+            points,
+            ...(existingLvl?.formatCode ? { formatCode: existingLvl.formatCode } : {})
+          }
+        ];
       }
     }
   }
 }
 
 function fillGroupCaches(group: ChartTypeGroup, ctx: ResolverContext, date1904?: boolean): void {
+  // Group-level `dataLabels.dataLabelsRange` (Excel 2013+ "Value From
+  // Cells" at the chart-type group level). The builder places
+  // `dataLabelsRange` on the group when the caller passes `dataLabels:
+  // { valueFromCells }` at the group level — we previously only filled
+  // the per-series variant, so a group-wide value-from-cells range
+  // silently stayed empty until a formula engine recalculated it.
+  const groupDataLabels = (group as { dataLabels?: { dataLabelsRange?: DataLabelsRange } })
+    .dataLabels;
+  if (groupDataLabels?.dataLabelsRange?.formula) {
+    fillDataLabelsRange(groupDataLabels.dataLabelsRange, ctx);
+  }
   const series = (group as { series?: SeriesBase[] }).series;
   if (!series) {
     return;
@@ -194,7 +321,15 @@ function fillDataLabelsRange(range: DataLabelsRange, ctx: ResolverContext): void
     }
     idx++;
   }
-  range.cache = { pointCount: idx, points };
+  // Match the sibling fillers (`fillNumRefInternal`, `fillStrRefInternal`,
+  // `fillChartExCaches`) — gate on "resolved any cells" rather than
+  // "collected any non-empty values". An all-blank range still needs a
+  // sparse `{ pointCount: N, points: [] }` cache so Excel sizes the
+  // label array correctly; dropping the cache entirely under-counted
+  // the label index and desynchronised labels from their data points.
+  if (idx > 0) {
+    range.cache = { pointCount: idx, points };
+  }
 }
 
 function fillAxisDataSource(src: AxisDataSource, ctx: ResolverContext, date1904?: boolean): void {
@@ -245,6 +380,15 @@ function fillNumRefInternal(ref: NumberReference, ctx: ResolverContext, date1904
     }
     idx++;
   }
+  // `idx === 0` means we resolved no cells at all — treat the same as
+  // an un-resolvable reference and keep any pre-existing cache intact.
+  // When we did resolve cells but all of them were empty/undefined,
+  // still emit the cache with `points: []` and the correct
+  // `pointCount`: Excel needs the pointCount to size sparse arrays
+  // correctly even when every slot is blank.
+  if (idx === 0) {
+    return;
+  }
   if (!ref.cache) {
     ref.cache = { points: [] };
   }
@@ -286,6 +430,12 @@ function fillStrRefInternal(ref: StringReference, ctx: ResolverContext): void {
       points.push({ index: idx, value: s });
     }
     idx++;
+  }
+  // See `fillNumRefInternal`: no cells resolved → preserve any
+  // pre-existing cache; otherwise write the computed cache (possibly
+  // with `points: []` and `pointCount` reflecting blank slots).
+  if (idx === 0) {
+    return;
   }
   if (!ref.cache) {
     ref.cache = { points: [] };
@@ -358,27 +508,64 @@ interface ResolvedReferenceMatrix {
  * The set is mutated (added/deleted) rather than copied on each call; this
  * is safe because resolution is single-threaded and each recursive call
  * properly cleans up before returning.
+ *
+ * `definedNameDepth` is a defence-in-depth counter against non-cyclic but
+ * pathologically-deep chains (`A → B → C → D → …`) that the cycle guard
+ * cannot catch. Without a hard cap, a malicious or malformed workbook
+ * with hundreds of non-cyclic nested names can exhaust the JS call
+ * stack and throw `RangeError: Maximum call stack size exceeded` from
+ * deep inside the resolver. The limit matches LibreOffice's defined-name
+ * expansion ceiling.
  */
 interface ResolverContext {
   workbook: Workbook;
   contextWorksheet?: Worksheet;
   localSheetId?: number;
   visitedDefinedNames: Set<string>;
+  definedNameDepth: number;
 }
+
+/**
+ * Maximum defined-name expansion depth. Picked to match LibreOffice and
+ * comfortably exceed anything a legitimate workbook produces (Excel's UI
+ * stops the user well before this).
+ */
+const MAX_DEFINED_NAME_DEPTH = 128;
 
 function buildResolverContext(workbook: Workbook, contextWorksheet?: Worksheet): ResolverContext {
   let localSheetId: number | undefined;
   if (contextWorksheet) {
-    // workbook.worksheets is ordered/filtered the same way Excel lists sheets,
-    // which matches the `localSheetId` assigned at save time by
-    // workbook-xform.ts:63-108. Any other indexing (e.g. internal sparse _id)
-    // would not match defined names parsed from disk.
-    const idx = workbook.worksheets.indexOf(contextWorksheet);
-    if (idx >= 0) {
-      localSheetId = idx;
+    // OOXML `definedName/@localSheetId` is a 0-based index into the
+    // workbook-level `<sheets>` element, which INTERLEAVES worksheets
+    // and chartsheets. Previously this helper used
+    // `workbook.worksheets.indexOf(contextWorksheet)` — the compressed
+    // worksheets-only position — so an interleaved
+    // `[WS1, CS, WS2]` workbook resolved WS2's `localSheetId` to `1`,
+    // colliding with the chartsheet's real tab position and making
+    // every sheet-scoped defined name on WS2 miss.
+    //
+    // `worksheet.orderNo` is set at BOTH save time (addWorksheet /
+    // addChartsheet use a unified counter) and load time
+    // (workbook-xform assigns `sheetPosition` across the mixed
+    // `<sheets>` list), so it is the authoritative mixed-tab index.
+    // Fall back to the compressed lookup for test worksheets that
+    // bypass the allocator and never receive an `orderNo`.
+    if (typeof contextWorksheet.orderNo === "number") {
+      localSheetId = contextWorksheet.orderNo;
+    } else {
+      const idx = workbook.worksheets.indexOf(contextWorksheet);
+      if (idx >= 0) {
+        localSheetId = idx;
+      }
     }
   }
-  return { workbook, contextWorksheet, localSheetId, visitedDefinedNames: new Set() };
+  return {
+    workbook,
+    contextWorksheet,
+    localSheetId,
+    visitedDefinedNames: new Set(),
+    definedNameDepth: 0
+  };
 }
 
 /**
@@ -419,6 +606,14 @@ function resolveReference(formula: string, ctx: ResolverContext): ResolvedRefere
     try {
       decoded = colCache.decodeEx(trimmed);
     } catch {
+      return undefined;
+    }
+    // `decodeEx` can also return `{ sheetName, error: "#REF!" }` for
+    // malformed references — that shape has neither `row`/`col` nor
+    // `top`/`left`, so without an explicit check we would return
+    // `{ worksheet, cells: [] }` and silently mask an invalid formula as a
+    // successful empty resolution.
+    if ("error" in decoded) {
       return undefined;
     }
     const sheetName = decoded.sheetName;
@@ -503,7 +698,14 @@ function resolveDefinedNameReference(
   if (ctx.visitedDefinedNames.has(visitKey)) {
     return undefined;
   }
+  // Depth guard: terminate pathological non-cyclic chains
+  // (A → B → C → D → … with hundreds of links) before the JS call
+  // stack blows up.
+  if (ctx.definedNameDepth >= MAX_DEFINED_NAME_DEPTH) {
+    return undefined;
+  }
   ctx.visitedDefinedNames.add(visitKey);
+  ctx.definedNameDepth += 1;
 
   try {
     // A defined name may expand to multiple ranges (comma-separated union).
@@ -532,6 +734,7 @@ function resolveDefinedNameReference(
     return { worksheet: firstWorksheet, cells: aggregated };
   } finally {
     ctx.visitedDefinedNames.delete(visitKey);
+    ctx.definedNameDepth -= 1;
   }
 }
 
@@ -556,7 +759,20 @@ function findDefinedName(
     // workbook-scoped if the sheet has no matching entry.
     const qualifyingSheet = ctx.workbook.getWorksheet(qualified.sheetName);
     if (qualifyingSheet) {
-      const sheetIdx = ctx.workbook.worksheets.indexOf(qualifyingSheet);
+      // Match the scoping key used in `buildResolverContext` — always
+      // prefer `orderNo` (the mixed-tab workbook position, counting
+      // chartsheets) over `worksheets.indexOf` (the worksheets-only
+      // position). When these disagree — e.g. in a workbook ordered
+      // `[WS1, ChartSheet, WS2]`, `WS2.orderNo === 2` but
+      // `worksheets.indexOf(WS2) === 1` — sheet-scoped defined name
+      // lookups via bare and qualified paths must agree, otherwise
+      // the qualified path silently falls back to the workbook-scoped
+      // entry (or misses entirely) while the bare path finds the
+      // correct sheet-scoped one.
+      const sheetIdx =
+        typeof qualifyingSheet.orderNo === "number"
+          ? qualifyingSheet.orderNo
+          : ctx.workbook.worksheets.indexOf(qualifyingSheet);
       if (sheetIdx >= 0) {
         const scoped = getDefinedNameRanges(ctx.workbook, qualified.name, sheetIdx);
         if (scoped) {
@@ -666,15 +882,85 @@ function splitQualifiedName(formula: string): { sheetName: string; name: string 
   return { sheetName, name };
 }
 
+/**
+ * Peel off an optional `Sheet1!` or `'My Sheet'!` prefix from a formula
+ * without validating the shape of the remainder. Unlike
+ * {@link splitQualifiedName} (which additionally checks that the RHS is a
+ * bare defined name), this helper is safe to use on structured
+ * references (`Table1[Col]`), absolute ranges (`$A$1:$B$2`) and anything
+ * else that might follow a sheet prefix.
+ *
+ * Returns `undefined` when the input has no sheet prefix — callers should
+ * treat that as "use the input unchanged".
+ */
+function splitSheetPrefix(formula: string): { sheetName: string; remainder: string } | undefined {
+  let i = 0;
+  let sheetName = "";
+  if (formula[0] === "'") {
+    i = 1;
+    while (i < formula.length) {
+      if (formula[i] === "'" && formula[i + 1] === "'") {
+        sheetName += "'";
+        i += 2;
+      } else if (formula[i] === "'") {
+        i++;
+        break;
+      } else {
+        sheetName += formula[i];
+        i++;
+      }
+    }
+    if (formula[i] !== "!") {
+      return undefined;
+    }
+  } else {
+    const bang = formula.indexOf("!");
+    if (bang <= 0) {
+      return undefined;
+    }
+    sheetName = formula.slice(0, bang);
+    i = bang;
+  }
+  if (formula[i] !== "!") {
+    return undefined;
+  }
+  return { sheetName, remainder: formula.slice(i + 1) };
+}
+
 function resolveStructuredReference(
   formula: string,
   workbook: Workbook
 ): ResolvedReference | undefined {
-  const parsed = parseStructuredReference(formula.trim());
+  // Excel accepts both bare (`Table1[Col]`) and sheet-qualified
+  // (`Sheet1!Table1[Col]`) structured references. Strip the optional sheet
+  // prefix so table lookup can operate on the bare `Table1[Col]` form; we
+  // also use the prefix to bias the worksheet search order so a same-named
+  // table on the referenced sheet wins over an unrelated sheet that
+  // happens to carry the same name.
+  //
+  // NOTE: `splitQualifiedName` validates the RHS against
+  // `BARE_DEFINED_NAME_RE`, which rejects structured references because
+  // they contain `[`. We therefore use a dedicated sheet-prefix splitter
+  // that does not gate on name shape — `splitSheetPrefix` only peels off
+  // the quoted / unquoted sheet name, leaving the table reference
+  // syntactically intact.
+  const split = splitSheetPrefix(formula.trim());
+  const bareFormula = split ? split.remainder : formula.trim();
+  const preferredSheetName = split?.sheetName;
+  const parsed = parseStructuredReference(bareFormula);
   if (!parsed) {
     return undefined;
   }
-  for (const worksheet of workbook.worksheets) {
+  const worksheets = [...workbook.worksheets];
+  if (preferredSheetName) {
+    // Move the preferred sheet to the front of the search (case-insensitive).
+    const target = preferredSheetName.toLowerCase();
+    const idx = worksheets.findIndex(ws => ws.name.toLowerCase() === target);
+    if (idx > 0) {
+      worksheets.unshift(...worksheets.splice(idx, 1));
+    }
+  }
+  for (const worksheet of worksheets) {
     const table = worksheet
       .getTables()
       .find(t => t.name === parsed.tableName || t.displayName === parsed.tableName);
@@ -796,7 +1082,13 @@ function resolveReferenceMatrix(
     if (ctx.visitedDefinedNames.has(visitKey)) {
       return undefined;
     }
+    // Same depth guard as `resolveDefinedNameReference`; matrices route
+    // through a separate code path so they need their own bail-out.
+    if (ctx.definedNameDepth >= MAX_DEFINED_NAME_DEPTH) {
+      return undefined;
+    }
     ctx.visitedDefinedNames.add(visitKey);
+    ctx.definedNameDepth += 1;
     try {
       let firstWorksheet: Worksheet | undefined;
       const mergedValues: unknown[][] = [];
@@ -823,6 +1115,7 @@ function resolveReferenceMatrix(
       };
     } finally {
       ctx.visitedDefinedNames.delete(visitKey);
+      ctx.definedNameDepth -= 1;
     }
   }
 
@@ -840,6 +1133,11 @@ function resolveReferenceMatrix(
     try {
       decoded = colCache.decodeEx(trimmed);
     } catch {
+      return undefined;
+    }
+    // See `resolveReference`: treat `{ error: ... }` results from
+    // `decodeEx` as unresolved rather than as empty cell sets.
+    if ("error" in decoded) {
       return undefined;
     }
     const sheetName = decoded.sheetName;
@@ -988,7 +1286,35 @@ function toString(v: unknown): string | undefined {
     return String(v);
   }
   if (v instanceof Date) {
-    return v.toISOString();
+    // Date-cells feeding a chart's category axis (via a `strRef` — e.g.
+    // `=Sheet1!$A$1:$A$10` where A1:A10 are dates) should surface as
+    // human-readable labels, not ISO 8601 timestamps. `toISOString()`
+    // produced output like `"2023-01-15T00:00:00.000Z"` which rendered
+    // verbatim on axis labels and diverged from Excel's cache (Excel
+    // stores the formatted display text per the referenced cell's
+    // numFmt).
+    //
+    // We don't have access to the source cell's numFmt from this
+    // fallback path, but a locale-neutral `YYYY-MM-DD` (or
+    // `YYYY-MM-DD HH:mm:ss` when the time portion is non-zero) is a
+    // reasonable approximation that renders well in every preview and
+    // matches Excel's default date format more closely than ISO.
+    if (Number.isNaN(v.getTime())) {
+      return undefined;
+    }
+    const year = v.getUTCFullYear().toString().padStart(4, "0");
+    const month = (v.getUTCMonth() + 1).toString().padStart(2, "0");
+    const day = v.getUTCDate().toString().padStart(2, "0");
+    const hour = v.getUTCHours();
+    const min = v.getUTCMinutes();
+    const sec = v.getUTCSeconds();
+    if (hour === 0 && min === 0 && sec === 0) {
+      return `${year}-${month}-${day}`;
+    }
+    const hh = hour.toString().padStart(2, "0");
+    const mm = min.toString().padStart(2, "0");
+    const ss = sec.toString().padStart(2, "0");
+    return `${year}-${month}-${day} ${hh}:${mm}:${ss}`;
   }
   return undefined;
 }

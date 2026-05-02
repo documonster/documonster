@@ -6,31 +6,81 @@
  * files is handled by raw byte passthrough (model.rawXml is preferred when set).
  */
 
+import { ChartOptionsError } from "@excel/errors";
+
 import type { ChartExAxis, ChartExDataEntry, ChartExModel, ChartExSeries } from "./chart-ex-types";
 import {
   renderSvgToPng,
   type ChartPdfDrawingSurface,
   type ChartPdfPathOp,
   type ChartRenderOptions,
-  type PdfColor,
   type RegionMapDataOptions,
   type RegionMapMatchRule
 } from "./chart-renderer";
+import {
+  COLORS,
+  DEFAULT_HEIGHT,
+  DEFAULT_WIDTH,
+  clamp01,
+  escapeXml,
+  escapeXmlAttr,
+  fmt,
+  fmtNumAttr,
+  fmtNumText,
+  formatNumber,
+  hexToPdfColor,
+  insetRect,
+  interpolateColor,
+  polar,
+  previewShapeFillColor,
+  themeIndexToName,
+  valueToY,
+  withAlpha,
+  type ChartRect,
+  type PdfColor
+} from "./chart-utils";
+import { getSpPrFill, isRawXmlShape } from "./shape-properties";
 import { resolveTopologyObject, type ResolvedRing, type TopologyLike } from "./topojson";
 import type {
   ChartColor,
+  ChartRichText,
   ChartTextProperties,
   ChartTitle,
+  CustomGeometry,
+  CustomGeometryCommand,
   EffectList,
+  PresetGeometry,
   Scene3D,
   Shadow,
   ShapeProperties,
-  ShapeProperties3D
+  ShapeProperties3D,
+  ShapeTransform
 } from "./types";
 
-const DEFAULT_WIDTH = 640;
-const DEFAULT_HEIGHT = 360;
-const COLORS = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
+/**
+ * Local alias kept for file-level readability. ChartEx code has always
+ * called these `SvgRect`; the underlying shape matches the shared
+ * {@link ChartRect} exactly.
+ */
+type SvgRect = ChartRect;
+
+/**
+ * Return the maximum absolute value of `values`, floored at `min`.
+ * Folds via a loop rather than `Math.max(min, ...values.map(...))`
+ * — the spread form blows the JS call stack past ~100k elements.
+ * Matches the defensive style used elsewhere in this file
+ * (`valueRange`, `boxStats`, `buildBubbles`).
+ */
+function maxAbsValue(values: readonly number[], min: number): number {
+  let max = min;
+  for (const v of values) {
+    const abs = Math.abs(v);
+    if (Number.isFinite(abs) && abs > max) {
+      max = abs;
+    }
+  }
+  return max;
+}
 
 /**
  * Render a ChartExModel to the full XML string representation of cx:chart.
@@ -70,10 +120,40 @@ export function renderChartEx(
     ].join("\n")
   );
   const space = model.chartSpace;
+  // ECMA-376 / Chart2014 `CT_ChartSpace` child order:
+  //   chartData, chart, clrMapOvr?, spPr?, txPr?, protection?,
+  //   externalData*, printSettings?, extLst?.
+  // `spPr` / `txPr` / `protection` / `printSettings` are preserved
+  // verbatim so ChartEx files that carry chartSpace-level styling or
+  // print settings round-trip through `forceStructural` writes.
   parts.push(renderChartData(space.chartData));
   parts.push(renderChart(space.chart));
   if (space.clrMapOvr) {
     parts.push(space.clrMapOvr);
+  }
+  if (space.spPr) {
+    parts.push(renderSpPr(space.spPr, "  "));
+  }
+  if (space.txPr) {
+    parts.push(renderTxPr(space.txPr, "  ", "cx:txPr"));
+  }
+  if (space.protection) {
+    parts.push(space.protection);
+  }
+  // `cx:externalData` is a direct child of `cx:chartSpace` per
+  // Chart2014's `CT_ChartSpace`. Previous versions of this library
+  // emitted it inside `cx:chartData`, which strict validators and
+  // the Office reader reject. Parser migration moves legacy data
+  // into `space.externalData` so this single emit covers both
+  // newly-authored and round-tripped models.
+  if (space.externalData) {
+    for (const ed of space.externalData) {
+      const attrs = ed.autoUpdate === undefined ? "" : ` autoUpdate="${ed.autoUpdate ? "1" : "0"}"`;
+      parts.push(`  <cx:externalData r:id="${ed.id}"${attrs}/>`);
+    }
+  }
+  if (space.printSettings) {
+    parts.push(space.printSettings);
   }
   if (space.extLst) {
     parts.push(space.extLst);
@@ -86,7 +166,11 @@ export function renderChartExSvg(model: ChartExModel, options: ChartRenderOption
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
   const title = options.title ?? chartTitleText(model.chartSpace.chart.title);
-  const plot = getPlotRect(width, height, !!title);
+  // Count newlines in the title so `getPlotRect` can expand the top
+  // margin for multi-paragraph titles; a 3-line title with the default
+  // 52px top margin would otherwise overflow into the plot area.
+  const titleLineCount = title ? title.split(/\r?\n/).length : 0;
+  const plot = getPlotRect(width, height, !!title, titleLineCount);
   const backgroundColor = options.backgroundColor ?? "#fff";
   const series =
     model.chartSpace.chart.plotArea.plotAreaRegion?.series ??
@@ -97,17 +181,52 @@ export function renderChartExSvg(model: ChartExModel, options: ChartRenderOption
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
   );
   if (backgroundColor !== "transparent") {
-    parts.push(`<rect width="100%" height="100%" fill="${escapeAttr(backgroundColor)}"/>`);
+    parts.push(`<rect width="100%" height="100%" fill="${escapeXmlAttr(backgroundColor)}"/>`);
   }
   if (title) {
-    parts.push(
-      `<text x="${fmt(width / 2)}" y="26" text-anchor="middle" font-family="Arial" font-size="18" fill="#222">${escapeXml(title)}</text>`
-    );
+    // Multi-paragraph titles arrive as a `\n`-joined string from
+    // `chartTitleText`. SVG `<text>` normalises whitespace (including
+    // newlines) to spaces, so we must emit each paragraph as its own
+    // `<tspan>` with an explicit baseline offset to stack them
+    // vertically. Single-line titles stay on the fast path and emit a
+    // bare `<text>` node — matches the previous byte-for-byte output
+    // for the common case.
+    const lines = title.split(/\r?\n/);
+    if (lines.length === 1) {
+      parts.push(
+        `<text x="${fmt(width / 2)}" y="26" text-anchor="middle" font-family="Arial" font-size="18" fill="#222">${escapeXml(title)}</text>`
+      );
+    } else {
+      const lineHeightEm = 1.2;
+      const tspans = lines
+        .map(
+          (line, i) =>
+            `<tspan x="${fmt(width / 2)}"${i === 0 ? "" : ` dy="${lineHeightEm}em"`}>${escapeXml(line)}</tspan>`
+        )
+        .join("");
+      parts.push(
+        `<text x="${fmt(width / 2)}" y="26" text-anchor="middle" font-family="Arial" font-size="18" fill="#222">${tspans}</text>`
+      );
+    }
   }
   for (let i = 0; i < series.length; i++) {
     renderChartExSeriesSvg(parts, model, series[i], plot, i, options);
   }
-  renderChartExLegend(parts, series, width, !!title);
+  // Only draw a legend when the model carries one. Previously this
+  // call was unconditional, producing a synthetic legend on charts that
+  // explicitly hid the legend (e.g. builder used `showLegend: false`,
+  // which stores `legend: undefined`). The classic renderer honours
+  // the legend model — ChartEx now matches.
+  if (model.chartSpace.chart.legend) {
+    renderChartExLegend(
+      parts,
+      series,
+      width,
+      height,
+      !!title,
+      model.chartSpace.chart.legend.legendPos
+    );
+  }
   parts.push("</svg>");
   return parts.join("");
 }
@@ -153,6 +272,11 @@ export const VECTOR_PDF_CHART_EX_LAYOUT_IDS: readonly string[] = [
   // both types. The Pareto branch is detected at draw time via
   // `series.layoutPr?.paretoLine`.
   "clusteredColumn",
+  // Standalone `paretoLine` layoutId — Excel emits this for the
+  // cumulative-percent line component of a paired Pareto chart. The
+  // SVG and PDF paths render it as a line-with-points curve rather
+  // than falling through to the column default.
+  "paretoLine",
   // regionMap now has a full vector path (topology polygons, centroid
   // preview, hex-tile fallback — all three modes ported from the SVG
   // emitter). Callers who need raster output can still opt in via
@@ -199,7 +323,11 @@ export function drawChartExPdf(
   const plotArea = model.chartSpace.chart.plotArea;
   const seriesList = plotArea.plotAreaRegion?.series ?? plotArea.series ?? [];
   const titleText = options.title ?? chartTitleText(model.chartSpace.chart.title);
-  const titleHeight = titleText ? 28 : 0;
+  // `titleHeight` must scale with the number of lines so multi-paragraph
+  // titles don't overflow the plot area. Line-height of 19.2 matches
+  // the 16pt font × 1.2 line-height applied below in the drawText loop.
+  const titleLines = titleText ? titleText.split(/\r?\n/).length : 0;
+  const titleHeight = titleText ? Math.max(28, 20 + titleLines * 19.2) : 0;
   const plot: SvgRect = {
     x: rect.x + 12,
     y: rect.y + titleHeight + 12,
@@ -218,13 +346,24 @@ export function drawChartExPdf(
   });
 
   if (titleText) {
-    surface.drawText(titleText, {
-      x: rect.x + rect.width / 2,
-      y: rect.y + 20,
-      fontSize: 16,
-      anchor: "middle",
-      color: hexToPdfColor("#222222")
-    });
+    // Multi-paragraph titles arrive as a `\n`-joined string from
+    // `chartTitleText`. `drawText` is a single-line primitive on every
+    // surface we support, so previously a two-paragraph title rendered
+    // as one line containing a literal `\n`. Split explicitly and
+    // stack paragraphs vertically with a `fontSize * 1.2` line-height
+    // (same convention as the SVG path below).
+    const fontSize = 16;
+    const lineHeight = Math.round(fontSize * 1.2);
+    const lines = titleText.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      surface.drawText(lines[i], {
+        x: rect.x + rect.width / 2,
+        y: rect.y + 20 + i * lineHeight,
+        fontSize,
+        anchor: "middle",
+        color: hexToPdfColor("#222222")
+      });
+    }
   }
 
   for (const series of seriesList) {
@@ -245,10 +384,20 @@ export function drawChartExPdf(
       // builder normalisation; distinguishing them is a single runtime
       // flag (`layoutPr.paretoLine`).
       if (series.layoutPr?.paretoLine) {
-        drawParetoPdf(surface, model, series, plot);
+        drawParetoPdf(surface, model, series, plot, { drawColumns: true });
       } else {
         drawHistogramPdf(surface, model, series, plot);
       }
+    } else if (series.layoutId === "paretoLine") {
+      // Standalone paretoLine (distinct from `clusteredColumn` with
+      // `paretoLine` flag) — Excel emits this for the cumulative-
+      // percent line overlay when the author builds a paired Pareto
+      // chart via the UI. The bars come from a sibling `clusteredColumn`
+      // series; this series draws ONLY the overlay curve. PDF dispatch
+      // was missing this case and threw `layoutId 'paretoLine' is not
+      // supported`; then when added, unconditionally redrew the columns
+      // on top of the companion series' bars.
+      drawParetoPdf(surface, model, series, plot, { drawColumns: false });
     } else {
       throw new Error(
         `drawChartExPdf: layoutId '${series.layoutId}' is not supported by the vector path. ` +
@@ -415,9 +564,10 @@ function drawColumnsPdf(
   values: number[],
   categories: string[],
   plot: SvgRect,
-  color: string
+  color: string,
+  axis?: ChartExAxis
 ): void {
-  const range = valueRange(values);
+  const range = valueRange(values, axis);
   drawAxesPdf(surface, plot, range);
   const count = Math.max(1, values.length);
   const groupWidth = plot.width / count;
@@ -456,7 +606,8 @@ function drawHistogramPdf(
     bins.map(bin => bin.count),
     bins.map(bin => bin.label),
     plot,
-    COLORS[0]
+    COLORS[0],
+    findValueAxis(model)
   );
 }
 
@@ -464,70 +615,98 @@ function drawParetoPdf(
   surface: ChartPdfDrawingSurface,
   model: ChartExModel,
   series: ChartExSeries,
-  plot: SvgRect
+  plot: SvgRect,
+  options: { drawColumns?: boolean } = {}
 ): void {
+  const { drawColumns = true } = options;
   const refs = resolveChartExRefs(model, series);
   const values = refs.values;
   const categories =
     refs.categories.length > 0 ? refs.categories : values.map((_, i) => String(i + 1));
+  // Filter non-finite values before sorting. `Array.prototype.sort`
+  // is undefined on `NaN` comparator outputs (V8 TimSort keeps them
+  // in their discovery position, WebKit may shuffle them arbitrarily),
+  // so a blank / `#N/A` source cell produces bars at a random X
+  // position and desynces the cumulative curve from the column heights.
+  // Pareto convention also drops missing rows entirely.
   const sorted = values
     .map((value, i) => ({ value, category: categories[i] ?? String(i + 1) }))
+    .filter(item => Number.isFinite(item.value))
     .sort((a, b) => b.value - a.value);
   const sortedValues = sorted.map(item => item.value);
-  drawColumnsPdf(
-    surface,
-    sortedValues,
-    sorted.map(item => item.category),
-    plot,
-    COLORS[0]
-  );
+  if (drawColumns) {
+    drawColumnsPdf(
+      surface,
+      sortedValues,
+      sorted.map(item => item.category),
+      plot,
+      COLORS[0],
+      findValueAxis(model)
+    );
+  }
 
   // Cumulative polyline. Rendered as connected `drawLine` segments so
   // the path stays visible on surfaces without `drawPath`, matching
   // the SVG polyline behaviour. `drawCircle` is used for the dots
   // when available; otherwise small rects serve as markers.
-  const total = sortedValues.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
-  let cumulative = 0;
-  const count = Math.max(1, sortedValues.length);
-  const step = plot.width / count;
-  const points = sortedValues.map((value, i) => {
-    cumulative += Math.max(0, value);
-    return {
-      x: plot.x + i * step + step / 2,
-      y: plot.y + plot.height - (cumulative / total) * plot.height
-    };
-  });
-  const lineColor = hexToPdfColor(COLORS[1]);
-  for (let i = 1; i < points.length; i++) {
-    surface.drawLine({
-      x1: points[i - 1].x,
-      y1: points[i - 1].y,
-      x2: points[i].x,
-      y2: points[i].y,
-      color: lineColor,
-      lineWidth: 2
+  //
+  // Non-finite values (NaN from blank / `#N/A` source cells) would
+  // otherwise poison `Math.max(0, …)` and zero the visible `> 0` check
+  // — mirrors the SVG pareto guard.
+  const positiveSum = sortedValues.reduce(
+    (sum, v) => sum + (Number.isFinite(v) ? Math.max(0, v) : 0),
+    0
+  );
+  // When the dataset has no positive values (all-zero or all-negative
+  // Pareto input), the cumulative-percent curve is undefined — every
+  // point would collapse to the baseline and imply a flat 0 %
+  // cumulative trace. Suppress the overlay entirely so the author
+  // notices the input is out of range, rather than silently emitting
+  // a flat line that reads as valid data.
+  if (positiveSum > 0) {
+    const total = positiveSum;
+    let cumulative = 0;
+    const count = Math.max(1, sortedValues.length);
+    const step = plot.width / count;
+    const points = sortedValues.map((value, i) => {
+      cumulative += Number.isFinite(value) ? Math.max(0, value) : 0;
+      return {
+        x: plot.x + i * step + step / 2,
+        y: plot.y + plot.height - (cumulative / total) * plot.height
+      };
     });
-  }
-  for (const p of points) {
-    if (surface.drawCircle) {
-      surface.drawCircle({ cx: p.x, cy: p.y, r: 3, fill: lineColor });
-    } else {
-      surface.drawRect({
-        x: p.x - 3,
-        y: p.y - 3,
-        width: 6,
-        height: 6,
-        fill: lineColor
+    const lineColor = hexToPdfColor(COLORS[1]);
+    for (let i = 1; i < points.length; i++) {
+      surface.drawLine({
+        x1: points[i - 1].x,
+        y1: points[i - 1].y,
+        x2: points[i].x,
+        y2: points[i].y,
+        color: lineColor,
+        lineWidth: 2
       });
     }
+    for (const p of points) {
+      if (surface.drawCircle) {
+        surface.drawCircle({ cx: p.x, cy: p.y, r: 3, fill: lineColor });
+      } else {
+        surface.drawRect({
+          x: p.x - 3,
+          y: p.y - 3,
+          width: 6,
+          height: 6,
+          fill: lineColor
+        });
+      }
+    }
+    surface.drawText("Cumulative %", {
+      x: plot.x + plot.width - 4,
+      y: plot.y + 12,
+      fontSize: 10,
+      color: lineColor,
+      anchor: "end"
+    });
   }
-  surface.drawText("Cumulative %", {
-    x: plot.x + plot.width - 4,
-    y: plot.y + 12,
-    fontSize: 10,
-    color: lineColor,
-    anchor: "end"
-  });
 }
 
 function drawWaterfallPdf(
@@ -543,12 +722,33 @@ function drawWaterfallPdf(
   const subtotalIdx = new Set(series.layoutPr?.subtotals?.map(s => s.idx) ?? []);
   let running = 0;
   const spans = values.map((value, i) => {
-    const start = subtotalIdx.has(i) ? 0 : running;
-    const end = subtotalIdx.has(i) ? value : running + value;
+    // Subtotal convention: span `0 → running sum` (not the scalar
+    // value stored at the row). See `renderWaterfallSvg` for the
+    // matching rationale.
+    if (subtotalIdx.has(i)) {
+      const end = running;
+      return { start: 0, end, value: end, total: true, gap: false };
+    }
+    // NaN guard mirrors the SVG path — `collectChartExNumbers` emits
+    // `NaN` for sparse slots; adding that into `running` poisons every
+    // subsequent bar. Emit a zero-height placeholder span and leave
+    // `running` untouched. Flag as `gap` so the colour picker below
+    // routes to a neutral grey rather than "increase" green
+    // (`value: 0 >= 0` would otherwise paint the gap row the same as a
+    // zero-increase row, making missing data indistinguishable from a
+    // real zero delta).
+    if (!Number.isFinite(value)) {
+      return { start: running, end: running, value: 0, total: false, gap: true };
+    }
+    const start = running;
+    const end = running + value;
     running = end;
-    return { start, end, value, total: subtotalIdx.has(i) };
+    return { start, end, value, total: false, gap: false };
   });
-  const range = valueRange(spans.flatMap(s => [s.start, s.end]));
+  const range = valueRange(
+    spans.flatMap(s => [s.start, s.end]),
+    findValueAxis(model)
+  );
   drawAxesPdf(surface, plot, range);
   const count = Math.max(1, spans.length);
   const groupWidth = plot.width / count;
@@ -559,16 +759,22 @@ function drawWaterfallPdf(
     const y1 = valueToY(span.start, range.min, range.max, plot);
     const y2 = valueToY(span.end, range.min, range.max, plot);
     const x = plot.x + i * groupWidth + groupWidth * 0.18;
-    const colorHex = span.total
-      ? shapeFillColor(series.layoutPr?.totalSpPr, COLORS[2])
-      : span.value >= 0
-        ? shapeFillColor(series.layoutPr?.increaseSpPr, "#70AD47")
-        : shapeFillColor(series.layoutPr?.decreaseSpPr, "#C00000");
+    const colorHex = span.gap
+      ? "#BFBFBF"
+      : span.total
+        ? shapeFillColor(series.layoutPr?.totalSpPr, COLORS[2])
+        : span.value >= 0
+          ? shapeFillColor(series.layoutPr?.increaseSpPr, "#70AD47")
+          : shapeFillColor(series.layoutPr?.decreaseSpPr, "#C00000");
     surface.drawRect({
       x,
       y: Math.min(y1, y2),
       width: groupWidth * 0.64,
-      height: Math.max(1, Math.abs(y1 - y2)),
+      // Gap rows should have zero visible height — `Math.max(1, 0)`
+      // produced a 1-pixel green sliver that looked like a tiny
+      // positive delta. Skip the `Math.max` clamp when the span is
+      // intentionally flat.
+      height: span.gap ? 0 : Math.max(1, Math.abs(y1 - y2)),
       fill: hexToPdfColor(colorHex)
     });
     surface.drawText(categories[i] ?? String(i + 1), {
@@ -604,17 +810,43 @@ function drawFunnelPdf(
   const values = refs.values;
   const categories =
     refs.categories.length > 0 ? refs.categories : values.map((_, i) => String(i + 1));
-  const max = Math.max(1, ...values.map(v => Math.abs(v)));
+  // Use the true maximum magnitude — flooring at 1 collapses charts
+  // whose data is entirely sub-1 (conversion rates, probabilities,
+  // proportions) into a tiny funnel because every stage width then
+  // scales as `value / 1` rather than `value / max`. Only fall back
+  // to `1` when there are no positive, finite values at all so
+  // downstream arithmetic never divides by zero.
+  const trueMax = maxAbsValue(values, 0);
+  const max = trueMax > 0 ? trueMax : 1;
   const count = Math.max(1, values.length);
   const h = plot.height / count;
   const labelColor: PdfColor = { r: 1, g: 1, b: 1 };
   const whiteStroke: PdfColor = { r: 1, g: 1, b: 1 };
+  // Pre-resolve per-point `dataPt/@idx` overrides into a map, mirroring
+  // `renderFunnelSvg`. Previously the PDF path used the default
+  // `COLORS` palette regardless of `dataPt` overrides, so a
+  // round-tripped funnel with custom stage colours rendered correctly
+  // in SVG but reverted to the default palette in PDF output — a
+  // silent divergence between the two backends.
+  const pointFills = new Map<number, string>();
+  if (series.dataPt) {
+    for (const dp of series.dataPt) {
+      if (dp.spPr) {
+        pointFills.set(dp.idx, shapeFillColor(dp.spPr, COLORS[dp.idx % COLORS.length]));
+      }
+    }
+  }
   values.forEach((value, i) => {
-    const topW = (Math.abs(value) / max) * plot.width;
-    const bottomW = (Math.abs(values[i + 1] ?? value) / max) * plot.width;
+    // Non-finite values must not propagate into the polygon vertices —
+    // see `renderFunnelSvg` for the rationale.
+    const absValue = Number.isFinite(value) ? Math.abs(value) : 0;
+    const rawNext = values[i + 1];
+    const nextAbs = Number.isFinite(rawNext) ? Math.abs(rawNext) : absValue;
+    const topW = (absValue / max) * plot.width;
+    const bottomW = (nextAbs / max) * plot.width;
     const y = plot.y + i * h;
     const cx = plot.x + plot.width / 2;
-    const fill = hexToPdfColor(COLORS[i % COLORS.length]);
+    const fill = hexToPdfColor(pointFills.get(i) ?? COLORS[i % COLORS.length]);
     // Trapezoid = quadrilateral polygon: `drawPath` with move + 3×line
     // + close. When the surface lacks drawPath we still keep a filled
     // rectangle (retains the colour signal) and overlay four stroke-
@@ -700,7 +932,7 @@ function drawBoxWhiskerPdf(
       ? groupValuesByCategory(values, categories)
       : new Map([["Values", values]]);
   const allValues = Array.from(groups.values()).flat();
-  const range = valueRange(allValues);
+  const range = valueRange(allValues, findValueAxis(model));
   drawAxesPdf(surface, plot, range);
   const keys = Array.from(groups.keys());
   const groupWidth = plot.width / Math.max(1, keys.length);
@@ -766,10 +998,14 @@ function drawBoxWhiskerPdf(
         dashPattern: [3, 2]
       });
     }
-    // Inner points — small translucent dots, one per raw value.
+    // Inner points — small translucent dots, one per non-outlier
+    // sample. Matches the SVG path; iterate `stats.nonOutliers` (not
+    // the full raw group) so outlier values don't get double-plotted
+    // as both an inner-point dot AND a hollow outlier ring when both
+    // flags are enabled.
     if (series.layoutPr?.showInnerPoints) {
       const innerFill = { ...seriesColor, a: 0.55 };
-      for (const value of groups.get(key) ?? []) {
+      for (const value of stats.nonOutliers) {
         const y = valueToY(value, range.min, range.max, plot);
         if (surface.drawCircle) {
           surface.drawCircle({ cx: cx - w * 0.62, cy: y, r: 1.6, fill: innerFill });
@@ -847,7 +1083,7 @@ function drawRegionMapPdf(
   const values = refs.values;
   const categories =
     refs.categories.length > 0 ? refs.categories : values.map((_, i) => String(i + 1));
-  const range = valueRange(values);
+  const range = valueRange(values, findValueAxis(model));
 
   // 1. TopoJSON branch.
   if (mapOptions?.topology) {
@@ -902,8 +1138,16 @@ function drawRegionMapPdf(
       series.layoutPr?.projection ?? "miller",
       plot
     );
-    const t = (record.value - range.min) / (range.max - range.min);
-    const radius = 6 + Math.sqrt(Math.max(0, t)) * 14;
+    // Skip non-finite values and clamp `t` to `[0, 1]` — same guard
+    // as the SVG path; without it `radius` / `interpolateColor`
+    // receive `NaN` or out-of-range input and draw invisible or
+    // garbage-coloured dots. Matches the TOPO path's clamp.
+    if (!Number.isFinite(record.value)) {
+      continue;
+    }
+    const rawT = (record.value - range.min) / Math.max(1e-9, range.max - range.min);
+    const t = Math.max(0, Math.min(1, rawT));
+    const radius = 6 + Math.sqrt(t) * 14;
     const fillColor: PdfColor = {
       ...hexToPdfColor(interpolateColor("#D9EAF7", "#2F75B5", t)),
       // Matches the SVG `opacity="0.92"`; `/ExtGState` will materialise
@@ -1014,6 +1258,35 @@ function tryDrawRegionMapWithTopologyPdf(
     return false;
   }
 
+  // Pre-pass: resolve matches and count hits BEFORE drawing anything.
+  // PDF surface calls can't be rolled back, so if we committed the
+  // frame + outlines to the surface and then returned `false`, the
+  // caller would layer its centroid fallback on top of our partial
+  // topo-map — the SVG path had the same bug and buffers fragments
+  // instead. Here we just do the decision first and only touch the
+  // surface on the success path.
+  const resolvedMatch = new Map<
+    (typeof features)[number],
+    { key: string; value: number } | undefined
+  >();
+  let matchedCount = 0;
+  for (const feature of features) {
+    const keys = candidateKeys(feature);
+    let hit: { key: string; value: number } | undefined;
+    for (const key of keys) {
+      const value = valueByLabel.get(key);
+      if (value !== undefined) {
+        hit = { key, value };
+        matchedCount += 1;
+        break;
+      }
+    }
+    resolvedMatch.set(feature, hit);
+  }
+  if (matchedCount === 0) {
+    return false;
+  }
+
   // Frame. PDF surface `drawRect` does not expose `borderRadius` via
   // the chart surface interface, so the SVG's `rx="14"` rounded
   // corners become sharp corners here — the only intentional visual
@@ -1027,31 +1300,12 @@ function tryDrawRegionMapWithTopologyPdf(
     stroke: hexToPdfColor("#C7DFF2")
   });
 
-  const resolvedMatch = new Map<
-    (typeof features)[number],
-    { key: string; value: number } | undefined
-  >();
-  for (const feature of features) {
-    const keys = candidateKeys(feature);
-    let hit: { key: string; value: number } | undefined;
-    for (const key of keys) {
-      const value = valueByLabel.get(key);
-      if (value !== undefined) {
-        hit = { key, value };
-        break;
-      }
-    }
-    resolvedMatch.set(feature, hit);
-  }
-
   const strokeHex = mapOptions.strokeColor ?? "#FFFFFF";
   const strokeColor = hexToPdfColor(strokeHex);
-  let matchedCount = 0;
   for (const feature of features) {
     const match = resolvedMatch.get(feature);
     const fillHex = match
       ? (() => {
-          matchedCount++;
           const t = (match.value - range.min) / Math.max(1e-9, range.max - range.min);
           return interpolateColor("#D9EAF7", "#2F75B5", Math.max(0, Math.min(1, t)));
         })()
@@ -1113,7 +1367,7 @@ function tryDrawRegionMapWithTopologyPdf(
     }
   }
 
-  return matchedCount > 0;
+  return true;
 }
 
 /**
@@ -1323,28 +1577,6 @@ function appendArcAsBeziers(
   }
 }
 
-function hexToPdfColor(hex: string): PdfColor {
-  const clean = hex.replace(/^#/, "");
-  const full =
-    clean.length === 3
-      ? clean
-          .split("")
-          .map(c => c + c)
-          .join("")
-      : clean;
-  const r = parseInt(full.slice(0, 2), 16) / 255;
-  const g = parseInt(full.slice(2, 4), 16) / 255;
-  const b = parseInt(full.slice(4, 6), 16) / 255;
-  return { r, g, b };
-}
-
-interface SvgRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 interface HierarchyNode {
   name: string;
   value: number;
@@ -1363,22 +1595,41 @@ function renderChartExSeriesSvg(
   const values = refs.values;
   const categories =
     refs.categories.length > 0 ? refs.categories : values.map((_, i) => String(i + 1));
+  // Locate the value axis once per series so `valScaling.min/max` can be
+  // honoured. Non-valued layouts (treemap / sunburst / funnel / regionMap)
+  // ignore the axis; columnar layouts pass it into `valueRange` below.
+  const valueAxis = findValueAxis(model);
   switch (series.layoutId) {
     case "funnel":
-      renderFunnelSvg(parts, values, categories, plot);
+      renderFunnelSvg(parts, values, categories, series, plot);
       return;
     case "waterfall":
-      renderWaterfallSvg(parts, values, categories, series, plot);
+      renderWaterfallSvg(parts, values, categories, series, plot, valueAxis);
       return;
     case "clusteredColumn":
       if (series.layoutPr?.paretoLine) {
-        renderParetoSvg(parts, values, categories, series, plot);
+        renderParetoSvg(parts, values, categories, series, plot, valueAxis, {
+          drawColumns: true
+        });
       } else {
-        renderHistogramSvg(parts, values, series, plot);
+        renderHistogramSvg(parts, values, series, plot, valueAxis);
       }
       return;
+    case "paretoLine":
+      // `paretoLine` is a valid layoutId distinct from `clusteredColumn`
+      // + `layoutPr.paretoLine`. Excel stores the paired Pareto chart
+      // as two sibling series — a `clusteredColumn` for the bars and a
+      // `paretoLine` for the cumulative curve — so the standalone
+      // variant must emit ONLY the overlay line (the columns come from
+      // the companion series, if any). Previously this case fell
+      // through to `renderParetoSvg` which unconditionally redrew the
+      // columns in sorted order on top of the companion series' bars.
+      renderParetoSvg(parts, values, categories, series, plot, valueAxis, {
+        drawColumns: false
+      });
+      return;
     case "boxWhisker":
-      renderBoxWhiskerSvg(parts, values, categories, series, plot);
+      renderBoxWhiskerSvg(parts, values, categories, series, plot, valueAxis);
       return;
     case "treemap":
       renderTreemapSvg(parts, buildHierarchy(refs.hierarchy, categories, values), plot);
@@ -1387,10 +1638,25 @@ function renderChartExSeriesSvg(
       renderSunburstSvg(parts, buildHierarchy(refs.hierarchy, categories, values), plot);
       return;
     case "regionMap":
-      renderRegionMapSvg(parts, values, categories, series, plot, renderOptions.regionMap);
+      renderRegionMapSvg(
+        parts,
+        values,
+        categories,
+        series,
+        plot,
+        renderOptions.regionMap,
+        valueAxis
+      );
       return;
     default:
-      renderColumnSvg(parts, values, categories, plot, COLORS[seriesIndex % COLORS.length]);
+      renderColumnSvg(
+        parts,
+        values,
+        categories,
+        plot,
+        COLORS[seriesIndex % COLORS.length],
+        valueAxis
+      );
   }
 }
 
@@ -1402,16 +1668,61 @@ function resolveChartExRefs(
   const entries = (series.dataRefs ?? [])
     .map(ref => (ref.dataId === undefined ? undefined : dataById.get(ref.dataId)))
     .filter((entry): entry is ChartExDataEntry => !!entry);
-  const stringDims = entries
-    .filter(entry => entry.strDim)
+
+  // Per ECMA-376 Chart2014 `ST_DimType`, the dimension's `@type`
+  // attribute carries its semantic role:
+  //   - `"val"` / `"y"` / `"size"` → primary numeric axis
+  //   - `"cat"` → categorical (string) axis
+  //   - `"x"` → value-axis category (histogram / pareto bin)
+  //   - `"from"` / `"to"` → waterfall transitions
+  //   - `"classification"` → hierarchical classifier
+  //
+  // Previously the renderer picked "the first strDim / numDim in
+  // declaration order" which happened to work for simple sunburst /
+  // treemap layouts but silently mis-routed dimensions whenever
+  // Excel authored the data in a different order (common in
+  // waterfall and pareto files, where the `type="x"` numDim often
+  // precedes the primary `type="val"` one). Honour the dimension
+  // type so the numeric payload lands on `values` regardless of
+  // declaration order, and keep a "declaration order" fallback for
+  // ChartEx files whose dims carry the permissive `"val"` default.
+  const pickNumDim = (): number[] => {
+    const valDim = entries.find(
+      entry => entry.numDim && (entry.numDim.type === "val" || entry.numDim.type === "y")
+    );
+    if (valDim) {
+      return collectChartExNumbers(valDim);
+    }
+    // No `val`/`y` — fall back to `size` (bubble / ChartEx size
+    // dimension) and then to the first numDim in order.
+    const sizeDim = entries.find(entry => entry.numDim?.type === "size");
+    if (sizeDim) {
+      return collectChartExNumbers(sizeDim);
+    }
+    const first = entries.find(entry => entry.numDim);
+    return first ? collectChartExNumbers(first) : [];
+  };
+  const pickPrimaryCategoryDim = (): string[] => {
+    const catDim = entries.find(entry => entry.strDim?.type === "cat");
+    if (catDim) {
+      return collectChartExStrings(catDim);
+    }
+    const first = entries.find(entry => entry.strDim);
+    return first ? collectChartExStrings(first) : [];
+  };
+  // Hierarchy = every `strDim` that isn't the primary category axis.
+  // Preserves their declaration order so sunburst/treemap rings still
+  // stack outward in the author's intent.
+  const primaryCatEntry =
+    entries.find(entry => entry.strDim?.type === "cat") ?? entries.find(entry => entry.strDim);
+  const hierarchy = entries
+    .filter(entry => entry.strDim && entry !== primaryCatEntry)
     .map(entry => collectChartExStrings(entry));
-  const numericDims = entries
-    .filter(entry => entry.numDim)
-    .map(entry => collectChartExNumbers(entry));
+
   return {
-    values: numericDims[0] ?? [],
-    categories: stringDims[0] ?? [],
-    hierarchy: stringDims.slice(1)
+    values: pickNumDim(),
+    categories: pickPrimaryCategoryDim(),
+    hierarchy
   };
 }
 
@@ -1421,10 +1732,17 @@ function collectChartExStrings(entry: ChartExDataEntry): string[] {
   if (!first) {
     return [];
   }
-  const count = first.ptCount ?? first.points.length;
+  // Hard ceiling on densification — prevents malicious / malformed XML
+  // from allocating a gigabyte-scale array via a bogus `ptCount`.
+  // Matches the classic `collectNumberValues` guard (`SPARSE_ARRAY_CEILING`).
+  const SPARSE_ARRAY_CEILING = 2_097_152;
+  const declared = first.ptCount ?? first.points.length;
+  const count = Math.min(Math.max(first.points.length, declared), SPARSE_ARRAY_CEILING);
   const values = Array.from({ length: count }, (_, i) => String(i + 1));
   for (const point of first.points) {
-    values[point.index] = point.value;
+    if (point.index >= 0 && point.index < count) {
+      values[point.index] = point.value;
+    }
   }
   return values;
 }
@@ -1435,10 +1753,22 @@ function collectChartExNumbers(entry: ChartExDataEntry): number[] {
   if (!first) {
     return [];
   }
-  const count = first.ptCount ?? first.points.length;
-  const values = Array.from({ length: count }, () => 0);
+  const SPARSE_ARRAY_CEILING = 2_097_152;
+  const declared = first.ptCount ?? first.points.length;
+  const count = Math.min(Math.max(first.points.length, declared), SPARSE_ARRAY_CEILING);
+  // Mirror the classic `collectNumberValues` semantics: sparse slots
+  // are gaps, not zeros. Excel omits `<cx:pt>` entries for blank /
+  // `#N/A` source cells; the classic renderer encodes those as `NaN`
+  // so `valueToY` / bar builders skip them. Previously the ChartEx
+  // path filled gaps with `0`, producing phantom zero-value entries
+  // that poisoned the data range (waterfall spanning to 0, histogram
+  // bars showing at "empty" categories) and diverged from the classic
+  // rendering of identical data.
+  const values = Array.from({ length: count }, () => NaN);
   for (const point of first.points) {
-    values[point.index] = point.value;
+    if (point.index >= 0 && point.index < count) {
+      values[point.index] = point.value;
+    }
   }
   return values;
 }
@@ -1448,9 +1778,10 @@ function renderColumnSvg(
   values: number[],
   categories: string[],
   plot: SvgRect,
-  color: string
+  color: string,
+  axis?: ChartExAxis
 ): void {
-  const range = valueRange(values);
+  const range = valueRange(values, axis);
   renderAxes(parts, plot, range);
   const count = Math.max(1, values.length);
   const groupWidth = plot.width / count;
@@ -1477,7 +1808,8 @@ function renderHistogramSvg(
   parts: string[],
   values: number[],
   series: ChartExSeries,
-  plot: SvgRect
+  plot: SvgRect,
+  axis?: ChartExAxis
 ): void {
   const bins = buildHistogramBins(values, series.layoutPr?.binning);
   renderColumnSvg(
@@ -1485,7 +1817,8 @@ function renderHistogramSvg(
     bins.map(bin => bin.count),
     bins.map(bin => bin.label),
     plot,
-    COLORS[0]
+    COLORS[0],
+    axis
   );
 }
 
@@ -1494,37 +1827,76 @@ function renderParetoSvg(
   values: number[],
   categories: string[],
   series: ChartExSeries,
-  plot: SvgRect
+  plot: SvgRect,
+  axis?: ChartExAxis,
+  options: { drawColumns?: boolean } = {}
 ): void {
+  const { drawColumns = true } = options;
+  // Filter non-finite values before sorting — see `drawParetoPdf` for
+  // the full explanation. `NaN` comparator outputs make the sort order
+  // implementation-defined, which desyncs bars from the cumulative curve.
   const sorted = values
     .map((value, i) => ({ value, category: categories[i] ?? String(i + 1) }))
+    .filter(item => Number.isFinite(item.value))
     .sort((a, b) => b.value - a.value);
   const sortedValues = sorted.map(item => item.value);
-  renderColumnSvg(
-    parts,
-    sortedValues,
-    sorted.map(item => item.category),
-    plot,
-    COLORS[0]
-  );
-  const total = sortedValues.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
-  let cumulative = 0;
-  const count = Math.max(1, sortedValues.length);
-  const step = plot.width / count;
-  const points = sortedValues.map((value, i) => {
-    cumulative += Math.max(0, value);
-    return {
-      x: plot.x + i * step + step / 2,
-      y: plot.y + plot.height - (cumulative / total) * plot.height
-    };
-  });
-  parts.push(
-    `<polyline points="${points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${COLORS[1]}" stroke-width="2"/>`
-  );
-  for (const p of points) {
-    parts.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="3" fill="${COLORS[1]}"/>`);
+  if (drawColumns) {
+    renderColumnSvg(
+      parts,
+      sortedValues,
+      sorted.map(item => item.category),
+      plot,
+      COLORS[0],
+      axis
+    );
   }
-  if (series.layoutPr?.paretoLine) {
+  // Suppress the cumulative overlay when the dataset has no positive
+  // contribution. A `|| 1` fallback previously produced a flat line
+  // at the baseline for all-zero / all-negative data, visually
+  // indistinguishable from legitimate 0 % cumulative. See the PDF
+  // path (`drawParetoPdf`) for the matching rationale.
+  //
+  // `sortedValues` may carry `NaN` for blank / `#N/A` source cells
+  // (`collectChartExNumbers` preserves slot identity). `Math.max(0, NaN)`
+  // is `NaN`, and `NaN > 0` is `false`, so a single missing value
+  // previously suppressed the entire cumulative line. Coerce non-finite
+  // values to zero contribution so the line tracks the real positive
+  // data.
+  const positiveSum = sortedValues.reduce(
+    (sum, v) => sum + (Number.isFinite(v) ? Math.max(0, v) : 0),
+    0
+  );
+  if (positiveSum > 0) {
+    const total = positiveSum;
+    let cumulative = 0;
+    const count = Math.max(1, sortedValues.length);
+    const step = plot.width / count;
+    const points = sortedValues.map(value => {
+      cumulative += Number.isFinite(value) ? Math.max(0, value) : 0;
+      return {
+        y: plot.y + plot.height - (cumulative / total) * plot.height
+      };
+    });
+    // Re-derive X positions so the type stays simple (no array-index
+    // closure capture) — keeps the polyline emission below straight.
+    const plotted = points.map((p, i) => ({ x: plot.x + i * step + step / 2, y: p.y }));
+    parts.push(
+      `<polyline points="${plotted.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${COLORS[1]}" stroke-width="2"/>`
+    );
+    for (const p of plotted) {
+      parts.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="3" fill="${COLORS[1]}"/>`);
+    }
+    // Emit the "Cumulative %" caption whenever the cumulative line is
+    // drawn, matching the PDF path. The previous
+    // `series.layoutPr?.paretoLine` guard only fired for the paired
+    // `clusteredColumn + paretoLine` variant; the standalone
+    // `layoutId: "paretoLine"` case (added at line 1527) reached this
+    // function without the flag set and silently dropped the caption
+    // — producing SVG output that disagreed with the PDF.
+    // `series` is kept as a parameter in case future heuristics want
+    // to tweak placement, but the caption is no longer gated by the
+    // layoutPr flag.
+    void series;
     parts.push(svgText(plot.x + plot.width - 4, plot.y + 12, "Cumulative %", 10, COLORS[1], "end"));
   }
 }
@@ -1534,17 +1906,48 @@ function renderWaterfallSvg(
   values: number[],
   categories: string[],
   series: ChartExSeries,
-  plot: SvgRect
+  plot: SvgRect,
+  axis?: ChartExAxis
 ): void {
   const subtotalIdx = new Set(series.layoutPr?.subtotals?.map(s => s.idx) ?? []);
   let running = 0;
   const spans = values.map((value, i) => {
-    const start = subtotalIdx.has(i) ? 0 : running;
-    const end = subtotalIdx.has(i) ? value : running + value;
+    // Excel's waterfall convention: a subtotal column spans `0 → running`
+    // — it visualises the cumulative sum up to that point, not the
+    // scalar value stored at the row. Author convention leaves the
+    // subtotal row's numeric value at `0` (the subtotal is derived),
+    // so the old `end = value` read `0` and the subtotal bar
+    // collapsed to zero height. Worse, `running = end` then reset
+    // the running sum, corrupting every subsequent bar.
+    if (subtotalIdx.has(i)) {
+      const end = running;
+      // Keep `running` unchanged — the next bar should start from the
+      // same cumulative sum the subtotal displays.
+      return { start: 0, end, value: end, total: true, gap: false };
+    }
+    // `collectChartExNumbers` emits `NaN` for sparse `<cx:pt>` slots
+    // (blanks or `#N/A` source cells). Adding NaN into `running`
+    // permanently poisons it, collapsing every subsequent bar's height
+    // to zero (via `fmt(NaN) → "0"`). Treat a blank slot as a
+    // zero-height span at the current running total and flag it as a
+    // `gap` so the colour picker routes to neutral grey rather than
+    // "increase" green (`value: 0 >= 0` would otherwise paint the gap
+    // row identically to a zero-increase row — visually
+    // indistinguishable from real data). Leave `running` advancing as
+    // if the missing value were `0`; this matches Excel's own behaviour
+    // for blank waterfall rows.
+    if (!Number.isFinite(value)) {
+      return { start: running, end: running, value: 0, total: false, gap: true };
+    }
+    const start = running;
+    const end = running + value;
     running = end;
-    return { start, end, value, total: subtotalIdx.has(i) };
+    return { start, end, value, total: false, gap: false };
   });
-  const range = valueRange(spans.flatMap(s => [s.start, s.end]));
+  const range = valueRange(
+    spans.flatMap(s => [s.start, s.end]),
+    axis
+  );
   renderAxes(parts, plot, range);
   const count = Math.max(1, spans.length);
   const groupWidth = plot.width / count;
@@ -1553,13 +1956,19 @@ function renderWaterfallSvg(
     const y1 = valueToY(span.start, range.min, range.max, plot);
     const y2 = valueToY(span.end, range.min, range.max, plot);
     const x = plot.x + i * groupWidth + groupWidth * 0.18;
-    const color = span.total
-      ? shapeFillColor(series.layoutPr?.totalSpPr, COLORS[2])
-      : span.value >= 0
-        ? shapeFillColor(series.layoutPr?.increaseSpPr, "#70AD47")
-        : shapeFillColor(series.layoutPr?.decreaseSpPr, "#C00000");
+    const color = span.gap
+      ? "#BFBFBF"
+      : span.total
+        ? shapeFillColor(series.layoutPr?.totalSpPr, COLORS[2])
+        : span.value >= 0
+          ? shapeFillColor(series.layoutPr?.increaseSpPr, "#70AD47")
+          : shapeFillColor(series.layoutPr?.decreaseSpPr, "#C00000");
+    // Gap rows should render invisibly. `Math.max(1, …)` floored
+    // zero-height spans to a 1-pixel sliver that reads as a tiny
+    // positive delta; skip the floor when the span is flagged flat.
+    const height = span.gap ? 0 : Math.max(1, Math.abs(y1 - y2));
     parts.push(
-      `<rect x="${fmt(x)}" y="${fmt(Math.min(y1, y2))}" width="${fmt(groupWidth * 0.64)}" height="${fmt(Math.max(1, Math.abs(y1 - y2)))}" fill="${color}"/>`
+      `<rect x="${fmt(x)}" y="${fmt(Math.min(y1, y2))}" width="${fmt(groupWidth * 0.64)}" height="${fmt(height)}" fill="${color}"/>`
     );
     parts.push(
       svgText(
@@ -1586,18 +1995,49 @@ function renderFunnelSvg(
   parts: string[],
   values: number[],
   categories: string[],
+  series: ChartExSeries,
   plot: SvgRect
 ): void {
-  const max = Math.max(1, ...values.map(v => Math.abs(v)));
+  // See `drawFunnelPdf` for why we use the true max (not floored at
+  // 1): fractional-magnitude data would otherwise render as a tiny
+  // off-centre funnel.
+  const trueMax = maxAbsValue(values, 0);
+  const max = trueMax > 0 ? trueMax : 1;
   const count = Math.max(1, values.length);
   const h = plot.height / count;
+  // Pre-resolve per-point `dataPt/@idx` overrides into a map so the
+  // hot loop stays O(n). Previously funnel charts ignored
+  // `<cx:dataPt>` entirely and forced the preview palette, so an
+  // Excel-authored funnel with individually-coloured stages rendered
+  // with the wrong colours after a round-trip — even though the
+  // authored XML was preserved byte-for-byte on write.
+  const pointFills = new Map<number, string>();
+  if (series.dataPt) {
+    for (const dp of series.dataPt) {
+      if (dp.spPr) {
+        pointFills.set(dp.idx, shapeFillColor(dp.spPr, COLORS[dp.idx % COLORS.length]));
+      }
+    }
+  }
   values.forEach((value, i) => {
-    const topW = (Math.abs(value) / max) * plot.width;
-    const bottomW = (Math.abs(values[i + 1] ?? value) / max) * plot.width;
+    // Non-finite values (blank / `#N/A` source cells emit NaN via
+    // `collectChartExNumbers`) must not propagate into the polygon
+    // vertices — `Math.abs(NaN) = NaN`, and `fmt(NaN)` returns `"0"`,
+    // collapsing the stage's edges to the SVG page origin at (0, 0).
+    // Coerce the width contribution to zero so a gap stage renders
+    // as a degenerate zero-width wedge rather than a triangle pointing
+    // at the page corner. Same for `values[i+1]`, where `??` would
+    // only have coalesced `null`/`undefined`, not NaN.
+    const absValue = Number.isFinite(value) ? Math.abs(value) : 0;
+    const rawNext = values[i + 1];
+    const nextAbs = Number.isFinite(rawNext) ? Math.abs(rawNext) : absValue;
+    const topW = (absValue / max) * plot.width;
+    const bottomW = (nextAbs / max) * plot.width;
     const y = plot.y + i * h;
     const cx = plot.x + plot.width / 2;
+    const fill = pointFills.get(i) ?? COLORS[i % COLORS.length];
     parts.push(
-      `<polygon points="${fmt(cx - topW / 2)},${fmt(y)} ${fmt(cx + topW / 2)},${fmt(y)} ${fmt(cx + bottomW / 2)},${fmt(y + h * 0.88)} ${fmt(cx - bottomW / 2)},${fmt(y + h * 0.88)}" fill="${COLORS[i % COLORS.length]}" stroke="#fff"/>`
+      `<polygon points="${fmt(cx - topW / 2)},${fmt(y)} ${fmt(cx + topW / 2)},${fmt(y)} ${fmt(cx + bottomW / 2)},${fmt(y + h * 0.88)} ${fmt(cx - bottomW / 2)},${fmt(y + h * 0.88)}" fill="${fill}" stroke="#fff"/>`
     );
     parts.push(svgText(cx, y + h * 0.55, categories[i] ?? String(i + 1), 11, "#fff", "middle"));
   });
@@ -1608,14 +2048,15 @@ function renderBoxWhiskerSvg(
   values: number[],
   categories: string[],
   series: ChartExSeries,
-  plot: SvgRect
+  plot: SvgRect,
+  axis?: ChartExAxis
 ): void {
   const groups =
     categories.length > 0
       ? groupValuesByCategory(values, categories)
       : new Map([["Values", values]]);
   const allValues = Array.from(groups.values()).flat();
-  const range = valueRange(allValues);
+  const range = valueRange(allValues, axis);
   renderAxes(parts, plot, range);
   const keys = Array.from(groups.keys());
   const groupWidth = plot.width / Math.max(1, keys.length);
@@ -1649,7 +2090,12 @@ function renderBoxWhiskerSvg(
       );
     }
     if (series.layoutPr?.showInnerPoints) {
-      for (const value of groups.get(key) ?? []) {
+      // Iterate `nonOutliers` (NOT the full raw group) so outlier
+      // samples don't get double-painted as both a filled inner-point
+      // dot AND a hollow outlier ring when both flags are enabled.
+      // Matches Excel's semantics: "inner points" are individual
+      // non-outlier observations.
+      for (const value of stats.nonOutliers) {
         parts.push(
           `<circle cx="${fmt(cx - w * 0.62)}" cy="${fmt(valueToY(value, range.min, range.max, plot))}" r="1.6" fill="${COLORS[i % COLORS.length]}" opacity="0.55"/>`
         );
@@ -1715,11 +2161,20 @@ export interface TreemapCell {
 export function collectTreemapCells(root: HierarchyNode, plot: SvgRect): TreemapCell[] {
   const nodes = root.children.length > 0 ? root.children : [{ ...root, name: "Values" }];
   const entries = sliceDice(nodes, plot, true);
-  return entries.map((entry, i) => ({
-    rect: entry.rect,
-    color: COLORS[i % COLORS.length],
-    label: entry.rect.width > 40 && entry.rect.height > 18 ? entry.node.name : undefined
-  }));
+  // Drop degenerate cells (zero-value nodes produce zero-width or
+  // zero-height rects). Without the filter, those rects are still
+  // emitted with `stroke="#fff"` — browsers render the stroke on a
+  // collapsed rect as a visible 1-pixel line, producing parasitic
+  // white seams between otherwise-adjacent coloured tiles. Color
+  // palette indices stay aligned with the remaining nodes so
+  // neighbouring tiles keep their authored colour mapping.
+  return entries
+    .filter(entry => entry.rect.width > 0.5 && entry.rect.height > 0.5)
+    .map((entry, i) => ({
+      rect: entry.rect,
+      color: COLORS[i % COLORS.length],
+      label: entry.rect.width > 40 && entry.rect.height > 18 ? entry.node.name : undefined
+    }));
 }
 
 /**
@@ -1751,9 +2206,23 @@ export function collectSunburstSlices(root: HierarchyNode, plot: SvgRect): Sunbu
   const slices: SunburstSlice[] = [];
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
-  const maxDepth = hierarchyDepth(root);
+  // `hierarchyDepth(root)` counts the invisible root, but the recursive
+  // emitter skips `depth === 0` (the root doesn't draw). The number of
+  // *visible* rings is therefore `depth - 1`. Dividing `radius` by
+  // `depth` directly left the outermost `1 / depth` of the plot radius
+  // blank (leaf slices stopped at `ring * (depth - 1)` instead of
+  // reaching `radius`), wasting one full ring of visual space —
+  // progressively worse for shallow hierarchies (a single-level tree
+  // halved the rendered radius).
+  const maxDepth = Math.max(1, hierarchyDepth(root) - 1);
   const radius = Math.min(plot.width, plot.height) / 2.25;
-  collectSunburstSlicesRecursive(slices, root, cx, cy, 0, Math.PI * 2, 0, maxDepth, radius, 0);
+  // Seed `colorIndex = -1` so the root's "consumed" palette slot (which
+  // the recursive emitter reserves via `colorIndex + 1` pre-increment)
+  // lands on index `0`. The old `colorIndex = 0` made the root eat
+  // `COLORS[0]`, then its first visible child drew at `COLORS[1]` —
+  // every sunburst started with orange instead of the accent-1 blue
+  // that every other ChartEx type uses.
+  collectSunburstSlicesRecursive(slices, root, cx, cy, 0, Math.PI * 2, 0, maxDepth, radius, -1);
   return slices;
 }
 
@@ -1784,8 +2253,19 @@ function collectSunburstSlicesRecursive(
   }
   const total = node.children.reduce((sum, c) => sum + Math.max(0, c.value), 0) || 1;
   let angle = startAngle;
-  for (const child of node.children) {
-    const next = angle + (Math.max(0, child.value) / total) * (endAngle - startAngle);
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    // Snap the last child to `endAngle` exactly. Summing N floating
+    // fractions of a range almost never reproduces the range bound
+    // (IEEE-754 drift on the order of 1e-13 per step), and on deep
+    // hierarchies with many siblings that drift accumulates until the
+    // outermost ring's sweep slips below the `2π - 1e-9` full-circle
+    // guard downstream — the ring then renders as a degenerate
+    // near-invisible arc instead of the closing slice.
+    const next =
+      i === node.children.length - 1
+        ? endAngle
+        : angle + (Math.max(0, child.value) / total) * (endAngle - startAngle);
     nextColorIndex = collectSunburstSlicesRecursive(
       out,
       child,
@@ -1809,9 +2289,10 @@ function renderRegionMapSvg(
   categories: string[],
   series: ChartExSeries,
   plot: SvgRect,
-  mapOptions?: RegionMapDataOptions
+  mapOptions?: RegionMapDataOptions,
+  axis?: ChartExAxis
 ): void {
-  const range = valueRange(values);
+  const range = valueRange(values, axis);
 
   // Path A: caller supplied a TopoJSON dataset. Try to draw real
   // region polygons; fall through to the centroid preview if anything
@@ -1858,8 +2339,19 @@ function renderRegionMapSvg(
       series.layoutPr?.projection ?? "miller",
       plot
     );
-    const t = (record.value - range.min) / (range.max - range.min);
-    const radius = 6 + Math.sqrt(Math.max(0, t)) * 14;
+    // Skip non-finite values — `collectChartExNumbers` preserves `NaN`
+    // for blank / `#N/A` cells, and `(NaN - range.min) / …` propagates
+    // `NaN` into both `radius` (a `NaN` passed to `fmt` emits `"0"`,
+    // drawing an invisible 0-radius dot) and `interpolateColor`
+    // (produces a garbage colour off the clamp path). Also clamp `t`
+    // to `[0, 1]` so out-of-range values still receive a defined
+    // colour — mirrors the TOPO branch's clamp at `tryRender…WithTopology`.
+    if (!Number.isFinite(record.value)) {
+      continue;
+    }
+    const rawT = (record.value - range.min) / Math.max(1e-9, range.max - range.min);
+    const t = Math.max(0, Math.min(1, rawT));
+    const radius = 6 + Math.sqrt(t) * 14;
     parts.push(
       `<circle cx="${fmt(projected.x)}" cy="${fmt(projected.y)}" r="${fmt(radius)}" fill="${interpolateColor("#D9EAF7", "#2F75B5", t)}" stroke="#fff" stroke-width="1.5" opacity="0.92"/>`
     );
@@ -1964,7 +2456,14 @@ function tryRenderRegionMapWithTopology(
     return false;
   }
 
-  parts.push(
+  // Buffer the SVG fragments into a local array instead of pushing
+  // directly to `parts`. If we ultimately return `false` (no feature
+  // matched a category), the caller falls through to the centroid
+  // preview — we MUST NOT leave a half-drawn world outline underneath
+  // that preview, or the composite image shows both layers. Flush the
+  // buffer only once we've decided to claim the chart area.
+  const buffer: string[] = [];
+  buffer.push(
     `<rect x="${fmt(plot.x)}" y="${fmt(plot.y)}" width="${fmt(plot.width)}" height="${fmt(plot.height)}" rx="14" fill="#F7FBFF" stroke="#C7DFF2" data-region-map-mode="topojson"/>`
   );
 
@@ -2004,10 +2503,18 @@ function tryRenderRegionMapWithTopology(
       : "#E9EEF3";
     const path = featureToSvgPath(feature.rings, projection, plot, extent);
     if (path) {
-      parts.push(
-        `<path d="${path}" fill="${fill}" stroke="${escapeAttr(stroke)}" stroke-width="0.5" stroke-linejoin="round"/>`
+      buffer.push(
+        `<path d="${path}" fill="${fill}" stroke="${escapeXmlAttr(stroke)}" stroke-width="0.5" stroke-linejoin="round"/>`
       );
     }
+  }
+
+  // No feature matched any author-supplied category. Abandon the
+  // buffered world outline — the caller will draw the centroid
+  // preview on a clean plot area instead of layering it over our
+  // partial output.
+  if (matchedCount === 0) {
+    return false;
   }
 
   // Build a reverse lookup (normalised category → original label) once
@@ -2043,11 +2550,17 @@ function tryRenderRegionMapWithTopology(
       const originalLabel =
         labelByKey.get(match.key) ??
         (typeof feature.id === "string" ? feature.id : String(feature.id ?? ""));
-      parts.push(svgText(projected.x, projected.y + 3, originalLabel, 9, "#1F3B53", "middle"));
+      buffer.push(svgText(projected.x, projected.y + 3, originalLabel, 9, "#1F3B53", "middle"));
     }
   }
 
-  return matchedCount > 0;
+  // Commit the buffered fragments now that we know at least one
+  // feature matched — the caller will see a complete topo-map
+  // rendering and skip the centroid preview.
+  for (const frag of buffer) {
+    parts.push(frag);
+  }
+  return true;
 }
 
 /**
@@ -2088,7 +2601,16 @@ function projectLonLatRaw(
   projection: NonNullable<RegionMapDataOptions["projection"]>
 ): { x: number; y: number } {
   const clampedLon = Math.max(-180, Math.min(180, lon));
-  const clampedLat = Math.max(-85, Math.min(85, lat));
+  // The ±85° clamp only applies to projections with a Mercator-style
+  // singularity at the poles (`log(tan(π/4 ± π/2)) → ∞`). Albers,
+  // Robinson, and plain equirectangular are all finite at ±90°, so
+  // clamping their input destroys 5° of polar data for no reason —
+  // Antarctica and high-latitude research stations silently flatten
+  // onto the `±85°` parallel when rendered under those projections.
+  const clampedLat =
+    projection === "mercator" || projection === "miller"
+      ? Math.max(-MERCATOR_LAT_CLAMP_DEG, Math.min(MERCATOR_LAT_CLAMP_DEG, lat))
+      : Math.max(-90, Math.min(90, lat));
   switch (projection) {
     case "mercator": {
       const rad = (clampedLat * Math.PI) / 180;
@@ -2184,18 +2706,60 @@ function featureToSvgPath(
   return segments.length > 0 ? segments.join("") : undefined;
 }
 
-/** Geometric centroid of a ring of lon/lat pairs. */
+/**
+ * Geometric (area-weighted) centroid of a polygon ring in lon/lat
+ * space. Uses the shoelace formula (Bourke 1988) so vertex density
+ * does not bias the result — a country with a densely sampled
+ * coastline and a sparse inland border still has its label centred
+ * on the polygon's visual mass. The previous implementation returned
+ * the vertex mean, which for long-coastline countries (Norway,
+ * Chile, Indonesia) sat visibly off-centre.
+ *
+ * Falls back to the vertex mean when the ring's signed area rounds
+ * to zero (degenerate / self-intersecting polygons where the
+ * shoelace formula is undefined).
+ */
 function ringCentroid(ring: ResolvedRing): [number, number] | undefined {
-  if (ring.length === 0) {
+  const n = ring.length;
+  if (n === 0) {
     return undefined;
   }
-  let sumX = 0;
-  let sumY = 0;
-  for (const [x, y] of ring) {
-    sumX += x;
-    sumY += y;
+  if (n < 3) {
+    // A 1- or 2-point ring has no interior. Return the vertex mean;
+    // callers use this centroid purely for label placement.
+    let sumX = 0;
+    let sumY = 0;
+    for (const [x, y] of ring) {
+      sumX += x;
+      sumY += y;
+    }
+    return [sumX / n, sumY / n];
   }
-  return [sumX / ring.length, sumY / ring.length];
+  let signedArea = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % n];
+    const cross = x0 * y1 - x1 * y0;
+    signedArea += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  signedArea *= 0.5;
+  if (!Number.isFinite(signedArea) || Math.abs(signedArea) < 1e-12) {
+    // Degenerate ring (zero area / numerical collapse) — fall back to
+    // the vertex mean so we still return *something* for the label.
+    let sumX = 0;
+    let sumY = 0;
+    for (const [x, y] of ring) {
+      sumX += x;
+      sumY += y;
+    }
+    return [sumX / n, sumY / n];
+  }
+  const scale = 1 / (6 * signedArea);
+  return [cx * scale, cy * scale];
 }
 
 /** Lowercase + trim label to match the case-insensitive lookup policy. */
@@ -2404,7 +2968,14 @@ const REGION_COORDINATES: Record<string, RegionCoordinate> = {
 };
 
 function lookupRegionCoordinate(label: string): RegionCoordinate | undefined {
-  return REGION_COORDINATES[normalizeRegionLabel(label)];
+  // Consult the pre-normalised lookup table so queries and keys go
+  // through the identical `normalizeRegionLabel` transform. The old
+  // `REGION_COORDINATES[normalizeRegionLabel(label)]` path applied the
+  // strip-the/republic-of regex to the *query* only, leaving keys like
+  // `"democratic republic of the congo"` unreachable via their own
+  // canonical name — `lookup("Democratic Republic of the Congo")`
+  // normalised to `"democratic congo"` and missed the key.
+  return NORMALISED_REGION_COORDINATES.get(normalizeRegionLabel(label));
 }
 
 function normalizeRegionLabel(label: string): string {
@@ -2415,6 +2986,14 @@ function normalizeRegionLabel(label: string): string {
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
+
+/**
+ * Pre-normalised view of {@link REGION_COORDINATES}. Built once at module
+ * load so runtime lookups don't re-normalise keys on every query.
+ */
+const NORMALISED_REGION_COORDINATES: Map<string, RegionCoordinate> = new Map(
+  Object.entries(REGION_COORDINATES).map(([k, v]) => [normalizeRegionLabel(k), v])
+);
 
 function renderRegionMapGraticule(parts: string[], plot: SvgRect): void {
   for (let i = 1; i < 4; i++) {
@@ -2431,13 +3010,30 @@ function renderRegionMapGraticule(parts: string[], plot: SvgRect): void {
   }
 }
 
+// Mercator projection clamps latitude to `±MERCATOR_LAT_CLAMP_DEG`
+// to avoid the singularity at the poles (where `log(tan(π/4 + π/2)) → ∞`).
+// 85° is the de facto standard used by Web Mercator / EPSG:3857 tile
+// services; clamping to a smaller value would visibly shear circumpolar
+// regions. Two separate code paths in this file (`projectLonLatRaw`
+// and `projectRegionCoordinate`) previously used different values (85
+// vs 84), producing slightly different output for the same topology —
+// the centroid path and the polygon path rendered at different zoom
+// levels. Unify here.
+const MERCATOR_LAT_CLAMP_DEG = 85;
+
 function projectRegionCoordinate(
   coord: RegionCoordinate,
   projection: NonNullable<NonNullable<ChartExSeries["layoutPr"]>["projection"]>,
   plot: SvgRect
 ): { x: number; y: number } {
   const lon = Math.max(-180, Math.min(180, coord.lon));
-  const lat = Math.max(-84, Math.min(84, coord.lat));
+  // Only mercator/miller need the ±85° clamp (log-singularity at the
+  // poles). Albers / Robinson / equirectangular are finite at ±90°;
+  // clamping their input silently drops 5° of polar data.
+  const lat =
+    projection === "mercator" || projection === "miller"
+      ? Math.max(-MERCATOR_LAT_CLAMP_DEG, Math.min(MERCATOR_LAT_CLAMP_DEG, coord.lat))
+      : Math.max(-90, Math.min(90, coord.lat));
   let nx: number;
   let ny: number;
   if (projection === "mercator") {
@@ -2453,8 +3049,14 @@ function projectRegionCoordinate(
   } else if (projection === "robinson") {
     ({ nx, ny } = projectRobinson(lon, lat));
   } else {
+    // Fallback "plain" equirectangular projection: latitude in degrees
+    // spans the range `[-90, 90]`, so the normalised Y is `0.5 - lat/180`.
+    // The previous constant `190` was a typo — it compressed the
+    // vertical axis by ~5.3%, producing visible drift for high-latitude
+    // regions (89° mapped to `0.032` instead of `0.006`). Caught by the
+    // deep audit, not covered by any existing snapshot.
     nx = (lon + 180) / 360;
-    ny = 0.5 - lat / 190;
+    ny = 0.5 - lat / 180;
   }
   return {
     x: plot.x + 14 + clamp01(nx) * Math.max(1, plot.width - 28),
@@ -2523,9 +3125,20 @@ function rawAlbers(lon: number, lat: number): { rawX: number; rawY: number } {
 function projectAlbers(lon: number, lat: number): { nx: number; ny: number } {
   const { rawX, rawY } = rawAlbers(lon, lat);
   const { minX, maxX, minY, maxY } = ALBERS_RANGE;
+  // `rawAlbers` follows the Snyder §14 convention where `rawY` grows
+  // northward (rawY at +90° ≈ +1.39, at −90° ≈ −0.74). Normalising
+  // directly to [0..1] would put the North Pole at ny=1 — but SVG / PDF
+  // y grows downward, so ny=1 renders at the BOTTOM of the plot. The
+  // other projections in this file (`mercator`, `miller`,
+  // equirectangular, `robinson`) all flip the sign explicitly (see
+  // `projectRobinson` at line 2888: `sign = lat >= 0 ? -1 : 1`).
+  // Without the flip, every Albers-projected map rendered upside down
+  // relative to its siblings — the USA sat across the southern
+  // hemisphere on every regionMap chart. Mirror the normalised output
+  // so north = top for this projection too.
   return {
     nx: (rawX - minX) / (maxX - minX),
-    ny: (rawY - minY) / (maxY - minY)
+    ny: 1 - (rawY - minY) / (maxY - minY)
   };
 }
 
@@ -2573,19 +3186,6 @@ function projectRobinson(lon: number, lat: number): { nx: number; ny: number } {
   return { nx, ny };
 }
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
-  return value;
-}
-
 function renderRegionMapTileFallback(
   parts: string[],
   records: Array<{ value: number; label: string }>,
@@ -2602,7 +3202,7 @@ function renderRegionMapTileFallback(
   records.forEach((record, i) => {
     const cx = plot.x + (i % cols) * cellW + cellW / 2;
     const cy = plot.y + Math.floor(i / cols) * cellH + cellH / 2;
-    const t = (record.value - range.min) / (range.max - range.min);
+    const t = (record.value - range.min) / Math.max(1e-9, range.max - range.min);
     const points = hexagonPoints(cx, cy, radius);
     parts.push(
       `<polygon points="${points}" fill="${interpolateColor("#D9EAF7", "#2F75B5", t)}" stroke="#fff" data-region-map-mode="${mode}"/>`
@@ -2624,15 +3224,25 @@ function buildHistogramBins(
   values: number[],
   binning: NonNullable<ChartExSeries["layoutPr"]>["binning"] | undefined
 ): Array<{ label: string; count: number }> {
-  if (values.length === 0) {
+  // `collectChartExNumbers` encodes blank / `#N/A` source cells as
+  // `NaN` (matching the classic renderer's gap semantics). NaN
+  // propagates through `sort((a,b) => a-b)` (the comparator returns
+  // `NaN`, which the sort treats as "no swap", leaving the NaNs
+  // wherever they landed) — so `sorted[0]` or `sorted[N-1]` can be
+  // `NaN`, producing `rawSize = NaN` and throwing downstream. Strip
+  // non-finite values up front: a histogram of "blanks mixed with
+  // numbers" means "bin the numbers, ignore the blanks", matching
+  // Excel's own behaviour.
+  const finite = values.filter(v => Number.isFinite(v));
+  if (finite.length === 0) {
     return [];
   }
-  const sorted = values.slice().sort((a, b) => a - b);
+  const sorted = finite.slice().sort((a, b) => a - b);
   const min = sorted[0];
   const max = sorted[sorted.length - 1];
   if (binning?.binType === "categories") {
     const counts = new Map<string, number>();
-    for (const value of values) {
+    for (const value of finite) {
       const key = String(value);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -2640,8 +3250,29 @@ function buildHistogramBins(
   }
   const binCount =
     binning?.binCount ??
-    (binning?.binType === "binCount" ? 10 : Math.ceil(Math.sqrt(values.length)));
-  const rawSize = binning?.binSize ?? Math.max(1, (max - min) / Math.max(1, binCount));
+    (binning?.binType === "binCount" ? 10 : Math.ceil(Math.sqrt(finite.length)));
+  // Auto bin width. The previous `Math.max(1, …)` floor collapsed
+  // fractional datasets (percentages / probabilities / 0-1 ranges)
+  // into a single bin — e.g. `[0.1..0.9]` with `binCount=3` produced
+  // `rawSize=1` and a single `[0.1, 1.1]` bin. Scale the bin width to
+  // the data range instead, but fall back to 1 when the data collapses
+  // to a single point (`max === min`) so the `> 0` guard below doesn't
+  // fire for a legitimate all-identical dataset.
+  const span = max - min;
+  const rawSize = binning?.binSize ?? (span > 0 ? span / Math.max(1, binCount) : 1);
+  // Guard against a caller-supplied or computation-produced
+  // non-positive bin width. Previously the `for` loop below never
+  // advanced when `rawSize <= 0`, degenerating into a 1000-iteration
+  // spin (stopped only by the `bins.length > 1000` safety valve) that
+  // wasted CPU and produced a chart full of zero-width "bins". Fail
+  // loud with a descriptive error instead — this catches user mistakes
+  // (e.g. `binning: { binSize: 0 }`) and edge cases where `max === min`
+  // with `binCount === 0`.
+  if (!(rawSize > 0) || !Number.isFinite(rawSize)) {
+    throw new ChartOptionsError(
+      `Histogram bin size must be a positive finite number; got ${rawSize}.`
+    );
+  }
   const start = binning?.underflow ?? min;
   const end = binning?.overflow ?? max;
   const bins: Array<{ low: number; high: number; label: string; count: number }> = [];
@@ -2653,12 +3284,45 @@ function buildHistogramBins(
       count: 0
     });
   }
-  for (let low = start; low <= end; low += rawSize) {
-    const high = low + rawSize;
+  // Cap the bin count at a sane limit. Excel's own histogram UI
+  // accepts up to ~1000 bins; going higher produces unreadable output
+  // anyway. `HISTOGRAM_BIN_CAP` used to `break` silently, truncating
+  // the last bin's upper bound and mis-positioning the overflow bin
+  // — users with a tiny `rawSize` relative to `end - start` got a
+  // chart with no visual clue that data was cut off. Fail loud with
+  // `ChartOptionsError` instead; callers with legitimately wide
+  // ranges should reduce their bin count or widen `rawSize`.
+  const HISTOGRAM_BIN_CAP = 1000;
+  const expectedBinCount = Math.ceil((end - start) / rawSize);
+  if (expectedBinCount > HISTOGRAM_BIN_CAP) {
+    throw new ChartOptionsError(
+      `Histogram would produce ${expectedBinCount} bins with binSize=${rawSize} over [${start}, ${end}]; ` +
+        `the renderer caps at ${HISTOGRAM_BIN_CAP}. Widen the bin size or narrow the data range.`
+    );
+  }
+  // Emit exactly enough bins to cover `[start, end]`. Compute the bin
+  // count up front and iterate by index so repeated `low += rawSize`
+  // IEEE-754 drift doesn't produce a spurious extra bin — e.g.
+  // `start=0.05, end=0.95, rawSize=0.1` previously drifted past `end`
+  // because the `0.1`s accumulate (summing ten of them lands at
+  // `0.9999999999999999`, not `1.0`), emitting an 11th empty bin that
+  // trailed the chart at the right edge. `Math.round` the count so
+  // we stop at the last bin whose UPPER edge is still `<= end`;
+  // anything beyond `end` is captured by `bins[bins.length - 1]`'s
+  // upper fence or the overflow bin.
+  const normalSpan = end - start;
+  // `Math.round(normalSpan / rawSize)` handles the exact-multiple case
+  // (e.g. `span=10, rawSize=2` → 5 bins, not 4 from `Math.floor`
+  // after `9.999…`). Adding `8*EPSILON*|span|` is a drift cushion that
+  // pulls a `9.999…99` computation up to 10 before rounding.
+  const expectedNormalBins = Math.max(
+    1,
+    Math.round((normalSpan + Number.EPSILON * 8 * normalSpan) / rawSize)
+  );
+  for (let i = 0; i < expectedNormalBins; i++) {
+    const low = start + i * rawSize;
+    const high = i === expectedNormalBins - 1 ? end : start + (i + 1) * rawSize;
     bins.push({ low, high, label: `${formatNumber(low)}-${formatNumber(high)}`, count: 0 });
-    if (bins.length > 1000) {
-      break;
-    }
   }
   if (binning?.overflow !== undefined) {
     bins.push({
@@ -2668,12 +3332,50 @@ function buildHistogramBins(
       count: 0
     });
   }
+  // Degenerate case: `start === end` (all input values identical, or
+  // caller set `underflow === overflow`) means the generator loop
+  // emitted zero "normal" bins. Without a fallback, the counting loop
+  // below would try to write `bins[-1].count++` and throw. Guarantee
+  // at least one bin exists by synthesising a unit-width bucket at
+  // `start`; this matches Excel's own single-bin output for all-
+  // identical data.
+  if (bins.length === 0) {
+    bins.push({
+      low: start,
+      high: start + rawSize,
+      label: `${formatNumber(start)}-${formatNumber(start + rawSize)}`,
+      count: 0
+    });
+  }
   const closedLeft = binning?.intervalClosed === "l";
-  for (const value of values) {
+  // Index of the lowest "normal" bin (first bin after an optional
+  // underflow sentinel). Values equal to the axis minimum need to
+  // land here for right-closed intervals — `value > b.low` would
+  // otherwise drop them into the fallback. Mirrors Excel's own
+  // "values less than or equal to this bin" semantics where the
+  // lowest bin has no effective lower bound.
+  const firstNormalBinIdx = binning?.underflow !== undefined ? 1 : 0;
+  // Similarly, the highest "normal" bin must accept values equal to
+  // the axis maximum under left-closed intervals (`value < b.high`
+  // otherwise excludes them).
+  const lastNormalBinIdx = bins.length - (binning?.overflow !== undefined ? 2 : 1);
+  // Iterate over the NaN-filtered array so sparse blanks don't leak
+  // into the `bins[bins.length - 1]` fallback at the loop tail.
+  for (const value of finite) {
     const bin =
-      bins.find(b =>
-        closedLeft ? value >= b.low && value < b.high : value > b.low && value <= b.high
-      ) ?? bins[bins.length - 1];
+      bins.find((b, idx) => {
+        const lowHit = closedLeft
+          ? value >= b.low
+          : idx === firstNormalBinIdx
+            ? value >= b.low
+            : value > b.low;
+        const highHit = closedLeft
+          ? idx === lastNormalBinIdx
+            ? value <= b.high
+            : value < b.high
+          : value <= b.high;
+        return lowHit && highHit;
+      }) ?? bins[bins.length - 1];
     bin.count++;
   }
   return bins.map(({ label, count }) => ({ label, count }));
@@ -2704,22 +3406,48 @@ function boxStats(values: number[], method: "inclusive" | "exclusive") {
   const highFence = q3 + 1.5 * iqr;
   const nonOutliers = safe.filter(v => v >= lowFence && v <= highFence);
   const outliers = safe.filter(v => v < lowFence || v > highFence);
+  // Whisker bounds are the smallest and largest *non-outlier* values.
+  // Use `reduce` instead of `Math.min(...arr)` / `Math.max(...arr)` so the
+  // implementation is safe for large samples (the spread form blows the
+  // JS call stack past ~100k elements).
+  const whiskerSource = nonOutliers.length ? nonOutliers : safe;
+  const low = whiskerSource.reduce((acc, v) => (v < acc ? v : acc), whiskerSource[0]);
+  const high = whiskerSource.reduce((acc, v) => (v > acc ? v : acc), whiskerSource[0]);
   return {
     q1,
     median,
     q3,
-    low: Math.min(...(nonOutliers.length ? nonOutliers : safe)),
-    high: Math.max(...(nonOutliers.length ? nonOutliers : safe)),
+    low,
+    high,
     mean: safe.reduce((sum, v) => sum + v, 0) / safe.length,
-    outliers
+    outliers,
+    // `nonOutliers` — every finite sample within `[lowFence, highFence]`.
+    // Exposed so renderers that draw "inner points" do not double-plot
+    // outliers as both a filled inner-point dot AND a hollow outlier
+    // ring. Excel's convention: inner points are individual non-outlier
+    // observations; outlier points are the `|v - median| > 1.5·IQR`
+    // samples, and the two overlays must be disjoint.
+    nonOutliers
   };
 }
 
 function percentile(values: number[], p: number, method: "inclusive" | "exclusive"): number {
+  if (values.length === 0) {
+    return NaN;
+  }
   if (values.length === 1) {
     return values[0];
   }
-  const rank = method === "inclusive" ? 1 + (values.length - 1) * p : (values.length + 1) * p;
+  // `rank` is 1-indexed per the convention used by NIST / Excel's
+  // `PERCENTILE.INC` / `PERCENTILE.EXC`. Clamp to `[1, N]` so the
+  // interpolation `fraction = rank - lower` stays in `[0, 1]`.
+  // Previously `rank` could fall below 1 for the exclusive method with
+  // small `p` (e.g. N=2, p=0.25, exclusive: rank = 3*0.25 = 0.75 → lower
+  // clamped to 1 but fraction = −0.25, producing a point lower than
+  // both source values — wrong sign). The clamp here matches Excel's
+  // behaviour of returning the minimum / maximum for out-of-band `p`.
+  const rawRank = method === "inclusive" ? 1 + (values.length - 1) * p : (values.length + 1) * p;
+  const rank = Math.max(1, Math.min(values.length, rawRank));
   const lower = Math.max(1, Math.floor(rank));
   const upper = Math.min(values.length, Math.ceil(rank));
   const fraction = rank - lower;
@@ -2730,17 +3458,34 @@ function buildHierarchy(levels: string[][], categories: string[], values: number
   const root: HierarchyNode = { name: "root", value: 0, children: [] };
   values.forEach((value, i) => {
     let node = root;
-    const path = [...levels.map(level => level[i]).filter(Boolean), categories[i] ?? String(i + 1)];
+    // Preserve explicit empty-string labels (`""` is a legitimate
+    // node name in Excel's hierarchy data — "Unassigned" / "Blank"
+    // category rolls up under a visible empty slice). The previous
+    // `filter(Boolean)` dropped every level where the user had
+    // intentionally left the label empty, collapsing those points into
+    // the wrong parent. Also filter `null`/`undefined` which do mean
+    // "no hierarchy level at this depth".
+    const path = [
+      ...levels.map(level => level[i]).filter(v => v !== undefined && v !== null),
+      categories[i] ?? String(i + 1)
+    ];
+    // Clamp negative contributions to zero at insert time. Sunburst /
+    // treemap layouts use angular / areal sweep proportional to
+    // `node.value`; a mix of positive and negative values would
+    // otherwise net out to a small (or zero) parent total, producing
+    // a ring with zero angular span. NaN / Infinity likewise
+    // degrade to zero so they don't poison the sum.
+    const safeValue = Number.isFinite(value) && value > 0 ? value : 0;
     for (const name of path) {
       let child = node.children.find(c => c.name === name);
       if (!child) {
         child = { name, value: 0, children: [] };
         node.children.push(child);
       }
-      child.value += value;
+      child.value += safeValue;
       node = child;
     }
-    root.value += value;
+    root.value += safeValue;
   });
   return root;
 }
@@ -2760,7 +3505,17 @@ function sliceDice(
       : { x: rect.x, y: rect.y + offset, width: rect.width, height: rect.height * share };
     result.push({ node, rect: r });
     if (node.children.length > 0 && r.width > 18 && r.height > 18) {
-      result.push(...sliceDice(node.children, insetRect(r, 4), !horizontal));
+      // Push entries one at a time instead of `result.push(...recursive)`.
+      // `Function.prototype.apply`-style spread passes each element as a
+      // separate function argument, which V8 / JSC throw `RangeError:
+      // Maximum call stack size exceeded` on past ~100k entries. The
+      // file already documents this defensive pattern in
+      // `maxAbsValue` / `valueRange` / `boxStats`; this loop was the
+      // last hold-out.
+      const children = sliceDice(node.children, insetRect(r, 4), !horizontal);
+      for (const child of children) {
+        result.push(child);
+      }
     }
     offset += horizontal ? r.width : r.height;
   }
@@ -2776,7 +3531,24 @@ function renderRingSlice(
   end: number,
   color: string
 ): string {
-  const large = end - start > Math.PI ? 1 : 0;
+  const sweep = end - start;
+  // Full ring: SVG can't describe a 360° arc with a single `A` — start
+  // and end points coincide so the renderer would emit an empty path.
+  // Build a full ring from two 180° arcs on each radius instead. The
+  // epsilon guards against float drift (sunburst with one leaf at a
+  // given depth has `sweep === endAngle - startAngle === 2π`).
+  if (sweep >= Math.PI * 2 - 1e-9) {
+    return (
+      `<path d="M ${fmt(cx - outer)} ${fmt(cy)} ` +
+      `A ${fmt(outer)} ${fmt(outer)} 0 1 1 ${fmt(cx + outer)} ${fmt(cy)} ` +
+      `A ${fmt(outer)} ${fmt(outer)} 0 1 1 ${fmt(cx - outer)} ${fmt(cy)} ` +
+      `M ${fmt(cx - inner)} ${fmt(cy)} ` +
+      `A ${fmt(inner)} ${fmt(inner)} 0 1 0 ${fmt(cx + inner)} ${fmt(cy)} ` +
+      `A ${fmt(inner)} ${fmt(inner)} 0 1 0 ${fmt(cx - inner)} ${fmt(cy)} Z" ` +
+      `fill="${color}" fill-rule="evenodd" stroke="#fff"/>`
+    );
+  }
+  const large = sweep > Math.PI ? 1 : 0;
   const p1 = polar(cx, cy, outer, start);
   const p2 = polar(cx, cy, outer, end);
   const p3 = polar(cx, cy, inner, end);
@@ -2785,7 +3557,19 @@ function renderRingSlice(
 }
 
 function hierarchyDepth(node: HierarchyNode): number {
-  return 1 + Math.max(0, ...node.children.map(hierarchyDepth));
+  // Fold via a loop rather than `Math.max(0, ...arr)` spread — for
+  // pathologically-wide hierarchies (>~100k siblings) the spread blows
+  // the JS call stack. Every other per-array fold in this file
+  // (valueRange, boxStats, funnel max) takes this shape; keep the
+  // defensive style consistent here too.
+  let maxChild = 0;
+  for (const child of node.children) {
+    const d = hierarchyDepth(child);
+    if (d > maxChild) {
+      maxChild = d;
+    }
+  }
+  return 1 + maxChild;
 }
 
 function renderAxes(parts: string[], plot: SvgRect, range: { min: number; max: number }): void {
@@ -2835,21 +3619,116 @@ function renderChartExLegend(
   parts: string[],
   series: ChartExSeries[],
   width: number,
-  hasTitle: boolean
+  height: number,
+  hasTitle: boolean,
+  legendPos: "b" | "l" | "r" | "t" | "tr" | undefined
 ): void {
-  series.forEach((s, i) => {
-    const y = (hasTitle ? 44 : 20) + i * 18;
+  // Honour the ChartEx `legendPos` attribute when picking where to
+  // stack the swatches. Previously every preview pinned the legend to
+  // the right edge regardless of authored position — a chart with
+  // `legendPos="b"` rendered with its legend on the right, visibly
+  // misrepresenting the authored layout.
+  //
+  // Layout budget: allow ~18 px per row for vertical stacks and
+  // ~96 px per inline item for horizontal stacks. Unknown positions
+  // fall back to the right side for backward compatibility.
+  const pos = legendPos ?? "r";
+  const rowHeight = 18;
+  const swatchSize = 10;
+  const hGap = 8; // gap between swatch and text
+  const itemPadding = 14; // gap between horizontal entries
+  const estItemWidth = (label: string): number =>
+    swatchSize + hGap + Math.max(28, label.length * 6) + itemPadding;
+  const labels = series.map((s, i) => seriesLabelText(s) ?? `Series ${i + 1}`);
+
+  if (pos === "b" || pos === "t") {
+    // Horizontal row. Put `b` at the bottom of the canvas, `t`
+    // immediately below the chart title (or near the top when none).
+    const totalW = labels.reduce((sum, l) => sum + estItemWidth(l), 0) - itemPadding;
+    const startX = Math.max(6, (width - totalW) / 2);
+    const baseY = pos === "b" ? height - 22 : hasTitle ? 44 : 10;
+    let offsetX = startX;
+    series.forEach((_s, i) => {
+      const label = labels[i];
+      const itemWidth = estItemWidth(label);
+      parts.push(
+        `<rect x="${fmt(offsetX)}" y="${fmt(baseY)}" width="${swatchSize}" height="${swatchSize}" fill="${COLORS[i % COLORS.length]}"/>`
+      );
+      parts.push(
+        svgText(offsetX + swatchSize + hGap, baseY + swatchSize - 1, label, 10, "#555", "start")
+      );
+      offsetX += itemWidth;
+    });
+    return;
+  }
+
+  if (pos === "l") {
+    // Left vertical stack. Place inside the left margin; getPlotRect
+    // leaves `plot.x` at 58 so a 10 px swatch + ~40 px label fits.
+    series.forEach((_s, i) => {
+      const y = (hasTitle ? 44 : 20) + i * rowHeight;
+      parts.push(
+        `<rect x="${fmt(8)}" y="${fmt(y)}" width="${swatchSize}" height="${swatchSize}" fill="${COLORS[i % COLORS.length]}"/>`
+      );
+      parts.push(svgText(22, y + 9, labels[i], 10, "#555", "start"));
+    });
+    return;
+  }
+
+  // Default: right / top-right vertical stack. Top-right lifts the
+  // stack up near the title baseline; plain right sits slightly below
+  // it. Both land inside the 128 px right margin from `getPlotRect`.
+  const baseY = pos === "tr" ? (hasTitle ? 44 : 16) : hasTitle ? 44 : 20;
+  series.forEach((_s, i) => {
+    const y = baseY + i * rowHeight;
     parts.push(
-      `<rect x="${fmt(width - 116)}" y="${fmt(y)}" width="10" height="10" fill="${COLORS[i % COLORS.length]}"/>`
+      `<rect x="${fmt(width - 116)}" y="${fmt(y)}" width="${swatchSize}" height="${swatchSize}" fill="${COLORS[i % COLORS.length]}"/>`
     );
-    parts.push(svgText(width - 102, y + 9, s.tx?.value ?? `Series ${i + 1}`, 10, "#555", "start"));
+    parts.push(svgText(width - 102, y + 9, labels[i], 10, "#555", "start"));
   });
 }
 
-function getPlotRect(width: number, height: number, hasTitle: boolean): SvgRect {
+/**
+ * Extract a plain-text caption from a {@link ChartExSeries.tx} in the
+ * canonical preference order: `rich` (walk paragraphs → runs) →
+ * `strRef` (the formula string itself, since cached points live on
+ * the series-data side of the model not on `tx`) → `value`. Mirrors
+ * `Chart.title` resolution on the classic side.
+ */
+function seriesLabelText(s: ChartExSeries): string | undefined {
+  const tx = s.tx;
+  if (!tx) {
+    return undefined;
+  }
+  if (tx.rich) {
+    return tx.rich.paragraphs.map(p => (p.runs ?? []).map(r => r.text).join("")).join("\n");
+  }
+  if (tx.value !== undefined) {
+    return tx.value;
+  }
+  if (tx.strRef) {
+    // Prefer the cached resolved value when the parser captured one;
+    // it's what Excel shows in the legend before formula evaluation.
+    // Fall back to the raw formula string so the series remains
+    // visually identifiable when no cache was stored.
+    if (typeof tx.strRef === "object") {
+      return tx.strRef.cached ?? tx.strRef.formula;
+    }
+    return tx.strRef;
+  }
+  return undefined;
+}
+
+function getPlotRect(width: number, height: number, hasTitle: boolean, titleLines = 1): SvgRect {
   const left = 58;
   const right = 128;
-  const top = hasTitle ? 52 : 24;
+  // Scale the top margin by `titleLines` so multi-paragraph titles
+  // (emitted as stacked tspans) do not collide with the plot area.
+  // Baseline is 52 for a single-line title (matches the pre-tspan
+  // behaviour byte-for-byte); each additional line adds ~22px which
+  // matches the `<tspan dy="1.2em">` spacing at the 18px title font.
+  const extraLines = Math.max(0, titleLines - 1);
+  const top = hasTitle ? 52 + extraLines * 22 : 24;
   const bottom = 46;
   return {
     x: left,
@@ -2859,15 +3738,130 @@ function getPlotRect(width: number, height: number, hasTitle: boolean): SvgRect 
   };
 }
 
-function valueRange(values: number[]): { min: number; max: number } {
+function valueRange(values: number[], axis?: ChartExAxis): { min: number; max: number } {
+  // Honour author-supplied bounds first. `valScaling.min` / `valScaling.max`
+  // (Chart2014 `CT_AxisUnit`) let the user pin the axis regardless of the
+  // observed data range; the renderer previously ignored them, so a
+  // histogram / pareto / waterfall / boxWhisker authored with an explicit
+  // axis bound rendered at auto-computed bounds (user intent lost on every
+  // preview, even though the serialised `.xlsx` carried the value).
+  //
+  // Handle each side independently: a single-sided bound (`min` without
+  // `max`, or vice versa) still needs the other side computed from data.
+  const authoredMin = axis?.valScaling?.min;
+  const authoredMax = axis?.valScaling?.max;
+  const hasAuthoredMin = typeof authoredMin === "number" && Number.isFinite(authoredMin);
+  const hasAuthoredMax = typeof authoredMax === "number" && Number.isFinite(authoredMax);
+
   const finite = values.filter(Number.isFinite);
-  const min = finite.length > 0 ? Math.min(0, ...finite) : 0;
-  const max = finite.length > 0 ? Math.max(1, ...finite) : 1;
-  return max <= min ? { min, max: min + 1 } : { min, max };
+  if (finite.length === 0) {
+    // Completely empty / non-finite dataset — fall back to a safe
+    // [0, 1] range so downstream `valueToY` doesn't divide by zero.
+    // Still honour explicit bounds so the plot still scales correctly
+    // when the caller hands us a bound dataset with no finite points.
+    const min = hasAuthoredMin ? (authoredMin as number) : 0;
+    const max = hasAuthoredMax ? (authoredMax as number) : 1;
+    return max > min ? { min, max } : { min, max: min + 1 };
+  }
+  // Fold over `reduce` instead of `Math.min(...arr)` / `Math.max(...arr)`
+  // — the spread form blows the JS call stack past ~100k entries, and
+  // waterfall / histogram / pareto series are exactly the workloads
+  // that hit this limit.
+  //
+  // Compute the true data range first. The previous implementation
+  // anchored `rawMax = 1` and `rawMin = 0`, which was correct for
+  // bin-count axes but wrong for wholly-negative datasets (e.g.
+  // `[-5, -3, -1]` produced `[-5, 1]`, wasting the upper half of
+  // the plot area on whitespace). Widen zero-anchoring only when the
+  // data actually straddles zero on that side; keep the `max >= 1`
+  // pad ONLY when the data's natural max is positive — for negative
+  // datasets the axis now ends at the max observed value.
+  let dataMin = finite[0];
+  let dataMax = finite[0];
+  for (let i = 1; i < finite.length; i++) {
+    const v = finite[i];
+    if (v < dataMin) {
+      dataMin = v;
+    }
+    if (v > dataMax) {
+      dataMax = v;
+    }
+  }
+  // Zero-anchor symmetry per ECMA-376 bar-like chart conventions:
+  //   - mixed data (crosses zero)         → min = dataMin, max = max(1, dataMax)
+  //   - wholly non-negative (dataMin ≥ 0) → min = 0, max = max(dataMax, dataMin + 1)
+  //                                         (the +1 widens degenerate
+  //                                          "all values equal" sets
+  //                                          so ticks land on legible
+  //                                          round numbers)
+  //   - wholly negative (dataMax < 0)     → min = dataMin, max = 0 so
+  //                                         the negative values sweep
+  //                                         up to the axis
+  //
+  // The previous implementation forced `rawMax = Math.max(1, dataMax)`
+  // whenever `dataMin <= 0`, which was correct for mixed data but
+  // buggy for wholly-negative datasets (`[-5, -3, -1]` → `{min: -5,
+  // max: 1}`, wasting the upper half of the plot area on whitespace
+  // above zero). Zero-anchor to the top only when the data reaches or
+  // exceeds 0; end the axis at the observed max otherwise.
+  let rawMin: number;
+  let rawMax: number;
+  if (dataMin >= 0) {
+    // All non-negative: anchor to 0, pad top for degenerate ranges.
+    rawMin = 0;
+    rawMax = Math.max(dataMax, dataMin + 1);
+  } else if (dataMax < 0) {
+    // All negative: anchor top to 0 so the bars sweep upward to the
+    // zero line, showing the magnitude.
+    rawMin = dataMin;
+    rawMax = 0;
+  } else {
+    // Mixed (straddles zero): preserve the data range with a floor of
+    // 1 on the positive side so small-magnitude bin counts still have
+    // legible ticks.
+    rawMin = dataMin;
+    rawMax = Math.max(1, dataMax);
+  }
+  // Override with author-supplied bounds. Do this AFTER the data-derived
+  // calculation so a single-sided authored bound still lets the other side
+  // follow the data.
+  const finalMin = hasAuthoredMin ? (authoredMin as number) : rawMin;
+  const finalMax = hasAuthoredMax ? (authoredMax as number) : rawMax;
+  if (finalMax <= finalMin) {
+    // Degenerate or inverted bounds — widen so `valueToY` has a non-zero
+    // span. When both bounds were authored we preserve the authored min
+    // and invent a top; when one side is data-derived we nudge it to
+    // exceed the authored side instead.
+    if (hasAuthoredMin && hasAuthoredMax) {
+      return { min: finalMin, max: finalMin + 1 };
+    }
+    if (hasAuthoredMin) {
+      return { min: finalMin, max: finalMin + 1 };
+    }
+    if (hasAuthoredMax) {
+      return { min: finalMax - 1, max: finalMax };
+    }
+    return { min: finalMin, max: finalMin + 1 };
+  }
+  return { min: finalMin, max: finalMax };
 }
 
-function valueToY(value: number, min: number, max: number, plot: SvgRect): number {
-  return plot.y + plot.height - ((value - min) / (max - min)) * plot.height;
+/**
+ * Locate the "value" axis on a ChartEx plot area — the one whose
+ * `valScaling` bounds (`min` / `max`) define the numeric range of the
+ * displayed data. Chart2014 `CT_PlotArea` allows zero or more axes; for
+ * the layouts that live in this renderer (histogram, pareto, waterfall,
+ * boxWhisker) exactly one axis should carry `type === "val"`.
+ *
+ * Returns `undefined` when no such axis is authored, in which case the
+ * caller should fall back to fully data-derived bounds.
+ */
+function findValueAxis(model: ChartExModel): ChartExAxis | undefined {
+  const axes = model.chartSpace.chart.plotArea.axis;
+  if (!axes || axes.length === 0) {
+    return undefined;
+  }
+  return axes.find(a => a.type === "val");
 }
 
 function svgText(
@@ -2878,80 +3872,87 @@ function svgText(
   color: string,
   anchor: "start" | "middle" | "end"
 ): string {
-  return `<text x="${fmt(x)}" y="${fmt(y)}" text-anchor="${anchor}" font-family="Arial" font-size="${fontSize}" fill="${color}">${escapeXml(text)}</text>`;
-}
-
-function insetRect(rect: SvgRect, amount: number): SvgRect {
-  return {
-    x: rect.x + amount,
-    y: rect.y + amount,
-    width: Math.max(0, rect.width - amount * 2),
-    height: Math.max(0, rect.height - amount * 2)
-  };
-}
-
-function polar(cx: number, cy: number, radius: number, angle: number): { x: number; y: number } {
-  return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
+  // `color` and `anchor` flow into attribute values — escape defensively
+  // even though all current callers pass validated strings, so a future
+  // caller can't accidentally inject a `"` that breaks the SVG parse.
+  return `<text x="${fmt(x)}" y="${fmt(y)}" text-anchor="${escapeXmlAttr(anchor)}" font-family="Arial" font-size="${fontSize}" fill="${escapeXmlAttr(color)}">${escapeXml(text)}</text>`;
 }
 
 function chartTitleText(title: ChartTitle | undefined): string | undefined {
-  return title?.text?.paragraphs.map(p => (p.runs ?? []).map(r => r.text).join("")).join("\n");
+  if (!title) {
+    return undefined;
+  }
+  // Structured rich-text takes precedence — it's the authored form
+  // when the builder created the title from a string literal.
+  const richText = title.text?.paragraphs
+    .map(p => (p.runs ?? []).map(r => r.text).join(""))
+    .join("\n");
+  if (richText) {
+    return richText;
+  }
+  // Formula-linked titles resolve via the strRef cache — cache-populator
+  // fills `strRef.cache.points[0].value` from the referenced cell at
+  // workbook save time (and the parser carries `<cx:v>` through on
+  // round-trip). Only expose a non-empty cached value so callers can
+  // tell "unresolved" from "intentionally empty".
+  const cached = title.strRef?.cache?.points?.[0]?.value;
+  if (typeof cached === "string" && cached.length > 0) {
+    return cached;
+  }
+  return undefined;
 }
 
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const clean = hex.replace(/^#/, "");
-  const mix = (component: string) => {
-    const value = parseInt(component, 16);
-    return Math.round(value * alpha + 255 * (1 - alpha))
-      .toString(16)
-      .padStart(2, "0")
-      .toUpperCase();
-  };
-  return `#${mix(clean.slice(0, 2))}${mix(clean.slice(2, 4))}${mix(clean.slice(4, 6))}`;
-}
-
-function interpolateColor(a: string, b: string, t: number): string {
-  const ca = a.replace(/^#/, "");
-  const cb = b.replace(/^#/, "");
-  const safe = Math.max(0, Math.min(1, t));
-  const mix = (i: number) => {
-    const av = parseInt(ca.slice(i, i + 2), 16);
-    const bv = parseInt(cb.slice(i, i + 2), 16);
-    return Math.round(av + (bv - av) * safe)
-      .toString(16)
-      .padStart(2, "0")
-      .toUpperCase();
-  };
-  return `#${mix(0)}${mix(2)}${mix(4)}`;
-}
-
+/**
+ * Extract a hex-encoded fill colour from a shape's {@link ShapeProperties}
+ * for rendering in the preview / vector PDF paths. Thin wrapper around
+ * {@link previewShapeFillColor} kept for readability inside this file
+ * (all the ChartEx renderers take `spPr` directly). Routes through
+ * `getSpPrFill` so chart parts that were captured as raw XML by the
+ * xform layer (the common case for loaded `.xlsx` files) still resolve
+ * their fill correctly — before this fix the helper read
+ * `spPr?.fill` directly, which is `undefined` for the `_rawXml` path
+ * and dropped the authored colour back to the caller's fallback.
+ */
 function shapeFillColor(spPr: ShapeProperties | undefined, fallback: string): string {
-  const srgb = spPr?.fill?.solid?.srgb;
-  return srgb ? `#${srgb.replace(/^#/, "")}` : fallback;
-}
-
-function fmt(value: number): string {
-  return value.toFixed(2).replace(/\.00$/, "");
+  return previewShapeFillColor(spPr ? getSpPrFill(spPr) : undefined, fallback);
 }
 
 function renderChartData(data: ChartExModel["chartSpace"]["chartData"]): string {
   const parts: string[] = [];
   parts.push("  <cx:chartData>");
-  if (data.externalData) {
-    for (const ed of data.externalData) {
-      const attrs = ed.autoUpdate === undefined ? "" : ` autoUpdate="${ed.autoUpdate ? "1" : "0"}"`;
-      parts.push(`    <cx:externalData r:id="${ed.id}"${attrs}/>`);
-    }
-  }
+  // NOTE: `cx:externalData` used to be emitted here, but it is a
+  // child of `cx:chartSpace` (not `cx:chartData`) per the Chart2014
+  // schema. The writer now emits it at the chartSpace level; the
+  // deprecated `data.externalData` slot is ignored here so a
+  // legacy round-trip cannot double-emit it.
   for (const entry of data.data) {
     parts.push(renderDataEntry(entry));
   }
   parts.push("  </cx:chartData>");
   return parts.join("\n");
+}
+
+/**
+ * Compute the effective `ptCount` attribute for a `<cx:lvl>` element.
+ *
+ * Respects the invariant that the attribute declares the logical
+ * length of the sparse array — it is never smaller than the highest
+ * authored index, nor smaller than the number of materialised points.
+ * Preserves a parser-captured `declared` value when it is larger than
+ * both (sparse round-trip). Returns `0` for an empty level with no
+ * declared count.
+ */
+function computePtCount(
+  declared: number | undefined,
+  points: readonly { index: number }[]
+): number {
+  let maxIdx = -1;
+  for (const p of points) {
+    if (typeof p.index === "number" && Number.isFinite(p.index) && p.index > maxIdx) {
+      maxIdx = p.index;
+    }
+  }
+  return Math.max(declared ?? 0, maxIdx + 1, points.length);
 }
 
 function renderDataEntry(entry: ChartExDataEntry): string {
@@ -2965,7 +3966,14 @@ function renderDataEntry(entry: ChartExDataEntry): string {
     }
     if (d.levels) {
       for (const lvl of d.levels) {
-        const ptCount = lvl.ptCount ?? lvl.points.length;
+        // `ptCount` is preserved on parse so sparse arrays survive
+        // round-trip (e.g. `ptCount="100"` with only three authored
+        // `<cx:pt>`). Mutations that append fresh points leave the
+        // declared count stale, so use `max(declared, maxIdx+1,
+        // length)` to cover both paths: the declared count wins for
+        // sparse inputs, and the materialised points win when the
+        // model grew past the captured attribute.
+        const ptCount = computePtCount(lvl.ptCount, lvl.points);
         const ptAttr = ` ptCount="${ptCount}"`;
         if (lvl.points.length === 0) {
           parts.push(`        <cx:lvl${ptAttr}/>`);
@@ -2988,15 +3996,22 @@ function renderDataEntry(entry: ChartExDataEntry): string {
     }
     if (d.levels) {
       for (const lvl of d.levels) {
-        const fmtAttr = lvl.formatCode ? ` formatCode="${escapeAttr(lvl.formatCode)}"` : "";
-        const ptCount = lvl.ptCount ?? lvl.points.length;
+        const fmtAttr = lvl.formatCode ? ` formatCode="${escapeXmlAttr(lvl.formatCode)}"` : "";
+        // See `computePtCount` note above — same sparse-safe rule.
+        const ptCount = computePtCount(lvl.ptCount, lvl.points);
         const ptAttr = ` ptCount="${ptCount}"`;
         if (lvl.points.length === 0) {
           parts.push(`        <cx:lvl${ptAttr}${fmtAttr}/>`);
         } else {
           parts.push(`        <cx:lvl${ptAttr}${fmtAttr}>`);
           for (const p of lvl.points) {
-            parts.push(`          <cx:pt idx="${p.index}">${p.value}</cx:pt>`);
+            // Route numeric content through `fmtNumText` so
+            // `NaN` / `Infinity` from a mutated / user-built model
+            // degrade to `"0"` instead of emitting literal `"NaN"`
+            // text content that no OOXML reader accepts. The parser
+            // at `chart-ex-parser.ts` already filters non-finite on
+            // read; the writer is the weak link.
+            parts.push(`          <cx:pt idx="${p.index}">${fmtNumText(p.value)}</cx:pt>`);
           }
           parts.push("        </cx:lvl>");
         }
@@ -3014,15 +4029,25 @@ function renderChart(chart: ChartExModel["chartSpace"]["chart"]): string {
   if (chart.title) {
     parts.push(renderTitle(chart.title));
   }
-  if (chart.autoTitleDeleted !== undefined && !chart.title) {
+  // Per ECMA-376 `CT_Chart`, `autoTitleDeleted` is an independent
+  // optional child that follows `title` — the two are **not** mutually
+  // exclusive. Previously the guard `!chart.title` would drop
+  // `autoTitleDeleted` whenever a title was also present, breaking
+  // round-trip of files that explicitly record "the auto title was
+  // deleted, user picked a custom one".
+  if (chart.autoTitleDeleted !== undefined) {
     parts.push(`    <cx:autoTitleDeleted val="${chart.autoTitleDeleted ? "1" : "0"}"/>`);
   }
   parts.push(renderPlotArea(chart.plotArea));
   if (chart.legend) {
     parts.push(renderLegend(chart.legend));
   }
-  if (chart.spPr) {
-    parts.push(renderSpPr(chart.spPr, "    "));
+  // CT_Chart does NOT carry `spPr` in the ECMA-376 / Chart2014 schema
+  // — chart-frame styling lives on `CT_ChartSpace`. `chart.spPr` is a
+  // legacy type field kept for backward compat (see the @deprecated
+  // note on `ChartExChart.spPr`); do not emit it to avoid invalid XML.
+  if (chart.extLst) {
+    parts.push(`    ${chart.extLst}`);
   }
   parts.push("  </cx:chart>");
   return parts.join("\n");
@@ -3031,88 +4056,336 @@ function renderChart(chart: ChartExModel["chartSpace"]["chart"]): string {
 function renderTitle(title: ChartTitle): string {
   const parts: string[] = [];
   parts.push("    <cx:title>");
-  if (title.text) {
+  // Chart2014 `CT_Title` sequence: `tx? → spPr? → txPr? → overlay?`.
+  // `layout` is NOT a valid child of `<cx:title>` in the Chart2014
+  // schema — earlier versions of this library emitted `<cx:layout/>`
+  // here, which strict validators (LibreOffice strict mode,
+  // `ooxml-validate`) reject. We also previously emitted `overlay`
+  // before `spPr`/`txPr`, a sequence violation. Both are fixed here.
+  // Title layout information belongs in the `manualLayout` extension,
+  // not a direct child; round-trip of buggy legacy files preserves
+  // `title.layout` on the model but the writer intentionally drops it.
+  if (title.text && (title.text.paragraphs?.length ?? 0) > 0) {
+    // If the structured model carries a non-empty rich-text body,
+    // emit it; otherwise fall back to the raw bytes captured at parse
+    // time (`rawTx`). When both are present the structured path wins —
+    // that's the convention `mutateChartEx` documents for "mutation
+    // invalidates raw". Checking `paragraphs.length > 0` guards
+    // against a model where the user cleared paragraphs but forgot
+    // to null `text` — without the check, we'd emit an empty
+    // `<cx:tx><cx:rich></cx:rich></cx:tx>` and drop the valid rawTx.
     parts.push("      <cx:tx>");
-    parts.push("        <cx:rich>");
-    parts.push("          <a:bodyPr/>");
-    parts.push("          <a:lstStyle/>");
-    for (const p of title.text.paragraphs) {
-      parts.push("          <a:p>");
-      for (const run of p.runs ?? []) {
-        parts.push("            <a:r>");
-        parts.push(`              <a:t>${escapeXml(run.text)}</a:t>`);
-        parts.push("            </a:r>");
-      }
-      parts.push("          </a:p>");
-    }
-    parts.push("        </cx:rich>");
+    parts.push(renderRichText(title.text, "        "));
     parts.push("      </cx:tx>");
+  } else if (title.strRef?.formula) {
+    // Formula-linked title — `<cx:tx><cx:txData><cx:f>…</cx:f>
+    // [<cx:v>cachedValue</cx:v>]</cx:txData></cx:tx>`. The
+    // `ChartTitle.strRef` shape stores the formula + optional cached
+    // points (same shape as classic chart title strRefs). The builder
+    // accepts `{ formula }` and creates `strRef.cache = { points: [] }`
+    // pre-population; the writer surfaces the first cached point's
+    // value as `<cx:v>` so readers without a formula engine still
+    // see the title text.
+    const cached = title.strRef.cache?.points?.[0]?.value;
+    parts.push("      <cx:tx>");
+    parts.push("        <cx:txData>");
+    parts.push(`          <cx:f>${escapeXml(title.strRef.formula)}</cx:f>`);
+    if (typeof cached === "string" && cached.length > 0) {
+      parts.push(`          <cx:v>${escapeXml(cached)}</cx:v>`);
+    }
+    parts.push("        </cx:txData>");
+    parts.push("      </cx:tx>");
+  } else if (title.rawTx) {
+    // The parser captured `<cx:tx>…</cx:tx>` verbatim; use it directly
+    // so users can round-trip a chart whose title uses DrawingML
+    // features we don't (yet) structure (hyperlinks, fields, …).
+    parts.push(`      ${title.rawTx}`);
   }
-  parts.push(`      <cx:overlay val="${title.overlay ? "1" : "0"}"/>`);
+  if (title.spPr) {
+    parts.push(renderSpPr(title.spPr, "      "));
+  }
+  if (title.txPr) {
+    parts.push(renderTxPr(title.txPr, "      "));
+  }
+  // `overlay` is optional per `CT_Title` — only emit when the caller
+  // explicitly set it. Writing `val="0"` on every untouched title
+  // pollutes round-trip byte-compare with a spurious attribute.
+  if (title.overlay !== undefined) {
+    parts.push(`      <cx:overlay val="${title.overlay ? "1" : "0"}"/>`);
+  }
   parts.push("    </cx:title>");
   return parts.join("\n");
+}
+
+/**
+ * Render a {@link ChartRichText} as `<cx:rich>…</cx:rich>` (DrawingML
+ * body + one or more `<a:p>` paragraphs). Shared between title
+ * rendering and series `tx.rich`. Run attributes (bold, italic,
+ * fontFamily, colour) are intentionally omitted from the textBody —
+ * ChartEx callers that need per-run formatting should upgrade to
+ * `text` with explicit paragraph properties and we'll emit them here
+ * once `types.ts:ChartParagraph` carries the full OOXML mapping.
+ */
+/**
+ * Render a {@link ChartRichText} as `<cx:rich>…</cx:rich>` (DrawingML
+ * body + one or more `<a:p>` paragraphs). Shared between title
+ * rendering and series `tx.rich`.
+ *
+ * Emits run-level properties (bold / italic / size / colour /
+ * fontFamily / underline / strike / baseline / cap) from
+ * {@link ChartTextRun.properties}. Previously the writer silently
+ * dropped every run property, so `setTitleRichText({ runs: [{ text: "Bold",
+ * properties: { bold: true } }] })` produced un-bolded output.
+ *
+ * Paragraph-level properties and hyperlinks are still deferred — the
+ * current `types.ts` `ChartParagraphProperties` type only models what
+ * the classic writer has wired up, and copying that to ChartEx
+ * pending a unified paragraph-properties model.
+ */
+function renderRichText(text: ChartRichText, indent: string): string {
+  const parts: string[] = [];
+  parts.push(`${indent}<cx:rich>`);
+  parts.push(`${indent}  <a:bodyPr/>`);
+  parts.push(`${indent}  <a:lstStyle/>`);
+  for (const p of text.paragraphs) {
+    parts.push(`${indent}  <a:p>`);
+    for (const run of p.runs ?? []) {
+      const rPr = run.properties ? renderRunProperties(run.properties, "a:rPr") : "";
+      // `xml:space="preserve"` so leading / trailing whitespace inside
+      // a run survives the reader's whitespace normalisation. The
+      // XML spec collapses repeated whitespace in text nodes and
+      // turns every `\t` / `\n` / `\r` into a space; DrawingML runs
+      // often carry significant whitespace between runs (spacing) or
+      // embedded newlines (multi-line tooltips). The previous trigger
+      // missed tabs and newlines in the middle of a run that had no
+      // leading / trailing whitespace — those were silently turned
+      // into spaces by compliant readers.
+      const tAttrs = needsXmlSpacePreserve(run.text) ? ' xml:space="preserve"' : "";
+      parts.push(`${indent}    <a:r>`);
+      if (rPr) {
+        parts.push(`${indent}      ${rPr}`);
+      }
+      parts.push(`${indent}      <a:t${tAttrs}>${escapeXml(run.text)}</a:t>`);
+      parts.push(`${indent}    </a:r>`);
+    }
+    // Always emit an `<a:endParaRPr/>` so Excel treats the paragraph
+    // as explicitly terminated (it otherwise writes an implicit one).
+    // `lang` default matches what Excel ships.
+    parts.push(`${indent}    <a:endParaRPr lang="en-US"/>`);
+    parts.push(`${indent}  </a:p>`);
+  }
+  parts.push(`${indent}</cx:rich>`);
+  return parts.join("\n");
+}
+
+/**
+ * Render run / default-run properties as a single line `<a:rPr…>` or
+ * `<a:defRPr…>` element. Supports the common attributes (size, bold,
+ * italic, underline, strike, baseline, cap, lang) and the typeface /
+ * colour children. Kept in sync with the classic chart-space-xform's
+ * `_renderRunProperties` so the two writers emit byte-identical run
+ * properties given the same structured input.
+ */
+function renderRunProperties(props: ChartTextProperties, tag: "a:rPr" | "a:defRPr"): string {
+  const attrParts: string[] = [];
+  if (props.size !== undefined) {
+    attrParts.push(`sz="${props.size}"`);
+  }
+  if (props.bold !== undefined) {
+    attrParts.push(`b="${props.bold ? 1 : 0}"`);
+  }
+  if (props.italic !== undefined) {
+    attrParts.push(`i="${props.italic ? 1 : 0}"`);
+  }
+  if (props.underline !== undefined) {
+    const u =
+      typeof props.underline === "boolean" ? (props.underline ? "sng" : "none") : props.underline;
+    attrParts.push(`u="${u}"`);
+  }
+  if (props.strike) {
+    attrParts.push(`strike="${props.strike}"`);
+  }
+  if (props.baseline !== undefined) {
+    attrParts.push(`baseline="${props.baseline}"`);
+  }
+  if (props.cap) {
+    attrParts.push(`cap="${props.cap}"`);
+  }
+  if (props.lang) {
+    attrParts.push(`lang="${escapeXmlAttr(props.lang)}"`);
+  }
+  const attrStr = attrParts.length > 0 ? ` ${attrParts.join(" ")}` : "";
+
+  const children: string[] = [];
+  if (props.color) {
+    children.push(`<a:solidFill>${renderColor(props.color)}</a:solidFill>`);
+  }
+  if (props.fontFamily) {
+    children.push(`<a:latin typeface="${escapeXmlAttr(props.fontFamily)}"/>`);
+  }
+  if (props.eastAsianFamily) {
+    children.push(`<a:ea typeface="${escapeXmlAttr(props.eastAsianFamily)}"/>`);
+  }
+  if (props.complexScriptFamily) {
+    children.push(`<a:cs typeface="${escapeXmlAttr(props.complexScriptFamily)}"/>`);
+  }
+
+  if (children.length === 0) {
+    return `<${tag}${attrStr}/>`;
+  }
+  return `<${tag}${attrStr}>${children.join("")}</${tag}>`;
 }
 
 function renderPlotArea(pa: ChartExModel["chartSpace"]["chart"]["plotArea"]): string {
   const parts: string[] = [];
   parts.push("    <cx:plotArea>");
-  if (pa.spPr) {
-    parts.push(renderSpPr(pa.spPr, "      "));
-  }
+  // `CT_PlotArea` (Chart2014): sequence is `plotAreaRegion?` → `axis*`
+  // → `spPr?` → `extLst?`. Emit `spPr` and `extLst` last — previously
+  // `spPr` was emitted first, which is a schema-order violation, and
+  // `extLst` was not supported at all.
   const region = pa.plotAreaRegion;
   if (region) {
     parts.push("      <cx:plotAreaRegion>");
-    if (region.layout) {
-      parts.push(renderRawOrEmptyLayout(region.layout as any, "        "));
-    }
+    // `CT_PlotAreaRegion` (Chart2014): sequence is `plotSurface?` →
+    // `series*` → `extLst?`. `layout` is NOT a valid child. Earlier
+    // versions of this library captured `<cx:layout/>` on the model
+    // via the parser and re-emitted it here, producing XML that
+    // strict validators reject. The parser now retains the field only
+    // for in-memory round-trip continuity; the writer intentionally
+    // drops it.
     if (region.plotSurface) {
-      parts.push(renderSpPr(region.plotSurface, "        "));
+      // `CT_PlotSurface` is `<cx:plotSurface><cx:spPr>…</cx:spPr></cx:plotSurface>`
+      // — previously we wrote the inner `<cx:spPr>` directly as a
+      // child of `<cx:plotAreaRegion>`, which is a schema violation.
+      parts.push("        <cx:plotSurface>");
+      parts.push(renderSpPr(region.plotSurface, "          "));
+      parts.push("        </cx:plotSurface>");
     }
     for (const s of region.series) {
       parts.push(renderSeries(s));
     }
+    if (region.extLst) {
+      parts.push(`        ${region.extLst}`);
+    }
     parts.push("      </cx:plotAreaRegion>");
   } else if (pa.series) {
+    // When the model stores the series directly on the plotArea (no
+    // `plotAreaRegion` wrapper), wrap them into a synthetic
+    // `plotAreaRegion` on write. `CT_PlotArea` does not allow `series`
+    // as a direct child — only `plotAreaRegion` can host them.
+    parts.push("      <cx:plotAreaRegion>");
+    parts.push("        <cx:plotSurface/>");
     for (const s of pa.series) {
       parts.push(renderSeries(s));
     }
+    parts.push("      </cx:plotAreaRegion>");
   }
   if (pa.axis) {
     for (const axis of pa.axis) {
       parts.push(renderAxis(axis));
     }
   }
+  if (pa.spPr) {
+    parts.push(renderSpPr(pa.spPr, "      "));
+  }
+  if (pa.extLst) {
+    parts.push(`      ${pa.extLst}`);
+  }
   parts.push("    </cx:plotArea>");
   return parts.join("\n");
 }
 
-function renderRawOrEmptyLayout(layout: { _rawXml?: string } | undefined, indent: string): string {
-  return layout?._rawXml ? indent + layout._rawXml : `${indent}<cx:layout/>`;
-}
-
 function renderSeries(s: ChartExSeries): string {
   const parts: string[] = [];
-  const attrs = [`layoutId="${s.layoutId}"`];
-  if (s.hidden) {
-    attrs.push('hidden="1"');
+  // Prefer the verbatim `rawLayoutId` captured during parsing so
+  // unknown / future layoutIds (e.g. a new layout shipped in a later
+  // Office build) survive round-trip intact — but only when the
+  // caller hasn't overridden `layoutId` since parsing. If
+  // `layoutId` is still the synthesized "clusteredColumn" fallback
+  // the parser placed there, the raw attribute wins; otherwise the
+  // caller intentionally set a structured `layoutId` and we emit
+  // that instead. This lets mutations work as expected while
+  // preserving unknowns for untouched series.
+  const useRaw = s.rawLayoutId !== undefined && s.layoutId === "clusteredColumn";
+  const layoutIdAttr = escapeXmlAttr(useRaw ? (s.rawLayoutId as string) : s.layoutId);
+  const attrs = [`layoutId="${layoutIdAttr}"`];
+  // Emit explicit `hidden="0"` when the caller set `hidden: false`
+  // so round-trip of Excel-authored `<cx:series hidden="0">` doesn't
+  // drop the attribute. Previously the truthy check collapsed the
+  // `false` case to "no attribute", breaking byte-identity for files
+  // that carried an explicit suppression marker.
+  if (s.hidden !== undefined) {
+    attrs.push(`hidden="${s.hidden ? "1" : "0"}"`);
   }
   if (s.ownerIdx !== undefined) {
     attrs.push(`ownerIdx="${s.ownerIdx}"`);
   }
   parts.push(`        <cx:series ${attrs.join(" ")}>`);
+  // Chart2014 `CT_Series` child order:
+  //   tx? → spPr? → txPr? → valueColors? → valueColorPositions? →
+  //   dataPt* → dataLabels? → dataId? → layoutPr? → axisId* → extLst?
+  // The previous writer emitted dataRefs/axisId **before** dataLabels
+  // and dataPt, which is a schema-order violation. Excel 2019+ accepts
+  // the file but round-tripping it through strict validators fails.
   if (s.tx) {
-    if (s.tx.value !== undefined) {
+    // Preference order: structured rich > value > strRef. ECMA-376 allows
+    // only one of these forms at a time; when the model accidentally
+    // sets both `rich` and `value`, the richer representation wins so
+    // per-run formatting doesn't get silently downgraded to a plain
+    // string. Previously the writer didn't handle `rich` at all, so
+    // `<cx:tx><cx:rich>…</cx:rich></cx:tx>` round-trips were flattened.
+    if (s.tx.rich) {
+      parts.push("          <cx:tx>");
+      parts.push(renderRichText(s.tx.rich, "            "));
+      parts.push("          </cx:tx>");
+    } else if (s.tx.value !== undefined) {
       parts.push(
         `          <cx:tx><cx:txData><cx:v>${escapeXml(s.tx.value)}</cx:v></cx:txData></cx:tx>`
       );
     } else if (s.tx.strRef) {
+      // Accept both the new `{ formula, cached? }` shape and the
+      // legacy string form. Emit `<cx:f>` for the formula and, when a
+      // cached resolved value is present, `<cx:v>` alongside — this
+      // mirrors Excel's own output and lets charts display their
+      // series labels before recalculation completes.
+      const ref = s.tx.strRef;
+      const formula = typeof ref === "string" ? ref : ref.formula;
+      const cached = typeof ref === "string" ? undefined : ref.cached;
+      const cachedXml = cached !== undefined ? `<cx:v>${escapeXml(cached)}</cx:v>` : "";
       parts.push(
-        `          <cx:tx><cx:txData><cx:f>${escapeXml(s.tx.strRef)}</cx:f></cx:txData></cx:tx>`
+        `          <cx:tx><cx:txData><cx:f>${escapeXml(formula)}</cx:f>${cachedXml}</cx:txData></cx:tx>`
       );
     }
   }
   if (s.spPr) {
     parts.push(renderSpPr(s.spPr, "          "));
+  }
+  if (s.txPr) {
+    parts.push(renderTxPr(s.txPr, "          ", "cx:txPr"));
+  }
+  // `valueColors` / `valueColorPositions` — raw-preserved chart-2014
+  // colour-by-value palette. Emitted verbatim in the schema-mandated
+  // position (after `txPr`, before `dataPt`). Previously these were
+  // silently dropped by the writer even when the parser captured them.
+  if (s.valueColors) {
+    parts.push(`          ${s.valueColors}`);
+  }
+  if (s.valueColorPositions) {
+    parts.push(`          ${s.valueColorPositions}`);
+  }
+  // dataPt — per-point overrides (before dataLabels and dataId per
+  // CT_Series schema).
+  if (s.dataPt) {
+    for (const dp of s.dataPt) {
+      parts.push(`          <cx:dataPt idx="${dp.idx}">`);
+      if (dp.spPr) {
+        parts.push(renderSpPr(dp.spPr, "            "));
+      }
+      parts.push("          </cx:dataPt>");
+    }
+  }
+  if (s.dataLabels) {
+    parts.push(renderDataLabels(s.dataLabels));
   }
   if (s.dataRefs) {
     for (const ref of s.dataRefs) {
@@ -3129,18 +4402,6 @@ function renderSeries(s: ChartExSeries): string {
       parts.push(`          <cx:axisId val="${id}"/>`);
     }
   }
-  if (s.dataLabels) {
-    parts.push(renderDataLabels(s.dataLabels));
-  }
-  if (s.dataPt) {
-    for (const dp of s.dataPt) {
-      parts.push(`          <cx:dataPt idx="${dp.idx}">`);
-      if (dp.spPr) {
-        parts.push(renderSpPr(dp.spPr, "            "));
-      }
-      parts.push("          </cx:dataPt>");
-    }
-  }
   if (s.extLst) {
     parts.push(s.extLst);
   }
@@ -3153,8 +4414,8 @@ function renderLayoutProperties(
   lp: NonNullable<ChartExSeries["layoutPr"]>
 ): string {
   const parts: string[] = [];
-  if ((lp as any)._rawXml && !hasStructuredLayoutProperties(lp)) {
-    return `          ${(lp as any)._rawXml}`;
+  if (lp._rawXml && !hasStructuredLayoutProperties(lp)) {
+    return `          ${lp._rawXml}`;
   }
   parts.push("          <cx:layoutPr>");
   if (lp.parentLabelLayout && (layoutId === "sunburst" || layoutId === "treemap")) {
@@ -3173,35 +4434,77 @@ function renderLayoutProperties(
   if (lp.binning) {
     const b = lp.binning;
     const attrs: string[] = [];
-    if (b.intervalClosed) {
+    // Validate `intervalClosed` against the Chart2014 enum before
+    // interpolating — the parser currently casts this field without
+    // validation, so a fuzz-tested or hand-built model could carry
+    // an unsafe string that injects out of the attribute. See
+    // `chart-ex-parser.ts:parseLayoutProperties` for the read side.
+    if (b.intervalClosed === "l" || b.intervalClosed === "r") {
       attrs.push(`intervalClosed="${b.intervalClosed}"`);
     }
-    if (b.underflow !== undefined) {
-      attrs.push(`underflow="${b.underflow}"`);
+    // `underflow` / `overflow` / `binSize` / `binCount` are numeric
+    // attributes. Route through `fmtNumAttr` so `NaN` / `Infinity`
+    // from a mutated model degrades to "attribute absent" rather
+    // than emitting literal `"NaN"` text.
+    const underflowAttr = fmtNumAttr(b.underflow);
+    if (underflowAttr !== "") {
+      attrs.push(`underflow="${underflowAttr}"`);
     }
-    if (b.overflow !== undefined) {
-      attrs.push(`overflow="${b.overflow}"`);
+    const overflowAttr = fmtNumAttr(b.overflow);
+    if (overflowAttr !== "") {
+      attrs.push(`overflow="${overflowAttr}"`);
     }
     const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : "";
     parts.push(`            <cx:binning${attrStr}>`);
+    // Per CT_Binning schema (Chart2014):
+    //   <xsd:sequence>
+    //     <xsd:choice minOccurs="0">
+    //       <xsd:element name="auto"|"categories"|"manual"/>
+    //     </xsd:choice>
+    //     <xsd:element name="binSize" minOccurs="0"/>
+    //     <xsd:element name="binCount" minOccurs="0"/>
+    //   </xsd:sequence>
+    // The discriminator choice (auto/categories/manual) is mutually
+    // exclusive, but `<cx:binSize>` / `<cx:binCount>` may coexist
+    // with any of them. Previously the writer unconditionally emitted
+    // `<cx:auto/>` alongside `<cx:binSize>`, producing an ambiguous
+    // model that the parser's priority chain (auto > categories >
+    // manual > binSize > binCount) collapsed to "auto" and silently
+    // dropped the configured bin size.
     if (b.binType === "auto") {
       parts.push("              <cx:auto/>");
-    }
-    if (b.binSize !== undefined) {
-      parts.push(`              <cx:binSize val="${b.binSize}"/>`);
-    }
-    if (b.binCount !== undefined) {
-      parts.push(`              <cx:binCount val="${b.binCount}"/>`);
-    }
-    if (b.binType === "categories") {
+    } else if (b.binType === "categories") {
       parts.push("              <cx:categories/>");
     } else if (b.binType === "manual") {
       parts.push("              <cx:manual/>");
     }
+    // `binSize` / `binCount` are independent of the discriminator,
+    // so emit whenever explicitly set — this preserves authored
+    // values in combination with any manual/categorical layout.
+    const binSizeAttr = fmtNumAttr(b.binSize);
+    if (binSizeAttr !== "") {
+      parts.push(`              <cx:binSize val="${binSizeAttr}"/>`);
+    }
+    const binCountAttr = fmtNumAttr(b.binCount);
+    if (binCountAttr !== "") {
+      parts.push(`              <cx:binCount val="${binCountAttr}"/>`);
+    }
     parts.push("            </cx:binning>");
   }
-  if (lp.paretoLine) {
-    parts.push('            <cx:paretoLine val="1"/>');
+  // `<cx:paretoLine>` is only a valid child of `<cx:layoutPr>` when
+  // the enclosing series is a pareto layout (`clusteredColumn` with
+  // histogram binning, per Chart2014 §L.5.4.6). Emit unguarded had
+  // us produce schema-invalid output for every non-histogram series
+  // that happened to have a `paretoLine` bool set in the model.
+  if (
+    lp.paretoLine !== undefined &&
+    (layoutId === "clusteredColumn" || layoutId === "paretoLine")
+  ) {
+    // Emit the explicit bool so `paretoLine: false` round-trips as
+    // `<cx:paretoLine val="0"/>` (user suppression of the line).
+    // Previously the `if (lp.paretoLine)` check dropped the `false`
+    // case entirely, silently re-enabling the line on save.
+    parts.push(`            <cx:paretoLine val="${lp.paretoLine ? "1" : "0"}"/>`);
   }
   if (layoutId === "boxWhisker") {
     if (lp.quartileMethod) {
@@ -3239,13 +4542,19 @@ function renderLayoutProperties(
 }
 
 function hasStructuredLayoutProperties(lp: NonNullable<ChartExSeries["layoutPr"]>): boolean {
+  // `increaseSpPr` / `decreaseSpPr` / `totalSpPr` are preview-only
+  // fields consumed by the SVG/PDF renderer to colour waterfall bars;
+  // Chart2014 has no schema slot for them (per-point styling lives on
+  // `<cx:dataPt>` instead). Keep them in the public type so applications
+  // can theme the preview, but DON'T treat setting one as a "structured
+  // mutation" — that would force the writer down the structured path
+  // and discard `_rawXml`, silently dropping all the other properties
+  // the raw bytes carried. Only fields that `renderLayoutProperties`
+  // actually emits count here.
   return [
     lp.parentLabelLayout,
     lp.subtotals,
     lp.connectorLines,
-    lp.increaseSpPr,
-    lp.decreaseSpPr,
-    lp.totalSpPr,
     lp.binning,
     lp.paretoLine,
     lp.quartileMethod,
@@ -3277,7 +4586,11 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
     if (v.numFmt !== undefined) {
       attrs.push(`numFmt="${v.numFmt ? "1" : "0"}"`);
     }
-    parts.push(`            <cx:visibility ${attrs.join(" ")}/>`);
+    // Emit a self-closing tag without the trailing space when no
+    // attributes are set — `<cx:visibility />` breaks byte-identity
+    // against Excel's output while `<cx:visibility/>` matches.
+    const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+    parts.push(`            <cx:visibility${attrStr}/>`);
   }
   if (dl.position) {
     parts.push(`            <cx:dataLabel pos="${dl.position}"/>`);
@@ -3286,7 +4599,7 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
     parts.push(`            <cx:separator>${escapeXml(dl.separator)}</cx:separator>`);
   }
   if (dl.numFmt) {
-    parts.push(`            <cx:numFmt formatCode="${escapeAttr(dl.numFmt)}"/>`);
+    parts.push(`            <cx:numFmt formatCode="${escapeXmlAttr(dl.numFmt)}"/>`);
   }
   if (dl.spPr) {
     parts.push(renderSpPr(dl.spPr, "            "));
@@ -3300,56 +4613,115 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
 
 function renderAxis(axis: ChartExAxis): string {
   const parts: string[] = [];
-  parts.push(`      <cx:axis id="${axis.axisId}">`);
-  if (axis.hidden) {
-    parts.push('        <cx:hidden val="1"/>');
+  // `CT_Axis` (Chart2014):
+  //   - `hidden` is an **attribute** on `<cx:axis>`, not a child
+  //     element. Emitting `<cx:hidden val="1"/>` is a schema violation
+  //     — Excel 2019+ rejects the document on open.
+  //   - Children have a strict order: catScaling | valScaling, then
+  //     title, units, majorTickMarks, minorTickMarks, majorGridlines,
+  //     minorGridlines, numFmt, txPr, spPr, extLst.
+  //   - Element names use the **plural** form (`majorTickMarks`,
+  //     `minorTickMarks`); we were writing the classic-chart singular
+  //     form which the ChartEx parser also rejects.
+  const axisAttrs = [`id="${axis.axisId}"`];
+  // Emit explicit `hidden="0"` when the caller / parser set the flag
+  // to `false` so round-trip of `<cx:axis hidden="0">` doesn't drop
+  // the attribute. The old `if (axis.hidden)` truthy check collapsed
+  // `false` and `undefined` into "omit" — fine on a freshly built
+  // model, but lossy when loading an Excel-authored file that
+  // explicitly declared the axis visible (a distinction only
+  // observable on a secondary-axis round-trip, but real nonetheless).
+  if (axis.hidden !== undefined) {
+    axisAttrs.push(`hidden="${axis.hidden ? "1" : "0"}"`);
+  }
+  parts.push(`      <cx:axis ${axisAttrs.join(" ")}>`);
+  // catScaling and valScaling are a `<choice>` — emit at most one.
+  // Route numeric attributes through `fmtNumAttr` so NaN / Infinity
+  // values from user-built or mutated models degrade to "absent"
+  // rather than being interpolated as literal `"NaN"` into the XML.
+  if (axis.catScaling) {
+    const cs = axis.catScaling;
+    const attrs: string[] = [];
+    const gapWidthAttr = fmtNumAttr(cs.gapWidth);
+    if (gapWidthAttr !== "") {
+      attrs.push(`gapWidth="${gapWidthAttr}"`);
+    }
+    parts.push(
+      attrs.length > 0 ? `        <cx:catScaling ${attrs.join(" ")}/>` : "        <cx:catScaling/>"
+    );
+  } else if (axis.valScaling) {
+    const vs = axis.valScaling;
+    const attrs: string[] = [];
+    const pushNum = (name: string, value: number | undefined): void => {
+      const a = fmtNumAttr(value);
+      if (a !== "") {
+        attrs.push(`${name}="${a}"`);
+      }
+    };
+    pushNum("min", vs.min);
+    pushNum("max", vs.max);
+    pushNum("majorUnit", vs.majorUnit);
+    pushNum("minorUnit", vs.minorUnit);
+    parts.push(
+      attrs.length > 0 ? `        <cx:valScaling ${attrs.join(" ")}/>` : "        <cx:valScaling/>"
+    );
+  }
+  if (axis.title) {
+    parts.push(renderTitle(axis.title));
+  }
+  // `<cx:units>` — display-unit scaler (thousand / million / custom).
+  // Emitted verbatim from the parser-captured raw bytes. Previously
+  // this element evaporated on round-trip.
+  if (axis.units) {
+    parts.push(`        ${axis.units}`);
   }
   if (axis.majorTickMark) {
-    parts.push(`        <cx:majorTickMark val="${axis.majorTickMark}"/>`);
+    parts.push(`        <cx:majorTickMarks val="${tickMarkToOoxml(axis.majorTickMark)}"/>`);
   }
   if (axis.minorTickMark) {
-    parts.push(`        <cx:minorTickMark val="${axis.minorTickMark}"/>`);
+    parts.push(`        <cx:minorTickMarks val="${tickMarkToOoxml(axis.minorTickMark)}"/>`);
+  }
+  // `<cx:majorGridlines>` / `<cx:minorGridlines>` wrap an optional
+  // `<cx:spPr>`. Presence of the element (even with empty shape) is
+  // meaningful — it requests Excel's default gridlines — so emit a
+  // self-closing form when `spPr` is empty or undefined. Previously
+  // gridlines were missing entirely from the writer; round-tripping
+  // an Excel-authored chart lost the tick-aligned guide lines that
+  // users rely on for reading values.
+  if (axis.majorGridlines !== undefined) {
+    const mg = axis.majorGridlines;
+    const hasSpPr = mg && Object.keys(mg).length > 0;
+    if (hasSpPr) {
+      parts.push("        <cx:majorGridlines>");
+      parts.push(renderSpPr(mg, "          "));
+      parts.push("        </cx:majorGridlines>");
+    } else {
+      parts.push("        <cx:majorGridlines/>");
+    }
+  }
+  if (axis.minorGridlines !== undefined) {
+    const mg = axis.minorGridlines;
+    const hasSpPr = mg && Object.keys(mg).length > 0;
+    if (hasSpPr) {
+      parts.push("        <cx:minorGridlines>");
+      parts.push(renderSpPr(mg, "          "));
+      parts.push("        </cx:minorGridlines>");
+    } else {
+      parts.push("        <cx:minorGridlines/>");
+    }
   }
   if (axis.numFmt) {
-    const attrs = [`formatCode="${escapeAttr(axis.numFmt.formatCode)}"`];
+    const attrs = [`formatCode="${escapeXmlAttr(axis.numFmt.formatCode)}"`];
     if (axis.numFmt.sourceLinked !== undefined) {
       attrs.push(`sourceLinked="${axis.numFmt.sourceLinked ? "1" : "0"}"`);
     }
     parts.push(`        <cx:numFmt ${attrs.join(" ")}/>`);
   }
-  if (axis.title) {
-    parts.push(renderTitle(axis.title));
-  }
-  if (axis.valScaling) {
-    const vs = axis.valScaling;
-    const attrs: string[] = [];
-    if (vs.min !== undefined) {
-      attrs.push(`min="${vs.min}"`);
-    }
-    if (vs.max !== undefined) {
-      attrs.push(`max="${vs.max}"`);
-    }
-    if (vs.majorUnit !== undefined) {
-      attrs.push(`majorUnit="${vs.majorUnit}"`);
-    }
-    if (vs.minorUnit !== undefined) {
-      attrs.push(`minorUnit="${vs.minorUnit}"`);
-    }
-    parts.push(`        <cx:valScaling ${attrs.join(" ")}/>`);
-  }
-  if (axis.catScaling) {
-    const cs = axis.catScaling;
-    const attrs: string[] = [];
-    if (cs.gapWidth !== undefined) {
-      attrs.push(`gapWidth="${cs.gapWidth}"`);
-    }
-    parts.push(`        <cx:catScaling ${attrs.join(" ")}/>`);
+  if (axis.txPr) {
+    parts.push(renderTxPr(axis.txPr, "        ", "cx:txPr"));
   }
   if (axis.spPr) {
     parts.push(renderSpPr(axis.spPr, "        "));
-  }
-  if (axis.txPr) {
-    parts.push(renderTxPr(axis.txPr, "        ", "cx:txPr"));
   }
   if (axis.extLst) {
     parts.push(`        ${axis.extLst}`);
@@ -3358,46 +4730,118 @@ function renderAxis(axis: ChartExAxis): string {
   return parts.join("\n");
 }
 
+/**
+ * Serialise a `cx:legend` element to XML. Exported so the xlsx raw-
+ * patch path (`buildRawChartExLegendXml` in `xlsx.browser.ts`) can
+ * produce identical output to the structured writer. Previously the
+ * raw patcher emitted a self-closing `<cx:legend pos="…"/>`, dropping
+ * `align`, `cx:legendEntry*`, `cx:spPr`, `cx:txPr`, and `cx:extLst`
+ * on every styled-legend round-trip.
+ */
+export function renderChartExLegendXml(
+  l: NonNullable<ChartExModel["chartSpace"]["chart"]["legend"]>
+): string {
+  return renderLegend(l);
+}
+
 function renderLegend(l: NonNullable<ChartExModel["chartSpace"]["chart"]["legend"]>): string {
   const parts: string[] = [];
+  // `CT_Legend` (Chart2014) attribute list: `pos`, `align` (default
+  // `"ctr"`), `overlay` (default `"false"`). Excel always emits `pos`
+  // and `align` together — they describe two dimensions of legend
+  // placement. Pair them so round-trip matches Excel's byte output;
+  // emit `overlay` independently since its default is documented and
+  // distinct. Absent position (`legendPos` undefined) also skips
+  // `align` — neither attribute makes sense without the other.
+  //
+  // Emit `align` only when the model carries an explicit value. The
+  // previous heuristic `l.align ?? "ctr"` promoted any unset alignment
+  // to `"ctr"`, which broke byte-equality on round-trip of files
+  // where Excel had omitted the attribute (since the parser returns
+  // `undefined` for absent and the writer would stamp `"ctr"`).
   const attrs: string[] = [];
   if (l.legendPos) {
     attrs.push(`pos="${l.legendPos}"`);
+    if (l.align !== undefined) {
+      attrs.push(`align="${l.align}"`);
+    }
   }
   if (l.overlay !== undefined) {
-    attrs.push(`align="ctr" overlay="${l.overlay ? "1" : "0"}"`);
+    attrs.push(`overlay="${l.overlay ? "1" : "0"}"`);
   }
-  const hasChildren = !!(l.spPr || l.legendEntries);
-  if (hasChildren) {
-    parts.push(`    <cx:legend ${attrs.join(" ")}>`);
-    if (l.spPr) {
-      parts.push(renderSpPr(l.spPr, "      "));
-    }
-    if (l.legendEntries) {
-      for (const entry of l.legendEntries) {
-        parts.push(`      <cx:legendEntry idx="${entry.index}"/>`);
-      }
-    }
-    parts.push("    </cx:legend>");
-  } else {
-    parts.push(`    <cx:legend ${attrs.join(" ")}/>`);
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  const legendEntries = l.legendEntries ?? [];
+  // `CT_Legend` sequence: legendEntry* → spPr? → txPr? → extLst?.
+  // Previously the writer emitted entries only as `<cx:legendEntry
+  // idx="N"/>` and ignored their per-entry `delete` attribute, `txPr`,
+  // and `extLst` — so Excel-authored legends with a disabled entry or
+  // a coloured series label stripped those fields on save.
+  const hasChildren = !!(l.spPr || l.txPr || l.extLst || legendEntries.length > 0);
+  if (!hasChildren) {
+    parts.push(`    <cx:legend${attrStr}/>`);
+    return parts.join("\n");
   }
+  parts.push(`    <cx:legend${attrStr}>`);
+  for (const entry of legendEntries) {
+    const entryAttrs: string[] = [`idx="${entry.index}"`];
+    if (entry.delete !== undefined) {
+      entryAttrs.push(`delete="${entry.delete ? "1" : "0"}"`);
+    }
+    const entryHasChildren = !!(entry.txPr || entry.extLst);
+    if (!entryHasChildren) {
+      parts.push(`      <cx:legendEntry ${entryAttrs.join(" ")}/>`);
+      continue;
+    }
+    parts.push(`      <cx:legendEntry ${entryAttrs.join(" ")}>`);
+    if (entry.txPr) {
+      parts.push(renderTxPr(entry.txPr, "        "));
+    }
+    if (entry.extLst) {
+      parts.push(`        ${entry.extLst}`);
+    }
+    parts.push(`      </cx:legendEntry>`);
+  }
+  if (l.spPr) {
+    parts.push(renderSpPr(l.spPr, "      "));
+  }
+  if (l.txPr) {
+    parts.push(renderTxPr(l.txPr, "      "));
+  }
+  if (l.extLst) {
+    parts.push(`      ${l.extLst}`);
+  }
+  parts.push("    </cx:legend>");
   return parts.join("\n");
 }
 
 function renderSpPr(spPr: ShapeProperties, indent: string): string {
-  // When the shape still carries the raw XML captured at parse time AND no
-  // structured field has been re-assigned (mutation APIs in
-  // `shape-properties.ts` drop `_rawXml` on `buildSpPr` / `setSpPrFill` /
-  // `setSpPrLine`), emit the original bytes verbatim. This preserves
-  // DrawingML elements that this renderer does not reconstruct
-  // structurally (e.g. `a:xfrm`, `a:prstGeom`, `a:custGeom`, `a:ln`
-  // joints/compounds the writer below doesn't cover, future extensions).
-  if (spPr._rawXml) {
-    return indent + spPr._rawXml;
+  // Emit the captured raw bytes only when the shape is PURELY a raw
+  // capture — `_rawXml` is present AND no structured field has been
+  // re-assigned. `isRawXmlShape` performs that check, matching the
+  // semantics of `setSpPrFill`/`setSpPrLine` which drop `_rawXml` on
+  // structured mutation. Previously this test was `if (spPr._rawXml)`,
+  // so `mutate(model => { model.…spPr.fill = {...} })` silently
+  // produced output that still emitted the old raw XML and discarded
+  // the structured mutation — a quiet data loss.
+  if (isRawXmlShape(spPr)) {
+    return indent + spPr._rawXml!;
   }
   const parts: string[] = [];
   parts.push(`${indent}<cx:spPr>`);
+  // Per DrawingML §20.1.2.2.35 (CT_ShapeProperties), children appear in
+  // the sequence: xfrm → (prstGeom | custGeom) → (fill) → ln →
+  // effectLst → scene3d → sp3d → extLst. Emit xfrm / geometry first so
+  // `parseSpPr → buildSpPr → renderSpPr` round-trips cleanly (previously
+  // these fields were captured by the parser but silently dropped by
+  // this writer).
+  if (spPr.transform) {
+    renderShapeTransform(parts, spPr.transform, `${indent}  `);
+  }
+  if (spPr.presetGeometry) {
+    renderPresetGeometry(parts, spPr.presetGeometry, `${indent}  `);
+  } else if (spPr.customGeometry) {
+    renderCustomGeometry(parts, spPr.customGeometry, `${indent}  `);
+  }
   if (spPr.fill) {
     if (spPr.fill.noFill) {
       parts.push(`${indent}  <a:noFill/>`);
@@ -3409,16 +4853,53 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
         parts.push(`${indent}  <a:gradFill>`);
         parts.push(`${indent}    <a:gsLst>`);
         for (const stop of g.stops) {
-          parts.push(
-            `${indent}      <a:gs pos="${Math.round(stop.position * 1000)}">${renderColor(stop.color)}</a:gs>`
-          );
+          // OOXML `<a:gs pos>` encodes position as hundredths of a
+          // percent (0–100000), NOT thousandths. The previous writer
+          // used ×1000 — emitting `pos="1000"` for a 100% stop, which
+          // any schema-validating reader treats as 1%. Clamp to the
+          // legal range so user-supplied stops outside `[0, 1]` don't
+          // produce files Excel rejects.
+          const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
+          parts.push(`${indent}      <a:gs pos="${encoded}">${renderColor(stop.color)}</a:gs>`);
         }
         parts.push(`${indent}    </a:gsLst>`);
         if (g.type === "linear" || g.type === undefined) {
-          parts.push(`${indent}    <a:lin ang="${(g.angle ?? 0) * 60000}" scaled="1"/>`);
+          // `<a:lin ang>` is in 60000ths of a degree. Round so we emit
+          // a pure integer — non-integer degrees (e.g. 45.5°) were
+          // previously producing fractional attribute values that
+          // Excel accepts but some strict validators reject.
+          //
+          // `scaled` is only emitted when the author explicitly set it;
+          // leaving it absent lets DrawingML apply the implicit default
+          // (`scaled="1"`, matching Excel's own emission). Unconditionally
+          // emitting `scaled="1"` previously overwrote a parsed
+          // `scaled="0"` on round-trip — visible drift for any author
+          // that used the shape-independent orientation mode.
+          const angleEmu = Math.round((g.angle ?? 0) * 60000);
+          const scaledAttr = g.scaled === undefined ? "" : ` scaled="${g.scaled ? "1" : "0"}"`;
+          parts.push(`${indent}    <a:lin ang="${angleEmu}"${scaledAttr}/>`);
         } else {
+          // Path gradient with optional focal rectangle. Each component
+          // is a fraction (0–1) in the model; hundredths-of-a-percent
+          // (0–100000) on the wire. Preserve absent components as
+          // Excel's default (centre at 50%). `CT_FillToRectangle`
+          // treats each side as `ST_Percentage`, which permits
+          // negative values (focal point outside the shape); don't
+          // clamp to zero — clamping there discarded legitimate
+          // authored state on round-trip.
+          const rect = g.fillToRect;
+          const pct = (v: number | undefined, def: number): number => {
+            if (v === undefined) {
+              return def;
+            }
+            return Math.round(v * 100000);
+          };
+          const l = pct(rect?.left, 50000);
+          const t = pct(rect?.top, 50000);
+          const r = pct(rect?.right, 50000);
+          const b = pct(rect?.bottom, 50000);
           parts.push(
-            `${indent}    <a:path path="${g.type}"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/></a:path>`
+            `${indent}    <a:path path="${g.type}"><a:fillToRect l="${l}" t="${t}" r="${r}" b="${b}"/></a:path>`
           );
         }
         parts.push(`${indent}  </a:gradFill>`);
@@ -3433,6 +4914,23 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
         parts.push(`${indent}    <a:bgClr>${renderColor(p.background)}</a:bgClr>`);
       }
       parts.push(`${indent}  </a:pattFill>`);
+    } else if (spPr.fill.blip?.relationshipId) {
+      // Picture fill. Mirrors `_renderSpPr` / `_renderBlipFill` in
+      // `chart-space-xform.ts` so ChartEx shapes with `<a:blipFill>` do
+      // not lose their image reference on round-trip. The `rId` itself
+      // is resolved elsewhere (chart-images); the writer only needs to
+      // know that `spPr.fill.blip.relationshipId` is the embed target.
+      const blip = spPr.fill.blip;
+      parts.push(`${indent}  <a:blipFill>`);
+      parts.push(
+        `${indent}    <a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${escapeXmlAttr(blip.relationshipId ?? "")}"/>`
+      );
+      if (blip.fillMode === "tile") {
+        parts.push(`${indent}    <a:tile/>`);
+      } else {
+        parts.push(`${indent}    <a:stretch><a:fillRect/></a:stretch>`);
+      }
+      parts.push(`${indent}  </a:blipFill>`);
     }
   }
   if (spPr.line) {
@@ -3441,10 +4939,14 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
       lnAttrs.push(`w="${spPr.line.width}"`);
     }
     if (spPr.line.cap) {
-      lnAttrs.push(`cap="${spPr.line.cap}"`);
+      // Defensive escape — same rationale as `dash` below: the type is
+      // an enum but legacy round-tripped models can carry arbitrary
+      // strings (future OOXML additions, vendor extensions).
+      lnAttrs.push(`cap="${escapeXmlAttr(spPr.line.cap)}"`);
     }
     if (spPr.line.compound) {
-      lnAttrs.push(`cmpd="${spPr.line.compound}"`);
+      // Defensive escape (see `cap` above).
+      lnAttrs.push(`cmpd="${escapeXmlAttr(spPr.line.compound)}"`);
     }
     const attrStr = lnAttrs.length > 0 ? ` ${lnAttrs.join(" ")}` : "";
     // DrawingML order: fill child first (noFill/solidFill), then dash, then
@@ -3456,7 +4958,10 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
       lnChildren.push(`<a:solidFill>${renderColor(spPr.line.color)}</a:solidFill>`);
     }
     if (spPr.line.dash) {
-      lnChildren.push(`<a:prstDash val="${spPr.line.dash}"/>`);
+      // Defensive escape: `dash` is typed as an enum but legacy
+      // round-tripped models may carry arbitrary strings from future
+      // OOXML additions.
+      lnChildren.push(`<a:prstDash val="${escapeXmlAttr(spPr.line.dash)}"/>`);
     }
     if (spPr.line.join === "round") {
       lnChildren.push(`<a:round/>`);
@@ -3484,8 +4989,154 @@ function renderSpPr(spPr: ShapeProperties, indent: string): string {
   return parts.join("\n");
 }
 
+function renderShapeTransform(parts: string[], transform: ShapeTransform, indent: string): void {
+  const attrs: string[] = [];
+  if (transform.rotation !== undefined && transform.rotation !== 0) {
+    attrs.push(`rot="${transform.rotation}"`);
+  }
+  if (transform.flipHorizontal) {
+    attrs.push(`flipH="1"`);
+  }
+  if (transform.flipVertical) {
+    attrs.push(`flipV="1"`);
+  }
+  const hasOff = transform.offsetX !== undefined || transform.offsetY !== undefined;
+  const hasExt = transform.width !== undefined || transform.height !== undefined;
+  if (!hasOff && !hasExt && attrs.length === 0) {
+    return;
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  if (!hasOff && !hasExt) {
+    parts.push(`${indent}<a:xfrm${attrStr}/>`);
+    return;
+  }
+  parts.push(`${indent}<a:xfrm${attrStr}>`);
+  if (hasOff) {
+    parts.push(`${indent}  <a:off x="${transform.offsetX ?? 0}" y="${transform.offsetY ?? 0}"/>`);
+  }
+  if (hasExt) {
+    parts.push(`${indent}  <a:ext cx="${transform.width ?? 0}" cy="${transform.height ?? 0}"/>`);
+  }
+  parts.push(`${indent}</a:xfrm>`);
+}
+
+function renderPresetGeometry(parts: string[], geom: PresetGeometry, indent: string): void {
+  // Escape every interpolated user string — `preset`, `name`, and
+  // `fmla` all ultimately come from parsed XML or user-authored
+  // values and can legally contain `"`, `<`, `&` or whitespace. The
+  // previous implementation concatenated them raw, so a malformed
+  // preset / adjustment would produce invalid XML that broke the
+  // entire chart part. Omit `<a:avLst>` entirely when no adjustments
+  // are present — Excel writes a self-closing `<a:avLst/>` in that
+  // case; our self-closing emission stays valid and matches the
+  // stricter `ooxml-validate` expectation.
+  parts.push(`${indent}<a:prstGeom prst="${escapeXmlAttr(geom.preset)}">`);
+  const adjustments = geom.adjustments ?? [];
+  if (adjustments.length === 0) {
+    parts.push(`${indent}  <a:avLst/>`);
+  } else {
+    parts.push(`${indent}  <a:avLst>`);
+    for (const adj of adjustments) {
+      parts.push(
+        `${indent}    <a:gd name="${escapeXmlAttr(adj.name)}" fmla="${escapeXmlAttr(adj.fmla)}"/>`
+      );
+    }
+    parts.push(`${indent}  </a:avLst>`);
+  }
+  parts.push(`${indent}</a:prstGeom>`);
+}
+
+function renderCustomGeometry(parts: string[], geom: CustomGeometry, indent: string): void {
+  parts.push(`${indent}<a:custGeom>`);
+  const adjustments = geom.adjustments ?? [];
+  if (adjustments.length === 0) {
+    parts.push(`${indent}  <a:avLst/>`);
+  } else {
+    parts.push(`${indent}  <a:avLst>`);
+    for (const adj of adjustments) {
+      parts.push(
+        `${indent}    <a:gd name="${escapeXmlAttr(adj.name)}" fmla="${escapeXmlAttr(adj.fmla)}"/>`
+      );
+    }
+    parts.push(`${indent}  </a:avLst>`);
+  }
+  parts.push(`${indent}  <a:pathLst>`);
+  for (const path of geom.paths ?? []) {
+    const pathAttrs: string[] = [];
+    if (path.w !== undefined) {
+      pathAttrs.push(`w="${path.w}"`);
+    }
+    if (path.h !== undefined) {
+      pathAttrs.push(`h="${path.h}"`);
+    }
+    if (path.fill !== undefined) {
+      // `path.fill` is typed as an enum but a legacy round-tripped
+      // model could still carry an unexpected string — escape so an
+      // odd value can't close the attribute.
+      pathAttrs.push(`fill="${escapeXmlAttr(String(path.fill))}"`);
+    }
+    if (path.stroke !== undefined) {
+      pathAttrs.push(`stroke="${path.stroke ? "1" : "0"}"`);
+    }
+    const pathAttrStr = pathAttrs.length > 0 ? ` ${pathAttrs.join(" ")}` : "";
+    parts.push(`${indent}    <a:path${pathAttrStr}>`);
+    for (const cmd of path.commands) {
+      renderCustomGeometryCommand(parts, cmd, `${indent}      `);
+    }
+    parts.push(`${indent}    </a:path>`);
+  }
+  parts.push(`${indent}  </a:pathLst>`);
+  parts.push(`${indent}</a:custGeom>`);
+}
+
+function renderCustomGeometryCommand(
+  parts: string[],
+  cmd: CustomGeometryCommand,
+  indent: string
+): void {
+  if (cmd.type === "close") {
+    parts.push(`${indent}<a:close/>`);
+    return;
+  }
+  if (cmd.type === "arcTo") {
+    const p = cmd.arcParams;
+    if (!p) {
+      return;
+    }
+    parts.push(
+      `${indent}<a:arcTo wR="${p.wR}" hR="${p.hR}" stAng="${p.stAng}" swAng="${p.swAng}"/>`
+    );
+    return;
+  }
+  const tag =
+    cmd.type === "moveTo"
+      ? "a:moveTo"
+      : cmd.type === "lnTo"
+        ? "a:lnTo"
+        : cmd.type === "cubicBezTo"
+          ? "a:cubicBezTo"
+          : "a:quadBezTo";
+  if (!cmd.points || cmd.points.length === 0) {
+    parts.push(`${indent}<${tag}/>`);
+    return;
+  }
+  parts.push(`${indent}<${tag}>`);
+  for (const point of cmd.points) {
+    parts.push(`${indent}  <a:pt x="${point.x}" y="${point.y}"/>`);
+  }
+  parts.push(`${indent}</${tag}>`);
+}
+
 function renderEffectList(parts: string[], effects: EffectList, indent: string): void {
   parts.push(`${indent}<a:effectLst>`);
+  // DrawingML `CT_EffectList` declares a strict `<xsd:sequence>`:
+  //   blur → fillOverlay → glow → innerShdw → outerShdw → prstShdw →
+  //   reflection → softEdge.
+  // The previous implementation emitted in an ad-hoc order (blur,
+  // outerShdw, innerShdw, prstShdw, glow, softEdge, reflection), so
+  // Excel accepted the file but strict validators (e.g. `ooxml-validate`,
+  // LibreOffice's strict mode) rejected it. `fillOverlay` is not
+  // modelled yet so its slot is intentionally empty.
   if (effects.blur) {
     const attrs: string[] = [];
     if (effects.blur.radius !== undefined) {
@@ -3496,11 +5147,17 @@ function renderEffectList(parts: string[], effects: EffectList, indent: string):
     }
     parts.push(`${indent}  <a:blur${attrs.length > 0 ? " " + attrs.join(" ") : ""}/>`);
   }
-  if (effects.outerShadow) {
-    renderShadowElement(parts, "a:outerShdw", effects.outerShadow, `${indent}  `);
+  // fillOverlay — reserved slot per schema, not currently modelled.
+  if (effects.glow) {
+    parts.push(
+      `${indent}  <a:glow rad="${effects.glow.radius}">${renderColor(effects.glow.color)}</a:glow>`
+    );
   }
   if (effects.innerShadow) {
     renderShadowElement(parts, "a:innerShdw", effects.innerShadow, `${indent}  `);
+  }
+  if (effects.outerShadow) {
+    renderShadowElement(parts, "a:outerShdw", effects.outerShadow, `${indent}  `);
   }
   if (effects.presetShadow) {
     const ps = effects.presetShadow;
@@ -3516,14 +5173,6 @@ function renderEffectList(parts: string[], effects: EffectList, indent: string):
     } else {
       parts.push(`${indent}  <a:prstShdw ${attrs.join(" ")}/>`);
     }
-  }
-  if (effects.glow) {
-    parts.push(
-      `${indent}  <a:glow rad="${effects.glow.radius}">${renderColor(effects.glow.color)}</a:glow>`
-    );
-  }
-  if (effects.softEdge) {
-    parts.push(`${indent}  <a:softEdge rad="${effects.softEdge.radius}"/>`);
   }
   if (effects.reflection) {
     const r = effects.reflection;
@@ -3571,6 +5220,9 @@ function renderEffectList(parts: string[], effects: EffectList, indent: string):
       attrs.push(`rotWithShape="1"`);
     }
     parts.push(`${indent}  <a:reflection${attrs.length > 0 ? " " + attrs.join(" ") : ""}/>`);
+  }
+  if (effects.softEdge) {
+    parts.push(`${indent}  <a:softEdge rad="${effects.softEdge.radius}"/>`);
   }
   parts.push(`${indent}</a:effectLst>`);
 }
@@ -3639,6 +5291,13 @@ function renderScene3D(parts: string[], scene: Scene3D, indent: string): void {
 
 function renderSp3D(parts: string[], sp: ShapeProperties3D, indent: string): void {
   const attrs: string[] = [];
+  // `z` records the shape's Z offset into the 3D scene (EMU). The
+  // classic-chart writer (`chart-space-xform.ts:_renderSp3D`) emits it;
+  // the ChartEx path previously dropped it, so round-tripping a ChartEx
+  // authored with `<a:sp3d z="…" .../>` silently lost the attribute.
+  if (sp.z !== undefined) {
+    attrs.push(`z="${sp.z}"`);
+  }
   if (sp.extrusionHeight !== undefined) {
     attrs.push(`extrusionH="${sp.extrusionHeight}"`);
   }
@@ -3691,16 +5350,65 @@ function renderSp3D(parts: string[], sp: ShapeProperties3D, indent: string): voi
  */
 function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx:txPr"): string {
   if (txPr._rawXml) {
-    // Swap the outer wrapper to the requested namespace (chartEx uses
-    // cx:txPr, classic charts use c:txPr). The raw bytes captured at
-    // parse time always start with the namespace they came from.
-    if (wrapperName === "cx:txPr" && txPr._rawXml.startsWith("<c:txPr")) {
-      const rewrapped = txPr._rawXml
-        .replace(/^<c:txPr/, "<cx:txPr")
-        .replace(/<\/c:txPr>$/, "</cx:txPr>");
-      return indent + rewrapped;
+    // Swap the outer wrapper element to the requested namespace.
+    // Classic charts captured `<c:txPr>…</c:txPr>`; ChartEx emits
+    // `<cx:txPr>…</cx:txPr>`. The raw bytes always start with the
+    // namespace they came from. Use a regex that admits leading
+    // whitespace, attributes, and either namespace prefix so bytes
+    // captured from a classic chart round-trip cleanly through the
+    // ChartEx writer. Inner children are all DrawingML (`a:bodyPr`,
+    // `a:lstStyle`, `a:p`), so they require no rewrite.
+    const raw = txPr._rawXml;
+    // Handle self-closing first — `<c:txPr/>` or `<cx:txPr/>` has no
+    // inner content and no close tag to search for. Emit a self-closing
+    // element with the requested wrapper name so a classic-captured
+    // `<c:txPr/>` becomes `<cx:txPr/>` when rendered into a ChartEx
+    // pipeline (and vice versa). The previous fall-through echoed the
+    // raw bytes verbatim, producing a namespace-mismatched element.
+    const selfCloseRe = /<(c|cx):txPr\b([^>]*?)\/>/;
+    const selfCloseMatch = selfCloseRe.exec(raw);
+    if (selfCloseMatch) {
+      const rawAttrs = selfCloseMatch[2] ?? "";
+      const attrs = rawAttrs
+        .replace(/\s+xmlns(?::[A-Za-z_][-A-Za-z0-9_.]*)?="[^"]*"/g, "")
+        .replace(/\s+$/, "");
+      return `${indent}<${wrapperName}${attrs}/>`;
     }
-    return indent + txPr._rawXml;
+    const openRe = /<(c|cx):txPr\b([^>]*)>/;
+    const closeRe = /<\/(c|cx):txPr>/;
+    const openMatch = openRe.exec(raw);
+    // Search for the matching close AFTER the open tag to avoid picking
+    // up a close tag that occurs inside the body (shouldn't happen, but
+    // defensive).
+    const closeMatch = openMatch
+      ? closeRe.exec(raw.slice(openMatch.index + openMatch[0].length))
+      : null;
+    if (openMatch && closeMatch) {
+      const openEnd = openMatch.index + openMatch[0].length;
+      // `closeMatch.index` is relative to the slice after `openEnd`,
+      // so add `openEnd` back to get the absolute position in `raw`.
+      const closeStart = openEnd + closeMatch.index;
+      const inner = raw.slice(openEnd, closeStart);
+      // Drop everything outside the element (including any leading or
+      // trailing whitespace the raw capture preserved). Previously we
+      // echoed `beforeOpen` and `afterClose` verbatim, which leaked
+      // newlines and other whitespace past the caller's `indent` and
+      // broke snapshot tests; text content outside a single element
+      // is out-of-spec for `_rawXml` anyway.
+      //
+      // Also strip any `xmlns:…` declarations from the captured
+      // attribute list. These were legitimate on the source element
+      // (e.g. `<c:txPr xmlns:a="…">`) but may be redundant or invalid
+      // on the rewritten parent, and duplicate xmlns emission upsets
+      // strict validators. Non-namespace attributes (like
+      // `xml:space="preserve"`) pass through.
+      const rawAttrs = openMatch[2] ?? "";
+      const attrs = rawAttrs
+        .replace(/\s+xmlns(?::[A-Za-z_][-A-Za-z0-9_.]*)?="[^"]*"/g, "")
+        .replace(/\s+$/, "");
+      return `${indent}<${wrapperName}${attrs}>${inner}</${wrapperName}>`;
+    }
+    return indent + raw;
   }
   const rPrAttrs: string[] = [];
   if (txPr.size !== undefined) {
@@ -3717,8 +5425,8 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
     rPrChildren.push(`<a:solidFill>${renderColor(txPr.color)}</a:solidFill>`);
   }
   if (txPr.fontFamily) {
-    rPrChildren.push(`<a:latin typeface="${escapeAttr(txPr.fontFamily)}"/>`);
-    rPrChildren.push(`<a:cs typeface="${escapeAttr(txPr.fontFamily)}"/>`);
+    rPrChildren.push(`<a:latin typeface="${escapeXmlAttr(txPr.fontFamily)}"/>`);
+    rPrChildren.push(`<a:cs typeface="${escapeXmlAttr(txPr.fontFamily)}"/>`);
   }
   const rPrAttrStr = rPrAttrs.length > 0 ? " " + rPrAttrs.join(" ") : "";
   const defRPr =
@@ -3739,80 +5447,138 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
 }
 
 function renderColor(c: ChartColor): string {
+  // `srgb` is typed as a 6-digit hex, but a round-tripped /
+  // user-supplied value could carry stray whitespace or XML-active
+  // characters. Escape defensively so a corrupt field can never break
+  // out of the attribute quoting. The same applies to `sysClr` /
+  // `prstClr` which are enum strings but still pass through user code.
   const modifiers = renderColorModifiers(c);
   if (c.srgb) {
-    if (modifiers) {
-      return `<a:srgbClr val="${c.srgb}">${modifiers}</a:srgbClr>`;
-    }
-    return `<a:srgbClr val="${c.srgb}"/>`;
+    const val = escapeXmlAttr(c.srgb);
+    return modifiers
+      ? `<a:srgbClr val="${val}">${modifiers}</a:srgbClr>`
+      : `<a:srgbClr val="${val}"/>`;
   }
   if (c.theme !== undefined) {
-    const themeNames = [
-      "dk1",
-      "lt1",
-      "dk2",
-      "lt2",
-      "accent1",
-      "accent2",
-      "accent3",
-      "accent4",
-      "accent5",
-      "accent6",
-      "hlink",
-      "folHlink"
-    ];
-    const name = themeNames[c.theme] ?? "dk1";
-    if (modifiers) {
-      return `<a:schemeClr val="${name}">${modifiers}</a:schemeClr>`;
-    }
-    return `<a:schemeClr val="${name}"/>`;
+    const name = themeIndexToName(c.theme);
+    return modifiers
+      ? `<a:schemeClr val="${name}">${modifiers}</a:schemeClr>`
+      : `<a:schemeClr val="${name}"/>`;
+  }
+  if (c.schemeName) {
+    // Preserve scheme-colour tokens that can't be mapped to one of the
+    // 12 theme slots (e.g. `phClr` placeholder colour, or vendor /
+    // future scheme names). The parser stores them under `schemeName`
+    // precisely so the writer can round-trip `<a:schemeClr>` rather
+    // than silently emitting `<a:sysClr>` (a semantically-different
+    // element).
+    const val = escapeXmlAttr(c.schemeName);
+    return modifiers
+      ? `<a:schemeClr val="${val}">${modifiers}</a:schemeClr>`
+      : `<a:schemeClr val="${val}"/>`;
   }
   if (c.sysClr) {
-    if (modifiers) {
-      return `<a:sysClr val="${c.sysClr}">${modifiers}</a:sysClr>`;
-    }
-    return `<a:sysClr val="${c.sysClr}"/>`;
+    const val = escapeXmlAttr(c.sysClr);
+    return modifiers
+      ? `<a:sysClr val="${val}">${modifiers}</a:sysClr>`
+      : `<a:sysClr val="${val}"/>`;
   }
   if (c.prstClr) {
-    if (modifiers) {
-      return `<a:prstClr val="${c.prstClr}">${modifiers}</a:prstClr>`;
-    }
-    return `<a:prstClr val="${c.prstClr}"/>`;
+    const val = escapeXmlAttr(c.prstClr);
+    return modifiers
+      ? `<a:prstClr val="${val}">${modifiers}</a:prstClr>`
+      : `<a:prstClr val="${val}"/>`;
   }
-  return "";
+  // Loud failure for malformed `ChartColor` objects — none of
+  // `srgb` / `theme` / `schemeName` / `sysClr` / `prstClr` set. Silently
+  // emitting a transparent black placeholder (as the previous fallback
+  // did) hid real bugs (e.g. a code path that built a `{}` colour
+  // literal) under phantom valid-looking XML. DrawingML requires
+  // exactly one colour child, and the caller is always in a position
+  // to provide one — fail so the mistake surfaces in tests rather than
+  // shipping silently-wrong colour data into the user's XLSX.
+  throw new ChartOptionsError(
+    `renderColor: ChartColor requires exactly one of srgb / theme / schemeName / sysClr / prstClr; got ${JSON.stringify(c)}.`
+  );
 }
 
 function renderColorModifiers(c: ChartColor): string {
+  // Each modifier serialises as `<a:* val="N"/>` where `N` is an
+  // `xsd:int` in the DrawingML per-thousand space. Guard against
+  // non-finite (`NaN` / `Infinity`) values — they'd interpolate as
+  // the literal string `"NaN"` and produce XML that strict readers
+  // (including Excel's own stricter open path) reject with
+  // "invalid attribute value for xs:int". `tint` is additionally
+  // scaled from the 0..1 fraction convention documented on
+  // `ChartColor.tint`; the other modifiers are already stored as
+  // OOXML integers so they pass through with just a rounding guard.
   const parts: string[] = [];
-  if (c.alpha !== undefined) {
-    parts.push(`<a:alpha val="${c.alpha}"/>`);
-  }
-  if (c.tint !== undefined) {
+  const emitInt = (tag: string, value: number | undefined): void => {
+    if (value === undefined || !Number.isFinite(value)) {
+      return;
+    }
+    parts.push(`<a:${tag} val="${Math.round(value)}"/>`);
+  };
+  emitInt("alpha", c.alpha);
+  // `tint` is a fraction in [0, 1] per `ChartColor.tint` docs; convert
+  // to the DrawingML 0..100000 per-thousand integer here.
+  if (c.tint !== undefined && Number.isFinite(c.tint)) {
     parts.push(`<a:tint val="${Math.round(c.tint * 100000)}"/>`);
   }
-  if (c.shade !== undefined) {
-    parts.push(`<a:shade val="${c.shade}"/>`);
-  }
-  if (c.satMod !== undefined) {
-    parts.push(`<a:satMod val="${c.satMod}"/>`);
-  }
-  if (c.lumMod !== undefined) {
-    parts.push(`<a:lumMod val="${c.lumMod}"/>`);
-  }
-  if (c.lumOff !== undefined) {
-    parts.push(`<a:lumOff val="${c.lumOff}"/>`);
-  }
+  emitInt("shade", c.shade);
+  emitInt("satMod", c.satMod);
+  emitInt("lumMod", c.lumMod);
+  emitInt("lumOff", c.lumOff);
   return parts.join("");
 }
 
-function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/**
+ * Strip characters that aren't legal in XML 1.0 and escape the five
+ * structural entities. XML 1.0 disallows most C0 control codes except
+ * `\t` `\n` `\r`; the DEL character (0x7F) and the C1 range
+ * (0x80-0x9F) are discouraged in user content. We silently strip the
+ * disallowed control codes rather than throw — they almost always
+ * arrive as accidents (e.g. copy/pasted binary garbage) and emitting
+ * them would produce an xlsx that no XML parser can reopen.
+ */
+/**
+ * Does the string require `xml:space="preserve"` to survive XML
+ * whitespace normalisation? XML's default (`xml:space="default"`)
+ * collapses leading / trailing whitespace and reduces internal
+ * whitespace runs to single spaces; any tab / newline / carriage
+ * return is equivalent to a space. A run needs `preserve` iff it has:
+ *   - leading or trailing whitespace,
+ *   - ≥2 consecutive whitespace characters internally, or
+ *   - any tab / newline / carriage return character.
+ */
+function needsXmlSpacePreserve(text: string): boolean {
+  if (text === "") {
+    return false;
+  }
+  if (/^\s|\s$/.test(text)) {
+    return true;
+  }
+  if (/[\t\n\r]/.test(text)) {
+    return true;
+  }
+  if (/\s{2,}/.test(text)) {
+    return true;
+  }
+  return false;
 }
 
-function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+/**
+ * Map the public API's friendly tick-mark names (`inside` / `outside`,
+ * matching `types.ts:TickMark`) back to the OOXML `ST_TickMark` tokens
+ * (`in` / `out`) on the way out. Keeps the writer aligned with the
+ * parser at `chart-ex-parser.parseAxis`.
+ */
+function tickMarkToOoxml(value: "none" | "inside" | "outside" | "cross"): string {
+  if (value === "inside") {
+    return "in";
+  }
+  if (value === "outside") {
+    return "out";
+  }
+  return value;
 }

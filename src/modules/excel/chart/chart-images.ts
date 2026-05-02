@@ -33,7 +33,7 @@ import type {
  * slice instead to keep the chart module import-light.
  */
 export interface PictureFillHostWorkbook {
-  addImage(image: ImageData): number;
+  addImage(image: WorkbookImagePayload): number;
   getImage(id: number | string): WorkbookMediaLike | undefined;
 }
 
@@ -44,7 +44,13 @@ interface WorkbookMediaLike {
   filename?: string | undefined;
 }
 
-interface ImageData {
+/**
+ * Image payload accepted by `Workbook.addImage`. Named
+ * `WorkbookImagePayload` — NOT `ImageData` — so we do not collide with
+ * the browser's built-in `ImageData` DOM type (pixel buffer used by
+ * Canvas) when this module is compiled for the browser bundle.
+ */
+interface WorkbookImagePayload {
   extension: "jpeg" | "png" | "gif";
   base64?: string;
   filename?: string;
@@ -73,11 +79,21 @@ interface ImageData {
  * @param entry   The chart entry being registered. Its `rels` array is
  *                populated (created if absent) with any freshly
  *                allocated image relationships.
- * @param workbook Host workbook exposing `addImage`.
+ * @param workbook Host workbook exposing `addImage`. Also consulted for
+ *                its internal `_chartRels[n]` bag — those rels are
+ *                loaded from disk during round-trip and carry canonical
+ *                rIds that must NOT collide with freshly allocated
+ *                image rels (the xlsx writer merges both lists and
+ *                silently drops any duplicate Id, which would otherwise
+ *                orphan the image relationship).
+ * @param chartNumber 1-based chart index. Used to look up
+ *                `workbook._chartRels[chartNumber]` so pre-existing
+ *                rels seed the collision set.
  */
 export function resolvePendingChartImages(
   entry: ChartEntry,
-  workbook: PictureFillHostWorkbook
+  workbook: PictureFillHostWorkbook,
+  chartNumber: number
 ): void {
   const blips = collectBlipFills(entry.model);
   if (blips.length === 0) {
@@ -90,6 +106,27 @@ export function resolvePendingChartImages(
   for (const rel of rels) {
     if (rel?.Id) {
       usedIds.add(rel.Id);
+    }
+  }
+  // Also seed from the workbook-level `_chartRels` bag. Those entries
+  // come from the xlsx reader (round-tripped rels: style / colors /
+  // userShapes / existing images) and are merged BEFORE `entry.rels`
+  // by the writer — the writer drops any `entry.rels` entry whose Id
+  // collides. Without seeding here, a fresh image rel allocated as
+  // `rId1` would be silently dropped by the writer on a round-tripped
+  // chart whose original style sidecar already took `rId1`, leaving
+  // the chart's `r:embed="rId1"` pointing at the wrong target.
+  const chartRelsBag = (
+    workbook as unknown as {
+      _chartRels?: Record<number, Array<{ Id?: string }>>;
+    }
+  )._chartRels;
+  const existingChartRels = chartRelsBag?.[chartNumber];
+  if (Array.isArray(existingChartRels)) {
+    for (const rel of existingChartRels) {
+      if (rel?.Id) {
+        usedIds.add(rel.Id);
+      }
     }
   }
   let counter = 1;
@@ -149,6 +186,7 @@ function collectBlipFills(model: ChartModel): ChartBlipFill[] {
     }
   };
   visitSpPr(model.spPr);
+  visitSpPr(model.chart?.title?.spPr);
   visitSpPr(model.chart?.floor);
   visitSpPr(model.chart?.sideWall);
   visitSpPr(model.chart?.backWall);
@@ -158,6 +196,7 @@ function collectBlipFills(model: ChartModel): ChartBlipFill[] {
   }
   for (const axis of model.chart?.plotArea?.axes ?? []) {
     visitSpPr(axis.spPr);
+    visitSpPr(axis.title?.spPr);
     // `majorGridlines` and `minorGridlines` are themselves `ShapeProperties`
     // (the grid-line style uses the same DrawingML fill/line/effect
     // vocabulary as any other shape); pass them through directly rather
@@ -186,6 +225,16 @@ function visitGroup(
   if (groupWithSeries.series) {
     for (const s of groupWithSeries.series) {
       visit(s.spPr);
+      // Series-level data labels and trendlines are DrawingML shapes too;
+      // both can carry picture fills (e.g. a branded label background).
+      const dataLabels = (s as { dataLabels?: { spPr?: ShapeProperties } }).dataLabels;
+      visit(dataLabels?.spPr);
+      const trendlines = (s as { trendlines?: Array<{ spPr?: ShapeProperties }> }).trendlines;
+      if (trendlines) {
+        for (const tl of trendlines) {
+          visit(tl.spPr);
+        }
+      }
       // Per-point overrides live on specific series subtypes (BarSeries,
       // LineSeries, …) as `dataPoints?: DataPoint[]`. They all share the
       // same shape — walk them generically without narrowing to each
@@ -223,14 +272,52 @@ function normaliseImage(
     if (!existing) {
       return undefined;
     }
-    const ext = (existing.extension ?? "png") as "png" | "jpeg" | "gif";
-    return { mediaId: image.workbookImageId, extension: ext };
+    // DrawingML's `<a:blipFill>` technically accepts more formats (BMP,
+    // TIFF, EMF/WMF) but the workbook media pipeline and our
+    // magic-byte sniffer only cover PNG / JPEG / GIF. Silently
+    // dropping the blip is preferable to emitting a rel entry whose
+    // media bytes would be mislabelled and fail to decode in Excel.
+    // Callers needing the exotic formats should add them to the
+    // workbook media collection separately and use `workbookImageId`.
+    const raw = existing.extension;
+    if (raw !== "png" && raw !== "jpeg" && raw !== "gif") {
+      return undefined;
+    }
+    return { mediaId: image.workbookImageId, extension: raw };
   }
 
-  // Raw binary payload.
-  if (image instanceof Uint8Array) {
-    const ext = sniffImageExtension(image);
-    const id = workbook.addImage({ extension: ext, buffer: image });
+  // Raw binary payload. `instanceof Uint8Array` is realm-sensitive:
+  // a buffer produced inside a Web Worker or another iframe has a
+  // different `Uint8Array` prototype, so the operator returns false
+  // even though the object is a genuine byte array. Duck-typing via
+  // `ArrayBuffer.isView` + `BYTES_PER_ELEMENT === 1` covers both the
+  // same-realm path and cross-realm buffers (workers, SharedWorkers,
+  // MessagePort transfers, `structuredClone` round-trips), and still
+  // excludes `Uint16Array` / `DataView` etc. — `DataView` has
+  // no `BYTES_PER_ELEMENT` on instances (the property is on the
+  // constructor), so the check rejects it naturally. `Int8Array` /
+  // `Uint8ClampedArray` DO pass the check; that's intentional —
+  // both carry byte-granular binary data and the sniffer below
+  // operates on the first few bytes regardless of typed-array
+  // signedness. The workbook image store only needs a
+  // `Uint8Array`, so we coerce through a shared underlying buffer.
+  if (
+    ArrayBuffer.isView(image) &&
+    (image as unknown as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+  ) {
+    const view = image as ArrayBufferView;
+    const bytes =
+      view instanceof Uint8Array
+        ? view
+        : new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    const ext = sniffImageExtension(bytes);
+    if (!ext) {
+      // Unknown format (WebP / AVIF / TIFF / …) — drop the blip rather
+      // than mislabel it as `png`. The caller keeps `pictureOptions`
+      // so the rest of the chart still renders.
+      return undefined;
+    }
+    const id = workbook.addImage({ extension: ext, buffer: bytes });
     return { mediaId: id, extension: ext };
   }
 
@@ -259,8 +346,11 @@ function normaliseImage(
 
 /**
  * Parse a `data:image/<type>;base64,…` URL or a bare base64 string into
- * `{ extension, base64 }`. Returns `undefined` for empty or unrecognised
- * input. Unknown data-URL content types default to PNG.
+ * `{ extension, base64 }`. Returns `undefined` for empty or
+ * unrecognised input (including data URLs whose content-type is not one
+ * of the three `<a:blipFill>`-supported formats — e.g. `image/svg+xml`
+ * or `image/bmp`). Callers interpret `undefined` as "drop the blip"
+ * rather than emitting a corrupted `.png` file.
  */
 function parseDataUrlOrBase64(
   input: string
@@ -268,7 +358,16 @@ function parseDataUrlOrBase64(
   if (!input) {
     return undefined;
   }
-  const dataUrl = /^data:image\/([a-z]+)(?:;[^,]*)?;base64,(.+)$/i.exec(input.trim());
+  // `data:image/<subtype>[;param=value]*;base64,<payload>`. Support
+  // multiple parameter segments (e.g. `;charset=utf-8;base64,...`).
+  // The previous `(?:;[^,]*)?` admitted only a single parameter AND
+  // used a greedy class that could swallow the required `;base64`
+  // token, forcing backtracking that silently failed for common
+  // multi-param forms. Allow any number of `;token[=value]` groups
+  // before the required trailing `;base64,`.
+  const dataUrl = /^data:image\/([a-z+]+)(?:;[^,;=]+(?:=[^,;]*)?)*;base64,(.+)$/i.exec(
+    input.trim()
+  );
   if (dataUrl) {
     const rawType = dataUrl[1].toLowerCase();
     const ext =
@@ -276,7 +375,15 @@ function parseDataUrlOrBase64(
         ? "jpeg"
         : rawType === "png" || rawType === "jpeg" || rawType === "gif"
           ? (rawType as "png" | "jpeg" | "gif")
-          : "png";
+          : undefined;
+    if (ext === undefined) {
+      // Content-type outside the `<a:blipFill>` white-list (e.g.
+      // `svg+xml`, `bmp`, `webp`, `tiff`). Dropping is better than
+      // silently relabelling an SVG payload as `image/png` — Excel
+      // would try to decode SVG bytes with the PNG parser and either
+      // error out or leave an invisible shape.
+      return undefined;
+    }
     return { extension: ext, base64: dataUrl[2] };
   }
   // Bare base64 — extension unknown, default to PNG (the most common
@@ -293,7 +400,15 @@ function parseDataUrlOrBase64(
  * default: Excel will try to decode and most viewers treat unrecognised
  * binary as PNG).
  */
-function sniffImageExtension(data: Uint8Array): "png" | "jpeg" | "gif" {
+/**
+ * Inspect the first few bytes of `data` and return the matching
+ * `<a:blipFill>`-supported image extension, or `undefined` when the
+ * payload doesn't look like one of the three supported formats
+ * (PNG / JPEG / GIF). Callers treat `undefined` as "drop the blip" —
+ * preferable to emitting a `.png` file whose decoded bytes are
+ * actually WebP / AVIF / TIFF, which Excel would fail to render.
+ */
+function sniffImageExtension(data: Uint8Array): "png" | "jpeg" | "gif" | undefined {
   if (
     data.length >= 8 &&
     data[0] === 0x89 &&
@@ -321,5 +436,5 @@ function sniffImageExtension(data: Uint8Array): "png" | "jpeg" | "gif" {
   ) {
     return "gif";
   }
-  return "png";
+  return undefined;
 }

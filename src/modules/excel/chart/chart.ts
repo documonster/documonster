@@ -27,18 +27,67 @@ import type {
 import { ChartOptionsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import type { Worksheet } from "@excel/worksheet";
+import { RelType } from "@excel/xlsx/rel-type";
 
+import { fillChartCaches } from "./cache-populator";
 import {
   applyChartSeriesOptionsPatch,
   buildChartModel,
   buildChartSeriesForType
 } from "./chart-builder";
 import { renderChartExPng, renderChartExSvg } from "./chart-ex-renderer";
+import { resolvePendingChartImages, type PictureFillHostWorkbook } from "./chart-images";
 import { renderChartPng, renderChartSvg, type ChartRenderOptions } from "./chart-renderer";
+import { parseTxPr } from "./shape-properties";
 
-// Pre-compiled regexes for _extractTextFromRawTx
-const RAW_TX_AT_RE = /<a:t>([\s\S]*?)<\/a:t>/g;
-const RAW_TX_CV_RE = /<c:v>([\s\S]*?)<\/c:v>/g;
+// Structural view of the @internal chart-registration hooks on Worksheet.
+// Keep this type in sync with `Worksheet._registerChart` /
+// `Worksheet._registerChartEx` — changing those signatures without updating
+// here will produce a compile error at the cast in `Chart.copyTo`.
+interface WorksheetChartRegistrar {
+  _registerChart(model: ChartModel, range: AddChartRange): number;
+  _registerChartEx(model: ChartExModel, range: AddChartRange): number;
+}
+
+/**
+ * Default chart extent when a caller passes a single-cell address. Matches
+ * Excel's behaviour on a fresh chart insertion (roughly 10 columns × 15
+ * rows). Shared between the initial anchor resolution and {@link Chart._cloneRange}
+ * so the two paths cannot drift.
+ */
+const DEFAULT_CHART_WIDTH_COLS = 10;
+const DEFAULT_CHART_HEIGHT_ROWS = 15;
+
+// Pre-compiled regexes for _extractTextFromRawTx.
+// NOTE: These patterns are consumed via `String.prototype.matchAll`, which
+// returns a fresh iterator per call. They are intentionally NOT used with
+// `RegExp.prototype.exec` + shared `lastIndex`, which would interleave state
+// across concurrent callers (multiple titles extracted on the same chart in
+// parallel promise chains).
+//
+// The `<a:t>` open tag may carry attributes — notably `xml:space="preserve"`
+// when the run contains leading / trailing or internal whitespace. The
+// original pattern (`<a:t>…`) missed those, causing the text extractor
+// to skip every preserved-whitespace run. Allow a `>` or any attribute
+// list (`[^>]*>`) to close the open tag.
+const RAW_TX_AT_RE = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g;
+const RAW_TX_CV_RE = /<c:v(?:\s[^>]*)?>([\s\S]*?)<\/c:v>/g;
+
+/**
+ * Relationship entry written to `chart{N}.xml.rels` / `chartEx{N}.xml.rels`.
+ * Kept as a lightweight structural record (not a full rels type) so the
+ * round-trip path works uniformly with what the xform reader/writer emits.
+ */
+export interface ChartRelEntry {
+  /** `rId…` identifier referenced from the chart part XML. */
+  Id: string;
+  /** Relationship type URI (e.g. the user-shapes / style / colours type). */
+  Type: string;
+  /** Target path, relative to the chart part. */
+  Target: string;
+  /** Optional mode for external targets (`"External"`). */
+  TargetMode?: string;
+}
 
 /**
  * Internal model stored on the Workbook for each chart.
@@ -64,8 +113,8 @@ export interface ChartEntry {
   style?: ChartStyleModel;
   /** Chart colors (colorsN.xml) — raw XML for round-trip */
   colors?: ChartColorsModel;
-  /** Chart rels (chart{N}.xml.rels) — raw entries for round-trip */
-  rels?: any[];
+  /** Chart rels (chart{N}.xml.rels) — entries for round-trip */
+  rels?: ChartRelEntry[];
   /**
    * Raw bytes of the user-shapes drawing part targeted by this chart's
    * `c:userShapes r:id="…"` reference. OOXML stores annotation shapes
@@ -103,7 +152,7 @@ export interface ChartExEntry {
   /** When true, writing fails instead of re-rendering if raw ChartEx XML cannot be safely patched. */
   requireRawPatch?: boolean;
   /** ChartEx rels — preserved for round-trip */
-  rels?: any[];
+  rels?: ChartRelEntry[];
 }
 
 /**
@@ -126,10 +175,24 @@ interface ChartAnchorRange {
  * A chart embedded in a worksheet.
  *
  * Charts come in two flavours:
- * - **Classic** (`chartNumber` set): fully parsed c:chart with a ChartModel.
- * - **ChartEx** (`chartExNumber` set): Office 2016+ cx:chart stored as raw bytes.
- *   The high-level accessors (`chartModel`, `chartTypes`, `axes`, etc.) return
- *   `undefined` / empty for chartEx charts because the data is not parsed.
+ *
+ * - **Classic** (`chartNumber` set): a fully-parsed `c:chart` with a
+ *   {@link ChartModel}. All public accessors (`chartModel`,
+ *   `chartTypes`, `axes`, series mutators, `style`, `mutate`, …) are
+ *   backed by the structured model.
+ *
+ * - **ChartEx** (`chartExNumber` set): Office 2016+ `cx:chart`. The
+ *   structured model (`chartExModel`) is populated; a parallel
+ *   `rawXml` buffer is kept so byte-for-byte round-trip is the default
+ *   when no mutation happens. The high-level accessors that make
+ *   sense on both flavours (`title`, `legend`, `spPr`, `toSVG`,
+ *   `toPNG`, `unknownElements`) work uniformly. ChartTypeGroup-level
+ *   APIs (`chartTypes`, `axes`, `plotArea`, `getAxis`, `categoryAxis`,
+ *   `valueAxis`, `addSeries`, `removeSeries`, `getSeries`,
+ *   `updateSeries`, `addSeriesFromOptions`, `seriesCount`, `mutate`,
+ *   `setStyle`) are classic-only — ChartEx has its own topology that
+ *   doesn't map cleanly onto the classic group/series abstraction;
+ *   use {@link Chart.mutateChartEx} for ChartEx mutations.
  */
 class Chart {
   readonly worksheet: Worksheet;
@@ -168,11 +231,18 @@ class Chart {
           editAs: "twoCell"
         };
       }
-      // Single cell — default to 10 cols x 15 rows
+      // Single cell — default to DEFAULT_CHART_WIDTH_COLS x DEFAULT_CHART_HEIGHT_ROWS.
       const addr = colCache.decodeAddress(range);
       return {
         tl: new Anchor(worksheet, { col: addr.col, row: addr.row }, -1),
-        br: new Anchor(worksheet, { col: addr.col + 10, row: addr.row + 15 }, 0),
+        br: new Anchor(
+          worksheet,
+          {
+            col: addr.col + DEFAULT_CHART_WIDTH_COLS,
+            row: addr.row + DEFAULT_CHART_HEIGHT_ROWS
+          },
+          0
+        ),
         editAs: "twoCell"
       };
     }
@@ -184,8 +254,17 @@ class Chart {
       return new Anchor(worksheet, v, 0);
     };
 
-    // Absolute anchor: { pos, ext }
+    // Absolute anchor: { pos, ext }. `ext` is mandatory — without it
+    // the drawing layer has no extent to emit and the writer would
+    // produce `<xdr:ext cx="undefined" cy="undefined"/>`. Reject
+    // early so callers see a clear error at the assignment site
+    // rather than an opaque serialization failure.
     if ("pos" in range && range.pos !== undefined) {
+      if (!range.ext) {
+        throw new ChartOptionsError(
+          "Chart range with `pos` requires `ext` (absolute anchor needs an explicit EMU extent)."
+        );
+      }
       return {
         // Absolute anchors have no meaningful "tl" cell, but the drawing layer
         // still requires one — default to (0, 0) with the provided offsets.
@@ -196,8 +275,18 @@ class Chart {
       };
     }
 
-    // One-cell anchor: { tl, ext } (has tl, no br)
-    if ("ext" in range && range.ext !== undefined && "tl" in range && !("br" in range)) {
+    // One-cell anchor: { tl, ext } with no bottom-right. We key on
+    // `range.br === undefined` (not `"br" in range`) so a caller that
+    // passes `{ tl, ext, br: undefined }` still lands here instead of
+    // falling through to the two-cell branch, which would then call
+    // `parseAnchor(undefined)` and throw from inside the Anchor
+    // constructor.
+    if (
+      "tl" in range &&
+      "ext" in range &&
+      range.ext !== undefined &&
+      (!("br" in range) || (range as { br?: unknown }).br === undefined)
+    ) {
       return {
         tl: parseAnchor(range.tl),
         ext: range.ext,
@@ -332,17 +421,19 @@ class Chart {
    */
   setUserShapesXml(xml: Uint8Array | string | undefined): void {
     if (this.chartNumber <= 0) {
-      throw new Error("Chart.setUserShapesXml is only supported on classic charts");
+      throw new ChartOptionsError("Chart.setUserShapesXml is only supported on classic charts.");
     }
     const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
     if (!entry) {
-      throw new Error(`Chart ${this.chartNumber} has no registered chart entry`);
+      throw new ChartOptionsError(`Chart ${this.chartNumber} has no registered chart entry.`);
     }
     if (xml === undefined) {
       this.removeUserShapes();
       return;
     }
     const bytes = typeof xml === "string" ? new TextEncoder().encode(xml) : xml;
+    // Empty strings / empty byte arrays are treated the same as `undefined`
+    // — they remove the user-shapes reference entirely.
     if (bytes.length === 0) {
       this.removeUserShapes();
       return;
@@ -350,25 +441,64 @@ class Chart {
     // Minimal sanity check — full validation is left to downstream consumers.
     const peek = new TextDecoder().decode(bytes.slice(0, 512));
     if (!peek.includes("userShapes")) {
-      throw new Error(
-        "Chart.setUserShapesXml expects a DrawingML document whose root is c:userShapes"
+      throw new ChartOptionsError(
+        "Chart.setUserShapesXml expects a DrawingML document whose root is c:userShapes."
       );
     }
     entry.userShapesXml = bytes;
     entry.dirty = true;
-    // Allocate an r:id if we didn't have one. The writer fills in the
-    // actual rel entry when emitting chartN.xml.rels — we only need to
-    // reserve a stable r:id so the chart XML can reference it.
+    // Reserve an r:id if we didn't have one, and pre-record a matching
+    // rel entry so that other allocators on this chart part
+    // (e.g. `chart-images.resolvePendingChartImages`) see the id as
+    // already taken and don't reuse it. The writer rewrites the
+    // `Target` to the final `chartUserShape{N}.xml` path at emission
+    // time (xlsx writer, `_writeChart`), so the placeholder Target here
+    // is advisory only.
+    //
+    // We seed the counter from `max(existing numeric suffix) + 1`
+    // instead of `rels.length + 1`, because rels can be sparse
+    // (e.g. rId1 / rId5 with rId2-4 removed) and `length + 1` would
+    // collide with live identifiers in that case.
     if (!entry.model.userShapesRelId) {
       const rels = (entry.rels ??= []);
-      const existing = new Set(rels.map(r => r?.Id).filter(Boolean));
-      let counter = rels.length + 1;
+      const existing = new Set(rels.map(r => r?.Id).filter((id): id is string => Boolean(id)));
+      let maxSeen = 0;
+      for (const id of existing) {
+        const match = /^rId(\d+)$/.exec(id);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (Number.isFinite(n) && n > maxSeen) {
+            maxSeen = n;
+          }
+        }
+      }
+      let counter = maxSeen + 1;
       let rid = `rId${counter}`;
       while (existing.has(rid)) {
         counter += 1;
         rid = `rId${counter}`;
       }
       entry.model.userShapesRelId = rid;
+      // Push a placeholder rel so downstream allocators see the id as
+      // taken. The xlsx writer resolves the Target to the actual
+      // drawing part path at emission time.
+      //
+      // CRITICAL: use `RelType.ChartUserShapes` (the canonical
+      // `chartUserShapes`, plural, ECMA-376 / Open XML SDK URI). An
+      // earlier version hardcoded the singular `chartUserShape` here,
+      // which drifted from `RelType.ChartUserShapes` used by the xlsx
+      // writer (see `xlsx.browser.ts`). The writer couldn't recognise
+      // this placeholder as the existing userShapes rel and would push
+      // a second rel on every write, producing a duplicate rel entry
+      // in the chart rels file.
+      const hasUserShapesRel = rels.some(r => r?.Type === RelType.ChartUserShapes);
+      if (!hasUserShapesRel) {
+        rels.push({
+          Id: rid,
+          Type: RelType.ChartUserShapes,
+          Target: ""
+        });
+      }
     }
   }
 
@@ -393,6 +523,34 @@ class Chart {
     entry.model.userShapesRelId = undefined;
     if (relId && Array.isArray(entry.rels)) {
       entry.rels = entry.rels.filter(r => r?.Id !== relId);
+    }
+    // Also purge the matching rel from the workbook-level `_chartRels`
+    // bag. The writer merges `model.chartRels[n]` (which is
+    // `_chartRels`) into the emitted .rels file BEFORE folding in
+    // `entry.rels`, so cleaning only `entry.rels` leaves the original
+    // userShapes rel in place — producing a chart whose XML has no
+    // `<c:userShapes>` reference but whose .rels still points at a
+    // drawing part that is never emitted.
+    const workbook = this.worksheet.workbook;
+    const workbookChartRels = (
+      workbook as unknown as {
+        _chartRels?: Record<number, Array<{ Id?: string; Type?: string }>>;
+      }
+    )._chartRels;
+    if (workbookChartRels && Array.isArray(workbookChartRels[this.chartNumber])) {
+      workbookChartRels[this.chartNumber] = workbookChartRels[this.chartNumber].filter(r => {
+        // Match on the specific `Id` we just cleared — but also defensively
+        // drop any entry whose `Type` points at a userShapes drawing
+        // rel, covering the edge case where the model lost track of its
+        // authored `userShapesRelId` but the rel is still present.
+        if (relId && r?.Id === relId) {
+          return false;
+        }
+        if (r?.Type === RelType.ChartUserShapes) {
+          return false;
+        }
+        return true;
+      });
     }
   }
 
@@ -423,7 +581,7 @@ class Chart {
     if (chartEx) {
       return renderChartExSvg(chartEx, options);
     }
-    throw new Error("Cannot render chart because no chart model is available");
+    throw new ChartOptionsError("Cannot render chart because no chart model is available.");
   }
 
   /**
@@ -439,7 +597,13 @@ class Chart {
    * See {@link toSVG} for the full scope-boundary note. For pixel-perfect
    * output, convert through LibreOffice.
    */
-  toPNG(options: ChartRenderOptions = {}): Promise<Uint8Array> {
+  async toPNG(options: ChartRenderOptions = {}): Promise<Uint8Array> {
+    // `async` makes the "no model" branch reject the returned promise
+    // instead of throwing synchronously. The previous non-async form
+    // violated its `Promise<Uint8Array>` contract by throwing on the
+    // hot path — a caller using `.then().catch()` (e.g. a background
+    // job runner) would see an uncaught synchronous exception rather
+    // than a rejected promise.
     const model = this.chartModel;
     if (model) {
       return renderChartPng(model, options);
@@ -448,7 +612,7 @@ class Chart {
     if (chartEx) {
       return renderChartExPng(chartEx, options);
     }
-    throw new Error("Cannot render chart because no chart model is available");
+    throw new ChartOptionsError("Cannot render chart because no chart model is available.");
   }
 
   /** Get the chart title text. Returns undefined if no title. */
@@ -460,7 +624,15 @@ class Chart {
     if (titleObj.text) {
       return this._extractTextFromRichText(titleObj.text);
     }
-    if (titleObj.strRef?.cache?.points) {
+    // Only consider the strRef cache resolved when it actually contains
+    // at least one point. Formula-bound titles are authored with
+    // `strRef: { formula, cache: { points: [] } }` (see
+    // `chart-builder.ts:makeTitle`), and without the explicit length
+    // check this getter returned `""` for every such title that hadn't
+    // yet gone through `fillChartCaches` — callers couldn't
+    // distinguish "title exists, not yet resolved" from an
+    // intentionally-empty title.
+    if (titleObj.strRef?.cache?.points && titleObj.strRef.cache.points.length > 0) {
       return titleObj.strRef.cache.points.map(p => p.value).join("");
     }
     // Fall back to rawTx — extract text from <a:t> elements
@@ -498,16 +670,28 @@ class Chart {
         overlay: chart.title?.overlay ?? false
       };
       chart.autoTitleDeleted = false;
+      // Repopulate the title cache from the referenced cell(s) so
+      // preview callers (toSVG / toPNG) and headless converters can
+      // resolve the title text without waiting for a worksheet-side
+      // recalc. `fillChartCaches` no-ops for non-formula titles and
+      // already-populated caches, so calling it here is safe.
+      this._refreshCaches();
       return;
     }
     if (typeof value === "object" && "paragraphs" in value) {
       this._markDirty();
-      // Rich text
+      // Rich text — shallow-clone the paragraphs array so callers who
+      // reuse the same `ChartRichText` object across charts don't
+      // accidentally alias mutations. Runs remain shared by reference
+      // inside each paragraph — consumers generally treat them as
+      // immutable, and a deep clone here is cheap but hides the
+      // aliasing concern rather than documents it. Users who mutate
+      // a run after assignment should clone the object themselves.
       chart.title = {
         ...(chart.title ?? {}),
         strRef: undefined,
         rawTx: undefined,
-        text: value,
+        text: { ...value, paragraphs: [...value.paragraphs] },
         overlay: chart.title?.overlay ?? false
       };
       chart.autoTitleDeleted = false;
@@ -515,7 +699,14 @@ class Chart {
     }
     // Plain string — try to preserve first-run formatting of existing title.
     if (typeof value !== "string") {
-      return; // Type-safety guard; other object shapes handled above.
+      // Reach here only when `value` is an object whose shape matches none of
+      // the branches above (e.g. `{ formula: 123 }`, `{ foo: 1 }`). Previously
+      // we silently returned, which quietly swallowed malformed input; throw
+      // instead so callers see the bug at the assignment site.
+      throw new ChartOptionsError(
+        "Chart.title accepts string | ChartRichText | { formula: string } | undefined. " +
+          `Got: ${JSON.stringify(value)}`
+      );
     }
     this._markDirty(true);
     const existing = chart.title;
@@ -576,17 +767,41 @@ class Chart {
     }
   }
 
-  /** Get the chart-level shape properties */
+  /**
+   * Get the chart-level shape properties. Works for both classic charts
+   * (`c:chartSpace/c:spPr`) and ChartEx (`cx:chartSpace/cx:spPr` — the
+   * Chart2014 schema puts `spPr` on `chartSpace`, not on `chart`).
+   */
   get spPr(): ShapeProperties | undefined {
-    return this.chartModel?.spPr;
+    if (this.chartModel) {
+      return this.chartModel.spPr;
+    }
+    // ChartEx stores chart-frame shape properties on `CT_ChartSpace/spPr`.
+    // Legacy files that (incorrectly) placed `spPr` on `<cx:chart>`
+    // are migrated by the parser into `chartSpace.spPr` at load
+    // time — so this getter no longer needs a fallback path.
+    return this.chartExModel?.chartSpace?.spPr;
   }
 
-  /** Set the chart-level shape properties */
+  /**
+   * Set the chart-level shape properties. Routes to either
+   * `ChartModel.spPr` (classic) or `ChartExModel.chartSpace.spPr`
+   * (ChartEx); previously the ChartEx branch was a silent no-op, and
+   * the fix before that mis-targeted `chart.spPr` — which is not a
+   * valid child of `CT_Chart` in the Chart2014 schema (chart-frame
+   * styling belongs to `CT_ChartSpace/spPr`).
+   */
   set spPr(value: ShapeProperties | undefined) {
     const cm = this.chartModel;
     if (cm) {
       this._markDirty();
       cm.spPr = value;
+      return;
+    }
+    const chartSpace = this.chartExModel?.chartSpace;
+    if (chartSpace) {
+      this._markDirty();
+      chartSpace.spPr = value;
     }
   }
 
@@ -622,8 +837,8 @@ class Chart {
   ): this {
     const model = this.chartModel;
     if (!model) {
-      throw new Error(
-        "Cannot mutate a classic chart model because this chart is ChartEx or missing"
+      throw new ChartOptionsError(
+        "Cannot mutate a classic chart model because this chart is ChartEx or missing."
       );
     }
     mutator(model);
@@ -637,7 +852,9 @@ class Chart {
   ): this {
     const model = this.chartExModel;
     if (!model) {
-      throw new Error("Cannot mutate a ChartEx model because this chart is classic or missing");
+      throw new ChartOptionsError(
+        "Cannot mutate a ChartEx model because this chart is classic or missing."
+      );
     }
     mutator(model);
     // Invalidate the model-level rawXml cache so subsequent calls to
@@ -652,6 +869,16 @@ class Chart {
     // can reuse it.
     if (!options.preferRawPatch && !options.requireRawPatch) {
       model.rawXml = undefined;
+      // Also clear title-level rawTx when the structured `text` was
+      // updated. Otherwise the writer's "structured path wins over
+      // raw" rule correctly routes the new text, but downstream
+      // snapshotters (change-detection / test helpers) still see the
+      // stale rawTx bytes and conclude the model hasn't been mutated.
+      // Clearing here unifies the invalidation model.
+      const title = model.chartSpace.chart.title;
+      if (title?.text && title.rawTx !== undefined) {
+        title.rawTx = undefined;
+      }
     }
     this._markDirty(options.preferRawPatch ?? false, options.requireRawPatch ?? false);
     return this;
@@ -703,6 +930,14 @@ class Chart {
   /**
    * Add a series to a chart type group.
    *
+   * The series' `index` and `order` fields are rewritten to the next
+   * available slot in the target group so callers can safely push
+   * series that were built with a placeholder index (e.g. a reused
+   * result of `buildChartSeriesForType(..., 0)`). OOXML requires
+   * `c:ser/@idx` to be unique within the chart; leaving caller-provided
+   * values alone silently produces a chart with duplicate `<c:idx>`
+   * entries that Excel either rejects or collapses to a single series.
+   *
    * @param series - The series object matching the expected series type for the chart.
    * @param groupIndex - 0-based index of the chart type group (for combo charts). Defaults to 0.
    */
@@ -710,7 +945,42 @@ class Chart {
     const ctg = this.chartTypes[groupIndex];
     if (ctg) {
       this._markDirty();
-      ctg.series.push(series as any);
+      // Pick an idx/order strictly greater than every existing series
+      // across all groups. `sum of lengths` (used previously) assumed
+      // every existing series had contiguous indices `[0, N-1]`, which
+      // breaks after a `removeSeries` or for charts loaded from files
+      // with non-contiguous authored indices — the new series then
+      // collides with an existing `c:idx`, producing malformed OOXML
+      // that Excel either rejects outright or silently collapses to a
+      // single series on reopen.
+      let maxIdx = -1;
+      for (const g of this.chartTypes) {
+        for (const s of g.series) {
+          const idx = typeof s.index === "number" ? s.index : -1;
+          if (Number.isFinite(idx) && idx > maxIdx) {
+            maxIdx = idx;
+          }
+        }
+      }
+      const nextIdx = maxIdx + 1;
+      series.index = nextIdx;
+      series.order = nextIdx;
+      // `ctg.series` is a discriminated union keyed on `ctg.type` — TS can't
+      // verify that `series` matches the expected variant from a generic
+      // `SeriesBase`. Callers are documented as responsible for passing a
+      // matching shape; we widen through `unknown` to avoid `as any` while
+      // keeping a single signature. Runtime validation lives in
+      // `buildChartModel`, which is invoked when the chart is serialised.
+      (ctg.series as SeriesBase[]).push(series);
+      // Refresh caches so the first preview render (and any
+      // change-detection snapshot taken before the next save cycle)
+      // sees the actual data rather than the blank shell the caller
+      // probably built via `buildChartSeriesForType`. `updateSeries`
+      // and `addSeriesFromOptions` already do this; the lower-level
+      // `addSeries` path previously skipped the refresh, so a chart
+      // authored via direct `ctg.series.push`-style flows displayed
+      // empty until the next save / reload cycle.
+      this._refreshCaches();
     }
   }
 
@@ -750,8 +1020,40 @@ class Chart {
     if (!series) {
       return false;
     }
-    this._markDirty(true);
+    // Apply the patch first so a malformed option (e.g. an unknown
+    // enum on `lineDash`) throws *before* we flip the dirty flag. The
+    // previous ordering left the chart entry marked dirty on failure,
+    // which then forced a full rebuild on the next write even though
+    // no mutation had actually landed on the model.
     applyChartSeriesOptionsPatch(series, options, this.chartTypes[groupIndex]?.type);
+    // Resolve any staged `series.spPr.fill.blip._pendingImage` that the
+    // patch placed on the series. The initial `addChart` path does
+    // this in the worksheet's `addChart` hook (same for `addChartsheet`
+    // / `replaceChartsheetChart`), but post-registration mutations via
+    // `updateSeries` had no equivalent pass — the `_pendingImage`
+    // payload sat on the model and the xlsx writer emitted
+    // `<a:blipFill>` without a matching rel, leaving Excel with a
+    // broken picture reference. Match the registration paths so
+    // pictureFill works uniformly for create and update.
+    if (options.pictureFill?.image !== undefined) {
+      this._resolveSeriesPictureFills();
+    }
+    // Refresh numeric / string caches when the patch introduced a new
+    // formula reference. `applyChartSeriesOptionsPatch` always replaces
+    // `target.val` / `target.cat` / `target.xVal` / `target.bubbleSize`
+    // with a fresh `makeNumRef` / `makeStrRef` whose `cache.points` is
+    // empty, so preview readers and headless converters see blank
+    // values until the next `fillChartCaches` pass. Calling it here
+    // keeps parity with the worksheet's initial `addChart` step.
+    if (
+      options.values !== undefined ||
+      options.categories !== undefined ||
+      options.xValues !== undefined ||
+      options.bubbleSize !== undefined
+    ) {
+      this._refreshCaches();
+    }
+    this._markDirty(true);
     return true;
   }
 
@@ -761,9 +1063,48 @@ class Chart {
     if (!ctg) {
       return false;
     }
-    const index = ctg.series.length;
+    // OOXML `c:ser/@idx` is unique across the whole chart, not per
+    // chart-type group. For combo charts the new series must take the
+    // next index across *all* groups, not just the target group — else
+    // a combo chart with two groups of 3 series each that adds one new
+    // series to group 0 collides with the existing series at index 3
+    // in group 1.
+    //
+    // Scan for the maximum authored index (not the series count) so
+    // post-`removeSeries` state and non-contiguous authored indices
+    // still produce a unique new slot. See `addSeries` for the full
+    // rationale on why `sum of lengths` is insufficient.
+    let maxIdx = -1;
+    for (const g of this.chartTypes) {
+      for (const s of g.series) {
+        const idx = typeof s.index === "number" ? s.index : -1;
+        if (Number.isFinite(idx) && idx > maxIdx) {
+          maxIdx = idx;
+        }
+      }
+    }
+    const index = maxIdx + 1;
+    // `buildChartSeriesForType` can throw for invalid options (e.g. a
+    // `pie` chart given `scatter`-only fields). Build first, mark
+    // dirty only after the push lands — otherwise a failing build
+    // leaves the entry marked dirty without any change to serialise.
+    //
+    // `buildChartSeriesForType` returns the exact variant matching `ctg.type`,
+    // but TS sees `SeriesBase`. Widen via `unknown` (instead of `as any`) so
+    // the tighter typing of the union is preserved at the push site.
+    const built = buildChartSeriesForType(ctg.type, options, index);
+    (ctg.series as SeriesBase[]).push(built);
+    // Same rationale as `updateSeries`: if the new series carries a
+    // pictureFill image, resolve the pending payload into an actual
+    // media entry + chart rel so the writer emits valid XML.
+    if (options.pictureFill?.image !== undefined) {
+      this._resolveSeriesPictureFills();
+    }
+    // Newly added series always carry empty caches on their val /
+    // cat / xVal references — refresh so the first preview render
+    // sees the actual data rather than a blank shell.
+    this._refreshCaches();
     this._markDirty();
-    ctg.series.push(buildChartSeriesForType(ctg.type, options, index) as any);
     return true;
   }
 
@@ -824,15 +1165,70 @@ class Chart {
     const sourceModel = this.chartModel;
     const sourceChartExModel = this.chartExModel;
     if (!sourceModel && !sourceChartExModel) {
-      throw new Error("Cannot copy chart because no chart model is available");
+      throw new ChartOptionsError("Cannot copy chart because no chart model is available.");
     }
     const targetRange = range ?? this._cloneRange();
+    // `Worksheet` declares `_registerChart` / `_registerChartEx` as
+    // `@internal private`, which TypeScript hides from external callers.
+    // Chart lives in the same compilation unit as Worksheet but the class
+    // boundary still enforces `private`, so we access the hooks through a
+    // narrowly-typed structural interface. Keep this cast co-located with
+    // the call sites so any rename of the Worksheet internals surfaces here.
+    const registrar = targetWs as unknown as WorksheetChartRegistrar;
     if (sourceChartExModel) {
-      return (targetWs as any)._registerChartEx(deepClone(sourceChartExModel), targetRange);
+      const newChartExNumber = registrar._registerChartEx(
+        deepClone(sourceChartExModel),
+        targetRange
+      );
+      // Copy chartEx-specific sidecars (the `_chartExRels` bag of
+      // authored relationship entries). Previously the copy dropped
+      // every rel, so a chartEx with `cx14:` extension references or
+      // embedded media ended up pointing at undefined rel ids on the
+      // clone.
+      this.worksheet.workbook.copyChartExSidecars?.(
+        this.chartExNumber,
+        newChartExNumber,
+        targetWs.workbook
+      );
+      return newChartExNumber;
     }
     const clonedModel = deepClone(sourceModel!);
-    const chartNumber = (targetWs as any)._registerChart(clonedModel, targetRange);
+    const chartNumber = registrar._registerChart(clonedModel, targetRange);
     this.worksheet.workbook.copyChartSidecars?.(this.chartNumber, chartNumber, targetWs.workbook);
+    // `_registerChart` creates a minimal entry (model only). Carry
+    // the per-entry `userShapesXml` bytes across so annotation
+    // overlays (callouts, arrows, text boxes the user drew on top of
+    // the chart) survive the clone. Without this the duplicate loses
+    // every overlay — the drawing part is referenced via a per-entry
+    // rel that `copyChartSidecars` already copied, but the backing
+    // bytes live on the entry itself and were being dropped.
+    //
+    // Also carry over `entry.rels`. The workbook-level
+    // `copyChartSidecars` hook copies `_chartRels[n]` (style / colors /
+    // on-disk image rels), but rels generated programmatically by
+    // `resolvePendingChartImages` (for a `series.spPr.fill.blip`
+    // picture fill) and the user-shapes placeholder rel pushed by
+    // `setUserShapesXml` live on `entry.rels`. Without this copy,
+    // the clone's `spPr.fill.blip.relationshipId` / `model.userShapesRelId`
+    // referenced in the deep-cloned model point at rel IDs that
+    // only exist on the SOURCE entry — the target writes out a
+    // chart whose XML uses `r:embed="rId{N}"` but whose .rels has
+    // no matching entry, so Excel renders the picture-fill series
+    // as a broken / blank fill.
+    const srcEntry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+    const dstEntry = targetWs.workbook.getChartEntry(chartNumber);
+    if (srcEntry && dstEntry) {
+      if (srcEntry.userShapesXml) {
+        dstEntry.userShapesXml = srcEntry.userShapesXml.slice();
+      }
+      if (Array.isArray(srcEntry.rels) && srcEntry.rels.length > 0) {
+        // Shallow-clone each rel so later mutations on the source
+        // don't leak into the clone. The writer only reads `Id`,
+        // `Type`, `Target`, and `TargetMode` off these entries, so
+        // a spread is sufficient.
+        dstEntry.rels = srcEntry.rels.map(rel => ({ ...rel }));
+      }
+    }
     return chartNumber;
   }
 
@@ -845,7 +1241,7 @@ class Chart {
   }
 
   private _cloneRange(): AddChartRange {
-    // Default clone range: shift right of original by its width
+    // Two-cell anchor: shift the clone right by the original's width.
     if (this.range.br) {
       const tl = this.range.tl.model;
       const br = this.range.br.model;
@@ -855,10 +1251,51 @@ class Chart {
         br: { col: br.nativeCol + 1 + width, row: br.nativeRow }
       };
     }
-    // Fallback: same location (caller should override)
+    // Absolute anchor: shift horizontally by the extent so the clone
+    // sits alongside the original. Preserve `editAs: "absolute"` so
+    // the writer emits `<xdr:absoluteAnchor>` — the previous fallback
+    // degraded every non-two-cell anchor into a twoCell placed
+    // on top of the original, both changing the anchor kind and
+    // overlapping the source chart 100%.
+    if (this.range.pos && this.range.ext) {
+      return {
+        pos: {
+          x: this.range.pos.x + this.range.ext.cx,
+          y: this.range.pos.y
+        },
+        ext: { cx: this.range.ext.cx, cy: this.range.ext.cy },
+        editAs: "absolute"
+      };
+    }
+    // One-cell anchor: shift the `tl` column right by enough columns
+    // to clear the original's extent. Converting the EMU width back
+    // to a column count is approximate (Excel column widths vary per
+    // sheet), so estimate at `DEFAULT_CHART_WIDTH_COLS` for
+    // consistency with the two-cell fallback and keep `editAs:
+    // "oneCell"` so the writer emits `<xdr:oneCellAnchor>`.
+    if (this.range.ext) {
+      return {
+        tl: {
+          col: this.range.tl.nativeCol + DEFAULT_CHART_WIDTH_COLS,
+          row: this.range.tl.nativeRow
+        },
+        ext: { cx: this.range.ext.cx, cy: this.range.ext.cy },
+        editAs: "oneCell"
+      };
+    }
+    // No extent at all (should not happen in practice — `parseRange`
+    // always populates at least `ext` for oneCell/absolute and `br` for
+    // twoCell). Fall back to a two-cell shifted right by the default
+    // chart extent.
     return {
-      tl: { col: this.range.tl.nativeCol, row: this.range.tl.nativeRow },
-      br: { col: this.range.tl.nativeCol + 10, row: this.range.tl.nativeRow + 15 }
+      tl: {
+        col: this.range.tl.nativeCol + DEFAULT_CHART_WIDTH_COLS,
+        row: this.range.tl.nativeRow
+      },
+      br: {
+        col: this.range.tl.nativeCol + 2 * DEFAULT_CHART_WIDTH_COLS,
+        row: this.range.tl.nativeRow + DEFAULT_CHART_HEIGHT_ROWS
+      }
     };
   }
 
@@ -881,7 +1318,88 @@ class Chart {
         entry.dirty = true;
         entry.preferRawPatch = preferRawPatch;
         entry.requireRawPatch = requireRawPatch;
+        // Invalidate the ChartExModel.rawXml cache on every structural
+        // mutation (title / legend / spPr setters, addSeries etc.) —
+        // direct consumers of `renderChartEx(model)` (standalone
+        // preview, tests) short-circuit to `model.rawXml` when present
+        // and would otherwise silently drop the mutation. The
+        // `preferRawPatch` opt-in keeps the bytes so the xlsx writer
+        // can still do surgical byte patching on them.
+        if (!preferRawPatch && !requireRawPatch && entry.model) {
+          entry.model.rawXml = undefined;
+        }
       }
+    }
+  }
+
+  /**
+   * Resolve any `_pendingImage` payloads this chart's series carry into
+   * workbook media entries + chart relationships. Used by
+   * `updateSeries` / `addSeriesFromOptions` when a caller adds a
+   * picture fill *after* registration — the initial `addChart` /
+   * `addChartsheet` path already calls `resolvePendingChartImages`,
+   * but post-registration mutations previously left `_pendingImage`
+   * un-registered and the writer emitted `<a:blipFill>` pointing at a
+   * missing rel.
+   *
+   * Uses the same resolver helper as the initial path, so rel id
+   * allocation, collision checks against `_chartRels`, and media
+   * naming stay centralised.
+   */
+  private _resolveSeriesPictureFills(): void {
+    if (this.chartNumber <= 0) {
+      return;
+    }
+    const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+    if (!entry) {
+      return;
+    }
+    try {
+      resolvePendingChartImages(
+        entry,
+        this.worksheet.workbook as unknown as PictureFillHostWorkbook,
+        this.chartNumber
+      );
+    } catch {
+      // Best-effort: a malformed image payload should not take down
+      // the surrounding `updateSeries` / `addSeriesFromOptions` call.
+      // The series keeps its `pictureOptions`; only the blip-fill
+      // registration is skipped.
+    }
+  }
+
+  /**
+   * Rebuild numeric / string caches on this chart's model from the
+   * current worksheet data. Callers mutating formula references after
+   * registration (`updateSeries`, `addSeriesFromOptions`, title setter
+   * with `{ formula }`) invoke this so preview renders and the
+   * snapshot-based change detector see populated points instead of
+   * the empty `{ points: [] }` shell the builders install.
+   *
+   * `fillChartCaches` short-circuits on already-populated caches, so
+   * repeated calls across a burst of mutations are effectively O(N)
+   * in the number of *new* references.
+   */
+  private _refreshCaches(): void {
+    const model = this.chartModel;
+    if (!model) {
+      return;
+    }
+    try {
+      // Pass `this.worksheet` as the resolver context so sheet-scoped
+      // defined names on this chart's owning sheet outrank workbook-
+      // scoped names of the same bare name (matches Excel resolution
+      // order and the `addChart` path in `Worksheet`).
+      fillChartCaches(
+        model,
+        this.worksheet.workbook as unknown as Parameters<typeof fillChartCaches>[1],
+        this.worksheet as unknown as Parameters<typeof fillChartCaches>[2]
+      );
+    } catch {
+      // Cache population is best-effort; a bad reference in one
+      // series should not prevent the mutation from landing. The
+      // writer still emits the new formula, and a later workbook-
+      // wide pass can populate the cache when called explicitly.
     }
   }
 
@@ -892,36 +1410,77 @@ class Chart {
   private _extractTextFromRawTx(rawTx: string): string | undefined {
     // Extract all <a:t>…</a:t> text content from raw c:tx XML.
     // Also check <c:v>…</c:v> for strRef-based titles.
+    //
+    // Uses `matchAll` rather than `RegExp.exec` + shared `lastIndex` so
+    // concurrent calls (extracting multiple titles in parallel promise
+    // chains) cannot interleave each other's iterator state.
     const parts: string[] = [];
-    RAW_TX_AT_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = RAW_TX_AT_RE.exec(rawTx)) !== null) {
-      parts.push(this._decodeXmlEntities(m[1]));
+    for (const match of rawTx.matchAll(RAW_TX_AT_RE)) {
+      parts.push(this._decodeXmlEntities(match[1]));
     }
     if (parts.length > 0) {
       return parts.join("");
     }
-    // strRef inside rawTx: look for <c:v> elements
-    RAW_TX_CV_RE.lastIndex = 0;
-    while ((m = RAW_TX_CV_RE.exec(rawTx)) !== null) {
-      parts.push(this._decodeXmlEntities(m[1]));
+    for (const match of rawTx.matchAll(RAW_TX_CV_RE)) {
+      parts.push(this._decodeXmlEntities(match[1]));
     }
     return parts.length > 0 ? parts.join("") : undefined;
   }
 
   private _decodeXmlEntities(text: string): string {
-    return text
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
+    // Single-pass decoder so sequences like `&amp;lt;` (the XML-encoded
+    // form of a literal `&lt;`) decode to `&lt;` — NOT to `<`. Chaining
+    // `.replace(/&amp;/g,"&").replace(/&lt;/g,"<")` produced the double-
+    // decode by accident: the first replace turned `&amp;lt;` into
+    // `&lt;`, which the second step then decoded as `<`. A title
+    // authored as literal `&lt;tag&gt;` would round-trip as `<tag>`,
+    // silently corrupting the user's text.
+    return text.replace(
+      /&(?:([A-Za-z]+)|#x([0-9A-Fa-f]+)|#(\d+));/g,
+      (match, name: string | undefined, hex: string | undefined, dec: string | undefined) => {
+        if (name !== undefined) {
+          switch (name) {
+            case "amp":
+              return "&";
+            case "lt":
+              return "<";
+            case "gt":
+              return ">";
+            case "quot":
+              return '"';
+            case "apos":
+              return "'";
+            default:
+              return match;
+          }
+        }
+        if (hex !== undefined) {
+          const code = parseInt(hex, 16);
+          return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        }
+        if (dec !== undefined) {
+          const code = parseInt(dec, 10);
+          return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        }
+        return match;
+      }
+    );
   }
 
   /**
    * Extract the run properties of the first text run in an existing title,
-   * if any. Used to preserve formatting when replacing plain-string title text.
-   * If only `rawTx` is available, we attempt to parse the first `<a:rPr>` from it.
+   * if any. Used to preserve formatting when replacing plain-string title
+   * text.
+   *
+   * We prefer the structured path (`title.text.paragraphs[0].runs[0]`) and
+   * fall back to parsing the first `<a:rPr>...</a:rPr>` block out of
+   * `rawTx`. The fallback used to only read *attributes* off the opening
+   * tag (size / bold / italic / underline / strike / lang), which meant
+   * the `<a:solidFill>` colour child and `<a:latin>` / `<a:cs>` typefaces
+   * were silently stripped when a plain-string title replaced a
+   * rich-text title. Now we delegate to `parseTxPr` (the same helper the
+   * chart-space xform uses for the full txPr tree) so every supported
+   * rPr field round-trips faithfully.
    */
   private _extractFirstRunProperties(
     title: ChartTitle | undefined
@@ -929,54 +1488,37 @@ class Chart {
     if (!title) {
       return undefined;
     }
-    // Structured path
+    // Structured path — cheapest and most complete.
     const firstRun = title.text?.paragraphs?.[0]?.runs?.[0];
     if (firstRun?.properties) {
       return { ...firstRun.properties };
     }
-    // rawTx path — capture the first run's rPr attributes as opaque raw XML.
+    // rawTx path — isolate the first `<a:rPr>…</a:rPr>` fragment (including
+    // the self-closing variant) and delegate parsing to `parseTxPr`, which
+    // understands colour, font family, east-asian / complex-script
+    // typefaces and the run-level number format.
     if (title.rawTx) {
-      const rPrMatch = /<a:rPr\b[^>]*\/?>/.exec(title.rawTx);
-      if (rPrMatch) {
-        // Build a text-properties object that renders to the same attributes.
-        return this._parseRunAttrsToProps(rPrMatch[0]);
+      const selfClosing = /<a:rPr\b[^>]*\/>/.exec(title.rawTx);
+      const openClose = /<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>/.exec(title.rawTx);
+      const rPrFragment =
+        openClose && (!selfClosing || openClose.index <= selfClosing.index)
+          ? openClose[0]
+          : selfClosing?.[0];
+      if (rPrFragment) {
+        // `parseTxPr` looks for `<a:defRPr>` and `<a:rPr>` fragments inside
+        // the passed-in raw XML; wrapping in a minimal `<c:txPr>` so it
+        // finds exactly our fragment.
+        const synthetic = `<c:txPr>${rPrFragment}</c:txPr>`;
+        const parsed = parseTxPr({ _rawXml: synthetic });
+        // `parsed` still contains `_rawXml`; strip it so the run properties
+        // don't drag along a synthetic wrapper. Callers (setter for
+        // `title`) only use the structured fields.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { _rawXml, ...structured } = parsed;
+        return structured;
       }
     }
     return undefined;
-  }
-
-  /** Parse `<a:rPr ...>` attributes into a ChartTextProperties. */
-  private _parseRunAttrsToProps(tag: string): ChartTextProperties {
-    const p: ChartTextProperties = {};
-    const attrMatch = (name: string): string | undefined => {
-      const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag);
-      return m ? m[1] : undefined;
-    };
-    const sz = attrMatch("sz");
-    if (sz) {
-      p.size = parseInt(sz, 10);
-    }
-    const b = attrMatch("b");
-    if (b) {
-      p.bold = b === "1";
-    }
-    const i = attrMatch("i");
-    if (i) {
-      p.italic = i === "1";
-    }
-    const u = attrMatch("u");
-    if (u && u !== "none") {
-      p.underline = u as NonNullable<ChartTextProperties["underline"]>;
-    }
-    const strike = attrMatch("strike");
-    if (strike) {
-      p.strike = strike as NonNullable<ChartTextProperties["strike"]>;
-    }
-    const lang = attrMatch("lang");
-    if (lang) {
-      p.lang = lang;
-    }
-    return p;
   }
 }
 
@@ -997,14 +1539,14 @@ export interface ChartAnchorModel {
 }
 
 /**
- * Deep-clone a plain data structure (ChartModel is JSON-safe — no cycles, no
- * class instances). Uses `structuredClone` when available, else a JSON fallback.
+ * Deep-clone a chart model. Uses `structuredClone` which is always available
+ * in our supported environments (Node 22+, all modern browsers) and handles
+ * the `Uint8Array` captured on {@link ChartExModel.rawXml} correctly — the
+ * older `JSON.parse(JSON.stringify(...))` fallback stripped the typed-array
+ * prototype and corrupted round-trip data.
  */
 function deepClone<T>(obj: T): T {
-  if (typeof structuredClone === "function") {
-    return structuredClone(obj);
-  }
-  return JSON.parse(JSON.stringify(obj));
+  return structuredClone(obj);
 }
 
 export { Chart, buildChartModel };

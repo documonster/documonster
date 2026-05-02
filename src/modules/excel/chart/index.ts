@@ -236,7 +236,26 @@ export type {
   LabelAlignment,
   DisplayBlanksAs,
   PrintSettings,
-  PivotFormat
+  PivotFormat,
+  // Transitively-referenced types that callers need when constructing
+  // public option shapes. They used to live behind `@excel/chart/types`
+  // only, forcing consumers to either duplicate the interface or reach
+  // into the internal module path.
+  DataLabelsRange,
+  AxisBase,
+  PresetGeometry,
+  CustomGeometry,
+  CustomGeometryPath,
+  CustomGeometryCommand,
+  ShapeTransform,
+  ChartBlipFill,
+  ChartColorVariation,
+  AddChartPictureFillImage,
+  ChartPictureFillImageData,
+  PivotChartOptions,
+  ChartUnknownElement,
+  ChartStyleElement,
+  ChartRange
 } from "./types";
 export {
   parseSpPr,

@@ -35,14 +35,60 @@ import type {
 // Raw XML access helpers
 // ============================================================================
 
-/** Get the raw XML string if the object was captured as raw XML */
-function getRawXml(obj: any): string | undefined {
+/** Get the raw XML string if the object was captured as raw XML. */
+function getRawXml(obj: { _rawXml?: string } | undefined): string | undefined {
   return obj?._rawXml;
 }
 
-/** Check if the object is a raw XML capture (not yet structured) */
-function isRawXml(obj: any): boolean {
-  return typeof obj?._rawXml === "string";
+/**
+ * Check if the object is purely a raw XML capture — `_rawXml` is set
+ * and NO structured fields have been populated. The parser produces
+ * dual-state objects (both `_rawXml` and structured) from raw bytes so
+ * downstream consumers get the best of both worlds: cheap byte-perfect
+ * round-trip PLUS typed access. Getters (`getSpPrFillColor` et al.)
+ * must prefer structured when present; setters must NOT reparse from
+ * `_rawXml` because doing so wipes any prior structured mutation.
+ *
+ * Writers must ALSO consult this predicate before short-circuiting to
+ * the raw bytes: if the model has been mutated through a direct
+ * property assignment (`spPr.fill = {...}` without routing through
+ * `setSpPrFill`), the raw bytes are stale and the structured path
+ * must win. Exported for use by `_renderSpPr` in both the classic
+ * chart-space xform and the ChartEx renderer.
+ *
+ * Previously `isRawXml` returned `true` whenever `_rawXml` was a
+ * string, which caused `setSpPrFill` → `parseSpPr` to re-read from
+ * raw and discard pending `line.width` / `fill.solid` assignments.
+ */
+export function isRawXmlShape(obj: { _rawXml?: string } | undefined): boolean {
+  return isRawXml(obj);
+}
+
+function isRawXml(obj: { _rawXml?: string } | undefined): boolean {
+  if (!obj || typeof obj._rawXml !== "string") {
+    return false;
+  }
+  // "Purely raw" when no structured field is present. Enumerate the
+  // fields we care about so adding new structured slots to
+  // `ShapeProperties` doesn't require touching this predicate —
+  // anything absent from this list is either raw-bytes-only (like
+  // `extLst`) or part of the raw payload itself.
+  const structuredKeys = [
+    "fill",
+    "line",
+    "effectList",
+    "scene3d",
+    "sp3d",
+    "transform",
+    "presetGeometry",
+    "customGeometry"
+  ] as const;
+  for (const key of structuredKeys) {
+    if ((obj as Record<string, unknown>)[key] !== undefined) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ============================================================================
@@ -67,40 +113,64 @@ const SHADOW_RES: Record<string, RegExp> = {
  */
 function extractColorRegion(xml: string, openMatch: RegExpExecArray, closeTag: string): string {
   const endIdx = xml.indexOf(closeTag, openMatch.index);
+  if (endIdx >= 0) {
+    // Stop at the close tag's `>` so the region never spills into the
+    // next sibling (which could itself have a colour element whose
+    // modifiers would then be misattributed).
+    const closeGt = xml.indexOf(">", endIdx);
+    return xml.slice(openMatch.index, closeGt >= 0 ? closeGt + 1 : endIdx + closeTag.length);
+  }
+  // No close tag — the element is self-closing (`<a:srgbClr val="FF0000"/>`)
+  // or truncated. DrawingML never nests modifiers inside a self-closing
+  // colour token, so return just the opening fragment up to the first
+  // `>` to avoid picking up modifiers that belong to a sibling colour.
+  const openEnd = xml.indexOf(">", openMatch.index);
   return xml.slice(
     openMatch.index,
-    endIdx >= 0 ? endIdx + closeTag.length + 1 : openMatch.index + openMatch[0].length + 200 // Generous fallback for self-closing tags or short fragments
+    openEnd >= 0 ? openEnd + 1 : openMatch.index + openMatch[0].length
   );
 }
 
 /**
  * Parse all DrawingML color modifiers from a region of XML.
  * Handles: alpha, tint, shade, satMod, lumMod, lumOff.
+ *
+ * Regexes accept `-?\d+(?:\.\d+)?` — negative and fractional values
+ * are legal in third-party exports (e.g. `<a:tint val="-5000"/>`,
+ * `<a:satMod val="123456.7"/>`); `\d+` alone dropped them silently.
+ * `parseFloat` with rounding preserves the intended semantics.
  */
 function parseColorModifiers(region: string, color: ChartColor): void {
-  const alphaMatch = /<a:alpha\s+val="(\d+)"/.exec(region);
-  if (alphaMatch) {
-    color.alpha = parseInt(alphaMatch[1], 10);
+  const parseModifierValue = (m: RegExpExecArray | null): number | undefined =>
+    m ? Math.round(parseFloat(m[1])) : undefined;
+  const alphaMatch = /<a:alpha\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
+  const alphaVal = parseModifierValue(alphaMatch);
+  if (alphaVal !== undefined) {
+    color.alpha = alphaVal;
   }
-  const tintMatch = /<a:tint\s+val="(\d+)"/.exec(region);
+  const tintMatch = /<a:tint\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
   if (tintMatch) {
-    color.tint = parseInt(tintMatch[1], 10) / 100000;
+    color.tint = parseFloat(tintMatch[1]) / 100000;
   }
-  const shadeMatch = /<a:shade\s+val="(\d+)"/.exec(region);
-  if (shadeMatch) {
-    color.shade = parseInt(shadeMatch[1], 10);
+  const shadeMatch = /<a:shade\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
+  const shadeVal = parseModifierValue(shadeMatch);
+  if (shadeVal !== undefined) {
+    color.shade = shadeVal;
   }
-  const satModMatch = /<a:satMod\s+val="(\d+)"/.exec(region);
-  if (satModMatch) {
-    color.satMod = parseInt(satModMatch[1], 10);
+  const satModMatch = /<a:satMod\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
+  const satModVal = parseModifierValue(satModMatch);
+  if (satModVal !== undefined) {
+    color.satMod = satModVal;
   }
-  const lumModMatch = /<a:lumMod\s+val="(\d+)"/.exec(region);
-  if (lumModMatch) {
-    color.lumMod = parseInt(lumModMatch[1], 10);
+  const lumModMatch = /<a:lumMod\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
+  const lumModVal = parseModifierValue(lumModMatch);
+  if (lumModVal !== undefined) {
+    color.lumMod = lumModVal;
   }
-  const lumOffMatch = /<a:lumOff\s+val="(\d+)"/.exec(region);
-  if (lumOffMatch) {
-    color.lumOff = parseInt(lumOffMatch[1], 10);
+  const lumOffMatch = /<a:lumOff\s+val="(-?\d+(?:\.\d+)?)"/.exec(region);
+  const lumOffVal = parseModifierValue(lumOffMatch);
+  if (lumOffVal !== undefined) {
+    color.lumOff = lumOffVal;
   }
 }
 
@@ -120,11 +190,20 @@ function parseColorFromXml(xml: string): ChartColor | undefined {
   // Try schemeClr (theme)
   const schemeMatch = SCHEME_CLR_RE.exec(xml);
   if (schemeMatch) {
+    // Theme index → canonical scheme name. `tx1/bg1/tx2/bg2` are
+    // "slide"-style aliases of `dk1/lt1/dk2/lt2` defined in ECMA-376
+    // §20.1.2.3.29, so we fold them into the same indices rather than
+    // dropping them as "unknown theme" (which used to silently return
+    // index 0 / `dk1` and corrupt the colour on round-trip).
     const themeMap: Record<string, number> = {
       dk1: 0,
+      tx1: 0,
       lt1: 1,
+      bg1: 1,
       dk2: 2,
+      tx2: 2,
       lt2: 3,
+      bg2: 3,
       accent1: 4,
       accent2: 5,
       accent3: 6,
@@ -134,7 +213,16 @@ function parseColorFromXml(xml: string): ChartColor | undefined {
       hlink: 10,
       folHlink: 11
     };
-    const color: ChartColor = { theme: themeMap[schemeMatch[1]] ?? 0 };
+    const raw = schemeMatch[1];
+    const idx = themeMap[raw];
+    // When we can't map the name to a theme index (e.g. `phClr` — the
+    // DrawingML "placeholder colour" token — or a future addition),
+    // preserve it as a scheme-name token under `schemeName` so the
+    // writer re-emits `<a:schemeClr val="…">` on round-trip. The old
+    // code stored the raw token under `sysClr`, which caused the
+    // writer to emit `<a:sysClr>` instead — silently changing the
+    // DrawingML element type and breaking theme placeholder semantics.
+    const color: ChartColor = idx !== undefined ? { theme: idx } : { schemeName: raw };
     const region = extractColorRegion(xml, schemeMatch, `</a:schemeClr`);
     parseColorModifiers(region, color);
     return color;
@@ -170,18 +258,31 @@ function parseGradientFill(xml: string): ChartFill | undefined {
   }
   const region = xml.slice(gradStart, gradEnd + 20);
 
-  // Parse gradient stops
+  // Parse gradient stops. OOXML `<a:gs pos="N">` encodes `N` as
+  // hundredths of a percent (0–100000), NOT thousandths. The
+  // previous implementation divided by 1000 — producing `stop.position`
+  // values that were 100× too large (e.g. a 50% stop decoded as 50
+  // instead of 0.5). Paired with the equally-wrong writer multiplier
+  // of ×1000, round-trip byte-compared equal but any freshly-built
+  // gradient rendered in Excel at a wildly wrong position. See the
+  // companion fix in `chart-ex-renderer.ts:renderSpPr` gradient path.
   const stops: Array<{ position: number; color: ChartColor }> = [];
   // Find each <a:gs pos="..."> ... </a:gs>
   const gsListStart = region.indexOf("<a:gsLst");
   const gsListEnd = region.indexOf("</a:gsLst");
   if (gsListStart >= 0 && gsListEnd >= 0) {
     const gsListRegion = region.slice(gsListStart, gsListEnd + 12);
-    const gsPosRegex = /<a:gs\s+pos="(\d+)"/g;
+    // OOXML `ST_PositiveFixedPercentage` is `xsd:int` in [0, 100000]
+    // — integer by schema — but third-party authors sometimes emit
+    // fractional values (e.g. `pos="33333.33"`) that readers tolerate.
+    // The previous `\d+`-only regex silently dropped stops with
+    // fractional positions, truncating the whole gradient on parse.
+    // Match fractional too so we at least preserve the author's intent.
+    const gsPosRegex = /<a:gs\s+pos="(-?\d+(?:\.\d+)?)"/g;
     let match: RegExpExecArray | null;
     const positions: Array<{ pos: number; startIdx: number }> = [];
     while ((match = gsPosRegex.exec(gsListRegion)) !== null) {
-      positions.push({ pos: parseInt(match[1], 10), startIdx: match.index });
+      positions.push({ pos: parseFloat(match[1]), startIdx: match.index });
     }
     for (let i = 0; i < positions.length; i++) {
       const start = positions[i].startIdx;
@@ -189,30 +290,87 @@ function parseGradientFill(xml: string): ChartFill | undefined {
       const gsRegion = gsListRegion.slice(start, end);
       const color = parseColorFromXml(gsRegion);
       if (color) {
-        stops.push({ position: positions[i].pos / 1000, color });
+        stops.push({ position: positions[i].pos / 100000, color });
       }
     }
   }
 
-  if (stops.length === 0) {
+  // A legal gradient requires at least two stops — `CT_GradientStopList`
+  // declares `minOccurs="2"`. Reject single-stop gradients at parse so
+  // the writer (which gates `g.stops.length >= 2`) doesn't silently
+  // drop the entire `<a:gradFill>` block on round-trip, producing a
+  // shape with no fill attribute at all. A user authoring a malformed
+  // single-stop gradient is better served by a missing fill that
+  // surfaces in testing than by silent truncation at save.
+  if (stops.length < 2) {
     return undefined;
   }
 
-  // Parse angle from <a:lin ang="...">
+  // Parse angle from <a:lin ang="..."> — OOXML stores 60000ths of a
+  // degree. The attribute is an xsd:int but we accept fractional
+  // values too so libraries that emit millidegrees don't lose data.
+  // `scaled` is a sibling boolean attribute on the same element; we
+  // capture it only when authored so a default-scaled gradient doesn't
+  // round-trip as an explicit `scaled="1"` (matching Excel's emission,
+  // which omits the attribute when the implicit default applies).
   let angle: number | undefined;
+  let scaled: boolean | undefined;
   let type: "linear" | "circle" | "rect" | "shape" | undefined;
-  const linMatch = /<a:lin\s+ang="(\d+)"/.exec(region);
+  const linMatch = /<a:lin\b([^/>]*)\/?>/.exec(region);
   if (linMatch) {
-    angle = parseInt(linMatch[1], 10) / 60000;
+    const linAttrs = linMatch[1];
+    const angMatch = /\bang="(-?\d+(?:\.\d+)?)"/.exec(linAttrs);
+    if (angMatch) {
+      angle = parseFloat(angMatch[1]) / 60000;
+    }
+    const scaledMatch = /\bscaled="(1|true|0|false)"/.exec(linAttrs);
+    if (scaledMatch) {
+      scaled = scaledMatch[1] === "1" || scaledMatch[1] === "true";
+    }
     type = "linear";
   }
-  // Check for path gradient
+  // Check for path gradient — `<a:path path="circle|rect|shape">`
+  // optionally wrapping `<a:fillToRect l t r b/>` focal rectangle
+  // (each component in hundredths of a percent).
   const pathMatch = /<a:path\s+path="([^"]+)"/.exec(region);
+  let fillToRect: { left?: number; top?: number; right?: number; bottom?: number } | undefined;
   if (pathMatch) {
     type = pathMatch[1] as typeof type;
+    const fillRectMatch = /<a:fillToRect\b([^/>]*)/.exec(region);
+    if (fillRectMatch) {
+      const attrs = fillRectMatch[1];
+      const pick = (name: string): number | undefined => {
+        const m = new RegExp(`\\b${name}="(-?\\d+(?:\\.\\d+)?)"`).exec(attrs);
+        return m ? parseFloat(m[1]) / 100000 : undefined;
+      };
+      fillToRect = {
+        left: pick("l"),
+        top: pick("t"),
+        right: pick("r"),
+        bottom: pick("b")
+      };
+      // Drop the object entirely when every component is missing so we
+      // don't carry an all-undefined placeholder through the model.
+      if (
+        fillToRect.left === undefined &&
+        fillToRect.top === undefined &&
+        fillToRect.right === undefined &&
+        fillToRect.bottom === undefined
+      ) {
+        fillToRect = undefined;
+      }
+    }
   }
 
-  return { gradient: { stops, angle, type } };
+  return {
+    gradient: {
+      stops,
+      angle,
+      type,
+      ...(scaled !== undefined ? { scaled } : {}),
+      ...(fillToRect ? { fillToRect } : {})
+    }
+  };
 }
 
 function parsePatternFill(xml: string): ChartFill | undefined {
@@ -225,24 +383,97 @@ function parsePatternFill(xml: string): ChartFill | undefined {
   const pattEnd = xml.indexOf("</a:pattFill", pattStart);
   const region = xml.slice(pattStart, pattEnd > 0 ? pattEnd + 15 : undefined);
 
-  let foreground: ChartColor | undefined;
-  let background: ChartColor | undefined;
+  // Slice each colour region by pair-of-tags OR by the range from the
+  // current open up to the next known child — matches what a real XML
+  // parser would do, and doesn't over-read into the sibling colour
+  // when the element happens to be self-closing.
+  const sliceChildRegion = (open: string, close: string, stopBefore: string): string => {
+    const start = region.indexOf(open);
+    if (start < 0) {
+      return "";
+    }
+    const end = region.indexOf(close, start);
+    if (end >= 0) {
+      return region.slice(start, end + close.length + 1);
+    }
+    // No close tag — element is self-closing or malformed. Stop at
+    // the next recognised sibling child so the slice never walks into
+    // the neighbouring colour block.
+    const nextSibling = region.indexOf(stopBefore, start + open.length);
+    return region.slice(start, nextSibling > 0 ? nextSibling : undefined);
+  };
 
-  const fgStart = region.indexOf("<a:fgClr");
-  if (fgStart >= 0) {
-    const fgEnd = region.indexOf("</a:fgClr", fgStart);
-    const fgRegion = region.slice(fgStart, fgEnd > 0 ? fgEnd + 12 : undefined);
-    foreground = parseColorFromXml(fgRegion);
-  }
-
-  const bgStart = region.indexOf("<a:bgClr");
-  if (bgStart >= 0) {
-    const bgEnd = region.indexOf("</a:bgClr", bgStart);
-    const bgRegion = region.slice(bgStart, bgEnd > 0 ? bgEnd + 12 : undefined);
-    background = parseColorFromXml(bgRegion);
-  }
+  const fgRegion = sliceChildRegion("<a:fgClr", "</a:fgClr", "<a:bgClr");
+  const bgRegion = sliceChildRegion("<a:bgClr", "</a:bgClr", "<a:fgClr");
+  const foreground = fgRegion ? parseColorFromXml(fgRegion) : undefined;
+  const background = bgRegion ? parseColorFromXml(bgRegion) : undefined;
 
   return { pattern: { preset, foreground, background } };
+}
+
+/**
+ * Remove the FIRST matching `<tag …>…</tag>` (or self-closing
+ * `<tag …/>`) block from the input XML, returning the remainder. Used
+ * by {@link parseSpPr} to isolate shape-level children (fill / effects)
+ * from decorative children that nest inside `<a:ln>` — the line's own
+ * `<a:solidFill>` / `<a:noFill/>` / `<a:gradFill>` should not be
+ * harvested as the shape's fill.
+ *
+ * Strips ALL occurrences of `tag` (both self-closing and paired) in
+ * one pass. A previous version returned after the earliest match,
+ * which failed on inputs like `<a:ln/>…<a:ln>…</a:ln>` — the paired
+ * block survived and its inner `<a:solidFill>` was then mistakenly
+ * parsed as the shape's fill.
+ *
+ * Not a general-purpose XML tool — does not handle same-named nested
+ * occurrences. Sufficient for DrawingML spPr, where `<a:ln>` never
+ * nests another `<a:ln>`.
+ */
+function stripOuterElement(xml: string, tag: string): string {
+  const selfCloseRe = new RegExp(`<${tag}\\b[^>]*/>`);
+  const openRe = new RegExp(`<${tag}\\b[^>]*(?<!/)>`);
+  const closeRe = new RegExp(`</${tag}>`);
+
+  let current = xml;
+  // Strip up to 8 occurrences. DrawingML spPr never has more than one
+  // `<a:ln>`, so the loop normally exits after the first iteration;
+  // the ceiling guards against pathological input causing infinite
+  // loops without changing the happy path.
+  for (let i = 0; i < 8; i++) {
+    const selfCloseMatch = selfCloseRe.exec(current);
+    const openMatch = openRe.exec(current);
+    const selfCloseIndex = selfCloseMatch ? selfCloseMatch.index : Infinity;
+    const openIndex = openMatch ? openMatch.index : Infinity;
+
+    if (selfCloseIndex === Infinity && openIndex === Infinity) {
+      break;
+    }
+
+    if (selfCloseIndex < openIndex && selfCloseMatch) {
+      current =
+        current.slice(0, selfCloseMatch.index) +
+        current.slice(selfCloseMatch.index + selfCloseMatch[0].length);
+      continue;
+    }
+    if (openMatch) {
+      // Find the close tag that pairs with this open — start searching
+      // after the open's end to avoid capturing `</tag>` that belongs
+      // to a prior unrelated (e.g. self-closing lookalike) open.
+      const openEnd = openMatch.index + openMatch[0].length;
+      const closeMatch = closeRe.exec(current.slice(openEnd));
+      if (!closeMatch) {
+        // Malformed — stop stripping to avoid further mutation of
+        // input we don't understand.
+        break;
+      }
+      const closeStart = openEnd + closeMatch.index;
+      const closeEnd = closeStart + closeMatch[0].length;
+      current = current.slice(0, openMatch.index) + current.slice(closeEnd);
+      continue;
+    }
+    break;
+  }
+  return current;
 }
 
 // ============================================================================
@@ -261,36 +492,127 @@ export function parseSpPr(spPr: ShapeProperties): ShapeProperties {
 
   const result: ShapeProperties = {};
 
+  // The fill parser searches for `<a:solidFill>` at the top level — but
+  // `<a:ln>…<a:solidFill>…</a:solidFill></a:ln>` is a common DrawingML
+  // pattern where the line itself carries a solid colour. Previously
+  // `rawXml.includes("<a:solidFill")` matched the line's inner fill,
+  // picked up its colour as `result.fill.solid`, and the writer then
+  // emitted a phantom `<a:solidFill>` as a shape fill — silently
+  // painting the entire chart area with the border colour on re-save.
+  // Excise any `<a:ln>…</a:ln>` block before searching for the shape
+  // fill. The line block is parsed separately below, so nothing is
+  // lost. Gradient / pattern / noFill have the same issue with respect
+  // to `<a:ln>/<a:noFill/>`.
+  const fillSearchXml = stripOuterElement(rawXml, "a:ln");
+
   // Parse fill
-  if (rawXml.includes("<a:solidFill")) {
-    const color = parseColorFromXml(
-      rawXml.slice(rawXml.indexOf("<a:solidFill"), rawXml.indexOf("</a:solidFill") + 20)
-    );
-    if (color) {
-      result.fill = { solid: color };
+  //
+  // The open/close tag search must be done defensively: `indexOf` on a
+  // missing close tag returns `-1`, so the naïve
+  // `fillSearchXml.slice(openIdx, fillSearchXml.indexOf("</a:solidFill") + 20)`
+  // picks up position `19` as the upper bound — either truncating the
+  // slice to garbage or producing an empty string. Both shapes
+  // silently corrupted the fill parser when a `<a:solidFill/>` was
+  // self-closed or when the close tag was missing.
+  //
+  // Prefer the open-tag-or-self-closing form, then only try to capture
+  // a close tag when we've seen a proper open tag. If we do not find a
+  // valid solid-fill region, fall through to the other fill branches
+  // so a `<a:gradFill>` that coexists with a malformed solidFill still
+  // gets picked up.
+  let fillMatched = false;
+  const solidFillSelfClose = /<a:solidFill\s*\/>/.exec(fillSearchXml);
+  const solidFillOpenIdx = fillSearchXml.indexOf("<a:solidFill");
+  const solidFillNonSelfClose = solidFillOpenIdx >= 0 && !solidFillSelfClose;
+  if (solidFillNonSelfClose) {
+    const closeIdx = fillSearchXml.indexOf("</a:solidFill>", solidFillOpenIdx);
+    if (closeIdx >= 0) {
+      const color = parseColorFromXml(
+        fillSearchXml.slice(solidFillOpenIdx, closeIdx + "</a:solidFill>".length)
+      );
+      if (color) {
+        result.fill = { solid: color };
+        fillMatched = true;
+      }
     }
-  } else if (rawXml.includes("<a:noFill")) {
-    result.fill = { noFill: true };
-  } else if (rawXml.includes("<a:gradFill")) {
-    result.fill = parseGradientFill(rawXml);
-  } else if (rawXml.includes("<a:pattFill")) {
-    result.fill = parsePatternFill(rawXml);
+    // else: malformed solidFill (no close tag) — fall through below.
+  } else if (solidFillSelfClose) {
+    // `<a:solidFill/>` has no child colour; DrawingML schema does not
+    // allow this, but some legacy exports emit it. Treat as "unknown
+    // fill, do not record" and fall through.
+  }
+  if (!fillMatched) {
+    if (fillSearchXml.includes("<a:noFill")) {
+      result.fill = { noFill: true };
+    } else if (fillSearchXml.includes("<a:gradFill")) {
+      result.fill = parseGradientFill(fillSearchXml);
+    } else if (fillSearchXml.includes("<a:pattFill")) {
+      result.fill = parsePatternFill(fillSearchXml);
+    }
   }
 
   // Parse line
-  const lnMatch = /<a:ln(?:\s+w="(\d+)")?/.exec(rawXml);
+  //
+  // Anchor the regex on a real `<a:ln ...>` / `<a:ln>` / `<a:ln/>` — the
+  // lookahead `(?=[\s/>])` ensures we don't match a neighbouring element
+  // like `<a:lnRef>` or `<a:lnB>` (both appear in DrawingML theme /
+  // styleLst blocks) and silently walk the wrong region when extracting
+  // the stroke colour. We then parse `w` / other attributes separately
+  // from the captured opening-tag body — the old `(?:\s+w="(\d+)")?`
+  // inline group only captured `w` when it was the FIRST attribute
+  // after `<a:ln`, so `<a:ln cap="flat" w="12700">` silently dropped
+  // the width.
+  const lnMatch = /<a:ln(?=[\s/>])([^>]*)/.exec(rawXml);
   if (lnMatch) {
-    const lnEnd = rawXml.indexOf("</a:ln", lnMatch.index);
-    const lnRegion = rawXml.slice(lnMatch.index, lnEnd > 0 ? lnEnd + 10 : undefined);
+    // Distinguish `<a:ln/>` (self-closing, no body) from `<a:ln …>…</a:ln>`.
+    // The greedy `[^>]*` in the regex captures everything up to (but not
+    // including) the closing `>`. For `<a:ln w="12700"/>` the captured
+    // group is ` w="12700"/` — the `/` is THE self-close marker. Earlier
+    // code walked `rawXml[tokenEnd]` looking for `/`, but `tokenEnd` points
+    // at `>`, not `/`, so `selfClosing` was always false and the parser
+    // fell through to `indexOf("</a:ln", …)` (which returns -1 for a
+    // self-closing tag). That made `lnRegion` span to the end of the
+    // rawXml, causing the shape's own `<a:solidFill>` to be picked up as
+    // the line colour. Detect self-close by inspecting what the regex
+    // already captured — ignore trailing whitespace before the `/`.
+    const selfClosing = /\/\s*$/.test(lnMatch[1]);
+    const tokenEnd = lnMatch.index + lnMatch[0].length;
+    // The match stopped at the byte BEFORE the closing `>`; advance one
+    // character so the close-tag-aware slice below includes the `>`.
+    const openTagEnd = tokenEnd + 1;
+    // Use the full `</a:ln>` terminator (with the trailing `>`) instead
+    // of the old `</a:ln` prefix — the prefix also matches `</a:lnRef>`
+    // and `</a:lnB>` inside DrawingML styleLst blocks, which would
+    // cause the region to stop short of the real line close.
+    const lnEnd = selfClosing ? -1 : rawXml.indexOf("</a:ln>", lnMatch.index);
+    const lnRegion = selfClosing
+      ? rawXml.slice(lnMatch.index, openTagEnd)
+      : lnEnd >= 0
+        ? rawXml.slice(lnMatch.index, lnEnd + "</a:ln>".length)
+        : // Malformed (open tag with no matching close) — clip to the
+          // open tag only so we don't walk into unrelated XML. Previous
+          // behaviour sliced to `undefined` (rest of the document), which
+          // was the root of this bug.
+          rawXml.slice(lnMatch.index, openTagEnd);
 
     const line: ChartLine = {};
-    if (lnMatch[1]) {
-      line.width = parseInt(lnMatch[1], 10);
+    const widthMatch = /\bw="(\d+)"/.exec(lnMatch[1]);
+    if (widthMatch) {
+      line.width = parseInt(widthMatch[1], 10);
     }
     if (lnRegion.includes("<a:noFill")) {
       line.noFill = true;
     } else if (lnRegion.includes("<a:solidFill")) {
-      line.color = parseColorFromXml(lnRegion);
+      // Scope the colour search to the `<a:solidFill>` body so a line
+      // that also carries a gradient / pattern fill (rare but legal —
+      // `<a:ln><a:gradFill>…</a:gradFill></a:ln>`) doesn't pollute
+      // `parseColorFromXml` with the gradient's first stop colour. The
+      // previous code passed the whole `lnRegion` — if the line had
+      // both fills `parseColorFromXml` picked up whichever colour it
+      // found first in document order, silently mis-rendering the
+      // line. For pure-solid lines the result is identical.
+      const solidFillMatch = /<a:solidFill>([\s\S]*?)<\/a:solidFill>/.exec(lnRegion);
+      line.color = parseColorFromXml(solidFillMatch ? solidFillMatch[1] : lnRegion);
     }
     const dashMatch = /<a:prstDash\s+val="([^"]+)"/.exec(lnRegion);
     if (dashMatch) {
@@ -536,10 +858,21 @@ function parseCustGeomCommands(body: string): CustomGeometryCommand[] {
       continue;
     }
     const points: Array<{ x: number; y: number }> = [];
-    const ptRe = /<a:pt\b[^>]*\bx="(-?\d+)"\s+y="(-?\d+)"[^/>]*\/>/g;
+    // Parse `<a:pt x="…" y="…"/>` without requiring a specific
+    // attribute order — some authors / writers emit
+    // `<a:pt y="100" x="200"/>` or interleave other attributes between
+    // `x` and `y`. The previous regex required `x` first, then only
+    // whitespace, then `y`, silently dropping all points on a
+    // legitimately-authored geometry that used the reversed order.
+    const ptRe = /<a:pt\b([^/>]*)\/>/g;
     let pt: RegExpExecArray | null;
     while ((pt = ptRe.exec(cmdBody)) !== null) {
-      points.push({ x: parseInt(pt[1], 10), y: parseInt(pt[2], 10) });
+      const attrs = pt[1];
+      const xAttr = /\bx="(-?\d+)"/.exec(attrs);
+      const yAttr = /\by="(-?\d+)"/.exec(attrs);
+      if (xAttr && yAttr) {
+        points.push({ x: parseInt(xAttr[1], 10), y: parseInt(yAttr[1], 10) });
+      }
     }
     commands.push({ type: kind, points });
   }
@@ -844,6 +1177,18 @@ export function getSpPrFillColor(spPr: ShapeProperties): ChartColor | undefined 
 }
 
 /**
+ * Get the complete fill (solid / gradient / pattern / noFill) from a
+ * ShapeProperties object. Works for both raw XML and structured models.
+ * Prefer this over {@link getSpPrFillColor} when the caller needs to
+ * distinguish between "no fill", "gradient", etc. — the color-only
+ * accessor collapses all three to `undefined`.
+ */
+export function getSpPrFill(spPr: ShapeProperties): ChartFill | undefined {
+  const parsed = isRawXml(spPr) ? parseSpPr(spPr) : spPr;
+  return parsed.fill;
+}
+
+/**
  * Get the line/outline properties from a ShapeProperties object.
  */
 export function getSpPrLine(spPr: ShapeProperties): ChartLine | undefined {
@@ -873,6 +1218,22 @@ export function getSpPrPattern(spPr: ShapeProperties): ChartFill["pattern"] | un
 
 /**
  * Extract structured text properties from a raw txPr XML string.
+ *
+ * Parses the fields the structured {@link ChartTextProperties} model
+ * declares:
+ *   - `size`, `bold`, `italic`, `underline`, `strike`, `cap`, `baseline`,
+ *     `kern`, `spacing`, `lang` (from the first `<a:defRPr>` / `<a:rPr>`)
+ *   - `color` (from `<a:solidFill>` inside the same element)
+ *   - `fontFamily`, `eastAsianFamily`, `complexScriptFamily`
+ *     (from `<a:latin>` / `<a:ea>` / `<a:cs>` children)
+ *   - `rotation` (from `<a:bodyPr/@rot>`)
+ *
+ * Callers that want to preserve every attribute OOXML might carry
+ * (e.g. `spc="100"`, `u="sng"`, `baseline="30000"`) must not rely on
+ * this function round-tripping via structured fields alone — keep the
+ * `_rawXml` on the txPr. This parser is a best-effort structural view
+ * for consumers that want to READ the common properties; `_rawXml`
+ * remains authoritative for write-side fidelity.
  */
 export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   const rawXml = getRawXml(txPr);
@@ -888,32 +1249,115 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
     result.size = parseInt(szMatch[1], 10);
   }
 
-  // Bold
-  const bMatch = /<a:(?:defRPr|rPr)[^>]*\s+b="1"/.exec(rawXml);
+  // Bold — accept `"1"` / `"true"` per XSD `xsd:boolean`. Previously
+  // only `"1"` was recognised, so LibreOffice-authored files (which
+  // emit `b="true"`) silently round-tripped bold text as regular.
+  // An explicit `b="0"` / `b="false"` is preserved as `false` rather
+  // than dropped — semantically distinct from the attribute being
+  // absent (which leaves the field undefined so downstream writers
+  // know not to force a value).
+  const bMatch = /<a:(?:defRPr|rPr)[^>]*\sb="(1|true|0|false)"/.exec(rawXml);
   if (bMatch) {
-    result.bold = true;
+    result.bold = bMatch[1] === "1" || bMatch[1] === "true";
   }
 
-  // Italic
-  const iMatch = /<a:(?:defRPr|rPr)[^>]*\s+i="1"/.exec(rawXml);
+  // Italic — same lenient boolean handling as `b` above.
+  const iMatch = /<a:(?:defRPr|rPr)[^>]*\si="(1|true|0|false)"/.exec(rawXml);
   if (iMatch) {
-    result.italic = true;
+    result.italic = iMatch[1] === "1" || iMatch[1] === "true";
   }
 
-  // Font color
-  const rPrStart = rawXml.indexOf("<a:defRPr");
-  if (rPrStart >= 0) {
-    const rPrEnd = rawXml.indexOf("</a:defRPr", rPrStart);
-    const rPrRegion = rawXml.slice(rPrStart, rPrEnd > 0 ? rPrEnd + 15 : undefined);
-    if (rPrRegion.includes("<a:solidFill")) {
-      result.color = parseColorFromXml(rPrRegion);
+  // Underline style (a:rPr/@u). Values are the DrawingML `ST_TextUnderlineType`
+  // enum: "none" | "sng" | "dbl" | "heavy" | "dotted" | "dottedHeavy" |
+  // "dash" | "dashHeavy" | "dashLong" | "dashLongHeavy" | "dotDash" |
+  // "dotDashHeavy" | "dotDotDash" | "dotDotDashHeavy" | "wavy" |
+  // "wavyHeavy" | "wavyDbl".
+  const uMatch = /<a:(?:defRPr|rPr)[^>]*\su="([A-Za-z]+)"/.exec(rawXml);
+  if (uMatch) {
+    result.underline = uMatch[1] as ChartTextProperties["underline"];
+  }
+
+  // Strike-through (a:rPr/@strike). Values: "noStrike" | "sngStrike" |
+  // "dblStrike".
+  const strikeMatch = /<a:(?:defRPr|rPr)[^>]*\sstrike="(noStrike|sngStrike|dblStrike)"/.exec(
+    rawXml
+  );
+  if (strikeMatch) {
+    result.strike = strikeMatch[1] as ChartTextProperties["strike"];
+  }
+
+  // Capitalisation (a:rPr/@cap). Values: "none" | "small" | "all".
+  const capMatch = /<a:(?:defRPr|rPr)[^>]*\scap="(none|small|all)"/.exec(rawXml);
+  if (capMatch) {
+    result.cap = capMatch[1] as ChartTextProperties["cap"];
+  }
+
+  // Baseline offset (a:rPr/@baseline) — percentage * 1000 per OOXML
+  // (signed; positive = superscript, negative = subscript).
+  const baselineMatch = /<a:(?:defRPr|rPr)[^>]*\sbaseline="(-?\d+)"/.exec(rawXml);
+  if (baselineMatch) {
+    result.baseline = parseInt(baselineMatch[1], 10);
+  }
+
+  // Character kerning cut-off (a:rPr/@kern) — hundredths of a point.
+  const kernMatch = /<a:(?:defRPr|rPr)[^>]*\skern="(\d+)"/.exec(rawXml);
+  if (kernMatch) {
+    result.kern = parseInt(kernMatch[1], 10);
+  }
+
+  // Character spacing (a:rPr/@spc) — hundredths of a point.
+  const spcMatch = /<a:(?:defRPr|rPr)[^>]*\sspc="(-?\d+)"/.exec(rawXml);
+  if (spcMatch) {
+    result.spacing = parseInt(spcMatch[1], 10);
+  }
+
+  // Language (a:rPr/@lang) — BCP 47 language tag (e.g. "en-US", "ja-JP").
+  // Wider character class than `\w+` because tags can include hyphens
+  // and digits ("zh-Hant-TW").
+  const langMatch = /<a:(?:defRPr|rPr)[^>]*\slang="([A-Za-z0-9-]+)"/.exec(rawXml);
+  if (langMatch) {
+    result.lang = langMatch[1];
+  }
+
+  // Font color. Try the paragraph-level default (`<a:defRPr>…`) first,
+  // then fall back to the first run-property block (`<a:rPr>…`). Chart
+  // titles / data-label rich text often carry colour on `<a:rPr>` (per
+  // run), not on `<a:defRPr>` — the old implementation only checked the
+  // former and silently dropped colour on round-trip.
+  const extractColorFrom = (openTag: string, closeTag: string): ChartColor | undefined => {
+    const start = rawXml.indexOf(openTag);
+    if (start < 0) {
+      return undefined;
     }
-  }
+    const end = rawXml.indexOf(closeTag, start);
+    const region = rawXml.slice(start, end > 0 ? end + closeTag.length : undefined);
+    if (!region.includes("<a:solidFill")) {
+      return undefined;
+    }
+    return parseColorFromXml(region);
+  };
+  result.color =
+    extractColorFrom("<a:defRPr", "</a:defRPr>") ?? extractColorFrom("<a:rPr", "</a:rPr>");
 
-  // Font family
+  // Latin font family (a:latin/@typeface) — structured default.
   const latinMatch = /<a:latin\s+typeface="([^"]+)"/.exec(rawXml);
   if (latinMatch) {
     result.fontFamily = latinMatch[1];
+  }
+
+  // East Asian font family (a:ea/@typeface) — used for CJK characters
+  // when the primary Latin font doesn't cover them. Dropping this
+  // field on round-trip made CJK-labelled charts reflow on reload.
+  const eaMatch = /<a:ea\s+typeface="([^"]+)"/.exec(rawXml);
+  if (eaMatch) {
+    result.eastAsianFamily = eaMatch[1];
+  }
+
+  // Complex-script font family (a:cs/@typeface) — used for Arabic /
+  // Hebrew / Thai fallbacks.
+  const csMatch = /<a:cs\s+typeface="([^"]+)"/.exec(rawXml);
+  if (csMatch) {
+    result.complexScriptFamily = csMatch[1];
   }
 
   // Rotation (on bodyPr)
@@ -969,138 +1413,30 @@ export function getTxPrItalic(txPr: ChartTextProperties): boolean | undefined {
 }
 
 // ============================================================================
-// Generate spPr/txPr XML from structured models
+// Build structured spPr / txPr models
 // ============================================================================
-
-function colorToXml(color: ChartColor, indent: string): string {
-  if (color.srgb) {
-    const children: string[] = [];
-    if (color.alpha !== undefined) {
-      children.push(`<a:alpha val="${color.alpha}"/>`);
-    }
-    if (color.tint !== undefined) {
-      children.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
-    }
-    if (color.lumMod !== undefined) {
-      children.push(`<a:lumMod val="${color.lumMod}"/>`);
-    }
-    if (color.lumOff !== undefined) {
-      children.push(`<a:lumOff val="${color.lumOff}"/>`);
-    }
-    if (color.shade !== undefined) {
-      children.push(`<a:shade val="${color.shade}"/>`);
-    }
-    if (color.satMod !== undefined) {
-      children.push(`<a:satMod val="${color.satMod}"/>`);
-    }
-    if (children.length > 0) {
-      return `${indent}<a:srgbClr val="${color.srgb}">${children.join("")}</a:srgbClr>`;
-    }
-    return `${indent}<a:srgbClr val="${color.srgb}"/>`;
-  }
-  if (color.theme !== undefined) {
-    const themeNames = [
-      "dk1",
-      "lt1",
-      "dk2",
-      "lt2",
-      "accent1",
-      "accent2",
-      "accent3",
-      "accent4",
-      "accent5",
-      "accent6",
-      "hlink",
-      "folHlink"
-    ];
-    const themeName = themeNames[color.theme] ?? "dk1";
-    const children: string[] = [];
-    if (color.alpha !== undefined) {
-      children.push(`<a:alpha val="${color.alpha}"/>`);
-    }
-    if (color.lumMod !== undefined) {
-      children.push(`<a:lumMod val="${color.lumMod}"/>`);
-    }
-    if (color.lumOff !== undefined) {
-      children.push(`<a:lumOff val="${color.lumOff}"/>`);
-    }
-    if (color.tint !== undefined) {
-      children.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
-    }
-    if (color.shade !== undefined) {
-      children.push(`<a:shade val="${color.shade}"/>`);
-    }
-    if (color.satMod !== undefined) {
-      children.push(`<a:satMod val="${color.satMod}"/>`);
-    }
-    if (children.length > 0) {
-      return `${indent}<a:schemeClr val="${themeName}">${children.join("")}</a:schemeClr>`;
-    }
-    return `${indent}<a:schemeClr val="${themeName}"/>`;
-  }
-  if (color.sysClr) {
-    const children: string[] = [];
-    if (color.alpha !== undefined) {
-      children.push(`<a:alpha val="${color.alpha}"/>`);
-    }
-    if (color.tint !== undefined) {
-      children.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
-    }
-    if (color.lumMod !== undefined) {
-      children.push(`<a:lumMod val="${color.lumMod}"/>`);
-    }
-    if (color.lumOff !== undefined) {
-      children.push(`<a:lumOff val="${color.lumOff}"/>`);
-    }
-    if (color.shade !== undefined) {
-      children.push(`<a:shade val="${color.shade}"/>`);
-    }
-    if (color.satMod !== undefined) {
-      children.push(`<a:satMod val="${color.satMod}"/>`);
-    }
-    if (children.length > 0) {
-      return `${indent}<a:sysClr val="${color.sysClr}">${children.join("")}</a:sysClr>`;
-    }
-    return `${indent}<a:sysClr val="${color.sysClr}"/>`;
-  }
-  if (color.prstClr) {
-    const children: string[] = [];
-    if (color.alpha !== undefined) {
-      children.push(`<a:alpha val="${color.alpha}"/>`);
-    }
-    if (color.tint !== undefined) {
-      children.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
-    }
-    if (color.lumMod !== undefined) {
-      children.push(`<a:lumMod val="${color.lumMod}"/>`);
-    }
-    if (color.lumOff !== undefined) {
-      children.push(`<a:lumOff val="${color.lumOff}"/>`);
-    }
-    if (color.shade !== undefined) {
-      children.push(`<a:shade val="${color.shade}"/>`);
-    }
-    if (color.satMod !== undefined) {
-      children.push(`<a:satMod val="${color.satMod}"/>`);
-    }
-    if (children.length > 0) {
-      return `${indent}<a:prstClr val="${color.prstClr}">${children.join("")}</a:prstClr>`;
-    }
-    return `${indent}<a:prstClr val="${color.prstClr}"/>`;
-  }
-  return "";
-}
+//
+// Previously this module also produced raw DrawingML XML for spPr / txPr via
+// a `colorToXml` helper. That path was removed because the chart writer
+// (`chart-space-xform._renderSpPr` / `_renderTxPr` / `_renderColor`) emits
+// the XML directly from structured data, and returning raw XML here forced
+// callers to rebuild `buildTxPr` after every mutation. The helper was dead
+// code and has been deleted — see the note on `buildTxPr` below.
 
 /**
- * Build a structured ShapeProperties object from the given properties.
+ * Build a structured ShapeProperties object, preserving every field that
+ * `parseSpPr` can produce (fill, line, effectList, scene3d, sp3d, transform,
+ * presetGeometry, customGeometry, bwMode).
  *
- * Previous versions generated `_rawXml` but this caused data loss for
- * effectList/scene3d/sp3d. The returned object is now purely structured
- * and rendered correctly by `_renderSpPr` in chart-space-xform.ts.
+ * Previous versions only copied a five-field subset, which caused
+ * `setSpPrFill` / `setSpPrLine` to silently strip `xfrm` / `prstGeom` /
+ * `custGeom` off the returned spPr whenever the input had been parsed from
+ * raw XML. The earlier `_rawXml` round-trip path was dropped because it lost
+ * effectList/scene3d/sp3d; we now keep all structured fields and intentionally
+ * omit `_rawXml` so that `_renderSpPr` (chart-space-xform) re-emits the spPr
+ * from the structured data.
  */
 export function buildSpPr(props: ShapeProperties): ShapeProperties {
-  // Return a purely structured object — no _rawXml.
-  // _renderSpPr handles fill, line, effectList, scene3d, sp3d structurally.
   const result: ShapeProperties = {};
   if (props.fill) {
     result.fill = props.fill;
@@ -1117,57 +1453,77 @@ export function buildSpPr(props: ShapeProperties): ShapeProperties {
   if (props.sp3d) {
     result.sp3d = props.sp3d;
   }
+  if (props.transform) {
+    result.transform = props.transform;
+  }
+  if (props.presetGeometry) {
+    result.presetGeometry = props.presetGeometry;
+  }
+  if (props.customGeometry) {
+    result.customGeometry = props.customGeometry;
+  }
   return result;
 }
 
 /**
- * Build a raw XML txPr string from structured ChartTextProperties.
- * Returns an object with `_rawXml` that can be assigned to `txPr`.
+ * Build a structured {@link ChartTextProperties} object.
  *
- * Unlike `buildSpPr` which returns purely structured data, `buildTxPr`
- * generates `_rawXml` because `_renderTxPr` in chart-space-xform relies
- * on raw XML passthrough for text properties.
+ * Returns a plain structured copy (no `_rawXml`) so downstream mutations
+ * (`props.size = 1400`) take effect when the txPr is later serialised.
+ * The writer (`_renderTxPr` / `_renderRunProperties` in
+ * `chart-space-xform.ts`) fully supports structured txPr data and only
+ * falls back to raw XML pass-through when `_rawXml` is present; returning
+ * `_rawXml` here would freeze the txPr and silently discard subsequent
+ * edits, which is a trap API.
  */
 export function buildTxPr(props: ChartTextProperties): ChartTextProperties {
-  const rPrAttrs: string[] = [];
+  const result: ChartTextProperties = {};
   if (props.size !== undefined) {
-    rPrAttrs.push(` sz="${props.size}"`);
+    result.size = props.size;
   }
-  if (props.bold) {
-    rPrAttrs.push(' b="1"');
+  if (props.bold !== undefined) {
+    result.bold = props.bold;
   }
-  if (props.italic) {
-    rPrAttrs.push(' i="1"');
+  if (props.italic !== undefined) {
+    result.italic = props.italic;
   }
-
-  const rPrChildren: string[] = [];
+  if (props.underline !== undefined) {
+    result.underline = props.underline;
+  }
+  if (props.strike !== undefined) {
+    result.strike = props.strike;
+  }
+  if (props.rotation !== undefined) {
+    result.rotation = props.rotation;
+  }
+  if (props.baseline !== undefined) {
+    result.baseline = props.baseline;
+  }
+  if (props.kern !== undefined) {
+    result.kern = props.kern;
+  }
+  if (props.spacing !== undefined) {
+    result.spacing = props.spacing;
+  }
+  if (props.cap !== undefined) {
+    result.cap = props.cap;
+  }
+  if (props.lang !== undefined) {
+    result.lang = props.lang;
+  }
   if (props.color) {
-    rPrChildren.push(`<a:solidFill>${colorToXml(props.color, "")}</a:solidFill>`);
+    result.color = props.color;
   }
   if (props.fontFamily) {
-    rPrChildren.push(`<a:latin typeface="${props.fontFamily}"/>`);
-    rPrChildren.push(`<a:cs typeface="${props.fontFamily}"/>`);
+    result.fontFamily = props.fontFamily;
   }
-
-  const rPrContent =
-    rPrChildren.length > 0
-      ? `<a:defRPr${rPrAttrs.join("")}>${rPrChildren.join("")}</a:defRPr>`
-      : `<a:defRPr${rPrAttrs.join("")}/>`;
-
-  const bodyPrAttrs = props.rotation !== undefined ? ` rot="${props.rotation}"` : "";
-
-  const xml = [
-    "<c:txPr>",
-    `  <a:bodyPr${bodyPrAttrs}/>`,
-    "  <a:lstStyle/>",
-    "  <a:p>",
-    `    <a:pPr>${rPrContent}</a:pPr>`,
-    "    <a:endParaRPr/>",
-    "  </a:p>",
-    "</c:txPr>"
-  ].join("\n");
-
-  return { ...props, _rawXml: xml };
+  if (props.eastAsianFamily) {
+    result.eastAsianFamily = props.eastAsianFamily;
+  }
+  if (props.complexScriptFamily) {
+    result.complexScriptFamily = props.complexScriptFamily;
+  }
+  return result;
 }
 
 /**

@@ -14,8 +14,9 @@ import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import { parseChartEx } from "@excel/chart/chart-ex-parser";
-import { renderChartEx } from "@excel/chart/chart-ex-renderer";
+import { renderChartEx, renderChartExLegendXml } from "@excel/chart/chart-ex-renderer";
 import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
+import { themeIndexToName } from "@excel/chart/chart-utils";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -98,6 +99,7 @@ import {
   isBinaryEntryPath,
   normalizeZipPath,
   OOXML_PATHS,
+  resolveRelTarget,
   vmlDrawingPath,
   vmlDrawingHFPath,
   vmlDrawingHFRelsPath,
@@ -106,8 +108,7 @@ import {
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
 import { StreamBuf } from "@excel/utils/stream-buf";
-import type { Workbook } from "@excel/workbook";
-import type { ExternalLinkModel } from "@excel/workbook.browser";
+import type { Workbook, ExternalLinkModel } from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
 import {
   ExternalLinkXform,
@@ -146,6 +147,7 @@ import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { PassThrough, type IEventEmitter } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { bufferToString, base64ToUint8Array } from "@utils/utils";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import { XmlStreamWriter } from "@xml/stream-writer";
 import { XmlWriter } from "@xml/writer";
 
@@ -615,6 +617,89 @@ function snapshotChartModel(model: unknown): string | undefined {
   }
 }
 
+/**
+ * Extract leading XML comments that appear immediately before a target
+ * element's open tag in an OOXML chart part. We use this to preserve
+ * vendor / annotation comments (e.g. style provenance markers) when the
+ * chart writer falls back to a structured rebuild — `BaseXform.parseStreamDirect`
+ * does not surface `comment` events, so the structured model has no
+ * memory of them.
+ *
+ * Returns the substring of comment nodes (whitespace stripped, joined
+ * by no separator). Empty string when no comment precedes the open tag.
+ */
+function extractLeadingComments(originalXml: string, openTagRegex: RegExp): string {
+  const m = openTagRegex.exec(originalXml);
+  if (!m) {
+    return "";
+  }
+  const before = originalXml.slice(0, m.index);
+  // Walk backwards collecting consecutive `<!--…-->` blocks (with
+  // optional whitespace between them and the open tag).
+  const comments: string[] = [];
+  let cursor = before.length;
+  while (cursor > 0) {
+    // Skip trailing whitespace
+    let head = cursor;
+    while (head > 0 && /\s/.test(before.charAt(head - 1))) {
+      head--;
+    }
+    // Look for `-->` ending right at `head`
+    if (head < 3 || before.slice(head - 3, head) !== "-->") {
+      break;
+    }
+    // Find the matching `<!--` start
+    const start = before.lastIndexOf("<!--", head - 3);
+    if (start < 0) {
+      break;
+    }
+    comments.unshift(before.slice(start, head));
+    cursor = start;
+  }
+  return comments.join("");
+}
+
+/**
+ * Render a chart part (classic) to bytes via `XmlWriter`, then splice
+ * preserved leading comments from the original raw XML in front of the
+ * `<c:chart>` open tag. If the original has no leading comments or no
+ * `rawData` is available, returns the unmodified rendered bytes.
+ */
+function renderChartWithLeadingComments(
+  entry: ChartEntry,
+  xform: { render(xmlStream: any, model?: any): void }
+): Uint8Array {
+  const writer = new XmlWriter();
+  xform.render(writer, entry.model);
+  let xml = writer.toString();
+  if (entry.rawData) {
+    const originalXml = new TextDecoder().decode(entry.rawData);
+    const comments = extractLeadingComments(originalXml, /<c:chart(?:\s|>)/);
+    if (comments) {
+      xml = xml.replace(/<c:chart(\s|>)/, `${comments}<c:chart$1`);
+    }
+  }
+  return new TextEncoder().encode(xml);
+}
+
+/**
+ * Splice preserved leading comments from a ChartEx raw XML buffer into
+ * a freshly-rendered structural rebuild output.
+ */
+function spliceChartExLeadingComments(
+  renderedXml: string,
+  originalRawXml: string | undefined
+): string {
+  if (!originalRawXml) {
+    return renderedXml;
+  }
+  const comments = extractLeadingComments(originalRawXml, /<cx:chart(?:\s|>)/);
+  if (!comments) {
+    return renderedXml;
+  }
+  return renderedXml.replace(/<cx:chart(\s|>)/, `${comments}<cx:chart$1`);
+}
+
 function shouldPassthroughChartEntry(
   entry: ChartEntry
 ): entry is ChartEntry & { rawData: Uint8Array } {
@@ -789,9 +874,11 @@ interface ChartExRawPatchPlan {
   title: boolean;
   legend: boolean;
   autoTitleDeleted: boolean;
-  chartSpPr: boolean;
+  /** `<cx:chartSpace/cx:spPr>` — chart-frame shape properties. Renamed
+   *  from the legacy `chartSpPr` after `ChartExChart.spPr` was removed
+   *  (it was a schema violation — see the parser migration path). */
+  chartSpaceSpPr: boolean;
   plotAreaSpPr: boolean;
-  plotAreaRegionLayout: boolean;
   plotSurface: boolean;
   series: RawPatchListPlan<ChartExSeriesRawPatchPlan>;
   axes: RawPatchListPlan<ChartExAxisRawPatchPlan>;
@@ -847,9 +934,8 @@ function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | unde
       data: true,
       legend: true,
       autoTitleDeleted: true,
-      chartSpPr: true,
+      chartSpaceSpPr: true,
       plotAreaSpPr: true,
-      plotAreaRegionLayout: true,
       plotSurface: true,
       series: true,
       axes: true
@@ -877,12 +963,11 @@ function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | unde
     title: !sameJson(prevChart?.title, curChart?.title),
     legend: !sameJson(prevChart?.legend, curChart?.legend),
     autoTitleDeleted: !sameJson(prevChart?.autoTitleDeleted, curChart?.autoTitleDeleted),
-    chartSpPr: !sameJson(prevChart?.spPr, curChart?.spPr),
+    // Chart-frame styling lives on `CT_ChartSpace/spPr` in Chart2014,
+    // not on `CT_Chart`. Diff the correct slot; the `ChartExChart.spPr`
+    // field has been removed from the type.
+    chartSpaceSpPr: !sameJson(previous.chartSpace?.spPr, current.chartSpace?.spPr),
     plotAreaSpPr: !sameJson(prevChart?.plotArea?.spPr, curChart?.plotArea?.spPr),
-    plotAreaRegionLayout: !sameJson(
-      prevChart?.plotArea?.plotAreaRegion?.layout,
-      curChart?.plotArea?.plotAreaRegion?.layout
-    ),
     plotSurface: !sameJson(
       prevChart?.plotArea?.plotAreaRegion?.plotSurface,
       curChart?.plotArea?.plotAreaRegion?.plotSurface
@@ -894,9 +979,8 @@ function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | unde
     plan.title ||
     plan.legend ||
     plan.autoTitleDeleted ||
-    plan.chartSpPr ||
+    plan.chartSpaceSpPr ||
     plan.plotAreaSpPr ||
-    plan.plotAreaRegionLayout ||
     plan.plotSurface ||
     hasRawPatchListChanges(plan.series) ||
     hasRawPatchListChanges(plan.axes)
@@ -963,7 +1047,10 @@ function stripPatchableChartExFields(model: any): any {
     clone.chartSpace.chart.title = undefined;
     clone.chartSpace.chart.legend = undefined;
     clone.chartSpace.chart.autoTitleDeleted = undefined;
-    clone.chartSpace.chart.spPr = undefined;
+    // NOTE: `chart.spPr` was previously cleared here, but the field
+    // has been removed from `ChartExChart` (see the migration in
+    // chart-ex-parser); the writer now emits chart-frame styling from
+    // `chartSpace.spPr` only.
     if (clone.chartSpace.chart.plotArea) {
       clone.chartSpace.chart.plotArea.spPr = undefined;
       clone.chartSpace.chart.plotArea.axis = undefined;
@@ -1059,16 +1146,23 @@ function patchRawChartExChartBlock(
           )
         : removeXmlBlock(patched, "cx:legend");
   }
-  if (patchPlan.chartSpPr) {
+  if (patchPlan.chartSpaceSpPr) {
+    // Target `<cx:chartSpace>` (the root element) rather than
+    // `<cx:chart>`. Chart-frame styling belongs on the chartSpace
+    // parent per Chart2014; previous versions of this patcher
+    // incorrectly wrote it inside `<cx:chart>`, producing output
+    // strict validators reject. The siblings list is CT_ChartSpace's
+    // child order after `cx:chart`: `cx:spPr, cx:txPr, cx:externalData,
+    // cx:printSettings, cx:extLst`.
     patched = patchGenericChild(
       patched,
       "cx:spPr",
-      buildRawShapePropertiesXml(chart.spPr, "cx"),
-      ["cx:extLst"],
-      "cx:chart"
+      buildRawShapePropertiesXml(model.chartSpace?.spPr, "cx"),
+      ["cx:txPr", "cx:externalData", "cx:printSettings", "cx:extLst"],
+      "cx:chartSpace"
     );
   }
-  if (patchPlan.plotAreaSpPr || patchPlan.plotAreaRegionLayout || patchPlan.plotSurface) {
+  if (patchPlan.plotAreaSpPr || patchPlan.plotSurface) {
     const plotRange = findXmlBlock(patched, "cx:plotArea");
     if (!plotRange) {
       return undefined;
@@ -1076,39 +1170,52 @@ function patchRawChartExChartBlock(
     let plotBlock = patched.slice(plotRange.start, plotRange.end);
     const plotArea = chart.plotArea;
     if (patchPlan.plotAreaSpPr) {
+      // `CT_PlotArea` sequence: `plotAreaRegion?` → `axis*` → `spPr?` →
+      // `extLst?`. `spPr` is the next-to-last child, so its only
+      // follower is `extLst`.
       plotBlock = patchGenericChild(
         plotBlock,
         "cx:spPr",
         buildRawShapePropertiesXml(plotArea?.spPr, "cx"),
-        ["cx:plotAreaRegion", "cx:axis", "cx:extLst"],
+        ["cx:extLst"],
         "cx:plotArea"
       );
     }
-    if (patchPlan.plotAreaRegionLayout || patchPlan.plotSurface) {
+    if (patchPlan.plotSurface) {
+      // `CT_PlotAreaRegion` (Chart2014): `plotSurface?` → `series*` →
+      // `extLst?`. The `spPr` is a child of `<cx:plotSurface>`, NOT a
+      // direct child of `<cx:plotAreaRegion>`. Previously the raw
+      // patcher wrote a bare `<cx:spPr>` under `<cx:plotAreaRegion>`
+      // (schema violation) and also had a separate
+      // `plotAreaRegionLayout` patch that emitted `<cx:layout>`
+      // there (also invalid — layout only lives on `<cx:plotArea>` /
+      // `<cx:title>` via the manualLayout extension).
+      //
+      // The correct form is:
+      //   <cx:plotAreaRegion>
+      //     <cx:plotSurface>
+      //       <cx:spPr>…</cx:spPr>
+      //     </cx:plotSurface>
+      //     <cx:series/>
+      //     …
+      //   </cx:plotAreaRegion>
       const regionRange = findXmlBlock(plotBlock, "cx:plotAreaRegion");
       if (!regionRange) {
         return undefined;
       }
       let regionBlock = plotBlock.slice(regionRange.start, regionRange.end);
       const region = plotArea?.plotAreaRegion;
-      if (patchPlan.plotAreaRegionLayout) {
-        regionBlock = patchGenericChild(
-          regionBlock,
-          "cx:layout",
-          buildRawChartExLayoutXml(region?.layout),
-          ["cx:spPr", "cx:series", "cx:extLst"],
-          "cx:plotAreaRegion"
-        );
-      }
-      if (patchPlan.plotSurface) {
-        regionBlock = patchGenericChild(
-          regionBlock,
-          "cx:spPr",
-          buildRawShapePropertiesXml(region?.plotSurface, "cx"),
-          ["cx:series", "cx:extLst"],
-          "cx:plotAreaRegion"
-        );
-      }
+      const surfaceSpPrXml = buildRawShapePropertiesXml(region?.plotSurface, "cx");
+      const plotSurfaceXml = surfaceSpPrXml
+        ? `<cx:plotSurface>${surfaceSpPrXml}</cx:plotSurface>`
+        : undefined;
+      regionBlock = patchGenericChild(
+        regionBlock,
+        "cx:plotSurface",
+        plotSurfaceXml,
+        ["cx:series", "cx:extLst"],
+        "cx:plotAreaRegion"
+      );
       plotBlock =
         plotBlock.slice(0, regionRange.start) + regionBlock + plotBlock.slice(regionRange.end);
     }
@@ -1486,12 +1593,23 @@ function rawPatchFlag<T extends object>(plan: T | true | false, key: keyof T): b
 }
 
 function buildRawChartTitleXml(text: string): string {
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Full text escape (strips C0 control characters beyond `\t\n\r`,
+  // encodes the five reserved entities) so injected titles can't break
+  // out of the `<a:t>` element. Matches the `escapeXml` helper used
+  // elsewhere in this module.
+  const escaped = escapeXml(text);
   return `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escaped}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`;
 }
 
 function buildRawChartLegendXml(pos: string): string {
-  return `<c:legend><c:legendPos val="${pos}"/><c:overlay val="0"/></c:legend>`;
+  // Escape the attribute value — `pos` is typed as `LegendPosition`
+  // (a 5-member enum) but the raw-patch path can't enforce that
+  // statically, so a malicious or buggy caller could inject XML via
+  // the attribute. Narrow to the enum set so truly unexpected values
+  // fall back to the schema default `"b"` instead of being echoed
+  // through verbatim.
+  const safe = pos === "b" || pos === "l" || pos === "r" || pos === "t" || pos === "tr" ? pos : "b";
+  return `<c:legend><c:legendPos val="${safe}"/><c:overlay val="0"/></c:legend>`;
 }
 
 function buildRawChartExTitleXml(text: string): string {
@@ -1499,24 +1617,32 @@ function buildRawChartExTitleXml(text: string): string {
 }
 
 function buildRawChartExLegendXml(legend: any): string {
-  const attrs = [
-    legend.legendPos ? `pos="${escapeAttr(legend.legendPos)}"` : undefined,
-    legend.overlay !== undefined ? `overlay="${legend.overlay ? "1" : "0"}"` : undefined
-  ].filter((attr): attr is string => !!attr);
-  return `<cx:legend ${attrs.join(" ")}/>`;
+  // Delegate to the structured ChartEx writer so the raw-patch path
+  // produces a byte-identical serialisation. Previously this function
+  // hand-rolled a self-closing `<cx:legend pos="…" overlay="…"/>`,
+  // silently dropping `align`, `legendEntry*`, `spPr`, `txPr`, and
+  // `extLst` on every styled-legend round-trip. Sharing the writer
+  // guarantees parity with the non-raw path.
+  // Indentation differs from the structured writer's formatted output —
+  // the raw patcher inserts into an inline stream, so strip the
+  // leading indent that `renderChartExLegendXml` prefixes each line
+  // with. The result is semantically identical; just flattened.
+  return renderChartExLegendXml(legend)
+    .split("\n")
+    .map(line => line.replace(/^\s*/, ""))
+    .join("");
 }
 
 function buildRawChartExDataXml(chartData: any): string {
   const parts = ["<cx:chartData>"];
-  for (const externalData of chartData?.externalData ?? []) {
-    const attrs = [
-      `r:id="${escapeAttr(externalData.id ?? "")}"`,
-      externalData.autoUpdate !== undefined
-        ? `autoUpdate="${externalData.autoUpdate ? "1" : "0"}"`
-        : undefined
-    ].filter((attr): attr is string => !!attr);
-    parts.push(`<cx:externalData ${attrs.join(" ")}/>`);
-  }
+  // NOTE: `cx:externalData` is a child of `cx:chartSpace` per
+  // Chart2014's `CT_ChartSpace`, NOT of `cx:chartData`. The raw
+  // patcher used to emit it here — that produced a document Office
+  // rejected in strict mode. The structured writer and raw-patch
+  // paths now both emit externalData at the chartSpace level; any
+  // legacy `chartData.externalData` is migrated to
+  // `chartSpace.externalData` at parse time so the deprecated slot
+  // can be ignored here without data loss.
   for (const entry of chartData?.data ?? []) {
     parts.push(`<cx:data id="${entry.id}">`);
     if (entry.strDim) {
@@ -1972,9 +2098,23 @@ function serialiseSimpleGroupFieldValue(value: unknown): string {
     return value ? "1" : "0";
   }
   if (typeof value === "number") {
-    return String(value);
+    // Guard against `NaN` / `Infinity` leaking into the attribute —
+    // `String(NaN) === "NaN"` produces XML Excel rejects. Callers
+    // that pass an invalid numeric should get an empty string
+    // instead; the caller removes the leaf on absence, so an empty
+    // serialise is equivalent to "don't emit this field".
+    return Number.isFinite(value) ? String(value) : "";
   }
-  return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  // Strings go through the canonical attribute encoder. Previously
+  // this helper hand-rolled a minimal `& " <` escape chain, which
+  // let newlines / tabs / illegal XML chars / lone surrogates
+  // through verbatim — the raw patcher then produced attribute
+  // values that (a) normalized to a single space on parse (XML 1.0
+  // §3.3.3), losing newlines, or (b) contained chars no parser
+  // accepts. `xmlEncodeAttr` strips the illegal ones and encodes
+  // CR/LF/Tab as numeric character references so round-trip preserves
+  // whitespace.
+  return xmlEncodeAttr(String(value));
 }
 
 function patchRawChartGroupDataLabels(raw: string, model: any): string | undefined {
@@ -2060,16 +2200,6 @@ function buildRawLayoutXml(layout: any, namespace: "c" | "cx" = "c"): string {
   }
   parts.push(`</${namespace}:manualLayout></${namespace}:layout>`);
   return parts.join("");
-}
-
-function buildRawChartExLayoutXml(layout: any): string {
-  if (!layout) {
-    return "";
-  }
-  if (layout._rawXml && !layout.manualLayout) {
-    return layout._rawXml;
-  }
-  return buildRawLayoutXml(layout, "cx");
 }
 
 function patchRawChartGroupDataLabelsBlock(block: string, group: any): string {
@@ -2616,13 +2746,23 @@ function buildRawScalingXml(scaling: any): string {
   if (scaling.orientation !== undefined) {
     parts.push(`<c:orientation val="${escapeAttr(scaling.orientation)}"/>`);
   }
-  if (scaling.max !== undefined) {
+  // Numeric scaling attributes MUST be finite on the wire; the OOXML
+  // grammar requires `xsd:double` / `xsd:unsignedInt`, and writing
+  // `val="NaN"` or `val="Infinity"` produces a file Excel refuses to
+  // open. `String(NaN) === "NaN"`, so the prior direct interpolation
+  // silently passed garbage through. Guard each slot and skip
+  // non-finite values — the schema treats absence as "auto", which
+  // is closer to the author's intent than an invalid literal.
+  if (scaling.max !== undefined && Number.isFinite(scaling.max)) {
     parts.push(`<c:max val="${scaling.max}"/>`);
   }
-  if (scaling.min !== undefined) {
+  if (scaling.min !== undefined && Number.isFinite(scaling.min)) {
     parts.push(`<c:min val="${scaling.min}"/>`);
   }
-  if (scaling.logBase !== undefined) {
+  if (scaling.logBase !== undefined && Number.isFinite(scaling.logBase) && scaling.logBase > 0) {
+    // `CT_LogBase` requires the value be `>= 2` per ECMA-376
+    // §21.2.3.21; `> 0` is the looser guard we use at parse time.
+    // Leave range clamping to the builder.
     parts.push(`<c:logBase val="${scaling.logBase}"/>`);
   }
   parts.push("</c:scaling>");
@@ -3086,6 +3226,12 @@ function writeRawColor(writer: XmlWriter, color: any): void {
       "folHlink"
     ];
     writeColorNode("a:schemeClr", themeNames[color.theme] ?? "dk1");
+  } else if (color.schemeName) {
+    // Unknown scheme colour tokens (e.g. `phClr`, vendor extensions)
+    // round-trip as `<a:schemeClr>` — keeping the element identity
+    // intact. Previously these fell through to `<a:sysClr>` via the
+    // parser, silently changing the DrawingML colour kind.
+    writeColorNode("a:schemeClr", color.schemeName);
   } else if (color.sysClr) {
     writeColorNode("a:sysClr", color.sysClr);
   } else if (color.prstClr) {
@@ -3100,17 +3246,55 @@ function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
   writer.openNode("a:gradFill");
   writer.openNode("a:gsLst");
   for (const stop of gradient.stops) {
-    writer.openNode("a:gs", { pos: String(Math.round(stop.position * 1000)) });
+    // OOXML `<a:gs pos>` is hundredths of a percent (0–100000). See
+    // the matching fixes in `chart-space-xform.ts` and
+    // `chart-ex-renderer.ts`; the previous `×1000` multiplier was
+    // 100× too small and produced gradients in Excel at wildly
+    // wrong positions.
+    const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
+    writer.openNode("a:gs", { pos: String(encoded) });
     writeRawColor(writer, stop.color);
     writer.closeNode();
   }
   writer.closeNode();
   if (gradient.type === "circle" || gradient.type === "rect" || gradient.type === "shape") {
+    // Preserve parsed `fillToRect` focal rectangle when present;
+    // default to Excel's centred form (all components at 50%).
+    // `CT_FillToRectangle` sides are `ST_Percentage`, which permits
+    // negative values (focal point outside the shape). Don't clamp
+    // to `[0, 100000]` — negative focal points were being lost on
+    // round-trip before this fix.
+    const rect = gradient.fillToRect;
+    const pct = (v: number | undefined, def: number): number => {
+      if (v === undefined) {
+        return def;
+      }
+      return Math.round(v * 100000);
+    };
     writer.openNode("a:path", { path: gradient.type });
-    writer.leafNode("a:fillToRect", { l: "50000", t: "50000", r: "50000", b: "50000" });
+    writer.leafNode("a:fillToRect", {
+      l: String(pct(rect?.left, 50000)),
+      t: String(pct(rect?.top, 50000)),
+      r: String(pct(rect?.right, 50000)),
+      b: String(pct(rect?.bottom, 50000))
+    });
     writer.closeNode();
   } else {
-    writer.leafNode("a:lin", { ang: String((gradient.angle ?? 0) * 60000), scaled: "1" });
+    // Emit `scaled` only when the author explicitly set it; mirrors
+    // the structured ChartEx renderer (chart-ex-renderer.ts line
+    // 4782) so both paths produce the same bytes. Previously this
+    // raw writer unconditionally stamped `scaled="1"`, which
+    // overwrote a parsed `scaled="0"` on round-trip — a visible
+    // drift for gradients with the shape-independent orientation
+    // mode. The OOXML default is `false` per `CT_LinearShadeProperties`,
+    // so omitting it when absent is lossless.
+    const linAttrs: Record<string, string> = {
+      ang: String(Math.round((gradient.angle ?? 0) * 60000))
+    };
+    if (gradient.scaled !== undefined) {
+      linAttrs.scaled = gradient.scaled ? "1" : "0";
+    }
+    writer.leafNode("a:lin", linAttrs);
   }
   writer.closeNode();
 }
@@ -3306,25 +3490,34 @@ function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
 }
 
 function buildRawColorModifiersXml(color: any): string {
+  // Each modifier must serialise as `<a:* val="N"/>` where `N` is a
+  // valid `xsd:int`. Previously the raw patcher interpolated model
+  // values directly, so `NaN` / `Infinity` / unrounded floats leaked
+  // into the attribute and Excel's strict reader rejected the file
+  // with "invalid attribute value for xs:int". The structured renderer
+  // (`renderColorModifiers` in chart-ex-renderer.ts) guards with
+  // `Number.isFinite` + `Math.round` — mirror that here so both write
+  // paths produce identical bytes, then share the helper.
   const parts: string[] = [];
-  if (color.alpha !== undefined) {
-    parts.push(`<a:alpha val="${color.alpha}"/>`);
-  }
-  if (color.tint !== undefined) {
+  const emitInt = (tag: string, value: number | undefined): void => {
+    if (value === undefined || !Number.isFinite(value)) {
+      return;
+    }
+    parts.push(`<a:${tag} val="${Math.round(value)}"/>`);
+  };
+  emitInt("alpha", color.alpha);
+  // `tint` on the public `ChartColor` is a 0..1 fraction; convert to
+  // the DrawingML 0..100000 per-thousand integer here. DrawingML also
+  // permits NEGATIVE tint (shade toward black) per
+  // `CT_PositiveFixedPercentage` — the structured path preserves the
+  // sign, so we do too.
+  if (color.tint !== undefined && Number.isFinite(color.tint)) {
     parts.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
   }
-  if (color.lumMod !== undefined) {
-    parts.push(`<a:lumMod val="${color.lumMod}"/>`);
-  }
-  if (color.lumOff !== undefined) {
-    parts.push(`<a:lumOff val="${color.lumOff}"/>`);
-  }
-  if (color.shade !== undefined) {
-    parts.push(`<a:shade val="${color.shade}"/>`);
-  }
-  if (color.satMod !== undefined) {
-    parts.push(`<a:satMod val="${color.satMod}"/>`);
-  }
+  emitInt("shade", color.shade);
+  emitInt("satMod", color.satMod);
+  emitInt("lumMod", color.lumMod);
+  emitInt("lumOff", color.lumOff);
   return parts.join("");
 }
 
@@ -3347,6 +3540,46 @@ function patchRawChartExSeriesBlock(
   series: any,
   patchPlan: ChartExSeriesRawPatchPlan | true
 ): string {
+  // Child sequence per Chart2014 `CT_Series`:
+  //
+  //   tx? → spPr? → txPr? → valueColors? → valueColorPositions? →
+  //   dataPt* → dataLabels? → dataId* → layoutPr? → axisId* → extLst?
+  //
+  // The sibling arrays below describe the elements that must come
+  // AFTER the element being inserted so `replaceOrInsertBeforeGeneric`
+  // can splice into the right position. Previous versions used
+  // sibling lists that put `dataId` before `dataLabels` / `dataPt` —
+  // reversing the schema order and producing files strict validators
+  // reject. Use the real schema order so raw-patch output matches
+  // what `renderSeries` produces for the same model.
+  const afterTx = [
+    "cx:spPr",
+    "cx:txPr",
+    "cx:valueColors",
+    "cx:valueColorPositions",
+    "cx:dataPt",
+    "cx:dataLabels",
+    "cx:dataId",
+    "cx:layoutPr",
+    "cx:axisId",
+    "cx:extLst"
+  ];
+  const afterSpPr = [
+    "cx:txPr",
+    "cx:valueColors",
+    "cx:valueColorPositions",
+    "cx:dataPt",
+    "cx:dataLabels",
+    "cx:dataId",
+    "cx:layoutPr",
+    "cx:axisId",
+    "cx:extLst"
+  ];
+  const afterDataPt = ["cx:dataLabels", "cx:dataId", "cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterDataLabels = ["cx:dataId", "cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterDataId = ["cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterLayoutPr = ["cx:axisId", "cx:extLst"];
+  const afterAxisId = ["cx:extLst"];
   let patched = block;
   if (rawPatchFlag(patchPlan, "hidden")) {
     patched = patchOpeningTagBooleanAttribute(patched, "cx:series", "hidden", series.hidden);
@@ -3359,15 +3592,7 @@ function patchRawChartExSeriesBlock(
       patched,
       "cx:tx",
       buildRawChartExSeriesTxXml(series.tx),
-      [
-        "cx:spPr",
-        "cx:dataId",
-        "cx:layoutPr",
-        "cx:axisId",
-        "cx:dataLabels",
-        "cx:dataPt",
-        "cx:extLst"
-      ],
+      afterTx,
       "cx:series"
     );
   }
@@ -3376,7 +3601,25 @@ function patchRawChartExSeriesBlock(
       patched,
       "cx:spPr",
       buildRawShapePropertiesXml(series.spPr, "cx"),
-      ["cx:dataId", "cx:layoutPr", "cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      afterSpPr,
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataPoints")) {
+    const dataPointXml = (series.dataPt ?? [])
+      .map((point: any) => {
+        const spPrXml = buildRawShapePropertiesXml(point.spPr, "cx") ?? "";
+        return `<cx:dataPt idx="${point.idx}">${spPrXml}</cx:dataPt>`;
+      })
+      .join("");
+    patched = patchRepeatingChildren(patched, "cx:dataPt", dataPointXml, afterDataPt, "cx:series");
+  }
+  if (rawPatchFlag(patchPlan, "dataLabels")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:dataLabels",
+      buildRawChartExDataLabelsXml(series.dataLabels),
+      afterDataLabels,
       "cx:series"
     );
   }
@@ -3390,20 +3633,14 @@ function patchRawChartExSeriesBlock(
             : ""
       )
       .join("");
-    patched = patchRepeatingChildren(
-      patched,
-      "cx:dataId",
-      dataRefsXml,
-      ["cx:layoutPr", "cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
-      "cx:series"
-    );
+    patched = patchRepeatingChildren(patched, "cx:dataId", dataRefsXml, afterDataId, "cx:series");
   }
   if (rawPatchFlag(patchPlan, "layoutPr")) {
     patched = patchGenericChild(
       patched,
       "cx:layoutPr",
       buildRawChartExLayoutPropertiesXml(series.layoutId, series.layoutPr),
-      ["cx:axisId", "cx:dataLabels", "cx:dataPt", "cx:extLst"],
+      afterLayoutPr,
       "cx:series"
     );
   }
@@ -3411,37 +3648,7 @@ function patchRawChartExSeriesBlock(
     const axisIdsXml = (series.axisId ?? [])
       .map((id: number) => `<cx:axisId val="${id}"/>`)
       .join("");
-    patched = patchRepeatingChildren(
-      patched,
-      "cx:axisId",
-      axisIdsXml,
-      ["cx:dataLabels", "cx:dataPt", "cx:extLst"],
-      "cx:series"
-    );
-  }
-  if (rawPatchFlag(patchPlan, "dataLabels")) {
-    patched = patchGenericChild(
-      patched,
-      "cx:dataLabels",
-      buildRawChartExDataLabelsXml(series.dataLabels),
-      ["cx:dataPt", "cx:extLst"],
-      "cx:series"
-    );
-  }
-  if (rawPatchFlag(patchPlan, "dataPoints")) {
-    const dataPointXml = (series.dataPt ?? [])
-      .map((point: any) => {
-        const spPrXml = buildRawShapePropertiesXml(point.spPr, "cx") ?? "";
-        return `<cx:dataPt idx="${point.idx}">${spPrXml}</cx:dataPt>`;
-      })
-      .join("");
-    patched = patchRepeatingChildren(
-      patched,
-      "cx:dataPt",
-      dataPointXml,
-      ["cx:extLst"],
-      "cx:series"
-    );
+    patched = patchRepeatingChildren(patched, "cx:axisId", axisIdsXml, afterAxisId, "cx:series");
   }
   return patched;
 }
@@ -3450,13 +3657,126 @@ function buildRawChartExSeriesTxXml(tx: any): string {
   if (!tx) {
     return "";
   }
+  if (tx.rich) {
+    // Round-trip parity with the structured writer — ChartEx series
+    // names authored as rich text (per-run formatting, bold / colour
+    // / font-family overrides) used to be silently dropped by the raw
+    // patcher: only `tx.value` and `tx.strRef` were handled, so a
+    // mutation that preserved `tx.rich` on the model would re-emit
+    // `<cx:tx/>` without a `<cx:rich>` child, collapsing the label to
+    // an unstyled placeholder. Emit a minimal `<cx:tx><cx:rich>…`
+    // subtree carrying the paragraph / run structure. The rPr helper
+    // is a pragmatic subset (size / bold / italic / color) — features
+    // beyond that flight through the structured path, which is the
+    // default when `preferRawPatch` isn't opt-in.
+    return `<cx:tx>${buildRawChartExRichTextXml(tx.rich)}</cx:tx>`;
+  }
   if (tx.value !== undefined) {
     return `<cx:tx><cx:txData><cx:v>${escapeXml(String(tx.value))}</cx:v></cx:txData></cx:tx>`;
   }
   if (tx.strRef !== undefined) {
-    return `<cx:tx><cx:txData><cx:f>${escapeXml(String(tx.strRef))}</cx:f></cx:txData></cx:tx>`;
+    // `tx.strRef` is declared as `string | { formula: string; cached?: string }`
+    // on `ChartExSeries.tx`. The previous writer coerced via
+    // `String(tx.strRef)`, which produced the literal `"[object Object]"`
+    // for the structured form — silently corrupting the formula on every
+    // series that carried a `{ formula, cached }` pair through the raw
+    // patch path.
+    let formula: string;
+    let cached: string | undefined;
+    if (typeof tx.strRef === "string") {
+      formula = tx.strRef;
+    } else if (
+      tx.strRef &&
+      typeof tx.strRef === "object" &&
+      typeof tx.strRef.formula === "string"
+    ) {
+      formula = tx.strRef.formula;
+      cached = typeof tx.strRef.cached === "string" ? tx.strRef.cached : undefined;
+    } else {
+      // Degenerate shape (unknown form) — drop the element rather than
+      // emit `<cx:f>[object Object]</cx:f>` and corrupt the formula.
+      return "";
+    }
+    const cachedEl = cached !== undefined ? `<cx:v>${escapeXml(cached)}</cx:v>` : "";
+    return `<cx:tx><cx:txData><cx:f>${escapeXml(formula)}</cx:f>${cachedEl}</cx:txData></cx:tx>`;
   }
   return "";
+}
+
+/**
+ * Minimal `<cx:rich>` emitter used by the ChartEx raw patcher when a
+ * series `tx` carries a `rich` paragraph tree. Mirrors the structured
+ * renderer's output shape (`renderRichText` in `chart-ex-renderer`)
+ * for the attributes the raw patch path needs — size / bold / italic
+ * and the text colour — so round-trip parity is preserved for the
+ * common "bold label" case. Features outside this subset (mixed font
+ * families, east-Asian runs, paragraph properties) flow through the
+ * structured writer, which the mutation helper invokes by default;
+ * `preferRawPatch` callers who need the full set should stay on
+ * structural rebuilds.
+ */
+function buildRawChartExRichTextXml(rich: any): string {
+  if (!rich || !Array.isArray(rich.paragraphs)) {
+    return "";
+  }
+  const parts: string[] = ["<cx:rich>", "<a:bodyPr/>", "<a:lstStyle/>"];
+  for (const p of rich.paragraphs) {
+    parts.push("<a:p>");
+    for (const run of p.runs ?? []) {
+      const rPr = buildRawChartExRunPropertiesXml(run.properties);
+      // Preserve significant whitespace — matches the structured
+      // writer's `xml:space="preserve"` rule (see `needsXmlSpacePreserve`).
+      const text = typeof run.text === "string" ? run.text : "";
+      const needsPreserve = /^\s|\s$|[\t\n\r]/.test(text);
+      const tAttrs = needsPreserve ? ' xml:space="preserve"' : "";
+      parts.push(`<a:r>${rPr}<a:t${tAttrs}>${escapeXml(text)}</a:t></a:r>`);
+    }
+    parts.push('<a:endParaRPr lang="en-US"/>');
+    parts.push("</a:p>");
+  }
+  parts.push("</cx:rich>");
+  return parts.join("");
+}
+
+function buildRawChartExRunPropertiesXml(props: any): string {
+  if (!props || typeof props !== "object") {
+    return "";
+  }
+  const attrs: string[] = [];
+  if (typeof props.size === "number" && Number.isFinite(props.size)) {
+    attrs.push(`sz="${props.size}"`);
+  }
+  if (props.bold !== undefined) {
+    attrs.push(`b="${props.bold ? 1 : 0}"`);
+  }
+  if (props.italic !== undefined) {
+    attrs.push(`i="${props.italic ? 1 : 0}"`);
+  }
+  // Inline colour child only — the full `<a:solidFill>` emitter is
+  // intentionally out of scope for the raw patcher (structural
+  // rebuild handles anything beyond srgbClr / theme).
+  const color = props.color;
+  let colorChild = "";
+  if (color && typeof color === "object") {
+    if (typeof color.srgb === "string") {
+      colorChild = `<a:solidFill><a:srgbClr val="${escapeAttr(color.srgb)}"/></a:solidFill>`;
+    } else if (typeof color.theme === "number") {
+      // `color.theme` is a 0-based index into the workbook's theme
+      // palette — 0..3 are bg/lt1/dk2/lt2, 4..9 are accent1..accent6,
+      // 10..11 are hlink / folHlink. The previous implementation
+      // emitted `accent${color.theme}`, which produced nonsense
+      // (`accent4` for `theme=4` instead of `accent1`; `accent0` for
+      // `theme=0` which is not even a valid DrawingML scheme slot).
+      // Route through the canonical helper shared with the
+      // structural emitters so the mapping stays in one place.
+      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(themeIndexToName(color.theme))}"/></a:solidFill>`;
+    }
+  }
+  if (attrs.length === 0 && !colorChild) {
+    return "";
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  return colorChild ? `<a:rPr${attrStr}>${colorChild}</a:rPr>` : `<a:rPr${attrStr}/>`;
 }
 
 function buildRawChartExLayoutPropertiesXml(layoutId: string, layoutPr: any): string {
@@ -3483,30 +3803,55 @@ function buildRawChartExLayoutPropertiesXml(layoutId: string, layoutPr: any): st
   if (layoutPr.binning) {
     const binning = layoutPr.binning;
     const attrs = [
-      binning.intervalClosed ? `intervalClosed="${escapeAttr(binning.intervalClosed)}"` : undefined,
-      binning.underflow !== undefined ? `underflow="${binning.underflow}"` : undefined,
-      binning.overflow !== undefined ? `overflow="${binning.overflow}"` : undefined
+      binning.intervalClosed === "l" || binning.intervalClosed === "r"
+        ? `intervalClosed="${escapeAttr(binning.intervalClosed)}"`
+        : undefined,
+      binning.underflow !== undefined && Number.isFinite(binning.underflow)
+        ? `underflow="${binning.underflow}"`
+        : undefined,
+      binning.overflow !== undefined && Number.isFinite(binning.overflow)
+        ? `overflow="${binning.overflow}"`
+        : undefined
     ].filter((attr): attr is string => !!attr);
     parts.push(`<cx:binning${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}>`);
+    // CT_Binning schema order: choice(auto|categories|manual)
+    // followed by optional binSize and binCount. Previously the raw
+    // patcher emitted `<cx:auto/>` then `<cx:binSize/>` then
+    // `<cx:binCount/>` then `<cx:categories/>` / `<cx:manual/>` — but
+    // `categories`/`manual` are mutually exclusive with `auto`, and
+    // emitting them after binSize/binCount puts them out of the
+    // schema sequence. The parser's priority chain at
+    // `chart-ex-parser.ts:parseLayoutProperties` resolves
+    // auto > categories > manual, so the stray trailing elements
+    // never round-tripped back anyway. Mirror the structured
+    // renderer's order: one discriminator first, then the numeric
+    // children.
     if (binning.binType === "auto") {
       parts.push("<cx:auto/>");
+    } else if (binning.binType === "categories") {
+      parts.push("<cx:categories/>");
+    } else if (binning.binType === "manual") {
+      parts.push("<cx:manual/>");
     }
-    if (binning.binSize !== undefined) {
+    if (binning.binSize !== undefined && Number.isFinite(binning.binSize)) {
       parts.push(`<cx:binSize val="${binning.binSize}"/>`);
     }
-    if (binning.binCount !== undefined) {
+    if (binning.binCount !== undefined && Number.isFinite(binning.binCount)) {
       parts.push(`<cx:binCount val="${binning.binCount}"/>`);
-    }
-    if (binning.binType === "categories") {
-      parts.push("<cx:categories/>");
-    }
-    if (binning.binType === "manual") {
-      parts.push("<cx:manual/>");
     }
     parts.push("</cx:binning>");
   }
-  if (layoutPr.paretoLine) {
-    parts.push('<cx:paretoLine val="1"/>');
+  // `paretoLine` is only a valid child when the enclosing layout is a
+  // pareto (clusteredColumn with pareto overlay, or the standalone
+  // `paretoLine` layoutId). Emit the explicit boolean — including
+  // `false` — so round-trip of user-suppressed pareto overlays
+  // matches the structured writer. Previously `if (layoutPr.paretoLine)`
+  // silently dropped the `false` case, re-enabling the line on save.
+  if (
+    layoutPr.paretoLine !== undefined &&
+    (layoutId === "clusteredColumn" || layoutId === "paretoLine")
+  ) {
+    parts.push(`<cx:paretoLine val="${layoutPr.paretoLine ? "1" : "0"}"/>`);
   }
   if (layoutId === "boxWhisker") {
     for (const [name, value] of [
@@ -3542,13 +3887,20 @@ function buildRawChartExLayoutPropertiesXml(layoutId: string, layoutPr: any): st
 }
 
 function hasStructuredChartExLayoutProperties(layoutPr: any): boolean {
+  // `increaseSpPr` / `decreaseSpPr` / `totalSpPr` are **preview-only**
+  // fields consumed by the SVG/PDF renderer to colour waterfall bars;
+  // Chart2014 has no schema slot for them (per-point styling lives on
+  // `<cx:dataPt>` instead). Do NOT treat setting one as a "structured
+  // mutation" — doing so would force the raw patcher onto the
+  // structured rebuild path and discard `_rawXml`, silently dropping
+  // every other property the raw bytes carried. The structured
+  // renderer (`hasStructuredLayoutProperties` in chart-ex-renderer.ts)
+  // uses the same exclusion list; keeping the two helpers in sync
+  // prevents asymmetric behaviour between raw-patch and rebuild.
   return [
     layoutPr.parentLabelLayout,
     layoutPr.subtotals,
     layoutPr.connectorLines,
-    layoutPr.increaseSpPr,
-    layoutPr.decreaseSpPr,
-    layoutPr.totalSpPr,
     layoutPr.binning,
     layoutPr.paretoLine,
     layoutPr.quartileMethod,
@@ -3629,67 +3981,105 @@ function patchRawChartExAxisBlock(
   axis: any,
   patchPlan: ChartExAxisRawPatchPlan | true
 ): string {
+  // `CT_Axis` child sequence (Chart2014):
+  //
+  //   (catScaling | valScaling) → title → units →
+  //   majorTickMarks → minorTickMarks →
+  //   majorGridlines → minorGridlines →
+  //   numFmt → txPr → spPr → extLst
+  //
+  // (The structured renderer emits `txPr` before `spPr` to match
+  // Excel's real output; some schema mirrors put spPr first, but
+  // Excel itself serialises txPr first and readers accept both. The
+  // raw patcher mirrors the structured renderer so both paths land
+  // byte-identical XML for the same model.)
+  //
+  // Sibling lists describe every element that must come AFTER the
+  // element being inserted. Older versions of the patcher used
+  // sibling arrays that put `majorTickMarks` before
+  // `title`/`valScaling`/`catScaling`, inverting the schema — strict
+  // validators rejected the output and Excel's own reader silently
+  // dropped whichever element landed out of position.
+  const afterScaling = [
+    "cx:title",
+    "cx:units",
+    "cx:majorTickMarks",
+    "cx:majorTickMark",
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterTitle = [
+    "cx:units",
+    "cx:majorTickMarks",
+    "cx:majorTickMark",
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterMajorTicks = [
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterMinorTicks = [
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterNumFmt = ["cx:txPr", "cx:spPr", "cx:extLst"];
+  const afterTxPr = ["cx:spPr", "cx:extLst"];
+  const afterSpPr = ["cx:extLst"];
   let patched = block;
   if (rawPatchFlag(patchPlan, "hidden")) {
-    patched = patchBooleanLeaf(
-      patched,
-      "cx:hidden",
-      axis.hidden,
-      [
-        "cx:majorTickMark",
-        "cx:minorTickMark",
-        "cx:numFmt",
-        "cx:title",
-        "cx:valScaling",
-        "cx:catScaling",
-        "cx:spPr",
-        "cx:txPr",
-        "cx:extLst"
-      ],
-      "cx:axis"
-    );
+    // `CT_Axis/@hidden` is an **attribute** on the opening `<cx:axis>`
+    // tag per ECMA-376 Chart2014, not a child element. Previously
+    // this raw-patch path emitted `<cx:hidden val="1"/>` as a child,
+    // which strict validators reject. Replay the mutation as an
+    // attribute tweak on the opening tag. When `axis.hidden` is
+    // `undefined` the attribute is removed entirely; explicit `false`
+    // lands `hidden="0"` so files that carried an affirmative
+    // visibility marker round-trip byte-identically.
+    patched = patchXmlAttribute(patched, "cx:axis", "hidden", axis.hidden);
+    // Clean up any stale child `<cx:hidden/>` bytes left over from
+    // legacy output that predated the attribute rewrite — the parser
+    // accepts both forms (see `chart-ex-parser.ts:parseAxis`), so
+    // round-tripping an older file must eliminate the legacy form.
+    patched = removeXmlBlock(patched, "cx:hidden");
   }
-  if (rawPatchFlag(patchPlan, "majorTickMark")) {
-    patched = patchValueLeaf(
-      patched,
-      "cx:majorTickMark",
-      axis.majorTickMark,
-      [
-        "cx:minorTickMark",
-        "cx:numFmt",
-        "cx:title",
-        "cx:valScaling",
-        "cx:catScaling",
-        "cx:spPr",
-        "cx:txPr",
-        "cx:extLst"
-      ],
-      "cx:axis"
-    );
-  }
-  if (rawPatchFlag(patchPlan, "minorTickMark")) {
-    patched = patchValueLeaf(
-      patched,
-      "cx:minorTickMark",
-      axis.minorTickMark,
-      [
-        "cx:numFmt",
-        "cx:title",
-        "cx:valScaling",
-        "cx:catScaling",
-        "cx:spPr",
-        "cx:txPr",
-        "cx:extLst"
-      ],
-      "cx:axis"
-    );
-  }
-  if (rawPatchFlag(patchPlan, "numFmt")) {
+  if (rawPatchFlag(patchPlan, "valScaling")) {
     patched = patchGenericChild(
       patched,
-      "cx:numFmt",
-      buildRawChartExNumFmtXml(axis.numFmt),
-      ["cx:title", "cx:valScaling", "cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:valScaling",
+      buildRawChartExScalingXml("valScaling", axis.valScaling),
+      afterScaling,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "catScaling")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:catScaling",
+      buildRawChartExScalingXml("catScaling", axis.catScaling),
+      afterScaling,
       "cx:axis"
     );
   }
@@ -3701,7 +4091,7 @@ function patchRawChartExAxisBlock(
           patched,
           "cx:title",
           buildRawChartExTitleXml(text),
-          ["cx:valScaling", "cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+          afterTitle,
           "cx:axis"
         );
       }
@@ -3709,30 +4099,38 @@ function patchRawChartExAxisBlock(
       patched = removeXmlBlock(patched, "cx:title");
     }
   }
-  if (rawPatchFlag(patchPlan, "valScaling")) {
-    patched = patchGenericChild(
+  if (rawPatchFlag(patchPlan, "majorTickMark")) {
+    // `cx:majorTickMark` in the Chart2014 schema is the **plural**
+    // `majorTickMarks`. Earlier versions of this library emitted the
+    // classic-chart singular form; the raw patcher now always lands
+    // the plural, and strips any stale singular leftover so repeated
+    // patches don't duplicate the element.
+    patched = removeXmlBlock(patched, "cx:majorTickMark");
+    patched = patchValueLeaf(
       patched,
-      "cx:valScaling",
-      buildRawChartExScalingXml("valScaling", axis.valScaling),
-      ["cx:catScaling", "cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:majorTickMarks",
+      axis.majorTickMark,
+      afterMajorTicks,
       "cx:axis"
     );
   }
-  if (rawPatchFlag(patchPlan, "catScaling")) {
-    patched = patchGenericChild(
+  if (rawPatchFlag(patchPlan, "minorTickMark")) {
+    // Plural form — see `majorTickMark` note above.
+    patched = removeXmlBlock(patched, "cx:minorTickMark");
+    patched = patchValueLeaf(
       patched,
-      "cx:catScaling",
-      buildRawChartExScalingXml("catScaling", axis.catScaling),
-      ["cx:spPr", "cx:txPr", "cx:extLst"],
+      "cx:minorTickMarks",
+      axis.minorTickMark,
+      afterMinorTicks,
       "cx:axis"
     );
   }
-  if (rawPatchFlag(patchPlan, "spPr")) {
+  if (rawPatchFlag(patchPlan, "numFmt")) {
     patched = patchGenericChild(
       patched,
-      "cx:spPr",
-      buildRawShapePropertiesXml(axis.spPr, "cx"),
-      ["cx:txPr", "cx:extLst"],
+      "cx:numFmt",
+      buildRawChartExNumFmtXml(axis.numFmt),
+      afterNumFmt,
       "cx:axis"
     );
   }
@@ -3741,7 +4139,16 @@ function patchRawChartExAxisBlock(
       patched,
       "cx:txPr",
       buildRawTextPropertiesXml(axis.txPr, "cx"),
-      ["cx:extLst"],
+      afterTxPr,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(axis.spPr, "cx"),
+      afterSpPr,
       "cx:axis"
     );
   }
@@ -3857,13 +4264,26 @@ function patchOpeningTagBooleanAttribute(
   if (openEnd < 0 || !block.startsWith(`<${tag}`)) {
     return block;
   }
-  let open = block
+  const head = block
     .slice(0, openEnd + 1)
     .replace(new RegExp(`\\s${attr}=("[^"]*"|'[^']*')`, "g"), "");
-  if (value) {
-    open = open.replace(/>$/, ` ${attr}="1">`);
+  if (value === undefined) {
+    return head + block.slice(openEnd + 1);
   }
-  return open + block.slice(openEnd + 1);
+  // Emit an explicit `val="0"` / `val="1"` for both boolean states so
+  // the raw patch path matches the structured renderer (which emits
+  // `hidden="0"` on `<cx:series>` when the author set `hidden:
+  // false`). Previously the `false` case dropped the attribute
+  // entirely — technically equivalent to the schema default, but
+  // asymmetric with the structured writer: files round-tripping
+  // through raw-patch lost an explicitly-false marker that the
+  // structural path preserved.
+  const selfClosing = head.endsWith("/>");
+  const insertion = ` ${attr}="${value ? "1" : "0"}"`;
+  const rewritten = selfClosing
+    ? head.replace(/\/>$/, `${insertion}/>`)
+    : head.replace(/>$/, `${insertion}>`);
+  return rewritten + block.slice(openEnd + 1);
 }
 
 /**
@@ -3913,6 +4333,55 @@ function patchRepeatingChildren(
 function removeXmlBlock(block: string, tag: string): string {
   const range = findXmlBlock(block, tag);
   return range ? block.slice(0, range.start) + block.slice(range.end) : block;
+}
+
+/**
+ * Patch a single attribute on the opening tag of `elementTag` inside
+ * the supplied `block`. Intended for raw-XML patching where the
+ * attribute, not a child element, carries the field — e.g.
+ * `CT_Axis/@hidden` in the Chart2014 schema.
+ *
+ *   - `value === undefined` removes the attribute (if present).
+ *   - `value === true | false` lands `attr="1"` / `attr="0"` — the
+ *     OOXML `xsd:boolean` lexical form.
+ *   - `value: string` lands literally (escaped).
+ *
+ * The function only mutates the **first** matching opening tag; it
+ * does not recurse into nested elements of the same name (axes in a
+ * combo-chart plotArea are iterated by the caller, each block already
+ * narrowed to a single `<cx:axis …>` opening). Returns the block
+ * unchanged when `elementTag` can't be found — callers rely on the
+ * identity comparison `patched !== block` to detect successful writes.
+ */
+function patchXmlAttribute(
+  block: string,
+  elementTag: string,
+  attrName: string,
+  value: boolean | string | undefined
+): string {
+  // Match the opening tag, allowing leading whitespace in attributes
+  // and both self-closing and regular element forms. Escape the tag
+  // for regex; element names can contain `:` and `-` but nothing else
+  // that regex would interpret.
+  const tagRe = new RegExp(`<${elementTag.replace(/[:.]/g, "\\$&")}\\b([^>]*)(/?)>`);
+  const match = tagRe.exec(block);
+  if (!match) {
+    return block;
+  }
+  const [fullMatch, attrSegment, selfClose] = match;
+  const attrRe = new RegExp(`\\s${attrName}="[^"]*"`);
+  const stripped = attrSegment.replace(attrRe, "");
+  const serialised =
+    value === undefined
+      ? ""
+      : typeof value === "boolean"
+        ? ` ${attrName}="${value ? "1" : "0"}"`
+        : ` ${attrName}="${escapeAttr(value)}"`;
+  const rebuilt = `<${elementTag}${stripped}${serialised}${selfClose}>`;
+  if (rebuilt === fullMatch) {
+    return block;
+  }
+  return block.slice(0, match.index) + rebuilt + block.slice(match.index + fullMatch.length);
 }
 
 function removeXmlBlocks(block: string, tag: string): string {
@@ -3969,33 +4438,144 @@ function findAxisBlock(
   return undefined;
 }
 
+/**
+ * Locate the `<tag …>…</tag>` (or self-closing `<tag …/>`) block in
+ * `raw` starting at or after `offset`. Returns `{ start, end }` on hit,
+ * `undefined` on miss.
+ *
+ * Two correctness concerns this implementation guards against:
+ *   1. **Prefix collision** — `indexOf("<tag")` matches `<tag2>` or
+ *      `<tagX>` as well as the literal `<tag>` / `<tag `/`<tag/`. We
+ *      require the character immediately after the tag name to be one
+ *      of `>`, `/`, or whitespace so `<c:chart>` can't match
+ *      `<c:chartSpace>` and `<c:ax>` can't match `<c:axId>`.
+ *   2. **Nested same-name elements** — `<c:extLst><c:ext>…<c:extLst>
+ *      …</c:extLst></c:ext></c:extLst>` used to match the inner
+ *      close. Walk open/close tokens with a depth counter to find the
+ *      matching end.
+ *
+ * Limitations: the scanner treats XML tokens lexically and will fail
+ * on same-name occurrences inside CDATA or XML comments. ChartEx XML
+ * does not use either, so this remains a safe shortcut.
+ */
 function findXmlBlock(
   raw: string,
   tag: string,
   offset = 0
 ): { start: number; end: number } | undefined {
-  const open = raw.indexOf(`<${tag}`, offset);
-  if (open < 0) {
+  const openToken = `<${tag}`;
+  const closeToken = `</${tag}>`;
+
+  let pos = offset;
+  let start = -1;
+  // First, find the first legitimate open tag — one whose next char is
+  // `>`, `/`, or whitespace. Prefix collisions (`<tag2>`) are silently
+  // skipped.
+  while (pos < raw.length) {
+    const candidate = raw.indexOf(openToken, pos);
+    if (candidate < 0) {
+      return undefined;
+    }
+    const nextChar = raw[candidate + openToken.length];
+    if (nextChar === ">" || nextChar === "/" || /\s/.test(nextChar ?? "")) {
+      start = candidate;
+      break;
+    }
+    pos = candidate + openToken.length;
+  }
+  if (start < 0) {
     return undefined;
   }
-  const openEnd = raw.indexOf(">", open);
+
+  // Find the end of the open tag. `>` inside a quoted attribute would
+  // confuse this, but Chart XML attributes never contain `>`.
+  const openEnd = raw.indexOf(">", start);
   if (openEnd < 0) {
     return undefined;
   }
   if (raw[openEnd - 1] === "/") {
-    return { start: open, end: openEnd + 1 };
+    return { start, end: openEnd + 1 };
   }
-  const closeToken = `</${tag}>`;
-  const close = raw.indexOf(closeToken, openEnd + 1);
-  return close >= 0 ? { start: open, end: close + closeToken.length } : undefined;
+
+  // Walk forward balancing opens and closes for this same tag name.
+  // A nested `<tag>` inside the element bumps the depth; `</tag>`
+  // decrements. When depth hits zero we've found the matching close.
+  let depth = 1;
+  let scan = openEnd + 1;
+  while (scan < raw.length && depth > 0) {
+    const nextOpen = (() => {
+      let p = scan;
+      while (p < raw.length) {
+        const c = raw.indexOf(openToken, p);
+        if (c < 0) {
+          return -1;
+        }
+        const next = raw[c + openToken.length];
+        if (next === ">" || next === "/" || /\s/.test(next ?? "")) {
+          return c;
+        }
+        p = c + openToken.length;
+      }
+      return -1;
+    })();
+    const nextClose = raw.indexOf(closeToken, scan);
+    if (nextClose < 0) {
+      return undefined;
+    }
+    if (nextOpen >= 0 && nextOpen < nextClose) {
+      // Another open of the same tag — but only count it if it's a
+      // real element (not self-closing, which shouldn't change depth).
+      const oeNext = raw.indexOf(">", nextOpen);
+      if (oeNext < 0) {
+        return undefined;
+      }
+      if (raw[oeNext - 1] !== "/") {
+        depth++;
+      }
+      scan = oeNext + 1;
+    } else {
+      depth--;
+      if (depth === 0) {
+        return { start, end: nextClose + closeToken.length };
+      }
+      scan = nextClose + closeToken.length;
+    }
+  }
+  return undefined;
 }
 
 function escapeXml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Route through the canonical XML encoder so every raw-patch / XML
+  // builder call site benefits from the same strict sanitisation:
+  //
+  //   - strips XML 1.0-forbidden control characters (`#x0`-`#x1F`
+  //     except `\t \n \r`, `#x7F` DEL, `#xFFFE`, `#xFFFF`);
+  //   - strips lone surrogate halves (previously `U+D800`-`U+DFFF`
+  //     outside a valid pair could leak into attribute / text
+  //     content and corrupt the output encoding);
+  //   - escapes all five XML structural entities (`< > & " '`).
+  //
+  // The previous local implementation only handled `& < >` plus a
+  // partial control-char strip. That was enough for the reserved-
+  // trio case but left `"` untouched in attribute values (callers
+  // compensated with a manual `.replace(/"/g, "&quot;")`), and
+  // lone surrogates survived — producing bytes no XML parser can
+  // reopen.
+  //
+  // Element-text call sites used to emit `"` / `'` verbatim; the
+  // new encoder produces `&quot;` / `&apos;`. Both are valid XML
+  // and round-trip identically through any parser, but byte-level
+  // diffs against the old output will show the extra entities.
+  return xmlEncode(value);
 }
 
 function escapeAttr(value: string): string {
-  return escapeXml(value).replace(/"/g, "&quot;");
+  // Attribute values need the extra step of escaping `\t \n \r` as
+  // numeric character references; without it, XML 1.0 §3.3.3
+  // attribute-value normalisation replaces them with a single
+  // literal space at parse time, silently losing any embedded
+  // newline / tab in (e.g.) a chart title.
+  return xmlEncodeAttr(value);
 }
 
 /**
@@ -4711,10 +5291,22 @@ class XLSX {
       }
     });
 
-    // Reconcile chartsheets — link their drawing references
+    // Reconcile chartsheets — link their drawing references and
+    // preserve every relationship so the writer can round-trip
+    // every r:id referenced by raw-captured children (legacyDrawing,
+    // picture, legacyDrawingHF, drawingHF, etc.). Previously only
+    // the drawing rel was hooked up and everything else was
+    // silently discarded on save, leaving any raw-captured child
+    // with a dangling r:id pointing at a now-missing part.
     const chartsheetsList = model.chartsheetsList || [];
     for (const cs of chartsheetsList) {
       const csRels = model.chartsheetRels[cs.sheetNo];
+      if (csRels) {
+        // Keep the full rels list attached to the model so
+        // `addChartsheets` can re-emit it. Copy so downstream
+        // mutations don't leak back into `model.chartsheetRels`.
+        cs.relationships = [...csRels];
+      }
       if (cs.drawing && csRels) {
         const drawingRel = csRels.find((r: any) => r.Id === cs.drawing.rId);
         if (drawingRel) {
@@ -6047,20 +6639,79 @@ class XLSX {
   async addChartsheets(zip: IZipWriter, model: any): Promise<void> {
     const chartsheetXform = new ChartsheetXform();
     const relsXform = new RelationshipsXform();
+    const vmlDrawingXform = new VmlDrawingXform();
+    // Track VML drawing zip paths we re-emit for chartsheets so we
+    // don't accidentally write the same VML part twice when a single
+    // VML file is referenced by multiple chartsheets. Writing a ZIP
+    // entry twice produces a package with duplicate central-directory
+    // entries — most consumers tolerate it (reading the last), but
+    // validators flag it and `unzip -l` shows the duplication.
+    const emittedVmlPaths = new Set<string>();
 
     for (const cs of model.chartsheets || []) {
       await this._renderToZip(zip, chartsheetPath(cs.sheetNo), chartsheetXform, cs);
 
-      // Write chartsheet rels if there's a drawing
+      // Chartsheet rels. A chartsheet may carry rels beyond the
+      // drawing reference — `legacyDrawing`, `legacyDrawingHF`,
+      // `drawingHF`, `picture`, etc. — and those rels are referenced
+      // by `r:id` attributes inside the raw-captured `rawChildren`
+      // blocks. If we only emit the drawing rel (the previous
+      // implementation), every other r:id goes dangling at save,
+      // corrupting the package.
+      //
+      // Strategy:
+      //   1. Start with the preserved `relationships` list from load
+      //      (missing for newly-created chartsheets).
+      //   2. Overlay / insert the current drawing rel — the drawing
+      //      target may have been rewritten (e.g. chartsheet renamed
+      //      or its drawing renumbered) so we replace any prior
+      //      entry with the same Id.
+      const baseRels: any[] = Array.isArray(cs.relationships) ? [...cs.relationships] : [];
       if (cs.drawing) {
-        const rels = [
-          {
-            Id: cs.drawing.rId,
-            Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
-            Target: `../drawings/${cs.drawingName}.xml`
+        const drawingRel = {
+          Id: cs.drawing.rId,
+          Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+          Target: `../drawings/${cs.drawingName}.xml`
+        };
+        const existingIdx = baseRels.findIndex((r: any) => r?.Id === cs.drawing.rId);
+        if (existingIdx >= 0) {
+          baseRels[existingIdx] = drawingRel;
+        } else {
+          baseRels.push(drawingRel);
+        }
+      }
+      if (baseRels.length > 0) {
+        await this._renderToZip(zip, chartsheetRelsPath(cs.sheetNo), relsXform, baseRels);
+      }
+
+      // Re-emit any VML drawing parts this chartsheet's rels reference.
+      // The worksheet loop only emits VML for worksheets that own
+      // comments / form controls / header images; a chartsheet that
+      // carries its own `<legacyDrawing r:id="…"/>` would preserve its
+      // rel target on write but leave the VML body missing from the
+      // package — a dangling relationship. Walk the chartsheet's rels,
+      // resolve each VML target against the chartsheet path, and emit
+      // the parsed body captured at load time.
+      if (model.vmlDrawings) {
+        const baseDir = `xl/chartsheets/`;
+        for (const rel of baseRels) {
+          if (rel?.Type !== RelType.VmlDrawing || !rel.Target) {
+            continue;
           }
-        ];
-        await this._renderToZip(zip, chartsheetRelsPath(cs.sheetNo), relsXform, rels);
+          const vmlPath = resolveRelTarget(baseDir, rel.Target);
+          if (emittedVmlPaths.has(vmlPath)) {
+            continue;
+          }
+          const vmlModel = model.vmlDrawings[vmlPath];
+          if (!vmlModel) {
+            continue;
+          }
+          emittedVmlPaths.add(vmlPath);
+          await this._renderToZip(zip, vmlPath, vmlDrawingXform, vmlModel);
+          // `prepareChartsheets` already flipped `model.hasChartsheetVml`
+          // before content-types was written, so no further signalling
+          // is needed here.
+        }
       }
     }
   }
@@ -6134,7 +6785,13 @@ class XLSX {
           if (requireRawPatch) {
             throw new ChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
           }
-          await this._renderToZip(zip, chartPath(n), new ChartSpaceXform(), chartEntry.model);
+          // Render via buffered path so we can splice preserved leading
+          // XML comments (e.g. vendor provenance markers) from the
+          // original raw bytes back in front of `<c:chart>`. The SAX-
+          // backed xform parser drops `comment` events so the
+          // structured model has no memory of them.
+          const buffered = renderChartWithLeadingComments(chartEntry, new ChartSpaceXform());
+          zip.append(buffered, { name: chartPath(n) });
         }
       }
 
@@ -6260,7 +6917,16 @@ class XLSX {
           if (requireRawPatch) {
             throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
           }
-          zip.append(renderChartEx(stripChartExRawXml(structuredEntry.model)), {
+          const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
+          // Splice preserved leading XML comments from original raw
+          // bytes back in front of `<cx:chart>`. The chartEx parser
+          // calls `parseXml(...)` without `{ comments: true }` so the
+          // structured model has no memory of them.
+          const originalRawXml = rawBytes
+            ? new TextDecoder().decode(rawBytes as Uint8Array)
+            : structuredEntry.model.rawXml;
+          const finalXml = spliceChartExLeadingComments(renderedXml, originalRawXml);
+          zip.append(finalXml, {
             name: chartExPath(n)
           });
         }
@@ -6672,6 +7338,33 @@ class XLSX {
       }
       if (!model.drawings.some((drawing: any) => drawing.name === cs.drawingName)) {
         model.drawings.push({ name: cs.drawingName });
+      }
+    }
+
+    // Signal the content-types writer that the `Default Extension="vml"`
+    // declaration is required when ANY chartsheet carries a VML
+    // relationship (e.g. `<legacyDrawing r:id="…"/>` referencing a
+    // preserved `xl/drawings/vmlDrawing*.vml` part). Previously the
+    // flag was only set inside `addChartsheets`, which runs AFTER
+    // `addContentTypes` — so a chartsheet-only VML dependency silently
+    // shipped without its content-type declaration, and Excel refused
+    // to open the resulting package. Compute it here, during `prepare`,
+    // before any part is written.
+    if (model.vmlDrawings) {
+      for (const cs of model.chartsheets) {
+        if (!Array.isArray(cs.relationships)) {
+          continue;
+        }
+        const hasVmlRel = cs.relationships.some(
+          (rel: any) =>
+            rel?.Type === RelType.VmlDrawing &&
+            typeof rel.Target === "string" &&
+            model.vmlDrawings[resolveRelTarget("xl/chartsheets/", rel.Target)] !== undefined
+        );
+        if (hasVmlRel) {
+          model.hasChartsheetVml = true;
+          break;
+        }
       }
     }
   }

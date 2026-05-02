@@ -362,6 +362,35 @@ class WorkSheetXform extends BaseXform {
 
         const drawing = model.drawing;
         for (const chartAnchor of newCharts) {
+          // Chart `ChartAnchorModel.range` stores absolute position
+          // (`pos.x/y`) and extent (`ext.cx/cy`) in EMU — the native
+          // OOXML unit. The drawing xform pipeline (PosXform,
+          // ExtXform) expects pixels at 96 dpi (the image convention
+          // — `ext.width/height`) and multiplies by `EMU_PER_PIXEL_AT_96_DPI`
+          // on render. Normalise at this boundary: convert the EMU
+          // values to pixels so downstream xforms re-convert to EMU
+          // without doubling.
+          //
+          // Without this conversion an absolute-anchored chart wrote
+          // `<xdr:pos x="8709660000" y="8709660000"/>` for a 914400
+          // EMU position (a 9525× overshoot) and
+          // `<xdr:ext cx="NaN" cy="NaN"/>` because `ext` carried
+          // `{ cx, cy }` keys but ExtXform looked for `{ width,
+          // height }`.
+          const emuToPixel = 9525; // EMU_PER_PIXEL_AT_96_DPI
+          const normalizedRange: Record<string, unknown> = { ...chartAnchor.range };
+          if (chartAnchor.range.pos) {
+            normalizedRange.pos = {
+              x: chartAnchor.range.pos.x / emuToPixel,
+              y: chartAnchor.range.pos.y / emuToPixel
+            };
+          }
+          if (chartAnchor.range.ext && chartAnchor.range.ext.cx !== undefined) {
+            normalizedRange.ext = {
+              width: chartAnchor.range.ext.cx / emuToPixel,
+              height: chartAnchor.range.ext.cy / emuToPixel
+            };
+          }
           const chartRId = nextRid(drawing.rels);
           if (chartAnchor.chartExNumber) {
             drawing.rels.push({
@@ -370,7 +399,7 @@ class WorkSheetXform extends BaseXform {
               Target: chartExRelTargetFromDrawing(chartAnchor.chartExNumber)
             });
             drawing.anchors.push({
-              range: chartAnchor.range,
+              range: normalizedRange,
               chartExNumber: chartAnchor.chartExNumber,
               alternateContent: { requires: "cx" },
               graphicFrame: {
@@ -386,7 +415,7 @@ class WorkSheetXform extends BaseXform {
               Target: chartRelTargetFromDrawing(chartAnchor.chartNumber)
             });
             drawing.anchors.push({
-              range: chartAnchor.range,
+              range: normalizedRange,
               chartNumber: chartAnchor.chartNumber,
               graphicFrame: {
                 rId: chartRId,
@@ -730,6 +759,15 @@ class WorkSheetXform extends BaseXform {
     this.map.headerFooter.render(xmlStream, model.headerFooter);
     this.map.rowBreaks.render(xmlStream, model.rowBreaks);
     this.map.colBreaks.render(xmlStream, model.colBreaks);
+    // `ignoredErrors` must precede `drawing` per ECMA-376 §18.3.1.99
+    // CT_Worksheet (… colBreaks, customProperties, cellWatches,
+    // ignoredErrors, smartTags, drawing, legacyDrawing, …). Emitting
+    // it after `controls` produced out-of-order XML that strict
+    // validators reject and some Excel builds repair on open
+    // (dropping the ignoredErrors block entirely). Previously the
+    // comment on this call claimed the opposite order — it was
+    // factually wrong.
+    this.map.ignoredErrors.render(xmlStream, model.ignoredErrors);
     this.map.drawing.render(xmlStream, model.drawing); // Note: must be after rowBreaks/colBreaks
     this.map.picture.render(xmlStream, model.background); // Note: must be after drawing
 
@@ -807,9 +845,10 @@ class WorkSheetXform extends BaseXform {
       xmlStream.closeNode();
     }
 
-    // ignoredErrors must come after controls, before tableParts (OOXML schema order).
-    this.map.ignoredErrors.render(xmlStream, model.ignoredErrors);
-    // tableParts must come after ignoredErrors.
+    // `ignoredErrors` is rendered earlier (before `drawing`) per
+    // ECMA-376 §18.3.1.99 schema order — see the block above
+    // `this.map.drawing.render(...)`. Only `tableParts` and `extLst`
+    // remain in this tail section.
     this.map.tableParts.render(xmlStream, model.tables);
 
     // extLst should be the last element in the worksheet.

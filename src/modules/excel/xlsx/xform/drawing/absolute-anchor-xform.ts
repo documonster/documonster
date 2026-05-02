@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
+import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 
@@ -76,6 +77,15 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
       "xdr:pos": new PosXform(),
       "xdr:ext": new ExtXform({ tag: "xdr:ext" }),
       "xdr:pic": new PicXform(),
+      // `xdr:graphicFrame` carries the chart / embedded object payload
+      // for absolute-anchor sheet drawings. The oneCell / twoCell
+      // counterparts already handled it; the absolute branch was
+      // pic-only, so a chart authored with an absolute anchor (or
+      // programmatically constructed via `{ pos, ext }`) silently
+      // dropped its graphicFrame on write — the drawing XML emitted
+      // `<xdr:absoluteAnchor><xdr:pos/><xdr:ext/><xdr:clientData/></xdr:absoluteAnchor>`
+      // with no chart reference, so the anchor was ignored on open.
+      "xdr:graphicFrame": new GraphicFrameXform(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -87,6 +97,8 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
   prepare(model: any, options: { index: number }): void {
     if (model.picture) {
       this.map["xdr:pic"].prepare(model.picture, options);
+    } else if (model.graphicFrame) {
+      this.map["xdr:graphicFrame"].prepare(model.graphicFrame, options);
     }
   }
 
@@ -97,6 +109,8 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     this.map["xdr:ext"].render(xmlStream, model.range.ext);
     if (model.picture) {
       this.map["xdr:pic"].render(xmlStream, model.picture);
+    } else if (model.graphicFrame) {
+      this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
     }
     this.map["xdr:clientData"].render(xmlStream, {});
 
@@ -115,6 +129,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
         this.model.range.pos = this.map["xdr:pos"].model;
         this.model.range.ext = this.map["xdr:ext"].model;
         this.model.picture = this.map["xdr:pic"].model;
+        this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
         return false;
       default:
         return true;
@@ -122,7 +137,9 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
   }
 
   reconcile(model: any, options: any): void {
-    model.medium = this.reconcilePicture(model.picture, options);
+    if (model.picture) {
+      model.medium = this.reconcilePicture(model.picture, options);
+    }
   }
 }
 

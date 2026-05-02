@@ -9,6 +9,8 @@
  * Reference: ECMA-376 §18.18.92 + Office Open XML extension `x14` namespace.
  */
 
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
+
 /**
  * Top-level sparkline group — matches `x14:sparklineGroup`.
  */
@@ -383,7 +385,12 @@ function sparklineColorAttrs(c: SparklineColor): string {
 }
 
 function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Use the canonical encoder: strips XML 1.0 control characters /
+  // lone surrogates and escapes the five reserved entities. The
+  // previous manual chain missed `"` / `'` (ok for text, but we
+  // share the helper with attribute-less contexts where lone
+  // surrogates or bg-copied control codes would corrupt the part).
+  return xmlEncode(s);
 }
 
 // ============================================================================
@@ -396,10 +403,18 @@ function escapeXml(s: string): string {
  */
 export function parseSparklineGroups(xml: string): SparklineGroup[] {
   const groups: SparklineGroup[] = [];
-  const groupRe = /<x14:sparklineGroup\b([^>]*)>([\s\S]*?)<\/x14:sparklineGroup>/g;
+  // Match both the open/close and self-closing forms of
+  // `<x14:sparklineGroup ...>`. Excel legitimately emits the
+  // self-closing variant (`<x14:sparklineGroup .../>`) when the
+  // group has no child elements — e.g. a group whose sole sparkline
+  // was deleted but the parent was preserved for styling, or an
+  // empty group created programmatically. Requiring an explicit
+  // closing tag silently dropped those groups on load, losing the
+  // entry on the next write.
+  const groupRe = /<x14:sparklineGroup\b([^>]*?)(?:\/>|>([\s\S]*?)<\/x14:sparklineGroup>)/g;
   let m: RegExpExecArray | null;
   while ((m = groupRe.exec(xml)) !== null) {
-    const g = parseGroupBlock(m[1], m[2]);
+    const g = parseGroupBlock(m[1] ?? "", m[2] ?? "");
     groups.push(g);
   }
   return groups;
@@ -652,6 +667,37 @@ export function renderSparklineSvg(
       // down, zeros disappear.
       const n = data.length;
       const barW = Math.max(1, (innerW / Math.max(n, 1)) * 0.8);
+      // Identify the value indices of the first / last / high / low
+      // bars up front so the loop below can swap colours in O(1).
+      // Excel honours `colorFirst / colorLast / colorHigh / colorLow`
+      // on column sparklines by RECOLORING the corresponding bar(s),
+      // not by overlaying a circle as line sparklines do. Previously
+      // the column / stacked branch ignored these flags entirely —
+      // any authored styling silently reverted to the plain palette.
+      let firstIdx = -1;
+      let lastIdx = -1;
+      let highIdx = -1;
+      let lowIdx = -1;
+      let highVal = -Infinity;
+      let lowVal = Infinity;
+      for (let i = 0; i < n; i++) {
+        const v = data[i];
+        if (!Number.isFinite(v)) {
+          continue;
+        }
+        if (firstIdx === -1) {
+          firstIdx = i;
+        }
+        lastIdx = i;
+        if (v > highVal) {
+          highVal = v;
+          highIdx = i;
+        }
+        if (v < lowVal) {
+          lowVal = v;
+          lowIdx = i;
+        }
+      }
       for (let i = 0; i < n; i++) {
         const v = data[i];
         if (!Number.isFinite(v) || v === 0) {
@@ -659,7 +705,29 @@ export function renderSparklineSvg(
         }
         const centre = xAt(i, n);
         const x = centre - barW / 2;
-        const color = v < 0 && group.negative !== false ? negativeColor : lineColor;
+        // Negative bars pick up `colorNegative` only when the author
+        // opted in (`group.negative === true`). The previous
+        // `!== false` predicate inverted the default — `undefined`
+        // satisfies `!== false`, so every negative bar on a default-
+        // styled sparkline was painted red, diverging from Excel's
+        // own rendering on the same file.
+        let color = v < 0 && group.negative === true ? negativeColor : lineColor;
+        // Special-marker colour overrides run in Excel's precedence
+        // order: negative first, then high/low, then first/last
+        // (later wins when the same bar qualifies multiple times —
+        // matches Excel's observable behaviour on the same data).
+        if (group.high && i === highIdx) {
+          color = highColor;
+        }
+        if (group.low && i === lowIdx) {
+          color = lowColor;
+        }
+        if (group.first && i === firstIdx) {
+          color = firstColor;
+        }
+        if (group.last && i === lastIdx) {
+          color = lastColor;
+        }
         let y: number;
         let h: number;
         if (group.type === "stacked") {
@@ -731,11 +799,27 @@ export function renderSparklineSvg(
       }
     }
 
-    if (group.displayXAxis && min <= 0 && max >= 0) {
-      const axisY = yAt(0);
-      parts.push(
-        `<line x1="${innerX}" y1="${axisY}" x2="${innerX + innerW}" y2="${axisY}" stroke="${axisColor}" stroke-width="0.5"/>`
-      );
+    if (group.displayXAxis) {
+      // Win/loss (`stacked`) sparklines always paint positives from
+      // the midpoint up and negatives from the midpoint down,
+      // regardless of magnitude — so the zero rule must sit at the
+      // geometric midpoint, not wherever `yAt(0)` lands on the
+      // min/max-scaled axis. The old `yAt(0)` was only correct when
+      // the data happened to be symmetric around zero; any asymmetry
+      // left the axis line visibly detached from where the bars met.
+      // Line / column sparklines render from actual min/max so their
+      // rule stays at `yAt(0)`, but only when zero is in range.
+      let axisY: number | undefined;
+      if (group.type === "stacked") {
+        axisY = innerY + innerH / 2;
+      } else if (min <= 0 && max >= 0) {
+        axisY = yAt(0);
+      }
+      if (axisY !== undefined) {
+        parts.push(
+          `<line x1="${innerX}" y1="${axisY}" x2="${innerX + innerW}" y2="${axisY}" stroke="${axisColor}" stroke-width="0.5"/>`
+        );
+      }
     }
   }
 
@@ -751,10 +835,19 @@ function axisRangeFor(
 ): { min: number; max: number } {
   let min: number;
   let max: number;
+  // Track whether each bound came from the caller's explicit `custom`
+  // setting. A manual bound must never be padded away by the
+  // zero-span fallback below — a user who deliberately set
+  // `manualMin === manualMax` (e.g. to highlight deviation from a
+  // fixed reference value) would otherwise see their bound silently
+  // widened by ±1.
+  let minIsManual = false;
+  let maxIsManual = false;
   if (group.minAxisType === "group") {
     min = groupMin;
   } else if (group.minAxisType === "custom" && group.manualMin !== undefined) {
     min = group.manualMin;
+    minIsManual = true;
   } else {
     min = finiteMin(row);
   }
@@ -762,6 +855,7 @@ function axisRangeFor(
     max = groupMax;
   } else if (group.maxAxisType === "custom" && group.manualMax !== undefined) {
     max = group.manualMax;
+    maxIsManual = true;
   } else {
     max = finiteMax(row);
   }
@@ -769,7 +863,13 @@ function axisRangeFor(
     return { min: 0, max: 1 };
   }
   if (min === max) {
-    // Flat line — pad so the point renders in the middle.
+    // Flat line — pad so the point renders in the middle. Only apply
+    // the pad when neither bound was manually authored; otherwise the
+    // user's explicit choice wins and the sparkline renders as a
+    // single point at mid-height (which is what the bound requested).
+    if (minIsManual || maxIsManual) {
+      return { min, max };
+    }
     return { min: min - 1, max: max + 1 };
   }
   return { min, max };
@@ -849,9 +949,9 @@ function resolveSparklineColor(color: SparklineColor | undefined): string | unde
 }
 
 function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  // Attribute values additionally require `\t \n \r` → numeric refs
+  // so XML attribute-value normalisation doesn't collapse them to
+  // literal spaces (losing e.g. a manual cell-reference break in a
+  // sparkline group's `manualMin` / `manualMax` display label).
+  return xmlEncodeAttr(s);
 }

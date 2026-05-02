@@ -6,6 +6,7 @@
  * These files are normally written and read as opaque XML; this module offers
  * structured access for users who want to inspect or rewrite the palette.
  */
+import { escapeXmlAttr } from "./chart-utils";
 import type {
   ChartColorVariation,
   ChartColorsEntry,
@@ -32,17 +33,28 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
 
   // Colors come as a sequence of <a:schemeClr> and <a:srgbClr> at the top
   // level of <cs:colorStyle>, each optionally wrapped with children.
+  //
+  // We locate every `<cs:variation>...</cs:variation>` span first so colour
+  // blocks sitting *inside* a variation can be excluded in O(1) per match,
+  // independent of document order (the previous `lastIndexOf` strategy was
+  // order-sensitive — colours declared after a `variation` close tag were
+  // classified based on the last variation in the file, not the enclosing
+  // element).
+  const variationRanges: Array<{ start: number; end: number }> = [];
+  const varRangeRe = /<cs:variation\b[^>]*(?:\/>|>[\s\S]*?<\/cs:variation>)/g;
+  let vrm: RegExpExecArray | null;
+  while ((vrm = varRangeRe.exec(rawXml)) !== null) {
+    variationRanges.push({ start: vrm.index, end: vrm.index + vrm[0].length });
+  }
+  const inVariation = (index: number): boolean =>
+    variationRanges.some(r => index >= r.start && index < r.end);
+
   const colors: ChartColorsEntry[] = [];
   // Match a group starting with schemeClr or srgbClr — may self-close or have nested modifiers.
   const colorBlockRe = /<a:(schemeClr|srgbClr)\b[^>]*(?:\/>|>([\s\S]*?)<\/a:\1>)/g;
   let m: RegExpExecArray | null;
   while ((m = colorBlockRe.exec(rawXml)) !== null) {
-    // Skip if this block is inside a <cs:variation> — variations are fancier
-    // per-color modifiers; rawXml round-trip keeps them.
-    const before = rawXml.slice(0, m.index);
-    const lastVar = before.lastIndexOf("<cs:variation");
-    const lastVarEnd = before.lastIndexOf("</cs:variation");
-    if (lastVar > lastVarEnd) {
+    if (inVariation(m.index)) {
       continue;
     }
     const entry: ChartColorsEntry = {};
@@ -53,31 +65,39 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
     } else if (m[1] === "srgbClr" && valMatch) {
       entry.srgb = valMatch[1];
     }
-    // Extract optional child modifiers
+    // Extract optional child modifiers. Accept fractional / negative
+    // values per `shape-properties.ts:parseColorModifiers` — third-party
+    // exporters (e.g. LibreOffice, custom palettes) emit `val="-5000"`
+    // or `val="12345.67"`; the previous `\d+`-only regex silently
+    // dropped them. Round after parsing so wire values stay integers.
+    const parseModAttr = (xml: string, tag: string): number | undefined => {
+      const m = new RegExp(`<a:${tag}\\s+val="(-?\\d+(?:\\.\\d+)?)"`).exec(xml);
+      return m ? Math.round(parseFloat(m[1])) : undefined;
+    };
     const inner = m[2] ?? "";
-    const lumModM = /<a:lumMod\s+val="(\d+)"/.exec(inner);
-    if (lumModM) {
-      entry.lumMod = parseInt(lumModM[1], 10);
+    const lumModV = parseModAttr(inner, "lumMod");
+    if (lumModV !== undefined) {
+      entry.lumMod = lumModV;
     }
-    const lumOffM = /<a:lumOff\s+val="(\d+)"/.exec(inner);
-    if (lumOffM) {
-      entry.lumOff = parseInt(lumOffM[1], 10);
+    const lumOffV = parseModAttr(inner, "lumOff");
+    if (lumOffV !== undefined) {
+      entry.lumOff = lumOffV;
     }
-    const tintM = /<a:tint\s+val="(\d+)"/.exec(inner);
-    if (tintM) {
-      entry.tint = parseInt(tintM[1], 10);
+    const tintV = parseModAttr(inner, "tint");
+    if (tintV !== undefined) {
+      entry.tint = tintV;
     }
-    const shadeM = /<a:shade\s+val="(\d+)"/.exec(inner);
-    if (shadeM) {
-      entry.shade = parseInt(shadeM[1], 10);
+    const shadeV = parseModAttr(inner, "shade");
+    if (shadeV !== undefined) {
+      entry.shade = shadeV;
     }
-    const satModM = /<a:satMod\s+val="(\d+)"/.exec(inner);
-    if (satModM) {
-      entry.satMod = parseInt(satModM[1], 10);
+    const satModV = parseModAttr(inner, "satMod");
+    if (satModV !== undefined) {
+      entry.satMod = satModV;
     }
-    const alphaM = /<a:alpha\s+val="(\d+)"/.exec(inner);
-    if (alphaM) {
-      entry.alpha = parseInt(alphaM[1], 10);
+    const alphaV = parseModAttr(inner, "alpha");
+    if (alphaV !== undefined) {
+      entry.alpha = alphaV;
     }
     if (entry.theme || entry.srgb) {
       colors.push(entry);
@@ -95,32 +115,41 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
   const variations: ChartColorVariation[] = [];
   const variationRe = /<cs:variation\b[^>]*>([\s\S]*?)<\/cs:variation>|<cs:variation\b[^>]*\/>/g;
   let vm: RegExpExecArray | null;
+  // Reuse the sibling `parseModAttr` semantics from the colour parser
+  // above: accept signed / fractional values. Third-party exports
+  // (LibreOffice palette packs, custom theme builders) emit these
+  // forms for colour variations; the previous `\d+`-only regex
+  // silently dropped them.
+  const parseModAttr = (xml: string, tag: string): number | undefined => {
+    const m = new RegExp(`<a:${tag}\\b[^>]*\\bval="(-?\\d+(?:\\.\\d+)?)"`).exec(xml);
+    return m ? Math.round(parseFloat(m[1])) : undefined;
+  };
   while ((vm = variationRe.exec(rawXml)) !== null) {
     const body = vm[1] ?? "";
     const entry: ChartColorVariation = {};
-    const lumMod = /<a:lumMod\b[^>]*\bval="(\d+)"/.exec(body);
-    if (lumMod) {
-      entry.lumMod = parseInt(lumMod[1], 10);
+    const lumModV = parseModAttr(body, "lumMod");
+    if (lumModV !== undefined) {
+      entry.lumMod = lumModV;
     }
-    const lumOff = /<a:lumOff\b[^>]*\bval="(\d+)"/.exec(body);
-    if (lumOff) {
-      entry.lumOff = parseInt(lumOff[1], 10);
+    const lumOffV = parseModAttr(body, "lumOff");
+    if (lumOffV !== undefined) {
+      entry.lumOff = lumOffV;
     }
-    const tint = /<a:tint\b[^>]*\bval="(\d+)"/.exec(body);
-    if (tint) {
-      entry.tint = parseInt(tint[1], 10);
+    const tintV = parseModAttr(body, "tint");
+    if (tintV !== undefined) {
+      entry.tint = tintV;
     }
-    const shade = /<a:shade\b[^>]*\bval="(\d+)"/.exec(body);
-    if (shade) {
-      entry.shade = parseInt(shade[1], 10);
+    const shadeV = parseModAttr(body, "shade");
+    if (shadeV !== undefined) {
+      entry.shade = shadeV;
     }
-    const satMod = /<a:satMod\b[^>]*\bval="(\d+)"/.exec(body);
-    if (satMod) {
-      entry.satMod = parseInt(satMod[1], 10);
+    const satModV = parseModAttr(body, "satMod");
+    if (satModV !== undefined) {
+      entry.satMod = satModV;
     }
-    const alpha = /<a:alpha\b[^>]*\bval="(\d+)"/.exec(body);
-    if (alpha) {
-      entry.alpha = parseInt(alpha[1], 10);
+    const alphaV = parseModAttr(body, "alpha");
+    if (alphaV !== undefined) {
+      entry.alpha = alphaV;
     }
     // Push even empty variations so the count survives round-trip —
     // Excel uses the presence of a `<cs:variation/>` self-closing tag
@@ -135,11 +164,17 @@ export function parseChartColors(rawXml: string): ChartColorsModel {
 
 /**
  * Build a `colors{N}.xml` string from a structured ChartColorsModel.
- * If `model.colors` is provided, it takes precedence over `rawXml`.
+ *
+ * Structured data (`colors` / `variations`) takes precedence over `rawXml`.
+ * If neither `colors` nor `variations` is present we fall back to `rawXml`
+ * (round-trip) or the built-in default palette. Mutations to `variations`
+ * alone therefore still take effect without requiring the caller to also
+ * populate `colors`.
  */
 export function buildChartColors(model: ChartColorsModel): string {
-  if (!model.colors || model.colors.length === 0) {
-    // Fall back to round-trip rawXml if available
+  const hasColors = !!model.colors && model.colors.length > 0;
+  const hasVariations = !!model.variations && model.variations.length > 0;
+  if (!hasColors && !hasVariations) {
     return model.rawXml ?? buildDefaultChartColors();
   }
   const parts: string[] = [];
@@ -149,17 +184,19 @@ export function buildChartColors(model: ChartColorsModel): string {
     'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
   ];
   if (model.method !== undefined) {
-    attrs.push(`meth="${model.method}"`);
+    attrs.push(`meth="${escapeXmlAttr(model.method)}"`);
   }
   if (model.id !== undefined) {
     attrs.push(`id="${model.id}"`);
   }
   parts.push(`<cs:colorStyle ${attrs.join(" ")}>`);
-  for (const c of model.colors) {
-    parts.push(colorEntryToXml(c));
+  if (hasColors) {
+    for (const c of model.colors!) {
+      parts.push(colorEntryToXml(c));
+    }
   }
-  if (model.variations) {
-    for (const v of model.variations) {
+  if (hasVariations) {
+    for (const v of model.variations!) {
       parts.push(variationEntryToXml(v));
     }
   }
@@ -167,26 +204,34 @@ export function buildChartColors(model: ChartColorsModel): string {
   return parts.join("\n");
 }
 
+// `escapeXmlAttr` is imported from `chart-utils`; it delegates to the
+// canonical `xmlEncodeAttr` from `@xml/encode`. Sidecar output now
+// shares byte-for-byte escaping semantics with the rest of the chart
+// pipeline — previously this module carried a local copy that omitted
+// the CR/LF/Tab → numeric-ref encoding, letting whitespace-laden
+// attribute values lose data on round-trip.
+
 function variationEntryToXml(v: ChartColorVariation): string {
+  // Modifier values must be valid `xsd:int` on the wire. Interpolating
+  // raw model numbers directly let `NaN` / `Infinity` / unrounded
+  // floats through to the attribute, which Excel's strict reader
+  // rejects as "invalid xs:int". Guard each slot with
+  // `Number.isFinite` + `Math.round` so the sidecar consistently
+  // produces well-formed XML even when a public API consumer hands in
+  // an out-of-range number.
   const children: string[] = [];
-  if (v.lumMod !== undefined) {
-    children.push(`<a:lumMod val="${v.lumMod}"/>`);
-  }
-  if (v.lumOff !== undefined) {
-    children.push(`<a:lumOff val="${v.lumOff}"/>`);
-  }
-  if (v.tint !== undefined) {
-    children.push(`<a:tint val="${v.tint}"/>`);
-  }
-  if (v.shade !== undefined) {
-    children.push(`<a:shade val="${v.shade}"/>`);
-  }
-  if (v.satMod !== undefined) {
-    children.push(`<a:satMod val="${v.satMod}"/>`);
-  }
-  if (v.alpha !== undefined) {
-    children.push(`<a:alpha val="${v.alpha}"/>`);
-  }
+  const emitInt = (tag: string, value: number | undefined): void => {
+    if (value === undefined || !Number.isFinite(value)) {
+      return;
+    }
+    children.push(`<a:${tag} val="${Math.round(value)}"/>`);
+  };
+  emitInt("lumMod", v.lumMod);
+  emitInt("lumOff", v.lumOff);
+  emitInt("tint", v.tint);
+  emitInt("shade", v.shade);
+  emitInt("satMod", v.satMod);
+  emitInt("alpha", v.alpha);
   if (children.length === 0) {
     return "  <cs:variation/>";
   }
@@ -225,7 +270,7 @@ function chartStyleElementToXml(name: string, entry: ChartStyleElement): string 
   const attrParts: string[] = [];
   if (entry.attributes) {
     for (const [k, v] of Object.entries(entry.attributes)) {
-      attrParts.push(`${k}="${v.replace(/"/g, "&quot;")}"`);
+      attrParts.push(`${k}="${escapeXmlAttr(v)}"`);
     }
   }
   const body: string[] = [];
@@ -262,34 +307,34 @@ function chartStyleElementToXml(name: string, entry: ChartStyleElement): string 
 }
 
 function colorEntryToXml(c: ChartColorsEntry): string {
+  // Same guard rationale as `variationEntryToXml` — reject non-finite
+  // modifier values so the serialiser can never produce
+  // `<a:tint val="NaN"/>` etc.
   const mods: string[] = [];
-  if (c.lumMod !== undefined) {
-    mods.push(`<a:lumMod val="${c.lumMod}"/>`);
-  }
-  if (c.lumOff !== undefined) {
-    mods.push(`<a:lumOff val="${c.lumOff}"/>`);
-  }
-  if (c.tint !== undefined) {
-    mods.push(`<a:tint val="${c.tint}"/>`);
-  }
-  if (c.shade !== undefined) {
-    mods.push(`<a:shade val="${c.shade}"/>`);
-  }
-  if (c.satMod !== undefined) {
-    mods.push(`<a:satMod val="${c.satMod}"/>`);
-  }
-  if (c.alpha !== undefined) {
-    mods.push(`<a:alpha val="${c.alpha}"/>`);
-  }
+  const emitInt = (tag: string, value: number | undefined): void => {
+    if (value === undefined || !Number.isFinite(value)) {
+      return;
+    }
+    mods.push(`<a:${tag} val="${Math.round(value)}"/>`);
+  };
+  emitInt("lumMod", c.lumMod);
+  emitInt("lumOff", c.lumOff);
+  emitInt("tint", c.tint);
+  emitInt("shade", c.shade);
+  emitInt("satMod", c.satMod);
+  emitInt("alpha", c.alpha);
 
   let tag: string;
   let val: string;
   if (c.theme) {
     tag = "a:schemeClr";
-    val = c.theme;
+    // Theme / srgb tokens live in attribute context — escape in case
+    // a consumer passes an unvalidated string. `escapeXmlAttr`
+    // strips illegal XML chars and encodes reserved entities.
+    val = escapeXmlAttr(c.theme);
   } else if (c.srgb) {
     tag = "a:srgbClr";
-    val = c.srgb;
+    val = escapeXmlAttr(c.srgb);
   } else {
     return "";
   }

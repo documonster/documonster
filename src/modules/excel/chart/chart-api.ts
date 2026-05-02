@@ -1,6 +1,8 @@
+import { ChartOptionsError } from "@excel/errors";
 import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
 
+import type { CellValueInputType } from "../cell";
 import type { Table } from "../table";
 import type { Worksheet } from "../worksheet";
 import type { AddChartExOptions, AddChartExSeriesOptions } from "./chart-ex-types";
@@ -9,7 +11,7 @@ import type { AddChartOptions, AddChartSeriesOptions } from "./types";
 export interface SeriesFromColumnsOptions {
   categories?: string;
   values: string;
-  name?: string | { formula: string };
+  name?: AddChartSeriesOptions["name"];
 }
 
 export interface AddChartFromTableOptions extends Omit<AddChartOptions, "series"> {
@@ -41,80 +43,106 @@ export function seriesFromColumns(
   };
 }
 
-export function chartOptionsFromTable(
+/**
+ * Common layout resolved from a worksheet Table — shared by the classic and
+ * ChartEx helpers so the two paths cannot drift. Previously the two helpers
+ * re-implemented ~50 lines of near-identical code (column resolution, range
+ * derivation, structured-vs-absolute reference emission); now both consume
+ * this structure and only differ in how they assemble the final series.
+ */
+interface ResolvedTableLayout {
+  dataStartRow: number;
+  dataEndRow: number;
+  tableLeft: number;
+  tableName: string;
+  columnNames: Array<string | undefined>;
+  categoryIndex: number;
+  valueColumns: number[];
+  sheetName: string;
+  structured: boolean;
+}
+
+function resolveTableLayout(
   worksheet: Worksheet,
   table: Table | string,
-  options: AddChartFromTableOptions
-): AddChartOptions {
+  options: Pick<
+    AddChartFromTableOptions,
+    "categoryColumn" | "valueColumns" | "structuredReferences"
+  >
+): ResolvedTableLayout {
   const resolved = typeof table === "string" ? worksheet.getTable(table) : table;
   if (!resolved) {
-    throw new Error(`Table not found: ${String(table)}`);
+    throw new ChartOptionsError(`Table not found: ${String(table)}.`);
   }
   const model = resolved.model;
   const tableRef = colCache.decode(model.tableRef ?? model.ref);
   if (!("top" in tableRef)) {
-    throw new Error(`Invalid table range: ${model.ref}`);
+    throw new ChartOptionsError(`Invalid table range: ${model.ref}.`);
   }
   if (tableRef.bottom < tableRef.top) {
-    throw new Error(`Invalid table range: ${model.ref}`);
+    throw new ChartOptionsError(`Invalid table range: ${model.ref}.`);
   }
   const headerRow = model.headerRow !== false;
   const dataStartRow = tableRef.top + (headerRow ? 1 : 0);
   const dataEndRow = tableRef.bottom - (model.totalsRow ? 1 : 0);
   if (dataEndRow < dataStartRow) {
-    throw new Error(`Table has no data rows: ${model.name}`);
+    throw new ChartOptionsError(`Table has no data rows: ${model.name}.`);
   }
-  const categoryIndex = resolveTableColumn(
-    model.columns.map(c => c.name),
-    options.categoryColumn ?? 0
+  const columnNames = model.columns.map(c => c.name);
+  const categoryIndex = resolveTableColumn(columnNames, options.categoryColumn ?? 0);
+  const explicitValueCols = options.valueColumns;
+  const valueColumns =
+    explicitValueCols && explicitValueCols.length > 0
+      ? explicitValueCols.map(col => resolveTableColumn(columnNames, col))
+      : model.columns.map((_, i) => i).filter(i => i !== categoryIndex);
+  if (valueColumns.length === 0) {
+    throw new ChartOptionsError(`Table has no value columns: ${model.name}.`);
+  }
+  return {
+    dataStartRow,
+    dataEndRow,
+    tableLeft: tableRef.left,
+    tableName: model.name,
+    columnNames,
+    categoryIndex,
+    valueColumns,
+    sheetName: worksheet.name,
+    structured: options.structuredReferences !== false
+  };
+}
+
+function buildColumnReference(layout: ResolvedTableLayout, columnIndex: number): string {
+  if (layout.structured) {
+    const name = layout.columnNames[columnIndex];
+    if (name === undefined) {
+      throw new ChartOptionsError(
+        `Table column at index ${columnIndex} has no name; cannot emit a structured reference.`
+      );
+    }
+    return tableColumnReference(layout.tableName, name);
+  }
+  return absoluteRange(
+    layout.sheetName,
+    layout.dataStartRow,
+    layout.tableLeft + columnIndex,
+    layout.dataEndRow,
+    layout.tableLeft + columnIndex
   );
-  const valueColumns = options.valueColumns?.length
-    ? options.valueColumns.map(col =>
-        resolveTableColumn(
-          model.columns.map(c => c.name),
-          col
-        )
-      )
-    : model.columns.map((_, i) => i).filter(i => i !== categoryIndex);
-  const sheetName = worksheet.name;
-  const series = valueColumns.map(index => ({
-    name: model.columns[index]?.name,
-    categories:
-      options.structuredReferences === false
-        ? absoluteRange(
-            sheetName,
-            dataStartRow,
-            tableRef.left + categoryIndex,
-            dataEndRow,
-            tableRef.left + categoryIndex
-          )
-        : tableColumnReference(model.name, model.columns[categoryIndex]?.name),
-    values:
-      options.structuredReferences === false
-        ? absoluteRange(
-            sheetName,
-            dataStartRow,
-            tableRef.left + index,
-            dataEndRow,
-            tableRef.left + index
-          )
-        : tableColumnReference(model.name, model.columns[index]?.name)
+}
+
+export function chartOptionsFromTable(
+  worksheet: Worksheet,
+  table: Table | string,
+  options: AddChartFromTableOptions
+): AddChartOptions {
+  const layout = resolveTableLayout(worksheet, table, options);
+  const categoryReference = buildColumnReference(layout, layout.categoryIndex);
+  const series = layout.valueColumns.map(index => ({
+    name: layout.columnNames[index],
+    categories: categoryReference,
+    values: buildColumnReference(layout, index)
   }));
-  // Strip helper-only keys before spreading — they would ride through
-  // as excess properties on the returned `AddChartOptions` and any
-  // stricter downstream validator (e.g. `ChartOptionsError` gates)
-  // would flag them. The sibling `chartExOptionsFromTable` already
-  // does this; mirror the treatment here.
-  const {
-    categoryColumn: _catCol,
-    valueColumns: _valCols,
-    structuredReferences: _structured,
-    ...rest
-  } = options;
-  void _catCol;
-  void _valCols;
-  void _structured;
-  return { ...rest, series };
+  return { ...stripTableHelperOptions(options), series };
 }
 
 export function chartOptionsFromRows<T extends Record<string, unknown>>(
@@ -123,89 +151,162 @@ export function chartOptionsFromRows<T extends Record<string, unknown>>(
   options: AddChartFromRowsOptions<T>
 ): AddChartOptions {
   if (rows.length === 0) {
-    throw new Error("chartOptionsFromRows requires at least one row");
+    throw new ChartOptionsError("chartOptionsFromRows requires at least one row.");
   }
-  if (options.sheetName !== undefined && options.sheetName !== worksheet.name) {
-    const target = worksheet.workbook.getWorksheet(options.sheetName);
-    if (!target || target !== worksheet) {
-      throw new Error(
-        `chartOptionsFromRows sheetName must match the target worksheet (${worksheet.name})`
-      );
-    }
-  }
-  const start = colCache.decodeAddress(options.startCell ?? "A1");
-  const includeHeaders = options.includeHeaders !== false;
-  const keys = [options.x, ...(Array.isArray(options.y) ? options.y : [options.y])];
-  const startRow = start.row;
-  const startCol = start.col;
-  if (includeHeaders) {
-    keys.forEach((key, i) => {
-      worksheet.getCell(startRow, startCol + i).value = key;
-    });
-  }
-  rows.forEach((row, r) => {
-    keys.forEach((key, c) => {
-      worksheet.getCell(startRow + (includeHeaders ? 1 : 0) + r, startCol + c).value = row[
-        key
-      ] as never;
-    });
-  });
-  const dataStartRow = startRow + (includeHeaders ? 1 : 0);
-  const dataEndRow = dataStartRow + rows.length - 1;
-  const sheetName = options.sheetName ?? worksheet.name;
-  const yKeys = Array.isArray(options.y) ? options.y : [options.y];
-  const series = yKeys.map((key, i) => ({
+  const staged = stageRowsIntoWorksheet(worksheet, rows, options);
+  const sheetName = worksheet.name;
+  const series = staged.yKeys.map((key, i) => ({
     name: key,
-    categories: absoluteRange(sheetName, dataStartRow, startCol, dataEndRow, startCol),
-    values: absoluteRange(sheetName, dataStartRow, startCol + i + 1, dataEndRow, startCol + i + 1)
+    categories: absoluteRange(
+      sheetName,
+      staged.dataStartRow,
+      staged.startCol,
+      staged.dataEndRow,
+      staged.startCol
+    ),
+    values: absoluteRange(
+      sheetName,
+      staged.dataStartRow,
+      staged.startCol + i + 1,
+      staged.dataEndRow,
+      staged.startCol + i + 1
+    )
   }));
-  const {
-    x: _x,
-    y: _y,
-    sheetName: _sheet,
-    startCell: _startCell,
-    includeHeaders: _headers,
-    ...rest
-  } = options;
-  void _x;
-  void _y;
-  void _sheet;
-  void _startCell;
-  void _headers;
-  return { ...rest, series };
+  return { ...stripRowsHelperOptions(options), series };
 }
 
-function tableColumnReference(tableName: string, columnName: string | undefined): string {
-  if (!columnName) {
-    throw new Error("Table column has no name");
-  }
+/**
+ * Table column helper — validates a column descriptor against a table's
+ * header list. Strings match case-insensitively; numbers are zero-based
+ * indexes. Missing column names are treated as unmatchable (not a
+ * TypeError) so a table with a blank header column is diagnosable.
+ */
+function tableColumnReference(tableName: string, columnName: string): string {
   return `${escapeStructuredReferenceName(tableName)}[${escapeStructuredReferenceColumn(columnName)}]`;
 }
 
+/**
+ * Quote a table name for use in a structured reference. Excel table names
+ * are validated when they are created — they cannot contain whitespace,
+ * `[`, `]`, `#`, `'`, `@`, or start with a digit — so the legal-name set
+ * is very restricted. Any name that fails validation throws instead of
+ * silently round-tripping invalid XML.
+ *
+ * Allows Unicode characters in the Basic Multilingual Plane (BMP)
+ * above `\u00A0` — matches `cache-populator.ts` which accepts CJK
+ * table names from Chinese / Japanese / Korean workbooks. The prior
+ * ASCII-only regex threw on `"销售表"` or `"商品マスター"` even though
+ * Excel itself permits them.
+ */
 function escapeStructuredReferenceName(name: string): string {
-  return /^[A-Za-z_\\][A-Za-z0-9_.\\]*$/.test(name) ? name : `'${name.replace(/'/g, "''")}'`;
+  // Canonical structure check — identifier must start with a letter /
+  // underscore, then letters / digits / underscore / dot / non-ASCII.
+  if (!/^[A-Za-z_\u00A0-\uFFFF][A-Za-z0-9_.\u00A0-\uFFFF]*$/.test(name)) {
+    throw new ChartOptionsError(
+      `Invalid Excel table name for structured reference: ${JSON.stringify(name)}.`
+    );
+  }
+  // Reject Unicode whitespace, line / paragraph separators, zero-width
+  // characters and the BOM. The structural regex above admits them via
+  // the `\u00A0-\uFFFF` range, but Excel rejects them in real table
+  // names — without this guard a name like `"Tab\u2028le"` would pass
+  // our validation but break the formula parser downstream.
+  if (/[\u00A0\u1680\u2000-\u200F\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(name)) {
+    throw new ChartOptionsError(
+      `Excel table name contains whitespace / separator / zero-width character: ${JSON.stringify(name)}.`
+    );
+  }
+  return name;
 }
 
+/**
+ * Escape the special characters (`[ ] # ' @`) in a structured-reference
+ * column specifier by prefixing each with a single apostrophe, per
+ * §18.17.2.4 of the Excel formula grammar.
+ */
 function escapeStructuredReferenceColumn(name: string): string {
   return name.replace(/([[\]#'@])/g, "'$1");
 }
 
-function resolveTableColumn(names: string[], column: string | number): number {
+function resolveTableColumn(names: Array<string | undefined>, column: string | number): number {
   if (typeof column === "number") {
     if (column < 0 || column >= names.length) {
-      throw new Error(`Table column index out of range: ${column}`);
+      throw new ChartOptionsError(`Table column index out of range: ${column}.`);
     }
     return column;
   }
-  const idx = names.findIndex(name => name.toLowerCase() === column.toLowerCase());
+  const target = column.toLowerCase();
+  const idx = names.findIndex(name => name !== undefined && name.toLowerCase() === target);
   if (idx < 0) {
-    throw new Error(`Table column not found: ${column}`);
+    throw new ChartOptionsError(`Table column not found: ${column}.`);
   }
   return idx;
 }
 
 function qualifyRange(sheetName: string, range: string): string {
-  return range.includes("!") ? range : `${quoteSheetName(sheetName)}!${absoluteA1Range(range)}`;
+  // Always produce an absolute A1 range. Chart formulas are expected
+  // to remain stable across insertions/deletions, so relative refs
+  // would silently shift rows/columns on the first edit.
+  //
+  // Split on the first `!` so pre-qualified refs (`"Sheet1!A1:B2"`)
+  // still get their range part normalised to `$A$1:$B$2`. The old
+  // early-return kept the caller's relative form verbatim, producing
+  // divergent output depending on whether the input was sheet-
+  // qualified or not.
+  //
+  // Normalise the caller-supplied sheet prefix through `quoteSheetName`
+  // so `"My Sheet!A1"` and `"'My Sheet'!A1"` both emit the same
+  // single-quoted form, matching what the unqualified branch produces
+  // via `quoteSheetName(sheetName)`. `quoteSheetName` is idempotent
+  // for safely-named sheets, so pre-quoted input stays pre-quoted.
+  const bang = range.indexOf("!");
+  if (bang >= 0) {
+    const rawSheet = range.slice(0, bang);
+    const ref = range.slice(bang + 1);
+    // Strip one optional layer of single quotes + collapse escaped `''`
+    // back to a literal single quote so we can re-quote through the
+    // canonical helper. `'` is the only character OOXML escapes in
+    // sheet names.
+    const unquoted =
+      rawSheet.length >= 2 && rawSheet.startsWith("'") && rawSheet.endsWith("'")
+        ? rawSheet.slice(1, -1).replace(/''/g, "'")
+        : rawSheet;
+    // A reference that isn't a plain A1 cell/range — a structured
+    // reference (`Table1[Sales]`) or a defined-name reference
+    // (`MyData`) — must pass through unchanged. `colCache.decode`
+    // doesn't throw on these inputs but silently returns garbage
+    // (e.g. `Table1[Sales]` decodes as if it were a cell address "T1"),
+    // which `absoluteA1Range` then emits as `$T$1`, silently corrupting
+    // the formula. Detect non-A1 shapes and keep them verbatim.
+    if (isA1RangeOrCell(ref)) {
+      return `${quoteSheetName(unquoted)}!${absoluteA1Range(ref)}`;
+    }
+    // Pass through structured/named refs verbatim — the sheet prefix is
+    // still legal (e.g. `Sheet1!Table1[Sales]` is accepted by Excel).
+    return `${quoteSheetName(unquoted)}!${ref}`;
+  }
+  if (!isA1RangeOrCell(range)) {
+    // Bare structured / named refs resolve against the workbook as a
+    // whole; they don't take a sheet prefix.
+    return range;
+  }
+  return `${quoteSheetName(sheetName)}!${absoluteA1Range(range)}`;
+}
+
+/**
+ * Whether a reference string is a classic A1 cell or range (optionally
+ * with `$` absolute markers). Returns false for structured references
+ * like `Table1[Sales]`, defined-name references like `MyRange`, and
+ * other non-A1 shapes so callers can route them away from
+ * `colCache.decode` (which silently produces garbage on bad input).
+ */
+function isA1RangeOrCell(ref: string): boolean {
+  // Cell: optional $, letters, optional $, digits. Range: two of those
+  // joined by `:`. Full-column (`A:A`) and full-row (`1:1`) references
+  // are also A1-shaped and accepted.
+  return /^\$?[A-Za-z]{1,3}\$?\d+(:\$?[A-Za-z]{1,3}\$?\d+)?$|^\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}$|^\$?\d+:\$?\d+$/.test(
+    ref
+  );
 }
 
 function absoluteRange(
@@ -224,6 +325,151 @@ function absoluteA1Range(range: string): string {
     return `$${colCache.n2l(decoded.left)}$${decoded.top}:$${colCache.n2l(decoded.right)}$${decoded.bottom}`;
   }
   return `$${colCache.n2l(decoded.col)}$${decoded.row}`;
+}
+
+// ---------------------------------------------------------------------------
+// Shared row-staging helpers
+// ---------------------------------------------------------------------------
+
+interface StagedRows<T extends Record<string, unknown>> {
+  yKeys: Array<keyof T & string>;
+  startCol: number;
+  dataStartRow: number;
+  dataEndRow: number;
+}
+
+/**
+ * Write a rows-style dataset into the target worksheet and return the
+ * resolved data extents. Shared by `chartOptionsFromRows` /
+ * `chartExOptionsFromRows` so the two paths agree on cell coercion,
+ * sheet-name validation, and header handling.
+ */
+function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
+  worksheet: Worksheet,
+  rows: T[],
+  options: {
+    x: keyof T & string;
+    y: (keyof T & string) | Array<keyof T & string>;
+    sheetName?: string;
+    startCell?: string;
+    includeHeaders?: boolean;
+  }
+): StagedRows<T> {
+  if (options.sheetName !== undefined && !sheetNamesEqual(options.sheetName, worksheet.name)) {
+    throw new ChartOptionsError(
+      `sheetName must match the target worksheet: got ${JSON.stringify(options.sheetName)}, expected ${JSON.stringify(worksheet.name)}.`
+    );
+  }
+  const start = colCache.decodeAddress(options.startCell ?? "A1");
+  const includeHeaders = options.includeHeaders !== false;
+  const yKeys: Array<keyof T & string> = Array.isArray(options.y) ? options.y : [options.y];
+  // Reject `y` lists that include the `x` key — without this check the
+  // header row gets two copies of the same column name and the series
+  // references `x` twice, producing a chart where the author sees the
+  // same column as both the category and value axis without any
+  // diagnostic.
+  if (yKeys.some(k => k === (options.x as unknown))) {
+    throw new ChartOptionsError(
+      `chart y columns must not include the x key: x=${JSON.stringify(options.x)} appears in y=${JSON.stringify(yKeys)}.`
+    );
+  }
+  const keys: Array<keyof T & string> = [options.x, ...yKeys];
+  const startRow = start.row;
+  const startCol = start.col;
+  if (includeHeaders) {
+    keys.forEach((key, i) => {
+      worksheet.getCell(startRow, startCol + i).value = key as unknown as CellValueInputType;
+    });
+  }
+  const dataRowOffset = includeHeaders ? 1 : 0;
+  rows.forEach((row, r) => {
+    keys.forEach((key, c) => {
+      worksheet.getCell(startRow + dataRowOffset + r, startCol + c).value = coerceCellValue(
+        row[key],
+        key
+      );
+    });
+  });
+  const dataStartRow = startRow + dataRowOffset;
+  return {
+    yKeys,
+    startCol,
+    dataStartRow,
+    dataEndRow: dataStartRow + rows.length - 1
+  };
+}
+
+/**
+ * Narrow a value produced by indexing into a user-supplied row object to
+ * one of the types `Worksheet.getCell().value` accepts. Unsupported shapes
+ * (plain objects that aren't Date, Symbols, functions) throw with a
+ * clear message rather than silently flowing into the worksheet as an
+ * `as never` cast and surfacing elsewhere as a confusing writer error.
+ */
+function coerceCellValue(value: unknown, key: string): CellValueInputType {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Date
+  ) {
+    return value as CellValueInputType;
+  }
+  throw new ChartOptionsError(
+    `Unsupported row value for column ${JSON.stringify(key)}: ${typeof value}. ` +
+      `Expected string | number | boolean | Date | null | undefined.`
+  );
+}
+
+function sheetNamesEqual(a: string, b: string): boolean {
+  // Excel sheet names are case-insensitive.
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Strip the helper-only table options before spreading the remainder onto
+ * an `AddChart(Ex)Options`. Previously the classic and ChartEx helpers
+ * each had their own byte-for-byte duplicate of this function; the
+ * structural constraint is all that matters at runtime, so we unify them
+ * on a single generic.
+ */
+function stripTableHelperOptions<
+  O extends {
+    categoryColumn?: string | number;
+    valueColumns?: Array<string | number>;
+    structuredReferences?: boolean;
+  }
+>(options: O): Omit<O, "categoryColumn" | "valueColumns" | "structuredReferences"> {
+  const { categoryColumn, valueColumns, structuredReferences, ...rest } = options;
+  void categoryColumn;
+  void valueColumns;
+  void structuredReferences;
+  return rest;
+}
+
+/**
+ * Strip the helper-only rows options. Shared between the classic and
+ * ChartEx rows helpers (see {@link stripTableHelperOptions}).
+ */
+function stripRowsHelperOptions<
+  O extends {
+    x: unknown;
+    y: unknown;
+    sheetName?: string;
+    startCell?: string;
+    includeHeaders?: boolean;
+  }
+>(options: O): Omit<O, "x" | "y" | "sheetName" | "startCell" | "includeHeaders"> {
+  const { x, y, sheetName, startCell, includeHeaders, ...rest } = options;
+  void x;
+  void y;
+  void sheetName;
+  void startCell;
+  void includeHeaders;
+  return rest;
 }
 
 // ============================================================================
@@ -299,66 +545,13 @@ export function chartExOptionsFromTable(
   table: Table | string,
   options: AddChartExFromTableOptions & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
-  const resolved = typeof table === "string" ? worksheet.getTable(table) : table;
-  if (!resolved) {
-    throw new Error(`Table not found: ${String(table)}`);
-  }
-  const model = resolved.model;
-  const tableRef = colCache.decode(model.tableRef ?? model.ref);
-  if (!("top" in tableRef)) {
-    throw new Error(`Invalid table range: ${model.ref}`);
-  }
-  if (tableRef.bottom < tableRef.top) {
-    throw new Error(`Invalid table range: ${model.ref}`);
-  }
-  const headerRow = model.headerRow !== false;
-  const dataStartRow = tableRef.top + (headerRow ? 1 : 0);
-  const dataEndRow = tableRef.bottom - (model.totalsRow ? 1 : 0);
-  if (dataEndRow < dataStartRow) {
-    throw new Error(`Table has no data rows: ${model.name}`);
-  }
-  const columnNames = model.columns.map(c => c.name);
-  const categoryIndex = resolveTableColumn(columnNames, options.categoryColumn ?? 0);
-  const valueColumns = options.valueColumns?.length
-    ? options.valueColumns.map(col => resolveTableColumn(columnNames, col))
-    : model.columns.map((_, i) => i).filter(i => i !== categoryIndex);
-  if (valueColumns.length === 0) {
-    throw new Error(`Table has no value columns: ${model.name}`);
-  }
-  const sheetName = worksheet.name;
-  const structured = options.structuredReferences !== false;
-  const categories = structured
-    ? tableColumnReference(model.name, columnNames[categoryIndex])
-    : absoluteRange(
-        sheetName,
-        dataStartRow,
-        tableRef.left + categoryIndex,
-        dataEndRow,
-        tableRef.left + categoryIndex
-      );
-  const series: AddChartExSeriesOptions[] = valueColumns.map(index => ({
-    name: columnNames[index],
-    values: structured
-      ? tableColumnReference(model.name, columnNames[index])
-      : absoluteRange(
-          sheetName,
-          dataStartRow,
-          tableRef.left + index,
-          dataEndRow,
-          tableRef.left + index
-        )
+  const layout = resolveTableLayout(worksheet, table, options);
+  const categories = buildColumnReference(layout, layout.categoryIndex);
+  const series: AddChartExSeriesOptions[] = layout.valueColumns.map(index => ({
+    name: layout.columnNames[index],
+    values: buildColumnReference(layout, index)
   }));
-  // Strip helper-only keys before spreading.
-  const {
-    categoryColumn: _catCol,
-    valueColumns: _valCols,
-    structuredReferences: _structured,
-    ...rest
-  } = options;
-  void _catCol;
-  void _valCols;
-  void _structured;
-  return { ...rest, categories, series };
+  return { ...stripTableHelperOptions(options), categories, series };
 }
 
 /**
@@ -372,54 +565,26 @@ export function chartExOptionsFromRows<T extends Record<string, unknown>>(
   options: AddChartExFromRowsOptions<T> & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
   if (rows.length === 0) {
-    throw new Error("chartExOptionsFromRows requires at least one row");
+    throw new ChartOptionsError("chartExOptionsFromRows requires at least one row.");
   }
-  if (options.sheetName !== undefined && options.sheetName !== worksheet.name) {
-    const target = worksheet.workbook.getWorksheet(options.sheetName);
-    if (!target || target !== worksheet) {
-      throw new Error(
-        `chartExOptionsFromRows sheetName must match the target worksheet (${worksheet.name})`
-      );
-    }
-  }
-  const start = colCache.decodeAddress(options.startCell ?? "A1");
-  const includeHeaders = options.includeHeaders !== false;
-  const yKeys = Array.isArray(options.y) ? options.y : [options.y];
-  const keys = [options.x, ...yKeys];
-  const startRow = start.row;
-  const startCol = start.col;
-  if (includeHeaders) {
-    keys.forEach((key, i) => {
-      worksheet.getCell(startRow, startCol + i).value = key;
-    });
-  }
-  rows.forEach((row, r) => {
-    keys.forEach((key, c) => {
-      worksheet.getCell(startRow + (includeHeaders ? 1 : 0) + r, startCol + c).value = row[
-        key
-      ] as never;
-    });
-  });
-  const dataStartRow = startRow + (includeHeaders ? 1 : 0);
-  const dataEndRow = dataStartRow + rows.length - 1;
-  const sheetName = options.sheetName ?? worksheet.name;
-  const categories = absoluteRange(sheetName, dataStartRow, startCol, dataEndRow, startCol);
-  const series: AddChartExSeriesOptions[] = yKeys.map((key, i) => ({
+  const staged = stageRowsIntoWorksheet(worksheet, rows, options);
+  const sheetName = worksheet.name;
+  const categories = absoluteRange(
+    sheetName,
+    staged.dataStartRow,
+    staged.startCol,
+    staged.dataEndRow,
+    staged.startCol
+  );
+  const series: AddChartExSeriesOptions[] = staged.yKeys.map((key, i) => ({
     name: key,
-    values: absoluteRange(sheetName, dataStartRow, startCol + i + 1, dataEndRow, startCol + i + 1)
+    values: absoluteRange(
+      sheetName,
+      staged.dataStartRow,
+      staged.startCol + i + 1,
+      staged.dataEndRow,
+      staged.startCol + i + 1
+    )
   }));
-  const {
-    x: _x,
-    y: _y,
-    sheetName: _sheet,
-    startCell: _startCell,
-    includeHeaders: _headers,
-    ...rest
-  } = options;
-  void _x;
-  void _y;
-  void _sheet;
-  void _startCell;
-  void _headers;
-  return { ...rest, categories, series };
+  return { ...stripRowsHelperOptions(options), categories, series };
 }

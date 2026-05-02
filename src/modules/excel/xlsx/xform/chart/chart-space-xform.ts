@@ -11,6 +11,8 @@
  * The r: namespace is http://schemas.openxmlformats.org/officeDocument/2006/relationships
  */
 
+import { escapeXml, escapeXmlAttr, themeIndexToName } from "@excel/chart/chart-utils";
+import { isRawXmlShape } from "@excel/chart/shape-properties";
 import type {
   ChartModel,
   ChartData,
@@ -64,6 +66,10 @@ import type {
   StringLiteral,
   MultiLevelStringReference,
   ShapeProperties,
+  ShapeTransform,
+  PresetGeometry,
+  CustomGeometry,
+  CustomGeometryCommand,
   ChartColor,
   ChartTextProperties,
   ChartRichText,
@@ -85,6 +91,11 @@ import type {
   PictureOptions
 } from "@excel/chart/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import {
+  parseXsdBoolean as sharedParseXsdBoolean,
+  parseXsdInt as sharedParseXsdInt,
+  parseXsdFloat as sharedParseXsdFloat
+} from "@excel/xlsx/xform/xsd-values";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -152,7 +163,11 @@ class RawXmlCapture {
     let s = `<${node.name}`;
     if (node.attributes) {
       for (const [k, v] of Object.entries(node.attributes)) {
-        s += ` ${k}="${escapeXml(String(v))}"`;
+        // Use the attribute-specific escape so control characters
+        // (`\t` / `\n` / `\r`) survive the XML attribute-value
+        // normaliser, and both quote styles (`'` and `"`) are
+        // escaped defensively.
+        s += ` ${k}="${escapeXmlAttr(String(v))}"`;
       }
     }
     s += ">";
@@ -163,19 +178,156 @@ class RawXmlCapture {
     let s = `<${node.name}`;
     if (node.attributes) {
       for (const [k, v] of Object.entries(node.attributes)) {
-        s += ` ${k}="${escapeXml(String(v))}"`;
+        s += ` ${k}="${escapeXmlAttr(String(v))}"`;
       }
     }
     return s + "/>";
   }
 }
 
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+// `escapeXml` / `escapeXmlAttr` / `escapeXmlText` are imported from
+// `@excel/chart/chart-utils`. They're the single authoritative entry
+// points every chart writer uses for text content / attribute values —
+// the xform used to carry its own local copies that (1) did not strip
+// the C0 / C1 control characters XML 1.0 forbids, letting malformed
+// upstream input produce an xlsx no consumer could reopen, and
+// (2) drifted from the `chart-renderer` / `chart-ex-renderer` /
+// `chart-sidecar` equivalents across releases. `escapeXmlAttr` adds
+// `\t\n\r` → numeric-ref encoding so attribute round-trip preserves
+// whitespace.
+
+/**
+ * Does the string require `xml:space="preserve"` to survive XML
+ * whitespace normalisation? The XML default (`xml:space="default"`)
+ * collapses leading/trailing whitespace and reduces internal
+ * whitespace runs to single spaces; any tab or newline is equivalent
+ * to a space. Therefore a run needs `preserve` iff it has:
+ *   - leading or trailing whitespace,
+ *   - ≥2 consecutive whitespace characters internally, or
+ *   - any tab / newline / carriage return character.
+ */
+function needsXmlSpacePreserve(text: string): boolean {
+  if (text === "") {
+    return false;
+  }
+  if (/^\s|\s$/.test(text)) {
+    return true;
+  }
+  if (/[\t\n\r]/.test(text)) {
+    return true;
+  }
+  if (/\s{2,}/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Parse an OOXML `xsd:boolean` attribute value. OOXML allows the four
+ * canonical forms: `"0" | "1" | "false" | "true"`. Excel itself always
+ * emits `"0"` or `"1"`, but non-Microsoft writers (LibreOffice, custom
+ * pipelines, hand-authored XML) use the textual forms — the parser used
+ * to silently treat them as `false`, which corrupted round-trip.
+ *
+ * Returns `true`/`false`/`undefined` (when the attribute is missing or
+ * not a recognised boolean).
+ *
+ * For OOXML elements whose schema default is `true` when the attribute
+ * is absent (CT_Boolean variants — e.g. `<c:auto/>`), pass the result
+ * through `?? true` at the call site.
+ */
+/**
+ * Parse an OOXML boolean attribute. Re-exported from the shared
+ * `xsd-values` helper so every xform shares a single source of truth;
+ * chartsheet-xform, worksheet-xform, etc. import from
+ * `@excel/xlsx/xform/xsd-values` directly.
+ *
+ * For OOXML elements whose schema default is `true` when the attribute
+ * is absent (CT_Boolean variants — e.g. `<c:auto/>`), pass the result
+ * through `?? true` at the call site.
+ */
+function parseXsdBoolean(value: string | undefined): boolean | undefined {
+  return sharedParseXsdBoolean(value);
+}
+
+/**
+ * Parse an OOXML integer attribute safely. Returns `undefined` when the
+ * input is missing, empty or non-numeric rather than producing `NaN`
+ * (which then propagates through the model and surfaces as `"NaN"` in
+ * the round-trip XML). Call sites that need a default should pipe
+ * through `?? fallback`.
+ */
+function parseXsdInt(value: string | undefined): number | undefined {
+  return sharedParseXsdInt(value);
+}
+
+/**
+ * Parse an OOXML floating-point attribute safely. See
+ * {@link parseXsdInt} for the rationale.
+ */
+function parseXsdFloat(value: string | undefined): number | undefined {
+  return sharedParseXsdFloat(value);
+}
+
+/**
+ * Narrow a parsed attribute value to a known enum tuple. Unknown values
+ * are returned as the raw string so that `as any` casts in the parser
+ * don't silently coerce garbage into the model — the caller can then
+ * decide to drop, log, or surface the anomaly. Returns `undefined` when
+ * the input is `undefined` so callers can distinguish "absent" from
+ * "present but invalid".
+ *
+ * Type parameter trickery: when the input matches, the return type is
+ * the narrowed union; when it doesn't, we still return a `string`
+ * (widened) so the caller sees its typed field populated with a value
+ * that may be an illegal enum member. The recommended pattern is to
+ * forward this to `unknownElements` diagnostics rather than storing the
+ * raw string on the model, but that requires each call site to decide;
+ * this helper is the minimum hygienic improvement over a naked `as any`.
+ */
+function narrowEnumValue<T extends string>(
+  value: string | undefined,
+  allowed: readonly T[]
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
+}
+
+/**
+ * Map the public API's friendly tick-mark vocabulary (`inside` /
+ * `outside`, matching {@link TickMark}) back to the OOXML
+ * `ST_TickMark` tokens (`in` / `out`) on the way out. Kept aligned
+ * with the inverse map used in {@link parseTickMarkFromOoxml} and
+ * with the ChartEx renderer's copy of the same helper.
+ */
+function tickMarkToOoxml(value: "none" | "inside" | "outside" | "cross"): string {
+  if (value === "inside") {
+    return "in";
+  }
+  if (value === "outside") {
+    return "out";
+  }
+  return value;
+}
+
+/**
+ * Inverse of {@link tickMarkToOoxml} for parse side.
+ */
+function parseTickMarkFromOoxml(
+  value: string | undefined
+): "none" | "inside" | "outside" | "cross" | undefined {
+  if (value === "in") {
+    return "inside";
+  }
+  if (value === "out") {
+    return "outside";
+  }
+  if (value === "none" || value === "cross") {
+    return value;
+  }
+  return undefined;
 }
 
 // ============================================================================
@@ -228,14 +380,12 @@ const C16_CHART_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2014/ch
 const C15_DATA_LABELS_RANGE_EXT_URI = "{CE6537A1-D6FC-4f65-9D91-7224C49458BB}";
 const C15_CHART_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2012/chart";
 
-/**
- * Escape text content for safe XML embedding. Mirrors the implementation
- * used by chart-builder / chart-ex-renderer so emitted XML is consistent
- * across all writer paths.
- */
-function escapeXmlText(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+// `escapeXmlText` is a local alias for {@link escapeXml}. Kept so the
+// extension builders below read clearly at the call site ("text node
+// content" vs. "attribute value"); both paths need identical escaping
+// semantics — `&`, `<`, `>`, `"`, `'` entity-encoded, C0/C1 control
+// chars and lone surrogates stripped.
+const escapeXmlText = escapeXml;
 
 /**
  * Parse the contents of a `<c:ext uri="{781A…}">` element that wraps a
@@ -374,11 +524,26 @@ function parseC15DataLabelsRange(extXml: string): DataLabelsRange | undefined {
 }
 
 function decodeXmlText(value: string): string {
+  // Also decode numeric character references (`&#nnn;` decimal and
+  // `&#xHH;` hex). Required so that formulas containing non-ASCII
+  // characters via numeric escape (e.g. German `é` written as
+  // `&#233;`, bullet `&#x2022;`, most Excel-authored CJK) round-trip
+  // back to their original code points; the previous implementation
+  // only decoded the five named entities and silently left numeric
+  // references as literal text (`"&#233;"`) in the formula string.
   return value
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) => {
+      const cp = parseInt(hex, 16);
+      return Number.isFinite(cp) && cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+    })
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const cp = parseInt(dec, 10);
+      return Number.isFinite(cp) && cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+    })
     .replace(/&amp;/g, "&");
 }
 
@@ -447,10 +612,52 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   reset(): void {
     super.reset();
+    // Clear every bit of parse state. Previously only `stateStack`,
+    // `rawCapture` and `textBuf` were cleared, which meant that if the
+    // same xform instance was reused after an exception (or via
+    // `BaseXform.parseStreamDirect`), leftover `currentXxx` fields from
+    // the previous parse could leak into the next — most visibly
+    // causing `currentDataLabelEntry` to carry over to the next
+    // series's `<c:dLbls>` and mis-attribute `c:dLblPos` etc. to the
+    // wrong chart.
     this.stateStack = [];
     this.rawCapture = null;
     this.rawCaptureContext = null;
     this.textBuf = "";
+    this.currentChartTypeGroup = null;
+    this.currentSeries = null;
+    this.currentAxis = null;
+    this.currentTitle = null;
+    this.currentLegend = null;
+    this.currentDataLabels = null;
+    this.currentDataLabelEntry = null;
+    this.currentMarker = null;
+    this.currentDataPoint = null;
+    this.currentTrendline = null;
+    this.currentErrorBars = null;
+    this.currentNumRef = null;
+    this.currentStrRef = null;
+    this.currentNumLit = null;
+    this.currentStrLit = null;
+    this.currentNumCache = null;
+    this.currentStrCache = null;
+    this.currentLayout = null;
+    this.currentManualLayout = null;
+    this.currentView3D = null;
+    this.currentUpDownBars = null;
+    this.currentLegendEntry = null;
+    this.currentDataTable = null;
+    this.currentDisplayUnits = null;
+    this.currentPivotFormat = null;
+    this.currentTrendlineLbl = null;
+    this.currentPictureOptions = null;
+    this.currentPrintSettings = null;
+    this.currentMultiLvlStrRef = null;
+    this.currentLvl = null;
+    this.currentFloorWall = null;
+    this.currentLineContext = null;
+    this._pendingLineSpPr = null;
+    this.insidePlotArea = false;
   }
 
   // ============================================================================
@@ -484,6 +691,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     } else if (m.style !== undefined) {
       xmlStream.leafNode("c:style", { val: String(m.style) });
     }
+    // ECMA-376 §21.2.2.29 `CT_ChartSpace` child order:
+    //   date1904, lang, roundedCorners, (AlternateContent | style),
+    //   clrMapOvr, pivotSource, protection, chart,
+    //   spPr, txPr, externalData, printSettings, userShapes, extLst.
+    // `clrMapOvr` must appear BEFORE `chart` (the chart's colour
+    // references may already point at the mapping); previously we
+    // emitted it after `chart`, which strict OOXML validators reject.
+    if (m.clrMapOvr) {
+      xmlStream.writeRaw(m.clrMapOvr);
+    }
     if (m.pivotSource) {
       xmlStream.writeRaw(m.pivotSource);
     }
@@ -493,31 +710,36 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
     this._renderChart(xmlStream, m.chart);
 
-    if (m.clrMapOvr) {
-      xmlStream.writeRaw(m.clrMapOvr);
-    }
-    // `<c:userShapes r:id="…"/>` — optional reference to a separate
-    // drawing part holding user-drawn annotations on the chart. The
-    // part itself rides along via the chart rels; here we emit the
-    // reference so Excel knows where to find it.
-    if (m.userShapesRelId) {
-      xmlStream.leafNode("c:userShapes", { "r:id": m.userShapesRelId });
-    }
     if (m.spPr) {
       this._renderSpPr(xmlStream, m.spPr);
     }
     if (m.txPr) {
       this._renderTxPr(xmlStream, m.txPr);
     }
-    if (m.printSettings) {
-      this._renderPrintSettings(xmlStream, m.printSettings);
-    }
-    if (m.externalData) {
+    if (m.externalData && m.externalData.id) {
+      // `<c:externalData>` requires a non-empty `r:id` referencing a
+      // real relationship in the chart's `.rels` part. Emitting
+      // `r:id=""` (which happened when the source XML had been parsed
+      // from a chart whose `r:id` was missing or blank) produces a
+      // workbook that Excel's strict-open rejects with the "repair"
+      // dialog on reopen. Drop the element entirely when we have no
+      // valid relationship id to point at.
       xmlStream.openNode("c:externalData", { "r:id": m.externalData.id });
       if (m.externalData.autoUpdate !== undefined) {
         xmlStream.leafNode("c:autoUpdate", { val: m.externalData.autoUpdate ? "1" : "0" });
       }
       xmlStream.closeNode();
+    }
+    if (m.printSettings) {
+      this._renderPrintSettings(xmlStream, m.printSettings);
+    }
+    // `<c:userShapes r:id="…"/>` — optional reference to a separate
+    // drawing part holding user-drawn annotations on the chart. The
+    // part itself rides along via the chart rels; here we emit the
+    // reference so Excel knows where to find it. Per schema, it is
+    // the last structured child before `extLst`.
+    if (m.userShapesRelId) {
+      xmlStream.leafNode("c:userShapes", { "r:id": m.userShapesRelId });
     }
     if (m.extLst || m.pivotOptions) {
       this._renderChartSpaceExtLst(xmlStream, m);
@@ -549,7 +771,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     // piece is optional; we only emit a `<c:extLst>` wrapper when at
     // least one piece is present.
     const extPieces: string[] = [];
-    if (m.pivotSource && m.pivotOptions) {
+    // Emit the pivot extension chain whenever we have structured
+    // `pivotOptions`, regardless of whether `pivotSource` is also
+    // present. Historically the gate required both because
+    // `pivotSource` is what links the chart to its PivotTable, but
+    // programmatic builders may legitimately set `pivotOptions` first
+    // (e.g. during incremental construction) and have the source
+    // linked later — dropping the options silently on write lost the
+    // author's work. If no options are set, both helpers return empty
+    // strings and no extension is emitted.
+    if (m.pivotOptions) {
       const c14 = this._buildC14PivotOptionsExt(m.pivotOptions);
       if (c14) {
         extPieces.push(c14);
@@ -666,8 +897,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       for (const pf of chart.pivotFormats) {
         xml.openNode("c:pivotFmt");
         xml.leafNode("c:idx", { val: String(pf.index) });
+        // CT_PivotFmt child order: `idx, spPr?, txPr?, marker?, dLbl?`.
+        // Previously `txPr` was never written out; any pivotFmt-level
+        // typography set on the model would vanish on round-trip.
         if (pf.spPr) {
           this._renderSpPr(xml, pf.spPr);
+        }
+        if (pf.txPr) {
+          this._renderTxPr(xml, pf.txPr);
         }
         if (pf.marker) {
           this._renderMarker(xml, pf.marker);
@@ -683,6 +920,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           xml.writeRaw(pf.rawDLbl);
         } else if (pf.dataLabels) {
           this._renderDataLabels(xml, pf.dataLabels);
+        }
+        // CT_PivotFmt ends with an optional `extLst`. Preserved as raw
+        // bytes so any unrecognised vendor extensions round-trip.
+        if (pf.extLst) {
+          xml.writeRaw(pf.extLst);
         }
         xml.closeNode();
       }
@@ -730,8 +972,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderView3D(xml: XmlSink, v: View3D): void {
     xml.openNode("c:view3D");
+    // ECMA-376 §21.2.2.228 CT_View3D child order:
+    //   rotX?, hPercent?, rotY?, depthPercent?, rAngAx?, perspective?, extLst?
+    // `hPercent` sits between `rotX` and `rotY`; the previous
+    // implementation placed it after `rAngAx`, which strict schema
+    // validators rejected.
     if (v.rotX !== undefined) {
       xml.leafNode("c:rotX", { val: String(v.rotX) });
+    }
+    if (v.hPercent !== undefined) {
+      xml.leafNode("c:hPercent", { val: String(v.hPercent) });
     }
     if (v.rotY !== undefined) {
       xml.leafNode("c:rotY", { val: String(v.rotY) });
@@ -742,11 +992,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (v.rAngAx !== undefined) {
       xml.leafNode("c:rAngAx", { val: v.rAngAx ? "1" : "0" });
     }
-    if (v.hPercent !== undefined) {
-      xml.leafNode("c:hPercent", { val: String(v.hPercent) });
-    }
     if (v.perspective !== undefined) {
       xml.leafNode("c:perspective", { val: String(v.perspective) });
+    }
+    if (v.extLst) {
+      xml.writeRaw(v.extLst);
     }
     xml.closeNode();
   }
@@ -803,12 +1053,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
     switch (ctg.type) {
       case "bar":
-      case "bar3D":
         this._renderBarChart(xml, ctg);
         break;
+      case "bar3D":
+        this._renderBar3DChart(xml, ctg);
+        break;
       case "line":
-      case "line3D":
         this._renderLineChart(xml, ctg);
+        break;
+      case "line3D":
+        this._renderLine3DChart(xml, ctg);
         break;
       case "pie":
       case "pie3D":
@@ -850,8 +1104,18 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderBarChart(xml: XmlSink, g: BarChartGroup): void {
-    xml.leafNode("c:barDir", { val: g.barDir });
-    xml.leafNode("c:grouping", { val: g.grouping });
+    // `CT_BarChart` (2D) schema sequence:
+    //   barDir, grouping?, varyColors?, ser*, dLbls?, gapWidth?,
+    //   overlap?, serLines*, axId{2}.
+    //
+    // `c:barDir` and `c:grouping` are required children, but the parser
+    // may leave them `undefined` if the source XML had an invalid value
+    // that `narrowEnumValue` rejected. Emitting `val=""` produces a
+    // file Excel rejects outright. Fall back to the schema defaults
+    // (`"col"` for barDir, `"clustered"` for grouping) — these match
+    // Excel's behaviour when the attributes are absent.
+    xml.leafNode("c:barDir", { val: g.barDir ?? "col" });
+    xml.leafNode("c:grouping", { val: g.grouping ?? "clustered" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -872,14 +1136,44 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       this._renderSpPr(xml, g.serLines);
       xml.closeNode();
     }
-    if (g.shape) {
-      xml.leafNode("c:shape", { val: g.shape });
+    for (const id of g.axisIds) {
+      xml.leafNode("c:axId", { val: String(id) });
     }
-    // `gapDepth` is only valid for bar3D but Excel tolerates it being
-    // absent on 2D too; we emit it whenever the user set it so the
-    // type system remains a loose union.
+  }
+
+  /**
+   * Render a 3-D bar chart per `CT_Bar3DChart`. The 3-D schema DROPS
+   * `overlap` and `serLines` (both 2-D-only) and ADDS `gapDepth` and
+   * `shape`. The child order differs from 2-D:
+   *
+   *   barDir, grouping?, varyColors?, ser*, dLbls?, gapWidth?,
+   *   gapDepth?, shape?, axId{3}.
+   *
+   * Previously the builder shared `_renderBarChart` with bar2D, which
+   * emitted `overlap` / `serLines` on bar3D (schema violation) and put
+   * `shape` before `gapDepth` (sequence violation — Excel tolerates it
+   * on read, strict validators reject).
+   */
+  private _renderBar3DChart(xml: XmlSink, g: BarChartGroup): void {
+    xml.leafNode("c:barDir", { val: g.barDir ?? "col" });
+    xml.leafNode("c:grouping", { val: g.grouping ?? "clustered" });
+    if (g.varyColors !== undefined) {
+      xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
+    }
+    for (const s of g.series) {
+      this._renderBarSeries(xml, s);
+    }
+    if (g.dataLabels) {
+      this._renderDataLabels(xml, g.dataLabels);
+    }
+    if (g.gapWidth !== undefined) {
+      xml.leafNode("c:gapWidth", { val: String(g.gapWidth) });
+    }
     if (g.gapDepth !== undefined) {
       xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
+    }
+    if (g.shape) {
+      xml.leafNode("c:shape", { val: g.shape });
     }
     for (const id of g.axisIds) {
       xml.leafNode("c:axId", { val: String(id) });
@@ -887,7 +1181,13 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderLineChart(xml: XmlSink, g: LineChartGroup): void {
-    xml.leafNode("c:grouping", { val: g.grouping });
+    // `CT_LineChart` (2D) schema sequence:
+    //   grouping, varyColors?, ser*, dLbls?, dropLines?, hiLowLines?,
+    //   upDownBars?, marker?, smooth?, axId{2}.
+    //
+    // Guard required `c:grouping` with schema default `"standard"` when
+    // parser narrowing rejected the source value; see `_renderBarChart`.
+    xml.leafNode("c:grouping", { val: g.grouping ?? "standard" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -916,8 +1216,42 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (g.smooth !== undefined) {
       xml.leafNode("c:smooth", { val: g.smooth ? "1" : "0" });
     }
-    // Only line3DChart uses gapDepth; we emit it whenever set to keep
-    // the type shape simple and let Excel ignore it on 2D line charts.
+    for (const id of g.axisIds) {
+      xml.leafNode("c:axId", { val: String(id) });
+    }
+  }
+
+  /**
+   * Render a 3-D line chart per `CT_Line3DChart`. Schema DROPS
+   * `hiLowLines`, `upDownBars`, `marker`, `smooth` (all 2-D-only) and
+   * ADDS `gapDepth`. Child order:
+   *
+   *   grouping, varyColors?, ser*, dLbls?, dropLines?, gapDepth?,
+   *   axId{3}.
+   *
+   * Previously the builder shared `_renderLineChart` with line2D,
+   * producing `<c:line3DChart>` with illegal children (most Excel-
+   * authored tools would still open the file, but strict validators
+   * reject it; more importantly, Excel's own read path silently
+   * ignored the illegal children, so the line3D chart lost its marker
+   * / smooth / up-down bars on round-trip).
+   */
+  private _renderLine3DChart(xml: XmlSink, g: LineChartGroup): void {
+    xml.leafNode("c:grouping", { val: g.grouping ?? "standard" });
+    if (g.varyColors !== undefined) {
+      xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
+    }
+    for (const s of g.series) {
+      this._renderLineSeries(xml, s);
+    }
+    if (g.dataLabels) {
+      this._renderDataLabels(xml, g.dataLabels);
+    }
+    if (g.dropLines) {
+      xml.openNode("c:dropLines");
+      this._renderSpPr(xml, g.dropLines);
+      xml.closeNode();
+    }
     if (g.gapDepth !== undefined) {
       xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
     }
@@ -960,7 +1294,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderAreaChart(xml: XmlSink, g: AreaChartGroup): void {
-    xml.leafNode("c:grouping", { val: g.grouping });
+    // Guard required `c:grouping` — see `_renderBarChart`.
+    xml.leafNode("c:grouping", { val: g.grouping ?? "standard" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -975,8 +1310,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       this._renderSpPr(xml, g.dropLines);
       xml.closeNode();
     }
-    // Only area3DChart uses gapDepth — emitted whenever set.
-    if (g.gapDepth !== undefined) {
+    // `c:gapDepth` exists only on `CT_Area3DChart`, not on plain
+    // `CT_AreaChart`. The builder's validator rejects `gapDepth` for
+    // 2-D area, but a direct model mutation (`group.gapDepth = 50`)
+    // would previously sneak the value through and produce an
+    // invalid `<c:areaChart><c:gapDepth/>` — every strict validator
+    // rejects that. Gate on the group type so only `area3D` emits
+    // the element.
+    if (g.type === "area3D" && g.gapDepth !== undefined) {
       xml.leafNode("c:gapDepth", { val: String(g.gapDepth) });
     }
     for (const id of g.axisIds) {
@@ -985,7 +1326,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderScatterChart(xml: XmlSink, g: ScatterChartGroup): void {
-    xml.leafNode("c:scatterStyle", { val: g.scatterStyle });
+    // `c:scatterStyle` is required; fall back to `"marker"` (Excel's
+    // default scatter style) when parser narrowing rejected the source.
+    xml.leafNode("c:scatterStyle", { val: g.scatterStyle ?? "marker" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -1025,7 +1368,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderRadarChart(xml: XmlSink, g: RadarChartGroup): void {
-    xml.leafNode("c:radarStyle", { val: g.radarStyle });
+    // `c:radarStyle` is required; default to `"standard"` per schema
+    // when parser narrowing rejected the source value.
+    xml.leafNode("c:radarStyle", { val: g.radarStyle ?? "standard" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -1041,14 +1386,27 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderStockChart(xml: XmlSink, g: StockChartGroup): void {
-    if (g.varyColors !== undefined) {
-      xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
-    }
+    // `CT_StockChart` child sequence per ECMA-376 §21.2.2.206:
+    //   ser+ → dLbls? → dropLines? → hiLowLines? → upDownBars? →
+    //   axId{2} → extLst?.
+    //
+    // The previous emission order was:
+    //   varyColors, ser, dLbls, hiLowLines, upDownBars, dropLines, axId
+    // which was invalid on two counts: `CT_StockChart` has no
+    // `varyColors` attribute (fields are bound by the schema, not the
+    // more permissive `CT_LineChart` superset), and `dropLines`
+    // precedes `hiLowLines` in the sequence. Strict validators
+    // (`ooxml-validate`, LibreOffice strict) rejected both.
     for (const s of g.series) {
       this._renderLineSeries(xml, s);
     }
     if (g.dataLabels) {
       this._renderDataLabels(xml, g.dataLabels);
+    }
+    if (g.dropLines) {
+      xml.openNode("c:dropLines");
+      this._renderSpPr(xml, g.dropLines);
+      xml.closeNode();
     }
     if (g.hiLowLines) {
       xml.openNode("c:hiLowLines");
@@ -1058,14 +1416,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (g.upDownBars) {
       this._renderUpDownBars(xml, g.upDownBars);
     }
-    if (g.dropLines) {
-      xml.openNode("c:dropLines");
-      this._renderSpPr(xml, g.dropLines);
-      xml.closeNode();
-    }
     for (const id of g.axisIds) {
       xml.leafNode("c:axId", { val: String(id) });
     }
+    // NOTE: `extLst` is intentionally omitted here — the caller
+    // (`_renderChartTypeGroup`) emits `ctg.extLst` for every group
+    // type unconditionally at the very end of the group element.
+    // Writing it here too would produce a duplicate `<c:extLst>`
+    // inside `<c:stockChart>`, which breaks strict validators.
   }
 
   private _renderSurfaceChart(xml: XmlSink, g: SurfaceChartGroup): void {
@@ -1075,9 +1433,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     for (const s of g.series) {
       this._renderSurfaceSeries(xml, s);
     }
-    if (g.dataLabels) {
-      this._renderDataLabels(xml, g.dataLabels);
-    }
+    // `CT_SurfaceChart` has no `dLbls` child per schema; the builder
+    // rejects `opts.dataLabels` for surface charts and the type no
+    // longer carries the slot, so we simply skip emitting it here.
     if (g.bandFormats && g.bandFormats.length > 0) {
       xml.openNode("c:bandFmts");
       for (const bf of g.bandFormats) {
@@ -1096,7 +1454,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderOfPieChart(xml: XmlSink, g: OfPieChartGroup): void {
-    xml.leafNode("c:ofPieType", { val: g.ofPieType });
+    // `c:ofPieType` is required; default to `"pie"` (Excel's default
+    // bar-of-pie / pie-of-pie style) when parser narrowing rejected.
+    xml.leafNode("c:ofPieType", { val: g.ofPieType ?? "pie" });
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
@@ -1251,6 +1611,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   private _renderAreaSeries(xml: XmlSink, s: AreaSeries): void {
     xml.openNode("c:ser");
     this._renderSeriesBase(xml, s);
+    // OOXML `CT_AreaSer` child sequence: SerShared (index, order, tx,
+    // spPr) → pictureOptions? → dPt* → dLbls → trendline* → errBars
+    // → cat → val → extLst. Previously `pictureOptions` was parsed
+    // (see `_processSeries` at line 4617) but never written back, so
+    // a round-trip of a texture-filled area chart lost the
+    // pictureFormat (`stretch` / `stack` / …) and the author's scale
+    // parameters — Excel fell back to `stretch` as the default.
+    if (s.pictureOptions) {
+      this._renderPictureOptions(xml, s.pictureOptions);
+    }
     if (s.dataPoints) {
       for (const dp of s.dataPoints) {
         this._renderDataPoint(xml, dp);
@@ -1468,12 +1838,21 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (cache.formatCode) {
       xml.leafNode("c:formatCode", undefined, cache.formatCode);
     }
-    if (cache.pointCount !== undefined) {
-      xml.leafNode("c:ptCount", { val: String(cache.pointCount) });
-    }
+    // ptCount: prefer the explicit value from the model (preserves the
+    // "declared N points but M ≤ N have values" OOXML convention for
+    // sparse caches); otherwise fall back to `points.length` so
+    // hand-authored caches never emit a cache missing the required
+    // `c:ptCount` element.
+    const ptCount = cache.pointCount ?? cache.points.length;
+    xml.leafNode("c:ptCount", { val: String(ptCount) });
     for (const pt of cache.points) {
-      if (pt.value !== null) {
-        const attrs: any = { idx: String(pt.index) };
+      // `!= null` catches both `null` (sparse slot sentinel) AND
+      // `undefined` (uninitialised points on hand-built caches).
+      // Strict `!== null` would let `undefined` through and emit
+      // `<c:v>undefined</c:v>` — Excel parses that as a string "undefined"
+      // on a numeric cache, corrupting the series on reopen.
+      if (pt.value != null) {
+        const attrs: Record<string, string> = { idx: String(pt.index) };
         if (pt.formatCode) {
           attrs.formatCode = pt.formatCode;
         }
@@ -1489,9 +1868,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderStrCache(xml: XmlSink, cache: StringCache): void {
     xml.openNode("c:strCache");
-    if (cache.pointCount !== undefined) {
-      xml.leafNode("c:ptCount", { val: String(cache.pointCount) });
-    }
+    const ptCount = cache.pointCount ?? cache.points.length;
+    xml.leafNode("c:ptCount", { val: String(ptCount) });
     for (const pt of cache.points) {
       xml.openNode("c:pt", { idx: String(pt.index) });
       xml.openNode("c:v");
@@ -1507,11 +1885,19 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (lit.formatCode) {
       xml.leafNode("c:formatCode", undefined, lit.formatCode);
     }
-    if (lit.pointCount !== undefined) {
-      xml.leafNode("c:ptCount", { val: String(lit.pointCount) });
-    }
+    // `CT_NumData` requires `ptCount` per ECMA-376 §21.2.2.163 (same
+    // convention as `CT_NumRef/numCache`). Fall back to `points.length`
+    // when the caller did not set an explicit `pointCount` so
+    // programmatically-built literal lists always emit the required
+    // element — the previous `if (lit.pointCount !== undefined)` gate
+    // produced schema-invalid XML that both validators and Excel's
+    // strict open path rejected.
+    const ptCount = lit.pointCount ?? lit.points.length;
+    xml.leafNode("c:ptCount", { val: String(ptCount) });
     for (const pt of lit.points) {
-      if (pt.value !== null) {
+      // `!= null` rather than `!== null` so `undefined` also skips
+      // emission — see `_renderNumCache` for the rationale.
+      if (pt.value != null) {
         xml.openNode("c:pt", { idx: String(pt.index) });
         xml.openNode("c:v");
         xml.writeText(String(pt.value));
@@ -1524,9 +1910,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderStrLit(xml: XmlSink, lit: StringLiteral): void {
     xml.openNode("c:strLit");
-    if (lit.pointCount !== undefined) {
-      xml.leafNode("c:ptCount", { val: String(lit.pointCount) });
-    }
+    // `CT_StrData` mandates `ptCount`; mirror the `_renderNumLit`
+    // fallback rather than silently omitting the element when
+    // `lit.pointCount` is unset.
+    const ptCount = lit.pointCount ?? lit.points.length;
+    xml.leafNode("c:ptCount", { val: String(ptCount) });
     for (const pt of lit.points) {
       xml.openNode("c:pt", { idx: String(pt.index) });
       xml.openNode("c:v");
@@ -1618,6 +2006,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   private _renderDataLabelEntry(xml: XmlSink, e: DataLabelEntry): void {
     xml.openNode("c:dLbl");
     xml.leafNode("c:idx", { val: String(e.index) });
+    // ECMA-376 CT_DLbl is `idx, choice(delete | (layout, tx, numFmt, spPr,
+    // txPr, dLblPos, showLegendKey, showVal, showCatName, showSerName,
+    // showPercent, showBubbleSize, separator), extLst)`. When `delete` is
+    // set we must emit `<c:delete val="1"/>` alone (choice left branch);
+    // all the display-option children belong to the other branch and
+    // would make the XML schema-invalid — some Excel builds reject it.
+    if (e.delete) {
+      xml.leafNode("c:delete", { val: "1" });
+      if (e.extLst) {
+        xml.writeRaw(e.extLst);
+      }
+      xml.closeNode();
+      return;
+    }
     if (e.layout) {
       this._renderLayout(xml, e.layout);
     }
@@ -1666,9 +2068,6 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       xml.writeText(e.separator);
       xml.closeNode();
     }
-    if (e.delete !== undefined) {
-      xml.leafNode("c:delete", { val: e.delete ? "1" : "0" });
-    }
     if (e.extLst) {
       xml.writeRaw(e.extLst);
     }
@@ -1677,6 +2076,21 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderDataLabels(xml: XmlSink, dl: DataLabels): void {
     xml.openNode("c:dLbls");
+    // ECMA-376 CT_DLbls: `(dLbl* & display-flags) | delete` — the
+    // `delete` choice is mutually exclusive with the dLbl list and
+    // every display-option child. Emit `delete` alone (+ extLst) when
+    // set so strict validators (xsd, Excel strict mode) accept the
+    // output. Previously we emitted `entries` before checking
+    // `delete`, producing `<c:dLbl>…<c:delete val="1"/>` which violates
+    // the choice.
+    if (dl.delete) {
+      xml.leafNode("c:delete", { val: "1" });
+      if (dl.extLst) {
+        xml.writeRaw(dl.extLst);
+      }
+      xml.closeNode();
+      return;
+    }
     if (dl.entries) {
       for (const e of dl.entries) {
         this._renderDataLabelEntry(xml, e);
@@ -1777,7 +2191,13 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     parts.push(`<c:ext uri="${C15_DATA_LABELS_RANGE_EXT_URI}" xmlns:c15="${C15_CHART_NAMESPACE}">`);
     parts.push(`<c15:datalabelsRange>`);
     parts.push(`<c15:f>${escapeXmlText(range.formula)}</c15:f>`);
-    if (range.cache && range.cache.points.length > 0) {
+    // Emit the cache whenever the parser / cache-populator saw ANY
+    // resolved cells — an all-blank range has `pointCount > 0` but
+    // `points = []`, and without the cache element Excel loses the
+    // array length and desynchronises labels from the underlying data
+    // points. Previously gated on `points.length > 0`, which dropped
+    // the `ptCount` for the blank case.
+    if (range.cache && (range.cache.pointCount !== undefined || range.cache.points.length > 0)) {
       parts.push(`<c15:dlblRangeCache>`);
       if (range.cache.pointCount !== undefined) {
         parts.push(`<c15:ptCount val="${range.cache.pointCount}"/>`);
@@ -1863,6 +2283,12 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderErrorBars(xml: XmlSink, eb: ErrorBars): void {
     xml.openNode("c:errBars");
+    // ECMA-376 CT_ErrBars child order:
+    //   errDir?, errBarType, errValType, noEndCap?, plus?, minus?, val?, spPr?, extLst?
+    // `c:val` must come after `plus`/`minus` — we previously emitted
+    // `val` before `plus`/`minus` which produced schema-invalid XML
+    // that strict OOXML validators (and some Excel versions in strict
+    // mode) reject.
     if (eb.errDir) {
       xml.leafNode("c:errDir", { val: eb.errDir });
     }
@@ -1871,14 +2297,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (eb.noEndCap !== undefined) {
       xml.leafNode("c:noEndCap", { val: eb.noEndCap ? "1" : "0" });
     }
-    if (eb.val !== undefined) {
-      xml.leafNode("c:val", { val: String(eb.val) });
-    }
     if (eb.plus) {
       this._renderValData(xml, eb.plus, "c:plus");
     }
     if (eb.minus) {
       this._renderValData(xml, eb.minus, "c:minus");
+    }
+    if (eb.val !== undefined) {
+      xml.leafNode("c:val", { val: String(eb.val) });
     }
     if (eb.spPr) {
       this._renderSpPr(xml, eb.spPr);
@@ -1924,6 +2350,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       this._renderSpPr(xml, udb.downBars);
       xml.closeNode();
     }
+    if (udb.extLst) {
+      xml.writeRaw(udb.extLst);
+    }
     xml.closeNode();
   }
 
@@ -1944,19 +2373,24 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     xml.openNode(tag);
     xml.leafNode("c:axId", { val: String(ax.axId) });
 
-    // Scaling
+    // Scaling — per ECMA-376 `CT_Scaling` sequence: `logBase?`,
+    // `orientation?`, `min?`, `max?`, `extLst?`. The previous order
+    // (`orientation, max, min, logBase`) is a schema violation and
+    // strict validators reject the document. Excel tolerates the old
+    // order on read, but LibreOffice strict mode and `ooxml-validate`
+    // do not; swap to the spec-correct order.
     xml.openNode("c:scaling");
+    if (ax.scaling?.logBase !== undefined) {
+      xml.leafNode("c:logBase", { val: String(ax.scaling.logBase) });
+    }
     if (ax.scaling?.orientation) {
       xml.leafNode("c:orientation", { val: ax.scaling.orientation });
-    }
-    if (ax.scaling?.max !== undefined) {
-      xml.leafNode("c:max", { val: String(ax.scaling.max) });
     }
     if (ax.scaling?.min !== undefined) {
       xml.leafNode("c:min", { val: String(ax.scaling.min) });
     }
-    if (ax.scaling?.logBase !== undefined) {
-      xml.leafNode("c:logBase", { val: String(ax.scaling.logBase) });
+    if (ax.scaling?.max !== undefined) {
+      xml.leafNode("c:max", { val: String(ax.scaling.max) });
     }
     xml.closeNode();
 
@@ -1986,10 +2420,10 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       });
     }
     if (ax.majorTickMark) {
-      xml.leafNode("c:majorTickMark", { val: ax.majorTickMark });
+      xml.leafNode("c:majorTickMark", { val: tickMarkToOoxml(ax.majorTickMark) });
     }
     if (ax.minorTickMark) {
-      xml.leafNode("c:minorTickMark", { val: ax.minorTickMark });
+      xml.leafNode("c:minorTickMark", { val: tickMarkToOoxml(ax.minorTickMark) });
     }
     if (ax.tickLblPos) {
       xml.leafNode("c:tickLblPos", { val: ax.tickLblPos });
@@ -2000,7 +2434,17 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (ax.txPr) {
       this._renderTxPr(xml, ax.txPr);
     }
-    xml.leafNode("c:crossAx", { val: String(ax.crossAx) });
+    // `c:crossAx` is a required child of every axis per ECMA-376
+    // `CT_ValAx` / `CT_CatAx`. Guard against `undefined` leaking from
+    // a mutated model — emitting `val="undefined"` here produces a
+    // file Excel rejects. Skip the element when the field is missing;
+    // the xform's axis-id allocator should have filled it in at parse
+    // time, so an absent crossAx at write time signals a bug upstream
+    // that's better surfaced as a validation error from Excel than
+    // silently corrupted XML.
+    if (typeof ax.crossAx === "number" && Number.isFinite(ax.crossAx)) {
+      xml.leafNode("c:crossAx", { val: String(ax.crossAx) });
+    }
     if (ax.crosses) {
       xml.leafNode("c:crosses", { val: ax.crosses });
     }
@@ -2042,14 +2486,19 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       }
       if (va.dispUnits) {
         xml.openNode("c:dispUnits");
+        // ECMA-376 CT_DispUnits: `(builtInUnit | custUnit)?` — the two
+        // are a choice, so emitting both produces schema-invalid XML.
+        // `builtInUnit` wins when the model (unusually) carries both.
         if (va.dispUnits.builtInUnit) {
           xml.leafNode("c:builtInUnit", { val: va.dispUnits.builtInUnit });
-        }
-        if (va.dispUnits.custUnit !== undefined) {
+        } else if (va.dispUnits.custUnit !== undefined) {
           xml.leafNode("c:custUnit", { val: String(va.dispUnits.custUnit) });
         }
         if (va.dispUnits.label) {
           this._renderTitle(xml, va.dispUnits.label, "c:dispUnitsLbl");
+        }
+        if (va.dispUnits.extLst) {
+          xml.writeRaw(va.dispUnits.extLst);
         }
         xml.closeNode();
       }
@@ -2126,7 +2575,12 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderLegend(xml: XmlSink, legend: ChartLegend): void {
     xml.openNode("c:legend");
-    xml.leafNode("c:legendPos", { val: legend.legendPos });
+    // `c:legendPos` is optional per CT_Legend. Skip when the model
+    // didn't set it rather than emit a literal `val="undefined"` which
+    // some validators / older Excel versions reject.
+    if (legend.legendPos) {
+      xml.leafNode("c:legendPos", { val: legend.legendPos });
+    }
     if (legend.legendEntries) {
       for (const e of legend.legendEntries) {
         xml.openNode("c:legendEntry");
@@ -2163,7 +2617,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderLayout(xml: XmlSink, layout?: ChartLayout): void {
     if (!layout) {
-      xml.leafNode("c:layout");
+      // Previously this emitted an empty `<c:layout/>` sentinel. That
+      // produced a byte-diff on every round-trip of charts whose source
+      // XML did not include a `<c:layout>` element (which is the norm:
+      // Excel omits it when no manual layout is set). Callers that
+      // genuinely need the placeholder now emit `<c:layout/>` themselves.
       return;
     }
     xml.openNode("c:layout");
@@ -2249,8 +2707,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         if (run.properties) {
           this._renderRunProperties(xml, run.properties, "a:rPr");
         }
-        xml.openNode("a:t");
-        xml.writeText(run.text);
+        // Emit `xml:space="preserve"` when the run text contains
+        // whitespace that XML normalisation would strip: leading /
+        // trailing whitespace, runs of ≥2 spaces, or any tab/newline
+        // in the middle. The ChartEx renderer has the equivalent
+        // guard; previously the classic `<a:t>` writer silently
+        // dropped padding whitespace on round-trip of axis titles and
+        // category labels that intentionally carry alignment spaces.
+        const text = run.text ?? "";
+        if (needsXmlSpacePreserve(text)) {
+          xml.openNode("a:t", { "xml:space": "preserve" });
+        } else {
+          xml.openNode("a:t");
+        }
+        xml.writeText(text);
         xml.closeNode();
         xml.closeNode();
       }
@@ -2371,8 +2841,40 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderRunProperties(xml: XmlSink, props: ChartTextProperties, tag: string): void {
     if (props._rawXml) {
-      xml.writeRaw(props._rawXml);
-      return;
+      // Rewrite the outer element name to match the target tag before
+      // emitting the raw bytes. The parser captures run properties
+      // under whatever element it found (`<a:defRPr>` on paragraph
+      // defaults, `<a:rPr>` inside `<a:r>`, `<a:endParaRPr>` after the
+      // final run); the caller passes a target tag that may differ
+      // from the captured one (e.g. restyling a paragraph default as a
+      // per-run property). Previously the function emitted the bytes
+      // verbatim — producing schema-invalid output when the target tag
+      // was `a:endParaRPr` but the bytes were `<a:defRPr>…</a:defRPr>`,
+      // or a `<a:defRPr>` appearing where the writer asked for `<a:rPr>`.
+      const raw = props._rawXml;
+      const openRe = /<a:(?:defRPr|rPr|endParaRPr)\b([^>]*)(\/?)>/;
+      const closeRe = /<\/a:(?:defRPr|rPr|endParaRPr)>/;
+      const openMatch = openRe.exec(raw);
+      if (!openMatch) {
+        // Captured bytes aren't a recognisable run-properties element.
+        // Drop to the structured path below so we don't emit garbage.
+      } else {
+        const attrs = openMatch[1] ?? "";
+        const selfClosing = openMatch[2] === "/";
+        const stripNamespace = tag.replace(/^a:/, "");
+        const targetTag = `a:${stripNamespace}`;
+        if (selfClosing) {
+          xml.writeRaw(`<${targetTag}${attrs}/>`);
+          return;
+        }
+        const closeMatch = closeRe.exec(raw);
+        if (closeMatch) {
+          const inner = raw.slice(openMatch.index + openMatch[0].length, closeMatch.index);
+          xml.writeRaw(`<${targetTag}${attrs}>${inner}</${targetTag}>`);
+          return;
+        }
+        // Malformed — fall through to structured path.
+      }
     }
     const attrs: Record<string, string> = {};
     if (props.size !== undefined) {
@@ -2446,13 +2948,31 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   // ---- Shape Properties (simplified + raw XML) ----
 
   private _renderSpPr(xml: XmlSink, spPr: ShapeProperties): void {
-    // If we have raw XML from parsing, emit it directly for perfect round-trip
-    if (spPr._rawXml) {
-      xml.writeRaw(spPr._rawXml);
+    // Emit raw XML only when the model is a pure raw-capture — i.e.
+    // `_rawXml` is present AND no structured field has been set. If
+    // the caller assigned `spPr.fill = {...}` directly (without going
+    // through `setSpPrFill`, which clears `_rawXml`), the stale raw
+    // bytes are stale and the structured writer must win. Previously
+    // this check was `if (spPr._rawXml)` — so any direct mutation of
+    // a loaded chart's spPr was silently dropped on save.
+    if (isRawXmlShape(spPr)) {
+      xml.writeRaw(spPr._rawXml!);
       return;
     }
 
     xml.openNode("c:spPr");
+    // Per DrawingML §20.1.2.2.35 (CT_ShapeProperties), child order is:
+    // xfrm? → (prstGeom | custGeom)? → (fill)? → ln? → effectLst|effectDag? →
+    // scene3d? → sp3d? → extLst?. We emit in that order so round-trip
+    // through `parseSpPr → buildSpPr` re-serialises to valid OOXML.
+    if (spPr.transform) {
+      this._renderShapeTransform(xml, spPr.transform);
+    }
+    if (spPr.presetGeometry) {
+      this._renderPresetGeometry(xml, spPr.presetGeometry);
+    } else if (spPr.customGeometry) {
+      this._renderCustomGeometry(xml, spPr.customGeometry);
+    }
     if (spPr.fill) {
       if (spPr.fill.noFill) {
         xml.leafNode("a:noFill");
@@ -2466,19 +2986,56 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           xml.openNode("a:gradFill");
           xml.openNode("a:gsLst");
           for (const stop of g.stops) {
-            xml.openNode("a:gs", { pos: String(Math.round(stop.position * 1000)) });
+            // OOXML `<a:gs pos>` encodes position as hundredths of a
+            // percent (0–100000), NOT thousandths. The previous writer
+            // used ×1000 — emitting `pos="1000"` for a 100% stop, which
+            // schema-validating readers treat as 1%. Matching fix lives
+            // in `chart-ex-renderer.ts` and the gradient parser in
+            // `shape-properties.ts`.
+            const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
+            xml.openNode("a:gs", { pos: String(encoded) });
             this._renderColor(xml, stop.color);
             xml.closeNode();
           }
           xml.closeNode();
           if (g.type === "linear" || g.type === undefined) {
-            xml.leafNode("a:lin", {
-              ang: String((g.angle ?? 0) * 60000),
-              scaled: "1"
-            });
+            // `<a:lin ang>` is in 60000ths of a degree. `Math.round`
+            // keeps the attribute an integer even for fractional
+            // degrees passed through the structured model.
+            //
+            // `scaled` is only emitted when the author explicitly set
+            // it — leaving it absent lets DrawingML apply the implicit
+            // default (`scaled="1"`). Unconditionally writing
+            // `scaled="1"` previously overwrote a parsed `scaled="0"`
+            // on round-trip, silently toggling whether the angle
+            // scales with the shape's aspect ratio.
+            const angleEmu = Math.round((g.angle ?? 0) * 60000);
+            const linAttrs: Record<string, string> = { ang: String(angleEmu) };
+            if (g.scaled !== undefined) {
+              linAttrs.scaled = g.scaled ? "1" : "0";
+            }
+            xml.leafNode("a:lin", linAttrs);
           } else if (g.type === "circle" || g.type === "rect" || g.type === "shape") {
+            // Path gradient with optional focal rectangle. Preserve
+            // parsed `fillToRect` so off-centre radial gradients
+            // round-trip; fall back to Excel's centred default.
+            // `CT_FillToRectangle` sides are `ST_Percentage` — the
+            // full signed range is legal; don't clamp to `[0, 100000]`
+            // or off-centre focal points get lost on re-save.
+            const rect = g.fillToRect;
+            const pct = (v: number | undefined, def: number): number => {
+              if (v === undefined) {
+                return def;
+              }
+              return Math.round(v * 100000);
+            };
             xml.openNode("a:path", { path: g.type });
-            xml.leafNode("a:fillToRect", { l: "50000", t: "50000", r: "50000", b: "50000" });
+            xml.leafNode("a:fillToRect", {
+              l: String(pct(rect?.left, 50000)),
+              t: String(pct(rect?.top, 50000)),
+              r: String(pct(rect?.right, 50000)),
+              b: String(pct(rect?.bottom, 50000))
+            });
             xml.closeNode();
           }
           xml.closeNode();
@@ -2553,6 +3110,138 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   /**
+   * Emit `<a:xfrm>` with optional `@rot` / `@flipH` / `@flipV` attributes
+   * and nested `<a:off>` / `<a:ext>`. Matches what `parseSpPr` captures in
+   * `shape-properties.ts`.
+   */
+  private _renderShapeTransform(xml: XmlSink, transform: ShapeTransform): void {
+    const attrs: Record<string, string> = {};
+    if (transform.rotation !== undefined && transform.rotation !== 0) {
+      attrs.rot = String(transform.rotation);
+    }
+    if (transform.flipHorizontal) {
+      attrs.flipH = "1";
+    }
+    if (transform.flipVertical) {
+      attrs.flipV = "1";
+    }
+    const hasOff = transform.offsetX !== undefined || transform.offsetY !== undefined;
+    const hasExt = transform.width !== undefined || transform.height !== undefined;
+    if (!hasOff && !hasExt && Object.keys(attrs).length === 0) {
+      // Nothing meaningful to emit.
+      return;
+    }
+    if (!hasOff && !hasExt) {
+      xml.leafNode("a:xfrm", attrs);
+      return;
+    }
+    xml.openNode("a:xfrm", Object.keys(attrs).length > 0 ? attrs : undefined);
+    if (hasOff) {
+      xml.leafNode("a:off", {
+        x: String(transform.offsetX ?? 0),
+        y: String(transform.offsetY ?? 0)
+      });
+    }
+    if (hasExt) {
+      xml.leafNode("a:ext", {
+        cx: String(transform.width ?? 0),
+        cy: String(transform.height ?? 0)
+      });
+    }
+    xml.closeNode();
+  }
+
+  /**
+   * Emit `<a:prstGeom prst="…"><a:avLst>…</a:avLst></a:prstGeom>`. The
+   * `a:avLst` wrapper is always written (even when empty) to match Excel's
+   * own output; adjustments are optional inside.
+   */
+  private _renderPresetGeometry(xml: XmlSink, geom: PresetGeometry): void {
+    xml.openNode("a:prstGeom", { prst: geom.preset });
+    xml.openNode("a:avLst");
+    for (const adj of geom.adjustments ?? []) {
+      xml.leafNode("a:gd", { name: adj.name, fmla: adj.fmla });
+    }
+    xml.closeNode();
+    xml.closeNode();
+  }
+
+  /**
+   * Emit `<a:custGeom>` with its adjustments list and the `<a:pathLst>`
+   * command stream. Commands map 1:1 to the DrawingML path command set
+   * (`moveTo` / `lnTo` / `arcTo` / `cubicBezTo` / `quadBezTo` / `close`);
+   * `arcTo` carries its parameters as attributes instead of control
+   * points, matching the parser.
+   */
+  private _renderCustomGeometry(xml: XmlSink, geom: CustomGeometry): void {
+    xml.openNode("a:custGeom");
+    xml.openNode("a:avLst");
+    for (const adj of geom.adjustments ?? []) {
+      xml.leafNode("a:gd", { name: adj.name, fmla: adj.fmla });
+    }
+    xml.closeNode();
+    // `a:gdLst`, `a:ahLst`, `a:cxnLst`, `a:rect` are omitted here — the
+    // parser does not consume them and the round-trip path is dominated
+    // by `_rawXml` for geometry-heavy shapes.
+    xml.openNode("a:pathLst");
+    for (const path of geom.paths ?? []) {
+      const pathAttrs: Record<string, string> = {};
+      if (path.w !== undefined) {
+        pathAttrs.w = String(path.w);
+      }
+      if (path.h !== undefined) {
+        pathAttrs.h = String(path.h);
+      }
+      if (path.fill !== undefined) {
+        pathAttrs.fill = path.fill;
+      }
+      if (path.stroke !== undefined) {
+        pathAttrs.stroke = path.stroke ? "1" : "0";
+      }
+      xml.openNode("a:path", Object.keys(pathAttrs).length > 0 ? pathAttrs : undefined);
+      for (const cmd of path.commands) {
+        this._renderCustomGeometryCommand(xml, cmd);
+      }
+      xml.closeNode();
+    }
+    xml.closeNode();
+    xml.closeNode();
+  }
+
+  private _renderCustomGeometryCommand(xml: XmlSink, cmd: CustomGeometryCommand): void {
+    if (cmd.type === "close") {
+      xml.leafNode("a:close");
+      return;
+    }
+    if (cmd.type === "arcTo") {
+      const p = cmd.arcParams;
+      if (!p) {
+        return;
+      }
+      xml.leafNode("a:arcTo", {
+        wR: String(p.wR),
+        hR: String(p.hR),
+        stAng: String(p.stAng),
+        swAng: String(p.swAng)
+      });
+      return;
+    }
+    const tag =
+      cmd.type === "moveTo"
+        ? "a:moveTo"
+        : cmd.type === "lnTo"
+          ? "a:lnTo"
+          : cmd.type === "cubicBezTo"
+            ? "a:cubicBezTo"
+            : "a:quadBezTo";
+    xml.openNode(tag);
+    for (const point of cmd.points ?? []) {
+      xml.leafNode("a:pt", { x: String(point.x), y: String(point.y) });
+    }
+    xml.closeNode();
+  }
+
+  /**
    * Render an `<a:blipFill>` element for a picture fill. The element is
    * `<a:blipFill><a:blip r:embed="rIdN"/>[<a:srcRect …/>]<a:stretch …>
    * or <a:tile …></a:blipFill>` matching the OOXML shape-fill subschema
@@ -2615,6 +3304,15 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   private _renderEffectList(xml: XmlSink, effects: EffectList): void {
     xml.openNode("a:effectLst");
+    // DrawingML `CT_EffectList` declares a strict `<xsd:sequence>`:
+    //   blur → fillOverlay → glow → innerShdw → outerShdw → prstShdw →
+    //   reflection → softEdge.
+    // The previous emission order (blur → outerShdw → innerShdw →
+    // prstShdw → glow → softEdge → reflection) was accepted by Excel
+    // but rejected by strict validators (`ooxml-validate`, LibreOffice
+    // strict mode). Keep this ordering in sync with
+    // `chart-ex-renderer.ts:renderEffectList`. `fillOverlay` is not
+    // modelled yet and its slot is intentionally empty.
     if (effects.blur) {
       const attrs: Record<string, string> = {};
       if (effects.blur.radius !== undefined) {
@@ -2625,11 +3323,17 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       }
       xml.leafNode("a:blur", Object.keys(attrs).length > 0 ? attrs : undefined);
     }
-    if (effects.outerShadow) {
-      this._renderShadowElement(xml, "a:outerShdw", effects.outerShadow);
+    // fillOverlay — reserved slot per schema, not currently modelled.
+    if (effects.glow) {
+      xml.openNode("a:glow", { rad: String(effects.glow.radius) });
+      this._renderColor(xml, effects.glow.color);
+      xml.closeNode();
     }
     if (effects.innerShadow) {
       this._renderShadowElement(xml, "a:innerShdw", effects.innerShadow);
+    }
+    if (effects.outerShadow) {
+      this._renderShadowElement(xml, "a:outerShdw", effects.outerShadow);
     }
     if (effects.presetShadow) {
       const ps = effects.presetShadow;
@@ -2645,14 +3349,6 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this._renderColor(xml, ps.color);
       }
       xml.closeNode();
-    }
-    if (effects.glow) {
-      xml.openNode("a:glow", { rad: String(effects.glow.radius) });
-      this._renderColor(xml, effects.glow.color);
-      xml.closeNode();
-    }
-    if (effects.softEdge) {
-      xml.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
     }
     if (effects.reflection) {
       const r = effects.reflection;
@@ -2700,6 +3396,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         attrs.rotWithShape = "1";
       }
       xml.leafNode("a:reflection", attrs);
+    }
+    if (effects.softEdge) {
+      xml.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
     }
     xml.closeNode();
   }
@@ -2867,165 +3566,119 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderColor(xml: XmlSink, color: ChartColor): void {
+    // Children shared across all five DrawingML colour-element kinds
+    // (srgbClr, schemeClr, sysClr, schemeClr-by-name, prstClr). Rather
+    // than duplicating the guard + emission logic in every branch,
+    // route through these two helpers.
+    //
+    // `hasModifiers` avoids the pathological
+    // `<a:srgbClr val="…"></a:srgbClr>` output (invalid child count);
+    // `emitModifiers` enforces:
+    //   1. Fields stored as OOXML integers (`alpha`, `shade`, `satMod`,
+    //      `lumMod`, `lumOff`) round to guard against `NaN.toString()`
+    //      producing `"NaN"` in attribute values (strict readers reject).
+    //   2. `tint` is a fraction in 0..1 per `ChartColor.tint` contract;
+    //      multiply by 100000. Negative `tint` on `schemeClr` is a
+    //      known Excel-UI convention for "darken by |tint|"; map to
+    //      `<a:shade>` exactly as the existing code did.
+    const hasModifiers = (c: ChartColor): boolean =>
+      c.alpha !== undefined ||
+      c.tint !== undefined ||
+      c.lumMod !== undefined ||
+      c.lumOff !== undefined ||
+      c.shade !== undefined ||
+      c.satMod !== undefined;
+    const emitInt = (tag: string, value: number | undefined): void => {
+      if (value === undefined || !Number.isFinite(value)) {
+        return;
+      }
+      xml.leafNode(tag, { val: String(Math.round(value)) });
+    };
+    const emitModifiers = (c: ChartColor, tintAsShade: boolean = false): void => {
+      emitInt("a:alpha", c.alpha);
+      let tintEmittedShade = false;
+      if (c.tint !== undefined && Number.isFinite(c.tint)) {
+        if (tintAsShade && c.tint < 0) {
+          // Legacy scheme-colour convention: negative tint → equivalent
+          // shade. `(1 + tint) * 100000` lives on the 0..100000 range
+          // for tint ∈ [-1, 0].
+          xml.leafNode("a:shade", { val: String(Math.round((1 + c.tint) * 100000)) });
+          tintEmittedShade = true;
+        } else {
+          xml.leafNode("a:tint", { val: String(Math.round(c.tint * 100000)) });
+        }
+      }
+      emitInt("a:lumMod", c.lumMod);
+      emitInt("a:lumOff", c.lumOff);
+      if (!tintEmittedShade) {
+        emitInt("a:shade", c.shade);
+      }
+      emitInt("a:satMod", c.satMod);
+    };
+
     if (color.srgb) {
       const attrs: Record<string, string> = { val: color.srgb };
-      const hasChildren =
-        color.alpha !== undefined ||
-        color.tint !== undefined ||
-        color.lumMod !== undefined ||
-        color.lumOff !== undefined ||
-        color.shade !== undefined ||
-        color.satMod !== undefined;
-      if (!hasChildren) {
+      if (!hasModifiers(color)) {
         xml.leafNode("a:srgbClr", attrs);
       } else {
         xml.openNode("a:srgbClr", attrs);
-        if (color.alpha !== undefined) {
-          xml.leafNode("a:alpha", { val: String(color.alpha) });
-        }
-        if (color.tint !== undefined) {
-          xml.leafNode("a:tint", { val: String(Math.round(color.tint * 100000)) });
-        }
-        if (color.lumMod !== undefined) {
-          xml.leafNode("a:lumMod", { val: String(color.lumMod) });
-        }
-        if (color.lumOff !== undefined) {
-          xml.leafNode("a:lumOff", { val: String(color.lumOff) });
-        }
-        if (color.shade !== undefined) {
-          xml.leafNode("a:shade", { val: String(color.shade) });
-        }
-        if (color.satMod !== undefined) {
-          xml.leafNode("a:satMod", { val: String(color.satMod) });
-        }
+        emitModifiers(color);
         xml.closeNode();
       }
     } else if (color.theme !== undefined) {
-      const themeNames = [
-        "dk1",
-        "lt1",
-        "dk2",
-        "lt2",
-        "accent1",
-        "accent2",
-        "accent3",
-        "accent4",
-        "accent5",
-        "accent6",
-        "hlink",
-        "folHlink"
-      ];
-      const name = themeNames[color.theme] ?? "dk1";
-      const hasChildren =
-        color.alpha !== undefined ||
-        color.tint !== undefined ||
-        color.lumMod !== undefined ||
-        color.lumOff !== undefined ||
-        color.shade !== undefined ||
-        color.satMod !== undefined;
-      if (!hasChildren) {
+      const name = themeIndexToName(color.theme);
+      if (!hasModifiers(color)) {
         xml.leafNode("a:schemeClr", { val: name });
       } else {
         xml.openNode("a:schemeClr", { val: name });
-        if (color.alpha !== undefined) {
-          xml.leafNode("a:alpha", { val: String(color.alpha) });
-        }
-        let tintEmittedShade = false;
-        if (color.tint !== undefined) {
-          if (color.tint >= 0) {
-            xml.leafNode("a:tint", { val: String(Math.round(color.tint * 100000)) });
-          } else {
-            xml.leafNode("a:shade", { val: String(Math.round((1 + color.tint) * 100000)) });
-            tintEmittedShade = true;
-          }
-        }
-        if (color.lumMod !== undefined) {
-          xml.leafNode("a:lumMod", { val: String(color.lumMod) });
-        }
-        if (color.lumOff !== undefined) {
-          xml.leafNode("a:lumOff", { val: String(color.lumOff) });
-        }
-        if (color.shade !== undefined && !tintEmittedShade) {
-          xml.leafNode("a:shade", { val: String(color.shade) });
-        }
-        if (color.satMod !== undefined) {
-          xml.leafNode("a:satMod", { val: String(color.satMod) });
-        }
+        // Scheme-colour is the only variant that honours the negative-
+        // tint-as-shade legacy mapping; the other elements don't.
+        emitModifiers(color, /* tintAsShade */ true);
         xml.closeNode();
       }
     } else if (color.sysClr) {
-      const hasChildren =
-        color.alpha !== undefined ||
-        color.tint !== undefined ||
-        color.lumMod !== undefined ||
-        color.lumOff !== undefined ||
-        color.shade !== undefined ||
-        color.satMod !== undefined;
-      if (!hasChildren) {
+      if (!hasModifiers(color)) {
         xml.leafNode("a:sysClr", { val: color.sysClr });
       } else {
         xml.openNode("a:sysClr", { val: color.sysClr });
-        if (color.alpha !== undefined) {
-          xml.leafNode("a:alpha", { val: String(color.alpha) });
-        }
-        if (color.tint !== undefined) {
-          xml.leafNode("a:tint", { val: String(Math.round(color.tint * 100000)) });
-        }
-        if (color.lumMod !== undefined) {
-          xml.leafNode("a:lumMod", { val: String(color.lumMod) });
-        }
-        if (color.lumOff !== undefined) {
-          xml.leafNode("a:lumOff", { val: String(color.lumOff) });
-        }
-        if (color.shade !== undefined) {
-          xml.leafNode("a:shade", { val: String(color.shade) });
-        }
-        if (color.satMod !== undefined) {
-          xml.leafNode("a:satMod", { val: String(color.satMod) });
-        }
+        emitModifiers(color);
+        xml.closeNode();
+      }
+    } else if (color.schemeName) {
+      // Scheme-colour tokens that can't be mapped onto a theme index
+      // (e.g. `phClr`, vendor extensions). Round-trip as
+      // `<a:schemeClr>` rather than silently re-emitting as
+      // `<a:sysClr>` (which the old parser did, but which is a
+      // semantically-different DrawingML element kind).
+      if (!hasModifiers(color)) {
+        xml.leafNode("a:schemeClr", { val: color.schemeName });
+      } else {
+        xml.openNode("a:schemeClr", { val: color.schemeName });
+        emitModifiers(color);
         xml.closeNode();
       }
     } else if (color.prstClr) {
-      const hasChildren =
-        color.alpha !== undefined ||
-        color.tint !== undefined ||
-        color.lumMod !== undefined ||
-        color.lumOff !== undefined ||
-        color.shade !== undefined ||
-        color.satMod !== undefined;
-      if (!hasChildren) {
+      if (!hasModifiers(color)) {
         xml.leafNode("a:prstClr", { val: color.prstClr });
       } else {
         xml.openNode("a:prstClr", { val: color.prstClr });
-        if (color.alpha !== undefined) {
-          xml.leafNode("a:alpha", { val: String(color.alpha) });
-        }
-        if (color.tint !== undefined) {
-          xml.leafNode("a:tint", { val: String(Math.round(color.tint * 100000)) });
-        }
-        if (color.lumMod !== undefined) {
-          xml.leafNode("a:lumMod", { val: String(color.lumMod) });
-        }
-        if (color.lumOff !== undefined) {
-          xml.leafNode("a:lumOff", { val: String(color.lumOff) });
-        }
-        if (color.shade !== undefined) {
-          xml.leafNode("a:shade", { val: String(color.shade) });
-        }
-        if (color.satMod !== undefined) {
-          xml.leafNode("a:satMod", { val: String(color.satMod) });
-        }
+        emitModifiers(color);
         xml.closeNode();
       }
     }
+    // else: unknown / empty color — drop silently (same as before)
   }
 
   private _renderPrintSettings(xml: XmlSink, ps: PrintSettings): void {
     xml.openNode("c:printSettings");
+    // Only emit `c:headerFooter` / `c:pageSetup` when the model
+    // actually carries them. Previously we unconditionally wrote empty
+    // `<c:headerFooter/>` / `<c:pageSetup/>` sentinels, which broke
+    // byte-for-byte round-trip on files that did not originally
+    // include them (and added elements Excel would gladly default,
+    // inflating diffs / confusing compare tools).
     if (typeof ps.headerFooter === "string") {
       xml.writeRaw(ps.headerFooter);
-    } else {
-      xml.leafNode("c:headerFooter");
     }
     if (ps.pageMargins) {
       xml.leafNode("c:pageMargins", {
@@ -3046,8 +3699,6 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         attrs.paperSize = String(ps.pageSetup.paperSize);
       }
       xml.leafNode("c:pageSetup", Object.keys(attrs).length > 0 ? attrs : undefined);
-    } else {
-      xml.leafNode("c:pageSetup");
     }
     xml.closeNode();
   }
@@ -3082,8 +3733,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       name === "c:extLst" ||
       (name === "c:tx" && this.currentTitle && !this.currentSeries) ||
       (name === "c:tx" && this.currentDataLabelEntry != null) ||
-      (name === "c:tx" && this.currentTrendlineLbl != null) ||
-      (name === "c:dLbl" && this.currentPivotFormat && !this.currentDataLabels)
+      (name === "c:tx" && this.currentTrendlineLbl != null)
     ) {
       if (node.isSelfClosing) {
         // Empty element — no raw XML needed
@@ -3108,6 +3758,19 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           this.rawCaptureContext = "dataPoint";
         } else if (this.currentErrorBars) {
           this.rawCaptureContext = "errorBars";
+        } else if (this.currentPivotFormat) {
+          // Must be checked before `series`/`chartTypeGroup` because
+          // pivotFmt lives alongside (not inside) the chart type group
+          // but is set independently; without this branch a pivotFmt
+          // `extLst` would fall through to `chart` and be attached at
+          // the wrong level.
+          this.rawCaptureContext = "pivotFormat";
+        } else if (this.currentDisplayUnits) {
+          this.rawCaptureContext = "displayUnits";
+        } else if (this.currentUpDownBars) {
+          this.rawCaptureContext = "upDownBars";
+        } else if (this.currentView3D) {
+          this.rawCaptureContext = "view3D";
         } else if (this.currentSeries) {
           this.rawCaptureContext = "series";
         } else if (this.currentDataTable) {
@@ -3147,10 +3810,18 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       ) {
         this.rawXmlTarget = "c:tx:trendlineLbl";
       }
-      // c:dLbl inside pivotFmt (not wrapped in c:dLbls) → capture raw XML
-      if (name === "c:dLbl" && this.currentPivotFormat && !this.currentDataLabels) {
-        this.rawXmlTarget = "c:dLbl:pivotFmt";
-      }
+      // c:dLbl inside pivotFmt is now parsed structurally (see the
+      // `currentDataLabelEntry` branch below — `c:dLbl` open always
+      // starts an entry, and the matching close routes it to the
+      // pivotFormat or the data-labels bundle depending on the
+      // surrounding state). The previous raw-capture branch that
+      // preempted structured parsing has been removed because it
+      // made `PivotFormat.dLbl` unreachable from XML — callers could
+      // only populate the field by mutating the model directly, and
+      // the writer then had to consult both `dLbl` and the
+      // deprecated `rawDLbl` fallback. Now the parser always
+      // produces `dLbl`; `rawDLbl` remains on the type only for
+      // legacy round-trip of files parsed by older versions.
       return true;
     }
 
@@ -3176,10 +3847,10 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this.chartModel.lang = attrs.val;
         break;
       case "c:roundedCorners":
-        this.chartModel.roundedCorners = attrs.val === "1";
+        this.chartModel.roundedCorners = parseXsdBoolean(attrs.val) ?? true;
         break;
       case "c:date1904":
-        this.chartModel.date1904 = attrs.val === "1";
+        this.chartModel.date1904 = parseXsdBoolean(attrs.val) ?? true;
         break;
       case "c:userShapes":
         // `<c:userShapes r:id="rIdN"/>` — reference to a sibling drawing
@@ -3189,9 +3860,13 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           this.chartModel.userShapesRelId = attrs["r:id"];
         }
         break;
-      case "c:style":
-        this.chartModel.style = parseInt(attrs.val, 10);
+      case "c:style": {
+        const style = parseXsdInt(attrs.val);
+        if (style !== undefined) {
+          this.chartModel.style = style;
+        }
         break;
+      }
       case "c:chart":
         this.chartData = { plotArea: { chartTypes: [], axes: [] } };
         break;
@@ -3201,7 +3876,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:autoTitleDeleted":
         if (this.chartData) {
-          this.chartData.autoTitleDeleted = attrs.val === "1";
+          this.chartData.autoTitleDeleted = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:view3D":
@@ -3209,32 +3884,37 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:rotX":
         if (this.currentView3D) {
-          this.currentView3D.rotX = parseInt(attrs.val, 10);
+          // View3D integer fields default to chart-type-specific values
+          // (`rotX=15` for most, `0` for pie3D) rather than a single
+          // universal default. Forcing `0` on absent attribute changes
+          // rotation semantics AND round-trips as `val="0"` — breaking
+          // byte-compare tests. Leave undefined so the writer omits.
+          this.currentView3D.rotX = parseXsdInt(attrs.val);
         }
         break;
       case "c:rotY":
         if (this.currentView3D) {
-          this.currentView3D.rotY = parseInt(attrs.val, 10);
+          this.currentView3D.rotY = parseXsdInt(attrs.val);
         }
         break;
       case "c:depthPercent":
         if (this.currentView3D) {
-          this.currentView3D.depthPercent = parseInt(attrs.val, 10);
+          this.currentView3D.depthPercent = parseXsdInt(attrs.val);
         }
         break;
       case "c:rAngAx":
         if (this.currentView3D) {
-          this.currentView3D.rAngAx = attrs.val === "1";
+          this.currentView3D.rAngAx = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:hPercent":
         if (this.currentView3D) {
-          this.currentView3D.hPercent = parseInt(attrs.val, 10);
+          this.currentView3D.hPercent = parseXsdInt(attrs.val);
         }
         break;
       case "c:perspective":
         if (this.currentView3D) {
-          this.currentView3D.perspective = parseInt(attrs.val, 10);
+          this.currentView3D.perspective = parseXsdInt(attrs.val);
         }
         break;
       case "c:plotArea":
@@ -3243,32 +3923,59 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:plotVisOnly":
         if (this.chartData) {
-          this.chartData.plotVisOnly = attrs.val === "1";
+          this.chartData.plotVisOnly = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:dispBlanksAs":
         if (this.chartData) {
-          this.chartData.dispBlanksAs = attrs.val as any;
+          // `ST_DispBlanksAs` values: gap | span | zero.
+          this.chartData.dispBlanksAs = narrowEnumValue(attrs.val, [
+            "gap",
+            "span",
+            "zero"
+          ] as const);
         }
         break;
       case "c:showDLblsOverMax":
         if (this.chartData) {
-          this.chartData.showDLblsOverMax = attrs.val === "1";
+          this.chartData.showDLblsOverMax = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:legend":
-        this.currentLegend = { legendPos: "b" };
+        // Don't seed `legendPos` to `"b"` up-front — `CT_Legend/legendPos`
+        // is optional per ECMA-376 §21.2.2.118 and Excel happily omits
+        // it when the user hasn't chosen a specific position. A hard
+        // default would pollute every round-tripped legend with an
+        // unchanged-but-suddenly-explicit position (`<c:legendPos val="b"/>`),
+        // breaking byte-for-byte round-trip and interfering with the
+        // "legendPos undefined → don't emit" fix in `_renderLegend`.
+        this.currentLegend = {};
         break;
       case "c:legendPos":
         if (this.currentLegend) {
-          this.currentLegend.legendPos = attrs.val as any;
+          // `ST_LegendPos` values per ECMA-376 §21.2.3.25.
+          this.currentLegend.legendPos = narrowEnumValue(attrs.val, [
+            "b",
+            "tr",
+            "l",
+            "r",
+            "t"
+          ] as const);
         }
         break;
       case "c:overlay":
+        // ECMA-376 `CT_Boolean` defaults `val` to `true` when absent,
+        // but specific elements override that. `c:overlay` on both
+        // `c:title` and `c:legend` documents its default as `false`
+        // (the title / legend should NOT overlay the plot area unless
+        // explicitly asked). Parsing `<c:overlay/>` as `true` flipped
+        // the convention and moved titles/legends on top of charts
+        // after any round-trip of files that carried the element with
+        // no `val` attribute.
         if (this.currentLegend) {
-          this.currentLegend.overlay = attrs.val === "1";
+          this.currentLegend.overlay = parseXsdBoolean(attrs.val) ?? false;
         } else if (this.currentTitle) {
-          this.currentTitle.overlay = attrs.val === "1";
+          this.currentTitle.overlay = parseXsdBoolean(attrs.val) ?? false;
         }
         break;
       case "c:legendEntry":
@@ -3297,8 +4004,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           if (attrs.orientation) {
             this.currentPrintSettings.pageSetup.orientation = attrs.orientation as any;
           }
-          if (attrs.paperSize) {
-            this.currentPrintSettings.pageSetup.paperSize = parseInt(attrs.paperSize, 10);
+          const paperSize = parseXsdInt(attrs.paperSize);
+          if (paperSize !== undefined) {
+            this.currentPrintSettings.pageSetup.paperSize = paperSize;
           }
         }
         break;
@@ -3307,7 +4015,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:autoUpdate":
         if (this.chartModel.externalData) {
-          this.chartModel.externalData.autoUpdate = attrs.val === "1";
+          this.chartModel.externalData.autoUpdate = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
 
@@ -3340,47 +4048,61 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:layoutTarget":
         if (this.currentManualLayout) {
-          this.currentManualLayout.layoutTarget = attrs.val as any;
+          // `ST_LayoutTarget` values: inner | outer (ECMA-376 §21.2.3.21).
+          this.currentManualLayout.layoutTarget = narrowEnumValue(attrs.val, [
+            "inner",
+            "outer"
+          ] as const);
         }
         break;
       case "c:xMode":
-        if (this.currentManualLayout) {
-          this.currentManualLayout.xMode = attrs.val as any;
-        }
-        break;
       case "c:yMode":
-        if (this.currentManualLayout) {
-          this.currentManualLayout.yMode = attrs.val as any;
-        }
-        break;
       case "c:wMode":
-        if (this.currentManualLayout) {
-          this.currentManualLayout.wMode = attrs.val as any;
-        }
-        break;
       case "c:hMode":
         if (this.currentManualLayout) {
-          this.currentManualLayout.hMode = attrs.val as any;
+          // `ST_LayoutMode` values: edge | factor (ECMA-376 §21.2.3.22).
+          const mode = narrowEnumValue(attrs.val, ["edge", "factor"] as const);
+          if (name === "c:xMode") {
+            this.currentManualLayout.xMode = mode;
+          } else if (name === "c:yMode") {
+            this.currentManualLayout.yMode = mode;
+          } else if (name === "c:wMode") {
+            this.currentManualLayout.wMode = mode;
+          } else {
+            this.currentManualLayout.hMode = mode;
+          }
         }
         break;
       case "c:x":
         if (this.currentManualLayout) {
-          this.currentManualLayout.x = parseFloat(attrs.val);
+          const v = parseXsdFloat(attrs.val);
+          if (v !== undefined) {
+            this.currentManualLayout.x = v;
+          }
         }
         break;
       case "c:y":
         if (this.currentManualLayout) {
-          this.currentManualLayout.y = parseFloat(attrs.val);
+          const v = parseXsdFloat(attrs.val);
+          if (v !== undefined) {
+            this.currentManualLayout.y = v;
+          }
         }
         break;
       case "c:w":
         if (this.currentManualLayout) {
-          this.currentManualLayout.w = parseFloat(attrs.val);
+          const v = parseXsdFloat(attrs.val);
+          if (v !== undefined) {
+            this.currentManualLayout.w = v;
+          }
         }
         break;
       case "c:h":
         if (this.currentManualLayout) {
-          this.currentManualLayout.h = parseFloat(attrs.val);
+          const v = parseXsdFloat(attrs.val);
+          if (v !== undefined) {
+            this.currentManualLayout.h = v;
+          }
         }
         break;
 
@@ -3390,22 +4112,22 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:showHorzBorder":
         if (this.currentDataTable) {
-          this.currentDataTable.showHorzBorder = attrs.val === "1";
+          this.currentDataTable.showHorzBorder = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:showVertBorder":
         if (this.currentDataTable) {
-          this.currentDataTable.showVertBorder = attrs.val === "1";
+          this.currentDataTable.showVertBorder = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:showOutline":
         if (this.currentDataTable) {
-          this.currentDataTable.showOutline = attrs.val === "1";
+          this.currentDataTable.showOutline = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:showKeys":
         if (this.currentDataTable) {
-          this.currentDataTable.showKeys = attrs.val === "1";
+          this.currentDataTable.showKeys = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
 
@@ -3415,12 +4137,29 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:builtInUnit":
         if (this.currentDisplayUnits) {
-          this.currentDisplayUnits.builtInUnit = attrs.val as any;
+          // `ST_BuiltInUnit` enumeration (ECMA-376 §21.2.3.2). Values
+          // outside the set fall through to `undefined`, which
+          // `narrowEnumValue` signals — caller keeps whatever default
+          // the model already has.
+          const v = narrowEnumValue(attrs.val, [
+            "hundreds",
+            "thousands",
+            "tenThousands",
+            "hundredThousands",
+            "millions",
+            "tenMillions",
+            "hundredMillions",
+            "billions",
+            "trillions"
+          ] as const);
+          if (v !== undefined) {
+            this.currentDisplayUnits.builtInUnit = v;
+          }
         }
         break;
       case "c:custUnit":
         if (this.currentDisplayUnits) {
-          this.currentDisplayUnits.custUnit = parseFloat(attrs.val);
+          this.currentDisplayUnits.custUnit = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:dispUnitsLbl":
@@ -3455,8 +4194,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         // can warn when a structural rebuild would drop them. This
         // mirrors ChartExModel.unknownElements and uses the same shape
         // (ChartExUnknownElement-compatible { name, path }).
+        //
+        // We also **enter raw-capture** for the unknown element's full
+        // subtree. Without this, children named like `c:idx` / `c:val`
+        // inside the unknown block would fall through to the core
+        // dispatcher and write to the current parent (e.g.
+        // `currentSeries.index`), corrupting the structural model. The
+        // captured bytes themselves are discarded — we only care that
+        // the inner dispatcher cannot touch current* state.
         if (
-          this.rawXmlTarget === null &&
+          this.rawCapture === null &&
           name.includes(":") &&
           !name.startsWith("c:") &&
           !name.startsWith("a:") &&
@@ -3470,6 +4217,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
             this.chartModel.unknownElements = [];
           }
           this.chartModel.unknownElements.push({ name, path: `${parent}/${name}` });
+          if (!node.isSelfClosing) {
+            this.rawCapture = new RawXmlCapture();
+            this.rawCapture.start(node);
+            // Deliberately do NOT set `rawXmlTarget` / `rawCaptureContext`
+            // so the matching close handler discards the buffer instead
+            // of trying to attach it to a structured model slot.
+            this.rawXmlTarget = "__unknown__";
+          }
         }
         break;
     }
@@ -3492,8 +4247,16 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       if (!this.rawCapture.handleClose(name)) {
         const rawXml = this.rawCapture.xml;
         this.rawCapture = null;
-        this._attachRawXml(this.rawXmlTarget!, rawXml);
+        const target = this.rawXmlTarget;
         this.rawXmlTarget = null;
+        // `__unknown__` targets are vendor / unknown-namespace subtrees
+        // that we captured solely to prevent the inner dispatcher from
+        // polluting `current*` state. The captured bytes have no
+        // structured sink — drop them. (`unknownElements` was already
+        // recorded on the open side.)
+        if (target !== null && target !== "__unknown__") {
+          this._attachRawXml(target, rawXml);
+        }
       }
       return true;
     }
@@ -3645,9 +4408,29 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         } else if (this.currentSeries && this.currentDataLabels) {
           this.currentSeries.dataLabels = this.currentDataLabels;
         } else if (this.currentChartTypeGroup && this.currentDataLabels) {
-          this.currentChartTypeGroup.dataLabels = this.currentDataLabels;
+          // `CT_SurfaceChart` is the only chart-type group that has no
+          // `dLbls` child per schema. A `c:dLbls` element encountered
+          // under `<c:surfaceChart>` / `<c:surface3DChart>` means the
+          // author wrote invalid XML — dropping the element here
+          // matches the builder's `dataLabels is not supported for
+          // surface charts` validation and prevents round-trip from
+          // re-emitting the invalid structure. Every other group
+          // type honours the attribute.
+          const groupType = (this.currentChartTypeGroup as { type?: string }).type;
+          if (groupType !== "surface" && groupType !== "surface3D") {
+            (this.currentChartTypeGroup as { dataLabels?: unknown }).dataLabels =
+              this.currentDataLabels;
+          }
         }
         this.currentDataLabels = null;
+        // Defensive: if a `<c:dLbl>` closed mid-parse (e.g. an error
+        // captured before the `dLbl` pop or an XML file where an `idx`
+        // was followed by a `delete` without later elements), the entry
+        // may still be dangling. Clear it so the next series's
+        // `<c:dLbls>` starts clean — otherwise a stray `c:dLblPos`
+        // parsed after this `dLbls` close was mis-attributed to the
+        // previous series's dLbl entry.
+        this.currentDataLabelEntry = null;
         break;
       case "c:dLbl":
         if (this.currentDataLabels && this.currentDataLabelEntry) {
@@ -3655,6 +4438,15 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
             this.currentDataLabels.entries = [];
           }
           this.currentDataLabels.entries.push(this.currentDataLabelEntry);
+          this.currentDataLabelEntry = null;
+        } else if (this.currentPivotFormat && this.currentDataLabelEntry) {
+          // Bare `<c:dLbl>` inside `<c:pivotFmt>` (no `<c:dLbls>`
+          // wrapper). Pivot samples from Excel emit a single dLbl
+          // here and the structured slot on `PivotFormat.dLbl`
+          // captures it. Previously this element was raw-captured
+          // into `rawDLbl`, which made the structured field
+          // unreachable from on-disk files.
+          this.currentPivotFormat.dLbl = this.currentDataLabelEntry;
           this.currentDataLabelEntry = null;
         }
         break;
@@ -3993,97 +4785,127 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       // Series basic
       case "c:idx":
         if (this.currentDataLabelEntry) {
-          this.currentDataLabelEntry.index = parseInt(attrs.val, 10);
+          this.currentDataLabelEntry.index = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentDataPoint) {
-          this.currentDataPoint.index = parseInt(attrs.val, 10);
+          this.currentDataPoint.index = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentLegendEntry) {
-          this.currentLegendEntry.index = parseInt(attrs.val, 10);
+          this.currentLegendEntry.index = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentPivotFormat) {
-          this.currentPivotFormat.index = parseInt(attrs.val, 10);
+          this.currentPivotFormat.index = parseXsdInt(attrs.val) ?? 0;
         } else {
           // Check for bandFmt context in stateStack
           const bandFmtState = this.stateStack.find(s => s.tag === "c:bandFmt");
           if (bandFmtState) {
-            bandFmtState.context.index = parseInt(attrs.val, 10);
+            bandFmtState.context.index = parseXsdInt(attrs.val) ?? 0;
           } else if (this.currentSeries) {
-            this.currentSeries.index = parseInt(attrs.val, 10);
+            this.currentSeries.index = parseXsdInt(attrs.val) ?? 0;
           }
         }
         break;
       case "c:order":
         if (this.currentTrendline) {
-          this.currentTrendline.order = parseInt(attrs.val, 10);
+          this.currentTrendline.order = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentSeries) {
-          this.currentSeries.order = parseInt(attrs.val, 10);
+          this.currentSeries.order = parseXsdInt(attrs.val) ?? 0;
         }
         break;
 
       // Chart type group attributes
       case "c:barDir":
+        // Skip when `val` is missing or unrecognised so a malformed
+        // `<c:barDir/>` doesn't land `undefined` on the model, which
+        // would later serialise as the literal string `"undefined"` in
+        // writer attributes. `ST_BarDir` admits `"bar"` / `"col"`.
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.barDir = attrs.val;
+          const v = narrowEnumValue(attrs.val, ["bar", "col"] as const);
+          if (v !== undefined) {
+            this.currentChartTypeGroup.barDir = v;
+          }
         }
         break;
       case "c:grouping":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.grouping = attrs.val;
+          // `ST_Grouping` for bar / line / area: standard, stacked,
+          // percentStacked. Bar additionally admits `clustered`.
+          const v = narrowEnumValue(attrs.val, [
+            "standard",
+            "clustered",
+            "stacked",
+            "percentStacked"
+          ] as const);
+          if (v !== undefined) {
+            this.currentChartTypeGroup.grouping = v;
+          }
         }
         break;
       case "c:varyColors":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.varyColors = attrs.val === "1";
+          this.currentChartTypeGroup.varyColors = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:scatterStyle":
-        if (this.currentChartTypeGroup) {
+        if (this.currentChartTypeGroup && attrs.val !== undefined) {
           this.currentChartTypeGroup.scatterStyle = attrs.val;
         }
         break;
       case "c:radarStyle":
-        if (this.currentChartTypeGroup) {
+        if (this.currentChartTypeGroup && attrs.val !== undefined) {
           this.currentChartTypeGroup.radarStyle = attrs.val;
         }
         break;
       case "c:ofPieType":
-        if (this.currentChartTypeGroup) {
+        if (this.currentChartTypeGroup && attrs.val !== undefined) {
           this.currentChartTypeGroup.ofPieType = attrs.val;
         }
         break;
       case "c:gapWidth":
         if (this.currentUpDownBars) {
-          this.currentUpDownBars.gapWidth = parseInt(attrs.val, 10);
+          this.currentUpDownBars.gapWidth = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.gapWidth = parseInt(attrs.val, 10);
+          this.currentChartTypeGroup.gapWidth = parseXsdInt(attrs.val) ?? 0;
         }
         break;
       case "c:gapDepth":
         if (this.currentChartTypeGroup) {
-          (this.currentChartTypeGroup as { gapDepth?: number }).gapDepth = parseInt(attrs.val, 10);
+          // Schema default for `c:gapDepth` is 150 (not 0). Coercing a
+          // missing-attribute `<c:gapDepth/>` to 0 produced a bar3D
+          // with zero inter-series gap — not Excel's actual default.
+          // Leave `undefined` so the writer's `!== undefined` guard
+          // omits the element and Excel applies its own 150 default.
+          (this.currentChartTypeGroup as { gapDepth?: number }).gapDepth = parseXsdInt(attrs.val);
         }
         break;
       case "c:overlap":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.overlap = parseInt(attrs.val, 10);
+          this.currentChartTypeGroup.overlap = parseXsdInt(attrs.val) ?? 0;
         }
         break;
       case "c:firstSliceAng":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.firstSliceAng = parseInt(attrs.val, 10);
+          this.currentChartTypeGroup.firstSliceAng = parseXsdInt(attrs.val) ?? 0;
         }
         break;
       case "c:holeSize":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.holeSize = parseInt(attrs.val, 10);
+          // `c:holeSize` has valid range 10–90 (schema default 10 for
+          // doughnut). Coercing a missing / blank `<c:holeSize/>` to
+          // `0` produced out-of-range output that Excel's strict
+          // validators flag and some OOXML consumers reject. Leave
+          // undefined so the writer omits the element.
+          this.currentChartTypeGroup.holeSize = parseXsdInt(attrs.val);
         }
         break;
       case "c:bubbleScale":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.bubbleScale = parseInt(attrs.val, 10);
+          // Schema default 100 (valid range 0–300). Same rationale as
+          // `c:holeSize` — don't write `0` back when the attribute was
+          // absent on the wire.
+          this.currentChartTypeGroup.bubbleScale = parseXsdInt(attrs.val);
         }
         break;
       case "c:showNegBubbles":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.showNegBubbles = attrs.val === "1";
+          this.currentChartTypeGroup.showNegBubbles = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:sizeRepresents":
@@ -4093,7 +4915,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:wireframe":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.wireframe = attrs.val === "1";
+          this.currentChartTypeGroup.wireframe = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:splitType":
@@ -4103,52 +4925,80 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:splitPos":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.splitPos = parseFloat(attrs.val);
+          this.currentChartTypeGroup.splitPos = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:secondPieSize":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.secondPieSize = parseInt(attrs.val, 10);
+          // `c:secondPieSize` valid range 5–200 (schema default 75).
+          // 0 is invalid per schema; coercing to 0 triggers Excel's
+          // repair dialog on reopen. Leave undefined on missing val.
+          this.currentChartTypeGroup.secondPieSize = parseXsdInt(attrs.val);
         }
         break;
       case "c:axId":
         if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.axisIds.push(parseInt(attrs.val, 10));
+          const v = parseXsdInt(attrs.val);
+          if (v !== undefined) {
+            this.currentChartTypeGroup.axisIds.push(v);
+          }
         }
         break;
 
       // Series-specific
       case "c:invertIfNegative":
-        if (this.currentSeries) {
-          this.currentSeries.invertIfNegative = attrs.val === "1";
+        // `c:invertIfNegative` is valid both on `c:ser` (series-level)
+        // and on `c:dPt` (per-point override). Check the inner
+        // context first so a per-point value doesn't leak onto the
+        // whole series — previously this silently overwrote
+        // `currentSeries.invertIfNegative` with the last `dPt` value
+        // and dropped the per-point flag.
+        if (this.currentDataPoint) {
+          this.currentDataPoint.invertIfNegative = parseXsdBoolean(attrs.val) ?? true;
+        } else if (this.currentSeries) {
+          this.currentSeries.invertIfNegative = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:smooth":
         if (this.currentSeries) {
-          this.currentSeries.smooth = attrs.val === "1";
+          this.currentSeries.smooth = parseXsdBoolean(attrs.val) ?? true;
         } else if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.smooth = attrs.val === "1";
+          this.currentChartTypeGroup.smooth = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:explosion":
         if (this.currentDataPoint) {
-          this.currentDataPoint.explosion = parseInt(attrs.val, 10);
+          this.currentDataPoint.explosion = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentSeries) {
-          this.currentSeries.explosion = parseInt(attrs.val, 10);
+          this.currentSeries.explosion = parseXsdInt(attrs.val) ?? 0;
         }
         break;
       case "c:bubble3D":
         if (this.currentDataPoint) {
-          this.currentDataPoint.bubble3D = attrs.val === "1";
+          this.currentDataPoint.bubble3D = parseXsdBoolean(attrs.val) ?? true;
         } else if (this.currentSeries) {
-          this.currentSeries.bubble3D = attrs.val === "1";
+          this.currentSeries.bubble3D = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:shape":
-        if (this.currentSeries) {
-          this.currentSeries.shape = attrs.val;
-        } else if (this.currentChartTypeGroup) {
-          this.currentChartTypeGroup.shape = attrs.val;
+        {
+          // `ST_Shape` for bar3D: cone, coneToMax, box, cylinder,
+          // pyramid, pyramidToMax. Default is `"box"`.
+          const v = narrowEnumValue(attrs.val, [
+            "cone",
+            "coneToMax",
+            "box",
+            "cylinder",
+            "pyramid",
+            "pyramidToMax"
+          ] as const);
+          if (v !== undefined) {
+            if (this.currentSeries) {
+              this.currentSeries.shape = v;
+            } else if (this.currentChartTypeGroup) {
+              this.currentChartTypeGroup.shape = v;
+            }
+          }
         }
         break;
 
@@ -4163,7 +5013,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       case "c:val":
         // c:val inside errBars is a leaf <c:val val="5"/> with val attribute
         if (this.currentErrorBars && attrs.val !== undefined) {
-          this.currentErrorBars.val = parseFloat(attrs.val);
+          this.currentErrorBars.val = parseXsdFloat(attrs.val) ?? 0;
         } else {
           this.stateStack.push({ tag: name, context: null });
         }
@@ -4189,19 +5039,29 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:ptCount":
         if (this.currentNumCache) {
-          this.currentNumCache.pointCount = parseInt(attrs.val, 10);
+          this.currentNumCache.pointCount = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentStrCache) {
-          this.currentStrCache.pointCount = parseInt(attrs.val, 10);
+          this.currentStrCache.pointCount = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentNumLit) {
-          this.currentNumLit.pointCount = parseInt(attrs.val, 10);
+          this.currentNumLit.pointCount = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentStrLit) {
-          this.currentStrLit.pointCount = parseInt(attrs.val, 10);
+          this.currentStrLit.pointCount = parseXsdInt(attrs.val) ?? 0;
         } else if (this.currentMultiLvlStrRef?.cache) {
-          this.currentMultiLvlStrRef.cache.pointCount = parseInt(attrs.val, 10);
+          this.currentMultiLvlStrRef.cache.pointCount = parseXsdInt(attrs.val) ?? 0;
         }
         break;
       case "c:pt":
-        this.stateStack.push({ tag: "c:pt", context: { index: parseInt(attrs.idx ?? "0", 10) } });
+        // Capture the optional per-point `formatCode` attribute. Some
+        // Excel versions (and notably mixed-format pivot charts) emit
+        // different number formats for each point inside the same
+        // `c:numCache` — see the serializer in `_renderNumCache` which
+        // already emits `formatCode` on `<c:pt>`. Dropping it on parse
+        // made every round-trip flatten back to the cache-level
+        // `formatCode`, losing the per-point override.
+        this.stateStack.push({
+          tag: "c:pt",
+          context: { index: parseXsdInt(attrs.idx) ?? 0, formatCode: attrs.formatCode }
+        });
         break;
 
       // DataLabels
@@ -4212,55 +5072,72 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this.currentDataLabelEntry = { index: 0 };
         break;
       case "c:showLegendKey":
-        this._setBoolOnLabels("showLegendKey", attrs.val === "1");
+        this._setBoolOnLabels("showLegendKey", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showVal":
-        this._setBoolOnLabels("showVal", attrs.val === "1");
+        this._setBoolOnLabels("showVal", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showCatName":
-        this._setBoolOnLabels("showCatName", attrs.val === "1");
+        this._setBoolOnLabels("showCatName", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showSerName":
-        this._setBoolOnLabels("showSerName", attrs.val === "1");
+        this._setBoolOnLabels("showSerName", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showPercent":
-        this._setBoolOnLabels("showPercent", attrs.val === "1");
+        this._setBoolOnLabels("showPercent", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showBubbleSize":
-        this._setBoolOnLabels("showBubbleSize", attrs.val === "1");
+        this._setBoolOnLabels("showBubbleSize", parseXsdBoolean(attrs.val) ?? true);
         break;
       case "c:showLeaderLines":
         if (this.currentDataLabels) {
-          this.currentDataLabels.showLeaderLines = attrs.val === "1";
+          this.currentDataLabels.showLeaderLines = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
-      case "c:dLblPos":
-        if (this.currentDataLabelEntry) {
-          this.currentDataLabelEntry.position = attrs.val as any;
-        } else if (this.currentDataLabels) {
-          this.currentDataLabels.position = attrs.val as any;
+      case "c:dLblPos": {
+        // `ST_DLblPos` enumeration (ECMA-376 §21.2.3.11). Unknown
+        // values are dropped so we don't echo `val="invalid"` back
+        // into the output on save.
+        const v = narrowEnumValue(attrs.val, [
+          "ctr",
+          "l",
+          "r",
+          "t",
+          "b",
+          "bestFit",
+          "inBase",
+          "inEnd",
+          "outEnd"
+        ] as const);
+        if (v !== undefined) {
+          if (this.currentDataLabelEntry) {
+            this.currentDataLabelEntry.position = v;
+          } else if (this.currentDataLabels) {
+            this.currentDataLabels.position = v;
+          }
         }
         break;
+      }
       case "c:numFmt":
         if (this.currentTrendlineLbl) {
           this.currentTrendlineLbl.numFmt = {
             formatCode: attrs.formatCode,
-            sourceLinked: attrs.sourceLinked === "1"
+            sourceLinked: parseXsdBoolean(attrs.sourceLinked) ?? true
           };
         } else if (this.currentAxis) {
           this.currentAxis.numFmt = {
             formatCode: attrs.formatCode,
-            sourceLinked: attrs.sourceLinked === "1"
+            sourceLinked: parseXsdBoolean(attrs.sourceLinked) ?? true
           };
         } else if (this.currentDataLabelEntry) {
           this.currentDataLabelEntry.numFmt = {
             formatCode: attrs.formatCode,
-            sourceLinked: attrs.sourceLinked === "1"
+            sourceLinked: parseXsdBoolean(attrs.sourceLinked) ?? true
           };
         } else if (this.currentDataLabels) {
           this.currentDataLabels.numFmt = {
             formatCode: attrs.formatCode,
-            sourceLinked: attrs.sourceLinked === "1"
+            sourceLinked: parseXsdBoolean(attrs.sourceLinked) ?? true
           };
         }
         break;
@@ -4270,8 +5147,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         if (attrs.val !== undefined) {
           // Group-level boolean marker (line/stock charts)
           if (this.currentChartTypeGroup) {
-            this.currentChartTypeGroup.marker = attrs.val === "1";
+            this.currentChartTypeGroup.marker = parseXsdBoolean(attrs.val) ?? true;
           }
+        } else if (
+          this.currentChartTypeGroup &&
+          !this.currentSeries &&
+          !this.currentDataPoint &&
+          !this.currentPivotFormat
+        ) {
+          // Self-closing `<c:marker/>` on a line / stock chart group is
+          // CT_Boolean (`<c:marker val="1"/>` with val omitted → default
+          // `true` per ECMA-376). Previously we treated it as the start
+          // of a container marker, silently losing the boolean and
+          // leaving `currentMarker` dangling.
+          this.currentChartTypeGroup.marker = true;
         } else {
           // Container marker (series/pivotFmt/dataPoint level)
           this.currentMarker = {};
@@ -4279,12 +5168,30 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:symbol":
         if (this.currentMarker) {
-          this.currentMarker.symbol = attrs.val as any;
+          // `ST_MarkerStyle` values per ECMA-376 §21.2.3.30.
+          this.currentMarker.symbol = narrowEnumValue(attrs.val, [
+            "circle",
+            "dash",
+            "diamond",
+            "dot",
+            "none",
+            "picture",
+            "plus",
+            "square",
+            "star",
+            "triangle",
+            "x",
+            "auto"
+          ] as const);
         }
         break;
       case "c:size":
         if (this.currentMarker) {
-          this.currentMarker.size = parseInt(attrs.val, 10);
+          // Marker `c:size` valid range 2–72 (schema default 5).
+          // Writing `0` is out-of-range — leave undefined when the
+          // attribute is absent so the writer omits the element and
+          // Excel applies its own default.
+          this.currentMarker.size = parseXsdInt(attrs.val);
         }
         break;
 
@@ -4299,37 +5206,53 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:trendlineType":
         if (this.currentTrendline) {
-          this.currentTrendline.type = attrs.val as any;
+          // `ST_TrendlineType` values per ECMA-376 §21.2.3.49.
+          const type = narrowEnumValue(attrs.val, [
+            "exp",
+            "linear",
+            "log",
+            "movingAvg",
+            "poly",
+            "power"
+          ] as const);
+          // Fall back to the constructor default `"linear"` so the
+          // trendline structure remains renderable; the original attrs
+          // value (if unrecognised) is simply dropped.
+          this.currentTrendline.type = type ?? "linear";
         }
         break;
       case "c:period":
         if (this.currentTrendline) {
-          this.currentTrendline.period = parseInt(attrs.val, 10);
+          // Moving-average `c:period` has `minInclusive=2` per schema
+          // (default 2); writing `0` is out-of-range and Excel
+          // clamps/repairs on reopen. Leave undefined so the writer
+          // omits the element.
+          this.currentTrendline.period = parseXsdInt(attrs.val);
         }
         break;
       case "c:forward":
         if (this.currentTrendline) {
-          this.currentTrendline.forward = parseFloat(attrs.val);
+          this.currentTrendline.forward = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:backward":
         if (this.currentTrendline) {
-          this.currentTrendline.backward = parseFloat(attrs.val);
+          this.currentTrendline.backward = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:intercept":
         if (this.currentTrendline) {
-          this.currentTrendline.intercept = parseFloat(attrs.val);
+          this.currentTrendline.intercept = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:dispRSqr":
         if (this.currentTrendline) {
-          this.currentTrendline.displayRSqr = attrs.val === "1";
+          this.currentTrendline.displayRSqr = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:dispEq":
         if (this.currentTrendline) {
-          this.currentTrendline.displayEq = attrs.val === "1";
+          this.currentTrendline.displayEq = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
 
@@ -4344,12 +5267,24 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:errValType":
         if (this.currentErrorBars) {
-          this.currentErrorBars.errValType = attrs.val as any;
+          // `ST_ErrValType` values per ECMA-376 §21.2.3.15. The model
+          // field is required, so fall back to `"fixedVal"` (Excel's
+          // default) when the source XML carries an unrecognised or
+          // missing value — preserves the error-bar structure rather
+          // than throwing at parse time.
+          this.currentErrorBars.errValType =
+            narrowEnumValue(attrs.val, [
+              "cust",
+              "fixedVal",
+              "percentage",
+              "stdDev",
+              "stdErr"
+            ] as const) ?? "fixedVal";
         }
         break;
       case "c:noEndCap":
         if (this.currentErrorBars) {
-          this.currentErrorBars.noEndCap = attrs.val === "1";
+          this.currentErrorBars.noEndCap = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:errDir":
@@ -4428,7 +5363,10 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:secondPiePt":
         if (this.currentChartTypeGroup?.custSplit) {
-          this.currentChartTypeGroup.custSplit.push(parseInt(attrs.val, 10));
+          const v = parseXsdInt(attrs.val);
+          if (v !== undefined) {
+            this.currentChartTypeGroup.custSplit.push(v);
+          }
         }
         break;
 
@@ -4438,27 +5376,31 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:applyToFront":
         if (this.currentPictureOptions) {
-          this.currentPictureOptions.applyToFront = attrs.val === "1";
+          this.currentPictureOptions.applyToFront = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:applyToSides":
         if (this.currentPictureOptions) {
-          this.currentPictureOptions.applyToSides = attrs.val === "1";
+          this.currentPictureOptions.applyToSides = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:applyToEnd":
         if (this.currentPictureOptions) {
-          this.currentPictureOptions.applyToEnd = attrs.val === "1";
+          this.currentPictureOptions.applyToEnd = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:pictureFormat":
         if (this.currentPictureOptions) {
-          this.currentPictureOptions.pictureFormat = attrs.val as any;
+          // `ST_PictureFormat` enumeration (ECMA-376 §21.2.3.38).
+          const v = narrowEnumValue(attrs.val, ["stretch", "stack", "stackScale"] as const);
+          if (v !== undefined) {
+            this.currentPictureOptions.pictureFormat = v;
+          }
         }
         break;
       case "c:pictureStackUnit":
         if (this.currentPictureOptions) {
-          this.currentPictureOptions.pictureStackUnit = parseFloat(attrs.val);
+          this.currentPictureOptions.pictureStackUnit = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
 
@@ -4467,12 +5409,19 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         // Text will be captured in parseClose
         break;
 
-      // delete on legend entry
+      // delete on legend entry / data-label entry / data-labels block.
+      // `<c:delete/>` with no `val` attribute means `true` (CT_Boolean
+      // default), per ECMA-376. `currentDataLabelEntry` is checked
+      // before `currentDataLabels` so per-label delete wins over
+      // block-level delete when both are in scope (unlikely in real
+      // files but defensive).
       case "c:delete":
         if (this.currentLegendEntry) {
-          this.currentLegendEntry.delete = attrs.val === "1";
+          this.currentLegendEntry.delete = parseXsdBoolean(attrs.val) ?? true;
         } else if (this.currentDataLabelEntry) {
-          this.currentDataLabelEntry.delete = attrs.val === "1";
+          this.currentDataLabelEntry.delete = parseXsdBoolean(attrs.val) ?? true;
+        } else if (this.currentDataLabels) {
+          this.currentDataLabels.delete = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
     }
@@ -4485,9 +5434,15 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
     switch (name) {
       case "c:axId":
-        // axId in axis context (vs chart type group)
+        // axId in axis context (vs chart type group).
+        // A malformed / missing `val` leaves `currentAxis.axId = 0`
+        // from the axis initialiser; refusing to overwrite with NaN
+        // preserves that sentinel rather than poisoning the chart.
         if (!this.currentChartTypeGroup) {
-          this.currentAxis.axId = parseInt(attrs.val, 10);
+          const v = parseXsdInt(attrs.val);
+          if (v !== undefined) {
+            this.currentAxis.axId = v;
+          }
         }
         break;
       case "c:scaling":
@@ -4500,22 +5455,22 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         break;
       case "c:max":
         if (this.currentAxis.scaling) {
-          this.currentAxis.scaling.max = parseFloat(attrs.val);
+          this.currentAxis.scaling.max = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:min":
         if (this.currentAxis.scaling) {
-          this.currentAxis.scaling.min = parseFloat(attrs.val);
+          this.currentAxis.scaling.min = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:logBase":
         if (this.currentAxis.scaling) {
-          this.currentAxis.scaling.logBase = parseFloat(attrs.val);
+          this.currentAxis.scaling.logBase = parseXsdFloat(attrs.val) ?? 0;
         }
         break;
       case "c:delete":
         if (!this.currentLegendEntry && !this.currentDataLabelEntry) {
-          this.currentAxis.delete = attrs.val === "1";
+          this.currentAxis.delete = parseXsdBoolean(attrs.val) ?? true;
         }
         break;
       case "c:axPos":
@@ -4529,49 +5484,65 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this.stateStack.push({ tag: "c:minorGridlines", context: {} });
         break;
       case "c:majorTickMark":
-        this.currentAxis.majorTickMark = attrs.val;
+        this.currentAxis.majorTickMark = parseTickMarkFromOoxml(attrs.val);
         break;
       case "c:minorTickMark":
-        this.currentAxis.minorTickMark = attrs.val;
+        this.currentAxis.minorTickMark = parseTickMarkFromOoxml(attrs.val);
         break;
       case "c:tickLblPos":
         this.currentAxis.tickLblPos = attrs.val;
         break;
       case "c:crossAx":
-        this.currentAxis.crossAx = parseInt(attrs.val, 10);
+        this.currentAxis.crossAx = parseXsdInt(attrs.val) ?? 0;
         break;
       case "c:crosses":
         this.currentAxis.crosses = attrs.val;
         break;
       case "c:crossesAt":
-        this.currentAxis.crossesAt = parseFloat(attrs.val);
+        // `c:crossesAt` has no schema default; when absent the axis
+        // uses Excel's `c:crosses` choice ("autoZero"/"min"/"max")
+        // instead. Forcing `0` when `val` was missing changed semantics
+        // ("axis crosses at 0") and leaked to round-trip XML as
+        // `val="0"`. Leave undefined so the writer omits the element.
+        this.currentAxis.crossesAt = parseXsdFloat(attrs.val);
         break;
       case "c:auto":
-        this.currentAxis.auto = attrs.val === "1";
+        // CT_Boolean — absent `val` attribute means `true` per ECMA-376.
+        this.currentAxis.auto = parseXsdBoolean(attrs.val) ?? true;
         break;
       case "c:lblAlgn":
         this.currentAxis.lblAlgn = attrs.val;
         break;
       case "c:lblOffset":
-        this.currentAxis.lblOffset = parseInt(attrs.val, 10);
+        // Schema default is `100` (percent). Leaving undefined so the
+        // writer omits the element when the source did; forcing `0`
+        // semantically meant "no offset" but round-tripped `val="0"`,
+        // which Excel interprets DIFFERENTLY from an omitted element.
+        this.currentAxis.lblOffset = parseXsdInt(attrs.val);
         break;
       case "c:tickLblSkip":
-        this.currentAxis.tickLblSkip = parseInt(attrs.val, 10);
+        // Schema default is `1` (show every tick). Similar round-trip
+        // fidelity reasoning — preserve "attribute was absent".
+        this.currentAxis.tickLblSkip = parseXsdInt(attrs.val);
         break;
       case "c:tickMarkSkip":
-        this.currentAxis.tickMarkSkip = parseInt(attrs.val, 10);
+        this.currentAxis.tickMarkSkip = parseXsdInt(attrs.val);
         break;
       case "c:noMultiLvlLbl":
-        this.currentAxis.noMultiLvlLbl = attrs.val === "1";
+        this.currentAxis.noMultiLvlLbl = parseXsdBoolean(attrs.val) ?? true;
         break;
       case "c:crossBetween":
         this.currentAxis.crossBetween = attrs.val;
         break;
       case "c:majorUnit":
-        this.currentAxis.majorUnit = parseFloat(attrs.val);
+        // No schema default — omitting the element means "auto unit".
+        // Writing `<c:majorUnit val="0"/>` produces a divide-by-zero
+        // condition in tick positioning on the consumer side; leave
+        // undefined so the writer omits the element.
+        this.currentAxis.majorUnit = parseXsdFloat(attrs.val);
         break;
       case "c:minorUnit":
-        this.currentAxis.minorUnit = parseFloat(attrs.val);
+        this.currentAxis.minorUnit = parseXsdFloat(attrs.val);
         break;
       case "c:baseTimeUnit":
         this.currentAxis.baseTimeUnit = attrs.val;
@@ -4591,21 +5562,37 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     const ptState = this.stateStack.find(s => s.tag === "c:pt");
     if (ptState) {
       const ptCtx = ptState.context;
+      const perPointFormat: string | undefined = ptCtx.formatCode;
       // Check numLit/strLit/lvl before numCache/strCache
       if (this.currentLvl) {
         this.currentLvl.points.push({ index: ptCtx.index, value: text });
       } else if (this.currentNumLit) {
+        // `parseFloat` returns NaN for blank / non-numeric text. Treat
+        // anything we can't turn into a finite number as `null`
+        // (OOXML's "blank cell" sentinel in a numeric cache) — keeps
+        // the model free of NaN that would later round-trip as the
+        // literal string "NaN".
+        const n = text ? parseFloat(text) : NaN;
         this.currentNumLit.points.push({
           index: ptCtx.index,
-          value: text ? parseFloat(text) : null
+          value: Number.isFinite(n) ? n : null
         });
       } else if (this.currentStrLit) {
         this.currentStrLit.points.push({ index: ptCtx.index, value: text });
       } else if (this.currentNumCache) {
-        this.currentNumCache.points.push({
+        const n = text ? parseFloat(text) : NaN;
+        // Propagate per-point `formatCode` captured from the `<c:pt>`
+        // open handler. Only set it when present so hand-built caches
+        // without per-point overrides stay clean (the default
+        // `cache.formatCode` applies downstream).
+        const point: NumberCache["points"][number] = {
           index: ptCtx.index,
-          value: text ? parseFloat(text) : null
-        });
+          value: Number.isFinite(n) ? n : null
+        };
+        if (perPointFormat) {
+          point.formatCode = perPointFormat;
+        }
+        this.currentNumCache.points.push(point);
       } else if (this.currentStrCache) {
         this.currentStrCache.points.push({ index: ptCtx.index, value: text });
       }
@@ -4714,6 +5701,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           this.currentSeries[key] = { numLit: this.currentNumLit };
         }
         break;
+      // Error-bar custom values can also be numLit (literal list) rather
+      // than numRef (sheet reference). `_attachNumRef` handles the
+      // reference case; without the mirrored branches here the literal
+      // form was silently dropped on parse.
+      case "c:plus":
+        if (this.currentErrorBars) {
+          this.currentErrorBars.plus = { numLit: this.currentNumLit };
+        }
+        break;
+      case "c:minus":
+        if (this.currentErrorBars) {
+          this.currentErrorBars.minus = { numLit: this.currentNumLit };
+        }
+        break;
     }
   }
 
@@ -4792,11 +5793,6 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       if (this.currentTrendlineLbl) {
         this.currentTrendlineLbl.rawTx = rawXml;
       }
-    } else if (target === "c:dLbl:pivotFmt") {
-      // Raw c:dLbl captured inside a pivotFmt context (not wrapped in c:dLbls)
-      if (this.currentPivotFormat) {
-        this.currentPivotFormat.rawDLbl = rawXml;
-      }
     } else if (target === "c:spPr") {
       // Check for line contexts first (#6)
       if (this.currentLineContext) {
@@ -4865,6 +5861,13 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         }
       }
     } else if (target === "c:txPr") {
+      // Route the parsed txPr object to the nearest enclosing model
+      // slot. Order matters: inner contexts (title, trendlineLbl,
+      // dataLabelEntry, dataLabels, dataTable, pivotFmt) win over
+      // outer ones (axis, legendEntry, legend, chartSpace). Missing
+      // `currentPivotFormat` used to let a pivotFmt-internal `c:txPr`
+      // fall through all the way to `chartModel.txPr`, silently
+      // stealing chart-space-level typography.
       if (this.currentTitle) {
         this.currentTitle.txPr = txPrObj;
       } else if (this.currentTrendlineLbl) {
@@ -4875,6 +5878,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         this.currentDataLabels.txPr = txPrObj;
       } else if (this.currentDataTable) {
         this.currentDataTable.txPr = txPrObj;
+      } else if (this.currentPivotFormat) {
+        this.currentPivotFormat.txPr = txPrObj;
       } else if (this.currentAxis) {
         this.currentAxis.txPr = txPrObj;
       } else if (this.currentLegendEntry) {
@@ -4938,6 +5943,26 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         case "errorBars":
           if (this.currentErrorBars) {
             this.currentErrorBars.extLst = rawXml;
+          }
+          break;
+        case "pivotFormat":
+          if (this.currentPivotFormat) {
+            this.currentPivotFormat.extLst = rawXml;
+          }
+          break;
+        case "displayUnits":
+          if (this.currentDisplayUnits) {
+            this.currentDisplayUnits.extLst = rawXml;
+          }
+          break;
+        case "upDownBars":
+          if (this.currentUpDownBars) {
+            this.currentUpDownBars.extLst = rawXml;
+          }
+          break;
+        case "view3D":
+          if (this.currentView3D) {
+            this.currentView3D.extLst = rawXml;
           }
           break;
         case "series":

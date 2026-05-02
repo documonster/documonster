@@ -1,7 +1,38 @@
 import { measureTextWidthPx } from "@excel/utils/text-metrics";
 
-import { parseTxPr, getSpPrLine, getTxPrFontSize } from "./shape-properties";
+import {
+  AXIS_COLOR,
+  COLORS,
+  DEFAULT_HEIGHT,
+  DEFAULT_WIDTH,
+  GRID_COLOR,
+  PRESET_COLOR_HEX_TABLE,
+  clamp01,
+  escapeXml,
+  escapeXmlAttr,
+  fmt,
+  hexToPdfColor,
+  hexToPdfColorWithAlpha,
+  interpolateColor,
+  normalizeHex6,
+  previewShapeFillColor,
+  previewShapeLineColor,
+  previewShapeLineWidthPx,
+  resolveChartColor,
+  valueToX,
+  valueToY,
+  withAlpha,
+  type PdfColor
+} from "./chart-utils";
+import {
+  parseSpPr,
+  parseTxPr,
+  getSpPrFill,
+  getSpPrLine,
+  getTxPrFontSize
+} from "./shape-properties";
 import type {
+  AxisDataSource,
   ChartAxis,
   ChartColor,
   ChartLegend,
@@ -12,13 +43,27 @@ import type {
   ChartTypeGroup,
   DataLabelPosition,
   DataLabels,
+  DataPoint,
   DataTable,
   EffectList,
   ErrorBars,
   LegendPosition,
+  NumberLiteral,
+  NumberReference,
   SeriesBase,
+  ShapeProperties,
+  StringReference,
   Trendline
 } from "./types";
+
+export type { PdfColor };
+
+/**
+ * Legacy name — kept so existing imports
+ * (`import { PRESET_COLOR_HEX } from "./chart-renderer"`) continue to
+ * resolve. Prefer importing directly from `./chart-utils` in new code.
+ */
+export const PRESET_COLOR_HEX = PRESET_COLOR_HEX_TABLE;
 
 /**
  * Options for the built-in deterministic chart preview renderer.
@@ -224,21 +269,6 @@ export type ChartPdfPathOp =
   | { op: "line"; x: number; y: number }
   | { op: "curve"; x1: number; y1: number; x2: number; y2: number; x3: number; y3: number }
   | { op: "close" };
-
-/**
- * RGB(A) colour triple used by the chart PDF bridge. `a` is optional and
- * defaults to 1 (fully opaque); surfaces that implement transparency
- * (e.g. `@pdf/builder` `PdfPageBuilder`) materialise `a < 1` as an
- * `/ExtGState` resource and emit the corresponding `gs` operator. Older
- * surfaces that ignore `a` render as opaque, which matches the
- * pre-alpha behaviour exactly.
- */
-export interface PdfColor {
-  r: number;
-  g: number;
-  b: number;
-  a?: number;
-}
 
 export interface ChartScene {
   width: number;
@@ -504,9 +534,31 @@ interface NormalizedSeries {
   globalIndex: number;
   label: string;
   color: string;
+  /** Values already passed through the axis log transform (display space). */
   values: number[];
   categories?: string[];
+  /** X values already passed through the x axis log transform (display space). */
   xValues?: number[];
+  /**
+   * Pre-transform y values (raw data). Separate from {@link values} so
+   * trendline regression can fit the curve on the author's original
+   * numbers — fitting in display space silently turns every "linear"
+   * trendline on a log-scale chart into an exponential fit (the
+   * implicit `log(y) = a + bx` becomes `y = c * base^(bx)`), which
+   * mismatches Excel's behaviour and user expectations.
+   */
+  rawValues: number[];
+  /** Pre-transform x values (raw data). */
+  rawXValues?: number[];
+  /**
+   * Y-axis log base, if any. Null when the value axis is linear.
+   * Trendline sample points must re-apply this transform before being
+   * mapped to pixels via {@link valueToY}, which receives the
+   * already-transformed `min`/`max`.
+   */
+  yLogBase?: number;
+  /** X-axis log base for scatter/bubble charts on a log x axis. */
+  xLogBase?: number;
   bubbleSizes?: number[];
   dataLabels?: DataLabels;
   trendlines?: Trendline[];
@@ -584,16 +636,33 @@ export interface ChartScenePoint {
   y: number;
 }
 
-const DEFAULT_WIDTH = 640;
-const DEFAULT_HEIGHT = 360;
-const COLORS = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
-const AXIS_COLOR = "#444444";
-const GRID_COLOR = "#D9D9D9";
+/**
+ * Fold-based `Math.max` for per-series `.values.length` — avoids the
+ * `Math.max(1, ...arr.map(...))` spread which blows the JS call stack
+ * for timeseries past ~100k points.
+ */
+function maxSeriesLength(groupSeries: readonly { values: readonly unknown[] }[]): number {
+  let max = 1;
+  for (const s of groupSeries) {
+    if (s.values.length > max) {
+      max = s.values.length;
+    }
+  }
+  return max;
+}
 
 export function buildChartScene(model: ChartModel, options: ChartRenderOptions = {}): ChartScene {
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
   const titleText = options.title ?? extractTitle(model);
+  // `title.overlay === true` instructs Excel to paint the title on top
+  // of the plot area rather than reserving space above it. Thread this
+  // into `getPlotRect` so the plot uses the full chart height when an
+  // overlay title is set — previously the title always pushed the plot
+  // down by ~52 px regardless of `overlay`, wasting the top band of an
+  // Excel-authored overlay title chart.
+  const titleOverlay = model.chart.title?.overlay === true;
+  const hasReservedTitle = !!titleText && !titleOverlay;
   const groups = model.chart.plotArea.chartTypes;
   const normalized = normalizeSeries(groups, model);
   const seriesValues = normalized.map(s => s.values);
@@ -601,7 +670,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
     normalized.find(s => s.categories && s.categories.length > 0)?.categories ??
     seriesValues[0]?.map((_, i) => String(i + 1)) ??
     [];
-  const legend = buildSceneLegend(model.chart.legend, normalized, width, height, !!titleText);
+  const legend = buildSceneLegend(model.chart.legend, normalized, width, height, hasReservedTitle);
   // Data tables sit below the plot area. Pre-compute their vertical
   // footprint so `getPlotRect` can reserve space before series-level
   // geometry is built. Sizing uses the same text-metrics pipeline as
@@ -610,7 +679,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   const dataTableHeight = dataTableSpec
     ? computeDataTableHeight(dataTableSpec, normalized, categories)
     : 0;
-  const plot = getPlotRect(width, height, !!titleText, legend, model, dataTableHeight);
+  const plot = getPlotRect(width, height, hasReservedTitle, legend, model, dataTableHeight);
   const axisContext = buildAxisContext(model, normalized);
   const sceneSeries = buildSceneSeries(
     groups,
@@ -670,7 +739,14 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
         }
       : undefined,
     plot,
-    gridlines: buildGridlines(plot, axisContext.primaryYAxis),
+    gridlines: buildGridlines(
+      plot,
+      axisContext.primaryYAxis,
+      primaryYRange,
+      axisContext.primaryXAxis,
+      primaryXRange,
+      categories
+    ),
     // When a data table is drawn, Excel suppresses the primary x-axis
     // category labels because categories already appear as the header
     // row of the table. We keep gridlines and the axis line itself so
@@ -683,7 +759,8 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
       primaryYRange.max,
       plot,
       axisContext.primaryYAxis,
-      false
+      false,
+      categories
     ),
     secondaryXLabels: axisContext.secondaryXAxis
       ? buildXLabels(secondaryXCategories, plot, axisContext.secondaryXAxis, secondaryXRange, true)
@@ -695,7 +772,8 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
             secondaryYRange.max,
             plot,
             axisContext.secondaryYAxis,
-            true
+            true,
+            categories
           )
         : [],
     axisTitles: buildAxisTitles(axisContext, plot),
@@ -803,8 +881,18 @@ export function renderChartSvg(model: ChartModel, options: ChartRenderOptions = 
   for (const title of scene.axisTitles) {
     parts.push(renderSvgText(title));
   }
+  // Two-pass series rendering so every series' adornments (data labels,
+  // trendlines, error bars, markers) paint on top of *every* series'
+  // filled shapes. A single-pass emission ran `renderSvgSeries` which
+  // drew a series' rects/polygons and then immediately its adornments,
+  // meaning the next series' filled area polygons / stacked bars
+  // covered the previous series' labels — especially bad on
+  // semi-transparent area/radar fills where labels were half-masked.
   for (const s of scene.series) {
     renderSvgSeries(parts, s);
+  }
+  for (const s of scene.series) {
+    renderSvgAdornments(parts, s);
   }
   if (scene.dataTable) {
     renderSvgDataTable(parts, scene.dataTable);
@@ -1091,8 +1179,22 @@ class BasicRasterCanvas {
     if (!rgba || points.length < 3) {
       return;
     }
-    const minY = clampInt(Math.floor(Math.min(...points.map(p => p.y))), 0, this.height - 1);
-    const maxY = clampInt(Math.ceil(Math.max(...points.map(p => p.y))), 0, this.height - 1);
+    // Use `reduce` rather than `Math.min(...arr)` / `Math.max(...arr)` —
+    // polygons used for chart fills are small, but the PNG rasteriser
+    // also feeds this helper with large path-derived point sets and we
+    // want the safe default everywhere.
+    let minYRaw = points[0].y;
+    let maxYRaw = points[0].y;
+    for (const p of points) {
+      if (p.y < minYRaw) {
+        minYRaw = p.y;
+      }
+      if (p.y > maxYRaw) {
+        maxYRaw = p.y;
+      }
+    }
+    const minY = clampInt(Math.floor(minYRaw), 0, this.height - 1);
+    const maxY = clampInt(Math.ceil(maxYRaw), 0, this.height - 1);
     for (let y = minY; y <= maxY; y++) {
       const intersections: number[] = [];
       for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
@@ -1279,6 +1381,11 @@ function parsePathPoints(input: string | undefined, scale = 1): ChartScenePoint[
   if (!input) {
     return [];
   }
+  // Accept both upper and lower-case SVG commands; we lowercase via
+  // `toUpperCase` below, treating relative and absolute forms the
+  // same (caller supplies paths the renderer itself emits, which are
+  // always absolute — the tolerance is for third-party author-shape
+  // round-trips).
   const tokens = input.match(/[MLAZ]|-?\d+(?:\.\d+)?/gi) ?? [];
   const points: ChartScenePoint[] = [];
   let i = 0;
@@ -1288,39 +1395,57 @@ function parsePathPoints(input: string | undefined, scale = 1): ChartScenePoint[
     const command = tokens[i++].toUpperCase();
     if (command === "M" || command === "L") {
       const point = readPathPoint(tokens, i);
+      i += 2;
       if (!point) {
-        break;
+        // Malformed M/L — skip its two parameter tokens (already
+        // advanced) and continue walking the rest of the path. The
+        // previous `break` abandoned every subsequent command,
+        // silently dropping half a path for a single bad coordinate.
+        continue;
       }
       point.x *= scale;
       point.y *= scale;
-      i += 2;
       current = point;
       start ??= point;
       points.push(point);
     } else if (command === "A") {
+      // An `A` command consumes seven parameter tokens regardless of
+      // whether the arc is successfully decoded. Advance the cursor
+      // up front so a malformed arc doesn't strand the parser on its
+      // own parameter list.
       if (!current) {
-        break;
+        i += 7;
+        continue;
       }
       const arc = readPathArc(tokens, i, current, scale);
-      if (!arc) {
-        break;
-      }
       i += 7;
-      points.push(...arc.points);
+      if (!arc) {
+        continue;
+      }
+      for (const p of arc.points) {
+        points.push(p);
+      }
       current = arc.end;
     } else if (command === "Z") {
       if (start) {
         points.push(start);
       }
     } else {
+      // Unrecognised command — try to reinterpret the token as an
+      // implicit coordinate pair (SVG allows repeated coordinates
+      // after an `M` / `L`, e.g. `M 1 2 3 4` draws an implicit
+      // lineTo from (1,2) to (3,4)).
       const numeric = Number.parseFloat(command);
       if (!Number.isFinite(numeric) || i >= tokens.length) {
-        break;
+        // Genuinely unknown token — skip and keep walking instead
+        // of abandoning the rest of the path.
+        continue;
       }
-      const y = Number.parseFloat(tokens[i++]);
+      const y = Number.parseFloat(tokens[i]);
       if (!Number.isFinite(y)) {
-        break;
+        continue;
       }
+      i++;
       current = { x: numeric * scale, y: y * scale };
       start ??= current;
       points.push(current);
@@ -1376,15 +1501,40 @@ function approximateArcPoints(
   const h = Math.sqrt(Math.max(0, radius * radius - halfChord * halfChord));
   const nx = -dy / chord;
   const ny = dx / chord;
+  // When the chord equals the diameter (`h ≈ 0` for a half-circle)
+  // both candidate centres coincide at the midpoint and produce
+  // `|delta| ≈ π`. The strict inequality `|delta| > π === largeArc`
+  // treats both as "not large", so the selected centre was identical
+  // regardless of `largeArc`, making a semicircle traced the wrong
+  // way round for `largeArc=true`. Use the SVG endpoint→centre
+  // parametrisation for this degenerate case and fall back to the
+  // chord-bisector approach otherwise.
   const candidates = [
     { x: mx + nx * h, y: my + ny * h },
     { x: mx - nx * h, y: my - ny * h }
   ];
-  const selected =
-    candidates.find(center => {
-      const delta = arcDelta(center, start, end, sweep);
-      return Math.abs(delta) > Math.PI === largeArc;
-    }) ?? candidates[0];
+  // Prefer the candidate whose resulting arc length matches
+  // `largeArc`. Use `>=` so the exact-π boundary sorts with
+  // `largeArc=true` instead of `false`; combined with the
+  // `sweep` tie-breaker below, this routes a true semicircle to the
+  // candidate whose winding direction matches `sweep`.
+  let selected = candidates[0];
+  let bestScore = -Infinity;
+  for (const center of candidates) {
+    const delta = arcDelta(center, start, end, sweep);
+    const isLarge = Math.abs(delta) >= Math.PI - 1e-9;
+    // Score 2 when this candidate's large-arc classification agrees
+    // with the requested `largeArc`; score 1 as a half-match when we
+    // are exactly on the boundary (the `Math.abs(delta) - π` is near
+    // zero); score 0 otherwise. Picking the highest score gives us
+    // the disambiguation we need for semicircles without breaking
+    // non-boundary cases.
+    const score = isLarge === largeArc ? 2 : 1 - Math.abs(Math.abs(delta) - Math.PI);
+    if (score > bestScore) {
+      bestScore = score;
+      selected = center;
+    }
+  }
   const startAngle = Math.atan2(start.y - selected.y, start.x - selected.x);
   const delta = arcDelta(selected, start, end, sweep);
   const steps = clampInt(Math.ceil((Math.abs(delta) * radius) / 8), 4, 90);
@@ -1437,15 +1587,71 @@ function parseSvgColor(color: string | undefined): [number, number, number, numb
       255
     ];
   }
+  // `#RRGGBBAA` — OOXML encodes alpha inside the srgb hex for some
+  // generators, and `resolveChartColor` lets the 8-digit form through
+  // with alpha stripped for SVG (browsers parse `#RRGGBBAA` natively).
+  // The PNG fallback raster used to reject 8-digit hex → every
+  // `<a:srgbClr val="RRGGBBAA"/>`-coloured shape silently vanished
+  // from the rasterised output.
+  if (/^[0-9a-fA-F]{8}$/.test(normalized)) {
+    return [
+      Number.parseInt(normalized.slice(0, 2), 16),
+      Number.parseInt(normalized.slice(2, 4), 16),
+      Number.parseInt(normalized.slice(4, 6), 16),
+      Number.parseInt(normalized.slice(6, 8), 16)
+    ];
+  }
+  // `#RGBA` — 4-digit shorthand mirrors `#RGB` with a nibble-alpha.
+  if (/^[0-9a-fA-F]{4}$/.test(normalized)) {
+    return [
+      Number.parseInt(normalized[0] + normalized[0], 16),
+      Number.parseInt(normalized[1] + normalized[1], 16),
+      Number.parseInt(normalized[2] + normalized[2], 16),
+      Number.parseInt(normalized[3] + normalized[3], 16)
+    ];
+  }
   return undefined;
 }
 
 function decodeSvgText(value: string): string {
-  return value
-    .replace(/<[^>]*>/g, "")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
+  // Strip SVG markup first, then decode XML entities in a single pass
+  // so that `&amp;lt;` decodes to `&lt;` (the literal user-authored
+  // text) rather than `<` (double-decoded). Chaining `.replace(/&lt;/g,
+  // "<").replace(/&amp;/g, "&")` silently corrupted labels whose text
+  // included an XML-escaped entity — the first replace turned
+  // `&amp;lt;` into `&lt;`, then the second decoded that to `<`, so a
+  // title authored as literal `&lt;tag&gt;` round-tripped as `<tag>`.
+  const stripped = value.replace(/<[^>]*>/g, "");
+  return stripped.replace(
+    /&(?:([A-Za-z]+)|#x([0-9A-Fa-f]+)|#(\d+));/g,
+    (match, name: string | undefined, hex: string | undefined, dec: string | undefined) => {
+      if (name !== undefined) {
+        switch (name) {
+          case "amp":
+            return "&";
+          case "lt":
+            return "<";
+          case "gt":
+            return ">";
+          case "quot":
+            return '"';
+          case "apos":
+            return "'";
+          default:
+            return match;
+        }
+      }
+      if (hex !== undefined) {
+        const code = parseInt(hex, 16);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      }
+      if (dec !== undefined) {
+        const code = parseInt(dec, 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      }
+      return match;
+    }
+  );
 }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -1609,9 +1815,16 @@ export function drawChartPdf(
     trace?.push(`text:label:${label.text}:${fmt(label.x)},${fmt(label.y)}`);
     drawPdfText(page, label);
   }
+  // Two-pass rendering: every series' shapes first, then every
+  // series' adornments. Same fix as the SVG path — see the matching
+  // comment in `renderChartSvg`. Single-pass (shapes + adornments
+  // together per series) lets the next series' filled shapes paint
+  // over the previous series' data labels and trendlines.
   for (const s of scene.series) {
     trace?.push(`series:${s.type}`);
     drawPdfSeries(page, s);
+  }
+  for (const s of scene.series) {
     drawPdfAdornments(page, s, trace);
   }
   if (scene.dataTable) {
@@ -1647,20 +1860,25 @@ function drawPdfText(
   extra: { anchorOverride?: "start" | "middle" | "end" } = {}
 ): void {
   const anchor = extra.anchorOverride ?? text.anchor ?? "start";
-  // `estimateTextWidth` uses `@excel/utils/text-metrics`; for fallback
-  // surfaces that ignore `anchor` we pre-shift x with a width estimate
-  // that reflects the actual font whenever a family is declared (the
-  // engine falls back to Arial metrics otherwise). Surfaces that honour
-  // `anchor` re-resolve using their own `measureText` in `drawText`, so
-  // supplying both is safe.
-  const width = estimateTextWidth(text.text, text.fontSize, {
-    bold: text.bold,
-    italic: text.italic,
-    fontName: text.fontFamily
-  });
-  const shiftedX = anchor === "start" ? text.x : text.x - width * (anchor === "middle" ? 0.5 : 1);
+  // Pass the true anchor point `text.x` and the `anchor` hint to the
+  // surface unchanged. Modern library surfaces (`PdfPageBuilder`,
+  // canvas rasteriser) honour `anchor` by measuring the text and
+  // shifting internally. Legacy surfaces that predate the `anchor`
+  // parameter are documented to ignore it and render as if anchor
+  // were `"start"`; callers with such surfaces accept the
+  // approximate alignment.
+  //
+  // The previous code ALSO pre-shifted `x` by `-width * anchorBias`
+  // before passing `anchor` through. Surfaces that honour `anchor`
+  // then shifted a second time, producing `text.x - width` for a
+  // `"middle"`-anchored label (i.e., the text landed one glyph-width
+  // to the left of the correct anchor point). The comment on the
+  // old implementation claimed "supplying both is safe" but the
+  // arithmetic was double-compensation: the surface's own measurement
+  // yielded the same width, so the two shifts stacked instead of
+  // cancelling.
   page.drawText(text.text, {
-    x: shiftedX,
+    x: text.x,
     y: text.y,
     fontSize: text.fontSize,
     color: text.color ? hexToPdfColor(text.color) : undefined,
@@ -1728,21 +1946,26 @@ function drawPdfAdornments(
   // Trendlines — polyline over the precomputed points, plus an optional
   // label at the end. The SVG variant uses `stroke-dasharray="4 3"`
   // whenever `dash` is set; mirror that as a simple on/off dash pattern.
+  // Segment the polyline at NaN gaps (moving-average trendlines can
+  // emit NaN points for leading positions before the window fills) so
+  // the PDF matches the SVG `segmentFinitePoints` treatment.
   for (const trend of series.trendlines ?? []) {
     trace?.push(`trendline:${trend.points.length}pts`);
     const dashPattern = trend.dash ? [4, 3] : undefined;
-    for (let i = 1; i < trend.points.length; i++) {
-      const p0 = trend.points[i - 1];
-      const p1 = trend.points[i];
-      page.drawLine({
-        x1: p0.x,
-        y1: p0.y,
-        x2: p1.x,
-        y2: p1.y,
-        color: hexToPdfColor(trend.color),
-        lineWidth: trend.width ?? 1.5,
-        dashPattern
-      });
+    for (const segment of segmentFinitePoints(trend.points)) {
+      for (let i = 1; i < segment.length; i++) {
+        const p0 = segment[i - 1];
+        const p1 = segment[i];
+        page.drawLine({
+          x1: p0.x,
+          y1: p0.y,
+          x2: p1.x,
+          y2: p1.y,
+          color: hexToPdfColor(trend.color),
+          lineWidth: trend.width ?? 1.5,
+          dashPattern
+        });
+      }
     }
     if (trend.label) {
       drawPdfText(page, trend.label);
@@ -1758,18 +1981,20 @@ function drawPdfAdornments(
     drawPdfText(page, label);
   }
   // bar3D's decorative depth hint: two parallelograms projected along
-  // (+depth, -depth) for every bar. The SVG path emits them inline on
-  // each bar (`renderBarDepth`); the PDF path does the same thing here
-  // using `drawPath` when available. Surfaces without `drawPath` fall
+  // (+depth, -depth) for every bar. The PDF path does the same thing
+  // using `drawPath` when available; surfaces without `drawPath` fall
   // back to drawing the two parallelograms as pairs of lines, which
   // preserves the 3D illusion even without filled polygons.
-  if (series.type === "bar" && series.depth && series.depth > 0) {
+  //
+  // `buildSceneSeries` sets `depth > 0` only when `projection3D` is
+  // also present (see the `bar3DDepth` ternary at line 2880), so the
+  // previous `else if (depth && !projection3D)` branch that called
+  // `drawPdfBarDepth` was structurally unreachable. Dropped along
+  // with its SVG counterpart; the remaining 3D path covers every
+  // bar3D configuration the builder emits.
+  if (series.type === "bar" && series.depth && series.depth > 0 && series.projection3D) {
     for (const bar of series.bars) {
-      if (series.projection3D) {
-        drawPdfBar3DBox(page, bar, series.projection3D, color, series.horizontal);
-      } else {
-        drawPdfBarDepth(page, bar, series.depth, color);
-      }
+      drawPdfBar3DBox(page, bar, series.projection3D, color, series.horizontal);
     }
   }
   // Radar's translucent fill is emitted by `drawPdfSeries` itself (the
@@ -1793,29 +2018,65 @@ function drawPdfMarker(page: ChartPdfDrawingSurface, marker: ChartSceneMarker): 
     });
     return;
   }
-  if (symbol === "diamond" && page.drawPath) {
-    page.drawPath(
-      [
-        { op: "move", x: marker.x, y: marker.y - r },
-        { op: "line", x: marker.x + r, y: marker.y },
-        { op: "line", x: marker.x, y: marker.y + r },
-        { op: "line", x: marker.x - r, y: marker.y },
-        { op: "close" }
-      ],
-      { fill }
-    );
+  if (symbol === "diamond") {
+    if (page.drawPath) {
+      page.drawPath(
+        [
+          { op: "move", x: marker.x, y: marker.y - r },
+          { op: "line", x: marker.x + r, y: marker.y },
+          { op: "line", x: marker.x, y: marker.y + r },
+          { op: "line", x: marker.x - r, y: marker.y },
+          { op: "close" }
+        ],
+        { fill }
+      );
+      return;
+    }
+    // Fall back to a stroked-outline diamond when the surface lacks
+    // `drawPath`. A circle fallback (the old behaviour) loses the
+    // shape identity — four lines preserve the diamond's silhouette
+    // at the cost of the fill.
+    page.drawLine({ x1: marker.x, y1: marker.y - r, x2: marker.x + r, y2: marker.y, color: fill });
+    page.drawLine({ x1: marker.x + r, y1: marker.y, x2: marker.x, y2: marker.y + r, color: fill });
+    page.drawLine({ x1: marker.x, y1: marker.y + r, x2: marker.x - r, y2: marker.y, color: fill });
+    page.drawLine({ x1: marker.x - r, y1: marker.y, x2: marker.x, y2: marker.y - r, color: fill });
     return;
   }
-  if (symbol === "triangle" && page.drawPath) {
-    page.drawPath(
-      [
-        { op: "move", x: marker.x, y: marker.y - r },
-        { op: "line", x: marker.x + r, y: marker.y + r },
-        { op: "line", x: marker.x - r, y: marker.y + r },
-        { op: "close" }
-      ],
-      { fill }
-    );
+  if (symbol === "triangle") {
+    if (page.drawPath) {
+      page.drawPath(
+        [
+          { op: "move", x: marker.x, y: marker.y - r },
+          { op: "line", x: marker.x + r, y: marker.y + r },
+          { op: "line", x: marker.x - r, y: marker.y + r },
+          { op: "close" }
+        ],
+        { fill }
+      );
+      return;
+    }
+    // Stroked-outline triangle fallback for surfaces without `drawPath`.
+    page.drawLine({
+      x1: marker.x,
+      y1: marker.y - r,
+      x2: marker.x + r,
+      y2: marker.y + r,
+      color: fill
+    });
+    page.drawLine({
+      x1: marker.x + r,
+      y1: marker.y + r,
+      x2: marker.x - r,
+      y2: marker.y + r,
+      color: fill
+    });
+    page.drawLine({
+      x1: marker.x - r,
+      y1: marker.y + r,
+      x2: marker.x,
+      y2: marker.y - r,
+      color: fill
+    });
     return;
   }
   if (symbol === "x") {
@@ -1868,60 +2129,6 @@ function drawPdfMarker(page: ChartPdfDrawingSurface, marker: ChartSceneMarker): 
       height: marker.size,
       fill
     });
-  }
-}
-
-function drawPdfBarDepth(
-  page: ChartPdfDrawingSurface,
-  bar: ChartSceneRect,
-  depth: number,
-  baseColor: PdfColor
-): void {
-  // Match the SVG path's `withAlpha(series.color, 0.75)` top/right
-  // parallelograms. `PdfColor.a` now flows through to `/ExtGState` when
-  // the surface supports it, so the PDF and SVG look identical on
-  // capable viewers; legacy surfaces ignore `a` and fall back to an
-  // opaque parallelogram which is the pre-alpha rendering.
-  const shadeColor: PdfColor = {
-    r: baseColor.r,
-    g: baseColor.g,
-    b: baseColor.b,
-    a: 0.75
-  };
-  const topOps: ChartPdfPathOp[] = [
-    { op: "move", x: bar.x, y: bar.y },
-    { op: "line", x: bar.x + depth, y: bar.y - depth },
-    { op: "line", x: bar.x + bar.width + depth, y: bar.y - depth },
-    { op: "line", x: bar.x + bar.width, y: bar.y },
-    { op: "close" }
-  ];
-  const rightOps: ChartPdfPathOp[] = [
-    { op: "move", x: bar.x + bar.width, y: bar.y },
-    { op: "line", x: bar.x + bar.width + depth, y: bar.y - depth },
-    { op: "line", x: bar.x + bar.width + depth, y: bar.y - depth + bar.height },
-    { op: "line", x: bar.x + bar.width, y: bar.y + bar.height },
-    { op: "close" }
-  ];
-  if (page.drawPath) {
-    page.drawPath(topOps, { fill: shadeColor });
-    page.drawPath(rightOps, { fill: shadeColor });
-    return;
-  }
-  // Surfaces without drawPath fall back to outlining the parallelograms
-  // with strokes so the 3D hint is still recognisable.
-  for (const ops of [topOps, rightOps]) {
-    for (let i = 1; i < ops.length; i++) {
-      const a = ops[i - 1];
-      const b = ops[i];
-      if (a.op === "close" || b.op === "close") {
-        continue;
-      }
-      // Only move/line ops have x/y; curve ops never appear in these
-      // parallelogram paths but the type narrowing needs the guard.
-      if ("x" in a && "y" in a && "x" in b && "y" in b) {
-        page.drawLine({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, color: shadeColor });
-      }
-    }
   }
 }
 
@@ -1997,9 +2204,16 @@ function getPlotRect(
   // Legend padding is derived from the real scene rectangle so long series
   // names push the plot rectangle inwards instead of being clipped by it.
   // `legend.rect.width` was sized by `legendRect` from actual label widths.
-  const leftLegendPad = legend.visible && legend.position === "l" ? legend.rect.width + 12 : 0;
+  //
+  // `model.chart.legend.overlay === true` instructs Excel to paint the
+  // legend on top of the plot area instead of reserving space for it.
+  // Previously the renderer always reserved space, silently shrinking
+  // the plot even when the author explicitly asked for an overlay
+  // legend.
+  const legendReserves = legend.visible && !(model.chart.legend?.overlay === true);
+  const leftLegendPad = legendReserves && legend.position === "l" ? legend.rect.width + 12 : 0;
   const rightLegendPad =
-    legend.visible && (legend.position === "r" || legend.position === "tr")
+    legendReserves && (legend.position === "r" || legend.position === "tr")
       ? legend.rect.width + 16
       : 0;
   const left = 58 + (leftAxis?.title ? 18 : 0) + leftLegendPad;
@@ -2008,17 +2222,25 @@ function getPlotRect(
     (hasTitle ? 52 : 24) +
     (topAxis ? 22 : 0) +
     (topAxis?.title ? 16 : 0) +
-    (legend.visible && legend.position === "t" ? 30 : 0);
-  // When a data table is drawn below the plot, the legend placed at `b`
-  // still needs room underneath it. The axis's x-labels get hidden
-  // (handled by `buildChartScene`) so we drop their 22 px contribution
-  // when the data table replaces them.
-  const bottomAxisLabelSpace = dataTableHeight > 0 ? 0 : 0; // kept explicit for readability
+    (legendReserves && legend.position === "t" ? 30 : 0);
+  // Bottom-margin budget:
+  //
+  //   * 24 px base (chart-edge padding + a safety margin for stroke
+  //     rounding on the axis line).
+  //   * 22 px for axis tick labels — reserved when a bottom axis exists
+  //     AND its labels are actually emitted. When a data table replaces
+  //     the category labels (`buildChartScene` suppresses them in that
+  //     case) we reclaim the space so the data table's own header
+  //     doesn't push the plot up unnecessarily.
+  //   * Optional bottom-axis title.
+  //   * Optional legend at `b` (only when the legend does not overlay).
+  //   * Data-table footprint.
+  const bottomLabelSpace = bottomAxis && dataTableHeight === 0 ? 22 : 0;
   const bottom =
-    46 +
-    bottomAxisLabelSpace +
+    24 +
+    bottomLabelSpace +
     (bottomAxis?.title ? 18 : 0) +
-    (legend.visible && legend.position === "b" ? 28 : 0) +
+    (legendReserves && legend.position === "b" ? 28 : 0) +
     dataTableHeight;
   const auto: ChartSceneRect = {
     x: left,
@@ -2069,19 +2291,6 @@ function applyManualPlotLayout(
   const clampedW = Math.min(w, chartWidth - clampedX);
   const clampedH = Math.min(h, chartHeight - clampedY);
   return { x: clampedX, y: clampedY, width: clampedW, height: clampedH };
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  if (value < 0) {
-    return 0;
-  }
-  if (value > 1) {
-    return 1;
-  }
-  return value;
 }
 
 // ============================================================================
@@ -2316,8 +2525,17 @@ function formatDataTableValue(value: number | undefined): string {
  * mode still projects the depth vector onto screen space via `rotY`,
  * because without that `dx` a bar3D would collapse into a flat 2D
  * bar. The flag only means "axes stay perpendicular in 3D world
- * space" (vs. pivoting into a trimetric projection). We keep the
- * `cos(rotY)` term regardless.
+ * space" (vs. pivoting into a trimetric projection).
+ *
+ * Horizontal extrusion depends on `sin(rotY)`, not `cos(rotY)`: at
+ * `rotY=0` the viewer is looking straight at the bar, so the depth
+ * vector points directly away from the camera and contributes zero
+ * horizontal screen offset. At `rotY=90°` the viewer is looking from
+ * the side, so the full depth projects onto the screen's x-axis.
+ * The previous `cos(rotY)` was backwards: it gave maximum `dx=0.6`
+ * at `rotY=0` and zero at `rotY=90°`. The default `rotY=20°` happened
+ * to look plausible (`cos(20°)≈0.94`, so the bar still extruded), but
+ * any custom rotation rendered with the wrong horizontal offset.
  */
 function resolveBar3DProjection(view3D: ChartModel["chart"]["view3D"] | undefined): {
   dx: number;
@@ -2325,9 +2543,18 @@ function resolveBar3DProjection(view3D: ChartModel["chart"]["view3D"] | undefine
 } {
   const rotX = toRad(view3D?.rotX ?? 15);
   const rotY = toRad(view3D?.rotY ?? 20);
+  // `view3D.depthPercent` (OOXML `c:view3D/c:depthPercent/@val`,
+  // schema default 100, valid range 20–2000) scales the depth-axis
+  // extrusion magnitude. Previously this setting was silently ignored —
+  // a bar3D chart with `<c:depthPercent val="400"/>` rendered
+  // identically to the default. Clamp to the schema's stated range so
+  // pathological values don't produce off-surface extrusions.
+  const rawDepth = view3D?.depthPercent ?? 100;
+  const depthFactor =
+    Number.isFinite(rawDepth) && rawDepth > 0 ? Math.min(2000, Math.max(20, rawDepth)) / 100 : 1;
   return {
-    dx: 0.6 * Math.cos(rotY),
-    dy: 0.6 * Math.sin(rotX)
+    dx: 0.6 * Math.sin(rotY) * depthFactor,
+    dy: 0.6 * Math.sin(rotX) * depthFactor
   };
 }
 
@@ -2339,12 +2566,13 @@ function getSpPrLineColor(spPr: DataTable["spPr"]): string | undefined {
   if (!spPr) {
     return undefined;
   }
-  // Import is kept inline so we can reuse the structured accessor without
-  // perturbing the top-level import block. `getSpPrLine` handles both
-  // structured ShapeProperties and `_rawXml` passthroughs.
-  const line = getSpPrLine(spPr);
-  const srgb = line?.color?.srgb;
-  return typeof srgb === "string" ? `#${srgb.replace(/^#/, "")}` : undefined;
+  // `getSpPrLine` handles both structured ShapeProperties and
+  // `_rawXml` passthroughs; `resolveChartColor` accepts every
+  // DrawingML colour variant (srgb / theme / sysClr / prstClr).
+  // Previously this helper read `line.color.srgb` only, so a
+  // theme-coloured data-table frame silently fell back to the
+  // caller's default (grey).
+  return resolveChartColor(getSpPrLine(spPr)?.color);
 }
 
 function buildSceneSeries(
@@ -2371,7 +2599,9 @@ function buildSceneSeries(
             first.values,
             plot,
             group.type === "doughnut",
-            first
+            first,
+            (group as { firstSliceAng?: number }).firstSliceAng,
+            (group as { holeSize?: number }).holeSize
           ),
           first,
           plot,
@@ -2387,7 +2617,7 @@ function buildSceneSeries(
       const yRange = getSeriesYRange(first, axisContext);
       result.push(
         withAdornments(
-          buildOfPieSeries(first.values, plot, group.secondPieSize),
+          buildOfPieSeries(first.values, plot, group.secondPieSize, first),
           first,
           plot,
           yRange.min,
@@ -2425,11 +2655,28 @@ function buildSceneSeries(
     }
     if (group.type === "area" || group.type === "area3D") {
       const groupRange = getGroupYRange(group, axisContext);
-      const baselineY = valueToY(0, groupRange.min, groupRange.max, plot);
+      const baselineY = valueToY(
+        axisBaseline(groupRange.min, groupRange.max),
+        groupRange.min,
+        groupRange.max,
+        plot
+      );
       const stacked = group.grouping === "stacked" || group.grouping === "percentStacked";
       const percent = group.grouping === "percentStacked";
+      // Percent-stacked axis range is `[0, 1]` for all-positive data
+      // and `[-1, 1]` when any series contains negative values — Excel
+      // stacks positives upward and negatives downward from the zero
+      // baseline, so the axis needs to span both sides. The old
+      // unconditional `{0, 1}` clipped every negative segment below the
+      // plot rectangle (label ladder said `-100%..100%` but bars were
+      // drawn against `0..1`).
+      const percentHasNegatives =
+        percent && groupSeries.some(s => s.values.some(v => Number.isFinite(v) && v < 0));
+      const percentRange: ValueRange = percentHasNegatives
+        ? { min: -1, max: 1 }
+        : { min: 0, max: 1 };
       for (const s of groupSeries) {
-        const yRange = percent ? { min: 0, max: 1 } : getSeriesYRange(s, axisContext);
+        const yRange = percent ? percentRange : getSeriesYRange(s, axisContext);
         const band = stacked
           ? buildStackedAreaBand(groupSeries, s.seriesIndex, plot, yRange.min, yRange.max, percent)
           : { upper: buildLinePoints(s.values, plot, yRange.min, yRange.max), lower: undefined };
@@ -2455,6 +2702,7 @@ function buildSceneSeries(
       continue;
     }
     if (group.type === "bubble") {
+      const showNegBubbles = group.showNegBubbles === true;
       for (const s of groupSeries) {
         const yRange = getSeriesYRange(s, axisContext);
         const xRange = getSeriesXRange(s, axisContext);
@@ -2464,13 +2712,22 @@ function buildSceneSeries(
               type: "bubble",
               color: s.color,
               label: s.label,
-              bubbles: buildBubbles(s, plot, yRange.min, yRange.max, xRange.min, xRange.max)
+              bubbles: buildBubbles(
+                s,
+                plot,
+                yRange.min,
+                yRange.max,
+                xRange.min,
+                xRange.max,
+                showNegBubbles
+              )
             },
             s,
             plot,
             yRange.min,
             yRange.max,
-            categories
+            categories,
+            xRange
           )
         );
       }
@@ -2478,13 +2735,44 @@ function buildSceneSeries(
     }
     if (group.type === "line" || group.type === "line3D" || group.type === "scatter") {
       const sceneType = group.type === "scatter" ? "scatter" : "line";
+      // Stacked / percent-stacked line charts render each series'
+      // cumulative top — the same geometry the author would get in
+      // Excel. Previously the renderer drew raw `s.values` regardless
+      // of `grouping`, so a stacked line chart looked identical to a
+      // clustered one. Scatter charts do not participate in stacking
+      // (they're value/value, not category/value), so keep them on
+      // the raw path.
+      const isLineStacked =
+        (group.type === "line" || group.type === "line3D") &&
+        (group.grouping === "stacked" || group.grouping === "percentStacked");
+      const isPercentStacked = isLineStacked && group.grouping === "percentStacked";
+      const stackedTotalsCache = isLineStacked
+        ? stackedTotals(groupSeries, maxSeriesLength(groupSeries), isPercentStacked)
+        : undefined;
+      // Percent-stacked line axis mirrors the bar / area treatment —
+      // `[-1, 1]` when any series contains negatives so negative
+      // segments render inside the plot; `[0, 1]` otherwise.
+      const linePercentHasNegatives =
+        isPercentStacked && groupSeries.some(s => s.values.some(v => Number.isFinite(v) && v < 0));
+      const linePercentRange: ValueRange = linePercentHasNegatives
+        ? { min: -1, max: 1 }
+        : { min: 0, max: 1 };
       for (const s of groupSeries) {
-        const yRange = getSeriesYRange(s, axisContext);
+        const yRange = isPercentStacked ? linePercentRange : getSeriesYRange(s, axisContext);
         const xRange = getSeriesXRange(s, axisContext);
         const points =
           group.type === "scatter"
             ? buildScatterPoints(s, plot, yRange.min, yRange.max, xRange.min, xRange.max)
-            : buildLinePoints(s.values, plot, yRange.min, yRange.max);
+            : isLineStacked && stackedTotalsCache
+              ? buildLinePoints(
+                  Array.from({ length: maxSeriesLength(groupSeries) }, (_, i) =>
+                    stackedValueAt(groupSeries, s.seriesIndex, i, stackedTotalsCache, true)
+                  ),
+                  plot,
+                  yRange.min,
+                  yRange.max
+                )
+              : buildLinePoints(s.values, plot, yRange.min, yRange.max);
         result.push(
           withAdornments(
             {
@@ -2492,14 +2780,23 @@ function buildSceneSeries(
               color: s.color,
               label: s.label,
               points,
-              smooth: "smooth" in group ? group.smooth || s.marker?.symbol === "auto" : false,
+              // `smooth` controls whether the line is drawn with curve
+              // interpolation (`c:smooth`). Previously the expression
+              // conflated it with `s.marker?.symbol === "auto"` —
+              // the auto-marker default triggered smoothing on every
+              // marker-less line series, overriding an explicit
+              // `group.smooth === false` and producing rounded lines
+              // where the user asked for straight segments. Two
+              // concepts; read `group.smooth` alone.
+              smooth: "smooth" in group ? (group.smooth ?? false) : false,
               showLine: group.type !== "scatter" || group.scatterStyle !== "marker"
             },
             s,
             plot,
             yRange.min,
             yRange.max,
-            categories
+            categories,
+            group.type === "scatter" ? xRange : undefined
           )
         );
       }
@@ -2508,6 +2805,18 @@ function buildSceneSeries(
     if (group.type === "bar" || group.type === "bar3D") {
       const stacked = group.grouping === "stacked" || group.grouping === "percentStacked";
       const percent = group.grouping === "percentStacked";
+      // Percent-stacked axis range is `[0, 1]` unless the data crosses
+      // zero, in which case `[-1, 1]` so negative segments render inside
+      // the plot rectangle. `stackedValueAt` returns signed fractions
+      // (`accum / totals[i]`, and `accum` carries the sign of the side
+      // the current series sits on), so a bar with value `-30` in a
+      // `[+50, -30]` column yields `-0.3`. With `yRange={0,1}` that
+      // pixelates to `plot.y + 1.3*plot.height` — 30% below the frame.
+      const percentHasNegatives =
+        percent && groupSeries.some(s => s.values.some(v => Number.isFinite(v) && v < 0));
+      const percentRange: ValueRange = percentHasNegatives
+        ? { min: -1, max: 1 }
+        : { min: 0, max: 1 };
       // Cabinet-ish axonometric projection for bar3D. The OOXML default
       // view is rotX=15°, rotY=20°, depthPercent=100; when authors leave
       // `view3D` unset we fall back to those values so the preview still
@@ -2517,7 +2826,7 @@ function buildSceneSeries(
       const proj = group.type === "bar3D" ? resolveBar3DProjection(view3D) : undefined;
       for (const s of groupSeries) {
         const horizontal = group.barDir === "bar";
-        const yRange = percent ? { min: 0, max: 1 } : getSeriesYRange(s, axisContext);
+        const yRange = percent ? percentRange : getSeriesYRange(s, axisContext);
         const bars = stacked
           ? buildStackedBars(
               groupSeries,
@@ -2604,7 +2913,13 @@ function buildBars(
   const count = Math.max(1, categories.length, values.length);
   const groupWidth = plot.width / count;
   const barWidth = (groupWidth * 0.72) / Math.max(1, seriesCount);
-  const zero = valueToY(0, min, max, plot);
+  // Anchor bars at the axis baseline, not at the virtual value `0`.
+  // When the axis range excludes zero (e.g. user-authored `min: 20`)
+  // the previous `valueToY(0, …)` coordinate sat below the plot area
+  // and bars rendered overflowing the plot frame. Clamp `0` into
+  // `[min, max]` so bars grow from the axis floor upward, matching
+  // Excel's native behaviour.
+  const zero = valueToY(axisBaseline(min, max), min, max, plot);
   return values.map((value, i) => {
     const y = valueToY(value, min, max, plot);
     return {
@@ -2614,6 +2929,29 @@ function buildBars(
       height: Math.abs(zero - y)
     };
   });
+}
+
+/**
+ * Effective axis baseline — the coordinate bars anchor to and stacked
+ * segments chain from. Defaults to `0` for ranges that straddle zero;
+ * when the axis explicitly excludes zero (e.g. `min: 20, max: 100`),
+ * clamp to the nearer end so bars grow from the visible axis floor
+ * rather than from a virtual zero that lives outside the plot area.
+ * Handles reversed axes (`min > max`, from `scaling.orientation =
+ * "maxMin"`) too.
+ */
+function axisBaseline(min: number, max: number): number {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  if (lo <= 0 && hi >= 0) {
+    return 0;
+  }
+  // Range entirely above zero — baseline at the lower bound (axis floor).
+  if (lo > 0) {
+    return lo;
+  }
+  // Range entirely below zero — baseline at the upper bound (axis ceiling).
+  return hi;
 }
 
 function buildHorizontalBars(
@@ -2628,7 +2966,11 @@ function buildHorizontalBars(
   const count = Math.max(1, categories.length, values.length);
   const groupHeight = plot.height / count;
   const barHeight = (groupHeight * 0.72) / Math.max(1, seriesCount);
-  const zero = valueToX(0, min, max, plot);
+  // Anchor bars at the axis baseline (see `axisBaseline` for the
+  // clamp rule). A value-axis range that excludes zero previously
+  // forced bars to anchor at the virtual `0` coordinate which fell
+  // outside the plot area, making bars overflow the chart frame.
+  const zero = valueToX(axisBaseline(min, max), min, max, plot);
   return values.map((value, i) => {
     const x = valueToX(value, min, max, plot);
     return {
@@ -2649,11 +2991,9 @@ function buildStackedBars(
   max: number,
   percent: boolean
 ): ChartSceneRect[] {
-  const count = Math.max(1, ...groupSeries.map(s => s.values.length));
+  const count = maxSeriesLength(groupSeries);
   const slot = horizontal ? plot.height / count : plot.width / count;
   const thickness = slot * 0.72;
-  const zeroY = valueToY(0, min, max, plot);
-  const zeroX = valueToX(0, min, max, plot);
   const totals = stackedTotals(groupSeries, count, percent);
   return Array.from({ length: count }, (_, i) => {
     const start = stackedValueAt(groupSeries, seriesIndex, i, totals, false);
@@ -2661,8 +3001,16 @@ function buildStackedBars(
     if (horizontal) {
       const x1 = valueToX(start, min, max, plot);
       const x2 = valueToX(end, min, max, plot);
+      // Each stack segment spans exactly `[start, end]`. The bar's left
+      // edge is `Math.min(x1, x2)` — i.e. x1 for a positive segment, x2
+      // for a negative one. A previous version included `zeroX` in the
+      // min, which only happened to work for segments that straddle
+      // zero or start at zero (the first segment of each stack). Any
+      // later positive segment rendered anchored at `zeroX` instead of
+      // `x1`, collapsing every stack past the first series into the
+      // axis origin with a width equal to only its own delta.
       return {
-        x: Math.min(x1, x2, zeroX),
+        x: Math.min(x1, x2),
         y: plot.y + i * slot + slot * 0.14,
         width: Math.abs(x2 - x1),
         height: thickness
@@ -2670,9 +3018,16 @@ function buildStackedBars(
     }
     const y1 = valueToY(start, min, max, plot);
     const y2 = valueToY(end, min, max, plot);
+    // Vertical axis: SVG y grows downward, so `Math.min(y1, y2)` picks
+    // the topmost pixel — that's the larger value for a positive
+    // segment, the smaller-absolute value for a negative segment. The
+    // previous `Math.min(y1, y2, zeroY)` broke stacks of negative
+    // segments that didn't reach zero: a negative stack past the first
+    // series was anchored at the zero-line instead of at the top of
+    // its own slice, sliding the rectangle up towards the axis.
     return {
       x: plot.x + i * slot + slot * 0.14,
-      y: Math.min(y1, y2, zeroY),
+      y: Math.min(y1, y2),
       width: thickness,
       height: Math.abs(y2 - y1)
     };
@@ -2687,7 +3042,7 @@ function buildStackedAreaBand(
   max: number,
   percent: boolean
 ): { upper: ChartScenePoint[]; lower: ChartScenePoint[] } {
-  const count = Math.max(1, ...groupSeries.map(s => s.values.length));
+  const count = maxSeriesLength(groupSeries);
   const totals = stackedTotals(groupSeries, count, percent);
   const lowerValues = Array.from({ length: count }, (_, i) =>
     stackedValueAt(groupSeries, seriesIndex, i, totals, false)
@@ -2702,9 +3057,25 @@ function buildStackedAreaBand(
 }
 
 function stackedTotals(groupSeries: NormalizedSeries[], count: number, percent: boolean): number[] {
+  // Excel splits stacked totals by sign: positives stack upward from
+  // zero, negatives stack downward. For **percent-stacked** the
+  // denominator is `|positive_sum| + |negative_sum|` so each bar still
+  // fills the axis width, but negatives extend left/down. The previous
+  // implementation clamped with `Math.max(0, v)` — which silently
+  // dropped every negative value and produced totals that were too
+  // small for charts containing any negatives.
   return Array.from({ length: count }, (_, i) => {
-    const sum = groupSeries.reduce((total, s) => total + Math.max(0, s.values[i] ?? 0), 0);
-    return percent ? sum || 1 : 1;
+    if (!percent) {
+      return 1;
+    }
+    let absSum = 0;
+    for (const s of groupSeries) {
+      const v = s.values[i];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        absSum += Math.abs(v);
+      }
+    }
+    return absSum || 1;
   });
 }
 
@@ -2715,12 +3086,29 @@ function stackedValueAt(
   totals: number[],
   includeCurrent: boolean
 ): number {
-  const end = includeCurrent ? seriesIndex : seriesIndex - 1;
-  let sum = 0;
-  for (let i = 0; i <= end; i++) {
-    sum += Math.max(0, groupSeries[i]?.values[pointIndex] ?? 0);
+  // Split positive and negative contributions — they stack along
+  // opposite directions from the zero baseline. For the `end` of the
+  // current slice we include the current series' contribution in the
+  // side matching its sign; for the `start` we take only the earlier
+  // series' contributions on that same side (so the rectangle covers
+  // exactly this series' delta).
+  const currentValue = groupSeries[seriesIndex]?.values[pointIndex];
+  const currentIsFinite = typeof currentValue === "number" && Number.isFinite(currentValue);
+  const currentSide: 1 | -1 = currentIsFinite && (currentValue as number) < 0 ? -1 : 1;
+  let accum = 0;
+  const upto = includeCurrent ? seriesIndex : seriesIndex - 1;
+  for (let i = 0; i <= upto; i++) {
+    const v = groupSeries[i]?.values[pointIndex];
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      continue;
+    }
+    const side: 1 | -1 = v < 0 ? -1 : 1;
+    if (side !== currentSide) {
+      continue;
+    }
+    accum += v;
   }
-  return sum / totals[pointIndex];
+  return accum / totals[pointIndex];
 }
 
 function buildScatterPoints(
@@ -2735,8 +3123,32 @@ function buildScatterPoints(
     series.xValues && series.xValues.length > 0
       ? series.xValues
       : series.values.map((_, i) => i + 1);
-  const computedXMin = Math.min(0, ...xValues.filter(Number.isFinite));
-  const computedXMax = Math.max(1, ...xValues.filter(Number.isFinite));
+  // Fold via a loop rather than `Math.min(0, ...xValues.filter(...))`
+  // / `Math.max(1, ...)`; the spread form blows the call stack past
+  // ~100k entries (large time-series scatters).
+  //
+  // Seed ±Infinity so the range converges on the actual x extremes.
+  // The old `min=0, max=1` seeds anchored the range incorrectly when
+  // every value was above 1 (`[10,20,30]` → `{0, 30}`) or below 0
+  // (`[-30,-20,-10]` → `{-30, 1}`), which mis-positioned scatter points
+  // to the left/right of where the axis labels implied.
+  let computedXMin = Infinity;
+  let computedXMax = -Infinity;
+  for (const x of xValues) {
+    if (!Number.isFinite(x)) {
+      continue;
+    }
+    if (x < computedXMin) {
+      computedXMin = x;
+    }
+    if (x > computedXMax) {
+      computedXMax = x;
+    }
+  }
+  if (!Number.isFinite(computedXMin) || !Number.isFinite(computedXMax)) {
+    computedXMin = 0;
+    computedXMax = Math.max(1, xValues.length);
+  }
   const effectiveXMin = xMin ?? computedXMin;
   const effectiveXMax = xMax ?? computedXMax;
   return series.values.map((value, i) => ({
@@ -2766,7 +3178,8 @@ function buildBubbles(
   min: number,
   max: number,
   xMin?: number,
-  xMax?: number
+  xMax?: number,
+  showNegBubbles = false
 ): ChartSceneBubble[] {
   const xValues =
     series.xValues && series.xValues.length > 0
@@ -2774,22 +3187,98 @@ function buildBubbles(
       : series.values.map((_, i) => i + 1);
   const yValues = series.values;
   const sizes = series.bubbleSizes ?? [];
-  const sizeMax = Math.max(1, ...sizes.map(v => Math.abs(v)));
-  const count = Math.max(xValues.length, yValues.length);
-  const computedXMin = Math.min(0, ...xValues.filter(Number.isFinite));
-  const computedXMax = Math.max(1, ...xValues.filter(Number.isFinite));
+  // Fold with `reduce` rather than `Math.max(...arr)` / `Math.min(...arr)`
+  // — the spread form blows the JS call stack once the array grows past
+  // ~100k entries (large scatter / bubble time-series).
+  //
+  // Seed `sizeMax` at `0`, not `1`. When every authored size is < 1
+  // (e.g. all sizes = `0.5`), the old `sizeMax=1` seed never got
+  // overwritten, so `radius = 4 + sqrt(size)/sqrt(1) * 16 ≈ 15.3` for
+  // every bubble — the relative visual scaling (biggest bubble vs.
+  // smallest bubble) collapsed. Initialising at `0` lets the fold pick
+  // the true max; guard against div-by-zero at the call site.
+  let sizeMax = 0;
+  for (const s of sizes) {
+    // When `showNegBubbles=false` (OOXML default) the render loop below
+    // skips negative-sized bubbles entirely — so they must not
+    // contribute to `sizeMax` either. Previously the fold used
+    // `Math.abs(s)`, which let an invisible `size=-100` inflate the
+    // denominator and visually shrink every rendered positive bubble
+    // (e.g. sizes `[10, -100, 20]` gave every visible bubble the
+    // radius it would have had if the -100 were a real 100-unit
+    // bubble). Gate on sign when negatives are hidden; fall back to
+    // `|s|` when `showNegBubbles=true` so the absolute-magnitude
+    // rendering stays consistent with the per-point radius computation.
+    const contributes = showNegBubbles ? Math.abs(s) : s;
+    if (Number.isFinite(contributes) && contributes > sizeMax) {
+      sizeMax = contributes;
+    }
+  }
+  // Seed ±Infinity so `xValues=[10,20,30]` produces {10, 30} instead of
+  // `{0, 30}` (the old `min=0, max=1` seeds incorrectly anchored the
+  // x-domain at `0` whenever the data didn't cross it).
+  let computedXMin = Infinity;
+  let computedXMax = -Infinity;
+  for (const x of xValues) {
+    if (!Number.isFinite(x)) {
+      continue;
+    }
+    if (x < computedXMin) {
+      computedXMin = x;
+    }
+    if (x > computedXMax) {
+      computedXMax = x;
+    }
+  }
+  if (!Number.isFinite(computedXMin) || !Number.isFinite(computedXMax)) {
+    computedXMin = 0;
+    computedXMax = Math.max(1, xValues.length);
+  }
   const effectiveXMin = xMin ?? computedXMin;
   const effectiveXMax = xMax ?? computedXMax;
-  return Array.from({ length: count }, (_, i) => ({
-    x: valueToX(
-      xValues[i] ?? i + 1,
-      effectiveXMin,
-      effectiveXMax <= effectiveXMin ? effectiveXMin + 1 : effectiveXMax,
-      plot
-    ),
-    y: valueToY(yValues[i] ?? 0, min, max, plot),
-    radius: 4 + (Math.sqrt(Math.abs(sizes[i] ?? 1)) / Math.sqrt(sizeMax)) * 16
-  }));
+  const count = Math.max(xValues.length, yValues.length);
+  const out: ChartSceneBubble[] = [];
+  for (let i = 0; i < count; i++) {
+    const rawSize = sizes[i];
+    // `showNegBubbles=false` (OOXML default) hides bubbles with
+    // negative size — a true "data-driven omission" rather than an
+    // absolute-value rescale. `showNegBubbles=true` renders them using
+    // the absolute magnitude so the author's requested visual appears;
+    // previously the renderer always dropped negative bubbles, giving
+    // authors no way to opt in to Excel's native "show negatives"
+    // behaviour.
+    if (!showNegBubbles && typeof rawSize === "number" && Number.isFinite(rawSize) && rawSize < 0) {
+      continue;
+    }
+    // Skip points with non-finite x or y — `??` only catches null /
+    // undefined, so `NaN ?? 0` stays `NaN` and propagates to
+    // `valueToY`, emitting a ghost bubble at `(0,0)` in the SVG (since
+    // `fmt(NaN)` returns `"0"`). `collectNumberValues` maps blank /
+    // error cells to `NaN`, which is a common case for bubble data.
+    const xRaw = xValues[i] ?? i + 1;
+    const yRaw = yValues[i] ?? 0;
+    if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) {
+      continue;
+    }
+    const rawSafeSize = typeof rawSize === "number" && Number.isFinite(rawSize) ? rawSize : 1;
+    const safeSize = Math.abs(rawSafeSize);
+    // `sizeMax === 0` happens for bubble series with no authored sizes
+    // (empty array) or all-zero sizes — every bubble collapses to a
+    // point. Fall back to `1` so the sqrt denominator stays non-zero
+    // and every bubble renders at the minimum radius.
+    const sizeDenom = sizeMax > 0 ? Math.sqrt(sizeMax) : 1;
+    out.push({
+      x: valueToX(
+        xRaw,
+        effectiveXMin,
+        effectiveXMax <= effectiveXMin ? effectiveXMin + 1 : effectiveXMax,
+        plot
+      ),
+      y: valueToY(yRaw, min, max, plot),
+      radius: 4 + (Math.sqrt(safeSize) / sizeDenom) * 16
+    });
+  }
+  return out;
 }
 
 function buildPieSeries(
@@ -2797,21 +3286,58 @@ function buildPieSeries(
   values: number[],
   plot: ChartSceneRect,
   doughnut: boolean,
-  series?: NormalizedSeries
+  series?: NormalizedSeries,
+  firstSliceAng?: number,
+  holeSize?: number
 ): ChartScenePieSeries {
   const radius = Math.min(plot.width, plot.height) / 2.35;
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
-  const total = values.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
-  let angle = -Math.PI / 2;
+  // Excel renders pie slices using the absolute magnitude of each
+  // value, so negative values still produce a visible wedge (flipped
+  // to its positive magnitude). Using `Math.max(0, v)` here collapsed
+  // negative slices to zero-width wedges and, worse, disagreed with
+  // `buildDataLabels` which already uses `Math.abs(v)` for the
+  // percentage total. Mirror the label convention so slices and
+  // labels stay in lock-step.
+  //
+  // Non-finite values (blank / `#N/A` cells — `collectNumberValues`
+  // deliberately maps those to `NaN` to preserve slot identity) must
+  // be skipped: `Math.abs(NaN) = NaN`, which poisons `total` and then
+  // every downstream `angle = next = angle + NaN/1 = NaN`, collapsing
+  // every subsequent slice to the SVG origin. Coerce to zero-sweep so
+  // the gap is simply absent from the pie.
+  const total = values.reduce((sum, v) => sum + (Number.isFinite(v) ? Math.abs(v) : 0), 0) || 1;
+  // Per-slice colour overrides from `series.dataPoints[idx].spPr.fill`.
+  // Pie / doughnut charts in Excel almost always use data-point styling
+  // (one colour per slice); previously the renderer ignored
+  // `dataPoints` entirely and every slice rotated through the 6-entry
+  // default palette — breaking the common "colour-by-category" idiom.
+  const dataPointColors = collectDataPointColors(series);
+  const dataPointExplosions = collectDataPointExplosions(series);
+  // OOXML `firstSliceAng` is the clockwise offset (in degrees) from
+  // 12 o'clock. Convert to radians and add to the SVG base angle
+  // (`-π/2` = 12 o'clock). A missing / zero value keeps the classic
+  // 12-o'clock start; positive values rotate the pie clockwise.
+  const startAngle =
+    -Math.PI / 2 +
+    (firstSliceAng && Number.isFinite(firstSliceAng) ? (firstSliceAng * Math.PI) / 180 : 0);
+  let angle = startAngle;
   const slices = values.map((value, i) => {
-    const next = angle + (Math.max(0, value) / total) * Math.PI * 2;
+    const sweep = Number.isFinite(value) ? (Math.abs(value) / total) * Math.PI * 2 : 0;
+    const next = angle + sweep;
+    // Honour per-slice `explosion` (0–400 % of radius — Excel's native
+    // range). Offset the centre along the angle bisector so the slice
+    // visibly separates from the pie without changing its sweep.
+    const explosion = dataPointExplosions[i] ?? 0;
+    const offsetRadius = explosion > 0 ? radius * (explosion / 100) : 0;
+    const mid = (angle + next) / 2;
     const slice = {
-      color: COLORS[i % COLORS.length],
-      cx,
-      cy,
+      color: dataPointColors[i] ?? COLORS[i % COLORS.length],
+      cx: cx + Math.cos(mid) * offsetRadius,
+      cy: cy + Math.sin(mid) * offsetRadius,
       radius,
-      innerRadius: doughnut ? radius * 0.45 : 0,
+      innerRadius: doughnut ? radius * resolveDoughnutHoleRatio(holeSize) : 0,
       startAngle: angle,
       endAngle: next
     };
@@ -2824,7 +3350,8 @@ function buildPieSeries(
 function buildOfPieSeries(
   values: number[],
   plot: ChartSceneRect,
-  secondPieSize = 75
+  secondPieSize = 75,
+  series?: NormalizedSeries
 ): ChartScenePieSeries {
   const split = Math.max(1, Math.floor(values.length * 0.7));
   const primaryValues = values.slice(0, split);
@@ -2833,18 +3360,30 @@ function buildOfPieSeries(
     "pie",
     primaryValues,
     { ...plot, width: plot.width * 0.62 },
-    false
+    false,
+    series
   );
   const radius =
     (Math.min(plot.width, plot.height) / 2.35) * Math.max(0.25, Math.min(2, secondPieSize / 100));
   const cx = plot.x + plot.width * 0.78;
   const cy = plot.y + plot.height / 2;
   let angle = -Math.PI / 2;
-  const total = secondaryValues.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
+  // Use `|v|` for both the total and the slice sweep so mixed-sign
+  // data produces a consistent geometry (matches `buildPieSeries` and
+  // the `buildDataLabels` percentage formula). Skip non-finite values
+  // (NaN from blank / `#N/A` source cells) — see `buildPieSeries` for
+  // the rationale.
+  const total =
+    secondaryValues.reduce((sum, v) => sum + (Number.isFinite(v) ? Math.abs(v) : 0), 0) || 1;
+  // Per-slice colour overrides for the secondary pie. Index is the
+  // absolute source position (`split + i`), matching how Excel writes
+  // `c:dPt` for ofPie series.
+  const dataPointColors = collectDataPointColors(series);
   const secondarySlices = secondaryValues.map((value, i) => {
-    const next = angle + (Math.max(0, value) / total) * Math.PI * 2;
+    const sweep = Number.isFinite(value) ? (Math.abs(value) / total) * Math.PI * 2 : 0;
+    const next = angle + sweep;
     const slice = {
-      color: COLORS[(split + i) % COLORS.length],
+      color: dataPointColors[split + i] ?? COLORS[(split + i) % COLORS.length],
       cx,
       cy,
       radius,
@@ -2883,10 +3422,37 @@ function buildRadarSeries(
 ): ChartSceneRadarSeries {
   const center = { x: plot.x + plot.width / 2, y: plot.y + plot.height / 2 };
   const radius = Math.min(plot.width, plot.height) / 2.25;
-  const count = Math.max(3, series.values.length);
+  // Guard against `max === min` (all values equal, e.g. `[3, 3, 3, 3]`).
+  // `(value - min) / (max - min)` would yield `NaN` which `fmt` silently
+  // collapses to "0", producing a radar with every vertex at the
+  // centre. Widen the range so each vertex sits at the outer ring.
+  const span = max - min;
+  const safeSpan = span === 0 || !Number.isFinite(span) ? 1 : span;
+  // Distribute each point evenly around the circle using the *actual*
+  // series length as the divisor. The old `Math.max(3, length)` clamp
+  // was meant to guarantee a valid polygon, but for a 2-point radar it
+  // produced vertices at `0°` and `120°` instead of the symmetric
+  // `0°` and `180°`, leaving a blank 240° wedge. For `length < 3` the
+  // resulting "polygon" is a line segment / single point; that's
+  // expected — radar charts with 1-2 categories have no well-defined
+  // polygon fill anyway, and `Math.max(1, …)` guards against
+  // `NaN` / division by zero.
+  const divisor = Math.max(1, series.values.length);
   const points = series.values.map((value, i) => {
-    const angle = -Math.PI / 2 + (i / count) * Math.PI * 2;
-    const r = ((value - min) / (max - min)) * radius;
+    const angle = -Math.PI / 2 + (i / divisor) * Math.PI * 2;
+    // Non-finite values (blank / `#N/A` cells — `collectNumberValues`
+    // emits NaN to preserve slot identity) must NOT be projected to
+    // the plot centre. Previously we coerced `normalised = 0`, which
+    // placed the vertex at the origin and left the polygon with a
+    // sharp "V" cut from the previous vertex through the centre and
+    // back out to the next — nothing like Excel's actual gap handling.
+    // Emit `{NaN, NaN}` so the renderer's `segmentFinitePoints` pass
+    // can split the polygon at the gap (matching line / area behaviour).
+    if (!Number.isFinite(value)) {
+      return { x: Number.NaN, y: Number.NaN };
+    }
+    const normalised = (value - min) / safeSpan;
+    const r = normalised * radius;
     return { x: center.x + Math.cos(angle) * r, y: center.y + Math.sin(angle) * r };
   });
   return {
@@ -2910,25 +3476,67 @@ function buildStockSeries(
   const count = Math.max(1, categories.length, ...groupSeries.map(s => s.values.length));
   const groupWidth = plot.width / count;
   const candleWidth = Math.max(3, groupWidth * 0.45);
-  const firstValue = (seriesIndex: number, pointIndex: number): number | undefined =>
-    groupSeries[seriesIndex]?.values[pointIndex];
+  // Return `undefined` for non-finite (gap) values — NaN from
+  // `collectNumberValues` would otherwise propagate through `Math.max` /
+  // `Math.min` below and poison every `valueToY` output, rendering the
+  // candle as a zero-height bar at the plot top.
+  const firstValue = (seriesIndex: number, pointIndex: number): number | undefined => {
+    const raw = groupSeries[seriesIndex]?.values[pointIndex];
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  };
   const useVolume = groupSeries.length >= 5;
   const offset = useVolume ? 1 : 0;
   const hasOpen = groupSeries.length - offset >= 4;
   const candles: ChartSceneStockCandle[] = [];
   for (let i = 0; i < count; i++) {
+    // Read each OHLC channel directly from its source series. The
+    // previous `??` fallback chain (e.g. `high ?? open`, `close ?? low`)
+    // silently fabricated values for gap slots — a HL-only chart with
+    // `high=10, low=undefined` would emit a phantom candle with
+    // `low=high=10`, and an OHLC chart with a missing close would
+    // emit `close=low`, flattening the candle body to the wick bottom.
+    // Treat each missing channel as a genuine gap and feed `defined`
+    // only the values that are actually present, so the wick / body
+    // reflect authored data rather than synthesised fallbacks.
     const open = hasOpen ? firstValue(offset, i) : undefined;
-    const high = firstValue(offset + (hasOpen ? 1 : 0), i) ?? open ?? 0;
-    const low = firstValue(offset + (hasOpen ? 2 : 1), i) ?? high;
-    const close = firstValue(offset + (hasOpen ? 3 : 2), i) ?? low;
+    const high = firstValue(offset + (hasOpen ? 1 : 0), i);
+    const low = firstValue(offset + (hasOpen ? 2 : 1), i);
+    const close = firstValue(offset + (hasOpen ? 3 : 2), i);
+    // Gather the defined extremes so `Math.max` / `Math.min` never see
+    // `NaN`. Skip the candle entirely when no finite data point is
+    // present — the scene builder will emit nothing for that slot and
+    // the PNG / PDF surfaces won't draw phantom lines at the plot top.
+    const defined: number[] = [];
+    if (typeof open === "number") {
+      defined.push(open);
+    }
+    if (typeof high === "number") {
+      defined.push(high);
+    }
+    if (typeof low === "number") {
+      defined.push(low);
+    }
+    if (typeof close === "number") {
+      defined.push(close);
+    }
+    if (defined.length === 0) {
+      continue;
+    }
+    const hi = defined.reduce((a, b) => (b > a ? b : a), defined[0]);
+    const lo = defined.reduce((a, b) => (b < a ? b : a), defined[0]);
     candles.push({
       x: plot.x + i * groupWidth + groupWidth / 2,
-      highY: valueToY(Math.max(high, low, open ?? high, close), min, max, plot),
-      lowY: valueToY(Math.min(high, low, open ?? low, close), min, max, plot),
+      highY: valueToY(hi, min, max, plot),
+      lowY: valueToY(lo, min, max, plot),
       openY: open === undefined ? undefined : valueToY(open, min, max, plot),
-      closeY: valueToY(close, min, max, plot),
+      closeY: close === undefined ? undefined : valueToY(close, min, max, plot),
       width: candleWidth,
-      up: open === undefined || close >= open
+      // When either endpoint of the body is missing the up/down state
+      // is undefined by the data — leave `up` as `true` (Excel's own
+      // default for partial candles) but note that callers should skip
+      // drawing the body on `open === undefined || close === undefined`
+      // so the colour never matters.
+      up: open === undefined || close === undefined ? true : close >= open
     });
   }
   return { type: "stock", color: COLORS[0], candles, label: groupSeries[0]?.label };
@@ -2942,7 +3550,7 @@ function buildSurfaceSeries(
   wireframe?: boolean
 ): ChartSceneSurfaceSeries {
   const rows = Math.max(1, groupSeries.length);
-  const cols = Math.max(1, ...groupSeries.map(s => s.values.length));
+  const cols = maxSeriesLength(groupSeries);
   const cellWidth = plot.width / cols;
   const cellHeight = plot.height / rows;
   const cells: ChartSceneSurfaceCell[] = [];
@@ -2963,15 +3571,268 @@ function buildSurfaceSeries(
   return { type: "surface", cells, wireframe, label: groupSeries[0]?.label };
 }
 
-function buildGridlines(plot: ChartSceneRect, axis?: ChartAxis): ChartSceneLine[] {
-  if (axis?.majorGridlines === undefined) {
-    return [];
+/**
+ * Compute the set of value-axis tick positions for a given data range.
+ *
+ * Priority:
+ *   1. If `axis.majorUnit` is set (author-specified tick step): generate
+ *      ticks at `min`, `min + majorUnit`, `min + 2*majorUnit`, … up to
+ *      (and including) `max`. Excel snaps ticks to `majorUnit` starting
+ *      from the axis minimum, NOT from zero — matching
+ *      `ST_AxisScaling/@majorUnit` semantics.
+ *   2. Otherwise fall back to 6 evenly-spaced positions (`min, min + 1/5
+ *      (max-min), …, max`). This matches Excel's behaviour when the
+ *      author has not specified tick properties and the data range is
+ *      within the auto-scaling band.
+ *
+ * The result is **always non-empty** so callers never have to guard
+ * against an empty tick list. A degenerate `min === max` range collapses
+ * to a single tick at that value.
+ *
+ * Honouring `majorUnit` is critical for two things:
+ *   - gridlines align with the axis tick labels (previously gridlines
+ *     were locked at 1/5 intervals regardless of the author's tick
+ *     step, so any custom `majorUnit` produced gridlines and labels at
+ *     different positions);
+ *   - tick labels themselves render at the intended numeric grid
+ *     (previously all value axes showed 6 evenly-spaced labels even
+ *     when the author configured `majorUnit=10` on a `[0, 100]` range).
+ */
+function valueAxisTickPositions(min: number, max: number, axis: ChartAxis | undefined): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    return [min];
   }
-  const color = colorFromShapeLine(axis.majorGridlines.line) ?? GRID_COLOR;
+  // `majorUnit` lives on `ValueAxis` / `DateAxis` but not on the
+  // category / series axis variants. Category / series axes never
+  // reach this helper in practice — they have their own label
+  // builders in `buildXLabels` / `buildYLabels` that key off the
+  // category list. Narrow through `unknown` so the call site can
+  // pass any `ChartAxis` without discriminating, and the missing
+  // property simply resolves to `undefined`.
+  const step = (axis as { majorUnit?: number } | undefined)?.majorUnit;
+  if (typeof step === "number" && Number.isFinite(step) && step > 0) {
+    // `min > max` when `scaling.orientation === "maxMin"` — `getValueRange`
+    // swaps the endpoints so callers can flip the axis without knowing
+    // about orientation. Walk ticks in the direction `min → max`; the
+    // old `max - min` / `Math.floor(span/step)` produced a negative /
+    // zero count for reversed axes, so only the final `ticks.push(max)`
+    // fired and the axis ended up with a single tick label.
+    const span = Math.abs(max - min);
+    const direction = max >= min ? 1 : -1;
+    // Cap at ~200 ticks for malformed inputs (tiny majorUnit on wide
+    // range). Preview renderers should not allocate megabytes of tick
+    // text to honour a typo; the cap is well above any legitimate
+    // Excel value.
+    const MAX_TICKS = 200;
+    const rawCount = Math.floor(span / step) + 1;
+    const count = Math.min(MAX_TICKS, rawCount);
+    const ticks: number[] = [];
+    for (let i = 0; i < count; i++) {
+      ticks.push(min + direction * i * step);
+    }
+    // Always include the maximum so the gridline at the plot's top /
+    // right edge is drawn even when `(max - min) % step !== 0`. When
+    // the cap was hit, we still want `max` in the list — previously
+    // the `count < MAX_TICKS` guard suppressed the trailing push in
+    // that case, silently dropping the top-edge gridline and label.
+    // Replace the nearest overshooting tick with `max` so the array
+    // stays at its MAX_TICKS ceiling while still anchoring the upper
+    // bound.
+    const last = ticks[ticks.length - 1];
+    if (last !== max) {
+      if (count < MAX_TICKS) {
+        ticks.push(max);
+      } else {
+        // Already at the cap — swap the last sample for `max` so the
+        // array ends at the axis boundary and the preview's top/right
+        // rail still carries a gridline.
+        ticks[ticks.length - 1] = max;
+      }
+    }
+    return ticks;
+  }
+  // Log-scale axis: place a tick at every integer power of the log
+  // base inside the range. `min` / `max` are already in log space
+  // (normalizeSeries pre-transforms values), so stepping by `1` gives
+  // powers-of-base ticks (e.g. `[0, 1, 2, 3]` on a log10 axis over
+  // `[10^0, 10^3]` → tick labels "1", "10", "100", "1000"). Ranges
+  // spanning more than 6 decades fall back to the non-log uniform
+  // path so labels don't crowd the axis.
+  //
+  // `getValueRange` returns `min > max` on reversed axes
+  // (`scaling.orientation === "maxMin"`). The integer-power sweep must
+  // walk the numeric interval — normalise to lo/hi first, then emit
+  // ticks in the axis's display direction so downstream callers
+  // position gridlines and labels consistently with the data.
+  const logBase = axisScaleLogBase(axis);
+  if (logBase !== undefined) {
+    const lo = Math.min(min, max);
+    const hi = Math.max(min, max);
+    if (hi - lo <= 6 + 1e-9) {
+      const first = Math.ceil(lo - 1e-9);
+      const last = Math.floor(hi + 1e-9);
+      const span = last - first + 1;
+      if (span >= 2 && span <= 20) {
+        const ticks: number[] = [];
+        const reversed = min > max;
+        if (reversed) {
+          for (let k = last; k >= first; k--) {
+            ticks.push(k);
+          }
+        } else {
+          for (let k = first; k <= last; k++) {
+            ticks.push(k);
+          }
+        }
+        return ticks;
+      }
+    }
+  }
+  // Fallback: 6 evenly-spaced ticks (5 intervals) — the pre-`majorUnit`
+  // default. Matches Excel's auto-generated tick density for most
+  // preview-sized data ranges.
+  const ticks: number[] = [];
+  for (let i = 0; i <= 5; i++) {
+    ticks.push(min + ((max - min) * i) / 5);
+  }
+  return ticks;
+}
+
+/**
+ * Read the logarithmic base configured on a value axis, if any.
+ * Returns `undefined` for linear axes or when the base is out of
+ * range (OOXML requires `logBase` strictly greater than 1 in the
+ * range [2, 1000]; Excel's UI enforces [2, 1000] but we accept any
+ * value `> 1` to stay lenient with third-party authors).
+ */
+/**
+ * Read the log base configured on an axis's `scaling`. Returns
+ * `undefined` when the axis is absent, linear, or carries an invalid
+ * base (≤ 1 — OOXML requires `logBase` strictly greater than 1 in the
+ * range [2, 1000]; we accept any value `> 1` to stay lenient with
+ * third-party authors).
+ *
+ * Single source of truth — callers previously split between a pair of
+ * near-identical helpers (`axisScaleLogBase` / `axisLogBase`) whose
+ * validity gates disagreed (one rejected `base ≤ 1`, the other
+ * rejected `base ≤ 0 || base === 1`). The disagreement meant that a
+ * pathological base like `0.5` would be passed through by
+ * `axisLogBase` (used for data-space transforms) but rejected by
+ * `axisScaleLogBase` (used for tick positions), producing data points
+ * that no longer landed on the tick marks.
+ */
+function axisLogBase(axis: ChartAxis | undefined): number | undefined {
+  const base = (axis as { scaling?: { logBase?: number } } | undefined)?.scaling?.logBase;
+  if (typeof base !== "number" || !Number.isFinite(base) || base <= 1) {
+    return undefined;
+  }
+  return base;
+}
+
+// `axisScaleLogBase` is retained as an alias for the existing call
+// sites that use it for tick-label formatting; both helpers now read
+// through `axisLogBase` so the validity gate is consistent.
+const axisScaleLogBase = axisLogBase;
+
+/**
+ * Format a log-space tick value as its data-space equivalent.
+ * `logValue` is the already-transformed coordinate (e.g. `2` on a
+ * log10 axis); the returned string represents `base^logValue`
+ * (e.g. `"100"`). Falls back to {@link formatAxisNumber} when the
+ * inverse transform produces a non-finite number.
+ */
+function formatLogAxisNumber(logValue: number, logBase: number): string {
+  const dataValue = Math.pow(logBase, logValue);
+  if (!Number.isFinite(dataValue)) {
+    return formatAxisNumber(logValue);
+  }
+  return formatAxisNumber(dataValue);
+}
+
+function buildGridlines(
+  plot: ChartSceneRect,
+  yAxis: ChartAxis | undefined,
+  yRange: ValueRange,
+  xAxis: ChartAxis | undefined,
+  xRange: ValueRange,
+  xCategories: readonly string[] = []
+): ChartSceneLine[] {
   const lines: ChartSceneLine[] = [];
-  for (let i = 1; i < 5; i++) {
-    const y = plot.y + (plot.height * i) / 5;
-    lines.push({ x1: plot.x, y1: y, x2: plot.x + plot.width, y2: y, color });
+  // Y-axis major gridlines: horizontal lines across the plot (values
+  // grow bottom→top). Rendered for column / line / area / scatter /
+  // bubble charts where the value axis is vertical. Lines are placed
+  // at the same positions as the axis's tick labels so both always
+  // align — previously the renderer hard-coded 5 equal divisions
+  // regardless of `majorUnit`, so any author-specified tick step
+  // produced gridlines and labels at different positions.
+  //
+  // We iterate tick values in **descending** order (top→bottom in SVG
+  // coordinates) so the emitted `<line>` sequence is stable across
+  // refactors — matches the pre-existing auto-tick loop that walked
+  // `i = 1..4` (top to bottom) and keeps SVG golden-hash snapshots
+  // from churning when the gridline values didn't actually move.
+  if (yAxis?.majorGridlines !== undefined) {
+    const color = previewShapeLineColor(getSpPrLine(yAxis.majorGridlines)) ?? GRID_COLOR;
+    if (yAxis.axisType === "cat" || yAxis.axisType === "ser") {
+      // Horizontal bar charts put categories on the Y axis. Draw
+      // horizontal lines at the boundaries *between* category slots
+      // rather than at numeric tick positions. Without this, a
+      // horizontal bar chart with `categoryAxis.majorGridlines` set
+      // previously rendered lines at positions derived from the
+      // unrelated X-axis numeric range.
+      const count = Math.max(1, xCategories.length);
+      const slot = plot.height / count;
+      for (let i = 1; i < count; i++) {
+        const y = plot.y + i * slot;
+        lines.push({ x1: plot.x, y1: y, x2: plot.x + plot.width, y2: y, color });
+      }
+    } else {
+      const ticks = valueAxisTickPositions(yRange.min, yRange.max, yAxis);
+      for (let i = ticks.length - 1; i >= 0; i--) {
+        const y = valueToY(ticks[i], yRange.min, yRange.max, plot);
+        // Skip the bottom edge (the x-axis line coincides with it) and
+        // the top edge (no visual value adding a gridline there);
+        // matches Excel's own rendering.
+        if (Math.abs(y - (plot.y + plot.height)) < 0.5 || Math.abs(y - plot.y) < 0.5) {
+          continue;
+        }
+        lines.push({ x1: plot.x, y1: y, x2: plot.x + plot.width, y2: y, color });
+      }
+    }
+  }
+  // X-axis major gridlines: vertical lines down the plot (values grow
+  // left→right). Rendered for horizontal bar charts and scatter /
+  // bubble charts that also carry an X-axis `majorGridlines` element.
+  // Previously ignored entirely — `buildGridlines` only consulted the
+  // Y axis, so a horizontal bar chart with `valueAxis.majorGridlines`
+  // rendered no gridlines at all (Excel draws vertical lines at each
+  // tick for exactly this chart orientation).
+  if (xAxis?.majorGridlines !== undefined) {
+    const color = previewShapeLineColor(getSpPrLine(xAxis.majorGridlines)) ?? GRID_COLOR;
+    if (xAxis.axisType === "cat" || xAxis.axisType === "ser") {
+      // Column / line / area chart category axis on the X side. The
+      // previous implementation fed the category x-axis through
+      // `valueAxisTickPositions(xRange)` — but `xRange` for a
+      // category chart is synthesised from the Y values via
+      // `scatterXValues`, so ticks landed at numerically meaningful
+      // positions that had nothing to do with category slots. Draw
+      // vertical lines at category slot boundaries instead.
+      const count = Math.max(1, xCategories.length);
+      const groupWidth = plot.width / count;
+      for (let i = 1; i < count; i++) {
+        const x = plot.x + i * groupWidth;
+        lines.push({ x1: x, y1: plot.y, x2: x, y2: plot.y + plot.height, color });
+      }
+    } else {
+      const ticks = valueAxisTickPositions(xRange.min, xRange.max, xAxis);
+      for (const value of ticks) {
+        const x = valueToX(value, xRange.min, xRange.max, plot);
+        if (Math.abs(x - plot.x) < 0.5 || Math.abs(x - (plot.x + plot.width)) < 0.5) {
+          continue;
+        }
+        lines.push({ x1: x, y1: plot.y, x2: x, y2: plot.y + plot.height, color });
+      }
+    }
   }
   return lines;
 }
@@ -2982,11 +3843,19 @@ function withAdornments<T extends ChartSceneSeries>(
   plot: ChartSceneRect,
   min: number,
   max: number,
-  categories: string[]
+  categories: string[],
+  xRange?: { min: number; max: number }
 ): T {
   const points = representativePoints(sceneSeries);
   const values = series.values;
-  let labels = buildDataLabels(points, values, categories, series, plot);
+  // Data labels should display the author's original numbers even when
+  // the value axis is log-scaled. `series.values` has already been
+  // passed through `applyAxisTransform` (to place the points at the
+  // correct pixel y), so use `rawValues` for the label text; fall
+  // back to the display values when no raw copy is available
+  // (synthetic series used by a handful of legacy callers).
+  const labelValues = series.rawValues ?? values;
+  let labels = buildDataLabels(points, labelValues, categories, series, plot, sceneSeries);
   const markers = buildMarkers(points, series);
   const trendlines = buildTrendlines(points, values, series, plot, min, max);
   let leaderLines: ChartSceneLine[] | undefined;
@@ -3008,7 +3877,24 @@ function withAdornments<T extends ChartSceneSeries>(
     // charts emit overlapping <text> glyphs at the same coordinates.
     labels = resolveLabelCollisions(labels, plot);
   }
-  const errorBars = buildErrorBars(points, values, series, plot, min, max);
+  // Horizontal bars swap the value axis (normally Y) onto X — the
+  // `min/max` this function receives is the *value* range regardless
+  // of orientation, but whether that range maps to screen-Y or screen-X
+  // depends on `sceneSeries.horizontal`. `buildErrorBars` needs the
+  // orientation flag so the default (unauthored) error direction
+  // matches Excel's "extend along the value axis" convention.
+  const horizontal = sceneSeries.type === "bar" && sceneSeries.horizontal === true;
+  const errorBars = buildErrorBars(
+    points,
+    values,
+    series,
+    plot,
+    min,
+    max,
+    horizontal,
+    xRange,
+    series.xValues
+  );
   return {
     ...sceneSeries,
     labels: labels.length > 0 ? labels : undefined,
@@ -3036,6 +3922,7 @@ function withAdornments<T extends ChartSceneSeries>(
 function resolveLabelCollisions(labels: ChartSceneText[], plot: ChartSceneRect): ChartSceneText[] {
   const padding = 2;
   const topBound = plot.y + 4;
+  const bottomBound = plot.y + plot.height - 4;
   interface Entry {
     label: ChartSceneText;
     left: number;
@@ -3087,14 +3974,28 @@ function resolveLabelCollisions(labels: ChartSceneText[], plot: ChartSceneRect):
       const prevTop = prev.label.y - prev.height;
       const currTop = curr.label.y - curr.height;
       if (currTop + curr.height + padding > prevTop) {
-        // Attempt to move current label above the previous one.
+        // Try nudging current label above the previous one first
+        // (preserves the classic upward-only behaviour that callers
+        // depend on for stacked bar labels).
         const newY = prevTop - padding;
-        if (newY - curr.height < topBound) {
-          // No room left — drop this label entirely instead of overlapping.
-          curr.kept = false;
-          break;
+        if (newY - curr.height >= topBound) {
+          curr.label = { ...curr.label, y: newY };
+          continue;
         }
-        curr.label = { ...curr.label, y: newY };
+        // Fallback: try nudging DOWNWARD past the previous label's
+        // baseline. Excel's own label placement does the same when
+        // outEnd/bestFit is asked and the upward slot is exhausted.
+        // Previously this branch dropped the label entirely, so dense
+        // charts lost labels systematically.
+        const prevBottom = prev.label.y;
+        const downY = prevBottom + curr.height + padding;
+        if (downY <= bottomBound) {
+          curr.label = { ...curr.label, y: downY };
+          continue;
+        }
+        // Both directions exhausted — drop the label as a last resort.
+        curr.kept = false;
+        break;
       }
     }
   }
@@ -3149,6 +4050,13 @@ function layoutPieLabels(
     fontSize: number;
     color: string;
     textAnchor: "start" | "end";
+    /**
+     * Set when `nudge` cannot place this label within the plot
+     * rectangle. Filtered out of both the rendered label array and
+     * the leader-line array so the preview never draws an
+     * overlapping pile at the plot edge.
+     */
+    _dropped?: boolean;
   }
   const entries: Entry[] = allSlices.map((slice, i) => {
     const angle = (slice.startAngle + slice.endAngle) / 2;
@@ -3178,11 +4086,18 @@ function layoutPieLabels(
   });
 
   // Greedy collision avoidance per hemisphere: sort top→bottom and push
-  // each label below its predecessor's baseline + fontSize.
+  // each label below its predecessor's baseline + fontSize. Labels that
+  // cannot fit within `[topBound, bottomBound]` are dropped entirely
+  // rather than clamped to the bound — clamping previously collapsed
+  // every overflow entry onto the same y coordinate, producing an
+  // unreadable pile of overlapping labels at the plot edge. Dropped
+  // entries are marked by setting `_dropped = true` so the caller can
+  // filter them out of both the label and leader-line lists.
   const nudge = (hemisphere: Entry[]): void => {
     hemisphere.sort((a, b) => a.y - b.y);
     const topBound = plot.y + 4;
     const bottomBound = plot.y + plot.height - 4;
+    // Forward pass: nudge each label below its predecessor.
     for (let i = 0; i < hemisphere.length; i++) {
       const e = hemisphere[i];
       if (i === 0) {
@@ -3190,12 +4105,22 @@ function layoutPieLabels(
         continue;
       }
       const prev = hemisphere[i - 1];
+      // Skip dropped predecessors so their clamped y doesn't push us
+      // past the bound on the very first item.
+      if (prev._dropped) {
+        e.y = Math.max(e.y, topBound);
+        continue;
+      }
       const minY = prev.y + prev.fontSize + 2;
       if (e.y < minY) {
         e.y = minY;
       }
       if (e.y > bottomBound) {
-        e.y = bottomBound;
+        // Try a reverse pass recovery: if the stack runs out of room
+        // at the bottom, drop this label — the alternative of pinning
+        // every overflowing label to `bottomBound` created an opaque
+        // overlap pile that conveyed no information.
+        e._dropped = true;
       }
     }
   };
@@ -3211,7 +4136,12 @@ function layoutPieLabels(
     }
   }
 
-  const labels: ChartSceneText[] = entries.map(e => ({
+  // Filter out entries marked `_dropped` (label couldn't fit without
+  // overlapping). Dropping rather than stacking preserves readability
+  // at the cost of occasional missing labels — preview callers that
+  // care about complete coverage should increase the plot height.
+  const keep = entries.filter(e => !e._dropped);
+  const labels: ChartSceneText[] = keep.map(e => ({
     x: e.x,
     y: e.y,
     text: e.text,
@@ -3219,7 +4149,7 @@ function layoutPieLabels(
     color: e.color,
     anchor: e.textAnchor === "end" ? "end" : "start"
   }));
-  const leaderLines: ChartSceneLine[] = entries.map(e => ({
+  const leaderLines: ChartSceneLine[] = keep.map(e => ({
     x1: e.anchorX,
     y1: e.anchorY,
     x2: e.x - (e.side === "right" ? 4 : -4),
@@ -3232,6 +4162,19 @@ function layoutPieLabels(
 
 function representativePoints(series: ChartSceneSeries): ChartScenePoint[] {
   if (series.type === "bar") {
+    // Anchor data labels / markers / error bars on the value-end edge
+    // of each bar. For vertical bars (columns) that's the centre-top
+    // (`bar.x + width/2, bar.y`); for horizontal bars it's the right-
+    // middle (`bar.x + width, bar.y + height/2`) — previously both
+    // orientations used the column anchor, which placed labels inside
+    // an upward-growing horizontal bar's body instead of at its value
+    // tip.
+    if (series.horizontal) {
+      return series.bars.map(bar => ({
+        x: bar.x + bar.width,
+        y: bar.y + bar.height / 2
+      }));
+    }
     return series.bars.map(bar => ({ x: bar.x + bar.width / 2, y: bar.y }));
   }
   if (
@@ -3266,24 +4209,88 @@ function buildDataLabels(
   values: number[],
   categories: string[],
   series: NormalizedSeries,
-  plot: ChartSceneRect
+  plot: ChartSceneRect,
+  sceneSeries?: ChartSceneSeries
 ): ChartSceneText[] {
   const labels = mergeDataLabels(series.group, series.series);
   if (!labels?.showVal && !labels?.showCatName && !labels?.showSerName && !labels?.showPercent) {
     return [];
   }
-  const total = values.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
+  // Percentage totals use the sum of absolute magnitudes so slices with
+  // mixed-sign values still sum to 100 %. See `makeDataLabelText` for
+  // the matching per-slice formula (`|v| / Σ|v|`). Previously the
+  // total folded via `Math.max(0, v)` (dropping negatives), producing
+  // asymmetric percentages that didn't match the pie's rendered wedges.
+  //
+  // For `ofPie` the primary and secondary pies each have their own
+  // angular total (derived from their own slice of the values array).
+  // Before this split, every `ofPie` label's percentage was computed
+  // against the COMBINED series total — so a slice showing "100 %" of
+  // the secondary pie was labelled at its fraction of the whole series
+  // instead (e.g. 13 % of 78 %). Build the two per-pie totals up front
+  // when the scene says we're rendering an `ofPie`, and pick per-index
+  // below so every label matches the pie its slice actually occupies.
+  // Sum magnitudes with a NaN guard. `collectNumberValues` emits `NaN`
+  // for blanks / error cells, and `Math.abs(NaN)` is `NaN` — a single
+  // gap would collapse the whole total to `NaN`, and then `NaN || 1`
+  // silently substitutes `1`, making every per-slice percentage
+  // evaluate to `Math.round(|v|/1 * 100)` (i.e. "1000 %" for v=10).
+  // Matches the guard already in `buildPieSeries`.
+  const sumAbsFinite = (arr: readonly number[]): number =>
+    arr.reduce((sum, v) => sum + (Number.isFinite(v) ? Math.abs(v) : 0), 0);
+  const overallTotal = sumAbsFinite(values) || 1;
+  let ofPieSplit = -1;
+  let primaryOfPieTotal = overallTotal;
+  let secondaryOfPieTotal = overallTotal;
+  if (sceneSeries?.type === "ofPie") {
+    // `buildOfPieSeries` stores the primary slices in `slices` and the
+    // rest in `secondarySlices`; we use the primary slice count as the
+    // split index. When either bag is empty we fall back to the
+    // overall total so the `|| 1` divide-by-zero guard still applies.
+    ofPieSplit = sceneSeries.slices.length;
+    const primaryValues = values.slice(0, ofPieSplit);
+    const secondaryValues = values.slice(ofPieSplit);
+    primaryOfPieTotal = sumAbsFinite(primaryValues) || 1;
+    secondaryOfPieTotal = sumAbsFinite(secondaryValues) || 1;
+  }
   const position = labels.position ?? "outEnd";
   const labelStyle = textStyleFromTxPr(labels.txPr);
   const labelColor = colorFromChartTextProperties(labels.txPr) ?? "#333333";
+  // For bar / column series, the representative `point` is the
+  // value-end of each bar. Some positions (`inBase`, `ctr`) need the
+  // bar's *other* endpoint — e.g. `inBase` on a vertical column means
+  // "at the baseline", which is the *bottom* of the bar (`bar.y +
+  // bar.height`), not `point.y + 16px` (near the top). Pre-compute the
+  // per-bar base anchor and pass it to `positionDataLabel` when the
+  // sceneSeries is a bar.
+  const baseAnchors: ChartScenePoint[] | undefined =
+    sceneSeries?.type === "bar"
+      ? sceneSeries.bars.map(bar =>
+          sceneSeries.horizontal
+            ? { x: bar.x, y: bar.y + bar.height / 2 }
+            : { x: bar.x + bar.width / 2, y: bar.y + bar.height }
+        )
+      : undefined;
   return points.map((point, i) => {
     const entry = labels.entries?.find(e => e.index === i);
     const effectivePosition = entry?.position ?? position;
-    const { x, y, anchor } = positionDataLabel(point, effectivePosition, plot);
+    const { x, y, anchor } = positionDataLabel(
+      point,
+      effectivePosition,
+      plot,
+      baseAnchors?.[i],
+      sceneSeries?.type === "bar" ? sceneSeries.horizontal : false
+    );
+    // Resolve the total this particular label should compare against.
+    // Pie and doughnut use the series total; ofPie uses per-pie totals
+    // so each label's percentage reflects its wedge's share of the
+    // pie it visually occupies.
+    const effectiveTotal =
+      ofPieSplit >= 0 ? (i < ofPieSplit ? primaryOfPieTotal : secondaryOfPieTotal) : overallTotal;
     return {
       x,
       y,
-      text: makeDataLabelText(labels, series, categories[i], values[i] ?? 0, total),
+      text: makeDataLabelText(labels, series, categories[i], values[i] ?? 0, effectiveTotal),
       fontSize: 10,
       color: labelColor,
       anchor,
@@ -3312,7 +4319,9 @@ function buildDataLabels(
 function positionDataLabel(
   point: ChartScenePoint,
   position: DataLabelPosition,
-  plot: ChartSceneRect
+  plot: ChartSceneRect,
+  baseAnchor?: ChartScenePoint,
+  horizontalBar = false
 ): { x: number; y: number; anchor: "start" | "middle" | "end" } {
   const offset = 6;
   const minY = plot.y + 10;
@@ -3322,13 +4331,46 @@ function positionDataLabel(
   switch (position) {
     case "t":
     case "outEnd":
+      if (horizontalBar) {
+        // `outEnd` on a horizontal bar extends past the value-tip.
+        return {
+          x: Math.min(maxX, point.x + offset),
+          y: point.y + 3,
+          anchor: "start"
+        };
+      }
       return {
         x: point.x,
         y: Math.max(minY, point.y - offset),
         anchor: "middle"
       };
-    case "b":
     case "inBase":
+      // `inBase` = inside the bar at the base (the axis-crossing end).
+      // For a vertical column that's the bottom of the bar (`bar.y +
+      // bar.height`); for a horizontal bar, the left edge (`bar.x`).
+      // Without `baseAnchor` (pie / line / scatter) `inBase` has no
+      // well-defined meaning — fall back to the point-below behaviour
+      // used by the `b` position.
+      if (baseAnchor) {
+        if (horizontalBar) {
+          return {
+            x: Math.max(minX, baseAnchor.x + offset),
+            y: baseAnchor.y + 3,
+            anchor: "start"
+          };
+        }
+        return {
+          x: baseAnchor.x,
+          y: Math.min(maxY, baseAnchor.y - offset),
+          anchor: "middle"
+        };
+      }
+      return {
+        x: point.x,
+        y: Math.min(maxY, point.y + offset + 10),
+        anchor: "middle"
+      };
+    case "b":
       return {
         x: point.x,
         y: Math.min(maxY, point.y + offset + 10),
@@ -3347,6 +4389,21 @@ function positionDataLabel(
         anchor: "start"
       };
     case "ctr":
+      // `ctr` = dead centre of the shape. For a bar, that's the midpoint
+      // between the value-tip (`point`) and the baseline anchor; fall
+      // back to the point for non-bar series.
+      if (baseAnchor) {
+        return {
+          x: (point.x + baseAnchor.x) / 2,
+          y: (point.y + baseAnchor.y) / 2 + 3,
+          anchor: "middle"
+        };
+      }
+      return {
+        x: point.x,
+        y: point.y + 3,
+        anchor: "middle"
+      };
     case "inEnd":
     case "bestFit":
     default:
@@ -3383,25 +4440,37 @@ function buildTrendlines(
     return [];
   }
   return series.trendlines.map(trendline => {
-    const trendPoints =
-      trendline.type === "movingAvg"
-        ? movingAveragePoints(points, values, trendline.period ?? 2, plot, min, max)
-        : linearTrendlinePoints(points);
+    const trendPoints = computeTrendlinePoints(trendline, points, values, series, plot, min, max);
+    // `trendPoints` can be empty when the trendline helper rejected
+    // the input (e.g. movingAvg period larger than window, or not
+    // enough positive values for exp/log/power). Reading
+    // `trendPoints[length-1].x` on an empty array crashes — guard so
+    // a malformed series still renders the rest of the chart.
+    const lastPoint = trendPoints.length > 0 ? trendPoints[trendPoints.length - 1] : undefined;
     return {
-      color: colorFromShapeLine(trendline.spPr?.line) ?? "#666666",
-      width: trendline.spPr?.line?.width ? trendline.spPr.line.width / 12700 : 1.5,
+      color:
+        previewShapeLineColor(trendline.spPr ? getSpPrLine(trendline.spPr) : undefined) ??
+        "#666666",
+      // Reuse `previewShapeLineWidthPx` so the EMU→pt conversion, the
+      // `0.5pt` minimum stroke, and the `undefined`-when-absent
+      // behaviour match every other line-style consumer. The previous
+      // inline expression (`width ? width/12700 : 1.5`) treated any
+      // falsy width — including the perfectly valid `0` — as absent.
+      width:
+        previewShapeLineWidthPx(trendline.spPr ? getSpPrLine(trendline.spPr) : undefined) ?? 1.5,
       dash: trendline.spPr?.line?.dash,
       points: trendPoints,
-      label: trendline.name
-        ? {
-            x: trendPoints[trendPoints.length - 1].x,
-            y: trendPoints[trendPoints.length - 1].y - 8,
-            text: trendline.name,
-            fontSize: 10,
-            color: "#555555",
-            anchor: "end"
-          }
-        : undefined
+      label:
+        trendline.name && lastPoint
+          ? {
+              x: lastPoint.x,
+              y: lastPoint.y - 8,
+              text: trendline.name,
+              fontSize: 10,
+              color: "#555555",
+              anchor: "end"
+            }
+          : undefined
     };
   });
 }
@@ -3412,24 +4481,109 @@ function buildErrorBars(
   series: NormalizedSeries,
   plot: ChartSceneRect,
   min: number,
-  max: number
+  max: number,
+  horizontal = false,
+  xRange?: { min: number; max: number },
+  xValues?: number[]
 ): ChartSceneErrorBar[] {
   if (!series.errorBars || points.length === 0) {
     return [];
   }
   const bars: ChartSceneErrorBar[] = [];
   for (const err of series.errorBars) {
-    const color = colorFromShapeLine(err.spPr?.line) ?? "#555555";
+    const color = previewShapeLineColor(err.spPr ? getSpPrLine(err.spPr) : undefined) ?? "#555555";
+    // Honour `barDir` ("plus" / "minus" / "both") and `errDir`
+    // ("x" / "y"). Previously the renderer ignored both fields and
+    // always drew a full-both-sides vertical error bar for every
+    // configuration — "plus"-only error bars silently extended below
+    // the data point, and horizontal (x-direction) errors on scatter /
+    // bubble series rendered as vertical bars anchored at the wrong
+    // axis.
+    //
+    // Default direction depends on the series orientation. Vertical
+    // bars / columns / line / area extend along the Y axis (`y`), so
+    // the unspecified default is `y`. Horizontal bars swap the value
+    // axis onto X, so their default becomes `x` — the previous
+    // unconditional `y` default drew vertical error whiskers across
+    // a horizontal bar chart instead of extending along the value
+    // axis.
+    const direction = err.errDir === "x" ? "x" : err.errDir === "y" ? "y" : horizontal ? "x" : "y";
+    const showPlus = err.barDir === "plus" || err.barDir === "both";
+    const showMinus = err.barDir === "minus" || err.barDir === "both";
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
-      const value = values[i] ?? 0;
-      const amount = errorAmount(err, value, values);
-      const plusY = valueToY(value + amount, min, max, plot);
-      const minusY = valueToY(value - amount, min, max, plot);
+      const value = values[i];
+      // Skip gaps — `collectNumberValues` encodes blank cells as NaN
+      // so downstream segmentation can drop them. `p.x`/`p.y` for a
+      // gap point are also NaN (via `valueToY(NaN, …)`), and `fmt(NaN)`
+      // silently emits `"0"` into SVG attributes. Without this guard
+      // every gap produced an error bar spiking to `(0, 0)` — a
+      // visible cross at the top-left of the plot.
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(value)) {
+        continue;
+      }
+      const { plus: plusAmount, minus: minusAmount } = errorAmounts(err, value, values, i);
+      if (direction === "x") {
+        // Horizontal error bar: extend along the value axis. For
+        // horizontal bars the value axis *is* the X axis and `min`/`max`
+        // are the value range, so we derive the pixel delta from those
+        // directly. For scatter / bubble x-direction errors the value
+        // lives at `xValues[i]` and scales against `xRange`.
+        let baseValue: number;
+        let lo: number;
+        let hi: number;
+        if (horizontal) {
+          baseValue = value;
+          lo = min;
+          hi = max;
+        } else if (xRange && xValues) {
+          const xv = xValues[i];
+          if (!Number.isFinite(xv)) {
+            continue;
+          }
+          baseValue = xv;
+          lo = xRange.min;
+          hi = xRange.max;
+        } else {
+          // No x-axis context (legacy caller, category series). Fall
+          // back to `p.x ± pixelAmount` with the value-range scale — a
+          // coarse approximation, but better than silently producing
+          // an infinitely-long whisker.
+          baseValue = value;
+          lo = min;
+          hi = max;
+        }
+        const plusX = showPlus
+          ? valueToX(baseValue + plusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+          : p.x;
+        const minusX = showMinus
+          ? valueToX(baseValue - minusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+          : p.x;
+        bars.push({
+          line: { x1: minusX, y1: p.y, x2: plusX, y2: p.y, color },
+          cap1:
+            err.noEndCap || !showPlus
+              ? undefined
+              : { x1: plusX, y1: p.y - 4, x2: plusX, y2: p.y + 4, color },
+          cap2:
+            err.noEndCap || !showMinus
+              ? undefined
+              : { x1: minusX, y1: p.y - 4, x2: minusX, y2: p.y + 4, color }
+        });
+        continue;
+      }
+      const plusY = showPlus ? valueToY(value + plusAmount, min, max, plot) : p.y;
+      const minusY = showMinus ? valueToY(value - minusAmount, min, max, plot) : p.y;
       bars.push({
         line: { x1: p.x, y1: plusY, x2: p.x, y2: minusY, color },
-        cap1: err.noEndCap ? undefined : { x1: p.x - 4, y1: plusY, x2: p.x + 4, y2: plusY, color },
-        cap2: err.noEndCap ? undefined : { x1: p.x - 4, y1: minusY, x2: p.x + 4, y2: minusY, color }
+        cap1:
+          err.noEndCap || !showPlus
+            ? undefined
+            : { x1: p.x - 4, y1: plusY, x2: p.x + 4, y2: plusY, color },
+        cap2:
+          err.noEndCap || !showMinus
+            ? undefined
+            : { x1: p.x - 4, y1: minusY, x2: p.x + 4, y2: minusY, color }
       });
     }
   }
@@ -3453,12 +4607,28 @@ function buildXLabels(
   const count = Math.max(1, categories.length);
   const groupWidth = plot.width / count;
   const skip = axis?.axisType === "cat" || axis?.axisType === "ser" ? (axis.tickLblSkip ?? 1) : 1;
-  const visible = categories.slice(0, 12).filter((_, i) => i % Math.max(1, skip) === 0);
+  // Apply `skip` across the **full** category list first, then cap the
+  // visible labels. Doing `slice(0, 12)` **before** the skip filter
+  // (as the previous implementation did) caused categories 13+ to lose
+  // their labels even when `tickLblSkip` would have selected them —
+  // e.g. 20 categories with `tickLblSkip=3` should show 0,3,6,9,12,15,18
+  // but we were only picking from [0..11] and producing 0,3,6,9.
+  const safeSkip = Math.max(1, skip);
+  const MAX_VISIBLE_LABELS = 12;
+  const visibleEntries: Array<{ label: string; idx: number }> = [];
+  for (let i = 0; i < categories.length; i++) {
+    if (i % safeSkip !== 0) {
+      continue;
+    }
+    visibleEntries.push({ label: categories[i], idx: i });
+    if (visibleEntries.length >= MAX_VISIBLE_LABELS) {
+      break;
+    }
+  }
   const axisStyle = textStyleFromTxPr(axis?.txPr);
-  return visible.map((label, visibleIndex) => {
-    const i = visibleIndex * Math.max(1, skip);
+  return visibleEntries.map(({ label, idx }) => {
     return {
-      x: plot.x + i * groupWidth + groupWidth / 2,
+      x: plot.x + idx * groupWidth + groupWidth / 2,
       y: top ? plot.y - 10 : plot.y + plot.height + 18,
       text: truncateLabel(label),
       fontSize: 10,
@@ -3479,12 +4649,17 @@ function buildValueXLabels(
   const labels: ChartSceneText[] = [];
   const color = tickLabelColor(axis);
   const axisStyle = textStyleFromTxPr(axis?.txPr);
-  for (let i = 0; i <= 5; i++) {
-    const value = min + ((max - min) * i) / 5;
+  const logBase = axisScaleLogBase(axis);
+  // Use the shared tick-position helper so axis labels align with the
+  // gridlines drawn by `buildGridlines`. Previously this function
+  // hardcoded 6 evenly-spaced labels (5 intervals) regardless of the
+  // author's `majorUnit` — labels and gridlines then drifted apart on
+  // any chart that set a custom tick step.
+  for (const value of valueAxisTickPositions(min, max, axis)) {
     labels.push({
       x: valueToX(value, min, max, plot),
       y: top ? plot.y - 10 : plot.y + plot.height + 18,
-      text: formatAxisNumber(value),
+      text: logBase ? formatLogAxisNumber(value, logBase) : formatAxisNumber(value),
       fontSize: 10,
       color,
       anchor: "middle",
@@ -3499,7 +4674,8 @@ function buildYLabels(
   max: number,
   plot: ChartSceneRect,
   axis?: ChartAxis,
-  right = false
+  right = false,
+  categories: readonly string[] = []
 ): ChartSceneText[] {
   if (axis?.delete || axis?.tickLblPos === "none") {
     return [];
@@ -3507,12 +4683,53 @@ function buildYLabels(
   const labels: ChartSceneText[] = [];
   const color = tickLabelColor(axis);
   const axisStyle = textStyleFromTxPr(axis?.txPr);
-  for (let i = 0; i <= 5; i++) {
-    const value = min + ((max - min) * i) / 5;
+  // Category / series axes on a horizontal-bar-style Y axis should
+  // render as category names, not numeric quintiles. Excel places the
+  // value axis at the bottom for `barDir="bar"` and the category axis
+  // on the left; the category axis has `axisType === "cat"`. The
+  // previous buildYLabels always called `formatAxisNumber`, emitting
+  // `"0"`, `"0.4"`, … next to bars whose actual categories lived on
+  // this axis — typical horizontal bar chart rendered with blank /
+  // numeric Y labels instead of the category names.
+  if ((axis?.axisType === "cat" || axis?.axisType === "ser") && categories.length > 0) {
+    const skip = axis.tickLblSkip ?? 1;
+    const safeSkip = Math.max(1, skip);
+    const MAX_VISIBLE_LABELS = 12;
+    const slot = plot.height / Math.max(1, categories.length);
+    const visibleEntries: Array<{ label: string; idx: number }> = [];
+    for (let i = 0; i < categories.length; i++) {
+      if (i % safeSkip !== 0) {
+        continue;
+      }
+      visibleEntries.push({ label: categories[i], idx: i });
+      if (visibleEntries.length >= MAX_VISIBLE_LABELS) {
+        break;
+      }
+    }
+    for (const { label, idx } of visibleEntries) {
+      labels.push({
+        x: right ? plot.x + plot.width + 8 : plot.x - 8,
+        y: plot.y + idx * slot + slot / 2 + 3,
+        text: truncateLabel(label),
+        fontSize: 10,
+        color,
+        anchor: right ? "start" : "end",
+        ...axisStyle
+      });
+    }
+    return labels;
+  }
+  // Use the shared tick-position helper so value-axis labels align with
+  // the gridlines `buildGridlines` draws. See
+  // `valueAxisTickPositions` for the `majorUnit` semantics — when the
+  // author has not set `majorUnit` this falls back to the historical
+  // 6-label behaviour.
+  const logBase = axisScaleLogBase(axis);
+  for (const value of valueAxisTickPositions(min, max, axis)) {
     labels.push({
       x: right ? plot.x + plot.width + 8 : plot.x - 8,
       y: valueToY(value, min, max, plot) + 3,
-      text: formatAxisNumber(value),
+      text: logBase ? formatLogAxisNumber(value, logBase) : formatAxisNumber(value),
       fontSize: 10,
       color,
       anchor: right ? "start" : "end",
@@ -3523,28 +4740,53 @@ function buildYLabels(
 }
 
 function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): NormalizedSeries[] {
-  // Pre-compute axis log transforms once: `logBase` lives on the value
-  // axis (`c:valAx/c:scaling/c:logBase`). We apply the transform to
-  // every series' `values` and `xValues` here so every downstream
-  // consumer (range calculation, valueToY, trendlines, error bars)
-  // sees the already-mapped coordinates without needing axis context.
+  // Resolve the axis log transform *per group* rather than once for the
+  // whole chart. Combo charts (`c:barChart` + `c:lineChart` sharing a
+  // plot area) routinely bind groups to different value axes via
+  // `c:axId` — a primary axis can be linear while the secondary is a
+  // log scale (or vice versa). The previous implementation took the
+  // first axis it found and applied that log base to every series,
+  // which silently corrupted the secondary-axis series in combo charts
+  // with heterogeneous scales.
   //
-  // This is a "best-effort" log axis: OOXML forbids non-positive
-  // values on log axes, but the renderer is preview-grade and refusing
-  // to render is worse than placing them at the axis floor. Negative
-  // values pass through unchanged (see {@link applyAxisTransform}).
-  const yLogBase = extractValueAxisLogBase(model, "y");
-  const xLogBase = extractValueAxisLogBase(model, "x");
+  // OOXML forbids non-positive values on log axes, but the renderer is
+  // preview-grade and refusing to render is worse than placing them at
+  // the axis floor. Negative values pass through unchanged (see
+  // {@link applyAxisTransform}).
+  const axes = model?.chart?.plotArea?.axes;
+  const axesById = new Map<number, ChartAxis>();
+  if (axes) {
+    for (const ax of axes) {
+      axesById.set(ax.axId, ax);
+    }
+  }
+  const logBaseCache = new Map<ChartTypeGroup, { yLogBase?: number; xLogBase?: number }>();
+  const getGroupLogBases = (group: ChartTypeGroup): { yLogBase?: number; xLogBase?: number } => {
+    const cached = logBaseCache.get(group);
+    if (cached) {
+      return cached;
+    }
+    const axisIds = (group as { axisIds?: number[] }).axisIds ?? [];
+    const yAxisId = getYAxisIdForGroup(group, axisIds, axesById);
+    const xAxisId = getXAxisIdForGroup(group, axisIds, axesById);
+    const resolved = {
+      yLogBase: axisLogBase(yAxisId !== undefined ? axesById.get(yAxisId) : undefined),
+      xLogBase: axisLogBase(xAxisId !== undefined ? axesById.get(xAxisId) : undefined)
+    };
+    logBaseCache.set(group, resolved);
+    return resolved;
+  };
 
   const normalized: NormalizedSeries[] = [];
   let globalIndex = 0;
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
     const group = groups[groupIndex];
     const series = collectSeries(group);
+    const { yLogBase, xLogBase } = getGroupLogBases(group);
     for (let seriesIndex = 0; seriesIndex < series.length; seriesIndex++) {
       const s = series[seriesIndex];
       const rawValues = collectValues(s);
-      const rawXValues = collectAxisValues((s as { xVal?: unknown }).xVal);
+      const rawXValues = collectAxisValues((s as { xVal?: AxisDataSource }).xVal);
       normalized.push({
         group,
         groupIndex,
@@ -3560,8 +4802,12 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
         xValues: xLogBase
           ? rawXValues.map(v => (typeof v === "number" ? applyAxisTransform(v, xLogBase) : v))
           : rawXValues,
+        rawValues,
+        rawXValues: rawXValues.length > 0 ? rawXValues : undefined,
+        yLogBase,
+        xLogBase,
         bubbleSizes: collectNumberValues(
-          (s as { bubbleSize?: { numRef?: unknown } }).bubbleSize?.numRef
+          (s as { bubbleSize?: { numRef?: NumberReference } }).bubbleSize?.numRef
         ),
         dataLabels: (s as { dataLabels?: DataLabels }).dataLabels,
         trendlines: (s as { trendlines?: Trendline[] }).trendlines,
@@ -3575,44 +4821,92 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
 }
 
 /**
- * Find the log base configured on the first value axis matching
- * `axisKind`. Returns `undefined` when no axis of that kind exists or
- * when the axis is linear.
- *
- * We treat `axisKind === "y"` as any value axis whose position is
- * `l` / `r` (left / right — the usual vertical placements) and
- * `axisKind === "x"` as a value axis placed at `b` / `t` (the
- * scatter/bubble x axis). Category axes never carry a log scale in
- * OOXML so we ignore them.
+ * Second definition of `axisLogBase` has been merged with
+ * {@link axisLogBase} above; this helper is no longer needed.
+ * Kept as a no-op placeholder to preserve line-number references in
+ * stack traces during the refactor — callers now route through the
+ * canonical helper.
  */
-function extractValueAxisLogBase(
-  model: ChartModel | undefined,
-  axisKind: "y" | "x"
-): number | undefined {
-  const axes = model?.chart?.plotArea?.axes;
-  if (!axes) {
-    return undefined;
-  }
-  const hPos = new Set(["b", "t"]);
-  const vPos = new Set(["l", "r"]);
-  const positions = axisKind === "y" ? vPos : hPos;
-  for (const ax of axes) {
-    // Only value axes carry logBase. The discriminator is the presence
-    // of numeric scaling fields, which `ValueAxis` / `DateAxis` expose.
-    const axisPosition = (ax as { axPos?: string }).axPos;
-    if (!axisPosition || !positions.has(axisPosition)) {
-      continue;
-    }
-    const logBase = (ax as { scaling?: { logBase?: number } }).scaling?.logBase;
-    if (logBase && logBase > 0 && logBase !== 1) {
-      return logBase;
-    }
-  }
-  return undefined;
-}
 
 function seriesColor(series: SeriesBase, index: number): string {
-  return colorFromShapeFill((series as { spPr?: any }).spPr?.fill) ?? COLORS[index % COLORS.length];
+  return (
+    previewShapeFillColor(series.spPr ? getSpPrFill(series.spPr) : undefined, undefined) ??
+    COLORS[index % COLORS.length]
+  );
+}
+
+/**
+ * Collect per-point fill-colour overrides from `series.dataPoints[]`.
+ * Returns a sparse array keyed by `dataPoint.index` — callers combine
+ * with their default palette (`colors[i] ?? palette[i % ...]`). Used
+ * by pie / doughnut / ofPie scenes where the overwhelmingly common
+ * case is one colour per slice driven by `c:dPt` / `cx:dataPt`; the
+ * previous renderer ignored `dataPoints` entirely and rotated every
+ * slice through the 6-entry default palette.
+ */
+function collectDataPointColors(series: NormalizedSeries | undefined): Array<string | undefined> {
+  const out: Array<string | undefined> = [];
+  if (!series) {
+    return out;
+  }
+  const dataPoints = (series.series as SeriesBase & { dataPoints?: DataPoint[] }).dataPoints;
+  if (!dataPoints) {
+    return out;
+  }
+  for (const dp of dataPoints) {
+    if (typeof dp.index !== "number" || dp.index < 0) {
+      continue;
+    }
+    const color = previewShapeFillColor(dp.spPr ? getSpPrFill(dp.spPr) : undefined, undefined);
+    if (color) {
+      out[dp.index] = color;
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect per-point `explosion` values from `series.dataPoints[]`.
+ * Excel stores explosion as an integer percentage (0–400) of the pie
+ * radius — non-zero values push the matching slice outward along its
+ * angle bisector. Returns a sparse array keyed by `dataPoint.index`;
+ * callers treat absent slots as `0` (no explosion).
+ */
+function collectDataPointExplosions(
+  series: NormalizedSeries | undefined
+): Array<number | undefined> {
+  const out: Array<number | undefined> = [];
+  if (!series) {
+    return out;
+  }
+  const dataPoints = (series.series as SeriesBase & { dataPoints?: DataPoint[] }).dataPoints;
+  if (!dataPoints) {
+    return out;
+  }
+  for (const dp of dataPoints) {
+    if (typeof dp.index !== "number" || dp.index < 0) {
+      continue;
+    }
+    if (typeof dp.explosion === "number" && Number.isFinite(dp.explosion) && dp.explosion > 0) {
+      out[dp.index] = dp.explosion;
+    }
+  }
+  return out;
+}
+
+/**
+ * Map OOXML `CT_DoughnutChart/holeSize` (0–90, percent of radius) to
+ * a usable inner-radius ratio. Clamp to the legal range so malformed
+ * models don't produce a negative or overlarge hole that collides
+ * with the outer arc. The `?? 45` fallback matches Excel's default
+ * hole size for a freshly authored doughnut.
+ */
+function resolveDoughnutHoleRatio(holeSize: number | undefined): number {
+  const percent =
+    typeof holeSize === "number" && Number.isFinite(holeSize)
+      ? Math.max(0, Math.min(90, holeSize))
+      : 45;
+  return percent / 100;
 }
 
 function normalizeErrorBars(value: ErrorBars | ErrorBars[] | undefined): ErrorBars[] | undefined {
@@ -3676,7 +4970,7 @@ function buildAxisContext(model: ChartModel, normalized: NormalizedSeries[]): Ch
     if (isStacked) {
       const yAxisId = getYAxisIdForGroup(groupSeries[0].group, ids, axesById);
       if (yAxisId !== undefined) {
-        const pointCount = Math.max(1, ...groupSeries.map(s => s.values.length));
+        const pointCount = maxSeriesLength(groupSeries);
         const columnSums: number[] = [];
         for (let i = 0; i < pointCount; i++) {
           let posSum = 0;
@@ -3719,8 +5013,13 @@ function buildAxisContext(model: ChartModel, normalized: NormalizedSeries[]): Ch
     axesById,
     primaryXAxis: pickAxis(axes, "x", false),
     primaryYAxis: pickAxis(axes, "y", false),
-    secondaryXAxis: pickAxis(axes, "x", true),
-    secondaryYAxis: pickAxis(axes, "y", true),
+    // Secondary axes must be a DIFFERENT physical object from the
+    // primary; otherwise `buildChartScene` emits `axes.x` and `axes.x2`
+    // as two overlapping lines and `secondaryXLabels` duplicates
+    // `xLabels` at the same position, double-drawing tick text. When
+    // only one axis exists for a direction, treat secondary as absent.
+    secondaryXAxis: pickSecondaryAxis(axes, "x", pickAxis(axes, "x", false)),
+    secondaryYAxis: pickSecondaryAxis(axes, "y", pickAxis(axes, "y", false)),
     yRangesByAxisId,
     xRangesByAxisId,
     defaultYRange,
@@ -3749,6 +5048,23 @@ function pickAxis(
     axes.find(axis => !axis.delete && axis.axPos === preferred) ??
     (!secondary ? axes.find(axis => !axis.delete && axis.axPos === fallback) : undefined)
   );
+}
+
+/**
+ * Pick a secondary axis that is distinct from the primary. When the
+ * workbook only authored one axis in a given direction, `pickAxis(…,
+ * secondary=true)` can return the same object the primary fallback
+ * already picked (e.g. primary falls back to `t` when only `t` exists
+ * → secondary also picks `t`). Exclude whatever the primary chose so
+ * the caller never receives two references to the same axis.
+ */
+function pickSecondaryAxis(
+  axes: ChartAxis[],
+  direction: "x" | "y",
+  primary: ChartAxis | undefined
+): ChartAxis | undefined {
+  const picked = pickAxis(axes, direction, true);
+  return picked && picked !== primary ? picked : undefined;
 }
 
 function getSeriesYRange(series: NormalizedSeries, context: ChartAxisContext): ValueRange {
@@ -3992,7 +5308,7 @@ function titleToText(title: ChartTitle): string | undefined {
 }
 
 function axisColor(axis: ChartAxis | undefined): string {
-  return colorFromShapeLine(axis?.spPr?.line) ?? AXIS_COLOR;
+  return previewShapeLineColor(axis?.spPr ? getSpPrLine(axis.spPr) : undefined) ?? AXIS_COLOR;
 }
 
 function tickLabelColor(axis: ChartAxis | undefined): string {
@@ -4004,10 +5320,27 @@ function titleColor(title: ChartTitle): string {
 }
 
 function colorFromChartTextProperties(
-  textProperties: { color?: { srgb?: string } } | undefined
+  textProperties: ChartTextProperties | undefined
 ): string | undefined {
-  const srgb = textProperties?.color?.srgb;
-  return typeof srgb === "string" ? `#${srgb.replace(/^#/, "")}` : undefined;
+  if (!textProperties) {
+    return undefined;
+  }
+  // Mirror `textStyleFromTxPr`: when the record arrived as raw XML
+  // (`{ _rawXml: "..." }`) with no structured `color`, delegate to
+  // `parseTxPr` so the authored colour is still recovered. Previously
+  // this helper only read `.color.srgb` directly, which is `undefined`
+  // on the raw-XML path — every Excel-loaded axis / title / legend
+  // with a custom colour silently fell back to the caller's default.
+  const resolved =
+    typeof textProperties._rawXml === "string" && textProperties.color === undefined
+      ? parseTxPr(textProperties)
+      : textProperties;
+  // Delegate to the shared ChartColor resolver so theme / sysClr /
+  // prstClr are honoured on par with `srgbClr`. The previous
+  // implementation read `color.srgb` only and silently reverted every
+  // theme-coloured title / legend / axis / data-label text to the
+  // caller's default grey.
+  return resolveChartColor(resolved.color);
 }
 
 /**
@@ -4089,27 +5422,511 @@ function makeDataLabelText(
     parts.push(formatAxisNumber(value));
   }
   if (labels.showPercent) {
-    parts.push(`${Math.round((Math.max(0, value) / total) * 100)}%`);
+    // Use absolute magnitude for percentage labels — Excel's own
+    // behaviour is `|v| / Σ|v|` so slices sum to 100 % even for a pie
+    // / stacked chart containing negatives. The previous
+    // `Math.max(0, value) / total` with `total = Σ max(0, v)` dropped
+    // negatives entirely, producing slices whose visible percentages
+    // summed to a number < 100 % (because each negative slice showed
+    // as 0 %) or > 100 % (when the caller supplied a different total
+    // convention).
+    //
+    // Guard against non-finite `value` (gaps propagated from
+    // `collectNumberValues` as NaN) and `total === 0` — both would
+    // emit a literal "NaN%" label that looks broken. Skip the
+    // percentage component in those cases.
+    if (Number.isFinite(value) && Number.isFinite(total) && total > 0) {
+      parts.push(`${Math.round((Math.abs(value) / total) * 100)}%`);
+    }
   }
   return parts.join(sep);
 }
 
-function linearTrendlinePoints(points: ChartScenePoint[]): ChartScenePoint[] {
-  if (points.length < 2) {
-    return points;
+/**
+ * Compute the sampled points of a trendline curve. Regression always
+ * runs in raw data space (pre-log-transform) so the fitted curve
+ * represents the author's original numbers. The returned points are
+ * already mapped to pixel coordinates — the caller just hands them
+ * to the SVG/PDF emitter.
+ *
+ * Supports Excel's full set of OOXML `<c:trendline>` types:
+ *   - `linear`:   `y = a + b·x`
+ *   - `exp`:      `y = a · e^(b·x)`  (linearised via `log(y) = log(a) + b·x`)
+ *   - `log`:      `y = a + b · ln(x)`
+ *   - `power`:    `y = a · x^b`      (linearised via `log(y) = log(a) + b·log(x)`)
+ *   - `poly`:     `y = Σ c_i · x^i`  (least squares on Vandermonde matrix)
+ *   - `movingAvg`: rolling mean over the last `period` points
+ *
+ * Categorical charts (line, bar, column, area, radar) use 1-based
+ * category indexes as x; scatter and bubble charts use the authored
+ * x values. This mirrors Excel — an author selecting "exponential
+ * trendline" on a column chart gets `y = a · e^(b·i)` where `i` is
+ * the 1-based point index.
+ *
+ * Previously linear regressed in pixel space. Because the SVG y axis
+ * is inverted, the resulting "slope" carried the wrong sign for a
+ * log-scale or reverse-orientation chart, and `exp`/`log`/`power`/
+ * `poly` silently fell back to the same pixel-space linear fit.
+ */
+function computeTrendlinePoints(
+  trendline: Trendline,
+  _points: ChartScenePoint[],
+  displayValues: number[],
+  series: NormalizedSeries,
+  plot: ChartSceneRect,
+  min: number,
+  max: number
+): ChartScenePoint[] {
+  if (trendline.type === "movingAvg") {
+    return movingAveragePoints(_points, displayValues, trendline.period ?? 2, plot, min, max);
   }
-  const n = points.length;
-  const meanX = points.reduce((sum, p) => sum + p.x, 0) / n;
-  const meanY = points.reduce((sum, p) => sum + p.y, 0) / n;
-  const denominator = points.reduce((sum, p) => sum + (p.x - meanX) ** 2, 0) || 1;
-  const slope = points.reduce((sum, p) => sum + (p.x - meanX) * (p.y - meanY), 0) / denominator;
-  const intercept = meanY - slope * meanX;
-  const x1 = points[0].x;
-  const x2 = points[points.length - 1].x;
-  return [
-    { x: x1, y: slope * x1 + intercept },
-    { x: x2, y: slope * x2 + intercept }
-  ];
+
+  // Build the fitter input in *raw* data space. Fall back to display
+  // space only when raw data isn't available (should never happen
+  // after `normalizeSeries`, but keep the path defensive).
+  const rawValues = series.rawValues ?? displayValues;
+  // Per-index lookup so the fitter aligns with whatever
+  // `buildScatterPoints` / `buildBubbles` drew. The previous
+  // all-or-nothing rule (use authored x if `rawXValues.length >=
+  // rawValues.length`, else 1-based indices) meant a series whose
+  // trailing `xRef` cells resolved to fewer points than the value
+  // column silently switched the trendline to an integer x-domain
+  // — the curve fit indices while the data points drew against the
+  // authored x values. Mirror the scatter/bubble `xValues[i] ?? i + 1`
+  // fallback instead so each sample stays aligned.
+  const rawX = series.rawXValues ?? [];
+
+  const samples: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < rawValues.length; i++) {
+    const y = rawValues[i];
+    // Per-sample fallback to 1-based indices when the authored x ref
+    // didn't reach index `i`. Matches `buildScatterPoints` /
+    // `buildBubbles` (`xValues[i] ?? i + 1`) so the fitted curve and
+    // the plotted points live in the same x-domain.
+    const x = rawX[i] ?? i + 1;
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      samples.push({ x, y });
+    }
+  }
+  if (samples.length < 2) {
+    return [];
+  }
+
+  // Determine the x domain to sample the fitted curve over. Honor
+  // `forward` / `backward` extensions (in raw x units) so users can
+  // project a trend ahead/behind their data.
+  let xLo = samples[0].x;
+  let xHi = samples[samples.length - 1].x;
+  for (const s of samples) {
+    if (s.x < xLo) {
+      xLo = s.x;
+    }
+    if (s.x > xHi) {
+      xHi = s.x;
+    }
+  }
+  if (!Number.isFinite(xLo) || !Number.isFinite(xHi) || xHi === xLo) {
+    return [];
+  }
+  const forward = Number.isFinite(trendline.forward) ? (trendline.forward as number) : 0;
+  const backward = Number.isFinite(trendline.backward) ? (trendline.backward as number) : 0;
+  const domainLo = xLo - backward;
+  const domainHi = xHi + forward;
+
+  const evaluator = fitTrendlineEvaluator(trendline, samples);
+  if (!evaluator) {
+    return [];
+  }
+
+  // Linear trendlines render with just two endpoints — a straight
+  // line in data space stays straight under the linear
+  // category-axis / linear-value-axis mapping used for categorical
+  // charts. Scatter charts with a log x-axis would bend the line,
+  // so fall through to the sampled path when any transform is active.
+  const needsSampling =
+    trendline.type !== "linear" || series.yLogBase !== undefined || series.xLogBase !== undefined;
+  const sampleCount = needsSampling ? 64 : 2;
+  const result: ChartScenePoint[] = [];
+
+  // For scatter / bubble charts, `points[i].x` is `valueToX(xValues[i],
+  // xMin, xMax, plot)`. We reproduce the same mapping here so the
+  // trendline endpoints line up with the drawn data. For line / bar
+  // / column / area / radar charts, the x positions are
+  // `plot.x + i * step` (see `buildLinePoints`), which is not a
+  // `valueToX` call — instead we interpolate across the plot area
+  // using the category index domain.
+  const isValueX = series.group.type === "scatter" || series.group.type === "bubble";
+  // Pre-compute pixel x range for the category axis so we don't have
+  // to redo the (non-value) interpolation math per sample point.
+  const catPointCount = rawValues.length;
+  const pixelXForCat = (xData: number): number => {
+    if (catPointCount <= 1) {
+      return plot.x + plot.width / 2;
+    }
+    // Category indexes are 1-based in `rawX` but drawn at
+    // `plot.x + i * step` with `step = plot.width / (n - 1)`.
+    // Convert back: index `k` (0-based) → `plot.x + k * step`.
+    const step = plot.width / (catPointCount - 1);
+    const clamped = Math.max(0, Math.min(catPointCount - 1, xData - 1));
+    return plot.x + clamped * step;
+  };
+  const valueXContext = isValueX ? resolveScatterXContext(series, catPointCount) : undefined;
+
+  for (let i = 0; i < sampleCount; i++) {
+    // `sampleCount` is either 2 (linear endpoints) or 64 (curve
+    // sampling), so `sampleCount - 1` is never zero — but guard
+    // defensively so future changes to the constant can't divide by
+    // zero and poison every sample's t.
+    const divisor = sampleCount > 1 ? sampleCount - 1 : 1;
+    const t = i / divisor;
+    const xData = domainLo + (domainHi - domainLo) * t;
+    const yData = evaluator(xData);
+    if (!Number.isFinite(yData)) {
+      continue;
+    }
+    // Re-apply the y-axis log transform (if any) so the plotted
+    // curve lands at the correct pixel y on a log-scale chart.
+    const yDisplay = series.yLogBase ? applyAxisTransform(yData, series.yLogBase) : yData;
+    if (!Number.isFinite(yDisplay)) {
+      continue;
+    }
+    let px: number;
+    if (isValueX && valueXContext) {
+      const xDisplay = series.xLogBase ? applyAxisTransform(xData, series.xLogBase) : xData;
+      if (!Number.isFinite(xDisplay)) {
+        continue;
+      }
+      px = valueToX(xDisplay, valueXContext.min, valueXContext.max, plot);
+    } else {
+      px = pixelXForCat(xData);
+    }
+    const py = valueToY(yDisplay, min, max, plot);
+    if (Number.isFinite(px) && Number.isFinite(py)) {
+      result.push({ x: px, y: py });
+    }
+  }
+  return result;
+}
+
+/**
+ * Return a function `f(x) -> y` that evaluates the fitted trendline
+ * curve in raw data space. Returns `undefined` when the fit can't be
+ * computed for this sample set (e.g. exponential/power require strictly
+ * positive y values; log requires strictly positive x values; poly
+ * needs enough points to pin down the order).
+ */
+function fitTrendlineEvaluator(
+  trendline: Trendline,
+  samples: Array<{ x: number; y: number }>
+): ((x: number) => number) | undefined {
+  switch (trendline.type) {
+    case "linear": {
+      const { slope, intercept } = linearLeastSquares(
+        samples.map(s => s.x),
+        samples.map(s => s.y)
+      );
+      if (!Number.isFinite(slope) || !Number.isFinite(intercept)) {
+        return undefined;
+      }
+      return x => slope * x + intercept;
+    }
+    case "exp": {
+      // Fit log(y) = log(a) + b·x, requires y > 0.
+      const filtered = samples.filter(s => s.y > 0);
+      if (filtered.length < 2) {
+        return undefined;
+      }
+      const { slope: b, intercept: lnA } = linearLeastSquares(
+        filtered.map(s => s.x),
+        filtered.map(s => Math.log(s.y))
+      );
+      if (!Number.isFinite(b) || !Number.isFinite(lnA)) {
+        return undefined;
+      }
+      const a = Math.exp(lnA);
+      return x => a * Math.exp(b * x);
+    }
+    case "log": {
+      // Fit y = a + b·ln(x), requires x > 0.
+      const filtered = samples.filter(s => s.x > 0);
+      if (filtered.length < 2) {
+        return undefined;
+      }
+      const { slope: b, intercept: a } = linearLeastSquares(
+        filtered.map(s => Math.log(s.x)),
+        filtered.map(s => s.y)
+      );
+      if (!Number.isFinite(b) || !Number.isFinite(a)) {
+        return undefined;
+      }
+      return x => (x > 0 ? a + b * Math.log(x) : NaN);
+    }
+    case "power": {
+      // Fit log(y) = log(a) + b·log(x), requires x > 0 and y > 0.
+      const filtered = samples.filter(s => s.x > 0 && s.y > 0);
+      if (filtered.length < 2) {
+        return undefined;
+      }
+      const { slope: b, intercept: lnA } = linearLeastSquares(
+        filtered.map(s => Math.log(s.x)),
+        filtered.map(s => Math.log(s.y))
+      );
+      if (!Number.isFinite(b) || !Number.isFinite(lnA)) {
+        return undefined;
+      }
+      const a = Math.exp(lnA);
+      return x => (x > 0 ? a * Math.pow(x, b) : NaN);
+    }
+    case "poly": {
+      // Default to order 2 when the user didn't pin one down. Clamp
+      // to Excel's accepted range [2, 6] to match the builder-side
+      // `validateTrendlineOptions`; higher orders are numerically
+      // unstable on small samples.
+      const orderRaw = trendline.order ?? 2;
+      const order = Math.max(2, Math.min(6, Math.floor(orderRaw)));
+      if (samples.length <= order) {
+        // Not enough points to fit — fall back to linear rather than
+        // return no trend at all, mirroring Excel's behaviour of
+        // showing a degenerate line when a high-order poly lacks data.
+        const { slope, intercept } = linearLeastSquares(
+          samples.map(s => s.x),
+          samples.map(s => s.y)
+        );
+        if (!Number.isFinite(slope) || !Number.isFinite(intercept)) {
+          return undefined;
+        }
+        return x => slope * x + intercept;
+      }
+      const coeffs = polynomialLeastSquares(
+        samples.map(s => s.x),
+        samples.map(s => s.y),
+        order
+      );
+      if (!coeffs || coeffs.some(c => !Number.isFinite(c))) {
+        return undefined;
+      }
+      return x => {
+        let acc = 0;
+        let pow = 1;
+        for (const c of coeffs) {
+          acc += c * pow;
+          pow *= x;
+        }
+        return acc;
+      };
+    }
+    default: {
+      // `movingAvg` is handled in the caller; any other type is an
+      // invariant violation (the `TrendlineType` enum would have had
+      // to gain a new variant without this switch).
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Ordinary least-squares linear regression. Returns NaN slope /
+ * intercept when the input is degenerate (single unique x, or all
+ * non-finite); the caller filters finite inputs upstream.
+ */
+function linearLeastSquares(xs: number[], ys: number[]): { slope: number; intercept: number } {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 2) {
+    return { slope: NaN, intercept: NaN };
+  }
+  let meanX = 0;
+  let meanY = 0;
+  for (let i = 0; i < n; i++) {
+    meanX += xs[i];
+    meanY += ys[i];
+  }
+  meanX /= n;
+  meanY /= n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - meanX;
+    num += dx * (ys[i] - meanY);
+    den += dx * dx;
+  }
+  if (den === 0) {
+    return { slope: NaN, intercept: NaN };
+  }
+  const slope = num / den;
+  return { slope, intercept: meanY - slope * meanX };
+}
+
+/**
+ * Least-squares polynomial fit of degree `order`. Solves the normal
+ * equations `(V^T · V) · c = V^T · y` via Gaussian elimination. The
+ * Vandermonde matrix `V[i][j] = xs[i]^j` is built in-place; for the
+ * orders Excel accepts (2–6) the system is small enough that LU
+ * factorisation isn't worth the extra complexity.
+ *
+ * Returns the coefficients in ascending-power order: `[c0, c1, …, cN]`
+ * so `y = c0 + c1·x + c2·x^2 + …`. Returns `undefined` if the system
+ * is singular (rank-deficient input — e.g. all identical x values).
+ */
+function polynomialLeastSquares(xs: number[], ys: number[], order: number): number[] | undefined {
+  const n = Math.min(xs.length, ys.length);
+  const m = order + 1;
+  if (n < m) {
+    return undefined;
+  }
+  // Normalise x to reduce conditioning issues on large-magnitude
+  // inputs (e.g. year numbers): subtract the mean, rescale by the
+  // range. We undo the transform below when returning coefficients.
+  let meanX = 0;
+  for (let i = 0; i < n; i++) {
+    meanX += xs[i];
+  }
+  meanX /= n;
+  let rangeX = 0;
+  for (let i = 0; i < n; i++) {
+    const d = Math.abs(xs[i] - meanX);
+    if (d > rangeX) {
+      rangeX = d;
+    }
+  }
+  const scale = rangeX > 0 ? rangeX : 1;
+  const sx = xs.map(x => (x - meanX) / scale);
+
+  // Build normal equations.
+  const ata: number[][] = Array.from({ length: m }, () => new Array<number>(m).fill(0));
+  const atb: number[] = new Array<number>(m).fill(0);
+  for (let i = 0; i < n; i++) {
+    const x = sx[i];
+    const powers = new Array<number>(m);
+    let p = 1;
+    for (let j = 0; j < m; j++) {
+      powers[j] = p;
+      p *= x;
+    }
+    const y = ys[i];
+    for (let j = 0; j < m; j++) {
+      atb[j] += powers[j] * y;
+      for (let k = 0; k < m; k++) {
+        ata[j][k] += powers[j] * powers[k];
+      }
+    }
+  }
+
+  // Solve via Gaussian elimination with partial pivoting.
+  const aug = ata.map((row, i) => [...row, atb[i]]);
+  for (let col = 0; col < m; col++) {
+    let pivot = col;
+    let pivotAbs = Math.abs(aug[pivot][col]);
+    for (let r = col + 1; r < m; r++) {
+      const v = Math.abs(aug[r][col]);
+      if (v > pivotAbs) {
+        pivotAbs = v;
+        pivot = r;
+      }
+    }
+    if (pivotAbs < 1e-12) {
+      return undefined;
+    }
+    if (pivot !== col) {
+      const tmp = aug[col];
+      aug[col] = aug[pivot];
+      aug[pivot] = tmp;
+    }
+    const pivotVal = aug[col][col];
+    for (let c = col; c <= m; c++) {
+      aug[col][c] /= pivotVal;
+    }
+    for (let r = 0; r < m; r++) {
+      if (r === col) {
+        continue;
+      }
+      const factor = aug[r][col];
+      if (factor === 0) {
+        continue;
+      }
+      for (let c = col; c <= m; c++) {
+        aug[r][c] -= factor * aug[col][c];
+      }
+    }
+  }
+  const scaled = new Array<number>(m);
+  for (let j = 0; j < m; j++) {
+    scaled[j] = aug[j][m];
+  }
+
+  // Undo the `(x - meanX) / scale` substitution:
+  //   y = Σ scaled[j] · ((x - meanX) / scale)^j
+  // Expand via binomial theorem into coefficients in `x`.
+  const result = new Array<number>(m).fill(0);
+  for (let j = 0; j < m; j++) {
+    const sj = scaled[j] / Math.pow(scale, j);
+    // (x - meanX)^j = Σ_{k=0..j} C(j,k) · x^k · (-meanX)^(j-k)
+    for (let k = 0; k <= j; k++) {
+      result[k] += sj * binomial(j, k) * Math.pow(-meanX, j - k);
+    }
+  }
+  return result;
+}
+
+function binomial(n: number, k: number): number {
+  if (k < 0 || k > n) {
+    return 0;
+  }
+  if (k === 0 || k === n) {
+    return 1;
+  }
+  let num = 1;
+  let den = 1;
+  const limit = Math.min(k, n - k);
+  for (let i = 0; i < limit; i++) {
+    num *= n - i;
+    den *= i + 1;
+  }
+  return num / den;
+}
+
+/**
+ * Recover the x-axis data-space `min`/`max` used to position the
+ * scatter/bubble points so the trendline curve lines up pixel-
+ * perfect with the plotted data. Mirrors the computation inside
+ * `buildScatterPoints` / `buildBubbles` — kept in sync by going
+ * through the same `xValues.reduce` walk and falling back to
+ * `[0, n]` when no x series is authored.
+ */
+function resolveScatterXContext(
+  series: NormalizedSeries,
+  pointCount: number
+): { min: number; max: number } | undefined {
+  const xValues = series.xValues && series.xValues.length > 0 ? series.xValues : undefined;
+  if (!xValues) {
+    return { min: 0, max: Math.max(1, pointCount) };
+  }
+  // Seed with ±Infinity so the fold converges on the true extremes.
+  // Previously `min=0, max=1` anchored the range for any x-series whose
+  // values never crossed those thresholds — e.g. `x=[10,20,30]` produced
+  // `{min: 0, max: 30}` even though the data starts at 10. The scatter
+  // geometry elsewhere uses `getSeriesXRange(..., includeZero:false)`
+  // which *does* converge on `{min:10, max:30}`, so the trendline drew
+  // with one x-domain while the data points drew with another.
+  let min = Infinity;
+  let max = -Infinity;
+  for (const x of xValues) {
+    if (!Number.isFinite(x)) {
+      continue;
+    }
+    if (x < min) {
+      min = x;
+    }
+    if (x > max) {
+      max = x;
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: 0, max: Math.max(1, pointCount) };
+  }
+  if (max <= min) {
+    max = min + 1;
+  }
+  return { min, max };
 }
 
 function movingAveragePoints(
@@ -4123,46 +5940,89 @@ function movingAveragePoints(
   const safePeriod = Math.max(1, Math.floor(period));
   return points.map((point, i) => {
     const start = Math.max(0, i - safePeriod + 1);
-    const window = values.slice(start, i + 1);
-    const avg = window.reduce((sum, v) => sum + v, 0) / Math.max(1, window.length);
+    // Filter gap markers (`NaN` from `collectNumberValues`) out of the
+    // moving-average window. Without the filter a single blank cell
+    // anywhere in the source range poisoned the mean (`NaN + x = NaN`)
+    // and the trendline jumped to the plot midpoint (`valueToY(NaN)`)
+    // for every point after the gap, producing a visible "dead zone"
+    // that never recovered.
+    const window = values.slice(start, i + 1).filter(v => Number.isFinite(v));
+    if (window.length === 0) {
+      return { x: point.x, y: point.y };
+    }
+    const avg = window.reduce((sum, v) => sum + v, 0) / window.length;
     return { x: point.x, y: valueToY(avg, min, max, plot) };
   });
 }
 
-function errorAmount(err: ErrorBars, value: number, values: number[]): number {
+/**
+ * Compute the plus and minus offsets for a single error-bar data point.
+ * Returns a `{ plus, minus }` pair so custom (`c:errValType="cust"`)
+ * error bars can honour their authored per-point `plus` / `minus`
+ * arrays — previously the generic `errorAmount` returned a single
+ * magnitude and custom bars silently fell back to `err.val ?? 1`,
+ * ignoring the worksheet-driven values entirely.
+ */
+function errorAmounts(
+  err: ErrorBars,
+  value: number,
+  values: number[],
+  pointIndex: number
+): { plus: number; minus: number } {
   if (err.errValType === "fixedVal") {
-    return err.val ?? 1;
+    const v = err.val ?? 1;
+    return { plus: v, minus: v };
   }
   if (err.errValType === "percentage") {
-    return Math.abs(value) * ((err.val ?? 5) / 100);
+    const v = Math.abs(value) * ((err.val ?? 5) / 100);
+    return { plus: v, minus: v };
   }
-  if (err.errValType === "stdDev") {
-    const mean = values.reduce((sum, v) => sum + v, 0) / Math.max(1, values.length);
-    const variance =
-      values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / Math.max(1, values.length);
-    return Math.sqrt(variance) * (err.val ?? 1);
+  if (err.errValType === "cust") {
+    // Per-point arrays. Missing entries fall back to 0 (no bar in that
+    // direction) rather than `err.val ?? 1` — Excel leaves the bar
+    // stub absent when the referenced cell is blank.
+    const plusPoints = err.plus?.numRef?.cache?.points ?? err.plus?.numLit?.points ?? [];
+    const minusPoints = err.minus?.numRef?.cache?.points ?? err.minus?.numLit?.points ?? [];
+    const findAt = (points: typeof plusPoints): number => {
+      const match = points.find(p => p.index === pointIndex);
+      const raw = match?.value;
+      return typeof raw === "number" && Number.isFinite(raw) ? Math.abs(raw) : 0;
+    };
+    return { plus: findAt(plusPoints), minus: findAt(minusPoints) };
   }
-  if (err.errValType === "stdErr") {
-    const mean = values.reduce((sum, v) => sum + v, 0) / Math.max(1, values.length);
-    const variance =
-      values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / Math.max(1, values.length);
-    return Math.sqrt(variance) / Math.sqrt(Math.max(1, values.length));
+  if (err.errValType === "stdDev" || err.errValType === "stdErr") {
+    // Filter to finite values so "gap" points (`NaN` via
+    // `collectNumberValues`) don't poison the mean / variance. Without
+    // the filter a single blank cell in the series propagated `NaN`
+    // all the way to `errorAmount`, which `buildErrorBars` then fed
+    // into `valueToY` and produced invalid `<line y1="NaN" …/>`
+    // attributes.
+    const finite = values.filter(v => Number.isFinite(v));
+    if (finite.length === 0) {
+      const v = err.val ?? 1;
+      return { plus: v, minus: v };
+    }
+    const n = finite.length;
+    const mean = finite.reduce((sum, v) => sum + v, 0) / n;
+    // Excel's "Standard Deviation" error bars compute the *sample*
+    // standard deviation via `STDEV.S` = `sqrt(Σ(x-μ)² / (n-1))`; the
+    // previous implementation divided by `n`, producing systematically
+    // narrower bars than Excel for any series with fewer than ~100
+    // points (the classic finite-sample bias). Guard against `n == 1`
+    // by dividing by `max(1, n-1)` — a single-point sample has
+    // undefined variance; Excel displays no error bar in that case,
+    // but falling back to the point's own magnitude keeps the
+    // rendered output non-zero without reintroducing the population
+    // variance bug.
+    const divisor = Math.max(1, n - 1);
+    const variance = finite.reduce((sum, v) => sum + (v - mean) ** 2, 0) / divisor;
+    const stdDev = Math.sqrt(variance);
+    // Standard error of the mean = sample stdev / sqrt(n).
+    const magnitude = err.errValType === "stdDev" ? stdDev * (err.val ?? 1) : stdDev / Math.sqrt(n);
+    return { plus: magnitude, minus: magnitude };
   }
-  return err.val ?? 1;
-}
-
-function colorFromShapeFill(fill: any): string | undefined {
-  const srgb = fill?.solid?.srgb;
-  return typeof srgb === "string" ? `#${srgb.replace(/^#/, "")}` : undefined;
-}
-
-function colorFromShapeLine(line: any): string | undefined {
-  const srgb = line?.color?.srgb;
-  return typeof srgb === "string" ? `#${srgb.replace(/^#/, "")}` : undefined;
-}
-
-function lineWidthFromShapeLine(line: any): number | undefined {
-  return typeof line?.width === "number" ? Math.max(0.5, line.width / 12700) : undefined;
+  const fallback = err.val ?? 1;
+  return { plus: fallback, minus: fallback };
 }
 
 function getValueRange(
@@ -4172,19 +6032,55 @@ function getValueRange(
 ): ValueRange {
   const values = seriesValues.flat().filter(Number.isFinite);
   const includeZero = options.includeZero !== false;
-  const rawMin = values.length > 0 ? Math.min(...(includeZero ? [0, ...values] : values)) : 0;
-  const rawMax = values.length > 0 ? Math.max(1, ...values) : 1;
-  const min = axis?.scaling?.min ?? rawMin;
-  const max = axis?.scaling?.max ?? rawMax;
-  return max <= min ? { min, max: min + 1 } : { min, max };
-}
-
-function valueToY(value: number, min: number, max: number, plot: ChartSceneRect): number {
-  return plot.y + plot.height - ((value - min) / (max - min)) * plot.height;
-}
-
-function valueToX(value: number, min: number, max: number, plot: ChartSceneRect): number {
-  return plot.x + ((value - min) / (max - min)) * plot.width;
+  // Use `reduce` instead of `Math.min(...arr)` / `Math.max(...arr)` — the
+  // spread-based call allocates each element as an argument and blows the
+  // JS stack once `arr.length` exceeds ~100k, which happens in real-world
+  // datasets (minute-granularity telemetry, etc.).
+  //
+  // Seed `rawMin` / `rawMax` symmetrically so both folds converge on the
+  // true extremes. `includeZero=true` anchors the range at 0 (Excel's
+  // default "axis crosses at value 0" behaviour for bar / column charts);
+  // `includeZero=false` uses unbounded seeds so scatter / bubble charts
+  // can hug their data.
+  //
+  // Previously `rawMax` was seeded with the literal `1`, so all-negative
+  // data (`[-100, -50]`) ended up with `max=1` (a bogus tick at the top
+  // of the axis), and fractional scatter data (`[0.1, 0.3, 0.5]` with
+  // `includeZero:false`) got `max=1` instead of `0.5` — the x-axis
+  // extended well past the real data.
+  const baseMin = includeZero ? 0 : Infinity;
+  const baseMax = includeZero ? 0 : -Infinity;
+  const rawMin = values.length > 0 ? values.reduce((acc, v) => (v < acc ? v : acc), baseMin) : 0;
+  const rawMax = values.length > 0 ? values.reduce((acc, v) => (v > acc ? v : acc), baseMax) : 1;
+  // When the axis is logarithmic, `seriesValues` has already been
+  // pre-transformed by `normalizeSeries` through `applyAxisTransform`
+  // — so `rawMin` / `rawMax` are in LOG space. The author-supplied
+  // `scaling.min` / `scaling.max` (OOXML `c:min/@val`, `c:max/@val`),
+  // however, are RAW data values. Mixing them places every point at
+  // the extreme end of the axis.
+  //
+  // Example: log10 axis, `scaling.min=1`, `scaling.max=10000`, data
+  // `[10, 100, 1000]`. Pre-transformed values are `[1, 2, 3]`;
+  // `getValueRange` must compare them against log10(1)=0 and
+  // log10(10000)=4, not raw 1 and 10000.
+  const logBase = axis?.scaling?.logBase;
+  const toAxisSpace = (v: number | undefined): number | undefined =>
+    v === undefined ? undefined : applyAxisTransform(v, logBase);
+  const min = toAxisSpace(axis?.scaling?.min) ?? rawMin;
+  const max = toAxisSpace(axis?.scaling?.max) ?? rawMax;
+  // Widen when max <= min so downstream `valueToY` has a non-zero span
+  // to divide by.
+  const base: ValueRange = max <= min ? { min, max: min + 1 } : { min, max };
+  // `scaling.orientation === "maxMin"` reverses the axis — low values
+  // render at the top-right instead of the bottom-left. The renderer's
+  // `valueToY` / `valueToX` helpers compute position from the passed-in
+  // `(min, max)`, so swapping them flips the axis direction without
+  // every call site needing to know about orientation. This honours
+  // Excel's "values in reverse order" axis option.
+  if (axis?.scaling?.orientation === "maxMin") {
+    return { min: base.max, max: base.min };
+  }
+  return base;
 }
 
 /**
@@ -4234,18 +6130,27 @@ function assignEffectFilters(
   const keyToId = new Map<string, string>();
   const limit = Math.min(normalized.length, sceneSeries.length);
   for (let i = 0; i < limit; i++) {
-    const effects = (normalized[i].series as { spPr?: { effectList?: EffectList } }).spPr
-      ?.effectList;
-    if (!effects) {
+    const rawSpPr = (normalized[i].series as { spPr?: ShapeProperties }).spPr;
+    if (!rawSpPr) {
+      continue;
+    }
+    // Loaded charts hold spPr as `{ _rawXml: "…" }` without structured
+    // `effectList`; run parse-on-demand so DrawingML shadow / glow /
+    // reflection / blur / inner-shadow effects survive from the
+    // round-trip path to the preview. Previously this helper read
+    // `spPr.effectList` directly, which was always `undefined` for
+    // Excel-authored charts and silently dropped every effect filter.
+    const structured = getSpPrEffectList(rawSpPr);
+    if (!structured) {
       continue;
     }
     // Stable cache key so duplicate effect trees share a filter. We
     // intentionally ignore field ordering differences — JSON stringify
     // is deterministic for the flat record shape `EffectList` uses.
-    const key = JSON.stringify(effects);
+    const key = JSON.stringify(structured);
     let id = keyToId.get(key);
     if (!id) {
-      const xml = buildEffectFilter(`excelts-fx-${filters.length + 1}`, effects);
+      const xml = buildEffectFilter(`excelts-fx-${filters.length + 1}`, structured);
       if (!xml) {
         continue;
       }
@@ -4256,6 +6161,22 @@ function assignEffectFilters(
     (sceneSeries[i] as ChartSceneAdornment).effectFilterId = id;
   }
   return filters;
+}
+
+/**
+ * Extract a structured {@link EffectList} from a `ShapeProperties`
+ * object that may still carry its raw-XML payload. The write-side
+ * `parseSpPr` handles both code paths; surfaces this helper here so
+ * `assignEffectFilters` stays focused on cache-key / id assignment.
+ */
+function getSpPrEffectList(spPr: ShapeProperties): EffectList | undefined {
+  if (spPr.effectList) {
+    return spPr.effectList;
+  }
+  if (typeof spPr._rawXml === "string") {
+    return parseSpPr(spPr).effectList;
+  }
+  return undefined;
 }
 
 /**
@@ -4384,14 +6305,20 @@ function polarOffset(distanceEmu: number, direction1_60000: number): [number, nu
 }
 
 function colourToHex(color: ChartColor | undefined): string | undefined {
-  if (!color) {
+  // Delegate every DrawingML colour variant to the shared
+  // `resolveChartColor` helper — previously this function only
+  // honoured `srgbClr` and silently dropped theme / preset / sysClr
+  // shadow / glow / effect colours to the caller's fallback. The
+  // 8-digit → 6-digit RGB normalisation (DrawingML stores alpha
+  // separately via `<a:alpha>`; CSS 8-digit `#RRGGBBAA` is a
+  // downstream extension we do not round-trip as a fill colour)
+  // moves into the resolver's srgb branch via `normalizeHex6`.
+  const resolved = resolveChartColor(color);
+  if (!resolved) {
     return undefined;
   }
-  if (color.srgb) {
-    const s = color.srgb.length === 8 ? color.srgb.slice(2) : color.srgb;
-    return `#${s}`;
-  }
-  return undefined;
+  const normalised = normalizeHex6(resolved);
+  return normalised ? `#${normalised}` : resolved;
 }
 
 function alphaFromColor(color: ChartColor | undefined): number {
@@ -4406,7 +6333,7 @@ function applyLineStyle(line: ChartSceneLine, axis: ChartAxis | undefined): Char
   return {
     ...line,
     color: axisColor(axis),
-    width: lineWidthFromShapeLine(axis?.spPr?.line) ?? line.width
+    width: previewShapeLineWidthPx(axis?.spPr ? getSpPrLine(axis.spPr) : undefined) ?? line.width
   };
 }
 
@@ -4430,37 +6357,65 @@ function renderSvgSeries(parts: string[], series: ChartSceneSeries): void {
         // back face is hidden behind the front rect by definition, so
         // we only paint three visible faces.
         parts.push(renderBar3DBox(bar, series.projection3D, series.color, series.horizontal));
-      } else if (series.depth) {
-        parts.push(renderBarDepth(bar, series.depth, withAlpha(series.color, 0.75)));
-        parts.push(
-          `<rect x="${fmt(bar.x)}" y="${fmt(bar.y)}" width="${fmt(bar.width)}" height="${fmt(bar.height)}" fill="${series.color}"/>`
-        );
       } else {
+        // Plain 2D bar. `buildSceneSeries` sets `depth` to 0 whenever
+        // `projection3D` is undefined (see the `bar3DDepth` ternary),
+        // so the `depth && !projection3D` case is structurally
+        // unreachable and the old `renderBarDepth` extrusion-only
+        // fallback has been removed.
         parts.push(
           `<rect x="${fmt(bar.x)}" y="${fmt(bar.y)}" width="${fmt(bar.width)}" height="${fmt(bar.height)}" fill="${series.color}"/>`
         );
       }
     }
   } else if (series.type === "area") {
-    const points = [
-      ...series.points,
-      ...(series.lowerPoints ?? series.points.map(p => ({ x: p.x, y: series.baselineY })))
-        .slice()
-        .reverse()
-    ];
-    parts.push(
-      `<polygon points="${points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="${withAlpha(series.color, 0.35)}"/>`
-    );
-    parts.push(
-      `<polyline points="${series.points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${series.color}" stroke-width="2"/>`
-    );
-  } else if (series.type === "line" || series.type === "scatter") {
-    if (series.showLine !== false) {
+    // Split the upper / lower line at NaN gaps so a missing data point
+    // doesn't produce a stray `(x, 0)` spike across the area outline.
+    const segments = segmentFinitePoints(series.points);
+    const lowerSource =
+      series.lowerPoints ?? series.points.map(p => ({ x: p.x, y: series.baselineY }));
+    for (const segment of segments) {
+      if (segment.length < 2) {
+        continue;
+      }
+      // Build the matching lower slice with the same x-range so the
+      // stacked-area fill stays closed across any gaps above.
+      const startX = segment[0].x;
+      const endX = segment[segment.length - 1].x;
+      const lowerSegment = lowerSource.filter(p => p.x >= startX && p.x <= endX);
+      if (lowerSegment.length === 0) {
+        continue;
+      }
+      const polygonPoints = [...segment, ...lowerSegment.slice().reverse()];
       parts.push(
-        `<polyline points="${series.points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${series.color}" stroke-width="2"${series.smooth ? ' stroke-linejoin="round" stroke-linecap="round"' : ""}/>`
+        `<polygon points="${polygonPoints.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="${withAlpha(series.color, 0.35)}"/>`
+      );
+      parts.push(
+        `<polyline points="${segment.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${series.color}" stroke-width="2"/>`
       );
     }
+  } else if (series.type === "line" || series.type === "scatter") {
+    if (series.showLine !== false) {
+      // Honour the `dispBlanksAs="gap"` default: split the polyline at
+      // non-finite points so a blank cell in the source range renders
+      // as an actual break in the line, not a dip to `(x, 0)` (the
+      // previous output of `fmt(NaN) === "0"`). Scatter plots already
+      // expect gaps between unrelated points.
+      const segments = segmentFinitePoints(series.points);
+      const strokeAttrs = series.smooth ? ' stroke-linejoin="round" stroke-linecap="round"' : "";
+      for (const segment of segments) {
+        if (segment.length < 2) {
+          continue;
+        }
+        parts.push(
+          `<polyline points="${segment.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${series.color}" stroke-width="2"${strokeAttrs}/>`
+        );
+      }
+    }
     for (const point of series.points) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        continue;
+      }
       parts.push(
         `<circle cx="${fmt(point.x)}" cy="${fmt(point.y)}" r="3" fill="${series.color}"/>`
       );
@@ -4486,21 +6441,50 @@ function renderSvgSeries(parts: string[], series: ChartSceneSeries): void {
       parts.push(renderSvgPieSlice(slice));
     }
   } else if (series.type === "radar") {
-    const points = series.points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ");
+    // Split at non-finite vertices (NaN markers for blank / `#N/A`
+    // values) so the polygon/polyline doesn't plunge through the plot
+    // centre at each gap. Matches line/area gap handling; see
+    // `segmentFinitePoints`.
     parts.push(
       `<circle cx="${fmt(series.center.x)}" cy="${fmt(series.center.y)}" r="${fmt(series.radius)}" fill="none" stroke="${GRID_COLOR}"/>`
     );
-    parts.push(
-      `<polygon points="${points}" fill="${series.filled ? withAlpha(series.color, 0.35) : "none"}" stroke="${series.color}" stroke-width="2"/>`
-    );
+    const segments = segmentFinitePoints(series.points);
+    // A fully-finite series is still drawn as a single closed polygon
+    // so the fill surface is correct. Any gap degrades to one or more
+    // polylines (open shapes) — matching Excel's behaviour where a
+    // missing category breaks the polygon ring.
+    const noGap = segments.length === 1 && segments[0].length === series.points.length;
+    if (noGap) {
+      const pts = segments[0].map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ");
+      parts.push(
+        `<polygon points="${pts}" fill="${series.filled ? withAlpha(series.color, 0.35) : "none"}" stroke="${series.color}" stroke-width="2"/>`
+      );
+    } else {
+      for (const seg of segments) {
+        if (seg.length < 2) {
+          continue;
+        }
+        const pts = seg.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ");
+        parts.push(
+          `<polyline points="${pts}" fill="${series.filled ? withAlpha(series.color, 0.35) : "none"}" stroke="${series.color}" stroke-width="2"/>`
+        );
+      }
+    }
   } else if (series.type === "stock") {
     for (const candle of series.candles) {
       parts.push(
         `<line x1="${fmt(candle.x)}" y1="${fmt(candle.highY)}" x2="${fmt(candle.x)}" y2="${fmt(candle.lowY)}" stroke="#555"/>`
       );
-      if (candle.openY !== undefined) {
-        const y = Math.min(candle.openY, candle.closeY ?? candle.openY);
-        const h = Math.max(1, Math.abs((candle.closeY ?? candle.openY) - candle.openY));
+      // A candle body needs BOTH open and close to form a real
+      // rectangle. The old code fell back to `closeY ?? openY` for the
+      // height, which collapses to a forced-1px strip — a horizontal
+      // line drawn at the open price that looks like a legit minimum-
+      // height candle body but was actually a rendering artefact when
+      // close was absent. Suppress the body entirely when either endpoint
+      // is missing; the HLC wick already conveys the data.
+      if (candle.openY !== undefined && candle.closeY !== undefined) {
+        const y = Math.min(candle.openY, candle.closeY);
+        const h = Math.max(1, Math.abs(candle.closeY - candle.openY));
         parts.push(
           `<rect x="${fmt(candle.x - candle.width / 2)}" y="${fmt(y)}" width="${fmt(candle.width)}" height="${fmt(h)}" fill="${candle.up ? "#70AD47" : "#C00000"}" stroke="#555"/>`
         );
@@ -4516,7 +6500,10 @@ function renderSvgSeries(parts: string[], series: ChartSceneSeries): void {
   if (filterId) {
     parts.push(`</g>`);
   }
-  renderSvgAdornments(parts, series);
+  // Adornments (markers, data labels, trendlines, error bars) are
+  // emitted in a second pass by `renderChartSvg` — see the two-pass
+  // comment at the top of the series loop. Emitting them inline here
+  // would paint them under later series' shapes.
 }
 
 function renderSvgAdornments(parts: string[], series: ChartSceneAdornment): void {
@@ -4530,9 +6517,18 @@ function renderSvgAdornments(parts: string[], series: ChartSceneAdornment): void
     }
   }
   for (const trendline of series.trendlines ?? []) {
-    parts.push(
-      `<polyline points="${trendline.points.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${trendline.color}" stroke-width="${trendline.width ?? 1.5}"${trendline.dash ? ' stroke-dasharray="4 3"' : ""}/>`
-    );
+    // Segment the polyline at NaN gaps so moving-average trendlines —
+    // which legitimately emit NaN for leading positions before the
+    // window fills — don't spike through `(x, 0)` via `fmt(NaN)`.
+    const dashAttr = trendline.dash ? ' stroke-dasharray="4 3"' : "";
+    for (const segment of segmentFinitePoints(trendline.points)) {
+      if (segment.length < 2) {
+        continue;
+      }
+      parts.push(
+        `<polyline points="${segment.map(p => `${fmt(p.x)},${fmt(p.y)}`).join(" ")}" fill="none" stroke="${trendline.color}" stroke-width="${trendline.width ?? 1.5}"${dashAttr}/>`
+      );
+    }
     if (trendline.label) {
       parts.push(renderSvgText(trendline.label));
     }
@@ -4575,16 +6571,6 @@ function renderSvgMarker(marker: ChartSceneMarker): string {
     return lines.join("");
   }
   return `<circle cx="${fmt(marker.x)}" cy="${fmt(marker.y)}" r="${fmt(r)}" fill="${marker.color}"/>`;
-}
-
-function renderBarDepth(bar: ChartSceneRect, depth: number, color: string): string {
-  const right = bar.x + bar.width;
-  const top = bar.y;
-  const bottom = bar.y + bar.height;
-  return [
-    `<polygon points="${fmt(bar.x)},${fmt(top)} ${fmt(bar.x + depth)},${fmt(top - depth)} ${fmt(right + depth)},${fmt(top - depth)} ${fmt(right)},${fmt(top)}" fill="${color}"/>`,
-    `<polygon points="${fmt(right)},${fmt(top)} ${fmt(right + depth)},${fmt(top - depth)} ${fmt(right + depth)},${fmt(bottom - depth)} ${fmt(right)},${fmt(bottom)}" fill="${withAlpha(color, 0.85)}"/>`
-  ].join("");
 }
 
 /**
@@ -4647,7 +6633,41 @@ function renderBar3DBox(
 }
 
 function renderSvgPieSlice(slice: ChartScenePieSlice): string {
-  const large = slice.endAngle - slice.startAngle > Math.PI ? 1 : 0;
+  // Full-sweep slice (single-value pie): SVG arcs can't describe a
+  // full 360° circle with a single `A` command — start and end points
+  // coincide, so the renderer returns an empty path. Emit a
+  // `<circle>` (or a doughnut `<path>` built from two semicircles) in
+  // that case. A tiny epsilon guards against floating drift when the
+  // sweep is computed as `100 / total * 2π` on integer totals.
+  //
+  // `sweepRaw` may be negative if a caller (e.g. `translatePieSlice`
+  // in `flipY` mode, or a hand-built slice) passes `endAngle <
+  // startAngle`. A raw negative value would land in `large = 0`
+  // without the absolute-value guard and the arc draws the *long* way
+  // round (covering `2π - |sweep|` of the circle). Normalise on the
+  // magnitude and track the direction in the SVG `sweep-flag`.
+  const sweepRaw = slice.endAngle - slice.startAngle;
+  const sweep = Math.abs(sweepRaw);
+  if (sweep >= Math.PI * 2 - 1e-9) {
+    if (slice.innerRadius > 0) {
+      // Doughnut full-ring: concatenate two 180° arcs on each radius.
+      const r = slice.radius;
+      const ir = slice.innerRadius;
+      return (
+        `<path d="M ${fmt(slice.cx - r)} ${fmt(slice.cy)} ` +
+        `A ${fmt(r)} ${fmt(r)} 0 1 1 ${fmt(slice.cx + r)} ${fmt(slice.cy)} ` +
+        `A ${fmt(r)} ${fmt(r)} 0 1 1 ${fmt(slice.cx - r)} ${fmt(slice.cy)} ` +
+        `M ${fmt(slice.cx - ir)} ${fmt(slice.cy)} ` +
+        `A ${fmt(ir)} ${fmt(ir)} 0 1 0 ${fmt(slice.cx + ir)} ${fmt(slice.cy)} ` +
+        `A ${fmt(ir)} ${fmt(ir)} 0 1 0 ${fmt(slice.cx - ir)} ${fmt(slice.cy)} Z" ` +
+        `fill="${slice.color}" fill-rule="evenodd"/>`
+      );
+    }
+    return `<circle cx="${fmt(slice.cx)}" cy="${fmt(slice.cy)}" r="${fmt(slice.radius)}" fill="${slice.color}"/>`;
+  }
+  const large = sweep > Math.PI ? 1 : 0;
+  const sweepFlag = sweepRaw >= 0 ? 1 : 0;
+  const innerSweepFlag = sweepRaw >= 0 ? 0 : 1;
   const x1 = slice.cx + Math.cos(slice.startAngle) * slice.radius;
   const y1 = slice.cy + Math.sin(slice.startAngle) * slice.radius;
   const x2 = slice.cx + Math.cos(slice.endAngle) * slice.radius;
@@ -4657,9 +6677,9 @@ function renderSvgPieSlice(slice: ChartScenePieSlice): string {
     const iy1 = slice.cy + Math.sin(slice.endAngle) * slice.innerRadius;
     const ix2 = slice.cx + Math.cos(slice.startAngle) * slice.innerRadius;
     const iy2 = slice.cy + Math.sin(slice.startAngle) * slice.innerRadius;
-    return `<path d="M ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} 1 ${fmt(x2)} ${fmt(y2)} L ${fmt(ix1)} ${fmt(iy1)} A ${fmt(slice.innerRadius)} ${fmt(slice.innerRadius)} 0 ${large} 0 ${fmt(ix2)} ${fmt(iy2)} Z" fill="${slice.color}"/>`;
+    return `<path d="M ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} L ${fmt(ix1)} ${fmt(iy1)} A ${fmt(slice.innerRadius)} ${fmt(slice.innerRadius)} 0 ${large} ${innerSweepFlag} ${fmt(ix2)} ${fmt(iy2)} Z" fill="${slice.color}"/>`;
   }
-  return `<path d="M ${fmt(slice.cx)} ${fmt(slice.cy)} L ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} 1 ${fmt(x2)} ${fmt(y2)} Z" fill="${slice.color}"/>`;
+  return `<path d="M ${fmt(slice.cx)} ${fmt(slice.cy)} L ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} Z" fill="${slice.color}"/>`;
 }
 
 function renderSvgDataTable(parts: string[], table: ChartSceneDataTable): void {
@@ -4687,23 +6707,70 @@ function renderSvgLegend(parts: string[], legend: ChartSceneLegend): void {
   const color = legend.textStyle?.color ?? "#555";
   const weightAttr = legend.textStyle?.bold ? ' font-weight="bold"' : "";
   const styleAttr = legend.textStyle?.italic ? ' font-style="italic"' : "";
+  const bold = legend.textStyle?.bold;
+  const italic = legend.textStyle?.italic;
+  const swatchSize = 10;
+  const swatchToLabelGap = 4;
+  const interItemGap = 16;
+  // Walk horizontally with `estimateTextWidth` so long labels don't
+  // overlap the next swatch. Previously the SVG path divided
+  // `rect.width / items.length` into equal slots regardless of label
+  // length, producing visibly-different output from the PDF path
+  // (`drawPdfLegend`) which already cursor-advances with measured
+  // widths. Chart round-trip tests that compared SVG ↔ PDF swatch
+  // positions drifted for any chart with asymmetric label lengths.
+  let cursorX = legend.rect.x;
   legend.items.forEach((item, i) => {
-    const itemX =
-      legend.orientation === "horizontal"
-        ? legend.rect.x + i * (legend.rect.width / legend.items.length)
-        : legend.rect.x;
+    const itemX = legend.orientation === "horizontal" ? cursorX : legend.rect.x;
     const y = legend.orientation === "horizontal" ? legend.rect.y : legend.rect.y + i * 18;
     parts.push(
-      `<rect x="${fmt(itemX)}" y="${fmt(y)}" width="10" height="10" fill="${item.color}"/>`
+      `<rect x="${fmt(itemX)}" y="${fmt(y)}" width="${swatchSize}" height="${swatchSize}" fill="${item.color}"/>`
     );
     parts.push(
-      `<text x="${fmt(itemX + 14)}" y="${fmt(y + 9)}" font-family="${escapeXmlAttr(fontFamily)}" font-size="${fontSize}" fill="${color}"${weightAttr}${styleAttr}>${escapeXml(item.label)}</text>`
+      `<text x="${fmt(itemX + swatchSize + swatchToLabelGap)}" y="${fmt(y + 9)}" font-family="${escapeXmlAttr(fontFamily)}" font-size="${fontSize}" fill="${color}"${weightAttr}${styleAttr}>${escapeXml(item.label)}</text>`
     );
+    if (legend.orientation === "horizontal") {
+      const labelWidth = estimateTextWidth(item.label, fontSize, {
+        bold,
+        italic,
+        fontName: fontFamily
+      });
+      cursorX += swatchSize + swatchToLabelGap + labelWidth + interItemGap;
+    }
   });
 }
 
 function renderSvgLine(line: ChartSceneLine): string {
   return `<line x1="${fmt(line.x1)}" y1="${fmt(line.y1)}" x2="${fmt(line.x2)}" y2="${fmt(line.y2)}" stroke="${line.color}" stroke-width="${line.width ?? 1}"/>`;
+}
+
+/**
+ * Split a list of points into contiguous runs of finite `(x, y)` pairs.
+ * A non-finite coordinate (typically `NaN` propagated from a blank /
+ * `#N/A` source cell by `collectNumberValues`) terminates the current
+ * segment so the rendered polyline / polygon breaks at the gap instead
+ * of collapsing to `(x, 0)` via `fmt(NaN) === "0"`.
+ *
+ * Matches Excel's default `dispBlanksAs="gap"` behaviour for line /
+ * scatter / area charts — the other modes (`"zero"` / `"span"`) are
+ * expected to be handled upstream by the scene builder (by mapping
+ * NaN to `0` or by filtering out the point respectively).
+ */
+function segmentFinitePoints(points: readonly ChartScenePoint[]): ChartScenePoint[][] {
+  const segments: ChartScenePoint[][] = [];
+  let current: ChartScenePoint[] = [];
+  for (const p of points) {
+    if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
+      current.push(p);
+    } else if (current.length > 0) {
+      segments.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) {
+    segments.push(current);
+  }
+  return segments;
 }
 
 function renderSvgText(text: ChartSceneText): string {
@@ -4713,52 +6780,119 @@ function renderSvgText(text: ChartSceneText): string {
   const fontFamily = text.fontFamily ?? "Arial";
   const weightAttr = text.bold ? ' font-weight="bold"' : "";
   const styleAttr = text.italic ? ' font-style="italic"' : "";
-  return `<text x="${fmt(text.x)}" y="${fmt(text.y)}" text-anchor="${text.anchor ?? "start"}" font-family="${escapeXmlAttr(fontFamily)}" font-size="${text.fontSize}" fill="${text.color}"${weightAttr}${styleAttr}${transform}>${escapeXml(text.text)}</text>`;
+  const anchor = text.anchor ?? "start";
+  // SVG `<text>` collapses whitespace including newlines, so a
+  // multi-line chart title (from a rich-text model with >1 paragraph)
+  // renders as one line with spaces in place of `\n`. Split on `\n`
+  // and emit `<tspan>` children with an explicit `dy` baseline offset
+  // to stack paragraphs. Single-line strings stay on the fast path so
+  // the common case is byte-identical with the old output.
+  // Accept both LF and CRLF line endings — Windows-authored titles
+  // that round-trip via a Buffer or raw-XML reader may arrive with
+  // `\r\n` pairs. Previously `split("\n")` left the `\r` attached to
+  // the preceding tspan, leaking a literal carriage-return into the
+  // SVG and visibly displacing the next paragraph by one em.
+  if (/[\r\n]/.test(text.text)) {
+    const lines = text.text.split(/\r?\n/);
+    const lineHeightEm = 1.2;
+    const tspans = lines
+      .map(
+        (line, i) =>
+          `<tspan x="${fmt(text.x)}"${i === 0 ? "" : ` dy="${lineHeightEm}em"`}>${escapeXml(line)}</tspan>`
+      )
+      .join("");
+    return `<text x="${fmt(text.x)}" y="${fmt(text.y)}" text-anchor="${anchor}" font-family="${escapeXmlAttr(fontFamily)}" font-size="${text.fontSize}" fill="${text.color}"${weightAttr}${styleAttr}${transform}>${tspans}</text>`;
+  }
+  return `<text x="${fmt(text.x)}" y="${fmt(text.y)}" text-anchor="${anchor}" font-family="${escapeXmlAttr(fontFamily)}" font-size="${text.fontSize}" fill="${text.color}"${weightAttr}${styleAttr}${transform}>${escapeXml(text.text)}</text>`;
 }
 
 function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): void {
   if (series.type === "bar") {
     for (const bar of series.bars) {
+      // Skip the front-face rect here when the series has a `projection3D`
+      // hint — the dedicated bar3D pass at the end of this function
+      // (`drawPdfBar3DBox`) paints the front face itself along with the
+      // top and right shaded faces, so drawing it a second time here
+      // would over-composite opaque PDF fills and double-stroke outlines
+      // on surfaces that don't honour alpha compositing.
+      if (series.projection3D && series.depth && series.depth > 0) {
+        continue;
+      }
       page.drawRect({ ...bar, fill: hexToPdfColor(series.color) });
     }
   } else if (series.type === "area") {
     if (page.drawPath && series.points.length > 0) {
-      const lower = series.lowerPoints ?? series.points.map(p => ({ x: p.x, y: series.baselineY }));
-      const ops: ChartPdfPathOp[] = [
-        { op: "move", x: lower[0].x, y: lower[0].y },
-        ...series.points.map(p => ({ op: "line" as const, x: p.x, y: p.y })),
-        ...lower
-          .slice()
-          .reverse()
-          .map(p => ({ op: "line" as const, x: p.x, y: p.y })),
-        { op: "close" }
-      ];
-      // Match the SVG path's `withAlpha(color, 0.35)` fill so stacked
-      // areas behind the current one remain visible through the
-      // translucent polygon. Opaque fallback for surfaces that ignore
-      // `PdfColor.a` — same degradation policy as everywhere else.
-      page.drawPath(ops, { fill: hexToPdfColorWithAlpha(series.color, 0.35) });
+      const lowerSource =
+        series.lowerPoints ?? series.points.map(p => ({ x: p.x, y: series.baselineY }));
+      // Draw one closed path per contiguous finite run of upper points
+      // so NaN gaps produce real breaks in the fill instead of zero-
+      // height spikes pulled from `fmt(NaN)` downstream. Match the
+      // matching lower slice by x-range.
+      for (const segment of segmentFinitePoints(series.points)) {
+        if (segment.length === 0) {
+          continue;
+        }
+        const startX = segment[0].x;
+        const endX = segment[segment.length - 1].x;
+        const lowerSegment = lowerSource.filter(
+          p => Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= startX && p.x <= endX
+        );
+        if (lowerSegment.length === 0) {
+          continue;
+        }
+        const ops: ChartPdfPathOp[] = [
+          { op: "move", x: lowerSegment[0].x, y: lowerSegment[0].y },
+          ...segment.map(p => ({ op: "line" as const, x: p.x, y: p.y })),
+          ...lowerSegment
+            .slice()
+            .reverse()
+            .map(p => ({ op: "line" as const, x: p.x, y: p.y })),
+          { op: "close" }
+        ];
+        // Match the SVG path's `withAlpha(color, 0.35)` fill so
+        // stacked areas behind the current one remain visible through
+        // the translucent polygon. Opaque fallback for surfaces that
+        // ignore `PdfColor.a` — same degradation policy as everywhere
+        // else.
+        page.drawPath(ops, { fill: hexToPdfColorWithAlpha(series.color, 0.35) });
+      }
     }
-    for (let i = 1; i < series.points.length; i++) {
-      page.drawLine({
-        x1: series.points[i - 1].x,
-        y1: series.points[i - 1].y,
-        x2: series.points[i].x,
-        y2: series.points[i].y,
-        color: hexToPdfColor(series.color)
-      });
+    // Split the line at NaN gaps so blanks show as breaks rather than
+    // `(x, 0)` spikes. Mirrors the SVG `segmentFinitePoints` path.
+    for (const segment of segmentFinitePoints(series.points)) {
+      for (let i = 1; i < segment.length; i++) {
+        page.drawLine({
+          x1: segment[i - 1].x,
+          y1: segment[i - 1].y,
+          x2: segment[i].x,
+          y2: segment[i].y,
+          color: hexToPdfColor(series.color)
+        });
+      }
     }
   } else if (series.type === "line" || series.type === "scatter") {
-    for (let i = 1; i < series.points.length; i++) {
-      page.drawLine({
-        x1: series.points[i - 1].x,
-        y1: series.points[i - 1].y,
-        x2: series.points[i].x,
-        y2: series.points[i].y,
-        color: hexToPdfColor(series.color)
-      });
+    // Honour `showLine === false` — pure-marker scatter charts and line
+    // charts with the line removed via style shouldn't paint an
+    // implicit connector. The SVG path checks this flag; the PDF
+    // branch used to unconditionally draw the line even when the
+    // caller asked for markers only.
+    if (series.showLine !== false) {
+      for (const segment of segmentFinitePoints(series.points)) {
+        for (let i = 1; i < segment.length; i++) {
+          page.drawLine({
+            x1: segment[i - 1].x,
+            y1: segment[i - 1].y,
+            x2: segment[i].x,
+            y2: segment[i].y,
+            color: hexToPdfColor(series.color)
+          });
+        }
+      }
     }
     for (const point of series.points) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        continue;
+      }
       page.drawRect({
         x: point.x - 2,
         y: point.y - 2,
@@ -4817,29 +6951,53 @@ function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): 
       page.drawLine({ ...line, color: hexToPdfColor(line.color) });
     }
   } else if (series.type === "radar") {
+    // Split at non-finite vertices so gaps don't drag the polygon
+    // through the plot centre. Mirrors the SVG path.
+    const segments = segmentFinitePoints(series.points);
+    const noGap = segments.length === 1 && segments[0].length === series.points.length;
     // Filled radar: the SVG path draws a `withAlpha(color, 0.35)` polygon
     // before the stroke loop. Mirror that here when `drawPath` is
-    // available; when absent the stroke loop below alone preserves the
-    // polygon shape, which is the best degradation a drawLine-only
-    // surface can offer.
-    if (series.filled && page.drawPath && series.points.length > 0) {
+    // available AND the polygon is gap-free (a partial polygon with
+    // holes produces ambiguous fill — skip it, matching the SVG
+    // `polyline` degradation above). When `drawPath` is absent the
+    // stroke loop below alone preserves the polygon shape, which is
+    // the best degradation a drawLine-only surface can offer.
+    if (series.filled && page.drawPath && noGap && segments[0].length > 0) {
+      const seg = segments[0];
       const ops: ChartPdfPathOp[] = [
-        { op: "move", x: series.points[0].x, y: series.points[0].y },
-        ...series.points.slice(1).map(p => ({ op: "line" as const, x: p.x, y: p.y })),
+        { op: "move", x: seg[0].x, y: seg[0].y },
+        ...seg.slice(1).map(p => ({ op: "line" as const, x: p.x, y: p.y })),
         { op: "close" }
       ];
       page.drawPath(ops, { fill: hexToPdfColorWithAlpha(series.color, 0.35) });
     }
-    for (let i = 0; i < series.points.length; i++) {
-      const next = series.points[(i + 1) % series.points.length];
-      page.drawLine({
-        x1: series.points[i].x,
-        y1: series.points[i].y,
-        x2: next.x,
-        y2: next.y,
-        color: hexToPdfColor(series.color),
-        lineWidth: 2
-      });
+    for (const seg of segments) {
+      if (seg.length < 2) {
+        continue;
+      }
+      // Emit strokes between consecutive finite vertices only. Close
+      // the loop only when the series has no gaps — a partial polygon
+      // stays open at the gap.
+      for (let i = 0; i < seg.length - 1; i++) {
+        page.drawLine({
+          x1: seg[i].x,
+          y1: seg[i].y,
+          x2: seg[i + 1].x,
+          y2: seg[i + 1].y,
+          color: hexToPdfColor(series.color),
+          lineWidth: 2
+        });
+      }
+      if (noGap && seg.length > 1) {
+        page.drawLine({
+          x1: seg[seg.length - 1].x,
+          y1: seg[seg.length - 1].y,
+          x2: seg[0].x,
+          y2: seg[0].y,
+          color: hexToPdfColor(series.color),
+          lineWidth: 2
+        });
+      }
     }
   } else if (series.type === "stock") {
     for (const candle of series.candles) {
@@ -4850,12 +7008,15 @@ function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): 
         y2: candle.lowY,
         color: hexToPdfColor("#555555")
       });
-      if (candle.openY !== undefined) {
+      // See SVG path — render the candle body only when BOTH open and
+      // close are known. Previously a missing close silently collapsed
+      // to a 1-px strip at the open price.
+      if (candle.openY !== undefined && candle.closeY !== undefined) {
         page.drawRect({
           x: candle.x - candle.width / 2,
-          y: Math.min(candle.openY, candle.closeY ?? candle.openY),
+          y: Math.min(candle.openY, candle.closeY),
           width: candle.width,
-          height: Math.max(1, Math.abs((candle.closeY ?? candle.openY) - candle.openY)),
+          height: Math.max(1, Math.abs(candle.closeY - candle.openY)),
           fill: hexToPdfColor(candle.up ? "#70AD47" : "#C00000")
         });
       }
@@ -5071,7 +7232,7 @@ function translateSeries(
   }
   if (series.type === "pie" || series.type === "doughnut") {
     return translateAdornments(
-      { ...series, slices: series.slices.map(slice => translatePieSlice(slice, mapPoint)) },
+      { ...series, slices: series.slices.map(slice => translatePieSlice(slice, mapPoint, flipY)) },
       mapPoint,
       mapLine,
       mapText
@@ -5081,8 +7242,10 @@ function translateSeries(
     return translateAdornments(
       {
         ...series,
-        slices: series.slices.map(slice => translatePieSlice(slice, mapPoint)),
-        secondarySlices: series.secondarySlices?.map(slice => translatePieSlice(slice, mapPoint)),
+        slices: series.slices.map(slice => translatePieSlice(slice, mapPoint, flipY)),
+        secondarySlices: series.secondarySlices?.map(slice =>
+          translatePieSlice(slice, mapPoint, flipY)
+        ),
         connectors: series.connectors?.map(line => ({
           ...line,
           ...lineFromPoints(
@@ -5151,15 +7314,27 @@ function translateAdornments<T extends ChartSceneSeries>(
 
 function translatePieSlice(
   slice: ChartScenePieSlice,
-  mapPoint: (point: ChartScenePoint) => ChartScenePoint
+  mapPoint: (point: ChartScenePoint) => ChartScenePoint,
+  flipY: boolean
 ): ChartScenePieSlice {
   const center = mapPoint({ x: slice.cx, y: slice.cy });
+  // Flipping `Y` geometrically mirrors the slice, so the sweep
+  // direction must invert. When `flipY` is false the caller is only
+  // translating the scene — angles must stay untouched, otherwise the
+  // pie re-orders its wedges after any `offset`-only transform.
+  if (flipY) {
+    return {
+      ...slice,
+      cx: center.x,
+      cy: center.y,
+      startAngle: -slice.endAngle,
+      endAngle: -slice.startAngle
+    };
+  }
   return {
     ...slice,
     cx: center.x,
-    cy: center.y,
-    startAngle: -slice.endAngle,
-    endAngle: -slice.startAngle
+    cy: center.y
   };
 }
 
@@ -5251,27 +7426,208 @@ function collectSeries(group: ChartTypeGroup | undefined): SeriesBase[] {
 }
 
 function collectValues(series: SeriesBase): number[] {
-  const ref =
-    (series as { val?: any; yVal?: any }).val?.numRef ?? (series as { yVal?: any }).yVal?.numRef;
-  return collectNumberValues(ref);
+  // `SeriesBase` does not declare `val` / `yVal` (they live on the
+  // discriminated subclasses like `BarSeries` / `BubbleSeries`), but
+  // at render time we walk the heterogeneous `plotArea.chartTypes[].series`
+  // array where every series is narrowed only by runtime shape. Widen
+  // through `unknown` rather than `any` so the local access stays typed.
+  const s = series as SeriesBase & {
+    val?: { numRef?: NumberReference; numLit?: NumberLiteral };
+    yVal?: { numRef?: NumberReference; numLit?: NumberLiteral };
+  };
+  // `NumberDataSource` can carry either a formula ref (`numRef`) or
+  // inline literal values (`numLit`) per ECMA-376 `CT_NumDataSource`.
+  // Excel-authored charts usually use `numRef`, but inline-literal
+  // series appear in pivot-chart metadata, and in charts authored by
+  // tools that don't emit workbook cells. Previously the renderer only
+  // read `numRef.cache`, so literal-only series rendered as flat
+  // zero bars. Fall back to `numLit` when no ref is present.
+  const ref = s.val?.numRef ?? s.yVal?.numRef;
+  if (ref) {
+    return collectNumberValues(ref);
+  }
+  const lit = s.val?.numLit ?? s.yVal?.numLit;
+  return collectNumberLiteralValues(lit);
 }
 
-function collectNumberValues(ref: any): number[] {
-  return (ref?.cache?.points ?? []).map((p: { value: number | null }) =>
-    typeof p.value === "number" ? p.value : 0
+function collectNumberValues(ref: NumberReference | undefined): number[] {
+  // Preserve "point is a gap" semantics: Excel writes `<c:v>` omitted
+  // or `null` in the cached points when the source cell was blank /
+  // `#N/A`. Coercing to `0` painted phantom zero-height bars where the
+  // user expected a gap. Map to `NaN` so downstream builders
+  // (`valueToY`, `buildBars`, `buildLinePoints`) can skip the slot —
+  // they already guard `Number.isFinite` for other paths.
+  //
+  // Honour the sparse `idx` attribute: Excel writes `<c:pt idx="0">A</c:pt>
+  // <c:pt idx="2">C</c:pt>` with index 1 missing. The previous
+  // `.map(p => p.value)` emitted `[A, C]`, shifting `C` into slot 1 and
+  // mis-aligning categories with values downstream. Build a dense
+  // array indexed by `p.index`, filling gaps with `NaN`.
+  const points = ref?.cache?.points ?? [];
+  return densifySparsePoints(points, ref?.cache?.pointCount, NaN, raw =>
+    typeof raw === "number" && Number.isFinite(raw) ? raw : NaN
   );
 }
 
-function collectAxisValues(axisData: any): number[] {
-  return collectNumberValues(axisData?.numRef);
+/**
+ * Hard ceiling for sparse-array densification — prevents malicious or
+ * malformed XML from allocating gigabyte-scale arrays via a bogus
+ * `<c:ptCount val="...">`. Excel's per-worksheet row limit is
+ * 1 048 576; doubling that gives a generous upper bound that still
+ * fits comfortably in memory for legitimate workbooks.
+ */
+const SPARSE_ARRAY_CEILING = 2_097_152;
+
+/**
+ * Reconstruct a dense array from OOXML's sparse `<c:pt idx="N">` form.
+ * Shared between the numeric (`collectNumberValues`) and string
+ * (`collectCategories`) code paths — previously both duplicated the
+ * `maxIdx` / `declaredCount` / ceiling logic, and each drift kept
+ * quietly mis-routing indices.
+ *
+ * @param points      Sparse point records with `index` and optional `value`.
+ * @param pointCount  The total slot count declared in `<c:ptCount>`.
+ * @param empty       Value for slots with no matching point.
+ * @param coerce      Maps a raw `value` to the output type; used to
+ *                    reject non-finite numbers / non-string category
+ *                    values to `empty`.
+ */
+function densifySparsePoints<T, Raw>(
+  points: readonly { index: number; value?: Raw }[],
+  pointCount: number | undefined,
+  empty: T,
+  coerce: (raw: Raw | undefined) => T
+): T[] {
+  if (points.length === 0) {
+    return [];
+  }
+  let maxIdx = -1;
+  for (const p of points) {
+    if (typeof p.index === "number" && Number.isFinite(p.index) && p.index > maxIdx) {
+      maxIdx = p.index;
+    }
+  }
+  const declaredCount = typeof pointCount === "number" ? pointCount : 0;
+  const rawLength = Math.max(points.length, maxIdx + 1, declaredCount);
+  const length = Math.min(rawLength, SPARSE_ARRAY_CEILING);
+  const dense: T[] = new Array(length).fill(empty);
+  for (const p of points) {
+    const idx =
+      typeof p.index === "number" && Number.isFinite(p.index) && p.index >= 0 ? p.index : -1;
+    if (idx < 0 || idx >= length) {
+      continue;
+    }
+    dense[idx] = coerce(p.value);
+  }
+  return dense;
+}
+
+function collectAxisValues(axisData: AxisDataSource | undefined): number[] {
+  if (!axisData) {
+    return [];
+  }
+  // Prefer the reference form; fall back to the literal form so
+  // literal-only axis data sources (scatter / bubble charts that inline
+  // their x values, pivot-chart metadata) still render instead of
+  // producing a flat x=0 column.
+  if (axisData.numRef) {
+    return collectNumberValues(axisData.numRef);
+  }
+  return collectNumberLiteralValues(axisData.numLit);
+}
+
+/**
+ * Collect numeric values from a `<c:numLit>` (inline literal) source,
+ * treating the result identically to the cached form of `<c:numRef>`.
+ * Non-finite / null values become `NaN` so `valueToY` and friends skip
+ * them the same way they skip blank-cell-backed gaps.
+ */
+function collectNumberLiteralValues(lit: NumberLiteral | undefined): number[] {
+  if (!lit) {
+    return [];
+  }
+  return densifySparsePoints(lit.points, lit.pointCount, NaN, raw =>
+    typeof raw === "number" && Number.isFinite(raw) ? raw : NaN
+  );
 }
 
 function collectCategories(series: SeriesBase | undefined): string[] | undefined {
-  const cat = (series as { cat?: any } | undefined)?.cat;
-  const ref = cat?.strRef ?? cat?.multiLvlStrRef?.cache?.levels?.[0];
-  return (
-    ref?.cache?.points?.map((p: { value: string }) => p.value) ??
-    ref?.points?.map((p: { value: string }) => p.value)
+  const cat = (series as (SeriesBase & { cat?: AxisDataSource }) | undefined)?.cat;
+  if (!cat) {
+    return undefined;
+  }
+  // Prefer the structured string form; fall back to `numRef` (date /
+  // numeric categories) so charts whose category axis is date-valued
+  // still render tick labels. Previously only string refs were
+  // honoured and numeric-category charts rendered with empty labels.
+  //
+  // The fallback chain must treat "present but empty" the same as
+  // "absent" — a `<c:strRef><c:f>…</c:f></c:strRef>` with no cache
+  // lands `strRef.cache.points = []` on the model; `??` would stop
+  // at that empty array and `numRef.cache.points` would never be
+  // consulted. Iterate candidate refs and pick the first non-empty
+  // one.
+  const strRef = cat.strRef ?? cat.multiLvlStrRef?.cache?.levels?.[0];
+  const numRef = cat.numRef;
+  type AnyPoint = { index: number; value?: string | number | null };
+  const candidates: Array<{
+    points: readonly AnyPoint[];
+    cache?: { pointCount?: number };
+  }> = [];
+  // `strRef` is either a `StringReference` (points live in `.cache.points`)
+  // or a `StringCache` extracted from a multi-level reference level
+  // (points live on the root directly). Probe both shapes.
+  const strRefCachePoints = (strRef as StringReference | undefined)?.cache?.points;
+  const strRefDirectPoints = (strRef as { points?: readonly AnyPoint[] } | undefined)?.points;
+  if (strRefCachePoints && strRefCachePoints.length > 0) {
+    candidates.push({
+      points: strRefCachePoints,
+      cache: (strRef as StringReference).cache
+    });
+  } else if (strRefDirectPoints && strRefDirectPoints.length > 0) {
+    candidates.push({ points: strRefDirectPoints });
+  }
+  if (numRef?.cache?.points && numRef.cache.points.length > 0) {
+    candidates.push({ points: numRef.cache.points, cache: numRef.cache });
+  }
+  // Fall back to the literal forms (`c:strLit` / `c:numLit`) when no
+  // cached reference is available. Charts authored by tools that
+  // don't emit backing workbook cells, and some pivot-chart metadata
+  // use these exclusively.
+  if (candidates.length === 0 && cat.strLit && cat.strLit.points.length > 0) {
+    candidates.push({
+      points: cat.strLit.points,
+      cache: { pointCount: cat.strLit.pointCount }
+    });
+  }
+  if (candidates.length === 0 && cat.numLit && cat.numLit.points.length > 0) {
+    candidates.push({
+      points: cat.numLit.points,
+      cache: { pointCount: cat.numLit.pointCount }
+    });
+  }
+  const chosen = candidates[0];
+  if (!chosen) {
+    return undefined;
+  }
+  // Densify via the shared sparse-array helper. String points use the
+  // value directly; numeric points (date / numeric categories) are
+  // passed through `formatAxisNumber` as a pragmatic fallback — the
+  // formal OOXML treatment would honour `cache.formatCode`, which we
+  // don't yet parse in full.
+  return densifySparsePoints<string, string | number | null>(
+    chosen.points,
+    chosen.cache?.pointCount,
+    "",
+    raw => {
+      if (typeof raw === "string") {
+        return raw;
+      }
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        return formatAxisNumber(raw);
+      }
+      return "";
+    }
   );
 }
 
@@ -5287,20 +7643,68 @@ function collectSeriesLabel(series: SeriesBase | undefined, index: number): stri
 }
 
 function extractTitle(model: ChartModel): string | undefined {
-  return model.chart.title?.text?.paragraphs
-    .map(p => (p.runs ?? []).map(r => r.text).join(""))
-    .join("\n");
+  // Reuse `titleToText` so the chart title falls back through all three
+  // of Excel's title representations in the same order as axis titles
+  // (structured rich text → cached `strRef` values). Previously only
+  // `.text` was inspected, which silently dropped the title for any
+  // chart whose title is authored as a formula (`<c:tx><c:strRef>…`)
+  // — the preview then rendered no title even though the model clearly
+  // carries one.
+  const title = model.chart.title;
+  if (!title) {
+    return undefined;
+  }
+  const text = titleToText(title);
+  return text && text.length > 0 ? text : undefined;
 }
 
 function formatAxisNumber(value: number): string {
-  if (Math.abs(value) >= 1000) {
+  // Defensive against NaN / ±Infinity reaching the formatter — axis
+  // range helpers widen degenerate ranges, but a single stray NaN
+  // (e.g. from `(max - min) / 5` when max/min collapse to NaN) would
+  // otherwise stamp the literal string `"NaN"` into every tick label.
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  const abs = Math.abs(value);
+  if (abs !== 0 && abs < 0.01) {
+    // `toFixed(1)` on tiny fractions collapses to `"0.0"` — every tick
+    // on a probability / ratio axis then reads zero. Use scientific
+    // notation (`1.00e-3`) so the axis stays readable.
+    return value.toExponential(2);
+  }
+  if (abs >= 1000) {
     return value.toFixed(0);
   }
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/**
+ * Truncate a label to at most 12 visible code points, appending
+ * `"..."` when the label was cut. `String.length` counts UTF-16 code
+ * units — a single surrogate-pair emoji is 2 units, so slicing at
+ * `label.slice(0, 11)` can bisect a code point and emit a lone
+ * surrogate (invalid Unicode). CJK characters inside the BMP count
+ * as 1 each under either measurement, but characters outside the BMP
+ * (emoji, some historic scripts, math symbols) need the array walk.
+ *
+ * Using `Array.from(label)` iterates by code point (the iterator
+ * yields one entry per surrogate pair), which is the right
+ * granularity for "a visible character" on the preview. True grapheme
+ * clusters (e.g. family emoji built from ZWJ sequences) would need
+ * `Intl.Segmenter`; the extra complexity isn't worth it for a
+ * best-effort tick-label truncator, and `Array.from` is correct for
+ * everything except ZWJ-glued sequences.
+ */
 function truncateLabel(label: string): string {
-  return label.length > 12 ? label.slice(0, 11) + "..." : label;
+  if (label.length <= 12) {
+    return label;
+  }
+  const cps = Array.from(label);
+  if (cps.length <= 12) {
+    return label;
+  }
+  return `${cps.slice(0, 11).join("")}...`;
 }
 
 /**
@@ -5330,62 +7734,6 @@ function estimateTextWidth(
   });
 }
 
-function escapeXml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeXmlAttr(value: string): string {
-  return escapeXml(value).replace(/"/g, "&quot;");
-}
-
-function hexToPdfColor(hex: string): PdfColor {
-  const clean = hex.replace(/^#/, "");
-  return {
-    r: parseInt(clean.slice(0, 2), 16) / 255,
-    g: parseInt(clean.slice(2, 4), 16) / 255,
-    b: parseInt(clean.slice(4, 6), 16) / 255
-  };
-}
-
-/**
- * Like {@link hexToPdfColor} but attaches an alpha value. Callers use
- * this to mirror the SVG path's `withAlpha(color, 0.35)` pattern on
- * the PDF bridge: the hex itself stays opaque, `a` carries the
- * transparency the SVG would paint by white-blending. Surfaces that
- * honour `PdfColor.a` (notably `PdfPageBuilder` via `/ExtGState`)
- * produce real transparency; those that don't render opaque, which is
- * the pre-alpha behaviour.
- */
-function hexToPdfColorWithAlpha(hex: string, alpha: number): PdfColor {
-  return { ...hexToPdfColor(hex), a: Math.max(0, Math.min(1, alpha)) };
-}
-
-function interpolateColor(a: string, b: string, t: number): string {
-  const ca = a.replace(/^#/, "");
-  const cb = b.replace(/^#/, "");
-  const mix = (i: number) => {
-    const av = parseInt(ca.slice(i, i + 2), 16);
-    const bv = parseInt(cb.slice(i, i + 2), 16);
-    return Math.round(av + (bv - av) * t)
-      .toString(16)
-      .padStart(2, "0")
-      .toUpperCase();
-  };
-  return `#${mix(0)}${mix(2)}${mix(4)}`;
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const clean = hex.replace(/^#/, "");
-  const mix = (component: string) => {
-    const value = parseInt(component, 16);
-    return Math.round(value * alpha + 255 * (1 - alpha))
-      .toString(16)
-      .padStart(2, "0")
-      .toUpperCase();
-  };
-  return `#${mix(clean.slice(0, 2))}${mix(clean.slice(2, 4))}${mix(clean.slice(4, 6))}`;
-}
-
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -5393,17 +7741,4 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     image.onerror = () => reject(new Error("Failed to load chart SVG image"));
     image.src = url;
   });
-}
-
-function fmt(value: number): string {
-  // `Number.toFixed` serialises `NaN` as the literal string `"NaN"`,
-  // which the SVG emitters would paste into attribute values like
-  // `x="NaN"` — invalid SVG. When a value slips past the upstream
-  // `Number.isFinite` filters (degenerate inputs, axis range of
-  // `{min: NaN, max: NaN}`, etc.), fall back to `"0"` so the emitted
-  // SVG stays parseable.
-  if (!Number.isFinite(value)) {
-    return "0";
-  }
-  return value.toFixed(2).replace(/\.00$/, "");
 }

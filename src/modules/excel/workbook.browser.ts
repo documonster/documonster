@@ -20,6 +20,7 @@ import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
 import { buildChartExModel } from "@excel/chart/chart-ex-builder";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
+import { resolvePendingChartImages } from "@excel/chart/chart-images";
 import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
 import type { AddComboChartOptions, ChartModel } from "@excel/chart/types";
 import {
@@ -31,8 +32,12 @@ import { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
 import { ExcelDownloadError, ExcelNotSupportedError, WorksheetNameError } from "@excel/errors";
 import { withPivotChartSource } from "@excel/pivot-chart";
 import type { PivotTable } from "@excel/pivot-table";
-import { WorkbookReader, type WorkbookReaderOptions } from "@excel/stream/workbook-reader";
-import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer";
+import {
+  WorkbookReader,
+  type WorkbookReaderOptions,
+  type CommonInput
+} from "@excel/stream/workbook-reader.browser";
+import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer.browser";
 import type {
   AddWorksheetOptions,
   CalculationProperties,
@@ -49,15 +54,15 @@ import type {
 import { synthGuid } from "@excel/utils/guid";
 import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import { Worksheet, type WorksheetModel } from "@excel/worksheet";
+import { RelType } from "@excel/xlsx/rel-type";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
-import { XLSX } from "@excel/xlsx/xlsx";
+import { XLSX } from "@excel/xlsx/xlsx.browser";
 import type { SyntaxProbe } from "@formula/default-syntax-probe";
 import { invokeFormulaEngine } from "@formula/host-registry";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
 import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";
 import { pipeline } from "@stream";
-import type { Readable } from "@stream";
 import type { IReadable, IWritable } from "@stream/types";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
 import { DateParser, DateFormatter, type DateFormat } from "@utils/datetime";
@@ -881,11 +886,101 @@ class Workbook {
     // Deep copy via model: the getter serializes ALL worksheet properties and the
     // setter deserializes them, so future properties are automatically included.
     const sourceModel = source.model;
+    // Remap chart numbers so the source's `chartNumber` / `chartExNumber`
+    // references point at entries we actually copy into the target
+    // workbook. Build the map here so the rewritten `charts` array and
+    // the copied entries use consistent ids.
+    const chartMap = new Map<number, number>();
+    const chartExMap = new Map<number, number>();
+    const sourceWorkbook = source.workbook as unknown as Workbook;
+    const differentWorkbook = sourceWorkbook !== (this as unknown as Workbook);
+    const sourceCharts = sourceModel.charts ?? [];
+    // `nextChartNumber()` / `nextChartExNumber()` compute `max(existing) + 1`
+    // from the entry maps — they do NOT reserve a slot. Calling them in
+    // a tight loop without an intervening `addChartEntry` therefore
+    // returns the SAME number N times, and the second loop below then
+    // overwrites `_chartEntries[dstNum]` repeatedly — only the last
+    // cloned entry survives, the others are silently lost. Track the
+    // allocator locally so each source chart gets a unique target slot.
+    let nextChartAlloc = this.nextChartNumber();
+    let nextChartExAlloc = this.nextChartExNumber();
+    for (const anchor of sourceCharts) {
+      if (anchor.chartNumber && anchor.chartNumber > 0 && !chartMap.has(anchor.chartNumber)) {
+        chartMap.set(anchor.chartNumber, nextChartAlloc++);
+      }
+      if (
+        anchor.chartExNumber &&
+        anchor.chartExNumber > 0 &&
+        !chartExMap.has(anchor.chartExNumber)
+      ) {
+        chartExMap.set(anchor.chartExNumber, nextChartExAlloc++);
+      }
+    }
+    const remappedCharts = sourceCharts.map(anchor => ({
+      ...anchor,
+      chartNumber: anchor.chartNumber
+        ? (chartMap.get(anchor.chartNumber) ?? anchor.chartNumber)
+        : anchor.chartNumber,
+      chartExNumber: anchor.chartExNumber
+        ? (chartExMap.get(anchor.chartExNumber) ?? anchor.chartExNumber)
+        : anchor.chartExNumber
+    }));
     newWs.model = {
       ...sourceModel,
       id: newWs.id,
-      name: newWs.name
+      name: newWs.name,
+      charts: remappedCharts
     };
+
+    // Copy the actual chart parts + sidecars into the target workbook
+    // so the remapped `charts` array references live entries. Without
+    // this, `importSheet` left the target with chart anchors but no
+    // backing chart XML, producing a broken package on save. We copy
+    // both the structured model (via `getChartEntry` / `addChartEntry`
+    // — the public API) and all sidecars (`copyChartSidecars` /
+    // `copyChartExSidecars`).
+    if (chartMap.size > 0 || chartExMap.size > 0) {
+      for (const [srcNum, dstNum] of chartMap) {
+        const entry = sourceWorkbook.getChartEntry(srcNum);
+        if (!entry) {
+          continue;
+        }
+        // Deep-clone the entry with every metadata field preserved —
+        // rawData / userShapesXml (byte slices), modelSnapshot and the
+        // dirty / preferRawPatch / requireRawPatch writer hints, plus
+        // per-entry `rels`. Previously only `model`, `rawData`, and
+        // `userShapesXml` were copied, so the cross-workbook import
+        // path produced charts where the raw-patch fast path couldn't
+        // run and the change-detection snapshot didn't reflect the
+        // source entry's load-time state.
+        this.addChartEntry(cloneChartEntry(entry, dstNum));
+        if (differentWorkbook) {
+          sourceWorkbook.copyChartSidecars(srcNum, dstNum, this as unknown as Workbook);
+        } else {
+          this.copyChartSidecars(srcNum, dstNum);
+        }
+      }
+      for (const [srcNum, dstNum] of chartExMap) {
+        const exEntry = sourceWorkbook.getChartExStructuredEntry?.(srcNum);
+        if (exEntry) {
+          this.addChartExStructuredEntry(cloneChartExEntry(exEntry, dstNum));
+        } else {
+          const rawBytes = (
+            sourceWorkbook as unknown as { _chartExEntries?: Record<number, Uint8Array> }
+          )._chartExEntries?.[srcNum];
+          if (rawBytes) {
+            (this as unknown as { _chartExEntries: Record<number, Uint8Array> })._chartExEntries[
+              dstNum
+            ] = rawBytes.slice();
+          }
+        }
+        if (differentWorkbook) {
+          sourceWorkbook.copyChartExSidecars(srcNum, dstNum, this as unknown as Workbook);
+        } else {
+          this.copyChartExSidecars(srcNum, dstNum);
+        }
+      }
+    }
 
     return newWs;
   }
@@ -1525,17 +1620,14 @@ class Workbook {
    * Create a streaming workbook writer for large files.
    * This is more memory-efficient than using Workbook for large datasets.
    *
-   * @param options - Options for the workbook writer
-   *   - Node.js: can use { filename } or { stream }
-   *   - Browser: must use { stream }
-   * @returns A new WorkbookWriter instance
+   * File-path output (`{ filename }`) is a Node.js-only feature and is
+   * exposed by the Node `Workbook` subclass, which overrides this
+   * factory to return the Node `WorkbookWriter`. This browser base
+   * only accepts `{ stream }`.
    *
    * @example
    * ```ts
-   * // Node.js with filename
-   * const writer = Workbook.createStreamWriter({ filename: "large-file.xlsx" });
-   *
-   * // Browser or Node.js with stream
+   * // Browser (or Node.js with an explicit stream)
    * const writer = Workbook.createStreamWriter({ stream: writableStream });
    *
    * const sheet = writer.addWorksheet("Sheet1");
@@ -1553,16 +1645,15 @@ class Workbook {
    * Create a streaming workbook reader for large files.
    * This is more memory-efficient than using Workbook.xlsx.readFile for large datasets.
    *
-   * @param input - File path (Node.js only) or readable stream
-   * @param options - Options for the workbook reader
-   * @returns A new WorkbookReader instance
+   * File-path input (`string`) is a Node.js-only feature and is exposed
+   * by the Node `Workbook` subclass, which overrides this factory to
+   * return the Node `WorkbookReader`. This browser base accepts the
+   * cross-platform `CommonInput` type
+   * (`Uint8Array | ArrayBuffer | Readable | ReadableStream`).
    *
    * @example
    * ```ts
-   * // Node.js with file path
-   * const reader = Workbook.createStreamReader("large-file.xlsx");
-   *
-   * // Browser or Node.js with stream
+   * // Browser or Node.js with stream / buffer
    * const reader = Workbook.createStreamReader(readableStream);
    *
    * for await (const event of reader) {
@@ -1575,10 +1666,7 @@ class Workbook {
    * }
    * ```
    */
-  static createStreamReader(
-    input: string | Readable,
-    options?: WorkbookReaderOptions
-  ): WorkbookReader {
+  static createStreamReader(input: CommonInput, options?: WorkbookReaderOptions): WorkbookReader {
     return new WorkbookReader(input, options);
   }
 
@@ -1602,15 +1690,22 @@ class Workbook {
   addWorksheet(name?: string, options?: AddWorksheetOptions): Worksheet {
     const id = this.nextId;
 
-    const lastOrderNo = this._worksheets.reduce(
-      (acc, ws) => ((ws && ws.orderNo) > acc ? ws.orderNo : acc),
-      0
-    );
+    // Allocate `orderNo` from the unified worksheet+chartsheet counter.
+    // Looking only at `_worksheets` here (the previous implementation)
+    // silently collides when a chartsheet has been added in between:
+    // e.g. `addWorksheet("A")` → orderNo 0; `addChartsheet(…)` → 1
+    // (via `_nextSheetOrderNo()`); `addWorksheet("B")` → 1 again
+    // (because `max(worksheets.orderNo) + 1 = 0 + 1 = 1`), so A and
+    // B share an ordinal with the chartsheet. The writer's stable
+    // sort then interleaves them non-deterministically, scrambling
+    // the user's tab order (`[A, CS, B]` could come out as
+    // `[A, B, CS]` or `[A, CS, B]` across runs).
+    const orderNo = this._nextSheetOrderNo();
     const worksheetOptions = {
       ...options,
       id,
       name,
-      orderNo: lastOrderNo + 1,
+      orderNo,
       workbook: this as any
     };
 
@@ -1676,15 +1771,23 @@ class Workbook {
     const sheetName = this._validateChartsheetName(name ?? `Chart${this._chartsheets.length + 1}`);
     const sheetNo = this._nextChartsheetNo();
     const id = this._nextSheetId();
+    // Assign a unified `orderNo` across worksheets and chartsheets so
+    // the writer can preserve the author's interleaved tab layout.
+    // Without this, workbook-xform `prepare()` sorted by `sheetNo`
+    // (file-path number, independent per family) and reordered
+    // `[ws1, cs1, ws2]` into `[ws1, ws2, cs1]`.
+    const orderNo = this._nextSheetOrderNo();
     const chartsheet: ChartsheetModel = {
       sheetNo,
       id,
       name: sheetName,
+      orderNo,
       state: options.state ?? "visible",
       tabSelected: options.tabSelected,
       zoomScale: options.zoomScale,
+      workbookViewId: options.workbookViewId,
+      zoomToFit: options.zoomToFit,
       pageMargins: options.pageMargins,
-      printOptions: options.printOptions,
       pageSetup: options.pageSetup,
       drawing: { rId: "rId1" }
     };
@@ -1709,7 +1812,26 @@ class Workbook {
       } catch {
         // Cache population is best-effort; never let it break chart creation.
       }
-      this.addChartEntry({ chartNumber, model: chartModel });
+      const entry: ChartEntry = { chartNumber, model: chartModel };
+      // Resolve programmatic `series.spPr.fill.blip._pendingImage`
+      // payloads into workbook media entries and chart rels. The
+      // worksheet-embedded `addChart` path does this immediately
+      // after `fillChartCaches`; chartsheets ran the same builder
+      // output but skipped the image-resolution step entirely, so a
+      // picture-fill series authored via `addChartsheet` was
+      // registered with its `_pendingImage` stuck on the model and
+      // never reached `media/imageN.{ext}` — Excel rendered the
+      // series as a transparent fill. Safe to call before
+      // `addChartEntry` so the stored entry carries its resolved
+      // `entry.rels` from the start.
+      try {
+        resolvePendingChartImages(entry, this as any, chartNumber);
+      } catch {
+        // Image resolution is best-effort; a broken image payload
+        // should never take down chart creation — the series keeps
+        // its `pictureOptions`, just without the blipFill.
+      }
+      this.addChartEntry(entry);
       this._applyChartsheetSidecars(chartNumber, options.chart);
       chartsheet.chartNumber = chartNumber;
     }
@@ -1797,6 +1919,10 @@ class Workbook {
       ...deepClone(source),
       id: this._nextSheetId(),
       sheetNo: this._nextChartsheetNo(),
+      // New tab position — the clone goes to the tail of the tab
+      // bar, matching Excel's "Duplicate" behaviour. Drop the
+      // deep-cloned `orderNo` from the source.
+      orderNo: this._nextSheetOrderNo(),
       name: cloneName,
       drawingName: undefined,
       relationships: source.relationships ? deepClone(source.relationships) : undefined
@@ -1805,7 +1931,14 @@ class Workbook {
       const entry = this.getChartEntry(source.chartNumber);
       if (entry) {
         const chartNumber = this.nextChartNumber();
-        this.addChartEntry({ chartNumber, model: deepClone(entry.model) });
+        // Clone the entry with ALL metadata: rawData, modelSnapshot,
+        // dirty, preferRawPatch, requireRawPatch, rels (per-entry),
+        // userShapesXml. A freshly-created entry carrying only `model`
+        // would lose Excel-authored user-shape overlays, the raw-patch
+        // fast path, and any per-entry rels that aren't in
+        // `_chartRels`. Keeping them in lockstep means a clone of a
+        // just-loaded chart matches the source byte-for-byte.
+        this.addChartEntry(cloneChartEntry(entry, chartNumber));
         this.copyChartSidecars(source.chartNumber, chartNumber);
         clone.chartNumber = chartNumber;
         clone.chartExNumber = undefined;
@@ -1814,10 +1947,19 @@ class Workbook {
       const entry = this.getChartExStructuredEntry(source.chartExNumber);
       const chartExNumber = this.nextChartExNumber();
       if (entry) {
-        this.addChartExStructuredEntry({ chartExNumber, model: deepClone(entry.model) });
+        // Same rationale as the classic branch — carry dirty /
+        // preferRawPatch / requireRawPatch / rawData / modelSnapshot
+        // across the clone so the raw-patch path keeps working on
+        // the duplicate.
+        this.addChartExStructuredEntry(cloneChartExEntry(entry, chartExNumber));
       } else if (this._chartExEntries[source.chartExNumber]) {
         this._chartExEntries[chartExNumber] = this._chartExEntries[source.chartExNumber].slice();
       }
+      // Copy the chartEx sidecars (authored rels) so the cloned
+      // chartsheet's XML references stay valid. Previously a chartEx
+      // with `cx14:` / media rels on the source lost every relationship
+      // on the clone.
+      this.copyChartExSidecars(source.chartExNumber, chartExNumber);
       clone.chartExNumber = chartExNumber;
       clone.chartNumber = undefined;
     }
@@ -1872,7 +2014,18 @@ class Workbook {
       } catch {
         // Cache population is best-effort; never let it break chart replacement.
       }
-      this.addChartEntry({ chartNumber, model: newChartModel });
+      const entry: ChartEntry = { chartNumber, model: newChartModel };
+      // Resolve programmatic `series.spPr.fill.blip._pendingImage`
+      // payloads — matches the classic `addChart` and `addChartsheet`
+      // paths. Previously replacement via `replaceChartsheetChart`
+      // silently dropped picture-fill payloads on the floor.
+      try {
+        resolvePendingChartImages(entry, this as any, chartNumber);
+      } catch {
+        // Image resolution is best-effort; a broken image payload
+        // should never take down chart replacement.
+      }
+      this.addChartEntry(entry);
       this._applyChartsheetSidecars(chartNumber, chart);
       model.chartNumber = chartNumber;
     }
@@ -2122,7 +2275,7 @@ class Workbook {
   copyChartSidecars(
     sourceChartNumber: number,
     targetChartNumber: number,
-    targetWorkbook: Pick<Workbook, "setChartStyle" | "setChartColors"> = this
+    targetWorkbook: Workbook = this
   ): void {
     const style = this._chartStyles[sourceChartNumber];
     if (style) {
@@ -2131,6 +2284,179 @@ class Workbook {
     const colors = this._chartColors[sourceChartNumber];
     if (colors) {
       targetWorkbook.setChartColors(targetChartNumber, colors.slice());
+    }
+    // Copy the full chart rels bag (`_chartRels`), not just the
+    // style/colors pair. A classic chart can carry rels to embedded
+    // images (pictureFill), external data links, and `<c:userShapes>`
+    // drawing parts — without copying those the clone ends up with
+    // dangling rIds. Deep-copy each rel so a later mutation on the
+    // source doesn't leak into the clone.
+    //
+    // Rewrite style/colors Targets to the destination chart number —
+    // verbatim copy would leave the rel pointing at the source's
+    // `style{src}.xml`, while the writer emits `style{dst}.xml` and
+    // produces a chart whose .rels references a non-existent file.
+    //
+    // For image rels on a cross-workbook copy (`targetWorkbook !==
+    // this`), re-register each referenced image in the destination
+    // workbook and rewrite the Target to point at the new media
+    // file. Without this, a pictureFill that round-tripped through
+    // `importSheet` pointed at the source workbook's media array —
+    // which the destination package doesn't ship, so Excel shows a
+    // broken image icon.
+    const srcRels = this._chartRels[sourceChartNumber];
+    if (Array.isArray(srcRels) && srcRels.length > 0) {
+      const crossWorkbook = targetWorkbook !== this;
+      targetWorkbook._chartRels[targetChartNumber] = srcRels.map(rel => {
+        if (typeof rel !== "object" || rel === null) {
+          return rel;
+        }
+        const cloned = { ...rel } as { Type?: string; Target?: string; [k: string]: unknown };
+        const target = typeof cloned.Target === "string" ? cloned.Target : undefined;
+        if (target) {
+          if (/^style\d+\.xml$/.test(target)) {
+            cloned.Target = `style${targetChartNumber}.xml`;
+          } else if (/^colors\d+\.xml$/.test(target)) {
+            cloned.Target = `colors${targetChartNumber}.xml`;
+          } else if (crossWorkbook && cloned.Type === RelType.Image) {
+            const rewritten = this._rewriteCrossWorkbookImageTarget(target, targetWorkbook);
+            if (rewritten !== undefined) {
+              cloned.Target = rewritten;
+            }
+          }
+        }
+        return cloned;
+      });
+    }
+  }
+
+  /**
+   * Copy the media referenced by `target` (e.g. `../media/image3.png`)
+   * from this workbook's media collection into `targetWorkbook`, then
+   * return the rewritten Target pointing at the destination workbook's
+   * copy. Returns `undefined` when the source media can't be
+   * resolved — callers leave the original target in place and let
+   * the writer emit a broken rel (same degradation as before the
+   * cross-workbook rewrite landed).
+   *
+   * The on-disk naming convention is determined by the destination
+   * workbook's `addImage`, so we take the `id` the new image gets and
+   * compute `../media/image{id+1}.{ext}` (the same formula used in
+   * `chart-images.ts:resolvePendingChartImages`). Centralising the
+   * mapping here keeps the cross-workbook copy robust against future
+   * media-naming changes on either workbook.
+   */
+  private _rewriteCrossWorkbookImageTarget(
+    target: string,
+    targetWorkbook: Workbook
+  ): string | undefined {
+    const match = /\/media\/image(\d+)\.([a-zA-Z0-9]+)$/.exec(target);
+    if (!match) {
+      return undefined;
+    }
+    const sourceMediaIndex = parseInt(match[1], 10) - 1;
+    if (!Number.isFinite(sourceMediaIndex) || sourceMediaIndex < 0) {
+      return undefined;
+    }
+    const medium = this.getImage?.(sourceMediaIndex) as
+      | { extension?: string; buffer?: Uint8Array; base64?: string }
+      | undefined;
+    if (!medium) {
+      return undefined;
+    }
+    const ext = medium.extension as "png" | "jpeg" | "gif" | undefined;
+    if (ext !== "png" && ext !== "jpeg" && ext !== "gif") {
+      return undefined;
+    }
+    const payload: { extension: "png" | "jpeg" | "gif"; buffer?: Uint8Array; base64?: string } = {
+      extension: ext
+    };
+    // `instanceof Uint8Array` is realm-sensitive: buffers that crossed
+    // a Worker / iframe / `structuredClone` boundary carry a different
+    // `Uint8Array` prototype and fail the operator even though they
+    // are byte-granular typed arrays. Duck-type via `ArrayBuffer.isView`
+    // + `BYTES_PER_ELEMENT === 1` so cross-workbook copies from a
+    // worker-loaded Workbook preserve the image bytes; otherwise the
+    // copy path silently falls through to `return undefined`, dropping
+    // every image from the chart. Matches `chart-images.ts`'s handling
+    // of the same realm-crossing issue.
+    const buf = medium.buffer as ArrayBufferView | undefined;
+    if (
+      buf &&
+      ArrayBuffer.isView(buf) &&
+      (buf as unknown as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+    ) {
+      payload.buffer =
+        buf instanceof Uint8Array
+          ? buf.slice()
+          : new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    } else if (typeof medium.base64 === "string") {
+      payload.base64 = medium.base64;
+    } else {
+      return undefined;
+    }
+    const newId = targetWorkbook.addImage(payload);
+    return `../media/image${newId + 1}.${ext}`;
+  }
+
+  /**
+   * Copy the ChartEx-specific sidecar state from one `chartExNumber` slot
+   * to another. Classic charts have `copyChartSidecars` for chart-style /
+   * chart-colors; ChartEx charts carry their own `_chartExRels`
+   * (relationship entries for extension packages, embedded images, etc.)
+   * that the classic helper does not touch. Without this, cloning a
+   * ChartEx via {@link Chart.copyTo} / {@link Chartsheet.clone} silently
+   * dropped every relationship the source had — authored `cx14:`
+   * extensions, embedded custom geometry, or linked media ended up
+   * pointing at an undefined rel id on the clone.
+   */
+  copyChartExSidecars(
+    sourceChartExNumber: number,
+    targetChartExNumber: number,
+    targetWorkbook: Workbook = this
+  ): void {
+    const rels = this._chartExRels[sourceChartExNumber];
+    if (rels && rels.length > 0) {
+      // Rewrite `Target` for rels that point at numbered sidecars
+      // (styleEx / colorsEx / userShapes). Those files get different
+      // on-disk numbers on the clone — copying the rel verbatim
+      // leaves it pointing at the source's sidecar, so saving the
+      // package produces a chartEx whose .rels references
+      // `styleEx{src}.xml` while the writer emits `styleEx{dst}.xml`.
+      // Strip the number from the source Target and re-stamp it with
+      // the target's number.
+      targetWorkbook._chartExRels[targetChartExNumber] = rels.map(r => {
+        if (typeof r !== "object" || r === null) {
+          return r;
+        }
+        const cloned = { ...r };
+        const target: string | undefined =
+          typeof cloned.Target === "string" ? cloned.Target : undefined;
+        if (target) {
+          const styleExMatch = /^styleEx\d+\.xml$/.exec(target);
+          if (styleExMatch) {
+            cloned.Target = `styleEx${targetChartExNumber}.xml`;
+          }
+          const colorsExMatch = /^colorsEx\d+\.xml$/.exec(target);
+          if (colorsExMatch) {
+            cloned.Target = `colorsEx${targetChartExNumber}.xml`;
+          }
+        }
+        return cloned;
+      });
+    }
+    // ChartEx style / colors sidecars (matching `_chartStyles` /
+    // `_chartColors` for classic charts). Previously only `_chartExRels`
+    // was copied — a cloned chartEx lost its authored chartExStyle and
+    // chartExColors bytes, so the saved package re-derived them from
+    // defaults and the clone looked different from the source.
+    const exStyle = this._chartExStyles[sourceChartExNumber];
+    if (exStyle) {
+      targetWorkbook._chartExStyles[targetChartExNumber] = exStyle.slice();
+    }
+    const exColors = this._chartExColors[sourceChartExNumber];
+    if (exColors) {
+      targetWorkbook._chartExColors[targetChartExNumber] = exColors.slice();
     }
   }
 
@@ -2206,6 +2532,28 @@ class Workbook {
     return existing.length > 0 ? Math.max(...existing) + 1 : 1;
   }
 
+  /**
+   * Next value for the unified `orderNo` (tab-bar position) counter
+   * shared between worksheets and chartsheets. Used by the writer's
+   * `prepare()` to emit `<sheets>` in the author's insertion order,
+   * preserving interleaved `[ws, cs, ws]` layouts that the old
+   * sheetNo-based sort used to reshuffle.
+   */
+  private _nextSheetOrderNo(): number {
+    let max = -1;
+    for (const ws of this._worksheets) {
+      if (ws && typeof ws.orderNo === "number" && ws.orderNo > max) {
+        max = ws.orderNo;
+      }
+    }
+    for (const cs of this._chartsheets) {
+      if (typeof cs.orderNo === "number" && cs.orderNo > max) {
+        max = cs.orderNo;
+      }
+    }
+    return max + 1;
+  }
+
   private _nextSheetId(): number {
     const worksheetIds = this.worksheets.map(ws => ws.id);
     const chartsheetIds = this._chartsheets.map(cs => cs.id).filter(Number.isFinite);
@@ -2213,7 +2561,30 @@ class Workbook {
     return ids.length > 0 ? Math.max(...ids) + 1 : 1;
   }
 
-  private _validateChartsheetName(name: string): string {
+  /**
+   * Validate a sheet name (worksheet OR chartsheet) against Excel's
+   * single unified namespace. Returns the (possibly truncated) name on
+   * success; throws {@link WorksheetNameError} on invalid input.
+   *
+   * Unifying the check at the workbook level fixes three related
+   * regressions that used to exist in the per-family validators:
+   *   1. `Worksheet.name` setter only cross-checked against other
+   *      worksheets, so `addChartsheet("S")` followed by
+   *      `addWorksheet("S")` silently produced a duplicate tab name.
+   *   2. The chartsheet regex was missing the backslash, so
+   *      `addChartsheet("A\\B")` sneaked through — Excel rejects it.
+   *   3. `Chartsheet.name = …` bypassed validation entirely, letting
+   *      users mutate the model into a corrupt state.
+   *
+   * @param name - Proposed sheet name. `undefined` / empty / over-31
+   *   chars / containing any of `* ? : \\ / [ ]` / leading or trailing
+   *   single-quote is rejected. Names ≤31 chars are passed through;
+   *   longer ones are truncated (non-production builds emit a warning).
+   * @param existing - The sheet being renamed (if any) — it is
+   *   excluded from the duplicate check so `sheet.name = sheet.name`
+   *   is a no-op rather than a self-collision.
+   */
+  validateSheetName(name: string, existing?: Worksheet | { name: string }): string {
     if (typeof name !== "string") {
       throw new WorksheetNameError("The name has to be a string.");
     }
@@ -2223,29 +2594,42 @@ class Workbook {
     if (name === "History") {
       throw new WorksheetNameError('The name "History" is protected. Please use a different name.');
     }
-    if (/[*?:/[\]]/.test(name)) {
+    // Illegal characters per Excel's own naming rules: asterisk (*),
+    // question mark (?), colon (:), forward slash (/), backslash (\),
+    // left bracket ([), right bracket (]). The chartsheet regex used
+    // to omit `\\`; unified here so both families enforce the same
+    // char set.
+    if (/[*?:/\\[\]]/.test(name)) {
       throw new WorksheetNameError(
-        `Worksheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`
+        `Sheet name ${name} cannot include any of the following characters: * ? : \\ / [ ]`
       );
     }
     if (/(^')|('$)/.test(name)) {
       throw new WorksheetNameError(
-        `The first or last character of worksheet name cannot be a single quotation mark: ${name}`
+        `The first or last character of sheet name cannot be a single quotation mark: ${name}`
       );
     }
     if (name.length > 31) {
       if (process.env.NODE_ENV !== "production") {
-        console.warn(`Worksheet name ${name} exceeds 31 chars. This will be truncated`);
+        console.warn(`Sheet name ${name} exceeds 31 chars. This will be truncated`);
       }
       name = name.substring(0, 31);
     }
     const nameLower = name.toLowerCase();
-    const duplicateWorksheet = this.worksheets.find(ws => ws.name.toLowerCase() === nameLower);
-    const duplicateChartsheet = this._chartsheets.find(cs => cs.name.toLowerCase() === nameLower);
+    const duplicateWorksheet = this.worksheets.find(
+      ws => ws && ws !== existing && ws.name.toLowerCase() === nameLower
+    );
+    const duplicateChartsheet = this._chartsheets.find(
+      cs => cs && cs !== existing && cs.name.toLowerCase() === nameLower
+    );
     if (duplicateWorksheet || duplicateChartsheet) {
-      throw new WorksheetNameError(`Worksheet name already exists: ${name}`);
+      throw new WorksheetNameError(`Sheet name already exists: ${name}`);
     }
     return name;
+  }
+
+  private _validateChartsheetName(name: string): string {
+    return this.validateSheetName(name);
   }
   /** Remove a structured chartEx entry. */
   removeChartExStructuredEntry(chartExNumber: number): void {
@@ -2514,8 +2898,20 @@ class Workbook {
     this._chartExEntries = value.chartExEntries || {};
     this._chartExRels = value.chartExRels || {};
     this._chartExStructuredEntries = value.chartExStructuredEntries || {};
-    // Restore chartsheets
+    // Restore chartsheets. Populate each chartsheet's `orderNo` from
+    // the position in `value.sheets` (workbook.xml tab order) so the
+    // writer's `prepare()` can sort interleaved worksheets +
+    // chartsheets back into the author's layout. Matches the
+    // equivalent loop above for worksheets.
     this._chartsheets = value.chartsheets || [];
+    if (value.sheets) {
+      for (const cs of this._chartsheets) {
+        const idx = value.sheets.findIndex((s: { id?: number }) => s.id === cs.id);
+        if (idx !== -1) {
+          cs.orderNo = idx;
+        }
+      }
+    }
     // Restore threaded-comment person directory. Always assign a new
     // list so callers editing the previous value don't mutate the
     // newly-loaded workbook by accident.
@@ -2541,6 +2937,54 @@ function deepClone<T>(value: T): T {
     return structuredClone(value);
   }
   return JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * Deep-copy a {@link ChartEntry}, preserving every field that affects
+ * write-time behaviour — rawData (for the raw-patch fast path),
+ * modelSnapshot (change detection), dirty / preferRawPatch /
+ * requireRawPatch (writer hints), style / colors (ancillary parts),
+ * rels (per-entry relationship bag), and userShapesXml (annotation
+ * overlay). The caller supplies the new `chartNumber`; everything
+ * else is a structural clone so later mutations on one entry don't
+ * leak into the other.
+ *
+ * `rawData` and `userShapesXml` are `Uint8Array`s — `.slice()` is
+ * used instead of `structuredClone` to keep the fast path cheap.
+ */
+function cloneChartEntry(entry: ChartEntry, chartNumber: number): ChartEntry {
+  return {
+    chartNumber,
+    model: deepClone(entry.model),
+    ...(entry.rawData ? { rawData: entry.rawData.slice() } : {}),
+    ...(entry.modelSnapshot !== undefined ? { modelSnapshot: entry.modelSnapshot } : {}),
+    ...(entry.dirty !== undefined ? { dirty: entry.dirty } : {}),
+    ...(entry.preferRawPatch !== undefined ? { preferRawPatch: entry.preferRawPatch } : {}),
+    ...(entry.requireRawPatch !== undefined ? { requireRawPatch: entry.requireRawPatch } : {}),
+    ...(entry.style ? { style: deepClone(entry.style) } : {}),
+    ...(entry.colors ? { colors: deepClone(entry.colors) } : {}),
+    ...(entry.rels ? { rels: entry.rels.map(r => ({ ...r })) } : {}),
+    ...(entry.userShapesXml ? { userShapesXml: entry.userShapesXml.slice() } : {})
+  };
+}
+
+/**
+ * Deep-copy a {@link ChartExEntry}, preserving the same write-time
+ * fields as {@link cloneChartEntry} but for the ChartEx family
+ * (structured model + rawData + dirty / preferRawPatch /
+ * requireRawPatch + rels).
+ */
+function cloneChartExEntry(entry: ChartExEntry, chartExNumber: number): ChartExEntry {
+  return {
+    chartExNumber,
+    model: deepClone(entry.model),
+    ...(entry.rawData ? { rawData: entry.rawData.slice() } : {}),
+    ...(entry.modelSnapshot !== undefined ? { modelSnapshot: entry.modelSnapshot } : {}),
+    ...(entry.dirty !== undefined ? { dirty: entry.dirty } : {}),
+    ...(entry.preferRawPatch !== undefined ? { preferRawPatch: entry.preferRawPatch } : {}),
+    ...(entry.requireRawPatch !== undefined ? { requireRawPatch: entry.requireRawPatch } : {}),
+    ...(entry.rels ? { rels: entry.rels.map(r => ({ ...r })) } : {})
+  };
 }
 
 export { Workbook };

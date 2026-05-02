@@ -288,6 +288,8 @@ worksheet.columns.forEach(column => {
 
 ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
+> A runnable end-to-end example is at [`src/modules/excel/examples/charts.ts`](examples/charts.ts) — it creates 70+ charts covering every classic + ChartEx type, all preset families, combo / pivot / chartsheet layouts, and exports SVG / PNG / PDF previews. Run with `pnpm exec tsx src/modules/excel/examples/charts.ts`.
+
 ### Rendering scope
 
 The built-in `chart.toSVG()` / `chart.toPNG()` / `chartToPdf(chart)` helpers produce a **zero-dependency deterministic preview** — not an Excel-pixel-perfect compositor. The same `ChartScene` intermediate representation drives all three backends, so what you see in SVG is what the PDF emits (modulo rasterisation) and what the Node PNG rasteriser paints. The preview is well-suited to:
@@ -342,19 +344,89 @@ ws.addChart(
 ### Presets And Convenience APIs
 
 ```typescript
-import { EXCEL_CHART_PRESETS } from "@cj-tech-master/excelts";
+import {
+  EXCEL_CHART_PRESETS,
+  EXCEL_CHART_EX_PRESETS,
+  applyChartPreset,
+  applyChartExPreset
+} from "@cj-tech-master/excelts";
 
+// 99 classic presets + 10 ChartEx presets (Excel UI aliases)
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
-ws.addColumnChart(
-  { series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] },
-  "E18:M32"
-);
-ws.addPieChart(
-  { series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] },
-  "E34:M48"
+ws.addPresetChartEx(
+  "boxAndWhisker",
+  { series: [{ values: "Samples!$A$2:$A$50" }] },
+  "N1:V16"
 );
 
-console.log(EXCEL_CHART_PRESETS); // 70+ Excel UI aliases
+// Per-type shortcut methods — the `type` field is implied.
+ws.addColumnChart({ series: [...] }, "E18:M32");
+ws.addBarChart({ series: [...] }, "E34:M48");
+ws.addLineChart({ series: [...] }, "E50:M64");
+ws.addAreaChart({ series: [...] }, "E66:M80");
+ws.addPieChart({ series: [...] }, "P1:X16");
+ws.addDoughnutChart({ series: [...] }, "P18:X32");
+ws.addScatterChart({ series: [...] }, "P34:X48");
+ws.addBubbleChart({ series: [...] }, "P50:X64");
+ws.addRadarChart({ series: [...] }, "P66:X80");
+ws.addStockChart({ series: [...] }, "AA1:AI16");
+ws.addSurfaceChart({ series: [...] }, "AA18:AI32");
+// ChartEx shortcuts
+ws.addHistogramChart({ series: [...] }, "AA34:AI48");
+ws.addParetoChart({ series: [...] }, "AA50:AI64");
+ws.addWaterfallChart({ series: [...] }, "AA66:AI80");
+ws.addFunnelChart({ series: [...] }, "AK1:AS16");
+ws.addTreemapChart({ series: [...] }, "AK18:AS32");
+ws.addSunburstChart({ series: [...] }, "AK34:AS48");
+ws.addBoxWhiskerChart({ series: [...] }, "AK50:AS64");
+ws.addRegionMapChart({ series: [...] }, "AK66:AS80");
+
+console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
+```
+
+Build chart option bags from data-frame-style inputs:
+
+```typescript
+// Object-array → chart: stages the rows into the worksheet and returns
+// the chart number.
+ws.addChartFromRows(
+  [
+    { day: "Mon", visits: 312 },
+    { day: "Tue", visits: 400 },
+    { day: "Wed", visits: 280 }
+  ],
+  { type: "bar", barDir: "col", x: "day", y: "visits", startCell: "A1" },
+  "C1:K16"
+);
+
+// Column-shortcut — same as above with `type: "bar", barDir: "col"` implied.
+ws.addColumnChartFromRows(rows, { x: "quarter", y: "revenue", startCell: "A1" }, "C1:K16");
+
+// Excel Table → chart. Series references are structured (`Table1[Col]`)
+// so the chart expands automatically when the table grows.
+const table = ws.addTable({ name: "Kpi", ref: "A1", headerRow: true, columns: [...], rows: [...] });
+ws.addChartFromTable(
+  table,
+  { type: "bar", barDir: "col", categoryColumn: "Month", valueColumns: ["Revenue", "Profit"] },
+  "F1:N18"
+);
+
+// ChartEx helpers have the same shape.
+ws.addChartExFromRows(rows, { type: "histogram", x: "bucket", y: "count" }, "AA1:AI18");
+ws.addChartExFromTable(
+  table,
+  { type: "funnel", categoryColumn: "Stage", valueColumns: ["Users"] },
+  "AA20:AI40"
+);
+
+// Low-level range helper — emits a series with absolute refs, matching
+// what the builders produce internally.
+const s = ws.seriesFromColumns({
+  categories: "Sales!$A$2:$A$7",
+  values: "Sales!$B$2:$B$7",
+  name: "Revenue"
+});
+ws.addChart({ type: "line", series: [s] }, "A20:I35");
 ```
 
 ### Combo, ChartEx, Pivot Chart, And Chartsheet
@@ -374,28 +446,241 @@ ws.addComboChart(
         series: [{ name: "Profit", categories: "Sales!$A$2:$A$4", values: "Sales!$C$2:$C$4" }]
       }
     ],
-    title: "Revenue vs Profit"
+    title: "Revenue vs Profit",
+    dataTable: { showKeys: true, showHorzBorder: true, showVertBorder: true }
   },
   "N1:V16"
 );
 
+// ChartEx — Office 2016+ modern types (histogram/pareto/waterfall/funnel/
+// treemap/sunburst/boxWhisker/regionMap). Each type has a dedicated
+// shortcut; for full control pass `AddChartExOptions` to `addChartEx`.
 ws.addHistogramChart(
   { series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }], binning: { binType: "auto" } },
   "N18:V32"
 );
+ws.addWaterfallChart(
+  {
+    title: "Revenue waterfall",
+    categories: "Sales!$A$2:$A$7",
+    series: [{ name: "Delta", values: "Sales!$C$2:$C$7", subtotals: [0, 5] }],
+    layout: { connectorLines: true }
+  },
+  "N34:V48"
+);
+ws.addTreemapChart(
+  {
+    categories: "Hier!$C$2:$C$10",
+    series: [
+      {
+        name: "Sales",
+        values: "Hier!$D$2:$D$10",
+        hierarchy: ["Hier!$A$2:$A$10", "Hier!$B$2:$B$10"]
+      }
+    ],
+    layout: { parentLabelLayout: "banner" }
+  },
+  "N50:V64"
+);
 
+// Pivot chart — same options as a classic chart plus the link back to
+// the pivot table; `pivotChartOptions` controls drop-zone visibility,
+// refresh-on-open, and the Office 2014 expand/collapse field buttons.
+const pivot = ws.addPivotTable({ sourceTable: src, rows: ["Region"], values: ["Revenue"] });
+ws.addPivotChart(
+  pivot,
+  {
+    type: "bar",
+    barDir: "col",
+    series: [{ name: "Revenue", categories: "Src!$A$2:$A$9", values: "Src!$D$2:$D$9" }],
+    pivotChartOptions: {
+      dropZonesVisible: true,
+      dropZoneFilter: true,
+      dropZoneCategories: true,
+      dropZoneData: true,
+      refreshOnOpen: true,
+      showExpandCollapseFieldButtons: true
+    }
+  },
+  "F1:N20"
+);
+ws.addPivotComboChart(pivot, { groups: [...] }, "F22:N40");
+
+// Chartsheet — a full-page chart on its own tab. Works with any of
+// `AddChartOptions`, `AddComboChartOptions`, or `AddChartExOptions`.
 workbook.addChartsheet("Revenue Chart", {
-  chart: { type: "bar", series: [{ categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }] }
+  tabSelected: true,
+  zoomToFit: true,
+  chart: { type: "bar", series: [...] }
 });
+
+workbook.addPivotChartsheet("Pivot Dashboard", pivot, {
+  chart: { type: "line", showMarker: true, series: [...] }
+});
+```
+
+### Anchor Forms
+
+```typescript
+// String A1 range (two-cell anchor, the most common form).
+ws.addChart({ type: "bar", series: [...] }, "A1:H15");
+
+// Two-cell anchor with row/col coordinates.
+ws.addChart(options, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } });
+
+// One-cell anchor — pinned to a cell with a fixed EMU extent (5×3 in).
+// 914400 EMU = 1 inch.
+ws.addChart(options, {
+  tl: { col: 1, row: 19 },
+  ext: { cx: 5 * 914400, cy: 3 * 914400 },
+  editAs: "oneCell"
+});
+
+// Absolute anchor — fixed EMU position + size, ignores rows/columns.
+ws.addChart(options, {
+  pos: { x: 914400, y: 36 * 914400 },
+  ext: { cx: 5 * 914400, cy: 3 * 914400 },
+  editAs: "absolute"
+});
+```
+
+### Advanced Series Formatting
+
+```typescript
+ws.addChart(
+  {
+    type: "line",
+    title: {
+      paragraphs: [
+        { runs: [{ text: "Q2 ", properties: { bold: true, size: 1600 } }, { text: "Performance" }] }
+      ]
+    },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: "4472C4",
+        lineWidth: 2.5,
+        lineDash: "solid",
+        marker: { symbol: "circle", size: 8, fill: "4472C4", border: "FFFFFF" },
+        trendline: {
+          type: "linear",
+          displayEq: true,
+          displayRSqr: true,
+          forward: 1,
+          line: "ED7D31",
+          lineDash: "dash"
+        },
+        errorBars: {
+          direction: "y",
+          barDir: "both",
+          type: "percentage",
+          value: 10
+        },
+        dataLabels: { showVal: true, position: "t", numFmt: "$#,##0" },
+        // Per-point overrides
+        dataPoints: [
+          { index: 0, fill: "C00000" },
+          { index: 5, fill: "70AD47", marker: { symbol: "diamond", size: 10 } }
+        ]
+      }
+    ],
+    categoryAxis: { title: "Month", textRotation: -45 },
+    valueAxis: {
+      title: "Revenue",
+      numFmt: "$#,##0",
+      min: 0,
+      logBase: 10,
+      majorGridlines: true,
+      displayUnits: "thousands",
+      displayUnitsLabel: "× 1 000"
+    },
+    legendOptions: {
+      entries: [{ index: 1, hidden: true }],
+      txPr: { size: 900, color: { srgb: "595959" } }
+    },
+    plotAreaOptions: { spPr: { fill: "FAFAFA", border: "D9D9D9" } }
+  },
+  "A1:L20"
+);
+
+// Picture-fill (bars filled with an image). Accepts raw Uint8Array,
+// a `data:` URL, a bare base64 string, a `{ workbookImageId }` handle,
+// or a structured `ChartPictureFillImageData`.
+ws.addChart(
+  {
+    type: "bar",
+    barDir: "col",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        pictureFill: { image: pngBytes, fillMode: "stretch" }
+      }
+    ]
+  },
+  "N1:V16"
+);
+```
+
+### Chart Styling
+
+```typescript
+// Legacy 2007/2010 built-in style (1..48). Emits `<c:style val="N"/>`.
+chart.setStyle(42);
+chart.setBuiltInStyle(42); // alias matching xlsxwriter terminology
+
+// Modern Office 2013+ sidecar — full styleN.xml + colorsN.xml. Applied
+// via `addChart` options or copied in later via the chart entry.
+ws.addChart(
+  {
+    type: "bar",
+    series: [...],
+    chartStyle: {
+      id: 201,
+      elements: {
+        chartArea: { fillRefIdx: 1, lnRefIdx: 1, effectRefIdx: 0, fontRefIdx: "minor" },
+        title: { fontRefIdx: "major" }
+      }
+    },
+    chartColors: {
+      method: "cycle",
+      id: 10,
+      colors: [{ srgb: "4472C4" }, { srgb: "ED7D31" }, { srgb: "A5A5A5" }]
+    }
+  },
+  "A1:H15"
+);
 ```
 
 ### Preview Export
 
 ```typescript
+import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+
 const chart = ws.getCharts()[0];
 
+// SVG / PNG previews — Promise for PNG because the Node rasteriser is async.
 const svg = chart.toSVG({ width: 800, height: 450, backgroundColor: "transparent" });
 const png = await chart.toPNG({ width: 800, height: 450, scale: 2, dpi: 192 });
+
+// Standalone one-page PDF — classic charts render as vector content
+// (selectable text, resolution-independent shapes); ChartEx types render
+// as vector too when supported, or raster via `forceRaster: true`.
+const pdf = await chartToPdf(chart, {
+  title: "Revenue",
+  width: 640,
+  height: 400,
+  margin: 36
+});
+
+// Inspect the vector-vs-raster decision explicitly:
+import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts";
+if (chart.chartExModel) {
+  console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
+}
 ```
 
 Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel/Aspose pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
@@ -500,7 +785,7 @@ Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs t
 | ChartEx                 | sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap (see regionMap note)                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement)                                                                                                                                                                                                 |
 | Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Presets                 | 70+ Excel UI aliases including cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (via `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                   |
 | ChartEx helpers         | `chartExOptionsFromTable` / `chartExOptionsFromRows` (+ `worksheet.addChartExFromTable/FromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                |
 | Template fidelity       | byte-preserving round-trip, raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.unknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                                                                      |
 | Rendering scope         | **zero-dependency deterministic preview** — not an Excel-identical compositor. Same `ChartScene` IR drives SVG, Node/browser PNG, PDF. For pixel-perfect output, round-trip the `.xlsx` through `soffice --convert-to pdf`                                                                                                                                                                                                                                                                                                         |

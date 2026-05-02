@@ -24,6 +24,7 @@
 import type { ThreadedComment, ThreadedCommentMention, ThreadedCommentPerson } from "@excel/types";
 import { synthGuid } from "@excel/utils/guid";
 import { findChild, findChildren, parseXml, textContent } from "@xml/dom";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
 const TC_NAMESPACE = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 
@@ -65,6 +66,21 @@ export function renderThreadedComments(
     if (c.mentions && c.mentions.length > 0) {
       parts.push("<mentions>");
       for (const m of c.mentions) {
+        // `startIndex` and `length` are `xsd:unsignedInt` per the
+        // threaded-comments schema — negative, non-integer, or
+        // non-finite values produce XML that strict validators (and
+        // Excel's own reader) reject. Fail loud with a descriptive
+        // error rather than ship a broken comment part.
+        if (!isNonNegativeInt(m.startIndex)) {
+          throw new Error(
+            `Threaded comment mention.startIndex must be a non-negative integer; got ${m.startIndex}.`
+          );
+        }
+        if (!isNonNegativeInt(m.length)) {
+          throw new Error(
+            `Threaded comment mention.length must be a non-negative integer; got ${m.length}.`
+          );
+        }
         const mAttrs: string[] = [
           `mentionpersonId="${escapeAttr(m.mentionPersonId)}"`,
           `mentionId="${escapeAttr(m.mentionId ?? `{${synthGuid()}}`)}"`,
@@ -186,9 +202,28 @@ export function parsePersonList(rawXml: string): ThreadedCommentPerson[] {
 }
 
 function escapeXml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Route through the canonical encoder so the writer strips
+  // XML-illegal control characters / lone surrogates in user-supplied
+  // comment text. The previous manual `.replace` chain only handled
+  // `& < >` and left every other hazard untouched — e.g. a pasted
+  // `\u0008` corrupted the whole `<ThreadedComments>` part on save.
+  return xmlEncode(value);
 }
 
 function escapeAttr(value: string): string {
-  return escapeXml(value).replace(/"/g, "&quot;");
+  // Attribute values additionally need `\t \n \r` encoded as
+  // numeric character references so XML attribute-value normalisation
+  // doesn't collapse them to literal spaces; a threaded comment
+  // `personId` / `id` GUID shouldn't ever contain whitespace but the
+  // `ref` / `displayName` attributes can carry user input.
+  return xmlEncodeAttr(value);
+}
+
+/**
+ * Whether `v` is a finite non-negative integer suitable for the
+ * `xsd:unsignedInt` attributes used by the threaded-comments schema.
+ * Rejects `NaN`, `±Infinity`, negative numbers, and fractional values.
+ */
+function isNonNegativeInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && Math.floor(v) === v;
 }

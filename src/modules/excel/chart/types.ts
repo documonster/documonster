@@ -174,11 +174,35 @@ export interface ChartColor {
   srgb?: string;
   /** Theme color index */
   theme?: number;
+  /**
+   * DrawingML scheme colour name that could not be mapped onto a theme
+   * index (e.g. `"phClr"` — the DrawingML "placeholder colour" token —
+   * or a future / vendor addition). When set, the writer emits
+   * `<a:schemeClr val="…">` (NOT `<a:sysClr>`); this preserves the
+   * original element identity on round-trip. Prefer {@link theme} when
+   * the name is one of the 12 canonical scheme slots.
+   */
+  schemeName?: string;
   /** System color (e.g. "windowText", "window") */
   sysClr?: string;
   /** Preset color name (e.g. "black", "white") */
   prstClr?: string;
-  /** Tint modifier (0 to 1.0, fraction — stored as 0–100000 in OOXML). E.g., 0.5 = 50% tint. */
+  /**
+   * Tint modifier. Stored as a **fraction in 0..1** (e.g. `0.5` for
+   * 50% tint); the writer multiplies by `100000` to produce the OOXML
+   * `<a:tint val="…"/>` integer.
+   *
+   * ⚠ This convention differs from {@link ChartColorsEntry.tint} and
+   * {@link ChartColorVariation.tint}, which store the **raw OOXML
+   * integer** (0..100000) because those palette types pass the DrawingML
+   * modifier value through unchanged. Copying a value between the two
+   * shapes without conversion will land the wrong colour — use
+   *
+   *     chartColorsEntry.tint = Math.round(chartColor.tint * 100000)
+   *     chartColor.tint       = chartColorsEntry.tint / 100000
+   *
+   * at the boundary.
+   */
   tint?: number;
   /** Shade (OOXML percentage, 0-100000) */
   shade?: number;
@@ -239,10 +263,42 @@ export interface ChartFill {
   };
   /** Gradient fill */
   gradient?: {
+    /**
+     * Gradient colour stops. `position` is a **fraction** in the range
+     * `[0, 1]` (0 = start, 1 = end), regardless of OOXML's on-disk
+     * encoding which uses hundredths-of-a-percent (`0`–`100000`). The
+     * renderer converts to/from the wire format.
+     */
     stops: Array<{ position: number; color: ChartColor }>;
+    /**
+     * Linear-gradient angle in **degrees** (0 = left-to-right, 90 =
+     * top-to-bottom). Ignored for `circle` / `rect` / `shape` paths.
+     * OOXML stores this as 60000ths of a degree; the renderer converts.
+     */
     angle?: number;
+    /**
+     * DrawingML `<a:lin/@scaled>` — when `true` (the default Excel
+     * emits), the angle scales with the shape's aspect ratio; when
+     * `false`, the angle is independent of shape geometry. The
+     * difference is visible: a 45° gradient on a 2:1 rectangle aims
+     * at a different corner depending on this flag. The writer
+     * defaults to `true` when omitted (matching Excel), so only
+     * `false` changes the on-disk bytes; but preserving the authored
+     * value is needed to avoid silently drifting the flag on
+     * round-trip.
+     */
+    scaled?: boolean;
     /** Linear, circle, rect, shape */
     type?: "linear" | "circle" | "rect" | "shape";
+    /**
+     * Focal rectangle for non-linear gradients. Components are
+     * fractions in `[0, 1]` (left/top/right/bottom insets from the
+     * bounding box). Absent or all-zero means the focal centre is the
+     * shape centre — OOXML's `<a:fillToRect l="50000" t="50000"
+     * r="50000" b="50000"/>` equivalent. The renderer converts to
+     * hundredths-of-a-percent on write.
+     */
+    fillToRect?: { left?: number; top?: number; right?: number; bottom?: number };
   };
   /**
    * Picture (blip) fill — `<a:blipFill>/<a:blip r:embed="rIdN"/>`.
@@ -854,6 +910,14 @@ export interface ChartMarker {
  * Data labels configuration.
  */
 export interface DataLabels {
+  /**
+   * Suppress this whole `c:dLbls` block. OOXML expresses this as the
+   * `<c:delete val="1"/>` choice-left branch of `CT_DLbls`; when set,
+   * only `c:delete` (and `c:extLst`) is emitted. Typical usage: turn
+   * off the default data labels inherited from a chart style / theme
+   * while keeping per-point overrides in {@link entries} visible.
+   */
+  delete?: boolean;
   showLegendKey?: boolean;
   showVal?: boolean;
   showCatName?: boolean;
@@ -879,11 +943,17 @@ export interface DataLabels {
    * the feature Excel surfaces as the "Value From Cells" checkbox in
    * the Format Data Labels pane.
    *
-   * The matching per-point `<c:dLbl>` entries use `<c:tx><c:rich>…`
-   * holding the cached label string so viewers that don't understand
-   * the extension still render something sensible; the writer builds
-   * those placeholders automatically from the range cache when a
-   * `dataLabelsRange` is present.
+   * The matching per-point `<c:dLbl>` entries would traditionally
+   * hold `<c:tx><c:rich>…</c:rich></c:tx>` with the cached label
+   * string so viewers that don't understand the extension still
+   * render something sensible. This library currently emits the
+   * extension (`<c15:datalabelsRange>` inside `c:dLbls/c:extLst`)
+   * with its cache, but does NOT auto-generate placeholder
+   * per-point `<c:dLbl>` entries — Excel and every modern viewer
+   * reads the `c15:` extension directly, so the fallback placeholders
+   * are optional. Callers that need the fallback for a legacy
+   * consumer can populate {@link DataLabels.entries} manually with
+   * the same cached values.
    */
   dataLabelsRange?: DataLabelsRange;
   /** Extension list (raw XML for round-trip) */
@@ -964,13 +1034,37 @@ export interface TrendlineLabel {
 }
 
 export interface ErrorBars {
+  /**
+   * Which error-bar cap to show (x / y axis): `"x"`, `"y"` or both.
+   * Maps to OOXML `c:errDir`.
+   */
   errDir?: ErrorBarDirection;
+  /**
+   * Whether the bar extends above (`"plus"`), below (`"minus"`) or
+   * both (`"both"`) the data point. The field is named `barDir` for
+   * historical reasons; the matching OOXML element is `c:errBarType`
+   * (see `ST_ErrBarType`). It is NOT the same kind of value as the
+   * chart-level {@link BarChartGroup.barDir} (`"col"` / `"bar"`).
+   */
   barDir: ErrorBarType;
+  /**
+   * How `val` / `plus` / `minus` are interpreted — fixed value,
+   * percentage, standard deviation, standard error or custom range.
+   */
   errValType: ErrorBarValueType;
+  /** Suppress the end-cap (`<c:noEndCap val="1"/>`). */
   noEndCap?: boolean;
+  /**
+   * Error magnitude for `fixedVal` / `percentage` / `stdDev`. For
+   * `"stdErr"` this is ignored (Excel computes it from the series);
+   * for `"cust"` {@link plus} and {@link minus} are required instead.
+   */
   val?: number;
+  /** Positive-direction reference (used with `errValType === "cust"`). */
   plus?: NumberDataSource;
+  /** Negative-direction reference (used with `errValType === "cust"`). */
   minus?: NumberDataSource;
+  /** Error-bar shape properties (colour, line width, end-cap style). */
   spPr?: ShapeProperties;
   /** Extension list (raw XML for round-trip) */
   extLst?: string;
@@ -1046,6 +1140,14 @@ export interface AreaSeries extends SeriesBase {
   errorBars?: ErrorBars;
   cat?: AxisDataSource;
   val?: NumberDataSource;
+  /**
+   * Picture fill options — `CT_AreaSer/c:pictureOptions`. Controls
+   * how a texture / blip fill applies across the area
+   * (`pictureFormat`: `stretch` | `stack` | `stackScale`, etc.).
+   * Parsed from source XML by `_processSeries`; round-tripped to
+   * preserve texture-filled areas.
+   */
+  pictureOptions?: PictureOptions;
 }
 
 /**
@@ -1236,12 +1338,24 @@ export interface RadarChartGroup {
 
 export interface StockChartGroup {
   type: "stock";
-  varyColors?: boolean;
+  // `CT_StockChart` in the Chart2014 schema does NOT carry a
+  // `varyColors` attribute — the lines are always single-coloured per
+  // series. Previous versions of this library accepted the option and
+  // emitted `<c:varyColors>`, which LibreOffice's strict validator
+  // rejects. The field is intentionally absent.
   series: StockSeries[];
   dataLabels?: DataLabels;
+  /**
+   * Per ECMA-376 `CT_StockChart` sequence: `dropLines` appears **before**
+   * `hiLowLines`. The previous model had no notion of ordering
+   * because it used object field declaration order — the writer took
+   * advantage of that to emit the correct sequence, so only the
+   * serialiser cares. Keep the TypeScript declaration order matching
+   * the schema for clarity.
+   */
+  dropLines?: ShapeProperties;
   hiLowLines?: ShapeProperties;
   upDownBars?: UpDownBars;
-  dropLines?: ShapeProperties;
   axisIds: number[];
   extLst?: string;
 }
@@ -1250,7 +1364,14 @@ export interface SurfaceChartGroup {
   type: "surface" | "surface3D";
   wireframe?: boolean;
   series: SurfaceSeries[];
-  dataLabels?: DataLabels;
+  // NOTE: `CT_SurfaceChart` has no `dLbls` child per ECMA-376 §21.2.2.204
+  // (it only allows `wireframe, ser*, bandFmts?, axId{2,3}`). The
+  // builder's validator explicitly rejects `opts.dataLabels` for
+  // surface charts, and the parser now drops any parsed `c:dLbls`
+  // encountered under `c:surfaceChart` rather than letting it escape
+  // into the model. Keeping the field off the type ensures programmatic
+  // callers can't route a data-labels mutation here and have the
+  // writer silently emit invalid OOXML.
   bandFormats?: BandFormat[];
   axisIds: number[];
   extLst?: string;
@@ -1289,6 +1410,8 @@ export interface UpDownBars {
   gapWidth?: number;
   upBars?: ShapeProperties;
   downBars?: ShapeProperties;
+  /** Extension list (raw XML for round-trip). */
+  extLst?: string;
 }
 
 export interface BandFormat {
@@ -1426,6 +1549,8 @@ export interface DisplayUnits {
     | "trillions";
   custUnit?: number;
   label?: ChartTitle;
+  /** Extension list (raw XML for round-trip). */
+  extLst?: string;
 }
 
 // ============================================================================
@@ -1437,6 +1562,13 @@ export interface DisplayUnits {
  */
 export interface ChartLayout {
   manualLayout?: ManualLayout;
+  /**
+   * @internal Raw XML preserved for round-trip of layout variants the
+   * structured model does not (yet) cover — used by the ChartEx parser
+   * on `cx:layout` where the DrawingML-like layout syntax differs from
+   * `c:layout / c:manualLayout`. Not intended for public consumption.
+   */
+  _rawXml?: string;
 }
 
 export interface ManualLayout {
@@ -1477,6 +1609,14 @@ export interface ChartTitle {
  */
 export interface ChartLegend {
   legendPos?: LegendPosition;
+  /**
+   * Horizontal / vertical alignment within the position slot. Chart2014
+   * `CT_Legend/@align` admits `"ctr"` (centred — the default Excel
+   * always emits), `"l"` / `"r"` (left / right within horizontal
+   * positions), or `"t"` / `"b"` (top / bottom within vertical
+   * positions). Absent means inherit the default (`"ctr"`).
+   */
+  align?: "ctr" | "l" | "r" | "t" | "b";
   legendEntries?: LegendEntry[];
   layout?: ChartLayout;
   overlay?: boolean;
@@ -1508,6 +1648,8 @@ export interface View3D {
   rAngAx?: boolean;
   hPercent?: number;
   perspective?: number;
+  /** Extension list (raw XML for round-trip). */
+  extLst?: string;
 }
 
 // ============================================================================
@@ -1585,6 +1727,8 @@ export interface PivotFormat {
    * round-trip. Writers prefer `dLbl` when both are present.
    */
   rawDLbl?: string;
+  /** Extension list (raw XML for round-trip). */
+  extLst?: string;
 }
 
 /**
@@ -1863,7 +2007,11 @@ export interface ChartColorVariation {
   lumMod?: number;
   /** `<a:lumOff val="…"/>` — luminance offset. */
   lumOff?: number;
-  /** `<a:tint val="…"/>`. */
+  /**
+   * `<a:tint val="…"/>` as the **raw OOXML integer** (0..100000). ⚠
+   * {@link ChartColor.tint} uses a 0..1 fraction; do not assign between
+   * the two types without scaling (×100000 / ÷100000).
+   */
   tint?: number;
   /** `<a:shade val="…"/>`. */
   shade?: number;
@@ -1885,7 +2033,11 @@ export interface ChartColorsEntry {
   lumMod?: number;
   /** Luminance offset */
   lumOff?: number;
-  /** Tint */
+  /**
+   * Tint as the **raw OOXML integer** (0..100000). ⚠ {@link ChartColor.tint}
+   * uses a 0..1 fraction; do not assign between the two types without
+   * scaling (×100000 / ÷100000).
+   */
   tint?: number;
   /** Shade */
   shade?: number;
@@ -1940,8 +2092,18 @@ export interface AddChartOptions {
   type: ChartType;
   /** Series definitions */
   series?: AddChartSeriesOptions[];
-  /** Chart title text, formula reference, or structured rich text */
-  title?: string | { formula: string } | ChartRichText;
+  /**
+   * Chart title. Accepts:
+   *   - `string` — literal title text
+   *   - `{ formula: string }` — formula reference resolved at read time
+   *   - {@link ChartRichText} — structured rich text for per-run formatting
+   *   - `null` — explicitly suppress the title (Excel will NOT
+   *     auto-generate one; `autoTitleDeleted="1"` is emitted)
+   *
+   * Omit the option entirely to let Excel auto-title the chart per its
+   * default behaviour.
+   */
+  title?: string | { formula: string } | ChartRichText | null;
   /** Show legend */
   showLegend?: boolean;
   /** Legend position */
@@ -2005,6 +2167,15 @@ export interface AddChartOptions {
   dataLabels?: AddDataLabelsOptions;
   /** Gap width percentage (bar/column charts, default 150) */
   gapWidth?: number;
+  /**
+   * Gap depth percentage for 3-D charts (`c:gapDepth`, 0-500). Only
+   * valid on `bar3D` / `line3D` / `area3D`; rejected on every other
+   * type (including `pie3D`, which has no `gapDepth` child in its
+   * `CT_Pie3DChart` definition despite the name suggesting it). Sets
+   * the depth-direction spacing between series in the z-axis
+   * extrusion.
+   */
+  gapDepth?: number;
   /** Overlap percentage (bar/column charts, -100 to 100) */
   overlap?: number;
   /** Show markers on line/radar (default true for line, false for radar "filled") */
@@ -2403,10 +2574,23 @@ export interface AddChartSeriesOptions {
      * automatically. Subsequent writes emit the correct `<a:blipFill>`
      * with the matching `r:embed` reference.
      *
-     * `extension` is inferred from the buffer's magic bytes when not
-     * supplied; PNG / JPEG / GIF are recognised. Unknown binary data
-     * defaults to PNG — the caller can override by passing a structured
-     * `ImageData` with an explicit `extension`.
+     * `extension` is inferred from the buffer's magic bytes when the
+     * caller passes a raw `Uint8Array`: PNG / JPEG / GIF are
+     * recognised (every `<a:blipFill>`-supported format) and
+     * anything else — WebP / AVIF / TIFF / BMP / SVG — is dropped
+     * entirely rather than relabelled as `png`. Emitting an image
+     * with a wrong extension would produce a broken picture in
+     * Excel, so "drop the blip" is safer than "guess".
+     *
+     * For string inputs the rule differs: a `data:image/<type>;base64,…`
+     * URL requires `<type>` to be `png` / `jpeg` / `jpg` / `gif` (other
+     * content-types are dropped), but a **bare base64 payload** (no
+     * `data:` prefix) has no embedded content-type and so is
+     * assumed to be PNG — the most common encode target when
+     * callers pass an already-stripped payload. Authors who need a
+     * different format for bare base64 should pass a structured
+     * {@link ChartPictureFillImageData} with an explicit
+     * `extension`, or prefix with the matching data URL.
      */
     image?: AddChartPictureFillImage;
     /** How to stretch: stretch (whole bar) or stack (per unit) */
@@ -2420,8 +2604,17 @@ export interface AddChartSeriesOptions {
   };
   /** Advanced shape properties (overrides fill/line when set) */
   spPr?: ShapeProperties | AddShapeFillOptions;
-  /** Text properties for this series */
-  txPr?: ChartTextProperties;
+  // NOTE: classic chart **series** have no `txPr` slot in OOXML —
+  // `CT_BarSer`, `CT_LineSer`, `CT_PieSer`, `CT_ScatterSer`,
+  // `CT_BubbleSer`, `CT_AreaSer`, `CT_RadarSer` and `CT_SurfaceSer`
+  // all omit the element (only the chart-space, title, legend,
+  // axis, and data-labels nodes carry `txPr`). The previous
+  // `txPr?: ChartTextProperties` field on this options bag was
+  // accepted by the builder and stored on the series object, but no
+  // writer ever emitted it — every programmatic caller was
+  // silently losing their styling on save. For per-run / per-label
+  // text styling use `dataLabels.txPr`; for axis / title text use
+  // `valueAxis.txPr` / `titleOptions.txPr`.
 }
 
 /**
