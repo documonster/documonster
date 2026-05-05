@@ -210,7 +210,15 @@ class ContentTypesXform extends BaseXform {
         chartExPartNamesEmitted.add(partName);
         xmlStream.leafNode("Override", {
           PartName: partName,
-          ContentType: "application/vnd.ms-office.chartEx+xml"
+          // Microsoft's canonical content type for ChartEx parts is
+          // `application/vnd.ms-office.chartex+xml` — ALL lowercase.
+          // Earlier versions of this library emitted the camel-cased
+          // `chartEx+xml` variant; Excel 2016+ is strict about this and
+          // drops any chartEx whose content-type doesn't match exactly,
+          // which cascades into "Removed Part: /xl/drawings/drawingN.xml
+          // (Drawing shape)" because the parent drawing's r:id pointer
+          // is left dangling.
+          ContentType: "application/vnd.ms-office.chartex+xml"
         });
       }
     }
@@ -224,7 +232,7 @@ class ContentTypesXform extends BaseXform {
         chartExPartNamesEmitted.add(partName);
         xmlStream.leafNode("Override", {
           PartName: partName,
-          ContentType: "application/vnd.ms-office.chartEx+xml"
+          ContentType: "application/vnd.ms-office.chartex+xml"
         });
       }
     }

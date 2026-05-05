@@ -14,7 +14,11 @@ import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import { parseChartEx } from "@excel/chart/chart-ex-parser";
-import { renderChartEx, renderChartExLegendXml } from "@excel/chart/chart-ex-renderer";
+import {
+  renderChartEx,
+  renderChartExLegendXml,
+  rewriteChartExDataRefsToDefinedNames
+} from "@excel/chart/chart-ex-renderer";
 import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
 import { themeIndexToName } from "@excel/chart/chart-utils";
 import {
@@ -107,6 +111,7 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
+import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { StreamBuf } from "@excel/utils/stream-buf";
 import type { Workbook, ExternalLinkModel } from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
@@ -147,6 +152,7 @@ import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { PassThrough, type IEventEmitter } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { bufferToString, base64ToUint8Array } from "@utils/utils";
+import { uuidV4 } from "@utils/uuid";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import { XmlStreamWriter } from "@xml/stream-writer";
 import { XmlWriter } from "@xml/writer";
@@ -525,6 +531,31 @@ export interface XlsxWriteOptions {
    */
   strictTemplateMode?: boolean;
   /**
+   * Run the OOXML self-check on the produced bytes and `console.warn`
+   * every detected problem. Only {@link XLSX.writeBuffer} honours this
+   * flag — `write(stream)` / `writeFile` cannot post-validate because
+   * their output is streamed to the caller.
+   *
+   * Default resolution:
+   *   - In Node.js with `NODE_ENV !== "production"` and NOT running
+   *     under vitest (`process.env.VITEST !== "true"`): `true`.
+   *   - In production, in the browser, or under vitest: `false`.
+   *
+   * The vitest carve-out exists because running validation on every
+   * `writeBuffer` call inflates fixture `beforeAll` hooks that build
+   * hundreds of workbooks by ~50 seconds on typical hardware. Tests
+   * that want validation use {@link expectValidXlsx} directly.
+   *
+   * Pass `true` to force validation (even in production or under
+   * vitest), or `false` to suppress it (even in development). The
+   * self-check never throws: a failed validation becomes a warning so
+   * writers that intentionally produce non-conformant xlsx for
+   * testing keep working.
+   *
+   * @see OoxmlValidationReport
+   */
+  validate?: boolean;
+  /**
    * Forward-compatibility / subclass extension escape hatch. Unknown keys are
    * passed through to internal writers; unrecognised keys are ignored.
    */
@@ -628,6 +659,114 @@ function snapshotChartModel(model: unknown): string | undefined {
  * Returns the substring of comment nodes (whitespace stripped, joined
  * by no separator). Empty string when no comment precedes the open tag.
  */
+/**
+ * Build the chartsheet-drawing XML that wraps a single classic or
+ * ChartEx chart occupying the entire chartsheet canvas.
+ *
+ * Chartsheets have no cell grid — `sheetData` is empty and there are
+ * no `<cols>` / `<row>` sizing entries for Excel to lay an anchor
+ * against. A cell-based `<xdr:twoCellAnchor from="A1" to="R31"/>`
+ * (what the generic `DrawingXform` emits) therefore resolves to a
+ * 0×0 bounding box on a chartsheet, and Excel renders a blank
+ * white canvas with no chart inside. Using `<xdr:absoluteAnchor>`
+ * with concrete EMU coordinates is how Excel itself writes
+ * chartsheet drawings — the anchor's `pos`/`ext` pair gives the
+ * engine something real to lay the graphic against, while the
+ * inner `<xdr:graphicFrame>/<xdr:xfrm>` repeats the extent so the
+ * graphic is sized to fill the anchor.
+ *
+ * ChartEx drawings additionally need an `<mc:AlternateContent>`
+ * wrapper around the `<xdr:graphicFrame>` — the `cx` namespace is
+ * a Microsoft extension that legacy-Excel loaders don't understand,
+ * so the Fallback branch emits a placeholder shape (the same
+ * "This chart isn't available in your version of Excel" message
+ * Office uses).
+ */
+function renderChartsheetDrawingXml(options: {
+  chartRId: string;
+  chartName: string;
+  isChartEx: boolean;
+  extCx: number;
+  extCy: number;
+}): string {
+  const { chartRId, chartName, isChartEx, extCx, extCy } = options;
+  const escName = xmlEncodeAttr(chartName);
+  const escRId = xmlEncodeAttr(chartRId);
+  const cNvPrExtLst = isChartEx
+    ? `<a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{${uuidV4().toUpperCase()}}"/></a:ext></a:extLst>`
+    : "";
+  const graphicFrame =
+    `<xdr:graphicFrame macro="">` +
+    `<xdr:nvGraphicFramePr>` +
+    (cNvPrExtLst
+      ? `<xdr:cNvPr id="1" name="${escName}">${cNvPrExtLst}</xdr:cNvPr>`
+      : `<xdr:cNvPr id="1" name="${escName}"/>`) +
+    `<xdr:cNvGraphicFramePr/>` +
+    `</xdr:nvGraphicFramePr>` +
+    `<xdr:xfrm>` +
+    `<a:off x="0" y="0"/>` +
+    `<a:ext cx="${extCx}" cy="${extCy}"/>` +
+    `</xdr:xfrm>` +
+    `<a:graphic>` +
+    (isChartEx
+      ? `<a:graphicData uri="http://schemas.microsoft.com/office/drawing/2014/chartex">` +
+        `<cx:chart xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="${escRId}"/>` +
+        `</a:graphicData>`
+      : `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">` +
+        `<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="${escRId}"/>` +
+        `</a:graphicData>`) +
+    `</a:graphic>` +
+    `</xdr:graphicFrame>`;
+
+  const fallbackShape =
+    `<xdr:sp macro="" textlink="">` +
+    `<xdr:nvSpPr>` +
+    `<xdr:cNvPr id="0" name=""/>` +
+    `<xdr:cNvSpPr><a:spLocks noTextEdit="1"/></xdr:cNvSpPr>` +
+    `</xdr:nvSpPr>` +
+    `<xdr:spPr>` +
+    `<a:xfrm>` +
+    `<a:off x="0" y="0"/>` +
+    `<a:ext cx="${extCx}" cy="${extCy}"/>` +
+    `</a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+    `<a:solidFill><a:prstClr val="white"/></a:solidFill>` +
+    `<a:ln w="1"><a:solidFill><a:prstClr val="black"/></a:solidFill></a:ln>` +
+    `</xdr:spPr>` +
+    `<xdr:txBody>` +
+    `<a:bodyPr vertOverflow="clip" horzOverflow="clip"/>` +
+    `<a:lstStyle/>` +
+    `<a:p><a:r><a:rPr lang="en-US" sz="1100"/>` +
+    `<a:t>This chart isn&apos;t available in your version of Excel.\n\n` +
+    `Editing this shape or saving this workbook into a different file format will permanently break the chart.</a:t>` +
+    `</a:r></a:p>` +
+    `</xdr:txBody>` +
+    `</xdr:sp>`;
+
+  const anchorBody = isChartEx
+    ? `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">` +
+      `<mc:Choice xmlns:cx1="http://schemas.microsoft.com/office/drawing/2015/9/8/chartex" Requires="cx1">` +
+      graphicFrame +
+      `</mc:Choice>` +
+      `<mc:Fallback>` +
+      fallbackShape +
+      `</mc:Fallback>` +
+      `</mc:AlternateContent>`
+    : graphicFrame;
+
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+    `<xdr:absoluteAnchor>` +
+    `<xdr:pos x="0" y="0"/>` +
+    `<xdr:ext cx="${extCx}" cy="${extCy}"/>` +
+    anchorBody +
+    `<xdr:clientData/>` +
+    `</xdr:absoluteAnchor>` +
+    `</xdr:wsDr>`
+  );
+}
+
 function extractLeadingComments(originalXml: string, openTagRegex: RegExp): string {
   const m = openTagRegex.exec(originalXml);
   if (!m) {
@@ -730,6 +869,82 @@ function stripChartExRawXml(model: any): any {
 
 function isStrictTemplateMode(options?: XlsxWriteOptions): boolean {
   return options?.templateMode === "strict" || options?.strictTemplateMode === true;
+}
+
+/**
+ * Decide whether `writeBuffer` should run the OOXML self-check after
+ * producing bytes. Resolves the `validate` option against the current
+ * environment:
+ *
+ *   - Explicit `true` / `false` → honoured as-is.
+ *   - `undefined` (default)     → `true` in non-production Node.js
+ *                                 when NOT running under vitest. We
+ *                                 detect vitest via `process.env.VITEST`
+ *                                 to avoid adding multi-second
+ *                                 validation overhead to fixture
+ *                                 `beforeAll` hooks that produce
+ *                                 hundreds of workbooks (the chartEx
+ *                                 preset corpus alone builds ~100
+ *                                 fixtures per run — at ~450 ms each
+ *                                 that is a 45 s penalty on every full
+ *                                 suite execution). Vitest tests that
+ *                                 need validation call
+ *                                 `expectValidXlsx()` explicitly.
+ *                                 `false` in production and in the
+ *                                 browser where `process` is absent.
+ *
+ * Kept as a module-level helper so the resolution rule is testable in
+ * isolation and so subclasses can override by passing an explicit
+ * `validate` flag rather than re-implementing the default logic.
+ */
+function shouldAutoValidate(explicit: boolean | undefined): boolean {
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  // In the browser `process` is undefined; skip the overhead there.
+  if (typeof process === "undefined" || !process.env) {
+    return false;
+  }
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  // Vitest sets VITEST=true automatically in its worker processes.
+  // Skip the auto-check there; tests opt-in via `expectValidXlsx`.
+  if (process.env.VITEST === "true") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Run `validateXlsxBuffer` on writer output and emit a consolidated
+ * `console.warn` for every detected problem. Never throws: a validator
+ * exception is degraded to a warning so writers that intentionally
+ * produce non-conformant xlsx (e.g. for negative-path tests) keep
+ * working. The message includes the actionable opt-out so downstream
+ * consumers know how to silence it without grepping docs.
+ */
+async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
+  try {
+    const report = await validateXlsxBuffer(bytes, { maxProblems: 20 });
+    if (report.ok) {
+      return;
+    }
+    const summary = report.problems
+      .map((p, i) => `  ${i + 1}. [${p.kind}] ${p.file ?? "<package>"}: ${p.message}`)
+      .join("\n");
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[excelts] writeBuffer() produced xlsx with ${report.problems.length} OOXML issue(s):\n` +
+        `${summary}\n` +
+        `Pass \`{ validate: false }\` to silence this self-check, or set NODE_ENV=production.`
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[excelts] writeBuffer() self-check threw unexpectedly and was skipped: ${String(err)}`
+    );
+  }
 }
 
 function hasChartEntryChanged(entry: ChartEntry): boolean {
@@ -1705,21 +1920,31 @@ function patchRawSeries(
   model: any,
   patchPlan: RawPatchListPlan<ChartSeriesRawPatchPlan>
 ): string | undefined {
-  const seriesModels = (model.chart?.plotArea?.chartTypes ?? []).flatMap(
-    (group: any) => group.series ?? []
-  );
+  // Track the owning chart-type group for each series so doughnut
+  // series can suppress `c:dLblPos` when writing `<c:dLbls>` — Excel
+  // rejects that element on doughnut charts (see
+  // `_renderDoughnutChart` in `chart-space-xform.ts`).
+  const seriesEntries: Array<{ series: any; chartType: string | undefined }> = [];
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    for (const series of group.series ?? []) {
+      seriesEntries.push({ series, chartType: group.type });
+    }
+  }
   let index = 0;
   return replaceXmlBlocks(raw, "c:ser", block => {
-    const series = seriesModels[index++];
+    const entry = seriesEntries[index++];
     const seriesPlan = getRawPatchListItem(patchPlan, index - 1);
-    return series && seriesPlan ? patchRawSeriesBlock(block, series, seriesPlan) : block;
+    return entry && seriesPlan
+      ? patchRawSeriesBlock(block, entry.series, seriesPlan, entry.chartType)
+      : block;
   });
 }
 
 function patchRawSeriesBlock(
   block: string,
   series: any,
-  patchPlan: ChartSeriesRawPatchPlan | true
+  patchPlan: ChartSeriesRawPatchPlan | true,
+  chartType?: string
 ): string | undefined {
   let patched = block;
   if (rawPatchFlag(patchPlan, "tx") && series.tx) {
@@ -1855,7 +2080,7 @@ function patchRawSeriesBlock(
       patched = replaceOrInsertBefore(
         patched,
         "c:dLbls",
-        buildRawDataLabelsXml(series.dataLabels),
+        buildRawDataLabelsXml(series.dataLabels, { suppressDLblPos: chartType === "doughnut" }),
         [
           "c:trendline",
           "c:errBars",
@@ -2209,7 +2434,9 @@ function patchRawChartGroupDataLabelsBlock(block: string, group: any): string {
       replaceOrInsertBefore(
         withoutSeriesBlocks.xml,
         "c:dLbls",
-        buildRawDataLabelsXml(group.dataLabels),
+        buildRawDataLabelsXml(group.dataLabels, {
+          suppressDLblPos: group.type === "doughnut"
+        }),
         [
           "c:gapWidth",
           "c:overlap",
@@ -2278,11 +2505,11 @@ function restoreSeriesBlocks(block: string, seriesBlocks: string[]): string {
   );
 }
 
-function buildRawDataLabelsXml(dataLabels: any): string {
+function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boolean }): string {
   const parts = ["<c:dLbls>"];
   if (Array.isArray(dataLabels.entries)) {
     for (const entry of dataLabels.entries) {
-      parts.push(buildRawDataLabelEntryXml(entry));
+      parts.push(buildRawDataLabelEntryXml(entry, opts));
     }
   }
   if (dataLabels.numFmt?.formatCode) {
@@ -2313,7 +2540,10 @@ function buildRawDataLabelsXml(dataLabels: any): string {
   if (dataLabels.separator !== undefined) {
     parts.push(`<c:separator>${escapeXml(String(dataLabels.separator))}</c:separator>`);
   }
-  if (dataLabels.position !== undefined) {
+  // Doughnut charts must not emit `c:dLblPos` — Excel rejects the
+  // element on open. See `_renderDoughnutChart` in
+  // `chart-space-xform.ts` for the full rationale and bisect.
+  if (dataLabels.position !== undefined && !opts?.suppressDLblPos) {
     parts.push(`<c:dLblPos val="${escapeAttr(String(dataLabels.position))}"/>`);
   }
   if (dataLabels.spPr) {
@@ -2329,7 +2559,7 @@ function buildRawDataLabelsXml(dataLabels: any): string {
   return parts.join("");
 }
 
-function buildRawDataLabelEntryXml(entry: any): string {
+function buildRawDataLabelEntryXml(entry: any, opts?: { suppressDLblPos?: boolean }): string {
   const parts = ["<c:dLbl>", `<c:idx val="${entry.index ?? 0}"/>`];
   if (entry.layout) {
     parts.push(buildRawLayoutXml(entry.layout));
@@ -2352,7 +2582,7 @@ function buildRawDataLabelEntryXml(entry: any): string {
   if (entry.txPr) {
     parts.push(buildRawTextPropertiesXml(entry.txPr, "c") ?? "");
   }
-  if (entry.position !== undefined) {
+  if (entry.position !== undefined && !opts?.suppressDLblPos) {
     parts.push(`<c:dLblPos val="${escapeAttr(String(entry.position))}"/>`);
   }
   for (const [name, value] of [
@@ -2743,6 +2973,16 @@ function buildRawScalingXml(scaling: any): string {
     return "";
   }
   const parts = ["<c:scaling>"];
+  // ECMA-376 `CT_Scaling` sequence is `logBase?, orientation?,
+  // max?, min?, extLst?`. Emitting children in any other order
+  // triggers a "Repaired Records" dialog when Excel opens the
+  // file and causes LibreOffice strict-mode to reject it outright.
+  if (scaling.logBase !== undefined && Number.isFinite(scaling.logBase) && scaling.logBase > 0) {
+    // `CT_LogBase` requires the value be `>= 2` per ECMA-376
+    // §21.2.3.21; `> 0` is the looser guard we use at parse time.
+    // Leave range clamping to the builder.
+    parts.push(`<c:logBase val="${scaling.logBase}"/>`);
+  }
   if (scaling.orientation !== undefined) {
     parts.push(`<c:orientation val="${escapeAttr(scaling.orientation)}"/>`);
   }
@@ -2758,12 +2998,6 @@ function buildRawScalingXml(scaling: any): string {
   }
   if (scaling.min !== undefined && Number.isFinite(scaling.min)) {
     parts.push(`<c:min val="${scaling.min}"/>`);
-  }
-  if (scaling.logBase !== undefined && Number.isFinite(scaling.logBase) && scaling.logBase > 0) {
-    // `CT_LogBase` requires the value be `>= 2` per ECMA-376
-    // §21.2.3.21; `> 0` is the looser guard we use at parse time.
-    // Leave range clamping to the builder.
-    parts.push(`<c:logBase val="${scaling.logBase}"/>`);
   }
   parts.push("</c:scaling>");
   return parts.join("");
@@ -5114,7 +5348,16 @@ class XLSX {
     zip.pipe(stream);
     await this.writeToZip(zip, options);
     await this._finalize(zip);
-    return stream.read() || new Uint8Array(0);
+    const bytes = stream.read() || new Uint8Array(0);
+
+    // Optional OOXML self-check. Enabled by default in non-production
+    // Node.js environments; disabled in the browser and in production.
+    // See `XlsxWriteOptions.validate` for the resolution rules.
+    if (shouldAutoValidate(options.validate)) {
+      await runWriteBufferSelfCheck(bytes);
+    }
+
+    return bytes;
   }
 
   // ===========================================================================
@@ -6734,24 +6977,39 @@ class XLSX {
       }
     }
 
-    // Chartsheet drawings — each chartsheet references a drawing containing a chart
+    // Chartsheet drawings — each chartsheet references a drawing
+    // containing a single chart that fills the entire sheet. Unlike
+    // worksheet-embedded charts (where a `<xdr:twoCellAnchor>` with
+    // `<xdr:from>/<xdr:to>` cell references pins the chart to a
+    // rectangle of cells, whose dimensions Excel computes from the
+    // sheet's column widths and row heights), a chartsheet has no
+    // cell grid — its `sheetData` is empty. A cell-based anchor on
+    // a chartsheet therefore resolves to a 0×0 rectangle and Excel
+    // renders an empty white canvas instead of the chart.
+    //
+    // Excel's own output for chartsheet drawings uses
+    // `<xdr:absoluteAnchor>` with concrete EMU `pos`/`ext` values
+    // (≈ 10.84″ × 6.67″ — standard A4 landscape minus default
+    // margins), AND repeats the same `<a:ext>` on the inner
+    // `<xdr:graphicFrame>/<xdr:xfrm>` so both the anchor-level and
+    // frame-level sizes are non-zero. Omitting either produces the
+    // blank-canvas rendering bug users see. We emit the same byte
+    // layout here verbatim rather than route through `DrawingXform`,
+    // which is tuned for the worksheet twoCellAnchor case.
+    const CHARTSHEET_EMU_CX = 9906000; // ≈ 10.84 inches
+    const CHARTSHEET_EMU_CY = 6096000; // ≈  6.67 inches
     for (const cs of model.chartsheets || []) {
       if (cs.drawingName && (cs.chartNumber || cs.chartExNumber)) {
         const chartRId = "rId1";
         const isChartEx = !cs.chartNumber && !!cs.chartExNumber;
-        const drawingModel = {
-          anchors: [
-            {
-              range: { tl: { col: 0, row: 0 }, br: { col: 10, row: 15 } },
-              graphicFrame: {
-                rId: chartRId,
-                isChartEx,
-                name: isChartEx ? `Chart ${cs.chartExNumber}` : `Chart ${cs.chartNumber}`
-              },
-              ...(isChartEx ? { alternateContent: { requires: "cx" } } : {})
-            }
-          ]
-        };
+        const chartName = isChartEx ? `Chart ${cs.chartExNumber}` : `Chart ${cs.chartNumber}`;
+        const drawingXml = renderChartsheetDrawingXml({
+          chartRId,
+          chartName,
+          isChartEx,
+          extCx: CHARTSHEET_EMU_CX,
+          extCy: CHARTSHEET_EMU_CY
+        });
         const drawingRels = [
           {
             Id: chartRId,
@@ -6761,8 +7019,7 @@ class XLSX {
               : chartRelTargetFromDrawing(cs.chartNumber)
           }
         ];
-        drawingXform.prepare(drawingModel);
-        await this._renderToZip(zip, drawingPath(cs.drawingName), drawingXform, drawingModel);
+        zip.append(drawingXml, { name: drawingPath(cs.drawingName) });
         await this._renderToZip(zip, drawingRelsPath(cs.drawingName), relsXform, drawingRels);
       }
     }
@@ -6949,7 +7206,13 @@ class XLSX {
       if (written.has(n)) {
         continue;
       }
-      const xml = renderChartEx(entry.model);
+      // Data-ref → `_xlchart.vN.M` defined-name rewrite has already
+      // run in `prepareChartExSidecars` so the model's formulas now
+      // point at hidden names and the cached `<cx:lvl>` levels have
+      // been cleared. Force structural rebuild to pick up the
+      // mutated model (any stale `rawXml` from earlier mutations
+      // would mask the rewrite).
+      const xml = renderChartEx(entry.model, { forceStructural: true });
       zip.append(xml, { name: chartExPath(n) });
       this._appendChartExSidecars(zip, model, n, entry);
       const chartExRels = this._buildChartExRels(n, entry.rels, model, entry);
@@ -7290,6 +7553,27 @@ class XLSX {
   prepareChartExSidecars(model: any): void {
     const structured = (model.chartExStructuredEntries ?? {}) as Record<string, ChartExEntry>;
     for (const [n, entry] of Object.entries(structured)) {
+      // Excel 2016+ requires chartEx `<cx:f>` to reference hidden
+      // `_xlchart.vN.M` defined names, NOT direct worksheet ranges.
+      // Walk the model and rewrite data refs BEFORE workbook.xml is
+      // serialised so the newly-registered defined names end up in
+      // `<definedNames>`. See `rewriteChartExDataRefsToDefinedNames`
+      // for the full rationale.
+      const chartExIndex = parseInt(n, 10);
+      if (
+        Number.isFinite(chartExIndex) &&
+        model.definedNamesInstance &&
+        typeof model.definedNamesInstance.addHidden === "function"
+      ) {
+        rewriteChartExDataRefsToDefinedNames(entry.model, chartExIndex, (name, ref) => {
+          model.definedNamesInstance.addHidden(ref, name);
+        });
+        // Re-materialise the array snapshot so addWorkbook picks up the
+        // new hidden `_xlchart.*` names. `definedNames` in the write
+        // model is the serialised form (array); the rewrite added
+        // entries to the live `DefinedNames` instance on the workbook.
+        model.definedNames = model.definedNamesInstance.model;
+      }
       if (entry.model.style && !model.chartExStyles?.[n]) {
         model.chartExStyles ??= {};
         model.chartExStyles[n] = new TextEncoder().encode(buildChartStyle(entry.model.style));

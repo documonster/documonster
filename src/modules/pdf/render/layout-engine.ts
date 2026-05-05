@@ -23,15 +23,18 @@ import type { FontManager } from "../font/font-manager";
 import { resolvePdfFontName } from "../font/font-manager";
 import type {
   PdfSheetData,
+  PdfChartsheetData,
   PdfCellData,
   PdfCellStyle,
   PdfRowData,
   PdfRichTextRunData,
   PdfSheetImage,
+  PdfSheetChart,
   PdfAlignmentData,
   PdfCellTypeValue,
   ResolvedPdfOptions,
   LayoutPage,
+  LayoutChart,
   LayoutCell,
   LayoutBorder,
   LayoutRichTextRun
@@ -146,8 +149,87 @@ export async function layoutSheet(
   if (layoutPages.length > 0 && sheet.images) {
     assignImagesToPages(sheet.images, layoutPages, ctx.scaleFactor);
   }
+  if (layoutPages.length > 0 && sheet.charts) {
+    assignChartsToPages(sheet.charts, layoutPages, ctx.scaleFactor);
+  }
 
   return layoutPages;
+}
+
+/**
+ * Produce the layout for a chartsheet — a single PDF page whose entire
+ * content area is covered by one chart.
+ *
+ * Chartsheets have no row/column grid, so we bypass the cell-layout
+ * pipeline entirely. Page dimensions come from `options.pageSize`, with
+ * orientation overridden by the chartsheet's own `orientation` field
+ * (Excel's chartsheet convention defaults to landscape; see the
+ * `CHARTSHEET_EMU_CX/CY` constants that define the drawing canvas in
+ * `xlsx.browser.ts`).
+ *
+ * The returned LayoutPage has:
+ *  - `cells = []` (no grid to render)
+ *  - `charts` containing one full-content-area chart
+ *  - all other cell-grid arrays empty
+ *
+ * The existing `renderSinglePage` in `pdf-exporter.ts` already handles
+ * pages with zero cells and a non-empty `charts` array via the shared
+ * chart-rendering path, so no exporter changes are needed here.
+ */
+export function layoutChartsheet(
+  sheet: PdfChartsheetData,
+  documentOptions: ResolvedPdfOptions
+): LayoutPage[] {
+  // Chartsheet orientation override — independent of the document
+  // default. We clone the options so neighbouring worksheets aren't
+  // affected when a single chartsheet flips to portrait.
+  const orientation: ResolvedPdfOptions["orientation"] =
+    sheet.orientation ?? documentOptions.orientation;
+  const options: ResolvedPdfOptions = { ...documentOptions, orientation };
+
+  let pageWidth = options.pageSize.width;
+  let pageHeight = options.pageSize.height;
+  if (options.orientation === "landscape") {
+    [pageWidth, pageHeight] = [pageHeight, pageWidth];
+  }
+
+  const margins = options.margins;
+  const headerHeight = options.showSheetNames ? 20 : 0;
+  const contentX = margins.left;
+  const contentY = margins.bottom;
+  const contentWidth = pageWidth - margins.left - margins.right;
+  const contentHeight = pageHeight - margins.top - margins.bottom - headerHeight;
+
+  const chart: LayoutChart = {
+    rect: {
+      x: contentX,
+      y: contentY,
+      width: Math.max(0, contentWidth),
+      height: Math.max(0, contentHeight)
+    },
+    drawVector: sheet.chart.drawVector,
+    raster: sheet.chart.raster
+  };
+
+  const page: LayoutPage = {
+    pageNumber: 1,
+    options,
+    cells: [],
+    width: pageWidth,
+    height: pageHeight,
+    sheetName: sheet.name,
+    sheetCols: [],
+    columnOffsets: [],
+    columnWidths: [],
+    sheetRows: [],
+    rowYPositions: [],
+    rowHeights: [],
+    images: [],
+    charts: [chart],
+    scaleFactor: 1
+  };
+
+  return [page];
 }
 
 // =============================================================================
@@ -413,6 +495,7 @@ function buildPageLayout(
     rowYPositions,
     rowHeights: pageRowHeights,
     images: [],
+    charts: [],
     scaleFactor
   };
 }
@@ -438,6 +521,7 @@ function createEmptyPage(sheet: PdfSheetData, options: ResolvedPdfOptions): Layo
     rowYPositions: [],
     rowHeights: [],
     images: [],
+    charts: [],
     scaleFactor: 1
   };
 }
@@ -1103,8 +1187,104 @@ export function resolveSharedBorders(
 }
 
 // =============================================================================
-// Image Placement
+// Image & Chart Placement
 // =============================================================================
+
+/**
+ * Resolve an anchor's page-space rectangle by combining the `tl` / `br` /
+ * `ext` fields of a {@link PdfSheetImage.range} or {@link PdfSheetChart.range}.
+ *
+ * The convention is identical for both object types:
+ *  - `tl` locates the upper-left corner in sheet coordinates (`nativeCol`,
+ *    `nativeRow`, + sub-cell offsets in EMU).
+ *  - `br` — when present — locates the opposite corner, so the rect size is
+ *    the difference.
+ *  - `ext` — when present — overrides the size directly. Images use pixels
+ *    (px × 0.75 = pt); charts use EMU (EMU / 9525 = pt). The `extUnit`
+ *    field disambiguates. Historical callers that omit `extUnit` keep
+ *    the legacy px behaviour.
+ *
+ * Returns `null` if the anchor does not land on any of the supplied
+ * pages (e.g. the object is anchored below the printed area).
+ */
+function resolveAnchorRect(
+  range: PdfSheetImage["range"],
+  layoutPages: LayoutPage[],
+  scaleFactor: number
+): { page: LayoutPage; x: number; y: number; width: number; height: number } | null {
+  const tl = range.tl;
+  const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // 0-indexed → 1-indexed
+  const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
+
+  const targetPage = layoutPages.find(
+    page => page.sheetCols.includes(tlCol) && page.sheetRows.includes(tlRow)
+  );
+  if (!targetPage) {
+    return null;
+  }
+
+  const pageColIndex = targetPage.sheetCols.indexOf(tlCol);
+  const pageRowIndex = targetPage.sheetRows.indexOf(tlRow);
+  const baseX = targetPage.columnOffsets[pageColIndex] ?? targetPage.options.margins.left;
+  const baseY =
+    targetPage.rowYPositions[pageRowIndex] ??
+    targetPage.height -
+      targetPage.options.margins.top -
+      (targetPage.options.showSheetNames ? 20 : 0);
+
+  // Apply sub-cell offsets (EMU: 1pt = 12700 EMU), scaled to match page layout
+  const tlColOff = ((tl.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
+  const tlRowOff = ((tl.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
+  const x = baseX + tlColOff;
+  const yTop = baseY - tlRowOff;
+
+  // Determine width / height
+  let width = 100;
+  let height = 100;
+  const extUnit = range.extUnit ?? "px";
+  if (range.ext) {
+    if (extUnit === "emu") {
+      // EMU → pt (1 pt = 9525 EMU, same as the Excel drawing ext.cx/cy).
+      width = (range.ext.width / 9525) * scaleFactor;
+      height = (range.ext.height / 9525) * scaleFactor;
+    } else {
+      // Legacy pixel → pt (0.75 factor = 72/96 dpi)
+      width = range.ext.width * 0.75 * scaleFactor;
+      height = range.ext.height * 0.75 * scaleFactor;
+    }
+  } else if (range.br) {
+    const br = range.br;
+    const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
+    const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
+    const brPageColIndex = targetPage.sheetCols.indexOf(brCol);
+    const brPageRowIndex = targetPage.sheetRows.indexOf(brRow);
+    const brBaseX =
+      brPageColIndex >= 0
+        ? targetPage.columnOffsets[brPageColIndex]
+        : x + (targetPage.columnWidths[pageColIndex] ?? 100);
+    const brBaseY =
+      brPageRowIndex >= 0
+        ? targetPage.rowYPositions[brPageRowIndex]
+        : yTop - (targetPage.rowHeights[pageRowIndex] ?? 100);
+    const brColOff = ((br.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
+    const brRowOff = ((br.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
+    const brX = brBaseX + brColOff;
+    const brYTop = brBaseY - brRowOff;
+    width = brX - x;
+    height = yTop - brYTop;
+  }
+
+  // Normalise to bottom-left y (PDF origin is bottom-left).
+  const absWidth = Math.abs(width);
+  const absHeight = Math.abs(height);
+  return {
+    page: targetPage,
+    x,
+    y: yTop - absHeight,
+    width: absWidth,
+    height: absHeight
+  };
+}
 
 /**
  * Assign pre-collected images to the pages that contain their top-left anchor.
@@ -1115,69 +1295,47 @@ function assignImagesToPages(
   scaleFactor: number
 ): void {
   for (const img of images) {
-    const tl = img.range.tl;
-    const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // convert 0-indexed to 1-indexed
-    const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
-
-    const targetPage = layoutPages.find(
-      page => page.sheetCols.includes(tlCol) && page.sheetRows.includes(tlRow)
-    );
-    if (!targetPage) {
+    const placement = resolveAnchorRect(img.range, layoutPages, scaleFactor);
+    if (!placement) {
       continue;
     }
-
-    const pageColIndex = targetPage.sheetCols.indexOf(tlCol);
-    const pageRowIndex = targetPage.sheetRows.indexOf(tlRow);
-    const baseX = targetPage.columnOffsets[pageColIndex] ?? targetPage.options.margins.left;
-    const baseY =
-      targetPage.rowYPositions[pageRowIndex] ??
-      targetPage.height -
-        targetPage.options.margins.top -
-        (targetPage.options.showSheetNames ? 20 : 0);
-
-    // Apply sub-cell offsets (EMU: 1pt = 12700 EMU), scaled to match page layout
-    const tlColOff = ((tl.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
-    const tlRowOff = ((tl.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
-    const imgX = baseX + tlColOff;
-    const imgY = baseY - tlRowOff;
-
-    // Determine image size
-    let imgWidth = 100;
-    let imgHeight = 100;
-    if (img.range.ext) {
-      imgWidth = (img.range.ext.width ?? 100) * 0.75 * scaleFactor;
-      imgHeight = (img.range.ext.height ?? 100) * 0.75 * scaleFactor;
-    } else if (img.range.br) {
-      const br = img.range.br;
-      const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
-      const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
-      const brPageColIndex = targetPage.sheetCols.indexOf(brCol);
-      const brPageRowIndex = targetPage.sheetRows.indexOf(brRow);
-      const brBaseX =
-        brPageColIndex >= 0
-          ? targetPage.columnOffsets[brPageColIndex]
-          : imgX + (targetPage.columnWidths[pageColIndex] ?? 100);
-      const brBaseY =
-        brPageRowIndex >= 0
-          ? targetPage.rowYPositions[brPageRowIndex]
-          : imgY - (targetPage.rowHeights[pageRowIndex] ?? 100);
-      const brColOff = ((br.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
-      const brRowOff = ((br.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
-      const brX = brBaseX + brColOff;
-      const brY = brBaseY - brRowOff;
-      imgWidth = brX - imgX;
-      imgHeight = imgY - brY;
-    }
-
-    targetPage.images.push({
+    placement.page.images.push({
       data: img.data,
       format: img.format,
       rect: {
-        x: imgX,
-        y: imgY - imgHeight,
-        width: Math.abs(imgWidth),
-        height: Math.abs(imgHeight)
+        x: placement.x,
+        y: placement.y,
+        width: placement.width,
+        height: placement.height
       }
+    });
+  }
+}
+
+/**
+ * Assign pre-collected charts to the pages that contain their top-left
+ * anchor. Mirrors {@link assignImagesToPages} but forwards the chart's
+ * vector callback or raster payload to the page instead of an image.
+ */
+function assignChartsToPages(
+  charts: PdfSheetChart[],
+  layoutPages: LayoutPage[],
+  scaleFactor: number
+): void {
+  for (const chart of charts) {
+    const placement = resolveAnchorRect(chart.range, layoutPages, scaleFactor);
+    if (!placement) {
+      continue;
+    }
+    placement.page.charts.push({
+      rect: {
+        x: placement.x,
+        y: placement.y,
+        width: placement.width,
+        height: placement.height
+      },
+      drawVector: chart.drawVector,
+      raster: chart.raster
     });
   }
 }

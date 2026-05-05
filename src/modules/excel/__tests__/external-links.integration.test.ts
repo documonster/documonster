@@ -27,8 +27,11 @@ import { ZipParser } from "@archive/unzip/zip-parser";
 import { Workbook } from "@excel/workbook";
 import { describe, expect, it } from "vitest";
 
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
+
 async function writeAndUnzip(wb: Workbook): Promise<Map<string, string>> {
   const buf = await wb.xlsx.writeBuffer();
+  await expectValidXlsx(buf, { label: "external-links writeAndUnzip" });
   const parser = new ZipParser(buf);
   const files = await parser.extractAll();
   const decoder = new TextDecoder();
@@ -200,6 +203,7 @@ describe("external workbook links — end-to-end", () => {
     ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 123 };
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "cached-values roundtrip" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buf);
@@ -256,6 +260,7 @@ describe("external workbook links — end-to-end", () => {
     };
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "issue-3039-chinese" });
 
     const { writeFile, mkdir } = await import("node:fs/promises");
     await mkdir("tmp", { recursive: true });
@@ -285,6 +290,7 @@ describe("external workbook links — end-to-end", () => {
     };
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "absolute-file-url" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(buf);
 
@@ -304,6 +310,7 @@ describe("external workbook links — end-to-end", () => {
     ws.getCell("A4").value = { formula: "[ref.xlsx]Alpha!B1", result: 4 }; // dup
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "multi-sheet external ref" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(buf);
 
@@ -322,7 +329,9 @@ describe("external workbook links — end-to-end", () => {
     ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 1 };
 
     const buf1 = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf1, { label: "repeated-writeBuffer pass 1" });
     const buf2 = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf2, { label: "repeated-writeBuffer pass 2" });
 
     // Public API stays empty (no user-declared links).
     expect(wb.externalLinks).toHaveLength(0);
@@ -350,6 +359,7 @@ describe("external workbook links — end-to-end", () => {
 
     expect(wb.externalLinks).toHaveLength(0);
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "auto-discovered external link" });
     expect(wb.externalLinks).toHaveLength(0);
 
     // Reading it back, though, surfaces the link — the file is complete.
@@ -377,7 +387,8 @@ describe("external workbook links — end-to-end", () => {
     // not inflate the user's sheetNames either.
     ws.getCell("A2").value = { formula: "[src.xlsx]OtherSheet!A1", result: 0 };
 
-    await wb.xlsx.writeBuffer();
+    const mutatedBuf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(mutatedBuf, { label: "no-user-link-mutation" });
 
     expect(link.rId).toBeUndefined();
     expect(link.sheetNames).toEqual(["Sheet1"]);
@@ -399,6 +410,7 @@ describe("external workbook links — end-to-end", () => {
     ws.getCell("A1").value = { formula: "[ref.xlsx]Data!A1", result: 777 };
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "stream-read-path" });
 
     // Feed the bytes through a Node Readable to exercise the streaming
     // reader path (loadFromZipEntries), not the in-memory buffer path.
@@ -435,6 +447,7 @@ describe("external workbook links — end-to-end", () => {
 
     const originalSheetNames = [...wb.externalLinks[0].sheetNames];
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "numeric-form-formula" });
 
     // User's object must not have been mutated.
     expect(wb.externalLinks[0].sheetNames).toEqual(originalSheetNames);
@@ -470,6 +483,7 @@ describe("external workbook links — end-to-end", () => {
     ws.getCell("A1").value = { formula: "[errors.xlsx]Sheet1!A1", result: 0 };
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "cached-error-values" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buf);

@@ -58,13 +58,14 @@ export function bytesEqual(a: Uint8Array | undefined, b: Uint8Array | undefined)
  */
 export async function loadRoundTrip(bytes: Uint8Array): Promise<{
   wb: Workbook;
+  bytes: Uint8Array;
   entries: EntryMap;
 }> {
   const wb = new Workbook();
   await wb.xlsx.load(bytes);
   const out = new Uint8Array(await wb.xlsx.writeBuffer());
   const entries = await extractAll(out);
-  return { wb, entries };
+  return { wb, bytes: out, entries };
 }
 
 /**

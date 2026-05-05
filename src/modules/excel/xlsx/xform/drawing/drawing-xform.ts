@@ -58,7 +58,27 @@ class DrawingXform extends BaseXform<DrawingModel> {
   render(xmlStream: any, model?: DrawingModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
-    xmlStream.openNode(this.tag, DrawingXform.DRAWING_ATTRIBUTES);
+    // `<xdr:wsDr>` must declare every namespace prefix any descendant
+    // uses. Inline `xmlns:mc=…` declarations on a deeply nested
+    // `<mc:AlternateContent>` are legal XML and strictly sufficient for
+    // the parser, but Microsoft Excel's **drawing validator** walks the
+    // anchor tree ahead of the parser and rejects the whole drawing
+    // when it encounters an element whose prefix was not pre-declared
+    // on the wsDr root ("Removed Part: /xl/drawings/drawingN.xml
+    // part. (Drawing shape)"). Excel's own output for any drawing that
+    // hosts ChartEx content therefore declares all six prefixes —
+    // `xdr`, `a`, `r`, `c`, `mc`, `cx` — at the root.
+    //
+    // Switch to the extended namespace set whenever any anchor carries
+    // `alternateContent` metadata (form-control shapes, ChartEx
+    // charts, and their `cx1` variants all use the same wrapper). The
+    // bare `xdr` + `a` set is correct for "legacy only" drawings and
+    // round-trips byte-for-byte with Excel's output for those files.
+    const needsMcNamespaces = renderModel!.anchors.some(a => !!a?.alternateContent);
+    const rootAttrs = needsMcNamespaces
+      ? DrawingXform.DRAWING_ATTRIBUTES_WITH_MC
+      : DrawingXform.DRAWING_ATTRIBUTES;
+    xmlStream.openNode(this.tag, rootAttrs);
 
     renderModel!.anchors.forEach(item => {
       const anchor = this.map[item.anchorType];
@@ -192,6 +212,29 @@ class DrawingXform extends BaseXform<DrawingModel> {
   static DRAWING_ATTRIBUTES = {
     "xmlns:xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
     "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main"
+  };
+
+  /**
+   * Extended namespace set used when the drawing contains anchors
+   * wrapped in `<mc:AlternateContent>` — the ChartEx case. Excel's
+   * strict loader requires the `mc`, `r`, `c`, and `cx` prefixes at
+   * the root of `<xdr:wsDr>` before it will parse `<mc:Choice>` /
+   * `<cx:chart>` descendants. Declaring them only inside the inner
+   * `<mc:AlternateContent>` element (as earlier versions did) made
+   * Excel reject the drawing and report "Removed Part:
+   * /xl/drawings/drawingN.xml (Drawing shape)".
+   *
+   * Mirrors what Excel itself emits when it writes a drawing that
+   * hosts a ChartEx chart — see `__tests__/data/workbook-roundtrip-
+   * chartex.xlsx` (fixtures authored by Excel 2016+).
+   */
+  static DRAWING_ATTRIBUTES_WITH_MC = {
+    "xmlns:xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "xmlns:c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+    "xmlns:cx": "http://schemas.microsoft.com/office/drawing/2014/chartex"
   };
 }
 

@@ -133,35 +133,158 @@ export interface PdfPageSetupData {
   printArea?: string;
 }
 
+/** Anchor range shared by embedded images and charts. */
+export interface PdfAnchorRange {
+  tl: {
+    col: number;
+    row: number;
+    nativeCol?: number;
+    nativeRow?: number;
+    nativeColOff?: number;
+    nativeRowOff?: number;
+  };
+  br?: {
+    col: number;
+    row: number;
+    nativeCol?: number;
+    nativeRow?: number;
+    nativeColOff?: number;
+    nativeRowOff?: number;
+  };
+  /**
+   * Image variant uses pixels (px × 0.75 = pt).
+   * Chart variant uses EMU (cx / 9525 = pt).
+   * The layout engine picks the correct conversion via `extUnit`.
+   */
+  ext?: { width: number; height: number };
+  /** Unit of measure for `ext`. Defaults to "px" for backwards compatibility. */
+  extUnit?: "px" | "emu";
+}
+
 /** An image embedded in a sheet. */
 export interface PdfSheetImage {
   data: Uint8Array;
   format: "jpeg" | "png";
-  range: {
-    tl: {
-      col: number;
-      row: number;
-      nativeCol?: number;
-      nativeRow?: number;
-      nativeColOff?: number;
-      nativeRowOff?: number;
-    };
-    br?: {
-      col: number;
-      row: number;
-      nativeCol?: number;
-      nativeRow?: number;
-      nativeColOff?: number;
-      nativeRowOff?: number;
-    };
-    ext?: { width: number; height: number };
-  };
+  range: PdfAnchorRange;
 }
 
-/** A single sheet in the PDF input model. */
+/**
+ * Path operator set understood by {@link PdfChartDrawingSurface}.`drawPath`.
+ * Structurally compatible with `ChartPdfPathOp` from `@excel/chart` so the
+ * excel-bridge can forward between the two at the cast boundary.
+ */
+export type PdfChartPathOp =
+  | { op: "move"; x: number; y: number }
+  | { op: "line"; x: number; y: number }
+  | { op: "curve"; x1: number; y1: number; x2: number; y2: number; x3: number; y3: number }
+  | { op: "close" };
+
+/**
+ * Drawing surface used by vector chart renderers when embedded in a PDF page.
+ *
+ * Structurally compatible with `ChartPdfDrawingSurface` from the Excel chart
+ * renderer. Declared locally in the PDF layer so the rendering pipeline does
+ * not need to import chart types — only `excel-bridge.ts` (the documented
+ * layer-crossing file) forwards real chart models to the surface.
+ *
+ * All coordinates are in **PDF points with bottom-left origin**, matching the
+ * convention the chart renderer emits after its internal Y-flip.
+ */
+export interface PdfChartDrawingSurface {
+  drawRect(options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fill?: PdfColor;
+    stroke?: PdfColor;
+    lineWidth?: number;
+  }): unknown;
+  drawLine(options: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    color?: PdfColor;
+    lineWidth?: number;
+    dashPattern?: number[];
+  }): unknown;
+  drawText(
+    text: string,
+    options: {
+      x: number;
+      y: number;
+      fontSize?: number;
+      color?: PdfColor;
+      rotation?: number;
+      anchor?: "start" | "middle" | "end";
+      bold?: boolean;
+      italic?: boolean;
+      fontFamily?: string;
+    }
+  ): unknown;
+  drawCircle?(options: {
+    cx: number;
+    cy: number;
+    r: number;
+    fill?: PdfColor;
+    stroke?: PdfColor;
+    lineWidth?: number;
+  }): unknown;
+  drawPath?(
+    ops: PdfChartPathOp[],
+    options?: {
+      fill?: PdfColor;
+      stroke?: PdfColor;
+      closePath?: boolean;
+      lineWidth?: number;
+      dashPattern?: number[];
+    }
+  ): unknown;
+}
+
+/**
+ * A chart embedded in a sheet.
+ *
+ * Either provides a `drawVector` callback (preferred — selectable text,
+ * resolution-independent shapes) or a pre-rasterised `raster` payload that
+ * falls through to the image XObject pipeline. Exactly one of the two should
+ * be populated; if both are present the renderer prefers `drawVector`.
+ */
+export interface PdfSheetChart {
+  range: PdfAnchorRange;
+  /**
+   * Vector renderer. Bound in `excel-bridge.ts` over the concrete chart
+   * model; the PDF pipeline invokes it with a surface that adapts the
+   * current page's content stream. `rect` is in PDF page coordinates
+   * (bottom-left origin).
+   */
+  drawVector?: (
+    surface: PdfChartDrawingSurface,
+    rect: { x: number; y: number; width: number; height: number }
+  ) => void;
+  /**
+   * Raster fallback used when the chart has no vector path (currently only
+   * ChartEx layouts not in the `VECTOR_PDF_CHART_EX_LAYOUT_IDS` whitelist).
+   */
+  raster?: { data: Uint8Array; format: "png" | "jpeg" };
+}
+
+/** A single cell-grid sheet in the PDF input model. */
 export interface PdfSheetData {
+  /**
+   * Discriminator. Optional for backwards compatibility — when absent the
+   * exporter treats the sheet as a regular cell-grid worksheet.
+   */
+  kind?: "worksheet";
   name: string;
   state?: "visible" | "hidden" | "veryHidden";
+  /**
+   * Tab order from the source workbook. Used by `excelToPdf` to interleave
+   * worksheets and chartsheets in the same order Excel would display them.
+   * Optional; when absent the sheet keeps its array position.
+   */
+  orderNo?: number;
   /** Data bounds (1-based) */
   bounds: { top: number; left: number; bottom: number; right: number };
   /** Columns keyed by 1-based column number */
@@ -177,6 +300,58 @@ export interface PdfSheetData {
   colBreaks?: number[];
   /** Embedded images */
   images?: PdfSheetImage[];
+  /** Embedded charts (classic + ChartEx) */
+  charts?: PdfSheetChart[];
+}
+
+/**
+ * A chartsheet — a single-chart "sheet" with no cell grid.
+ *
+ * Excel stores chartsheets under `xl/chartsheets/sheetN.xml`, parallel to
+ * the worksheet family. A chartsheet has no rows/columns/cells; the entire
+ * printed canvas is one chart. The PDF pipeline honours that semantic: a
+ * chartsheet produces exactly one LayoutPage with a single chart filling
+ * the content area (below the optional header, above the optional footer).
+ */
+export interface PdfChartsheetData {
+  kind: "chartsheet";
+  name: string;
+  state?: "visible" | "hidden" | "veryHidden";
+  /** Tab order — used to interleave with worksheets. See {@link PdfSheetData.orderNo}. */
+  orderNo?: number;
+  /**
+   * Page orientation override. Excel's chartsheets default to landscape
+   * (wider canvas suits most charts) and we keep that default when this
+   * field is absent.
+   */
+  orientation?: "portrait" | "landscape";
+  /** The single chart that fills the sheet canvas. */
+  chart: {
+    drawVector?: PdfSheetChart["drawVector"];
+    raster?: PdfSheetChart["raster"];
+  };
+  /**
+   * Optional page setup overrides. Only a subset of the worksheet
+   * `PdfPageSetupData` is meaningful here (chartsheets don't have
+   * gridlines, print titles, row/col breaks, etc.). The renderer reads
+   * `orientation` off `this.orientation` first, then falls back to
+   * `pageSetup?.orientation`.
+   */
+  pageSetup?: PdfPageSetupData;
+}
+
+/**
+ * Union of sheet shapes accepted by {@link PdfWorkbook.sheets}.
+ *
+ * Named `PdfWorkbookSheet` (not `PdfSheet`) because `PdfSheet` already
+ * denotes a different user-facing input type in `pdf.ts` — the simple
+ * "pass me a 2D array or a single sheet description" shape.
+ */
+export type PdfWorkbookSheet = PdfSheetData | PdfChartsheetData;
+
+/** Type guard distinguishing chartsheets from cell-grid worksheets. */
+export function isPdfChartsheet(sheet: PdfWorkbookSheet): sheet is PdfChartsheetData {
+  return sheet.kind === "chartsheet";
 }
 
 /**
@@ -187,7 +362,7 @@ export interface PdfWorkbook {
   title?: string;
   creator?: string;
   subject?: string;
-  sheets: PdfSheetData[];
+  sheets: PdfWorkbookSheet[];
 }
 
 // =============================================================================
@@ -808,6 +983,8 @@ export interface LayoutPage {
   rowHeights: number[];
   /** Images to render on this page */
   images: LayoutImage[];
+  /** Charts to render on this page */
+  charts: LayoutChart[];
   /** Scale factor applied to this page (for fitToPage) */
   scaleFactor: number;
 }
@@ -822,4 +999,23 @@ export interface LayoutImage {
   format: "jpeg" | "png";
   /** Rectangle in page coordinates (PDF points, origin bottom-left) */
   rect: PdfRect;
+}
+
+/**
+ * A positioned chart on a PDF page.
+ *
+ * Either `drawVector` (preferred) or `raster` must be provided; the exporter
+ * prefers `drawVector` when both are present so the PDF keeps selectable
+ * text and resolution-independent shapes.
+ */
+export interface LayoutChart {
+  /** Rectangle in page coordinates (PDF points, origin bottom-left) */
+  rect: PdfRect;
+  /** Vector rendering callback, if the chart can be drawn as PDF geometry. */
+  drawVector?: (
+    surface: PdfChartDrawingSurface,
+    rect: { x: number; y: number; width: number; height: number }
+  ) => void;
+  /** Raster fallback for charts that have no vector path. */
+  raster?: { data: Uint8Array; format: "png" | "jpeg" };
 }

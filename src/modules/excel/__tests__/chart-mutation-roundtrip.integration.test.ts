@@ -24,6 +24,7 @@ import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runLibreOfficeOpenValidationAuto } from "./helpers/external-oracle";
 import {
   buildClassicPresetFixtures,
@@ -186,6 +187,7 @@ describe("Chart mutation round-trip", () => {
         const chart = wb.getWorksheet("Data")!.getCharts()[0];
         chart.title = `Pass ${i + 1}`;
         bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+        await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
         const entries = await extractAll(bytes);
         const xml = chartParts(entries).chartXml;
         expect(xml, `pass ${i + 1} marker`).toContain("SYNTHETIC-FIXTURE");
@@ -220,7 +222,9 @@ describe("Chart mutation round-trip", () => {
             model.chartSpace.chart.autoTitleDeleted = false;
           }
         });
-        const after = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+        const afterBytes = new Uint8Array(await wb.xlsx.writeBuffer());
+        await expectValidXlsx(afterBytes, { label: fixture.id });
+        const after = await extractAll(afterBytes);
         const chartExPath = [...after.keys()].find(name =>
           /^xl\/charts\/chartEx\d+[.]xml$/.test(name)
         );
@@ -249,6 +253,7 @@ describe("Chart mutation round-trip", () => {
       const chart = wb.getWorksheet("Data")!.getCharts()[0];
       chart.title = "LO-mutated title";
       const out = new Uint8Array(await wb.xlsx.writeBuffer());
+      await expectValidXlsx(out, { label: "mutated-classic-LO" });
       const result = await runLibreOfficeOpenValidationAuto(out, "mutated-classic.xlsx");
       if (!result.available) {
         expect(result.skipped).toBeTruthy();
@@ -279,6 +284,7 @@ describe("Chart mutation round-trip", () => {
           }
         });
         mutated = new Uint8Array(await wb.xlsx.writeBuffer());
+        await expectValidXlsx(mutated, { label: `mutated-chartEx-${fixture.id}` });
         pickedId = fixture.id;
         break;
       }

@@ -290,6 +290,16 @@ class WorkSheetXform extends BaseXform {
             index: anchor.graphicFrame?.index,
             name: anchor.graphicFrame?.name ?? `Chart ${anchor.chartExNumber}`
           };
+          // ChartEx MUST be serialised inside `<mc:AlternateContent>`
+          // — see TwoCellAnchorXform.render for the full rationale.
+          // Tag the anchor here so re-saves of files we authored
+          // ourselves (which load without the wrapper in the current
+          // codebase) still emit the correct structure on the next
+          // write. Files that came in already wrapped keep whatever
+          // requires value the parser captured.
+          if (!anchor.alternateContent) {
+            anchor.alternateContent = { requires: "cx1" };
+          }
         } else {
           // Traditional c: chart
           drawing.rels.push({
@@ -401,7 +411,7 @@ class WorkSheetXform extends BaseXform {
             drawing.anchors.push({
               range: normalizedRange,
               chartExNumber: chartAnchor.chartExNumber,
-              alternateContent: { requires: "cx" },
+              alternateContent: { requires: "cx1" },
               graphicFrame: {
                 rId: chartRId,
                 isChartEx: true,
@@ -769,11 +779,17 @@ class WorkSheetXform extends BaseXform {
     // factually wrong.
     this.map.ignoredErrors.render(xmlStream, model.ignoredErrors);
     this.map.drawing.render(xmlStream, model.drawing); // Note: must be after rowBreaks/colBreaks
-    this.map.picture.render(xmlStream, model.background); // Note: must be after drawing
 
+    // ECMA-376 §18.3.1.99 CT_Worksheet child sequence is:
+    //   … drawing → legacyDrawing → legacyDrawingHF → drawingHF → picture → oleObjects → controls →
+    //   webPublishItems → tableParts → extLst
+    // `legacyDrawing` and `legacyDrawingHF` therefore MUST be emitted
+    // before the background `<picture>` element. The previous order here
+    // had picture before legacyDrawing, which validates against strict
+    // OOXML checkers as out-of-order and was the root cause of several
+    // "Excel needs to repair" reports.
     if (model.rels) {
       // Add a <legacyDrawing /> node for each VML drawing relationship (comments and/or form controls).
-      // NOTE: Excel is picky about worksheet child element order; legacyDrawing must come before controls.
       model.rels.forEach(rel => {
         if (rel.Type === RelType.VmlDrawing) {
           // Skip VML rels that are for header images (they use legacyDrawingHF instead)
@@ -789,6 +805,10 @@ class WorkSheetXform extends BaseXform {
     if (model.headerImage) {
       xmlStream.leafNode("legacyDrawingHF", { "r:id": model.headerImage.vmlRelId });
     }
+
+    // Background image: must be emitted AFTER drawing/legacyDrawing per
+    // the CT_Worksheet sequence noted above.
+    this.map.picture.render(xmlStream, model.background);
 
     // Controls section for legacy form controls (checkboxes, etc.)
     // Excel expects <controls> entries that reference ctrlProp relationships.

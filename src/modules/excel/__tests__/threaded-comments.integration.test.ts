@@ -20,6 +20,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { describe, it, expect } from "vitest";
 
 import { Workbook, type ThreadedComment } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const decoder = new TextDecoder();
 
@@ -51,6 +52,7 @@ describe("threaded comments round-trip", () => {
     ws.threadedComments.push({ ref: "A1", comment: reply });
 
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "threaded-comments emit" });
     const entries = await extractAll(new Uint8Array(buf));
 
     // Parts landed at the expected paths.
@@ -103,6 +105,7 @@ describe("threaded comments round-trip", () => {
     });
 
     const firstBuf = await wb1.xlsx.writeBuffer();
+    await expectValidXlsx(firstBuf, { label: "threaded-comments roundtrip 1" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(firstBuf);
 
@@ -123,6 +126,7 @@ describe("threaded comments round-trip", () => {
     // byte equality, because element attribute order isn't strictly
     // controlled by the writer.
     const secondBuf = await wb2.xlsx.writeBuffer();
+    await expectValidXlsx(secondBuf, { label: "threaded-comments roundtrip 2" });
     const secondEntries = await extractAll(new Uint8Array(secondBuf));
     expect(secondEntries.get("xl/persons/person.xml")).toBeDefined();
     expect(secondEntries.get("xl/threadedComments/threadedComment1.xml")).toBeDefined();
@@ -153,6 +157,7 @@ describe("threaded comments round-trip", () => {
       }
     });
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "threaded-comments mentions" });
     const entries = await extractAll(new Uint8Array(buf));
     const xml = decoder.decode(entries.get("xl/threadedComments/threadedComment1.xml")!.data);
     expect(xml).toContain("<mentions>");
@@ -185,6 +190,7 @@ describe("threaded comments round-trip", () => {
     const ws = wb.addWorksheet("Sheet1");
     ws.getCell("A1").value = 1;
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "no-threaded-comments" });
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/persons/person.xml")).toBeUndefined();
     expect(entries.get("xl/threadedComments/threadedComment1.xml")).toBeUndefined();

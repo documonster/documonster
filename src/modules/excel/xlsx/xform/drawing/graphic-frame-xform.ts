@@ -22,9 +22,15 @@
  */
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { uuidV4 } from "@utils/uuid";
 
 const CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const CHART_EX_URI = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+// URI identifying the Office `creationId` extension registered on
+// `xdr:cNvPr`. This GUID is the Microsoft-assigned registry value
+// for the extension — every Office-authored drawing carries the
+// same uri on this element.
+const CREATION_ID_EXT_URI = "{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}";
 
 export interface GraphicFrameModel {
   /** Drawing object index (1-based unique id within the drawing part) */
@@ -66,17 +72,49 @@ class GraphicFrameXform extends BaseXform {
 
     // Non-visual properties
     xmlStream.openNode("xdr:nvGraphicFramePr");
+    // Microsoft Excel starts `xdr:cNvPr/@id` at 2 (id 1 is
+    // reserved for the anchor's own non-visual drawing id slot
+    // internal to Office's drawing engine). Mirror the convention
+    // here so freshly-authored drawings round-trip byte-for-byte
+    // against Excel's output. Loaded files retain whatever id they
+    // carried at parse time via `model.index`.
+    const cNvPrId = model.index ?? 2;
+    const cNvPrName = model.name ?? `Chart ${cNvPrId}`;
     if (model.cNvPrExtLst) {
       xmlStream.openNode("xdr:cNvPr", {
-        id: model.index ?? 0,
-        name: model.name ?? `Chart ${model.index ?? 1}`
+        id: cNvPrId,
+        name: cNvPrName
       });
       xmlStream.writeRaw(model.cNvPrExtLst);
       xmlStream.closeNode(); // xdr:cNvPr
+    } else if (model.isChartEx) {
+      // ChartEx drawings — auto-generate Microsoft's standard
+      // `<a:extLst>` with an `<a16:creationId>` extension so
+      // Excel 2019+ can track the drawing across sessions.
+      // Without this extension, strict Excel builds have been
+      // observed to reject the drawing part on load with
+      // "Removed Part: /xl/drawings/drawingN.xml (Drawing shape)"
+      // even when the chartEx reference inside is otherwise
+      // valid. A random UUID suffices — the id only has to be
+      // stable within a given saved file; it isn't a content
+      // address.
+      xmlStream.openNode("xdr:cNvPr", {
+        id: cNvPrId,
+        name: cNvPrName
+      });
+      xmlStream.openNode("a:extLst");
+      xmlStream.openNode("a:ext", { uri: CREATION_ID_EXT_URI });
+      xmlStream.leafNode("a16:creationId", {
+        "xmlns:a16": "http://schemas.microsoft.com/office/drawing/2014/main",
+        id: `{${uuidV4().toUpperCase()}}`
+      });
+      xmlStream.closeNode(); // a:ext
+      xmlStream.closeNode(); // a:extLst
+      xmlStream.closeNode(); // xdr:cNvPr
     } else {
       xmlStream.leafNode("xdr:cNvPr", {
-        id: model.index ?? 0,
-        name: model.name ?? `Chart ${model.index ?? 1}`
+        id: cNvPrId,
+        name: cNvPrName
       });
     }
     xmlStream.leafNode("xdr:cNvGraphicFramePr");

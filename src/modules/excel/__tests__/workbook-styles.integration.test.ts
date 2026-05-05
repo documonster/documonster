@@ -2,6 +2,7 @@ import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const TEST_XLSX_FILE_NAME = testFilePath("workbook-styles.test");
 
@@ -44,6 +45,7 @@ describe("Workbook", () => {
       ws.getCell("C3").value = "C3";
 
       await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
       const wb2 = new Workbook();
       await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
 
@@ -88,6 +90,7 @@ describe("Workbook", () => {
       ws.getCell("B4").font = testUtils.styles.fonts.broadwayRedOutline20;
 
       await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
       const wb2 = new Workbook();
       await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
 

@@ -10,8 +10,8 @@ import {
   discoverEnterpriseCorpus,
   loadEnterpriseCorpusManifest
 } from "./helpers/enterprise-corpus";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runExternalOracle, runOfficeOpenValidation } from "./helpers/external-oracle";
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
 
 describe("optional chart oracle and enterprise corpus harness", () => {
   it("optionally exports chart workbooks through LibreOffice as a visual oracle hook", async () => {
@@ -26,10 +26,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       "D1:J10"
     );
     const input = new Uint8Array(await workbook.xlsx.writeBuffer());
-    const zip = await extractAll(input);
-    const audit = auditOoxmlPackage(zip);
-
-    expect(audit.errors, audit.errors.join("\n")).toEqual([]);
+    await expectValidXlsx(input);
 
     const result = await runExternalOracle({
       envFlag: "EXCELTS_LIBREOFFICE_VISUAL_ORACLE",
@@ -86,8 +83,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     });
 
     const input = new Uint8Array(await workbook.xlsx.writeBuffer());
-    const audit = auditOoxmlPackage(await extractAll(input));
-    expect(audit.errors, audit.errors.join("\n")).toEqual([]);
+    await expectValidXlsx(input);
 
     const libreOffice = await runOfficeOpenValidation({
       envFlag: "EXCELTS_LIBREOFFICE_OPEN_VALIDATION",
@@ -143,10 +139,10 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       const wb = new Workbook();
       await wb.xlsx.load(input);
       const output = await wb.xlsx.writeBuffer();
-      const zip = await extractAll(new Uint8Array(output));
-      const audit = auditOoxmlPackage(zip);
+      const outBytes = new Uint8Array(output);
+      const zip = await extractAll(outBytes);
+      await expectValidXlsx(outBytes, { label: entry.path });
 
-      expect(audit.errors, `${entry.path}\n${audit.errors.join("\n")}`).toEqual([]);
       expect(zip.get("xl/workbook.xml")).toBeDefined();
       if (entry.expectCharts) {
         expect([...zip.keys()].some(path => /^xl\/charts\/chart\d+\.xml$/.test(path))).toBe(true);

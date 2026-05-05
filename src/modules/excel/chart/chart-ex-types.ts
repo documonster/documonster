@@ -138,6 +138,15 @@ export interface ChartExStringDimension {
   formula?: string;
   /** Level array (each level is one row of string points) */
   levels?: Array<{ ptCount?: number; points: Array<{ index: number; value: string }> }>;
+  /**
+   * @internal Skip `fillChartExCaches` population. Set on hierarchical
+   * (treemap / sunburst) `<cx:strDim>` entries whose `<cx:f>` points to
+   * a contiguous multi-column range — Excel expects NO `<cx:lvl>` cache
+   * on those dimensions and re-reads the cells on open. Caching the
+   * flattened point list into a single `<cx:lvl>` makes the hierarchy
+   * renderer paint an empty plot area.
+   */
+  _skipCache?: boolean;
 }
 
 export interface ChartExNumericDimension {
@@ -151,6 +160,8 @@ export interface ChartExNumericDimension {
     formatCode?: string;
     points: Array<{ index: number; value: number }>;
   }>;
+  /** @internal See `ChartExStringDimension._skipCache`. */
+  _skipCache?: boolean;
 }
 
 export type ChartExDimensionType =
@@ -396,6 +407,14 @@ export interface ChartExAxis {
   majorGridlines?: ShapeProperties;
   /** `<cx:minorGridlines>` — same semantics at minor tick positions. */
   minorGridlines?: ShapeProperties;
+  /**
+   * `<cx:tickLabels>` — tick-label rendering flag. Excel emits an
+   * empty `<cx:tickLabels/>` on every axis by default; without it
+   * the tick labels are suppressed entirely on load. Treated the
+   * same way as `majorGridlines`: `undefined` means "omit",
+   * presence (even as an empty object) means "emit `<cx:tickLabels/>`".
+   */
+  tickLabels?: Record<string, never> | { rawXml?: string };
   /** Number format */
   numFmt?: { formatCode: string; sourceLinked?: boolean };
   /** Shape properties */

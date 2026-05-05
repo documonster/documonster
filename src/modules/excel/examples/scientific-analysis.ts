@@ -370,18 +370,22 @@ async function main(): Promise<void> {
   dist.getCell("A1").value = "Distribution analysis — histogram, Pareto, box-whisker";
   dist.getCell("A1").font = { size: 14, bold: true, color: { argb: "FFED7D31" } };
 
+  // ChartEx charts prefer absolute-reference ranges over structured-table
+  // references in their `<cx:f>`. Using `Samples[Response]` works in
+  // some builds but Excel 2016 can surface a "Removed Records: Chart
+  // from /xl/charts/chartEx*" on open. Point directly at the cell
+  // range instead.
+  const samplesDataEnd = samples.length + 1; // row index of the last data row
+  const groupRange = `Samples!$A$2:$A$${samplesDataEnd}`;
+  const responseRange = `Samples!$D$2:$D$${samplesDataEnd}`;
+
   // ---- 4.1 Histogram — all responses
   dist.getCell("A3").value = "Histogram of all responses";
   dist.getCell("A3").font = { bold: true };
   dist.addHistogramChart(
     {
       title: "Response distribution (all groups)",
-      series: [
-        {
-          name: "Response",
-          values: `Samples[Response]`
-        }
-      ],
+      series: [{ name: "Response", values: responseRange }],
       binning: { binType: "auto" }
     },
     "A4:F22"
@@ -393,7 +397,7 @@ async function main(): Promise<void> {
   dist.addParetoChart(
     {
       title: "Response Pareto",
-      series: [{ name: "Response", values: `Samples[Response]` }],
+      series: [{ name: "Response", values: responseRange }],
       binning: { binType: "binCount", binCount: 12 }
     },
     "G4:L22"
@@ -405,8 +409,8 @@ async function main(): Promise<void> {
   dist.addBoxWhiskerChart(
     {
       title: "Response box-whisker by group",
-      categories: `Samples[Group]`,
-      series: [{ name: "Response", values: `Samples[Response]` }],
+      categories: groupRange,
+      series: [{ name: "Response", values: responseRange }],
       layout: {
         quartileMethod: "inclusive",
         showMeanLine: true,
@@ -480,6 +484,7 @@ async function main(): Promise<void> {
 
   regr.getCell("A6").value = "Scatter + 4 simultaneous model fits";
   regr.getCell("A6").font = { bold: true };
+  const doseRange = `Samples!$C$2:$C$${samples.length + 1}`;
   regr.addChart(
     {
       type: "scatter",
@@ -499,8 +504,8 @@ async function main(): Promise<void> {
       series: [
         {
           name: "Samples",
-          xValues: `Samples[Dose_mgkg]`,
-          values: `Samples[Response]`,
+          xValues: doseRange,
+          values: responseRange,
           marker: { symbol: "circle", size: 5, fill: "5B9BD5", border: "FFFFFF" },
           trendline: trendlines,
           errorBars: {

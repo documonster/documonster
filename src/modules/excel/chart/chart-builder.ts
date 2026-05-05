@@ -38,6 +38,7 @@ import type {
   ChartTypeGroup,
   DataLabels,
   DataLabelEntry,
+  DataLabelPosition,
   DataPoint,
   DataTable,
   DoughnutChartGroup,
@@ -112,6 +113,54 @@ const PIE_FAMILY_CHART_TYPES = new Set<AddChartOptions["type"]>([
   "doughnut",
   "ofPie"
 ]);
+
+/**
+ * Valid `c:dLblPos` values Excel accepts per chart type.
+ *
+ * Although ECMA-376 `ST_DLblPos` technically allows any of the nine
+ * values (`b | bestFit | ctr | inBase | inEnd | l | outEnd | r | t`)
+ * on any `c:dLbl` / `c:dLbls` element, Excel's reader is stricter:
+ * emitting a value outside the per-chart-type allow-list below
+ * triggers "Repaired Records: Drawing" warnings on open, and for
+ * doughnut charts the offending `drawing*.xml` part is stripped
+ * entirely ("Removed Part"). The allow-lists match the options
+ * surfaced by Excel 365's "Format Data Labels → Label Position"
+ * panel, which is the canonical UI reference.
+ *
+ * - `doughnut`: Excel's UI exposes no position choices at all, and
+ *   any `c:dLblPos` in a doughnut chart's `c:dLbls` causes the
+ *   entire drawing part to be removed on open. Use an empty list so
+ *   the validator rejects every value.
+ * - `bar` / `bar3D`: `inBase` is unique to bar — it anchors the
+ *   label to the axis end of a column, useful for negative values.
+ * - `pie`, `pie3D`, `ofPie`: share the pie label set. `bestFit` is
+ *   Excel's default and the only value that lets Excel place labels
+ *   automatically with leader lines.
+ * - `line` / `line3D` / `scatter` / `bubble` / `radar` / `stock`:
+ *   share the cartesian label set (above / below / left / right /
+ *   center).
+ * - `area` / `area3D`: Excel only accepts `ctr` for area fills.
+ * - `surface` / `surface3D`: data labels are already rejected
+ *   wholesale by `validateChartLevelOptions`.
+ */
+const VALID_DLBL_POSITIONS_BY_TYPE: Partial<
+  Record<AddChartOptions["type"], ReadonlySet<DataLabelPosition>>
+> = {
+  bar: new Set<DataLabelPosition>(["ctr", "inBase", "inEnd", "outEnd"]),
+  bar3D: new Set<DataLabelPosition>(["ctr", "inBase", "inEnd", "outEnd"]),
+  line: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  line3D: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  scatter: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  bubble: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  radar: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  stock: new Set<DataLabelPosition>(["ctr", "l", "r", "t", "b"]),
+  pie: new Set<DataLabelPosition>(["bestFit", "ctr", "inEnd", "outEnd"]),
+  pie3D: new Set<DataLabelPosition>(["bestFit", "ctr", "inEnd", "outEnd"]),
+  ofPie: new Set<DataLabelPosition>(["bestFit", "ctr", "inEnd", "outEnd"]),
+  doughnut: new Set<DataLabelPosition>(),
+  area: new Set<DataLabelPosition>(["ctr"]),
+  area3D: new Set<DataLabelPosition>(["ctr"])
+};
 
 /**
  * Simple axis ID allocator — scoped per buildChartModel call.
@@ -314,6 +363,13 @@ function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
   }
   if ((opts.type === "surface" || opts.type === "surface3D") && opts.dataLabels !== undefined) {
     assertChartOptions(false, `${path}.dataLabels is not supported for surface charts.`);
+  }
+  if (opts.dataLabels) {
+    // Chart-level data labels mirror the series-level ones at the
+    // `CT_*Chart/c:dLbls` slot (e.g. `CT_BarChart/c:dLbls`). Excel
+    // applies the same per-chart-type restrictions on `c:dLblPos`
+    // at this level, so run the same validator here.
+    validateDataLabelsOptions(opts.type, opts.dataLabels, `${path}.dataLabels`);
   }
   if (opts.holeSize !== undefined) {
     assertChartOptions(
@@ -532,6 +588,9 @@ function validateSeriesOptions(
       validateDataPointOptions(chartType, opts.dataPoints[i], `${path}.dataPoints[${i}]`);
     }
   }
+  if (opts.dataLabels) {
+    validateDataLabelsOptions(chartType, opts.dataLabels, `${path}.dataLabels`);
+  }
   if (opts.errorBars) {
     assertChartOptions(
       !PIE_FAMILY_CHART_TYPES.has(chartType),
@@ -550,6 +609,36 @@ function validateSeriesOptions(
       assertChartOptions(
         false,
         `${path}.errorBars must be a single configuration for ${chartType} charts; arrays are only valid for scatter and bubble.`
+      );
+    }
+    // Scatter / bubble: CT_ScatterSer / CT_BubbleSer declare
+    // `errBars` as `maxOccurs="2"` — one X, one Y. Allowing more
+    // than two (or two with the same `c:errDir`) is an OOXML schema
+    // violation and causes Excel to repair the chart on open,
+    // silently dropping the extras. Fail the author up-front so
+    // mistakes like passing an array of "every error-bar type" on a
+    // single series are caught rather than producing a file that
+    // prompts a repair dialog.
+    if (
+      (chartType === "scatter" || chartType === "bubble") &&
+      Array.isArray(opts.errorBars) &&
+      opts.errorBars.length > 2
+    ) {
+      assertChartOptions(
+        false,
+        `${path}.errorBars allows at most 2 entries on ${chartType} charts (one for direction "x", one for "y"). Split additional configurations across separate series.`
+      );
+    }
+    if (
+      (chartType === "scatter" || chartType === "bubble") &&
+      Array.isArray(opts.errorBars) &&
+      opts.errorBars.length === 2
+    ) {
+      const d0 = opts.errorBars[0]?.direction;
+      const d1 = opts.errorBars[1]?.direction;
+      assertChartOptions(
+        d0 !== undefined && d1 !== undefined && d0 !== d1,
+        `${path}.errorBars must use distinct directions ("x" and "y") when providing two entries on ${chartType} charts.`
       );
     }
     for (let i = 0; i < errorBars.length; i++) {
@@ -639,6 +728,51 @@ function validateErrorBarsOptions(opts: AddErrorBarsOptions, path: string): void
   }
   if (opts.value !== undefined) {
     assertNumberInRange(opts.value, `${path}.value`, 0, Number.MAX_SAFE_INTEGER);
+  }
+}
+
+/**
+ * Ensure every `dLblPos` value (group-level and per-entry overrides)
+ * is one that Excel will accept for the chart type — see the
+ * rationale on {@link VALID_DLBL_POSITIONS_BY_TYPE}. Writing an
+ * invalid position causes Excel to flag the drawing as corrupted
+ * ("Repaired Records" / "Removed Part") even though the OOXML
+ * schema would technically accept it.
+ *
+ * Rejects at author time so the caller gets a pointer to the exact
+ * offending field rather than debugging a Removed Part dialog.
+ */
+function validateDataLabelsOptions(
+  chartType: AddChartOptions["type"],
+  opts: AddDataLabelsOptions,
+  path: string
+): void {
+  const allowed = VALID_DLBL_POSITIONS_BY_TYPE[chartType];
+  const describeAllowed = (): string => {
+    if (!allowed) {
+      return "(unknown chart type)";
+    }
+    if (allowed.size === 0) {
+      return `(${chartType} does not support c:dLblPos — Excel rejects any value)`;
+    }
+    return [...allowed].sort().join(", ");
+  };
+  if (opts.position !== undefined) {
+    assertChartOptions(
+      !!allowed && allowed.has(opts.position),
+      `${path}.position="${opts.position}" is not valid for ${chartType} charts. Allowed: ${describeAllowed()}.`
+    );
+  }
+  if (opts.entries) {
+    for (let i = 0; i < opts.entries.length; i++) {
+      const entry = opts.entries[i];
+      if (entry?.position !== undefined) {
+        assertChartOptions(
+          !!allowed && allowed.has(entry.position),
+          `${path}.entries[${i}].position="${entry.position}" is not valid for ${chartType} charts. Allowed: ${describeAllowed()}.`
+        );
+      }
+    }
   }
 }
 

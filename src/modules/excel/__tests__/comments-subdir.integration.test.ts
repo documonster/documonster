@@ -10,6 +10,7 @@ import { ZipArchive } from "@archive/zip";
 import { describe, it, expect } from "vitest";
 
 import { Workbook, Note } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 // =============================================================================
 // Helpers
@@ -26,7 +27,9 @@ async function buildCommentsXlsx(): Promise<Uint8Array> {
   ws.getCell("B2").value = "World";
   ws.getCell("B2").comment = new Note({ texts: [{ text: "Comment by Bob" }] }, "Bob");
 
-  return wb.xlsx.writeBuffer();
+  const buffer = new Uint8Array(await wb.xlsx.writeBuffer());
+  await expectValidXlsx(buffer, { label: "comments-subdir build" });
+  return buffer;
 }
 
 /**
@@ -137,6 +140,7 @@ describe("Comments subdirectory layout", () => {
     ws.getCell("A1").comment = new Note({ texts: [{ text: "No author set" }] });
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "comment-default-author" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
     const ws2 = wb2.getWorksheet("Sheet1")!;

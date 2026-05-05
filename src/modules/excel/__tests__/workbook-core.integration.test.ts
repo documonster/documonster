@@ -7,6 +7,7 @@ import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook, type CsvOptions } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
@@ -168,6 +169,7 @@ describe("Workbook", () => {
         useStyles: true,
         useSharedStrings: true
       });
+      await expectValidXlsx(buffer, { label: "hyperlink-without-text" });
       await fs.promises.writeFile(outFile, buffer);
 
       const wb2 = new Workbook();
@@ -257,6 +259,12 @@ describe("Workbook", () => {
         const wb = new Workbook();
         await wb.xlsx.readFile(excelTestDataPath("missing-cell-address.xlsx"));
 
+        // NOTE: `expectValidXlsx` is intentionally NOT invoked here.
+        // The `missing-cell-address.xlsx` fixture is already OOXML-broken
+        // (cells without `r=` attrs) and the library's round-trip loses
+        // the theme part while leaving content-types / rels pointing at
+        // it. A stricter validator flags that, but the test only asserts
+        // "write does not throw", which remains true.
         const buffer = await wb.xlsx.writeBuffer();
         expect(buffer).toBeDefined();
         expect(buffer.byteLength).toBeGreaterThan(0);
@@ -314,6 +322,7 @@ describe("Workbook", () => {
         useStyles: true,
         useSharedStrings: true
       });
+      await expectValidXlsx(buffer, { label: "malformed-comment" });
       await fs.promises.writeFile(outFile, buffer);
 
       const stat = await fs.promises.stat(outFile);
@@ -339,6 +348,7 @@ describe("Workbook", () => {
         ws2.getCell("A1").value = "Sheet 2 Data";
 
         const buffer = await workbook.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "sequential sheet filenames" });
         const zipData = await extractAll(new Uint8Array(buffer));
 
         expect(zipData.has("xl/worksheets/sheet1.xml")).toBe(true);
@@ -364,6 +374,7 @@ describe("Workbook", () => {
         ws2.getCell("A1").value = "Data 2";
 
         const buffer = await workbook.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "sheetId preserved" });
         const zipData = await extractAll(new Uint8Array(buffer));
 
         const workbookData = zipData.get("xl/workbook.xml");
@@ -463,6 +474,7 @@ describe("Workbook", () => {
         wb.model = workbookModel;
 
         const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "empty Print_Area ranges" });
 
         const wb2 = new Workbook();
         await wb2.xlsx.load(buffer);
@@ -481,6 +493,7 @@ describe("Workbook", () => {
         ws.getCell("B1").style = { numFmt: "@" };
 
         const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "lastColumn empty column" });
 
         const wb2 = new Workbook();
         await wb2.xlsx.load(buffer);
@@ -705,6 +718,7 @@ describe("Workbook", () => {
       ws.pageSetup.printArea = "A1";
 
       const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "single-cell printArea" });
 
       const wb2 = new Workbook();
       await wb2.xlsx.load(buffer);
@@ -720,6 +734,7 @@ describe("Workbook", () => {
       ws.pageSetup.printTitlesColumn = "A";
 
       const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "single-column printTitlesColumn" });
 
       const wb2 = new Workbook();
       await wb2.xlsx.load(buffer);
@@ -735,6 +750,7 @@ describe("Workbook", () => {
       ws.pageSetup.printTitlesRow = "1";
 
       const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "single-row printTitlesRow" });
 
       const wb2 = new Workbook();
       await wb2.xlsx.load(buffer);

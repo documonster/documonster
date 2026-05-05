@@ -4,6 +4,7 @@ import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
@@ -33,6 +34,7 @@ describe("DataValidations", () => {
     };
 
     await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
 
     // Read back and verify validation survived
     const wb2 = new Workbook();
@@ -70,6 +72,7 @@ describe("DataValidations", () => {
     expect(ws!.dataValidations.model).toEqual(expected);
 
     await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
   });
 
   describe("ignoreNodes", () => {

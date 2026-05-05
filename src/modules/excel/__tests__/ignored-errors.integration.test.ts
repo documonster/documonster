@@ -2,6 +2,7 @@ import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const TEST_FILE = testFilePath("ignored-errors.test");
 
@@ -48,6 +49,7 @@ describe("ignoredErrors", () => {
     // ignoredErrors defaults to [] — should not write <ignoredErrors> tag
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "empty ignoredErrors" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
@@ -76,6 +78,7 @@ describe("ignoredErrors", () => {
     ];
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "all-boolean ignoredErrors" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);

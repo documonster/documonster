@@ -156,7 +156,7 @@ function patchContentTypesForChartSidecars(updated: Map<string, ExtractedFile>):
 
 /** Injects synthetic style{n}.xml + colors{n}.xml sidecars + chart{n}.xml.rels
  *  if they are not already present. The XML bodies use the minimal
- *  schemas required for `auditOoxmlPackage` and Excel's own loader to
+ *  schemas required for `validateXlsxBuffer` and Excel's own loader to
  *  accept them. */
 function injectChartSidecars(updated: Map<string, ExtractedFile>, n: number): void {
   const stylePath = `xl/charts/style${n}.xml`;
@@ -257,6 +257,26 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
     const isBubble = presetType === "bubble";
     const isStock = presetType === "stock";
 
+    // Pick a `dLblPos` that Excel accepts for this preset's chart
+    // type. See `VALID_DLBL_POSITIONS_BY_TYPE` in `chart-builder.ts`
+    // for the per-type allow-lists. `doughnut` rejects every
+    // position value, and `surface` / `surface3D` do not support
+    // series-level data labels at all, so skip the field entirely
+    // for those presets.
+    const skipDataLabels = presetType === "surface" || presetType === "surface3D";
+    const dataLabelPosition: "outEnd" | "t" | "ctr" | undefined =
+      presetType === "doughnut"
+        ? undefined
+        : presetType === "bar" ||
+            presetType === "bar3D" ||
+            presetType === "pie" ||
+            presetType === "pie3D" ||
+            presetType === "ofPie"
+          ? "outEnd"
+          : presetType === "area" || presetType === "area3D"
+            ? "ctr"
+            : "t";
+
     const wb = new Workbook();
     seedDataSheet(wb);
     const sheet = wb.getWorksheet("Data")!;
@@ -267,7 +287,11 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
       values: "Data!$G$2:$G$4",
       fill: "4472C4",
       line: "ED7D31",
-      dataLabels: { showVal: true, position: "outEnd" as const },
+      dataLabels: skipDataLabels
+        ? undefined
+        : dataLabelPosition !== undefined
+          ? { showVal: true, position: dataLabelPosition }
+          : { showVal: true },
       trendline: noTrendline ? undefined : { type: "linear" as const, displayEq: true },
       errorBars: noAxis ? undefined : { type: "fixedVal" as const, value: 1 },
       dataPoints: [{ index: 0, fill: "FFC000" }]

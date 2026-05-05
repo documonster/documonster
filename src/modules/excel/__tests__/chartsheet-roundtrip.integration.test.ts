@@ -15,7 +15,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildChartsheetFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, loadRoundTrip } from "./helpers/zip-text";
 
@@ -28,7 +28,7 @@ beforeAll(async () => {
 describe("Chartsheet round-trip", () => {
   it("preserves multiple chartsheets (pie, funnel, combo, hidden) plus a Data worksheet", async () => {
     const [fixture] = chartsheetFixtures;
-    const { wb, entries } = await loadRoundTrip(fixture.bytes);
+    const { wb, bytes, entries } = await loadRoundTrip(fixture.bytes);
 
     // High-level model: 1 worksheet + 4 chartsheets.
     expect(wb.worksheets.length).toBe(1);
@@ -49,8 +49,8 @@ describe("Chartsheet round-trip", () => {
       1
     );
 
-    // Audit clean.
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    // Package must validate cleanly.
+    await expectValidXlsx(bytes);
 
     // Each chartsheet xml references a drawing relationship.
     for (const path of chartsheetPaths) {
@@ -139,8 +139,7 @@ describe("Chartsheet round-trip", () => {
       await wb.xlsx.load(bytes);
       expect(wb.chartsheets.length, `pass ${i + 1}`).toBe(4);
       bytes = new Uint8Array(await wb.xlsx.writeBuffer());
-      const audit = auditOoxmlPackage(await extractAll(bytes));
-      expect(audit.errors, `pass ${i + 1}: ${audit.errors.join("\n")}`).toEqual([]);
+      await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
     }
   });
 
@@ -155,7 +154,7 @@ describe("Chartsheet round-trip", () => {
 
     const out = new Uint8Array(await wb.xlsx.writeBuffer());
     const entries = await extractAll(out);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    await expectValidXlsx(out);
 
     const sheet1Xml = entryText(entries, "xl/chartsheets/sheet1.xml")!;
     expect(sheet1Xml, "page metadata still present").toMatch(/<pageSetup/);

@@ -20,6 +20,131 @@ import type {
 import type { ChartRichText } from "./types";
 
 /**
+ * Parse a single-column range reference of the form `Sheet!$A$2:$A$8`
+ * (or `'Sheet Name'!$A$2:$A$8`) into its components. Returns `null`
+ * when the formula doesn't match the single-column absolute shape —
+ * caller should treat the hierarchy as non-combinable and fall back
+ * to whatever behaviour is appropriate for that chart type.
+ */
+interface ParsedColumnRef {
+  sheet: string;
+  quotedSheet: boolean;
+  colStart: string;
+  colEnd: string;
+  rowStart: number;
+  rowEnd: number;
+}
+
+function parseColumnRef(formula: string): ParsedColumnRef | null {
+  // Match: optional sheet (quoted or bare) + !$COL$ROW:$COL$ROW
+  const match =
+    /^\s*(?:'([^'\r\n]+)'|([A-Za-z_][A-Za-z0-9_. ]*))!\$([A-Z]{1,3})\$(\d+):\$([A-Z]{1,3})\$(\d+)\s*$/.exec(
+      formula
+    );
+  if (!match) {
+    return null;
+  }
+  // Groups: 1=quoted sheet, 2=bare sheet, 3=colStart, 4=rowStart,
+  // 5=colEnd, 6=rowEnd. The row/col pair alternates — the `:`
+  // delimiter is between the start address (cols + rows, i.e.
+  // `$COL$ROW`) and the end address.
+  return {
+    sheet: match[1] ?? match[2]!,
+    quotedSheet: !!match[1],
+    colStart: match[3],
+    colEnd: match[5],
+    rowStart: parseInt(match[4], 10),
+    rowEnd: parseInt(match[6], 10)
+  };
+}
+
+function colLettersToIndex(letters: string): number {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) {
+    n = n * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+function colIndexToLetters(index: number): string {
+  let n = index;
+  let out = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+/**
+ * Combine multiple single-column range formulas (first item is the
+ * OUTERMOST hierarchy level, last item is the leaf level / primary
+ * category) into a single multi-column range that Excel's hierarchical
+ * chartEx loader accepts.
+ *
+ * Microsoft Excel's treemap / sunburst writer emits ONE `<cx:strDim>`
+ * whose `<cx:f>` points at a contiguous multi-column range spanning
+ * every hierarchy level (e.g. `Sheet1!$A$2:$C$8` for a Region / Country
+ * / City breakdown). The chart reader derives the hierarchy from the
+ * column ORDER within that range — the first column is the root and
+ * the last is the leaf. Emitting per-level `<cx:strDim>` siblings (one
+ * per formula) is schema-legal but makes Excel draw an empty plot
+ * area: verified against `reference-hierarchy.xlsx` (Excel-authored
+ * sample) where the same hierarchy renders correctly only when the
+ * columns live under a single `<cx:f>`.
+ *
+ * Returns the combined formula when every input formula lives on the
+ * same sheet with identical row spans and contiguous ascending columns
+ * (the common case when authors lay their hierarchy out in adjacent
+ * worksheet columns). Returns `null` otherwise — the caller should
+ * fall back to per-level caching because Excel has no way to express
+ * a non-contiguous hierarchy as a single range.
+ */
+export function combineHierarchyFormulas(formulas: readonly string[]): string | null {
+  if (formulas.length === 0) {
+    return null;
+  }
+  if (formulas.length === 1) {
+    return formulas[0];
+  }
+  const parsed: ParsedColumnRef[] = [];
+  for (const f of formulas) {
+    const p = parseColumnRef(f);
+    if (!p) {
+      return null;
+    }
+    // Only single-column ranges are combinable. Multi-column inputs
+    // can't be meaningfully merged with another column without
+    // overlap / ambiguity.
+    if (p.colStart !== p.colEnd) {
+      return null;
+    }
+    parsed.push(p);
+  }
+  const first = parsed[0];
+  let prevCol = colLettersToIndex(first.colStart);
+  for (let i = 1; i < parsed.length; i++) {
+    const p = parsed[i];
+    if (p.sheet !== first.sheet) {
+      return null;
+    }
+    if (p.rowStart !== first.rowStart || p.rowEnd !== first.rowEnd) {
+      return null;
+    }
+    const curCol = colLettersToIndex(p.colStart);
+    if (curCol !== prevCol + 1) {
+      return null;
+    }
+    prevCol = curCol;
+  }
+  const startCol = first.colStart;
+  const endCol = colIndexToLetters(prevCol);
+  const sheetRef = first.quotedSheet ? `'${first.sheet}'` : first.sheet;
+  return `${sheetRef}!$${startCol}$${first.rowStart}:$${endCol}$${first.rowEnd}`;
+}
+
+/**
  * Build a structured ChartExModel from high-level options.
  */
 export function buildChartExModel(opts: AddChartExOptions): ChartExModel {
@@ -101,22 +226,45 @@ export function buildChartExModel(opts: AddChartExOptions): ChartExModel {
   // Build axes — needed for histogram, pareto, waterfall, funnel, boxWhisker.
   const axes: ChartExAxis[] = [];
   if (needsAxes(opts.type)) {
-    // Seed axisIds with a large base so builder-created axes don't
-    // collide with numeric ids allocated by the classic `chart.xml`
-    // side when a ChartEx chart is merged into a workbook alongside
-    // classic charts (e.g. via `copyTo`). Classic `chart-builder.ts`
-    // uses `100000000` for the same reason; ChartEx previously used
-    // `0` and `1`, which would collide with any axis allocated by the
-    // classic side via `chart.getOrCreateAxis(0)`.
-    const CHARTEX_AXIS_ID_SEED = 100000000;
-    const catAxisId = CHARTEX_AXIS_ID_SEED;
-    const valAxisId = CHARTEX_AXIS_ID_SEED + 1;
-    axes.push({ axisId: catAxisId, type: "cat" });
-    axes.push({ axisId: valAxisId, type: "val" });
-    // Wire series to axes
-    for (const s of series) {
-      s.axisId = [catAxisId, valAxisId];
-    }
+    // Match Microsoft Excel's convention: chartEx axes are numbered
+    // 0 and 1 (cat / val), not `100000000+` like classic charts.
+    // Excel writes axes this way for every chartEx it authors —
+    // using small sequential ids keeps our output byte-compatible
+    // with Excel 2016+ for a fresh chartEx. Classic charts still
+    // use the `100000000` seed to avoid collisions with loaded
+    // files that happened to allocate small ids; chartEx is a
+    // separate part and cannot collide with classic chart axes.
+    const catAxisId = 0;
+    const valAxisId = 1;
+    // Match Excel's default cat-axis `gapWidth` + `<cx:tickLabels/>`
+    // and val-axis `<cx:majorGridlines/>` + `<cx:tickLabels/>` so
+    // freshly-built chartEx charts look identical to what Excel
+    // itself emits for the same chart type. Excel uses
+    // `gapWidth="0"` for histogram + pareto (bars touching —
+    // histograms traditionally render with zero gap between bins)
+    // and `gapWidth="0.5"` for waterfall / boxWhisker / funnel
+    // (narrower categorical bars). Users who set `layout.gapWidth`
+    // override the default.
+    const defaultGapWidth = opts.type === "histogram" || opts.type === "pareto" ? 0 : 0.5;
+    axes.push({
+      axisId: catAxisId,
+      type: "cat",
+      catScaling: { gapWidth: defaultGapWidth },
+      tickLabels: {}
+    });
+    axes.push({
+      axisId: valAxisId,
+      type: "val",
+      majorGridlines: {},
+      tickLabels: {}
+    });
+    // Excel does NOT emit `<cx:axisId>` children on `<cx:series>` —
+    // it expects the axis binding to come from the axes in
+    // `cx:plotArea/cx:axis` directly. Leaving `s.axisId` unset
+    // matches Excel's output exactly. (The renderer still emits
+    // any `axisId` array populated by the parser for round-tripped
+    // files, so existing files that DO carry these references
+    // survive load → save without drift.)
   }
 
   const model: ChartExModel = {
@@ -146,19 +294,42 @@ export function buildChartExModel(opts: AddChartExOptions): ChartExModel {
           },
           axis: axes.length > 0 ? axes : undefined
         },
+        // Legend: Excel omits the `<cx:legend>` element entirely for
+        // histogram charts (a histogram has a single unnamed series,
+        // nothing to legend — emitting an empty legend placeholder
+        // causes Excel 2016+ to render the chart as a blank frame).
+        // Respect `opts.showLegend === false` for other types.
+        // Match Excel's legend attribute defaults otherwise:
+        // `pos="t" align="ctr" overlay="0"` — Excel's own output
+        // for a newly-inserted waterfall / funnel / boxWhisker uses
+        // top-centre placement. Users who pass `opts.legendPosition`
+        // still override `pos`.
         legend:
-          opts.showLegend !== false
-            ? // Leave `overlay` undefined so the writer omits the
-              // attribute entirely. Chart2014 `CT_Legend/@overlay`
-              // defaults to `false` when absent; emitting `overlay="0"`
-              // here pollutes round-trip byte-comparison and differs
-              // from what Excel produces for a fresh legend.
-              { legendPos: opts.legendPosition ?? "b" }
-            : undefined
+          opts.showLegend === false || opts.type === "histogram"
+            ? undefined
+            : {
+                legendPos: opts.legendPosition ?? "t",
+                align: "ctr",
+                overlay: false
+              }
       }
     },
-    style: opts.chartStyle,
-    colors: opts.chartColors
+    // ChartEx ALWAYS ships with a `chartStyle` + `chartColorStyle`
+    // sidecar, linked from `chartEx1.xml.rels`. Without them Excel
+    // 2016+ discards the chartEx part on load ("Removed Part:
+    // /xl/drawings/drawingN.xml (Drawing shape)"). When the caller
+    // hasn't supplied structured style / colors, we emit the
+    // id-only minimal form — `<cs:chartStyle id="395"/>` and
+    // `<cs:colorStyle meth="cycle" id="10"/>` — which Excel's
+    // default style table resolves to a sensible built-in palette.
+    // Style id 395 + colors id 10 are the defaults Excel itself
+    // uses for a freshly-inserted waterfall (verified against a
+    // reference xlsx authored by Excel 2021).
+    //
+    // Callers who want custom styling pass `opts.chartStyle` /
+    // `opts.chartColors`; those paths short-circuit this default.
+    style: opts.chartStyle ?? { id: 395 },
+    colors: opts.chartColors ?? { id: 10, method: "cycle" }
   };
 
   return model;
@@ -285,26 +456,80 @@ function buildSeriesAndData(
     series.dataRefs!.push({ dataId: catDataId });
   }
 
-  // For sunburst / treemap, emit hierarchy levels BEFORE the numeric
-  // value dimension (string dimensions contiguous). For other types,
-  // emit the value dimension now.
+  // For sunburst / treemap, Excel expects a SINGLE `<cx:strDim>`
+  // whose `<cx:f>` points to a contiguous MULTI-COLUMN range that
+  // spans every hierarchy level (outer → inner, root column first,
+  // leaf column last). See `combineHierarchyFormulas` for the
+  // rationale + the reference fixture (`reference-hierarchy.xlsx`)
+  // where the same layout rendered blank under the previous
+  // "one data entry per level" approach. When the caller's
+  // `categories` + `hierarchy` live in adjacent worksheet columns
+  // with matching row ranges we rewrite `catDataId`'s strDim with
+  // the combined range and skip per-level data entries. When the
+  // ranges can't be combined (different sheets, non-contiguous
+  // columns, …) we leave the entries as-is and accept that Excel
+  // may draw the chart blank — manual reshaping by the author is
+  // the only way to recover.
+  let hierarchyCombined = false;
   if (isHierarchical) {
-    if (so.hierarchy) {
-      for (const h of so.hierarchy) {
-        const hId = counter.value++;
-        data.push({
-          id: hId,
-          strDim: {
-            type: "cat",
-            formula: h,
-            levels: [{ ptCount: 0, points: [] }]
-          }
-        });
-        series.dataRefs!.push({ dataId: hId });
+    const hierarchyFormulas = so.hierarchy;
+    if (hierarchyFormulas && catDataId !== undefined && opts.categories) {
+      // Root → leaf: `[...hierarchy, categories]` matches Excel's
+      // left-to-right column reading order.
+      const combined = combineHierarchyFormulas([...hierarchyFormulas, opts.categories]);
+      if (combined) {
+        hierarchyCombined = true;
+        const catEntry = data.find(d => d.id === catDataId);
+        if (catEntry?.strDim) {
+          catEntry.strDim.formula = combined;
+          // Clear any seeded empty-level placeholder: Excel's writer
+          // emits no `<cx:lvl>` cache for hierarchical charts and
+          // reads fresh from the referenced cells on open.
+          catEntry.strDim.levels = undefined;
+          // Suppress cache population for this dimension. A flat
+          // `<cx:lvl>` of width × height points across the multi-column
+          // range would confuse Excel's hierarchical renderer (the
+          // chart draws empty). See `hasChartExStringPoints`.
+          catEntry.strDim._skipCache = true;
+        }
+      } else {
+        // Ranges aren't combinable — fall back to per-level data
+        // entries in OUTER→INNER order so at least the schema is
+        // valid. (Excel renders blank in this fallback; emit with a
+        // console warning in non-production so the author can
+        // diagnose why their hierarchical chart is empty.)
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            "[excelts] Treemap/sunburst hierarchy + categories could not be combined into a " +
+              "contiguous multi-column range. Excel will render the chart as an empty plot area. " +
+              "Lay your leaf + hierarchy columns contiguously on the same sheet with matching rows."
+          );
+        }
+        for (let i = hierarchyFormulas.length - 1; i >= 0; i--) {
+          const h = hierarchyFormulas[i];
+          const hId = counter.value++;
+          data.push({
+            id: hId,
+            strDim: {
+              type: "cat",
+              formula: h,
+              levels: [{ ptCount: 0, points: [] }]
+            }
+          });
+          series.dataRefs!.push({ dataId: hId });
+        }
       }
     }
     if (so.literalHierarchy) {
-      for (const level of so.literalHierarchy) {
+      // Literal hierarchy (no worksheet cells to reference) — cache
+      // every level's values inside a single strDim's `levels` array
+      // so `consolidateDataForRender` can flatten them into one
+      // `<cx:strDim>` with multiple `<cx:lvl>` children at render
+      // time. This does not match Excel's own "single multi-column
+      // <cx:f>" output verbatim but is what the schema allows when
+      // there are no real cells to point at.
+      for (let i = so.literalHierarchy.length - 1; i >= 0; i--) {
+        const level = so.literalHierarchy[i];
         const hId = counter.value++;
         data.push({
           id: hId,
@@ -325,7 +550,23 @@ function buildSeriesAndData(
 
   // Values — always create a fresh numDim entry.
   const valId = counter.value++;
-  const numDimType = opts.type === "histogram" || opts.type === "pareto" ? "x" : "val";
+  // Microsoft Excel uses `type="val"` for MOST chartEx numeric
+  // dimensions (histogram + pareto binning inputs, funnel values,
+  // box-whisker samples, waterfall deltas, regionMap values), but
+  // **sunburst and treemap use `type="size"`** — the hierarchy rings
+  // / tiles are sized by the numeric column, and Excel's loader
+  // keys the hierarchical layout engine off this attribute. Reference
+  // fixture `tmp/reference-hierarchy.xlsx` (Excel-authored) writes
+  // `<cx:numDim type="size">` on both its treemap and sunburst
+  // charts; the previous `type="val"` caused Excel to open the
+  // chart with an empty plot area (schema-valid but semantically
+  // wrong for the hierarchical renderer).
+  //
+  // Other layouts still use `"val"` — the alternative `"x"` is in
+  // `ST_NumDimType` but Excel 2016+ renders the chart as a blank
+  // frame when the dimension is labelled `"x"` (verified against
+  // an Excel 2021-authored histogram reference, `tmp/aaaaa.xlsx`).
+  const numDimType = isHierarchical ? "size" : "val";
   data.push({
     id: valId,
     numDim: {
@@ -338,10 +579,28 @@ function buildSeriesAndData(
               points: so.literalValues.map((value, index) => ({ index, value }))
             }
           ]
-        : [{ ptCount: 0, points: [] }]
+        : [{ ptCount: 0, points: [] }],
+      // Hierarchical charts that successfully combined their leaf +
+      // hierarchy formulas into a single multi-column `<cx:f>` ship
+      // the numeric dimension without a `<cx:lvl>` cache — same
+      // rationale as the `_skipCache` marker on the category strDim
+      // above. A simple sunburst with no hierarchy, or a combine
+      // that failed (non-contiguous columns), still caches normally
+      // so the chart at least has something to paint from.
+      ...(hierarchyCombined ? { _skipCache: true } : {})
     }
   });
   series.dataRefs!.push({ dataId: valId });
+  if (hierarchyCombined) {
+    // Skipping the cache populator means the placeholder level we seed
+    // above never gets replaced with real values. Clear it so the
+    // renderer emits just the `<cx:f>` reference, matching Excel's
+    // writer output for treemap + sunburst.
+    const valEntry = data.find(d => d.id === valId);
+    if (valEntry?.numDim && !so.literalValues?.length) {
+      valEntry.numDim.levels = undefined;
+    }
+  }
 
   // Waterfall subtotals. `subtotalPoints` is an alternative spelling
   // accepted by the public API; we normalise both into the
@@ -364,9 +623,37 @@ function buildSeriesAndData(
     }
     return so.subtotals ?? subtotalPoints?.map(p => p.idx);
   })();
-  if (mergedSubtotals && layoutId === "waterfall") {
+  if (layoutId === "waterfall") {
+    // Excel emits `<cx:layoutPr><cx:subtotals/></cx:layoutPr>` on
+    // EVERY waterfall series, even when the user has not marked any
+    // subtotal points. The empty `subtotals` element is treated as
+    // a "no subtotals but waterfall-aware" marker; without it Excel
+    // falls back to generic series rendering and, at load time,
+    // may reject the chartEx as malformed. Seed `layoutPr.subtotals`
+    // with an empty array here so the writer always emits the
+    // element — then merge in any explicit user-provided subtotal
+    // indices on top.
     series.layoutPr = {
-      subtotals: mergedSubtotals.map(i => ({ idx: i }))
+      subtotals: mergedSubtotals ? mergedSubtotals.map(i => ({ idx: i })) : []
+    };
+  }
+  if (layoutId === "treemap" || layoutId === "sunburst") {
+    // Excel 2016+ will NOT render a sunburst / treemap that lacks a
+    // `<cx:layoutPr>` child — the frame is drawn but the plot area
+    // shows a completely blank canvas (the hierarchy arcs / tiles
+    // are computed but never painted). Verified against
+    // `tmp/ttttt.xlsx` (Excel-authored sunburst reference) — every
+    // Excel-authored hierarchical chartEx carries at least an empty
+    // `<cx:layoutPr/>`, and treemap charts additionally carry a
+    // `<cx:parentLabelLayout val="overlapping"/>` (the default) so
+    // the engine has something to reach for when deciding how to
+    // stack parent labels. Seed a minimal default here so freshly
+    // authored sunburst/treemap charts render on open; the caller's
+    // `layout.parentLabelLayout` (applied below via `opts.layout`
+    // merge) overrides the default when set.
+    series.layoutPr = {
+      ...(series.layoutPr ?? {}),
+      ...(layoutId === "treemap" ? { parentLabelLayout: "overlapping" as const } : {})
     };
   }
 
@@ -392,9 +679,18 @@ function buildSeriesAndData(
     };
   }
   if ((opts.type === "histogram" || opts.type === "pareto") && !series.layoutPr?.binning) {
+    // Excel's default `<cx:binning>` for a freshly-inserted
+    // histogram carries `intervalClosed="r"` — meaning "right-
+    // closed bin boundaries" (bins are `[a, b]`, not `[a, b)`).
+    // Emitting the element without the attribute is spec-legal
+    // (ST_IntervalClosedSide has a schema default of `"r"`) but
+    // Excel 2016+ treats the absence as "auto-compute binning"
+    // AND sometimes renders the chart as a blank frame when the
+    // binning has no explicit side. Verified against
+    // `tmp/aaaaa.xlsx` (Excel-authored histogram reference).
     series.layoutPr = {
       ...(series.layoutPr ?? {}),
-      binning: { binType: "auto" }
+      binning: { binType: "auto", intervalClosed: "r" }
     };
   }
   if (opts.type === "pareto") {
@@ -462,6 +758,33 @@ function buildSeriesAndData(
       spPr: toShapeProperties(dl.spPr),
       txPr: dl.txPr
     };
+  }
+
+  // Default dataLabels for chartEx types where Excel always emits
+  // them. Match Excel's exact defaults so our output is byte-close
+  // to what a freshly-inserted chart looks like:
+  //
+  //   <cx:dataLabels pos="outEnd">
+  //     <cx:visibility seriesName="0" categoryName="0" value="1"/>
+  //   </cx:dataLabels>
+  //
+  // Only applied when the caller did NOT supply `so.dataLabels` —
+  // user-driven customisation is preserved. The branches cover
+  // every 2014+ layout for which Excel emits a default block;
+  // sunburst / treemap typically show only the category name, so
+  // their defaults differ. (Pareto is handled on the pareto line
+  // series via a separate pass.)
+  if (!series.dataLabels) {
+    if (layoutId === "waterfall" || layoutId === "funnel") {
+      series.dataLabels = {
+        position: "outEnd",
+        visibility: { seriesName: false, categoryName: false, value: true }
+      };
+    } else if (layoutId === "sunburst" || layoutId === "treemap") {
+      series.dataLabels = {
+        visibility: { seriesName: false, categoryName: true, value: false }
+      };
+    }
   }
 
   return series;

@@ -33,6 +33,14 @@ interface DefinedNameModel {
    * - "opaque": unrecognised content preserved for round-trip — stored in opaqueMap
    */
   kind?: "reference" | "formula" | "opaque";
+  /**
+   * `definedName/@hidden` — when `true`, emits `hidden="1"` on the
+   * XML element. Used by chartEx `_xlchart.vN.M` defined names that
+   * Excel creates automatically for every chartEx data reference;
+   * these names are infrastructure, never intended for users, so
+   * Excel hides them from the Name Manager UI.
+   */
+  hidden?: boolean;
 }
 
 /** Stored entry for an opaque (unrecognised) defined name. */
@@ -283,6 +291,13 @@ class DefinedNames {
    */
   localSheetIdMap: Record<string, number>;
   /**
+   * Tracks the `hidden` flag for each storage key. Used by chartEx
+   * `_xlchart.vN.M` infrastructure names — Excel emits them with
+   * `hidden="1"` to suppress the Name Manager UI. A missing key
+   * means "not hidden" (the default).
+   */
+  hiddenMap: Record<string, boolean>;
+  /**
    * Opaque defined names: storageKey → original text + optional localSheetId.
    */
   opaqueMap: Record<string, OpaqueEntry>;
@@ -312,6 +327,7 @@ class DefinedNames {
     this.matrixMap = {};
     this.formulaMap = {};
     this.localSheetIdMap = {};
+    this.hiddenMap = {};
     this.opaqueMap = {};
     this.nameForKey = {};
     this._explicitProbe = probe ?? null;
@@ -334,6 +350,30 @@ class DefinedNames {
     delete this.opaqueMap[name];
     this.nameForKey[name] = name;
     this.addEx(location, name);
+  }
+
+  /**
+   * Register a hidden defined name that maps a chartEx `_xlchart.vN.M`
+   * pointer to a worksheet range. Excel emits one of these for every
+   * data reference in a chartEx chart:
+   *
+   *   <definedName name="_xlchart.v1.0" hidden="1">Sheet1!$A$1:$A$3</definedName>
+   *
+   * The chartEx then references `_xlchart.v1.0` from its `<cx:f>`
+   * element instead of the worksheet range directly. Direct sheet
+   * references in `<cx:f>` are rejected by Excel 2016+ with
+   * "Removed Part: /xl/drawings/drawingN.xml (Drawing shape)" on
+   * load, so chartEx data MUST go through this indirection.
+   *
+   * Same semantics as `add()` but also marks the name `hidden` so
+   * it does not show up in Excel's Name Manager UI.
+   *
+   * @param locStr - Worksheet reference (e.g. `"Sheet1!$A$1:$A$3"`)
+   * @param name   - Defined name to register (e.g. `"_xlchart.v1.0"`)
+   */
+  addHidden(locStr: string, name: string): void {
+    this.add(locStr, name);
+    this.hiddenMap[name] = true;
   }
 
   addEx(location: CellLocation, name: string): void {
@@ -639,10 +679,15 @@ class DefinedNames {
       .map(([sKey, matrix]) => {
         const result = this.getRanges(sKey, matrix);
         const localSheetId = this.localSheetIdMap[sKey];
+        const hidden = this.hiddenMap[sKey];
+        const out: DefinedNameModel = { ...result };
         if (localSheetId !== undefined) {
-          return { ...result, localSheetId };
+          out.localSheetId = localSheetId;
         }
-        return result;
+        if (hidden) {
+          out.hidden = true;
+        }
+        return out;
       })
       .filter((definedName: DefinedNameModel) => definedName.ranges.length);
 
@@ -658,7 +703,10 @@ class DefinedNames {
         };
         const localSheetId = this.localSheetIdMap[sKey];
         if (localSheetId !== undefined) {
-          return { ...result, localSheetId };
+          result.localSheetId = localSheetId;
+        }
+        if (this.hiddenMap[sKey]) {
+          result.hidden = true;
         }
         return result;
       });
@@ -666,13 +714,17 @@ class DefinedNames {
     // Opaque names — rawText preserved for round-trip
     const opaqueNames: DefinedNameModel[] = Object.entries(this.opaqueMap).map(([sKey, entry]) => {
       const bareName = this.nameForKey[sKey] ?? sKey;
-      return {
+      const out: DefinedNameModel = {
         name: bareName,
         ranges: [],
         rawText: entry.rawText,
         localSheetId: entry.localSheetId,
         kind: "opaque" as const
       };
+      if (this.hiddenMap[sKey]) {
+        out.hidden = true;
+      }
+      return out;
     });
 
     return [...cellNames, ...formulaNames, ...opaqueNames];
@@ -690,6 +742,7 @@ class DefinedNames {
     const matrixMap = (this.matrixMap = {} as Record<string, CellMatrix>);
     const formulaMap = (this.formulaMap = {} as Record<string, string>);
     const localSheetIdMap = (this.localSheetIdMap = {} as Record<string, number>);
+    const hiddenMap = (this.hiddenMap = {} as Record<string, boolean>);
     const opaqueMap = (this.opaqueMap = {} as Record<string, OpaqueEntry>);
     const nameForKeyMap = (this.nameForKey = {} as Record<string, string>);
 
@@ -706,6 +759,9 @@ class DefinedNames {
       // Track localSheetId for all name kinds
       if (definedName.localSheetId !== undefined) {
         localSheetIdMap[sKey] = definedName.localSheetId;
+      }
+      if (definedName.hidden) {
+        hiddenMap[sKey] = true;
       }
 
       // Programmatic API path: formulaExpression already set and no rawText

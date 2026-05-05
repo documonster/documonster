@@ -28,8 +28,8 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { describe, it, expect, beforeAll } from "vitest";
 
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runLibreOfficeOpenValidationAuto } from "./helpers/external-oracle";
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
 
 // Path to test data file
 const SAMPLE_FILE = path.join(__dirname, "data", "chart-pivot-sample.xlsx");
@@ -63,14 +63,16 @@ function getEntryContent(entries: Map<string, any>, entryPath: string): string |
 async function performRoundTrip(): Promise<{
   inputEntries: Map<string, any>;
   outputEntries: Map<string, any>;
+  outputBytes: Uint8Array;
 }> {
   const workbook = await loadSampleWorkbook();
   const outputBuffer = await workbook.xlsx.writeBuffer();
+  const outputBytes = new Uint8Array(outputBuffer);
 
   const inputEntries = await extractAll(new Uint8Array(sampleBuffer));
-  const outputEntries = await extractAll(new Uint8Array(outputBuffer));
+  const outputEntries = await extractAll(outputBytes);
 
-  return { inputEntries, outputEntries };
+  return { inputEntries, outputEntries, outputBytes };
 }
 
 describe("Chart Round-Trip Preservation", () => {
@@ -195,9 +197,8 @@ describe("Chart Round-Trip Preservation", () => {
     });
 
     it("validates audit baseline on the real-fixture workbook", async () => {
-      const { outputEntries } = await performRoundTrip();
-      const audit = auditOoxmlPackage(outputEntries);
-      expect(audit.errors, audit.errors.join("\n")).toEqual([]);
+      const { outputBytes } = await performRoundTrip();
+      await expectValidXlsx(outputBytes);
     });
 
     it("optionally smoke-opens the real-fixture workbook with LibreOffice headless", async () => {

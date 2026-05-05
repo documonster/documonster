@@ -83,6 +83,115 @@ function maxAbsValue(values: readonly number[], min: number): number {
 }
 
 /**
+ * Rewrite a freshly-built ChartEx model's data references to use
+ * `_xlchart.vN.M` hidden defined-name indirection, matching the
+ * exact scheme Microsoft Excel emits.
+ *
+ * Excel 2016+ REQUIRES chartEx `<cx:f>` elements to point at
+ * hidden defined names, NOT directly at worksheet ranges. A
+ * chartEx with a bare `<cx:f>Sheet1!$A$1:$A$3</cx:f>` is rejected
+ * on load with:
+ *
+ *   "Removed Part: /xl/drawings/drawingN.xml (Drawing shape)"
+ *
+ * The canonical layout Excel uses:
+ *
+ *   chartEx1.xml:
+ *     <cx:strDim type="cat"><cx:f>_xlchart.v1.0</cx:f></cx:strDim>
+ *     <cx:numDim type="val"><cx:f>_xlchart.v1.1</cx:f></cx:numDim>
+ *
+ *   workbook.xml:
+ *     <definedName name="_xlchart.v1.0" hidden="1">Sheet1!$A$1:$A$3</definedName>
+ *     <definedName name="_xlchart.v1.1" hidden="1">Sheet1!$B$1:$B$3</definedName>
+ *
+ * This function walks the chart's data entries, allocates a
+ * sequential minor index `M` for every worksheet-range formula,
+ * registers a hidden defined name via the supplied callback, and
+ * rewrites the `formula` field on the model to point at the
+ * name. It also clears any cached `<cx:lvl>` point levels on
+ * those dimensions — Excel's output uses defined-name pointers
+ * exclusively; the cached-point form is what our earlier writer
+ * emitted to work around the (buggy) direct-reference path and is
+ * no longer needed.
+ *
+ * Non-worksheet formulas (lambda expressions, literal data,
+ * already-indirect `_xlchart.*` names from round-tripped files)
+ * are left untouched — only `SheetName!...` style references need
+ * the rewrite.
+ *
+ * @param model         ChartEx model to mutate in place.
+ * @param chartExIndex  1-based chartEx file index — becomes the
+ *                      `vN` major version in `_xlchart.vN.M`.
+ * @param register      Callback invoked for each newly allocated
+ *                      defined name. Implementations should add
+ *                      the name to the workbook's `definedNames`
+ *                      list with `hidden="1"`.
+ */
+export function rewriteChartExDataRefsToDefinedNames(
+  model: ChartExModel,
+  chartExIndex: number,
+  register: (definedName: string, ref: string) => void
+): void {
+  const data = model.chartSpace?.chartData?.data;
+  if (!data || data.length === 0) {
+    return;
+  }
+  let minor = 0;
+  // Worksheet-range refs look like `'Sheet Name'!$A$1:$A$3` or
+  // `Sheet1!$A$1:$A$3`. We treat any string containing `!` that's
+  // not already an `_xlchart.*` name as eligible for rewriting.
+  // Formulas that lack a sheet-qualifier (bare ranges, literals)
+  // are left alone — chartEx traditionally qualifies sheet names
+  // explicitly, so the heuristic is safe in practice.
+  const isWorksheetRef = (formula: string): boolean =>
+    formula.includes("!") && !formula.startsWith("_xlchart.");
+
+  const rewriteDim = (dim: { formula?: string; levels?: unknown }): void => {
+    if (!dim.formula || !isWorksheetRef(dim.formula)) {
+      return;
+    }
+    const definedName = `_xlchart.v${chartExIndex}.${minor++}`;
+    register(definedName, dim.formula);
+    dim.formula = definedName;
+    // Keep any cached `<cx:lvl>` points the builder populated.
+    // Histogram / pareto chartEx layouts can't render at all without
+    // the cached point array — Excel relies on the points to build
+    // the bins. (Waterfall / funnel / etc. that have an explicit
+    // categorical axis DO work with defined-name pointers alone, but
+    // leaving the cache in place for every dimension keeps the code
+    // uniform and matches what Excel itself emits when the chart
+    // data is NOT an embedded data table.)
+  };
+
+  for (const entry of data) {
+    // `ConsolidatedDataEntry` (from `consolidateDataForRender`)
+    // carries a `parts` array instead of direct `strDim` / `numDim`;
+    // process each part. `ChartExDataEntry` exposes the dims
+    // directly. Both shapes are handled here so the rewrite works
+    // uniformly before or after consolidation.
+    const parts = (entry as { parts?: ChartExDataEntry[] }).parts;
+    if (parts && Array.isArray(parts)) {
+      for (const p of parts) {
+        if (p.strDim) {
+          rewriteDim(p.strDim);
+        }
+        if (p.numDim) {
+          rewriteDim(p.numDim);
+        }
+      }
+    } else {
+      const plain = entry;
+      if (plain.strDim) {
+        rewriteDim(plain.strDim);
+      }
+      if (plain.numDim) {
+        rewriteDim(plain.numDim);
+      }
+    }
+  }
+}
+
+/**
  * Render a ChartExModel to the full XML string representation of cx:chart.
  *
  * By default the function prefers the raw XML captured at parse time
@@ -110,11 +219,17 @@ export function renderChartEx(
 
   const parts: string[] = [];
   parts.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+  // Match Microsoft Excel's exact namespace declaration set for
+  // `<cx:chartSpace>`: only the prefixes that are ACTUALLY used by
+  // the emitted content. ChartEx files rarely use `mc:AlternateContent`
+  // at the chartSpace root (the wrapper lives in the drawing part
+  // instead), so `xmlns:mc` is not declared here unless later
+  // content actually references it. The parser accepts either form;
+  // the writer defaults to the Excel-native minimal set.
   parts.push(
     [
       "<cx:chartSpace",
       '  xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"',
-      '  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"',
       '  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
       '  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
     ].join("\n")
@@ -126,8 +241,26 @@ export function renderChartEx(
   // `spPr` / `txPr` / `protection` / `printSettings` are preserved
   // verbatim so ChartEx files that carry chartSpace-level styling or
   // print settings round-trip through `forceStructural` writes.
-  parts.push(renderChartData(space.chartData));
-  parts.push(renderChart(space.chart));
+  //
+  // Per the official [MS-ODRAWXML] `CT_Series` schema, `<cx:dataId>`
+  // has `maxOccurs="1"` — only ONE data reference per series. A
+  // box-whisker / sunburst / treemap series naturally has MULTIPLE
+  // logical dimensions (categories + values + hierarchy levels); the
+  // schema-correct way to express that is to put every dimension
+  // inside a single `<cx:data>` entry (CT_Data allows multiple
+  // strDim/numDim children via `<xsd:choice maxOccurs="unbounded">`).
+  //
+  // The in-memory model still keeps one-dimension-per-entry so the
+  // parser/writer can share existing helpers. `consolidateDataForRender`
+  // transforms the model to the schema-compliant shape just for
+  // serialisation: every series ends up with ONE dataId pointing at
+  // ONE entry that contains every dimension it needs (categories
+  // duplicated across entries when shared). Earlier revisions
+  // emitted the raw multi-dataId form and Excel rejected the whole
+  // ChartEx part on load ("Removed Part: /xl/drawings/drawingN.xml").
+  const renderSpace = consolidateDataForRender(space);
+  parts.push(renderChartData(renderSpace.chartData));
+  parts.push(renderChart(renderSpace.chart));
   if (space.clrMapOvr) {
     parts.push(space.clrMapOvr);
   }
@@ -3917,6 +4050,142 @@ function shapeFillColor(spPr: ShapeProperties | undefined, fallback: string): st
   return previewShapeFillColor(spPr ? getSpPrFill(spPr) : undefined, fallback);
 }
 
+/**
+ * Reshape a `CT_ChartSpace` for schema-compliant serialisation.
+ *
+ * The in-memory model (produced by `buildChartExModel` and by the
+ * parser) stores each logical dimension as its own
+ * {@link ChartExDataEntry}, with the series keeping an ordered list of
+ * `dataRefs` into those entries. That layout is convenient for code
+ * that manipulates individual dimensions — but it does not match the
+ * official [MS-ODRAWXML] `CT_Series` schema, which allows at most one
+ * `<cx:dataId>` per series. The schema-correct form places every
+ * dimension a series references inside a single `<cx:data>` entry
+ * (CT_Data has `<xsd:choice maxOccurs="unbounded">` over `strDim` /
+ * `numDim`), and points the series at that one entry.
+ *
+ * This function rewrites the chartData + series so that each series
+ * ends up with exactly one data entry + one dataId pointing at it.
+ * The original model is left untouched; callers that mutate the
+ * returned model should not expect the mutation to persist.
+ *
+ * Shared category dimensions get duplicated across per-series
+ * entries. That inflates the on-disk size slightly but mirrors what
+ * Excel 2016+ itself writes for multi-series ChartEx plots — and it
+ * is what Excel's strict loader requires on open.
+ */
+function consolidateDataForRender(space: ChartExModel["chartSpace"]): ChartExModel["chartSpace"] {
+  const originalData = space.chartData.data;
+  const plotRegion = space.chart.plotArea.plotAreaRegion;
+  if (!plotRegion || plotRegion.series.length === 0) {
+    return space;
+  }
+  // Index data entries by id so series.dataRefs can look them up.
+  const entryById = new Map<number, ChartExDataEntry>();
+  for (const entry of originalData) {
+    entryById.set(entry.id, entry);
+  }
+  // Track which original entries still need to be emitted verbatim —
+  // entries referenced by a single-dataId series (schema-valid as-is)
+  // and orphaned entries not referenced by any series in the plot
+  // region (rare, but possible for legacy files). Entries that get
+  // absorbed into a consolidated synthetic entry (multi-dataId
+  // series) are REMOVED from this set.
+  const keepVerbatim = new Set<number>(entryById.keys());
+  // Consolidated entries are emitted as aggregates that share the
+  // `<cx:data>` wrapper with multiple strDim/numDim children. The
+  // in-memory {@link ChartExDataEntry} only has one `strDim` + one
+  // `numDim` slot, so consolidation produces a tagged record; the
+  // custom renderer below reaches into `parts` to walk each one.
+  const consolidated: ConsolidatedDataEntry[] = [];
+  const rewrittenSeries: ChartExSeries[] = plotRegion.series.map(series => {
+    const refs = series.dataRefs;
+    const dataIds = refs
+      ? refs.map(r => r.dataId).filter((id): id is number => typeof id === "number")
+      : [];
+    if (dataIds.length === 0) {
+      // Series has no data refs — keep as is. `dataRefs` may still
+      // contain `axisId` entries; preserve them.
+      return series;
+    }
+    if (dataIds.length === 1) {
+      // Already schema-correct — one dataId referencing one data
+      // entry. Keep the referenced entry in `keepVerbatim` (already
+      // there from the initial seed) and the series unchanged.
+      const axisRefs = refs!.filter(r => typeof r.dataId !== "number");
+      return {
+        ...series,
+        dataRefs: [{ dataId: dataIds[0] }, ...axisRefs]
+      };
+    }
+    // Multiple dataIds — consolidate into ONE synthetic entry.
+    // Reuse the SMALLEST absorbed id rather than allocating a fresh
+    // one above the existing max. Excel's own output numbers
+    // consolidated `<cx:data>` entries starting from 0
+    // (`<cx:data id="0">`), and our matching output here would be
+    // `id="2"` when the source entries were 0 and 1 — a cosmetic
+    // drift that also surprises comparison-based validators. Since
+    // we've already removed the source ids from `keepVerbatim`
+    // below, recycling one of them for the synthetic entry is safe.
+    const newId = Math.min(...dataIds);
+    const parts: ChartExDataEntry[] = [];
+    for (const id of dataIds) {
+      const entry = entryById.get(id);
+      if (entry) {
+        parts.push(entry);
+        // Mark this source entry as absorbed so we don't also emit
+        // it as a standalone `<cx:data>` in the final output.
+        keepVerbatim.delete(id);
+      }
+    }
+    consolidated.push({ id: newId, parts });
+    const axisRefs = refs!.filter(r => typeof r.dataId !== "number");
+    return {
+      ...series,
+      dataRefs: [{ dataId: newId }, ...axisRefs]
+    };
+  });
+  // Compose the final chartData: verbatim entries still referenced
+  // by a single-dataId series (or orphaned) followed by the
+  // consolidated synthetic entries.
+  const finalData: (ChartExDataEntry | ConsolidatedDataEntry)[] = [];
+  for (const entry of originalData) {
+    if (keepVerbatim.has(entry.id)) {
+      finalData.push(entry);
+    }
+  }
+  for (const entry of consolidated) {
+    finalData.push(entry);
+  }
+  return {
+    ...space,
+    chartData: {
+      ...space.chartData,
+      // The consolidated entries are `ConsolidatedDataEntry` (with a
+      // `parts` slot instead of raw strDim/numDim); cast into the
+      // public type and let the custom renderer dispatch on `parts`.
+      data: finalData as ChartExDataEntry[]
+    },
+    chart: {
+      ...space.chart,
+      plotArea: {
+        ...space.chart.plotArea,
+        plotAreaRegion: { ...plotRegion, series: rewrittenSeries }
+      }
+    }
+  };
+}
+
+/**
+ * Render-time-only aggregate produced by {@link consolidateDataForRender}.
+ * Carries multiple {@link ChartExDataEntry}s whose dimensions should be
+ * merged into a single `<cx:data>` element. Never escapes the renderer.
+ */
+interface ConsolidatedDataEntry {
+  id: number;
+  parts: ChartExDataEntry[];
+}
+
 function renderChartData(data: ChartExModel["chartSpace"]["chartData"]): string {
   const parts: string[] = [];
   parts.push("  <cx:chartData>");
@@ -3955,71 +4224,174 @@ function computePtCount(
   return Math.max(declared ?? 0, maxIdx + 1, points.length);
 }
 
-function renderDataEntry(entry: ChartExDataEntry): string {
+function renderDataEntry(entry: ChartExDataEntry | ConsolidatedDataEntry): string {
   const parts: string[] = [];
   parts.push(`    <cx:data id="${entry.id}">`);
-  if (entry.strDim) {
-    const d = entry.strDim;
-    parts.push(`      <cx:strDim type="${d.type}">`);
-    if (d.formula) {
-      parts.push(`        <cx:f>${escapeXml(d.formula)}</cx:f>`);
-    }
-    if (d.levels) {
-      for (const lvl of d.levels) {
-        // `ptCount` is preserved on parse so sparse arrays survive
-        // round-trip (e.g. `ptCount="100"` with only three authored
-        // `<cx:pt>`). Mutations that append fresh points leave the
-        // declared count stale, so use `max(declared, maxIdx+1,
-        // length)` to cover both paths: the declared count wins for
-        // sparse inputs, and the materialised points win when the
-        // model grew past the captured attribute.
-        const ptCount = computePtCount(lvl.ptCount, lvl.points);
-        const ptAttr = ` ptCount="${ptCount}"`;
-        if (lvl.points.length === 0) {
-          parts.push(`        <cx:lvl${ptAttr}/>`);
-        } else {
-          parts.push(`        <cx:lvl${ptAttr}>`);
-          for (const p of lvl.points) {
-            parts.push(`          <cx:pt idx="${p.index}">${escapeXml(p.value)}</cx:pt>`);
+  // `ConsolidatedDataEntry` is produced only by
+  // `consolidateDataForRender` and carries multiple original entries
+  // that must be emitted as children of a single `<cx:data>` — see the
+  // justification on the consolidation helper.
+  //
+  // For hierarchical series (treemap / sunburst) the builder produces
+  // one source `<cx:data>` per category + per hierarchy level + per
+  // value binding, each with a single-level `<cx:strDim>` /
+  // `<cx:numDim>`. Emitting those as SIBLING dimensions is
+  // schema-legal (`CT_Data` is `<xsd:choice maxOccurs="unbounded">`)
+  // but Microsoft Excel's treemap + sunburst renderer expects the
+  // canonical form every Excel-authored ChartEx uses: ONE
+  // `<cx:strDim type="cat">` with MULTIPLE `<cx:lvl>` children, one
+  // per hierarchy depth (leaf first, parent levels tagged
+  // `formatCode="General"`). Emitting multiple sibling `<cx:strDim>`
+  // entries triggers "Removed Part: /xl/drawings/drawingN.xml part.
+  // (Drawing shape)" — Excel drops the whole drawing rather than
+  // render a malformed hierarchy. Collapse same-type dimensions here
+  // so the consolidated rendering mirrors Excel's own output byte
+  // layout.
+  if ("parts" in entry && Array.isArray(entry.parts)) {
+    // Group strDim/numDim parts by dimension `type` while keeping
+    // their relative order (the FIRST occurrence's position dictates
+    // where the merged dimension lands in the output). Non-matching
+    // types stay as independent siblings.
+    const merged: Array<MergedStrDim | MergedNumDim> = [];
+    const strByType = new Map<string, MergedStrDim>();
+    const numByType = new Map<string, MergedNumDim>();
+    for (const part of entry.parts) {
+      if (part.strDim) {
+        const key = part.strDim.type;
+        const existing = strByType.get(key);
+        if (existing) {
+          // Later entries with the same type contribute additional
+          // `<cx:lvl>` children. Their formulas, if any, are dropped —
+          // CT_StringDataDimension only allows a single `<cx:f>` and
+          // the first one (the leaf) wins. Cached points from each
+          // source level survive as parent-level `<cx:lvl>` elements.
+          if (part.strDim.levels) {
+            existing.levels.push(...part.strDim.levels);
           }
-          parts.push("        </cx:lvl>");
+        } else {
+          const entry: MergedStrDim = {
+            kind: "str",
+            type: part.strDim.type,
+            formula: part.strDim.formula,
+            levels: [...(part.strDim.levels ?? [])]
+          };
+          strByType.set(key, entry);
+          merged.push(entry);
+        }
+      }
+      if (part.numDim) {
+        const key = part.numDim.type;
+        const existing = numByType.get(key);
+        if (existing) {
+          if (part.numDim.levels) {
+            existing.levels.push(...part.numDim.levels);
+          }
+        } else {
+          const numEntry: MergedNumDim = {
+            kind: "num",
+            type: part.numDim.type,
+            formula: part.numDim.formula,
+            levels: [...(part.numDim.levels ?? [])]
+          };
+          numByType.set(key, numEntry);
+          merged.push(numEntry);
         }
       }
     }
-    parts.push("      </cx:strDim>");
+    for (const m of merged) {
+      if (m.kind === "str") {
+        parts.push(renderStrDim({ type: m.type, formula: m.formula, levels: m.levels }));
+      } else {
+        parts.push(renderNumDim({ type: m.type, formula: m.formula, levels: m.levels }));
+      }
+    }
+    parts.push("    </cx:data>");
+    return parts.join("\n");
   }
-  if (entry.numDim) {
-    const d = entry.numDim;
-    parts.push(`      <cx:numDim type="${d.type}">`);
-    if (d.formula) {
-      parts.push(`        <cx:f>${escapeXml(d.formula)}</cx:f>`);
-    }
-    if (d.levels) {
-      for (const lvl of d.levels) {
-        const fmtAttr = lvl.formatCode ? ` formatCode="${escapeXmlAttr(lvl.formatCode)}"` : "";
-        // See `computePtCount` note above — same sparse-safe rule.
-        const ptCount = computePtCount(lvl.ptCount, lvl.points);
-        const ptAttr = ` ptCount="${ptCount}"`;
-        if (lvl.points.length === 0) {
-          parts.push(`        <cx:lvl${ptAttr}${fmtAttr}/>`);
-        } else {
-          parts.push(`        <cx:lvl${ptAttr}${fmtAttr}>`);
-          for (const p of lvl.points) {
-            // Route numeric content through `fmtNumText` so
-            // `NaN` / `Infinity` from a mutated / user-built model
-            // degrade to `"0"` instead of emitting literal `"NaN"`
-            // text content that no OOXML reader accepts. The parser
-            // at `chart-ex-parser.ts` already filters non-finite on
-            // read; the writer is the weak link.
-            parts.push(`          <cx:pt idx="${p.index}">${fmtNumText(p.value)}</cx:pt>`);
-          }
-          parts.push("        </cx:lvl>");
-        }
-      }
-    }
-    parts.push("      </cx:numDim>");
+  const plainEntry = entry as ChartExDataEntry;
+  if (plainEntry.strDim) {
+    parts.push(renderStrDim(plainEntry.strDim));
+  }
+  if (plainEntry.numDim) {
+    parts.push(renderNumDim(plainEntry.numDim));
   }
   parts.push("    </cx:data>");
+  return parts.join("\n");
+}
+
+interface MergedStrDim {
+  kind: "str";
+  type: NonNullable<ChartExDataEntry["strDim"]>["type"];
+  formula?: string;
+  levels: NonNullable<NonNullable<ChartExDataEntry["strDim"]>["levels"]>;
+}
+
+interface MergedNumDim {
+  kind: "num";
+  type: NonNullable<ChartExDataEntry["numDim"]>["type"];
+  formula?: string;
+  levels: NonNullable<NonNullable<ChartExDataEntry["numDim"]>["levels"]>;
+}
+
+function renderStrDim(d: NonNullable<ChartExDataEntry["strDim"]>): string {
+  const parts: string[] = [];
+  parts.push(`      <cx:strDim type="${d.type}">`);
+  if (d.formula) {
+    parts.push(`        <cx:f>${escapeXml(d.formula)}</cx:f>`);
+  }
+  if (d.levels) {
+    for (const lvl of d.levels) {
+      // `ptCount` is preserved on parse so sparse arrays survive
+      // round-trip (e.g. `ptCount="100"` with only three authored
+      // `<cx:pt>`). Mutations that append fresh points leave the
+      // declared count stale, so use `max(declared, maxIdx+1,
+      // length)` to cover both paths: the declared count wins for
+      // sparse inputs, and the materialised points win when the
+      // model grew past the captured attribute.
+      const ptCount = computePtCount(lvl.ptCount, lvl.points);
+      const ptAttr = ` ptCount="${ptCount}"`;
+      if (lvl.points.length === 0) {
+        parts.push(`        <cx:lvl${ptAttr}/>`);
+      } else {
+        parts.push(`        <cx:lvl${ptAttr}>`);
+        for (const p of lvl.points) {
+          parts.push(`          <cx:pt idx="${p.index}">${escapeXml(p.value)}</cx:pt>`);
+        }
+        parts.push("        </cx:lvl>");
+      }
+    }
+  }
+  parts.push("      </cx:strDim>");
+  return parts.join("\n");
+}
+
+function renderNumDim(d: NonNullable<ChartExDataEntry["numDim"]>): string {
+  const parts: string[] = [];
+  parts.push(`      <cx:numDim type="${d.type}">`);
+  if (d.formula) {
+    parts.push(`        <cx:f>${escapeXml(d.formula)}</cx:f>`);
+  }
+  if (d.levels) {
+    for (const lvl of d.levels) {
+      const fmtAttr = lvl.formatCode ? ` formatCode="${escapeXmlAttr(lvl.formatCode)}"` : "";
+      // See `computePtCount` note above — same sparse-safe rule.
+      const ptCount = computePtCount(lvl.ptCount, lvl.points);
+      const ptAttr = ` ptCount="${ptCount}"`;
+      if (lvl.points.length === 0) {
+        parts.push(`        <cx:lvl${ptAttr}${fmtAttr}/>`);
+      } else {
+        parts.push(`        <cx:lvl${ptAttr}${fmtAttr}>`);
+        for (const p of lvl.points) {
+          // Route numeric content through `fmtNumText` so
+          // `NaN` / `Infinity` from a mutated / user-built model
+          // degrade to `"0"` instead of emitting literal `"NaN"`
+          parts.push(`          <cx:pt idx="${p.index}">${fmtNumText(p.value)}</cx:pt>`);
+        }
+        parts.push("        </cx:lvl>");
+      }
+    }
+  }
+  parts.push("      </cx:numDim>");
   return parts.join("\n");
 }
 
@@ -4028,6 +4400,17 @@ function renderChart(chart: ChartExModel["chartSpace"]["chart"]): string {
   parts.push("  <cx:chart>");
   if (chart.title) {
     parts.push(renderTitle(chart.title));
+  } else {
+    // Match Excel's output: every chartEx chart (even ones without
+    // an explicit title) carries an empty `<cx:title>` placeholder
+    // that reserves layout space for the auto-derived title Excel
+    // shows for single-series charts. Omitting it caused Excel
+    // 2016+ to reject the chartEx as malformed and drop the
+    // parent drawing with "Removed Part: drawingN.xml (Drawing
+    // shape)". A freshly-built chartEx model has `chart.title`
+    // undefined; parsed models inherit whatever the on-disk bytes
+    // declared. See `ChartExModel.chartSpace.chart.title`.
+    parts.push('    <cx:title pos="t" align="ctr" overlay="0"/>');
   }
   // Per ECMA-376 `CT_Chart`, `autoTitleDeleted` is an independent
   // optional child that follows `title` — the two are **not** mutually
@@ -4055,16 +4438,30 @@ function renderChart(chart: ChartExModel["chartSpace"]["chart"]): string {
 
 function renderTitle(title: ChartTitle): string {
   const parts: string[] = [];
-  parts.push("    <cx:title>");
-  // Chart2014 `CT_Title` sequence: `tx? → spPr? → txPr? → overlay?`.
+  // Per the official [MS-ODRAWXML] CT_ChartTitle / CT_AxisTitle
+  // schemas, `overlay` is an ATTRIBUTE on `<cx:title>` (default 0),
+  // NOT a child element. Earlier revisions emitted
+  // `<cx:overlay val="…"/>` inside the title, which violates the
+  // sequence (no such child exists) — Excel 2016+ drops the whole
+  // ChartEx part on open and reports
+  // "Removed Part: /xl/drawings/drawingN.xml (Drawing shape)".
+  // Only emit the attribute when the caller explicitly set it so the
+  // default case produces a bare `<cx:title>` that matches what Excel
+  // itself writes.
+  const titleAttrs: string[] = [];
+  if (title.overlay !== undefined) {
+    titleAttrs.push(`overlay="${title.overlay ? "1" : "0"}"`);
+  }
+  parts.push(titleAttrs.length > 0 ? `    <cx:title ${titleAttrs.join(" ")}>` : "    <cx:title>");
+  // Chart2014 `CT_ChartTitle` sequence:
+  //   tx? → spPr? → txPr? → offset? → extLst?
   // `layout` is NOT a valid child of `<cx:title>` in the Chart2014
   // schema — earlier versions of this library emitted `<cx:layout/>`
-  // here, which strict validators (LibreOffice strict mode,
-  // `ooxml-validate`) reject. We also previously emitted `overlay`
-  // before `spPr`/`txPr`, a sequence violation. Both are fixed here.
-  // Title layout information belongs in the `manualLayout` extension,
-  // not a direct child; round-trip of buggy legacy files preserves
-  // `title.layout` on the model but the writer intentionally drops it.
+  // here, which strict validators reject. Title layout information
+  // belongs in the `offset` child or `extLst`-based extensions, not
+  // as a direct `layout` element; round-trip of buggy legacy files
+  // preserves `title.layout` on the model but the writer
+  // intentionally drops it.
   if (title.text && (title.text.paragraphs?.length ?? 0) > 0) {
     // If the structured model carries a non-empty rich-text body,
     // emit it; otherwise fall back to the raw bytes captured at parse
@@ -4079,13 +4476,7 @@ function renderTitle(title: ChartTitle): string {
     parts.push("      </cx:tx>");
   } else if (title.strRef?.formula) {
     // Formula-linked title — `<cx:tx><cx:txData><cx:f>…</cx:f>
-    // [<cx:v>cachedValue</cx:v>]</cx:txData></cx:tx>`. The
-    // `ChartTitle.strRef` shape stores the formula + optional cached
-    // points (same shape as classic chart title strRefs). The builder
-    // accepts `{ formula }` and creates `strRef.cache = { points: [] }`
-    // pre-population; the writer surfaces the first cached point's
-    // value as `<cx:v>` so readers without a formula engine still
-    // see the title text.
+    // [<cx:v>cachedValue</cx:v>]</cx:txData></cx:tx>`.
     const cached = title.strRef.cache?.points?.[0]?.value;
     parts.push("      <cx:tx>");
     parts.push("        <cx:txData>");
@@ -4096,9 +4487,6 @@ function renderTitle(title: ChartTitle): string {
     parts.push("        </cx:txData>");
     parts.push("      </cx:tx>");
   } else if (title.rawTx) {
-    // The parser captured `<cx:tx>…</cx:tx>` verbatim; use it directly
-    // so users can round-trip a chart whose title uses DrawingML
-    // features we don't (yet) structure (hyperlinks, fields, …).
     parts.push(`      ${title.rawTx}`);
   }
   if (title.spPr) {
@@ -4106,12 +4494,6 @@ function renderTitle(title: ChartTitle): string {
   }
   if (title.txPr) {
     parts.push(renderTxPr(title.txPr, "      "));
-  }
-  // `overlay` is optional per `CT_Title` — only emit when the caller
-  // explicitly set it. Writing `val="0"` on every untouched title
-  // pollutes round-trip byte-compare with a spurious attribute.
-  if (title.overlay !== undefined) {
-    parts.push(`      <cx:overlay val="${title.overlay ? "1" : "0"}"/>`);
   }
   parts.push("    </cx:title>");
   return parts.join("\n");
@@ -4399,6 +4781,22 @@ function renderSeries(s: ChartExSeries): string {
   }
   if (s.axisId) {
     for (const id of s.axisId) {
+      // Per the official ECMA-376 / [MS-ODRAWXML] chartEx schema,
+      // `<cx:axisId>` is a CT_UnsignedInteger — the id goes in a
+      // REQUIRED `val` attribute, not in text content. Microsoft
+      // Excel's own output always uses the attribute form:
+      //
+      //   <cx:axisId val="100000000"/>
+      //
+      // A previous revision of this file emitted `<cx:axisId>N</cx:axisId>`
+      // (text-content form) based on a misreading of the schema as
+      // `ST_AxisId = xsd:unsignedInt`. No such simple type exists;
+      // both `<cx:axisId>` and its sibling `<cx:dataId>` share the
+      // same `CT_UnsignedInteger` complex type. Excel's strict
+      // loader rejects the text form and surfaces the failure as
+      // "Removed Part: /xl/drawings/drawingN.xml (Drawing shape)"
+      // on open — the chartEx fails validation, then the parent
+      // drawing anchor gets purged along with it.
       parts.push(`          <cx:axisId val="${id}"/>`);
     }
   }
@@ -4417,35 +4815,68 @@ function renderLayoutProperties(
   if (lp._rawXml && !hasStructuredLayoutProperties(lp)) {
     return `          ${lp._rawXml}`;
   }
+  // Per the official [MS-ODRAWXML] CT_SeriesLayoutProperties schema,
+  // children MUST appear in this exact sequence (all optional):
+  //   parentLabelLayout → regionLabelLayout → visibility →
+  //   (aggregation | binning) → geography → statistics → subtotals →
+  //   extLst
+  //
+  // Several per-type flags are NOT direct children of `<cx:layoutPr>`
+  // but attributes on the above wrappers:
+  //   * `meanLine` / `meanMarker` / `nonoutliers` / `outliers` /
+  //     `connectorLines`  → `<cx:visibility>` attributes
+  //   * `quartileMethod`  → `<cx:statistics>` attribute
+  //
+  // Emitting them as bare elements (`<cx:showMeanLine val="1"/>` etc.)
+  // — which earlier versions of this library did — is a schema
+  // violation that causes Excel 2016+ to drop the whole ChartEx
+  // part on open ("Removed Part: /xl/drawings/drawingN.xml").
   parts.push("          <cx:layoutPr>");
+
+  // 1. parentLabelLayout — sunburst/treemap only
   if (lp.parentLabelLayout && (layoutId === "sunburst" || layoutId === "treemap")) {
     parts.push(`            <cx:parentLabelLayout val="${lp.parentLabelLayout}"/>`);
   }
-  if (lp.subtotals && layoutId === "waterfall") {
-    parts.push("            <cx:subtotals>");
-    for (const st of lp.subtotals) {
-      parts.push(`              <cx:subtotal idx="${st.idx}"/>`);
+
+  // 2. regionLabelLayout — regionMap only (map `regionLabels` model
+  //    field → spec `regionLabelLayout` element). `bestFit` from the
+  //    public option maps to schema `bestFitOnly`.
+  if (lp.regionLabels && layoutId === "regionMap") {
+    const val = lp.regionLabels === "bestFit" ? "bestFitOnly" : lp.regionLabels;
+    parts.push(`            <cx:regionLabelLayout val="${val}"/>`);
+  }
+
+  // 3. visibility — collect boxWhisker / waterfall flags into one
+  //    `<cx:visibility>` element with boolean attributes.
+  const visibilityAttrs: string[] = [];
+  if (layoutId === "boxWhisker") {
+    if (lp.showMeanLine !== undefined) {
+      visibilityAttrs.push(`meanLine="${lp.showMeanLine ? "1" : "0"}"`);
     }
-    parts.push("            </cx:subtotals>");
+    if (lp.showMeanMarker !== undefined) {
+      visibilityAttrs.push(`meanMarker="${lp.showMeanMarker ? "1" : "0"}"`);
+    }
+    if (lp.showInnerPoints !== undefined) {
+      visibilityAttrs.push(`nonoutliers="${lp.showInnerPoints ? "1" : "0"}"`);
+    }
+    if (lp.showOutlierPoints !== undefined) {
+      visibilityAttrs.push(`outliers="${lp.showOutlierPoints ? "1" : "0"}"`);
+    }
   }
   if (layoutId === "waterfall" && lp.connectorLines !== undefined) {
-    parts.push(`            <cx:connectorLines val="${lp.connectorLines ? "1" : "0"}"/>`);
+    visibilityAttrs.push(`connectorLines="${lp.connectorLines ? "1" : "0"}"`);
   }
+  if (visibilityAttrs.length > 0) {
+    parts.push(`            <cx:visibility ${visibilityAttrs.join(" ")}/>`);
+  }
+
+  // 4. binning — histogram / pareto only
   if (lp.binning) {
     const b = lp.binning;
     const attrs: string[] = [];
-    // Validate `intervalClosed` against the Chart2014 enum before
-    // interpolating — the parser currently casts this field without
-    // validation, so a fuzz-tested or hand-built model could carry
-    // an unsafe string that injects out of the attribute. See
-    // `chart-ex-parser.ts:parseLayoutProperties` for the read side.
     if (b.intervalClosed === "l" || b.intervalClosed === "r") {
       attrs.push(`intervalClosed="${b.intervalClosed}"`);
     }
-    // `underflow` / `overflow` / `binSize` / `binCount` are numeric
-    // attributes. Route through `fmtNumAttr` so `NaN` / `Infinity`
-    // from a mutated model degrades to "attribute absent" rather
-    // than emitting literal `"NaN"` text.
     const underflowAttr = fmtNumAttr(b.underflow);
     if (underflowAttr !== "") {
       attrs.push(`underflow="${underflowAttr}"`);
@@ -4455,83 +4886,86 @@ function renderLayoutProperties(
       attrs.push(`overflow="${overflowAttr}"`);
     }
     const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : "";
-    parts.push(`            <cx:binning${attrStr}>`);
-    // Per CT_Binning schema (Chart2014):
-    //   <xsd:sequence>
-    //     <xsd:choice minOccurs="0">
-    //       <xsd:element name="auto"|"categories"|"manual"/>
-    //     </xsd:choice>
-    //     <xsd:element name="binSize" minOccurs="0"/>
-    //     <xsd:element name="binCount" minOccurs="0"/>
-    //   </xsd:sequence>
-    // The discriminator choice (auto/categories/manual) is mutually
-    // exclusive, but `<cx:binSize>` / `<cx:binCount>` may coexist
-    // with any of them. Previously the writer unconditionally emitted
-    // `<cx:auto/>` alongside `<cx:binSize>`, producing an ambiguous
-    // model that the parser's priority chain (auto > categories >
-    // manual > binSize > binCount) collapsed to "auto" and silently
-    // dropped the configured bin size.
-    if (b.binType === "auto") {
-      parts.push("              <cx:auto/>");
-    } else if (b.binType === "categories") {
-      parts.push("              <cx:categories/>");
-    } else if (b.binType === "manual") {
-      parts.push("              <cx:manual/>");
-    }
-    // `binSize` / `binCount` are independent of the discriminator,
-    // so emit whenever explicitly set — this preserves authored
-    // values in combination with any manual/categorical layout.
+    // CT_Binning only allows `<cx:binSize>` or `<cx:binCount>`
+    // children. Per the MS-ODRAWXML Office 2016 schema these are
+    // typed as `xsd:unsignedInt` (simple type), but Microsoft
+    // Excel REJECTS the text-content form and requires a `val`
+    // attribute instead:
+    //
+    //   <cx:binCount val="12"/>   — Excel accepts
+    //   <cx:binCount>12</cx:binCount>   — Excel rejects (drawing dropped)
+    //
+    // Same discrepancy we saw on `<cx:axisId>` (typed `xsd:unsignedInt`
+    // on paper but treated as CT_UnsignedInteger on the wire).
+    // Emit the attribute form to match Excel's actual loader.
     const binSizeAttr = fmtNumAttr(b.binSize);
-    if (binSizeAttr !== "") {
-      parts.push(`              <cx:binSize val="${binSizeAttr}"/>`);
-    }
     const binCountAttr = fmtNumAttr(b.binCount);
-    if (binCountAttr !== "") {
-      parts.push(`              <cx:binCount val="${binCountAttr}"/>`);
-    }
-    parts.push("            </cx:binning>");
-  }
-  // `<cx:paretoLine>` is only a valid child of `<cx:layoutPr>` when
-  // the enclosing series is a pareto layout (`clusteredColumn` with
-  // histogram binning, per Chart2014 §L.5.4.6). Emit unguarded had
-  // us produce schema-invalid output for every non-histogram series
-  // that happened to have a `paretoLine` bool set in the model.
-  if (
-    lp.paretoLine !== undefined &&
-    (layoutId === "clusteredColumn" || layoutId === "paretoLine")
-  ) {
-    // Emit the explicit bool so `paretoLine: false` round-trips as
-    // `<cx:paretoLine val="0"/>` (user suppression of the line).
-    // Previously the `if (lp.paretoLine)` check dropped the `false`
-    // case entirely, silently re-enabling the line on save.
-    parts.push(`            <cx:paretoLine val="${lp.paretoLine ? "1" : "0"}"/>`);
-  }
-  if (layoutId === "boxWhisker") {
-    if (lp.quartileMethod) {
-      parts.push(`            <cx:quartileMethod val="${lp.quartileMethod}"/>`);
-    }
-    if (lp.showMeanLine !== undefined) {
-      parts.push(`            <cx:showMeanLine val="${lp.showMeanLine ? "1" : "0"}"/>`);
-    }
-    if (lp.showMeanMarker !== undefined) {
-      parts.push(`            <cx:showMeanMarker val="${lp.showMeanMarker ? "1" : "0"}"/>`);
-    }
-    if (lp.showInnerPoints !== undefined) {
-      parts.push(`            <cx:showInnerPoints val="${lp.showInnerPoints ? "1" : "0"}"/>`);
-    }
-    if (lp.showOutlierPoints !== undefined) {
-      parts.push(`            <cx:showOutlierPoints val="${lp.showOutlierPoints ? "1" : "0"}"/>`);
+    const hasChild = binSizeAttr !== "" || binCountAttr !== "";
+    if (!hasChild) {
+      parts.push(`            <cx:binning${attrStr}/>`);
+    } else {
+      parts.push(`            <cx:binning${attrStr}>`);
+      const preferCount =
+        b.binType === "binCount" || (b.binType === undefined && binCountAttr !== "");
+      if (binCountAttr !== "" && preferCount) {
+        parts.push(`              <cx:binCount val="${binCountAttr}"/>`);
+      } else if (binSizeAttr !== "") {
+        parts.push(`              <cx:binSize val="${binSizeAttr}"/>`);
+      } else if (binCountAttr !== "") {
+        parts.push(`              <cx:binCount val="${binCountAttr}"/>`);
+      }
+      parts.push("            </cx:binning>");
     }
   }
-  if (layoutId === "regionMap") {
+
+  // 5. geography — regionMap. Current structured model carries
+  //    `projection` / `geoMappingLevel`; emit as `<cx:geography>`
+  //    attributes.
+  if (layoutId === "regionMap" && (lp.projection || lp.geoMappingLevel)) {
+    const geoAttrs: string[] = [];
     if (lp.projection) {
-      parts.push(`            <cx:projection val="${lp.projection}"/>`);
-    }
-    if (lp.regionLabels) {
-      parts.push(`            <cx:regionLabels val="${lp.regionLabels}"/>`);
+      geoAttrs.push(`projectionType="${lp.projection}"`);
     }
     if (lp.geoMappingLevel) {
-      parts.push(`            <cx:geoMappingLevel val="${lp.geoMappingLevel}"/>`);
+      // Map the public enum onto the schema enum. Public option uses
+      // `country`; schema uses `countryRegion`.
+      const mapped =
+        lp.geoMappingLevel === "country"
+          ? "countryRegion"
+          : lp.geoMappingLevel === "automatic"
+            ? "dataOnly"
+            : lp.geoMappingLevel;
+      geoAttrs.push(`viewedRegionType="${mapped}"`);
+    }
+    // `cultureLanguage` and `cultureRegion` are required per schema —
+    // supply a sensible default when the caller didn't specify them.
+    geoAttrs.push(`cultureLanguage="en-US"`);
+    geoAttrs.push(`cultureRegion="US"`);
+    geoAttrs.push(`attribution=""`);
+    parts.push(`            <cx:geography ${geoAttrs.join(" ")}/>`);
+  }
+
+  // 6. statistics — boxWhisker only. `quartileMethod` is the only
+  //    attribute on `<cx:statistics>`.
+  if (layoutId === "boxWhisker" && lp.quartileMethod) {
+    parts.push(`            <cx:statistics quartileMethod="${lp.quartileMethod}"/>`);
+  }
+
+  // 7. subtotals — waterfall only. Schema uses `<cx:idx val="N"/>`
+  //    children (NOT `<cx:subtotal>` — earlier versions of this
+  //    library emitted the legacy element name). Emit the
+  //    self-closing form `<cx:subtotals/>` when the index list is
+  //    empty, matching Excel's exact byte layout for a waterfall
+  //    with no explicit subtotal markers.
+  if (lp.subtotals && layoutId === "waterfall") {
+    if (lp.subtotals.length === 0) {
+      parts.push("            <cx:subtotals/>");
+    } else {
+      parts.push("            <cx:subtotals>");
+      for (const st of lp.subtotals) {
+        parts.push(`              <cx:idx val="${st.idx}"/>`);
+      }
+      parts.push("            </cx:subtotals>");
     }
   }
   if (lp.extLst) {
@@ -4570,7 +5004,13 @@ function hasStructuredLayoutProperties(lp: NonNullable<ChartExSeries["layoutPr"]
 
 function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string {
   const parts: string[] = [];
-  parts.push("          <cx:dataLabels>");
+  // Per Excel's own output, `pos` is an ATTRIBUTE on `<cx:dataLabels>`
+  // itself, NOT a separate `<cx:dataLabel pos="..."/>` child element.
+  // Earlier revisions emitted the child-element form; Excel's strict
+  // loader interprets that as an unrecognised sibling and drops the
+  // surrounding chartEx part on load.
+  const openAttr = dl.position ? ` pos="${dl.position}"` : "";
+  parts.push(`          <cx:dataLabels${openAttr}>`);
   if (dl.visibility) {
     const v = dl.visibility;
     const attrs: string[] = [];
@@ -4591,9 +5031,6 @@ function renderDataLabels(dl: NonNullable<ChartExSeries["dataLabels"]>): string 
     // against Excel's output while `<cx:visibility/>` matches.
     const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
     parts.push(`            <cx:visibility${attrStr}/>`);
-  }
-  if (dl.position) {
-    parts.push(`            <cx:dataLabel pos="${dl.position}"/>`);
   }
   if (dl.separator) {
     parts.push(`            <cx:separator>${escapeXml(dl.separator)}</cx:separator>`);
@@ -4639,6 +5076,17 @@ function renderAxis(axis: ChartExAxis): string {
   // Route numeric attributes through `fmtNumAttr` so NaN / Infinity
   // values from user-built or mutated models degrade to "absent"
   // rather than being interpolated as literal `"NaN"` into the XML.
+  //
+  // Excel's strict loader requires this choice to be PRESENT — an
+  // empty `<cx:axis id="…"/>` with no catScaling/valScaling child is
+  // structurally ambiguous (the axis type isn't declared on the
+  // attribute set) and Excel responds by dropping the whole
+  // `<cx:chartSpace>` on open ("Removed Part: /xl/charts/chartExN.xml"
+  // cascading into the parent drawing). When the caller didn't set
+  // either explicitly, fall back to the axis's structural `type`
+  // field — the builder always tags freshly allocated axes as either
+  // `"cat"` or `"val"`, so this branch emits a schema-valid default
+  // discriminator instead of silently producing an empty element.
   if (axis.catScaling) {
     const cs = axis.catScaling;
     const attrs: string[] = [];
@@ -4665,6 +5113,10 @@ function renderAxis(axis: ChartExAxis): string {
     parts.push(
       attrs.length > 0 ? `        <cx:valScaling ${attrs.join(" ")}/>` : "        <cx:valScaling/>"
     );
+  } else if (axis.type === "cat") {
+    parts.push("        <cx:catScaling/>");
+  } else if (axis.type === "val") {
+    parts.push("        <cx:valScaling/>");
   }
   if (axis.title) {
     parts.push(renderTitle(axis.title));
@@ -4675,19 +5127,15 @@ function renderAxis(axis: ChartExAxis): string {
   if (axis.units) {
     parts.push(`        ${axis.units}`);
   }
-  if (axis.majorTickMark) {
-    parts.push(`        <cx:majorTickMarks val="${tickMarkToOoxml(axis.majorTickMark)}"/>`);
-  }
-  if (axis.minorTickMark) {
-    parts.push(`        <cx:minorTickMarks val="${tickMarkToOoxml(axis.minorTickMark)}"/>`);
-  }
-  // `<cx:majorGridlines>` / `<cx:minorGridlines>` wrap an optional
-  // `<cx:spPr>`. Presence of the element (even with empty shape) is
-  // meaningful — it requests Excel's default gridlines — so emit a
-  // self-closing form when `spPr` is empty or undefined. Previously
-  // gridlines were missing entirely from the writer; round-tripping
-  // an Excel-authored chart lost the tick-aligned guide lines that
-  // users rely on for reading values.
+  // Child element order per the official [MS-ODRAWXML] CT_Axis schema:
+  //   catScaling | valScaling (required choice), title, units,
+  //   majorGridlines, minorGridlines, majorTickMarks, minorTickMarks,
+  //   tickLabels, numFmt, spPr, txPr, extLst.
+  // Earlier revisions of this library emitted `majorTickMarks` /
+  // `minorTickMarks` BEFORE the gridlines and `txPr` BEFORE `spPr`,
+  // which violates the schema sequence and made Excel 2016+ report
+  // "Removed Part: /xl/drawings/drawingN.xml" for the drawing hosting
+  // the ChartEx — the axis fails schema validation and cascades out.
   if (axis.majorGridlines !== undefined) {
     const mg = axis.majorGridlines;
     const hasSpPr = mg && Object.keys(mg).length > 0;
@@ -4710,6 +5158,22 @@ function renderAxis(axis: ChartExAxis): string {
       parts.push("        <cx:minorGridlines/>");
     }
   }
+  if (axis.majorTickMark) {
+    // CT_TickMarks uses `type` attribute (not `val` like other chartEx
+    // elements). ST_TickMarksType enum: `in | out | cross | none`.
+    parts.push(`        <cx:majorTickMarks type="${tickMarkToOoxml(axis.majorTickMark)}"/>`);
+  }
+  if (axis.minorTickMark) {
+    parts.push(`        <cx:minorTickMarks type="${tickMarkToOoxml(axis.minorTickMark)}"/>`);
+  }
+  // `<cx:tickLabels/>` — Excel emits this empty element on every
+  // chartEx axis it authors; omitting it causes tick labels to
+  // disappear on load in some Excel 2016+ builds. The child-element
+  // order per the ChartEx schema places `tickLabels` AFTER
+  // `minorTickMarks` and BEFORE `numFmt`.
+  if (axis.tickLabels) {
+    parts.push("        <cx:tickLabels/>");
+  }
   if (axis.numFmt) {
     const attrs = [`formatCode="${escapeXmlAttr(axis.numFmt.formatCode)}"`];
     if (axis.numFmt.sourceLinked !== undefined) {
@@ -4717,11 +5181,11 @@ function renderAxis(axis: ChartExAxis): string {
     }
     parts.push(`        <cx:numFmt ${attrs.join(" ")}/>`);
   }
-  if (axis.txPr) {
-    parts.push(renderTxPr(axis.txPr, "        ", "cx:txPr"));
-  }
   if (axis.spPr) {
     parts.push(renderSpPr(axis.spPr, "        "));
+  }
+  if (axis.txPr) {
+    parts.push(renderTxPr(axis.txPr, "        ", "cx:txPr"));
   }
   if (axis.extLst) {
     parts.push(`        ${axis.extLst}`);

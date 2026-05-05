@@ -1,8 +1,9 @@
 import { extractAll } from "@archive/unzip/extract";
 import { FormCheckbox } from "@excel/form-control";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { Workbook } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
+
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("Form Control Checkbox", () => {
   describe("FormCheckbox class via worksheet", () => {
@@ -284,9 +285,7 @@ describe("Form Control Checkbox", () => {
       const buffer = await wb.xlsx.writeBuffer();
 
       // Gate on strict OOXML wiring and ordering rules we learned from Excel repair logs.
-      const report = await validateXlsxBuffer(new Uint8Array(buffer), { maxProblems: 50 });
-      expect(report.ok).toBe(true);
-      expect(report.problems).toEqual([]);
+      await expectValidXlsx(buffer);
 
       const entries = await extractAll(buffer);
 

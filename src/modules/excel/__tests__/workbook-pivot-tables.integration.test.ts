@@ -7,6 +7,7 @@ const fsReadFileAsync = promisify(fs.readFile);
 import { ZipParser } from "@archive/unzip/zip-parser";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const PIVOT_TABLE_FILEPATHS = [
   "xl/pivotCache/pivotCacheRecords1.xml",
@@ -32,9 +33,11 @@ async function writeThenParseZip(workbook: Workbook, filePath?: string): Promise
   if (filePath) {
     await workbook.xlsx.writeFile(filePath);
     const buffer = await fsReadFileAsync(filePath);
+    await expectValidXlsx(buffer, { label: `writeThenParseZip ${filePath}` });
     return new ZipParser(buffer).extractAllSync();
   }
   const buffer = await workbook.xlsx.writeBuffer();
+  await expectValidXlsx(buffer, { label: "writeThenParseZip buffer" });
   return new ZipParser(buffer as Buffer).extractAllSync();
 }
 
@@ -2488,6 +2491,7 @@ describe("Workbook", () => {
 
         // Step 4: Load the result again and verify integrity
         const buffer = await loaded.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "R9-T5 final load" });
         const final = new Workbook();
         await final.xlsx.load(buffer as Buffer);
 

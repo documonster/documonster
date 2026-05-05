@@ -1,20 +1,13 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { makeTestDataPath } from "@test/utils";
-import { describe, it, expect } from "vitest";
+import { describe, it } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 async function assertWorkbookOoxmlOk(wb: Workbook): Promise<void> {
   const buffer = await wb.xlsx.writeBuffer();
-  const report = await validateXlsxBuffer(new Uint8Array(buffer), { maxProblems: 50 });
-
-  if (!report.ok) {
-    throw new Error(`OOXML validation failed:\n${JSON.stringify(report, null, 2)}`);
-  }
-
-  expect(report.ok).toBe(true);
-  expect(report.problems).toEqual([]);
+  await expectValidXlsx(buffer);
 }
 
 describe("OOXML validator", () => {

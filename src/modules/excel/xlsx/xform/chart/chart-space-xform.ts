@@ -339,6 +339,21 @@ interface ParseState {
   context: any;
 }
 
+/**
+ * Flags that tune per-chart-type quirks in the shared `_renderDataLabels`
+ * / `_renderDataLabelEntry` / `_renderPieSeries` writers.
+ *
+ * `suppressDLblPos` — omit the `<c:dLblPos>` element. Doughnut charts
+ * set this because Excel's reader rejects any `c:dLblPos` inside a
+ * doughnut chart's data labels (series-level or per-point), even
+ * though the ECMA-376 schema technically allows it. Writing the
+ * element makes Excel strip the entire `drawing1.xml` part on open.
+ * See `_renderDoughnutChart` for the bisect that confirmed it.
+ */
+interface DataLabelRenderOptions {
+  suppressDLblPos?: boolean;
+}
+
 // Chart type element tags
 const CHART_TYPE_TAGS = new Set([
   "c:barChart",
@@ -1275,15 +1290,41 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     }
   }
 
+  /**
+   * Render `CT_DoughnutChart`. Child order matches the schema:
+   *   varyColors?, ser*, dLbls?, firstSliceAng?, holeSize?, extLst?.
+   *
+   * Excel's reader rejects `<c:dLblPos>` inside a doughnut chart's
+   * `<c:dLbls>` (both group-level and per-series). The Excel UI
+   * confirms this — the "Label Position" control is absent from the
+   * Format Data Labels panel for doughnut charts, whereas pie exposes
+   * center / inside end / outside end / best fit. Writing any
+   * `c:dLblPos` value (even `bestFit`) causes Excel to strip the
+   * entire `drawing1.xml` part on open with "Removed Part: Drawing
+   * shape".
+   *
+   * xlsxwriter hides this by forcibly nulling `labels["position"]`
+   * whenever the user-supplied position equals the chart's default
+   * ("best_fit" for pie/doughnut). That only masks the bug when the
+   * caller doesn't override the default; non-default positions still
+   * emit `c:dLblPos` and still break real-world doughnut files.
+   *
+   * The fix is to suppress `c:dLblPos` at serialisation time for
+   * doughnut — both in series `<c:dLbls>` and inside any per-point
+   * `<c:dLbl>` entries. `pie` and `ofPie` continue to emit it (they
+   * share `_renderPieSeries`, hence the explicit flag). The chart
+   * model still carries `position`, so SVG/PDF renderers keep using
+   * it for layout; only the XLSX writer filters it out.
+   */
   private _renderDoughnutChart(xml: XmlSink, g: DoughnutChartGroup): void {
     if (g.varyColors !== undefined) {
       xml.leafNode("c:varyColors", { val: g.varyColors ? "1" : "0" });
     }
     for (const s of g.series) {
-      this._renderPieSeries(xml, s);
+      this._renderPieSeries(xml, s, { suppressDLblPos: true });
     }
     if (g.dataLabels) {
-      this._renderDataLabels(xml, g.dataLabels);
+      this._renderDataLabels(xml, g.dataLabels, { suppressDLblPos: true });
     }
     if (g.firstSliceAng !== undefined) {
       xml.leafNode("c:firstSliceAng", { val: String(g.firstSliceAng) });
@@ -1582,7 +1623,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     xml.closeNode();
   }
 
-  private _renderPieSeries(xml: XmlSink, s: PieSeries): void {
+  private _renderPieSeries(xml: XmlSink, s: PieSeries, opts?: DataLabelRenderOptions): void {
     xml.openNode("c:ser");
     this._renderSeriesBase(xml, s);
     if (s.explosion !== undefined) {
@@ -1594,7 +1635,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       }
     }
     if (s.dataLabels) {
-      this._renderDataLabels(xml, s.dataLabels);
+      this._renderDataLabels(xml, s.dataLabels, opts);
     }
     if (s.cat) {
       this._renderCatData(xml, s.cat);
@@ -2003,7 +2044,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
    * pivot-format containers that emit a bare `<c:dLbl/>` without the
    * enclosing `<c:dLbls>` wrapper.
    */
-  private _renderDataLabelEntry(xml: XmlSink, e: DataLabelEntry): void {
+  private _renderDataLabelEntry(
+    xml: XmlSink,
+    e: DataLabelEntry,
+    opts?: DataLabelRenderOptions
+  ): void {
     xml.openNode("c:dLbl");
     xml.leafNode("c:idx", { val: String(e.index) });
     // ECMA-376 CT_DLbl is `idx, choice(delete | (layout, tx, numFmt, spPr,
@@ -2042,7 +2087,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (e.txPr) {
       this._renderTxPr(xml, e.txPr);
     }
-    if (e.position) {
+    if (e.position && !opts?.suppressDLblPos) {
       xml.leafNode("c:dLblPos", { val: e.position });
     }
     if (e.showLegendKey !== undefined) {
@@ -2074,7 +2119,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     xml.closeNode();
   }
 
-  private _renderDataLabels(xml: XmlSink, dl: DataLabels): void {
+  private _renderDataLabels(xml: XmlSink, dl: DataLabels, opts?: DataLabelRenderOptions): void {
     xml.openNode("c:dLbls");
     // ECMA-376 CT_DLbls: `(dLbl* & display-flags) | delete` — the
     // `delete` choice is mutually exclusive with the dLbl list and
@@ -2093,7 +2138,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     }
     if (dl.entries) {
       for (const e of dl.entries) {
-        this._renderDataLabelEntry(xml, e);
+        this._renderDataLabelEntry(xml, e, opts);
       }
     }
     if (dl.numFmt) {
@@ -2110,7 +2155,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (dl.txPr) {
       this._renderTxPr(xml, dl.txPr);
     }
-    if (dl.position) {
+    // `c:dLblPos` is forbidden by Excel's reader on doughnut charts
+    // even though the schema permits it — see `_renderDoughnutChart`
+    // for the full rationale. Callers set `opts.suppressDLblPos` to
+    // drop the element without mutating the source model.
+    if (dl.position && !opts?.suppressDLblPos) {
       xml.leafNode("c:dLblPos", { val: dl.position });
     }
     if (dl.showLegendKey !== undefined) {
@@ -2374,11 +2423,14 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     xml.leafNode("c:axId", { val: String(ax.axId) });
 
     // Scaling — per ECMA-376 `CT_Scaling` sequence: `logBase?`,
-    // `orientation?`, `min?`, `max?`, `extLst?`. The previous order
-    // (`orientation, max, min, logBase`) is a schema violation and
-    // strict validators reject the document. Excel tolerates the old
-    // order on read, but LibreOffice strict mode and `ooxml-validate`
-    // do not; swap to the spec-correct order.
+    // `orientation?`, `max?`, `min?`, `extLst?` (see Microsoft
+    // OpenXML `Scaling.ChildElementInfo` ordering). Emitting `min`
+    // before `max` — or any of the earlier orderings this file
+    // previously shipped (`orientation, max, min, logBase`) — is a
+    // schema violation. Excel tolerates the wrong order on read
+    // but flags the chart with a "Repaired Records" dialog on
+    // open; LibreOffice strict mode and `ooxml-validate` refuse
+    // the document outright.
     xml.openNode("c:scaling");
     if (ax.scaling?.logBase !== undefined) {
       xml.leafNode("c:logBase", { val: String(ax.scaling.logBase) });
@@ -2386,11 +2438,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (ax.scaling?.orientation) {
       xml.leafNode("c:orientation", { val: ax.scaling.orientation });
     }
-    if (ax.scaling?.min !== undefined) {
-      xml.leafNode("c:min", { val: String(ax.scaling.min) });
-    }
     if (ax.scaling?.max !== undefined) {
       xml.leafNode("c:max", { val: String(ax.scaling.max) });
+    }
+    if (ax.scaling?.min !== undefined) {
+      xml.leafNode("c:min", { val: String(ax.scaling.min) });
     }
     xml.closeNode();
 
@@ -2897,9 +2949,15 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (props.strike) {
       attrs.strike = props.strike;
     }
-    if (props.rotation !== undefined) {
-      attrs.rot = String(props.rotation);
-    }
+    // NOTE: `ChartTextProperties.rotation` intentionally does NOT
+    // contribute to run-property attributes. `rot` is a member of
+    // `CT_TextBodyProperties` (`<a:bodyPr>`) — it has no schema slot
+    // on `CT_TextCharacterProperties` (`<a:rPr>` / `<a:defRPr>` /
+    // `<a:endParaRPr>`). Emitting it here used to produce
+    // `<a:defRPr rot="-2700000"/>` which Microsoft Excel's strict
+    // loader rejects as "We found a problem with some content"
+    // (no repair dialog). `_renderTxPr` already writes rotation to
+    // the correct element on the enclosing `<a:bodyPr>`.
     if (props.baseline !== undefined) {
       attrs.baseline = String(props.baseline);
     }
@@ -3549,18 +3607,41 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       xml.writeRaw(txPr._rawXml);
       return;
     }
-    // Minimal rendering
     xml.openNode("c:txPr");
-    xml.leafNode(
-      "a:bodyPr",
-      txPr.rotation !== undefined ? { rot: String(txPr.rotation) } : undefined
-    );
+    // Excel's own `<a:bodyPr>` inside an axis `<c:txPr>` always carries
+    // the full attribute set — `spcFirstLastPara`, `vertOverflow`,
+    // `wrap`, `anchor`, `anchorCtr` — even when they mirror the schema
+    // defaults. Emitting a bare `<a:bodyPr rot="-2700000"/>` (the
+    // previous output) schema-validates but triggers Excel's strict
+    // loader to flag the chart as "needs repair": the drawing is
+    // kept but the file opens with the "we found a problem…" dialog
+    // and a "Repaired Records: Drawing" entry in the repair log.
+    // Verified against `tmp/reference-rotated-axis.xlsx` (Excel 2021-
+    // authored) — every axis `<c:txPr>` there carries the same attr
+    // bundle. Mirror that output here so a round-trip through our
+    // writer is byte-compatible with Excel's own output and survives
+    // the strict-loader's "drawing shape" integrity check.
+    const bodyPrAttrs: Record<string, string> = {
+      rot: String(txPr.rotation ?? 0),
+      spcFirstLastPara: "1",
+      vertOverflow: "ellipsis",
+      wrap: "square",
+      anchor: "ctr",
+      anchorCtr: "1"
+    };
+    xml.leafNode("a:bodyPr", bodyPrAttrs);
     xml.leafNode("a:lstStyle");
     xml.openNode("a:p");
     xml.openNode("a:pPr");
     this._renderRunProperties(xml, txPr, "a:defRPr");
     xml.closeNode();
-    xml.leafNode("a:endParaRPr");
+    // Every `<a:endParaRPr>` in Excel's own output carries a `lang`
+    // attribute. Emitting the bare self-closing form used to leave
+    // the strict loader flagging the chart as repairable even when
+    // the rest of the structure was clean. "en-US" matches Excel's
+    // factory default; callers that need a different locale can
+    // route through `_rawXml` on `ChartTextProperties`.
+    xml.leafNode("a:endParaRPr", { lang: "en-US" });
     xml.closeNode();
     xml.closeNode();
   }

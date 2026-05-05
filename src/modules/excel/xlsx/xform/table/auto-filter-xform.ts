@@ -35,8 +35,25 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
       ref: model.autoFilterRef
     });
 
+    // Only emit `<filterColumn>` for columns that carry actual filter
+    // state. Real Excel only emits the child when a filter is applied
+    // (`customFilters` / `filters` / `dynamicFilter`) or when the
+    // author explicitly set the filter-button visibility (either
+    // `filterButton: true` or `filterButton: false`). Columns that
+    // never touched `filterButton` (i.e. `undefined`) default to
+    // Excel's "show button" behaviour and should emit nothing —
+    // emitting an empty `<filterColumn hiddenButton="1"/>` for
+    // every such column makes Excel reject the table with
+    // "Removed Records: Table from /xl/tables/tableN.xml".
     model.columns.forEach((column: any) => {
-      this.map.filterColumn.render(xmlStream, column);
+      if (
+        column?.customFilters !== undefined ||
+        column?.filters !== undefined ||
+        column?.dynamicFilter !== undefined ||
+        column?.filterButton !== undefined
+      ) {
+        this.map.filterColumn.render(xmlStream, column);
+      }
     });
 
     xmlStream.closeNode();

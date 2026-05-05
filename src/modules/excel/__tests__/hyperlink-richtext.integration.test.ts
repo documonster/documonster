@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 
 import { Workbook, ValueType } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("Hyperlink + RichText round-trip (issue #142)", () => {
   it("preserves rich-text display on a hyperlink through writeBuffer → load", async () => {
@@ -27,6 +28,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     };
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "rich-text hyperlink sharedStrings" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
@@ -62,6 +64,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     };
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "plain hyperlink" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
 
@@ -91,6 +94,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     ws.getCell("A2").value = value;
 
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "rich-text hyperlink dedup" });
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);
     const ws2 = wb2.getWorksheet("Sheet1")!;
@@ -152,6 +156,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     };
 
     const buf1 = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf1, { label: "formula+hyperlink pass 1" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buf1);
@@ -165,6 +170,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
 
     // Second round-trip — formula must still be present
     const buf2 = await wb2.xlsx.writeBuffer();
+    await expectValidXlsx(buf2, { label: "formula+hyperlink pass 2" });
     const wb3 = new Workbook();
     await wb3.xlsx.load(buf2);
     const a1b = wb3.getWorksheet("Sheet1")!.getCell("A1");
@@ -185,6 +191,7 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     };
 
     const buffer = await wb.xlsx.writeBuffer({ useSharedStrings: false });
+    await expectValidXlsx(buffer, { label: "rich-text hyperlink inline" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(buffer);

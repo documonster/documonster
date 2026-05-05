@@ -346,11 +346,19 @@ class Table {
     assert(row > 0, "Table must be on valid row");
     assert(col > 0, "Table must be on valid col");
 
-    const { width, tableHeight } = this;
+    const { width, filterHeight, tableHeight } = this;
 
-    // autoFilterRef is a single-row range that targets the header row only.
-    // Excel uses this for filter buttons; including data rows can break filter rendering.
-    table.autoFilterRef = colCache.encode(row, col, row, col + width - 1);
+    // autoFilterRef spans the header + all data rows (excludes the
+    // optional totals row). Matches what Excel itself emits: a real
+    // `<table ref="A1:C7"><autoFilter ref="A1:C7"/>` uses the same
+    // range for both when there's no totals row, and shrinks the
+    // autoFilter by one row when a totals row is present. Emitting a
+    // single-row range (`A1:C1`) — which the library did previously —
+    // made Excel reject the entire table on open with "Removed
+    // Records: Table from /xl/tables/tableN.xml part (Table)" because
+    // the spec requires the autoFilter range to cover the filterable
+    // data.
+    table.autoFilterRef = colCache.encode(row, col, row + filterHeight - 1, col + width - 1);
 
     // tableRef is a range that includes optional headers and totals
     table.tableRef = colCache.encode(row, col, row + tableHeight - 1, col + width - 1);

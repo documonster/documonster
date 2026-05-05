@@ -244,7 +244,7 @@ function parseChartData(
     return { data: [] };
   }
 
-  const data = findChildren(chartDataEl, "cx:data").map(el => parseDataEntry(el, collector));
+  const data = findChildren(chartDataEl, "cx:data").flatMap(el => parseDataEntries(el, collector));
 
   // `cx:externalData` now lives on `ChartExSpace` (schema-correct
   // location). The caller (`parseChartEx`) migrates any legacy
@@ -266,6 +266,61 @@ function parseDataEntry(el: XmlElement, collector?: UnknownCollector): ChartExDa
     ...(strDim ? { strDim: parseStringDimension(strDim, collector) } : {}),
     ...(numDim ? { numDim: parseNumericDimension(numDim, collector) } : {})
   };
+}
+
+/**
+ * Parse one `<cx:data id="…">` element. Per [MS-ODRAWXML] the element
+ * can hold multiple `<cx:strDim>` and `<cx:numDim>` children (the
+ * `<xsd:choice maxOccurs="unbounded">` inside CT_Data). The writer's
+ * `consolidateDataForRender` uses that to satisfy the `maxOccurs="1"`
+ * on `<cx:dataId>` in CT_Series: it packs every dimension a series
+ * references into ONE `<cx:data>`.
+ *
+ * The in-memory {@link ChartExDataEntry} shape stores one `strDim`
+ * plus one `numDim` per entry — it can't hold a 4-dimension sunburst
+ * in a single record. So on parse we EXPLODE a multi-dimension
+ * `<cx:data>` back into a contiguous run of single-dimension entries:
+ * the first uses the element's `id` attribute verbatim, the rest use
+ * fresh synthetic ids off the top of the existing id range. Series
+ * `dataRefs` that reference the original id still hit the first
+ * exploded entry, and the writer's consolidator re-merges the run on
+ * the next serialisation pass.
+ */
+function parseDataEntries(el: XmlElement, collector?: UnknownCollector): ChartExDataEntry[] {
+  const baseId = parseIndexAttr(el.attributes.id);
+  // Collect children in document order so hierarchical sunburst /
+  // treemap levels come out as they were authored.
+  const ordered: XmlElement[] = [];
+  for (const child of el.children) {
+    if (child.type !== "element") {
+      continue;
+    }
+    if (child.name === "cx:strDim" || child.name === "cx:numDim") {
+      ordered.push(child);
+    }
+  }
+  if (ordered.length <= 1) {
+    return [parseDataEntry(el, collector)];
+  }
+  // For multi-dimension entries, produce one {@link ChartExDataEntry}
+  // per child, all sharing the `baseId` prefix. Use a wide numeric
+  // gap after the chart's highest id so the synthetic identifiers
+  // don't collide with legitimate, distinct `<cx:data id>` entries
+  // further down the `cx:chartData` block.
+  const entries: ChartExDataEntry[] = [];
+  for (let i = 0; i < ordered.length; i++) {
+    const child = ordered[i];
+    // `baseId` for the first slot preserves the series' dataRef
+    // linkage. Subsequent slots get an id the writer rarely picks
+    // on its own (10M-offset above whatever the chart already uses).
+    const id = i === 0 ? baseId : baseId * 1000 + 10_000_000 + i;
+    if (child.name === "cx:strDim") {
+      entries.push({ id, strDim: parseStringDimension(child, collector) });
+    } else {
+      entries.push({ id, numDim: parseNumericDimension(child, collector) });
+    }
+  }
+  return entries;
 }
 
 function parseStringDimension(
@@ -441,7 +496,32 @@ function parseSeries(
   const dataRefs = findChildren(el, "cx:dataId").map(dataId => ({
     dataId: parseIndexAttr(dataId.attributes.val)
   }));
-  const axisId = findChildren(el, "cx:axisId").map(axis => parseIndexAttr(axis.attributes.val));
+  // Primary form per the ECMA-376 chartEx schema and Microsoft Excel's
+  // own output: `<cx:axisId val="N"/>` (CT_UnsignedInteger with a
+  // required `val` attribute). A previous revision of our renderer
+  // mis-read the schema and emitted `<cx:axisId>N</cx:axisId>` as a
+  // text-content form — that form is not valid chartEx and Excel
+  // rejects it on open (drops the whole drawing). Read `val` first,
+  // then fall back to text content so round-trips of files authored
+  // by that buggy writer still recover the id instead of silently
+  // dropping it to `undefined`. Filter unresolvable ids so the
+  // returned array stays `number[]`.
+  const axisId = findChildren(el, "cx:axisId")
+    .map(axis => {
+      const viaAttr = parseIndexAttr(axis.attributes.val);
+      if (viaAttr !== undefined) {
+        return viaAttr;
+      }
+      const text = textContent(axis).trim();
+      if (text.length > 0) {
+        const parsed = Number(text);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+      return undefined;
+    })
+    .filter((id): id is number => id !== undefined);
   const tx = parseSeriesText(findChild(el, "cx:tx"));
   const layoutPr = parseLayoutProperties(findChild(el, "cx:layoutPr"));
 
@@ -525,16 +605,62 @@ function parseLayoutProperties(el: XmlElement | undefined): ChartExSeries["layou
 
   const binning = findChild(el, "cx:binning");
   const subtotalsEl = findChild(el, "cx:subtotals");
+  // Per the [MS-ODRAWXML] CT_Subtotals schema, children are named
+  // `<cx:idx val="N"/>` — with the INDEX in the `val` attribute.
+  // Earlier revisions of this library used a non-schema `<cx:subtotal
+  // idx="N"/>` element; accept both on parse. `<cx:idx>` schema has
+  // the index in `val`, legacy `<cx:subtotal>` had it in `idx`.
   const subtotals = subtotalsEl
-    ? findChildren(subtotalsEl, "cx:subtotal").map(st => ({
-        idx: parseIndexAttr(st.attributes.idx)
-      }))
+    ? [
+        ...findChildren(subtotalsEl, "cx:idx").map(st => ({
+          idx: parseIndexAttr(st.attributes.val)
+        })),
+        ...findChildren(subtotalsEl, "cx:subtotal").map(st => ({
+          idx: parseIndexAttr(st.attributes.idx)
+        }))
+      ]
     : undefined;
   const parentLabelLayout = childVal(el, "cx:parentLabelLayout");
-  const quartileMethod = childVal(el, "cx:quartileMethod");
-  const projection = childVal(el, "cx:projection");
-  const regionLabels = childVal(el, "cx:regionLabels");
-  const geoMappingLevel = childVal(el, "cx:geoMappingLevel");
+  // Per the official [MS-ODRAWXML] CT_SeriesLayoutProperties schema,
+  // several per-type flags live on wrapper elements rather than as
+  // flat children:
+  //
+  //   * `<cx:visibility>` carries the boxWhisker show* flags
+  //     (`meanLine`, `meanMarker`, `nonoutliers`, `outliers`) as
+  //     attributes, plus the waterfall `connectorLines` flag.
+  //   * `<cx:statistics>` carries the boxWhisker `quartileMethod`
+  //     attribute.
+  //   * `<cx:geography>` carries regionMap `projectionType` /
+  //     `viewedRegionType` attributes.
+  //   * `<cx:regionLabelLayout>` carries regionMap `regionLabels` via
+  //     a `val` attribute.
+  //
+  // Earlier revisions of this library wrote each of these as a flat
+  // element like `<cx:showMeanLine val="1"/>` / `<cx:projection val="…"/>`
+  // — that output was schema-invalid (Excel 2016+ rejects the whole
+  // ChartEx part on load) but we still need to parse files produced
+  // by those versions. Each property below checks the correct schema
+  // location first, then falls back to the flat form for legacy
+  // on-disk bytes.
+  const visibilityEl = findChild(el, "cx:visibility");
+  const statisticsEl = findChild(el, "cx:statistics");
+  const geographyEl = findChild(el, "cx:geography");
+  const regionLabelLayoutEl = findChild(el, "cx:regionLabelLayout");
+  const quartileMethod =
+    statisticsEl?.attributes.quartileMethod ?? childVal(el, "cx:quartileMethod");
+  const projection = geographyEl?.attributes.projectionType ?? childVal(el, "cx:projection");
+  const regionLabelsRaw = regionLabelLayoutEl?.attributes.val ?? childVal(el, "cx:regionLabels");
+  const regionLabels = regionLabelsRaw === "bestFitOnly" ? "bestFit" : regionLabelsRaw;
+  const geoMappingLevelRaw =
+    geographyEl?.attributes.viewedRegionType ?? childVal(el, "cx:geoMappingLevel");
+  // Map the spec-canonical `countryRegion` → public `country`;
+  // `dataOnly` → `automatic`. Other values pass through unchanged.
+  const geoMappingLevel =
+    geoMappingLevelRaw === "countryRegion"
+      ? "country"
+      : geoMappingLevelRaw === "dataOnly"
+        ? "automatic"
+        : geoMappingLevelRaw;
   // Collect each child only when the XML actually contains it. Emitting
   // `subtotals: []` / `parentLabelLayout: undefined` triggers
   // `hasStructuredLayoutProperties` (see chart-ex-renderer.ts) and forces the
@@ -552,6 +678,15 @@ function parseLayoutProperties(el: XmlElement | undefined): ChartExSeries["layou
       : {}),
     ...(subtotals !== undefined ? { subtotals } : {}),
     ...(() => {
+      // `connectorLines` (waterfall) is a `<cx:visibility>` attribute
+      // per CT_SeriesLayoutProperties. Read the attribute first; fall
+      // back to the legacy `<cx:connectorLines val="…"/>` flat element
+      // produced by older revisions of this library.
+      const raw = visibilityEl?.attributes.connectorLines;
+      if (raw !== undefined) {
+        const b = parseBoolString(raw);
+        return b !== undefined ? { connectorLines: b } : {};
+      }
       const v = parseCtBoolean(findChild(el, "cx:connectorLines"));
       return v !== undefined ? { connectorLines: v } : {};
     })(),
@@ -571,8 +706,29 @@ function parseLayoutProperties(el: XmlElement | undefined): ChartExSeries["layou
             >["intervalClosed"],
             underflow: parseOptionalFloat(binning.attributes.underflow),
             overflow: parseOptionalFloat(binning.attributes.overflow),
-            binSize: parseOptionalFloat(childVal(binning, "cx:binSize")),
-            binCount: parseOptionalInt(childVal(binning, "cx:binCount")),
+            // Per [MS-ODRAWXML] CT_Binning, `binSize` / `binCount` are
+            // element-content simple types (`<cx:binSize>0.5</cx:binSize>`),
+            // but Microsoft Excel 2016+ actually emits them with a `val`
+            // attribute (`<cx:binCount val="5"/>`) and rejects the text
+            // form on load. Accept both shapes so files authored by
+            // our earlier writers (text form) AND by Excel itself
+            // (attribute form) both round-trip. Nullish coalescing
+            // (`??`) is NOT enough here — self-closing `<cx:binCount/>`
+            // returns empty string from `childText` (NOT nullish),
+            // which would mask the `val` attribute. Use an explicit
+            // "non-empty-string or fall back" pattern.
+            binSize: parseOptionalFloat(
+              (childText(binning, "cx:binSize") || undefined) ?? childVal(binning, "cx:binSize")
+            ),
+            binCount: parseOptionalInt(
+              (childText(binning, "cx:binCount") || undefined) ?? childVal(binning, "cx:binCount")
+            ),
+            // `binType` is a library-internal discriminator — the
+            // official CT_Binning schema has no `<cx:auto>` /
+            // `<cx:categories>` / `<cx:manual>` elements. Map the
+            // schema-valid inputs onto the discriminator so existing
+            // callers who read `binType` continue to work; tolerate
+            // the legacy element forms on the way in.
             binType: findChild(binning, "cx:auto")
               ? "auto"
               : findChild(binning, "cx:categories")
@@ -583,7 +739,7 @@ function parseLayoutProperties(el: XmlElement | undefined): ChartExSeries["layou
                     ? "binSize"
                     : findChild(binning, "cx:binCount")
                       ? "binCount"
-                      : undefined
+                      : "auto"
           }
         }
       : {}),
@@ -597,18 +753,43 @@ function parseLayoutProperties(el: XmlElement | undefined): ChartExSeries["layou
         }
       : {}),
     ...(() => {
+      // `meanLine` / `meanMarker` / `nonoutliers` / `outliers` are
+      // `<cx:visibility>` attributes per the schema. Read the
+      // attribute first; fall back to the legacy `<cx:showMeanLine
+      // val="…"/>` flat element for files authored by older
+      // revisions of this library.
+      const raw = visibilityEl?.attributes.meanLine;
+      if (raw !== undefined) {
+        const b = parseBoolString(raw);
+        return b !== undefined ? { showMeanLine: b } : {};
+      }
       const v = parseCtBoolean(findChild(el, "cx:showMeanLine"));
       return v !== undefined ? { showMeanLine: v } : {};
     })(),
     ...(() => {
+      const raw = visibilityEl?.attributes.meanMarker;
+      if (raw !== undefined) {
+        const b = parseBoolString(raw);
+        return b !== undefined ? { showMeanMarker: b } : {};
+      }
       const v = parseCtBoolean(findChild(el, "cx:showMeanMarker"));
       return v !== undefined ? { showMeanMarker: v } : {};
     })(),
     ...(() => {
+      const raw = visibilityEl?.attributes.nonoutliers;
+      if (raw !== undefined) {
+        const b = parseBoolString(raw);
+        return b !== undefined ? { showInnerPoints: b } : {};
+      }
       const v = parseCtBoolean(findChild(el, "cx:showInnerPoints"));
       return v !== undefined ? { showInnerPoints: v } : {};
     })(),
     ...(() => {
+      const raw = visibilityEl?.attributes.outliers;
+      if (raw !== undefined) {
+        const b = parseBoolString(raw);
+        return b !== undefined ? { showOutlierPoints: b } : {};
+      }
       const v = parseCtBoolean(findChild(el, "cx:showOutlierPoints"));
       return v !== undefined ? { showOutlierPoints: v } : {};
     })(),
@@ -741,20 +922,30 @@ function parseAxis(el: XmlElement, collector?: UnknownCollector): ChartExAxis {
     // Element names are plural in the schema (`majorTickMarks`,
     // `minorTickMarks`). Again accept the singular form for backward
     // compatibility with files we produced before the rename.
+    // Per [MS-ODRAWXML] CT_TickMarks the discriminator is a `type`
+    // attribute — not `val` like most other chartEx elements. Read
+    // `type` first, fall back to `val` for files authored by older
+    // revisions of this library (which wrongly used `val`).
     majorTickMark: mapTickMark(
       validateEnum(
-        childVal(el, "cx:majorTickMarks") ?? childVal(el, "cx:majorTickMark"),
+        findChild(el, "cx:majorTickMarks")?.attributes.type ??
+          findChild(el, "cx:majorTickMark")?.attributes.type ??
+          childVal(el, "cx:majorTickMarks") ??
+          childVal(el, "cx:majorTickMark"),
         tickMarkOoxml,
         collector,
-        "cx:axis/cx:majorTickMarks/@val"
+        "cx:axis/cx:majorTickMarks/@type"
       )
     ),
     minorTickMark: mapTickMark(
       validateEnum(
-        childVal(el, "cx:minorTickMarks") ?? childVal(el, "cx:minorTickMark"),
+        findChild(el, "cx:minorTickMarks")?.attributes.type ??
+          findChild(el, "cx:minorTickMark")?.attributes.type ??
+          childVal(el, "cx:minorTickMarks") ??
+          childVal(el, "cx:minorTickMark"),
         tickMarkOoxml,
         collector,
-        "cx:axis/cx:minorTickMarks/@val"
+        "cx:axis/cx:minorTickMarks/@type"
       )
     ),
     numFmt: numFmt
@@ -1033,10 +1224,18 @@ function parseBoolAttr(el: XmlElement | undefined, name: string): boolean | unde
   if (value === undefined) {
     return undefined;
   }
-  // OOXML `xsd:boolean` admits the four canonical forms. Hand-authored
-  // or LibreOffice-produced XML uses the textual `"true"` / `"false"`;
-  // the previous implementation only recognised numeric forms and
-  // silently converted every unknown value to `false`.
+  return parseBoolString(value);
+}
+
+/**
+ * Parse an OOXML boolean string (`"1"` / `"0"` / `"true"` / `"false"`),
+ * returning `undefined` for anything else. Used by the layoutPr parser
+ * when reading boolean attributes off `<cx:visibility>` etc.
+ */
+function parseBoolString(value: string | undefined): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
   if (value === "1" || value === "true") {
     return true;
   }

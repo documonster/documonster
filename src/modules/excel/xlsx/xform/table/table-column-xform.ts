@@ -43,12 +43,28 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
   }
 
   render(xmlStream: any, model: TableColumnModel): void {
-    if (model.calculatedColumnFormula || model.totalsRowFormula) {
+    // `<totalsRowFormula>` is only valid when `totalsRowFunction="custom"`
+    // (or absent entirely, treated as custom). For the built-in
+    // functions — `sum` / `average` / `count` / `countNums` / `max` /
+    // `min` / `stdDev` / `var` — Excel GENERATES the SUBTOTAL formula
+    // itself at open time. Emitting a redundant
+    // `<totalsRowFormula>SUBTOTAL(101,Table[Col])</totalsRowFormula>`
+    // alongside `totalsRowFunction="average"` makes Excel report
+    // "Removed Records: Table from /xl/tables/tableN.xml" because the
+    // schema allows the child only with a custom function. The
+    // library's own `Table` class eagerly populates
+    // `column.totalsRowFormula = getFormula(column)` for every
+    // non-label column so rows render correctly in-memory; we gate
+    // the *emission* here instead of mutating that in-memory cache.
+    const isCustomFn =
+      model.totalsRowFunction === undefined || model.totalsRowFunction === "custom";
+    const emitTotalsFormula = !!model.totalsRowFormula && isCustomFn;
+    if (model.calculatedColumnFormula || emitTotalsFormula) {
       xmlStream.openNode(this.tag, this._renderAttributes(model));
       if (model.calculatedColumnFormula) {
         xmlStream.leafNode("calculatedColumnFormula", undefined, model.calculatedColumnFormula);
       }
-      if (model.totalsRowFormula) {
+      if (emitTotalsFormula) {
         xmlStream.leafNode("totalsRowFormula", undefined, model.totalsRowFormula);
       }
       xmlStream.closeNode();

@@ -16,7 +16,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { describe, expect, it } from "vitest";
 
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { entryText, loadRoundTrip, type EntryMap } from "./helpers/zip-text";
 
 /**
@@ -68,9 +68,8 @@ describe("Chart edge cases", () => {
       const out = new Uint8Array(await wb.xlsx.writeBuffer());
       const entries = await extractAll(out);
 
-      // Audit must remain clean (no dangling rels / missing parts).
-      const audit = auditOoxmlPackage(entries);
-      expect(audit.errors, audit.errors.join("\n")).toEqual([]);
+      // Validator must remain clean (no dangling rels / missing parts).
+      await expectValidXlsx(out);
 
       // Exactly two chart parts remain.
       const remainingCharts = listChartParts(entries);
@@ -104,8 +103,7 @@ describe("Chart edge cases", () => {
       expect(ws.removeChart(0)).toBe(true);
       const out = new Uint8Array(await wb.xlsx.writeBuffer());
       const entries = await extractAll(out);
-      const audit = auditOoxmlPackage(entries);
-      expect(audit.errors, audit.errors.join("\n")).toEqual([]);
+      await expectValidXlsx(out);
       // No chart parts should remain.
       expect(listChartParts(entries)).toEqual([]);
       // Drawing parts should also be gone (or at minimum have no chart
@@ -122,7 +120,7 @@ describe("Chart edge cases", () => {
     it("preserves drawing anchor order for 5 charts through round-trip", async () => {
       const bytes = await buildMultiChartWorkbook(5);
       const { wb, entries } = await loadRoundTrip(bytes);
-      expect(auditOoxmlPackage(entries).errors).toEqual([]);
+      await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
 
       // High-level model: 5 charts, original add order preserved.
       const charts = wb.getWorksheet("Data")!.getCharts();
@@ -210,8 +208,7 @@ describe("Chart edge cases", () => {
         // Force structured re-render by touching title with the same value.
         chart.title = title;
         const out = new Uint8Array(await wb2.xlsx.writeBuffer());
-        const entries = await extractAll(out);
-        expect(auditOoxmlPackage(entries).errors).toEqual([]);
+        await expectValidXlsx(out);
 
         const wb3 = new Workbook();
         await wb3.xlsx.load(out);

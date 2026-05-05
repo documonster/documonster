@@ -4,6 +4,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 class DefinedNamesXform extends BaseXform {
   declare private _parsedName?: string;
   declare private _parsedLocalSheetId?: string;
+  declare private _parsedHidden?: string;
   declare private _parsedText: string[];
 
   constructor() {
@@ -15,11 +16,16 @@ class DefinedNamesXform extends BaseXform {
     // <definedNames>
     //   <definedName name="name">text</definedName>
     //   <definedName name="_xlnm.Print_Area" localSheetId="0">text</definedName>
+    //   <definedName name="_xlchart.v1.0" hidden="1">Sheet1!$A$1:$A$3</definedName>
     // </definedNames>
-    xmlStream.openNode("definedName", {
+    const attrs: Record<string, unknown> = {
       name: model.name,
       localSheetId: model.localSheetId
-    });
+    };
+    if (model.hidden) {
+      attrs.hidden = 1;
+    }
+    xmlStream.openNode("definedName", attrs);
     // For opaque names, write the rawText verbatim to preserve round-trip fidelity.
     // For reference/formula names, join the ranges array as before.
     if (model.kind === "opaque" && model.rawText) {
@@ -35,6 +41,7 @@ class DefinedNamesXform extends BaseXform {
       case "definedName":
         this._parsedName = node.attributes.name;
         this._parsedLocalSheetId = node.attributes.localSheetId;
+        this._parsedHidden = node.attributes.hidden;
         this._parsedText = [];
         return true;
       default:
@@ -62,6 +69,9 @@ class DefinedNamesXform extends BaseXform {
 
     if (this._parsedLocalSheetId !== undefined) {
       model.localSheetId = parseInt(this._parsedLocalSheetId, 10);
+    }
+    if (this._parsedHidden === "1" || this._parsedHidden === "true") {
+      model.hidden = true;
     }
     this.model = model;
     return false;

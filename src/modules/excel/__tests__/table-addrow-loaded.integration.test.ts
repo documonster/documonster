@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("Table", () => {
   it("supports getTable().addRow() after loading a workbook", async () => {
@@ -23,6 +24,7 @@ describe("Table", () => {
     });
 
     const template = await wb1.xlsx.writeBuffer();
+    await expectValidXlsx(template, { label: "table-addrow-loaded template" });
 
     const wb2 = new Workbook();
     await wb2.xlsx.load(template);
@@ -40,10 +42,15 @@ describe("Table", () => {
     // Table reference should expand to include the new row
     expect(table2.model.tableRef).toBe("A1:B4");
 
-    // AutoFilter reference should remain header-row-only
-    expect(table2.model.autoFilterRef).toBe("A1:B1");
+    // AutoFilter reference must cover the entire filterable range —
+    // header row + all data rows (excluding any totals row). Real
+    // Excel emits the filter ref at the full table extent; a
+    // header-only ref like `A1:B1` makes Excel reject the table on
+    // open with "Removed Records: Table from /xl/tables/tableN.xml".
+    expect(table2.model.autoFilterRef).toBe("A1:B4");
 
     const out = await wb2.xlsx.writeBuffer();
+    await expectValidXlsx(out, { label: "table-addrow-loaded after addRow" });
 
     const wb3 = new Workbook();
     await wb3.xlsx.load(out);
@@ -51,7 +58,7 @@ describe("Table", () => {
     const table3 = ws3.getTable("TestTable");
 
     expect(table3.model.tableRef).toBe("A1:B4");
-    expect(table3.model.autoFilterRef).toBe("A1:B1");
+    expect(table3.model.autoFilterRef).toBe("A1:B4");
     expect(ws3.getCell("A4").value).toBe("Carol");
     expect(ws3.getCell("B4").value).toBe(41);
   });
@@ -114,6 +121,7 @@ describe("Table", () => {
 
     // Should not throw
     const buffer = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buffer, { label: "distinct table names across sheets" });
     expect(buffer).toBeTruthy();
   });
 

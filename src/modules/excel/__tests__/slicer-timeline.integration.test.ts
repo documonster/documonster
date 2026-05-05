@@ -22,6 +22,7 @@ import { ZipEditor } from "@archive/zip";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const decoder = new TextDecoder();
 
@@ -109,6 +110,7 @@ describe("slicer + timeline raw passthrough", () => {
     // verbatim, and the Content Types manifest must mention the new
     // content types so Excel recognises them.
     const resaved = new Uint8Array(await wb.xlsx.writeBuffer());
+    await expectValidXlsx(resaved, { label: "slicer+timeline resave" });
     const entries = await extractAll(resaved);
     expect(entries.get("xl/slicers/slicer1.xml")).toBeDefined();
     expect(entries.get("xl/slicerCaches/slicerCache1.xml")).toBeDefined();
@@ -135,6 +137,7 @@ describe("slicer + timeline raw passthrough", () => {
     const ws = wb.addWorksheet("Sheet1");
     ws.getCell("A1").value = 1;
     const buf = await wb.xlsx.writeBuffer();
+    await expectValidXlsx(buf, { label: "empty workbook no slicer/timeline" });
     const entries = await extractAll(new Uint8Array(buf));
     const contentTypes = decoder.decode(entries.get("[Content_Types].xml")!.data);
     expect(contentTypes).not.toContain("application/vnd.ms-excel.slicer+xml");

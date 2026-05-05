@@ -238,12 +238,29 @@ function fillGroupCaches(group: ChartTypeGroup, ctx: ResolverContext, date1904?:
 function hasChartExStringPoints(
   dim: NonNullable<ChartExModel["chartSpace"]["chartData"]["data"][number]["strDim"]>
 ): boolean {
+  // Hierarchical charts (treemap / sunburst) point their `<cx:strDim>`
+  // at a contiguous multi-column range (`$A$2:$C$N`). A single flat
+  // `<cx:lvl>` cache across 3 columns × N rows (3×N points) does not
+  // survive Excel's hierarchical-data pivot: the chart draws nothing
+  // because the loader cannot re-derive the row × column layout from
+  // a flat point list. Excel's own writer omits the cache entirely for
+  // treemap + sunburst and re-reads the cells on open. Mirror that:
+  // when a strDim is tagged `_skipCache` (set by the builder for
+  // hierarchical chartEx series), treat it as "already populated"
+  // so `fillChartExCaches` leaves it alone and the renderer emits
+  // just the `<cx:f>` reference.
+  if ((dim as { _skipCache?: boolean })._skipCache) {
+    return true;
+  }
   return dim.levels?.some(level => level.points.length > 0) ?? false;
 }
 
 function hasChartExNumberPoints(
   dim: NonNullable<ChartExModel["chartSpace"]["chartData"]["data"][number]["numDim"]>
 ): boolean {
+  if ((dim as { _skipCache?: boolean })._skipCache) {
+    return true;
+  }
   return dim.levels?.some(level => level.points.length > 0) ?? false;
 }
 

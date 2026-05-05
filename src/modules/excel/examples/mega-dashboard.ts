@@ -717,7 +717,11 @@ async function main(): Promise<void> {
           dataLabels: {
             showPercent: true,
             showCatName: true,
-            position: "outEnd",
+            // Doughnut charts do not accept `c:dLblPos` in their
+            // series `c:dLbls` — Excel's UI exposes no label
+            // position picker for doughnut, and emitting any value
+            // causes the drawing part to be stripped on open. See
+            // `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
             separator: " • "
           }
         }

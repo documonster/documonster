@@ -10,7 +10,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildPivotChartFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, type EntryMap } from "./helpers/zip-text";
 
@@ -22,10 +22,11 @@ beforeAll(async () => {
   pivotChartFixtures = await buildPivotChartFixtures();
 });
 
-async function loadAndWrite(bytes: Uint8Array): Promise<EntryMap> {
+async function loadAndWrite(bytes: Uint8Array): Promise<{ bytes: Uint8Array; entries: EntryMap }> {
   const wb = new Workbook();
   await wb.xlsx.load(bytes);
-  return extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+  const out = new Uint8Array(await wb.xlsx.writeBuffer());
+  return { bytes: out, entries: await extractAll(out) };
 }
 
 describe("Pivot chart round-trip", () => {
@@ -33,8 +34,8 @@ describe("Pivot chart round-trip", () => {
     const fixtures = pivotChartFixtures;
     const fixture = fixtures.find(f => f.id === "pivot-chart-multi-value")!;
     expect(fixture).toBeDefined();
-    const entries = await loadAndWrite(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { bytes, entries } = await loadAndWrite(fixture.bytes);
+    await expectValidXlsx(bytes);
 
     const chartPath = [...entries.keys()].find(p => /^xl\/charts\/chart\d+[.]xml$/.test(p))!;
     const chartXml = entryText(entries, chartPath)!;
@@ -58,8 +59,8 @@ describe("Pivot chart round-trip", () => {
   it("preserves two independent pivot caches each driving a separate pivot chart", async () => {
     const fixtures = pivotChartFixtures;
     const fixture = fixtures.find(f => f.id === "pivot-chart-multi-cache")!;
-    const entries = await loadAndWrite(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { bytes, entries } = await loadAndWrite(fixture.bytes);
+    await expectValidXlsx(bytes);
 
     // Two separate cache definitions and two pivot tables.
     const cacheDefs = [...entries.keys()].filter(p =>
@@ -104,15 +105,15 @@ describe("Pivot chart round-trip", () => {
       const xml = entryText(entries, chartPath)!;
       expect(xml, `pass ${i + 1} pivotOptions uri`).toContain(PIVOT_OPT_EXT_URI);
       expect(xml, `pass ${i + 1} dropZonesVisible`).toContain('<c14:dropZonesVisible val="1"/>');
-      expect(auditOoxmlPackage(entries).errors, `pass ${i + 1}`).toEqual([]);
+      await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
     }
   });
 
   it("audit baseline passes for every pivot chart fixture", async () => {
     const fixtures = pivotChartFixtures;
     for (const fixture of fixtures) {
-      const entries = await loadAndWrite(fixture.bytes);
-      expect(auditOoxmlPackage(entries).errors, fixture.id).toEqual([]);
+      const { bytes } = await loadAndWrite(fixture.bytes);
+      await expectValidXlsx(bytes, { label: fixture.id });
     }
   });
 });

@@ -66,8 +66,21 @@ class SparklineExtXform {
     if (!this.hasContent(sparklineGroups)) {
       return;
     }
+    // The canonical Microsoft-registered extension uri for
+    // `x14:sparklineGroups` is
+    //   {05C60535-1F16-4fd2-B633-F4F36F0B64E0}
+    // as emitted by Excel 2010 through Excel 365. Earlier
+    // revisions of this file used the WRONG uri
+    // `{05C60535-1F16-4fd2-B633-F4F36F0041E1}` (a typo that
+    // looked plausible but doesn't match any registered
+    // extension). Excel's MC processor — which is designed to
+    // silently skip unknown extension uris — dropped the whole
+    // `<ext>` element on load, erasing every sparkline the
+    // workbook defined. Verified against a Microsoft Excel 2021
+    // sparkline reference (`tmp/ccccc.xlsx`); switching to the
+    // correct uri restored sparkline rendering.
     xmlStream.openNode("ext", {
-      uri: "{05C60535-1F16-4fd2-B633-F4F36F0041E1}",
+      uri: "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
     });
     xmlStream.writeRaw(renderSparklineGroups(sparklineGroups));

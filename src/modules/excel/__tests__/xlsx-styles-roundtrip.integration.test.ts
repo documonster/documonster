@@ -2,6 +2,7 @@ import { getUniqueTestFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("xlsx styles roundtrip", () => {
   it("writes and reads common formatting", async () => {
@@ -60,6 +61,7 @@ describe("xlsx styles roundtrip", () => {
     ws.getCell(11, 1).alignment = { horizontal: "left", vertical: "top" };
 
     await wb.xlsx.writeFile(filename);
+    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
 
     const wb2 = new Workbook();
     await wb2.xlsx.readFile(filename);
@@ -110,6 +112,7 @@ describe("xlsx styles roundtrip", () => {
     ws.getCell("B1").font = { bold: true };
 
     await wb.xlsx.writeFile(filename);
+    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
 
     const wb2 = new Workbook();
     await wb2.xlsx.readFile(filename);

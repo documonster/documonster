@@ -238,6 +238,23 @@ function variationEntryToXml(v: ChartColorVariation): string {
   return `  <cs:variation>${children.join("")}</cs:variation>`;
 }
 
+// =============================================================================
+// Default chartStyle / chartColors XML — mirrored byte-for-byte from Microsoft
+// Excel 2021's own `style1.xml` / `colors1.xml` output for a freshly-inserted
+// waterfall chart. See the rationale on `buildChartStyle` /
+// `buildChartColors` for why we embed the full content rather than emitting
+// an id-only stub (Excel 2016+ rejects the stub form and drops the chartEx
+// part + parent drawing with "Removed Part: drawing${N}.xml (Drawing shape)").
+// These constants are the single source of truth for the Office built-in
+// style id=395 + colors id=10 defaults.
+// =============================================================================
+
+const DEFAULT_CHART_STYLE_XML =
+  '<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" id="395"><cs:axisTitle><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="900"/></cs:axisTitle><cs:categoryAxis><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr><cs:defRPr sz="900"/></cs:categoryAxis><cs:chartArea mods="allowNoFillOverride allowNoLineOverride"><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="bg1"/></a:solidFill><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr><cs:defRPr sz="1000"/></cs:chartArea><cs:dataLabel><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="900"/></cs:dataLabel><cs:dataLabelCallout><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="dk1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="lt1"/></a:solidFill><a:ln><a:solidFill><a:schemeClr val="dk1"><a:lumMod val="25000"/><a:lumOff val="75000"/></a:schemeClr></a:solidFill></a:ln></cs:spPr><cs:defRPr sz="900"/><cs:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="clip" horzOverflow="clip" vert="horz" wrap="square" lIns="36576" tIns="18288" rIns="36576" bIns="18288" anchor="ctr" anchorCtr="1"><a:spAutoFit/></cs:bodyPr></cs:dataLabelCallout><cs:dataPoint><cs:lnRef idx="0"/><cs:fillRef idx="0"><cs:styleClr val="auto"/></cs:fillRef><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></cs:spPr></cs:dataPoint><cs:dataPoint3D><cs:lnRef idx="0"/><cs:fillRef idx="0"><cs:styleClr val="auto"/></cs:fillRef><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></cs:spPr></cs:dataPoint3D><cs:dataPointLine><cs:lnRef idx="0"><cs:styleClr val="auto"/></cs:lnRef><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="28575" cap="rnd"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:round/></a:ln></cs:spPr></cs:dataPointLine><cs:dataPointMarker><cs:lnRef idx="0"/><cs:fillRef idx="0"><cs:styleClr val="auto"/></cs:fillRef><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:ln w="9525"><a:solidFill><a:schemeClr val="lt1"/></a:solidFill></a:ln></cs:spPr></cs:dataPointMarker><cs:dataPointMarkerLayout symbol="circle" size="5"/><cs:dataPointWireframe><cs:lnRef idx="0"><cs:styleClr val="auto"/></cs:lnRef><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="28575" cap="rnd"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:round/></a:ln></cs:spPr></cs:dataPointWireframe><cs:dataTable><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:spPr><a:ln w="9525"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill></a:ln></cs:spPr><cs:defRPr sz="900"/></cs:dataTable><cs:downBar><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="dk1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="dk1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill><a:ln w="9525"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill></a:ln></cs:spPr></cs:downBar><cs:dropLine><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="35000"/><a:lumOff val="65000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:dropLine><cs:errorBar><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:errorBar><cs:floor><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef></cs:floor><cs:gridlineMajor><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:gridlineMajor><cs:gridlineMinor><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:gridlineMinor><cs:hiLoLine><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="75000"/><a:lumOff val="25000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:hiLoLine><cs:leaderLine><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="35000"/><a:lumOff val="65000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr></cs:leaderLine><cs:legend><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="900"/></cs:legend><cs:plotArea mods="allowNoFillOverride allowNoLineOverride"><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef></cs:plotArea><cs:plotArea3D mods="allowNoFillOverride allowNoLineOverride"><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef></cs:plotArea3D><cs:seriesAxis><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln></cs:spPr><cs:defRPr sz="900"/></cs:seriesAxis><cs:seriesLine><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="9525" cap="flat"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill><a:round/></a:ln></cs:spPr></cs:seriesLine><cs:title><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="1400"/></cs:title><cs:trendline><cs:lnRef idx="0"><cs:styleClr val="auto"/></cs:lnRef><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef><cs:spPr><a:ln w="19050" cap="rnd"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="sysDash"/></a:ln></cs:spPr></cs:trendline><cs:trendlineLabel><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="900"/></cs:trendlineLabel><cs:upBar><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="dk1"/></cs:fontRef><cs:spPr><a:solidFill><a:schemeClr val="lt1"/></a:solidFill><a:ln w="9525"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill></a:ln></cs:spPr></cs:upBar><cs:valueAxis><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"><a:lumMod val="65000"/><a:lumOff val="35000"/></a:schemeClr></cs:fontRef><cs:defRPr sz="900"/></cs:valueAxis><cs:wall><cs:lnRef idx="0"/><cs:fillRef idx="0"/><cs:effectRef idx="0"/><cs:fontRef idx="minor"><a:schemeClr val="tx1"/></cs:fontRef></cs:wall></cs:chartStyle>';
+
+const DEFAULT_CHART_COLORS_XML =
+  '<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" meth="cycle" id="10"><a:schemeClr val="accent1"/><a:schemeClr val="accent2"/><a:schemeClr val="accent3"/><a:schemeClr val="accent4"/><a:schemeClr val="accent5"/><a:schemeClr val="accent6"/><cs:variation/><cs:variation><a:lumMod val="60000"/></cs:variation><cs:variation><a:lumMod val="80000"/><a:lumOff val="20000"/></cs:variation><cs:variation><a:lumMod val="80000"/></cs:variation><cs:variation><a:lumMod val="60000"/><a:lumOff val="40000"/></cs:variation><cs:variation><a:lumMod val="50000"/></cs:variation><cs:variation><a:lumMod val="70000"/><a:lumOff val="30000"/></cs:variation><cs:variation><a:lumMod val="70000"/></cs:variation><cs:variation><a:lumMod val="50000"/><a:lumOff val="50000"/></cs:variation></cs:colorStyle>';
+
 export function buildChartStyle(model: ChartStyleModel): string {
   // Prefer raw XML for byte-preserving round-trip of files that
   // haven't been mutated. Callers who want their `elements`
@@ -246,64 +263,46 @@ export function buildChartStyle(model: ChartStyleModel): string {
   if (model.rawXml) {
     return model.rawXml;
   }
-  if (model.elements && Object.keys(model.elements).length > 0) {
-    const id = model.id ?? 227;
-    const parts: string[] = [];
-    parts.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
-    parts.push(
-      `<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" id="${id}">`
+  const id = model.id ?? 395;
+  // Always emit the full Microsoft Excel default `<cs:chartStyle>`
+  // template with the caller's requested `id`. Partial element
+  // overrides declared via `ChartStyleModel.elements` are NOT safe
+  // to splice onto the template: the public `ChartStyleElement` type
+  // only exposes the four `*RefIdx` slots + a handful of raw-string
+  // escape hatches, so a merged element inevitably misses the
+  // `<cs:spPr>`, `<cs:defRPr>`, and fully-specified `<cs:fontRef>`
+  // children that Excel's `CT_StyleEntry` treats as required. The
+  // result (verified against Excel 2021 via
+  // `tmp/reference-styled.xlsx` vs the library's previous output)
+  // is a schema-shaped sidecar that Excel's strict loader still
+  // drops with "Removed Part: /xl/drawings/drawingN.xml part.
+  // (Drawing shape)".
+  //
+  // Authors who need genuine style customisation should:
+  //   1. Pre-build the sidecar XML themselves and pass it via
+  //      `rawXml` (honoured by the early return above), OR
+  //   2. Call `setBuiltInStyle(N)` on the chart instead — the
+  //      classic `<c:style val="N"/>` element is schema-legal
+  //      standalone and doesn't require a sidecar.
+  //
+  // Dropping `elements` silently would be a bigger regression, so
+  // log a one-time warning in non-production builds when an author
+  // passes partial elements we're about to discard.
+  if (
+    model.elements &&
+    Object.keys(model.elements).length > 0 &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    console.warn(
+      "[excelts] buildChartStyle: `model.elements` overrides are not yet supported — " +
+        "the default Excel style template will be emitted (customisation ignored). " +
+        "Pass a pre-built sidecar via `rawXml` if you need genuine overrides."
     );
-    for (const [name, element] of Object.entries(model.elements)) {
-      parts.push(chartStyleElementToXml(name, element));
-    }
-    parts.push(`</cs:chartStyle>`);
-    return parts.join("");
   }
-  const id = model.id ?? 227;
-  return [
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    `<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" id="${id}"/>`
-  ].join("\n");
-}
-
-function chartStyleElementToXml(name: string, entry: ChartStyleElement): string {
-  const attrParts: string[] = [];
-  if (entry.attributes) {
-    for (const [k, v] of Object.entries(entry.attributes)) {
-      attrParts.push(`${k}="${escapeXmlAttr(v)}"`);
-    }
-  }
-  const body: string[] = [];
-  if (entry.lnRefIdx !== undefined) {
-    body.push(`<cs:lnRef idx="${entry.lnRefIdx}"/>`);
-  }
-  if (entry.fillRefIdx !== undefined) {
-    body.push(`<cs:fillRef idx="${entry.fillRefIdx}"/>`);
-  }
-  if (entry.effectRefIdx !== undefined) {
-    body.push(`<cs:effectRef idx="${entry.effectRefIdx}"/>`);
-  }
-  if (entry.fontRefIdx !== undefined) {
-    if (entry.fontRefBody) {
-      body.push(`<cs:fontRef idx="${entry.fontRefIdx}">${entry.fontRefBody}</cs:fontRef>`);
-    } else {
-      body.push(`<cs:fontRef idx="${entry.fontRefIdx}"/>`);
-    }
-  }
-  if (entry.spPrXml) {
-    body.push(entry.spPrXml);
-  }
-  if (entry.defRPrXml) {
-    body.push(entry.defRPrXml);
-  }
-  if (entry.bodyPrXml) {
-    body.push(entry.bodyPrXml);
-  }
-  const attrs = attrParts.length > 0 ? " " + attrParts.join(" ") : "";
-  if (body.length === 0) {
-    return `<cs:${name}${attrs}/>`;
-  }
-  return `<cs:${name}${attrs}>${body.join("")}</cs:${name}>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${DEFAULT_CHART_STYLE_XML.replace(
+    /id="\d+"/,
+    `id="${id}"`
+  )}`;
 }
 
 function colorEntryToXml(c: ChartColorsEntry): string {
@@ -345,18 +344,15 @@ function colorEntryToXml(c: ChartColorsEntry): string {
 }
 
 function buildDefaultChartColors(): string {
-  return [
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    '<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" ',
-    '  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" meth="cycle" id="10">',
-    '  <a:schemeClr val="accent1"/>',
-    '  <a:schemeClr val="accent2"/>',
-    '  <a:schemeClr val="accent3"/>',
-    '  <a:schemeClr val="accent4"/>',
-    '  <a:schemeClr val="accent5"/>',
-    '  <a:schemeClr val="accent6"/>',
-    "</cs:colorStyle>"
-  ].join("\n");
+  // Excel 2016+ REJECTS stub `colorStyle` files that list only the
+  // 6 accent `schemeClr` entries without the 9 follow-on `variation`
+  // siblings — the chartEx is silently dropped along with its parent
+  // drawing ("Removed Part: drawingN.xml (Drawing shape)"). Emit the
+  // full Microsoft-authored default (id=10, 6 accents + 9 variations)
+  // byte-for-byte; the template is mirrored from Excel 2021's own
+  // `colors1.xml` output for a freshly-inserted chartEx. See the
+  // matching rationale on `DEFAULT_CHART_STYLE_XML`.
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${DEFAULT_CHART_COLORS_XML}`;
 }
 
 /**

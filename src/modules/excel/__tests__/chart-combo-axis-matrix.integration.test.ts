@@ -11,7 +11,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { auditOoxmlPackage } from "./helpers/ooxml-package-audit";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildComboAxisFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, type EntryMap } from "./helpers/zip-text";
 
@@ -23,6 +23,7 @@ beforeAll(async () => {
 
 async function loadFixture(bytes: Uint8Array): Promise<{
   wb: Workbook;
+  out: Uint8Array;
   entries: EntryMap;
   chartXml: string;
 }> {
@@ -30,7 +31,7 @@ async function loadFixture(bytes: Uint8Array): Promise<{
   await wb.xlsx.load(bytes);
   const out = new Uint8Array(await wb.xlsx.writeBuffer());
   const entries = await extractAll(out);
-  return { wb, entries, chartXml: entryText(entries, "xl/charts/chart1.xml")! };
+  return { wb, out, entries, chartXml: entryText(entries, "xl/charts/chart1.xml")! };
 }
 
 /**
@@ -53,8 +54,8 @@ describe("Chart combo / axis matrix", () => {
     const fixtures = comboAxisFixtures;
     const fixture = fixtures.find(f => f.id === "combo-stacked-secondary")!;
     expect(fixture).toBeDefined();
-    const { entries, chartXml } = await loadFixture(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { out, chartXml } = await loadFixture(fixture.bytes);
+    await expectValidXlsx(out);
     expect(chartXml).toContain("<c:barChart>");
     expect(chartXml).toContain("<c:lineChart>");
     expect(chartXml).toMatch(/<c:grouping val="stacked"\/>/);
@@ -68,8 +69,8 @@ describe("Chart combo / axis matrix", () => {
   it("preserves scatter + line combo with secondary axis through round-trip", async () => {
     const fixtures = comboAxisFixtures;
     const fixture = fixtures.find(f => f.id === "combo-scatter-line")!;
-    const { entries, chartXml } = await loadFixture(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { out, chartXml } = await loadFixture(fixture.bytes);
+    await expectValidXlsx(out);
     expect(chartXml).toContain("<c:scatterChart>");
     expect(chartXml).toContain("<c:lineChart>");
   });
@@ -77,8 +78,8 @@ describe("Chart combo / axis matrix", () => {
   it("preserves logarithmic value axis (logBase=10) through round-trip", async () => {
     const fixtures = comboAxisFixtures;
     const fixture = fixtures.find(f => f.id === "axis-log")!;
-    const { wb, entries, chartXml } = await loadFixture(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { wb, out, chartXml } = await loadFixture(fixture.bytes);
+    await expectValidXlsx(out);
     expect(chartXml).toMatch(/<c:logBase val="10"\/>/);
     expect(chartXml).toMatch(/<c:min val="1"\/>/);
     expect(chartXml).toMatch(/<c:max val="100"\/>/);
@@ -94,8 +95,8 @@ describe("Chart combo / axis matrix", () => {
   it("preserves three combo groups (bar primary, line+area secondary) through round-trip", async () => {
     const fixtures = comboAxisFixtures;
     const fixture = fixtures.find(f => f.id === "combo-three-groups-shared-secondary")!;
-    const { entries, chartXml } = await loadFixture(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { out, chartXml } = await loadFixture(fixture.bytes);
+    await expectValidXlsx(out);
     expect(chartXml).toContain("<c:barChart>");
     expect(chartXml).toContain("<c:lineChart>");
     expect(chartXml).toContain("<c:areaChart>");
@@ -111,8 +112,8 @@ describe("Chart combo / axis matrix", () => {
   it("preserves 3D bar + 2D line combo (with serAx for the 3D group) through round-trip", async () => {
     const fixtures = comboAxisFixtures;
     const fixture = fixtures.find(f => f.id === "combo-3d-bar-line")!;
-    const { entries, chartXml } = await loadFixture(fixture.bytes);
-    expect(auditOoxmlPackage(entries).errors).toEqual([]);
+    const { out, chartXml } = await loadFixture(fixture.bytes);
+    await expectValidXlsx(out);
     expect(chartXml).toContain("<c:bar3DChart>");
     expect(chartXml).toContain("<c:lineChart>");
     // 3D bar groups require a serAx alongside catAx/valAx.
@@ -146,8 +147,7 @@ describe("Chart combo / axis matrix", () => {
       const wb = new Workbook();
       await wb.xlsx.load(fixture.bytes);
       const out = new Uint8Array(await wb.xlsx.writeBuffer());
-      const audit = auditOoxmlPackage(await extractAll(out));
-      expect(audit.errors, `${fixture.id}: ${audit.errors.join("\n")}`).toEqual([]);
+      await expectValidXlsx(out, { label: fixture.id });
     }
   });
 });

@@ -93,6 +93,16 @@ export interface WorkbookModel {
   worksheets: WorksheetModel[];
   sheets?: WorksheetModel[];
   definedNames: DefinedNameModel[];
+  /**
+   * Live `DefinedNames` instance — used by the write-time chartEx
+   * transform (`prepareChartExSidecars`) which registers hidden
+   * `_xlchart.vN.M` defined names on the fly and needs an object
+   * it can mutate in place. The serialised `definedNames` array
+   * above is re-materialised from this instance after the
+   * transform runs. Optional because the model is also used for
+   * input paths that don't carry the live instance.
+   */
+  definedNamesInstance?: unknown;
   views: WorkbookView[];
   company: string;
   manager: string;
@@ -1675,13 +1685,37 @@ class Workbook {
   // ===========================================================================
 
   get nextId(): number {
-    // Find the next unique spot to add worksheet
+    // Worksheets and chartsheets share a single `sheetId` namespace in
+    // `workbook.xml`'s `<sheets>` element (OOXML requires each
+    // `sheetId` to be globally unique across both families). Allocating
+    // from `_worksheets` alone used to hand out an id already claimed
+    // by a chartsheet whenever the author interleaved their calls —
+    // e.g. `addWorksheet(×16)` → ids 1-16; `addChartsheet(×2)` → ids
+    // 17-18 (via `_nextSheetId()`); then `addWorksheet("X")` walked
+    // `_worksheets` slots 1..16, found them full, and returned
+    // `_worksheets.length = 17`, colliding with the first chartsheet.
+    // Excel rejects the resulting workbook as corrupt. Collect
+    // chartsheet ids up front so the search honours the shared pool.
+    const chartsheetIds = new Set<number>();
+    for (const cs of this._chartsheets) {
+      if (cs && typeof cs.id === "number" && Number.isFinite(cs.id)) {
+        chartsheetIds.add(cs.id);
+      }
+    }
+    // Prefer reusing vacated `_worksheets` slots (left as holes by
+    // `removeWorksheetEx`) so ids stay stable across delete+add cycles.
     for (let i = 1; i < this._worksheets.length; i++) {
-      if (!this._worksheets[i]) {
+      if (!this._worksheets[i] && !chartsheetIds.has(i)) {
         return i;
       }
     }
-    return this._worksheets.length || 1;
+    // No reusable hole — hand out the next id beyond the current
+    // tail, skipping any slots already taken by chartsheets.
+    let candidate = this._worksheets.length || 1;
+    while (chartsheetIds.has(candidate)) {
+      candidate++;
+    }
+    return candidate;
   }
 
   /**
@@ -2807,6 +2841,12 @@ class Workbook {
       worksheets: this.worksheets.map(worksheet => worksheet.model),
       sheets: this.worksheets.map(ws => ws.model).filter(Boolean),
       definedNames: this._definedNames.model,
+      // Live `DefinedNames` instance — required by the write-time
+      // chartEx transform `prepareChartExSidecars`, which registers
+      // hidden `_xlchart.vN.M` names on the fly and needs an object
+      // that can mutate in place. The serialised `definedNames`
+      // array above is re-materialised after the transform runs.
+      definedNamesInstance: this._definedNames,
       views: this.views,
       company: this.company,
       manager: this.manager,

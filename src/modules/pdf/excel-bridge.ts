@@ -15,7 +15,13 @@
  * ```
  */
 
-import type { Chart, RegionMapDataOptions } from "@excel/chart";
+import type {
+  Chart,
+  ChartExModel,
+  ChartModel,
+  ChartPdfDrawingSurface,
+  RegionMapDataOptions
+} from "@excel/chart";
 import {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
@@ -23,6 +29,7 @@ import {
   renderChartExPng,
   renderChartPng
 } from "@excel/chart";
+import type { Chartsheet } from "@excel/chartsheet";
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
 import type { Workbook } from "@excel/workbook";
@@ -36,6 +43,8 @@ import {
   PdfCellType,
   type PdfWorkbook,
   type PdfSheetData,
+  type PdfWorkbookSheet,
+  type PdfChartsheetData,
   type PdfRowData,
   type PdfCellData,
   type PdfColumnData,
@@ -48,6 +57,8 @@ import {
   type PdfAlignmentData,
   type PdfPageSetupData,
   type PdfSheetImage,
+  type PdfSheetChart,
+  type PdfAnchorRange,
   type PdfExportOptions,
   type PdfCellTypeValue
 } from "./types";
@@ -80,7 +91,7 @@ export async function excelToPdf(
   // shipped with (safe for workbooks last saved by Excel itself).
   tryInvokeFormulaEngine(workbook);
 
-  const pdfWorkbook = excelWorkbookToPdf(workbook);
+  const pdfWorkbook = await excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);
 }
 
@@ -235,13 +246,36 @@ export async function chartToPdf(
 
 /**
  * Convert an Excel Workbook to the internal PdfWorkbook data structure.
+ *
+ * Async because two conversion paths hand off work that may be off-thread:
+ *  - Non-whitelisted ChartEx layouts are rasterised to PNG at collection
+ *    time via `renderChartExPng` (so the exporter never blocks on chart
+ *    rendering).
+ *  - Chartsheets follow the same per-chart rasterisation rule.
+ *
+ * Worksheets and chartsheets are merged into a single `sheets` array in
+ * tab order (`orderNo`), matching what Excel / LibreOffice would print.
+ * Chartsheets without an orderNo fall to the end, mirroring how Excel
+ * treats sheets with missing tab positions.
  */
-function excelWorkbookToPdf(workbook: Workbook): PdfWorkbook {
+async function excelWorkbookToPdf(workbook: Workbook): Promise<PdfWorkbook> {
+  const worksheetResults = await Promise.all(
+    workbook.worksheets.map(ws => convertSheet(ws, workbook))
+  );
+  const chartsheetResults = await Promise.all(
+    workbook.chartsheets.map(cs => convertChartsheet(cs))
+  );
+
+  const combined: PdfWorkbookSheet[] = [...worksheetResults, ...chartsheetResults];
+  combined.sort(
+    (a, b) => (a.orderNo ?? Number.POSITIVE_INFINITY) - (b.orderNo ?? Number.POSITIVE_INFINITY)
+  );
+
   return {
     title: workbook.title || undefined,
     creator: workbook.creator || undefined,
     subject: workbook.subject || undefined,
-    sheets: workbook.worksheets.map(ws => convertSheet(ws, workbook))
+    sheets: combined
   };
 }
 
@@ -249,7 +283,7 @@ function excelWorkbookToPdf(workbook: Workbook): PdfWorkbook {
 // Sheet Conversion
 // =============================================================================
 
-function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
+async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheetData> {
   const dimensions = ws.dimensions;
   const hasData = dimensions && dimensions.model.top > 0 && dimensions.model.left > 0;
 
@@ -337,13 +371,27 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
   const rowBreaks: number[] | undefined = (ws as any).rowBreaks?.map((b: { id: number }) => b.id);
   const colBreaks: number[] | undefined = (ws as any).colBreaks?.map((b: { id: number }) => b.id);
 
-  // Convert images
+  // Convert images and charts. Both are floating objects anchored to
+  // cells, and both need to participate in bounds expansion so the
+  // layout engine allocates pages that cover their anchor rows/cols.
   const images = collectImages(ws, workbook);
+  const charts = await collectCharts(ws);
 
-  // Extend bounds to cover image anchors (so layout engine includes them)
+  const anchoredRanges: PdfAnchorRange[] = [];
   if (images) {
     for (const img of images) {
-      const tl = img.range.tl;
+      anchoredRanges.push(img.range);
+    }
+  }
+  if (charts) {
+    for (const ch of charts) {
+      anchoredRanges.push(ch.range);
+    }
+  }
+
+  if (anchoredRanges.length > 0) {
+    for (const range of anchoredRanges) {
+      const tl = range.tl;
       const tlCol = (tl.nativeCol ?? tl.col ?? 0) + 1; // 0-indexed → 1-indexed
       const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
       if (bounds.top === 0 && bounds.left === 0) {
@@ -358,8 +406,8 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
       }
 
       // Also extend to bottom-right anchor if present
-      if (img.range.br) {
-        const br = img.range.br;
+      if (range.br) {
+        const br = range.br;
         const brCol = (br.nativeCol ?? br.col ?? 0) + 1;
         const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
         if (brCol > bounds.right) {
@@ -389,8 +437,10 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
   }
 
   return {
+    kind: "worksheet",
     name: ws.name,
     state: (ws as any).state ?? "visible",
+    orderNo: (ws as any).orderNo,
     bounds,
     columns,
     rows,
@@ -398,7 +448,8 @@ function convertSheet(ws: Worksheet, workbook: Workbook): PdfSheetData {
     pageSetup,
     rowBreaks,
     colBreaks,
-    images
+    images,
+    charts
   };
 }
 
@@ -667,11 +718,275 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
             }
           : undefined,
         ext: wsImage.range.ext
-          ? { width: wsImage.range.ext.width, height: wsImage.range.ext.height }
-          : undefined
+          ? {
+              width: wsImage.range.ext.width,
+              height: wsImage.range.ext.height
+            }
+          : undefined,
+        // Images historically store ext as pixels — the layout engine
+        // converts px→pt at assignment time (px × 0.75 = pt).
+        extUnit: wsImage.range.ext ? ("px" as const) : undefined
       }
     });
   }
 
   return images.length > 0 ? images : undefined;
+}
+
+// =============================================================================
+// Chart Collection
+// =============================================================================
+
+/**
+ * Gather every embedded chart on a worksheet and wrap it in a
+ * {@link PdfSheetChart} the layout engine can place.
+ *
+ * - **Classic charts** and **whitelisted ChartEx layouts** get a
+ *   `drawVector` closure pinned over the chart model. The closure is
+ *   invoked later by the PDF exporter against a drawing surface adapted
+ *   over the page's content stream (see `render/chart-surface.ts`), so
+ *   the chart ends up as real PDF geometry — selectable text, crisp
+ *   shapes at any zoom.
+ * - **ChartEx layouts outside the whitelist** are rasterised up-front
+ *   via `renderChartExPng` and attached as a raster payload. The
+ *   exporter then treats the PNG as an image XObject. The raster size
+ *   is derived from the anchor extent (with a sensible fallback), and
+ *   the PDF viewer stretches the bitmap to the final rect.
+ *
+ * Pivot charts inherit the classic path — they are regular `Chart`
+ * objects with a `pivotSource` tag, and their model renders like any
+ * other classic chart.
+ */
+async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined> {
+  const wsCharts = (ws as any).getCharts?.() as Chart[] | undefined;
+  if (!wsCharts || !Array.isArray(wsCharts) || wsCharts.length === 0) {
+    return undefined;
+  }
+
+  const charts: PdfSheetChart[] = [];
+  for (const chart of wsCharts) {
+    const range = chartAnchorRange(chart);
+    if (!range) {
+      continue;
+    }
+
+    const classicModel = chart.chartModel;
+    const chartExModel = chart.chartExModel;
+
+    if (classicModel) {
+      // Classic chart → vector path.
+      const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
+        drawChartPdf(surface as unknown as ChartPdfDrawingSurface, classicModel as ChartModel, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      };
+      charts.push({ range, drawVector });
+      continue;
+    }
+
+    if (chartExModel) {
+      if (canRenderChartExAsVectorPdf(chartExModel)) {
+        // Whitelisted ChartEx layout → vector path.
+        const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
+          drawChartExPdf(
+            surface as unknown as ChartPdfDrawingSurface,
+            chartExModel as ChartExModel,
+            { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          );
+        };
+        charts.push({ range, drawVector });
+      } else {
+        // Non-whitelisted ChartEx layout → raster path.
+        const { widthPx, heightPx } = estimateChartPixelSize(range);
+        const png = await renderChartExPng(chartExModel, {
+          width: widthPx,
+          height: heightPx,
+          scale: 2
+        });
+        charts.push({
+          range,
+          raster: { data: png, format: "png" }
+        });
+      }
+      continue;
+    }
+
+    // Chart has neither model — likely a placeholder or unparsed
+    // `rawXml` shape. Rasterise nothing, skip silently; the cells
+    // underneath remain visible.
+  }
+
+  return charts.length > 0 ? charts : undefined;
+}
+
+/**
+ * Translate a `Chart.range` into the PDF layer's anchor shape. Returns
+ * `undefined` for charts that ExcelTS could not anchor to any cell
+ * (extremely rare — usually indicates a corrupt drawing relationship).
+ */
+function chartAnchorRange(chart: Chart): PdfAnchorRange | undefined {
+  const r = chart.range;
+  if (!r?.tl) {
+    return undefined;
+  }
+
+  const tl = r.tl;
+  const br = r.br;
+
+  return {
+    tl: {
+      col: tl.col ?? 0,
+      row: tl.row ?? 0,
+      nativeCol: tl.nativeCol,
+      nativeRow: tl.nativeRow,
+      nativeColOff: tl.nativeColOff,
+      nativeRowOff: tl.nativeRowOff
+    },
+    br: br
+      ? {
+          col: br.col ?? 0,
+          row: br.row ?? 0,
+          nativeCol: br.nativeCol,
+          nativeRow: br.nativeRow,
+          nativeColOff: br.nativeColOff,
+          nativeRowOff: br.nativeRowOff
+        }
+      : undefined,
+    // Chart anchors store ext as EMU (`cx`, `cy`). Pass the values
+    // through unchanged; the layout engine converts EMU→pt for charts
+    // (×1/9525) and px→pt for images (×0.75) based on `extUnit`.
+    ext: r.ext ? { width: r.ext.cx, height: r.ext.cy } : undefined,
+    extUnit: r.ext ? "emu" : undefined
+  };
+}
+
+/**
+ * Pick a PNG rasterisation size for a non-vectorable ChartEx layout.
+ *
+ * Strategy: use the anchor extent (EMU → pt → px at 96 dpi) when
+ * available; otherwise fall back to a reasonable default that survives
+ * half-page stretching without obvious artefacts. The exporter's
+ * `rasterScale` is applied separately in `collectCharts`.
+ */
+function estimateChartPixelSize(range: PdfAnchorRange): {
+  widthPx: number;
+  heightPx: number;
+} {
+  if (range.ext && range.extUnit === "emu") {
+    const widthPt = range.ext.width / 9525;
+    const heightPt = range.ext.height / 9525;
+    // 1 pt = 1/72 in ≈ 96/72 px at 96 dpi
+    return {
+      widthPx: Math.max(120, Math.round(widthPt * (96 / 72))),
+      heightPx: Math.max(80, Math.round(heightPt * (96 / 72)))
+    };
+  }
+  return { widthPx: 640, heightPx: 420 };
+}
+
+// =============================================================================
+// Chartsheet Conversion
+// =============================================================================
+
+/**
+ * Pixel dimensions used when rasterising a non-whitelisted ChartEx on a
+ * chartsheet. Derived from Excel's own chartsheet canvas defaults
+ * (A4 landscape minus default margins — see `CHARTSHEET_EMU_CX / CY`
+ * in `xlsx.browser.ts`). 2× is applied by `renderChartExPng` via the
+ * `scale` option so the PNG looks crisp at 150% zoom.
+ */
+const CHARTSHEET_RASTER_PX = { width: 1280, height: 720 } as const;
+
+/**
+ * Convert a {@link Chartsheet} into a {@link PdfChartsheetData}.
+ *
+ * A chartsheet is a "single chart fills the whole page" sheet type. Unlike
+ * a cell-grid worksheet there is no row/column layout to reason about —
+ * the chart just takes whatever content area the page margins leave.
+ *
+ * - **Classic chart** → vector `drawChartPdf` path (selectable text,
+ *   crisp at any zoom).
+ * - **ChartEx whitelisted layout** → vector `drawChartExPdf` path.
+ * - **ChartEx outside the whitelist** → rasterised to PNG up-front via
+ *   `renderChartExPng`; the PDF viewer stretches the bitmap to the final
+ *   page rect.
+ * - **No chart attached** → the chartsheet still produces a blank page
+ *   (matches what Excel prints for a chartsheet whose chart was deleted
+ *   but the sheet kept).
+ */
+async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
+  const classicModel = cs.chartModel;
+  const chartExModel = cs.chartExModel;
+
+  let chart: PdfChartsheetData["chart"] = {};
+
+  if (classicModel) {
+    const model = classicModel;
+    chart = {
+      drawVector: (surface, rect) => {
+        drawChartPdf(surface as unknown as ChartPdfDrawingSurface, model as ChartModel, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      }
+    };
+  } else if (chartExModel) {
+    if (canRenderChartExAsVectorPdf(chartExModel)) {
+      const model = chartExModel;
+      chart = {
+        drawVector: (surface, rect) => {
+          drawChartExPdf(surface as unknown as ChartPdfDrawingSurface, model as ChartExModel, {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height
+          });
+        }
+      };
+    } else {
+      const png = await renderChartExPng(chartExModel, {
+        width: CHARTSHEET_RASTER_PX.width,
+        height: CHARTSHEET_RASTER_PX.height,
+        scale: 2
+      });
+      chart = { raster: { data: png, format: "png" } };
+    }
+  }
+
+  // Chartsheet orientation: explicit pageSetup wins. Excel's chartsheet
+  // convention is landscape when unset (the CHARTSHEET_EMU_CX/CY pair in
+  // xlsx.browser.ts is wider than tall), so we inherit that default.
+  const explicitOrientation = cs.pageSetup?.orientation;
+  const orientation: PdfChartsheetData["orientation"] =
+    explicitOrientation === "portrait" || explicitOrientation === "landscape"
+      ? explicitOrientation
+      : "landscape";
+
+  // Capture the native pageSetup for callers / exporter heuristics.
+  // Chartsheet's `CT_CsPageSetup` is a subset of worksheet's `CT_PageSetup`;
+  // the fields we surface here are the ones the PDF renderer knows how
+  // to interpret. Unknown fields are silently dropped.
+  const ps = cs.pageSetup;
+  const pageSetup: PdfPageSetupData | undefined = ps
+    ? {
+        orientation: ps.orientation,
+        paperSize: ps.paperSize,
+        showGridLines: false
+      }
+    : undefined;
+
+  return {
+    kind: "chartsheet",
+    name: cs.name,
+    state: cs.state,
+    orderNo: cs.model.orderNo,
+    orientation,
+    chart,
+    pageSetup
+  };
 }

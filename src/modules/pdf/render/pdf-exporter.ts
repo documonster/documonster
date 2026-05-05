@@ -22,8 +22,9 @@ import { parseTtf } from "../font/ttf-parser";
 import {
   PageSizes,
   PdfCellType,
+  isPdfChartsheet,
   type PdfWorkbook,
-  type PdfSheetData,
+  type PdfWorkbookSheet,
   type PdfExportOptions,
   type ResolvedPdfOptions,
   type PdfPageSize,
@@ -33,7 +34,8 @@ import {
   type LayoutPage,
   type PdfWatermark
 } from "../types";
-import { layoutSheet } from "./layout-engine";
+import { createChartSurface } from "./chart-surface";
+import { layoutChartsheet, layoutSheet } from "./layout-engine";
 import { renderPage, alphaGsName, renderWatermark } from "./page-renderer";
 import { argbToPdfColor } from "./style-converter";
 
@@ -69,7 +71,7 @@ export async function exportPdf(
 
 /** Shared state for the export pipeline. */
 interface ExportContext {
-  sheets: PdfSheetData[];
+  sheets: PdfWorkbookSheet[];
   fontManager: FontManager;
   writer: PdfWriter;
   allPages: LayoutPage[];
@@ -130,15 +132,21 @@ function prepareExport(workbook: PdfWorkbook, options?: PdfExportOptions): Expor
 
 /**
  * Layout a single sheet and append its pages to the context.
+ *
+ * Dispatches on `sheet.kind`: chartsheets produce exactly one page via
+ * {@link layoutChartsheet}; cell-grid worksheets go through the full
+ * pagination pipeline via {@link layoutSheet}.
  */
 async function layoutSheetInto(
   ctx: ExportContext,
-  sheet: PdfSheetData,
+  sheet: PdfWorkbookSheet,
   options?: PdfExportOptions
 ): Promise<void> {
   try {
     const resolved = resolveOptions(options, sheet);
-    const pages = await layoutSheet(sheet, resolved, ctx.fontManager);
+    const pages = isPdfChartsheet(sheet)
+      ? layoutChartsheet(sheet, resolved)
+      : await layoutSheet(sheet, resolved, ctx.fontManager);
     ctx.allPages.push(...pages);
   } catch (err) {
     throw new PdfRenderError(`Failed to layout sheet "${sheet.name}"`, { cause: err });
@@ -197,7 +205,7 @@ async function finishExport(
 function ensureAtLeastOnePage(
   allPages: LayoutPage[],
   documentOptions: ResolvedPdfOptions,
-  sheets: PdfSheetData[]
+  sheets: PdfWorkbookSheet[]
 ): void {
   if (allPages.length === 0) {
     allPages.push({
@@ -214,6 +222,7 @@ function ensureAtLeastOnePage(
       rowYPositions: [],
       rowHeights: [],
       images: [],
+      charts: [],
       scaleFactor: 1
     });
   }
@@ -315,6 +324,42 @@ function renderSinglePage(
         const imgObjNum = writeImageXObject(writer, img.data, img.format);
         imageXObjects.set(imgName, imgObjNum);
         contentStream.drawImage(imgName, img.rect.x, img.rect.y, img.rect.width, img.rect.height);
+      }
+    }
+
+    // Handle charts. Two paths:
+    //  - `drawVector` charts go through a {@link createChartSurface}
+    //    adapter so the vector PDF operators (lines, text, shapes) land
+    //    in the same content stream as the cells. Text stays selectable
+    //    and the chart scales crisply at any zoom level.
+    //  - `raster` charts fall back to the image XObject pipeline, which
+    //    is identical to an embedded PNG. Used only for ChartEx layouts
+    //    outside the vector-render whitelist.
+    if (page.charts.length > 0) {
+      let rasterCounter = page.images.length;
+      for (const chart of page.charts) {
+        if (chart.drawVector) {
+          const surface = createChartSurface(contentStream, fontManager, alphaValues);
+          chart.drawVector(surface, {
+            x: chart.rect.x,
+            y: chart.rect.y,
+            width: chart.rect.width,
+            height: chart.rect.height
+          });
+          continue;
+        }
+        if (chart.raster) {
+          const imgName = `Im${++rasterCounter}`;
+          const imgObjNum = writeImageXObject(writer, chart.raster.data, chart.raster.format);
+          imageXObjects.set(imgName, imgObjNum);
+          contentStream.drawImage(
+            imgName,
+            chart.rect.x,
+            chart.rect.y,
+            chart.rect.width,
+            chart.rect.height
+          );
+        }
       }
     }
 
@@ -483,7 +528,7 @@ function buildFinalPdf(
 /**
  * Select which sheets to export based on the options.
  */
-function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfSheetData[] {
+function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfWorkbookSheet[] {
   const allSheets = workbook.sheets;
 
   if (!sheets || sheets.length === 0) {
@@ -491,7 +536,7 @@ function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfS
     return allSheets.filter(ws => ws.state !== "hidden" && ws.state !== "veryHidden");
   }
 
-  const result: PdfSheetData[] = [];
+  const result: PdfWorkbookSheet[] = [];
   for (const selector of sheets) {
     if (typeof selector === "string") {
       const ws = allSheets.find(s => s.name.toLowerCase() === selector.toLowerCase());
@@ -519,14 +564,25 @@ function selectSheets(workbook: PdfWorkbook, sheets?: (string | number)[]): PdfS
  */
 function resolveOptions(
   options: PdfExportOptions | undefined,
-  sheet?: PdfSheetData
+  sheet?: PdfWorkbookSheet
 ): ResolvedPdfOptions {
-  // Use sheet's pageSetup as fallback for unspecified options
+  // Use sheet's pageSetup as fallback for unspecified options. Chartsheets
+  // expose a narrower pageSetup shape (`CT_CsPageSetup`) — the fields we
+  // care about (orientation, paperSize, margins) live in the same places
+  // so the same destructuring works.
   const ps = sheet?.pageSetup;
 
   const pageSize = resolvePageSize(options?.pageSize, ps?.paperSize);
+  // Chartsheets carry their own `orientation` override (Excel defaults
+  // to landscape for chartsheets); if set, it wins over the pageSetup
+  // fallback. Note: `layoutChartsheet` applies the same rule in its
+  // own clone of the resolved options, so selecting orientation here
+  // is only the document-level hint.
+  const chartsheetOrientation = sheet && isPdfChartsheet(sheet) ? sheet.orientation : undefined;
   const orientation: PdfOrientation =
-    options?.orientation ?? (ps?.orientation === "landscape" ? "landscape" : "portrait");
+    options?.orientation ??
+    chartsheetOrientation ??
+    (ps?.orientation === "landscape" ? "landscape" : "portrait");
   const margins = resolveMargins(options?.margins, ps?.margins);
 
   const gridLineColorStr = options?.gridLineColor ?? "FFD0D0D0";
@@ -536,9 +592,11 @@ function resolveOptions(
     b: 0.816
   };
 
-  // Use sheet's printTitlesRow as fallback for repeatRows
+  // Use sheet's printTitlesRow as fallback for repeatRows. Only
+  // PdfSheetData carries `printTitlesRow` — chartsheets never have
+  // repeated header rows.
   let repeatRows: number | false = options?.repeatRows ?? false;
-  if (repeatRows === false && ps?.printTitlesRow) {
+  if (repeatRows === false && sheet && !isPdfChartsheet(sheet) && ps?.printTitlesRow) {
     // printTitlesRow format: "1:3" (repeat rows 1-3) or "1" (repeat row 1)
     const match = ps.printTitlesRow.match(/^(\d+)(?::(\d+))?$/);
     if (match) {
@@ -721,10 +779,20 @@ function isWatermarkApplicable(watermark: PdfWatermark, page: LayoutPage): boole
 /**
  * Collect all non-WinAnsi code points from sheet text (single pass).
  * Returns an empty set if all text is WinAnsi-representable.
+ *
+ * Chartsheets are skipped — the chart surface renders text via the
+ * same font manager but the characters come from the chart model (axis
+ * labels, data labels, title), which gets tracked via `fontManager.trackText`
+ * during rendering rather than here. This keeps the font-discovery scan
+ * focused on cell text, which is where non-WinAnsi characters
+ * overwhelmingly appear.
  */
-function collectNonWinAnsiCodePoints(sheets: PdfSheetData[]): Set<number> {
+function collectNonWinAnsiCodePoints(sheets: PdfWorkbookSheet[]): Set<number> {
   const result = new Set<number>();
   for (const sheet of sheets) {
+    if (isPdfChartsheet(sheet)) {
+      continue;
+    }
     for (const row of sheet.rows.values()) {
       for (const cell of row.cells.values()) {
         collectFromText(cell.text, result);

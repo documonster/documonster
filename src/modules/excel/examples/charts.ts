@@ -70,8 +70,31 @@
  *      `VECTOR_PDF_CHART_EX_LAYOUT_IDS`; `resolveTopologyObject` against
  *      a synthetic two-country TopoJSON; `applyChartPreset` /
  *      `applyChartExPreset` direct invocation.
- * 28.  Preview export — `chart.toSVG()`, `chart.toPNG()`, `chartToPdf()`.
- * 29.  Loading + mutating a chart (`chart.mutate(fn, { preferRawPatch })`).
+ * 28.  Axis edge cases — `invertIfNegative`, reversed axis
+ *      (`orientation: "maxMin"`), `crossesAt` / `crosses: "max"`,
+ *      `crossBetween: "midCat"`, `tickLblSkip` / `tickMarkSkip`,
+ *      `lblAlgn` / `lblOffset`, every `lineDash` preset, `logBase`
+ *      variants, `showDLblsOverMax`, `showLeaderLines`, defined-name
+ *      series references.
+ * 29.  Data-handling edge cases — three `displayBlanksAs` modes
+ *      side-by-side, negative-values with `invertIfNegative` +
+ *      `inBase`, `dataLabels.delete: true` mass-hide.
+ * 30.  Chart-type variants — HLC / VHLC / VOHLC stock, bubble with
+ *      negative sizes + `showNegBubbles`, wide radar (12 axes × 3
+ *      series), `ofPie splitType: "val"`, oversized `secondPieSize`,
+ *      8×8 surface matrix.
+ * 31.  ChartEx deep-dive — waterfall with `subTotal` markers,
+ *      4-level treemap / sunburst, funnel with custom per-stage
+ *      labels, histogram `binCount` and fixed-width + over/underflow
+ *      bins, styled pareto cumulative line, boxWhisker with every
+ *      statistical flag on.
+ * 32.  Style catalogue — trendline with rich-text label, error bars
+ *      with gradient `spPr`.
+ * 33.  Stress & robustness — 100 data points, 20 series, very long
+ *      titles, Unicode / emoji / RTL text, extreme `view3D`, layered
+ *      data-label cascade, 12 tile charts on one sheet.
+ * 34.  Preview export — `chart.toSVG()`, `chart.toPNG()`, `chartToPdf()`.
+ * 35.  Loading + mutating a chart (`chart.mutate(fn, { preferRawPatch })`).
  *
  * Output:
  *   tmp/charts-example.xlsx     — one workbook containing every chart
@@ -167,6 +190,23 @@ const HEX_PALETTE = [
   "9E480E",
   "C00000"
 ];
+
+/**
+ * Convert a 1-based column / row pair into an A1 address string
+ * (`cellAddr(1, 3) === "A3"`). Used by the section-33 "many charts
+ * on one sheet" tile generator where the chart ranges are laid out
+ * in a grid and the bookkeeping is cleaner in column / row form.
+ */
+function cellAddr(col: number, row: number): string {
+  let c = col;
+  let letters = "";
+  while (c > 0) {
+    const rem = (c - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    c = Math.floor((c - 1) / 26);
+  }
+  return `${letters}${row}`;
+}
 
 // ---------------------------------------------------------------------------
 // Data sheets — shared by most charts on the dashboard
@@ -475,7 +515,10 @@ async function main(): Promise<void> {
         name: "Revenue",
         categories: "Sales!$A$2:$A$7",
         values: "Sales!$B$2:$B$7",
-        dataLabels: { showVal: true, numFmt: "$#,##0", position: "ctr" }
+        // `c:dLblPos` is not a valid child of `<c:dLbls>` inside a
+        // doughnut series — see `VALID_DLBL_POSITIONS_BY_TYPE` in
+        // chart-builder.ts. Only emit the number format + show flag.
+        dataLabels: { showVal: true, numFmt: "$#,##0" }
       }
     ],
     legendPosition: "r"
@@ -1534,38 +1577,68 @@ async function main(): Promise<void> {
   );
 
   // --- 12.2 every error-bar value type
-  const errorBars: AddErrorBarsOptions[] = [
-    { type: "fixedVal", value: 10, direction: "y", barDir: "both", line: "4472C4" },
-    { type: "percentage", value: 15, direction: "y", barDir: "plus", line: "ED7D31" },
-    { type: "stdDev", value: 1, direction: "y", barDir: "minus", line: "70AD47" },
-    { type: "stdErr", direction: "y", barDir: "both", line: "FFC000" },
+  //
+  // OOXML's `CT_ScatterSer` (§21.2.2.168) restricts `c:errBars` to
+  // `maxOccurs="2"` — one for `errDir="x"` and one for `errDir="y"`.
+  // Stacking every variant onto a single series therefore emits
+  // schema-invalid XML and trips Excel's "Repaired Records" dialog
+  // on open. The demo renders each error-bar *valType* on its own
+  // series instead, which is also how Excel itself saves a chart
+  // built this way from the UI.
+  const errorBarRecipes: Array<{
+    label: string;
+    colour: string;
+    eb: AddErrorBarsOptions;
+  }> = [
     {
-      // Custom error bars — explicit per-point plus/minus ranges.
-      type: "cust",
-      direction: "y",
-      barDir: "both",
-      plus: "Sales!$C$2:$C$7",
-      minus: "Sales!$C$2:$C$7",
-      line: "5B9BD5",
-      noEndCap: false
+      label: "fixedVal",
+      colour: "4472C4",
+      eb: { type: "fixedVal", value: 10, direction: "y", barDir: "both", line: "4472C4" }
+    },
+    {
+      label: "percentage",
+      colour: "ED7D31",
+      eb: { type: "percentage", value: 15, direction: "y", barDir: "plus", line: "ED7D31" }
+    },
+    {
+      label: "stdDev",
+      colour: "70AD47",
+      eb: { type: "stdDev", value: 1, direction: "y", barDir: "minus", line: "70AD47" }
+    },
+    {
+      label: "stdErr",
+      colour: "FFC000",
+      eb: { type: "stdErr", direction: "y", barDir: "both", line: "FFC000" }
+    },
+    {
+      label: "cust",
+      colour: "5B9BD5",
+      eb: {
+        // Custom error bars — explicit per-point plus/minus ranges.
+        type: "cust",
+        direction: "y",
+        barDir: "both",
+        plus: "Sales!$C$2:$C$7",
+        minus: "Sales!$C$2:$C$7",
+        line: "5B9BD5",
+        noEndCap: false
+      }
     }
   ];
-  features.getCell("A25").value = "12.2 — every error-bar type";
+  features.getCell("A25").value = "12.2 — every error-bar type (one per series)";
   features.getCell("A25").font = { bold: true };
   features.addChart(
     {
       type: "scatter",
       scatterStyle: "marker",
       title: "All five error-bar types",
-      series: [
-        {
-          name: "Points",
-          xValues: "Scatter!$A$2:$A$8",
-          values: "Scatter!$B$2:$B$8",
-          marker: { symbol: "circle", size: 8, fill: "4472C4" },
-          errorBars
-        }
-      ]
+      series: errorBarRecipes.map(({ label, colour, eb }) => ({
+        name: label,
+        xValues: "Scatter!$A$2:$A$8",
+        values: "Scatter!$B$2:$B$8",
+        marker: { symbol: "circle", size: 8, fill: colour },
+        errorBars: eb
+      }))
     },
     "A26:L44"
   );
@@ -1714,7 +1787,11 @@ async function main(): Promise<void> {
           name: "Revenue",
           categories: "Sales!$A$2:$A$7",
           values: "Sales!$B$2:$B$7",
-          dataLabels: { showVal: true, position: "ctr" }
+          // Doughnut charts do not support `c:dLblPos` — Excel's UI
+          // has no position picker for doughnut labels and any
+          // value causes Excel to strip the drawing part on open.
+          // See `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
+          dataLabels: { showVal: true }
         }
       ]
     },
@@ -1795,7 +1872,12 @@ async function main(): Promise<void> {
                     }
                   ]
                 },
-                position: "t"
+                // `outEnd` (above the column) is the bar-chart
+                // equivalent of "top"; Excel's bar-chart label
+                // position picker only exposes ctr/inBase/inEnd/
+                // outEnd, and writing `t` here would trip a
+                // "Repaired Records" dialog on open.
+                position: "outEnd"
               },
               // Move the last label into the bar, large.
               {
@@ -3401,7 +3483,1498 @@ async function main(): Promise<void> {
   presetWs.addChartEx(presetExMerged, "A22:L41");
 
   // ---------------------------------------------------------------------------
-  // 28. Preview export — each chart → SVG, PNG, and a multi-page PDF.
+  // 28. Axis edge cases — every axis / label option Excel exposes that
+  //     the earlier sections didn't already demonstrate. Each sub-
+  //     example targets one `AddAxisOptions` or data-labels field so
+  //     the xlsx acts as a self-documenting catalogue of supported
+  //     values.
+  // ---------------------------------------------------------------------------
+
+  // Daily incidents across 90 days — a dense categorical axis used by
+  // `tickLblSkip` / `tickMarkSkip` and the `lblAlgn` / `lblOffset`
+  // examples below. 90 rows is enough to force Excel to overlap labels
+  // with the default skip=1 setting, so the demo clearly shows the
+  // effect of thinning the tick labels.
+  const dense = wb.addWorksheet("28-Dense Daily");
+  dense.addRow(["Date", "Incidents"]);
+  {
+    const start = Date.UTC(2024, 0, 1);
+    for (let i = 0; i < 90; i++) {
+      const date = new Date(start + i * 86_400_000);
+      // Mild trend + sinusoidal noise so the line chart has visible
+      // structure rather than a straight line.
+      const value = 20 + Math.round(Math.sin(i / 7) * 5 + i / 10);
+      dense.addRow([date, value]);
+    }
+  }
+  dense.getColumn(1).numFmt = "yyyy-mm-dd";
+
+  // Monthly P&L with mixed positive/negative results for the
+  // `invertIfNegative` demo. Losses in Feb/May make the inverted
+  // colour swap visible without editing the existing Sales sheet
+  // (which is monotone-positive and is consumed by dozens of
+  // upstream charts).
+  const pnl = wb.addWorksheet("28-PnL");
+  pnl.addRow(["Month", "Net"]);
+  pnl.addRows([
+    ["Jan", 120],
+    ["Feb", -45],
+    ["Mar", 85],
+    ["Apr", 210],
+    ["May", -30],
+    ["Jun", 175]
+  ]);
+  pnl.getColumn(2).numFmt = "$#,##0;[Red]-$#,##0";
+
+  const axisEdge = wb.addWorksheet("28-Axis Edge Cases");
+  axisEdge.addRow(["Axis edge cases"]);
+  axisEdge.getCell("A1").font = { bold: true };
+
+  // --- 28.1 `invertIfNegative` — bars flip fill colour when the value
+  //     is negative. Excel's default is `false`; turning it on is the
+  //     OOXML equivalent of the "Invert if negative" checkbox in the
+  //     Format Data Series dialog. Requires `fill` so Excel has a
+  //     positive-side colour to invert from.
+  axisEdge.getCell("A3").value = "28.1 — invertIfNegative (bar auto-flips colour on negatives)";
+  axisEdge.getCell("A3").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Net P&L — invertIfNegative on",
+      series: [
+        {
+          name: "Net",
+          categories: "'28-PnL'!$A$2:$A$7",
+          values: "'28-PnL'!$B$2:$B$7",
+          fill: "4472C4",
+          invertIfNegative: true
+        }
+      ],
+      showLegend: false,
+      valueAxis: {
+        // `crossesAt: 0` and `crossBetween: "between"` just clarify
+        // the zero baseline — not strictly needed for the demo.
+        crosses: "autoZero",
+        numFmt: "$#,##0"
+      }
+    },
+    "A4:L23"
+  );
+
+  // --- 28.2 `orientation: "maxMin"` — reverse the axis so values
+  //     count down. Common on financial / ranking charts where the
+  //     top rank sits at the top of the Y axis.
+  axisEdge.getCell("A26").value = "28.2 — orientation: 'maxMin' (reversed value axis)";
+  axisEdge.getCell("A26").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "bar",
+      grouping: "clustered",
+      title: "Reverse-ordered horizontal bars (highest at top)",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4"
+        }
+      ],
+      categoryAxis: {
+        // `maxMin` flips the category axis so Jan ends up at the
+        // bottom (OOXML default is `minMax`).
+        orientation: "maxMin"
+      }
+    },
+    "A27:L46"
+  );
+
+  // --- 28.3 `crosses: "max"` and `crossesAt: <number>` — make the
+  //     X axis cross the Y axis at a specific value (here the monthly
+  //     target $180k). Lets callers draw "above target / below target"
+  //     charts where the bars hang off a non-zero baseline.
+  axisEdge.getCell("A49").value = "28.3 — crossesAt: target line at $180k";
+  axisEdge.getCell("A49").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Deviation from $180k target",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4",
+          invertIfNegative: true
+        }
+      ],
+      showLegend: false,
+      valueAxis: {
+        crossesAt: 180,
+        numFmt: "$#,##0"
+      },
+      categoryAxis: {
+        // `crosses` on the category axis drives where the value axis
+        // "crosses" it. `min` / `max` pin the category axis to the
+        // corresponding end of the value axis — useful when the
+        // value axis is inverted and you want the baseline at the
+        // top of the plot.
+        crosses: "max"
+      }
+    },
+    "A50:L69"
+  );
+
+  // --- 28.4 `crossBetween: "midCat"` — value axis crosses the category
+  //     axis at the midpoint of each category tick rather than between
+  //     ticks. Mostly visible on line charts: `between` (default) makes
+  //     the line start half a tick in from the left; `midCat` starts
+  //     it flush against the axis.
+  axisEdge.getCell("A72").value = "28.4 — crossBetween: 'midCat' (line flush against axis)";
+  axisEdge.getCell("A72").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "line",
+      title: "crossBetween = midCat",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          line: "4472C4",
+          marker: { symbol: "circle", size: 7 }
+        }
+      ],
+      valueAxis: { crossBetween: "midCat" }
+    },
+    "A73:L92"
+  );
+
+  // --- 28.5 `tickLblSkip` / `tickMarkSkip` — on dense categorical
+  //     axes Excel will overlap labels unless the author thins them
+  //     out. `tickLblSkip: 10` means "label every 10th tick" — the
+  //     tick marks themselves still render at each data point, but
+  //     only one in ten carries a visible label.
+  axisEdge.getCell("A95").value = "28.5 — tickLblSkip=10 / tickMarkSkip=5 (90-day daily axis)";
+  axisEdge.getCell("A95").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "line",
+      title: "90 days of incidents — labels every 10 days",
+      series: [
+        {
+          name: "Incidents",
+          categories: "'28-Dense Daily'!$A$2:$A$91",
+          values: "'28-Dense Daily'!$B$2:$B$91",
+          line: "ED7D31",
+          marker: { symbol: "none" }
+        }
+      ],
+      categoryAxis: {
+        tickLblSkip: 10,
+        tickMarkSkip: 5,
+        textRotation: -45,
+        numFmt: "mmm-dd"
+      },
+      showLegend: false
+    },
+    "A96:L115"
+  );
+
+  // --- 28.6 `lblAlgn` / `lblOffset` — category axis label alignment
+  //     and spacing. `lblAlgn: "l"` left-aligns labels against their
+  //     tick; `lblOffset: 200` pushes them further from the axis
+  //     (default 100 = flush against tick marks).
+  axisEdge.getCell("A118").value = "28.6 — lblAlgn='l' + lblOffset=200 (left-aligned, pushed away)";
+  axisEdge.getCell("A118").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Left-aligned category labels with extra offset",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4"
+        }
+      ],
+      categoryAxis: {
+        lblAlgn: "l",
+        lblOffset: 200,
+        textRotation: 0
+      },
+      showLegend: false
+    },
+    "A119:L138"
+  );
+
+  // --- 28.7 All 11 `lineDash` styles on one radar chart — one
+  //     concentric ring per style so the reader can pick a dash they
+  //     like from the catalogue. The list mirrors `ST_PresetLineDashVal`
+  //     (§20.1.10.49).
+  const dashStyles: NonNullable<AddChartSeriesOptions["lineDash"]>[] = [
+    "solid",
+    "dot",
+    "dash",
+    "lgDash",
+    "dashDot",
+    "lgDashDot",
+    "lgDashDotDot",
+    "sysDash",
+    "sysDot",
+    "sysDashDot",
+    "sysDashDotDot"
+  ];
+  axisEdge.getCell("A141").value = "28.7 — every lineDash style (11 variants)";
+  axisEdge.getCell("A141").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "line",
+      title: "Catalogue of line-dash presets",
+      showMarker: false,
+      series: dashStyles.map((dash, i) => ({
+        // Offset each series vertically so they don't overlap — we
+        // multiply the same Sales revenue by a per-series scale to
+        // spread them into a readable ladder.
+        name: dash,
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: HEX_PALETTE[i % HEX_PALETTE.length],
+        lineWidth: 2,
+        lineDash: dash
+      })),
+      legendPosition: "r"
+    },
+    "A142:L175"
+  );
+
+  // --- 28.8 Log axis with an explicit `logBase: 2` (the Excel UI
+  //     defaults to 10, but any integer >= 2 is valid). Showcases
+  //     that our log axis isn't hardcoded to base-10.
+  axisEdge.getCell("A178").value = "28.8 — logBase=2 value axis (binary decade ticks)";
+  axisEdge.getCell("A178").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "line",
+      title: "Log scale — base 2",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          line: "70AD47",
+          marker: { symbol: "diamond", size: 7 }
+        }
+      ],
+      valueAxis: {
+        logBase: 2,
+        min: 64,
+        max: 512,
+        numFmt: "0",
+        title: "Revenue (log₂)"
+      }
+    },
+    "A179:L198"
+  );
+
+  // --- 28.9 `showDLblsOverMax: true` — render data labels even when
+  //     the label's value exceeds the value axis `max`. Without this
+  //     flag Excel clips the label along with the bar; with it set,
+  //     the label "floats" above the plot area so the number stays
+  //     readable.
+  axisEdge.getCell("A201").value = "28.9 — showDLblsOverMax: clipped bars still label";
+  axisEdge.getCell("A201").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Revenue clipped at $200 — labels still rendered",
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4",
+          dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" }
+        }
+      ],
+      valueAxis: { max: 200, numFmt: "$#,##0" },
+      showDLblsOverMax: true,
+      showLegend: false
+    },
+    "A202:L221"
+  );
+
+  // --- 28.10 `showLeaderLines: true` — pie charts with external
+  //     `outEnd` labels emit leader lines connecting each slice to
+  //     its label when the flag is on. Turning it off (default on
+  //     some Excel builds) leaves the labels visually detached.
+  axisEdge.getCell("A224").value = "28.10 — pie with explicit showLeaderLines";
+  axisEdge.getCell("A224").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "pie",
+      title: "Revenue by month — leader lines on",
+      varyColors: true,
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          dataLabels: {
+            showPercent: true,
+            showCatName: true,
+            position: "outEnd",
+            separator: " • ",
+            showLeaderLines: true
+          }
+        }
+      ]
+    },
+    "A225:L244"
+  );
+
+  // --- 28.11 Defined-name reference — `wb.definedNames.add(...)`
+  //     lets callers reuse a named range as a series reference
+  //     without repeating the `Sheet!$A$1:$A$n` formula. Common
+  //     when Excel users save a file with named ranges and expect
+  //     round-trip fidelity.
+  wb.definedNames.add("Sales!$A$2:$A$7", "MonthCategories");
+  wb.definedNames.add("Sales!$B$2:$B$7", "MonthRevenue");
+  axisEdge.getCell("A247").value = "28.11 — categories / values via defined names";
+  axisEdge.getCell("A247").font = { bold: true };
+  axisEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Series references via `=MonthCategories` / `=MonthRevenue`",
+      series: [
+        {
+          name: "Revenue",
+          categories: "MonthCategories",
+          values: "MonthRevenue",
+          fill: "5B9BD5"
+        }
+      ],
+      showLegend: false,
+      valueAxis: { numFmt: "$#,##0" }
+    },
+    "A248:L267"
+  );
+
+  // ---------------------------------------------------------------------------
+  // 29. Data-handling edge cases — how charts deal with blanks,
+  //     negatives, and blanket overrides on the whole data-labels
+  //     block.
+  // ---------------------------------------------------------------------------
+
+  // Sparse monthly data with two "hole" months, used by the three
+  // `displayBlanksAs` charts below to visualise each mode against
+  // the same numbers.
+  const sparse = wb.addWorksheet("29-Sparse");
+  sparse.addRow(["Month", "Revenue"]);
+  sparse.addRows([
+    ["Jan", 120],
+    ["Feb", null],
+    ["Mar", 160],
+    ["Apr", null],
+    ["May", 232],
+    ["Jun", 248]
+  ]);
+
+  const dataEdge = wb.addWorksheet("29-Data Handling");
+  dataEdge.addRow(["Data-handling edge cases"]);
+  dataEdge.getCell("A1").font = { bold: true };
+
+  // --- 29.1 `displayBlanksAs` variants side-by-side. `gap` (default)
+  //     leaves visible gaps in the line; `zero` treats blanks as 0
+  //     (producing spikes down to the axis); `span` interpolates
+  //     straight through the gap.
+  const blanksModes: Array<"gap" | "zero" | "span"> = ["gap", "zero", "span"];
+  for (let i = 0; i < blanksModes.length; i++) {
+    const mode = blanksModes[i];
+    const row = 3 + i * 22;
+    dataEdge.getCell(`A${row}`).value = `29.1.${i + 1} — displayBlanksAs: '${mode}'`;
+    dataEdge.getCell(`A${row}`).font = { bold: true };
+    dataEdge.addChart(
+      {
+        type: "line",
+        title: `Sparse data rendered with displayBlanksAs='${mode}'`,
+        series: [
+          {
+            name: "Revenue",
+            categories: "'29-Sparse'!$A$2:$A$7",
+            values: "'29-Sparse'!$B$2:$B$7",
+            line: HEX_PALETTE[i],
+            marker: { symbol: "circle", size: 7 }
+          }
+        ],
+        displayBlanksAs: mode,
+        showLegend: false
+      },
+      `A${row + 1}:L${row + 20}`
+    );
+  }
+
+  // --- 29.2 Negative values with `invertIfNegative` + `inBase` label
+  //     position. `inBase` places the value label at the category
+  //     axis end of each bar — useful for negative values because
+  //     it keeps the number anchored at the zero line instead of
+  //     floating below the plot area.
+  dataEdge.getCell("A70").value = "29.2 — negative bars with invertIfNegative + dLblPos 'inBase'";
+  dataEdge.getCell("A70").font = { bold: true };
+  dataEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Quarterly P&L (loss months flipped red)",
+      series: [
+        {
+          name: "Net",
+          categories: "'28-PnL'!$A$2:$A$7",
+          values: "'28-PnL'!$B$2:$B$7",
+          fill: "4472C4",
+          invertIfNegative: true,
+          dataLabels: {
+            showVal: true,
+            position: "inBase",
+            numFmt: "$#,##0;[Red]-$#,##0"
+          }
+        }
+      ],
+      showLegend: false,
+      valueAxis: { numFmt: "$#,##0" }
+    },
+    "A71:L90"
+  );
+
+  // --- 29.3 Mass-hide every data label via per-entry `delete: true`.
+  //     OOXML's internal `c:dLbls/c:delete` shortcut isn't exposed on
+  //     the public builder (it would conflict with the display-flags
+  //     choice group), but enumerating each point with `delete: true`
+  //     achieves the same "silence all labels" outcome against a
+  //     chart style that otherwise turns them on.
+  dataEdge.getCell("A93").value = "29.3 — per-entry delete suppresses every auto-label";
+  dataEdge.getCell("A93").font = { bold: true };
+  dataEdge.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Style-19 wants labels; enumerate-delete silences them",
+      style: 19,
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4",
+          dataLabels: {
+            entries: Array.from({ length: 6 }, (_, i) => ({ index: i, delete: true }))
+          }
+        }
+      ],
+      showLegend: false
+    },
+    "A94:L113"
+  );
+
+  // ---------------------------------------------------------------------------
+  // 30. Chart-type variants — extra flavours of stock / bubble /
+  //     radar / ofPie / surface that the 1-16 gallery glossed over.
+  // ---------------------------------------------------------------------------
+
+  // Stock variants. Excel's UI recognises four: HLC (High-Low-Close,
+  // 3 series), OHLC (Open-High-Low-Close, 4), VHLC (Volume-High-
+  // Low-Close, 4) and VOHLC (Volume-Open-High-Low-Close, 5). The
+  // existing gallery covers OHLC — add the other three here.
+  const stockMulti = wb.addWorksheet("30-Stock Variants");
+  stockMulti.addRow(["Date", "Volume", "Open", "High", "Low", "Close"]);
+  const stockRows: Array<[Date, number, number, number, number, number]> = [
+    [new Date("2024-02-01"), 2_400_000, 150, 156, 149, 154],
+    [new Date("2024-02-02"), 2_900_000, 154, 158, 152, 157],
+    [new Date("2024-02-05"), 2_150_000, 157, 161, 155, 159],
+    [new Date("2024-02-06"), 3_100_000, 159, 162, 156, 160],
+    [new Date("2024-02-07"), 2_750_000, 160, 165, 158, 164]
+  ];
+  stockMulti.addRows(stockRows);
+  stockMulti.getColumn(1).numFmt = "yyyy-mm-dd";
+  stockMulti.getColumn(2).numFmt = "#,##0";
+
+  const variants = wb.addWorksheet("30-Chart Variants");
+  variants.addRow(["Chart-type variants"]);
+  variants.getCell("A1").font = { bold: true };
+
+  // --- 30.1 Stock HLC (no Open series) — just High / Low / Close
+  //     connected by hiLowLines. The thinnest stock variant.
+  variants.getCell("A3").value = "30.1 — Stock HLC (High-Low-Close)";
+  variants.getCell("A3").font = { bold: true };
+  variants.addChart(
+    {
+      type: "stock",
+      title: "HLC — 3-series stock chart",
+      hiLowLines: true,
+      series: [
+        {
+          name: "High",
+          categories: "'30-Stock Variants'!$A$2:$A$6",
+          values: "'30-Stock Variants'!$D$2:$D$6",
+          line: "70AD47",
+          marker: { symbol: "none" }
+        },
+        {
+          name: "Low",
+          categories: "'30-Stock Variants'!$A$2:$A$6",
+          values: "'30-Stock Variants'!$E$2:$E$6",
+          line: "C00000",
+          marker: { symbol: "none" }
+        },
+        {
+          name: "Close",
+          categories: "'30-Stock Variants'!$A$2:$A$6",
+          values: "'30-Stock Variants'!$F$2:$F$6",
+          line: "000000",
+          marker: { symbol: "none" }
+        }
+      ],
+      categoryAxis: { numFmt: "yyyy-mm-dd" }
+    },
+    "A4:L23"
+  );
+
+  // --- 30.2 Stock VHLC — adds a Volume bar series on a secondary
+  //     axis. The builder doesn't yet auto-split into combo groups
+  //     for VHLC, so we use `addComboChart` to model it precisely
+  //     (bar + line groups, volume on primary / OHLC on secondary).
+  variants.getCell("A26").value = "30.2 — Stock VHLC (Volume + High-Low-Close) combo";
+  variants.getCell("A26").font = { bold: true };
+  variants.addComboChart(
+    {
+      title: "VHLC — Volume bars + HLC line",
+      groups: [
+        {
+          type: "bar",
+          barDir: "col",
+          grouping: "clustered",
+          series: [
+            {
+              name: "Volume",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$B$2:$B$6",
+              fill: "BFBFBF"
+            }
+          ],
+          // Put the category axis config on the primary group —
+          // `AddComboChartOptions` has no top-level categoryAxis
+          // slot (each group owns its own cat/val axes).
+          categoryAxis: { numFmt: "yyyy-mm-dd" },
+          valueAxis: { title: "Volume", numFmt: "#,##0" }
+        },
+        {
+          type: "stock",
+          hiLowLines: true,
+          series: [
+            {
+              name: "High",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$D$2:$D$6",
+              line: "70AD47",
+              marker: { symbol: "none" }
+            },
+            {
+              name: "Low",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$E$2:$E$6",
+              line: "C00000",
+              marker: { symbol: "none" }
+            },
+            {
+              name: "Close",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$F$2:$F$6",
+              line: "000000",
+              marker: { symbol: "none" }
+            }
+          ],
+          useSecondaryAxis: true,
+          valueAxis: { title: "Price", numFmt: "$0.00" }
+        }
+      ]
+    },
+    "A27:L46"
+  );
+
+  // --- 30.3 Stock VOHLC — Volume + full OHLC, the richest stock
+  //     variant. Same combo idea as VHLC plus an Open series.
+  variants.getCell("A49").value = "30.3 — Stock VOHLC (Volume + Open-High-Low-Close)";
+  variants.getCell("A49").font = { bold: true };
+  variants.addComboChart(
+    {
+      title: "VOHLC — Volume bars + OHLC with upDownBars",
+      groups: [
+        {
+          type: "bar",
+          barDir: "col",
+          grouping: "clustered",
+          series: [
+            {
+              name: "Volume",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$B$2:$B$6",
+              fill: "BFBFBF"
+            }
+          ],
+          categoryAxis: { numFmt: "yyyy-mm-dd" },
+          valueAxis: { title: "Volume", numFmt: "#,##0" }
+        },
+        {
+          type: "stock",
+          hiLowLines: true,
+          upDownBars: {
+            gapWidth: 150,
+            upBars: { fill: "FFFFFF", border: "70AD47" },
+            downBars: { fill: "C00000", border: "C00000" }
+          },
+          series: [
+            {
+              name: "Open",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$C$2:$C$6",
+              line: "70AD47",
+              marker: { symbol: "none" }
+            },
+            {
+              name: "High",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$D$2:$D$6",
+              line: "70AD47",
+              marker: { symbol: "none" }
+            },
+            {
+              name: "Low",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$E$2:$E$6",
+              line: "C00000",
+              marker: { symbol: "none" }
+            },
+            {
+              name: "Close",
+              categories: "'30-Stock Variants'!$A$2:$A$6",
+              values: "'30-Stock Variants'!$F$2:$F$6",
+              line: "000000",
+              marker: { symbol: "none" }
+            }
+          ],
+          useSecondaryAxis: true,
+          valueAxis: { title: "Price", numFmt: "$0.00" }
+        }
+      ]
+    },
+    "A50:L69"
+  );
+
+  // --- 30.4 Bubble with negative bubble sizes + `showNegBubbles: true`
+  //     + `bubble3D`. Negative sizes are common in scenario analysis
+  //     (loss size) and Excel uses a hollow / inverted bubble glyph
+  //     to represent them when the flag is on.
+  const bubbleNeg = wb.addWorksheet("30-Bubble Neg");
+  bubbleNeg.addRow(["Hours", "Score", "Impact"]);
+  bubbleNeg.addRows([
+    [1, 45, 3],
+    [2, 55, -5],
+    [3, 62, 4],
+    [4, 70, -7],
+    [5, 78, 6],
+    [6, 85, 9]
+  ]);
+  variants.getCell("A72").value = "30.4 — Bubble with negative sizes + showNegBubbles + bubble3D";
+  variants.getCell("A72").font = { bold: true };
+  variants.addChart(
+    {
+      type: "bubble",
+      title: "Impact bubbles — negatives shown as inverted markers",
+      bubbleScale: 100,
+      showNegBubbles: true,
+      sizeRepresents: "area",
+      series: [
+        {
+          name: "Scenarios",
+          xValues: "'30-Bubble Neg'!$A$2:$A$7",
+          values: "'30-Bubble Neg'!$B$2:$B$7",
+          bubbleSize: "'30-Bubble Neg'!$C$2:$C$7",
+          fill: "4472C4",
+          bubble3D: true
+        }
+      ],
+      categoryAxis: { title: "Hours" },
+      valueAxis: { title: "Score" }
+    },
+    "A73:L92"
+  );
+
+  // --- 30.5 Radar with 12 categories + 3 series — wide radar for
+  //     comparing skill / balance profiles.
+  const radarWide = wb.addWorksheet("30-Radar Wide");
+  radarWide.addRow(["Attribute", "Rookie", "Journeyman", "Expert"]);
+  radarWide.addRows([
+    ["Vision", 3, 6, 9],
+    ["Tempo", 4, 7, 8],
+    ["Precision", 2, 5, 10],
+    ["Strength", 5, 6, 7],
+    ["Stamina", 6, 7, 8],
+    ["Focus", 3, 6, 9],
+    ["Clutch", 2, 4, 10],
+    ["Leadership", 3, 7, 9],
+    ["Creativity", 4, 6, 8],
+    ["Adaptability", 5, 7, 9],
+    ["Grit", 6, 7, 10],
+    ["Poise", 4, 6, 9]
+  ]);
+  variants.getCell("A95").value = "30.5 — Radar with 12 axes × 3 series";
+  variants.getCell("A95").font = { bold: true };
+  variants.addChart(
+    {
+      type: "radar",
+      radarStyle: "marker",
+      title: "Skill profile radar",
+      series: [
+        {
+          name: "Rookie",
+          categories: "'30-Radar Wide'!$A$2:$A$13",
+          values: "'30-Radar Wide'!$B$2:$B$13",
+          line: "A5A5A5",
+          marker: { symbol: "circle", size: 5, fill: "A5A5A5" }
+        },
+        {
+          name: "Journeyman",
+          categories: "'30-Radar Wide'!$A$2:$A$13",
+          values: "'30-Radar Wide'!$C$2:$C$13",
+          line: "4472C4",
+          marker: { symbol: "square", size: 5, fill: "4472C4" }
+        },
+        {
+          name: "Expert",
+          categories: "'30-Radar Wide'!$A$2:$A$13",
+          values: "'30-Radar Wide'!$D$2:$D$13",
+          line: "70AD47",
+          marker: { symbol: "diamond", size: 6, fill: "70AD47" }
+        }
+      ],
+      valueAxis: { min: 0, max: 10, majorUnit: 2 }
+    },
+    "A96:L115"
+  );
+
+  // --- 30.6 `ofPie splitType: "val"` — split secondary pie by value
+  //     threshold. Every slice below the threshold goes into the
+  //     second pie; larger slices stay in the main.
+  variants.getCell("A118").value = "30.6 — ofPie splitType='val' (threshold = $130)";
+  variants.getCell("A118").font = { bold: true };
+  variants.addChart(
+    {
+      type: "ofPie",
+      ofPieType: "pie",
+      title: "Bar-of-pie split by value threshold",
+      splitType: "val",
+      splitPos: 130,
+      serLines: true,
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7"
+        }
+      ]
+    },
+    "A119:L138"
+  );
+
+  // --- 30.7 `ofPie splitType: "percent"` with a larger secondPieSize.
+  //     Demonstrates the `secondPieSize` extreme — pushing it to 150
+  //     makes the secondary pie bigger than the primary, a layout
+  //     choice Excel allows but rarely produces by default.
+  variants.getCell("A141").value =
+    "30.7 — ofPie secondPieSize=150 (secondary pie larger than primary)";
+  variants.getCell("A141").font = { bold: true };
+  variants.addChart(
+    {
+      type: "ofPie",
+      ofPieType: "pie",
+      title: "Oversized secondary pie",
+      splitType: "percent",
+      splitPos: 15,
+      secondPieSize: 150,
+      serLines: true,
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7"
+        }
+      ]
+    },
+    "A142:L161"
+  );
+
+  // --- 30.8 Surface with a richer 8×8 matrix — highlights band
+  //     transitions better than the 4×4 default gallery surface.
+  const surfaceBig = wb.addWorksheet("30-Surface Big");
+  // Build an 8×8 grid where z = sin(x/2) * cos(y/2) * 10 — a smooth
+  // radial pattern that surface charts render as concentric bands.
+  const headers = ["", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"];
+  surfaceBig.addRow(headers);
+  for (let r = 0; r < 8; r++) {
+    const row: Array<string | number> = [`R${r + 1}`];
+    for (let c = 0; c < 8; c++) {
+      row.push(Math.round(Math.sin(r / 2) * Math.cos(c / 2) * 10 + 20));
+    }
+    surfaceBig.addRow(row);
+  }
+  variants.getCell("A164").value = "30.8 — Surface 8×8 matrix (smoother band transitions)";
+  variants.getCell("A164").font = { bold: true };
+  variants.addChart(
+    {
+      type: "surface3D",
+      title: "Surface3D — smooth radial z = sin·cos",
+      view3D: { rotX: 30, rotY: 30, perspective: 30 },
+      series: Array.from({ length: 8 }, (_, i) => ({
+        name: `R${i + 1}`,
+        categories: "'30-Surface Big'!$B$1:$I$1",
+        values: `'30-Surface Big'!$B$${i + 2}:$I$${i + 2}`
+      }))
+    },
+    "A165:L184"
+  );
+
+  // ---------------------------------------------------------------------------
+  // 31. ChartEx deep-dive — extras for the Excel 2016+ modern
+  //     chart families that were only touched briefly in section 3.
+  // ---------------------------------------------------------------------------
+
+  // 4-level hierarchical data for the deep treemap / sunburst demos.
+  // `Region → Country → State → City` with a $Sales column.
+  const deepHier = wb.addWorksheet("31-Deep Hierarchy");
+  deepHier.addRows([
+    ["Region", "Country", "State", "City", "Sales"],
+    ["Americas", "USA", "CA", "San Francisco", 360],
+    ["Americas", "USA", "CA", "Los Angeles", 220],
+    ["Americas", "USA", "NY", "New York", 420],
+    ["Americas", "USA", "NY", "Buffalo", 110],
+    ["Americas", "USA", "TX", "Austin", 180],
+    ["Americas", "USA", "TX", "Houston", 140],
+    ["Americas", "Brazil", "SP", "São Paulo", 210],
+    ["Americas", "Brazil", "RJ", "Rio", 130],
+    ["EMEA", "UK", "ENG", "London", 310],
+    ["EMEA", "UK", "SCT", "Edinburgh", 90],
+    ["EMEA", "Germany", "BY", "Munich", 180],
+    ["EMEA", "Germany", "BE", "Berlin", 280],
+    ["EMEA", "France", "IDF", "Paris", 240],
+    ["EMEA", "France", "PAC", "Marseille", 80],
+    ["APAC", "Japan", "13", "Tokyo", 400],
+    ["APAC", "Japan", "27", "Osaka", 180],
+    ["APAC", "China", "31", "Shanghai", 520],
+    ["APAC", "China", "11", "Beijing", 310],
+    ["APAC", "Australia", "NSW", "Sydney", 180],
+    ["APAC", "Australia", "VIC", "Melbourne", 160]
+  ]);
+
+  // Wide histogram dataset — 120 samples with long tails so the
+  // `byWidth` / `overflow` bin modes show something interesting.
+  const histoWide = wb.addWorksheet("31-Histogram Wide");
+  histoWide.addRow(["Sample"]);
+  {
+    const wideSamples: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      // Normal-ish centre + long right tail.
+      const value = Math.round(
+        50 + Math.random() * 40 + (Math.random() < 0.08 ? Math.random() * 100 : 0)
+      );
+      wideSamples.push(value);
+    }
+    wideSamples.push(3, 7, 210, 240); // explicit outliers for overflow/underflow demos
+    wideSamples.forEach(n => histoWide.addRow([n]));
+  }
+
+  // Conversion-funnel stages for the custom-label funnel.
+  const funnelCustom = wb.addWorksheet("31-Funnel Stages");
+  funnelCustom.addRows([
+    ["Stage", "Visitors"],
+    ["Landing page", 10_000],
+    ["Viewed pricing", 4_200],
+    ["Added to cart", 1_850],
+    ["Checkout started", 720],
+    ["Payment confirmed", 410],
+    ["Retained 30d", 275]
+  ]);
+
+  const exDeep = wb.addWorksheet("31-ChartEx Deep");
+  exDeep.addRow(["ChartEx deep-dive"]);
+  exDeep.getCell("A1").font = { bold: true };
+
+  // --- 31.1 Waterfall with explicit `total` bars. Marking specific
+  //     points as totals lets Excel render them as standalone bars
+  //     (different colour, anchored at zero) instead of floating
+  //     on top of the running sum.
+  exDeep.getCell("A3").value = "31.1 — Waterfall with total markers at quarter-ends";
+  exDeep.getCell("A3").font = { bold: true };
+  const wfSheet = wb.addWorksheet("31-Waterfall");
+  wfSheet.addRows([
+    ["Step", "Delta"],
+    ["Starting cash", 1_000],
+    ["Q1 revenue", 450],
+    ["Q1 cost", -210],
+    ["Q1 total", 1_240],
+    ["Q2 revenue", 520],
+    ["Q2 cost", -280],
+    ["Q2 total", 1_480]
+  ]);
+  exDeep.addChartEx(
+    {
+      type: "waterfall",
+      title: "Waterfall — Q1/Q2 totals anchored at zero",
+      categories: "'31-Waterfall'!$A$2:$A$8",
+      series: [
+        {
+          name: "Cash",
+          values: "'31-Waterfall'!$B$2:$B$8",
+          // Flag specific indices as subtotals — the renderer draws
+          // them as wider anchored bars instead of floating deltas.
+          // Use the `subtotals` shortcut (array of 0-based indices)
+          // or the `subtotalPoints` form (`{ idx: number }`) when
+          // mixing with other OOXML-shaped builder code.
+          subtotals: [0, 3, 6]
+        }
+      ],
+      layout: { connectorLines: true }
+    },
+    "A4:L23"
+  );
+
+  // --- 31.2 Treemap with 4-level `parentLabelLayout: "overlapping"`.
+  //     Deeper hierarchies exercise the label-wrapping / color
+  //     cascade more than the gallery's 3-level demo.
+  exDeep.getCell("A26").value = "31.2 — Treemap 4 levels (Region → Country → State → City)";
+  exDeep.getCell("A26").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "treemap",
+      title: "Sales — 4-level treemap with overlapping parent labels",
+      categories: "'31-Deep Hierarchy'!$D$2:$D$21",
+      series: [
+        {
+          name: "Sales",
+          values: "'31-Deep Hierarchy'!$E$2:$E$21",
+          hierarchy: [
+            "'31-Deep Hierarchy'!$A$2:$A$21",
+            "'31-Deep Hierarchy'!$B$2:$B$21",
+            "'31-Deep Hierarchy'!$C$2:$C$21"
+          ]
+        }
+      ],
+      layout: { parentLabelLayout: "overlapping" }
+    },
+    "A27:L50"
+  );
+
+  // --- 31.3 Sunburst with the same 4-level hierarchy — compare
+  //     visual density vs the treemap.
+  exDeep.getCell("A53").value = "31.3 — Sunburst 4 levels (same hierarchy as 31.2)";
+  exDeep.getCell("A53").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "sunburst",
+      title: "Sales — 4-ring sunburst",
+      categories: "'31-Deep Hierarchy'!$D$2:$D$21",
+      series: [
+        {
+          name: "Sales",
+          values: "'31-Deep Hierarchy'!$E$2:$E$21",
+          hierarchy: [
+            "'31-Deep Hierarchy'!$A$2:$A$21",
+            "'31-Deep Hierarchy'!$B$2:$B$21",
+            "'31-Deep Hierarchy'!$C$2:$C$21"
+          ]
+        }
+      ]
+    },
+    "A54:L77"
+  );
+
+  // --- 31.4 Funnel with custom stage labels — annotating each stage
+  //     with `text` on the data-label entry puts a richer, in-bar
+  //     caption on top of the default stage name.
+  exDeep.getCell("A80").value = "31.4 — Funnel with per-stage custom labels";
+  exDeep.getCell("A80").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "funnel",
+      title: "Conversion funnel — rich per-stage callouts",
+      categories: "'31-Funnel Stages'!$A$2:$A$7",
+      series: [
+        {
+          name: "Visitors",
+          values: "'31-Funnel Stages'!$B$2:$B$7",
+          dataLabels: {
+            showValue: true,
+            showCategory: true,
+            numFmt: "#,##0"
+          }
+        }
+      ]
+    },
+    "A81:L104"
+  );
+
+  // --- 31.5 Histogram with `binCount: 8` — force an explicit number
+  //     of bins instead of letting Excel auto-choose. The `binning`
+  //     shortcut on `AddChartExOptions` is the ergonomic equivalent
+  //     of `layout.binning`.
+  exDeep.getCell("A107").value = "31.5 — Histogram binCount=8 bins";
+  exDeep.getCell("A107").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "histogram",
+      title: "Histogram — 8 auto-width bins",
+      categories: "'31-Histogram Wide'!$A$1:$A$1",
+      series: [
+        {
+          name: "Samples",
+          values: "'31-Histogram Wide'!$A$2:$A$105"
+        }
+      ],
+      binning: { binCount: 8, binType: "binCount" }
+    },
+    "A108:L127"
+  );
+
+  // --- 31.6 Histogram with fixed-width bins (`binSize: 20`) and
+  //     explicit overflow / underflow bounds. Outliers above 180
+  //     collapse into a single ">" bin; below 20 into a "<" bin.
+  exDeep.getCell("A130").value = "31.6 — Histogram binSize=20 + overflow 180 / underflow 20";
+  exDeep.getCell("A130").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "histogram",
+      title: "Histogram — fixed-width bins with overflow / underflow",
+      categories: "'31-Histogram Wide'!$A$1:$A$1",
+      series: [
+        {
+          name: "Samples",
+          values: "'31-Histogram Wide'!$A$2:$A$105"
+        }
+      ],
+      binning: {
+        binSize: 20,
+        binType: "binSize",
+        overflow: 180,
+        underflow: 20
+      }
+    },
+    "A131:L150"
+  );
+
+  // --- 31.7 Pareto — `layout.paretoLine: true` explicitly turns on
+  //     the cumulative overlay line. The builder infers this from
+  //     `type: "pareto"` but passing it explicitly is the escape
+  //     hatch for callers that want to keep the base histogram on
+  //     a pareto-typed chart without the cumulative curve.
+  exDeep.getCell("A153").value = "31.7 — Pareto with explicit paretoLine toggle";
+  exDeep.getCell("A153").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "pareto",
+      title: "Pareto — funnel stages with cumulative line",
+      categories: "'31-Funnel Stages'!$A$2:$A$7",
+      series: [
+        {
+          name: "Visitors",
+          values: "'31-Funnel Stages'!$B$2:$B$7",
+          fill: "4472C4"
+        }
+      ],
+      layout: { paretoLine: true }
+    },
+    "A154:L173"
+  );
+
+  // --- 31.8 BoxWhisker with every statistical flag on — inner
+  //     points, outliers, mean marker and mean line. All flags live
+  //     on `layout` for ChartEx, not on the series itself.
+  exDeep.getCell("A176").value = "31.8 — BoxWhisker all flags on (showInner/Outlier/Mean/MeanLine)";
+  exDeep.getCell("A176").font = { bold: true };
+  exDeep.addChartEx(
+    {
+      type: "boxWhisker",
+      title: "Distribution — full statistical detail",
+      categories: "Distribution!$A$1:$A$1",
+      series: [
+        {
+          name: "Samples",
+          values: "Distribution!$A$2:$A$41"
+        }
+      ],
+      layout: {
+        showInnerPoints: true,
+        showOutlierPoints: true,
+        showMeanMarker: true,
+        showMeanLine: true,
+        quartileMethod: "inclusive"
+      }
+    },
+    "A177:L196"
+  );
+
+  // ---------------------------------------------------------------------------
+  // 32. Style catalogue — advanced trendline / error-bar styling that
+  //     was not exercised in section 12.
+  // ---------------------------------------------------------------------------
+
+  const styleCat = wb.addWorksheet("32-Style Catalogue");
+  styleCat.addRow(["Style catalogue"]);
+  styleCat.getCell("A1").font = { bold: true };
+
+  // --- 32.1 Trendline with a custom rich-text label — label.txPr
+  //     lets callers override the auto-generated "y = 1.2x + 45"
+  //     caption with their own bold / coloured text.
+  styleCat.getCell("A3").value = "32.1 — Trendline with custom rich-text label";
+  styleCat.getCell("A3").font = { bold: true };
+  styleCat.addChart(
+    {
+      type: "scatter",
+      scatterStyle: "marker",
+      title: "Scatter with annotated trendline",
+      series: [
+        {
+          name: "Points",
+          xValues: "Scatter!$A$2:$A$8",
+          values: "Scatter!$B$2:$B$8",
+          marker: { symbol: "circle", size: 6, fill: "4472C4" },
+          trendline: {
+            type: "linear",
+            displayEq: true,
+            displayRSqr: true,
+            line: "ED7D31",
+            lineDash: "dash",
+            lineWidth: 2,
+            label: {
+              numFmt: "0.00",
+              txPr: { size: 1000, bold: true, color: { srgb: "C00000" } }
+            }
+          }
+        }
+      ]
+    },
+    "A4:L23"
+  );
+
+  // --- 32.2 Error bars with advanced `spPr` — structured line
+  //     properties (explicit width + dash + compound style) instead
+  //     of just a flat colour. `spPr` is the escape hatch for
+  //     authors who need more than the `line` / `lineWidth` /
+  //     `lineDash` shortcuts expose (e.g. compound double lines,
+  //     bevelled joins). `ChartLine` does not accept gradients —
+  //     Excel's `<a:ln>` grammar only takes a single solid-fill
+  //     colour on the error-bar stroke.
+  styleCat.getCell("A26").value = "32.2 — Error bars with structured spPr (compound line)";
+  styleCat.getCell("A26").font = { bold: true };
+  styleCat.addChart(
+    {
+      type: "scatter",
+      scatterStyle: "marker",
+      title: "Error bars with a compound double line",
+      series: [
+        {
+          name: "Measurements",
+          xValues: "Scatter!$A$2:$A$8",
+          values: "Scatter!$B$2:$B$8",
+          marker: { symbol: "diamond", size: 7, fill: "4472C4" },
+          errorBars: {
+            type: "percentage",
+            value: 15,
+            direction: "y",
+            barDir: "both",
+            spPr: {
+              line: {
+                width: 28_575, // 3pt in EMU
+                color: { srgb: "C00000" },
+                dash: "dash",
+                compound: "dbl",
+                cap: "rnd"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "A27:L46"
+  );
+
+  // ---------------------------------------------------------------------------
+  // 33. Stress & robustness — volume, long text, Unicode,
+  //     layered label overrides, extreme view3D. Intentionally
+  //     produces the "broadest" charts in the workbook so we can
+  //     spot layout regressions visually.
+  // ---------------------------------------------------------------------------
+
+  const stressData = wb.addWorksheet("33-Stress Data");
+  stressData.addRow(["Category", ...Array.from({ length: 20 }, (_, i) => `Series ${i + 1}`)]);
+  for (let r = 0; r < 100; r++) {
+    const row: Array<string | number> = [`C${r + 1}`];
+    for (let s = 0; s < 20; s++) {
+      // Each series follows a distinct sinusoid so the 20-series
+      // pile visually separates rather than all overlapping.
+      row.push(Math.round(50 + Math.sin(r / 8 + s / 3) * 20 + s));
+    }
+    stressData.addRow(row);
+  }
+
+  const stress = wb.addWorksheet("33-Stress & Edge");
+  stress.addRow(["Stress & robustness"]);
+  stress.getCell("A1").font = { bold: true };
+
+  // --- 33.1 Single series with 100 data points — tests how the
+  //     category axis and renderer handle a high point-count without
+  //     tick skipping.
+  stress.getCell("A3").value = "33.1 — 100 data points on one series";
+  stress.getCell("A3").font = { bold: true };
+  stress.addChart(
+    {
+      type: "line",
+      title: "100 points — dense single series",
+      series: [
+        {
+          name: "Series 1",
+          categories: "'33-Stress Data'!$A$2:$A$101",
+          values: "'33-Stress Data'!$B$2:$B$101",
+          line: "4472C4",
+          marker: { symbol: "none" }
+        }
+      ],
+      categoryAxis: { tickLblSkip: 10, textRotation: -45 },
+      showLegend: false
+    },
+    "A4:L23"
+  );
+
+  // --- 33.2 20 series on one chart — stresses the legend layout
+  //     and the colour palette auto-selection. `varyColors` is
+  //     true by default on area/line; passing explicit per-series
+  //     `line` just to make every series visibly distinct.
+  stress.getCell("A26").value = "33.2 — 20 series at once (palette stress)";
+  stress.getCell("A26").font = { bold: true };
+  stress.addChart(
+    {
+      type: "line",
+      title: "20-series line chart",
+      series: Array.from({ length: 20 }, (_, i) => {
+        const col = String.fromCharCode("B".charCodeAt(0) + i);
+        return {
+          name: `Series ${i + 1}`,
+          categories: "'33-Stress Data'!$A$2:$A$21",
+          values: `'33-Stress Data'!$${col}$2:$${col}$21`,
+          line: HEX_PALETTE[i % HEX_PALETTE.length],
+          marker: { symbol: "none" }
+        };
+      }),
+      legendPosition: "r"
+    },
+    "A27:L46"
+  );
+
+  // --- 33.3 Extremely long titles and axis labels — exercises
+  //     Excel's title auto-wrap and tests that the writer doesn't
+  //     truncate text at arbitrary limits.
+  stress.getCell("A49").value = "33.3 — very long title + axis titles (wrap test)";
+  stress.getCell("A49").font = { bold: true };
+  const longTitle =
+    "A comprehensive quarterly performance summary of the North American and EMEA revenue streams aligned against our strategic targets for fiscal year 2024";
+  stress.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: longTitle,
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4"
+        }
+      ],
+      categoryAxis: {
+        title: "Calendar months of the current reporting period (January through June)"
+      },
+      valueAxis: {
+        title: "Revenue measured in United States dollars (before rebates and chargebacks)",
+        numFmt: "$#,##0"
+      }
+    },
+    "A50:L69"
+  );
+
+  // --- 33.4 Unicode / emoji / mixed-script text in titles and
+  //     categories. Covers CJK, RTL-eligible scripts (Arabic,
+  //     Hebrew) and emoji — text that historically tripped up
+  //     XML serialisers or measurement code.
+  const unicodeData = wb.addWorksheet("33-Unicode");
+  unicodeData.addRows([
+    ["Category", "Count"],
+    ["销售额 📈", 120],
+    ["مبيعات 🌍", 180],
+    ["מכירות ✨", 160],
+    ["売上 🚀", 205],
+    ["Продажи ❄", 232],
+    ["Ventas 🔥", 248]
+  ]);
+  stress.getCell("A72").value =
+    "33.4 — Unicode categories (CJK / Arabic / Hebrew / Cyrillic / emoji)";
+  stress.getCell("A72").font = { bold: true };
+  stress.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "Global categories — 销售额 / مبيعات / 売上 🌐",
+      series: [
+        {
+          name: "Count",
+          categories: "'33-Unicode'!$A$2:$A$7",
+          values: "'33-Unicode'!$B$2:$B$7",
+          fill: "70AD47"
+        }
+      ],
+      showLegend: false
+    },
+    "A73:L92"
+  );
+
+  // --- 33.5 Extreme view3D angles (rotX=75, rotY=340, perspective=100).
+  //     The OOXML range is 0–90 for rotX, 0–360 for rotY, 0–100 for
+  //     perspective — picking values near each extreme tests the
+  //     writer's attribute serialisation.
+  stress.getCell("A95").value = "33.5 — extreme view3D (rotX=75 / rotY=340 / perspective=100)";
+  stress.getCell("A95").font = { bold: true };
+  stress.addChart(
+    {
+      type: "bar3D",
+      barDir: "col",
+      grouping: "clustered",
+      title: "3D bar — near-limit view3D",
+      view3D: { rotX: 75, rotY: 340, rAngAx: false, perspective: 100 },
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4"
+        }
+      ]
+    },
+    "A96:L115"
+  );
+
+  // --- 33.6 Three-level data-label precedence: chart-level, series-
+  //     level, and per-entry. Excel applies the most specific
+  //     override wins — useful for programmatic writers that
+  //     cascade styles from "everyone shows percent" down to
+  //     "except point 3 which shows the value".
+  stress.getCell("A118").value = "33.6 — data-label cascade (chart > series > per-entry)";
+  stress.getCell("A118").font = { bold: true };
+  stress.addChart(
+    {
+      type: "bar",
+      barDir: "col",
+      grouping: "clustered",
+      title: "dLbls cascade",
+      // Chart-level default: show value + outEnd.
+      dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" },
+      series: [
+        {
+          name: "Revenue",
+          categories: "Sales!$A$2:$A$7",
+          values: "Sales!$B$2:$B$7",
+          fill: "4472C4",
+          // Series-level override: also show category name.
+          dataLabels: {
+            showVal: true,
+            showCatName: true,
+            position: "outEnd",
+            numFmt: "$#,##0",
+            separator: " • ",
+            entries: [
+              // Per-entry override: point 3 hides its label entirely.
+              { index: 3, delete: true },
+              // Per-entry override: point 5 uses a custom rich text
+              // and moves inside the bar.
+              {
+                index: 5,
+                text: {
+                  paragraphs: [
+                    {
+                      runs: [
+                        {
+                          text: "🏆 JUN MAX",
+                          properties: { bold: true, color: { srgb: "FFFFFF" }, size: 1100 }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                position: "inEnd"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "A119:L138"
+  );
+
+  // --- 33.7 Many charts on one sheet — 12 small tile charts packed
+  //     in a 3×4 grid to test the per-drawing anchor handling and
+  //     that drawing1.xml doesn't buckle under dozens of entries.
+  const manyCharts = wb.addWorksheet("33-Many Charts");
+  manyCharts.getCell("A1").value = "12 small charts on one sheet";
+  manyCharts.getCell("A1").font = { bold: true };
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 3; c++) {
+      const tileIndex = r * 3 + c + 1;
+      const startCol = 1 + c * 6;
+      const startRow = 3 + r * 18;
+      const range = `${cellAddr(startCol, startRow)}:${cellAddr(startCol + 5, startRow + 16)}`;
+      manyCharts.addChart(
+        {
+          type: "line",
+          title: `Tile ${tileIndex}`,
+          series: [
+            {
+              name: "Revenue",
+              categories: "Sales!$A$2:$A$7",
+              values: "Sales!$B$2:$B$7",
+              line: HEX_PALETTE[tileIndex % HEX_PALETTE.length],
+              marker: { symbol: "circle", size: 4 }
+            }
+          ],
+          showLegend: false
+        },
+        range
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 34. Preview export — each chart → SVG, PNG, and a multi-page PDF.
   // ---------------------------------------------------------------------------
 
   console.log("Rendering previews …");
@@ -3446,7 +5019,7 @@ async function main(): Promise<void> {
   writeFileSync(resolve(OUT_DIR, "charts-example-solo.pdf"), solo);
 
   // ---------------------------------------------------------------------------
-  // 29. Load + mutate — `chart.mutate(fn, { preferRawPatch })` round-trip.
+  // 35. Load + mutate — `chart.mutate(fn, { preferRawPatch })` round-trip.
   //
   // We first write the workbook to `tmp/charts-example.xlsx`, then load
   // it back and make a narrow, template-safe edit using the raw-patch

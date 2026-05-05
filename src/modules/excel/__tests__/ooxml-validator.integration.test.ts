@@ -1,9 +1,9 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { makeTestDataPath } from "@test/utils";
-import { describe, it, expect } from "vitest";
+import { describe, it } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("OOXML validator", () => {
   it("validates a complex generated workbook", async () => {
@@ -83,16 +83,7 @@ describe("OOXML validator", () => {
     });
 
     const buffer = await wb.xlsx.writeBuffer();
-    const report = await validateXlsxBuffer(new Uint8Array(buffer), {
-      maxProblems: 50
-    });
-
-    if (!report.ok) {
-      throw new Error(`OOXML validation failed:\n${JSON.stringify(report, null, 2)}`);
-    }
-
-    expect(report.ok).toBe(true);
-    expect(report.problems).toEqual([]);
+    await expectValidXlsx(buffer);
   });
 
   it("validates a workbook with table name containing spaces (issue #91)", async () => {
@@ -116,15 +107,6 @@ describe("OOXML validator", () => {
     });
 
     const buffer = await wb.xlsx.writeBuffer();
-    const report = await validateXlsxBuffer(new Uint8Array(buffer), {
-      maxProblems: 50
-    });
-
-    if (!report.ok) {
-      throw new Error(`OOXML validation failed:\n${JSON.stringify(report, null, 2)}`);
-    }
-
-    expect(report.ok).toBe(true);
-    expect(report.problems).toEqual([]);
+    await expectValidXlsx(buffer);
   });
 });

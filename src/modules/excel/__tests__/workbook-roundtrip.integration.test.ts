@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 
 import { ZipParser } from "../../archive/unzip/zip-parser";
 import { Workbook } from "../workbook";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -312,6 +313,9 @@ describe("Workbook Round-trip Preservation", () => {
     const workbook = new Workbook();
     await workbook.xlsx.load(inputBuffer);
     outputBuffer = (await workbook.xlsx.writeBuffer()) as Buffer;
+
+    // OOXML conformance gate on every round-trip output.
+    await expectValidXlsx(new Uint8Array(outputBuffer));
 
     // Parse both zip files
     inputZip = new ZipParser(inputBuffer).extractAllSync();

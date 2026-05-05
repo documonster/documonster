@@ -5,6 +5,7 @@ import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
 import { Workbook } from "../../../index";
+import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
@@ -891,6 +892,7 @@ describe("Workbook", () => {
       });
 
       const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "absoluteAnchor image" });
 
       // Read back
       const wb2 = new Workbook();
