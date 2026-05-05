@@ -563,7 +563,6 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
       mode: "production",
       entry: entryFile,
       output: { path: outDir, filename: "out.mjs", library: { type: "module" } },
-      experiments: { outputModule: true },
       target: scenario.platform === "browser" ? "web" : "node",
       externals: [/^node:/],
       resolve: {
