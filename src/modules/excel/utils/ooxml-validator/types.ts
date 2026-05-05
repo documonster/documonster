@@ -128,6 +128,37 @@ export type TableKind =
 export type ChartKind =
   | "chart-missing-chart"
   | "chart-missing-plotArea"
+  // Classic-chart ECMA-376 schema conformance — surfaces every
+  // structural violation that triggers "Repaired Records: Drawing"
+  // or "Removed Part: drawing*.xml" on open. Each kind maps to a
+  // concrete schema constraint; see `check-chart.ts` for the table
+  // and `__tests__/ooxml-validator/chart.test.ts` for negative
+  // samples.
+  | "chart-child-out-of-order"
+  | "chart-missing-required-child"
+  | "chart-wrong-child-count"
+  | "chart-invalid-enum-value"
+  | "chart-value-out-of-range"
+  // Context-aware classic-chart rules — fired by
+  // `checkContextAwareChartRules`. These catch violations that depend
+  // on the enclosing chart-type element, not just the child tag name.
+  | "chart-forbidden-child"
+  | "chart-duplicate-errBars-direction"
+  | "chart-duplicate-series-idx"
+  | "chart-duplicate-series-order"
+  | "chart-pt-idx-out-of-range"
+  // Cross-reference resolution — a chart-type `<c:axId>` or an
+  // axis `<c:crossAx>` must point at another axis in the same
+  // plot area. Unresolved references parse cleanly but produce
+  // charts Excel renders with missing / phantom axes.
+  | "chart-axid-unresolved"
+  // Cross-part references — these cross the chart XML boundary
+  // and resolve against other parts of the xlsx (theme1.xml for
+  // scheme colours, workbook.xml for defined names). Emitted
+  // by the `checkClassicChartSchema` cross-part pass.
+  | "chart-theme-missing-schemeClr-slot"
+  | "chart-f-invalid-syntax"
+  | "chart-f-undefined-name"
   | "chartEx-missing-chart"
   | "chartEx-missing-plotArea"
   | "chartEx-missing-series"

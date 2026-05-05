@@ -2512,6 +2512,16 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
       parts.push(buildRawDataLabelEntryXml(entry, opts));
     }
   }
+  // ECMA-376 `CT_DLbls` (§21.2.2.49) child order (confirmed against
+  // Microsoft OpenXML `DataLabels.ChildElementInfo`):
+  //   dLbl*, delete | (numFmt, spPr, txPr, dLblPos, showLegendKey,
+  //     showVal, showCatName, showSerName, showPercent,
+  //     showBubbleSize, separator, showLeaderLines, leaderLines),
+  //   extLst?.
+  // The earlier raw-builder placed every `show*` flag BEFORE
+  // `dLblPos` / `spPr` / `txPr` and `separator` AFTER
+  // `showLeaderLines` — two schema violations that Excel silently
+  // tolerates but LibreOffice strict mode refuses.
   if (dataLabels.numFmt?.formatCode) {
     const sourceLinked =
       dataLabels.numFmt.sourceLinked === undefined
@@ -2523,14 +2533,25 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
       `<c:numFmt formatCode="${escapeAttr(dataLabels.numFmt.formatCode)}" sourceLinked="${sourceLinked}"/>`
     );
   }
+  if (dataLabels.spPr) {
+    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "c") ?? "");
+  }
+  if (dataLabels.txPr) {
+    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "c") ?? "");
+  }
+  // Doughnut charts must not emit `c:dLblPos` — Excel rejects the
+  // element on open. See `_renderDoughnutChart` in
+  // `chart-space-xform.ts` for the full rationale and bisect.
+  if (dataLabels.position !== undefined && !opts?.suppressDLblPos) {
+    parts.push(`<c:dLblPos val="${escapeAttr(String(dataLabels.position))}"/>`);
+  }
   const flags = [
     ["showLegendKey", dataLabels.showLegendKey],
     ["showVal", dataLabels.showVal],
     ["showCatName", dataLabels.showCatName],
     ["showSerName", dataLabels.showSerName],
     ["showPercent", dataLabels.showPercent],
-    ["showBubbleSize", dataLabels.showBubbleSize],
-    ["showLeaderLines", dataLabels.showLeaderLines]
+    ["showBubbleSize", dataLabels.showBubbleSize]
   ] as const;
   for (const [name, value] of flags) {
     if (value !== undefined) {
@@ -2540,17 +2561,8 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
   if (dataLabels.separator !== undefined) {
     parts.push(`<c:separator>${escapeXml(String(dataLabels.separator))}</c:separator>`);
   }
-  // Doughnut charts must not emit `c:dLblPos` — Excel rejects the
-  // element on open. See `_renderDoughnutChart` in
-  // `chart-space-xform.ts` for the full rationale and bisect.
-  if (dataLabels.position !== undefined && !opts?.suppressDLblPos) {
-    parts.push(`<c:dLblPos val="${escapeAttr(String(dataLabels.position))}"/>`);
-  }
-  if (dataLabels.spPr) {
-    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "c") ?? "");
-  }
-  if (dataLabels.txPr) {
-    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "c") ?? "");
+  if (dataLabels.showLeaderLines !== undefined) {
+    parts.push(`<c:showLeaderLines val="${dataLabels.showLeaderLines ? "1" : "0"}"/>`);
   }
   if (dataLabels.extLst) {
     parts.push(dataLabels.extLst);
@@ -2560,7 +2572,20 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
 }
 
 function buildRawDataLabelEntryXml(entry: any, opts?: { suppressDLblPos?: boolean }): string {
+  // ECMA-376 `CT_DLbl` (§21.2.2.47) is a `choice(delete | …)` — the
+  // two branches are mutually exclusive. Emitting `delete` alongside
+  // any of the display-flag children (layout / tx / numFmt /
+  // dLblPos / show* / separator) violates the schema; Excel's
+  // tolerance varies by build (some strip the label wholesale).
   const parts = ["<c:dLbl>", `<c:idx val="${entry.index ?? 0}"/>`];
+  if (entry.delete) {
+    parts.push(`<c:delete val="1"/>`);
+    if (entry.extLst) {
+      parts.push(entry.extLst);
+    }
+    parts.push("</c:dLbl>");
+    return parts.join("");
+  }
   if (entry.layout) {
     parts.push(buildRawLayoutXml(entry.layout));
   }
@@ -2599,9 +2624,6 @@ function buildRawDataLabelEntryXml(entry: any, opts?: { suppressDLblPos?: boolea
   }
   if (entry.separator !== undefined) {
     parts.push(`<c:separator>${escapeXml(String(entry.separator))}</c:separator>`);
-  }
-  if (entry.delete !== undefined) {
-    parts.push(`<c:delete val="${entry.delete ? "1" : "0"}"/>`);
   }
   if (entry.extLst) {
     parts.push(entry.extLst);

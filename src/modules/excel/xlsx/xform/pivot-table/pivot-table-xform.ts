@@ -48,6 +48,14 @@ interface PivotTableRenderModel {
   cacheId: string | number;
   tableNumber: number;
   applyWidthHeightFormats: "0" | "1";
+  /**
+   * Optional top-left anchor (e.g. `"A3"`) for the pivot's displayed block.
+   * When set, the rendered `<location>` ref is computed from this anchor
+   * instead of the default `A{3 + pageOffset}`. The anchor represents the
+   * pivot's display origin — page filters (if any) occupy rows downward from
+   * the anchor, followed by a blank separator row and then the pivot body.
+   */
+  ref?: string;
   name?: string;
   chartFormat?: number;
   chartFormats?: PivotTableChartFormat[];
@@ -372,13 +380,37 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
     // Location ref: firstDataCol = number of row fields (row label columns),
     // endCol = row fields + data columns.
+    // When the caller supplies `ref`, it anchors the pivot's displayed block
+    // (page filters → blank separator → pivot body). The body — which is what
+    // <location ref="..."/> actually addresses in OOXML — therefore sits
+    // pageOffset rows below the anchor and shares its column.
     const firstDataCol = rows.length;
-    const startRow = 3 + pageOffset;
-    const endRow = startRow + 1; // header + 1 data row placeholder
     const dataColCount = isMultiValueNoCol ? values.length : 1;
-    const endCol = firstDataCol + dataColCount;
+    const totalPivotCols = firstDataCol + dataColCount;
+
+    let startRow: number;
+    let startCol: number;
+    if (model.ref) {
+      // `ref` is pre-normalised by makePivotTable to a canonical cell address,
+      // so decodeAddress cannot fail here. Guard anyway to surface any
+      // bypasses via `as any` with a clear error.
+      const addr = colCache.decodeAddress(model.ref);
+      if (!addr.col || !addr.row) {
+        throw new Error(
+          `Pivot table ref "${model.ref}" must include both column and row (e.g. "A3").`
+        );
+      }
+      startRow = addr.row + pageOffset;
+      startCol = addr.col;
+    } else {
+      startRow = 3 + pageOffset;
+      startCol = 1;
+    }
+    const endRow = startRow + 1; // header + 1 data row placeholder
+    const endCol = startCol + totalPivotCols - 1;
+    const startColLetter = colCache.n2l(startCol);
     const endColLetter = colCache.n2l(endCol);
-    const locationRef = `A${startRow}:${endColLetter}${endRow}`;
+    const locationRef = `${startColLetter}${startRow}:${endColLetter}${endRow}`;
 
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {

@@ -2540,5 +2540,156 @@ describe("Workbook", () => {
         expect(relsXml).toContain("pivotCacheRecords1.xml");
       });
     });
+
+    describe("explicit ref (anchor) for multiple pivots on one sheet", () => {
+      it("honours model.ref when writing the <location> element", async () => {
+        const workbook = new Workbook();
+        const source = workbook.addWorksheet("Data");
+        source.addRows(TEST_DATA);
+
+        const ws = workbook.addWorksheet("Pivots");
+        // Pivot anchored at C7 — rows=["A"] (1 row field) + values=["E"] (1 data col)
+        // => body spans C7:D8 (rows.length=1 so endCol = C+1 = D).
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["A"],
+          values: ["E"],
+          metric: "sum",
+          ref: "C7"
+        });
+
+        const zipData = await writeThenParseZip(workbook);
+        const xml = decodeXml(zipData, "xl/pivotTables/pivotTable1.xml");
+
+        expect(xml).toContain('ref="C7:D8"');
+        // firstDataCol is the offset of data columns *within the pivot*, so it
+        // must stay at 1 (not absolute col 3) regardless of the anchor column.
+        expect(xml).toContain('firstDataCol="1"');
+      });
+
+      it("shifts the body by pageOffset when page filters are present", async () => {
+        const workbook = new Workbook();
+        const source = workbook.addWorksheet("Data");
+        source.addRows(TEST_DATA);
+
+        const ws = workbook.addWorksheet("Pivots");
+        // 1 page filter → pageOffset = 2 (page row + blank). Anchor at A10
+        // puts the page field at row 10 and the pivot body at A12.
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["A"],
+          values: ["E"],
+          pages: ["C"],
+          metric: "sum",
+          ref: "A10"
+        });
+
+        const zipData = await writeThenParseZip(workbook);
+        const xml = decodeXml(zipData, "xl/pivotTables/pivotTable1.xml");
+
+        expect(xml).toMatch(/ref="A12:B13"/);
+        expect(xml).toContain('rowPageCount="1"');
+      });
+
+      it("keeps multiple pivots on one sheet from sharing the same location", async () => {
+        // Regression: previously every new pivot defaulted to column A row
+        // 3 + pageOffset, so stacking pivots on a single sheet caused Excel
+        // to report "there's already a PivotTable there" on refresh.
+        const workbook = new Workbook();
+        const source = workbook.addWorksheet("Data");
+        source.addRows(TEST_DATA);
+
+        const ws = workbook.addWorksheet("Stacked");
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["A"],
+          values: ["D"],
+          metric: "sum",
+          ref: "A3"
+        });
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["B"],
+          values: ["D"],
+          metric: "sum",
+          ref: "A20"
+        });
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["C"],
+          values: ["D"],
+          pages: ["A"],
+          metric: "sum",
+          ref: "A40"
+        });
+
+        const zipData = await writeThenParseZip(workbook);
+
+        const xml1 = decodeXml(zipData, "xl/pivotTables/pivotTable1.xml");
+        const xml2 = decodeXml(zipData, "xl/pivotTables/pivotTable2.xml");
+        const xml3 = decodeXml(zipData, "xl/pivotTables/pivotTable3.xml");
+
+        const refMatch = (xml: string): string => {
+          const m = xml.match(/<location[^/]*ref="([^"]+)"/);
+          if (!m) {
+            throw new Error("no <location> element");
+          }
+          return m[1];
+        };
+
+        expect(refMatch(xml1)).toBe("A3:B4");
+        expect(refMatch(xml2)).toBe("A20:B21");
+        // 1 page filter shifts the body 2 rows below the anchor.
+        expect(refMatch(xml3)).toBe("A42:B43");
+      });
+
+      it("accepts a range and reduces it to the top-left cell", async () => {
+        const workbook = new Workbook();
+        const source = workbook.addWorksheet("Data");
+        source.addRows(TEST_DATA);
+
+        const ws = workbook.addWorksheet("Pivots");
+        ws.addPivotTable({
+          sourceSheet: source,
+          rows: ["A"],
+          values: ["E"],
+          metric: "sum",
+          ref: "E5:Z99"
+        });
+
+        const zipData = await writeThenParseZip(workbook);
+        const xml = decodeXml(zipData, "xl/pivotTables/pivotTable1.xml");
+
+        expect(xml).toContain('ref="E5:F6"');
+      });
+
+      it("rejects malformed ref values with a PivotTableError", async () => {
+        const workbook = new Workbook();
+        const source = workbook.addWorksheet("Data");
+        source.addRows(TEST_DATA);
+        const ws = workbook.addWorksheet("Pivots");
+
+        expect(() =>
+          ws.addPivotTable({
+            sourceSheet: source,
+            rows: ["A"],
+            values: ["E"],
+            metric: "sum",
+            ref: "not-a-cell"
+          })
+        ).toThrow(/Invalid pivot table ref/);
+
+        // Column-only refs are not a cell address either.
+        expect(() =>
+          ws.addPivotTable({
+            sourceSheet: source,
+            rows: ["A"],
+            values: ["E"],
+            metric: "sum",
+            ref: "A"
+          })
+        ).toThrow(/Invalid pivot table ref/);
+      });
+    });
   });
 });

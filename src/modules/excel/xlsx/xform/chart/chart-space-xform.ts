@@ -2180,13 +2180,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     if (dl.showBubbleSize !== undefined) {
       xml.leafNode("c:showBubbleSize", { val: dl.showBubbleSize ? "1" : "0" });
     }
-    if (dl.showLeaderLines !== undefined) {
-      xml.leafNode("c:showLeaderLines", { val: dl.showLeaderLines ? "1" : "0" });
-    }
+    // `c:separator` MUST precede `c:showLeaderLines` / `c:leaderLines`
+    // per ECMA-376 `CT_DLbls` (§21.2.2.49) and Microsoft OpenXML SDK
+    // `DataLabels.ChildElementInfo` ordering:
+    //   … showBubbleSize, separator, showLeaderLines, leaderLines, extLst.
+    // Emitting `showLeaderLines` first produces a schema-invalid
+    // document — Excel repairs it silently on open (dropping either
+    // element), LibreOffice strict mode rejects it.
     if (dl.separator) {
       xml.openNode("c:separator");
       xml.writeText(dl.separator);
       xml.closeNode();
+    }
+    if (dl.showLeaderLines !== undefined) {
+      xml.leafNode("c:showLeaderLines", { val: dl.showLeaderLines ? "1" : "0" });
     }
     // `dataLabelsRange` (Excel 2013+ "Value From Cells") serialises as a
     // `c15:datalabelsRange` element inside `c:dLbls/c:extLst/c:ext`. When

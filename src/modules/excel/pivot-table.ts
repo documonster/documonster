@@ -118,6 +118,28 @@ export interface PivotTableModel {
    * @default '1'
    */
   applyWidthHeightFormats?: "0" | "1";
+  /**
+   * Top-left cell anchor for the pivot table, e.g. `"A3"` or `"E5"`.
+   *
+   * Specifies where the pivot's displayed block begins. When page filters are
+   * present they occupy rows from the anchor downward, followed by a blank
+   * separator row and then the pivot body (header + data). The library sizes
+   * the initial placeholder range automatically — when Excel refreshes the
+   * pivot cache it expands the pivot from this anchor to its full size.
+   *
+   * When multiple pivot tables share a worksheet, each must be given a distinct
+   * anchor with enough vertical or horizontal room between them so the expanded
+   * pivots do not overlap. Excel reports "there's already a PivotTable there"
+   * when refreshing two overlapping pivots, so this option is required for
+   * dashboards that host several pivots on one sheet.
+   *
+   * Accepts a single-cell address (`"A3"`). A range reference (`"A3:C5"`) is
+   * also tolerated — only the top-left cell is used; the range extent is
+   * recomputed from the pivot's field layout.
+   *
+   * @default `"A3"` (row 3 of column A)
+   */
+  ref?: string;
 }
 
 /** Allowed element types within CacheField.sharedItems */
@@ -275,6 +297,14 @@ export interface PivotTable {
   cacheId: string;
   /** Width/height format setting */
   applyWidthHeightFormats: "0" | "1";
+  /**
+   * Top-left cell anchor for the pivot block (e.g. `"A3"`).
+   * When present, overrides the default `A{3+pageOffset}` anchor used by the
+   * writer. The anchor represents the cell where the pivot's displayed area
+   * starts (page filters if any, followed by a blank row, followed by the
+   * pivot body).
+   */
+  ref?: string;
   /** 1-indexed table number for file naming (pivotTable1.xml, pivotTable2.xml, etc.) */
   tableNumber: number;
   /** Workbook relationship ID, assigned during write by addWorkbookRels() */
@@ -541,6 +571,11 @@ function makePivotTable(
       ? existingCacheIds.reduce((a, b) => (a > b ? a : b), -Infinity) + 1
       : BASE_CACHE_ID + tableNumber - 1;
 
+  // Normalise the optional user-supplied anchor. A range (e.g. "A3:C5") is
+  // reduced to its top-left cell; the pivot's own field layout determines the
+  // extent of the placeholder location written to XML.
+  const ref = normalisePivotRef(model.ref);
+
   // form pivot table object
   return {
     name: `PivotTable${tableNumber}`,
@@ -558,9 +593,44 @@ function makePivotTable(
     // '0' = preserve worksheet column widths (useful for custom sizing)
     // '1' = apply pivot table style width/height (default Excel behavior)
     applyWidthHeightFormats: model.applyWidthHeightFormats ?? "1",
+    ref,
     // Table number for file naming (pivotTable1.xml, pivotTable2.xml, etc.)
     tableNumber
   };
+}
+
+/**
+ * Normalise a user-supplied pivot anchor to a canonical top-left cell address
+ * (e.g. `"A3"`). Accepts either a single cell or a range; ranges are collapsed
+ * to their top-left cell. Returns `undefined` when the input is missing.
+ */
+function normalisePivotRef(ref: string | undefined): string | undefined {
+  if (ref === undefined) {
+    return undefined;
+  }
+  if (typeof ref !== "string" || ref.trim() === "") {
+    throw new PivotTableError(
+      `Invalid pivot table ref "${String(ref)}". Provide a cell address like "A3".`
+    );
+  }
+  // Strip an optional sheet prefix ("Sheet1!A3") so users can pass through
+  // range strings composed elsewhere without surprises.
+  const trimmed = ref.trim().replace(/^[^!]+!/, "");
+  const topLeft = trimmed.includes(":") ? trimmed.split(":", 1)[0] : trimmed;
+  let decoded: { col?: number; row?: number };
+  try {
+    decoded = colCache.decodeAddress(topLeft);
+  } catch {
+    throw new PivotTableError(
+      `Invalid pivot table ref "${ref}". Provide a cell address like "A3".`
+    );
+  }
+  if (!decoded.col || !decoded.row) {
+    throw new PivotTableError(
+      `Invalid pivot table ref "${ref}". Both column and row are required (e.g. "A3").`
+    );
+  }
+  return `${colCache.n2l(decoded.col)}${decoded.row}`;
 }
 
 function validate(model: PivotTableModel, source: PivotTableSource): void {

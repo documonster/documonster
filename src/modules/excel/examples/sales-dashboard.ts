@@ -301,12 +301,18 @@ async function main(): Promise<void> {
   pivotSheet.getCell("A1").font = { size: 14, bold: true, color: { argb: "FF2F5496" } };
 
   // Pivot 1: Region × Year revenue
+  //
+  // `ref` anchors the pivot body so the three pivots on this sheet do not
+  // overlap when Excel refreshes the cache. Without distinct anchors every
+  // pivot defaults to A3 and Excel reports "there's already a PivotTable
+  // there" on open.
   const regionYearPivot = pivotSheet.addPivotTable({
     sourceTable: txnTable,
     rows: ["Region"],
     columns: ["Year"],
     values: ["Revenue"],
-    metric: "sum"
+    metric: "sum",
+    ref: "A3"
   });
 
   // Pivot chart on that pivot — bar + data labels
@@ -338,13 +344,15 @@ async function main(): Promise<void> {
     "H3:P23"
   );
 
-  // Pivot 2: Product family × Channel
+  // Pivot 2: Product family × Channel — anchored far enough below Pivot 1
+  // that its expanded size (~20 rows × 6 cols) does not collide.
   const prodChannelPivot = pivotSheet.addPivotTable({
     sourceTable: txnTable,
     rows: ["ProductFamily", "ProductLine"],
     columns: ["Channel"],
     values: ["Revenue"],
-    metric: "sum"
+    metric: "sum",
+    ref: "A20"
   });
 
   pivotSheet.addPivotChart(
@@ -371,14 +379,17 @@ async function main(): Promise<void> {
     "H25:P45"
   );
 
-  // Pivot 3: Segment × Region with page filter on Year
+  // Pivot 3: Segment × Region with page filter on Year. Anchored below Pivot 2;
+  // the `Year` page filter lives at row 45, a blank separator follows, and
+  // the pivot body begins at row 47.
   const segmentRegionPivot = pivotSheet.addPivotTable({
     sourceTable: txnTable,
     rows: ["Segment"],
     columns: ["Region"],
     values: ["Revenue", "Profit"],
     pages: ["Year"],
-    metric: "sum"
+    metric: "sum",
+    ref: "A45"
   });
 
   pivotSheet.addPivotChart(
