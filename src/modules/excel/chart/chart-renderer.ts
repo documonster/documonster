@@ -24,6 +24,7 @@ import {
   withAlpha,
   type PdfColor
 } from "./chart-utils";
+import { loadSystemFont, rasterizeGlyph, type RasterFont } from "./glyph-rasterizer";
 import {
   parseSpPr,
   parseTxPr,
@@ -31,6 +32,7 @@ import {
   getSpPrLine,
   getTxPrFontSize
 } from "./shape-properties";
+import { STROKE_FONT } from "./stroke-font";
 import type {
   AxisDataSource,
   ChartAxis,
@@ -1228,61 +1230,160 @@ class BasicRasterCanvas {
       return;
     }
     // Use the same font-metrics engine as the SVG path so legend/title
-    // anchoring rasterises at the right offsets. Fall back to the old
-    // approximation if the measurement returns zero (defensive; the
-    // metrics engine always returns a positive value for non-empty text).
+    // anchoring rasterises at the right offsets.
     const measured = estimateTextWidth(text, fontSize);
     const textWidth = measured > 0 ? measured : Math.max(1, fontSize * 0.5) * text.length;
-    const charWidth = textWidth / text.length;
     const startX = anchor === "middle" ? x - textWidth / 2 : anchor === "end" ? x - textWidth : x;
-    const top = y - fontSize * 0.75;
-    const stroke = Math.max(1, Math.ceil(fontSize * 0.12));
+
+    // Try system font rasterization first (high quality filled glyphs)
+    const font = loadSystemFont();
+    if (font) {
+      this.drawTextWithFont(font, startX, y, text, fontSize, textWidth, color, rotation);
+      return;
+    }
+
+    // Fallback: stroke font
+    this.drawTextStroke(startX, y, text, fontSize, textWidth, color, rotation);
+  }
+
+  private drawTextWithFont(
+    font: RasterFont,
+    startX: number,
+    y: number,
+    text: string,
+    fontSize: number,
+    textWidth: number,
+    color: string | undefined,
+    rotation?: { angle: number; originX: number; originY: number }
+  ): void {
+    const rgba = parseSvgColor(color);
+    if (!rgba) {
+      return;
+    }
+
+    const scale = fontSize / font.unitsPerEm;
+
+    // Compute total advance from font metrics, then scale to match measured width
+    let totalAdvance = 0;
+    for (let i = 0; i < text.length; i++) {
+      const outline = font.getOutline(text.charCodeAt(i));
+      totalAdvance += outline ? outline.advanceWidth * scale : fontSize * 0.4;
+    }
+    const hScale = totalAdvance > 0 ? textWidth / totalAdvance : 1;
+
+    const theta = rotation && rotation.angle !== 0 ? (rotation.angle * Math.PI) / 180 : 0;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    const ox = rotation ? rotation.originX : 0;
+    const oy = rotation ? rotation.originY : 0;
+
+    let curX = startX;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      const outline = font.getOutline(code);
+      if (!outline) {
+        curX += fontSize * 0.4 * hScale;
+        continue;
+      }
+
+      const glyph = rasterizeGlyph(outline, fontSize, font.unitsPerEm);
+      if (glyph.pixels.length === 0) {
+        curX += outline.advanceWidth * scale * hScale;
+        continue;
+      }
+
+      // Position: baseline is at y; glyph offsetY is relative to baseline
+      const baseX = curX + glyph.offsetX;
+      const baseY = y + glyph.offsetY;
+
+      for (let row = 0; row < glyph.height; row++) {
+        for (let col = 0; col < glyph.width; col++) {
+          const coverage = glyph.pixels[row * glyph.width + col];
+          if (coverage > 0) {
+            let px = baseX + col;
+            let py = baseY + row;
+            if (theta !== 0) {
+              const dx = px - ox;
+              const dy = py - oy;
+              px = ox + dx * cos - dy * sin;
+              py = oy + dx * sin + dy * cos;
+            }
+            // Use coverage as alpha for anti-aliased rendering
+            const aa: [number, number, number, number] = [rgba[0], rgba[1], rgba[2], coverage];
+            this.setPixel(Math.round(px), Math.round(py), aa);
+          }
+        }
+      }
+      curX += outline.advanceWidth * scale * hScale;
+    }
+  }
+
+  private drawTextStroke(
+    startX: number,
+    y: number,
+    text: string,
+    fontSize: number,
+    textWidth: number,
+    color: string | undefined,
+    rotation?: { angle: number; originX: number; originY: number }
+  ): void {
+    const strokeWidth = Math.max(1, fontSize * 0.08);
+    let totalGlyphW = 0;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
+      totalGlyphW += glyph ? glyph.w : 0.4;
+    }
+    const scale = totalGlyphW > 0 ? textWidth / (totalGlyphW * fontSize) : 1;
+
     if (!rotation || rotation.angle === 0) {
+      let cx = startX;
       for (let i = 0; i < text.length; i++) {
-        const xx = startX + i * charWidth;
-        this.fillRect(xx, top, Math.max(1, charWidth * 0.55), stroke, color);
-        this.fillRect(xx, top + fontSize * 0.45, Math.max(1, charWidth * 0.45), stroke, color);
+        const code = text.charCodeAt(i);
+        const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
+        if (glyph) {
+          for (const stroke of glyph.d) {
+            for (let j = 1; j < stroke.length; j++) {
+              const x1 = cx + stroke[j - 1][0] * fontSize * scale;
+              const y1 = y - fontSize * 0.75 + stroke[j - 1][1] * fontSize;
+              const x2 = cx + stroke[j][0] * fontSize * scale;
+              const y2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
+              this.drawLine(x1, y1, x2, y2, color, strokeWidth);
+            }
+          }
+          cx += glyph.w * fontSize * scale;
+        }
       }
       return;
     }
-    // Rasterise each pseudo-glyph rectangle's pixels and apply the SVG-style
-    // rotation around (originX, originY). This preserves the visible
-    // direction of rotated axis-title and tick-label text in the Node PNG
-    // fallback, matching what the SVG already emits via
-    // `transform="rotate(angle x y)"`. The renderer still uses the same
-    // coarse two-bar glyphs as the unrotated path — the goal here is
-    // "correct orientation", not "real typography".
     const theta = (rotation.angle * Math.PI) / 180;
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
     const ox = rotation.originX;
     const oy = rotation.originY;
-    const rotatePixel = (px: number, py: number): [number, number] => {
+    const rotate = (px: number, py: number): [number, number] => {
       const dx = px - ox;
       const dy = py - oy;
       return [ox + dx * cos - dy * sin, oy + dx * sin + dy * cos];
     };
-    const fillRotatedRect = (rx: number, ry: number, rw: number, rh: number): void => {
-      const rgba = parseSvgColor(color);
-      if (!rgba) {
-        return;
-      }
-      // Iterate over the axis-aligned source rectangle's pixel grid and
-      // plot each rotated point. Using Math.ceil on dimensions keeps
-      // single-pixel strokes visible after rotation.
-      const w = Math.max(1, Math.ceil(rw));
-      const h = Math.max(1, Math.ceil(rh));
-      for (let j = 0; j < h; j++) {
-        for (let i = 0; i < w; i++) {
-          const [tx, ty] = rotatePixel(rx + i, ry + j);
-          this.setPixel(Math.round(tx), Math.round(ty), rgba);
-        }
-      }
-    };
+    let cx = startX;
     for (let i = 0; i < text.length; i++) {
-      const xx = startX + i * charWidth;
-      fillRotatedRect(xx, top, Math.max(1, charWidth * 0.55), stroke);
-      fillRotatedRect(xx, top + fontSize * 0.45, Math.max(1, charWidth * 0.45), stroke);
+      const code = text.charCodeAt(i);
+      const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
+      if (glyph) {
+        for (const stroke of glyph.d) {
+          for (let j = 1; j < stroke.length; j++) {
+            const px1 = cx + stroke[j - 1][0] * fontSize * scale;
+            const py1 = y - fontSize * 0.75 + stroke[j - 1][1] * fontSize;
+            const px2 = cx + stroke[j][0] * fontSize * scale;
+            const py2 = y - fontSize * 0.75 + stroke[j][1] * fontSize;
+            const [rx1, ry1] = rotate(px1, py1);
+            const [rx2, ry2] = rotate(px2, py2);
+            this.drawLine(rx1, ry1, rx2, ry2, color, strokeWidth);
+          }
+        }
+        cx += glyph.w * fontSize * scale;
+      }
     }
   }
 

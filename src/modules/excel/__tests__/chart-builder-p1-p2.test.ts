@@ -1496,7 +1496,7 @@ describe("P2: chart SVG/PDF renderer", () => {
   it("renderChartPng has a stable golden raster signature", async () => {
     const png = await renderChartPng(makeRenderedChartModel(), { width: 220, height: 140 });
     expectPngDimensions(png, 220, 140);
-    expect(pngSignature(png)).toBe("f3a8e1e4");
+    expect(pngSignature(png)).toBe("729e6626");
   });
 
   it("Node PNG fallback consumes text rotate transforms from the SVG", async () => {

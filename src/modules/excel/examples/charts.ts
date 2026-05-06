@@ -160,7 +160,8 @@ import {
   type RegionMapDataOptions,
   type TopologyLike,
   type NumberReference,
-  type StringReference
+  type StringReference,
+  installChartSupport
 } from "@excel/chart/index";
 import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
@@ -169,6 +170,8 @@ import { chartToPdf } from "@pdf/excel-bridge";
 import { Workbook } from "../../../index";
 import { drawChartExPdf } from "../chart/chart-ex-renderer";
 import { drawChartPdf } from "../chart/chart-renderer";
+
+installChartSupport();
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 const XLSX_PATH = resolve(OUT_DIR, "charts-example.xlsx");

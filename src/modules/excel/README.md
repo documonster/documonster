@@ -288,6 +288,15 @@ worksheet.columns.forEach(column => {
 
 ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
+> **Setup:** Chart support is opt-in to keep bundle size minimal. Call `installChartSupport()` once at startup before using any chart API (`addChart`, `addLineChart`, chart load/write, etc.):
+>
+> ```typescript
+> import { installChartSupport } from "@cj-tech-master/excelts/chart";
+> installChartSupport(); // once, at startup
+> ```
+>
+> Without this call, `worksheet.addChart()` and chart serialisation during `writeFile()` will throw.
+
 > A runnable end-to-end example is at [`src/modules/excel/examples/charts.ts`](examples/charts.ts) — it creates 70+ charts covering every classic + ChartEx type, all preset families, combo / pivot / chartsheet layouts, and exports SVG / PNG / PDF previews. Run with `pnpm exec tsx src/modules/excel/examples/charts.ts`.
 
 ### Rendering scope
