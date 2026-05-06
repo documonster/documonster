@@ -7318,7 +7318,7 @@ class XLSX {
    * relative** `Target` whenever the user supplied one. This is the single
    * line that makes Office / WPS resolve the referenced workbook relative
    * to the current file's directory (not the `%USERPROFILE%\Documents`
-   * fallback) — the root of the behaviour reported in exceljs#3039.
+   * fallback) — the root of the relative-path external-link behaviour.
    */
   async addExternalLinks(zip: IZipWriter, model: any): Promise<void> {
     const externalLinks = (model.externalLinks ?? []) as ExternalLinkModel[];

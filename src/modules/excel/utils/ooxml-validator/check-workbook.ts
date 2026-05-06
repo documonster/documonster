@@ -11,10 +11,13 @@
  *       · 1–31 characters
  *       · No characters in `\ / ? * [ ] :`
  *       · Not repeated case-insensitively
+ *   - CT_Workbook child element ordering (ECMA-376 Part 1 §18.2.27).
+ *     Excel rejects files whose direct children of `<workbook>` violate
+ *     the XSD sequence order.
  */
 
 import type { ValidationContext } from "./context";
-import { attrByLocalName, findChildLocal, findChildrenLocal } from "./xml-utils";
+import { attrByLocalName, findChildLocal, findChildrenLocal, localName } from "./xml-utils";
 
 const WORKBOOK_PATH = "xl/workbook.xml";
 const WORKBOOK_RELS_PATH = "xl/_rels/workbook.xml.rels";
@@ -23,6 +26,38 @@ const WORKBOOK_RELS_PATH = "xl/_rels/workbook.xml.rels";
 // https://support.microsoft.com/office/rename-a-worksheet-3f1f7148-ee83-404d-8ef0-9ff99fbad1f9
 const INVALID_SHEET_NAME_CHARS = /[\\/?*[\]:]/;
 const SHEET_NAME_MAX_LEN = 31;
+
+/**
+ * CT_Workbook child element sequence per ECMA-376 Part 1 §18.2.27.
+ *
+ * Excel strictly enforces this order: any child appearing AFTER another
+ * that should precede it causes the file to be rejected as corrupt
+ * (no repair offered). The list below covers every element in the
+ * standard sequence. Unknown / extension elements (mc:AlternateContent,
+ * extLst, etc.) are ignored — they can appear anywhere without breaking
+ * conformance.
+ */
+const WORKBOOK_CHILD_ORDER: readonly string[] = [
+  "fileVersion",
+  "fileSharing",
+  "workbookPr",
+  "workbookProtection",
+  "bookViews",
+  "sheets",
+  "functionGroups",
+  "externalReferences",
+  "definedNames",
+  "calcPr",
+  "oleSize",
+  "customWorkbookViews",
+  "pivotCaches",
+  "smartTagPr",
+  "smartTagTypes",
+  "webPublishing",
+  "fileRecoveryPr",
+  "webPublishObjects",
+  "extLst"
+];
 
 export function checkWorkbook(ctx: ValidationContext): void {
   if (!ctx.has(WORKBOOK_PATH) || !ctx.has(WORKBOOK_RELS_PATH)) {
@@ -37,6 +72,10 @@ export function checkWorkbook(ctx: ValidationContext): void {
   }
   const rels = ctx.readRels(WORKBOOK_RELS_PATH);
 
+  // --- Element order check ---
+  checkWorkbookChildOrder(ctx, dom.root);
+
+  // --- Sheet checks ---
   const sheets = findChildLocal(dom.root, "sheets");
   if (!sheets) {
     // workbook with zero sheets is handled elsewhere as a structural issue
@@ -129,6 +168,54 @@ export function checkWorkbook(ctx: ValidationContext): void {
       );
     } else {
       seenNamesLower.add(lower);
+    }
+  }
+}
+
+// =============================================================================
+// Element order validation
+// =============================================================================
+
+import type { XmlElement } from "@xml/types";
+
+/**
+ * Verify that the direct children of `<workbook>` follow the CT_Workbook
+ * XSD sequence. Excel is strict about this and rejects files with
+ * out-of-order elements as unrecoverable corruption.
+ */
+function checkWorkbookChildOrder(ctx: ValidationContext, root: XmlElement): void {
+  const orderIndex = new Map<string, number>();
+  for (let i = 0; i < WORKBOOK_CHILD_ORDER.length; i++) {
+    orderIndex.set(WORKBOOK_CHILD_ORDER[i], i);
+  }
+
+  let maxSeenIdx = -1;
+  let maxSeenName = "";
+
+  for (const child of root.children) {
+    if (child.type !== "element") {
+      continue;
+    }
+    const local = localName(child.name);
+    const idx = orderIndex.get(local);
+    if (idx === undefined) {
+      // Unknown / extension element — skip (mc:AlternateContent etc.)
+      continue;
+    }
+    if (idx < maxSeenIdx) {
+      ctx.reporter.error(
+        "workbook-child-order",
+        `Workbook child element <${local}> appears after <${maxSeenName}>, ` +
+          `violating CT_Workbook sequence order (ECMA-376 §18.2.27). ` +
+          `Excel will reject this file as corrupt.`,
+        WORKBOOK_PATH
+      );
+      // Report only the first violation to avoid noise
+      return;
+    }
+    if (idx > maxSeenIdx) {
+      maxSeenIdx = idx;
+      maxSeenName = local;
     }
   }
 }

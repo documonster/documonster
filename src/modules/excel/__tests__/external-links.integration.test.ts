@@ -17,7 +17,8 @@
  *   4. Reload the buffer into a fresh Workbook and confirm the model is
  *      reconstructed identically.
  *
- * This is the end-to-end regression test for exceljs#3039: if any of the
+ * This is the end-to-end regression test for external-link relative path
+ * resolution: if any of the
  * above pieces regresses, Office/WPS will not resolve relative paths
  * correctly and the file will either open with a "damaged" warning or
  * silently fall back to %USERPROFILE%\Documents.
@@ -49,7 +50,7 @@ describe("external workbook links — end-to-end", () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("Main");
 
-    // The user-facing call that exceljs#3039 needed: declare the external
+    // The user-facing call for external links: declare the external
     // workbook with just its bare filename — Office will resolve this
     // relative to the current workbook's directory.
     wb.addExternalLink({
@@ -248,10 +249,10 @@ describe("external workbook links — end-to-end", () => {
     expect(sheetXml).toContain("[3]Sheet1!A1");
   });
 
-  // This mirrors the exact scenario reported in exceljs#3039. We leave the
+  // External link with a non-ASCII (Chinese) filename. We leave the
   // resulting xlsx in tmp/ so it can be opened manually in Office/WPS for a
   // final visual check (the test itself only asserts the on-disk structure).
-  it("reproduces the issue #3039 scenario with Chinese filename", async () => {
+  it("writes a valid external link with Chinese filename", async () => {
     const wb = new Workbook();
     const ws = wb.addWorksheet("XYZ");
     ws.getCell("A1").value = {
@@ -260,11 +261,11 @@ describe("external workbook links — end-to-end", () => {
     };
 
     const buf = await wb.xlsx.writeBuffer();
-    await expectValidXlsx(buf, { label: "issue-3039-chinese" });
+    await expectValidXlsx(buf, { label: "external-link-chinese" });
 
     const { writeFile, mkdir } = await import("node:fs/promises");
     await mkdir("tmp", { recursive: true });
-    await writeFile("tmp/issue-3039.xlsx", buf);
+    await writeFile("tmp/external-link-chinese.xlsx", buf);
 
     // Reload and verify — the file we just wrote must be a valid xlsx
     // that excelts itself can read back.

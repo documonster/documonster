@@ -157,6 +157,17 @@ class WorkbookXform extends BaseXform {
     this.map.bookViews.render(xmlStream, model.views);
     this.map.sheets.render(xmlStream, model.sheets);
     this.map.definedNames.render(xmlStream, model.definedNames);
+
+    // <externalReferences> must appear BEFORE <calcPr> per ECMA-376
+    // CT_Workbook sequence: sheets → definedNames → externalReferences →
+    // calcPr → pivotCaches. Violating this order causes Excel to reject
+    // the file as corrupt.
+    const externalLinks = model.externalLinks ?? [];
+    if (externalLinks.length > 0) {
+      const externalReferenceModels = externalLinks.map((link: any) => ({ rId: link.rId }));
+      this.map.externalReferences.render(xmlStream, externalReferenceModels);
+    }
+
     this.map.calcPr.render(xmlStream, model.calcProperties);
     // R9-B6: Deduplicate pivot caches by cacheId before rendering.
     // Multiple pivot tables may share the same cache, but workbook.xml should
@@ -171,16 +182,6 @@ class WorkbookXform extends BaseXform {
       return true;
     });
     this.map.pivotCaches.render(xmlStream, uniquePivotCaches);
-
-    // <externalReferences> order matters: one entry per externalLink in
-    // declaration order, each carrying the r:id that resolves (via
-    // workbook.xml.rels) to `xl/externalLinks/externalLink{N}.xml`. The
-    // index inside this list is exactly the `[N]` used in formula strings.
-    const externalLinks = model.externalLinks ?? [];
-    if (externalLinks.length > 0) {
-      const externalReferenceModels = externalLinks.map((link: any) => ({ rId: link.rId }));
-      this.map.externalReferences.render(xmlStream, externalReferenceModels);
-    }
 
     xmlStream.closeNode();
   }

@@ -56,7 +56,8 @@ export type WorkbookKind =
   | "workbook-sheet-missing-name"
   | "workbook-sheet-name-too-long"
   | "workbook-sheet-name-invalid-chars"
-  | "workbook-sheet-name-duplicate";
+  | "workbook-sheet-name-duplicate"
+  | "workbook-child-order";
 
 // -----------------------------------------------------------------------------
 // Worksheet

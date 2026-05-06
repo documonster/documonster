@@ -128,19 +128,20 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
       return sheet && Object.keys(sheet).length > 0;
     });
 
-    if (hasAnyCache) {
-      xmlStream.openNode("sheetDataSet");
-      // Iterate in sheetNames order so sheetId indices are stable.
-      for (let i = 0; i < model.sheetNames.length; i++) {
-        const sheetName = model.sheetNames[i];
-        const cells = cache[sheetName];
-        if (!cells || Object.keys(cells).length === 0) {
-          continue;
-        }
+    // Excel requires <sheetDataSet> to be present even when empty —
+    // omitting it causes "file cannot be opened" errors. Each declared
+    // sheet must have a corresponding <sheetData sheetId="N"/> entry.
+    xmlStream.openNode("sheetDataSet");
+    for (let i = 0; i < model.sheetNames.length; i++) {
+      const sheetName = model.sheetNames[i];
+      const cells = hasAnyCache ? cache[sheetName] : undefined;
+      if (cells && Object.keys(cells).length > 0) {
         renderSheetData(xmlStream, i, cells);
+      } else {
+        xmlStream.leafNode("sheetData", { sheetId: String(i) });
       }
-      xmlStream.closeNode();
     }
+    xmlStream.closeNode();
 
     xmlStream.closeNode(); // </externalBook>
     xmlStream.closeNode(); // </externalLink>

@@ -212,7 +212,7 @@ export interface ExternalLinkModel {
    * path relative to the current workbook: `"测试.xlsx"`, `"data/ref.xlsx"`.
    * Office resolves bare relative paths from the current workbook's
    * directory — *that* is the fix for the "Office goes to the Documents
-   * folder" problem described in exceljs#3039.
+   * folder" problem with external links.
    *
    * Absolute `file:///` or `http(s)://` URIs are accepted and written
    * through unchanged.
