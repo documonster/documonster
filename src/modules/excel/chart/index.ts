@@ -1,6 +1,39 @@
 /**
- * Index file for the chart module.
+ * Public entry for the excelts chart module.
+ *
+ * Two complementary usage styles are supported:
+ *
+ * 1. **Functional, zero-side-effect** — tree-shakeable access to
+ *    chart builders, renderers, presets and parsers:
+ *    ```ts
+ *    import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
+ *    const model = buildChartModel(options);
+ *    const svg   = renderChartSvg(model);
+ *    ```
+ *    Bundlers drop everything the consumer does not reference.
+ *
+ * 2. **Support installation** — enables `worksheet.addChart()`,
+ *    `workbook.xlsx.writeFile()` chart-cache population, and chart
+ *    reconstruction during XLSX load:
+ *    ```ts
+ *    import { installChartSupport } from "@cj-tech-master/excelts/chart";
+ *    installChartSupport();                    // once, at startup
+ *    worksheet.addChart(options, "A1:D20");    // now works
+ *    ```
+ *
+ * Chart support is **never installed implicitly** — consumers pay for
+ * what they ask for. The package's root `sideEffects: false` contract
+ * stays intact, so bundles that only use the functional API include
+ * exactly the code paths reachable from the exports they reference.
+ *
+ * `installChartSupport` lives in a separate module (`./install.ts`) so
+ * its host-registry wiring and the full chart builder/renderer pipeline
+ * don't get pulled in by consumers who only import one or two
+ * functional helpers.
  */
+
+export { installChartSupport, uninstallChartSupport } from "./install";
+
 export { Chart, buildChartModel } from "./chart";
 export { buildComboChartModel } from "./chart-builder";
 export { fillChartCaches, fillChartExCaches, fillNumRef, fillStrRef } from "./cache-populator";

@@ -1,4 +1,5 @@
-import { Chart } from "@excel/chart/chart";
+import { getChartSupport } from "@excel/chart-host-registry";
+import type { Chart } from "@excel/chart/chart";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
 import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/types";
 import type { Worksheet } from "@excel/worksheet";
@@ -192,7 +193,7 @@ class Chartsheet {
     // `worksheet.name` from that position (plus anchor helpers that we've
     // stubbed above). Casting is safe here because the host deliberately
     // implements that exact contract and loudly rejects anything else.
-    return new Chart(
+    return getChartSupport().createChart(
       host as unknown as Worksheet,
       { chartNumber: this._model.chartNumber, chartExNumber: this._model.chartExNumber },
       "A1:K15"

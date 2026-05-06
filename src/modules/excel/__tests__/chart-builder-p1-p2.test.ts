@@ -7,20 +7,6 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import type {
-  AddChartOptions,
-  AddChartSeriesOptions,
-  ChartModel,
-  BarChartGroup,
-  LineChartGroup,
-  PieChartGroup,
-  BubbleChartGroup,
-  LineSeries,
-  BarSeries,
-  ValueAxis,
-  StockChartGroup,
-  OfPieChartGroup
-} from "@excel/chart";
 import {
   CHART_EX_PRESETS,
   CHART_PRESETS,
@@ -41,34 +27,49 @@ import {
   EXCEL_CHART_EX_PRESETS,
   EXCEL_CHART_PRESETS,
   drawChartPdf,
-  seriesFromColumns
-} from "@excel/chart";
-import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
-
-import {
-  Workbook as RootWorkbook,
+  seriesFromColumns,
   applyChartExPreset as rootApplyChartExPreset,
   CHART_EX_PRESETS as ROOT_CHART_EX_PRESETS,
   EXCEL_CHART_EX_PRESETS as ROOT_EXCEL_CHART_EX_PRESETS,
   CHART_PRESETS as ROOT_CHART_PRESETS,
   EXCEL_CHART_PRESETS as ROOT_EXCEL_CHART_PRESETS,
   buildChartExModel as rootBuildChartExModel,
-  chartOptionsFromRows as rootChartOptionsFromRows,
-  chartOptionsFromTable as rootChartOptionsFromTable,
   renderChartExSvg as rootRenderChartExSvg,
   renderChartSvg as rootRenderChartSvg,
   seriesFromColumns as rootSeriesFromColumns,
+  chartOptionsFromRows as rootChartOptionsFromRows,
+  chartOptionsFromTable as rootChartOptionsFromTable
+} from "@excel/chart/index";
+import type {
+  AddChartOptions,
+  AddChartSeriesOptions,
+  ChartModel,
+  BarChartGroup,
+  LineChartGroup,
+  PieChartGroup,
+  BubbleChartGroup,
+  LineSeries,
+  BarSeries,
+  ValueAxis,
+  StockChartGroup,
+  OfPieChartGroup,
+  ChartScene,
+  ChartSceneLegend,
+  ChartSceneSeries,
+  ChartSceneText,
+  AddChartFromRowsOptions,
+  AddChartFromTableOptions,
+  ChartExType,
+  SeriesFromColumnsOptions
+} from "@excel/chart/index";
+import { installChartSupport } from "@excel/chart/install";
+import { Workbook } from "@excel/workbook";
+import { beforeAll, describe, it, expect } from "vitest";
+
+import {
+  Workbook as RootWorkbook,
   validateXmlName as rootValidateXmlName,
-  xmlEncodeAttr as rootXmlEncodeAttr,
-  type AddChartFromRowsOptions,
-  type AddChartFromTableOptions,
-  type ChartExType,
-  type ChartScene,
-  type ChartSceneLegend,
-  type ChartSceneSeries,
-  type ChartSceneText,
-  type SeriesFromColumnsOptions
+  xmlEncodeAttr as rootXmlEncodeAttr
 } from "../../../index";
 import {
   CATEGORIES,
@@ -86,6 +87,10 @@ import {
 } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("P1: chart convenience APIs and presets", () => {
   it("addColumnChart creates a column bar chart", () => {

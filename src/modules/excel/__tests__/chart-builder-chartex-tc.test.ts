@@ -24,13 +24,18 @@ import {
   renderChartEx,
   renderChartExSvg
 } from "@excel/chart";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 
 import { VALUES_A, VALUES_B, baseSeries, stableHash } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("ChartEx modern chart types", () => {
   function makeExWb() {

@@ -12,15 +12,12 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
+// Chart serialisation / deserialisation goes through the chart-host-registry
+// slot so the chart module is only pulled into consumer bundles when they
+// explicitly `import "@cj-tech-master/excelts/chart"`. Type imports are
+// erased at runtime; runtime entry points route through `getChartSupport()`.
+import { getChartSupport } from "@excel/chart-host-registry";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
-import { parseChartEx } from "@excel/chart/chart-ex-parser";
-import {
-  renderChartEx,
-  renderChartExLegendXml,
-  rewriteChartExDataRefsToDefinedNames
-} from "@excel/chart/chart-ex-renderer";
-import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
-import { themeIndexToName } from "@excel/chart/chart-utils";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -120,7 +117,6 @@ import {
   type ParsedExternalLink
 } from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
-import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
 import {
   parsePersonList,
@@ -1842,7 +1838,8 @@ function buildRawChartExLegendXml(legend: any): string {
   // the raw patcher inserts into an inline stream, so strip the
   // leading indent that `renderChartExLegendXml` prefixes each line
   // with. The result is semantically identical; just flattened.
-  return renderChartExLegendXml(legend)
+  return getChartSupport()
+    .renderChartExLegendXml(legend)
     .split("\n")
     .map(line => line.replace(/^\s*/, ""))
     .join("");
@@ -4025,7 +4022,7 @@ function buildRawChartExRunPropertiesXml(props: any): string {
       // `theme=0` which is not even a valid DrawingML scheme slot).
       // Route through the canonical helper shared with the
       // structural emitters so the mapping stays in one place.
-      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(themeIndexToName(color.theme))}"/></a:solidFill>`;
+      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(getChartSupport().themeIndexToName(color.theme))}"/></a:solidFill>`;
     }
   }
   if (attrs.length === 0 && !colorChild) {
@@ -6290,7 +6287,7 @@ class XLSX {
     const data = rawData ?? (await this.collectStreamData(stream));
 
     // Parse into model for high-level API access
-    const xform = new ChartSpaceXform();
+    const xform = getChartSupport().createChartSpaceXform();
     const xmlString = this.bufferToString(data);
     const chart = await xform.parseStream(this.createTextStream(xmlString));
     if (chart) {
@@ -6549,7 +6546,7 @@ class XLSX {
       const rawXml = this.bufferToString(data);
       model.chartExEntries[chartExNumber] = data;
       try {
-        const parsed = parseChartEx(rawXml);
+        const parsed = getChartSupport().parseChartEx(rawXml);
         model.chartExStructuredEntries[chartExNumber] = {
           chartExNumber,
           model: parsed,
@@ -7069,7 +7066,10 @@ class XLSX {
           // original raw bytes back in front of `<c:chart>`. The SAX-
           // backed xform parser drops `comment` events so the
           // structured model has no memory of them.
-          const buffered = renderChartWithLeadingComments(chartEntry, new ChartSpaceXform());
+          const buffered = renderChartWithLeadingComments(
+            chartEntry,
+            getChartSupport().createChartSpaceXform()
+          );
           zip.append(buffered, { name: chartPath(n) });
         }
       }
@@ -7196,7 +7196,9 @@ class XLSX {
           if (requireRawPatch) {
             throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
           }
-          const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
+          const renderedXml = getChartSupport().renderChartEx(
+            stripChartExRawXml(structuredEntry.model)
+          );
           // Splice preserved leading XML comments from original raw
           // bytes back in front of `<cx:chart>`. The chartEx parser
           // calls `parseXml(...)` without `{ comments: true }` so the
@@ -7234,7 +7236,7 @@ class XLSX {
       // been cleared. Force structural rebuild to pick up the
       // mutated model (any stale `rawXml` from earlier mutations
       // would mask the rewrite).
-      const xml = renderChartEx(entry.model, { forceStructural: true });
+      const xml = getChartSupport().renderChartEx(entry.model, { forceStructural: true });
       zip.append(xml, { name: chartExPath(n) });
       this._appendChartExSidecars(zip, model, n, entry);
       const chartExRels = this._buildChartExRels(n, entry.rels, model, entry);
@@ -7251,14 +7253,14 @@ class XLSX {
     entry?: ChartExEntry
   ): void {
     if (entry?.model.style) {
-      zip.append(new TextEncoder().encode(buildChartStyle(entry.model.style)), {
+      zip.append(new TextEncoder().encode(getChartSupport().buildChartStyle(entry.model.style)), {
         name: chartExStylePath(n)
       });
     } else if (model.chartExStyles?.[n]) {
       zip.append(model.chartExStyles[n], { name: chartExStylePath(n) });
     }
     if (entry?.model.colors) {
-      zip.append(new TextEncoder().encode(buildChartColors(entry.model.colors)), {
+      zip.append(new TextEncoder().encode(getChartSupport().buildChartColors(entry.model.colors)), {
         name: chartExColorsPath(n)
       });
     } else if (model.chartExColors?.[n]) {
@@ -7587,9 +7589,13 @@ class XLSX {
         model.definedNamesInstance &&
         typeof model.definedNamesInstance.addHidden === "function"
       ) {
-        rewriteChartExDataRefsToDefinedNames(entry.model, chartExIndex, (name, ref) => {
-          model.definedNamesInstance.addHidden(ref, name);
-        });
+        getChartSupport().rewriteChartExDataRefsToDefinedNames(
+          entry.model,
+          chartExIndex,
+          (name, ref) => {
+            model.definedNamesInstance.addHidden(ref, name);
+          }
+        );
         // Re-materialise the array snapshot so addWorkbook picks up the
         // new hidden `_xlchart.*` names. `definedNames` in the write
         // model is the serialised form (array); the rewrite added
@@ -7598,11 +7604,15 @@ class XLSX {
       }
       if (entry.model.style && !model.chartExStyles?.[n]) {
         model.chartExStyles ??= {};
-        model.chartExStyles[n] = new TextEncoder().encode(buildChartStyle(entry.model.style));
+        model.chartExStyles[n] = new TextEncoder().encode(
+          getChartSupport().buildChartStyle(entry.model.style)
+        );
       }
       if (entry.model.colors && !model.chartExColors?.[n]) {
         model.chartExColors ??= {};
-        model.chartExColors[n] = new TextEncoder().encode(buildChartColors(entry.model.colors));
+        model.chartExColors[n] = new TextEncoder().encode(
+          getChartSupport().buildChartColors(entry.model.colors)
+        );
       }
     }
   }

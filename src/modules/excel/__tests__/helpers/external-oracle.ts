@@ -6,6 +6,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/** Cache resolved executables so we don't probe the filesystem repeatedly. */
+const resolveCache = new Map<string, string | undefined>();
+
 export interface ExternalOracleResult {
   available: boolean;
   skipped?: string;
@@ -151,18 +154,25 @@ async function resolveExecutable(
   candidates: string[],
   versionArgs: string[] | false = ["--version"]
 ): Promise<string | undefined> {
+  const cacheKey = `${envName}:${candidates.join(",")}:${String(versionArgs)}`;
+  if (resolveCache.has(cacheKey)) {
+    return resolveCache.get(cacheKey);
+  }
   const values = [process.env[envName], ...candidates].filter((value): value is string => !!value);
   for (const value of values) {
     if (versionArgs === false) {
+      resolveCache.set(cacheKey, value);
       return value;
     }
     try {
       await execFileAsync(value, versionArgs, { timeout: 10_000 });
+      resolveCache.set(cacheKey, value);
       return value;
     } catch {
       // Try next optional oracle executable.
     }
   }
+  resolveCache.set(cacheKey, undefined);
   return undefined;
 }
 

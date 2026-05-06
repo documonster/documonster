@@ -25,6 +25,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { extractAll } from "@archive/unzip/extract";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
 import { describe, it, expect, beforeAll } from "vitest";
 
@@ -74,6 +75,10 @@ async function performRoundTrip(): Promise<{
 
   return { inputEntries, outputEntries, outputBytes };
 }
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("Chart Round-Trip Preservation", () => {
   // Load sample buffer once before all tests

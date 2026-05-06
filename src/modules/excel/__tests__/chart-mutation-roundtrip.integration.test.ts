@@ -21,6 +21,7 @@
  */
 
 import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -32,6 +33,8 @@ import {
   type SyntheticFixture
 } from "./helpers/synthetic-fixtures";
 import { bytesEqual, entryText, loadRoundTripDiff } from "./helpers/zip-text";
+
+installChartSupport();
 
 let classicFixtures: SyntheticFixture[];
 let chartExFixtures: SyntheticFixture[];

@@ -26,10 +26,9 @@
  * `errors`).
  */
 
-import { escapeXml } from "@excel/chart/chart-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { parseXsdBoolean, parseXsdInt } from "@excel/xlsx/xform/xsd-values";
-import { xmlEncodeAttr } from "@xml/encode";
+import { xmlEncode as escapeXml, xmlEncodeAttr } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 export interface ChartsheetModel {

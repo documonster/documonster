@@ -15,13 +15,13 @@ import { parseCsv } from "@csv/parse";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
 import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
 import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
-import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator";
+// Chart runtime accessed through the host-registry slot; see
+// `chart-host-registry.ts` and `chart/install.ts`. Keeps chart code
+// out of consumer bundles when they don't import
+// `@cj-tech-master/excelts/chart`.
+import { getChartSupport } from "@excel/chart-host-registry";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
-import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
-import { resolvePendingChartImages } from "@excel/chart/chart-images";
-import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
 import type { AddComboChartOptions, ChartModel } from "@excel/chart/types";
 import {
   Chartsheet,
@@ -1827,22 +1827,24 @@ class Workbook {
     };
 
     if (isChartExOptions(options.chart)) {
+      const chartSupport = getChartSupport();
       const chartExNumber = this.nextChartExNumber();
-      const model = buildChartExModel(options.chart);
+      const model = chartSupport.buildChartExModel(options.chart);
       try {
-        fillChartExCaches(model, this as any);
+        chartSupport.fillChartExCaches(model, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart creation.
       }
       this.addChartExStructuredEntry({ chartExNumber, model });
       chartsheet.chartExNumber = chartExNumber;
     } else {
+      const chartSupport = getChartSupport();
       const chartNumber = this.nextChartNumber();
       const chartModel = isComboChartOptions(options.chart)
-        ? buildComboChartModel(options.chart)
-        : buildChartModel(options.chart);
+        ? chartSupport.buildComboChartModel(options.chart)
+        : chartSupport.buildChartModel(options.chart);
       try {
-        fillChartCaches(chartModel, this as any);
+        chartSupport.fillChartCaches(chartModel, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart creation.
       }
@@ -1859,7 +1861,7 @@ class Workbook {
       // `addChartEntry` so the stored entry carries its resolved
       // `entry.rels` from the start.
       try {
-        resolvePendingChartImages(entry, this as any, chartNumber);
+        chartSupport.resolvePendingChartImages(entry, this as any, chartNumber);
       } catch {
         // Image resolution is best-effort; a broken image payload
         // should never take down chart creation — the series keeps
@@ -2010,6 +2012,7 @@ class Workbook {
       return false;
     }
     const model = wrapper.model;
+    const chartSupport = getChartSupport();
     // Build the replacement first so a malformed options object throws
     // *before* we remove the existing chart entry. Without this, a
     // failed `buildChartExModel` / `buildChartModel` would leave the
@@ -2017,11 +2020,11 @@ class Workbook {
     let newChartExModel: ChartExModel | undefined;
     let newChartModel: ChartModel | undefined;
     if (isChartExOptions(chart)) {
-      newChartExModel = buildChartExModel(chart);
+      newChartExModel = chartSupport.buildChartExModel(chart);
     } else if (isComboChartOptions(chart)) {
-      newChartModel = buildComboChartModel(chart);
+      newChartModel = chartSupport.buildComboChartModel(chart);
     } else {
-      newChartModel = buildChartModel(chart);
+      newChartModel = chartSupport.buildChartModel(chart);
     }
     // Remove existing entries only after the new model builds cleanly.
     if (model.chartNumber) {
@@ -2035,7 +2038,7 @@ class Workbook {
     if (newChartExModel) {
       const chartExNumber = this.nextChartExNumber();
       try {
-        fillChartExCaches(newChartExModel, this as any);
+        chartSupport.fillChartExCaches(newChartExModel, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart replacement.
       }
@@ -2044,7 +2047,7 @@ class Workbook {
     } else if (newChartModel) {
       const chartNumber = this.nextChartNumber();
       try {
-        fillChartCaches(newChartModel, this as any);
+        chartSupport.fillChartCaches(newChartModel, this as any);
       } catch {
         // Cache population is best-effort; never let it break chart replacement.
       }
@@ -2054,7 +2057,7 @@ class Workbook {
       // paths. Previously replacement via `replaceChartsheetChart`
       // silently dropped picture-fill payloads on the floor.
       try {
-        resolvePendingChartImages(entry, this as any, chartNumber);
+        chartSupport.resolvePendingChartImages(entry, this as any, chartNumber);
       } catch {
         // Image resolution is best-effort; a broken image payload
         // should never take down chart replacement.
@@ -2501,16 +2504,20 @@ class Workbook {
     if (isChartExOptions(chartOptions)) {
       return;
     }
+    if (!chartOptions.chartStyle && !chartOptions.chartColors) {
+      return;
+    }
+    const chartSupport = getChartSupport();
     if (chartOptions.chartStyle) {
       this.setChartStyle(
         chartNumber,
-        new TextEncoder().encode(buildChartStyle(chartOptions.chartStyle))
+        new TextEncoder().encode(chartSupport.buildChartStyle(chartOptions.chartStyle))
       );
     }
     if (chartOptions.chartColors) {
       this.setChartColors(
         chartNumber,
-        new TextEncoder().encode(buildChartColors(chartOptions.chartColors))
+        new TextEncoder().encode(chartSupport.buildChartColors(chartOptions.chartColors))
       );
     }
   }

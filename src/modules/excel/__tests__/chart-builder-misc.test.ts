@@ -17,12 +17,17 @@ import {
   buildChartExModel,
   renderChartEx
 } from "@excel/chart";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 
 import { VALUES_B, baseSeries, bubbleSeries, ctg, scatterSeries } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("BUG-7+8: parseSpPr handles malformed XML", () => {
   it("parseSpPr handles missing end tag gracefully", () => {

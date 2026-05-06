@@ -14,6 +14,7 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -29,6 +30,8 @@ import {
   type SyntheticFixture
 } from "./helpers/synthetic-fixtures";
 import { entryText } from "./helpers/zip-text";
+
+installChartSupport();
 
 // Top-level fixture cache. Built once per file via `beforeAll` so the
 // per-fixture matrix tests don't pay the xlsx-serialisation cost N

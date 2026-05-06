@@ -23,12 +23,17 @@ import {
   parseChartStyle,
   buildChartScene
 } from "@excel/chart";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 
 import { CATEGORIES, VALUES_B, baseSeries, ctg, pa } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("trendline array", () => {
   it("single trendline option produces one trendline", () => {

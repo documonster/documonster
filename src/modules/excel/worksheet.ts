@@ -1,29 +1,21 @@
 import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
-import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator";
-import { Chart, buildChartModel, type ChartAnchorModel } from "@excel/chart/chart";
-import {
-  chartExOptionsFromRows,
-  chartExOptionsFromTable,
-  chartOptionsFromRows,
-  chartOptionsFromTable,
-  seriesFromColumns,
-  type AddChartExFromRowsOptions,
-  type AddChartExFromTableOptions,
-  type AddChartFromRowsOptions,
-  type AddChartFromTableOptions,
-  type SeriesFromColumnsOptions
+// Chart runtime is accessed via the chart-host-registry slot rather
+// than imported directly. See `chart-host-registry.ts` and
+// `chart/install.ts` for the registration protocol. Types are pulled
+// in via `import type` so bundlers emit zero runtime chart code unless
+// the consumer imports `@cj-tech-master/excelts/chart`.
+import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
+import type { ChartSupport } from "@excel/chart-host-registry";
+import type { Chart, ChartAnchorModel } from "@excel/chart/chart";
+import type {
+  AddChartExFromRowsOptions,
+  AddChartExFromTableOptions,
+  AddChartFromRowsOptions,
+  AddChartFromTableOptions,
+  SeriesFromColumnsOptions
 } from "@excel/chart/chart-api";
-import { buildComboChartModel } from "@excel/chart/chart-builder";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
-import { resolvePendingChartImages } from "@excel/chart/chart-images";
-import {
-  applyChartExPreset,
-  applyChartPreset,
-  type ExcelChartExPreset,
-  type ExcelChartPreset
-} from "@excel/chart/chart-presets";
-import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
+import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/chart-presets";
 import type {
   AddBarChartOptions,
   AddChartOptions,
@@ -1358,7 +1350,8 @@ class Worksheet {
    * Returns the chart number (1-based) that identifies this chart in the workbook.
    */
   addChart(options: AddChartOptions, range: AddChartRange): number {
-    return this._registerChart(buildChartModel(options), range, options);
+    const chart = getChartSupport();
+    return this._registerChart(chart.buildChartModel(options), range, options);
   }
 
   addColumnChart(
@@ -1445,7 +1438,7 @@ class Worksheet {
     options: Omit<AddChartOptions, "type"> & Partial<Pick<AddChartOptions, "type">>,
     range: AddChartRange
   ): number {
-    return this.addChart(applyChartPreset(preset, options), range);
+    return this.addChart(getChartSupport().applyChartPreset(preset, options), range);
   }
 
   addPresetChartEx(
@@ -1453,11 +1446,13 @@ class Worksheet {
     options: Omit<AddChartExOptions, "type"> & Partial<Pick<AddChartExOptions, "type">>,
     range: AddChartRange
   ): number {
-    return this.addChartEx(applyChartExPreset(preset, options), range);
+    return this.addChartEx(getChartSupport().applyChartExPreset(preset, options), range);
   }
 
-  seriesFromColumns(options: SeriesFromColumnsOptions): ReturnType<typeof seriesFromColumns> {
-    return seriesFromColumns(this.name, options);
+  seriesFromColumns(
+    options: SeriesFromColumnsOptions
+  ): ReturnType<ChartSupport["seriesFromColumns"]> {
+    return getChartSupport().seriesFromColumns(this.name, options);
   }
 
   addChartFromTable(
@@ -1465,7 +1460,7 @@ class Worksheet {
     options: AddChartFromTableOptions,
     range: AddChartRange
   ): number {
-    return this.addChart(chartOptionsFromTable(this, table, options), range);
+    return this.addChart(getChartSupport().chartOptionsFromTable(this, table, options), range);
   }
 
   addChartFromRows<T extends Record<string, unknown>>(
@@ -1473,7 +1468,7 @@ class Worksheet {
     options: AddChartFromRowsOptions<T>,
     range: AddChartRange
   ): number {
-    return this.addChart(chartOptionsFromRows(this, rows, options), range);
+    return this.addChart(getChartSupport().chartOptionsFromRows(this, rows, options), range);
   }
 
   addColumnChartFromRows<T extends Record<string, unknown>>(
@@ -1482,7 +1477,11 @@ class Worksheet {
     range: AddChartRange
   ): number {
     return this.addChart(
-      chartOptionsFromRows(this, rows, { ...options, type: "bar", barDir: "col" }),
+      getChartSupport().chartOptionsFromRows(this, rows, {
+        ...options,
+        type: "bar",
+        barDir: "col"
+      } as AddChartFromRowsOptions<T>),
       range
     );
   }
@@ -1501,7 +1500,7 @@ class Worksheet {
     },
     range: AddChartRange
   ): number {
-    return this.addChartEx(chartExOptionsFromTable(this, table, options), range);
+    return this.addChartEx(getChartSupport().chartExOptionsFromTable(this, table, options), range);
   }
 
   /**
@@ -1516,7 +1515,7 @@ class Worksheet {
     },
     range: AddChartRange
   ): number {
-    return this.addChartEx(chartExOptionsFromRows(this, rows, options), range);
+    return this.addChartEx(getChartSupport().chartExOptionsFromRows(this, rows, options), range);
   }
 
   /**
@@ -1525,7 +1524,11 @@ class Worksheet {
    */
   addPivotChart(pivotTable: PivotTable, options: AddChartOptions, range: AddChartRange): number {
     const pivotChartOptions = withPivotChartSource(pivotTable, options);
-    return this._registerChart(buildChartModel(pivotChartOptions), range, pivotChartOptions);
+    return this._registerChart(
+      getChartSupport().buildChartModel(pivotChartOptions),
+      range,
+      pivotChartOptions
+    );
   }
 
   /**
@@ -1538,7 +1541,11 @@ class Worksheet {
     range: AddChartRange
   ): number {
     const pivotChartOptions = withPivotChartSource(pivotTable, options);
-    return this._registerChart(buildComboChartModel(pivotChartOptions), range, pivotChartOptions);
+    return this._registerChart(
+      getChartSupport().buildComboChartModel(pivotChartOptions),
+      range,
+      pivotChartOptions
+    );
   }
 
   /**
@@ -1546,7 +1553,7 @@ class Worksheet {
    * Returns the chart number (1-based) that identifies this chart in the workbook.
    */
   addComboChart(options: AddComboChartOptions, range: AddChartRange): number {
-    return this._registerChart(buildComboChartModel(options), range, options);
+    return this._registerChart(getChartSupport().buildComboChartModel(options), range, options);
   }
 
   /**
@@ -1558,24 +1565,25 @@ class Worksheet {
    * Returns the chartEx number (1-based) that identifies this chart in the workbook.
    */
   addChartEx(options: AddChartExOptions, range: AddChartRange): number {
-    const model = buildChartExModel(options);
+    const model = getChartSupport().buildChartExModel(options);
     return this._registerChartEx(model, range);
   }
 
   /** @internal Register a built chartEx model into the workbook and this worksheet. */
   private _registerChartEx(model: ChartExModel, range: AddChartRange): number {
+    const chart = getChartSupport();
     const chartExNumber = this._workbook.nextChartExNumber();
     try {
       // Pass `this` as context worksheet so sheet-scoped defined names on
       // this sheet take precedence over workbook-scoped names of the same
       // bare name (matches Excel resolution order).
-      fillChartExCaches(model, this._workbook, this);
+      chart.fillChartExCaches(model, this._workbook, this);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
     this._workbook.addChartExStructuredEntry({ chartExNumber, model });
-    const chart = new Chart(this, { chartExNumber }, range);
-    this._charts.push(chart);
+    const chartInstance = chart.createChart(this, { chartExNumber }, range);
+    this._charts.push(chartInstance);
     return chartExNumber;
   }
 
@@ -1585,6 +1593,7 @@ class Worksheet {
     range: AddChartRange,
     options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
   ): number {
+    const chart = getChartSupport();
     const chartNumber = this._workbook.nextChartNumber();
     // Auto-populate caches so headless consumers see non-empty charts.
     // Excel itself will recompute on open; this is a best-effort enrichment.
@@ -1592,7 +1601,7 @@ class Worksheet {
     // this sheet take precedence over workbook-scoped names of the same
     // bare name (matches Excel resolution order).
     try {
-      fillChartCaches(chartModel, this._workbook, this);
+      chart.fillChartCaches(chartModel, this._workbook, this);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
@@ -1602,7 +1611,7 @@ class Worksheet {
     // `addChartEntry` so the entry we store already carries the final
     // `entry.rels` array.
     try {
-      resolvePendingChartImages(entry, this._workbook, chartNumber);
+      chart.resolvePendingChartImages(entry, this._workbook, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload should
       // never take down chart creation — the series keeps its
@@ -1610,8 +1619,8 @@ class Worksheet {
     }
     this._workbook.addChartEntry(entry);
     this._applyChartSidecars(chartNumber, options);
-    const chart = new Chart(this, { chartNumber }, range);
-    this._charts.push(chart);
+    const chartInstance = chart.createChart(this, { chartNumber }, range);
+    this._charts.push(chartInstance);
     return chartNumber;
   }
 
@@ -1619,16 +1628,20 @@ class Worksheet {
     chartNumber: number,
     options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
   ): void {
+    if (!options?.chartStyle && !options?.chartColors) {
+      return;
+    }
+    const chart = getChartSupport();
     if (options?.chartStyle) {
       this._workbook.setChartStyle(
         chartNumber,
-        new TextEncoder().encode(buildChartStyle(options.chartStyle))
+        new TextEncoder().encode(chart.buildChartStyle(options.chartStyle))
       );
     }
     if (options?.chartColors) {
       this._workbook.setChartColors(
         chartNumber,
-        new TextEncoder().encode(buildChartColors(options.chartColors))
+        new TextEncoder().encode(chart.buildChartColors(options.chartColors))
       );
     }
   }
@@ -2331,23 +2344,31 @@ class Worksheet {
     );
     // Preserve loaded drawing data (charts, etc.)
     this._drawing = value.drawing;
-    // Restore chart objects from model (explicit charts array) or from drawing anchors
-    if (value.charts && value.charts.length > 0) {
-      this._charts = value.charts.map(
-        (c: ChartAnchorModel) =>
-          new Chart(this, { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber }, c.range)
+    // Restore chart objects from model (explicit charts array) or from drawing anchors.
+    // If chart support is not installed we still preserve the chart data inside
+    // `workbook.charts` entries (the serialiser reads from there), but we leave
+    // `_charts` empty because the `Chart` wrapper class lives in the optional
+    // chart module. Consumers who want to *manipulate* charts must install
+    // chart support; consumers doing pure load-save pass-through don't need to.
+    const chartHost = tryGetChartSupport();
+    if (chartHost && value.charts && value.charts.length > 0) {
+      this._charts = value.charts.map((c: ChartAnchorModel) =>
+        chartHost.createChart(
+          this,
+          { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber },
+          c.range
+        )
       );
-    } else if ((value.drawing as any)?.anchors) {
+    } else if (chartHost && (value.drawing as any)?.anchors) {
       // Extract chart anchors from drawing (loaded from XLSX)
       this._charts = ((value.drawing as any).anchors as any[])
         .filter((a: any) => a.chartNumber || a.chartExNumber)
-        .map(
-          (a: any) =>
-            new Chart(
-              this,
-              { chartNumber: a.chartNumber ?? 0, chartExNumber: a.chartExNumber ?? 0 },
-              a.range
-            )
+        .map((a: any) =>
+          chartHost.createChart(
+            this,
+            { chartNumber: a.chartNumber ?? 0, chartExNumber: a.chartExNumber ?? 0 },
+            a.range
+          )
         );
     } else {
       this._charts = [];

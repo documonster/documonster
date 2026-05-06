@@ -10,6 +10,7 @@ export default defineConfig({
     testTimeout: 30000,
     include: ["src/**/__tests__/**/*.test.ts"],
     exclude: ["src/**/__tests__/browser/**/*.test.ts"],
-    setupFiles: ["src/test/setup-formula.ts"]
+    setupFiles: ["src/test/setup.ts"],
+    isolate: false
   }
 });

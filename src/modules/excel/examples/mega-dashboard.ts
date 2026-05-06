@@ -34,15 +34,15 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { chartToPdf, excelToPdf } from "@pdf/excel-bridge";
-
 import {
-  Workbook,
   type AddChartSeriesOptions,
   type ChartRichText,
   type ChartStyleModel,
   type ChartColorsModel
-} from "../../../index";
+} from "@excel/chart/index";
+import { chartToPdf, excelToPdf } from "@pdf/excel-bridge";
+
+import { Workbook } from "../../../index";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 mkdirSync(OUT_DIR, { recursive: true });

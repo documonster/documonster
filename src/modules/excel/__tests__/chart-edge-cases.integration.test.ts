@@ -13,8 +13,9 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { entryText, loadRoundTrip, type EntryMap } from "./helpers/zip-text";
@@ -50,6 +51,10 @@ async function buildMultiChartWorkbook(count: number): Promise<Uint8Array> {
 function listChartParts(entries: EntryMap): string[] {
   return [...entries.keys()].filter(p => /^xl\/charts\/chart\d+[.]xml$/.test(p)).sort();
 }
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("Chart edge cases", () => {
   describe("removal cleans up package state", () => {

@@ -8,8 +8,9 @@
  * conformant" shape so we do not accidentally flag valid output.
  */
 
+import { installChartSupport } from "@excel/chart/install";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { baseParts, buildPackage, contentTypesWith } from "./fixtures";
 
@@ -106,6 +107,10 @@ function minimalChartExBody(): string {
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("ooxml-validator / chart — baseline", () => {
   it("accepts a minimal schema-valid chartEx", async () => {

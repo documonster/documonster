@@ -12,12 +12,15 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildChartsheetFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, loadRoundTrip } from "./helpers/zip-text";
+
+installChartSupport();
 
 let chartsheetFixtures: SyntheticFixture[];
 

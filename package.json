@@ -69,6 +69,9 @@
       "formula": [
         "dist/types/modules/formula/index.d.ts"
       ],
+      "chart": [
+        "dist/types/modules/excel/chart/index.d.ts"
+      ],
       "xml": [
         "dist/types/modules/xml/index.d.ts"
       ],
@@ -181,6 +184,20 @@
       "require": {
         "types": "./dist/types/modules/formula/index.d.ts",
         "default": "./dist/cjs/modules/formula/index.js"
+      }
+    },
+    "./chart": {
+      "browser": {
+        "types": "./dist/browser/modules/excel/chart/index.d.ts",
+        "default": "./dist/browser/modules/excel/chart/index.js"
+      },
+      "import": {
+        "types": "./dist/types/modules/excel/chart/index.d.ts",
+        "default": "./dist/esm/modules/excel/chart/index.js"
+      },
+      "require": {
+        "types": "./dist/types/modules/excel/chart/index.d.ts",
+        "default": "./dist/cjs/modules/excel/chart/index.js"
       }
     },
     "./word": {

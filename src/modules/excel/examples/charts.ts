@@ -109,12 +109,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
-import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
-import { chartToPdf } from "@pdf/excel-bridge";
-
 import {
-  Workbook,
   EXCEL_CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
   CHART_PRESETS,
@@ -166,7 +161,12 @@ import {
   type TopologyLike,
   type NumberReference,
   type StringReference
-} from "../../../index";
+} from "@excel/chart/index";
+import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
+import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
+import { chartToPdf } from "@pdf/excel-bridge";
+
+import { Workbook } from "../../../index";
 import { drawChartExPdf } from "../chart/chart-ex-renderer";
 import { drawChartPdf } from "../chart/chart-renderer";
 

@@ -3,7 +3,7 @@
  * fail loudly when no engine is installed, and exercises the "no probe"
  * classification path for defined names.
  *
- * The global test setup (`src/test/setup-formula.ts`) installs both the
+ * The global test setup (`src/test/setup.ts`) installs both the
  * engine and the default syntax probe so the rest of the suite can run
  * without boilerplate. This file uninstalls both via
  * `uninstallFormulaEngine()` (symmetric reset) to exercise the cold-start

@@ -27,10 +27,15 @@ import {
   renderChartSvg,
   seriesFromColumns
 } from "@excel/chart";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 
 const textDecoder = new TextDecoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("Second-round chart bug fixes", () => {
   it("getValueRange: all-negative data does not synthesise a bogus max=1 tick", () => {

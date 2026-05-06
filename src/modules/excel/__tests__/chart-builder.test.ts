@@ -17,10 +17,11 @@ import {
   buildEffectFilter,
   renderChartSvg
 } from "@excel/chart";
+import { type ChartSceneSeries } from "@excel/chart/index";
+import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/workbook";
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 
-import { type ChartSceneSeries } from "../../../index";
 import {
   CATEGORIES,
   VALUES_A,
@@ -34,6 +35,10 @@ import {
 } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
+
+beforeAll(() => {
+  installChartSupport();
+});
 
 describe("buildChartModel — all 16 chart types", () => {
   it("bar chart", () => {

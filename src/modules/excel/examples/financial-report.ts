@@ -36,9 +36,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { type ChartRichText } from "@excel/chart/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
-import { Workbook, type ChartRichText } from "../../../index";
+import { Workbook } from "../../../index";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 mkdirSync(OUT_DIR, { recursive: true });
