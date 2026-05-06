@@ -672,7 +672,14 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
     normalized.find(s => s.categories && s.categories.length > 0)?.categories ??
     seriesValues[0]?.map((_, i) => String(i + 1)) ??
     [];
-  const legend = buildSceneLegend(model.chart.legend, normalized, width, height, hasReservedTitle);
+  const legend = buildSceneLegend(
+    model.chart.legend,
+    normalized,
+    width,
+    height,
+    hasReservedTitle,
+    categories
+  );
   // Data tables sit below the plot area. Pre-compute their vertical
   // footprint so `getPlotRect` can reserve space before series-level
   // geometry is built. Sizing uses the same text-metrics pipeline as
@@ -2336,7 +2343,9 @@ function getPlotRect(
   //   * Optional bottom-axis title.
   //   * Optional legend at `b` (only when the legend does not overlay).
   //   * Data-table footprint.
-  const bottomLabelSpace = bottomAxis && dataTableHeight === 0 ? 22 : 0;
+  // Reserve 40% of chart height for the bottom area (rotated X labels,
+  // data table, legend) so the plot area occupies ~50%.
+  const bottomLabelSpace = bottomAxis && dataTableHeight === 0 ? Math.max(22, height * 0.35) : 0;
   const bottom =
     24 +
     bottomLabelSpace +
@@ -3789,12 +3798,35 @@ function valueAxisTickPositions(min: number, max: number, axis: ChartAxis | unde
       }
     }
   }
-  // Fallback: 6 evenly-spaced ticks (5 intervals) — the pre-`majorUnit`
-  // default. Matches Excel's auto-generated tick density for most
-  // preview-sized data ranges.
+  // Fallback: generate ticks at "nice" round intervals (multiples of
+  // 1, 2, 5 × 10^n) targeting ~10 ticks. This matches Excel's auto-
+  // generated axis labels (e.g. 0, 20000, 40000, ...).
+  const span = Math.abs(max - min);
+  const rawStep = span / 10;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const residual = rawStep / magnitude;
+  let niceStep: number;
+  if (residual <= 1.5) {
+    niceStep = magnitude;
+  } else if (residual <= 3.5) {
+    niceStep = 2 * magnitude;
+  } else if (residual <= 7.5) {
+    niceStep = 5 * magnitude;
+  } else {
+    niceStep = 10 * magnitude;
+  }
   const ticks: number[] = [];
-  for (let i = 0; i <= 5; i++) {
-    ticks.push(min + ((max - min) * i) / 5);
+  const start = Math.ceil(min / niceStep) * niceStep;
+  for (let v = start; v <= max + niceStep * 0.001; v += niceStep) {
+    ticks.push(Math.round(v * 1e10) / 1e10); // avoid floating point noise
+    if (ticks.length > 50) {
+      break;
+    }
+  }
+  // Ensure 0 is included when the range spans zero
+  if (min <= 0 && max >= 0 && !ticks.includes(0)) {
+    ticks.push(0);
+    ticks.sort((a, b) => a - b);
   }
   return ticks;
 }
@@ -4317,6 +4349,25 @@ function buildDataLabels(
   if (!labels?.showVal && !labels?.showCatName && !labels?.showSerName && !labels?.showPercent) {
     return [];
   }
+  // When data points exceed a readable density, sample evenly so the
+  // chart still shows representative labels without turning into
+  // illegible noise. Excel renders all of them (relying on zoom), but
+  // for a static-resolution PDF preview we cap at ~30 visible labels
+  // spaced evenly across the series.
+  const MAX_DATA_LABELS = 30;
+  let labelPoints = points;
+  let labelValues = values;
+  let labelCategories = categories;
+  if (points.length > MAX_DATA_LABELS) {
+    const step = points.length / MAX_DATA_LABELS;
+    const sampled: number[] = [];
+    for (let i = 0; i < MAX_DATA_LABELS; i++) {
+      sampled.push(Math.round(i * step));
+    }
+    labelPoints = sampled.map(i => points[i]);
+    labelValues = sampled.map(i => values[i]);
+    labelCategories = sampled.map(i => categories[i]);
+  }
   // Percentage totals use the sum of absolute magnitudes so slices with
   // mixed-sign values still sum to 100 %. See `makeDataLabelText` for
   // the matching per-slice formula (`|v| / Σ|v|`). Previously the
@@ -4372,7 +4423,7 @@ function buildDataLabels(
             : { x: bar.x + bar.width / 2, y: bar.y + bar.height }
         )
       : undefined;
-  return points.map((point, i) => {
+  return labelPoints.map((point, i) => {
     const entry = labels.entries?.find(e => e.index === i);
     const effectivePosition = entry?.position ?? position;
     const { x, y, anchor } = positionDataLabel(
@@ -4391,7 +4442,13 @@ function buildDataLabels(
     return {
       x,
       y,
-      text: makeDataLabelText(labels, series, categories[i], values[i] ?? 0, effectiveTotal),
+      text: makeDataLabelText(
+        labels,
+        series,
+        labelCategories[i],
+        labelValues[i] ?? 0,
+        effectiveTotal
+      ),
       fontSize: 10,
       color: labelColor,
       anchor,
@@ -4707,18 +4764,20 @@ function buildXLabels(
   }
   const count = Math.max(1, categories.length);
   const groupWidth = plot.width / count;
-  const skip = axis?.axisType === "cat" || axis?.axisType === "ser" ? (axis.tickLblSkip ?? 1) : 1;
-  // Apply `skip` across the **full** category list first, then cap the
-  // visible labels. Doing `slice(0, 12)` **before** the skip filter
-  // (as the previous implementation did) caused categories 13+ to lose
-  // their labels even when `tickLblSkip` would have selected them —
-  // e.g. 20 categories with `tickLblSkip=3` should show 0,3,6,9,12,15,18
-  // but we were only picking from [0..11] and producing 0,3,6,9.
+  let skip = axis?.axisType === "cat" || axis?.axisType === "ser" ? (axis.tickLblSkip ?? 1) : 1;
+  // When the category count is much larger than MAX_VISIBLE_LABELS,
+  // auto-increase skip so labels are sampled evenly across the full
+  // axis width. Show up to 60 labels for dense charts.
   const safeSkip = Math.max(1, skip);
-  const MAX_VISIBLE_LABELS = 12;
+  const MAX_VISIBLE_LABELS = 60;
+  const candidateCount = Math.ceil(categories.length / safeSkip);
+  if (candidateCount > MAX_VISIBLE_LABELS) {
+    skip = Math.ceil(categories.length / MAX_VISIBLE_LABELS);
+  }
+  const effectiveSkip = Math.max(1, skip);
   const visibleEntries: Array<{ label: string; idx: number }> = [];
   for (let i = 0; i < categories.length; i++) {
-    if (i % safeSkip !== 0) {
+    if (i % effectiveSkip !== 0) {
       continue;
     }
     visibleEntries.push({ label: categories[i], idx: i });
@@ -4727,6 +4786,9 @@ function buildXLabels(
     }
   }
   const axisStyle = textStyleFromTxPr(axis?.txPr);
+  // When categories are dense, rotate labels 90° (head-left, foot-right)
+  // to match Excel's vertical tick label rendering.
+  const shouldRotate = categories.length > 6;
   return visibleEntries.map(({ label, idx }) => {
     return {
       x: plot.x + idx * groupWidth + groupWidth / 2,
@@ -4734,7 +4796,8 @@ function buildXLabels(
       text: truncateLabel(label),
       fontSize: 10,
       color: tickLabelColor(axis),
-      anchor: "middle",
+      anchor: shouldRotate ? ("end" as const) : ("middle" as const),
+      rotate: shouldRotate ? -90 : undefined,
       ...axisStyle
     };
   });
@@ -4821,10 +4884,7 @@ function buildYLabels(
     return labels;
   }
   // Use the shared tick-position helper so value-axis labels align with
-  // the gridlines `buildGridlines` draws. See
-  // `valueAxisTickPositions` for the `majorUnit` semantics — when the
-  // author has not set `majorUnit` this falls back to the historical
-  // 6-label behaviour.
+  // the gridlines `buildGridlines` draws.
   const logBase = axisScaleLogBase(axis);
   for (const value of valueAxisTickPositions(min, max, axis)) {
     labels.push({
@@ -4921,6 +4981,12 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
   return normalized;
 }
 
+/**
+ * Aggregate pivot-chart series so repeated categories are merged and their
+ * values summed. Pivot charts reference the full source-table column in
+ * their cache, yielding N raw rows (e.g. 10000 transactions) instead of
+ * the deduplicated pivot groups that Excel draws (e.g. 8 regions).
+ *
 /**
  * Second definition of `axisLogBase` has been merged with
  * {@link axisLogBase} above; this helper is no longer needed.
@@ -5262,7 +5328,8 @@ function buildSceneLegend(
   series: NormalizedSeries[],
   width: number,
   height: number,
-  hasTitle: boolean
+  hasTitle: boolean,
+  categories: string[] = []
 ): ChartSceneLegend {
   const visible = legend !== undefined && series.length > 0;
   const position = legend?.legendPos ?? "r";
@@ -5270,7 +5337,27 @@ function buildSceneLegend(
   const deletedEntries = new Set(
     legend?.legendEntries?.filter(entry => entry.delete).map(entry => entry.index) ?? []
   );
-  const visibleLabels = series.filter((_, index) => !deletedEntries.has(index)).map(s => s.label);
+
+  // When only 1 series but many categories, Excel shows per-category
+  // legend entries (each category gets its own colour swatch). This is
+  // the typical pivot-chart / varyColors pattern. Show ALL categories
+  // (not just unique) to match Excel's behaviour.
+  let items: Array<{ label: string; color: string }>;
+  if (series.length === 1 && categories.length > 1) {
+    items = categories.map((cat, i) => ({
+      label: cat,
+      color: COLORS[i % COLORS.length]
+    }));
+  } else {
+    items = series
+      .filter((_, index) => !deletedEntries.has(index))
+      .map(s => ({
+        label: s.label,
+        color: s.color
+      }));
+  }
+
+  const visibleLabels = items.map(item => item.label);
   const rect = legendRect(position, orientation, width, height, hasTitle, visibleLabels);
   const txStyle = textStyleFromTxPr(legend?.txPr);
   const txColor = legend?.txPr ? colorFromChartTextProperties(legend.txPr) : undefined;
@@ -5287,12 +5374,7 @@ function buildSceneLegend(
     visible,
     position,
     orientation,
-    items: series
-      .filter((_, index) => !deletedEntries.has(index))
-      .map(s => ({
-        label: s.label,
-        color: s.color
-      })),
+    items,
     textStyle
   };
 }
@@ -6909,6 +6991,7 @@ function renderSvgText(text: ChartSceneText): string {
 
 function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): void {
   if (series.type === "bar") {
+    const fill = hexToPdfColor(series.color);
     for (const bar of series.bars) {
       // Skip the front-face rect here when the series has a `projection3D`
       // hint — the dedicated bar3D pass at the end of this function
@@ -6919,7 +7002,23 @@ function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): 
       if (series.projection3D && series.depth && series.depth > 0) {
         continue;
       }
-      page.drawRect({ ...bar, fill: hexToPdfColor(series.color) });
+      // When bars are extremely narrow (dense data — thousands of
+      // categories), draw a small filled dot instead of a hair-thin
+      // rect. This matches Excel's rendering where sub-pixel bars
+      // appear as dots rather than vertical lines.
+      // After translateScene flipY, bar.y is the PDF bottom edge and
+      // bar.y + bar.height is the top edge (value end of the bar).
+      if (bar.width < 2) {
+        const cx = bar.x + bar.width / 2;
+        const cy = bar.y + bar.height;
+        if (page.drawCircle) {
+          page.drawCircle({ cx, cy, r: 1.2, fill });
+        } else {
+          page.drawRect({ x: cx - 1, y: cy - 1, width: 2, height: 2, fill });
+        }
+      } else {
+        page.drawRect({ ...bar, fill });
+      }
     }
   } else if (series.type === "area") {
     if (page.drawPath && series.points.length > 0) {
@@ -7147,6 +7246,8 @@ function drawPdfDataTable(
       fill: hexToPdfColor(swatch.color)
     });
   }
+  // Render data table cells. When extremely dense, the natural overlap
+  // of text glyphs produces the stippled black appearance Excel shows.
   for (const cell of table.cells) {
     trace?.push(`text:dTable:${cell.text}:${fmt(cell.x)},${fmt(cell.y)}`);
     drawPdfText(page, cell);
@@ -7157,47 +7258,87 @@ function drawPdfLegend(page: ChartPdfDrawingSurface, legend: ChartSceneLegend): 
   if (!legend.visible || legend.items.length === 0) {
     return;
   }
-  const legendFontSize = legend.textStyle?.fontSize ?? 10;
+  const itemCount = legend.items.length;
+  // For dense legends (many items), use smaller font and multi-column
+  // grid layout to fit within the available rect.
+  const isDense = itemCount > 10;
+  const legendFontSize = isDense ? 7 : (legend.textStyle?.fontSize ?? 10);
   const fontFamily = legend.textStyle?.fontFamily;
   const bold = legend.textStyle?.bold;
   const italic = legend.textStyle?.italic;
   const textColor = legend.textStyle?.color ? hexToPdfColor(legend.textStyle.color) : undefined;
-  const swatchSize = 10;
-  const swatchToLabelGap = 4;
-  const interItemGap = 16;
-  // Walk items left-to-right (horizontal) / top-to-bottom (vertical),
-  // measuring real label widths so long names do not collide with the
-  // next swatch. This mirrors the SVG emit path (see renderSvgLegend).
-  let cursorX = legend.rect.x;
-  legend.items.forEach((item, i) => {
-    const swatchX = legend.orientation === "horizontal" ? cursorX : legend.rect.x;
-    const y = legend.orientation === "horizontal" ? legend.rect.y : legend.rect.y + i * 18;
-    page.drawRect({
-      x: swatchX,
-      y,
-      width: swatchSize,
-      height: swatchSize,
-      fill: hexToPdfColor(item.color)
-    });
-    page.drawText(item.label, {
-      x: swatchX + swatchSize + swatchToLabelGap,
-      y: y + 1,
-      fontSize: legendFontSize,
-      anchor: "start",
-      fontFamily,
-      bold,
-      italic,
-      color: textColor
-    });
-    if (legend.orientation === "horizontal") {
-      const labelWidth = estimateTextWidth(item.label, legendFontSize, {
+  const swatchSize = isDense ? 7 : 10;
+  const swatchToLabelGap = 3;
+  const interItemGapX = isDense ? 8 : 16;
+  const rowHeight = isDense ? 10 : 18;
+
+  if (isDense) {
+    // Multi-column grid layout: calculate how many columns fit
+    const avgLabelWidth = 50; // rough estimate for truncated labels
+    const colWidth = swatchSize + swatchToLabelGap + avgLabelWidth + interItemGapX;
+    const availableWidth = legend.rect.width > 0 ? legend.rect.width : 600;
+    const cols = Math.max(1, Math.floor(availableWidth / colWidth));
+
+    for (let i = 0; i < itemCount; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = legend.rect.x + col * colWidth;
+      const y = legend.rect.y + row * rowHeight;
+      // Stop if we overflow the legend rect vertically
+      if (y + rowHeight > legend.rect.y + legend.rect.height) {
+        break;
+      }
+      page.drawRect({
+        x,
+        y,
+        width: swatchSize,
+        height: swatchSize,
+        fill: hexToPdfColor(legend.items[i].color)
+      });
+      page.drawText(legend.items[i].label, {
+        x: x + swatchSize + swatchToLabelGap,
+        y: y + 1,
+        fontSize: legendFontSize,
+        anchor: "start",
+        fontFamily,
         bold,
         italic,
-        fontName: fontFamily
+        color: textColor
       });
-      cursorX += swatchSize + swatchToLabelGap + labelWidth + interItemGap;
     }
-  });
+  } else {
+    // Original layout for small legends
+    let cursorX = legend.rect.x;
+    legend.items.forEach((item, i) => {
+      const swatchX = legend.orientation === "horizontal" ? cursorX : legend.rect.x;
+      const y = legend.orientation === "horizontal" ? legend.rect.y : legend.rect.y + i * rowHeight;
+      page.drawRect({
+        x: swatchX,
+        y,
+        width: swatchSize,
+        height: swatchSize,
+        fill: hexToPdfColor(item.color)
+      });
+      page.drawText(item.label, {
+        x: swatchX + swatchSize + swatchToLabelGap,
+        y: y + 1,
+        fontSize: legendFontSize,
+        anchor: "start",
+        fontFamily,
+        bold,
+        italic,
+        color: textColor
+      });
+      if (legend.orientation === "horizontal") {
+        const labelWidth = estimateTextWidth(item.label, legendFontSize, {
+          bold,
+          italic,
+          fontName: fontFamily
+        });
+        cursorX += swatchSize + swatchToLabelGap + labelWidth + interItemGapX;
+      }
+    });
+  }
 }
 
 function translateScene(

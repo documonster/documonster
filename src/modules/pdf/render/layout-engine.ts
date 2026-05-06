@@ -1258,14 +1258,67 @@ function resolveAnchorRect(
     const brRow = (br.nativeRow ?? br.row ?? 0) + 1;
     const brPageColIndex = targetPage.sheetCols.indexOf(brCol);
     const brPageRowIndex = targetPage.sheetRows.indexOf(brRow);
-    const brBaseX =
-      brPageColIndex >= 0
-        ? targetPage.columnOffsets[brPageColIndex]
-        : x + (targetPage.columnWidths[pageColIndex] ?? 100);
-    const brBaseY =
-      brPageRowIndex >= 0
-        ? targetPage.rowYPositions[brPageRowIndex]
-        : yTop - (targetPage.rowHeights[pageRowIndex] ?? 100);
+    let brBaseX: number;
+    let brBaseY: number;
+    if (brPageColIndex >= 0) {
+      brBaseX = targetPage.columnOffsets[brPageColIndex];
+    } else {
+      // br column is beyond this page — sum column widths from tl
+      // through the last page column, then extrapolate remaining cols
+      // at the average page column width so the chart stretches to its
+      // intended width even when the page doesn't extend far enough.
+      const lastCI = targetPage.sheetCols.length - 1;
+      const lastPageCol = targetPage.sheetCols[lastCI] ?? tlCol;
+      // End of the last column on this page:
+      const lastColEnd =
+        lastCI >= 0
+          ? targetPage.columnOffsets[lastCI] + (targetPage.columnWidths[lastCI] ?? 0)
+          : baseX;
+      if (brCol <= lastPageCol) {
+        // brCol should be on this page but indexOf missed — use end of
+        // the closest column as a fallback.
+        brBaseX = lastColEnd;
+      } else {
+        const avgColWidth =
+          targetPage.columnWidths.length > 0
+            ? targetPage.columnWidths.reduce((s, w) => s + w, 0) / targetPage.columnWidths.length
+            : 48;
+        const extraCols = brCol - lastPageCol;
+        brBaseX = lastColEnd + extraCols * avgColWidth;
+      }
+    }
+    if (brPageRowIndex >= 0) {
+      brBaseY = targetPage.rowYPositions[brPageRowIndex];
+    } else {
+      // br row is beyond this page — accumulate row heights from tl
+      // downward to compute the real chart height. In PDF coords,
+      // rows stack downward (decreasing y). `baseY` (= yTop before
+      // offsets) is the PDF y of the top of `tlRow`. Each subsequent
+      // row's top y = previous row's top y - that row's height.
+      const lastRI = targetPage.sheetRows.length - 1;
+      const lastPageRow = targetPage.sheetRows[lastRI] ?? tlRow;
+      if (brRow <= lastPageRow) {
+        // brRow is on this page — sum heights from tl up to br.
+        let accH = 0;
+        for (let ri = pageRowIndex; ri <= lastRI; ri++) {
+          if (targetPage.sheetRows[ri] >= brRow) {
+            break;
+          }
+          accH += targetPage.rowHeights[ri] ?? 0;
+        }
+        brBaseY = baseY - accH;
+      } else {
+        // brRow exceeds the page — sum all rows from tl to end of page,
+        // then extrapolate remaining rows at default height.
+        let accH = 0;
+        for (let ri = pageRowIndex; ri <= lastRI; ri++) {
+          accH += targetPage.rowHeights[ri] ?? 0;
+        }
+        const remainingRows = brRow - lastPageRow - 1;
+        accH += remainingRows * (15 * scaleFactor);
+        brBaseY = baseY - accH;
+      }
+    }
     const brColOff = ((br.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
     const brRowOff = ((br.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
     const brX = brBaseX + brColOff;
@@ -1275,8 +1328,21 @@ function resolveAnchorRect(
   }
 
   // Normalise to bottom-left y (PDF origin is bottom-left).
-  const absWidth = Math.abs(width);
+  // Clamp width to the page's content area; for height, if the chart's
+  // anchor extends well below the page boundary (less than 50% of the
+  // chart fits on this page), skip it entirely — drawing a severely
+  // clipped chart is worse than omitting it. Otherwise keep the full
+  // computed height so the chart renders at the correct aspect ratio
+  // even if it slightly overflows the page bottom.
+  const contentRight = targetPage.width - targetPage.options.margins.right;
+  const contentBottom = targetPage.options.margins.bottom;
+  const absWidth = Math.min(Math.abs(width), Math.max(0, contentRight - x));
   const absHeight = Math.abs(height);
+  const availableHeight = Math.max(0, yTop - contentBottom);
+  if (absHeight > 0 && availableHeight < absHeight * 0.5) {
+    // Less than half the chart fits on this page — skip it.
+    return null;
+  }
   return {
     page: targetPage,
     x,
@@ -1314,8 +1380,9 @@ function assignImagesToPages(
 
 /**
  * Assign pre-collected charts to the pages that contain their top-left
- * anchor. Mirrors {@link assignImagesToPages} but forwards the chart's
- * vector callback or raster payload to the page instead of an image.
+ * anchor. When a chart's anchor doesn't fit on any page (e.g. it spans
+ * most of its height below the page boundary), place it full-page on
+ * the next available page so it's not lost entirely.
  */
 function assignChartsToPages(
   charts: PdfSheetChart[],
@@ -1324,19 +1391,55 @@ function assignChartsToPages(
 ): void {
   for (const chart of charts) {
     const placement = resolveAnchorRect(chart.range, layoutPages, scaleFactor);
-    if (!placement) {
+    if (placement) {
+      placement.page.charts.push({
+        rect: {
+          x: placement.x,
+          y: placement.y,
+          width: placement.width,
+          height: placement.height
+        },
+        drawVector: chart.drawVector,
+        raster: chart.raster
+      });
       continue;
     }
-    placement.page.charts.push({
-      rect: {
-        x: placement.x,
-        y: placement.y,
-        width: placement.width,
-        height: placement.height
-      },
-      drawVector: chart.drawVector,
-      raster: chart.raster
-    });
+    // Chart didn't fit — find the page whose rows are closest to the
+    // chart's tl row and place it full-content-area on that page (or
+    // the next one if it exists). This handles charts whose tl anchor
+    // is near a page break: rather than clipping them to a sliver, we
+    // push them onto the following page at full size.
+    const tl = chart.range.tl;
+    const tlRow = (tl.nativeRow ?? tl.row ?? 0) + 1;
+    let targetPage: LayoutPage | undefined;
+    for (let pi = 0; pi < layoutPages.length; pi++) {
+      const page = layoutPages[pi];
+      const lastPageRow = page.sheetRows[page.sheetRows.length - 1] ?? 0;
+      if (lastPageRow >= tlRow - 1 && pi + 1 < layoutPages.length) {
+        targetPage = layoutPages[pi + 1];
+        break;
+      }
+      if (lastPageRow >= tlRow) {
+        targetPage = page;
+        break;
+      }
+    }
+    if (!targetPage) {
+      targetPage = layoutPages[layoutPages.length - 1];
+    }
+    if (targetPage) {
+      const margins = targetPage.options.margins;
+      const headerH = targetPage.options.showSheetNames ? 20 : 0;
+      const contentX = margins.left;
+      const contentY = margins.bottom;
+      const contentW = targetPage.width - margins.left - margins.right;
+      const contentH = targetPage.height - margins.top - margins.bottom - headerH;
+      targetPage.charts.push({
+        rect: { x: contentX, y: contentY, width: contentW, height: contentH },
+        drawVector: chart.drawVector,
+        raster: chart.raster
+      });
+    }
   }
 }
 

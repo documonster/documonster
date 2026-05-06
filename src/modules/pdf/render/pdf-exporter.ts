@@ -340,12 +340,12 @@ function renderSinglePage(
       for (const chart of page.charts) {
         if (chart.drawVector) {
           const surface = createChartSurface(contentStream, fontManager, alphaValues);
-          chart.drawVector(surface, {
-            x: chart.rect.x,
-            y: chart.rect.y,
-            width: chart.rect.width,
-            height: chart.rect.height
-          });
+          // Constrain aspect ratio: charts look best at roughly 16:9 to
+          // 4:3. If the allocated rect is too extreme (e.g. very tall and
+          // narrow due to page layout), letterbox the chart within the
+          // rect so it keeps a sensible proportion.
+          const drawRect = constrainChartAspectRatio(chart.rect);
+          chart.drawVector(surface, drawRect);
           continue;
         }
         if (chart.raster) {
@@ -826,4 +826,62 @@ function collectFromText(text: string | undefined, out: Set<number>): void {
       out.add(cp);
     }
   }
+}
+
+// =============================================================================
+// Chart Aspect Ratio Constraint
+// =============================================================================
+
+/**
+ * Constrain a chart drawing rectangle to a reasonable aspect ratio.
+ *
+ * Charts render best at roughly 16:9 (landscape) to 4:3. When the
+ * allocated page rect has an extreme ratio (e.g. very wide + short, or
+ * very tall + narrow — common when the chart anchor spans many rows but
+ * few columns or vice versa), letterbox the chart within the rect using
+ * a target ratio of 16:9 so it renders with correct proportions.
+ *
+ * The returned rect is centred within the original rect.
+ */
+function constrainChartAspectRatio(rect: { x: number; y: number; width: number; height: number }): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const { x, y, width, height } = rect;
+  if (width <= 0 || height <= 0) {
+    return rect;
+  }
+  const ratio = width / height;
+  // Target aspect ratio: 16:9 ≈ 1.78. Allow a generous range [1.0, 2.5]
+  // before applying correction. This avoids touching charts that already
+  // have a reasonable shape (e.g. 4:3 = 1.33, 16:9 = 1.78).
+  const minRatio = 1.0;
+  const maxRatio = 2.5;
+  const targetRatio = 16 / 9; // 1.778
+
+  if (ratio >= minRatio && ratio <= maxRatio) {
+    // Already in acceptable range — use as-is.
+    return rect;
+  }
+
+  let newWidth = width;
+  let newHeight = height;
+  if (ratio > maxRatio) {
+    // Too wide — shrink width to fit target ratio within the height.
+    newWidth = height * targetRatio;
+  } else {
+    // Too tall — shrink height to fit target ratio within the width.
+    newHeight = width / targetRatio;
+  }
+  // Centre within the original rect.
+  const dx = (width - newWidth) / 2;
+  const dy = (height - newHeight) / 2;
+  return {
+    x: x + dx,
+    y: y + dy,
+    width: newWidth,
+    height: newHeight
+  };
 }

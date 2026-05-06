@@ -461,12 +461,85 @@ export function drawChartExPdf(
   // the 16pt font × 1.2 line-height applied below in the drawText loop.
   const titleLines = titleText ? titleText.split(/\r?\n/).length : 0;
   const titleHeight = titleText ? Math.max(28, 20 + titleLines * 19.2) : 0;
+
+  // Internal drawing uses SVG coordinates (y=0 at top, increasing downward).
+  // The `rect` parameter is in PDF coordinates (y=0 at page bottom).
+  // We compute the plot in SVG-local space (origin 0,0 at top-left of chart)
+  // then use a flipping surface to emit correct PDF coordinates.
   const plot: SvgRect = {
-    x: rect.x + 12,
-    y: rect.y + titleHeight + 12,
+    x: 12,
+    y: titleHeight + 12,
     width: Math.max(10, rect.width - 24),
     height: Math.max(10, rect.height - titleHeight - 24)
   };
+
+  // Y-flipping surface: converts SVG-local y to PDF-page y.
+  // Formula: pdfY = rect.y + rect.height - localY
+  // For rects: PDF rect(x, pdfBottomY, w, h) where pdfBottomY = rect.y + rect.height - (localY + h)
+  const flipY = (localY: number): number => rect.y + rect.height - localY;
+  const flipped: ChartPdfDrawingSurface = {
+    drawRect(o) {
+      surface.drawRect({
+        ...o,
+        x: rect.x + o.x,
+        y: flipY(o.y + o.height),
+        width: o.width,
+        height: o.height
+      });
+      return flipped;
+    },
+    drawLine(o) {
+      surface.drawLine({
+        ...o,
+        x1: rect.x + o.x1,
+        y1: flipY(o.y1),
+        x2: rect.x + o.x2,
+        y2: flipY(o.y2)
+      });
+      return flipped;
+    },
+    drawText(text, o) {
+      surface.drawText(text, {
+        ...o,
+        x: rect.x + o.x,
+        y: flipY(o.y)
+      });
+      return flipped;
+    },
+    drawCircle: surface.drawCircle
+      ? o => {
+          surface.drawCircle!({
+            ...o,
+            cx: rect.x + o.cx,
+            cy: flipY(o.cy)
+          });
+          return flipped;
+        }
+      : undefined,
+    drawPath: surface.drawPath
+      ? (ops, pathOpts) => {
+          const flippedOps: ChartPdfPathOp[] = ops.map(op => {
+            if (op.op === "close") {
+              return op;
+            }
+            if (op.op === "curve") {
+              return {
+                ...op,
+                x1: rect.x + op.x1,
+                y1: flipY(op.y1),
+                x2: rect.x + op.x2,
+                y2: flipY(op.y2),
+                x3: rect.x + op.x3,
+                y3: flipY(op.y3)
+              };
+            }
+            return { ...op, x: rect.x + op.x, y: flipY(op.y) };
+          });
+          surface.drawPath!(flippedOps, pathOpts);
+          return flipped;
+        }
+      : undefined
+  } as ChartPdfDrawingSurface;
 
   // Page background: a light frame matching the SVG background rect.
   surface.drawRect({
@@ -489,9 +562,9 @@ export function drawChartExPdf(
     const lineHeight = Math.round(fontSize * 1.2);
     const lines = titleText.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
-      surface.drawText(lines[i], {
-        x: rect.x + rect.width / 2,
-        y: rect.y + 20 + i * lineHeight,
+      flipped.drawText(lines[i], {
+        x: rect.width / 2,
+        y: 20 + i * lineHeight,
         fontSize,
         anchor: "middle",
         color: hexToPdfColor("#222222")
@@ -501,25 +574,25 @@ export function drawChartExPdf(
 
   for (const series of seriesList) {
     if (series.layoutId === "treemap") {
-      drawTreemapPdf(surface, model, series, plot);
+      drawTreemapPdf(flipped, model, series, plot);
     } else if (series.layoutId === "sunburst") {
-      drawSunburstPdf(surface, model, series, plot);
+      drawSunburstPdf(flipped, model, series, plot);
     } else if (series.layoutId === "funnel") {
-      drawFunnelPdf(surface, model, series, plot);
+      drawFunnelPdf(flipped, model, series, plot);
     } else if (series.layoutId === "waterfall") {
-      drawWaterfallPdf(surface, model, series, plot);
+      drawWaterfallPdf(flipped, model, series, plot);
     } else if (series.layoutId === "boxWhisker") {
-      drawBoxWhiskerPdf(surface, model, series, plot);
+      drawBoxWhiskerPdf(flipped, model, series, plot);
     } else if (series.layoutId === "regionMap") {
-      drawRegionMapPdf(surface, model, series, plot, options.regionMap);
+      drawRegionMapPdf(flipped, model, series, plot, options.regionMap);
     } else if (series.layoutId === "clusteredColumn") {
       // Both `histogram` and `pareto` live under clusteredColumn after
       // builder normalisation; distinguishing them is a single runtime
       // flag (`layoutPr.paretoLine`).
       if (series.layoutPr?.paretoLine) {
-        drawParetoPdf(surface, model, series, plot, { drawColumns: true });
+        drawParetoPdf(flipped, model, series, plot, { drawColumns: true });
       } else {
-        drawHistogramPdf(surface, model, series, plot);
+        drawHistogramPdf(flipped, model, series, plot);
       }
     } else if (series.layoutId === "paretoLine") {
       // Standalone paretoLine (distinct from `clusteredColumn` with
@@ -530,7 +603,7 @@ export function drawChartExPdf(
       // was missing this case and threw `layoutId 'paretoLine' is not
       // supported`; then when added, unconditionally redrew the columns
       // on top of the companion series' bars.
-      drawParetoPdf(surface, model, series, plot, { drawColumns: false });
+      drawParetoPdf(flipped, model, series, plot, { drawColumns: false });
     } else {
       throw new Error(
         `drawChartExPdf: layoutId '${series.layoutId}' is not supported by the vector path. ` +

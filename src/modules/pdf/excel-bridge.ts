@@ -378,6 +378,14 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   // layout engine allocates pages that cover their anchor rows/cols.
   const images = collectImages(ws, workbook);
   const charts = await collectCharts(ws);
+  const sparklineCharts = collectSparklineCharts(ws);
+
+  // Merge sparkline micro-charts with regular charts
+  const allCharts = charts
+    ? sparklineCharts
+      ? [...charts, ...sparklineCharts]
+      : charts
+    : sparklineCharts || undefined;
 
   const anchoredRanges: PdfAnchorRange[] = [];
   if (images) {
@@ -385,8 +393,8 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
       anchoredRanges.push(img.range);
     }
   }
-  if (charts) {
-    for (const ch of charts) {
+  if (allCharts) {
+    for (const ch of allCharts) {
       anchoredRanges.push(ch.range);
     }
   }
@@ -451,7 +459,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
     rowBreaks,
     colBreaks,
     images,
-    charts
+    charts: allCharts
   };
 }
 
@@ -794,6 +802,13 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
     }
 
     if (chartExModel) {
+      // Hierarchical ChartEx (treemap/sunburst) marks its dims with
+      // `_skipCache` to prevent the XLSX writer from emitting flat
+      // cache levels (which confuses Excel). For PDF rendering we need
+      // the data in-memory, so temporarily lift the flag, fill caches
+      // from the worksheet, then restore it.
+      ensureChartExCachesFilled(chartExModel, ws);
+
       if (getChartSupport().canRenderChartExAsVectorPdf(chartExModel)) {
         // Whitelisted ChartEx layout → vector path.
         const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
@@ -826,6 +841,306 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
   }
 
   return charts.length > 0 ? charts : undefined;
+}
+
+/**
+ * Convert worksheet sparkline groups into micro-chart entries that flow
+ * through the same chart rendering pipeline. Each sparkline becomes a
+ * `PdfSheetChart` anchored to its `cellRef` cell (one cell wide, one
+ * row tall) with a `drawVector` callback that paints the sparkline's
+ * geometry (line polyline or column bars) directly into the PDF page.
+ */
+function collectSparklineCharts(ws: Worksheet): PdfSheetChart[] | undefined {
+  const groups = ws.getSparklineGroups?.();
+  if (!groups || groups.length === 0) {
+    return undefined;
+  }
+
+  const charts: PdfSheetChart[] = [];
+  for (const group of groups) {
+    for (const sparkline of group.sparklines) {
+      const { dataRef, cellRef } = sparkline;
+      if (!cellRef) {
+        continue;
+      }
+      // Parse cellRef (e.g. "N3") to get row/col
+      const cellMatch = cellRef.match(/^([A-Z]+)(\d+)$/i);
+      if (!cellMatch) {
+        continue;
+      }
+      const col = colLetterToNumber(cellMatch[1]);
+      const row = parseInt(cellMatch[2], 10);
+
+      // Resolve data values from the worksheet
+      const values = resolveSparklineData(ws, dataRef);
+      if (values.length === 0) {
+        continue;
+      }
+
+      // Build anchor: the sparkline occupies exactly one cell
+      const range: PdfAnchorRange = {
+        tl: { col: col - 1, row: row - 1, nativeCol: col - 1, nativeRow: row - 1 },
+        br: { col, row, nativeCol: col, nativeRow: row }
+      };
+
+      const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
+        drawSparklinePdf(surface, group, values, rect);
+      };
+      charts.push({ range, drawVector });
+    }
+  }
+  return charts.length > 0 ? charts : undefined;
+}
+
+/** Convert column letter(s) to 1-based number. */
+function colLetterToNumber(letters: string): number {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) {
+    n = n * 26 + (letters.charCodeAt(i) & 0x1f);
+  }
+  return n;
+}
+
+/** Resolve sparkline data reference to numeric values. */
+function resolveSparklineData(ws: Worksheet, dataRef: string): number[] {
+  if (!dataRef) {
+    return [];
+  }
+  // dataRef is like "Sheet1!B3:M3" or "'Regional KPIs'!B3:M3"
+  // Strip sheet prefix — sparklines always reference the same workbook
+  const bangIdx = dataRef.lastIndexOf("!");
+  const rangeStr = bangIdx >= 0 ? dataRef.slice(bangIdx + 1) : dataRef;
+  // Determine the source worksheet
+  let sourceWs: Worksheet = ws;
+  if (bangIdx >= 0) {
+    let sheetName = dataRef.slice(0, bangIdx);
+    // Remove surrounding quotes
+    if (sheetName.startsWith("'") && sheetName.endsWith("'")) {
+      sheetName = sheetName.slice(1, -1).replace(/''/g, "'");
+    }
+    const found = (ws as any).workbook?.getWorksheet?.(sheetName) as Worksheet | undefined;
+    if (found) {
+      sourceWs = found;
+    }
+  }
+  // Parse range (e.g. "$B$3:$M$3" or "A1:K1")
+  const clean = rangeStr.replace(/\$/g, "");
+  const parts = clean.split(":");
+  if (parts.length !== 2) {
+    return [];
+  }
+  const startMatch = parts[0].match(/^([A-Z]+)(\d+)$/i);
+  const endMatch = parts[1].match(/^([A-Z]+)(\d+)$/i);
+  if (!startMatch || !endMatch) {
+    return [];
+  }
+  const startCol = colLetterToNumber(startMatch[1]);
+  const startRow = parseInt(startMatch[2], 10);
+  const endCol = colLetterToNumber(endMatch[1]);
+  const endRow = parseInt(endMatch[2], 10);
+
+  const values: number[] = [];
+  if (startRow === endRow) {
+    // Horizontal range
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = sourceWs.getCell(startRow, c);
+      const v = typeof cell.value === "number" ? cell.value : (cell.result ?? NaN);
+      values.push(typeof v === "number" ? v : NaN);
+    }
+  } else {
+    // Vertical range
+    for (let r = startRow; r <= endRow; r++) {
+      const cell = sourceWs.getCell(r, startCol);
+      const v = typeof cell.value === "number" ? cell.value : (cell.result ?? NaN);
+      values.push(typeof v === "number" ? v : NaN);
+    }
+  }
+  return values;
+}
+
+/**
+ * Draw a single sparkline into a PDF rect. Mirrors the logic of
+ * `renderSparklineSvg` but emits PDF drawing primitives via the
+ * chart surface.
+ */
+function drawSparklinePdf(
+  surface: {
+    drawRect(o: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      fill?: { r: number; g: number; b: number };
+    }): unknown;
+    drawLine(o: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color?: { r: number; g: number; b: number };
+      lineWidth?: number;
+    }): unknown;
+    drawCircle?(o: {
+      cx: number;
+      cy: number;
+      r: number;
+      fill?: { r: number; g: number; b: number };
+    }): unknown;
+  },
+  group: {
+    type?: string;
+    negative?: boolean;
+    colorSeries?: any;
+    colorNegative?: any;
+    lineWeight?: number;
+    displayXAxis?: boolean;
+    rightToLeft?: boolean;
+    markers?: boolean;
+    high?: boolean;
+    low?: boolean;
+    first?: boolean;
+    last?: boolean;
+    colorHigh?: any;
+    colorLow?: any;
+    colorFirst?: any;
+    colorLast?: any;
+    colorMarkers?: any;
+    colorAxis?: any;
+    minAxisType?: string;
+    maxAxisType?: string;
+    manualMin?: number;
+    manualMax?: number;
+  },
+  values: number[],
+  rect: { x: number; y: number; width: number; height: number }
+): void {
+  const { x, y, width, height } = rect;
+  if (width <= 0 || height <= 0 || values.length === 0) {
+    return;
+  }
+
+  const padding = 2;
+  const innerX = x + padding;
+  const innerY = y + padding;
+  const innerW = width - padding * 2;
+  const innerH = height - padding * 2;
+  if (innerW <= 0 || innerH <= 0) {
+    return;
+  }
+
+  // Compute axis range
+  const finiteValues = values.filter(v => Number.isFinite(v));
+  if (finiteValues.length === 0) {
+    return;
+  }
+  let min = Math.min(...finiteValues);
+  let max = Math.max(...finiteValues);
+  if (group.minAxisType === "custom" && group.manualMin !== undefined) {
+    min = group.manualMin;
+  }
+  if (group.maxAxisType === "custom" && group.manualMax !== undefined) {
+    max = group.manualMax;
+  }
+  if (min === max) {
+    min -= 1;
+    max += 1;
+  }
+  const span = max - min;
+
+  const rtl = group.rightToLeft === true;
+  const n = values.length;
+  const xAt = (i: number): number => {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const shifted = rtl ? 1 - t : t;
+    return innerX + shifted * innerW;
+  };
+  // PDF y-up: higher values → higher y
+  const yAt = (v: number): number => {
+    if (!Number.isFinite(v)) {
+      return innerY;
+    }
+    const t = (v - min) / span;
+    return innerY + t * innerH;
+  };
+
+  const lineColor = resolveSpkColor(group.colorSeries) ?? { r: 0.22, g: 0.38, b: 0.57 };
+  const negColor = resolveSpkColor(group.colorNegative) ?? { r: 0.82, g: 0, b: 0 };
+
+  if (group.type === "column" || group.type === "stacked") {
+    const barW = Math.max(1, (innerW / Math.max(n, 1)) * 0.8);
+    for (let i = 0; i < n; i++) {
+      const v = values[i];
+      if (!Number.isFinite(v) || v === 0) {
+        continue;
+      }
+      const cx = xAt(i);
+      const bx = cx - barW / 2;
+      const color = v < 0 && group.negative === true ? negColor : lineColor;
+
+      let barY: number;
+      let barH: number;
+      if (group.type === "stacked") {
+        const half = innerH / 2;
+        if (v >= 0) {
+          barY = innerY + half;
+          barH = half;
+        } else {
+          barY = innerY;
+          barH = half;
+        }
+      } else {
+        const base = min <= 0 && max >= 0 ? yAt(0) : innerY;
+        const top = yAt(v);
+        barY = Math.min(base, top);
+        barH = Math.abs(top - base);
+      }
+      surface.drawRect({ x: bx, y: barY, width: barW, height: Math.max(barH, 0.5), fill: color });
+    }
+  } else {
+    // Line sparkline
+    const points: Array<{ px: number; py: number }> = [];
+    for (let i = 0; i < n; i++) {
+      if (Number.isFinite(values[i])) {
+        points.push({ px: xAt(i), py: yAt(values[i]) });
+      }
+    }
+    if (points.length >= 2) {
+      for (let i = 1; i < points.length; i++) {
+        surface.drawLine({
+          x1: points[i - 1].px,
+          y1: points[i - 1].py,
+          x2: points[i].px,
+          y2: points[i].py,
+          color: lineColor,
+          lineWidth: group.lineWeight ? group.lineWeight * 0.75 : 0.75
+        });
+      }
+    }
+    // Markers
+    if (group.markers && surface.drawCircle) {
+      const mkColor = resolveSpkColor(group.colorMarkers) ?? lineColor;
+      for (const p of points) {
+        surface.drawCircle({ cx: p.px, cy: p.py, r: 1.2, fill: mkColor });
+      }
+    }
+  }
+}
+
+/** Resolve a SparklineColor to a PdfColor-like {r,g,b}. */
+function resolveSpkColor(c: any): { r: number; g: number; b: number } | undefined {
+  if (!c) {
+    return undefined;
+  }
+  if (c.rgb) {
+    const hex = c.rgb.replace(/^#/, "").replace(/^FF/i, "");
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+      return { r, g, b };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -867,6 +1182,61 @@ function chartAnchorRange(chart: Chart): PdfAnchorRange | undefined {
     ext: r.ext ? { width: r.ext.cx, height: r.ext.cy } : undefined,
     extUnit: r.ext ? "emu" : undefined
   };
+}
+
+/**
+ * Ensure a ChartEx model's data caches are populated for rendering.
+ *
+ * Hierarchical charts (treemap/sunburst) set `_skipCache` on their
+ * string/numeric dimensions so the XLSX writer doesn't emit flat cache
+ * levels (Excel rejects them). For PDF/image rendering the data must be
+ * in-memory. This helper temporarily lifts the flag, calls
+ * `fillChartExCaches`, then restores it so subsequent XLSX writes are
+ * unaffected.
+ */
+function ensureChartExCachesFilled(model: ChartExModel, ws: Worksheet): void {
+  const data = model.chartSpace?.chartData?.data;
+  if (!data) {
+    return;
+  }
+  // Check if any dimension is missing cache data
+  const needsFill = data.some(entry => {
+    const strNeedsData = entry.strDim && (!entry.strDim.levels || entry.strDim.levels.length === 0);
+    const numNeedsData = entry.numDim && (!entry.numDim.levels || entry.numDim.levels.length === 0);
+    return strNeedsData || numNeedsData;
+  });
+  if (!needsFill) {
+    return;
+  }
+  // Temporarily lift _skipCache flags
+  const skipped: Array<Record<string, unknown>> = [];
+  for (const entry of data) {
+    const str = entry.strDim as Record<string, unknown> | undefined;
+    if (str?.["_skipCache"]) {
+      skipped.push(str);
+      delete str["_skipCache"];
+    }
+    const num = entry.numDim as Record<string, unknown> | undefined;
+    if (num?.["_skipCache"]) {
+      skipped.push(num);
+      delete num["_skipCache"];
+    }
+  }
+  try {
+    getChartSupport().fillChartExCaches(
+      model,
+      ws.workbook as unknown as Parameters<
+        ReturnType<typeof getChartSupport>["fillChartExCaches"]
+      >[1],
+      ws as unknown as Parameters<ReturnType<typeof getChartSupport>["fillChartExCaches"]>[2]
+    );
+  } catch {
+    // Best-effort — rendering will proceed with whatever data is available.
+  }
+  // Restore _skipCache
+  for (const dim of skipped) {
+    dim["_skipCache"] = true;
+  }
 }
 
 /**

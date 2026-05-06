@@ -35,8 +35,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { type ChartRichText } from "@excel/chart/index";
+import { type ChartRichText, installChartSupport } from "@excel/chart/index";
 import { excelToPdf } from "@pdf/excel-bridge";
+
+installChartSupport();
 
 import { Workbook } from "../../../index";
 
@@ -342,7 +344,7 @@ async function main(): Promise<void> {
         showExpandCollapseFieldButtons: true
       }
     },
-    "H3:P23"
+    "A4:P33"
   );
 
   // Pivot 2: Product family × Channel — anchored far enough below Pivot 1
@@ -377,7 +379,7 @@ async function main(): Promise<void> {
       ],
       pivotChartOptions: { refreshOnOpen: true, showExpandCollapseFieldButtons: true }
     },
-    "H25:P45"
+    "A35:P64"
   );
 
   // Pivot 3: Segment × Region with page filter on Year. Anchored below Pivot 2;
@@ -421,7 +423,7 @@ async function main(): Promise<void> {
         refreshOnOpen: true
       }
     },
-    "H47:P67"
+    "A66:P95"
   );
 
   // Combo pivot chart — revenue bars + YoY growth line (secondary axis)
@@ -458,7 +460,7 @@ async function main(): Promise<void> {
         }
       ]
     },
-    "H69:P89"
+    "A97:P126"
   );
 
   // =========================================================================
@@ -496,7 +498,7 @@ async function main(): Promise<void> {
         }
       ]
     },
-    "A4:F26"
+    "A4:P33"
   );
 
   // Treemap — product line nested under family
@@ -513,8 +515,8 @@ async function main(): Promise<void> {
   });
   treemapEntries.forEach(row => treemapHidden.addRow([row[0], row[1], row[2]]));
 
-  funnelSheet.getCell("G3").value = "Product hierarchy (treemap)";
-  funnelSheet.getCell("G3").font = { bold: true };
+  funnelSheet.getCell("A35").value = "Product hierarchy (treemap)";
+  funnelSheet.getCell("A35").font = { bold: true };
   funnelSheet.addTreemapChart(
     {
       title: "Revenue by product family → line",
@@ -528,7 +530,7 @@ async function main(): Promise<void> {
       ],
       layout: { parentLabelLayout: "banner" }
     },
-    "G4:L26"
+    "A36:P65"
   );
 
   // Sunburst — region → country → revenue
@@ -545,8 +547,8 @@ async function main(): Promise<void> {
   });
   sunburstEntries.forEach(row => sunburstHidden.addRow([row[0], row[1], row[2]]));
 
-  funnelSheet.getCell("A28").value = "Region → country sunburst";
-  funnelSheet.getCell("A28").font = { bold: true };
+  funnelSheet.getCell("A67").value = "Region → country sunburst";
+  funnelSheet.getCell("A67").font = { bold: true };
   funnelSheet.addSunburstChart(
     {
       title: "Revenue by region → country",
@@ -559,7 +561,7 @@ async function main(): Promise<void> {
         }
       ]
     },
-    "A29:F52"
+    "A68:P97"
   );
 
   // Region map — revenue per country
@@ -572,8 +574,8 @@ async function main(): Promise<void> {
   const mapEntries = Array.from(byCountry.entries());
   mapEntries.forEach(([country, rev]) => mapHidden.addRow([country, Math.round(rev * 100) / 100]));
 
-  funnelSheet.getCell("G28").value = "Revenue by country (region map)";
-  funnelSheet.getCell("G28").font = { bold: true };
+  funnelSheet.getCell("A99").value = "Revenue by country (region map)";
+  funnelSheet.getCell("A99").font = { bold: true };
   funnelSheet.addRegionMapChart(
     {
       title: "Revenue by country",
@@ -586,7 +588,7 @@ async function main(): Promise<void> {
       ],
       layout: { projection: "robinson", regionLabels: "bestFit", geoMappingLevel: "country" }
     },
-    "G29:L52"
+    "A100:P129"
   );
 
   // =========================================================================
@@ -957,7 +959,15 @@ async function main(): Promise<void> {
     title: "Sales BI Dashboard — FY23-25",
     author: "ExcelTS",
     showGridLines: false,
-    showPageNumbers: true
+    showPageNumbers: true,
+    sheets: [
+      "Executive Chart",
+      "Pivot Core",
+      "Pipeline",
+      "Cohort Retention",
+      "Regional KPIs",
+      "Start"
+    ]
   });
   writeFileSync(PDF_PATH, pdf);
   console.log(`PDF  → ${PDF_PATH}`);
