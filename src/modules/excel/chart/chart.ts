@@ -29,7 +29,7 @@ import { colCache } from "@excel/utils/col-cache";
 import type { Worksheet } from "@excel/worksheet";
 import { RelType } from "@excel/xlsx/rel-type";
 
-import { fillChartCaches } from "./cache-populator";
+import { fillChartCaches, fillChartExCaches } from "./cache-populator";
 import {
   applyChartSeriesOptionsPatch,
   buildChartModel,
@@ -579,6 +579,7 @@ class Chart {
     }
     const chartEx = this.chartExModel;
     if (chartEx) {
+      this._refreshChartExCaches();
       return renderChartExSvg(chartEx, options);
     }
     throw new ChartOptionsError("Cannot render chart because no chart model is available.");
@@ -610,6 +611,7 @@ class Chart {
     }
     const chartEx = this.chartExModel;
     if (chartEx) {
+      this._refreshChartExCaches();
       return renderChartExPng(chartEx, options);
     }
     throw new ChartOptionsError("Cannot render chart because no chart model is available.");
@@ -1400,6 +1402,53 @@ class Chart {
       // series should not prevent the mutation from landing. The
       // writer still emits the new formula, and a later workbook-
       // wide pass can populate the cache when called explicitly.
+    }
+  }
+
+  /**
+   * Populate ChartEx data caches (`strDim.levels` / `numDim.levels`) from
+   * the workbook's worksheet data so that preview renders see actual
+   * values instead of empty arrays.
+   *
+   * The builder marks hierarchical dimensions with `_skipCache` to
+   * prevent the XML writer from emitting flat cache levels (which
+   * confuses Excel's hierarchy renderer). However, the in-memory
+   * renderer still needs the data. We temporarily clear the flag,
+   * fill, then restore it so the writer behaviour is unaffected.
+   */
+  private _refreshChartExCaches(): void {
+    const model = this.chartExModel;
+    if (!model) {
+      return;
+    }
+    try {
+      // Temporarily lift _skipCache so fillChartExCaches actually populates
+      const skipped: Array<{ dim: Record<string, unknown>; field: "_skipCache" }> = [];
+      for (const entry of model.chartSpace.chartData.data) {
+        const str = entry.strDim as Record<string, unknown> | undefined;
+        if (str?.["_skipCache"]) {
+          skipped.push({ dim: str, field: "_skipCache" });
+          delete str["_skipCache"];
+        }
+        const num = entry.numDim as Record<string, unknown> | undefined;
+        if (num?.["_skipCache"]) {
+          skipped.push({ dim: num, field: "_skipCache" });
+          delete num["_skipCache"];
+        }
+      }
+
+      fillChartExCaches(
+        model,
+        this.worksheet.workbook as unknown as Parameters<typeof fillChartExCaches>[1],
+        this.worksheet as unknown as Parameters<typeof fillChartExCaches>[2]
+      );
+
+      // Restore _skipCache so the writer still suppresses cache output
+      for (const { dim } of skipped) {
+        dim["_skipCache"] = true;
+      }
+    } catch {
+      // Best-effort — same rationale as _refreshCaches.
     }
   }
 
