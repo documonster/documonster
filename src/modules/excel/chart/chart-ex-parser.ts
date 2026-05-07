@@ -508,15 +508,18 @@ function parseSeries(
   // returned array stays `number[]`.
   const axisId = findChildren(el, "cx:axisId")
     .map(axis => {
-      const viaAttr = parseIndexAttr(axis.attributes.val);
-      if (viaAttr !== undefined) {
-        return viaAttr;
+      // Prefer the `val` attribute when present and non-empty; fall
+      // back to text content for round-tripping files authored by
+      // buggy writers that emit the id as element text.
+      const rawAttr = axis.attributes.val;
+      if (rawAttr !== undefined && rawAttr !== "") {
+        return parseIndexAttr(rawAttr);
       }
       const text = textContent(axis).trim();
       if (text.length > 0) {
         const parsed = Number(text);
-        if (Number.isFinite(parsed)) {
-          return parsed;
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          return Math.round(parsed);
         }
       }
       return undefined;

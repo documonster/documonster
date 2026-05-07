@@ -288,6 +288,15 @@ worksheet.columns.forEach(column => {
 
 ExcelTS 提供结构化图表 API、模板 raw XML 保留，以及确定性的预览渲染器。目标不是只保留图表 XML，而是能直接创建、修改、导出图表预览。
 
+> **启用方式：** 图表功能是 opt-in 的，不会增大不使用图表的 bundle。在使用任何图表 API（`addChart`、`addLineChart`、图表加载/写入等）前，需在启动时调用一次 `installChartSupport()`：
+>
+> ```typescript
+> import { installChartSupport } from "@cj-tech-master/excelts/chart";
+> installChartSupport(); // 启动时调用一次
+> ```
+>
+> 不调用此函数时，`worksheet.addChart()` 和 `writeFile()` 中的图表序列化会抛错。
+
 > 完整可运行示例位于 [`src/modules/excel/examples/charts.ts`](examples/charts.ts)，涵盖 70+ 张图表——包含所有 classic 与 ChartEx 类型、各种 preset、combo/pivot/chartsheet 布局，并导出 SVG/PNG/PDF 预览。运行：`pnpm exec tsx src/modules/excel/examples/charts.ts`。
 
 ### Classic 图表
@@ -332,7 +341,7 @@ import {
   EXCEL_CHART_EX_PRESETS,
   applyChartPreset,
   applyChartExPreset
-} from "@cj-tech-master/excelts";
+} from "@cj-tech-master/excelts/chart";
 
 // 99 个 classic preset + 10 个 ChartEx preset（对齐 Excel UI 别名）
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
@@ -656,7 +665,7 @@ const pdf = await chartToPdf(chart, {
 });
 
 // 从外部查询矢量/栅格路径选择：
-import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts";
+import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
 if (chart.chartExModel) {
   console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
 }

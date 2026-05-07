@@ -12,7 +12,7 @@
  */
 
 import { escapeXml, escapeXmlAttr, themeIndexToName } from "@excel/chart/chart-utils";
-import { isRawXmlShape } from "@excel/chart/shape-properties";
+import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shape-properties";
 import type {
   ChartModel,
   ChartData,
@@ -3610,8 +3610,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   }
 
   private _renderTxPr(xml: XmlSink, txPr: ChartTextProperties): void {
-    if (txPr._rawXml) {
-      xml.writeRaw(txPr._rawXml);
+    if (isRawXmlTxPr(txPr)) {
+      xml.writeRaw(txPr._rawXml!);
       return;
     }
     xml.openNode("c:txPr");
@@ -3824,7 +3824,29 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       (name === "c:tx" && this.currentTrendlineLbl != null)
     ) {
       if (node.isSelfClosing) {
-        // Empty element — no raw XML needed
+        // Self-closing raw-preserve elements (e.g. `<c:extLst/>`,
+        // `<c:protection/>`) must still be captured and attached so
+        // they survive round-trip. Build the self-closing tag inline
+        // and route through `_attachRawXml` like the normal path.
+        let selfCloseXml = `<${node.name}`;
+        if (node.attributes) {
+          for (const [k, v] of Object.entries(node.attributes)) {
+            selfCloseXml += ` ${k}="${escapeXmlAttr(String(v))}"`;
+          }
+        }
+        selfCloseXml += "/>";
+        // Determine the correct rawXmlTarget for routing (mirrors the
+        // non-self-closing path below). For `c:tx` we need the
+        // context-qualified target name.
+        let selfCloseTarget: string = name;
+        if (name === "c:tx" && this.currentTitle && !this.currentSeries) {
+          selfCloseTarget = "c:tx:title";
+        } else if (name === "c:tx" && this.currentDataLabelEntry != null) {
+          selfCloseTarget = "c:tx:dLblEntry";
+        } else if (name === "c:tx" && this.currentTrendlineLbl != null) {
+          selfCloseTarget = "c:tx:trendlineLbl";
+        }
+        this._attachRawXml(selfCloseTarget, selfCloseXml);
         return true;
       }
       this.rawCapture = new RawXmlCapture();
@@ -4077,12 +4099,12 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       case "c:pageMargins":
         if (this.currentPrintSettings) {
           this.currentPrintSettings.pageMargins = {
-            b: parseFloat(attrs.b ?? "0.75"),
-            l: parseFloat(attrs.l ?? "0.7"),
-            r: parseFloat(attrs.r ?? "0.7"),
-            t: parseFloat(attrs.t ?? "0.75"),
-            header: parseFloat(attrs.header ?? "0.3"),
-            footer: parseFloat(attrs.footer ?? "0.3")
+            b: parseXsdFloat(attrs.b) ?? 0.75,
+            l: parseXsdFloat(attrs.l) ?? 0.7,
+            r: parseXsdFloat(attrs.r) ?? 0.7,
+            t: parseXsdFloat(attrs.t) ?? 0.75,
+            header: parseXsdFloat(attrs.header) ?? 0.3,
+            footer: parseXsdFloat(attrs.footer) ?? 0.3
           };
         }
         break;

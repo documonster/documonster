@@ -299,14 +299,33 @@ function qualifyRange(sheetName: string, range: string): string {
  * like `Table1[Sales]`, defined-name references like `MyRange`, and
  * other non-A1 shapes so callers can route them away from
  * `colCache.decode` (which silently produces garbage on bad input).
+ *
+ * Also rejects column letters beyond Excel's maximum column XFD (16384)
+ * so downstream `colCache.decode` / `n2l` calls don't throw cryptic
+ * out-of-bounds errors.
  */
 function isA1RangeOrCell(ref: string): boolean {
   // Cell: optional $, letters, optional $, digits. Range: two of those
   // joined by `:`. Full-column (`A:A`) and full-row (`1:1`) references
   // are also A1-shaped and accepted.
-  return /^\$?[A-Za-z]{1,3}\$?\d+(:\$?[A-Za-z]{1,3}\$?\d+)?$|^\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}$|^\$?\d+:\$?\d+$/.test(
-    ref
-  );
+  if (
+    !/^\$?[A-Za-z]{1,3}\$?\d+(:\$?[A-Za-z]{1,3}\$?\d+)?$|^\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}$|^\$?\d+:\$?\d+$/.test(
+      ref
+    )
+  ) {
+    return false;
+  }
+  // Validate column letters are within Excel's XFD (16384) limit.
+  const colParts = ref.replace(/\$/g, "").match(/[A-Za-z]+/g);
+  if (colParts) {
+    for (const col of colParts) {
+      const n = colCache.l2n(col.toUpperCase());
+      if (!n || n > 16384) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function absoluteRange(
@@ -320,7 +339,10 @@ function absoluteRange(
 }
 
 function absoluteA1Range(range: string): string {
-  const decoded = colCache.decode(range);
+  // Normalize to uppercase before decoding — `colCache.decodeAddress`
+  // only parses A-Z column letters; lowercase input (e.g. "b1:b2")
+  // would produce garbage or throw without this.
+  const decoded = colCache.decode(range.toUpperCase());
   if ("top" in decoded) {
     return `$${colCache.n2l(decoded.left)}$${decoded.top}:$${colCache.n2l(decoded.right)}$${decoded.bottom}`;
   }

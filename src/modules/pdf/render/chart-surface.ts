@@ -58,7 +58,21 @@ export function createChartSurface(
     }
     if (stroke) {
       stream.setStrokeColor(stroke);
-      applyAlpha(stroke);
+      // When fill applied a sub-1 alpha but stroke is fully opaque (no
+      // `a` field or `a >= 1`), we must explicitly restore opaque alpha
+      // so the stroke is not drawn with the fill's transparency. The
+      // ExtGState set by `applyAlpha(fill)` applies to both fill and
+      // stroke operations in PDF; without this reset the stroke leaks
+      // the fill's alpha.
+      const strokeNeedsAlpha = stroke.a !== undefined && stroke.a < 1;
+      const fillAppliedAlpha = fill?.a !== undefined && fill.a < 1;
+      if (strokeNeedsAlpha) {
+        applyAlpha(stroke);
+      } else if (fillAppliedAlpha) {
+        // Reset to fully opaque for the stroke
+        alphaValues.add(1);
+        stream.setGraphicsState(alphaGsName(1));
+      }
       if (lineWidth !== undefined) {
         stream.setLineWidth(lineWidth);
       }

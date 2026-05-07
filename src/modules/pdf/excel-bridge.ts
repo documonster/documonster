@@ -114,9 +114,11 @@ export interface ChartToPdfOptions {
   margin?: number;
   /**
    * Force rasterisation even for classic charts. Default: `false`
-   * (classic charts render as vector PDF content; ChartEx always
-   * rasterises because there is no vector renderer — see the
-   * "ChartEx PDF" note in `src/modules/excel/README.md`).
+   * (classic charts render as vector PDF content; ChartEx charts
+   * also render as vector when their layout IDs are supported — see
+   * `VECTOR_PDF_CHART_EX_LAYOUT_IDS` and the "ChartEx PDF" note in
+   * `src/modules/excel/README.md`). When `true`, all chart types go
+   * through the SVG → PNG → image-XObject raster pipeline.
    */
   forceRaster?: boolean;
   /** PNG raster scale multiplier when rasterising. Default: 2 (for crisp text). */
@@ -150,13 +152,11 @@ export interface ChartToPdfOptions {
  *
  * Classic charts take the **vector** path: the chart is drawn directly
  * onto the page via `drawChartPdf`, so text stays selectable and shapes
- * remain resolution-independent. ChartEx charts take the **raster**
- * path: they are rendered to PNG through the SVG pipeline and embedded
- * as an image XObject, because the library intentionally does not ship
- * a vector `drawChartExPdf` (see README "ChartEx PDF note"). The raster
- * path is also available for classic charts via `forceRaster: true` for
- * cases where pixel-level fidelity with the SVG/PNG preview matters
- * more than selectable text.
+ * remain resolution-independent. ChartEx charts whose layout IDs are in
+ * `VECTOR_PDF_CHART_EX_LAYOUT_IDS` also take the vector path via
+ * `drawChartExPdf`; unsupported layouts (if any) and charts where
+ * `forceRaster: true` is set fall through to the SVG → PNG → image-XObject
+ * raster pipeline.
  *
  * Lives in `excel-bridge.ts` because invoking the PDF builder from the
  * chart module would cross the Layer 4 → Layer 5 import boundary
@@ -183,12 +183,12 @@ export async function chartToPdf(
   const page = doc.addPage({ width: pageWidth, height: pageHeight });
 
   const isChartEx = chart.chartExModel !== undefined;
-  // ChartEx charts whose every series has a layoutId the renderer
-  // can express as PDF geometry (currently sunburst + treemap) take
-  // the vector route alongside classic charts. Anything else — or
-  // any chart the caller explicitly asks to rasterise via
-  // `forceRaster` — falls through to the SVG → PNG → image-XObject
-  // pipeline.
+  // ChartEx charts whose every series has a layoutId in
+  // VECTOR_PDF_CHART_EX_LAYOUT_IDS take the vector route alongside
+  // classic charts. As of the regionMap port this covers every ChartEx
+  // layout the builder currently emits. Anything else — or any chart
+  // the caller explicitly asks to rasterise via `forceRaster` — falls
+  // through to the SVG → PNG → image-XObject pipeline.
   const chartExModel = chart.chartExModel;
   const chartExVectorable =
     isChartEx &&

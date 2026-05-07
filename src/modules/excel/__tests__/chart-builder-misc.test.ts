@@ -1253,3 +1253,95 @@ describe("chartToPdf bridge", () => {
 // a regression in the renderer / builder / cache layer surfaces as a
 // clear failure rather than a subtle visual drift.
 // ============================================================================
+
+// ---------------------------------------------------------------------------
+// regionMap TopoJSON PDF vector path assertion
+// ---------------------------------------------------------------------------
+
+describe("drawChartExPdf regionMap with TopoJSON topology", () => {
+  it("draws polygon paths when a matching topology is provided", async () => {
+    const { drawChartExPdf } = await import("@excel/chart");
+    const paths: Array<{ ops: unknown[] }> = [];
+    const texts: string[] = [];
+    const surface = {
+      drawRect() {
+        return this;
+      },
+      drawLine() {
+        return this;
+      },
+      drawText(text: string) {
+        texts.push(text);
+        return this;
+      },
+      drawPath(ops: unknown[]) {
+        paths.push({ ops });
+        return this;
+      },
+      drawCircle() {
+        return this;
+      }
+    };
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Geo");
+    ws.addRows([
+      ["USA", 300],
+      ["CAN", 150],
+      ["MEX", 80]
+    ]);
+    ws.addChartEx(
+      {
+        type: "regionMap",
+        categories: "Geo!$A$1:$A$3",
+        series: [{ values: "Geo!$B$1:$B$3" }]
+      },
+      "D1:J10"
+    );
+    // Minimal TopoJSON with three country polygons that match by id.
+    const topology = {
+      type: "Topology" as const,
+      objects: {
+        countries: {
+          type: "GeometryCollection" as const,
+          geometries: [
+            { type: "Polygon" as const, id: "USA", arcs: [[0]] },
+            { type: "Polygon" as const, id: "CAN", arcs: [[1]] },
+            { type: "Polygon" as const, id: "MEX", arcs: [[2]] }
+          ]
+        }
+      },
+      arcs: [
+        // USA: triangle
+        [
+          [0, 0],
+          [100, 0],
+          [50, 100],
+          [0, 0]
+        ],
+        // CAN: triangle
+        [
+          [0, 100],
+          [100, 100],
+          [50, 200],
+          [0, 100]
+        ],
+        // MEX: triangle
+        [
+          [0, 200],
+          [100, 200],
+          [50, 300],
+          [0, 200]
+        ]
+      ]
+    };
+    drawChartExPdf(
+      surface,
+      ws.getCharts()[0].chartExModel!,
+      { x: 0, y: 0, width: 400, height: 300 },
+      { regionMap: { topology, objectName: "countries", match: "id" } }
+    );
+    // When TopoJSON polygons are provided, the renderer draws path primitives
+    // for each matched region (3 countries = at least 3 paths).
+    expect(paths.length).toBeGreaterThanOrEqual(3);
+  });
+});

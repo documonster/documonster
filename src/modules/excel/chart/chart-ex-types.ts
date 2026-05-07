@@ -495,7 +495,6 @@ export interface AddChartExOptions {
 export interface AddChartExHistogramOptions extends Omit<AddChartExOptions, "type"> {
   /** `histogram` for frequency columns, `pareto` for frequency columns plus cumulative line. */
   type?: "histogram" | "pareto";
-  binning?: ChartExLayoutProperties["binning"];
   layout?: Pick<ChartExLayoutProperties, "binning">;
 }
 

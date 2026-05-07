@@ -5,6 +5,14 @@ import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/c
 import type { Worksheet } from "@excel/worksheet";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
+/**
+ * Nominal anchor range for the full-sheet chart in a chartsheet.
+ * Chartsheet charts fill the entire sheet viewport; the anchor value is
+ * never used for positioning but is required by the Chart constructor to
+ * initialise its internal two-cell-anchor model.
+ */
+const CHARTSHEET_ANCHOR_RANGE = "A1:K15";
+
 export interface ChartsheetViewOptions {
   /** Whether the chartsheet tab is selected in the workbook view. */
   tabSelected?: boolean;
@@ -196,7 +204,7 @@ class Chartsheet {
     return getChartSupport().createChart(
       host as unknown as Worksheet,
       { chartNumber: this._model.chartNumber, chartExNumber: this._model.chartExNumber },
-      "A1:K15"
+      CHARTSHEET_ANCHOR_RANGE
     );
   }
 

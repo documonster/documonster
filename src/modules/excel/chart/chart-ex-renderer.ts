@@ -39,7 +39,7 @@ import {
   type ChartRect,
   type PdfColor
 } from "./chart-utils";
-import { getSpPrFill, isRawXmlShape } from "./shape-properties";
+import { getSpPrFill, isRawXmlShape, isRawXmlTxPr } from "./shape-properties";
 import { resolveTopologyObject, type ResolvedRing, type TopologyLike } from "./topojson";
 import type {
   ChartColor,
@@ -281,8 +281,15 @@ export function renderChartEx(
   // newly-authored and round-tripped models.
   if (space.externalData) {
     for (const ed of space.externalData) {
+      // Skip entries with missing or empty r:id — emitting
+      // `<cx:externalData r:id=""/>` produces a broken relationship
+      // that strict validators and Excel reject. Classic charts
+      // already guard against this (chart-space-xform.ts); sync here.
+      if (!ed.id) {
+        continue;
+      }
       const attrs = ed.autoUpdate === undefined ? "" : ` autoUpdate="${ed.autoUpdate ? "1" : "0"}"`;
-      parts.push(`  <cx:externalData r:id="${ed.id}"${attrs}/>`);
+      parts.push(`  <cx:externalData r:id="${escapeXmlAttr(ed.id)}"${attrs}/>`);
     }
   }
   if (space.printSettings) {
@@ -434,15 +441,14 @@ export function canRenderChartExAsVectorPdf(model: ChartExModel): boolean {
 
 /**
  * Draw a ChartEx chart as vector content onto a
- * {@link ChartPdfDrawingSurface}. Only the layout IDs in
- * {@link VECTOR_PDF_CHART_EX_LAYOUT_IDS} are supported today
- * (sunburst, treemap) — the surrounding geometry lives in the
- * "collect" functions shared with the SVG renderer, so when a third
- * layout gets promoted its SVG and PDF paths stay equivalent by
+ * {@link ChartPdfDrawingSurface}. All layout IDs listed in
+ * {@link VECTOR_PDF_CHART_EX_LAYOUT_IDS} are supported — the
+ * surrounding geometry lives in the "collect" functions shared with
+ * the SVG renderer, so the SVG and PDF paths stay equivalent by
  * construction.
  *
- * For other layout IDs the function throws; callers (notably
- * `@pdf/excel-bridge.chartToPdf`) must pre-filter via
+ * For any layout ID not in the set the function throws; callers
+ * (notably `@pdf/excel-bridge.chartToPdf`) must pre-filter via
  * {@link canRenderChartExAsVectorPdf}. Filtering ahead of time rather
  * than silently skipping preserves "fail loud on unsupported" — a
  * silent no-op would produce an empty page and hide the mistake.
@@ -1675,10 +1681,13 @@ function drawRegionMapTileFallbackPdf(
   const whiteStroke: PdfColor = { r: 1, g: 1, b: 1 };
   const labelColor = hexToPdfColor("#1F3B53");
   records.forEach((record, i) => {
+    if (!Number.isFinite(record.value)) {
+      return;
+    }
     const cx = plot.x + (i % cols) * cellW + cellW / 2;
     const cy = plot.y + Math.floor(i / cols) * cellH + cellH / 2;
-    const t = (record.value - range.min) / Math.max(1e-9, range.max - range.min);
-    const fill = hexToPdfColor(interpolateColor("#D9EAF7", "#2F75B5", Math.max(0, Math.min(1, t))));
+    const t = clamp01((record.value - range.min) / Math.max(1e-9, range.max - range.min));
+    const fill = hexToPdfColor(interpolateColor("#D9EAF7", "#2F75B5", t));
     const hexOps = hexagonPathOps(cx, cy, radius);
     if (surface.drawPath) {
       surface.drawPath(hexOps, { fill, stroke: whiteStroke });
@@ -2032,7 +2041,7 @@ function renderParetoSvg(
   parts: string[],
   values: number[],
   categories: string[],
-  series: ChartExSeries,
+  _series: ChartExSeries,
   plot: SvgRect,
   axis?: ChartExAxis,
   options: { drawColumns?: boolean } = {}
@@ -2099,10 +2108,9 @@ function renderParetoSvg(
     // `layoutId: "paretoLine"` case (added at line 1527) reached this
     // function without the flag set and silently dropped the caption
     // — producing SVG output that disagreed with the PDF.
-    // `series` is kept as a parameter in case future heuristics want
+    // `_series` is kept as a parameter in case future heuristics want
     // to tweak placement, but the caption is no longer gated by the
     // layoutPr flag.
-    void series;
     parts.push(svgText(plot.x + plot.width - 4, plot.y + 12, "Cumulative %", 10, COLORS[1], "end"));
   }
 }
@@ -3406,9 +3414,12 @@ function renderRegionMapTileFallback(
   const cellH = plot.height / rows;
   const radius = Math.min(cellW, cellH) * 0.38;
   records.forEach((record, i) => {
+    if (!Number.isFinite(record.value)) {
+      return;
+    }
     const cx = plot.x + (i % cols) * cellW + cellW / 2;
     const cy = plot.y + Math.floor(i / cols) * cellH + cellH / 2;
-    const t = (record.value - range.min) / Math.max(1e-9, range.max - range.min);
+    const t = clamp01((record.value - range.min) / Math.max(1e-9, range.max - range.min));
     const points = hexagonPoints(cx, cy, radius);
     parts.push(
       `<polygon points="${points}" fill="${interpolateColor("#D9EAF7", "#2F75B5", t)}" stroke="#fff" data-region-map-mode="${mode}"/>`
@@ -5886,7 +5897,7 @@ function renderSp3D(parts: string[], sp: ShapeProperties3D, indent: string): voi
  * and we rebuild a minimal structured equivalent.
  */
 function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx:txPr"): string {
-  if (txPr._rawXml) {
+  if (isRawXmlTxPr(txPr)) {
     // Swap the outer wrapper element to the requested namespace.
     // Classic charts captured `<c:txPr>…</c:txPr>`; ChartEx emits
     // `<cx:txPr>…</cx:txPr>`. The raw bytes always start with the
@@ -5895,7 +5906,7 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
     // captured from a classic chart round-trip cleanly through the
     // ChartEx writer. Inner children are all DrawingML (`a:bodyPr`,
     // `a:lstStyle`, `a:p`), so they require no rewrite.
-    const raw = txPr._rawXml;
+    const raw = txPr._rawXml!;
     // Handle self-closing first — `<c:txPr/>` or `<cx:txPr/>` has no
     // inner content and no close tag to search for. Emit a self-closing
     // element with the requested wrapper name so a classic-captured

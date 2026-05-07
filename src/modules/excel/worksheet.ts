@@ -2372,7 +2372,6 @@ class Worksheet {
         );
     } else {
       this._charts = [];
-      this._sparklineGroups = [];
     }
   }
 

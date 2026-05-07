@@ -64,6 +64,42 @@ export function isRawXmlShape(obj: { _rawXml?: string } | undefined): boolean {
   return isRawXml(obj);
 }
 
+/**
+ * Whether a `ChartTextProperties` object is a pure raw-XML capture
+ * with no structured fields set. Analogous to {@link isRawXmlShape}
+ * for shape properties: when a caller directly assigns `txPr.color`,
+ * `txPr.size`, etc., the stale `_rawXml` must NOT win — the writer
+ * should fall through to the structured rendering path.
+ */
+export function isRawXmlTxPr(obj: { _rawXml?: string } | undefined): boolean {
+  if (!obj || typeof obj._rawXml !== "string") {
+    return false;
+  }
+  const structuredKeys = [
+    "size",
+    "bold",
+    "italic",
+    "underline",
+    "strike",
+    "color",
+    "fontFamily",
+    "eastAsianFamily",
+    "complexScriptFamily",
+    "rotation",
+    "baseline",
+    "kern",
+    "spacing",
+    "cap",
+    "lang"
+  ] as const;
+  for (const key of structuredKeys) {
+    if ((obj as Record<string, unknown>)[key] !== undefined) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isRawXml(obj: { _rawXml?: string } | undefined): boolean {
   if (!obj || typeof obj._rawXml !== "string") {
     return false;
@@ -885,7 +921,7 @@ function parseEffectList(xml: string): EffectList | undefined {
   if (effStart < 0 || effEnd < 0) {
     return undefined;
   }
-  const region = xml.slice(effStart, effEnd + 14);
+  const region = xml.slice(effStart, effEnd + "</a:effectLst>".length);
   const result: EffectList = {};
 
   // Blur
@@ -1101,7 +1137,11 @@ function parseSp3D(xml: string): ShapeProperties3D | undefined {
   const selfClose = /<a:sp3d\s+[^>]*\/>/.exec(xml);
   const openClose = /<a:sp3d\s+([^>]*)>([\s\S]*?)<\/a:sp3d>/.exec(xml);
   const region = openClose ? openClose[0] : selfClose ? selfClose[0] : xml.slice(spStart);
-  const attrs = parseAttrs(region);
+  // Only parse attributes from the opening tag itself — NOT from child
+  // elements (e.g. `<a:bevelT w="..." h="..."/>`) which would pollute
+  // the attribute dict with unrelated keys.
+  const openTagMatch = /<a:sp3d\b([^>]*?)(?:\/?>)/.exec(region);
+  const attrs = parseAttrs(openTagMatch ? openTagMatch[0] : region);
   const result: ShapeProperties3D = {};
   if (attrs.z) {
     result.z = parseInt(attrs.z, 10);

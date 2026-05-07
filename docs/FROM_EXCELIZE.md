@@ -176,12 +176,12 @@ ws.addComboChart(
       },
       {
         type: "line",
+        useSecondaryAxis: true,
         series: [
           {
             name: "Cumulative %",
             categories: "S!$A$2:$A$6",
-            values: "S!$C$2:$C$6",
-            useSecondaryAxis: true
+            values: "S!$C$2:$C$6"
           }
         ]
       }

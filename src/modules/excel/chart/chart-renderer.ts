@@ -67,6 +67,98 @@ export type { PdfColor };
  */
 export const PRESET_COLOR_HEX = PRESET_COLOR_HEX_TABLE;
 
+// ---------------------------------------------------------------------------
+// Plot layout constants — extracted from getPlotRect / legendRect so the
+// spatial reasoning behind the scene builder is self-documenting.
+// ---------------------------------------------------------------------------
+
+/** Base left margin (space for Y-axis tick labels). */
+const PLOT_MARGIN_LEFT = 58;
+/** Base right margin (chart-edge padding). */
+const PLOT_MARGIN_RIGHT = 24;
+/** Extra right margin when a secondary value axis is present. */
+const PLOT_SECONDARY_AXIS_WIDTH = 42;
+/** Extra margin for an axis title label. */
+const PLOT_AXIS_TITLE_PADDING = 18;
+/** Top margin when no chart title is shown. */
+const PLOT_MARGIN_TOP_NO_TITLE = 24;
+/** Top margin when a chart title is shown. */
+const PLOT_MARGIN_TOP_WITH_TITLE = 52;
+/** Extra top space for a top-positioned axis. */
+const PLOT_TOP_AXIS_HEIGHT = 22;
+/** Extra top space for a top-axis title. */
+const PLOT_TOP_AXIS_TITLE_HEIGHT = 16;
+/** Extra top space when legend is placed at top. */
+const PLOT_TOP_LEGEND_PADDING = 30;
+/** Base bottom margin. */
+const PLOT_MARGIN_BOTTOM = 24;
+/** Default bottom-axis tick-label height (when no data table). */
+const PLOT_BOTTOM_AXIS_LABEL_HEIGHT = 22;
+/** Extra bottom space when legend is at bottom. */
+const PLOT_BOTTOM_LEGEND_PADDING = 28;
+/** Gap between legend rectangle edge and adjacent content. */
+const LEGEND_GAP_LEFT = 12;
+/** Gap between legend rectangle edge and adjacent content (right/topRight). */
+const LEGEND_GAP_RIGHT = 16;
+/** Minimum rendered plot dimension to avoid degenerate rects. */
+const PLOT_MIN_DIMENSION = 10;
+
+// Legend layout constants
+/** Horizontal padding between legend entries. */
+const LEGEND_ENTRY_PADDING = 32;
+/** Legend colour swatch width. */
+const LEGEND_SWATCH_WIDTH = 16;
+/** Legend font size in pixels. */
+const LEGEND_FONT_SIZE = 11;
+/** Legend row height in pixels. */
+const LEGEND_ROW_HEIGHT = 18;
+/** Minimum legend width / height floor. */
+const LEGEND_MIN_EXTENT = 96;
+/** Outer margin from chart edges to legend edges. */
+const LEGEND_OUTER_MARGIN = 20;
+/** Total horizontal inset for horizontal legends (both sides combined). */
+const LEGEND_HORIZ_INSET = 48;
+/** Total vertical inset for vertical legends (top + bottom combined). */
+const LEGEND_VERT_INSET = 48;
+/** Top position for legend below title. */
+const LEGEND_TOP_BELOW_TITLE = 48;
+/** Top position for legend without title. */
+const LEGEND_TOP_NO_TITLE = 20;
+/** Vertical legend top offset when title present (tr position). */
+const LEGEND_TR_WITH_TITLE = 44;
+
+// ---------------------------------------------------------------------------
+// Glyph rasterization cache — avoids re-rasterizing the same glyph outline
+// at the same font size across repeated chart text rendering calls. Keyed by
+// the GlyphOutline reference (stable per font + codePoint) and fontSize.
+// ---------------------------------------------------------------------------
+type RasterizedGlyph = {
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+  pixels: Uint8Array;
+};
+const glyphCache = new WeakMap<object, Map<number, RasterizedGlyph>>();
+
+function cachedRasterizeGlyph(
+  outline: object & { contours: unknown[]; advanceWidth: number },
+  fontSize: number,
+  unitsPerEm: number
+): RasterizedGlyph {
+  let sizeMap = glyphCache.get(outline);
+  if (!sizeMap) {
+    sizeMap = new Map();
+    glyphCache.set(outline, sizeMap);
+  }
+  let cached = sizeMap.get(fontSize);
+  if (!cached) {
+    cached = rasterizeGlyph(outline as Parameters<typeof rasterizeGlyph>[0], fontSize, unitsPerEm);
+    sizeMap.set(fontSize, cached);
+  }
+  return cached;
+}
+
 /**
  * Options for the built-in deterministic chart preview renderer.
  *
@@ -277,7 +369,7 @@ export interface ChartScene {
   height: number;
   title?: ChartSceneText;
   plot: ChartSceneRect;
-  axes: { x: ChartSceneLine; y: ChartSceneLine; x2?: ChartSceneLine; y2?: ChartSceneLine };
+  axes: { x?: ChartSceneLine; y?: ChartSceneLine; x2?: ChartSceneLine; y2?: ChartSceneLine };
   gridlines: ChartSceneLine[];
   xLabels: ChartSceneText[];
   yLabels: ChartSceneText[];
@@ -688,7 +780,15 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   const dataTableHeight = dataTableSpec
     ? computeDataTableHeight(dataTableSpec, normalized, categories)
     : 0;
-  const plot = getPlotRect(width, height, hasReservedTitle, legend, model, dataTableHeight);
+  const plot = getPlotRect(
+    width,
+    height,
+    hasReservedTitle,
+    legend,
+    model,
+    dataTableHeight,
+    categories.length
+  );
   const axisContext = buildAxisContext(model, normalized);
   const sceneSeries = buildSceneSeries(
     groups,
@@ -728,6 +828,12 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
     categories
   );
 
+  // Pie / doughnut / pie3D charts have no axes — suppress gridlines,
+  // labels, and axis lines so the preview only renders slices + legend.
+  const isPieOnly = groups.every(
+    g => g.type === "pie" || g.type === "pie3D" || g.type === "doughnut"
+  );
+
   return {
     width,
     height,
@@ -748,34 +854,49 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
         }
       : undefined,
     plot,
-    gridlines: buildGridlines(
-      plot,
-      axisContext.primaryYAxis,
-      primaryYRange,
-      axisContext.primaryXAxis,
-      primaryXRange,
-      categories
-    ),
+    gridlines: isPieOnly
+      ? []
+      : buildGridlines(
+          plot,
+          axisContext.primaryYAxis,
+          primaryYRange,
+          axisContext.primaryXAxis,
+          primaryXRange,
+          categories
+        ),
     // When a data table is drawn, Excel suppresses the primary x-axis
     // category labels because categories already appear as the header
     // row of the table. We keep gridlines and the axis line itself so
     // the plot boundary stays intact.
-    xLabels: dataTable
+    xLabels: isPieOnly
       ? []
-      : buildXLabels(categories, plot, axisContext.primaryXAxis, primaryXRange),
-    yLabels: buildYLabels(
-      primaryYRange.min,
-      primaryYRange.max,
-      plot,
-      axisContext.primaryYAxis,
-      false,
-      categories
-    ),
-    secondaryXLabels: axisContext.secondaryXAxis
-      ? buildXLabels(secondaryXCategories, plot, axisContext.secondaryXAxis, secondaryXRange, true)
-      : [],
-    secondaryYLabels:
-      axisContext.secondaryYAxis && secondaryYRange
+      : dataTable
+        ? []
+        : buildXLabels(categories, plot, axisContext.primaryXAxis, primaryXRange),
+    yLabels: isPieOnly
+      ? []
+      : buildYLabels(
+          primaryYRange.min,
+          primaryYRange.max,
+          plot,
+          axisContext.primaryYAxis,
+          false,
+          categories
+        ),
+    secondaryXLabels: isPieOnly
+      ? []
+      : axisContext.secondaryXAxis
+        ? buildXLabels(
+            secondaryXCategories,
+            plot,
+            axisContext.secondaryXAxis,
+            secondaryXRange,
+            true
+          )
+        : [],
+    secondaryYLabels: isPieOnly
+      ? []
+      : axisContext.secondaryYAxis && secondaryYRange
         ? buildYLabels(
             secondaryYRange.min,
             secondaryYRange.max,
@@ -785,57 +906,59 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
             categories
           )
         : [],
-    axisTitles: buildAxisTitles(axisContext, plot),
+    axisTitles: isPieOnly ? [] : buildAxisTitles(axisContext, plot),
     series: sceneSeries,
     legend,
     dataTable,
     effectFilters,
-    axes: {
-      x: applyLineStyle(
-        {
-          x1: plot.x,
-          y1: plot.y + plot.height,
-          x2: plot.x + plot.width,
-          y2: plot.y + plot.height,
-          color: AXIS_COLOR
-        },
-        axisContext.primaryXAxis
-      ),
-      y: applyLineStyle(
-        {
-          x1: plot.x,
-          y1: plot.y,
-          x2: plot.x,
-          y2: plot.y + plot.height,
-          color: AXIS_COLOR
-        },
-        axisContext.primaryYAxis
-      ),
-      x2: axisContext.secondaryXAxis
-        ? applyLineStyle(
+    axes: isPieOnly
+      ? { x: undefined, y: undefined, x2: undefined, y2: undefined }
+      : {
+          x: applyLineStyle(
             {
               x1: plot.x,
-              y1: plot.y,
-              x2: plot.x + plot.width,
-              y2: plot.y,
-              color: AXIS_COLOR
-            },
-            axisContext.secondaryXAxis
-          )
-        : undefined,
-      y2: axisContext.secondaryYAxis
-        ? applyLineStyle(
-            {
-              x1: plot.x + plot.width,
-              y1: plot.y,
+              y1: plot.y + plot.height,
               x2: plot.x + plot.width,
               y2: plot.y + plot.height,
               color: AXIS_COLOR
             },
-            axisContext.secondaryYAxis
-          )
-        : undefined
-    }
+            axisContext.primaryXAxis
+          ),
+          y: applyLineStyle(
+            {
+              x1: plot.x,
+              y1: plot.y,
+              x2: plot.x,
+              y2: plot.y + plot.height,
+              color: AXIS_COLOR
+            },
+            axisContext.primaryYAxis
+          ),
+          x2: axisContext.secondaryXAxis
+            ? applyLineStyle(
+                {
+                  x1: plot.x,
+                  y1: plot.y,
+                  x2: plot.x + plot.width,
+                  y2: plot.y,
+                  color: AXIS_COLOR
+                },
+                axisContext.secondaryXAxis
+              )
+            : undefined,
+          y2: axisContext.secondaryYAxis
+            ? applyLineStyle(
+                {
+                  x1: plot.x + plot.width,
+                  y1: plot.y,
+                  x2: plot.x + plot.width,
+                  y2: plot.y + plot.height,
+                  color: AXIS_COLOR
+                },
+                axisContext.secondaryYAxis
+              )
+            : undefined
+        }
   };
 }
 
@@ -867,8 +990,12 @@ export function renderChartSvg(model: ChartModel, options: ChartRenderOptions = 
   for (const gridline of scene.gridlines) {
     parts.push(renderSvgLine(gridline));
   }
-  parts.push(renderSvgLine(scene.axes.x));
-  parts.push(renderSvgLine(scene.axes.y));
+  if (scene.axes.x) {
+    parts.push(renderSvgLine(scene.axes.x));
+  }
+  if (scene.axes.y) {
+    parts.push(renderSvgLine(scene.axes.y));
+  }
   if (scene.axes.x2) {
     parts.push(renderSvgLine(scene.axes.x2));
   }
@@ -1030,14 +1157,33 @@ function renderSvgToBasicPng(
         );
       }
     } else if (name === "path") {
-      const points = parsePathPoints(attrs.d, scale);
-      canvas.fillPolygon(points, attrs.fill);
-      if (points.length > 0) {
-        canvas.drawPolyline(
-          [...points, points[0]],
-          attrs.stroke,
-          numAttr(attrs, "stroke-width", 1) * scale
-        );
+      // Pie/doughnut slices emit `data-sector="cx,cy,outerR,innerR,startAngle,endAngle"`
+      // for pixel-perfect circular rendering instead of polygon approximation.
+      const sectorData = attrs["data-sector"];
+      if (sectorData) {
+        const parts = sectorData.split(",").map(Number);
+        if (parts.length === 6 && parts.every(Number.isFinite)) {
+          const [cx, cy, outerR, innerR, startAngle, endAngle] = parts;
+          canvas.fillSector(
+            cx * scale,
+            cy * scale,
+            outerR * scale,
+            innerR * scale,
+            startAngle,
+            endAngle,
+            attrs.fill
+          );
+        }
+      } else {
+        const points = parsePathPoints(attrs.d, scale);
+        canvas.fillPolygon(points, attrs.fill);
+        if (points.length > 0) {
+          canvas.drawPolyline(
+            [...points, points[0]],
+            attrs.stroke,
+            numAttr(attrs, "stroke-width", 1) * scale
+          );
+        }
       }
     } else if (name === "text") {
       const rotation = parseSvgRotateTransform(attrs.transform);
@@ -1183,6 +1329,60 @@ class BasicRasterCanvas {
     this.drawPolyline(points, color, width);
   }
 
+  /**
+   * Fill a circular sector (pie slice) with pixel-level precision.
+   * Uses distance + angle tests per pixel instead of polygon scanline,
+   * producing smooth circular edges without polygon approximation artifacts.
+   */
+  fillSector(
+    cx: number,
+    cy: number,
+    outerR: number,
+    innerR: number,
+    startAngle: number,
+    endAngle: number,
+    color: string | undefined
+  ): void {
+    const rgba = parseSvgColor(color);
+    if (!rgba || outerR <= 0) {
+      return;
+    }
+    const x0 = clampInt(Math.floor(cx - outerR), 0, this.width);
+    const x1 = clampInt(Math.ceil(cx + outerR), 0, this.width);
+    const y0 = clampInt(Math.floor(cy - outerR), 0, this.height);
+    const y1 = clampInt(Math.ceil(cy + outerR), 0, this.height);
+    const outerRR = outerR * outerR;
+    const innerRR = innerR * innerR;
+    // Normalise angles to [0, 2π)
+    let sa = startAngle % (Math.PI * 2);
+    if (sa < 0) {
+      sa += Math.PI * 2;
+    }
+    let ea = endAngle % (Math.PI * 2);
+    if (ea < 0) {
+      ea += Math.PI * 2;
+    }
+    const crossesZero = ea < sa;
+    for (let y = y0; y < y1; y++) {
+      const dy = y + 0.5 - cy;
+      for (let x = x0; x < x1; x++) {
+        const dx = x + 0.5 - cx;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 > outerRR || dist2 < innerRR) {
+          continue;
+        }
+        let angle = Math.atan2(dy, dx);
+        if (angle < 0) {
+          angle += Math.PI * 2;
+        }
+        const inAngle = crossesZero ? angle >= sa || angle <= ea : angle >= sa && angle <= ea;
+        if (inAngle) {
+          this.setPixel(x, y, rgba);
+        }
+      }
+    }
+  }
+
   fillPolygon(points: ChartScenePoint[], color: string | undefined): void {
     const rgba = parseSvgColor(color);
     if (!rgba || points.length < 3) {
@@ -1270,10 +1470,12 @@ class BasicRasterCanvas {
 
     const scale = fontSize / font.unitsPerEm;
 
-    // Compute total advance from font metrics, then scale to match measured width
+    // Compute total advance from font metrics, then scale to match measured width.
+    // Iterate by code point (not UTF-16 code unit) so surrogate pairs for
+    // non-BMP characters resolve to a single glyph lookup.
     let totalAdvance = 0;
-    for (let i = 0; i < text.length; i++) {
-      const outline = font.getOutline(text.charCodeAt(i));
+    for (const ch of text) {
+      const outline = font.getOutline(ch.codePointAt(0)!);
       totalAdvance += outline ? outline.advanceWidth * scale : fontSize * 0.4;
     }
     const hScale = totalAdvance > 0 ? textWidth / totalAdvance : 1;
@@ -1285,15 +1487,15 @@ class BasicRasterCanvas {
     const oy = rotation ? rotation.originY : 0;
 
     let curX = startX;
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
+    for (const ch of text) {
+      const code = ch.codePointAt(0)!;
       const outline = font.getOutline(code);
       if (!outline) {
         curX += fontSize * 0.4 * hScale;
         continue;
       }
 
-      const glyph = rasterizeGlyph(outline, fontSize, font.unitsPerEm);
+      const glyph = cachedRasterizeGlyph(outline, fontSize, font.unitsPerEm);
       if (glyph.pixels.length === 0) {
         curX += outline.advanceWidth * scale * hScale;
         continue;
@@ -1336,8 +1538,8 @@ class BasicRasterCanvas {
   ): void {
     const strokeWidth = Math.max(1, fontSize * 0.08);
     let totalGlyphW = 0;
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
+    for (const ch of text) {
+      const code = ch.codePointAt(0)!;
       const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
       totalGlyphW += glyph ? glyph.w : 0.4;
     }
@@ -1345,8 +1547,8 @@ class BasicRasterCanvas {
 
     if (!rotation || rotation.angle === 0) {
       let cx = startX;
-      for (let i = 0; i < text.length; i++) {
-        const code = text.charCodeAt(i);
+      for (const ch of text) {
+        const code = ch.codePointAt(0)!;
         const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
         if (glyph) {
           for (const stroke of glyph.d) {
@@ -1374,8 +1576,8 @@ class BasicRasterCanvas {
       return [ox + dx * cos - dy * sin, oy + dx * sin + dy * cos];
     };
     let cx = startX;
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
+    for (const ch of text) {
+      const code = ch.codePointAt(0)!;
       const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
       if (glyph) {
         for (const stroke of glyph.d) {
@@ -1645,7 +1847,7 @@ function approximateArcPoints(
   }
   const startAngle = Math.atan2(start.y - selected.y, start.x - selected.x);
   const delta = arcDelta(selected, start, end, sweep);
-  const steps = clampInt(Math.ceil((Math.abs(delta) * radius) / 8), 4, 90);
+  const steps = clampInt(Math.ceil((Math.abs(delta) * radius) / 3), 12, 180);
   const points: ChartScenePoint[] = [];
   for (let i = 1; i <= steps; i++) {
     const angle = startAngle + (delta * i) / steps;
@@ -1893,14 +2095,18 @@ export function drawChartPdf(
     );
     page.drawLine({ ...gridline, color: hexToPdfColor(gridline.color) });
   }
-  trace?.push(
-    `line:x:${fmt(scene.axes.x.x1)},${fmt(scene.axes.x.y1)}-${fmt(scene.axes.x.x2)},${fmt(scene.axes.x.y2)}`
-  );
-  page.drawLine({ ...scene.axes.x, color: hexToPdfColor(scene.axes.x.color) });
-  trace?.push(
-    `line:y:${fmt(scene.axes.y.x1)},${fmt(scene.axes.y.y1)}-${fmt(scene.axes.y.x2)},${fmt(scene.axes.y.y2)}`
-  );
-  page.drawLine({ ...scene.axes.y, color: hexToPdfColor(scene.axes.y.color) });
+  if (scene.axes.x) {
+    trace?.push(
+      `line:x:${fmt(scene.axes.x.x1)},${fmt(scene.axes.x.y1)}-${fmt(scene.axes.x.x2)},${fmt(scene.axes.x.y2)}`
+    );
+    page.drawLine({ ...scene.axes.x, color: hexToPdfColor(scene.axes.x.color) });
+  }
+  if (scene.axes.y) {
+    trace?.push(
+      `line:y:${fmt(scene.axes.y.x1)},${fmt(scene.axes.y.y1)}-${fmt(scene.axes.y.x2)},${fmt(scene.axes.y.y2)}`
+    );
+    page.drawLine({ ...scene.axes.y, color: hexToPdfColor(scene.axes.y.color) });
+  }
   if (scene.axes.x2) {
     trace?.push(
       `line:x2:${fmt(scene.axes.x2.x1)},${fmt(scene.axes.x2.y1)}-${fmt(scene.axes.x2.x2)},${fmt(scene.axes.x2.y2)}`
@@ -2302,7 +2508,8 @@ function getPlotRect(
   hasTitle: boolean,
   legend: ChartSceneLegend,
   model: ChartModel,
-  dataTableHeight = 0
+  dataTableHeight = 0,
+  categoryCount = 0
 ): ChartSceneRect {
   const axes = model.chart.plotArea.axes;
   const leftAxis = axes.find(axis => !axis.delete && axis.axPos === "l");
@@ -2319,44 +2526,59 @@ function getPlotRect(
   // the plot even when the author explicitly asked for an overlay
   // legend.
   const legendReserves = legend.visible && !(model.chart.legend?.overlay === true);
-  const leftLegendPad = legendReserves && legend.position === "l" ? legend.rect.width + 12 : 0;
+  const leftLegendPad =
+    legendReserves && legend.position === "l" ? legend.rect.width + LEGEND_GAP_LEFT : 0;
   const rightLegendPad =
     legendReserves && (legend.position === "r" || legend.position === "tr")
-      ? legend.rect.width + 16
+      ? legend.rect.width + LEGEND_GAP_RIGHT
       : 0;
-  const left = 58 + (leftAxis?.title ? 18 : 0) + leftLegendPad;
-  const right = 24 + (rightAxis ? 42 : 0) + (rightAxis?.title ? 18 : 0) + rightLegendPad;
+  const left = PLOT_MARGIN_LEFT + (leftAxis?.title ? PLOT_AXIS_TITLE_PADDING : 0) + leftLegendPad;
+  const right =
+    PLOT_MARGIN_RIGHT +
+    (rightAxis ? PLOT_SECONDARY_AXIS_WIDTH : 0) +
+    (rightAxis?.title ? PLOT_AXIS_TITLE_PADDING : 0) +
+    rightLegendPad;
   const top =
-    (hasTitle ? 52 : 24) +
-    (topAxis ? 22 : 0) +
-    (topAxis?.title ? 16 : 0) +
-    (legendReserves && legend.position === "t" ? 30 : 0);
+    (hasTitle ? PLOT_MARGIN_TOP_WITH_TITLE : PLOT_MARGIN_TOP_NO_TITLE) +
+    (topAxis ? PLOT_TOP_AXIS_HEIGHT : 0) +
+    (topAxis?.title ? PLOT_TOP_AXIS_TITLE_HEIGHT : 0) +
+    (legendReserves && legend.position === "t" ? PLOT_TOP_LEGEND_PADDING : 0);
   // Bottom-margin budget:
   //
-  //   * 24 px base (chart-edge padding + a safety margin for stroke
-  //     rounding on the axis line).
-  //   * 22 px for axis tick labels — reserved when a bottom axis exists
-  //     AND its labels are actually emitted. When a data table replaces
-  //     the category labels (`buildChartScene` suppresses them in that
-  //     case) we reclaim the space so the data table's own header
-  //     doesn't push the plot up unnecessarily.
+  //   * PLOT_MARGIN_BOTTOM px base (chart-edge padding + a safety margin
+  //     for stroke rounding on the axis line).
+  //   * PLOT_BOTTOM_AXIS_LABEL_HEIGHT px for axis tick labels — reserved
+  //     when a bottom axis exists AND its labels are actually emitted.
+  //     When a data table replaces the category labels
+  //     (`buildChartScene` suppresses them in that case) we reclaim the
+  //     space so the data table's own header doesn't push the plot up
+  //     unnecessarily.
   //   * Optional bottom-axis title.
   //   * Optional legend at `b` (only when the legend does not overlay).
   //   * Data-table footprint.
-  // Reserve 40% of chart height for the bottom area (rotated X labels,
-  // data table, legend) so the plot area occupies ~50%.
-  const bottomLabelSpace = bottomAxis && dataTableHeight === 0 ? Math.max(22, height * 0.35) : 0;
+  // Bottom label space depends on whether categories will be rotated.
+  // The renderer rotates labels when categoryCount > 6 (see
+  // buildCategoryLabels). Rotated labels need more vertical space,
+  // but we cap at 20% of chart height to avoid squishing the plot.
+  // Non-rotated labels only need the fixed PLOT_BOTTOM_AXIS_LABEL_HEIGHT.
+  const labelsRotated = categoryCount > 6;
+  const bottomLabelSpace =
+    bottomAxis && dataTableHeight === 0
+      ? labelsRotated
+        ? Math.min(Math.max(PLOT_BOTTOM_AXIS_LABEL_HEIGHT, height * 0.15), height * 0.2)
+        : PLOT_BOTTOM_AXIS_LABEL_HEIGHT
+      : 0;
   const bottom =
-    24 +
+    PLOT_MARGIN_BOTTOM +
     bottomLabelSpace +
-    (bottomAxis?.title ? 18 : 0) +
-    (legendReserves && legend.position === "b" ? 28 : 0) +
+    (bottomAxis?.title ? PLOT_AXIS_TITLE_PADDING : 0) +
+    (legendReserves && legend.position === "b" ? PLOT_BOTTOM_LEGEND_PADDING : 0) +
     dataTableHeight;
   const auto: ChartSceneRect = {
     x: left,
     y: top,
-    width: Math.max(10, width - left - right),
-    height: Math.max(10, height - top - bottom)
+    width: Math.max(PLOT_MIN_DIMENSION, width - left - right),
+    height: Math.max(PLOT_MIN_DIMENSION, height - top - bottom)
   };
   const manual = model.chart.plotArea.layout?.manualLayout;
   if (!manual) {
@@ -3031,6 +3253,16 @@ function buildBars(
   // Excel's native behaviour.
   const zero = valueToY(axisBaseline(min, max), min, max, plot);
   return values.map((value, i) => {
+    // Skip NaN/non-finite values — produce a zero-height bar that is
+    // invisible rather than injecting NaN coordinates into SVG/PDF.
+    if (!Number.isFinite(value)) {
+      return {
+        x: plot.x + i * groupWidth + groupWidth * 0.14 + seriesIndex * barWidth,
+        y: zero,
+        width: barWidth,
+        height: 0
+      };
+    }
     const y = valueToY(value, min, max, plot);
     return {
       x: plot.x + i * groupWidth + groupWidth * 0.14 + seriesIndex * barWidth,
@@ -3082,6 +3314,16 @@ function buildHorizontalBars(
   // outside the plot area, making bars overflow the chart frame.
   const zero = valueToX(axisBaseline(min, max), min, max, plot);
   return values.map((value, i) => {
+    // Skip NaN/non-finite values — produce a zero-width bar that is
+    // invisible rather than injecting NaN coordinates into SVG/PDF.
+    if (!Number.isFinite(value)) {
+      return {
+        x: zero,
+        y: plot.y + i * groupHeight + groupHeight * 0.14 + seriesIndex * barHeight,
+        width: 0,
+        height: barHeight
+      };
+    }
     const x = valueToX(value, min, max, plot);
     return {
       x: Math.min(x, zero),
@@ -3801,7 +4043,17 @@ function valueAxisTickPositions(min: number, max: number, axis: ChartAxis | unde
   // Fallback: generate ticks at "nice" round intervals (multiples of
   // 1, 2, 5 × 10^n) targeting ~10 ticks. This matches Excel's auto-
   // generated axis labels (e.g. 0, 20000, 40000, ...).
-  const span = Math.abs(max - min);
+  // Handle reversed axes (`min > max` from `scaling.orientation =
+  // "maxMin"`) by normalising to ascending order for tick generation,
+  // then reversing the result so ticks render in descending order.
+  const reversed = min > max;
+  const lo = reversed ? max : min;
+  const hi = reversed ? min : max;
+  const span = hi - lo;
+  if (span <= 0) {
+    // Degenerate range — return a single tick at the midpoint.
+    return [lo];
+  }
   const rawStep = span / 10;
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
   const residual = rawStep / magnitude;
@@ -3816,17 +4068,20 @@ function valueAxisTickPositions(min: number, max: number, axis: ChartAxis | unde
     niceStep = 10 * magnitude;
   }
   const ticks: number[] = [];
-  const start = Math.ceil(min / niceStep) * niceStep;
-  for (let v = start; v <= max + niceStep * 0.001; v += niceStep) {
+  const start = Math.ceil(lo / niceStep) * niceStep;
+  for (let v = start; v <= hi + niceStep * 0.001; v += niceStep) {
     ticks.push(Math.round(v * 1e10) / 1e10); // avoid floating point noise
     if (ticks.length > 50) {
       break;
     }
   }
   // Ensure 0 is included when the range spans zero
-  if (min <= 0 && max >= 0 && !ticks.includes(0)) {
+  if (lo <= 0 && hi >= 0 && !ticks.includes(0)) {
     ticks.push(0);
     ticks.sort((a, b) => a - b);
+  }
+  if (reversed) {
+    ticks.reverse();
   }
   return ticks;
 }
@@ -4712,10 +4967,22 @@ function buildErrorBars(
           hi = max;
         }
         const plusX = showPlus
-          ? valueToX(baseValue + plusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+          ? Math.max(
+              plot.x,
+              Math.min(
+                plot.x + plot.width,
+                valueToX(baseValue + plusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+              )
+            )
           : p.x;
         const minusX = showMinus
-          ? valueToX(baseValue - minusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+          ? Math.max(
+              plot.x,
+              Math.min(
+                plot.x + plot.width,
+                valueToX(baseValue - minusAmount, lo, hi === lo ? lo + 1 : hi, plot)
+              )
+            )
           : p.x;
         bars.push({
           line: { x1: minusX, y1: p.y, x2: plusX, y2: p.y, color },
@@ -4730,8 +4997,18 @@ function buildErrorBars(
         });
         continue;
       }
-      const plusY = showPlus ? valueToY(value + plusAmount, min, max, plot) : p.y;
-      const minusY = showMinus ? valueToY(value - minusAmount, min, max, plot) : p.y;
+      const plusY = showPlus
+        ? Math.max(
+            plot.y,
+            Math.min(plot.y + plot.height, valueToY(value + plusAmount, min, max, plot))
+          )
+        : p.y;
+      const minusY = showMinus
+        ? Math.max(
+            plot.y,
+            Math.min(plot.y + plot.height, valueToY(value - minusAmount, min, max, plot))
+          )
+        : p.y;
       bars.push({
         line: { x1: p.x, y1: plusY, x2: p.x, y2: minusY, color },
         cap1:
@@ -4981,20 +5258,6 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
   return normalized;
 }
 
-/**
- * Aggregate pivot-chart series so repeated categories are merged and their
- * values summed. Pivot charts reference the full source-table column in
- * their cache, yielding N raw rows (e.g. 10000 transactions) instead of
- * the deduplicated pivot groups that Excel draws (e.g. 8 regions).
- *
-/**
- * Second definition of `axisLogBase` has been merged with
- * {@link axisLogBase} above; this helper is no longer needed.
- * Kept as a no-op placeholder to preserve line-number references in
- * stack traces during the refactor — callers now route through the
- * canonical helper.
- */
-
 function seriesColor(series: SeriesBase, index: number): string {
   return (
     previewShapeFillColor(series.spPr ? getSpPrFill(series.spPr) : undefined, undefined) ??
@@ -5003,16 +5266,16 @@ function seriesColor(series: SeriesBase, index: number): string {
 }
 
 /**
- * Collect per-point fill-colour overrides from `series.dataPoints[]`.
- * Returns a sparse array keyed by `dataPoint.index` — callers combine
- * with their default palette (`colors[i] ?? palette[i % ...]`). Used
- * by pie / doughnut / ofPie scenes where the overwhelmingly common
- * case is one colour per slice driven by `c:dPt` / `cx:dataPt`; the
- * previous renderer ignored `dataPoints` entirely and rotated every
- * slice through the 6-entry default palette.
+ * Generic collector that iterates `series.dataPoints[]` and extracts a
+ * per-point value using the supplied `extractor` function. Returns a sparse
+ * array keyed by `dataPoint.index`; callers combine the result with their
+ * default palette or zero-value fallback.
  */
-function collectDataPointColors(series: NormalizedSeries | undefined): Array<string | undefined> {
-  const out: Array<string | undefined> = [];
+function collectDataPointProperty<T>(
+  series: NormalizedSeries | undefined,
+  extractor: (dp: DataPoint) => T | undefined
+): Array<T | undefined> {
+  const out: Array<T | undefined> = [];
   if (!series) {
     return out;
   }
@@ -5024,12 +5287,19 @@ function collectDataPointColors(series: NormalizedSeries | undefined): Array<str
     if (typeof dp.index !== "number" || dp.index < 0) {
       continue;
     }
-    const color = previewShapeFillColor(dp.spPr ? getSpPrFill(dp.spPr) : undefined, undefined);
-    if (color) {
-      out[dp.index] = color;
+    const value = extractor(dp);
+    if (value !== undefined) {
+      out[dp.index] = value;
     }
   }
   return out;
+}
+
+function collectDataPointColors(series: NormalizedSeries | undefined): Array<string | undefined> {
+  return collectDataPointProperty(
+    series,
+    dp => previewShapeFillColor(dp.spPr ? getSpPrFill(dp.spPr) : undefined, undefined) || undefined
+  );
 }
 
 /**
@@ -5042,23 +5312,11 @@ function collectDataPointColors(series: NormalizedSeries | undefined): Array<str
 function collectDataPointExplosions(
   series: NormalizedSeries | undefined
 ): Array<number | undefined> {
-  const out: Array<number | undefined> = [];
-  if (!series) {
-    return out;
-  }
-  const dataPoints = (series.series as SeriesBase & { dataPoints?: DataPoint[] }).dataPoints;
-  if (!dataPoints) {
-    return out;
-  }
-  for (const dp of dataPoints) {
-    if (typeof dp.index !== "number" || dp.index < 0) {
-      continue;
-    }
-    if (typeof dp.explosion === "number" && Number.isFinite(dp.explosion) && dp.explosion > 0) {
-      out[dp.index] = dp.explosion;
-    }
-  }
-  return out;
+  return collectDataPointProperty(series, dp =>
+    typeof dp.explosion === "number" && Number.isFinite(dp.explosion) && dp.explosion > 0
+      ? dp.explosion
+      : undefined
+  );
 }
 
 /**
@@ -5097,7 +5355,7 @@ function buildAxisContext(model: ChartModel, normalized: NormalizedSeries[]): Ch
   const defaultXRange = getValueRange(
     normalized.map(s => scatterXValues(s)),
     undefined,
-    { includeZero: false }
+    { includeZero: false, padding: 0.05 }
   );
   const yValuesByAxisId = new Map<number, number[][]>();
   const xValuesByAxisId = new Map<number, number[][]>();
@@ -5387,24 +5645,24 @@ function legendRect(
   hasTitle: boolean,
   labels: string[]
 ): ChartSceneRect {
-  // Each legend entry renders as a 12-px colour swatch + 4 px gap + label
-  // + 16 px inter-item gap. Using real text metrics here (rather than a
-  // hardcoded `86` per item) lets longer series names push the legend
-  // wider instead of being truncated by the viewport clipping region.
-  const entryPadding = 32;
-  const swatchWidth = 16;
-  const legendFontSize = 11;
+  // Each legend entry renders as a colour swatch + gap + label + inter-item
+  // gap. Using real text metrics here (rather than a hardcoded pixel-per-item
+  // value) lets longer series names push the legend wider instead of being
+  // truncated by the viewport clipping region.
   const entryWidths = labels.map(
-    label => swatchWidth + estimateTextWidth(label, legendFontSize) + entryPadding
+    label => LEGEND_SWATCH_WIDTH + estimateTextWidth(label, LEGEND_FONT_SIZE) + LEGEND_ENTRY_PADDING
   );
   if (orientation === "horizontal") {
     const totalEntries = entryWidths.reduce((sum, w) => sum + w, 0);
-    const legendWidth = Math.min(width - 48, Math.max(96, Math.ceil(totalEntries)));
+    const legendWidth = Math.min(
+      width - LEGEND_HORIZ_INSET,
+      Math.max(LEGEND_MIN_EXTENT, Math.ceil(totalEntries))
+    );
     return {
       x: (width - legendWidth) / 2,
-      y: position === "t" ? (hasTitle ? 48 : 20) : height - 26,
+      y: position === "t" ? (hasTitle ? LEGEND_TOP_BELOW_TITLE : LEGEND_TOP_NO_TITLE) : height - 26,
       width: legendWidth,
-      height: 18
+      height: LEGEND_ROW_HEIGHT
     };
   }
   const longestLabelWidth = entryWidths.reduce((max, w) => (w > max ? w : max), 0);
@@ -5412,18 +5670,24 @@ function legendRect(
   // widest label, not the total; ensure a sensible minimum so short names
   // don't produce an absurdly narrow legend column.
   const legendColumnWidth = Math.min(
-    Math.max(96, Math.ceil(longestLabelWidth)),
-    Math.max(96, width - 64)
+    Math.max(LEGEND_MIN_EXTENT, Math.ceil(longestLabelWidth)),
+    Math.max(LEGEND_MIN_EXTENT, width - 64)
   );
-  const legendHeight = Math.min(height - 48, Math.max(18, labels.length * 18));
+  const legendHeight = Math.min(
+    height - LEGEND_VERT_INSET,
+    Math.max(LEGEND_ROW_HEIGHT, labels.length * LEGEND_ROW_HEIGHT)
+  );
   return {
-    x: position === "l" ? 20 : width - legendColumnWidth - 20,
+    x: position === "l" ? LEGEND_OUTER_MARGIN : width - legendColumnWidth - LEGEND_OUTER_MARGIN,
     y:
       position === "tr"
         ? hasTitle
-          ? 44
-          : 20
-        : Math.max(hasTitle ? 52 : 24, (height - legendHeight) / 2),
+          ? LEGEND_TR_WITH_TITLE
+          : LEGEND_TOP_NO_TITLE
+        : Math.max(
+            hasTitle ? PLOT_MARGIN_TOP_WITH_TITLE : PLOT_MARGIN_TOP_NO_TITLE,
+            (height - legendHeight) / 2
+          ),
     width: legendColumnWidth,
     height: legendHeight
   };
@@ -6211,7 +6475,7 @@ function errorAmounts(
 function getValueRange(
   seriesValues: number[][],
   axis?: ChartAxis,
-  options: { includeZero?: boolean } = {}
+  options: { includeZero?: boolean; padding?: number } = {}
 ): ValueRange {
   const values = seriesValues.flat().filter(Number.isFinite);
   const includeZero = options.includeZero !== false;
@@ -6254,6 +6518,14 @@ function getValueRange(
   // Widen when max <= min so downstream `valueToY` has a non-zero span
   // to divide by.
   const base: ValueRange = max <= min ? { min, max: min + 1 } : { min, max };
+  // Apply symmetric padding (e.g. 5% each side) so scatter/bubble edge
+  // points don't land exactly on the plot boundary.
+  const pad = options.padding ?? 0;
+  if (pad > 0 && !axis?.scaling?.min && !axis?.scaling?.max) {
+    const span = base.max - base.min;
+    base.min -= span * pad;
+    base.max += span * pad;
+  }
   // `scaling.orientation === "maxMin"` reverses the axis — low values
   // render at the top-right instead of the bottom-left. The renderer's
   // `valueToY` / `valueToX` helpers compute position from the passed-in
@@ -6860,9 +7132,9 @@ function renderSvgPieSlice(slice: ChartScenePieSlice): string {
     const iy1 = slice.cy + Math.sin(slice.endAngle) * slice.innerRadius;
     const ix2 = slice.cx + Math.cos(slice.startAngle) * slice.innerRadius;
     const iy2 = slice.cy + Math.sin(slice.startAngle) * slice.innerRadius;
-    return `<path d="M ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} L ${fmt(ix1)} ${fmt(iy1)} A ${fmt(slice.innerRadius)} ${fmt(slice.innerRadius)} 0 ${large} ${innerSweepFlag} ${fmt(ix2)} ${fmt(iy2)} Z" fill="${slice.color}"/>`;
+    return `<path d="M ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} L ${fmt(ix1)} ${fmt(iy1)} A ${fmt(slice.innerRadius)} ${fmt(slice.innerRadius)} 0 ${large} ${innerSweepFlag} ${fmt(ix2)} ${fmt(iy2)} Z" fill="${slice.color}" data-sector="${fmt(slice.cx)},${fmt(slice.cy)},${fmt(slice.radius)},${fmt(slice.innerRadius)},${fmt(slice.startAngle)},${fmt(slice.endAngle)}"/>`;
   }
-  return `<path d="M ${fmt(slice.cx)} ${fmt(slice.cy)} L ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} Z" fill="${slice.color}"/>`;
+  return `<path d="M ${fmt(slice.cx)} ${fmt(slice.cy)} L ${fmt(x1)} ${fmt(y1)} A ${fmt(slice.radius)} ${fmt(slice.radius)} 0 ${large} ${sweepFlag} ${fmt(x2)} ${fmt(y2)} Z" fill="${slice.color}" data-sector="${fmt(slice.cx)},${fmt(slice.cy)},${fmt(slice.radius)},0,${fmt(slice.startAngle)},${fmt(slice.endAngle)}"/>`;
 }
 
 function renderSvgDataTable(parts: string[], table: ChartSceneDataTable): void {
@@ -6993,6 +7265,18 @@ function drawPdfSeries(page: ChartPdfDrawingSurface, series: ChartSceneSeries): 
   if (series.type === "bar") {
     const fill = hexToPdfColor(series.color);
     for (const bar of series.bars) {
+      // Skip bars with NaN/non-finite geometry or zero area — these
+      // represent gap points (blank/error source cells) and must not
+      // emit invalid coordinates into the PDF stream.
+      if (
+        !Number.isFinite(bar.x) ||
+        !Number.isFinite(bar.y) ||
+        !Number.isFinite(bar.width) ||
+        !Number.isFinite(bar.height) ||
+        (bar.width === 0 && bar.height === 0)
+      ) {
+        continue;
+      }
       // Skip the front-face rect here when the series has a `projection3D`
       // hint — the dedicated bar3D pass at the end of this function
       // (`drawPdfBar3DBox`) paints the front face itself along with the
@@ -7373,8 +7657,8 @@ function translateScene(
     title: scene.title ? mapText(scene.title) : undefined,
     plot: mapRect(scene.plot),
     axes: {
-      x: mapLine(scene.axes.x),
-      y: mapLine(scene.axes.y),
+      x: scene.axes.x ? mapLine(scene.axes.x) : undefined,
+      y: scene.axes.y ? mapLine(scene.axes.y) : undefined,
       x2: scene.axes.x2 ? mapLine(scene.axes.x2) : undefined,
       y2: scene.axes.y2 ? mapLine(scene.axes.y2) : undefined
     },
@@ -7651,7 +7935,10 @@ function arcPolyline(
   endAngle: number
 ): ChartPdfPathOp[] {
   const sweep = endAngle - startAngle;
-  const segments = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 12)));
+  // Use high segment density for smooth arcs: ~1 segment per 2° of sweep,
+  // minimum 8 segments. A 36° slice (10% pie) gets 18 segments; a full
+  // circle gets 180. This eliminates visible polygon facets in PDF output.
+  const segments = Math.max(8, Math.ceil((Math.abs(sweep) * radius) / 3));
   const ops: ChartPdfPathOp[] = [];
   for (let i = 1; i <= segments; i++) {
     ops.push({ op: "line", ...polarPoint(cx, cy, radius, startAngle + (sweep * i) / segments) });
@@ -7946,7 +8233,7 @@ function truncateLabel(label: string): string {
   if (cps.length <= 12) {
     return label;
   }
-  return `${cps.slice(0, 11).join("")}...`;
+  return `${cps.slice(0, 9).join("")}\u2026`;
 }
 
 /**

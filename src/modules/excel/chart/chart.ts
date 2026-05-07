@@ -677,7 +677,11 @@ class Chart {
       // resolve the title text without waiting for a worksheet-side
       // recalc. `fillChartCaches` no-ops for non-formula titles and
       // already-populated caches, so calling it here is safe.
-      this._refreshCaches();
+      if (this.isChartEx) {
+        this._refreshChartExCaches();
+      } else {
+        this._refreshCaches();
+      }
       return;
     }
     if (typeof value === "object" && "paragraphs" in value) {
@@ -947,24 +951,7 @@ class Chart {
     const ctg = this.chartTypes[groupIndex];
     if (ctg) {
       this._markDirty();
-      // Pick an idx/order strictly greater than every existing series
-      // across all groups. `sum of lengths` (used previously) assumed
-      // every existing series had contiguous indices `[0, N-1]`, which
-      // breaks after a `removeSeries` or for charts loaded from files
-      // with non-contiguous authored indices — the new series then
-      // collides with an existing `c:idx`, producing malformed OOXML
-      // that Excel either rejects outright or silently collapses to a
-      // single series on reopen.
-      let maxIdx = -1;
-      for (const g of this.chartTypes) {
-        for (const s of g.series) {
-          const idx = typeof s.index === "number" ? s.index : -1;
-          if (Number.isFinite(idx) && idx > maxIdx) {
-            maxIdx = idx;
-          }
-        }
-      }
-      const nextIdx = maxIdx + 1;
+      const nextIdx = this._nextSeriesIndex();
       series.index = nextIdx;
       series.order = nextIdx;
       // `ctg.series` is a discriminated union keyed on `ctg.type` — TS can't
@@ -1065,27 +1052,7 @@ class Chart {
     if (!ctg) {
       return false;
     }
-    // OOXML `c:ser/@idx` is unique across the whole chart, not per
-    // chart-type group. For combo charts the new series must take the
-    // next index across *all* groups, not just the target group — else
-    // a combo chart with two groups of 3 series each that adds one new
-    // series to group 0 collides with the existing series at index 3
-    // in group 1.
-    //
-    // Scan for the maximum authored index (not the series count) so
-    // post-`removeSeries` state and non-contiguous authored indices
-    // still produce a unique new slot. See `addSeries` for the full
-    // rationale on why `sum of lengths` is insufficient.
-    let maxIdx = -1;
-    for (const g of this.chartTypes) {
-      for (const s of g.series) {
-        const idx = typeof s.index === "number" ? s.index : -1;
-        if (Number.isFinite(idx) && idx > maxIdx) {
-          maxIdx = idx;
-        }
-      }
-    }
-    const index = maxIdx + 1;
+    const index = this._nextSeriesIndex();
     // `buildChartSeriesForType` can throw for invalid options (e.g. a
     // `pie` chart given `scatter`-only fields). Build first, mark
     // dirty only after the push lands — otherwise a failing build
@@ -1305,21 +1272,57 @@ class Chart {
   // Private helpers
   // ===========================================================================
 
+  /**
+   * Compute the next available series index across all chart type groups.
+   * OOXML `c:ser/@idx` must be unique within the entire chart. Scans for
+   * the maximum authored index (not the series count) so post-removeSeries
+   * state and non-contiguous authored indices still produce a unique slot.
+   */
+  private _nextSeriesIndex(): number {
+    let maxIdx = -1;
+    for (const g of this.chartTypes) {
+      for (const s of g.series) {
+        const idx = typeof s.index === "number" ? s.index : -1;
+        if (Number.isFinite(idx) && idx > maxIdx) {
+          maxIdx = idx;
+        }
+      }
+    }
+    return maxIdx + 1;
+  }
+
   private _markDirty(preferRawPatch = false, requireRawPatch = false): void {
     if (this.chartNumber > 0) {
       const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
       if (entry) {
         entry.dirty = true;
-        entry.preferRawPatch = preferRawPatch;
-        entry.requireRawPatch = requireRawPatch;
+        // Once any mutation drops `preferRawPatch`, a full rebuild is
+        // required — a subsequent minor mutation must not re-enable
+        // patching. Conversely, if the entry was already marked for
+        // full rebuild, a minor mutation should not downgrade it back
+        // to patch mode.
+        if (!preferRawPatch) {
+          entry.preferRawPatch = false;
+        } else if (entry.preferRawPatch === undefined) {
+          entry.preferRawPatch = true;
+        }
+        if (requireRawPatch) {
+          entry.requireRawPatch = true;
+        }
       }
     }
     if (this.chartExNumber > 0) {
       const entry = this.worksheet.workbook.getChartExStructuredEntry(this.chartExNumber);
       if (entry) {
         entry.dirty = true;
-        entry.preferRawPatch = preferRawPatch;
-        entry.requireRawPatch = requireRawPatch;
+        if (!preferRawPatch) {
+          entry.preferRawPatch = false;
+        } else if (entry.preferRawPatch === undefined) {
+          entry.preferRawPatch = true;
+        }
+        if (requireRawPatch) {
+          entry.requireRawPatch = true;
+        }
         // Invalidate the ChartExModel.rawXml cache on every structural
         // mutation (title / legend / spPr setters, addSeries etc.) —
         // direct consumers of `renderChartEx(model)` (standalone
@@ -1421,34 +1424,35 @@ class Chart {
     if (!model) {
       return;
     }
-    try {
-      // Temporarily lift _skipCache so fillChartExCaches actually populates
-      const skipped: Array<{ dim: Record<string, unknown>; field: "_skipCache" }> = [];
-      for (const entry of model.chartSpace.chartData.data) {
-        const str = entry.strDim as Record<string, unknown> | undefined;
-        if (str?.["_skipCache"]) {
-          skipped.push({ dim: str, field: "_skipCache" });
-          delete str["_skipCache"];
-        }
-        const num = entry.numDim as Record<string, unknown> | undefined;
-        if (num?.["_skipCache"]) {
-          skipped.push({ dim: num, field: "_skipCache" });
-          delete num["_skipCache"];
-        }
+    // Temporarily lift _skipCache so fillChartExCaches actually populates
+    const skipped: Array<{ dim: Record<string, unknown>; field: "_skipCache" }> = [];
+    for (const entry of model.chartSpace.chartData.data) {
+      const str = entry.strDim as Record<string, unknown> | undefined;
+      if (str?.["_skipCache"]) {
+        skipped.push({ dim: str, field: "_skipCache" });
+        delete str["_skipCache"];
       }
+      const num = entry.numDim as Record<string, unknown> | undefined;
+      if (num?.["_skipCache"]) {
+        skipped.push({ dim: num, field: "_skipCache" });
+        delete num["_skipCache"];
+      }
+    }
 
+    try {
       fillChartExCaches(
         model,
         this.worksheet.workbook as unknown as Parameters<typeof fillChartExCaches>[1],
         this.worksheet as unknown as Parameters<typeof fillChartExCaches>[2]
       );
-
-      // Restore _skipCache so the writer still suppresses cache output
+    } catch {
+      // Best-effort — same rationale as _refreshCaches.
+    } finally {
+      // Restore _skipCache so the writer still suppresses cache output,
+      // even if fillChartExCaches threw an error.
       for (const { dim } of skipped) {
         dim["_skipCache"] = true;
       }
-    } catch {
-      // Best-effort — same rationale as _refreshCaches.
     }
   }
 

@@ -396,16 +396,16 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
       case "pageMargins":
         if (this.model) {
           this.model.pageMargins = {
-            l: attrs.left !== undefined ? parseFloat(attrs.left) : undefined,
-            r: attrs.right !== undefined ? parseFloat(attrs.right) : undefined,
-            t: attrs.top !== undefined ? parseFloat(attrs.top) : undefined,
-            b: attrs.bottom !== undefined ? parseFloat(attrs.bottom) : undefined,
-            left: attrs.left !== undefined ? parseFloat(attrs.left) : undefined,
-            right: attrs.right !== undefined ? parseFloat(attrs.right) : undefined,
-            top: attrs.top !== undefined ? parseFloat(attrs.top) : undefined,
-            bottom: attrs.bottom !== undefined ? parseFloat(attrs.bottom) : undefined,
-            header: attrs.header !== undefined ? parseFloat(attrs.header) : undefined,
-            footer: attrs.footer !== undefined ? parseFloat(attrs.footer) : undefined
+            l: parseMargin(attrs.left),
+            r: parseMargin(attrs.right),
+            t: parseMargin(attrs.top),
+            b: parseMargin(attrs.bottom),
+            left: parseMargin(attrs.left),
+            right: parseMargin(attrs.right),
+            top: parseMargin(attrs.top),
+            bottom: parseMargin(attrs.bottom),
+            header: parseMargin(attrs.header),
+            footer: parseMargin(attrs.footer)
           };
         }
         break;
@@ -594,8 +594,20 @@ function parseBool(value: string | undefined): boolean | undefined {
   return value === undefined ? undefined : value === "1" || value === "true";
 }
 
+function parseMargin(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function parseNumber(value: string | undefined): number | undefined {
-  return value === undefined ? undefined : Number(value);
+  if (value === undefined) {
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export { ChartsheetXform };

@@ -498,7 +498,7 @@ function buildSeriesAndData(
         // valid. (Excel renders blank in this fallback; emit with a
         // console warning in non-production so the author can
         // diagnose why their hierarchical chart is empty.)
-        if (process.env.NODE_ENV !== "production") {
+        if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
           console.warn(
             "[excelts] Treemap/sunburst hierarchy + categories could not be combined into a " +
               "contiguous multi-column range. Excel will render the chart as an empty plot area. " +

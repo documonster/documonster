@@ -16,18 +16,21 @@ interface PresetConfig {
   seriesDefaults?: PresetSeriesDefaults;
 }
 
-// Shared factory for bar/column preset variants. Accepts 2-D direction,
-// grouping and an optional 3-D shape. When `shape` is passed the preset
-// automatically upgrades to `bar3D` (cone/cylinder/pyramid require 3D).
+// Shared factory for bar/column preset variants. Accepts a base type ("bar"
+// or "bar3D"), direction, grouping and an optional 3-D shape. When `shape`
+// is passed the type is always forced to "bar3D" (cone/cylinder/pyramid
+// require 3D). The previous code had two nearly-identical factories
+// (`barPreset` / `bar3DPreset`) that differed only in the default type.
 const barPreset = (
   barDir: NonNullable<AddChartOptions["barDir"]>,
   grouping: Extract<
     NonNullable<AddChartOptions["grouping"]>,
     "clustered" | "stacked" | "percentStacked"
   >,
-  shape?: NonNullable<AddChartOptions["shape"]>
+  shape?: NonNullable<AddChartOptions["shape"]>,
+  type: "bar" | "bar3D" = "bar"
 ): PresetConfig => ({
-  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type: "bar", barDir, grouping }
+  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type, barDir, grouping }
 });
 
 const bar3DPreset = (
@@ -37,9 +40,7 @@ const bar3DPreset = (
     "clustered" | "stacked" | "percentStacked"
   >,
   shape?: NonNullable<AddChartOptions["shape"]>
-): PresetConfig => ({
-  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type: "bar3D", barDir, grouping }
-});
+): PresetConfig => barPreset(barDir, grouping, shape, "bar3D");
 
 export const CHART_PRESETS = {
   columnClustered: barPreset("col", "clustered"),

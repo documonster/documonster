@@ -449,26 +449,26 @@ function validateChartLevelOptions(opts: AddChartOptions, path: string): void {
   }
   if (opts.showMarker !== undefined) {
     assertChartOptions(
-      opts.type === "line" || opts.type === "line3D" || opts.type === "radar",
-      `${path}.showMarker is only valid for line, line3D, and radar charts.`
+      opts.type === "line" || opts.type === "radar",
+      `${path}.showMarker is only valid for line and radar charts (line3D does not support markers).`
     );
   }
   if (opts.smooth !== undefined) {
     assertChartOptions(
-      opts.type === "line" || opts.type === "line3D" || opts.type === "scatter",
-      `${path}.smooth is only valid for line, line3D, and scatter charts.`
+      opts.type === "line" || opts.type === "scatter",
+      `${path}.smooth is only valid for line and scatter charts (line3D does not support smooth).`
     );
   }
   if (opts.hiLowLines !== undefined) {
     assertChartOptions(
-      opts.type === "line" || opts.type === "line3D" || opts.type === "stock",
-      `${path}.hiLowLines is only valid for line, line3D, and stock charts.`
+      opts.type === "line" || opts.type === "stock",
+      `${path}.hiLowLines is only valid for line and stock charts (line3D does not support hiLowLines).`
     );
   }
   if (opts.upDownBars !== undefined) {
     assertChartOptions(
-      opts.type === "line" || opts.type === "line3D" || opts.type === "stock",
-      `${path}.upDownBars is only valid for line, line3D, and stock charts.`
+      opts.type === "line" || opts.type === "stock",
+      `${path}.upDownBars is only valid for line and stock charts (line3D does not support upDownBars).`
     );
   }
   if (opts.dropLines !== undefined) {
@@ -797,6 +797,12 @@ function validateAxisOptions(opts: AddAxisOptions | undefined, path: string): vo
     assertNumberInRange(opts.minorUnit, `${path}.minorUnit`, 0, Number.MAX_SAFE_INTEGER);
     assertChartOptions(opts.minorUnit > 0, `${path}.minorUnit must be greater than 0.`);
   }
+  if (opts.majorUnit !== undefined && opts.minorUnit !== undefined) {
+    assertChartOptions(
+      opts.minorUnit <= opts.majorUnit,
+      `${path}.minorUnit must be less than or equal to ${path}.majorUnit.`
+    );
+  }
   if (opts.logBase !== undefined) {
     assertNumberInRange(opts.logBase, `${path}.logBase`, 2, 1000);
   }
@@ -988,7 +994,7 @@ function makeSolidFill(hex: string): ShapeProperties {
 function makeSeriesTx(
   name: string | { formula: string } | undefined
 ): { strRef?: StringReference; value?: string } | undefined {
-  if (!name) {
+  if (name === undefined) {
     return undefined;
   }
   if (typeof name === "string") {
@@ -1086,10 +1092,10 @@ function buildDataLabelsFromOpts(opts: AddDataLabelsOptions): DataLabels {
   if (opts.position) {
     dl.position = opts.position;
   }
-  if (opts.separator) {
+  if (opts.separator !== undefined) {
     dl.separator = opts.separator;
   }
-  if (opts.numFmt) {
+  if (opts.numFmt !== undefined) {
     dl.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
   } else if (opts.numFmtLinked !== undefined) {
     // Allow `numFmtLinked` without an explicit `numFmt` to re-link the
@@ -1179,7 +1185,7 @@ function buildDataLabelEntryFromOpts(opts: AddDataLabelEntryOptions): DataLabelE
 
 function buildTrendlineFromOpts(opts: AddTrendlineOptions): Trendline {
   const t: Trendline = { type: opts.type };
-  if (opts.name) {
+  if (opts.name !== undefined) {
     t.name = opts.name;
   }
   if (opts.order !== undefined) {
@@ -1224,10 +1230,10 @@ function buildTrendlineFromOpts(opts: AddTrendlineOptions): Trendline {
 
 function buildTrendlineLabelFromOpts(opts: AddTrendlineLabelOptions): TrendlineLabel {
   const lbl: TrendlineLabel = {};
-  if (opts.text) {
+  if (opts.text !== undefined) {
     lbl.text = opts.text;
   }
-  if (opts.numFmt) {
+  if (opts.numFmt !== undefined) {
     lbl.numFmt = { formatCode: opts.numFmt, sourceLinked: opts.numFmtLinked };
   } else if (opts.numFmtLinked !== undefined) {
     // Allow standalone `numFmtLinked` — see `buildDataLabelsFromOpts`
@@ -1452,8 +1458,14 @@ function applyPictureFillToSeries(
   }
 }
 
-function buildBarSeries(opts: AddChartSeriesOptions, idx: number): BarSeries {
-  const s: BarSeries = { index: idx, order: idx };
+/**
+ * Populates common category-value series fields (tx, cat, val) shared by
+ * bar, line, pie, area, radar, and surface series builders.
+ */
+function populateCatValBase(
+  s: { tx?: unknown; cat?: unknown; val?: unknown },
+  opts: AddChartSeriesOptions
+): void {
   s.tx = makeSeriesTx(opts.name);
   if (opts.categories) {
     s.cat = makeAxisData(opts.categories);
@@ -1461,48 +1473,49 @@ function buildBarSeries(opts: AddChartSeriesOptions, idx: number): BarSeries {
   if (opts.values) {
     s.val = makeNumData(opts.values);
   }
+}
+
+/**
+ * Build a single error-bars entry from options, normalising the
+ * array-vs-single input shape used by non-scatter/bubble series.
+ */
+function buildSingleErrorBars(
+  opts: AddChartSeriesOptions["errorBars"]
+): ReturnType<typeof buildErrorBarsFromOpts> | undefined {
+  if (!opts) {
+    return undefined;
+  }
+  if (Array.isArray(opts)) {
+    return opts.length > 0 ? buildErrorBarsFromOpts(opts[0]) : undefined;
+  }
+  return buildErrorBarsFromOpts(opts);
+}
+
+function buildBarSeries(opts: AddChartSeriesOptions, idx: number): BarSeries {
+  const s: BarSeries = { index: idx, order: idx };
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts, { supportsPictureOptions: true });
   if (opts.invertIfNegative !== undefined) {
     s.invertIfNegative = opts.invertIfNegative;
   }
-  if (opts.errorBars) {
-    s.errorBars = Array.isArray(opts.errorBars)
-      ? buildErrorBarsFromOpts(opts.errorBars[0])
-      : buildErrorBarsFromOpts(opts.errorBars);
-  }
+  s.errorBars = buildSingleErrorBars(opts.errorBars);
   return s;
 }
 
 function buildLineSeries(opts: AddChartSeriesOptions, idx: number): LineSeries {
   const s: LineSeries = { index: idx, order: idx };
-  s.tx = makeSeriesTx(opts.name);
-  if (opts.categories) {
-    s.cat = makeAxisData(opts.categories);
-  }
-  if (opts.values) {
-    s.val = makeNumData(opts.values);
-  }
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts);
   if (opts.smooth !== undefined) {
     s.smooth = opts.smooth;
   }
-  if (opts.errorBars) {
-    s.errorBars = Array.isArray(opts.errorBars)
-      ? buildErrorBarsFromOpts(opts.errorBars[0])
-      : buildErrorBarsFromOpts(opts.errorBars);
-  }
+  s.errorBars = buildSingleErrorBars(opts.errorBars);
   return s;
 }
 
 function buildPieSeries(opts: AddChartSeriesOptions, idx: number): PieSeries {
   const s: PieSeries = { index: idx, order: idx };
-  s.tx = makeSeriesTx(opts.name);
-  if (opts.categories) {
-    s.cat = makeAxisData(opts.categories);
-  }
-  if (opts.values) {
-    s.val = makeNumData(opts.values);
-  }
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts);
   if (opts.explosion !== undefined) {
     s.explosion = opts.explosion;
@@ -1512,19 +1525,9 @@ function buildPieSeries(opts: AddChartSeriesOptions, idx: number): PieSeries {
 
 function buildAreaSeries(opts: AddChartSeriesOptions, idx: number): AreaSeries {
   const s: AreaSeries = { index: idx, order: idx };
-  s.tx = makeSeriesTx(opts.name);
-  if (opts.categories) {
-    s.cat = makeAxisData(opts.categories);
-  }
-  if (opts.values) {
-    s.val = makeNumData(opts.values);
-  }
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts);
-  if (opts.errorBars) {
-    s.errorBars = Array.isArray(opts.errorBars)
-      ? buildErrorBarsFromOpts(opts.errorBars[0])
-      : buildErrorBarsFromOpts(opts.errorBars);
-  }
+  s.errorBars = buildSingleErrorBars(opts.errorBars);
   return s;
 }
 
@@ -1576,26 +1579,14 @@ function buildBubbleSeries(opts: AddChartSeriesOptions, idx: number): BubbleSeri
 
 function buildRadarSeries(opts: AddChartSeriesOptions, idx: number): RadarSeries {
   const s: RadarSeries = { index: idx, order: idx };
-  s.tx = makeSeriesTx(opts.name);
-  if (opts.categories) {
-    s.cat = makeAxisData(opts.categories);
-  }
-  if (opts.values) {
-    s.val = makeNumData(opts.values);
-  }
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts);
   return s;
 }
 
 function buildSurfaceSeries(opts: AddChartSeriesOptions, idx: number): SurfaceSeries {
   const s: SurfaceSeries = { index: idx, order: idx };
-  s.tx = makeSeriesTx(opts.name);
-  if (opts.categories) {
-    s.cat = makeAxisData(opts.categories);
-  }
-  if (opts.values) {
-    s.val = makeNumData(opts.values);
-  }
+  populateCatValBase(s, opts);
   applySeriesOptions(s, opts);
   return s;
 }
@@ -1870,7 +1861,7 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   if (!opts) {
     return;
   }
-  if (opts.title) {
+  if (opts.title !== undefined) {
     // Replace the title text but preserve any previously-applied
     // `titleOptions` (layout, overlay, spPr, txPr) attached to
     // `axis.title`. Combo charts call `applyAxisOptions` repeatedly on
@@ -1893,7 +1884,7 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
     }
     applyTitleOptions(axis.title, opts.titleOptions);
   }
-  if (opts.numFmt) {
+  if (opts.numFmt !== undefined) {
     // Merge onto any prior `numFmt` so a later call that supplies
     // `opts.numFmt` without `opts.numFmtLinked` doesn't reset
     // `sourceLinked` back to `undefined`. Same class of bug as the
@@ -2000,7 +1991,7 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
     if (
       opts.displayUnits !== undefined ||
       opts.customUnit !== undefined ||
-      opts.displayUnitsLabel
+      opts.displayUnitsLabel !== undefined
     ) {
       valAx.dispUnits = valAx.dispUnits ?? {};
       if (opts.displayUnits !== undefined) {
@@ -2017,13 +2008,13 @@ function applyAxisOptions(axis: ChartAxis, opts: AddAxisOptions | undefined): vo
   // Date-axis-specific units
   if (axis.axisType === "date") {
     const dateAx = axis as DateAxis;
-    if (opts.baseTimeUnit) {
+    if (opts.baseTimeUnit !== undefined) {
       dateAx.baseTimeUnit = opts.baseTimeUnit;
     }
-    if (opts.majorTimeUnit) {
+    if (opts.majorTimeUnit !== undefined) {
       dateAx.majorTimeUnit = opts.majorTimeUnit;
     }
-    if (opts.minorTimeUnit) {
+    if (opts.minorTimeUnit !== undefined) {
       dateAx.minorTimeUnit = opts.minorTimeUnit;
     }
   }
@@ -2228,28 +2219,8 @@ function buildChartTypeGroup(
     case "line3D": {
       const { catAx, valAx, serAx } = buildCatValSerAxes(axIds);
       // `CT_Line3DChart` does NOT accept `marker`, `smooth`,
-      // `hiLowLines`, or `upDownBars` — all 2-D-only. Reject them here
-      // rather than silently emit schema-invalid XML.
-      if (opts.showMarker !== undefined) {
-        throw new ChartOptionsError(
-          'line3D charts do not support `showMarker` (valid only on 2-D `line`). Remove the field or switch to `type: "line"`.'
-        );
-      }
-      if (opts.smooth !== undefined) {
-        throw new ChartOptionsError(
-          'line3D charts do not support `smooth` (valid only on 2-D `line`). Remove the field or switch to `type: "line"`.'
-        );
-      }
-      if (opts.hiLowLines !== undefined) {
-        throw new ChartOptionsError(
-          "line3D charts do not support `hiLowLines` (valid only on 2-D `line`)."
-        );
-      }
-      if (opts.upDownBars !== undefined) {
-        throw new ChartOptionsError(
-          "line3D charts do not support `upDownBars` (valid only on 2-D `line`)."
-        );
-      }
+      // `hiLowLines`, or `upDownBars` — all 2-D-only.
+      // Rejected upstream in validateChartLevelOptions.
       const group: LineChartGroup = {
         type,
         grouping: (opts.grouping as LineGrouping) ?? "standard",

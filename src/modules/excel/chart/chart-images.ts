@@ -333,9 +333,19 @@ function normaliseImage(
 
   // Structured ChartPictureFillImageData.
   const data = image as ChartPictureFillImageData;
-  if (data.buffer instanceof Uint8Array) {
-    const id = workbook.addImage({ extension: data.extension, buffer: data.buffer });
-    return { mediaId: id, extension: data.extension };
+  if (data.buffer != null) {
+    // Use ArrayBuffer.isView to handle cross-realm Uint8Array instances
+    // that fail `instanceof` checks but are structurally identical.
+    const raw = data.buffer as unknown;
+    if (ArrayBuffer.isView(raw)) {
+      const view = raw as ArrayBufferView;
+      const bytes =
+        view instanceof Uint8Array
+          ? view
+          : new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+      const id = workbook.addImage({ extension: data.extension, buffer: bytes });
+      return { mediaId: id, extension: data.extension };
+    }
   }
   if (typeof data.base64 === "string" && data.base64.length > 0) {
     const id = workbook.addImage({ extension: data.extension, base64: data.base64 });

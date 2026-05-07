@@ -29,14 +29,15 @@ export function withPivotChartSource<T extends PivotChartCreationOptions>(
   const allocatedFmtId =
     fmtId ??
     (existingFormats.length === 0 ? 0 : Math.max(...existingFormats.map(f => f.format ?? 0)) + 1);
+  const resolvedPivotOpts = pivotChartOptions ?? options.pivotChartOptions;
   ensurePivotChartFormat(pivotTable, allocatedFmtId);
-  applyPivotChartOptions(pivotTable, pivotChartOptions ?? options.pivotChartOptions);
+  applyPivotChartOptions(pivotTable, resolvedPivotOpts);
   return {
     ...options,
     pivotSource: {
       name: buildPivotChartSourceName(pivotTable),
       fmtId: allocatedFmtId,
-      options: pivotChartOptions ?? options.pivotChartOptions
+      options: resolvedPivotOpts
     }
   };
 }

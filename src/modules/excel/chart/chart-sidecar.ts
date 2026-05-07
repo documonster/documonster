@@ -291,7 +291,8 @@ export function buildChartStyle(model: ChartStyleModel): string {
   if (
     model.elements &&
     Object.keys(model.elements).length > 0 &&
-    process.env.NODE_ENV !== "production"
+    typeof process !== "undefined" &&
+    process.env?.NODE_ENV !== "production"
   ) {
     console.warn(
       "[excelts] buildChartStyle: `model.elements` overrides are not yet supported — " +

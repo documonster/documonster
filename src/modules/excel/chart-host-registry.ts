@@ -196,9 +196,10 @@ export function getChartSupport(): ChartSupport {
  * Retrieve installed chart support, or `null` if none is installed.
  *
  * Used by code paths that can gracefully degrade when chart support is
- * missing — e.g. XLSX loading, which can preserve chart XML verbatim
- * without instantiating `Chart` objects the user cannot manipulate
- * anyway.
+ * missing — e.g. ChartEx loading, which can preserve raw XML verbatim
+ * without a full parse when chart support is absent. Note that classic
+ * chart loading currently requires chart support to be installed (the
+ * reader calls `getChartSupport()` unconditionally for classic charts).
  */
 export function tryGetChartSupport(): ChartSupport | null {
   return installed;

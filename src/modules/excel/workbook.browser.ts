@@ -2462,6 +2462,14 @@ class Workbook {
       // `styleEx{src}.xml` while the writer emits `styleEx{dst}.xml`.
       // Strip the number from the source Target and re-stamp it with
       // the target's number.
+      //
+      // For image rels on a cross-workbook copy (`targetWorkbook !==
+      // this`), re-register each referenced image in the destination
+      // workbook and rewrite the Target — same logic as classic chart
+      // sidecars. Without this, a ChartEx with embedded images (e.g.
+      // pictureFill or custom geometry) would reference media that
+      // doesn't exist in the destination package.
+      const crossWorkbook = targetWorkbook !== this;
       targetWorkbook._chartExRels[targetChartExNumber] = rels.map(r => {
         if (typeof r !== "object" || r === null) {
           return r;
@@ -2473,10 +2481,13 @@ class Workbook {
           const styleExMatch = /^styleEx\d+\.xml$/.exec(target);
           if (styleExMatch) {
             cloned.Target = `styleEx${targetChartExNumber}.xml`;
-          }
-          const colorsExMatch = /^colorsEx\d+\.xml$/.exec(target);
-          if (colorsExMatch) {
+          } else if (/^colorsEx\d+\.xml$/.exec(target)) {
             cloned.Target = `colorsEx${targetChartExNumber}.xml`;
+          } else if (crossWorkbook && cloned.Type === RelType.Image) {
+            const rewritten = this._rewriteCrossWorkbookImageTarget(target, targetWorkbook);
+            if (rewritten !== undefined) {
+              cloned.Target = rewritten;
+            }
           }
         }
         return cloned;

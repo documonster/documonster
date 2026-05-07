@@ -975,7 +975,7 @@ export interface DataLabelsRange {
    * without a formula engine still see the right labels; the
    * cache-populator auto-fills it when left empty.
    */
-  cache?: { pointCount?: number; points: Array<{ index: number; value: string }> };
+  cache?: StringCache;
 }
 
 export interface DataLabelEntry {
@@ -2408,54 +2408,30 @@ export interface ComboChartGroupOptions extends AddChartOptions {
  * );
  * ```
  */
-export interface AddComboChartOptions {
+export interface AddComboChartOptions extends Pick<
+  AddChartOptions,
+  | "title"
+  | "showLegend"
+  | "legendPosition"
+  | "displayBlanksAs"
+  | "style"
+  | "chartStyle"
+  | "chartColors"
+  | "pivotSource"
+  | "pivotChartOptions"
+  | "plotVisOnly"
+  | "showDLblsOverMax"
+  | "dataTable"
+  | "titleOptions"
+  | "legendOptions"
+  | "plotAreaOptions"
+  | "view3D"
+  | "floor"
+  | "sideWall"
+  | "backWall"
+> {
   /** Chart type groups — at least 2 for a combo chart */
   groups: ComboChartGroupOptions[];
-  /** Chart title text, formula reference, or structured rich text */
-  title?: string | { formula: string } | ChartRichText;
-  /** Show legend */
-  showLegend?: boolean;
-  /** Legend position */
-  legendPosition?: LegendPosition;
-  /** Display blanks as */
-  displayBlanksAs?: DisplayBlanksAs;
-  /** Style index */
-  style?: number;
-  /** Modern chart style sidecar written to xl/charts/styleN.xml */
-  chartStyle?: ChartStyleModel;
-  /** Modern chart colors sidecar written to xl/charts/colorsN.xml */
-  chartColors?: ChartColorsModel;
-  /** Pivot table source for creating a classic pivot chart. */
-  pivotSource?: PivotChartSource;
-  /** Pivot chart field buttons, filters, and refresh metadata. */
-  pivotChartOptions?: PivotChartOptions;
-  /** Plot visible cells only */
-  plotVisOnly?: boolean;
-  /** Show data labels over max */
-  showDLblsOverMax?: boolean;
-  /** Data table */
-  dataTable?:
-    | boolean
-    | {
-        showHorzBorder?: boolean;
-        showVertBorder?: boolean;
-        showOutline?: boolean;
-        showKeys?: boolean;
-      };
-  /** Title layout options */
-  titleOptions?: AddTitleOptions;
-  /** Legend layout / entry options */
-  legendOptions?: AddLegendOptions;
-  /** Plot area layout and background */
-  plotAreaOptions?: AddPlotAreaOptions;
-  /** 3D view */
-  view3D?: View3D;
-  /** 3D chart floor background */
-  floor?: ShapeProperties | AddShapeFillOptions;
-  /** 3D chart side wall background */
-  sideWall?: ShapeProperties | AddShapeFillOptions;
-  /** 3D chart back wall background */
-  backWall?: ShapeProperties | AddShapeFillOptions;
 }
 
 /**
@@ -2818,9 +2794,9 @@ export interface AddAxisOptions {
   min?: number;
   /** Maximum value */
   max?: number;
-  /** Major unit */
+  /** Major unit (must be > 0; when both are set, minorUnit must be \u2264 majorUnit) */
   majorUnit?: number;
-  /** Minor unit */
+  /** Minor unit (must be > 0; when both are set, must be \u2264 majorUnit) */
   minorUnit?: number;
   /** Major tick mark type */
   majorTickMark?: TickMark;

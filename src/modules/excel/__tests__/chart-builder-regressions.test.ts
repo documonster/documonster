@@ -646,16 +646,16 @@ describe("Third-round chart bug fixes", () => {
       series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
     };
     expect(() => ws.addChart({ ...base, showMarker: true } as AddChartOptions, "D1:J10")).toThrow(
-      /line3D charts do not support .showMarker./
+      /showMarker is only valid for line and radar charts/
     );
     expect(() => ws.addChart({ ...base, smooth: true } as AddChartOptions, "D1:J10")).toThrow(
-      /line3D charts do not support .smooth./
+      /smooth is only valid for line and scatter charts/
     );
     expect(() => ws.addChart({ ...base, hiLowLines: true } as AddChartOptions, "D1:J10")).toThrow(
-      /line3D charts do not support .hiLowLines./
+      /hiLowLines is only valid for line and stock charts/
     );
     expect(() => ws.addChart({ ...base, upDownBars: true } as AddChartOptions, "D1:J10")).toThrow(
-      /line3D charts do not support .upDownBars./
+      /upDownBars is only valid for line and stock charts/
     );
   });
 

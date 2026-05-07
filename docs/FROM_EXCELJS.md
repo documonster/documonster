@@ -160,8 +160,6 @@ Chartsheets round-trip losslessly through `wb.xlsx.load` → `writeBuffer` inclu
 ExcelJS has no pivot-chart surface — loaded pivot charts survive as opaque bytes only. ExcelTS gives you structured pivot-chart metadata:
 
 ```typescript
-import { withPivotChartSource } from "@cj-tech-master/excelts";
-
 // Create the pivot table first
 const pivot = ws.addPivotTable({
   name: "RegionSales",
@@ -182,18 +180,6 @@ ws.addPivotChart(
     title: "Revenue by region"
   },
   "D1:L20"
-);
-
-// If you only need metadata (no rendering), the lower-level
-// withPivotChartSource() composes cleanly with addChart:
-ws.addChart(
-  withPivotChartSource(pivot, {
-    type: "bar",
-    series: [
-      /* … */
-    ]
-  }),
-  "M1:T20"
 );
 ```
 
