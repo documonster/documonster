@@ -1,0 +1,199 @@
+import { inflateSync } from "node:zlib";
+
+import { Workbook } from "@excel/workbook";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { readPdf } from "@pdf/reader/pdf-reader";
+import { describe, it, expect } from "vitest";
+
+/**
+ * Regression tests for rich text overflow and wrapping in PDF rendering.
+ *
+ * Covers:
+ * - Rich text overflow in non-merged cells (clip width)
+ * - Overflow erase covers gridlines/borders in overflow region
+ * - Wrap path uses per-run font size, not max size
+ * - Layout countWrapLines matches render wrapRichTextLines
+ * - Neighbor blocking: rich text in adjacent cell blocks overflow
+ */
+
+async function getFragments(
+  pdfBytes: Uint8Array
+): Promise<{ text: string; x: number; y: number; fontSize?: number }[]> {
+  const result = await readPdf(pdfBytes);
+  return result.pages[0].textFragments.map(f => ({
+    text: f.text,
+    x: Math.round(f.x * 10) / 10,
+    y: Math.round(f.y * 10) / 10,
+    fontSize: f.fontSize
+  }));
+}
+
+/** Extract clip rect widths from the PDF content stream for text-drawing states. */
+function extractClipWidths(pdfBytes: Uint8Array): number[] {
+  const pdfStr = Buffer.from(pdfBytes).toString("latin1");
+  const regex = /stream\r?\n([\s\S]*?)endstream/g;
+  let m: RegExpExecArray | null;
+  const widths: number[] = [];
+  while ((m = regex.exec(pdfStr)) !== null) {
+    const raw = Buffer.from(m[1], "latin1");
+    let decoded: string;
+    try {
+      decoded = inflateSync(raw).toString("latin1");
+    } catch {
+      continue;
+    }
+    // Find clip rects: "x y w h re" followed by "W" and "n"
+    // Allow flexible whitespace between operators
+    const clipPattern = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+re\s+W\s+n/g;
+    let cm: RegExpExecArray | null;
+    while ((cm = clipPattern.exec(decoded)) !== null) {
+      widths.push(parseFloat(cm[3]));
+    }
+  }
+  return widths;
+}
+
+describe("Rich text PDF rendering", () => {
+  describe("rich text overflow into adjacent empty cells", () => {
+    it("should expand clip rect beyond cell width for rich text overflow", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 5; // ~30pt — very narrow
+      ws.getColumn(2).width = 20; // ~113pt
+      ws.getColumn(3).width = 10;
+
+      // Rich text wider than column A (~30pt), B is empty → overflow expected
+      ws.getCell("A1").value = {
+        richText: [
+          { text: "AAAA", font: { size: 8 } },
+          { text: " BBBB CCCC", font: { size: 16 } }
+        ]
+      };
+      ws.getCell("C1").value = "X";
+
+      const pdf = await excelToPdf(wb);
+      const clipWidths = extractClipWidths(pdf);
+
+      // Column A is ~30pt. The first clip rect (for A1's rich text) must be
+      // wider than the cell itself due to overflow into B1.
+      const colAWidth = (5 * 7 + 5) * 0.75; // ~30pt
+      const a1Clip = clipWidths[0];
+      expect(a1Clip).toBeGreaterThan(colAWidth);
+    });
+
+    it("should stop overflow at neighbor cell with rich text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 5;
+      ws.getColumn(2).width = 10;
+      ws.getColumn(3).width = 10;
+
+      ws.getCell("A1").value = "OverflowingTextThatShouldBeStopped";
+      // B1 has rich text — should block A1's overflow
+      ws.getCell("B1").value = {
+        richText: [{ text: "Block", font: { bold: true } }]
+      };
+      ws.getCell("C1").value = "X";
+
+      const pdf = await excelToPdf(wb);
+      const clipWidths = extractClipWidths(pdf);
+
+      // A1's clip should NOT extend past its own column since B1 blocks it
+      const colAWidth = (5 * 7 + 5) * 0.75; // ~30pt
+      // First clip is for A1 (no overflow since B1 blocks it)
+      expect(clipWidths.length).toBeGreaterThan(0);
+      expect(clipWidths[0]).toBeCloseTo(colAWidth, 0);
+    });
+  });
+
+  describe("wrap uses per-run font size", () => {
+    it("should wrap small-font text with more characters per line", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 15; // ~83pt
+      ws.getRow(1).height = 60;
+
+      // 16pt header + 7pt body. If wrap used 16pt for everything,
+      // body words would each be on separate lines.
+      ws.getCell("A1").value = {
+        richText: [
+          { text: "HDR ", font: { size: 16 } },
+          { text: "aaa bbb ccc ddd eee fff", font: { size: 7 } }
+        ]
+      };
+      ws.getCell("A1").alignment = { wrapText: true };
+
+      const pdf = await excelToPdf(wb);
+      const frags = await getFragments(pdf);
+
+      // At 7pt, "aaa bbb ccc" should fit on one line (~83pt available).
+      // If measured at 16pt, each word would be ~30pt and only 2 would fit.
+      // Check that we get fewer fragments (more words per line).
+      const smallFrags = frags.filter(f => f.fontSize === 7);
+      // With correct per-run measurement, at least one fragment should contain
+      // multiple words joined together (e.g. "aaa bbb ccc")
+      const multiWordFrag = smallFrags.find(f => f.text.split(" ").length >= 3);
+      expect(multiWordFrag).toBeDefined();
+    });
+  });
+
+  describe("layout row height matches render for rich text wrap", () => {
+    it("should auto-calculate row height correctly for rich text wrap", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 15;
+      // Do NOT set explicit row height — let auto-height calculate it
+
+      ws.getCell("A1").value = {
+        richText: [
+          { text: "BIG ", font: { size: 14 } },
+          { text: "tiny words that wrap at their own 7pt size", font: { size: 7 } }
+        ]
+      };
+      ws.getCell("A1").alignment = { wrapText: true };
+
+      const pdf = await excelToPdf(wb);
+      const frags = await getFragments(pdf);
+
+      // All text should be present (not clipped due to wrong row height)
+      const allText = frags.map(f => f.text).join("");
+      expect(allText).toContain("BIG");
+      expect(allText).toContain("tiny");
+      expect(allText).toContain("wrap");
+      expect(allText).toContain("size");
+    });
+  });
+
+  describe("overflow region erases underlying borders/gridlines", () => {
+    it("should produce valid PDF with overflow and gridlines enabled", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 8;
+      ws.getColumn(2).width = 8;
+      ws.getColumn(3).width = 8;
+
+      ws.getCell("A1").value = "Long text that overflows into B1 and C1 area";
+      ws.getCell("A1").border = {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+      // B1 has border but is empty — should be visually hidden by overflow
+      ws.getCell("B1").border = {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+      ws.getCell("C1").value = "Stop";
+
+      const pdf = await excelToPdf(wb, { showGridLines: true });
+      // At minimum: no crash, text is present
+      const frags = await getFragments(pdf);
+      expect(frags.find(f => f.text.startsWith("Long text"))).toBeDefined();
+      expect(frags.find(f => f.text === "Stop")).toBeDefined();
+      expect(pdf.length).toBeGreaterThan(0);
+    });
+  });
+});

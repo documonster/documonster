@@ -98,10 +98,66 @@ export function renderPage(
     drawCellBorders(stream, cell);
   }
 
+  // --- Step 3.5: Erase grid lines and borders in text overflow regions ---
+  // In Excel, text overflowing into adjacent empty cells hides gridlines and
+  // borders underneath. We draw white only over the portions of the overflow
+  // area that do NOT have a cell fill (cells with fill already cover gridlines
+  // in Step 2, and we must not erase their background).
+  for (const cell of page.cells) {
+    if (!cell.textOverflowWidth || cell.textOverflowWidth <= 0) {
+      continue;
+    }
+    const overflowLeft = cell.rect.x + cell.rect.width;
+    const overflowRight = overflowLeft + cell.textOverflowWidth;
+    const cellY = cell.rect.y;
+    const cellH = cell.rect.height;
+
+    // Find neighbor cells whose x range overlaps the overflow region and
+    // are on the same row (same y and height).
+    // Collect filled sub-ranges to skip.
+    const filledRanges: Array<{ left: number; right: number }> = [];
+    for (const other of page.cells) {
+      if (other === cell || !other.fillColor) {
+        continue;
+      }
+      // Same row check: same y position and height
+      if (Math.abs(other.rect.y - cellY) > 0.01 || Math.abs(other.rect.height - cellH) > 0.01) {
+        continue;
+      }
+      const oLeft = other.rect.x;
+      const oRight = oLeft + other.rect.width;
+      // Check overlap with overflow region
+      if (oRight > overflowLeft && oLeft < overflowRight) {
+        filledRanges.push({
+          left: Math.max(oLeft, overflowLeft),
+          right: Math.min(oRight, overflowRight)
+        });
+      }
+    }
+
+    // Draw white in unfilled portions of the overflow area
+    if (filledRanges.length === 0) {
+      stream.fillRect(overflowLeft, cellY, cell.textOverflowWidth, cellH, { r: 1, g: 1, b: 1 });
+    } else {
+      // Sort filled ranges and draw white in gaps
+      filledRanges.sort((a, b) => a.left - b.left);
+      let cursor = overflowLeft;
+      for (const fr of filledRanges) {
+        if (fr.left > cursor) {
+          stream.fillRect(cursor, cellY, fr.left - cursor, cellH, { r: 1, g: 1, b: 1 });
+        }
+        cursor = Math.max(cursor, fr.right);
+      }
+      if (cursor < overflowRight) {
+        stream.fillRect(cursor, cellY, overflowRight - cursor, cellH, { r: 1, g: 1, b: 1 });
+      }
+    }
+  }
+
   // --- Step 4: Draw cell text ---
   const sf = page.scaleFactor;
   for (const cell of page.cells) {
-    if (cell.text) {
+    if (cell.text || cell.richText) {
       drawCellText(stream, cell, fontManager, alphaValues, sf);
     }
   }
@@ -474,13 +530,8 @@ function drawRichText(
       return;
     }
 
-    // Concatenate full text and wrap it
-    const fullText = runs.map(r => r.text).join("");
-    const primaryResource = runResource(runs[0]);
-    const measure = (s: string) => fontManager.measureText(s, primaryResource, primaryFontSize);
-    const lines = wrapTextLines(fullText, measure, availWidth);
-
     // Build a character-to-run mapping so we know which run each char belongs to
+    const fullText = runs.map(r => r.text).join("");
     const runForChar: number[] = [];
     for (let ri = 0; ri < runs.length; ri++) {
       for (let ci = 0; ci < runs[ri].text.length; ci++) {
@@ -488,9 +539,22 @@ function drawRichText(
       }
     }
 
-    const primaryResourceName = runResource(runs[0]);
+    // Run-aware word-wrap using each character's actual run font size
+    const runResources: string[] = runs.map(r => runResource(r));
+
+    // Word-wrap using actual per-run measurements — returns character ranges
+    const lineRanges = wrapRichTextLines(
+      fullText,
+      runForChar,
+      runs,
+      runResources,
+      fontManager,
+      availWidth
+    );
+
+    const primaryResourceName = runResources[0];
     const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
-    const totalTextHeight = lines.length * lineHeight;
+    const totalTextHeight = lineRanges.length * lineHeight;
     const textStartY = computeTextStartY(
       verticalAlign,
       rect,
@@ -500,39 +564,24 @@ function drawRichText(
       pad.bottom
     );
 
-    let charPos = 0;
-    for (let li = 0; li < lines.length; li++) {
+    for (let li = 0; li < lineRanges.length; li++) {
       const lineY = textStartY - li * lineHeight;
-      const lineLen = lines[li].length;
+      const { start: lineStart, end: lineEnd } = lineRanges[li];
 
       // Split the line into segments by run
       const segments: Array<{ run: LayoutRichTextRun; text: string; resourceName: string }> = [];
-      const segStart = charPos;
-      for (let ci = 0; ci < lineLen; ci++) {
-        const globalIdx = charPos + ci;
-        const ri = runForChar[globalIdx] ?? runForChar.length - 1;
+      for (let ci = lineStart; ci < lineEnd; ci++) {
+        const ri = runForChar[ci] ?? runForChar.length - 1;
         const last = segments[segments.length - 1];
         if (last && last.run === runs[ri]) {
-          last.text += lines[li][ci];
+          last.text += fullText[ci];
         } else {
           segments.push({
             run: runs[ri],
-            text: lines[li][ci],
-            resourceName: runResource(runs[ri])
+            text: fullText[ci],
+            resourceName: runResources[ri]
           });
         }
-      }
-      charPos += lineLen;
-
-      // Skip whitespace chars consumed by word-wrap between lines
-      while (charPos < runForChar.length && charPos < segStart + lineLen + 1) {
-        const nextLineStart =
-          li + 1 < lines.length ? fullText.indexOf(lines[li + 1], charPos) : fullText.length;
-        if (nextLineStart > charPos) {
-          charPos = nextLineStart;
-          break;
-        }
-        break;
       }
 
       // Measure total line width for alignment
@@ -1397,6 +1446,142 @@ export function wrapTextLines(
   }
 
   return allLines.length > 0 ? allLines : [""];
+}
+
+/**
+ * Word-wrap rich text using per-run font measurements.
+ *
+ * Unlike `wrapTextLines` which uses a single measure function, this measures
+ * each character span at its actual run's font size. This produces correct
+ * line breaks when runs have very different sizes (e.g. a 16pt heading followed
+ * by 7pt body text).
+ *
+ * Returns an array of { start, end } character ranges in fullText for each line.
+ * This avoids the need for indexOf-based re-positioning which can fail with
+ * duplicate text content.
+ */
+interface RichTextLineRange {
+  start: number;
+  end: number;
+}
+
+function wrapRichTextLines(
+  fullText: string,
+  runForChar: number[],
+  runs: LayoutRichTextRun[],
+  runResources: string[],
+  fontManager: FontManager,
+  maxWidth: number
+): RichTextLineRange[] {
+  if (!fullText) {
+    return [{ start: 0, end: 0 }];
+  }
+
+  // Measure a substring using each character's actual run font size
+  const measureRange = (start: number, end: number): number => {
+    if (start >= end) {
+      return 0;
+    }
+    let width = 0;
+    let segStart = start;
+    let currentRi = runForChar[start] ?? 0;
+    for (let i = start + 1; i <= end; i++) {
+      const ri = i < end ? (runForChar[i] ?? currentRi) : -1;
+      if (ri !== currentRi) {
+        const run = runs[currentRi];
+        const seg = fullText.slice(segStart, i);
+        width += fontManager.measureText(seg, runResources[currentRi], run.fontSize);
+        segStart = i;
+        currentRi = ri;
+      }
+    }
+    return width;
+  };
+
+  const allLines: RichTextLineRange[] = [];
+  let globalOffset = 0;
+  const len = fullText.length;
+
+  // Process paragraph by paragraph (split on newlines)
+  while (globalOffset <= len) {
+    // Find end of current paragraph
+    let paraEnd = fullText.indexOf("\n", globalOffset);
+    if (paraEnd === -1) {
+      paraEnd = len;
+    }
+
+    if (paraEnd === globalOffset) {
+      // Empty paragraph
+      allLines.push({ start: globalOffset, end: globalOffset });
+      globalOffset = paraEnd + 1;
+      continue;
+    }
+
+    // Handle \r\n: exclude \r from paragraph content
+    const paraContentEnd =
+      paraEnd > globalOffset && fullText[paraEnd - 1] === "\r" ? paraEnd - 1 : paraEnd;
+
+    if (paraContentEnd === globalOffset) {
+      // Paragraph was just \r\n — treat as empty
+      allLines.push({ start: globalOffset, end: globalOffset });
+      globalOffset = paraEnd + 1;
+      continue;
+    }
+
+    // Word-wrap this paragraph
+    const paraText = fullText.slice(globalOffset, paraContentEnd);
+    // Find word boundaries within this paragraph
+    const wordStarts: number[] = [];
+    const wordEnds: number[] = [];
+    let inWord = false;
+    for (let i = 0; i < paraText.length; i++) {
+      const isSpace = paraText[i] === " " || paraText[i] === "\t";
+      if (!isSpace && !inWord) {
+        wordStarts.push(i);
+        inWord = true;
+      } else if (isSpace && inWord) {
+        wordEnds.push(i);
+        inWord = false;
+      }
+    }
+    if (inWord) {
+      wordEnds.push(paraText.length);
+    }
+
+    let lineStart = globalOffset;
+    let lineEnd = globalOffset;
+
+    for (let wi = 0; wi < wordStarts.length; wi++) {
+      const wordEnd = globalOffset + wordEnds[wi];
+      if (lineEnd === lineStart) {
+        // First word on line — always take it
+        lineEnd = wordEnd;
+        continue;
+      }
+      // Test if adding this word (with preceding space) fits
+      if (measureRange(lineStart, wordEnd) <= maxWidth) {
+        lineEnd = wordEnd;
+      } else {
+        // Emit current line
+        allLines.push({ start: lineStart, end: lineEnd });
+        // Start new line at this word
+        lineStart = globalOffset + wordStarts[wi];
+        lineEnd = wordEnd;
+      }
+    }
+
+    // Emit last line of paragraph
+    if (lineEnd > lineStart || wordStarts.length === 0) {
+      allLines.push({ start: lineStart, end: Math.max(lineEnd, lineStart) });
+    }
+
+    globalOffset = paraEnd + 1;
+    if (paraEnd === len) {
+      break;
+    }
+  }
+
+  return allLines.length > 0 ? allLines : [{ start: 0, end: 0 }];
 }
 
 // =============================================================================

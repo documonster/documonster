@@ -797,6 +797,25 @@ function countWrapLines(
     CELL_PADDING_H + borderLeft + (CELL_PADDING_H + borderRight) + indent * INDENT_WIDTH;
   const effectiveWidth = Math.max(scaledColPts - padding, 1);
 
+  // For rich text cells, use per-run font size measurement to match rendering
+  if (cell.type === PdfCellType.RichText) {
+    const value = cell.value;
+    if (value && typeof value === "object" && "richText" in value) {
+      const runs = (value as { richText: PdfRichTextRunData[] }).richText;
+      if (runs.length > 0) {
+        const wrappedCount = countRichTextWrapLines(
+          text,
+          runs,
+          scaleFactor,
+          effectiveWidth,
+          fontManager,
+          options
+        );
+        return Math.max(lineCount, wrappedCount);
+      }
+    }
+  }
+
   const scaledFontSize = fontSize * scaleFactor;
   const fontProps = extractFontProperties(
     cell.style.font,
@@ -811,6 +830,146 @@ function countWrapLines(
   const wrappedLines = wrapTextLines(text, measure, effectiveWidth);
 
   return Math.max(lineCount, wrappedLines.length);
+}
+
+/**
+ * Count wrap lines for a rich text cell using per-run font sizes.
+ * This mirrors the logic in wrapRichTextLines (page-renderer) so that
+ * the row height calculation matches the actual rendering.
+ */
+function countRichTextWrapLines(
+  text: string,
+  runs: PdfRichTextRunData[],
+  scaleFactor: number,
+  effectiveWidth: number,
+  fontManager: FontManager,
+  options: ResolvedPdfOptions
+): number {
+  // Build character-to-run mapping
+  const runForChar: number[] = [];
+  for (let ri = 0; ri < runs.length; ri++) {
+    for (let ci = 0; ci < runs[ri].text.length; ci++) {
+      runForChar.push(ri);
+    }
+  }
+
+  // Resolve font resources for each run
+  const runResources: string[] = runs.map(run => {
+    const fontProps = extractFontProperties(
+      run.font,
+      options.defaultFontFamily,
+      options.defaultFontSize
+    );
+    const pdfFontName = resolvePdfFontName(fontProps.fontFamily, fontProps.bold, fontProps.italic);
+    return fontManager.hasEmbeddedFont()
+      ? fontManager.getEmbeddedResourceName()
+      : fontManager.ensureFont(pdfFontName);
+  });
+
+  // Resolve scaled font sizes for each run
+  const runFontSizes: number[] = runs.map(run => {
+    const fontProps = extractFontProperties(
+      run.font,
+      options.defaultFontFamily,
+      options.defaultFontSize
+    );
+    return fontProps.fontSize * scaleFactor;
+  });
+
+  // Measure a range of fullText using per-character run font sizes
+  const measureRange = (start: number, end: number): number => {
+    let width = 0;
+    let segStart = start;
+    let currentRi = runForChar[start] ?? 0;
+    for (let i = start + 1; i <= end; i++) {
+      const ri = i < end ? (runForChar[i] ?? currentRi) : -1;
+      if (ri !== currentRi) {
+        const seg = text.slice(segStart, i);
+        width += fontManager.measureText(seg, runResources[currentRi], runFontSizes[currentRi]);
+        segStart = i;
+        currentRi = ri;
+      }
+    }
+    return width;
+  };
+
+  // Word-wrap using per-run measurements — mirrors wrapRichTextLines in
+  // page-renderer exactly (paragraph split on \n, word boundaries by
+  // scanning space/tab characters) to ensure line count matches rendering.
+  let totalLines = 0;
+  let globalOffset = 0;
+  const len = text.length;
+
+  while (globalOffset <= len) {
+    // Find end of current paragraph (handles both \n and \r\n)
+    let paraEnd = text.indexOf("\n", globalOffset);
+    if (paraEnd === -1) {
+      paraEnd = len;
+    }
+    // Skip \r before \n
+    const paraContentEnd =
+      paraEnd > globalOffset && text[paraEnd - 1] === "\r" ? paraEnd - 1 : paraEnd;
+
+    if (paraContentEnd === globalOffset) {
+      // Empty paragraph
+      totalLines++;
+      globalOffset = paraEnd + 1;
+      if (paraEnd === len) {
+        break;
+      }
+      continue;
+    }
+
+    // Find word boundaries within this paragraph (space/tab are separators)
+    const paraText = text.slice(globalOffset, paraContentEnd);
+    const wordStarts: number[] = [];
+    const wordEnds: number[] = [];
+    let inWord = false;
+    for (let i = 0; i < paraText.length; i++) {
+      const isSpace = paraText[i] === " " || paraText[i] === "\t";
+      if (!isSpace && !inWord) {
+        wordStarts.push(i);
+        inWord = true;
+      } else if (isSpace && inWord) {
+        wordEnds.push(i);
+        inWord = false;
+      }
+    }
+    if (inWord) {
+      wordEnds.push(paraText.length);
+    }
+
+    let lineStart = globalOffset;
+    let lineEnd = globalOffset;
+    let linesInParagraph = 0;
+
+    for (let wi = 0; wi < wordStarts.length; wi++) {
+      const wordEnd = globalOffset + wordEnds[wi];
+      if (lineEnd === lineStart) {
+        lineEnd = wordEnd;
+        continue;
+      }
+      if (measureRange(lineStart, wordEnd) <= effectiveWidth) {
+        lineEnd = wordEnd;
+      } else {
+        linesInParagraph++;
+        lineStart = globalOffset + wordStarts[wi];
+        lineEnd = wordEnd;
+      }
+    }
+
+    if (lineEnd > lineStart || wordStarts.length === 0) {
+      linesInParagraph++;
+    }
+    totalLines += linesInParagraph;
+
+    globalOffset = paraEnd + 1;
+    if (paraEnd === len) {
+      break;
+    }
+  }
+
+  return Math.max(1, totalLines);
 }
 
 // =============================================================================
@@ -1509,18 +1668,31 @@ function computeTextOverflows(
         !cell ||
         cell.wrapText ||
         cell.colSpan > 1 ||
-        !cell.text ||
-        cell.richText ||
+        (!cell.text && !cell.richText) ||
         (typeof cell.textRotation === "number" && cell.textRotation !== 0) ||
         cell.textRotation === "vertical"
       ) {
         continue;
       }
 
-      const resourceName = fontManager.hasEmbeddedFont()
-        ? fontManager.getEmbeddedResourceName()
-        : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
-      const textWidth = fontManager.measureText(cell.text, resourceName, cell.fontSize);
+      // Measure the total text width (plain text or rich text runs)
+      let textWidth: number;
+      if (cell.richText) {
+        textWidth = 0;
+        const isEmbedded = fontManager.hasEmbeddedFont();
+        for (const run of cell.richText) {
+          const resourceName = isEmbedded
+            ? fontManager.getEmbeddedResourceName()
+            : fontManager.ensureFont(resolvePdfFontName(run.fontFamily, run.bold, run.italic));
+          textWidth += fontManager.measureText(run.text, resourceName, run.fontSize);
+        }
+      } else {
+        const resourceName = fontManager.hasEmbeddedFont()
+          ? fontManager.getEmbeddedResourceName()
+          : fontManager.ensureFont(resolvePdfFontName(cell.fontFamily, cell.bold, cell.italic));
+        textWidth = fontManager.measureText(cell.text, resourceName, cell.fontSize);
+      }
+
       const cellContentWidth =
         cell.rect.width -
         (CELL_PADDING_H + cell.borderInsets.left) -
@@ -1543,7 +1715,7 @@ function computeTextOverflows(
         }
 
         const neighborCell = cellGrid.get(`${ri}:${j}`);
-        if (neighborCell?.text) {
+        if (neighborCell?.text || neighborCell?.richText) {
           break;
         }
 
