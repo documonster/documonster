@@ -1,13 +1,12 @@
 {
   "name": "@cj-tech-master/excelts",
   "version": "9.4.2",
-  "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), Word (DOCX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
+  "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
   "keywords": [
     "archive",
     "browser",
     "bun",
     "csv",
-    "docx",
     "excel",
     "formula",
     "markdown",
@@ -17,7 +16,6 @@
     "tar",
     "toolkit",
     "typescript",
-    "word",
     "workbook",
     "xlsx",
     "xml",
@@ -74,9 +72,6 @@
       ],
       "xml": [
         "dist/types/modules/xml/index.d.ts"
-      ],
-      "word": [
-        "dist/types/modules/word/index.d.ts"
       ],
       "browser": [
         "dist/browser/index.browser.d.ts"
@@ -198,20 +193,6 @@
       "require": {
         "types": "./dist/types/modules/excel/chart/index.d.ts",
         "default": "./dist/cjs/modules/excel/chart/index.js"
-      }
-    },
-    "./word": {
-      "browser": {
-        "types": "./dist/browser/modules/word/index.browser.d.ts",
-        "default": "./dist/browser/modules/word/index.browser.js"
-      },
-      "import": {
-        "types": "./dist/types/modules/word/index.d.ts",
-        "default": "./dist/esm/modules/word/index.js"
-      },
-      "require": {
-        "types": "./dist/types/modules/word/index.d.ts",
-        "default": "./dist/cjs/modules/word/index.js"
       }
     },
     "./xml": {
