@@ -368,8 +368,8 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  */
 export function parseEncryptionInfoXml(xmlStr: string): AgileEncryptionInfo {
   // Simple regex-based extraction for the key <keyEncryptors><keyEncryptor>... element
-  const keyDataMatch = /<keyData\s+([^/]+)\/>/.exec(xmlStr);
-  const pwdEncryptorMatch = /<p:encryptedKey\s+([^/]+)\/>/.exec(xmlStr);
+  const keyDataMatch = /<keyData\s([^/]*?)\/>/.exec(xmlStr);
+  const pwdEncryptorMatch = /<p:encryptedKey\s([^/]*?)\/>/.exec(xmlStr);
 
   if (!keyDataMatch || !pwdEncryptorMatch) {
     throw new Error("Invalid EncryptionInfo XML - missing keyData or encryptedKey");

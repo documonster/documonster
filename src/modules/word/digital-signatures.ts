@@ -111,7 +111,7 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
   }
 
   // Extract signature value (base64)
-  const sigValMatch = /<SignatureValue[^>]*>([\s\S]*?)<\/SignatureValue>/.exec(xmlStr);
+  const sigValMatch = /<SignatureValue[^>]*>([^]*?)<\/SignatureValue>/.exec(xmlStr);
   if (sigValMatch) {
     info.signatureValue = sigValMatch[1].trim();
   }

@@ -2407,7 +2407,8 @@ function parseSimpleSvg(svg: string): SimpleSvgDocument {
 
 function parseSvgAttrs(raw: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const attrRe = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/g;
+  // CodeQL: safe — `[\w:.-]*` and `[^"]*` are non-overlapping character classes.
+  const attrRe = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"/g;
   let match: RegExpExecArray | null;
   while ((match = attrRe.exec(raw)) !== null) {
     attrs[match[1]] = match[2];

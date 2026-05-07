@@ -1239,23 +1239,23 @@ function extractCellValue(ws: Worksheet, row: number, col: number): unknown {
     return undefined;
   }
   // Formula values are wrapped: { formula, result }
-  if (typeof v === "object" && v !== null && "result" in v) {
+  if (typeof v === "object" && "result" in (v as object)) {
     const result = (v as { result?: unknown }).result;
     return result;
   }
   // Rich text
-  if (typeof v === "object" && v !== null && "richText" in v) {
+  if (typeof v === "object" && "richText" in (v as object)) {
     const rt = (v as { richText?: Array<{ text?: string }> }).richText;
     if (rt) {
       return rt.map(r => r.text ?? "").join("");
     }
   }
   // Hyperlink / error
-  if (typeof v === "object" && v !== null) {
-    if ("error" in v) {
+  if (typeof v === "object") {
+    if ("error" in (v as object)) {
       return undefined;
     }
-    if ("text" in v && "hyperlink" in v) {
+    if ("text" in (v as object) && "hyperlink" in (v as object)) {
       return (v as { text?: unknown }).text;
     }
   }

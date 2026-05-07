@@ -4616,6 +4616,7 @@ function patchXmlAttribute(
   // and both self-closing and regular element forms. Escape the tag
   // for regex; element names can contain `:` and `-` but nothing else
   // that regex would interpret.
+  // CodeQL: safe — elementTag is escaped (`:` and `.` only), `[^>]*` terminates at `>`.
   const tagRe = new RegExp(`<${elementTag.replace(/[:.]/g, "\\$&")}\\b([^>]*)(/?)>`);
   const match = tagRe.exec(block);
   if (!match) {

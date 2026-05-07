@@ -5918,7 +5918,7 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
     if (selfCloseMatch) {
       const rawAttrs = selfCloseMatch[2] ?? "";
       const attrs = rawAttrs
-        .replace(/\s+xmlns(?::[A-Za-z_][-A-Za-z0-9_.]*)?="[^"]*"/g, "")
+        .replace(/\sxmlns(?::[A-Za-z_][\w.-]*)?="[^"]*"/g, "")
         .replace(/\s+$/, "");
       return `${indent}<${wrapperName}${attrs}/>`;
     }
@@ -5952,7 +5952,7 @@ function renderTxPr(txPr: ChartTextProperties, indent: string, wrapperName = "cx
       // `xml:space="preserve"`) pass through.
       const rawAttrs = openMatch[2] ?? "";
       const attrs = rawAttrs
-        .replace(/\s+xmlns(?::[A-Za-z_][-A-Za-z0-9_.]*)?="[^"]*"/g, "")
+        .replace(/\sxmlns(?::[A-Za-z_][\w.-]*)?="[^"]*"/g, "")
         .replace(/\s+$/, "");
       return `${indent}<${wrapperName}${attrs}>${inner}</${wrapperName}>`;
     }

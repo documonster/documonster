@@ -1134,8 +1134,8 @@ function parseSp3D(xml: string): ShapeProperties3D | undefined {
     return undefined;
   }
   // sp3d can be self-closing or have children (bevels)
-  const selfClose = /<a:sp3d\s+[^>]*\/>/.exec(xml);
-  const openClose = /<a:sp3d\s+([^>]*)>([\s\S]*?)<\/a:sp3d>/.exec(xml);
+  const selfClose = /<a:sp3d\s[^>]*\/>/.exec(xml);
+  const openClose = /<a:sp3d\s([^>]*)>([^]*?)<\/a:sp3d>/.exec(xml);
   const region = openClose ? openClose[0] : selfClose ? selfClose[0] : xml.slice(spStart);
   // Only parse attributes from the opening tag itself — NOT from child
   // elements (e.g. `<a:bevelT w="..." h="..."/>`) which would pollute
@@ -1155,23 +1155,23 @@ function parseSp3D(xml: string): ShapeProperties3D | undefined {
   if (attrs.prstMaterial) {
     result.material = attrs.prstMaterial;
   }
-  const bevelT = /<a:bevelT\s+([^/>]*)\s*\/>/.exec(region);
+  const bevelT = /<a:bevelT\s([^/]*?)\/>/.exec(region);
   if (bevelT) {
     result.bevelTop = parseBevelAttrs(bevelT[0]);
   }
-  const bevelB = /<a:bevelB\s+([^/>]*)\s*\/>/.exec(region);
+  const bevelB = /<a:bevelB\s([^/]*?)\/>/.exec(region);
   if (bevelB) {
     result.bevelBottom = parseBevelAttrs(bevelB[0]);
   }
   if (openClose) {
-    const extClrMatch = /<a:extrusionClr>([\s\S]*?)<\/a:extrusionClr>/.exec(openClose[2]);
+    const extClrMatch = /<a:extrusionClr>([^]*?)<\/a:extrusionClr>/.exec(openClose[2]);
     if (extClrMatch) {
       const c = parseColorFromXml(extClrMatch[1]);
       if (c) {
         result.extrusionColor = c;
       }
     }
-    const contClrMatch = /<a:contourClr>([\s\S]*?)<\/a:contourClr>/.exec(openClose[2]);
+    const contClrMatch = /<a:contourClr>([^]*?)<\/a:contourClr>/.exec(openClose[2]);
     if (contClrMatch) {
       const c = parseColorFromXml(contClrMatch[1]);
       if (c) {
@@ -1284,7 +1284,7 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   const result: ChartTextProperties = {};
 
   // Font size (a:sz)
-  const szMatch = /<a:(?:defRPr|rPr)[^>]*\s+sz="(\d+)"/.exec(rawXml);
+  const szMatch = /<a:(?:defRPr|rPr)[^>]*\ssz="(\d+)"/.exec(rawXml);
   if (szMatch) {
     result.size = parseInt(szMatch[1], 10);
   }
@@ -1401,7 +1401,7 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   }
 
   // Rotation (on bodyPr)
-  const rotMatch = /<a:bodyPr[^>]*\s+rot="(-?\d+)"/.exec(rawXml);
+  const rotMatch = /<a:bodyPr[^>]*\srot="(-?\d+)"/.exec(rawXml);
   if (rotMatch) {
     result.rotation = parseInt(rotMatch[1], 10);
   }

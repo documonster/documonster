@@ -504,11 +504,10 @@ function subdivideQuadratic(
 export function parseRasterFont(data: Uint8Array): RasterFont {
   // Handle TTC (TrueType Collection) — use first font
   const sfVersion = u32(data, 0);
-  let fontData = data;
+  const fontData = data;
   if (sfVersion === 0x74746366) {
     // 'ttcf' header
     const firstOffset = u32(data, 12);
-    fontData = data.subarray(firstOffset);
     // Re-read tables relative to the font offset — but table offsets in TTC
     // are absolute, so we keep original data and adjust
     const tables = parseTableDirectoryTTC(data, firstOffset);

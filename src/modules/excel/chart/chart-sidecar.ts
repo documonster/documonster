@@ -22,11 +22,11 @@ import type {
 export function parseChartColors(rawXml: string): ChartColorsModel {
   const result: ChartColorsModel = { rawXml };
 
-  const methodMatch = /<cs:colorStyle\s+[^>]*\bmeth="([^"]+)"/.exec(rawXml);
+  const methodMatch = /<cs:colorStyle[^>]*\smeth="([^"]+)"/.exec(rawXml);
   if (methodMatch) {
     result.method = methodMatch[1];
   }
-  const idMatch = /<cs:colorStyle\s+[^>]*\bid="(\d+)"/.exec(rawXml);
+  const idMatch = /<cs:colorStyle[^>]*\sid="(\d+)"/.exec(rawXml);
   if (idMatch) {
     result.id = parseInt(idMatch[1], 10);
   }
@@ -361,7 +361,7 @@ function buildDefaultChartColors(): string {
  */
 export function parseChartStyle(rawXml: string): ChartStyleModel {
   const result: ChartStyleModel = { rawXml };
-  const idMatch = /<cs:chartStyle\s+[^>]*\bid="(\d+)"/.exec(rawXml);
+  const idMatch = /<cs:chartStyle[^>]*\sid="(\d+)"/.exec(rawXml);
   if (idMatch) {
     result.id = parseInt(idMatch[1], 10);
   }

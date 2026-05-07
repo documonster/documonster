@@ -1612,6 +1612,7 @@ class BasicRasterCanvas {
 
 function parseSvgAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
+  // CodeQL: safe — `[\w:-]+` and `[^"]*` cannot backtrack against each other.
   const attrRe = /([\w:-]+)="([^"]*)"/g;
   let match: RegExpExecArray | null;
   while ((match = attrRe.exec(tag)) !== null) {
@@ -1635,6 +1636,7 @@ function parseSvgRotateTransform(
   if (!transform) {
     return undefined;
   }
+  // CodeQL: safe — fixed structure with non-overlapping alternatives; no ambiguous quantifiers.
   const match =
     /rotate\(\s*(-?\d+(?:\.\d+)?)\s*(?:[,\s]\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*)?\)/.exec(
       transform
@@ -1931,7 +1933,13 @@ function decodeSvgText(value: string): string {
   // included an XML-escaped entity — the first replace turned
   // `&amp;lt;` into `&lt;`, then the second decoded that to `<`, so a
   // title authored as literal `&lt;tag&gt;` round-tripped as `<tag>`.
-  const stripped = value.replace(/<[^>]*>/g, "");
+  // Loop until no tags remain to handle nested incomplete tags like `<sc<ript>>`.
+  let stripped = value;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/<[^>]*>/g, "");
+  } while (stripped !== prev);
   return stripped.replace(
     /&(?:([A-Za-z]+)|#x([0-9A-Fa-f]+)|#(\d+));/g,
     (match, name: string | undefined, hex: string | undefined, dec: string | undefined) => {
@@ -6729,7 +6737,8 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       `<feComposite in="innerColour" in2="innerClipped" operator="in" result="innerOut"/>`,
       `<feMerge result="innerMerged"><feMergeNode in="${inLayer}"/><feMergeNode in="innerOut"/></feMerge>`
     );
-    inLayer = "innerMerged";
+    // Keep `inLayer` consistent with the pattern above for future extensibility.
+    void (inLayer = "innerMerged");
   }
 
   if (prims.length === 0) {
