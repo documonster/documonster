@@ -866,10 +866,10 @@ function countRichTextWrapLines(
       ? {
           name: run.font.name ?? cellFont?.name,
           size: run.font.size ?? cellFont?.size,
-          bold: run.font.bold ?? cellFont?.bold,
-          italic: run.font.italic ?? cellFont?.italic,
-          strike: run.font.strike ?? cellFont?.strike,
-          underline: run.font.underline ?? cellFont?.underline,
+          bold: run.font.bold ?? false,
+          italic: run.font.italic ?? false,
+          strike: run.font.strike ?? false,
+          underline: run.font.underline ?? undefined,
           color: run.font.color ?? cellFont?.color
         }
       : cellFont;
@@ -886,8 +886,8 @@ function countRichTextWrapLines(
       ? {
           name: run.font.name ?? cellFont?.name,
           size: run.font.size ?? cellFont?.size,
-          bold: run.font.bold ?? cellFont?.bold,
-          italic: run.font.italic ?? cellFont?.italic
+          bold: run.font.bold ?? false,
+          italic: run.font.italic ?? false
         }
       : cellFont;
     const fontProps = extractFontProperties(effectiveRunFont, defaultFamily, defaultSize);
@@ -1818,15 +1818,19 @@ function buildRichTextRuns(
 
   return runs.map(run => {
     // When a run has no font at all, use cell font entirely.
-    // When a run has a partial font, merge with cell font for missing properties.
+    // When a run has its own <rPr>, properties NOT listed in that <rPr> default
+    // to their base values (false/undefined), NOT to the cell font.
+    // Only `name` and `size` fall back to cell font (they define the typeface/size
+    // context), but stylistic flags (bold, italic, strike, underline) do not
+    // inherit from the cell — an absent <b/> means "not bold".
     const effectiveFont: Partial<PdfFontStyle> | undefined = run.font
       ? {
           name: run.font.name ?? cellFont?.name,
           size: run.font.size ?? cellFont?.size,
-          bold: run.font.bold ?? cellFont?.bold,
-          italic: run.font.italic ?? cellFont?.italic,
-          strike: run.font.strike ?? cellFont?.strike,
-          underline: run.font.underline ?? cellFont?.underline,
+          bold: run.font.bold ?? false,
+          italic: run.font.italic ?? false,
+          strike: run.font.strike ?? false,
+          underline: run.font.underline ?? undefined,
           color: run.font.color ?? cellFont?.color
         }
       : cellFont;

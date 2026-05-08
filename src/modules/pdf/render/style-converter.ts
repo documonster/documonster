@@ -329,33 +329,33 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
 export function borderStyleToLineWidth(style: string): number {
   switch (style) {
     case "thin":
-      return 0.25;
+      return 0.5;
     case "medium":
-      return 0.5;
+      return 1.0;
     case "thick":
-      return 1;
+      return 2.0;
     case "double":
-      return 0.25;
+      return 0.5;
     case "hair":
-      return 0.1;
+      return 0.2;
     case "dotted":
-      return 0.25;
+      return 0.5;
     case "dashed":
-      return 0.25;
+      return 0.5;
     case "dashDot":
-      return 0.25;
+      return 0.5;
     case "dashDotDot":
-      return 0.25;
+      return 0.5;
     case "slantDashDot":
-      return 0.25;
+      return 0.5;
     case "mediumDashed":
-      return 0.5;
+      return 1.0;
     case "mediumDashDot":
-      return 0.5;
+      return 1.0;
     case "mediumDashDotDot":
-      return 0.5;
+      return 1.0;
     default:
-      return 0.25;
+      return 0.5;
   }
 }
 

@@ -189,8 +189,8 @@ describe("Style Converter", () => {
         bottom: { style: "medium", color: { argb: "FF000000" } }
       });
       expect(borders.top).not.toBeNull();
-      expect(borders.top!.width).toBe(0.25);
-      expect(borders.bottom!.width).toBe(0.5);
+      expect(borders.top!.width).toBe(0.5);
+      expect(borders.bottom!.width).toBe(1.0);
       expect(borders.right).toBeNull();
     });
 

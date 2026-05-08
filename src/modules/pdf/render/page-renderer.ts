@@ -135,21 +135,30 @@ export function renderPage(
       }
     }
 
-    // Draw white in unfilled portions of the overflow area
+    // Draw white in unfilled portions of the overflow area.
+    // Inset vertically by a small amount to avoid covering the horizontal
+    // border lines at the top/bottom edges of the cell.
+    const borderInset = 0.25;
+    const eraseY = cellY + borderInset;
+    const eraseH = cellH - borderInset * 2;
+    if (eraseH <= 0) {
+      continue;
+    }
+
     if (filledRanges.length === 0) {
-      stream.fillRect(overflowLeft, cellY, cell.textOverflowWidth, cellH, { r: 1, g: 1, b: 1 });
+      stream.fillRect(overflowLeft, eraseY, cell.textOverflowWidth, eraseH, { r: 1, g: 1, b: 1 });
     } else {
       // Sort filled ranges and draw white in gaps
       filledRanges.sort((a, b) => a.left - b.left);
       let cursor = overflowLeft;
       for (const fr of filledRanges) {
         if (fr.left > cursor) {
-          stream.fillRect(cursor, cellY, fr.left - cursor, cellH, { r: 1, g: 1, b: 1 });
+          stream.fillRect(cursor, eraseY, fr.left - cursor, eraseH, { r: 1, g: 1, b: 1 });
         }
         cursor = Math.max(cursor, fr.right);
       }
       if (cursor < overflowRight) {
-        stream.fillRect(cursor, cellY, overflowRight - cursor, cellH, { r: 1, g: 1, b: 1 });
+        stream.fillRect(cursor, eraseY, overflowRight - cursor, eraseH, { r: 1, g: 1, b: 1 });
       }
     }
   }
@@ -552,9 +561,22 @@ function drawRichText(
       availWidth
     );
 
+    // Compute per-line heights based on the maximum font size in each line
+    const lineHeights: number[] = [];
+    for (const range of lineRanges) {
+      let lineMaxFont = cell.fontSize;
+      for (let ci = range.start; ci < range.end; ci++) {
+        const ri = runForChar[ci] ?? 0;
+        if (runs[ri].fontSize > lineMaxFont) {
+          lineMaxFont = runs[ri].fontSize;
+        }
+      }
+      lineHeights.push(lineMaxFont * LINE_HEIGHT_FACTOR);
+    }
+
     const primaryResourceName = runResources[0];
     const ascent = fontManager.getFontAscent(primaryResourceName, primaryFontSize);
-    const totalTextHeight = lineRanges.length * lineHeight;
+    const totalTextHeight = lineHeights.reduce((sum, h) => sum + h, 0);
     const textStartY = computeTextStartY(
       verticalAlign,
       rect,
@@ -564,8 +586,10 @@ function drawRichText(
       pad.bottom
     );
 
+    let cumulativeY = 0;
     for (let li = 0; li < lineRanges.length; li++) {
-      const lineY = textStartY - li * lineHeight;
+      const lineY = textStartY - cumulativeY;
+      cumulativeY += lineHeights[li];
       const { start: lineStart, end: lineEnd } = lineRanges[li];
 
       // Split the line into segments by run

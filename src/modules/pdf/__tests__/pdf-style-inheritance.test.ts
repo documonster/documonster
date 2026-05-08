@@ -90,6 +90,36 @@ describe("PDF style rendering", () => {
       expect(regularOps.length).toBeGreaterThan(0);
     });
 
+    it("should NOT inherit bold when run has its own rPr without bold", async () => {
+      // Reproduces Issue #154: "Test Code" (bold from cell) + "(Tests X)" (has rPr
+      // with size/color but no <b/>, so should NOT be bold)
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 30;
+
+      const cell = ws.getCell("A1");
+      cell.value = {
+        richText: [
+          { text: "Test Code " }, // no font → inherits cell bold
+          { text: "(Tests X)", font: { size: 7, name: "Arial" } } // has rPr but no <b/>
+        ]
+      };
+      cell.font = { bold: true, size: 8, name: "Arial" };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // First run should use bold font (F2), second should use regular (F1)
+      const fontOps = content.match(/\/F\d+ [\d.]+ Tf/g) || [];
+      const boldOps = fontOps.filter(op => op.startsWith("/F2"));
+      const regularOps = fontOps.filter(op => op.startsWith("/F1"));
+
+      // "Test Code " → bold (inherited from cell)
+      expect(boldOps.length).toBeGreaterThan(0);
+      // "(Tests X)" → NOT bold (run has its own font without bold)
+      expect(regularOps.length).toBeGreaterThan(0);
+    });
+
     it("should inherit italic from cell style for runs without explicit italic", async () => {
       const wb = new Workbook();
       const ws = wb.addWorksheet("Sheet1");
@@ -283,8 +313,8 @@ describe("PDF style rendering", () => {
       const content = decompressPdfContent(pdf);
 
       // The PDF should contain stroke operations for the medium border on D1
-      // Medium border width = 0.5, so look for setLineWidth(0.5) → "0.5 w"
-      expect(content).toContain("0.5 w");
+      // Medium border width = 1.0, so look for setLineWidth(1) → "1 w"
+      expect(content).toContain("1 w");
     });
 
     it("should include cells with fill beyond value-based dimensions", async () => {
@@ -309,6 +339,94 @@ describe("PDF style rendering", () => {
 
       // Red fill → 1 0 0 rg followed by rect fill
       expect(content).toContain("1 0 0 rg");
+    });
+  });
+
+  describe("Issue #154: Border thickness distinction", () => {
+    it("should produce visually distinct line widths for thin vs medium borders", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 15;
+      ws.getColumn(2).width = 15;
+
+      ws.getCell("A1").value = "Thin";
+      ws.getCell("A1").font = { size: 10 };
+      ws.getCell("A1").border = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "thin", color: { argb: "FF000000" } }
+      };
+
+      ws.getCell("B1").value = "Medium";
+      ws.getCell("B1").font = { size: 10 };
+      ws.getCell("B1").border = {
+        top: { style: "medium", color: { argb: "FF000000" } },
+        bottom: { style: "medium", color: { argb: "FF000000" } }
+      };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // thin = 0.5pt, medium = 1.0pt — both should appear in PDF content
+      expect(content).toContain("0.5 w");
+      expect(content).toContain("1 w");
+    });
+
+    it("should produce distinct widths for thin, medium, and thick", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10;
+
+      ws.getCell("A1").value = "Test";
+      ws.getCell("A1").font = { size: 10 };
+      ws.getCell("A1").border = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "medium", color: { argb: "FF000000" } },
+        left: { style: "thick", color: { argb: "FF000000" } }
+      };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // All three widths should be distinct and present
+      expect(content).toContain("0.5 w");
+      expect(content).toContain("1 w");
+      expect(content).toContain("2 w");
+    });
+  });
+
+  describe("Issue #154: Rich text per-line height in wrap mode", () => {
+    it("should use per-line max font size for line height in wrapped rich text", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10; // narrow to force wrapping
+
+      const cell = ws.getCell("A1");
+      cell.value = {
+        richText: [
+          { text: "Big ", font: { size: 14 } },
+          { text: "text\n", font: { size: 14 } },
+          { text: "small text", font: { size: 7 } }
+        ]
+      };
+      cell.font = { size: 10 };
+      cell.alignment = { wrapText: true };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // The PDF should render the two different font sizes
+      // 14pt and 7pt scaled by scaleFactor should produce different Tf sizes
+      const fontOps = content.match(/\/F\d+ ([\d.]+) Tf/g) || [];
+      const sizes = fontOps.map(op => parseFloat(op.split(" ")[1]));
+
+      // Should have at least two distinct sizes
+      const uniqueSizes = [...new Set(sizes)];
+      expect(uniqueSizes.length).toBeGreaterThanOrEqual(2);
+
+      // The ratio between largest and smallest should be close to 14/7 = 2
+      const maxSize = Math.max(...sizes);
+      const minSize = Math.min(...sizes);
+      expect(maxSize / minSize).toBeCloseTo(2, 0);
     });
   });
 });
