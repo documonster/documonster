@@ -1232,12 +1232,53 @@ function parseBevelAttrs(tag: string): Bevel {
 
 function parseAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const re = /(\w+)="([^"]*)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tag)) !== null) {
-    attrs[m[1]] = m[2];
+  // Manual parser avoids regex backtracking on uncontrolled input.
+  let i = 0;
+  const len = tag.length;
+  while (i < len) {
+    // Skip non-word characters
+    while (i < len && !isWordChar(tag.charCodeAt(i))) {
+      i++;
+    }
+    if (i >= len) {
+      break;
+    }
+    // Read attribute name (word chars only)
+    const nameStart = i;
+    while (i < len && isWordChar(tag.charCodeAt(i))) {
+      i++;
+    }
+    const name = tag.slice(nameStart, i);
+    // Expect `="`
+    if (i >= len || tag.charCodeAt(i) !== 61 /* = */) {
+      continue;
+    }
+    i++;
+    if (i >= len || tag.charCodeAt(i) !== 34 /* " */) {
+      continue;
+    }
+    i++;
+    // Read attribute value until closing quote
+    const valStart = i;
+    while (i < len && tag.charCodeAt(i) !== 34) {
+      i++;
+    }
+    attrs[name] = tag.slice(valStart, i);
+    if (i < len) {
+      i++; // skip closing quote
+    }
   }
   return attrs;
+}
+
+/** Check if a char code is a word character [A-Za-z0-9_]. */
+function isWordChar(c: number): boolean {
+  return (
+    (c >= 65 && c <= 90) || // A-Z
+    (c >= 97 && c <= 122) || // a-z
+    (c >= 48 && c <= 57) || // 0-9
+    c === 95 // _
+  );
 }
 
 /**

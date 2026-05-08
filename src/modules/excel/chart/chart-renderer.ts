@@ -1612,10 +1612,55 @@ class BasicRasterCanvas {
 
 function parseSvgAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  for (const match of tag.matchAll(/([\w:-]+)="([^"]*)"/g)) {
-    attrs[match[1]] = match[2];
+  // Manual parser avoids regex backtracking on uncontrolled input.
+  let i = 0;
+  const len = tag.length;
+  while (i < len) {
+    // Skip non-name characters
+    while (i < len && !isNameChar(tag.charCodeAt(i))) {
+      i++;
+    }
+    if (i >= len) {
+      break;
+    }
+    // Read attribute name
+    const nameStart = i;
+    while (i < len && isNameChar(tag.charCodeAt(i))) {
+      i++;
+    }
+    const name = tag.slice(nameStart, i);
+    // Expect `="`
+    if (i >= len || tag.charCodeAt(i) !== 61 /* = */) {
+      continue;
+    }
+    i++;
+    if (i >= len || tag.charCodeAt(i) !== 34 /* " */) {
+      continue;
+    }
+    i++;
+    // Read attribute value until closing quote
+    const valStart = i;
+    while (i < len && tag.charCodeAt(i) !== 34) {
+      i++;
+    }
+    attrs[name] = tag.slice(valStart, i);
+    if (i < len) {
+      i++; // skip closing quote
+    }
   }
   return attrs;
+}
+
+/** Check if a char code is valid in an SVG/XML attribute name (word chars, colon, hyphen). */
+function isNameChar(c: number): boolean {
+  return (
+    (c >= 65 && c <= 90) || // A-Z
+    (c >= 97 && c <= 122) || // a-z
+    (c >= 48 && c <= 57) || // 0-9
+    c === 95 || // _
+    c === 58 || // :
+    c === 45 // -
+  );
 }
 
 /**
@@ -1927,20 +1972,24 @@ function parseSvgColor(color: string | undefined): [number, number, number, numb
 }
 
 function decodeSvgText(value: string): string {
-  // Strip SVG markup first, then decode XML entities in a single pass
-  // so that `&amp;lt;` decodes to `&lt;` (the literal user-authored
-  // text) rather than `<` (double-decoded). Chaining `.replace(/&lt;/g,
-  // "<").replace(/&amp;/g, "&")` silently corrupted labels whose text
-  // included an XML-escaped entity — the first replace turned
-  // `&amp;lt;` into `&lt;`, then the second decoded that to `<`, so a
-  // title authored as literal `&lt;tag&gt;` round-tripped as `<tag>`.
-  // Loop until no tags remain to handle nested incomplete tags like `<sc<ript>>`.
-  let stripped = value;
-  let prev: string;
-  do {
-    prev = stripped;
-    stripped = stripped.replace(/<[^>]*>/g, "");
-  } while (stripped !== prev);
+  // Strip SVG markup in a single O(n) pass to avoid polynomial complexity
+  // from repeated regex replacements on nested incomplete tags.
+  let stripped = "";
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value.charCodeAt(i);
+    if (ch === 60 /* < */) {
+      depth++;
+    } else if (ch === 62 /* > */) {
+      if (depth > 0) {
+        depth--;
+      } else {
+        stripped += ">";
+      }
+    } else if (depth === 0) {
+      stripped += value[i];
+    }
+  }
   return stripped.replace(
     /&(?:([A-Za-z]+)|#x([0-9A-Fa-f]+)|#(\d+));/g,
     (match, name: string | undefined, hex: string | undefined, dec: string | undefined) => {

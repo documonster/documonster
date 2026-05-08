@@ -2407,13 +2407,55 @@ function parseSimpleSvg(svg: string): SimpleSvgDocument {
 
 function parseSvgAttrs(raw: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  // Match `name="value"` pairs. Our SVG output never has spaces around `=`.
-  const attrRe = /([\w:-]+)="([^"]*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = attrRe.exec(raw)) !== null) {
-    attrs[match[1]] = match[2];
+  // Manual parser avoids regex backtracking on uncontrolled input.
+  let i = 0;
+  const len = raw.length;
+  while (i < len) {
+    // Skip non-name characters
+    while (i < len && !isSvgNameChar(raw.charCodeAt(i))) {
+      i++;
+    }
+    if (i >= len) {
+      break;
+    }
+    // Read attribute name
+    const nameStart = i;
+    while (i < len && isSvgNameChar(raw.charCodeAt(i))) {
+      i++;
+    }
+    const name = raw.slice(nameStart, i);
+    // Expect `="`
+    if (i >= len || raw.charCodeAt(i) !== 61 /* = */) {
+      continue;
+    }
+    i++;
+    if (i >= len || raw.charCodeAt(i) !== 34 /* " */) {
+      continue;
+    }
+    i++;
+    // Read attribute value until closing quote
+    const valStart = i;
+    while (i < len && raw.charCodeAt(i) !== 34) {
+      i++;
+    }
+    attrs[name] = raw.slice(valStart, i);
+    if (i < len) {
+      i++; // skip closing quote
+    }
   }
   return attrs;
+}
+
+/** Check if a char code is valid in an SVG/XML attribute name (word chars, colon, hyphen). */
+function isSvgNameChar(c: number): boolean {
+  return (
+    (c >= 65 && c <= 90) || // A-Z
+    (c >= 97 && c <= 122) || // a-z
+    (c >= 48 && c <= 57) || // 0-9
+    c === 95 || // _
+    c === 58 || // :
+    c === 45 // -
+  );
 }
 
 function numAttr(element: SimpleSvgElement, name: string, fallback: number): number {
