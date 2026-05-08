@@ -4,15 +4,6 @@
 
 ### 🔥 P1: High Priority
 
-#### Chart Support
-
-- [ ] Create basic charts (bar, line, pie)
-- [ ] Chart customization (title, legend, colors)
-
-#### Stream/Performance
-
-- [ ] Streaming shared strings (currently built in memory, then flushed)
-
 #### Formula
 
 - [ ] Dynamic array formula support (`FILTER`, `SORT`, `UNIQUE`, `XLOOKUP`, `SEQUENCE`) — requires `cm` attribute on `<c>`, `xl/metadata.xml` parsing/writing, `<xda:dynamicArrayProperties>` handling
