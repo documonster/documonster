@@ -33,6 +33,7 @@ export interface PdfColorData {
   argb?: string;
   theme?: number;
   tint?: number;
+  indexed?: number;
 }
 
 /** Font style in the PDF input model. */

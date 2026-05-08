@@ -298,6 +298,33 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
       }
     : { top: 0, left: 0, bottom: 0, right: 0 };
 
+  // Expand bounds to include cells that only have styles (borders, fills, fonts)
+  // but no values — these are not tracked by dimensions.
+  if (hasData) {
+    for (let r = bounds.top; r <= bounds.bottom; r++) {
+      const row = ws.findRow(r);
+      if (!row) {
+        continue;
+      }
+      row.eachCell({ includeEmpty: true }, cell => {
+        if (cell.col > bounds.right) {
+          const hasStyle =
+            cell.style &&
+            ((cell.style.border &&
+              (cell.style.border.top ||
+                cell.style.border.right ||
+                cell.style.border.bottom ||
+                cell.style.border.left)) ||
+              cell.style.fill ||
+              cell.style.font);
+          if (hasStyle || (cell.type !== ValueType.Null && cell.type !== ValueType.Merge)) {
+            bounds.right = cell.col;
+          }
+        }
+      });
+    }
+  }
+
   // Convert columns
   const columns = new Map<number, PdfColumnData>();
   if (hasData) {
@@ -620,7 +647,8 @@ function convertColor(color: any): PdfColorData {
   return {
     argb: color.argb,
     theme: color.theme,
-    tint: color.tint
+    tint: color.tint,
+    indexed: color.indexed
   };
 }
 

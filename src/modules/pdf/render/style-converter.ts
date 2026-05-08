@@ -68,7 +68,7 @@ export function argbToPdfColor(argb: string | undefined): PdfColor | null {
 
 /**
  * Convert a color data object to PDF color.
- * Handles both ARGB and theme-based colors.
+ * Handles ARGB, theme-based, and indexed colors.
  */
 export function excelColorToPdf(color: Partial<PdfColorData> | undefined): PdfColor | null {
   if (!color) {
@@ -91,6 +91,11 @@ export function excelColorToPdf(color: Partial<PdfColorData> | undefined): PdfCo
       return applyTint(base, tint);
     }
     return base;
+  }
+
+  // Indexed colors (legacy Excel color palette)
+  if (color.indexed !== undefined) {
+    return indexedColorToPdf(color.indexed);
   }
 
   return null;
@@ -117,6 +122,101 @@ function themeColorToPdf(themeIndex: number): PdfColor | null {
 
   if (themeIndex >= 0 && themeIndex < themeColors.length) {
     return themeColors[themeIndex];
+  }
+  return null;
+}
+
+/**
+ * Standard Excel indexed color palette (56 colors + system colors).
+ * Index 0–7: legacy base colors
+ * Index 8–63: standard palette (indices 8–63)
+ * Index 64: system foreground (black)
+ * Index 65: system background (white)
+ *
+ * @see ECMA-376 §18.8.27 — indexedColors
+ */
+const INDEXED_COLORS: string[] = [
+  // 0–7: legacy base colors (same as 8–15 but less commonly used directly)
+  "000000", // 0: Black
+  "FFFFFF", // 1: White
+  "FF0000", // 2: Red
+  "00FF00", // 3: Green
+  "0000FF", // 4: Blue
+  "FFFF00", // 5: Yellow
+  "FF00FF", // 6: Magenta
+  "00FFFF", // 7: Cyan
+  // 8–63: standard palette
+  "000000", // 8: Black
+  "FFFFFF", // 9: White
+  "FF0000", // 10: Red
+  "00FF00", // 11: Green
+  "0000FF", // 12: Blue
+  "FFFF00", // 13: Yellow
+  "FF00FF", // 14: Magenta
+  "00FFFF", // 15: Cyan
+  "800000", // 16: Dark Red
+  "008000", // 17: Dark Green
+  "000080", // 18: Dark Blue (Navy)
+  "808000", // 19: Dark Yellow (Olive)
+  "800080", // 20: Purple
+  "008080", // 21: Teal
+  "C0C0C0", // 22: Silver
+  "808080", // 23: Gray
+  "9999FF", // 24: Periwinkle
+  "993366", // 25: Plum
+  "FFFFCC", // 26: Ivory
+  "CCFFFF", // 27: Light Cyan
+  "660066", // 28: Dark Purple
+  "FF8080", // 29: Coral
+  "0066CC", // 30: Ocean Blue
+  "CCCCFF", // 31: Ice Blue
+  "000080", // 32: Dark Blue
+  "FF00FF", // 33: Pink
+  "FFFF00", // 34: Yellow
+  "00FFFF", // 35: Cyan
+  "800080", // 36: Purple
+  "800000", // 37: Dark Red
+  "008080", // 38: Teal
+  "0000FF", // 39: Blue
+  "00CCFF", // 40: Sky Blue
+  "CCFFFF", // 41: Light Turquoise
+  "CCFFCC", // 42: Light Green
+  "FFFF99", // 43: Light Yellow
+  "99CCFF", // 44: Pale Blue
+  "FF99CC", // 45: Rose
+  "CC99FF", // 46: Lavender
+  "FFCC99", // 47: Tan
+  "3366FF", // 48: Light Blue
+  "33CCCC", // 49: Aqua
+  "99CC00", // 50: Lime
+  "FFCC00", // 51: Gold
+  "FF9900", // 52: Light Orange
+  "FF6600", // 53: Orange
+  "666699", // 54: Blue Gray
+  "969696", // 55: Gray 40%
+  "003366", // 56: Dark Teal
+  "339966", // 57: Sea Green
+  "003300", // 58: Very Dark Green
+  "333300", // 59: Dark Olive
+  "993300", // 60: Brown
+  "993366", // 61: Plum
+  "333399", // 62: Indigo
+  "333333" // 63: Gray 80%
+];
+
+/**
+ * Convert an indexed color to PDF color.
+ * Index 64 = system foreground (black), 65 = system background (white).
+ */
+function indexedColorToPdf(index: number): PdfColor | null {
+  if (index === 64) {
+    return { r: 0, g: 0, b: 0 }; // System foreground (black)
+  }
+  if (index === 65) {
+    return { r: 1, g: 1, b: 1 }; // System background (white)
+  }
+  if (index >= 0 && index < INDEXED_COLORS.length) {
+    return argbToPdfColor(INDEXED_COLORS[index]) ?? null;
   }
   return null;
 }

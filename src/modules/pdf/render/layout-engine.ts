@@ -28,6 +28,7 @@ import type {
   PdfCellStyle,
   PdfRowData,
   PdfRichTextRunData,
+  PdfFontStyle,
   PdfSheetImage,
   PdfSheetChart,
   PdfAlignmentData,
@@ -809,7 +810,8 @@ function countWrapLines(
           scaleFactor,
           effectiveWidth,
           fontManager,
-          options
+          options,
+          cell.style?.font
         );
         return Math.max(lineCount, wrappedCount);
       }
@@ -843,8 +845,13 @@ function countRichTextWrapLines(
   scaleFactor: number,
   effectiveWidth: number,
   fontManager: FontManager,
-  options: ResolvedPdfOptions
+  options: ResolvedPdfOptions,
+  cellFont?: Partial<PdfFontStyle>
 ): number {
+  // Use cell-level font as fallback for runs without their own font
+  const defaultFamily = cellFont?.name ?? options.defaultFontFamily;
+  const defaultSize = cellFont?.size ?? options.defaultFontSize;
+
   // Build character-to-run mapping
   const runForChar: number[] = [];
   for (let ri = 0; ri < runs.length; ri++) {
@@ -853,13 +860,20 @@ function countRichTextWrapLines(
     }
   }
 
-  // Resolve font resources for each run
+  // Resolve font resources for each run (with cell font inheritance)
   const runResources: string[] = runs.map(run => {
-    const fontProps = extractFontProperties(
-      run.font,
-      options.defaultFontFamily,
-      options.defaultFontSize
-    );
+    const effectiveRunFont: Partial<PdfFontStyle> | undefined = run.font
+      ? {
+          name: run.font.name ?? cellFont?.name,
+          size: run.font.size ?? cellFont?.size,
+          bold: run.font.bold ?? cellFont?.bold,
+          italic: run.font.italic ?? cellFont?.italic,
+          strike: run.font.strike ?? cellFont?.strike,
+          underline: run.font.underline ?? cellFont?.underline,
+          color: run.font.color ?? cellFont?.color
+        }
+      : cellFont;
+    const fontProps = extractFontProperties(effectiveRunFont, defaultFamily, defaultSize);
     const pdfFontName = resolvePdfFontName(fontProps.fontFamily, fontProps.bold, fontProps.italic);
     return fontManager.hasEmbeddedFont()
       ? fontManager.getEmbeddedResourceName()
@@ -868,11 +882,15 @@ function countRichTextWrapLines(
 
   // Resolve scaled font sizes for each run
   const runFontSizes: number[] = runs.map(run => {
-    const fontProps = extractFontProperties(
-      run.font,
-      options.defaultFontFamily,
-      options.defaultFontSize
-    );
+    const effectiveRunFont: Partial<PdfFontStyle> | undefined = run.font
+      ? {
+          name: run.font.name ?? cellFont?.name,
+          size: run.font.size ?? cellFont?.size,
+          bold: run.font.bold ?? cellFont?.bold,
+          italic: run.font.italic ?? cellFont?.italic
+        }
+      : cellFont;
+    const fontProps = extractFontProperties(effectiveRunFont, defaultFamily, defaultSize);
     return fontProps.fontSize * scaleFactor;
   });
 
@@ -1223,8 +1241,10 @@ function buildLayoutCell(
     fontManager.trackText(text);
   }
 
-  // Rich text runs
-  const richText = buildRichTextRuns(cell, options, fontManager, scaleFactor);
+  // Rich text runs — pass cell-level font as the fallback for runs without
+  // their own font definition (e.g. the first run often has no font object
+  // and should inherit the cell's style font including bold/italic).
+  const richText = buildRichTextRuns(cell, options, fontManager, scaleFactor, style.font);
 
   const borders = excelBordersToPdf(style.border);
 
@@ -1727,6 +1747,36 @@ function computeTextOverflows(
 
       if (overflowAvailable > 0) {
         cell.textOverflowWidth = Math.min(overflowNeeded, overflowAvailable);
+
+        // Hide internal vertical borders in the overflow region.
+        // In Excel, when text overflows into adjacent empty cells, the shared
+        // vertical borders between them are not drawn (the text appears to
+        // span across seamlessly). We suppress:
+        // - The overflowing cell's right border
+        // - Each covered neighbor's left border (and right border if fully covered)
+        let accumulated = 0;
+        const actualOverflow = cell.textOverflowWidth;
+
+        // Remove the source cell's right border if text overflows
+        cell.borders.right = null;
+
+        for (let j = gci + 1; j < colGroup.length; j++) {
+          const neighborCell = cellGrid.get(`${ri}:${j}`);
+          if (!neighborCell) {
+            break;
+          }
+
+          // Remove the neighbor's left border (shared edge with previous cell)
+          neighborCell.borders.left = null;
+
+          accumulated += groupColWidths[j];
+          if (accumulated >= actualOverflow) {
+            break;
+          }
+
+          // If fully covered, also remove the neighbor's right border
+          neighborCell.borders.right = null;
+        }
       }
     }
   }
@@ -1744,7 +1794,8 @@ function buildRichTextRuns(
   cell: PdfCellData | undefined,
   options: ResolvedPdfOptions,
   fontManager: FontManager,
-  scaleFactor: number
+  scaleFactor: number,
+  cellFont?: Partial<PdfFontStyle>
 ): LayoutRichTextRun[] | null {
   if (!cell || cell.type !== PdfCellType.RichText) {
     return null;
@@ -1760,12 +1811,27 @@ function buildRichTextRuns(
     return null;
   }
 
+  // Use cell-level font as fallback for runs without their own font,
+  // falling back to global defaults only if cell font is not available.
+  const defaultFamily = cellFont?.name ?? options.defaultFontFamily;
+  const defaultSize = cellFont?.size ?? options.defaultFontSize;
+
   return runs.map(run => {
-    const fontProps = extractFontProperties(
-      run.font,
-      options.defaultFontFamily,
-      options.defaultFontSize
-    );
+    // When a run has no font at all, use cell font entirely.
+    // When a run has a partial font, merge with cell font for missing properties.
+    const effectiveFont: Partial<PdfFontStyle> | undefined = run.font
+      ? {
+          name: run.font.name ?? cellFont?.name,
+          size: run.font.size ?? cellFont?.size,
+          bold: run.font.bold ?? cellFont?.bold,
+          italic: run.font.italic ?? cellFont?.italic,
+          strike: run.font.strike ?? cellFont?.strike,
+          underline: run.font.underline ?? cellFont?.underline,
+          color: run.font.color ?? cellFont?.color
+        }
+      : cellFont;
+
+    const fontProps = extractFontProperties(effectiveFont, defaultFamily, defaultSize);
 
     // Register font for this run
     if (fontManager.hasEmbeddedFont()) {

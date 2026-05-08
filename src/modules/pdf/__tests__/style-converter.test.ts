@@ -253,4 +253,60 @@ describe("Style Converter", () => {
       expect(DEFAULT_COLORS.white).toEqual({ r: 1, g: 1, b: 1 });
     });
   });
+
+  describe("indexed colors", () => {
+    it("should resolve indexed 64 (system foreground) to black", () => {
+      const color = excelColorToPdf({ indexed: 64 });
+      expect(color).toEqual({ r: 0, g: 0, b: 0 });
+    });
+
+    it("should resolve indexed 65 (system background) to white", () => {
+      const color = excelColorToPdf({ indexed: 65 });
+      expect(color).toEqual({ r: 1, g: 1, b: 1 });
+    });
+
+    it("should resolve indexed 10 (Red)", () => {
+      const color = excelColorToPdf({ indexed: 10 });
+      expect(color).toEqual({ r: 1, g: 0, b: 0 });
+    });
+
+    it("should resolve indexed 62 (Indigo #333399)", () => {
+      const color = excelColorToPdf({ indexed: 62 });
+      expect(color!.r).toBeCloseTo(0.2, 2);
+      expect(color!.g).toBeCloseTo(0.2, 2);
+      expect(color!.b).toBeCloseTo(0.6, 2);
+    });
+
+    it("should resolve indexed 30 (Ocean Blue #0066CC)", () => {
+      const color = excelColorToPdf({ indexed: 30 });
+      expect(color!.r).toBeCloseTo(0, 2);
+      expect(color!.g).toBeCloseTo(0.4, 2);
+      expect(color!.b).toBeCloseTo(0.8, 2);
+    });
+
+    it("should resolve indexed 0 (Black)", () => {
+      const color = excelColorToPdf({ indexed: 0 });
+      expect(color).toEqual({ r: 0, g: 0, b: 0 });
+    });
+
+    it("should resolve indexed 9 (White)", () => {
+      const color = excelColorToPdf({ indexed: 9 });
+      expect(color).toEqual({ r: 1, g: 1, b: 1 });
+    });
+
+    it("should return null for out-of-range index", () => {
+      expect(excelColorToPdf({ indexed: 100 })).toBeNull();
+      expect(excelColorToPdf({ indexed: -1 })).toBeNull();
+    });
+
+    it("should prefer ARGB over indexed", () => {
+      const color = excelColorToPdf({ argb: "FF00FF00", indexed: 10 });
+      expect(color).toEqual({ r: 0, g: 1, b: 0 }); // green from ARGB, not red
+    });
+
+    it("should prefer theme over indexed", () => {
+      const color = excelColorToPdf({ theme: 1, indexed: 10 });
+      expect(color).toEqual({ r: 0, g: 0, b: 0 }); // black from theme:1, not red
+    });
+  });
 });

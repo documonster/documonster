@@ -1,0 +1,314 @@
+import { inflateSync } from "node:zlib";
+
+import { Workbook } from "@excel/workbook";
+import { excelToPdf } from "@pdf/excel-bridge";
+import { describe, it, expect } from "vitest";
+
+/**
+ * Tests for PDF style rendering:
+ * - Rich text runs inherit cell-level font properties (size, bold, italic)
+ * - Text overflow suppresses internal vertical borders
+ * - Indexed colors are correctly resolved
+ * - Bounds expansion to include style-only cells beyond dimensions
+ */
+
+/** Decompress PDF content streams and return as a single string. */
+function decompressPdfContent(pdfBytes: Uint8Array): string {
+  const pdfStr = Buffer.from(pdfBytes).toString("latin1");
+  const regex = /stream\r?\n([\s\S]*?)endstream/g;
+  const parts: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(pdfStr)) !== null) {
+    const raw = Buffer.from(m[1], "latin1");
+    try {
+      parts.push(inflateSync(raw).toString("latin1"));
+    } catch {
+      parts.push(raw.toString("latin1"));
+    }
+  }
+  return parts.join("\n");
+}
+
+describe("PDF style rendering", () => {
+  describe("Bug 1: Rich text inherits cell font properties", () => {
+    it("should use cell font size for runs without explicit size", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 30;
+
+      // Cell has font size 8, first run has no font (should inherit 8pt)
+      const cell = ws.getCell("A1");
+      cell.value = {
+        richText: [{ text: "Hello " }, { text: "World", font: { size: 7 } }]
+      };
+      cell.font = { size: 8, name: "Arial" };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // 8pt scaled should appear in Tf operator for the first run
+      // 7pt scaled should appear for the second run
+      const fontOps = content.match(/\/F\d+ ([\d.]+) Tf/g) || [];
+      const sizes = fontOps.map(op => parseFloat(op.split(" ")[1]));
+
+      // We should NOT see the global default 11pt (or its scaled equivalent)
+      // Both runs should have sizes derived from 8pt or 7pt
+      // scaleFactor maps 8 -> some value and 7 -> a smaller value
+      // The key assertion: we have at least 2 different sizes, and no 11pt
+      expect(sizes.length).toBeGreaterThanOrEqual(2);
+      // All sizes should be <= 8 * scaleFactor (no 11pt leak)
+      const maxSize = Math.max(...sizes);
+      const minSize = Math.min(...sizes);
+      // ratio should be close to 8/7 ≈ 1.14 (not 11/7 ≈ 1.57)
+      expect(maxSize / minSize).toBeCloseTo(8 / 7, 1);
+    });
+
+    it("should inherit bold from cell style for runs without explicit bold", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 30;
+
+      const cell = ws.getCell("A1");
+      cell.value = {
+        richText: [
+          { text: "Bold text " }, // no font → inherits cell bold
+          { text: "Normal", font: { bold: false, size: 10 } } // explicit non-bold
+        ]
+      };
+      cell.font = { bold: true, size: 10, name: "Arial" };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // F2 = bold font resource (Helvetica-Bold or similar)
+      // The first run should use bold (F2), second should use regular (F1)
+      const fontOps = content.match(/\/F\d+ [\d.]+ Tf/g) || [];
+      const boldOps = fontOps.filter(op => op.startsWith("/F2"));
+      const regularOps = fontOps.filter(op => op.startsWith("/F1"));
+
+      expect(boldOps.length).toBeGreaterThan(0);
+      expect(regularOps.length).toBeGreaterThan(0);
+    });
+
+    it("should inherit italic from cell style for runs without explicit italic", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 30;
+
+      const cell = ws.getCell("A1");
+      cell.value = {
+        richText: [
+          { text: "Italic " }, // no font → inherits cell italic
+          { text: "Normal", font: { italic: false, size: 10 } }
+        ]
+      };
+      cell.font = { italic: true, size: 10, name: "Arial" };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // Two different font resources should be used (italic vs regular),
+      // confirming the first run inherited italic and got a different font
+      // than the second run which explicitly has italic:false.
+      const fontOps = content.match(/\/F\d+ [\d.]+ Tf/g) || [];
+      const uniqueFonts = new Set(fontOps.map(op => op.split(" ")[0]));
+      expect(uniqueFonts.size).toBe(2);
+    });
+  });
+
+  describe("Bug 2: Text overflow hides internal vertical borders", () => {
+    it("should suppress vertical borders in overflow region", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Very narrow columns — text will overflow from A1 into B1, C1
+      ws.getColumn(1).width = 3;
+      ws.getColumn(2).width = 3;
+      ws.getColumn(3).width = 3;
+      ws.getColumn(4).width = 3;
+
+      // A1 has text that overflows; B1, C1 empty
+      ws.getCell("A1").value = "A VERY LONG TEXT THAT OVERFLOWS";
+      ws.getCell("A1").font = { size: 10 };
+
+      // All cells have thin borders on all sides
+      for (let col = 1; col <= 4; col++) {
+        ws.getCell(1, col).border = {
+          top: { style: "thin" },
+          right: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" }
+        };
+      }
+      // D1 has text to block overflow
+      ws.getCell("D1").value = "STOP";
+      ws.getCell("D1").font = { size: 10 };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // Count stroke operations (S) — with overflow border suppression,
+      // there should be fewer strokes than if all 4*4=16 borders were drawn
+      const strokeCount = (content.match(/^S$/gm) || []).length;
+
+      // Without suppression: 4 cells * 4 borders = 16, minus shared edges resolved
+      // With suppression: internal vertical borders in overflow area removed
+      // At minimum, A1's right border and B1's left border should be suppressed
+      // We verify the count is less than the maximum possible
+      expect(strokeCount).toBeLessThan(16);
+    });
+
+    it("should not suppress borders when text does not overflow", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Wide columns — text fits
+      ws.getColumn(1).width = 40;
+      ws.getColumn(2).width = 40;
+
+      ws.getCell("A1").value = "Short";
+      ws.getCell("A1").font = { size: 10 };
+
+      for (let col = 1; col <= 2; col++) {
+        ws.getCell(1, col).border = {
+          top: { style: "thin" },
+          right: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" }
+        };
+      }
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // All borders should be drawn (minus shared edge resolution)
+      // A1.right and B1.left are shared — one is suppressed by resolveSharedBorders
+      // So we expect: A1(top,bottom,left) + A1.right/B1.left (one wins) + B1(top,right,bottom)
+      // = at least 6 strokes
+      const strokeCount = (content.match(/^S$/gm) || []).length;
+      expect(strokeCount).toBeGreaterThanOrEqual(6);
+    });
+  });
+
+  describe("Bug 3: Indexed colors", () => {
+    it("should resolve indexed color 64 (system foreground) to black", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10;
+
+      ws.getCell("A1").value = "Test";
+      ws.getCell("A1").border = {
+        top: { style: "thin", color: { indexed: 64 } as any }
+      };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // Should have a black stroke (0 0 0 RG)
+      expect(content).toContain("0 0 0 RG");
+    });
+
+    it("should resolve indexed color 10 (Red) for font color", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10;
+
+      ws.getCell("A1").value = "Red text";
+      ws.getCell("A1").font = { color: { indexed: 10 } as any, size: 10 };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // indexed:10 = #FF0000 → 1 0 0 rg
+      expect(content).toContain("1 0 0 rg");
+    });
+
+    it("should resolve indexed color 62 (Indigo) for font color", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 10;
+
+      ws.getCell("A1").value = "Indigo text";
+      ws.getCell("A1").font = { color: { indexed: 62 } as any, size: 10 };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // indexed:62 = #333399 → 0.2 0.2 0.6 rg
+      expect(content).toContain("0.2 0.2 0.6 rg");
+    });
+
+    it("should resolve indexed color in rich text runs", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getColumn(1).width = 20;
+
+      ws.getCell("A1").value = {
+        richText: [
+          { text: "Normal " },
+          { text: "Blue", font: { color: { indexed: 39 } as any, size: 10 } }
+        ]
+      };
+      ws.getCell("A1").font = { size: 10 };
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // indexed:39 = #0000FF → 0 0 1 rg
+      expect(content).toContain("0 0 1 rg");
+    });
+  });
+
+  describe("Bounds expansion for style-only cells", () => {
+    it("should include cells with borders beyond value-based dimensions", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      // Only A1 has a value (dimensions will report right=1)
+      ws.getCell("A1").value = "Data";
+      ws.getCell("A1").font = { size: 10 };
+
+      // D1 has only a border, no value — should still be included in PDF
+      ws.getCell("D1").border = {
+        top: { style: "medium" },
+        bottom: { style: "medium" }
+      };
+      // Set column widths so we can verify D is rendered
+      ws.getColumn(1).width = 10;
+      ws.getColumn(2).width = 10;
+      ws.getColumn(3).width = 10;
+      ws.getColumn(4).width = 10;
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // The PDF should contain stroke operations for the medium border on D1
+      // Medium border width = 0.5, so look for setLineWidth(0.5) → "0.5 w"
+      expect(content).toContain("0.5 w");
+    });
+
+    it("should include cells with fill beyond value-based dimensions", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+
+      ws.getCell("A1").value = "Data";
+      ws.getCell("A1").font = { size: 10 };
+
+      // C1 has only a fill — should be included
+      ws.getCell("C1").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFF0000" }
+      };
+      ws.getColumn(1).width = 10;
+      ws.getColumn(2).width = 10;
+      ws.getColumn(3).width = 10;
+
+      const pdf = await excelToPdf(wb);
+      const content = decompressPdfContent(pdf);
+
+      // Red fill → 1 0 0 rg followed by rect fill
+      expect(content).toContain("1 0 0 rg");
+    });
+  });
+});
