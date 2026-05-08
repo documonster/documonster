@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.3](https://github.com/cjnoname/excelts/compare/v9.5.2...v9.5.3) (2026-05-08)
+
+
+### Bug Fixes
+
+* **pdf:** Draw borders after overflow erase to prevent white rects from covering border lines ([2b8c997](https://github.com/cjnoname/excelts/commit/2b8c9974429d1f69127d76873c2e59a074470d1a))
+* **stream:** Align read() with Node.js 26 behavior (return single chunk) ([5e90746](https://github.com/cjnoname/excelts/commit/5e9074695653307cf4e1f1ce072cf68bfab2aabb))
+
 ## [9.5.2](https://github.com/cjnoname/excelts/compare/v9.5.1...v9.5.2) (2026-05-08)
 
 
