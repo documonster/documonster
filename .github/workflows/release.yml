@@ -18,7 +18,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
 
   # Step 2a: Canary — publish on every push except when release-please just created a release.
@@ -34,14 +34,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10
+        uses: pnpm/action-setup@v6
 
-      - name: Use Node.js 24
+      - name: Use Node.js 26
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
@@ -81,7 +79,7 @@ jobs:
           echo "Verified: @cj-tech-master/excelts@${EXPECTED_VERSION} is live on npm"
 
       - name: Comment on commit
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.repos.createCommitComment({
@@ -103,14 +101,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10
+        uses: pnpm/action-setup@v6
 
-      - name: Use Node.js 24
+      - name: Use Node.js 26
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
