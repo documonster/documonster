@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.1](https://github.com/cjnoname/excelts/compare/v9.5.0...v9.5.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **pdf:** Correct rich text font inheritance, indexed colors, and overflow borders ([8090686](https://github.com/cjnoname/excelts/commit/8090686e4f345e13bd4182472796faa4718fe536))
+
+
+### Code Refactoring
+
+* **word:** Decompose document.ts into focused modules ([772cc2b](https://github.com/cjnoname/excelts/commit/772cc2be03b41ac56c776ac91bd909943e406d4f))
+
 ## [9.5.0](https://github.com/cjnoname/excelts/compare/v9.4.2...v9.5.0) (2026-05-08)
 
 
