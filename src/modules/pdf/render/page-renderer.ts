@@ -93,16 +93,10 @@ export function renderPage(
     }
   }
 
-  // --- Step 3: Draw cell borders ---
-  for (const cell of page.cells) {
-    drawCellBorders(stream, cell);
-  }
-
-  // --- Step 3.5: Erase grid lines and borders in text overflow regions ---
-  // In Excel, text overflowing into adjacent empty cells hides gridlines and
-  // borders underneath. We draw white only over the portions of the overflow
-  // area that do NOT have a cell fill (cells with fill already cover gridlines
-  // in Step 2, and we must not erase their background).
+  // --- Step 3: Erase grid lines in text overflow regions ---
+  // In Excel, text overflowing into adjacent empty cells hides gridlines
+  // underneath. We draw white over the overflow area before drawing borders
+  // so that borders remain crisp and unaffected.
   for (const cell of page.cells) {
     if (!cell.textOverflowWidth || cell.textOverflowWidth <= 0) {
       continue;
@@ -135,35 +129,31 @@ export function renderPage(
       }
     }
 
-    // Draw white in unfilled portions of the overflow area.
-    // Inset vertically by a small amount to avoid covering the horizontal
-    // border lines at the top/bottom edges of the cell.
-    const borderInset = 0.25;
-    const eraseY = cellY + borderInset;
-    const eraseH = cellH - borderInset * 2;
-    if (eraseH <= 0) {
-      continue;
-    }
-
+    // Draw white in unfilled portions of the overflow area
     if (filledRanges.length === 0) {
-      stream.fillRect(overflowLeft, eraseY, cell.textOverflowWidth, eraseH, { r: 1, g: 1, b: 1 });
+      stream.fillRect(overflowLeft, cellY, cell.textOverflowWidth, cellH, { r: 1, g: 1, b: 1 });
     } else {
       // Sort filled ranges and draw white in gaps
       filledRanges.sort((a, b) => a.left - b.left);
       let cursor = overflowLeft;
       for (const fr of filledRanges) {
         if (fr.left > cursor) {
-          stream.fillRect(cursor, eraseY, fr.left - cursor, eraseH, { r: 1, g: 1, b: 1 });
+          stream.fillRect(cursor, cellY, fr.left - cursor, cellH, { r: 1, g: 1, b: 1 });
         }
         cursor = Math.max(cursor, fr.right);
       }
       if (cursor < overflowRight) {
-        stream.fillRect(cursor, eraseY, overflowRight - cursor, eraseH, { r: 1, g: 1, b: 1 });
+        stream.fillRect(cursor, cellY, overflowRight - cursor, cellH, { r: 1, g: 1, b: 1 });
       }
     }
   }
 
-  // --- Step 4: Draw cell text ---
+  // --- Step 4: Draw cell borders (after overflow erase so borders stay crisp) ---
+  for (const cell of page.cells) {
+    drawCellBorders(stream, cell);
+  }
+
+  // --- Step 5: Draw cell text ---
   const sf = page.scaleFactor;
   for (const cell of page.cells) {
     if (cell.text || cell.richText) {
