@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.0](https://github.com/cjnoname/excelts/compare/v9.4.2...v9.5.0) (2026-05-08)
+
+
+### Features
+
+* **chart:** Add ChartEx cache population for improved preview rendering ([cc3b389](https://github.com/cjnoname/excelts/commit/cc3b3899ea5a632d78a2f2d0ed1d6f995da5975f))
+* **excel:** Add chart, chartEx, sparkline, and chartsheet support ([d13f95b](https://github.com/cjnoname/excelts/commit/d13f95b41146e21a5616612a1cdc239daadc87a5))
+* **excel:** Chart compatibility matrix, docs & ChartEx/3D/dataTable/userShapes gaps ([3c31a9e](https://github.com/cjnoname/excelts/commit/3c31a9edb5d409234620d47167854972271fc45f))
+* **excel:** Chart integration test suite + removeChart anchor cleanup ([465fa6e](https://github.com/cjnoname/excelts/commit/465fa6ea48ffb7192e764f3b5e2721fda832b958))
+* **excel:** Classic-chart schema validator + dLbls child order + pivot anchor ([5f6a37c](https://github.com/cjnoname/excelts/commit/5f6a37c306ba0c2080620b6632619a69b08fb083))
+* **excel:** Lazy chart support + test infrastructure improvements ([6b5a24d](https://github.com/cjnoname/excelts/commit/6b5a24d55a7ab883ee8784960750e52ce1aff861))
+* **excel:** OOXML validator overhaul + chart compliance fixes + full chart catalogue ([3638020](https://github.com/cjnoname/excelts/commit/363802034aefa3f0fe99cc87a58d5e820e01a61e))
+* **word:** Add comprehensive Word (DOCX) processing module ([b3d09e9](https://github.com/cjnoname/excelts/commit/b3d09e9b810dbb825c4c3144b8e54bb3176c8a69))
+
+
+### Bug Fixes
+
+* **chart:** Correct documentation, rendering, and cross-workbook copy issues ([3039fec](https://github.com/cjnoname/excelts/commit/3039fecede48115fe261dda03788b878a1f64d1f))
+* **excel:** Eleven chart bugs surfaced by a review + TZ-independent date serial ([0f240e0](https://github.com/cjnoname/excelts/commit/0f240e0b1960dc86029c9010207d5b06b5234c4d))
+* **excel:** External links cause Excel to reject file as corrupt ([eeaa273](https://github.com/cjnoname/excelts/commit/eeaa273bf0d87b7817faeab1da57af260bebae4f))
+* **excel:** Replace pseudo-glyph PNG text rendering with real TTF rasterizer ([3adefdb](https://github.com/cjnoname/excelts/commit/3adefdb85bf36ce012b6517cdd0932e4d47c2c2d))
+* **package:** Remove Word references from description, keywords, and exports ([d31d27f](https://github.com/cjnoname/excelts/commit/d31d27f1b130212e98dbb64c9bc9ac42e391ab49))
+* **pdf:** Overhaul chart rendering in PDF export ([72711e7](https://github.com/cjnoname/excelts/commit/72711e7b7c5b87e912a81568490f74d749db8406))
+* **pdf:** Rich text overflow, per-run wrap measurement, and overflow erase ([82faf0f](https://github.com/cjnoname/excelts/commit/82faf0f68ef8553dbd6853268de813dc7bd915ef))
+* **security:** Eliminate remaining CodeQL regex and sanitization alerts ([7b2d5e7](https://github.com/cjnoname/excelts/commit/7b2d5e76d412cf4cf4efa5f1805520fee78492f3))
+* **security:** Resolve all CodeQL polynomial regex and sanitization alerts ([af2d0c5](https://github.com/cjnoname/excelts/commit/af2d0c5378a38e92b5209e261918e9f4a812a44a))
+* **svg:** Replace regex parsing with manual attribute parser to avoid backtracking issues ([ce37fd1](https://github.com/cjnoname/excelts/commit/ce37fd1fdf45e8d3bb9bd125d46d535266cda1f3))
+* **test:** Replace platform-dependent PNG hash with determinism check ([709d834](https://github.com/cjnoname/excelts/commit/709d83456e9062bef33812bceebc5b46a790540a))
+
 ## [9.4.2](https://github.com/cjnoname/excelts/compare/v9.4.1...v9.4.2) (2026-04-25)
 
 
