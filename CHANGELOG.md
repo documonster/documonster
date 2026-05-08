@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.2](https://github.com/cjnoname/excelts/compare/v9.5.1...v9.5.2) (2026-05-08)
+
+
+### Bug Fixes
+
+* **pdf:** Resolve rich text bold inheritance and border rendering issues ([#154](https://github.com/cjnoname/excelts/issues/154)) ([50be87e](https://github.com/cjnoname/excelts/commit/50be87e950869a00e6b62cc0b55ece34a416b053))
+
 ## [9.5.1](https://github.com/cjnoname/excelts/compare/v9.5.0...v9.5.1) (2026-05-08)
 
 
