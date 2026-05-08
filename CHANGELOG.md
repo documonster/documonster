@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.4](https://github.com/cjnoname/excelts/compare/v9.5.3...v9.5.4) (2026-05-08)
+
+
+### Bug Fixes
+
+* **stream:** Update read() behavior to align with Node.js 26+ and maintain backward compatibility ([85314fa](https://github.com/cjnoname/excelts/commit/85314fa624b94f82faeaf66de07b7238bf4e93d6))
+
 ## [9.5.3](https://github.com/cjnoname/excelts/compare/v9.5.2...v9.5.3) (2026-05-08)
 
 
