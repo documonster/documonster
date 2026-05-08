@@ -2,6 +2,7 @@
  * DOCX Module - Content Types Generator
  *
  * Generates [Content_Types].xml for the DOCX package.
+ * Uses a plain data record + free functions for tree-shakeability.
  */
 
 import type { XmlSink } from "@xml/types";
@@ -19,58 +20,69 @@ export interface ContentTypeOverride {
   readonly contentType: string;
 }
 
-/**
- * Generates the [Content_Types].xml part.
- */
-export class ContentTypesManager {
-  private readonly _defaults = new Map<string, string>();
-  private readonly _overrides: ContentTypeOverride[] = [];
+/** Internal state for content types (plain record, not a class). */
+export interface ContentTypesState {
+  readonly defaults: Map<string, string>;
+  readonly overrides: ContentTypeOverride[];
+}
 
-  constructor() {
-    // Always include rels and xml defaults
-    this._defaults.set("rels", ContentType.Relationships);
-    this._defaults.set("xml", ContentType.Xml);
-  }
+/** Create a new ContentTypesState with standard defaults (rels, xml). */
+export function createContentTypes(): ContentTypesState {
+  const defaults = new Map<string, string>();
+  defaults.set("rels", ContentType.Relationships);
+  defaults.set("xml", ContentType.Xml);
+  return { defaults, overrides: [] };
+}
 
-  /** Add a default content type for a file extension. */
-  addDefault(extension: string, contentType: string): void {
-    this._defaults.set(extension, contentType);
-  }
+/** Add a default content type for a file extension. */
+export function addContentTypeDefault(
+  state: ContentTypesState,
+  extension: string,
+  contentType: string
+): void {
+  state.defaults.set(extension, contentType);
+}
 
-  /** Add an override content type for a specific part. */
-  addOverride(partName: string, contentType: string): void {
-    this._overrides.push({
-      partName: partName.startsWith("/") ? partName : `/${partName}`,
-      contentType
-    });
-  }
+/** Add an override content type for a specific part. */
+export function addContentTypeOverride(
+  state: ContentTypesState,
+  partName: string,
+  contentType: string
+): void {
+  (state.overrides as ContentTypeOverride[]).push({
+    partName: partName.startsWith("/") ? partName : `/${partName}`,
+    contentType
+  });
+}
 
-  /** Add image extension defaults from a set of used extensions. */
-  addImageDefaults(extensions: Iterable<string>): void {
-    for (const ext of extensions) {
-      const ct = IMAGE_CONTENT_TYPES[ext.toLowerCase()];
-      if (ct) {
-        this._defaults.set(ext.toLowerCase(), ct);
-      }
+/** Add image extension defaults from a set of used extensions. */
+export function addImageContentTypeDefaults(
+  state: ContentTypesState,
+  extensions: Iterable<string>
+): void {
+  for (const ext of extensions) {
+    const ct = IMAGE_CONTENT_TYPES[ext.toLowerCase()];
+    if (ct) {
+      state.defaults.set(ext.toLowerCase(), ct);
     }
   }
+}
 
-  /** Render the [Content_Types].xml to a sink. */
-  render(xml: XmlSink): void {
-    xml.openXml(STD_DOC_ATTRIBUTES);
-    xml.openNode("Types", { xmlns: NS_CONTENT_TYPES });
+/** Render the [Content_Types].xml to a sink. */
+export function renderContentTypes(state: ContentTypesState, xml: XmlSink): void {
+  xml.openXml(STD_DOC_ATTRIBUTES);
+  xml.openNode("Types", { xmlns: NS_CONTENT_TYPES });
 
-    // Defaults sorted by extension
-    const sortedDefaults = [...this._defaults.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    for (const [ext, ct] of sortedDefaults) {
-      xml.leafNode("Default", { Extension: ext, ContentType: ct });
-    }
-
-    // Overrides in order
-    for (const override of this._overrides) {
-      xml.leafNode("Override", { PartName: override.partName, ContentType: override.contentType });
-    }
-
-    xml.closeNode();
+  // Defaults sorted by extension
+  const sortedDefaults = [...state.defaults.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [ext, ct] of sortedDefaults) {
+    xml.leafNode("Default", { Extension: ext, ContentType: ct });
   }
+
+  // Overrides in order
+  for (const override of state.overrides) {
+    xml.leafNode("Override", { PartName: override.partName, ContentType: override.contentType });
+  }
+
+  xml.closeNode();
 }

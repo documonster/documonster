@@ -6,7 +6,7 @@
  * headings, comments, footnotes/endnotes, and more.
  */
 
-import { resolveThemeColor } from "./document";
+import { resolveThemeColor } from "./color-utils";
 import { bytesToBase64 } from "./internal-utils";
 import type {
   DocxDocument,

@@ -4,11 +4,11 @@
  * High-level fluent API for constructing DOCX documents programmatically.
  * Provides convenience methods for common operations including comments,
  * track changes, TOC, math, text boxes, checkboxes, and custom properties.
+ *
+ * This file has NO static imports from docx-packager or docx-reader,
+ * ensuring that importing builder helpers does not pull in archive/xml code.
  */
 
-import { packageDocx } from "./docx-packager";
-import { readDocx } from "./docx-reader";
-import { bytesToBase64 } from "./internal-utils";
 import type {
   DocxDocument,
   BodyContent,
@@ -69,12 +69,9 @@ import type {
   CommentRangeEnd,
   CommentReference,
   FloatingImage,
-  InlineImageContent,
   StructuredDocumentTag,
   SdtProperties,
   Watermark,
-  DocumentTheme,
-  ColorSpec,
   HexColor,
   DrawingShape,
   RunContent,
@@ -1086,112 +1083,167 @@ export function simpleTable(
 }
 
 // =============================================================================
-// Document Builder Class
+// Document Handle & Namespace
 // =============================================================================
 
 /**
- * Fluent builder for constructing DOCX documents.
+ * Internal state for a document being built.
+ * Consumers receive an opaque `DocumentHandle` — they cannot construct it directly.
+ */
+interface _DocumentState {
+  body: BodyContent[];
+  sectionProperties?: SectionProperties;
+  styles: StyleDef[];
+  docDefaults?: DocDefaults;
+  abstractNumberings: AbstractNumbering[];
+  numberingInstances: NumberingInstance[];
+  headers: Map<string, HeaderDef>;
+  footers: Map<string, FooterDef>;
+  footnotes: FootnoteDef[];
+  endnotes: EndnoteDef[];
+  images: ImageDef[];
+  fonts: FontDef[];
+  settings?: DocumentSettings;
+  coreProperties?: CoreProperties;
+  appProperties?: AppProperties;
+  comments: CommentDef[];
+  background?: DocumentBackground;
+  customProperties: CustomProperty[];
+  watermark?: Watermark;
+  nextImageId: number;
+  nextFootnoteId: number;
+  nextEndnoteId: number;
+  nextBookmarkId: number;
+  nextAbstractNumId: number;
+  nextNumId: number;
+  nextDrawingId: number;
+  nextCommentId: number;
+}
+
+declare const _documentBrand: unique symbol;
+
+/**
+ * Opaque handle representing a document being built.
+ * Created via `Document.create()`, passed to `Document.*` functions.
+ */
+export type DocumentHandle = { readonly [_documentBrand]: true };
+
+/** Cast internal state to opaque handle. */
+function _toHandle(state: _DocumentState): DocumentHandle {
+  return state as unknown as DocumentHandle;
+}
+
+/** Cast opaque handle back to internal state. */
+function _toState(handle: DocumentHandle): _DocumentState {
+  return handle as unknown as _DocumentState;
+}
+
+/**
+ * Namespace of free functions for building DOCX documents.
+ *
+ * Replaces the former `DocumentBuilder` class with tree-shakeable free functions.
+ * Each function operates on an opaque `DocumentHandle`.
  *
  * @example
  * ```ts
- * const doc = new DocumentBuilder()
- *   .addHeading("Hello World", 1)
- *   .addParagraph("This is a paragraph.")
- *   .addTable([["Name", "Age"], ["Alice", "30"]])
- *   .build();
- *
- * const bytes = await doc.toBuffer();
+ * const doc = Document.create();
+ * Document.addHeading(doc, "Hello World", 1);
+ * Document.addParagraph(doc, "This is a paragraph.");
+ * Document.addTable(doc, [["Name", "Age"], ["Alice", "30"]]);
+ * const bytes = await Document.toBuffer(doc);
  * ```
  */
-export class DocumentBuilder {
-  private _body: BodyContent[] = [];
-  private _sectionProperties?: SectionProperties;
-  private _styles: StyleDef[] = [];
-  private _docDefaults?: DocDefaults;
-  private _abstractNumberings: AbstractNumbering[] = [];
-  private _numberingInstances: NumberingInstance[] = [];
-  private _headers = new Map<string, HeaderDef>();
-  private _footers = new Map<string, FooterDef>();
-  private _footnotes: FootnoteDef[] = [];
-  private _endnotes: EndnoteDef[] = [];
-  private _images: ImageDef[] = [];
-  private _fonts: FontDef[] = [];
-  private _settings?: DocumentSettings;
-  private _coreProperties?: CoreProperties;
-  private _appProperties?: AppProperties;
-  private _comments: CommentDef[] = [];
-  private _background?: DocumentBackground;
-  private _customProperties: CustomProperty[] = [];
-  private _watermark?: Watermark;
-  private _nextImageId = 1;
-  private _nextFootnoteId = 1;
-  private _nextEndnoteId = 1;
-  private _nextBookmarkId = 0;
-  private _nextAbstractNumId = 0;
-  private _nextNumId = 1;
-  private _nextDrawingId = 1;
-  private _nextCommentId = 0;
+export const Document = {
+  /** Create a new document handle. */
+  create(): DocumentHandle {
+    return _toHandle({
+      body: [],
+      styles: [],
+      abstractNumberings: [],
+      numberingInstances: [],
+      headers: new Map(),
+      footers: new Map(),
+      footnotes: [],
+      endnotes: [],
+      images: [],
+      fonts: [],
+      comments: [],
+      customProperties: [],
+      nextImageId: 1,
+      nextFootnoteId: 1,
+      nextEndnoteId: 1,
+      nextBookmarkId: 0,
+      nextAbstractNumId: 0,
+      nextNumId: 1,
+      nextDrawingId: 1,
+      nextCommentId: 0
+    });
+  },
 
   /** Add raw body content. */
-  addContent(content: BodyContent): this {
-    this._body.push(content);
-    return this;
-  }
+  addContent(doc: DocumentHandle, content: BodyContent): void {
+    _toState(doc).body.push(content);
+  },
 
   /** Add a paragraph with runs. */
-  addParagraphElement(para: Paragraph): this {
-    this._body.push(para);
-    return this;
-  }
+  addParagraphElement(doc: DocumentHandle, para: Paragraph): void {
+    _toState(doc).body.push(para);
+  },
 
   /** Add a simple text paragraph. */
-  addParagraph(content: string, properties?: ParagraphProperties & { run?: RunProperties }): this {
-    this._body.push(textParagraph(content, properties));
-    return this;
-  }
+  addParagraph(
+    doc: DocumentHandle,
+    content: string,
+    properties?: ParagraphProperties & { run?: RunProperties }
+  ): void {
+    _toState(doc).body.push(textParagraph(content, properties));
+  },
 
   /** Add a heading. */
-  addHeading(content: string, level: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 = 1): this {
-    this._body.push(heading(content, level));
-    return this;
-  }
+  addHeading(
+    doc: DocumentHandle,
+    content: string,
+    level: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 = 1
+  ): void {
+    _toState(doc).body.push(heading(content, level));
+  },
 
   /** Add a page break. */
-  addPageBreak(): this {
-    this._body.push(paragraph([pageBreak()]));
-    return this;
-  }
+  addPageBreak(doc: DocumentHandle): void {
+    _toState(doc).body.push(paragraph([pageBreak()]));
+  },
 
   /** Add a table from a 2D array. */
   addTable(
+    doc: DocumentHandle,
     data: string[][],
     options?: { headerRow?: boolean; borders?: boolean; width?: TableWidth; columnWidths?: Twips[] }
-  ): this {
-    this._body.push(simpleTable(data, options));
-    return this;
-  }
+  ): void {
+    _toState(doc).body.push(simpleTable(data, options));
+  },
 
   /** Add a table element. */
-  addTableElement(tbl: Table): this {
-    this._body.push(tbl);
-    return this;
-  }
+  addTableElement(doc: DocumentHandle, tbl: Table): void {
+    _toState(doc).body.push(tbl);
+  },
 
   /** Add an inline image. Returns the image relationship ID and drawing ID. */
   addImage(
+    doc: DocumentHandle,
     data: Uint8Array,
     mediaType: ImageMediaType,
     width: Emu,
     height: Emu,
     options?: { altText?: string; name?: string }
   ): { rId: string; drawingId: number } {
-    const fileName = `image${this._nextImageId}.${mediaType}`;
-    const rId = `__img_${this._nextImageId}`;
-    const drawingId = this._nextDrawingId++;
+    const s = _toState(doc);
+    const fileName = `image${s.nextImageId}.${mediaType}`;
+    const rId = `__img_${s.nextImageId}`;
+    const drawingId = s.nextDrawingId++;
 
-    this._images.push({ data, mediaType, fileName, rId });
+    s.images.push({ data, mediaType, fileName, rId });
 
-    this._body.push(
+    s.body.push(
       paragraph([
         {
           content: [
@@ -1201,7 +1253,7 @@ export class DocumentBuilder {
               width,
               height,
               altText: options?.altText,
-              name: options?.name ?? `Picture ${this._nextImageId}`,
+              name: options?.name ?? `Picture ${s.nextImageId}`,
               drawingId
             }
           ]
@@ -1209,12 +1261,13 @@ export class DocumentBuilder {
       ])
     );
 
-    this._nextImageId++;
+    s.nextImageId++;
     return { rId, drawingId };
-  }
+  },
 
   /** Add a floating image. Returns the image relationship ID. */
   addFloatingImage(
+    doc: DocumentHandle,
     data: Uint8Array,
     mediaType: ImageMediaType,
     width: Emu,
@@ -1238,18 +1291,19 @@ export class DocumentBuilder {
       flipVertical?: boolean;
     }
   ): string {
-    const fileName = `image${this._nextImageId}.${mediaType}`;
-    const rId = `__img_${this._nextImageId}`;
+    const s = _toState(doc);
+    const fileName = `image${s.nextImageId}.${mediaType}`;
+    const rId = `__img_${s.nextImageId}`;
 
-    this._images.push({ data, mediaType, fileName, rId });
+    s.images.push({ data, mediaType, fileName, rId });
 
-    this._body.push(
+    s.body.push(
       floatingImage({
         rId,
         width,
         height,
         altText: options?.altText,
-        name: options?.name ?? `Picture ${this._nextImageId}`,
+        name: options?.name ?? `Picture ${s.nextImageId}`,
         horizontalPosition: options?.horizontalPosition,
         verticalPosition: options?.verticalPosition,
         wrap: options?.wrap,
@@ -1267,47 +1321,49 @@ export class DocumentBuilder {
       })
     );
 
-    this._nextImageId++;
+    s.nextImageId++;
     return rId;
-  }
+  },
 
   /** Add a custom font definition. */
-  addFont(font: FontDef): this {
-    this._fonts.push(font);
-    return this;
-  }
+  addFont(doc: DocumentHandle, font: FontDef): void {
+    _toState(doc).fonts.push(font);
+  },
 
   /** Set a text watermark on the document. */
-  setWatermark(watermark: Watermark): this {
-    this._watermark = watermark;
-    return this;
-  }
+  setWatermark(doc: DocumentHandle, watermark: Watermark): void {
+    _toState(doc).watermark = watermark;
+  },
 
   /** Add a footnote. Returns the footnote ID. */
-  addFootnote(content: string | Paragraph[]): number {
-    const id = this._nextFootnoteId++;
+  addFootnote(doc: DocumentHandle, content: string | Paragraph[]): number {
+    const s = _toState(doc);
+    const id = s.nextFootnoteId++;
     const paras = typeof content === "string" ? [textParagraph(content)] : content;
-    this._footnotes.push({ id, content: paras });
+    s.footnotes.push({ id, content: paras });
     return id;
-  }
+  },
 
   /** Add an endnote. Returns the endnote ID. */
-  addEndnote(content: string | Paragraph[]): number {
-    const id = this._nextEndnoteId++;
+  addEndnote(doc: DocumentHandle, content: string | Paragraph[]): number {
+    const s = _toState(doc);
+    const id = s.nextEndnoteId++;
     const paras = typeof content === "string" ? [textParagraph(content)] : content;
-    this._endnotes.push({ id, content: paras });
+    s.endnotes.push({ id, content: paras });
     return id;
-  }
+  },
 
   /** Add a comment. Returns the comment ID. */
   addComment(
+    doc: DocumentHandle,
     author: string,
     content: string | Paragraph[],
     options?: { date?: string; initials?: string }
   ): number {
-    const id = this._nextCommentId++;
+    const s = _toState(doc);
+    const id = s.nextCommentId++;
     const paras = typeof content === "string" ? [textParagraph(content)] : content;
-    this._comments.push({
+    s.comments.push({
       id,
       author,
       date: options?.date,
@@ -1315,32 +1371,31 @@ export class DocumentBuilder {
       content: paras
     });
     return id;
-  }
+  },
 
   /** Add a Table of Contents. */
-  addTableOfContents(options?: Partial<Omit<TableOfContents, "type">>): this {
-    this._body.push({
+  addTableOfContents(doc: DocumentHandle, options?: Partial<Omit<TableOfContents, "type">>): void {
+    _toState(doc).body.push({
       type: "tableOfContents",
       headingStyleRange: options?.headingStyleRange ?? "1-3",
       hyperlink: options?.hyperlink ?? true,
       ...options
     });
-    return this;
-  }
+  },
 
   /** Add a math equation block. */
-  addMath(content: MathContent[]): this {
-    this._body.push(mathBlock(content));
-    return this;
-  }
+  addMath(doc: DocumentHandle, content: MathContent[]): void {
+    _toState(doc).body.push(mathBlock(content));
+  },
 
   /** Add a text box. */
   addTextBox(
+    doc: DocumentHandle,
     content: string | Paragraph[],
     options?: { width?: Twips; height?: Twips; stroke?: boolean; fill?: boolean }
-  ): this {
+  ): void {
     const paras = typeof content === "string" ? [textParagraph(content)] : content;
-    this._body.push({
+    _toState(doc).body.push({
       type: "textBox",
       content: paras,
       width: options?.width,
@@ -1348,19 +1403,19 @@ export class DocumentBuilder {
       stroke: options?.stroke,
       fill: options?.fill
     });
-    return this;
-  }
+  },
 
   /** Add a bullet list. */
-  addBulletList(items: string[], level = 0): this {
+  addBulletList(doc: DocumentHandle, items: string[], level = 0): void {
+    const s = _toState(doc);
     // Create abstract numbering for bullets if not exists
-    let bulletAbsId = this._abstractNumberings.find(
+    let bulletAbsId = s.abstractNumberings.find(
       a => a.levels[0]?.format === "bullet"
     )?.abstractNumId;
 
     if (bulletAbsId === undefined) {
-      bulletAbsId = this._nextAbstractNumId++;
-      this._abstractNumberings.push({
+      bulletAbsId = s.nextAbstractNumId++;
+      s.abstractNumberings.push({
         abstractNumId: bulletAbsId,
         multiLevelType: "hybridMultilevel",
         levels: [
@@ -1393,30 +1448,27 @@ export class DocumentBuilder {
           }
         ]
       });
-      this._numberingInstances.push({
-        numId: this._nextNumId++,
+      s.numberingInstances.push({
+        numId: s.nextNumId++,
         abstractNumId: bulletAbsId
       });
     }
 
-    const numId = this._numberingInstances.find(n => n.abstractNumId === bulletAbsId)!.numId;
+    const numId = s.numberingInstances.find(n => n.abstractNumId === bulletAbsId)!.numId;
 
     for (const item of items) {
-      this._body.push(textParagraph(item, { numbering: { numId, level } }));
+      s.body.push(textParagraph(item, { numbering: { numId, level } }));
     }
-
-    return this;
-  }
+  },
 
   /** Add a numbered list. */
-  addNumberedList(items: string[], level = 0): this {
-    let numAbsId = this._abstractNumberings.find(
-      a => a.levels[0]?.format === "decimal"
-    )?.abstractNumId;
+  addNumberedList(doc: DocumentHandle, items: string[], level = 0): void {
+    const s = _toState(doc);
+    let numAbsId = s.abstractNumberings.find(a => a.levels[0]?.format === "decimal")?.abstractNumId;
 
     if (numAbsId === undefined) {
-      numAbsId = this._nextAbstractNumId++;
-      this._abstractNumberings.push({
+      numAbsId = s.nextAbstractNumId++;
+      s.abstractNumberings.push({
         abstractNumId: numAbsId,
         multiLevelType: "hybridMultilevel",
         levels: [
@@ -1446,42 +1498,38 @@ export class DocumentBuilder {
           }
         ]
       });
-      this._numberingInstances.push({
-        numId: this._nextNumId++,
+      s.numberingInstances.push({
+        numId: s.nextNumId++,
         abstractNumId: numAbsId
       });
     }
 
-    const numId = this._numberingInstances.find(n => n.abstractNumId === numAbsId)!.numId;
+    const numId = s.numberingInstances.find(n => n.abstractNumId === numAbsId)!.numId;
 
     for (const item of items) {
-      this._body.push(textParagraph(item, { numbering: { numId, level } }));
+      s.body.push(textParagraph(item, { numbering: { numId, level } }));
     }
-
-    return this;
-  }
+  },
 
   /** Set section properties (page size, margins, etc.). */
-  setSectionProperties(props: SectionProperties): this {
-    this._sectionProperties = props;
-    return this;
-  }
+  setSectionProperties(doc: DocumentHandle, props: SectionProperties): void {
+    _toState(doc).sectionProperties = props;
+  },
 
   /** Set document defaults. */
-  setDocDefaults(defaults: DocDefaults): this {
-    this._docDefaults = defaults;
-    return this;
-  }
+  setDocDefaults(doc: DocumentHandle, defaults: DocDefaults): void {
+    _toState(doc).docDefaults = defaults;
+  },
 
   /** Add a style definition. */
-  addStyle(style: StyleDef): this {
-    this._styles.push(style);
-    return this;
-  }
+  addStyle(doc: DocumentHandle, style: StyleDef): void {
+    _toState(doc).styles.push(style);
+  },
 
   /** Set default styles (Normal, Heading1-6, Hyperlink, etc.). */
-  useDefaultStyles(): this {
-    this._docDefaults = {
+  useDefaultStyles(doc: DocumentHandle): void {
+    const s = _toState(doc);
+    s.docDefaults = {
       runProperties: {
         font: { ascii: "Calibri", hAnsi: "Calibri", eastAsia: "SimSun", cs: "Times New Roman" },
         size: 22,
@@ -1493,7 +1541,7 @@ export class DocumentBuilder {
       }
     };
 
-    this._styles.push(
+    s.styles.push(
       { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true },
       {
         type: "paragraph",
@@ -1548,216 +1596,102 @@ export class DocumentBuilder {
         tableProperties: { borders: gridBorders(4, "auto") }
       }
     );
-
-    return this;
-  }
+  },
 
   /** Set a header for the given type. */
-  setHeader(type: string, content: HeaderFooterContent): this {
-    this._headers.set(type, { content });
-    return this;
-  }
+  setHeader(doc: DocumentHandle, type: string, content: HeaderFooterContent): void {
+    _toState(doc).headers.set(type, { content });
+  },
 
   /** Set a footer for the given type. */
-  setFooter(type: string, content: HeaderFooterContent): this {
-    this._footers.set(type, { content });
-    return this;
-  }
+  setFooter(doc: DocumentHandle, type: string, content: HeaderFooterContent): void {
+    _toState(doc).footers.set(type, { content });
+  },
 
   /** Set document settings. */
-  setSettings(settings: DocumentSettings): this {
-    this._settings = settings;
-    return this;
-  }
+  setSettings(doc: DocumentHandle, settings: DocumentSettings): void {
+    _toState(doc).settings = settings;
+  },
 
   /** Set core properties (metadata). */
-  setCoreProperties(props: CoreProperties): this {
-    this._coreProperties = props;
-    return this;
-  }
+  setCoreProperties(doc: DocumentHandle, props: CoreProperties): void {
+    _toState(doc).coreProperties = props;
+  },
 
   /** Set application properties. */
-  setAppProperties(props: AppProperties): this {
-    this._appProperties = props;
-    return this;
-  }
+  setAppProperties(doc: DocumentHandle, props: AppProperties): void {
+    _toState(doc).appProperties = props;
+  },
 
   /** Set document background. */
-  setBackground(background: DocumentBackground): this {
-    this._background = background;
-    return this;
-  }
+  setBackground(doc: DocumentHandle, background: DocumentBackground): void {
+    _toState(doc).background = background;
+  },
 
   /** Add a custom document property. */
-  addCustomProperty(name: string, value: CustomPropertyValue): this {
-    this._customProperties.push({ name, value });
-    return this;
-  }
+  addCustomProperty(doc: DocumentHandle, name: string, value: CustomPropertyValue): void {
+    _toState(doc).customProperties.push({ name, value });
+  },
 
   /** Add a section break with properties. */
-  addSectionBreak(props: SectionProperties): this {
+  addSectionBreak(doc: DocumentHandle, props: SectionProperties): void {
+    const s = _toState(doc);
     // Insert as the last paragraph's section properties
-    if (this._body.length > 0) {
-      const last = this._body[this._body.length - 1];
+    if (s.body.length > 0) {
+      const last = s.body[s.body.length - 1];
       if (last.type === "paragraph") {
         const existingProps = last.properties ?? {};
-        (this._body[this._body.length - 1] as any) = {
+        (s.body[s.body.length - 1] as any) = {
           ...last,
           properties: { ...existingProps, sectionProperties: props }
         };
-        return this;
+        return;
       }
     }
     // If no previous paragraph, add an empty one with section properties
-    this._body.push(paragraph([], { sectionProperties: props }));
-    return this;
-  }
+    s.body.push(paragraph([], { sectionProperties: props }));
+  },
 
   /** Get next available bookmark ID. */
-  nextBookmarkId(): number {
-    return this._nextBookmarkId++;
-  }
+  nextBookmarkId(doc: DocumentHandle): number {
+    return _toState(doc).nextBookmarkId++;
+  },
 
-  /** Build the DocxDocument model. */
-  build(): DocxDocument {
+  /** Build the DocxDocument model from the handle. */
+  build(doc: DocumentHandle): DocxDocument {
+    const s = _toState(doc);
     return {
-      body: this._body,
-      sectionProperties: this._sectionProperties ?? {
+      body: s.body,
+      sectionProperties: s.sectionProperties ?? {
         pageSize: { width: 12240, height: 15840 },
         margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
       },
-      styles: this._styles.length > 0 ? this._styles : undefined,
-      docDefaults: this._docDefaults,
-      abstractNumberings:
-        this._abstractNumberings.length > 0 ? this._abstractNumberings : undefined,
-      numberingInstances:
-        this._numberingInstances.length > 0 ? this._numberingInstances : undefined,
-      headers: this._headers.size > 0 ? this._headers : undefined,
-      footers: this._footers.size > 0 ? this._footers : undefined,
-      footnotes: this._footnotes.length > 0 ? this._footnotes : undefined,
-      endnotes: this._endnotes.length > 0 ? this._endnotes : undefined,
-      images: this._images.length > 0 ? this._images : undefined,
-      fonts: this._fonts.length > 0 ? this._fonts : undefined,
-      settings: this._settings,
-      coreProperties: this._coreProperties,
-      appProperties: this._appProperties,
-      comments: this._comments.length > 0 ? this._comments : undefined,
-      background: this._background,
-      customProperties: this._customProperties.length > 0 ? this._customProperties : undefined,
-      watermark: this._watermark
+      styles: s.styles.length > 0 ? s.styles : undefined,
+      docDefaults: s.docDefaults,
+      abstractNumberings: s.abstractNumberings.length > 0 ? s.abstractNumberings : undefined,
+      numberingInstances: s.numberingInstances.length > 0 ? s.numberingInstances : undefined,
+      headers: s.headers.size > 0 ? s.headers : undefined,
+      footers: s.footers.size > 0 ? s.footers : undefined,
+      footnotes: s.footnotes.length > 0 ? s.footnotes : undefined,
+      endnotes: s.endnotes.length > 0 ? s.endnotes : undefined,
+      images: s.images.length > 0 ? s.images : undefined,
+      fonts: s.fonts.length > 0 ? s.fonts : undefined,
+      settings: s.settings,
+      coreProperties: s.coreProperties,
+      appProperties: s.appProperties,
+      comments: s.comments.length > 0 ? s.comments : undefined,
+      background: s.background,
+      customProperties: s.customProperties.length > 0 ? s.customProperties : undefined,
+      watermark: s.watermark
     };
   }
-
-  /** Build and package to DOCX bytes. */
-  async toBuffer(compressionLevel?: number): Promise<Uint8Array> {
-    return packageDocx(this.build(), compressionLevel);
-  }
-
-  /** Build and package to base64 string. */
-  async toBase64(compressionLevel?: number): Promise<string> {
-    const bytes = await this.toBuffer(compressionLevel);
-    return bytesToBase64(bytes);
-  }
-}
-
-// =============================================================================
-// Theme Color Resolution
-// =============================================================================
-
-/**
- * Map OOXML theme color attribute names to theme color scheme keys.
- * Word uses different names in run/paragraph properties vs the theme XML.
- */
-const THEME_COLOR_MAP: Record<string, string> = {
-  dark1: "dk1",
-  light1: "lt1",
-  dark2: "dk2",
-  light2: "lt2",
-  accent1: "accent1",
-  accent2: "accent2",
-  accent3: "accent3",
-  accent4: "accent4",
-  accent5: "accent5",
-  accent6: "accent6",
-  hyperlink: "hlink",
-  followedHyperlink: "folHlink",
-  // Direct names also work
-  dk1: "dk1",
-  lt1: "lt1",
-  dk2: "dk2",
-  lt2: "lt2",
-  hlink: "hlink",
-  folHlink: "folHlink"
 };
 
-/**
- * Resolve a ColorSpec to an actual hex RGB color using the document theme.
- *
- * Applies theme color lookup + tint/shade transformations per OOXML spec.
- *
- * @param color - The color value (HexColor string or ColorSpec).
- * @param theme - The document theme (from `doc.theme`).
- * @returns Resolved hex color string (6 chars, no #), or undefined if unresolvable.
- */
-export function resolveThemeColor(
-  color: HexColor | ColorSpec | undefined,
-  theme?: DocumentTheme
-): HexColor | undefined {
-  if (color === undefined) {
-    return undefined;
-  }
-  if (typeof color === "string") {
-    return color;
-  }
-  // ColorSpec with val — use directly
-  if (color.val && color.val !== "auto") {
-    return color.val;
-  }
-  // Resolve via theme
-  if (!color.themeColor || !theme) {
-    return color.val;
-  }
-  const key = THEME_COLOR_MAP[color.themeColor] ?? color.themeColor;
-  const base = (theme.colorScheme.colors as Record<string, string>)[key];
-  if (!base) {
-    return color.val;
-  }
-  // Apply tint or shade
-  if (color.themeTint) {
-    return applyTint(base, parseInt(color.themeTint, 16) / 255);
-  }
-  if (color.themeShade) {
-    return applyShade(base, parseInt(color.themeShade, 16) / 255);
-  }
-  return base;
-}
+// =============================================================================
+// Theme Color Resolution (re-export from color-utils for backward compat)
+// =============================================================================
 
-/** Apply tint to a hex color. tint=1 → white, tint=0 → original. */
-function applyTint(hex: string, tint: number): string {
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const nr = Math.round(r + (255 - r) * tint);
-  const ng = Math.round(g + (255 - g) * tint);
-  const nb = Math.round(b + (255 - b) * tint);
-  return toHex2(nr) + toHex2(ng) + toHex2(nb);
-}
-
-/** Apply shade to a hex color. shade=1 → original, shade=0 → black. */
-function applyShade(hex: string, shade: number): string {
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const nr = Math.round(r * shade);
-  const ng = Math.round(g * shade);
-  const nb = Math.round(b * shade);
-  return toHex2(nr) + toHex2(ng) + toHex2(nb);
-}
-
-function toHex2(n: number): string {
-  const h = Math.max(0, Math.min(255, n)).toString(16);
-  return h.length < 2 ? "0" + h : h;
-}
+export { resolveThemeColor } from "./color-utils";
 
 // =============================================================================
 // Search & Replace
@@ -2272,209 +2206,7 @@ function countOccurrences(str: string, search: string): number {
 }
 
 // =============================================================================
-// Patcher / Template Fill API
+// Patcher / Template Fill API — exported from document-io.ts via index.base.ts
 // =============================================================================
-
-/** Type of content to patch into a placeholder. */
-export type PatchContent =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "paragraph"; readonly children: readonly Paragraph[] }
-  | { readonly type: "table"; readonly table: Table }
-  | {
-      readonly type: "image";
-      readonly image: ImageDef;
-      readonly width: number;
-      readonly height: number;
-    };
-
-/** A single patch operation mapping a placeholder to replacement content. */
-export interface PatchOperation {
-  /** Placeholder string to find (e.g. "{{name}}"). */
-  readonly placeholder: string;
-  /** Content to replace the placeholder with. */
-  readonly content: PatchContent;
-}
-
-/** Options for patchDocument. */
-export interface PatchOptions {
-  /** Compression level (0-9). Default: 6. */
-  readonly compressionLevel?: number;
-}
-
-/**
- * Read an existing DOCX file, replace placeholders with content, and produce a new DOCX.
- *
- * Placeholders are strings like `{{name}}` embedded in the document text.
- * They may span across multiple runs — the patcher handles cross-run matching.
- *
- * Supported patch content types:
- * - `text` — simple text replacement (preserves formatting of the first run)
- * - `paragraph` — replaces the entire paragraph containing the placeholder
- * - `table` — replaces the entire paragraph with a table
- * - `image` — replaces the placeholder with an inline image
- *
- * @param buffer - The source DOCX file as a Uint8Array.
- * @param patches - Array of patch operations to apply.
- * @param options - Optional compression settings.
- * @returns New DOCX file as a Uint8Array.
- */
-export async function patchDocument(
-  buffer: Uint8Array,
-  patches: readonly PatchOperation[],
-  options?: PatchOptions
-): Promise<Uint8Array> {
-  const doc = await readDocx(buffer);
-
-  // Build lookup map for quick placeholder matching
-  const patchMap = new Map<string, PatchOperation>();
-  for (const patch of patches) {
-    patchMap.set(patch.placeholder, patch);
-  }
-
-  // Process body content
-  const newBody: BodyContent[] = [];
-  for (const block of doc.body) {
-    if (block.type === "paragraph") {
-      const result = patchParagraph(block, patchMap);
-      if (result) {
-        if (Array.isArray(result)) {
-          newBody.push(...result);
-        } else {
-          newBody.push(result);
-        }
-      }
-    } else if (block.type === "table") {
-      patchTable(block as Table, patchMap);
-      newBody.push(block);
-    } else {
-      newBody.push(block);
-    }
-  }
-
-  // Patch headers
-  if (doc.headers) {
-    for (const [, headerDef] of doc.headers) {
-      patchHeaderFooterContent(headerDef.content, patchMap);
-    }
-  }
-
-  // Patch footers
-  if (doc.footers) {
-    for (const [, footerDef] of doc.footers) {
-      patchHeaderFooterContent(footerDef.content, patchMap);
-    }
-  }
-
-  // Add any new images from patches
-  const images = doc.images ? [...doc.images] : [];
-  for (const patch of patches) {
-    if (patch.content.type === "image") {
-      const imgContent = patch.content;
-      const existing = images.find(i => i.fileName === imgContent.image.fileName);
-      if (!existing) {
-        images.push(imgContent.image);
-      }
-    }
-  }
-
-  const patched: DocxDocument = {
-    ...doc,
-    body: newBody,
-    images: images.length > 0 ? images : undefined
-  };
-
-  return packageDocx(patched, options?.compressionLevel);
-}
-
-/** Patch a paragraph — returns replacement content or null to remove. */
-function patchParagraph(
-  para: Paragraph,
-  patchMap: Map<string, PatchOperation>
-): BodyContent | BodyContent[] | null {
-  const text = paragraphText(para);
-
-  for (const [placeholder, patch] of patchMap) {
-    if (!text.includes(placeholder)) {
-      continue;
-    }
-
-    switch (patch.content.type) {
-      case "text": {
-        replaceInParagraph(para, placeholder, patch.content.text);
-        return para;
-      }
-      case "paragraph": {
-        return patch.content.children as BodyContent[];
-      }
-      case "table": {
-        return patch.content.table;
-      }
-      case "image": {
-        const img = patch.content.image;
-        const rId = img.rId ?? `rId_img_${img.fileName}`;
-        const imgContent: InlineImageContent = {
-          type: "image",
-          rId,
-          width: patch.content.width,
-          height: patch.content.height,
-          altText: img.fileName,
-          name: img.fileName
-        };
-        const newPara: Paragraph = {
-          type: "paragraph",
-          properties: para.properties,
-          children: [{ content: [imgContent] } as Run]
-        };
-        return newPara;
-      }
-    }
-  }
-
-  return para;
-}
-
-/** Patch text inside table cells recursively. */
-function patchTable(table: Table, patchMap: Map<string, PatchOperation>): void {
-  for (const row of table.rows) {
-    for (const cell of row.cells) {
-      const newContent: BodyContent[] = [];
-      for (const block of cell.content) {
-        if (block.type === "paragraph") {
-          const result = patchParagraph(block, patchMap);
-          if (result) {
-            if (Array.isArray(result)) {
-              newContent.push(...result);
-            } else {
-              newContent.push(result);
-            }
-          }
-        } else if (block.type === "table") {
-          patchTable(block as Table, patchMap);
-          newContent.push(block);
-        } else {
-          newContent.push(block);
-        }
-      }
-      (cell as any).content = newContent;
-    }
-  }
-}
-
-/** Patch text in header/footer content. */
-function patchHeaderFooterContent(
-  content: HeaderFooterContent,
-  patchMap: Map<string, PatchOperation>
-): void {
-  for (const child of content.children) {
-    if (child.type === "paragraph") {
-      for (const [placeholder, patch] of patchMap) {
-        if (patch.content.type === "text") {
-          const text = paragraphText(child);
-          if (text.includes(placeholder)) {
-            replaceInParagraph(child, placeholder, patch.content.text);
-          }
-        }
-      }
-    }
-  }
-}
+// Types re-exported here for backward compatibility of deep imports
+export type { PatchContent, PatchOperation, PatchOptions } from "./document-io";

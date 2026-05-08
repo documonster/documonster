@@ -12,7 +12,12 @@
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
-import { ContentTypesManager } from "../content-types";
+import {
+  createContentTypes,
+  addContentTypeOverride,
+  addImageContentTypeDefaults,
+  renderContentTypes
+} from "../content-types";
 import {
   // Units
   inchesToTwips,
@@ -28,7 +33,7 @@ import {
   percentToTablePct,
 
   // Builder
-  DocumentBuilder,
+  Document,
   text,
   bold,
   italic,
@@ -55,6 +60,7 @@ import {
   // Packager & Reader
   packageDocx,
   readDocx,
+  toBuffer,
 
   // Errors
   DocxError,
@@ -62,7 +68,12 @@ import {
   DocxMissingPartError,
   isDocxError
 } from "../index";
-import { RelationshipManager } from "../relationships";
+import {
+  createRelationships,
+  addRelationship,
+  getRelationshipCount,
+  renderRelationships
+} from "../relationships";
 import type { DocxDocument, Paragraph, Table } from "../types";
 import { renderDocument } from "../writers/document-writer";
 import { renderFootnotes, renderEndnotes } from "../writers/footnote-writer";
@@ -464,24 +475,24 @@ describe("DOCX XML Writers", () => {
 // Relationship Manager Tests
 // =============================================================================
 
-describe("RelationshipManager", () => {
+describe("Relationships (free functions)", () => {
   it("should add relationships with auto-incrementing IDs", () => {
-    const mgr = new RelationshipManager();
-    const rId1 = mgr.add("type1", "target1");
-    const rId2 = mgr.add("type2", "target2");
+    const state = createRelationships();
+    const rId1 = addRelationship(state, "type1", "target1");
+    const rId2 = addRelationship(state, "type2", "target2");
 
     expect(rId1).toBe("rId1");
     expect(rId2).toBe("rId2");
-    expect(mgr.count).toBe(2);
+    expect(getRelationshipCount(state)).toBe(2);
   });
 
   it("should render relationships XML", () => {
-    const mgr = new RelationshipManager();
-    mgr.add("http://example.com/type", "file.xml");
-    mgr.add("http://example.com/ext", "https://example.com", "External");
+    const state = createRelationships();
+    addRelationship(state, "http://example.com/type", "file.xml");
+    addRelationship(state, "http://example.com/ext", "https://example.com", "External");
 
     const writer = new XmlWriter();
-    mgr.render(writer);
+    renderRelationships(state, writer);
     const xml = writer.xml;
 
     expect(xml).toContain("<Relationships");
@@ -495,11 +506,11 @@ describe("RelationshipManager", () => {
 // Content Types Manager Tests
 // =============================================================================
 
-describe("ContentTypesManager", () => {
+describe("ContentTypes (free functions)", () => {
   it("should include default rels and xml types", () => {
-    const mgr = new ContentTypesManager();
+    const state = createContentTypes();
     const writer = new XmlWriter();
-    mgr.render(writer);
+    renderContentTypes(state, writer);
     const xml = writer.xml;
 
     expect(xml).toContain('Extension="rels"');
@@ -507,10 +518,10 @@ describe("ContentTypesManager", () => {
   });
 
   it("should add overrides", () => {
-    const mgr = new ContentTypesManager();
-    mgr.addOverride("/word/document.xml", "application/test");
+    const state = createContentTypes();
+    addContentTypeOverride(state, "/word/document.xml", "application/test");
     const writer = new XmlWriter();
-    mgr.render(writer);
+    renderContentTypes(state, writer);
     const xml = writer.xml;
 
     expect(xml).toContain('PartName="/word/document.xml"');
@@ -518,10 +529,10 @@ describe("ContentTypesManager", () => {
   });
 
   it("should add image defaults", () => {
-    const mgr = new ContentTypesManager();
-    mgr.addImageDefaults(["png", "jpeg"]);
+    const state = createContentTypes();
+    addImageContentTypeDefaults(state, ["png", "jpeg"]);
     const writer = new XmlWriter();
-    mgr.render(writer);
+    renderContentTypes(state, writer);
     const xml = writer.xml;
 
     expect(xml).toContain('Extension="png"');
@@ -560,12 +571,14 @@ describe("DOCX Errors", () => {
 });
 
 // =============================================================================
-// DocumentBuilder Tests
+// Document Namespace Tests
 // =============================================================================
 
-describe("DocumentBuilder", () => {
+describe("Document namespace", () => {
   it("should build a basic document", () => {
-    const doc = new DocumentBuilder().addParagraph("Hello World").build();
+    const h = Document.create();
+    Document.addParagraph(h, "Hello World");
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(1);
     expect(doc.body[0].type).toBe("paragraph");
@@ -573,7 +586,10 @@ describe("DocumentBuilder", () => {
   });
 
   it("should add headings", () => {
-    const doc = new DocumentBuilder().addHeading("Title", 1).addHeading("Subtitle", 2).build();
+    const h = Document.create();
+    Document.addHeading(h, "Title", 1);
+    Document.addHeading(h, "Subtitle", 2);
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(2);
     expect((doc.body[0] as Paragraph).properties?.style).toBe("Heading1");
@@ -581,12 +597,12 @@ describe("DocumentBuilder", () => {
   });
 
   it("should add tables", () => {
-    const doc = new DocumentBuilder()
-      .addTable([
-        ["A", "B"],
-        ["C", "D"]
-      ])
-      .build();
+    const h = Document.create();
+    Document.addTable(h, [
+      ["A", "B"],
+      ["C", "D"]
+    ]);
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(1);
     expect(doc.body[0].type).toBe("table");
@@ -594,7 +610,9 @@ describe("DocumentBuilder", () => {
   });
 
   it("should add bullet lists", () => {
-    const doc = new DocumentBuilder().addBulletList(["Item 1", "Item 2", "Item 3"]).build();
+    const h = Document.create();
+    Document.addBulletList(h, ["Item 1", "Item 2", "Item 3"]);
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(3);
     expect(doc.abstractNumberings).toHaveLength(1);
@@ -603,14 +621,19 @@ describe("DocumentBuilder", () => {
   });
 
   it("should add numbered lists", () => {
-    const doc = new DocumentBuilder().addNumberedList(["First", "Second"]).build();
+    const h = Document.create();
+    Document.addNumberedList(h, ["First", "Second"]);
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(2);
     expect(doc.abstractNumberings![0].levels[0].format).toBe("decimal");
   });
 
   it("should apply default styles", () => {
-    const doc = new DocumentBuilder().useDefaultStyles().addParagraph("Test").build();
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "Test");
+    const doc = Document.build(h);
 
     expect(doc.styles).toBeDefined();
     expect(doc.styles!.length).toBeGreaterThan(0);
@@ -618,29 +641,30 @@ describe("DocumentBuilder", () => {
   });
 
   it("should set section properties", () => {
-    const doc = new DocumentBuilder()
-      .setSectionProperties({
-        pageSize: { width: 11906, height: 16838 },
-        margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
-      })
-      .build();
+    const h = Document.create();
+    Document.setSectionProperties(h, {
+      pageSize: { width: 11906, height: 16838 },
+      margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+    });
+    const doc = Document.build(h);
 
     expect(doc.sectionProperties?.pageSize?.width).toBe(11906);
   });
 
   it("should set core properties", () => {
-    const doc = new DocumentBuilder()
-      .setCoreProperties({ title: "Test", creator: "Author" })
-      .build();
+    const h = Document.create();
+    Document.setCoreProperties(h, { title: "Test", creator: "Author" });
+    const doc = Document.build(h);
 
     expect(doc.coreProperties?.title).toBe("Test");
     expect(doc.coreProperties?.creator).toBe("Author");
   });
 
   it("should add footnotes", () => {
-    const builder = new DocumentBuilder();
-    const id = builder.addFootnote("A footnote");
-    const doc = builder.addParagraph("Text").build();
+    const h = Document.create();
+    const id = Document.addFootnote(h, "A footnote");
+    Document.addParagraph(h, "Text");
+    const doc = Document.build(h);
 
     expect(id).toBe(1);
     expect(doc.footnotes).toHaveLength(1);
@@ -648,36 +672,39 @@ describe("DocumentBuilder", () => {
   });
 
   it("should add endnotes", () => {
-    const builder = new DocumentBuilder();
-    const id = builder.addEndnote("An endnote");
-    const doc = builder.addParagraph("Text").build();
+    const h = Document.create();
+    const id = Document.addEndnote(h, "An endnote");
+    Document.addParagraph(h, "Text");
+    const doc = Document.build(h);
 
     expect(id).toBe(1);
     expect(doc.endnotes).toHaveLength(1);
   });
 
   it("should add page breaks", () => {
-    const doc = new DocumentBuilder()
-      .addParagraph("Page 1")
-      .addPageBreak()
-      .addParagraph("Page 2")
-      .build();
+    const h = Document.create();
+    Document.addParagraph(h, "Page 1");
+    Document.addPageBreak(h);
+    Document.addParagraph(h, "Page 2");
+    const doc = Document.build(h);
 
     expect(doc.body).toHaveLength(3);
   });
 
   it("should set headers and footers", () => {
-    const doc = new DocumentBuilder()
-      .setHeader("default", { children: [textParagraph("Header")] })
-      .setFooter("default", { children: [textParagraph("Footer")] })
-      .build();
+    const h = Document.create();
+    Document.setHeader(h, "default", { children: [textParagraph("Header")] });
+    Document.setFooter(h, "default", { children: [textParagraph("Footer")] });
+    const doc = Document.build(h);
 
     expect(doc.headers?.size).toBe(1);
     expect(doc.footers?.size).toBe(1);
   });
 
   it("should set settings", () => {
-    const doc = new DocumentBuilder().setSettings({ zoom: 150, defaultTabStop: 720 }).build();
+    const h = Document.create();
+    Document.setSettings(h, { zoom: 150, defaultTabStop: 720 });
+    const doc = Document.build(h);
 
     expect(doc.settings?.zoom).toBe(150);
   });
@@ -689,11 +716,11 @@ describe("DocumentBuilder", () => {
 
 describe("DOCX Roundtrip", () => {
   it("should roundtrip a minimal document", async () => {
-    const original = new DocumentBuilder()
-      .useDefaultStyles()
-      .addParagraph("Hello World")
-      .setCoreProperties({ title: "Test Document", creator: "Test" })
-      .build();
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "Hello World");
+    Document.setCoreProperties(h, { title: "Test Document", creator: "Test" });
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     expect(bytes).toBeInstanceOf(Uint8Array);
@@ -710,11 +737,12 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip paragraphs with formatting", async () => {
-    const original = new DocumentBuilder()
-      .addParagraphElement(
-        paragraph([text("Normal "), bold("Bold "), italic("Italic")], { alignment: "center" })
-      )
-      .build();
+    const h = Document.create();
+    Document.addParagraphElement(
+      h,
+      paragraph([text("Normal "), bold("Bold "), italic("Italic")], { alignment: "center" })
+    );
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -727,13 +755,13 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip tables", async () => {
-    const original = new DocumentBuilder()
-      .addTable([
-        ["Header 1", "Header 2"],
-        ["Cell 1", "Cell 2"],
-        ["Cell 3", "Cell 4"]
-      ])
-      .build();
+    const h = Document.create();
+    Document.addTable(h, [
+      ["Header 1", "Header 2"],
+      ["Cell 1", "Cell 2"],
+      ["Cell 3", "Cell 4"]
+    ]);
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -745,7 +773,9 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip numbered lists", async () => {
-    const original = new DocumentBuilder().addNumberedList(["First", "Second", "Third"]).build();
+    const h = Document.create();
+    Document.addNumberedList(h, ["First", "Second", "Third"]);
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -759,7 +789,10 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip styles", async () => {
-    const original = new DocumentBuilder().useDefaultStyles().addParagraph("Test").build();
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "Test");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -770,10 +803,10 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip footnotes", async () => {
-    const builder = new DocumentBuilder();
-    builder.addFootnote("This is a footnote.");
-    builder.addParagraph("Text with footnote");
-    const original = builder.build();
+    const h = Document.create();
+    Document.addFootnote(h, "This is a footnote.");
+    Document.addParagraph(h, "Text with footnote");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -784,10 +817,10 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip endnotes", async () => {
-    const builder = new DocumentBuilder();
-    builder.addEndnote("This is an endnote.");
-    builder.addParagraph("Text with endnote");
-    const original = builder.build();
+    const h = Document.create();
+    Document.addEndnote(h, "This is an endnote.");
+    Document.addParagraph(h, "Text with endnote");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -797,15 +830,15 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip headers and footers", async () => {
-    const original = new DocumentBuilder()
-      .setHeader("default", { children: [textParagraph("My Header")] })
-      .setFooter("default", { children: [textParagraph("My Footer")] })
-      .setSectionProperties({
-        headers: [{ type: "default", rId: "" }],
-        footers: [{ type: "default", rId: "" }]
-      })
-      .addParagraph("Body text")
-      .build();
+    const h = Document.create();
+    Document.setHeader(h, "default", { children: [textParagraph("My Header")] });
+    Document.setFooter(h, "default", { children: [textParagraph("My Footer")] });
+    Document.setSectionProperties(h, {
+      headers: [{ type: "default", rId: "" }],
+      footers: [{ type: "default", rId: "" }]
+    });
+    Document.addParagraph(h, "Body text");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -815,10 +848,10 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip settings", async () => {
-    const original = new DocumentBuilder()
-      .setSettings({ zoom: 120, defaultTabStop: 720, compatibilityMode: 15 })
-      .addParagraph("Test")
-      .build();
+    const h = Document.create();
+    Document.setSettings(h, { zoom: 120, defaultTabStop: 720, compatibilityMode: 15 });
+    Document.addParagraph(h, "Test");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -828,7 +861,9 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip font table", async () => {
-    const original = new DocumentBuilder().addParagraph("Test").build();
+    const h = Document.create();
+    Document.addParagraph(h, "Test");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -840,20 +875,20 @@ describe("DOCX Roundtrip", () => {
 
   it("should roundtrip core properties", async () => {
     const now = new Date("2024-06-15T12:00:00Z");
-    const original = new DocumentBuilder()
-      .setCoreProperties({
-        title: "My Title",
-        subject: "My Subject",
-        creator: "Author Name",
-        description: "A description",
-        keywords: "test, docx",
-        lastModifiedBy: "Editor",
-        revision: "3",
-        created: now,
-        modified: now
-      })
-      .addParagraph("Test")
-      .build();
+    const h = Document.create();
+    Document.setCoreProperties(h, {
+      title: "My Title",
+      subject: "My Subject",
+      creator: "Author Name",
+      description: "A description",
+      keywords: "test, docx",
+      lastModifiedBy: "Editor",
+      revision: "3",
+      created: now,
+      modified: now
+    });
+    Document.addParagraph(h, "Test");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -865,10 +900,10 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should roundtrip app properties", async () => {
-    const original = new DocumentBuilder()
-      .setAppProperties({ application: "TestApp", appVersion: "2.0.0", pages: 3 })
-      .addParagraph("Test")
-      .build();
+    const h = Document.create();
+    Document.setAppProperties(h, { application: "TestApp", appVersion: "2.0.0", pages: 3 });
+    Document.addParagraph(h, "Test");
+    const original = Document.build(h);
 
     const bytes = await packageDocx(original);
     const parsed = await readDocx(bytes);
@@ -877,37 +912,32 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should handle complex document with all features", async () => {
-    const builder = new DocumentBuilder()
-      .useDefaultStyles()
-      .setCoreProperties({ title: "Complex Document", creator: "Test Suite" })
-      .setSettings({ zoom: 100 })
-      .addHeading("Chapter 1", 1)
-      .addParagraph("Introduction paragraph with normal text.")
-      .addHeading("Section 1.1", 2)
-      .addParagraphElement(
-        paragraph([
-          text("This has "),
-          bold("bold"),
-          text(" and "),
-          italic("italic"),
-          text(" text.")
-        ])
-      )
-      .addBulletList(["Bullet 1", "Bullet 2", "Bullet 3"])
-      .addNumberedList(["Step 1", "Step 2"])
-      .addTable([
-        ["Name", "Value", "Description"],
-        ["Alpha", "1", "First item"],
-        ["Beta", "2", "Second item"]
-      ])
-      .addPageBreak()
-      .addHeading("Chapter 2", 1)
-      .addParagraph("Second page content.");
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.setCoreProperties(h, { title: "Complex Document", creator: "Test Suite" });
+    Document.setSettings(h, { zoom: 100 });
+    Document.addHeading(h, "Chapter 1", 1);
+    Document.addParagraph(h, "Introduction paragraph with normal text.");
+    Document.addHeading(h, "Section 1.1", 2);
+    Document.addParagraphElement(
+      h,
+      paragraph([text("This has "), bold("bold"), text(" and "), italic("italic"), text(" text.")])
+    );
+    Document.addBulletList(h, ["Bullet 1", "Bullet 2", "Bullet 3"]);
+    Document.addNumberedList(h, ["Step 1", "Step 2"]);
+    Document.addTable(h, [
+      ["Name", "Value", "Description"],
+      ["Alpha", "1", "First item"],
+      ["Beta", "2", "Second item"]
+    ]);
+    Document.addPageBreak(h);
+    Document.addHeading(h, "Chapter 2", 1);
+    Document.addParagraph(h, "Second page content.");
 
-    builder.addFootnote("A test footnote.");
-    builder.addEndnote("A test endnote.");
+    Document.addFootnote(h, "A test footnote.");
+    Document.addEndnote(h, "A test endnote.");
 
-    const doc = builder.build();
+    const doc = Document.build(h);
     const bytes = await packageDocx(doc);
 
     expect(bytes.length).toBeGreaterThan(0);
@@ -923,7 +953,9 @@ describe("DOCX Roundtrip", () => {
   });
 
   it("should produce valid DOCX that can be re-packaged", async () => {
-    const doc = new DocumentBuilder().addParagraph("Test").build();
+    const h = Document.create();
+    Document.addParagraph(h, "Test");
+    const doc = Document.build(h);
 
     const bytes1 = await packageDocx(doc);
     const parsed = await readDocx(bytes1);
@@ -939,12 +971,14 @@ describe("DOCX Roundtrip", () => {
 });
 
 // =============================================================================
-// DocumentBuilder.toBuffer() Tests
+// Document.toBuffer() Tests
 // =============================================================================
 
-describe("DocumentBuilder.toBuffer()", () => {
+describe("Document.toBuffer()", () => {
   it("should generate DOCX bytes directly", async () => {
-    const bytes = await new DocumentBuilder().addParagraph("Hello").toBuffer();
+    const h = Document.create();
+    Document.addParagraph(h, "Hello");
+    const bytes = await toBuffer(Document.build(h));
 
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes[0]).toBe(0x50);
@@ -952,9 +986,14 @@ describe("DocumentBuilder.toBuffer()", () => {
   });
 
   it("should respect compression level", async () => {
-    const text = "A".repeat(10000);
-    const bytesLow = await new DocumentBuilder().addParagraph(text).toBuffer(1);
-    const bytesHigh = await new DocumentBuilder().addParagraph(text).toBuffer(9);
+    const longText = "A".repeat(10000);
+    const h1 = Document.create();
+    Document.addParagraph(h1, longText);
+    const bytesLow = await toBuffer(Document.build(h1), 1);
+
+    const h2 = Document.create();
+    Document.addParagraph(h2, longText);
+    const bytesHigh = await toBuffer(Document.build(h2), 9);
 
     // Higher compression should produce smaller output
     expect(bytesHigh.length).toBeLessThanOrEqual(bytesLow.length);
@@ -1004,19 +1043,20 @@ describe("drawingShape()", () => {
   });
 
   it("should round-trip a document with drawing shapes", async () => {
-    const doc = new DocumentBuilder()
-      .addParagraph("Before shape")
-      .addContent(
-        drawingShape({
-          shapeType: "ellipse",
-          width: 914400,
-          height: 914400,
-          fillColor: "00FF00",
-          name: "TestEllipse"
-        })
-      )
-      .addParagraph("After shape")
-      .build();
+    const h = Document.create();
+    Document.addParagraph(h, "Before shape");
+    Document.addContent(
+      h,
+      drawingShape({
+        shapeType: "ellipse",
+        width: 914400,
+        height: 914400,
+        fillColor: "00FF00",
+        name: "TestEllipse"
+      })
+    );
+    Document.addParagraph(h, "After shape");
+    const doc = Document.build(h);
 
     const buffer = await packageDocx(doc);
     const parsed = await readDocx(buffer);
@@ -1033,10 +1073,10 @@ describe("drawingShape()", () => {
 
 describe("mailMerge()", () => {
   it("should replace MERGEFIELD with data values", () => {
-    const doc = new DocumentBuilder()
-      .addParagraphElement(paragraph([field(" MERGEFIELD FirstName ")]))
-      .addParagraphElement(paragraph([field(" MERGEFIELD LastName ")]))
-      .build();
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD FirstName ")]));
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD LastName ")]));
+    const doc = Document.build(h);
 
     const count = mailMerge(doc, {
       FirstName: "John",
@@ -1051,9 +1091,9 @@ describe("mailMerge()", () => {
   });
 
   it("should leave unmatched fields by default", () => {
-    const doc = new DocumentBuilder()
-      .addParagraphElement(paragraph([field(" MERGEFIELD Unknown ")]))
-      .build();
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD Unknown ")]));
+    const doc = Document.build(h);
 
     const count = mailMerge(doc, { Other: "value" });
     expect(count).toBe(0);
@@ -1063,9 +1103,9 @@ describe("mailMerge()", () => {
   });
 
   it("should remove unmatched fields when removeUnmatched is true", () => {
-    const doc = new DocumentBuilder()
-      .addParagraphElement(paragraph([field(" MERGEFIELD Unknown ")]))
-      .build();
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD Unknown ")]));
+    const doc = Document.build(h);
 
     const count = mailMerge(doc, {}, { removeUnmatched: true });
     expect(count).toBe(1);
@@ -1076,9 +1116,9 @@ describe("mailMerge()", () => {
   });
 
   it("should handle quoted field names", () => {
-    const doc = new DocumentBuilder()
-      .addParagraphElement(paragraph([field(' MERGEFIELD "Full Name" ')]))
-      .build();
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([field(' MERGEFIELD "Full Name" ')]));
+    const doc = Document.build(h);
 
     const count = mailMerge(doc, { "Full Name": "Jane Smith" });
     expect(count).toBe(1);
@@ -1095,7 +1135,9 @@ describe("mailMerge()", () => {
     cell0.content = [paragraph([field(" MERGEFIELD City ")])];
     cell1.content = [paragraph([field(" MERGEFIELD State ")])];
 
-    const doc = new DocumentBuilder().addContent(tbl).build();
+    const h = Document.create();
+    Document.addContent(h, tbl);
+    const doc = Document.build(h);
     const count = mailMerge(doc, { City: "NYC", State: "NY" });
     expect(count).toBe(2);
   });
@@ -1107,7 +1149,9 @@ describe("mailMerge()", () => {
 
 describe("Opaque parts round-trip", () => {
   it("should preserve opaque parts through packaging", async () => {
-    const doc = new DocumentBuilder().addParagraph("Test").build();
+    const h = Document.create();
+    Document.addParagraph(h, "Test");
+    const doc = Document.build(h);
     (doc as any).opaqueParts = [
       {
         path: "word/charts/chart1.xml",
@@ -1182,19 +1226,19 @@ describe("Round-trip: bookmark colFirst/colLast", () => {
 
 describe("Round-trip: floating image layoutInCell/allowOverlap/simplePos", () => {
   it("should preserve anchor positioning attributes", async () => {
-    const builder = new DocumentBuilder();
+    const h = Document.create();
     const pngBytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
       1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 10, 0x49, 0x44, 0x41, 0x54,
       0x78, 0xda, 0x62, 0, 0, 0, 0, 5, 0, 1, 0x0d, 0x0a, 0x2d, 0xb4, 0, 0, 0, 0, 0x49, 0x45, 0x4e,
       0x44, 0xae, 0x42, 0x60, 0x82
     ]);
-    builder.addFloatingImage(pngBytes, "png", 914400, 914400, {
+    Document.addFloatingImage(h, pngBytes, "png", 914400, 914400, {
       layoutInCell: false,
       allowOverlap: false
     } as any);
-    builder.addParagraph("Doc with floating image");
-    const buffer = await builder.toBuffer();
+    Document.addParagraph(h, "Doc with floating image");
+    const buffer = await toBuffer(Document.build(h));
     const parsed = await readDocx(buffer);
     // Find floating image in body
     const fi = parsed.body.find(b => b.type === "floatingImage") as any;
@@ -2199,11 +2243,11 @@ describe("Regression: collectImageRids recurses into nested tables/SDTs", () => 
       0x78, 0xda, 0x62, 0, 0, 0, 0, 5, 0, 1, 0x0d, 0x0a, 0x2d, 0xb4, 0, 0, 0, 0, 0x49, 0x45, 0x4e,
       0x44, 0xae, 0x42, 0x60, 0x82
     ]);
-    const builder = new DocumentBuilder();
-    const { rId } = builder.addImage(pngBytes, "png", 914400, 914400);
+    const h = Document.create();
+    const { rId } = Document.addImage(h, pngBytes, "png", 914400, 914400);
 
     // Header containing nested table with image inside
-    builder.setHeader("default", {
+    Document.setHeader(h, "default", {
       children: [
         {
           type: "table",
@@ -2249,8 +2293,8 @@ describe("Regression: collectImageRids recurses into nested tables/SDTs", () => 
         }
       ]
     } as any);
-    builder.addParagraph("body");
-    const buffer = await builder.toBuffer();
+    Document.addParagraph(h, "body");
+    const buffer = await toBuffer(Document.build(h));
     // Just verify it round-trips without errors
     const parsed = await readDocx(buffer);
     expect(parsed.images?.length ?? 0).toBeGreaterThan(0);
@@ -2431,9 +2475,9 @@ describe("Error paths: readDocx", () => {
 
   it("recovers when optional numbering.xml is missing", async () => {
     // A valid minimal DOCX without numbering part
-    const builder = new DocumentBuilder();
-    builder.addParagraph("Hello");
-    const buffer = await builder.toBuffer();
+    const h = Document.create();
+    Document.addParagraph(h, "Hello");
+    const buffer = await toBuffer(Document.build(h));
     // Should parse without error
     const parsed = await readDocx(buffer);
     expect(parsed.body.length).toBeGreaterThan(0);
@@ -2458,9 +2502,9 @@ describe("Error paths: isDocxError guard", () => {
 describe("attrInt: NaN safety", () => {
   it("should not crash on malformed numeric attributes", async () => {
     // Build and parse a doc — non-numeric IDs in bookmarks shouldn't crash
-    const builder = new DocumentBuilder();
-    builder.addParagraph("hello");
-    const buffer = await builder.toBuffer();
+    const h = Document.create();
+    Document.addParagraph(h, "hello");
+    const buffer = await toBuffer(Document.build(h));
     const parsed = await readDocx(buffer);
     expect(parsed.body.length).toBe(1);
   });

@@ -321,7 +321,7 @@ export {
 
 // Builder helpers
 export {
-  DocumentBuilder,
+  Document,
   // Run helpers
   text,
   bold,
@@ -433,7 +433,6 @@ export {
   searchText,
   replaceText,
   resolveThemeColor,
-  patchDocument,
   mailMerge,
   // Query API
   paragraphCount,
@@ -447,13 +446,8 @@ export {
   tableCount,
   extractText
 } from "./document";
-export type {
-  SearchResult,
-  PatchContent,
-  PatchOperation,
-  PatchOptions,
-  DocumentHeading
-} from "./document";
+export type { DocumentHandle, SearchResult, DocumentHeading } from "./document";
+export type { PatchContent, PatchOperation, PatchOptions } from "./document-io";
 
 // Packager
 export { packageDocx } from "./docx-packager";
@@ -461,29 +455,9 @@ export { packageDocx } from "./docx-packager";
 // Reader
 export { readDocx } from "./docx-reader";
 
-// Font obfuscation utilities
-export { deobfuscateFont, obfuscateFont, generateFontKey } from "./font-obfuscation";
+// Document IO (toBuffer, toBase64, patchDocument)
+export { toBuffer, toBase64, patchDocument } from "./document-io";
 
-// Encryption utilities
-export {
-  isEncryptedDocx,
-  verifyPassword,
-  decryptPackage,
-  parseEncryptionInfoXml,
-  deriveEncryptionKey,
-  AGILE_BLOCK_KEYS
-} from "./encryption";
-export type { AgileEncryptionInfo } from "./encryption";
-
-// Digital signature utilities
-export {
-  hasDigitalSignatures,
-  parseSignatureXml,
-  extractSignatures,
-  isWellFormedSignature
-} from "./digital-signatures";
-export type { DigitalSignatureInfo } from "./digital-signatures";
-
-// HTML Renderer
-export { renderToHtml } from "./html-renderer";
-export type { HtmlRenderOptions, HtmlRenderResult } from "./html-renderer";
+// Sub-namespaces for grouped API ergonomics (no name conflicts with types)
+export { Field, Drawing, TrackChanges, Sdt, Query } from "./namespaces";
+export { Math as MathML } from "./namespaces";

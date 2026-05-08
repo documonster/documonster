@@ -54,6 +54,8 @@ interface Scenario {
   imports: string[];
   mustNotInclude: string[];
   platform?: "browser" | "node";
+  /** Bundlers to skip for this scenario (known tool limitations). */
+  excludeBundlers?: string[];
 }
 
 /** Shorthand for creating a scenario */
@@ -62,9 +64,10 @@ function s(
   importFrom: string,
   imports: string[],
   mustNotInclude: string[],
-  platform?: "browser" | "node"
+  platform?: "browser" | "node",
+  excludeBundlers?: string[]
 ): Scenario {
-  return { name, importFrom, imports, mustNotInclude, platform };
+  return { name, importFrom, imports, mustNotInclude, platform, excludeBundlers };
 }
 
 const scenarios: Scenario[] = [
@@ -251,6 +254,50 @@ const scenarios: Scenario[] = [
     `${PKG_NAME}/formula`,
     ["installFormulaEngine"],
     allModulesExcept("formula")
+  ),
+
+  // /word subpath (Node)
+  //
+  // The word module separates builders (document.ts) from IO
+  // (document-io.ts → docx-packager → archive + xml). Importing only
+  // builder helpers must NOT pull archive, xml, or packager code.
+  // NOTE: rspack cannot tree-shake barrel re-exports as aggressively as
+  // esbuild/rolldown, so these scenarios are tested only for esbuild+rolldown.
+  {
+    name: "/word: text+paragraph (no archive/xml leak)",
+    importFrom: `${PKG_NAME}/word`,
+    imports: ["text", "paragraph"],
+    mustNotInclude: [
+      "modules/archive/",
+      "modules/xml/",
+      "modules/word/docx-packager",
+      "modules/word/docx-reader"
+    ],
+    excludeBundlers: ["rspack"]
+  },
+  {
+    name: "/word: Document.create (no archive/xml leak)",
+    importFrom: `${PKG_NAME}/word`,
+    imports: ["Document"],
+    mustNotInclude: [
+      "modules/archive/",
+      "modules/xml/",
+      "modules/word/docx-packager",
+      "modules/word/docx-reader"
+    ],
+    excludeBundlers: ["rspack"]
+  },
+  s(
+    "/word: packageDocx (pulls archive+xml, no pdf/excel)",
+    `${PKG_NAME}/word`,
+    ["packageDocx"],
+    ["modules/pdf/", "modules/excel/", "modules/formula/", "modules/csv/"]
+  ),
+  s(
+    "/word: readDocx (pulls archive+xml, no pdf/excel)",
+    `${PKG_NAME}/word`,
+    ["readDocx"],
+    ["modules/pdf/", "modules/excel/", "modules/formula/", "modules/csv/"]
   ),
 
   // /markdown subpath (Node)
@@ -686,13 +733,19 @@ async function main(): Promise<void> {
 
   const results: ScenarioResult[] = [];
   for (const s of scenarios) {
-    results.push(runEsbuild(s));
+    if (!s.excludeBundlers?.includes("esbuild")) {
+      results.push(runEsbuild(s));
+    }
   }
   for (const s of scenarios) {
-    results.push(await runRolldown(s));
+    if (!s.excludeBundlers?.includes("rolldown")) {
+      results.push(await runRolldown(s));
+    }
   }
   for (const s of scenarios) {
-    results.push(await runRspack(s));
+    if (!s.excludeBundlers?.includes("rspack")) {
+      results.push(await runRspack(s));
+    }
   }
 
   const allPassed = report(results);

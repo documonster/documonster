@@ -11,8 +11,21 @@ import { zip } from "@archive/create-archive";
 import { XmlWriter } from "@xml/writer";
 
 import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "./constants";
-import { ContentTypesManager } from "./content-types";
-import { RelationshipManager } from "./relationships";
+import {
+  createContentTypes,
+  addContentTypeDefault,
+  addContentTypeOverride,
+  addImageContentTypeDefaults,
+  renderContentTypes
+} from "./content-types";
+import {
+  createRelationships,
+  addRelationship,
+  addRelationshipWithId,
+  getRelationshipCount,
+  renderRelationships
+} from "./relationships";
+import type { RelationshipsState } from "./relationships";
 import type {
   DocxDocument,
   BodyContent,
@@ -248,49 +261,49 @@ export async function packageDocx(
   const archive = zip({ level: compressionLevel ?? 6 });
 
   // Managers
-  const contentTypes = new ContentTypesManager();
-  const packageRels = new RelationshipManager();
-  const documentRels = new RelationshipManager();
+  const contentTypes = createContentTypes();
+  const packageRels = createRelationships();
+  const documentRels = createRelationships();
 
   // --- Package relationships ---
-  packageRels.add(RelType.OfficeDocument, "word/document.xml");
-  packageRels.add(RelType.CoreProperties, "docProps/core.xml");
-  packageRels.add(RelType.ExtendedProperties, "docProps/app.xml");
+  addRelationship(packageRels, RelType.OfficeDocument, "word/document.xml");
+  addRelationship(packageRels, RelType.CoreProperties, "docProps/core.xml");
+  addRelationship(packageRels, RelType.ExtendedProperties, "docProps/app.xml");
 
   // Custom properties
   const hasCustomProps = doc.customProperties && doc.customProperties.length > 0;
   if (hasCustomProps) {
-    packageRels.add(RelType.CustomProperties, "docProps/custom.xml");
+    addRelationship(packageRels, RelType.CustomProperties, "docProps/custom.xml");
   }
 
   // --- Document relationships ---
-  documentRels.add(RelType.Styles, "styles.xml");
-  documentRels.add(RelType.Settings, "settings.xml");
-  documentRels.add(RelType.FontTable, "fontTable.xml");
-  documentRels.add(RelType.Theme, "theme/theme1.xml");
+  addRelationship(documentRels, RelType.Styles, "styles.xml");
+  addRelationship(documentRels, RelType.Settings, "settings.xml");
+  addRelationship(documentRels, RelType.FontTable, "fontTable.xml");
+  addRelationship(documentRels, RelType.Theme, "theme/theme1.xml");
 
   // Numbering
   const hasNumbering =
     (doc.abstractNumberings && doc.abstractNumberings.length > 0) ||
     (doc.numberingInstances && doc.numberingInstances.length > 0);
   if (hasNumbering) {
-    documentRels.add(RelType.Numbering, "numbering.xml");
+    addRelationship(documentRels, RelType.Numbering, "numbering.xml");
   }
 
   // Footnotes & Endnotes
   const hasFootnotes = doc.footnotes && doc.footnotes.length > 0;
   const hasEndnotes = doc.endnotes && doc.endnotes.length > 0;
   if (hasFootnotes) {
-    documentRels.add(RelType.Footnotes, "footnotes.xml");
+    addRelationship(documentRels, RelType.Footnotes, "footnotes.xml");
   }
   if (hasEndnotes) {
-    documentRels.add(RelType.Endnotes, "endnotes.xml");
+    addRelationship(documentRels, RelType.Endnotes, "endnotes.xml");
   }
 
   // Comments
   const hasComments = doc.comments && doc.comments.length > 0;
   if (hasComments) {
-    documentRels.add(RelType.Comments, "comments.xml");
+    addRelationship(documentRels, RelType.Comments, "comments.xml");
   }
 
   // Images
@@ -315,7 +328,7 @@ export async function packageDocx(
         const fallbackFileName = `${baseName}_fallback.png`;
 
         // Register PNG fallback as the main rId
-        const fbRId = documentRels.add(RelType.Image, `media/${fallbackFileName}`);
+        const fbRId = addRelationship(documentRels, RelType.Image, `media/${fallbackFileName}`);
         (img as { rId?: string }).rId = fbRId;
         if (oldRid) {
           imageRidMap.set(oldRid, fbRId);
@@ -323,7 +336,7 @@ export async function packageDocx(
         imageExtensions.add("png");
 
         // Register SVG as separate image
-        const svgRId = documentRels.add(RelType.Image, `media/${img.fileName}`);
+        const svgRId = addRelationship(documentRels, RelType.Image, `media/${img.fileName}`);
         svgRidMap.set(img.fileName, svgRId);
         const ext = img.fileName.split(".").pop()?.toLowerCase();
         if (ext) {
@@ -332,7 +345,7 @@ export async function packageDocx(
 
         svgFallbacks.push({ fallbackFileName, data: img.fallbackData });
       } else {
-        const rId = documentRels.add(RelType.Image, `media/${img.fileName}`);
+        const rId = addRelationship(documentRels, RelType.Image, `media/${img.fileName}`);
         (img as { rId?: string }).rId = rId;
         if (oldRid) {
           imageRidMap.set(oldRid, rId);
@@ -401,7 +414,7 @@ export async function packageDocx(
   const hyperlinks = collectHyperlinks(doc.body);
   for (const link of hyperlinks) {
     if (link.url) {
-      const rId = documentRels.add(RelType.Hyperlink, link.url, "External");
+      const rId = addRelationship(documentRels, RelType.Hyperlink, link.url, "External");
       (link as { rId?: string }).rId = rId;
     }
   }
@@ -412,14 +425,15 @@ export async function packageDocx(
   altChunks.forEach((chunk, i) => {
     const fileName = chunk.fileName ?? `afchunk${i + 1}.html`;
     // Register relationship for the alt chunk
-    const rId = documentRels.add(
+    const rId = addRelationship(
+      documentRels,
       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk",
       fileName
     );
     (chunk as { rId?: string }).rId = rId;
     // Register content type
     const ct = chunk.contentType ?? "text/html";
-    contentTypes.addOverride(`/word/${fileName}`, ct);
+    addContentTypeOverride(contentTypes, `/word/${fileName}`, ct);
     // Write data to archive
     if (chunk.data) {
       archive.add(`word/${fileName}`, chunk.data);
@@ -428,21 +442,21 @@ export async function packageDocx(
 
   // Headers
   let headerIndex = 1;
-  const headerRelManagers = new Map<string, RelationshipManager>();
+  const headerRelManagers = new Map<string, RelationshipsState>();
   if (doc.headers) {
     for (const [key, headerDef] of doc.headers) {
-      const rId = documentRels.add(RelType.Header, `header${headerIndex}.xml`);
+      const rId = addRelationship(documentRels, RelType.Header, `header${headerIndex}.xml`);
       (headerDef as { rId?: string }).rId = rId;
 
-      // Create per-header relationship manager for images and hyperlinks
-      const hRels = new RelationshipManager();
+      // Create per-header relationship state for images and hyperlinks
+      const hRels = createRelationships();
       const imgRids = collectImageRidsFromContent(headerDef.content);
       if (imgRids.size > 0 && doc.images) {
         for (const oldRid of imgRids) {
           // O(1) lookup: direct or via remap
           const img = imageByRid.get(oldRid) ?? imageByRid.get(imageRidMap.get(oldRid) ?? "");
           if (img) {
-            hRels.addWithId(oldRid, RelType.Image, `media/${img.fileName}`);
+            addRelationshipWithId(hRels, oldRid, RelType.Image, `media/${img.fileName}`);
           }
         }
       }
@@ -450,11 +464,11 @@ export async function packageDocx(
       const hLinks = collectHyperlinksFromHeaderFooter(headerDef.content);
       for (const link of hLinks) {
         if (link.url) {
-          const linkRId = hRels.add(RelType.Hyperlink, link.url, "External");
+          const linkRId = addRelationship(hRels, RelType.Hyperlink, link.url, "External");
           (link as { rId?: string }).rId = linkRId;
         }
       }
-      if (hRels.count > 0) {
+      if (getRelationshipCount(hRels) > 0) {
         headerRelManagers.set(key, hRels);
       }
 
@@ -464,20 +478,20 @@ export async function packageDocx(
 
   // Footers
   let footerIndex = 1;
-  const footerRelManagers = new Map<string, RelationshipManager>();
+  const footerRelManagers = new Map<string, RelationshipsState>();
   if (doc.footers) {
     for (const [key, footerDef] of doc.footers) {
-      const rId = documentRels.add(RelType.Footer, `footer${footerIndex}.xml`);
+      const rId = addRelationship(documentRels, RelType.Footer, `footer${footerIndex}.xml`);
       (footerDef as { rId?: string }).rId = rId;
 
-      // Create per-footer relationship manager for images and hyperlinks
-      const fRels = new RelationshipManager();
+      // Create per-footer relationship state for images and hyperlinks
+      const fRels = createRelationships();
       const imgRids = collectImageRidsFromContent(footerDef.content);
       if (imgRids.size > 0 && doc.images) {
         for (const oldRid of imgRids) {
           const img = imageByRid.get(oldRid) ?? imageByRid.get(imageRidMap.get(oldRid) ?? "");
           if (img) {
-            fRels.addWithId(oldRid, RelType.Image, `media/${img.fileName}`);
+            addRelationshipWithId(fRels, oldRid, RelType.Image, `media/${img.fileName}`);
           }
         }
       }
@@ -485,11 +499,11 @@ export async function packageDocx(
       const fLinks = collectHyperlinksFromHeaderFooter(footerDef.content);
       for (const link of fLinks) {
         if (link.url) {
-          const linkRId = fRels.add(RelType.Hyperlink, link.url, "External");
+          const linkRId = addRelationship(fRels, RelType.Hyperlink, link.url, "External");
           (link as { rId?: string }).rId = linkRId;
         }
       }
-      if (fRels.count > 0) {
+      if (getRelationshipCount(fRels) > 0) {
         footerRelManagers.set(key, fRels);
       }
 
@@ -499,21 +513,21 @@ export async function packageDocx(
 
   // Watermark header (auto-generated if doc.watermark is set)
   let watermarkHeaderIndex: number | undefined;
-  let watermarkHeaderRels: RelationshipManager | undefined;
+  let watermarkHeaderRels: RelationshipsState | undefined;
   let watermarkHeaderRId: string | undefined;
   if (doc.watermark) {
     // Use next header index
     const wmHdrIdx = headerIndex;
-    watermarkHeaderRId = documentRels.add(RelType.Header, `header${wmHdrIdx}.xml`);
+    watermarkHeaderRId = addRelationship(documentRels, RelType.Header, `header${wmHdrIdx}.xml`);
     watermarkHeaderIndex = wmHdrIdx;
 
     // If image watermark, add image relationship in header .rels
     if (doc.watermark.type === "image") {
-      const wmRels = new RelationshipManager();
+      const wmRels = createRelationships();
       const wmRId = doc.watermark.rId;
       const img = imageByRid.get(wmRId) ?? imageByRid.get(imageRidMap.get(wmRId) ?? "");
       if (img) {
-        wmRels.addWithId(wmRId, RelType.Image, `media/${img.fileName}`);
+        addRelationshipWithId(wmRels, wmRId, RelType.Image, `media/${img.fileName}`);
       }
       watermarkHeaderRels = wmRels;
     }
@@ -521,30 +535,30 @@ export async function packageDocx(
   }
 
   // --- Content Types ---
-  contentTypes.addImageDefaults(imageExtensions);
-  contentTypes.addOverride(PartPath.Document, ContentType.Document);
-  contentTypes.addOverride(PartPath.Styles, ContentType.Styles);
-  contentTypes.addOverride(PartPath.Settings, ContentType.Settings);
-  contentTypes.addOverride(PartPath.FontTable, ContentType.FontTable);
-  contentTypes.addOverride(PartPath.Theme, ContentType.Theme);
+  addImageContentTypeDefaults(contentTypes, imageExtensions);
+  addContentTypeOverride(contentTypes, PartPath.Document, ContentType.Document);
+  addContentTypeOverride(contentTypes, PartPath.Styles, ContentType.Styles);
+  addContentTypeOverride(contentTypes, PartPath.Settings, ContentType.Settings);
+  addContentTypeOverride(contentTypes, PartPath.FontTable, ContentType.FontTable);
+  addContentTypeOverride(contentTypes, PartPath.Theme, ContentType.Theme);
 
   if (hasNumbering) {
-    contentTypes.addOverride(PartPath.Numbering, ContentType.Numbering);
+    addContentTypeOverride(contentTypes, PartPath.Numbering, ContentType.Numbering);
   }
   if (hasFootnotes) {
-    contentTypes.addOverride(PartPath.Footnotes, ContentType.Footnotes);
+    addContentTypeOverride(contentTypes, PartPath.Footnotes, ContentType.Footnotes);
   }
   if (hasEndnotes) {
-    contentTypes.addOverride(PartPath.Endnotes, ContentType.Endnotes);
+    addContentTypeOverride(contentTypes, PartPath.Endnotes, ContentType.Endnotes);
   }
   if (hasComments) {
-    contentTypes.addOverride(PartPath.Comments, ContentType.Comments);
+    addContentTypeOverride(contentTypes, PartPath.Comments, ContentType.Comments);
   }
 
   headerIndex = 1;
   if (doc.headers) {
     for (const [,] of doc.headers) {
-      contentTypes.addOverride(PartPath.header(headerIndex), ContentType.Header);
+      addContentTypeOverride(contentTypes, PartPath.header(headerIndex), ContentType.Header);
       headerIndex++;
     }
   }
@@ -552,19 +566,19 @@ export async function packageDocx(
   footerIndex = 1;
   if (doc.footers) {
     for (const [,] of doc.footers) {
-      contentTypes.addOverride(PartPath.footer(footerIndex), ContentType.Footer);
+      addContentTypeOverride(contentTypes, PartPath.footer(footerIndex), ContentType.Footer);
       footerIndex++;
     }
   }
 
   if (watermarkHeaderIndex !== undefined) {
-    contentTypes.addOverride(PartPath.header(watermarkHeaderIndex), ContentType.Header);
+    addContentTypeOverride(contentTypes, PartPath.header(watermarkHeaderIndex), ContentType.Header);
   }
 
-  contentTypes.addOverride(PartPath.CoreProps, ContentType.CoreProperties);
-  contentTypes.addOverride(PartPath.AppProps, ContentType.ExtendedProperties);
+  addContentTypeOverride(contentTypes, PartPath.CoreProps, ContentType.CoreProperties);
+  addContentTypeOverride(contentTypes, PartPath.AppProps, ContentType.ExtendedProperties);
   if (hasCustomProps) {
-    contentTypes.addOverride(PartPath.CustomProps, ContentType.CustomProperties);
+    addContentTypeOverride(contentTypes, PartPath.CustomProps, ContentType.CustomProperties);
   }
 
   // --- Generate & add parts to archive ---
@@ -575,7 +589,7 @@ export async function packageDocx(
   // word/_rels/document.xml.rels
   archive.add(
     PartPath.DocumentRels,
-    renderXml(xml => documentRels.render(xml))
+    renderXml(xml => renderRelationships(documentRels, xml))
   );
 
   // Build an effective doc that includes the auto-generated watermark header
@@ -615,7 +629,7 @@ export async function packageDocx(
   const chartRIds: string[] = [];
   charts.forEach(chartContent => {
     const num = chartRIds.length + 1;
-    const rId = documentRels.add(RelType.Chart, `charts/chart${num}.xml`);
+    const rId = addRelationship(documentRels, RelType.Chart, `charts/chart${num}.xml`);
     chartRIds.push(rId);
     // Store rId in registry so renderChartDrawing can look it up
     CHART_RID_REGISTRY.set(chartContent, rId);
@@ -647,7 +661,7 @@ export async function packageDocx(
 
   // word/fonts/*.odttf (embedded fonts)
   if (doc.embeddedFonts && doc.embeddedFonts.length > 0) {
-    const fontTableRels = new RelationshipManager();
+    const fontTableRels = createRelationships();
     const usedRIds = new Set<string>();
 
     // Collect rIds referenced in fontTable
@@ -674,27 +688,27 @@ export async function packageDocx(
 
       // Register relationship from fontTable.xml
       if (usedRIds.has(ef.rId)) {
-        fontTableRels.addWithId(ef.rId, RelType.Font, `fonts/${ef.fileName}`);
+        addRelationshipWithId(fontTableRels, ef.rId, RelType.Font, `fonts/${ef.fileName}`);
       } else {
         // Add anyway so the embedded font isn't orphaned
-        fontTableRels.addWithId(ef.rId, RelType.Font, `fonts/${ef.fileName}`);
+        addRelationshipWithId(fontTableRels, ef.rId, RelType.Font, `fonts/${ef.fileName}`);
       }
 
       // Register content type for .odttf / .ttf
       const ext = ef.fileName.split(".").pop()?.toLowerCase();
       if (ext === "odttf") {
-        contentTypes.addDefault("odttf", ContentType.ObfuscatedFont);
+        addContentTypeDefault(contentTypes, "odttf", ContentType.ObfuscatedFont);
       } else if (ext === "ttf") {
-        contentTypes.addDefault("ttf", "application/x-font-ttf");
+        addContentTypeDefault(contentTypes, "ttf", "application/x-font-ttf");
       } else if (ext === "otf") {
-        contentTypes.addDefault("otf", "application/x-font-otf");
+        addContentTypeDefault(contentTypes, "otf", "application/x-font-otf");
       }
     }
 
     // Write fontTable.xml.rels
     archive.add(
       "word/_rels/fontTable.xml.rels",
-      renderXml(xml => fontTableRels.render(xml))
+      renderXml(xml => renderRelationships(fontTableRels, xml))
     );
   }
 
@@ -729,21 +743,22 @@ export async function packageDocx(
       archive.add(propsPath, propsXml);
 
       // Write item rels (links itemN.xml → itemPropsN.xml)
-      const itemRels = new RelationshipManager();
-      itemRels.add(RelType.CustomXmlProps, `itemProps${num}.xml`);
+      const itemRels = createRelationships();
+      addRelationship(itemRels, RelType.CustomXmlProps, `itemProps${num}.xml`);
       archive.add(
         `word/customXml/_rels/item${num}.xml.rels`,
-        renderXml(xml => itemRels.render(xml))
+        renderXml(xml => renderRelationships(itemRels, xml))
       );
 
       // Register content types
-      contentTypes.addOverride(
+      addContentTypeOverride(
+        contentTypes,
         `/word/customXml/itemProps${num}.xml`,
         "application/vnd.openxmlformats-officedocument.customXmlProperties+xml"
       );
 
       // Add to document rels
-      documentRels.add(RelType.CustomXml, `customXml/item${num}.xml`);
+      addRelationship(documentRels, RelType.CustomXml, `customXml/item${num}.xml`);
     });
   }
 
@@ -791,8 +806,12 @@ export async function packageDocx(
     if (hasExtended) {
       const extXml = renderXml(xml => renderCommentsExtended(xml, doc.comments!));
       archive.add(PartPath.CommentsExtended, extXml);
-      documentRels.add(RelType.CommentsExtended, "commentsExtended.xml");
-      contentTypes.addOverride(`/${PartPath.CommentsExtended}`, ContentType.CommentsExtended);
+      addRelationship(documentRels, RelType.CommentsExtended, "commentsExtended.xml");
+      addContentTypeOverride(
+        contentTypes,
+        `/${PartPath.CommentsExtended}`,
+        ContentType.CommentsExtended
+      );
     }
   }
 
@@ -809,10 +828,10 @@ export async function packageDocx(
       // Header .rels file
       const hKey = keys[hIdx];
       const hRels = headerRelManagers.get(hKey);
-      if (hRels && hRels.count > 0) {
+      if (hRels && getRelationshipCount(hRels) > 0) {
         archive.add(
           `word/_rels/header${headerIndex}.xml.rels`,
-          renderXml(xml => hRels.render(xml))
+          renderXml(xml => renderRelationships(hRels, xml))
         );
       }
       headerIndex++;
@@ -833,10 +852,10 @@ export async function packageDocx(
       // Footer .rels file
       const fKey = keys[fIdx];
       const fRels = footerRelManagers.get(fKey);
-      if (fRels && fRels.count > 0) {
+      if (fRels && getRelationshipCount(fRels) > 0) {
         archive.add(
           `word/_rels/footer${footerIndex}.xml.rels`,
-          renderXml(xml => fRels.render(xml))
+          renderXml(xml => renderRelationships(fRels, xml))
         );
       }
       footerIndex++;
@@ -850,10 +869,10 @@ export async function packageDocx(
       PartPath.header(watermarkHeaderIndex),
       renderXml(xml => renderWatermarkHeader(xml, doc.watermark!))
     );
-    if (watermarkHeaderRels && watermarkHeaderRels.count > 0) {
+    if (watermarkHeaderRels && getRelationshipCount(watermarkHeaderRels) > 0) {
       archive.add(
         `word/_rels/header${watermarkHeaderIndex}.xml.rels`,
-        renderXml(xml => watermarkHeaderRels!.render(xml))
+        renderXml(xml => renderRelationships(watermarkHeaderRels!, xml))
       );
     }
   }
@@ -896,8 +915,8 @@ export async function packageDocx(
       PartPath.WebSettings,
       renderXml(xml => renderWebSettings(xml, doc.webSettings))
     );
-    documentRels.add(RelType.WebSettings, "webSettings.xml");
-    contentTypes.addOverride(`/${PartPath.WebSettings}`, ContentType.WebSettings);
+    addRelationship(documentRels, RelType.WebSettings, "webSettings.xml");
+    addContentTypeOverride(contentTypes, `/${PartPath.WebSettings}`, ContentType.WebSettings);
   }
 
   // word/people.xml
@@ -906,8 +925,8 @@ export async function packageDocx(
       PartPath.People,
       renderXml(xml => renderPeople(xml, doc.people!))
     );
-    documentRels.add(RelType.People, "people.xml");
-    contentTypes.addOverride(`/${PartPath.People}`, ContentType.People);
+    addRelationship(documentRels, RelType.People, "people.xml");
+    addContentTypeOverride(contentTypes, `/${PartPath.People}`, ContentType.People);
   }
 
   // docProps/thumbnail
@@ -921,11 +940,12 @@ export async function packageDocx(
     const thumbPath = `docProps/thumbnail.${ext}`;
     archive.add(thumbPath, doc.thumbnail.data);
     // Package rels: target is relative to package root (docProps/thumbnail.jpeg)
-    packageRels.add(
+    addRelationship(
+      packageRels,
       "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail",
       thumbPath
     );
-    contentTypes.addDefault(ext, doc.thumbnail.contentType);
+    addContentTypeDefault(contentTypes, ext, doc.thumbnail.contentType);
   }
 
   // Write opaque (unrecognized) parts for round-trip preservation
@@ -935,24 +955,24 @@ export async function packageDocx(
       // Register content type: explicit > inferred by extension > skip
       const ext = part.path.split(".").pop()?.toLowerCase();
       if (part.contentType) {
-        contentTypes.addOverride(`/${part.path}`, part.contentType);
+        addContentTypeOverride(contentTypes, `/${part.path}`, part.contentType);
       } else if (ext) {
         // Infer from common extensions so [Content_Types].xml isn't incomplete
         const inferred = inferContentType(ext);
         if (inferred) {
-          contentTypes.addOverride(`/${part.path}`, inferred);
+          addContentTypeOverride(contentTypes, `/${part.path}`, inferred);
         }
       }
       // Write part relationships if any
       if (part.relationships && part.relationships.length > 0) {
-        const partRels = new RelationshipManager();
+        const partRels = createRelationships();
         for (const rel of part.relationships) {
-          partRels.addWithId(rel.id, rel.type, rel.target, rel.targetMode);
+          addRelationshipWithId(partRels, rel.id, rel.type, rel.target, rel.targetMode);
         }
         const relsPath = getPartRelsPath(part.path);
         archive.add(
           relsPath,
-          renderXml(xml => partRels.render(xml))
+          renderXml(xml => renderRelationships(partRels, xml))
         );
       }
     }
@@ -970,18 +990,18 @@ export async function packageDocx(
     );
 
     // Register content type
-    contentTypes.addOverride(`/word/charts/chart${num}.xml`, ContentType.Chart);
+    addContentTypeOverride(contentTypes, `/word/charts/chart${num}.xml`, ContentType.Chart);
   });
 
   // LAST: Write [Content_Types].xml and _rels/.rels after all parts have registered
   // their content types and relationships.
   archive.add(
     PartPath.ContentTypes,
-    renderXml(xml => contentTypes.render(xml))
+    renderXml(xml => renderContentTypes(contentTypes, xml))
   );
   archive.add(
     PartPath.PackageRels,
-    renderXml(xml => packageRels.render(xml))
+    renderXml(xml => renderRelationships(packageRels, xml))
   );
 
   return archive.bytes();
