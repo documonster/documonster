@@ -4613,11 +4613,10 @@ function patchXmlAttribute(
   value: boolean | string | undefined
 ): string {
   // Match the opening tag, allowing leading whitespace in attributes
-  // and both self-closing and regular element forms. Escape the tag
-  // for regex; element names can contain `:` and `-` but nothing else
-  // that regex would interpret.
-  // CodeQL: safe — elementTag is escaped (`:` and `.` only), `[^>]*` terminates at `>`.
-  const tagRe = new RegExp(`<${elementTag.replace(/[:.]/g, "\\$&")}\\b([^>]*)(/?)>`);
+  // and both self-closing and regular element forms. Escape the full
+  // element name for regex safety (covers all special regex characters).
+  const escapedTag = elementTag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagRe = new RegExp(`<${escapedTag}\\b([^>]*)(/?)>`);
   const match = tagRe.exec(block);
   if (!match) {
     return block;

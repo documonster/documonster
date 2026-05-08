@@ -7,6 +7,27 @@
  * structured access for users who want to inspect or rewrite the palette.
  */
 import { escapeXmlAttr } from "./chart-utils";
+
+/** indexOf-based attribute extraction — no backtracking risk. */
+function extractAttr(xml: string, tagName: string, attrName: string): string | undefined {
+  const tagStart = xml.indexOf(`<${tagName}`);
+  if (tagStart < 0) {
+    return undefined;
+  }
+  const tagEnd = xml.indexOf(">", tagStart);
+  if (tagEnd < 0) {
+    return undefined;
+  }
+  const tag = xml.slice(tagStart, tagEnd + 1);
+  const attrStart = tag.indexOf(`${attrName}="`);
+  if (attrStart < 0) {
+    return undefined;
+  }
+  const valStart = attrStart + attrName.length + 2;
+  const valEnd = tag.indexOf('"', valStart);
+  return valEnd >= 0 ? tag.slice(valStart, valEnd) : undefined;
+}
+
 import type {
   ChartColorVariation,
   ChartColorsEntry,
@@ -22,13 +43,13 @@ import type {
 export function parseChartColors(rawXml: string): ChartColorsModel {
   const result: ChartColorsModel = { rawXml };
 
-  const methodMatch = /<cs:colorStyle[^>]*\smeth="([^"]+)"/.exec(rawXml);
+  const methodMatch = extractAttr(rawXml, "cs:colorStyle", "meth");
   if (methodMatch) {
-    result.method = methodMatch[1];
+    result.method = methodMatch;
   }
-  const idMatch = /<cs:colorStyle[^>]*\sid="(\d+)"/.exec(rawXml);
-  if (idMatch) {
-    result.id = parseInt(idMatch[1], 10);
+  const idVal = extractAttr(rawXml, "cs:colorStyle", "id");
+  if (idVal) {
+    result.id = parseInt(idVal, 10);
   }
 
   // Colors come as a sequence of <a:schemeClr> and <a:srgbClr> at the top
@@ -361,9 +382,9 @@ function buildDefaultChartColors(): string {
  */
 export function parseChartStyle(rawXml: string): ChartStyleModel {
   const result: ChartStyleModel = { rawXml };
-  const idMatch = /<cs:chartStyle[^>]*\sid="(\d+)"/.exec(rawXml);
-  if (idMatch) {
-    result.id = parseInt(idMatch[1], 10);
+  const idVal = extractAttr(rawXml, "cs:chartStyle", "id");
+  if (idVal) {
+    result.id = parseInt(idVal, 10);
   }
 
   // Walk every top-level `<cs:…>` child of `<cs:chartStyle>` and

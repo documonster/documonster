@@ -1133,15 +1133,30 @@ function parseSp3D(xml: string): ShapeProperties3D | undefined {
   if (spStart < 0) {
     return undefined;
   }
-  // sp3d can be self-closing or have children (bevels)
-  const selfClose = /<a:sp3d\s[^>]*\/>/.exec(xml);
-  const openClose = /<a:sp3d\s([^>]*)>([^]*?)<\/a:sp3d>/.exec(xml);
-  const region = openClose ? openClose[0] : selfClose ? selfClose[0] : xml.slice(spStart);
+  // Determine the tag extent using indexOf (no backtracking risk).
+  const selfCloseEnd = xml.indexOf("/>", spStart);
+  const openTagEnd = xml.indexOf(">", spStart);
+  const isSelfClose = selfCloseEnd >= 0 && (openTagEnd < 0 || selfCloseEnd < openTagEnd);
+  let region: string;
+  if (isSelfClose) {
+    region = xml.slice(spStart, selfCloseEnd + 2);
+  } else if (openTagEnd >= 0) {
+    const closeTag = "</a:sp3d>";
+    const closeIdx = xml.indexOf(closeTag, openTagEnd);
+    region =
+      closeIdx >= 0
+        ? xml.slice(spStart, closeIdx + closeTag.length)
+        : xml.slice(spStart, openTagEnd + 1);
+  } else {
+    region = xml.slice(spStart);
+  }
+
   // Only parse attributes from the opening tag itself — NOT from child
   // elements (e.g. `<a:bevelT w="..." h="..."/>`) which would pollute
   // the attribute dict with unrelated keys.
-  const openTagMatch = /<a:sp3d\b([^>]*?)(?:\/?>)/.exec(region);
-  const attrs = parseAttrs(openTagMatch ? openTagMatch[0] : region);
+  const firstClose = region.indexOf(">");
+  const openTag = firstClose >= 0 ? region.slice(0, firstClose + 1) : region;
+  const attrs = parseAttrs(openTag);
   const result: ShapeProperties3D = {};
   if (attrs.z) {
     result.z = parseInt(attrs.z, 10);
@@ -1155,27 +1170,45 @@ function parseSp3D(xml: string): ShapeProperties3D | undefined {
   if (attrs.prstMaterial) {
     result.material = attrs.prstMaterial;
   }
-  const bevelT = /<a:bevelT\s([^/]*?)\/>/.exec(region);
-  if (bevelT) {
-    result.bevelTop = parseBevelAttrs(bevelT[0]);
+  // Bevels — use indexOf to find the self-closing tags within the region
+  const bevelTStart = region.indexOf("<a:bevelT");
+  if (bevelTStart >= 0) {
+    const bevelTEnd = region.indexOf("/>", bevelTStart);
+    if (bevelTEnd >= 0) {
+      result.bevelTop = parseBevelAttrs(region.slice(bevelTStart, bevelTEnd + 2));
+    }
   }
-  const bevelB = /<a:bevelB\s([^/]*?)\/>/.exec(region);
-  if (bevelB) {
-    result.bevelBottom = parseBevelAttrs(bevelB[0]);
+  const bevelBStart = region.indexOf("<a:bevelB");
+  if (bevelBStart >= 0) {
+    const bevelBEnd = region.indexOf("/>", bevelBStart);
+    if (bevelBEnd >= 0) {
+      result.bevelBottom = parseBevelAttrs(region.slice(bevelBStart, bevelBEnd + 2));
+    }
   }
-  if (openClose) {
-    const extClrMatch = /<a:extrusionClr>([^]*?)<\/a:extrusionClr>/.exec(openClose[2]);
-    if (extClrMatch) {
-      const c = parseColorFromXml(extClrMatch[1]);
-      if (c) {
-        result.extrusionColor = c;
+  // Extrusion / contour colours — only present in open-close form
+  if (!isSelfClose) {
+    const extOpen = "<a:extrusionClr>";
+    const extClose = "</a:extrusionClr>";
+    const extStart = region.indexOf(extOpen);
+    if (extStart >= 0) {
+      const extEnd = region.indexOf(extClose, extStart);
+      if (extEnd >= 0) {
+        const c = parseColorFromXml(region.slice(extStart + extOpen.length, extEnd));
+        if (c) {
+          result.extrusionColor = c;
+        }
       }
     }
-    const contClrMatch = /<a:contourClr>([^]*?)<\/a:contourClr>/.exec(openClose[2]);
-    if (contClrMatch) {
-      const c = parseColorFromXml(contClrMatch[1]);
-      if (c) {
-        result.contourColor = c;
+    const contOpen = "<a:contourClr>";
+    const contClose = "</a:contourClr>";
+    const contStart = region.indexOf(contOpen);
+    if (contStart >= 0) {
+      const contEnd = region.indexOf(contClose, contStart);
+      if (contEnd >= 0) {
+        const c = parseColorFromXml(region.slice(contStart + contOpen.length, contEnd));
+        if (c) {
+          result.contourColor = c;
+        }
       }
     }
   }
@@ -1205,6 +1238,26 @@ function parseAttrs(tag: string): Record<string, string> {
     attrs[m[1]] = m[2];
   }
   return attrs;
+}
+
+/**
+ * Extract a single attribute value from the first occurrence of `<tagName ...>`
+ * in `xml`. Uses indexOf to locate the tag (no backtracking risk) then a simple
+ * attribute regex on the bounded tag substring.
+ */
+function findTagAttr(xml: string, tagName: string, attrName: string): string | undefined {
+  const tagStart = xml.indexOf(`<${tagName}`);
+  if (tagStart < 0) {
+    return undefined;
+  }
+  const tagEnd = xml.indexOf(">", tagStart);
+  if (tagEnd < 0) {
+    return undefined;
+  }
+  const tag = xml.slice(tagStart, tagEnd + 1);
+  const re = new RegExp(`${attrName}="([^"]*)"`);
+  const m = re.exec(tag);
+  return m ? m[1] : undefined;
 }
 
 /**
@@ -1283,10 +1336,10 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
 
   const result: ChartTextProperties = {};
 
-  // Font size (a:sz)
-  const szMatch = /<a:(?:defRPr|rPr)[^>]*\ssz="(\d+)"/.exec(rawXml);
-  if (szMatch) {
-    result.size = parseInt(szMatch[1], 10);
+  // Font size (a:sz) — search defRPr first, then rPr
+  const szVal = findTagAttr(rawXml, "a:defRPr", "sz") ?? findTagAttr(rawXml, "a:rPr", "sz");
+  if (szVal) {
+    result.size = parseInt(szVal, 10);
   }
 
   // Bold — accept `"1"` / `"true"` per XSD `xsd:boolean`. Previously
@@ -1296,15 +1349,15 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   // than dropped — semantically distinct from the attribute being
   // absent (which leaves the field undefined so downstream writers
   // know not to force a value).
-  const bMatch = /<a:(?:defRPr|rPr)[^>]*\sb="(1|true|0|false)"/.exec(rawXml);
-  if (bMatch) {
-    result.bold = bMatch[1] === "1" || bMatch[1] === "true";
+  const bVal = findTagAttr(rawXml, "a:defRPr", "b") ?? findTagAttr(rawXml, "a:rPr", "b");
+  if (bVal) {
+    result.bold = bVal === "1" || bVal === "true";
   }
 
   // Italic — same lenient boolean handling as `b` above.
-  const iMatch = /<a:(?:defRPr|rPr)[^>]*\si="(1|true|0|false)"/.exec(rawXml);
-  if (iMatch) {
-    result.italic = iMatch[1] === "1" || iMatch[1] === "true";
+  const iVal = findTagAttr(rawXml, "a:defRPr", "i") ?? findTagAttr(rawXml, "a:rPr", "i");
+  if (iVal) {
+    result.italic = iVal === "1" || iVal === "true";
   }
 
   // Underline style (a:rPr/@u). Values are the DrawingML `ST_TextUnderlineType`
@@ -1312,51 +1365,51 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   // "dash" | "dashHeavy" | "dashLong" | "dashLongHeavy" | "dotDash" |
   // "dotDashHeavy" | "dotDotDash" | "dotDotDashHeavy" | "wavy" |
   // "wavyHeavy" | "wavyDbl".
-  const uMatch = /<a:(?:defRPr|rPr)[^>]*\su="([A-Za-z]+)"/.exec(rawXml);
-  if (uMatch) {
-    result.underline = uMatch[1] as ChartTextProperties["underline"];
+  const uVal = findTagAttr(rawXml, "a:defRPr", "u") ?? findTagAttr(rawXml, "a:rPr", "u");
+  if (uVal) {
+    result.underline = uVal as ChartTextProperties["underline"];
   }
 
   // Strike-through (a:rPr/@strike). Values: "noStrike" | "sngStrike" |
   // "dblStrike".
-  const strikeMatch = /<a:(?:defRPr|rPr)[^>]*\sstrike="(noStrike|sngStrike|dblStrike)"/.exec(
-    rawXml
-  );
-  if (strikeMatch) {
-    result.strike = strikeMatch[1] as ChartTextProperties["strike"];
+  const strikeVal =
+    findTagAttr(rawXml, "a:defRPr", "strike") ?? findTagAttr(rawXml, "a:rPr", "strike");
+  if (strikeVal) {
+    result.strike = strikeVal as ChartTextProperties["strike"];
   }
 
   // Capitalisation (a:rPr/@cap). Values: "none" | "small" | "all".
-  const capMatch = /<a:(?:defRPr|rPr)[^>]*\scap="(none|small|all)"/.exec(rawXml);
-  if (capMatch) {
-    result.cap = capMatch[1] as ChartTextProperties["cap"];
+  const capVal = findTagAttr(rawXml, "a:defRPr", "cap") ?? findTagAttr(rawXml, "a:rPr", "cap");
+  if (capVal) {
+    result.cap = capVal as ChartTextProperties["cap"];
   }
 
   // Baseline offset (a:rPr/@baseline) — percentage * 1000 per OOXML
   // (signed; positive = superscript, negative = subscript).
-  const baselineMatch = /<a:(?:defRPr|rPr)[^>]*\sbaseline="(-?\d+)"/.exec(rawXml);
-  if (baselineMatch) {
-    result.baseline = parseInt(baselineMatch[1], 10);
+  const baselineVal =
+    findTagAttr(rawXml, "a:defRPr", "baseline") ?? findTagAttr(rawXml, "a:rPr", "baseline");
+  if (baselineVal) {
+    result.baseline = parseInt(baselineVal, 10);
   }
 
   // Character kerning cut-off (a:rPr/@kern) — hundredths of a point.
-  const kernMatch = /<a:(?:defRPr|rPr)[^>]*\skern="(\d+)"/.exec(rawXml);
-  if (kernMatch) {
-    result.kern = parseInt(kernMatch[1], 10);
+  const kernVal = findTagAttr(rawXml, "a:defRPr", "kern") ?? findTagAttr(rawXml, "a:rPr", "kern");
+  if (kernVal) {
+    result.kern = parseInt(kernVal, 10);
   }
 
   // Character spacing (a:rPr/@spc) — hundredths of a point.
-  const spcMatch = /<a:(?:defRPr|rPr)[^>]*\sspc="(-?\d+)"/.exec(rawXml);
-  if (spcMatch) {
-    result.spacing = parseInt(spcMatch[1], 10);
+  const spcVal = findTagAttr(rawXml, "a:defRPr", "spc") ?? findTagAttr(rawXml, "a:rPr", "spc");
+  if (spcVal) {
+    result.spacing = parseInt(spcVal, 10);
   }
 
   // Language (a:rPr/@lang) — BCP 47 language tag (e.g. "en-US", "ja-JP").
   // Wider character class than `\w+` because tags can include hyphens
   // and digits ("zh-Hant-TW").
-  const langMatch = /<a:(?:defRPr|rPr)[^>]*\slang="([A-Za-z0-9-]+)"/.exec(rawXml);
-  if (langMatch) {
-    result.lang = langMatch[1];
+  const langVal = findTagAttr(rawXml, "a:defRPr", "lang") ?? findTagAttr(rawXml, "a:rPr", "lang");
+  if (langVal) {
+    result.lang = langVal;
   }
 
   // Font color. Try the paragraph-level default (`<a:defRPr>…`) first,
@@ -1401,9 +1454,9 @@ export function parseTxPr(txPr: ChartTextProperties): ChartTextProperties {
   }
 
   // Rotation (on bodyPr)
-  const rotMatch = /<a:bodyPr[^>]*\srot="(-?\d+)"/.exec(rawXml);
-  if (rotMatch) {
-    result.rotation = parseInt(rotMatch[1], 10);
+  const rotVal = findTagAttr(rawXml, "a:bodyPr", "rot");
+  if (rotVal) {
+    result.rotation = parseInt(rotVal, 10);
   }
 
   return result;

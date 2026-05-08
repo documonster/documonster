@@ -1612,10 +1612,7 @@ class BasicRasterCanvas {
 
 function parseSvgAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  // CodeQL: safe — `[\w:-]+` and `[^"]*` cannot backtrack against each other.
-  const attrRe = /([\w:-]+)="([^"]*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = attrRe.exec(tag)) !== null) {
+  for (const match of tag.matchAll(/([\w:-]+)="([^"]*)"/g)) {
     attrs[match[1]] = match[2];
   }
   return attrs;
@@ -1636,20 +1633,24 @@ function parseSvgRotateTransform(
   if (!transform) {
     return undefined;
   }
-  // CodeQL: safe — fixed structure with non-overlapping alternatives; no ambiguous quantifiers.
-  const match =
-    /rotate\(\s*(-?\d+(?:\.\d+)?)\s*(?:[,\s]\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*)?\)/.exec(
-      transform
-    );
-  if (!match) {
+  // Parse `rotate(angle)` or `rotate(angle, cx, cy)` using indexOf + split
+  // to avoid regex backtracking on overlapping \s* quantifiers.
+  const rotIdx = transform.indexOf("rotate(");
+  if (rotIdx < 0) {
     return undefined;
   }
-  const angle = Number.parseFloat(match[1]);
+  const closeIdx = transform.indexOf(")", rotIdx);
+  if (closeIdx < 0) {
+    return undefined;
+  }
+  const inner = transform.slice(rotIdx + 7, closeIdx).trim();
+  const parts = inner.split(/[\s,]+/);
+  const angle = Number.parseFloat(parts[0]);
   if (!Number.isFinite(angle) || angle === 0) {
     return undefined;
   }
-  const originX = match[2] !== undefined ? Number.parseFloat(match[2]) : 0;
-  const originY = match[3] !== undefined ? Number.parseFloat(match[3]) : 0;
+  const originX = parts.length >= 3 ? Number.parseFloat(parts[1]) : 0;
+  const originY = parts.length >= 3 ? Number.parseFloat(parts[2]) : 0;
   return { angle, originX, originY };
 }
 
@@ -6737,8 +6738,6 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       `<feComposite in="innerColour" in2="innerClipped" operator="in" result="innerOut"/>`,
       `<feMerge result="innerMerged"><feMergeNode in="${inLayer}"/><feMergeNode in="innerOut"/></feMerge>`
     );
-    // Keep `inLayer` consistent with the pattern above for future extensibility.
-    void (inLayer = "innerMerged");
   }
 
   if (prims.length === 0) {

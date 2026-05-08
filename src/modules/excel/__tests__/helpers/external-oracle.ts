@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
@@ -212,14 +212,17 @@ async function collectOutputs(
 ): Promise<Array<{ name: string; data: Uint8Array }>> {
   const result: Array<{ name: string; data: Uint8Array }> = [];
   for (const name of await readdir(dir)) {
-    const filePath = join(dir, name);
-    if (!(await stat(filePath)).isFile()) {
-      continue;
-    }
     if (include && !include.test(name)) {
       continue;
     }
-    result.push({ name: basename(name), data: new Uint8Array(await readFile(filePath)) });
+    const filePath = join(dir, name);
+    // Read directly — skip on failure (avoids TOCTOU race between stat and read).
+    try {
+      const data = new Uint8Array(await readFile(filePath));
+      result.push({ name: basename(name), data });
+    } catch {
+      // Not a readable file (directory, permission error, removed between readdir and read).
+    }
   }
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }
