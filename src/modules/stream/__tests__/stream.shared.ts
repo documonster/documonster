@@ -5358,18 +5358,20 @@ export function runStreamTests(imports: StreamModuleImports): void {
       expect(r.read()).toBeNull();
     });
 
-    it("read() without size in binary mode should return first buffered chunk", () => {
+    it("read() without size in binary mode should return buffered data", () => {
       const r = new Readable({ read() {} });
       r.push(new Uint8Array([1, 2]));
       r.push(new Uint8Array([3, 4]));
 
-      const first = r.read() as Uint8Array;
-      expect(first).not.toBeNull();
-      expect(Array.from(first)).toEqual([1, 2]);
-
-      const second = r.read() as Uint8Array;
-      expect(second).not.toBeNull();
-      expect(Array.from(second)).toEqual([3, 4]);
+      // Node.js 22/24 and browser: read() returns all buffered data concatenated.
+      // Node.js 26+ and Bun: read() returns a single chunk (first buffered).
+      // Both behaviors are valid — collect all data via repeated read().
+      const chunks: number[] = [];
+      let chunk: Uint8Array | null;
+      while ((chunk = r.read() as Uint8Array | null) !== null) {
+        chunks.push(...Array.from(chunk));
+      }
+      expect(chunks).toEqual([1, 2, 3, 4]);
     });
 
     it("read(n) should return exactly n bytes", () => {

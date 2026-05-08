@@ -703,11 +703,11 @@ export class Readable<T = Uint8Array> extends EventEmitter {
     let result: T;
 
     if (n == null) {
-      // read() with no size: return one chunk from the buffer.
-      // Node.js 26+ returns a single chunk rather than concatenating all
-      // buffered data. This matches native behavior and avoids unnecessary
-      // allocations when consumers iterate with while(chunk = read()).
-      result = this._applyEncoding(this._buf.shift());
+      // read() with no size: return all buffered data as one chunk.
+      // Note: Node.js 26+ changed to return a single chunk, but our browser
+      // implementation preserves the pre-26 behavior (consumeAll) for backward
+      // compatibility and because it matches what most consumers expect.
+      result = this._applyEncoding(this._buf.consumeAll());
     } else {
       // read(n): return exactly n bytes, or null if not enough
       if (this._buf.byteSize < n) {
