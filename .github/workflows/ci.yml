@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22.x, 24.x, 25.x, 26.x]
+        node-version: [22.x, 24.x, 25.x]
         os: [ubuntu-latest, macOS-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
@@ -47,13 +47,13 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run tests
-        run: pnpm run test
+        run: pnpm test
         env:
           CI: true
 
@@ -93,7 +93,7 @@ jobs:
           bun-version: ${{ matrix.bun-version }}
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Run tests (Bun)
         run: bun run vitest run
@@ -119,13 +119,13 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Run linter
-        run: pnpm run lint
+        run: pnpm lint
 
       - name: Run type check
-        run: pnpm run type
+        run: pnpm type
 
   benchmark:
     needs: should-run
@@ -146,10 +146,10 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Run benchmark
-        run: pnpm run benchmark
+        run: pnpm benchmark
         env:
           CI: true
 
@@ -187,7 +187,7 @@ jobs:
           soffice --headless --version
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Run chart-oracle tests
         run: pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts src/modules/excel/__tests__/workbook-chart-roundtrip.integration.test.ts

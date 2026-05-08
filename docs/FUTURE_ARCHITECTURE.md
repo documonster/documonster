@@ -472,7 +472,7 @@ through a `Readable.toWeb()` bridge if needed.
 | `@pkg/chart` only when needed              |     n/a |       1200 KB |       1200 KB |
 | Tree-shake ratio (excel path)              |   40.6% |          <10% |           <8% |
 | `pnpm test` wall time (isolate:true)       |    148s |          <30s |          <20s |
-| `pnpm run generate:csv-worker`             |    slow |          fast |          fast |
+| `pnpm generate:csv-worker`                 |    slow |          fast |          fast |
 
 ## 9. Open questions
 

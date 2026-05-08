@@ -28,9 +28,6 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created != 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,10 +44,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Build
-        run: pnpm run build
+        run: pnpm build
         env:
           CI: true
 
@@ -65,7 +62,7 @@ jobs:
           node -e "const p=require('./package.json');p.version='${CANARY_VERSION}';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
 
       - name: Publish canary to npm
-        run: pnpm publish --tag canary --no-git-checks
+        run: npm publish --tag canary
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -98,9 +95,6 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -117,20 +111,20 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm i --frozen-lockfile
 
       - name: Build
-        run: pnpm run build
+        run: pnpm build
 
       - name: Publish to npm
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if echo "$VERSION" | grep -q "beta\|alpha\|rc"; then
             echo "Publishing ${VERSION} with --tag beta"
-            pnpm publish --no-git-checks --tag beta
+            npm publish --tag beta
           else
             echo "Publishing ${VERSION} as latest"
-            pnpm publish --no-git-checks
+            npm publish
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -15,7 +15,7 @@
 3. **No circular imports.** Enforced by `import/no-cycle`.
 4. **Named exports only.** No default exports.
 5. **Respect module dependency direction.** See layer diagram below. Never introduce upward dependencies.
-6. **Run `pnpm run check` then `pnpm run format` before committing.**
+6. **Run `pnpm check` then `pnpm format` before committing.**
 
 ## Bug Fixing & Code Changes
 
@@ -26,17 +26,17 @@
 - **Fix it properly.** If the correct fix requires changing multiple files, refactoring a helper, or adjusting an interface — do it. Do not take shortcuts to minimize the diff. The goal is the best solution, not the smallest patch.
 - **Do not be afraid of large changes.** If the best solution means rewriting a function, restructuring a module, or breaking an existing API — do it. Correctness and quality come first. Tests exist to catch regressions; use them.
 - **Do not touch unrelated files.** Only modify files directly relevant to the task. Never make drive-by changes to code you were not asked to work on.
-- **Verify your fix.** After making changes, run the relevant tests or `pnpm run check` to confirm the fix works. Never claim a problem is resolved without evidence.
+- **Verify your fix.** After making changes, run the relevant tests or `pnpm check` to confirm the fix works. Never claim a problem is resolved without evidence.
 - **No over-engineering.** Solve the actual problem, not a hypothetical general case. If unsure whether a design is over-engineered, summarize the tradeoffs and ask before proceeding.
 
 ## Commands
 
 ```bash
-pnpm install                  # Install (use pnpm, not npm/yarn)
-pnpm run check                # Type check + lint + format check — run before commit (do not run lint separately)
-pnpm run format               # Prettier format — run before commit
-pnpm run test                 # All tests
-pnpm run build                # Production build
+pnpm i                  # Install (use pnpm, not npm/yarn)
+pnpm check                # Type check + lint + format check — run before commit (do not run lint separately)
+pnpm format               # Prettier format — run before commit
+pnpm test                 # All tests
+pnpm build                # Production build
 
 # Single test file
 pnpm exec vitest run src/modules/excel/__tests__/cell.test.ts
@@ -92,7 +92,7 @@ Use aliases for cross-module imports. Use relative paths only within the same mo
 - **Type-only imports**: `import type { Foo } from "..."`
 - **Error handling**: Extend `BaseError` from `@utils/errors`, use `{ cause }` for chaining.
 - **Files**: kebab-case. **Browser variants**: `*.browser.ts`.
-- **Formatting**: Handled entirely by Prettier — just run `pnpm run format`.
+- **Formatting**: Handled entirely by Prettier — just run `pnpm format`.
 - **Tests**: Vitest, in `__tests__/*.test.ts`. Timeout: 30s.
 
 ## Example Output
