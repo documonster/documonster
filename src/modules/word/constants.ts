@@ -6,7 +6,7 @@
  */
 
 // =============================================================================
-// XML Namespaces
+// XML Namespaces (Transitional — ECMA-376 Part 4)
 // =============================================================================
 
 /** WordprocessingML main namespace (w:). */
@@ -26,6 +26,69 @@ export const NS_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 
 /** Markup compatibility namespace (mc:). */
 export const NS_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
+// =============================================================================
+// XML Namespaces (Strict — ISO 29500 Part 1)
+// =============================================================================
+
+/** Strict WordprocessingML main namespace. */
+export const NS_W_STRICT = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+
+/** Strict Relationships namespace. */
+export const NS_R_STRICT = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+
+/** Strict DrawingML Word Processing Drawing namespace. */
+export const NS_WP_STRICT = "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing";
+
+/** Strict DrawingML main namespace. */
+export const NS_A_STRICT = "http://purl.oclc.org/ooxml/drawingml/main";
+
+/** Strict DrawingML picture namespace. */
+export const NS_PIC_STRICT = "http://purl.oclc.org/ooxml/drawingml/picture";
+
+/** Strict Markup compatibility namespace. */
+export const NS_MC_STRICT = "http://purl.oclc.org/ooxml/markup-compatibility/2006";
+
+// =============================================================================
+// Strict → Transitional Namespace Mapping
+// =============================================================================
+
+/**
+ * Maps ISO 29500 Strict namespace URIs to their Transitional equivalents.
+ * Used during reading to normalize Strict documents into the internal model.
+ */
+export const STRICT_TO_TRANSITIONAL_NS: ReadonlyMap<string, string> = new Map([
+  ["http://purl.oclc.org/ooxml/wordprocessingml/main", NS_W],
+  ["http://purl.oclc.org/ooxml/officeDocument/relationships", NS_R],
+  ["http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing", NS_WP],
+  ["http://purl.oclc.org/ooxml/drawingml/main", NS_A],
+  ["http://purl.oclc.org/ooxml/drawingml/picture", NS_PIC],
+  ["http://purl.oclc.org/ooxml/markup-compatibility/2006", NS_MC],
+  [
+    "http://purl.oclc.org/ooxml/officeDocument/math",
+    "http://schemas.openxmlformats.org/officeDocument/2006/math"
+  ],
+  [
+    "http://purl.oclc.org/ooxml/officeDocument/extended-properties",
+    "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+  ],
+  [
+    "http://purl.oclc.org/ooxml/officeDocument/custom-properties",
+    "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
+  ],
+  [
+    "http://purl.oclc.org/ooxml/officeDocument/docPropsVTypes",
+    "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
+  ],
+  [
+    "http://purl.oclc.org/ooxml/drawingml/chart",
+    "http://schemas.openxmlformats.org/drawingml/2006/chart"
+  ],
+  [
+    "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
+    "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+  ]
+]);
 
 /** VML namespace (v:). */
 export const NS_V = "urn:schemas-microsoft-com:vml";
@@ -104,7 +167,7 @@ export const URI_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture
 // =============================================================================
 
 /** Standard namespace attributes for w:document root element. */
-export const DOCUMENT_NAMESPACES: Record<string, string> = {
+export const DOCUMENT_NAMESPACES: Readonly<Record<string, string>> = {
   "xmlns:wpc": NS_WPC,
   "xmlns:mc": NS_MC,
   "xmlns:o": NS_O,
@@ -130,6 +193,46 @@ export const DOCUMENT_NAMESPACES: Record<string, string> = {
 const REL_BASE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_BASE = "http://schemas.openxmlformats.org/package/2006/relationships";
 
+// Strict relationship base URIs (ISO 29500)
+const REL_BASE_STRICT = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+const PKG_BASE_STRICT = "http://purl.oclc.org/ooxml/package/relationships";
+
+/**
+ * Maps ISO 29500 Strict relationship type URIs to their Transitional equivalents.
+ * Used during reading to normalize Strict documents.
+ */
+export const STRICT_TO_TRANSITIONAL_REL: ReadonlyMap<string, string> = new Map([
+  [`${REL_BASE_STRICT}/officeDocument`, `${REL_BASE}/officeDocument`],
+  [`${PKG_BASE_STRICT}/metadata/core-properties`, `${PKG_BASE}/metadata/core-properties`],
+  [`${REL_BASE_STRICT}/extended-properties`, `${REL_BASE}/extended-properties`],
+  [`${REL_BASE_STRICT}/custom-properties`, `${REL_BASE}/custom-properties`],
+  [`${REL_BASE_STRICT}/styles`, `${REL_BASE}/styles`],
+  [`${REL_BASE_STRICT}/settings`, `${REL_BASE}/settings`],
+  [`${REL_BASE_STRICT}/fontTable`, `${REL_BASE}/fontTable`],
+  [`${REL_BASE_STRICT}/numbering`, `${REL_BASE}/numbering`],
+  [`${REL_BASE_STRICT}/footnotes`, `${REL_BASE}/footnotes`],
+  [`${REL_BASE_STRICT}/endnotes`, `${REL_BASE}/endnotes`],
+  [`${REL_BASE_STRICT}/header`, `${REL_BASE}/header`],
+  [`${REL_BASE_STRICT}/footer`, `${REL_BASE}/footer`],
+  [`${REL_BASE_STRICT}/image`, `${REL_BASE}/image`],
+  [`${REL_BASE_STRICT}/hyperlink`, `${REL_BASE}/hyperlink`],
+  [`${REL_BASE_STRICT}/theme`, `${REL_BASE}/theme`],
+  [`${REL_BASE_STRICT}/comments`, `${REL_BASE}/comments`],
+  [`${REL_BASE_STRICT}/commentsExtended`, `${REL_BASE}/commentsExtended`],
+  [`${REL_BASE_STRICT}/webSettings`, `${REL_BASE}/webSettings`],
+  [`${REL_BASE_STRICT}/glossaryDocument`, `${REL_BASE}/glossaryDocument`],
+  [`${REL_BASE_STRICT}/font`, `${REL_BASE}/font`],
+  [`${REL_BASE_STRICT}/chart`, `${REL_BASE}/chart`],
+  [`${REL_BASE_STRICT}/diagramData`, `${REL_BASE}/diagramData`],
+  [`${REL_BASE_STRICT}/customXml`, `${REL_BASE}/customXml`],
+  [`${REL_BASE_STRICT}/customXmlProps`, `${REL_BASE}/customXmlProps`],
+  [`${REL_BASE_STRICT}/vbaProject`, `${REL_BASE}/vbaProject`],
+  [`${REL_BASE_STRICT}/people`, `${REL_BASE}/people`],
+  [`${REL_BASE_STRICT}/package`, `${REL_BASE}/package`],
+  [`${REL_BASE_STRICT}/digital-signature/signature`, `${REL_BASE}/digital-signature/signature`],
+  [`${PKG_BASE_STRICT}/digital-signature/origin`, `${PKG_BASE}/digital-signature/origin`]
+]);
+
 /** OOXML relationship type URIs. */
 export const RelType = {
   OfficeDocument: `${REL_BASE}/officeDocument`,
@@ -153,11 +256,13 @@ export const RelType = {
   Glossary: `${REL_BASE}/glossaryDocument`,
   Font: `${REL_BASE}/font`,
   Chart: `${REL_BASE}/chart`,
+  ChartEx: "http://schemas.microsoft.com/office/2014/relationships/chartEx",
   Diagram: `${REL_BASE}/diagramData`,
   CustomXml: `${REL_BASE}/customXml`,
   CustomXmlProps: `${REL_BASE}/customXmlProps`,
   VbaProject: `${REL_BASE}/vbaProject`,
   People: `${REL_BASE}/people`,
+  Package: `${REL_BASE}/package`,
   DigitalSignature: `${REL_BASE}/digital-signature/signature`
 } as const;
 
@@ -170,6 +275,12 @@ export const ContentType = {
   Relationships: "application/vnd.openxmlformats-package.relationships+xml",
   Xml: "application/xml",
   Document: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+  /** Macro-enabled document (.docm) main part. */
+  DocumentMacroEnabled: "application/vnd.ms-word.document.macroEnabled.main+xml",
+  /** Template (.dotx) main part. */
+  Template: "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+  /** Macro-enabled template (.dotm) main part. */
+  TemplateMacroEnabled: "application/vnd.ms-word.template.macroEnabled.main+xml",
   Styles: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
   Settings: "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml",
   FontTable: "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml",
@@ -197,6 +308,8 @@ export const ContentType = {
   Wmf: "image/x-wmf",
   ObfuscatedFont: "application/vnd.openxmlformats-officedocument.obfuscatedFont",
   Chart: "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
+  ChartEx: "application/vnd.ms-office.chartEx+xml",
+  Xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   CustomXml: "application/xml",
   VbaProject: "application/vnd.ms-office.vbaProject"
 } as const;

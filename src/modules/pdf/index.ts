@@ -49,7 +49,12 @@
 export { pdf } from "./pdf";
 
 /** Excel-to-PDF conversion — accepts an Excel Workbook instance. */
-export { excelToPdf, chartToPdf, type ChartToPdfOptions } from "./excel-bridge";
+export {
+  excelToPdf,
+  chartToPdf,
+  createWordChartPdfRenderer,
+  type ChartToPdfOptions
+} from "./excel-bridge";
 
 /** Word-to-PDF conversion — accepts a DocxDocument. */
 export { docxToPdf } from "./word-bridge";

@@ -1,24 +1,20 @@
 /**
  * DOCX Module - Document IO
  *
- * IO operations that depend on docx-packager and docx-reader.
- * Separated from document.ts so that builder helpers can be imported
- * without pulling in archive/xml/writer code.
+ * IO operations: package/unpackage to bytes, base64, Flat OPC,
+ * plus the public Patch and Template APIs that combine read/patch/write.
  */
 
-import { packageDocx } from "./docx-packager";
-import { readDocx } from "./docx-reader";
-import { bytesToBase64 } from "./internal-utils";
-import type {
-  DocxDocument,
-  BodyContent,
-  Paragraph,
-  Run,
-  Table,
-  HeaderFooterContent,
-  ImageDef,
-  InlineImageContent
-} from "./types";
+import { bytesToBase64 } from "./core/internal-utils";
+import { applyPatchesToDocument, type PatchOperation } from "./patcher";
+import { readDocx } from "./reader/docx-reader";
+import { fillTemplate } from "./template/template-engine";
+import type { TemplateOptions } from "./template/template-engine";
+import type { DocxDocument } from "./types";
+import { packageDocx } from "./writer/docx-packager";
+
+// Re-export patch types for backward compatibility
+export type { PatchContent, PatchOperation } from "./patcher";
 
 // =============================================================================
 // Document IO (toBuffer / toBase64)
@@ -39,30 +35,52 @@ export async function toBase64(doc: DocxDocument, compressionLevel?: number): Pr
 // Patcher / Template Fill API
 // =============================================================================
 
-/** Type of content to patch into a placeholder. */
-export type PatchContent =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "paragraph"; readonly children: readonly Paragraph[] }
-  | { readonly type: "table"; readonly table: Table }
-  | {
-      readonly type: "image";
-      readonly image: ImageDef;
-      readonly width: number;
-      readonly height: number;
-    };
-
-/** A single patch operation mapping a placeholder to replacement content. */
-export interface PatchOperation {
-  /** Placeholder string to find (e.g. "{{name}}"). */
-  readonly placeholder: string;
-  /** Content to replace the placeholder with. */
-  readonly content: PatchContent;
-}
-
 /** Options for patchDocument. */
 export interface PatchOptions {
   /** Compression level (0-9). Default: 6. */
   readonly compressionLevel?: number;
+}
+
+/** A compiled template that can be reused for multiple patch operations. */
+export interface CompiledTemplate {
+  /** The parsed document model (internal use only). */
+  readonly _doc: DocxDocument;
+}
+
+/**
+ * Compile a DOCX template for reuse with multiple data sets.
+ *
+ * Parsing the ZIP and XML is expensive. If you need to patch the same template
+ * multiple times with different data, compile it once and reuse.
+ *
+ * @param buffer - The source DOCX template file as a Uint8Array.
+ * @returns A compiled template handle.
+ */
+export async function compileTemplate(buffer: Uint8Array): Promise<CompiledTemplate> {
+  const doc = await readDocx(buffer);
+  return { _doc: doc };
+}
+
+/**
+ * Apply patches to a pre-compiled template.
+ *
+ * Much faster than `patchDocument` when applying to the same template repeatedly,
+ * since ZIP/XML parsing is skipped.
+ *
+ * @param template - A compiled template from `compileTemplate`.
+ * @param patches - Array of patch operations to apply.
+ * @param options - Optional compression settings.
+ * @returns New DOCX file as a Uint8Array.
+ */
+export async function patchTemplate(
+  template: CompiledTemplate,
+  patches: readonly PatchOperation[],
+  options?: PatchOptions
+): Promise<Uint8Array> {
+  // Deep clone the document to avoid mutating the cached template
+  const doc = structuredClone(template._doc);
+  const patched = applyPatchesToDocument(doc, patches);
+  return packageDocx(patched, options?.compressionLevel);
 }
 
 /**
@@ -88,217 +106,66 @@ export async function patchDocument(
   options?: PatchOptions
 ): Promise<Uint8Array> {
   const doc = await readDocx(buffer);
-
-  // Build lookup map for quick placeholder matching
-  const patchMap = new Map<string, PatchOperation>();
-  for (const patch of patches) {
-    patchMap.set(patch.placeholder, patch);
-  }
-
-  // Process body content
-  const newBody: BodyContent[] = [];
-  for (const block of doc.body) {
-    if (block.type === "paragraph") {
-      const result = patchParagraph(block, patchMap);
-      if (result) {
-        if (Array.isArray(result)) {
-          newBody.push(...result);
-        } else {
-          newBody.push(result);
-        }
-      }
-    } else if (block.type === "table") {
-      patchTable(block as Table, patchMap);
-      newBody.push(block);
-    } else {
-      newBody.push(block);
-    }
-  }
-
-  // Patch headers
-  if (doc.headers) {
-    for (const [, headerDef] of doc.headers) {
-      patchHeaderFooterContent(headerDef.content, patchMap);
-    }
-  }
-
-  // Patch footers
-  if (doc.footers) {
-    for (const [, footerDef] of doc.footers) {
-      patchHeaderFooterContent(footerDef.content, patchMap);
-    }
-  }
-
-  // Add any new images from patches
-  const images = doc.images ? [...doc.images] : [];
-  for (const patch of patches) {
-    if (patch.content.type === "image") {
-      const imgContent = patch.content;
-      const existing = images.find(i => i.fileName === imgContent.image.fileName);
-      if (!existing) {
-        images.push(imgContent.image);
-      }
-    }
-  }
-
-  const patched: DocxDocument = {
-    ...doc,
-    body: newBody,
-    images: images.length > 0 ? images : undefined
-  };
-
+  const patched = applyPatchesToDocument(doc, patches);
   return packageDocx(patched, options?.compressionLevel);
 }
 
 // =============================================================================
-// Internal helpers
+// Template Engine - Convenience IO
 // =============================================================================
 
-/** Extract concatenated plain text from a paragraph's runs. */
-function paragraphText(para: Paragraph): string {
-  let t = "";
-  for (const child of para.children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      for (const c of child.content) {
-        if ("type" in c && c.type === "text" && "text" in c) {
-          t += (c as { text: string }).text;
-        }
-      }
-    }
-  }
-  return t;
+/**
+ * Read a DOCX buffer, fill template placeholders with data, and produce a new DOCX.
+ *
+ * This is a convenience wrapper combining readDocx + fillTemplate + packageDocx.
+ *
+ * @param buffer - The source DOCX template file as a Uint8Array.
+ * @param data - Data object to fill into the template placeholders.
+ * @param options - Template and compression options.
+ * @returns New DOCX file as a Uint8Array.
+ */
+export async function fillTemplateFromBuffer(
+  buffer: Uint8Array,
+  data: Record<string, unknown>,
+  options?: TemplateOptions & { readonly compressionLevel?: number }
+): Promise<Uint8Array> {
+  const doc = await readDocx(buffer);
+  const filled = fillTemplate(doc, data, options);
+  return packageDocx(filled, options?.compressionLevel);
 }
 
-/** Replace text within a single paragraph. */
-function replaceInParagraph(para: Paragraph, search: string, replacement: string): void {
-  for (const child of para.children) {
-    if (!("content" in child) || !Array.isArray(child.content)) {
-      continue;
-    }
-    for (const c of child.content) {
-      if (!("type" in c) || c.type !== "text" || !("text" in c)) {
-        continue;
-      }
-      const before = (c as { text: string }).text;
-      if (before.includes(search)) {
-        (c as { text: string }).text = before.replaceAll(search, replacement);
-      }
-    }
+// =============================================================================
+// Flat OPC Convenience
+// =============================================================================
+
+/**
+ * Package a DocxDocument model into Flat OPC XML format.
+ *
+ * This packages the document to a ZIP, then re-reads the entries to wrap
+ * them as Flat OPC XML. While this involves a ZIP round-trip, it ensures
+ * the Flat OPC output is byte-identical to what `packageDocx` would produce
+ * (same XML serialization, same relationships, same content types).
+ *
+ * @param doc - The document model.
+ * @param compressionLevel - Optional compression level (0 = no compression, faster for Flat OPC).
+ * @returns The Flat OPC XML string.
+ */
+export async function toFlatOpcFromDoc(
+  doc: DocxDocument,
+  compressionLevel?: number
+): Promise<string> {
+  // Use level 0 (store-only) since we're immediately decompressing
+  const zipBytes = await packageDocx(doc, compressionLevel ?? 0);
+
+  const { unzip } = await import("@archive/read-archive");
+  const reader = unzip(zipBytes);
+  const entries = new Map<string, Uint8Array>();
+  for await (const entry of reader.entries()) {
+    const data = await entry.bytes();
+    const path = entry.path.replace(/^\//, "").replace(/\\/g, "/");
+    entries.set(path, data);
   }
 
-  // Cross-run replacement fallback
-  const fullText = paragraphText(para);
-  if (fullText.includes(search)) {
-    const newText = fullText.replaceAll(search, replacement);
-    let placed = false;
-    for (const child of para.children) {
-      if (!("content" in child) || !Array.isArray(child.content)) {
-        continue;
-      }
-      for (const c of child.content) {
-        if (!("type" in c) || c.type !== "text" || !("text" in c)) {
-          continue;
-        }
-        if (!placed) {
-          (c as { text: string }).text = newText;
-          placed = true;
-        } else {
-          (c as { text: string }).text = "";
-        }
-      }
-    }
-  }
-}
-
-/** Patch a paragraph — returns replacement content or null to remove. */
-function patchParagraph(
-  para: Paragraph,
-  patchMap: Map<string, PatchOperation>
-): BodyContent | BodyContent[] | null {
-  const text = paragraphText(para);
-
-  for (const [placeholder, patch] of patchMap) {
-    if (!text.includes(placeholder)) {
-      continue;
-    }
-
-    switch (patch.content.type) {
-      case "text": {
-        replaceInParagraph(para, placeholder, patch.content.text);
-        return para;
-      }
-      case "paragraph": {
-        return patch.content.children as BodyContent[];
-      }
-      case "table": {
-        return patch.content.table;
-      }
-      case "image": {
-        const img = patch.content.image;
-        const rId = img.rId ?? `rId_img_${img.fileName}`;
-        const imgContent: InlineImageContent = {
-          type: "image",
-          rId,
-          width: patch.content.width,
-          height: patch.content.height,
-          altText: img.fileName,
-          name: img.fileName
-        };
-        const newPara: Paragraph = {
-          type: "paragraph",
-          properties: para.properties,
-          children: [{ content: [imgContent] } as Run]
-        };
-        return newPara;
-      }
-    }
-  }
-
-  return para;
-}
-
-/** Patch text inside table cells recursively. */
-function patchTable(table: Table, patchMap: Map<string, PatchOperation>): void {
-  for (const row of table.rows) {
-    for (const cell of row.cells) {
-      const newContent: BodyContent[] = [];
-      for (const block of cell.content) {
-        if (block.type === "paragraph") {
-          const result = patchParagraph(block, patchMap);
-          if (result) {
-            if (Array.isArray(result)) {
-              newContent.push(...result);
-            } else {
-              newContent.push(result);
-            }
-          }
-        } else if (block.type === "table") {
-          patchTable(block as Table, patchMap);
-          newContent.push(block);
-        } else {
-          newContent.push(block);
-        }
-      }
-      (cell as any).content = newContent;
-    }
-  }
-}
-
-/** Patch text in header/footer content. */
-function patchHeaderFooterContent(
-  content: HeaderFooterContent,
-  patchMap: Map<string, PatchOperation>
-): void {
-  for (const child of content.children) {
-    if (child.type === "paragraph") {
-      for (const [placeholder, patch] of patchMap) {
-        if (patch.content.type === "text") {
-          const text = paragraphText(child);
-          if (text.includes(placeholder)) {
-            replaceInParagraph(child, placeholder, patch.content.text);
-          }
-        }
-      }
-    }
-  }
+  const { toFlatOpc } = await import("./convert/flat-opc");
+  return toFlatOpc(entries);
 }

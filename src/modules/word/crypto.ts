@@ -1,35 +1,39 @@
 /**
- * DOCX Module - Encryption & Digital Signatures (Subpath Export)
+ * DOCX Module - Encryption & Digital Signatures (Subpath Entry)
  *
- * Import separately to avoid pulling crypto code into the bundle
- * when only core document building is needed.
+ * Re-exports the crypto API at `excelts/word/crypto`. This file is referenced
+ * by `package.json#exports["./word/crypto"]`; it forwards to the implementation
+ * under `./security/crypto`.
  *
  * @example
  * ```ts
- * import { isEncryptedDocx, decryptPackage } from "excelts/word/crypto";
- * import { extractSignatures } from "excelts/word/crypto";
+ * import { isEncryptedDocx, decryptDocx, encryptDocx } from "excelts/word/crypto";
  * ```
  */
 
-// Encryption utilities
 export {
   isEncryptedDocx,
   verifyPassword,
   decryptPackage,
+  decryptDocx,
+  encryptDocx,
   parseEncryptionInfoXml,
   deriveEncryptionKey,
-  AGILE_BLOCK_KEYS
-} from "./encryption";
-export type { AgileEncryptionInfo } from "./encryption";
-
-// Digital signature utilities
-export {
+  AGILE_BLOCK_KEYS,
+  DocxEncryptedError,
+  readCfb,
+  writeCfb,
   hasDigitalSignatures,
   parseSignatureXml,
   extractSignatures,
-  isWellFormedSignature
-} from "./digital-signatures";
-export type { DigitalSignatureInfo } from "./digital-signatures";
-
-// Font obfuscation utilities
-export { deobfuscateFont, obfuscateFont, generateFontKey } from "./font-obfuscation";
+  isWellFormedSignature,
+  deobfuscateFont,
+  obfuscateFont,
+  generateFontKey
+} from "./security/crypto";
+export type {
+  AgileEncryptionInfo,
+  EncryptOptions,
+  CfbEntry,
+  DigitalSignatureInfo
+} from "./security/crypto";

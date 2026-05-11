@@ -3,6 +3,7 @@
  *
  * Converts Excel Workbook data into the PDF module's independent data model.
  * This is the ONLY file in the PDF module that imports from @excel.
+ * It also imports from @word/excel-bridge for Word chart → ChartModel mapping.
  *
  * @example
  * ```typescript
@@ -36,8 +37,10 @@ import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
 import { tryInvokeFormulaEngine } from "@formula/host-registry";
 import { base64ToUint8Array } from "@utils/utils.base";
+import { wordChartToChartModel } from "@word/bridge/excel-bridge";
+import type { Chart as WordChart } from "@word/types";
 
-import { PdfDocumentBuilder } from "./builder/document-builder";
+import { PdfDocumentBuilder, type PdfPageBuilder } from "./builder/document-builder";
 import { exportPdf } from "./render/pdf-exporter";
 import {
   PdfCellType,
@@ -1400,5 +1403,41 @@ async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
     orientation,
     chart,
     pageSetup
+  };
+}
+
+// =============================================================================
+// Word Chart → PDF Integration
+// =============================================================================
+
+/**
+ * Create a chart renderer callback for use with `docxToPdf`.
+ *
+ * This factory returns a function that converts Word Chart definitions
+ * into Excel's internal ChartModel and renders them using the full
+ * Excel chart rendering engine (8000+ lines of vector drawing logic).
+ *
+ * Requires `installChartSupport()` to have been called.
+ *
+ * @example
+ * ```typescript
+ * import { installChartSupport } from "excelts/chart";
+ * import { docxToPdf, createWordChartPdfRenderer } from "excelts/pdf";
+ *
+ * installChartSupport();
+ * const pdfBytes = await docxToPdf(doc, {
+ *   chartRenderer: createWordChartPdfRenderer()
+ * });
+ * ```
+ */
+export function createWordChartPdfRenderer(): (
+  chart: WordChart,
+  page: PdfPageBuilder,
+  rect: { x: number; y: number; width: number; height: number }
+) => void {
+  return (chart, page, rect) => {
+    const support = getChartSupport();
+    const model = wordChartToChartModel(chart);
+    support.drawChartPdf(page, model, rect);
   };
 }

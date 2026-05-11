@@ -1,14 +1,15 @@
 /**
- * DOCX Module - HTML Renderer (Subpath Export)
+ * DOCX Module - HTML Converters (Subpath Entry)
  *
- * Import separately to avoid pulling html-renderer into the bundle
- * when only core document building is needed.
+ * Re-exports the HTML converter API at `excelts/word/html`. This file is
+ * referenced by `package.json#exports["./word/html"]`; it forwards to the
+ * implementation under `./convert/html`.
  *
  * @example
  * ```ts
- * import { renderToHtml } from "excelts/word/html";
+ * import { renderToHtml, htmlToDocxBody } from "excelts/word/html";
  * ```
  */
 
-export { renderToHtml } from "./html-renderer";
-export type { HtmlRenderOptions, HtmlRenderResult } from "./html-renderer";
+export { renderToHtml, htmlToDocxBody } from "./convert/html/html";
+export type { HtmlRenderOptions, HtmlRenderResult, HtmlImportOptions } from "./convert/html/html";

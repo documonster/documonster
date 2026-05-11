@@ -118,6 +118,12 @@ import {
   searchText,
   replaceText,
   mailMerge,
+  mergeDocuments,
+  resolveStyle,
+  getCompatibilityMode,
+  setCompatibilityMode,
+  underline,
+  strikethrough,
   paragraphCount,
   countWords,
   getHeadings,
@@ -126,6 +132,7 @@ import {
   listImages,
   listTables,
   listHyperlinks,
+  listSections,
   tableCount,
   extractText
 } from "./document";
@@ -139,6 +146,8 @@ export const Run = {
   text,
   bold,
   italic,
+  underline,
+  strikethrough,
   pageBreak,
   lineBreak,
   columnBreak,
@@ -306,6 +315,10 @@ export const Query = {
   search: searchText,
   replace: replaceText,
   mailMerge,
+  merge: mergeDocuments,
+  resolveStyle,
+  getCompatibilityMode,
+  setCompatibilityMode,
   paragraphCount,
   countWords,
   getHeadings,
@@ -314,6 +327,7 @@ export const Query = {
   listImages,
   listTables,
   listHyperlinks,
+  listSections,
   tableCount,
   extractText
 };

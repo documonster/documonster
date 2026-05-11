@@ -13,16 +13,9 @@ import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
 import {
-  createContentTypes,
-  addContentTypeOverride,
-  addImageContentTypeDefaults,
-  renderContentTypes
-} from "../content-types";
-import {
   // Units
   inchesToTwips,
   twipsToInches,
-  cmToTwips,
   ptToTwips,
   inchesToEmu,
   cmToEmu,
@@ -68,25 +61,32 @@ import {
   DocxMissingPartError,
   isDocxError
 } from "../index";
-import {
-  createRelationships,
-  addRelationship,
-  getRelationshipCount,
-  renderRelationships
-} from "../relationships";
+import { fillTemplate, TemplateError } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Table } from "../types";
-import { renderDocument } from "../writers/document-writer";
-import { renderFootnotes, renderEndnotes } from "../writers/footnote-writer";
-import { renderHeader, renderFooter } from "../writers/header-footer-writer";
-import { renderNumbering } from "../writers/numbering-writer";
+import {
+  createContentTypes,
+  addContentTypeOverride,
+  addImageContentTypeDefaults,
+  renderContentTypes
+} from "../writer/content-types";
+import { renderDocument } from "../writer/document-writer";
+import { renderFootnotes, renderEndnotes } from "../writer/footnote-writer";
+import { renderHeader, renderFooter } from "../writer/header-footer-writer";
+import { renderNumbering } from "../writer/numbering-writer";
 import {
   renderSettings,
   renderFontTable,
   renderCoreProperties,
   renderAppProperties,
   renderTheme
-} from "../writers/parts-writer";
-import { renderStyles } from "../writers/styles-writer";
+} from "../writer/parts-writer";
+import {
+  createRelationships,
+  addRelationship,
+  getRelationshipCount,
+  renderRelationships
+} from "../writer/relationships";
+import { renderStyles } from "../writer/styles-writer";
 
 // =============================================================================
 // Unit Conversion Tests
@@ -97,11 +97,6 @@ describe("DOCX Unit Conversions", () => {
     expect(inchesToTwips(1)).toBe(1440);
     expect(inchesToTwips(0.5)).toBe(720);
     expect(twipsToInches(1440)).toBe(1);
-  });
-
-  it("should convert cm to twips", () => {
-    expect(cmToTwips(2.54)).toBe(1440); // ~1 inch
-    expect(cmToTwips(1)).toBe(567);
   });
 
   it("should convert pt to twips", () => {
@@ -2674,5 +2669,187 @@ describe("Packager idempotency", () => {
     expect((doc as any)._watermarkHeaderRId).toBeUndefined();
     const finalHeaderCount = doc.sectionProperties?.headers?.length ?? 0;
     expect(finalHeaderCount).toBe(0); // caller didn't set any headers
+  });
+});
+
+// =============================================================================
+// Template Engine Tests
+// =============================================================================
+
+describe("Template Engine", () => {
+  function makePara(str: string): Paragraph {
+    return {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: str }] } as any]
+    };
+  }
+
+  function makeDoc(body: Paragraph[]): DocxDocument {
+    return { body } as DocxDocument;
+  }
+
+  function getText(para: Paragraph): string {
+    let result = "";
+    for (const child of para.children) {
+      if ("content" in child && Array.isArray(child.content)) {
+        for (const c of child.content) {
+          if ("type" in c && c.type === "text" && "text" in c) {
+            result += (c as any).text;
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  it("should replace simple variables", () => {
+    const doc = makeDoc([makePara("Hello {{name}}!")]);
+    const result = fillTemplate(doc, { name: "World" });
+    expect(getText(result.body[0] as Paragraph)).toBe("Hello World!");
+  });
+
+  it("should support dot-path variables", () => {
+    const doc = makeDoc([makePara("{{user.name}} - {{user.email}}")]);
+    const result = fillTemplate(doc, { user: { name: "Alice", email: "a@b.com" } });
+    expect(getText(result.body[0] as Paragraph)).toBe("Alice - a@b.com");
+  });
+
+  it("should handle {{#if}} conditional (truthy)", () => {
+    const doc = makeDoc([
+      makePara("{{#if show}}"),
+      makePara("Visible content"),
+      makePara("{{/if}}")
+    ]);
+    const result = fillTemplate(doc, { show: true });
+    expect(result.body.length).toBe(1);
+    expect(getText(result.body[0] as Paragraph)).toBe("Visible content");
+  });
+
+  it("should handle {{#if}} conditional (falsy)", () => {
+    const doc = makeDoc([
+      makePara("{{#if show}}"),
+      makePara("Visible content"),
+      makePara("{{/if}}")
+    ]);
+    const result = fillTemplate(doc, { show: false });
+    expect(result.body.length).toBe(0);
+  });
+
+  it("should handle {{#if}}...{{else}}...{{/if}}", () => {
+    const doc = makeDoc([
+      makePara("{{#if premium}}"),
+      makePara("Premium user"),
+      makePara("{{else}}"),
+      makePara("Free user"),
+      makePara("{{/if}}")
+    ]);
+
+    const result1 = fillTemplate(makeDoc([...doc.body.map(b => JSON.parse(JSON.stringify(b)))]), {
+      premium: true
+    });
+    expect(result1.body.length).toBe(1);
+    expect(getText(result1.body[0] as Paragraph)).toBe("Premium user");
+
+    const result2 = fillTemplate(makeDoc([...doc.body.map(b => JSON.parse(JSON.stringify(b)))]), {
+      premium: false
+    });
+    expect(result2.body.length).toBe(1);
+    expect(getText(result2.body[0] as Paragraph)).toBe("Free user");
+  });
+
+  it("should handle {{#each}} block loop", () => {
+    const doc = makeDoc([
+      makePara("{{#each items}}"),
+      makePara("Item: {{.name}}"),
+      makePara("{{/each}}")
+    ]);
+    const result = fillTemplate(doc, {
+      items: [{ name: "Apple" }, { name: "Banana" }]
+    });
+    expect(result.body.length).toBe(2);
+    expect(getText(result.body[0] as Paragraph)).toBe("Item: Apple");
+    expect(getText(result.body[1] as Paragraph)).toBe("Item: Banana");
+  });
+
+  it("should support {{.}} for primitive array items", () => {
+    const doc = makeDoc([
+      makePara("{{#each colors}}"),
+      makePara("Color: {{.}}"),
+      makePara("{{/each}}")
+    ]);
+    const result = fillTemplate(doc, { colors: ["red", "blue", "green"] });
+    expect(result.body.length).toBe(3);
+    expect(getText(result.body[0] as Paragraph)).toBe("Color: red");
+    expect(getText(result.body[2] as Paragraph)).toBe("Color: green");
+  });
+
+  it("should support {{@index}} in loops", () => {
+    const doc = makeDoc([
+      makePara("{{#each items}}"),
+      makePara("{{@index}}: {{.}}"),
+      makePara("{{/each}}")
+    ]);
+    const result = fillTemplate(doc, { items: ["a", "b"] });
+    expect(getText(result.body[0] as Paragraph)).toBe("0: a");
+    expect(getText(result.body[1] as Paragraph)).toBe("1: b");
+  });
+
+  it("should handle table row loops", () => {
+    const tbl: Table = {
+      type: "table",
+      rows: [
+        {
+          cells: [
+            { content: [makePara("{{#each rows}}{{.name}}{{/each}}")] },
+            { content: [makePara("{{#each rows}}{{.value}}{{/each}}")] }
+          ]
+        }
+      ]
+    };
+    const doc: DocxDocument = { body: [tbl] } as DocxDocument;
+    const result = fillTemplate(doc, {
+      rows: [
+        { name: "A", value: "1" },
+        { name: "B", value: "2" }
+      ]
+    });
+    const resultTable = result.body[0] as Table;
+    expect(resultTable.rows.length).toBe(2);
+  });
+
+  it("should throw TemplateError for unresolved variable in strict mode", () => {
+    const doc = makeDoc([makePara("{{missing}}")]);
+    expect(() => fillTemplate(doc, {})).toThrow(TemplateError);
+    expect(() => fillTemplate(doc, {})).toThrow("Unresolved variable");
+  });
+
+  it("should leave unresolved variables in non-strict mode", () => {
+    const doc = makeDoc([makePara("Hello {{missing}}!")]);
+    const result = fillTemplate(doc, {}, { strict: false });
+    expect(getText(result.body[0] as Paragraph)).toBe("Hello !");
+  });
+
+  it("should handle cross-run placeholders", () => {
+    // Simulate Word splitting {{name}} across multiple runs
+    const para: Paragraph = {
+      type: "paragraph",
+      children: [
+        { content: [{ type: "text", text: "Hello {{na" }] } as any,
+        { content: [{ type: "text", text: "me}}" }] } as any
+      ]
+    };
+    const doc: DocxDocument = { body: [para] } as DocxDocument;
+    const result = fillTemplate(doc, { name: "World" });
+    expect(getText(result.body[0] as Paragraph)).toBe("Hello World");
+  });
+
+  it("should process templates in headers", () => {
+    const headers = new Map([
+      ["default", { content: { children: [makePara("Header: {{title}}")] } }]
+    ]);
+    const doc = { body: [makePara("Body")], headers } as unknown as DocxDocument;
+    const result = fillTemplate(doc, { title: "My Doc" });
+    const headerContent = result.headers!.get("default")!.content.children;
+    expect(getText(headerContent[0] as Paragraph)).toBe("Header: My Doc");
   });
 });

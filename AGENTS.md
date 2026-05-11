@@ -77,6 +77,7 @@ Layer 0:  utils    (no module dependencies)
 - **Sole exceptions**:
   - `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may.
   - `pdf/word-bridge.ts` may import from `@word/`. No other file in `pdf/` may.
+  - `word/excel-bridge.ts` may import from `@excel/`. No other file in `word/` may.
   - `formula/` defines structural interfaces (`WorkbookLike`, `WorksheetLike`, `CellLike`) that `excel/` implements; `formula/` never imports concrete types from `@excel/*`.
 - `utils/` must never import from any module.
 

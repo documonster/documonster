@@ -300,6 +300,22 @@ const scenarios: Scenario[] = [
     ["modules/pdf/", "modules/excel/", "modules/formula/", "modules/csv/"]
   ),
 
+  // /word/excel subpath (Node)
+  s(
+    "/word/excel: excelToDocx (pulls excel, no pdf/markdown-renderer/html-renderer)",
+    `${PKG_NAME}/word/excel`,
+    ["excelToDocx"],
+    ["modules/pdf/", "modules/word/markdown-renderer", "modules/word/html-renderer"]
+  ),
+
+  // /word/markdown subpath (Node)
+  s(
+    "/word/markdown: renderToMarkdown (no pdf/excel/archive)",
+    `${PKG_NAME}/word/markdown`,
+    ["renderToMarkdown"],
+    ["modules/pdf/", "modules/excel/", "modules/archive/"]
+  ),
+
   // /markdown subpath (Node)
   s(
     "/markdown: parseMarkdown",

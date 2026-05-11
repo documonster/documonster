@@ -62,7 +62,7 @@ jobs:
           node -e "const p=require('./package.json');p.version='${CANARY_VERSION}';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
 
       - name: Publish canary to npm
-        run: npm publish --tag canary
+        run: pnpm publish --tag canary --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -121,10 +121,10 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           if echo "$VERSION" | grep -q "beta\|alpha\|rc"; then
             echo "Publishing ${VERSION} with --tag beta"
-            npm publish --tag beta
+            pnpm publish --tag beta --no-git-checks
           else
             echo "Publishing ${VERSION} as latest"
-            npm publish
+            pnpm publish --no-git-checks
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -180,13 +180,71 @@ export interface SectionColumns {
 /** Section break type. */
 export type SectionBreakType = "nextPage" | "continuous" | "evenPage" | "oddPage" | "nextColumn";
 
-/** Page number format. */
+/** Page number format (ST_NumberFormat subset used for page numbering). */
 export type PageNumberFormat =
   | "decimal"
   | "upperRoman"
   | "lowerRoman"
   | "upperLetter"
-  | "lowerLetter";
+  | "lowerLetter"
+  | "ordinal"
+  | "cardinalText"
+  | "ordinalText"
+  | "hex"
+  | "chicago"
+  | "ideographDigital"
+  | "japaneseCounting"
+  | "aiueo"
+  | "iroha"
+  | "decimalFullWidth"
+  | "decimalHalfWidth"
+  | "japaneseLegal"
+  | "japaneseDigitalTenThousand"
+  | "decimalEnclosedCircle"
+  | "decimalFullWidth2"
+  | "aiueoFullWidth"
+  | "irohaFullWidth"
+  | "decimalZero"
+  | "bullet"
+  | "ganada"
+  | "chosung"
+  | "decimalEnclosedFullstop"
+  | "decimalEnclosedParen"
+  | "decimalEnclosedCircleChinese"
+  | "ideographEnclosedCircle"
+  | "ideographTraditional"
+  | "ideographZodiac"
+  | "ideographZodiacTraditional"
+  | "taiwaneseCounting"
+  | "ideographLegalTraditional"
+  | "taiwaneseCountingThousand"
+  | "taiwaneseDigital"
+  | "chineseCounting"
+  | "chineseLegalSimplified"
+  | "chineseCountingThousand"
+  | "koreanDigital"
+  | "koreanCounting"
+  | "koreanLegal"
+  | "koreanDigital2"
+  | "vietnameseCounting"
+  | "russianLower"
+  | "russianUpper"
+  | "none"
+  | "numberInDash"
+  | "hebrew1"
+  | "hebrew2"
+  | "arabicAlpha"
+  | "arabicAbjad"
+  | "hindiVowels"
+  | "hindiConsonants"
+  | "hindiNumbers"
+  | "hindiCounting"
+  | "thaiLetters"
+  | "thaiNumbers"
+  | "thaiCounting"
+  | "bahtText"
+  | "dollarText"
+  | "custom";
 
 /** Header/footer reference type. */
 export type HeaderFooterType = "default" | "first" | "even";
@@ -205,8 +263,13 @@ export type PageVerticalAlign = "top" | "center" | "both" | "bottom";
 /** Document grid type. */
 export type DocumentGridType = "default" | "lines" | "linesAndChars" | "snapToChars";
 
-/** Page text direction. */
-export type PageTextDirection = "lrTb" | "tbRl" | "btLr" | "lrTbV" | "tbRlV" | "tbLrV";
+/**
+ * Page text direction.
+ *
+ * @deprecated Use {@link TextDirection} instead. This is an alias kept for
+ * backward compatibility and will be removed in a future major version.
+ */
+export type PageTextDirection = TextDirection;
 
 /** A single border definition. */
 export interface Border {
@@ -303,21 +366,25 @@ export interface SectionProperties {
 // Run Properties (Character Formatting)
 // =============================================================================
 
-/** Underline styles. */
+/** Underline styles (ST_Underline). */
 export type UnderlineStyle =
   | "single"
+  | "words"
   | "double"
   | "thick"
   | "dotted"
+  | "dottedHeavy"
   | "dash"
+  | "dashedHeavy"
+  | "dashLong"
+  | "dashLongHeavy"
   | "dotDash"
+  | "dashDotHeavy"
   | "dotDotDash"
+  | "dashDotDotHeavy"
   | "wave"
   | "wavyHeavy"
   | "wavyDouble"
-  | "dashLong"
-  | "dashLongHeavy"
-  | "words"
   | "none";
 
 /** Vertical alignment for superscript/subscript. */
@@ -677,6 +744,8 @@ export interface DateFieldContent {
   readonly format?: string;
   /** Language tag. */
   readonly language?: string;
+  /** Pre-computed cached value to display. If omitted, the field shows empty until updated by Word. */
+  readonly cachedValue?: string;
 }
 
 /** Content that can appear inside a run. */
@@ -696,7 +765,18 @@ export type RunContent =
   | SoftHyphenContent
   | LastRenderedPageBreakContent
   | AnnotationReferenceContent
-  | DateFieldContent;
+  | DateFieldContent
+  | OpaqueRunContent;
+
+/**
+ * Opaque run content: preserves unknown XML elements found inside a run
+ * for round-trip fidelity. The writer will emit the raw XML verbatim.
+ */
+export interface OpaqueRunContent {
+  readonly type: "opaqueRun";
+  /** Raw XML string of the unrecognized run child element. */
+  readonly rawXml: string;
+}
 
 // =============================================================================
 // Run
@@ -888,8 +968,20 @@ export interface CommentReference {
 // Paragraph Properties
 // =============================================================================
 
-/** Horizontal alignment. */
-export type Alignment = "start" | "center" | "end" | "both" | "distribute" | "left" | "right";
+/** Horizontal alignment (ST_Jc). */
+export type Alignment =
+  | "start"
+  | "center"
+  | "end"
+  | "both"
+  | "mediumKashida"
+  | "distribute"
+  | "numTab"
+  | "highKashida"
+  | "lowKashida"
+  | "thaiDistribute"
+  | "left"
+  | "right";
 
 /** Line spacing rule. */
 export type LineSpacingRule = "auto" | "exact" | "atLeast";
@@ -924,8 +1016,17 @@ export interface Indentation {
   readonly end?: Twips;
 }
 
-/** Tab stop alignment. */
-export type TabStopType = "left" | "center" | "right" | "decimal" | "bar" | "clear";
+/** Tab stop alignment (ST_TabJc). */
+export type TabStopType =
+  | "left"
+  | "center"
+  | "right"
+  | "decimal"
+  | "bar"
+  | "clear"
+  | "start"
+  | "end"
+  | "num";
 
 /** Tab stop leader character. */
 export type TabStopLeader = "dot" | "hyphen" | "underscore" | "none" | "heavy" | "middleDot";
@@ -1149,7 +1250,18 @@ export type ParagraphChild =
   | MovedFromRun
   | MovedToRun
   | MoveRangeMarker
-  | CustomXmlTrackingMarker;
+  | CustomXmlTrackingMarker
+  | OpaqueParagraphChild;
+
+/**
+ * Opaque paragraph child: preserves unknown XML elements found at paragraph level
+ * for round-trip fidelity. The writer will emit the raw XML verbatim.
+ */
+export interface OpaqueParagraphChild {
+  readonly type: "opaqueParagraphChild";
+  /** Raw XML string of the unrecognized paragraph child element. */
+  readonly rawXml: string;
+}
 
 // =============================================================================
 // Table
@@ -2083,6 +2195,7 @@ export type BodyContent =
   | DrawingShape
   | OpaqueDrawing
   | ChartContent
+  | ChartExContent
   | AltChunk
   | StructuredDocumentTag;
 
@@ -2121,7 +2234,45 @@ export type ChartType =
   | "areaStacked"
   | "scatter"
   | "scatterSmooth"
-  | "radar";
+  | "radar"
+  | "radarFilled"
+  | "bubble"
+  | "stock"
+  | "surface"
+  | "surface3D"
+  | "surfaceWireframe"
+  | "surfaceWireframe3D";
+
+/** Trendline type for chart series. */
+export type ChartTrendlineType =
+  | "linear"
+  | "exponential"
+  | "logarithmic"
+  | "polynomial"
+  | "power"
+  | "movingAvg";
+
+/** Trendline options for a chart series. */
+export interface ChartTrendline {
+  readonly type: ChartTrendlineType;
+  readonly order?: number;
+  readonly period?: number;
+  readonly displayEquation?: boolean;
+  readonly displayRSquared?: boolean;
+}
+
+/** Error bar direction. */
+export type ChartErrorBarDirection = "x" | "y" | "both";
+
+/** Error bar type. */
+export type ChartErrorBarType = "fixedVal" | "percentage" | "stdDev" | "stdErr" | "custom";
+
+/** Error bars options for a chart series. */
+export interface ChartErrorBars {
+  readonly direction: ChartErrorBarDirection;
+  readonly type: ChartErrorBarType;
+  readonly value?: number;
+}
 
 /** A data series in a chart. */
 export interface ChartSeries {
@@ -2131,10 +2282,28 @@ export interface ChartSeries {
   readonly color?: HexColor;
   readonly pointColors?: readonly HexColor[];
   readonly showDataLabels?: boolean;
+  readonly trendline?: ChartTrendline;
+  readonly errorBars?: ChartErrorBars;
+  /** Per-series chart type override (for combo charts). */
+  readonly chartType?: ChartType;
+  /** Plot on secondary axis (for combo charts). */
+  readonly plotOnSecondaryAxis?: boolean;
 }
 
 /** Chart legend position. */
 export type ChartLegendPosition = "b" | "l" | "r" | "t" | "tr" | "none";
+
+/** Data label position. */
+export type ChartDataLabelPosition = "outsideEnd" | "center" | "insideEnd" | "bestFit";
+
+/** Data labels options for a chart. */
+export interface ChartDataLabels {
+  readonly showValue?: boolean;
+  readonly showCategory?: boolean;
+  readonly showSerName?: boolean;
+  readonly showPercent?: boolean;
+  readonly position?: ChartDataLabelPosition;
+}
 
 /** Chart axis configuration. */
 export interface ChartAxis {
@@ -2152,6 +2321,7 @@ export interface Chart {
   readonly title?: string;
   readonly series: readonly ChartSeries[];
   readonly legend?: ChartLegendPosition;
+  readonly dataLabels?: ChartDataLabels;
   readonly categoryAxis?: ChartAxis;
   readonly valueAxis?: ChartAxis;
   readonly secondaryValueAxis?: ChartAxis;
@@ -2161,6 +2331,12 @@ export interface Chart {
   readonly style?: number;
   readonly width?: Emu;
   readonly height?: Emu;
+  /** Secondary chart type for combo charts (legacy approach). */
+  readonly secondaryType?: ChartType;
+  /** Secondary series for combo chart (plotted on secondary axis). */
+  readonly secondarySeries?: readonly ChartSeries[];
+  /** Whether to embed chart data as an xlsx workbook (for full editing in Word). */
+  readonly embedWorkbook?: boolean;
 }
 
 /** Chart content placed in a document. */
@@ -2169,6 +2345,46 @@ export interface ChartContent {
   readonly chart: Chart;
   readonly altText?: string;
   readonly name?: string;
+}
+
+/**
+ * ChartEx content block (cx: namespace, Office 2016+ chart types).
+ * Supports: sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap.
+ */
+export interface ChartExContent {
+  readonly type: "chartEx";
+  /** Pre-rendered ChartEx XML (cx:chartSpace). Generated via excel-bridge. */
+  readonly chartExXml: string;
+  /** Parsed structured data extracted from the ChartEx XML. */
+  readonly data?: ChartExData;
+  /** Alt text for accessibility. */
+  readonly altText?: string;
+  /** Drawing name. */
+  readonly name?: string;
+  /** Width in EMU. Default: 5486400 (6 inches). */
+  readonly width?: Emu;
+  /** Height in EMU. Default: 3657600 (4 inches). */
+  readonly height?: Emu;
+}
+
+/** Structured data extracted from a ChartEx (cx: namespace) XML. */
+export interface ChartExData {
+  /** Chart type (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap). */
+  readonly chartType: string;
+  /** Chart title. */
+  readonly title?: string;
+  /** Series data. */
+  readonly series: readonly ChartExSeriesData[];
+}
+
+/** A single data series within a ChartEx chart. */
+export interface ChartExSeriesData {
+  /** Series name/label. */
+  readonly name?: string;
+  /** String categories. */
+  readonly categories?: readonly string[];
+  /** Numeric values. */
+  readonly values?: readonly number[];
 }
 
 // =============================================================================
@@ -2265,24 +2481,71 @@ export interface DocDefaults {
 // Numbering / Lists
 // =============================================================================
 
-/** Number format type. */
+/** Number format type (ST_NumberFormat). */
 export type NumberFormat =
   | "decimal"
-  | "lowerLetter"
-  | "upperLetter"
-  | "lowerRoman"
   | "upperRoman"
-  | "bullet"
-  | "none"
-  | "chineseCounting"
+  | "lowerRoman"
+  | "upperLetter"
+  | "lowerLetter"
   | "ordinal"
   | "cardinalText"
   | "ordinalText"
+  | "hex"
+  | "chicago"
   | "ideographDigital"
-  | "ideographTraditional"
   | "japaneseCounting"
+  | "aiueo"
+  | "iroha"
+  | "decimalFullWidth"
+  | "decimalHalfWidth"
+  | "japaneseLegal"
+  | "japaneseDigitalTenThousand"
+  | "decimalEnclosedCircle"
+  | "decimalFullWidth2"
+  | "aiueoFullWidth"
+  | "irohaFullWidth"
   | "decimalZero"
-  | "decimalEnclosedCircle";
+  | "bullet"
+  | "ganada"
+  | "chosung"
+  | "decimalEnclosedFullstop"
+  | "decimalEnclosedParen"
+  | "decimalEnclosedCircleChinese"
+  | "ideographEnclosedCircle"
+  | "ideographTraditional"
+  | "ideographZodiac"
+  | "ideographZodiacTraditional"
+  | "taiwaneseCounting"
+  | "ideographLegalTraditional"
+  | "taiwaneseCountingThousand"
+  | "taiwaneseDigital"
+  | "chineseCounting"
+  | "chineseLegalSimplified"
+  | "chineseCountingThousand"
+  | "koreanDigital"
+  | "koreanCounting"
+  | "koreanLegal"
+  | "koreanDigital2"
+  | "vietnameseCounting"
+  | "russianLower"
+  | "russianUpper"
+  | "none"
+  | "numberInDash"
+  | "hebrew1"
+  | "hebrew2"
+  | "arabicAlpha"
+  | "arabicAbjad"
+  | "hindiVowels"
+  | "hindiConsonants"
+  | "hindiNumbers"
+  | "hindiCounting"
+  | "thaiLetters"
+  | "thaiNumbers"
+  | "thaiCounting"
+  | "bahtText"
+  | "dollarText"
+  | "custom";
 
 /** Level justification. */
 export type LevelJustification = "left" | "center" | "right";
@@ -2483,6 +2746,14 @@ export interface ImageDef {
   readonly fileName: string;
   /** Relationship ID (assigned during packaging). */
   rId?: string;
+  /**
+   * Additional relationship IDs under which this same media file is referenced
+   * by other parts (typically header/footer .rels using their own local id
+   * space). Populated by the reader so that the packager can rebuild each
+   * part's local .rels even when callers and parts use different rIds for the
+   * same physical media file.
+   */
+  readonly aliasRIds?: readonly string[];
   /** SVG fallback image data (PNG). Required for SVG images in Word. */
   readonly fallbackData?: Uint8Array;
 }
@@ -2581,8 +2852,18 @@ export interface DocumentSettings {
   readonly trackRevisions?: boolean;
   /** Document protection. */
   readonly documentProtection?: {
-    readonly type: ProtectionType;
+    readonly type?: ProtectionType;
+    readonly edit?: string;
     readonly enforcement?: boolean;
+    readonly formatting?: boolean;
+    /** Hash algorithm (e.g. "SHA-256"). */
+    readonly hashAlgorithm?: string;
+    /** Base64-encoded hash value. */
+    readonly hashValue?: string;
+    /** Base64-encoded salt value. */
+    readonly saltValue?: string;
+    /** Number of hash iterations. */
+    readonly spinCount?: number;
   };
   /** Hyphenation settings. */
   readonly hyphenation?: HyphenationSettings;
@@ -2843,7 +3124,26 @@ export interface PersonInfo {
   };
 }
 
+/**
+ * Document type discriminator.
+ * - "document" — standard .docx
+ * - "template" — .dotx (Word template)
+ * - "macroEnabledDocument" — .docm (macro-enabled)
+ * - "macroEnabledTemplate" — .dotm (macro-enabled template)
+ */
+export type DocxDocumentType =
+  | "document"
+  | "template"
+  | "macroEnabledDocument"
+  | "macroEnabledTemplate";
+
 export interface DocxDocument {
+  /**
+   * Document type. Determines the content type used in the package.
+   * Default: "document" (standard .docx).
+   */
+  readonly docType?: DocxDocumentType;
+
   /** Document body content. */
   readonly body: readonly BodyContent[];
 
@@ -2921,6 +3221,9 @@ export interface DocxDocument {
 
   /** Opaque (unrecognized) ZIP parts preserved for round-trip fidelity. */
   readonly opaqueParts?: readonly OpaquePart[];
+
+  /** VBA project binary (word/vbaProject.bin) for .docm/.dotm round-trip. */
+  readonly vbaProject?: Uint8Array;
 }
 
 // =============================================================================
@@ -2980,4 +3283,28 @@ export interface OpaqueDrawing {
 export interface DocxOptions {
   /** Compression level (0-9). Default: 6. */
   readonly compressionLevel?: number;
+}
+
+// =============================================================================
+// Asset References (currently unused; reserved for future package-model API)
+// =============================================================================
+
+/** A reference to a media asset (image, chart, etc.) by logical ID. */
+export interface AssetRef {
+  /** Logical asset ID (assigned by builder, resolved to rId at package time). */
+  readonly assetId: string;
+  /** Asset type hint. */
+  readonly type: "image" | "chart" | "oleObject" | "font" | "xlsx";
+}
+
+/** A media asset registered in the document. */
+export interface MediaAsset {
+  /** Logical ID for referencing. */
+  readonly id: string;
+  /** MIME content type. */
+  readonly contentType: string;
+  /** Raw binary data. */
+  readonly data: Uint8Array;
+  /** Suggested file name (without path). */
+  readonly fileName: string;
 }
