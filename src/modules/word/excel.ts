@@ -3,7 +3,7 @@
  *
  * Re-exports the Excel bridge API at `excelts/word/excel`. This file is
  * referenced by `package.json#exports["./word/excel"]`; it forwards to the
- * implementation under `./bridge/excel`.
+ * implementation under `./bridge/excel-bridge`.
  *
  * @example
  * ```ts
@@ -18,5 +18,5 @@ export {
   buildWordChartExXml,
   wordChartToChartModel,
   generateChartEmbeddedXlsx
-} from "./bridge/excel";
-export type { ExcelToDocxOptions, WordChartExOptions } from "./bridge/excel";
+} from "./bridge/excel-bridge";
+export type { ExcelToDocxOptions, WordChartExOptions } from "./bridge/excel-bridge";

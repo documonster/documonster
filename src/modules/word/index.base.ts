@@ -30,7 +30,6 @@ export type {
   HeaderFooterRef,
   PageVerticalAlign,
   DocumentGridType,
-  PageTextDirection,
   Border,
   ArtBorderType,
   PageBorders,
@@ -361,8 +360,12 @@ export {
 
 // --- Stable API ---
 /** @stability stable */
+export { Document } from "./builder/document-handle";
+/** @stability stable */
+export type { DocumentHandle } from "./builder/document-handle";
+
+/** @stability stable — Run / Field / Math / shape / chart / SDT builders */
 export {
-  Document,
   // Run helpers
   text,
   bold,
@@ -408,26 +411,6 @@ export {
   formTextField,
   formCheckboxField,
   formDropdownField,
-  // Paragraph helpers
-  paragraph,
-  textParagraph,
-  heading,
-  hyperlink,
-  bookmarkStart,
-  bookmarkEnd,
-  // Comment helpers
-  commentRangeStart,
-  commentRangeEnd,
-  commentReference,
-  // Track changes helpers
-  insertedRun,
-  deletedRun,
-  movedFromRun,
-  movedToRun,
-  moveFromRangeStart,
-  moveFromRangeEnd,
-  moveToRangeStart,
-  moveToRangeEnd,
   // CheckBox helper
   checkBox,
   // Math helpers
@@ -439,7 +422,6 @@ export {
   mathSum,
   mathIntegral,
   mathProduct,
-  // Additional math helpers
   mathSuperScript,
   mathSubScript,
   mathSubSuperScript,
@@ -465,42 +447,38 @@ export {
   // Chart helper
   chart,
   // SDT helper
-  structuredDocumentTag,
-  // Table helpers
-  border,
-  gridBorders,
-  cell,
-  row,
-  table,
-  simpleTable,
-  searchText,
-  replaceText,
-  resolveThemeColor,
-  mailMerge,
-  // Document merge
-  mergeDocuments,
-  // Style resolution
-  resolveStyle,
-  resolveRunStyle,
-  resolveNumberingLevel,
-  resolveTableStyle,
-  // Compatibility mode
-  getCompatibilityMode,
-  setCompatibilityMode,
-  // Track changes accept/reject
-  acceptAllRevisions,
-  rejectAllRevisions,
-  listRevisions,
-  acceptRevision,
-  rejectRevision,
-  // Document split
-  splitDocument,
-  // OpenDoPE data binding
-  resolveDataBindings,
-  // Form field operations
-  extractFormFields,
-  fillFormFields,
-  // Query API
+  structuredDocumentTag
+} from "./builder/run-builders";
+
+/** @stability stable — paragraph / hyperlink / comment / track-changes builders */
+export {
+  paragraph,
+  textParagraph,
+  heading,
+  hyperlink,
+  bookmarkStart,
+  bookmarkEnd,
+  commentRangeStart,
+  commentRangeEnd,
+  commentReference,
+  insertedRun,
+  deletedRun,
+  movedFromRun,
+  movedToRun,
+  moveFromRangeStart,
+  moveFromRangeEnd,
+  moveToRangeStart,
+  moveToRangeEnd
+} from "./builder/paragraph-builders";
+
+/** @stability stable — table builders */
+export { border, gridBorders, cell, row, table, simpleTable } from "./builder/table-builders";
+
+/** @stability stable — theme color resolution */
+export { resolveThemeColor } from "./core/color-utils";
+
+/** @stability stable — search / queries */
+export {
   paragraphCount,
   countWords,
   getHeadings,
@@ -511,24 +489,67 @@ export {
   listHyperlinks,
   listSections,
   tableCount,
-  extractText
-} from "./document";
+  extractText,
+  searchText
+} from "./query/search";
+/** @stability stable */
+export type { SearchResult, DocumentHeading, DocumentSection } from "./query/search";
+
+/** @stability stable */
+export { replaceText } from "./query/replace";
+
+/** @stability stable */
+export { mailMerge } from "./query/mail-merge";
+
+/** @stability stable */
+export { mergeDocuments } from "./query/merge";
+/** @stability stable */
+export type { MergeOptions } from "./query/merge";
+
+/** @stability stable */
+export { splitDocument } from "./query/split";
+/** @stability stable */
+export type { SplitOptions } from "./query/split";
+
+/** @stability stable */
+export {
+  acceptAllRevisions,
+  rejectAllRevisions,
+  listRevisions,
+  acceptRevision,
+  rejectRevision
+} from "./query/revisions";
+/** @stability stable */
+export type { RevisionEntry } from "./query/revisions";
+
+/** @stability stable */
+export {
+  resolveStyle,
+  resolveRunStyle,
+  resolveNumberingLevel,
+  resolveTableStyle
+} from "./query/style-resolve";
 /** @stability stable */
 export type {
-  DocumentHandle,
-  SearchResult,
-  DocumentHeading,
-  DocumentSection,
-  MergeOptions,
+  StyleResolveContext,
   ResolvedParagraphStyle,
   ResolvedRunStyle,
-  ResolvedNumberingLevel,
-  StyleResolveContext,
-  CompatibilityMode,
-  FormFieldEntry,
-  RevisionEntry,
-  SplitOptions
-} from "./document";
+  ResolvedNumberingLevel
+} from "./query/style-resolve";
+
+/** @stability stable */
+export { getCompatibilityMode, setCompatibilityMode } from "./query/compat";
+/** @stability stable */
+export type { CompatibilityMode } from "./query/compat";
+
+/** @stability stable */
+export { resolveDataBindings } from "./query/data-binding";
+
+/** @stability stable */
+export { extractFormFields, fillFormFields } from "./query/form-fields";
+/** @stability stable */
+export type { FormFieldEntry } from "./query/form-fields";
+
 /** @stability stable */
 export type { PatchContent, PatchOperation, PatchOptions, CompiledTemplate } from "./document-io";
 
@@ -580,12 +601,6 @@ export type {
   TemplateHtmlChunk,
   TemplateTag
 } from "./template/template-engine";
-
-// Sub-namespaces for grouped API ergonomics (no name conflicts with types)
-/** @stability stable */
-export { Field, Drawing, TrackChanges, Sdt, Query, Comment } from "./namespaces";
-/** @stability stable */
-export { Math as MathML } from "./namespaces";
 
 // --- Stable API ---
 /** @stability stable */
@@ -795,22 +810,6 @@ export type { ChartBinding, ChartSeriesData, ChartTemplateData } from "./templat
 export { encryptDocx } from "./security/encryption";
 export type { EncryptOptions } from "./security/encryption";
 
-// --- OPC Package Model (experimental) ---
-/** @stability experimental */
-export type {
-  PartName,
-  TargetMode,
-  OpcRelationship,
-  OpcRelationshipSet,
-  OpcPart,
-  ContentTypeEntry,
-  OpcPackage,
-  OpcWriteOptions,
-  WordPackagePlan
-} from "./core/opc-package";
-/** @stability experimental */
-export { planToPackage, normalizePartName, resolveTarget } from "./core/opc-package";
-
 // --- Security Policy ---
 /** @stability experimental */
 export type { WordSecurityPolicy } from "./security/policy";
@@ -832,6 +831,18 @@ export { createRenderContext, createIdGenerators } from "./writer/render-context
 export type { DocxTransformer, MapOptions } from "./core/mapper";
 
 export { mapDocument } from "./core/mapper";
+
+// --- Document Walker (experimental) ---
+/** @stability experimental */
+export type { DocxVisitor, WalkPath, WalkOptions, VisitAction } from "./core/walker";
+/** @stability experimental */
+export {
+  walkDocument,
+  walkBlocks,
+  collectParagraphs,
+  collectRuns,
+  collectTables
+} from "./core/walker";
 
 // --- Layout Model (experimental) ---
 /** @stability experimental */

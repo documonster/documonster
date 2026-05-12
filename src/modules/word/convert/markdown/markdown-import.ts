@@ -18,6 +18,7 @@
  */
 
 import { sanitizeUrl } from "../../core/internal-utils";
+import { isRun } from "../../core/text-utils";
 import type {
   AbstractNumbering,
   Alignment,
@@ -381,9 +382,15 @@ function parseMarkdownBlocks(lines: string[], start: number, end: number): Block
       continue;
     }
 
-    // Paragraph (default) — collect consecutive non-blank, non-block-start lines
+    // Paragraph (default) — collect consecutive non-blank, non-block-start lines.
+    // Additionally treat the start of a GFM table (a row immediately followed
+    // by a separator row) as a block boundary even without a blank line in
+    // between, matching the behavior of CommonMark/GFM parsers.
     const paraLines: string[] = [];
     while (i < end && lines[i].trim() !== "" && !isBlockStart(lines[i])) {
+      if (i + 1 < end && isTableRow(lines[i]) && isTableSeparator(lines[i + 1])) {
+        break;
+      }
       paraLines.push(lines[i]);
       i++;
     }
@@ -1164,7 +1171,13 @@ function convertList(
   parentLevel: number,
   state: ConversionState
 ): BodyContent[] {
-  const numId = getOrCreateNumbering(block.ordered, state);
+  // Ordered lists with a non-default `start` need their own numbering
+  // instance so the override actually takes effect — sharing one numId
+  // across all lists would force every list to start at the same number.
+  const numId =
+    block.ordered && block.start !== 1
+      ? createOrderedNumberingWithStart(block.start, state)
+      : getOrCreateNumbering(block.ordered, state);
   const result: BodyContent[] = [];
 
   for (const item of block.items) {
@@ -1230,8 +1243,8 @@ function convertTable(block: TableBlock, opts: ConvertOpts): Table {
     const boldPara: Paragraph = {
       ...para,
       children: para.children.map(child => {
-        if ("content" in child) {
-          return { ...child, properties: { ...(child as Run).properties, bold: true } };
+        if (isRun(child)) {
+          return { ...child, properties: { ...child.properties, bold: true } };
         }
         return child;
       })
@@ -1514,6 +1527,30 @@ function getOrCreateNumbering(ordered: boolean, state: ConversionState): number 
   } else {
     state.bulletNumId = numId;
   }
+
+  return numId;
+}
+
+/**
+ * Create a fresh ordered numbering instance with a startOverride at level 0.
+ * Re-uses the shared ordered abstract numbering (creating it on demand) so
+ * we don't duplicate the level definitions for every numbered list that has
+ * a non-default starting number.
+ */
+function createOrderedNumberingWithStart(start: number, state: ConversionState): number {
+  // Ensure the shared ordered abstract numbering exists.
+  const baseNumId = getOrCreateNumbering(true, state);
+  const baseInstance = state.numberingInstances.find(n => n.numId === baseNumId);
+  const abstractNumId = baseInstance?.abstractNumId ?? baseNumId;
+
+  const numId = state.nextNumId;
+  state.nextNumId++;
+
+  state.numberingInstances.push({
+    numId,
+    abstractNumId,
+    overrides: [{ level: 0, startOverride: start }]
+  });
 
   return numId;
 }

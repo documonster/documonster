@@ -11,6 +11,7 @@ import type { XmlElement } from "@xml/types";
 
 import { RelType } from "../constants";
 import { type Mutable, utf8Decoder } from "../core/internal-utils";
+import { isRun } from "../core/text-utils";
 import {
   DocxError,
   DocxParseError,
@@ -27,7 +28,6 @@ import type {
   Paragraph,
   ParagraphChild,
   Run,
-  RunProperties,
   RunContent,
   Table,
   TableRow,
@@ -63,7 +63,6 @@ import type {
   CheckBox,
   DocumentBackground,
   FieldContent,
-  FormField,
   Watermark,
   TextWatermark,
   ImageWatermark,
@@ -114,7 +113,7 @@ import {
   parseRevisionInfo
 } from "./properties-parsers";
 import type { ReaderContext } from "./reader-context";
-import { createReaderContext, parseRelationships } from "./reader-context";
+import { createFieldState, createReaderContext, parseRelationships } from "./reader-context";
 import { parseCheckBox, parseTocInstruction } from "./sdt-helpers";
 import { parseStyles } from "./styles-parser";
 import {
@@ -734,6 +733,19 @@ function parseSdt(
         content.push(parseTable(child, ctx));
       } else if (n === "r") {
         content.push(parseRun(child));
+      } else if (n === "sdt") {
+        // Nested SDT (e.g. repeating section's item SDTs). The current
+        // SdtProperties.content type does not allow a nested SDT element,
+        // so flatten the inner SDT's content into the parent's content.
+        // This preserves visible body content but loses the inner SDT's
+        // own metadata (data binding, alias, …) on round-trip — better
+        // than dropping the runs entirely.
+        const inner = parseSdt(child, ctx);
+        if (inner && inner.type === "sdt") {
+          for (const c of inner.content) {
+            content.push(c);
+          }
+        }
       }
     }
   }
@@ -806,12 +818,12 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
   const pPrEl = findChildNs(pEl, "pPr");
   const children: ParagraphChild[] = [];
 
-  // fldChar state machine: tracks field code assembly across runs
-  let fieldState: "none" | "instrText" | "cached" = "none";
-  let fieldInstr = "";
-  let fieldCached = "";
-  let fieldRunProps: RunProperties | undefined;
-  let fieldFormField: FormField | undefined;
+  // Field state machine lives on ctx so that complex fields (TOC, INDEX,
+  // long REF/SEQ chains) can span paragraph boundaries — the matching
+  // `<w:fldChar fldCharType="end">` may occur in a later paragraph than the
+  // `begin`. Storing state on ctx is also safe because part-scoped parsers
+  // (header/footer/footnote/endnote/comment) save and reset it on entry.
+  const field = ctx.field;
 
   for (const child of pEl.children) {
     if (child.type !== "element") {
@@ -850,45 +862,42 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
             hasFldChar = true;
             const fldCharType = attrVal(rc, "fldCharType");
             if (fldCharType === "begin") {
-              fieldState = "instrText";
-              fieldInstr = "";
-              fieldCached = "";
+              field.state = "instrText";
+              field.instr = "";
+              field.cached = "";
               // Capture run properties from this run for the field
               const rPrEl = findChildNs(resolved, "rPr");
-              fieldRunProps = rPrEl ? parseRunProperties(rPrEl) : undefined;
+              field.runProps = rPrEl ? parseRunProperties(rPrEl) : undefined;
               // Parse ffData for legacy form fields
               const ffDataEl = findChildNs(rc, "ffData");
-              if (ffDataEl) {
-                fieldFormField = parseFfData(ffDataEl);
-              } else {
-                fieldFormField = undefined;
-              }
+              field.formField = ffDataEl ? parseFfData(ffDataEl) : undefined;
             } else if (fldCharType === "separate") {
-              fieldState = "cached";
+              field.state = "cached";
             } else if (fldCharType === "end") {
               // Emit the assembled field as a Run with FieldContent
               const fc: FieldContent = {
                 type: "field",
-                instruction: fieldInstr.trim(),
-                cachedValue: fieldCached || undefined,
-                formField: fieldFormField
+                instruction: field.instr.trim(),
+                cachedValue: field.cached || undefined,
+                formField: field.formField
               };
               children.push({
-                properties: fieldRunProps,
+                properties: field.runProps,
                 content: [fc]
               } satisfies Run);
-              fieldState = "none";
-              fieldInstr = "";
-              fieldCached = "";
-              fieldRunProps = undefined;
+              field.state = "none";
+              field.instr = "";
+              field.cached = "";
+              field.runProps = undefined;
+              field.formField = undefined;
             }
-          } else if (rcName === "instrText" && fieldState === "instrText") {
+          } else if (rcName === "instrText" && field.state === "instrText") {
             hasFldChar = true;
-            fieldInstr += textContent(rc);
+            field.instr += textContent(rc);
           }
         }
 
-        if (fieldState === "cached") {
+        if (field.state === "cached") {
           // Collect cached text from this run
           for (const rc of resolved.children) {
             if (rc.type !== "element") {
@@ -896,7 +905,7 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
             }
             const rcName = rc.name.replace(/^w:/, "");
             if (rcName === "t") {
-              fieldCached += textContent(rc);
+              field.cached += textContent(rc);
             } else if (rcName === "fldChar") {
               // Already handled above
             }
@@ -906,10 +915,10 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
           }
         }
 
-        if (fieldState === "instrText" && hasFldChar) {
+        if (field.state === "instrText" && hasFldChar) {
           continue; // Don't add begin/instrText runs as normal content
         }
-        if (fieldState === "none" && !hasFldChar) {
+        if (field.state === "none" && !hasFldChar) {
           children.push(parseRun(resolved));
         }
         break;
@@ -952,9 +961,12 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
             hRuns.push(parseRun(hChild));
           }
         }
-        // Resolve URL from relMap
+        // Resolve URL from relMap. If the security policy disallows
+        // external targets, skip URL resolution entirely so the resulting
+        // Hyperlink only carries an anchor (or becomes a plain non-link
+        // wrapper). Internal anchor-only hyperlinks are unaffected.
         let url: string | undefined;
-        if (rId) {
+        if (rId && ctx.securityPolicy.allowExternalTargets) {
           const rel = ctx.relMap.get(rId);
           if (rel && rel.targetMode === "External") {
             url = rel.target;
@@ -981,9 +993,17 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
         break;
       }
       case "bookmarkStart": {
+        const idAttr = resolved.attributes["w:id"] ?? resolved.attributes["id"];
+        const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+        if (Number.isNaN(id)) {
+          // Without a valid id we can't pair this with a bookmarkEnd; drop it
+          // rather than fabricate id=0 (which would collide with every other
+          // bookmark missing an id and corrupt cross-references on round-trip).
+          break;
+        }
         const bm: Mutable<BookmarkStart> = {
           type: "bookmarkStart",
-          id: parseInt(resolved.attributes["w:id"] ?? resolved.attributes["id"] ?? "0", 10),
+          id,
           name: resolved.attributes["w:name"] ?? resolved.attributes["name"] ?? ""
         };
         const colFirst = resolved.attributes["w:colFirst"] ?? resolved.attributes["colFirst"];
@@ -1003,30 +1023,42 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
         children.push(bm);
         break;
       }
-      case "bookmarkEnd":
-        children.push({
-          type: "bookmarkEnd",
-          id: parseInt(resolved.attributes["w:id"] ?? resolved.attributes["id"] ?? "0", 10)
-        });
+      case "bookmarkEnd": {
+        const idAttr = resolved.attributes["w:id"] ?? resolved.attributes["id"];
+        const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+        if (Number.isNaN(id)) {
+          break;
+        }
+        children.push({ type: "bookmarkEnd", id });
         break;
-      case "commentRangeStart":
-        children.push({
-          type: "commentRangeStart",
-          id: parseInt(resolved.attributes["w:id"] ?? resolved.attributes["id"] ?? "0", 10)
-        });
+      }
+      case "commentRangeStart": {
+        const idAttr = resolved.attributes["w:id"] ?? resolved.attributes["id"];
+        const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+        if (Number.isNaN(id)) {
+          break;
+        }
+        children.push({ type: "commentRangeStart", id });
         break;
-      case "commentRangeEnd":
-        children.push({
-          type: "commentRangeEnd",
-          id: parseInt(resolved.attributes["w:id"] ?? resolved.attributes["id"] ?? "0", 10)
-        });
+      }
+      case "commentRangeEnd": {
+        const idAttr = resolved.attributes["w:id"] ?? resolved.attributes["id"];
+        const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+        if (Number.isNaN(id)) {
+          break;
+        }
+        children.push({ type: "commentRangeEnd", id });
         break;
-      case "commentReference":
-        children.push({
-          type: "commentReference",
-          id: parseInt(resolved.attributes["w:id"] ?? resolved.attributes["id"] ?? "0", 10)
-        });
+      }
+      case "commentReference": {
+        const idAttr = resolved.attributes["w:id"] ?? resolved.attributes["id"];
+        const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+        if (Number.isNaN(id)) {
+          break;
+        }
+        children.push({ type: "commentReference", id });
         break;
+      }
       case "ins": {
         // Inserted run (track changes)
         const rev = parseRevisionInfo(resolved);
@@ -1150,10 +1182,25 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
       case "smartTag":
       case "customXml":
       case "dir": {
-        // Semantic wrappers: flatten their children into the current paragraph.
-        // A smartTag/customXml/dir can contain runs, hyperlinks, nested wrappers, etc.
-        // Re-use parseParagraph to recursively parse the contained children.
-        const subPara = parseParagraph(resolved, ctx);
+        // Semantic wrappers: flatten their children into the current
+        // paragraph. The wrapper's own properties element (smartTagPr,
+        // customXmlPr, …) is not a paragraph child and would otherwise
+        // fall through to the `default` branch below and be emitted as a
+        // bogus `opaqueParagraphChild` containing the properties XML —
+        // poisoning the paragraph on round-trip. Build a synthetic element
+        // that excludes those `*Pr` siblings before recursing.
+        const filteredChildren = resolved.children.filter(c => {
+          if (c.type !== "element") {
+            return true;
+          }
+          const ln = c.name.replace(/^w:/, "");
+          return ln !== "smartTagPr" && ln !== "customXmlPr";
+        });
+        const surrogate: XmlElement = {
+          ...resolved,
+          children: filteredChildren
+        };
+        const subPara = parseParagraph(surrogate, ctx);
         for (const sub of subPara.children) {
           children.push(sub);
         }
@@ -1237,6 +1284,23 @@ function parseTableCell(el: XmlElement, ctx: ReaderContext): TableCell {
       content.push(parseParagraph(child, ctx));
     } else if (name === "tbl") {
       content.push(parseTable(child, ctx));
+    } else if (name === "sdt") {
+      // SDT inside a table cell. TableCell.content is `(Paragraph | Table)[]`
+      // and the model doesn't carry SDT here, so flatten the SDT's inner
+      // content into the cell. We keep paragraphs/tables; bare runs/sdts
+      // not at paragraph level are dropped (they would have no valid host
+      // in the cell). This preserves visible content but loses the SDT's
+      // own metadata on round-trip — better than dropping all of it.
+      const sdt = parseSdt(child, ctx);
+      if (sdt && sdt.type === "sdt") {
+        for (const c of sdt.content) {
+          if ((c as { type?: string }).type === "paragraph") {
+            content.push(c as Paragraph);
+          } else if ((c as { type?: string }).type === "table") {
+            content.push(c as Table);
+          }
+        }
+      }
     }
   }
 
@@ -1493,37 +1557,64 @@ function parseNotesXml(
   elementName: string,
   ctx: ReaderContext
 ): { id: number; type?: NoteType; content: Paragraph[] }[] {
-  const doc = parseXml(xmlStr);
-  const root = doc.root;
-  const notes: { id: number; type?: NoteType; content: Paragraph[] }[] = [];
+  // Each note part is self-contained. Save and reset the field state so an
+  // unterminated complex field in the document body cannot bleed into a
+  // footnote/endnote and swallow its runs.
+  const savedField = ctx.field;
+  ctx.field = createFieldState();
+  try {
+    const doc = parseXml(xmlStr);
+    const root = doc.root;
+    const notes: { id: number; type?: NoteType; content: Paragraph[] }[] = [];
 
-  for (const noteEl of findChildrenNs(root, elementName)) {
-    const id = attrInt(noteEl, "id");
-    const type = attrVal(noteEl, "type");
-    // Skip auto-generated separator entries (default IDs -1 and 0)
-    // Real separators/continuationSeparators are regenerated by the writer.
-    if (type === "separator" || type === "continuationSeparator") {
-      continue;
-    }
-    if (id === undefined) {
-      continue;
-    }
-
-    const content: Paragraph[] = [];
-    for (const child of noteEl.children) {
-      if (child.type === "element" && child.name.replace(/^w:/, "") === "p") {
-        content.push(parseParagraph(child, ctx));
+    for (const noteEl of findChildrenNs(root, elementName)) {
+      const id = attrInt(noteEl, "id");
+      const type = attrVal(noteEl, "type");
+      // Skip auto-generated separator entries (default IDs -1 and 0)
+      // Real separators/continuationSeparators are regenerated by the writer.
+      if (type === "separator" || type === "continuationSeparator") {
+        continue;
       }
+      if (id === undefined) {
+        continue;
+      }
+
+      const content: Paragraph[] = [];
+      for (const child of noteEl.children) {
+        if (child.type !== "element") {
+          continue;
+        }
+        const ln = child.name.replace(/^w:/, "");
+        if (ln === "p") {
+          content.push(parseParagraph(child, ctx));
+        } else if (ln === "sdt") {
+          // SDT inside a footnote/endnote: the model's content type is
+          // `Paragraph[]`, so flatten the SDT's inner paragraphs (and their
+          // descendants reachable as paragraphs). SDT-level metadata is
+          // dropped here on round-trip — better than losing the visible
+          // text completely.
+          const sdt = parseSdt(child, ctx);
+          if (sdt && sdt.type === "sdt") {
+            for (const c of sdt.content) {
+              if ((c as { type?: string }).type === "paragraph") {
+                content.push(c as Paragraph);
+              }
+            }
+          }
+        }
+      }
+
+      const note: { id: number; type?: NoteType; content: Paragraph[] } = { id, content };
+      if (type === "continuationNotice" || type === "normal") {
+        note.type = type;
+      }
+      notes.push(note);
     }
 
-    const note: { id: number; type?: NoteType; content: Paragraph[] } = { id, content };
-    if (type === "continuationNotice" || type === "normal") {
-      note.type = type;
-    }
-    notes.push(note);
+    return notes;
+  } finally {
+    ctx.field = savedField;
   }
-
-  return notes;
 }
 
 // =============================================================================
@@ -1535,19 +1626,42 @@ function parseHeaderFooterXml(xmlStr: string, ctx: ReaderContext): HeaderFooterC
 }
 
 function parseHeaderFooterRoot(root: XmlElement, ctx: ReaderContext): HeaderFooterContent {
-  const children: (Paragraph | Table)[] = [];
-  for (const child of root.children) {
-    if (child.type !== "element") {
-      continue;
+  // Header/footer parts are self-contained: reset field state on entry so an
+  // unterminated complex field in the body does not consume header/footer runs.
+  const savedField = ctx.field;
+  ctx.field = createFieldState();
+  try {
+    const children: (Paragraph | Table)[] = [];
+    for (const child of root.children) {
+      if (child.type !== "element") {
+        continue;
+      }
+      const name = child.name.replace(/^w:/, "");
+      if (name === "p") {
+        children.push(parseParagraph(child, ctx));
+      } else if (name === "tbl") {
+        children.push(parseTable(child, ctx));
+      } else if (name === "sdt") {
+        // Flatten SDT children. HeaderFooterContent.children is
+        // `(Paragraph | Table)[]` so we hoist the inner paragraphs/tables;
+        // SDT-level metadata is dropped on round-trip but visible content
+        // is preserved (better than losing the runs entirely).
+        const sdt = parseSdt(child, ctx);
+        if (sdt && sdt.type === "sdt") {
+          for (const c of sdt.content) {
+            if ((c as { type?: string }).type === "paragraph") {
+              children.push(c as Paragraph);
+            } else if ((c as { type?: string }).type === "table") {
+              children.push(c as Table);
+            }
+          }
+        }
+      }
     }
-    const name = child.name.replace(/^w:/, "");
-    if (name === "p") {
-      children.push(parseParagraph(child, ctx));
-    } else if (name === "tbl") {
-      children.push(parseTable(child, ctx));
-    }
+    return { children };
+  } finally {
+    ctx.field = savedField;
   }
-  return { children };
 }
 
 /** Detect watermark from a header's parsed XML root element. */
@@ -1660,37 +1774,45 @@ function parseImageWatermark(shapeEl: XmlElement, imgDataEl: XmlElement): ImageW
 // =============================================================================
 
 function parseCommentsXml(xmlStr: string, ctx: ReaderContext): CommentDef[] {
-  const doc = parseXml(xmlStr);
-  const root = doc.root;
-  const comments: CommentDef[] = [];
+  // Comments are a separate part — reset the field state so a body-level
+  // unterminated field does not bleed into comment parsing.
+  const savedField = ctx.field;
+  ctx.field = createFieldState();
+  try {
+    const doc = parseXml(xmlStr);
+    const root = doc.root;
+    const comments: CommentDef[] = [];
 
-  for (const commentEl of findChildrenNs(root, "comment")) {
-    const id = attrInt(commentEl, "id");
-    const author = attrVal(commentEl, "author");
-    if (id === undefined || !author) {
-      continue;
-    }
-
-    const content: Paragraph[] = [];
-    for (const child of commentEl.children) {
-      if (child.type === "element" && child.name.replace(/^w:/, "") === "p") {
-        content.push(parseParagraph(child, ctx));
+    for (const commentEl of findChildrenNs(root, "comment")) {
+      const id = attrInt(commentEl, "id");
+      const author = attrVal(commentEl, "author");
+      if (id === undefined || !author) {
+        continue;
       }
+
+      const content: Paragraph[] = [];
+      for (const child of commentEl.children) {
+        if (child.type === "element" && child.name.replace(/^w:/, "") === "p") {
+          content.push(parseParagraph(child, ctx));
+        }
+      }
+
+      const comment: Mutable<CommentDef> = { id, author, content };
+      const date = attrVal(commentEl, "date");
+      if (date) {
+        comment.date = date;
+      }
+      const initials = attrVal(commentEl, "initials");
+      if (initials) {
+        comment.initials = initials;
+      }
+      comments.push(comment);
     }
 
-    const comment: Mutable<CommentDef> = { id, author, content };
-    const date = attrVal(commentEl, "date");
-    if (date) {
-      comment.date = date;
-    }
-    const initials = attrVal(commentEl, "initials");
-    if (initials) {
-      comment.initials = initials;
-    }
-    comments.push(comment);
+    return comments;
+  } finally {
+    ctx.field = savedField;
   }
-
-  return comments;
 }
 
 /** Parse word/commentsExtended.xml — map paraId → { done, parentId }. */
@@ -1782,8 +1904,13 @@ function extractFloatingContent(
       if (graphicDataEl) {
         const picEl = findChild(graphicDataEl, "pic:pic") ?? findChildNs(graphicDataEl, "pic");
         if (!picEl) {
-          // Not an image — opaque inline drawing
-          // Find the w:drawing parent
+          // Not an image — opaque inline drawing. We deliberately keep this
+          // path even though parseDrawingContent also emits an `opaqueRun`
+          // for the same drawing: the body-level pass below removes the
+          // duplicate opaqueRun once we know this OpaqueDrawing has been
+          // captured. Inside table cells / headers / footers / SDTs (where
+          // this extractor is not invoked) the opaqueRun is the only
+          // representation, so the drawing still survives a round-trip.
           const rids = new Set<string>();
           collectRIds(child, rids);
           // Serialize the wp:inline element wrapped in w:drawing
@@ -1826,7 +1953,7 @@ function isEmptyParagraph(para: Paragraph): boolean {
     return true;
   }
   for (const child of para.children) {
-    if (!("content" in child) || !Array.isArray((child as Run).content)) {
+    if (!isRun(child)) {
       // Anything with a `type` (hyperlink, bookmark, insertedRun, etc.) is
       // considered meaningful content.
       return false;
@@ -1845,6 +1972,39 @@ function isEmptyParagraph(para: Paragraph): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Remove `opaqueRun` entries that wrap a non-picture `<wp:inline>` drawing.
+ *
+ * These are emitted by parseDrawingContent so the drawing survives a
+ * round-trip when its containing paragraph lives inside a table cell, header,
+ * footer or SDT (places where the body-level extractor never runs). At the
+ * body level, however, the same drawings are also captured as `OpaqueDrawing`
+ * entries by extractFloatingContent — keeping both would duplicate the
+ * drawing in the produced document. Mutates `para.children`/run content in
+ * place.
+ */
+function stripInlineDrawingOpaqueRuns(para: Paragraph): void {
+  for (const child of para.children) {
+    if (!isRun(child)) {
+      continue;
+    }
+    const run = child as Mutable<Run> & { content: RunContent[] };
+    let i = 0;
+    while (i < run.content.length) {
+      const c = run.content[i];
+      if (
+        c.type === "opaqueRun" &&
+        c.rawXml.includes("<wp:inline") &&
+        !c.rawXml.includes("<pic:pic")
+      ) {
+        run.content.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
+  }
 }
 
 function parseDocumentXml(
@@ -1910,6 +2070,19 @@ function parseDocumentXml(
         const pDrawingShapes: DrawingShape[] = [];
         const pOpaqueDrawings: OpaqueDrawing[] = [];
         extractFloatingContent(child, pFloatingImages, pDrawingShapes, pOpaqueDrawings, ctx);
+
+        // parseDrawingContent (called from parseRunContent) already preserved
+        // every non-picture inline drawing as an `opaqueRun` so the drawing
+        // survives a round-trip even inside cells/headers/footers/SDTs where
+        // this body-level extractor is not invoked. At the body level
+        // extractFloatingContent has now also captured those drawings as
+        // `OpaqueDrawing` entries — that is the form chart-parser is wired
+        // to look for when promoting them to `ChartContent`. To avoid
+        // duplicate output we strip any opaqueRun whose XML embeds a
+        // <wp:inline> drawing from the paragraph here.
+        if (pOpaqueDrawings.length > 0) {
+          stripInlineDrawingOpaqueRuns(para);
+        }
 
         // If the paragraph is otherwise empty AND we did extract anchored
         // content out of it, treat the paragraph as a synthetic carrier for
@@ -2033,7 +2206,10 @@ export async function readDocx(
     buffer[7] === 0xe1
   ) {
     if (options?.password != null) {
-      const decryptedZip = await decryptDocx(buffer, options.password);
+      // Pass the security policy's package-size cap so a hostile CFB cannot
+      // claim a multi-GiB decrypted size and force a huge buffer allocation
+      // before the unzip stage even runs.
+      const decryptedZip = await decryptDocx(buffer, options.password, policy.maxPackageSize);
       return readDocx(decryptedZip, options);
     }
     throw new DocxEncryptedError();
@@ -2051,13 +2227,6 @@ export async function readDocx(
 }
 
 async function _readDocxInner(
-  buffer: Uint8Array,
-  policy: Required<WordSecurityPolicy>
-): Promise<DocxDocument> {
-  return _readDocxInnerBody(buffer, policy);
-}
-
-async function _readDocxInnerBody(
   buffer: Uint8Array,
   policy: Required<WordSecurityPolicy>
 ): Promise<DocxDocument> {
@@ -2101,6 +2270,18 @@ async function _readDocxInnerBody(
 
   const decoder = utf8Decoder;
   const consumedPaths = new Set<string>(["[Content_Types].xml"]);
+
+  // Best-effort parse for non-critical parts (settings, numbering, styles,
+  // theme, fontTable, comments, charts, headers, footers, notes, …). A
+  // malformed auxiliary part should not prevent us from returning the main
+  // document body. Only parse failures on document.xml itself are fatal.
+  const tryParse = <T>(fn: () => T): T | undefined => {
+    try {
+      return fn();
+    } catch {
+      return undefined;
+    }
+  };
 
   // Parse [Content_Types].xml for accurate opaque part content types
   const contentTypesXml = entries.get("[Content_Types].xml");
@@ -2161,7 +2342,7 @@ async function _readDocxInnerBody(
   const _relMap = new Map(docRels.map(r => [r.id, r]));
 
   // Create reader context for this parse session (replaces module-level _session)
-  const ctx = createReaderContext();
+  const ctx = createReaderContext(policy);
   ctx.relMap = _relMap;
 
   // Parse document.xml (required)
@@ -2175,24 +2356,57 @@ async function _readDocxInnerBody(
   const stylesPath =
     resolveRelTarget(docRels, RelType.Styles, documentPartPath) ?? "word/styles.xml";
   const stylesXml = getText(stylesPath);
-  const stylesResult = stylesXml ? parseStyles(stylesXml) : undefined;
+  const stylesResult = stylesXml ? tryParse(() => parseStyles(stylesXml)) : undefined;
 
   // Parse numbering
   const numberingPath =
     resolveRelTarget(docRels, RelType.Numbering, documentPartPath) ?? "word/numbering.xml";
   const numberingXml = getText(numberingPath);
-  const numberingResult = numberingXml ? parseNumberingXml(numberingXml) : undefined;
+  const numberingResult = numberingXml
+    ? tryParse(() => parseNumberingXml(numberingXml))
+    : undefined;
 
-  // Parse footnotes/endnotes
+  // Parse footnotes/endnotes — swap ctx.relMap to the notes part's own
+  // .rels (footnotes.xml.rels / endnotes.xml.rels) so hyperlinks and images
+  // inside notes resolve against the correct relationship map. Without this,
+  // any rId used in a footnote silently resolves to undefined.
   const footnotesPath =
     resolveRelTarget(docRels, RelType.Footnotes, documentPartPath) ?? "word/footnotes.xml";
   const footnotesXml = getText(footnotesPath);
-  const footnotes = footnotesXml ? parseNotesXml(footnotesXml, "footnote", ctx) : undefined;
+  let footnotes: ReturnType<typeof parseNotesXml> | undefined;
+  if (footnotesXml) {
+    const footnotesRelsPath = getPartRelsPath(footnotesPath);
+    const footnotesRelsXml = getText(footnotesRelsPath);
+    const savedRelMap = ctx.relMap;
+    if (footnotesRelsXml) {
+      const footnotesRels = parseRelationships(footnotesRelsXml);
+      ctx.relMap = new Map(footnotesRels.map(r => [r.id, r]));
+      consumedPaths.add(footnotesRelsPath);
+    } else {
+      ctx.relMap = new Map();
+    }
+    footnotes = tryParse(() => parseNotesXml(footnotesXml, "footnote", ctx));
+    ctx.relMap = savedRelMap;
+  }
 
   const endnotesPath =
     resolveRelTarget(docRels, RelType.Endnotes, documentPartPath) ?? "word/endnotes.xml";
   const endnotesXml = getText(endnotesPath);
-  const endnotes = endnotesXml ? parseNotesXml(endnotesXml, "endnote", ctx) : undefined;
+  let endnotes: ReturnType<typeof parseNotesXml> | undefined;
+  if (endnotesXml) {
+    const endnotesRelsPath = getPartRelsPath(endnotesPath);
+    const endnotesRelsXml = getText(endnotesRelsPath);
+    const savedRelMap = ctx.relMap;
+    if (endnotesRelsXml) {
+      const endnotesRels = parseRelationships(endnotesRelsXml);
+      ctx.relMap = new Map(endnotesRels.map(r => [r.id, r]));
+      consumedPaths.add(endnotesRelsPath);
+    } else {
+      ctx.relMap = new Map();
+    }
+    endnotes = tryParse(() => parseNotesXml(endnotesXml, "endnote", ctx));
+    ctx.relMap = savedRelMap;
+  }
 
   // Parse headers/footers + detect watermarks
   const headers = new Map<string, HeaderDef>();
@@ -2217,11 +2431,15 @@ async function _readDocxInnerBody(
         } else {
           ctx.relMap = new Map();
         }
-        // Parse XML once, re-use for both header content and watermark detection
-        const headerRoot = parseXml(xml).root;
-        headers.set(rel.id, { content: parseHeaderFooterRoot(headerRoot, ctx), rId: rel.id });
-        if (!watermark) {
-          watermark = detectWatermarkFromRoot(headerRoot);
+        try {
+          // Parse XML once, re-use for both header content and watermark detection
+          const headerRoot = parseXml(xml).root;
+          headers.set(rel.id, { content: parseHeaderFooterRoot(headerRoot, ctx), rId: rel.id });
+          if (!watermark) {
+            watermark = detectWatermarkFromRoot(headerRoot);
+          }
+        } catch {
+          // Skip a malformed header; preserve other headers and the document.
         }
         ctx.relMap = savedRelMap;
       }
@@ -2242,7 +2460,11 @@ async function _readDocxInnerBody(
         } else {
           ctx.relMap = new Map();
         }
-        footers.set(rel.id, { content: parseHeaderFooterXml(xml, ctx), rId: rel.id });
+        try {
+          footers.set(rel.id, { content: parseHeaderFooterXml(xml, ctx), rId: rel.id });
+        } catch {
+          // Skip a malformed footer; preserve other footers and the document.
+        }
         ctx.relMap = savedRelMap;
       }
     }
@@ -2252,19 +2474,19 @@ async function _readDocxInnerBody(
   const settingsPath =
     resolveRelTarget(docRels, RelType.Settings, documentPartPath) ?? "word/settings.xml";
   const settingsXml = getText(settingsPath);
-  const settings = settingsXml ? parseSettingsXml(settingsXml) : undefined;
+  const settings = settingsXml ? tryParse(() => parseSettingsXml(settingsXml)) : undefined;
 
   // Parse web settings
   const webSettingsPath =
     resolveRelTarget(docRels, RelType.WebSettings, documentPartPath) ?? "word/webSettings.xml";
   const webSettingsXml = getText(webSettingsPath);
-  const webSettings = webSettingsXml ? parseWebSettings(webSettingsXml) : undefined;
+  const webSettings = webSettingsXml ? tryParse(() => parseWebSettings(webSettingsXml)) : undefined;
 
   // Parse people
   const peoplePath =
     resolveRelTarget(docRels, RelType.People, documentPartPath) ?? "word/people.xml";
   const peopleXml = getText(peoplePath);
-  const people = peopleXml ? parsePeople(peopleXml) : undefined;
+  const people = peopleXml ? tryParse(() => parsePeople(peopleXml)) : undefined;
 
   // Parse thumbnail (from package rels — reuse already-parsed rels)
   let thumbnail: DocxDocument["thumbnail"];
@@ -2303,7 +2525,7 @@ async function _readDocxInnerBody(
   const fontTablePath =
     resolveRelTarget(docRels, RelType.FontTable, documentPartPath) ?? "word/fontTable.xml";
   const fontTableXml = getText(fontTablePath);
-  const fonts = fontTableXml ? parseFontTableXml(fontTableXml) : undefined;
+  const fonts = fontTableXml ? tryParse(() => parseFontTableXml(fontTableXml)) : undefined;
 
   // Parse embedded fonts
   let embeddedFonts: EmbeddedFont[] | undefined;
@@ -2414,46 +2636,66 @@ async function _readDocxInnerBody(
 
   // Parse core properties
   const corePropsXml = getText("docProps/core.xml");
-  const coreProperties = corePropsXml ? parseCoreProps(corePropsXml) : undefined;
+  const coreProperties = corePropsXml ? tryParse(() => parseCoreProps(corePropsXml)) : undefined;
 
   // Parse app properties
   const appPropsXml = getText("docProps/app.xml");
-  const appProperties = appPropsXml ? parseAppProps(appPropsXml) : undefined;
+  const appProperties = appPropsXml ? tryParse(() => parseAppProps(appPropsXml)) : undefined;
 
-  // Parse comments
+  // Parse comments — switch ctx.relMap to comments.xml.rels so any
+  // hyperlinks/images referenced from inside comment paragraphs resolve
+  // against the comment part's own relationships rather than document.xml.rels.
   const commentsXml = getText("word/comments.xml");
-  let comments = commentsXml ? parseCommentsXml(commentsXml, ctx) : undefined;
+  let comments: CommentDef[] | undefined;
+  if (commentsXml) {
+    const commentsRelsPath = "word/_rels/comments.xml.rels";
+    const commentsRelsXml = getText(commentsRelsPath);
+    const savedRelMap = ctx.relMap;
+    if (commentsRelsXml) {
+      const commentsRels = parseRelationships(commentsRelsXml);
+      ctx.relMap = new Map(commentsRels.map(r => [r.id, r]));
+      consumedPaths.add(commentsRelsPath);
+    } else {
+      ctx.relMap = new Map();
+    }
+    comments = tryParse(() => parseCommentsXml(commentsXml, ctx));
+    ctx.relMap = savedRelMap;
+  }
 
   // Merge in commentsExtended.xml data if present
   const commentsExtXml = getText("word/commentsExtended.xml");
   if (commentsExtXml && comments) {
-    const extMap = parseCommentsExtendedXml(commentsExtXml);
-    comments = comments.map(c => {
-      const firstPara = c.content[0];
-      if (!firstPara?.paraId) {
-        return c;
-      }
-      const ext = extMap.get(firstPara.paraId);
-      if (!ext) {
-        return c;
-      }
-      return {
-        ...c,
-        ...(ext.done !== undefined ? { done: ext.done } : {}),
-        ...(ext.parentId !== undefined ? { parentId: ext.parentId } : {})
-      };
-    });
+    const extMap = tryParse(() => parseCommentsExtendedXml(commentsExtXml));
+    if (extMap) {
+      comments = comments.map(c => {
+        const firstPara = c.content[0];
+        if (!firstPara?.paraId) {
+          return c;
+        }
+        const ext = extMap.get(firstPara.paraId);
+        if (!ext) {
+          return c;
+        }
+        return {
+          ...c,
+          ...(ext.done !== undefined ? { done: ext.done } : {}),
+          ...(ext.parentId !== undefined ? { parentId: ext.parentId } : {})
+        };
+      });
+    }
   }
 
   // Parse custom properties
   const customPropsXml = getText("docProps/custom.xml");
-  const customProperties = customPropsXml ? parseCustomPropsXml(customPropsXml) : undefined;
+  const customProperties = customPropsXml
+    ? tryParse(() => parseCustomPropsXml(customPropsXml))
+    : undefined;
 
   // Parse theme
   const themePath =
     resolveRelTarget(docRels, RelType.Theme, documentPartPath) ?? "word/theme/theme1.xml";
   const themeXml = getText(themePath);
-  const theme = themeXml ? parseThemeXml(themeXml) : undefined;
+  const theme = themeXml ? tryParse(() => parseThemeXml(themeXml)) : undefined;
 
   // Collect images from main document relationships
   const images: ImageDef[] = [];
@@ -2541,7 +2783,7 @@ async function _readDocxInnerBody(
       consumedPaths.add(chartPath);
       const chartXml = getText(chartPath);
       if (chartXml) {
-        const chart = parseChartXml(chartXml);
+        const chart = tryParse(() => parseChartXml(chartXml));
         if (chart) {
           chartRIdToChart.set(rel.id, chart);
         }
@@ -2562,7 +2804,7 @@ async function _readDocxInnerBody(
       consumedPaths.add(chartExPath);
       const chartExXml = getText(chartExPath);
       if (chartExXml) {
-        const data = parseChartExXml(chartExXml);
+        const data = tryParse(() => parseChartExXml(chartExXml));
         const content: ChartExContent = {
           type: "chartEx",
           chartExXml,
@@ -2593,13 +2835,19 @@ async function _readDocxInnerBody(
     // "document" is the default — only set if non-standard
   }
 
-  // Extract VBA project binary for .docm/.dotm round-trip
+  // Extract VBA project binary for .docm/.dotm round-trip.
+  // Honour `preserveVbaProject`: if disabled, mark the relationship's
+  // target consumed (so opaqueParts won't retain it either) but leave
+  // `vbaProject` undefined so the produced model does not surface macro
+  // payloads to downstream consumers.
   let vbaProject: Uint8Array | undefined;
   for (const rel of docRels) {
     if (rel.type === RelType.VbaProject) {
       const vbaPath = resolvePartPath(documentPartPath, rel.target);
       consumedPaths.add(vbaPath);
-      vbaProject = entries.get(vbaPath);
+      if (policy.preserveVbaProject) {
+        vbaProject = entries.get(vbaPath);
+      }
       break;
     }
   }
@@ -2609,6 +2857,12 @@ async function _readDocxInnerBody(
   // body item with its data here AND mark the target path as consumed so the
   // opaqueParts collector below does not retain a duplicate copy that would
   // later be written back to the ZIP twice.
+  //
+  // Honour `preserveAltChunks`: when disabled, we still consume the target
+  // path (so it doesn't leak into opaqueParts) but skip data attachment
+  // and remove altChunk entries from the body before the document is
+  // returned. Embedded HTML/RTF in altChunks is a common attack vector
+  // for downstream renderers, so strict mode strips them entirely.
   for (const item of body) {
     if (item.type === "altChunk" && item.rId) {
       const rel = _relMap.get(item.rId);
@@ -2617,20 +2871,30 @@ async function _readDocxInnerBody(
         const targetData = entries.get(target);
         if (targetData) {
           consumedPaths.add(target);
-          const fileName = getFileName(target);
-          const mItem = item as Mutable<AltChunk>;
-          mItem.data = targetData;
-          mItem.fileName = fileName;
-          // Infer content type from extension
-          const ext = fileName ? getFileExt(fileName) : "";
-          if (ext === "html" || ext === "htm") {
-            mItem.contentType = "text/html";
-          } else if (ext === "rtf") {
-            mItem.contentType = "text/rtf";
-          } else if (ext === "txt") {
-            mItem.contentType = "text/plain";
+          if (policy.preserveAltChunks) {
+            const fileName = getFileName(target);
+            const mItem = item as Mutable<AltChunk>;
+            mItem.data = targetData;
+            mItem.fileName = fileName;
+            // Infer content type from extension
+            const ext = fileName ? getFileExt(fileName) : "";
+            if (ext === "html" || ext === "htm") {
+              mItem.contentType = "text/html";
+            } else if (ext === "rtf") {
+              mItem.contentType = "text/rtf";
+            } else if (ext === "txt") {
+              mItem.contentType = "text/plain";
+            }
           }
         }
+      }
+    }
+  }
+  // Remove altChunk body entries entirely when not preserving them.
+  if (!policy.preserveAltChunks) {
+    for (let i = body.length - 1; i >= 0; i--) {
+      if (body[i]!.type === "altChunk") {
+        body.splice(i, 1);
       }
     }
   }
@@ -2652,7 +2916,9 @@ async function _readDocxInnerBody(
         id: r.id,
         type: r.type,
         target: r.target,
-        targetMode: r.targetMode === "External" ? "External" : undefined
+        // Preserve the source string verbatim ("External", "Internal", or
+        // any non-standard value) so opaque round-trip is byte-faithful.
+        targetMode: r.targetMode
       }));
     }
     // Resolve content type from [Content_Types].xml (override > default by extension)

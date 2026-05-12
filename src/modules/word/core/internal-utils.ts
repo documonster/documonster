@@ -6,6 +6,8 @@
  * implementations of base64, UUID, UTF-16LE encoding, and XML helpers.
  */
 
+import { DocxError } from "../errors";
+
 // =============================================================================
 // Shared TextEncoder / TextDecoder singletons
 // =============================================================================
@@ -71,7 +73,7 @@ export function base64ToBytes(s: string): Uint8Array {
  * Generate a random UUID v4 string in the form "XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX".
  * Uses `crypto.getRandomValues` for cryptographic randomness.
  */
-export function generateUuid(): string {
+function generateUuid(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
 
@@ -109,87 +111,20 @@ export function stringToUtf16LE(str: string): Uint8Array {
   return buf;
 }
 
-/**
- * Decode UTF-16LE bytes to a string.
- */
-export function utf16LEToString(bytes: Uint8Array): string {
-  let result = "";
-  for (let i = 0; i + 1 < bytes.length; i += 2) {
-    result += String.fromCharCode(bytes[i] | (bytes[i + 1] << 8));
-  }
-  return result;
-}
-
-// =============================================================================
-// XML Utilities
-// =============================================================================
-
-/**
- * Build an XML attributes object from an array of [name, value] entries,
- * omitting entries whose value is `undefined` or `false`. Numeric and boolean
- * values are stringified: `number → String(n)`, `boolean → "1"`.
- *
- * Reduces repetitive `if (x !== undefined) attrs["w:x"] = String(x)` patterns.
- */
-export function buildAttrs(
-  entries: ReadonlyArray<[string, string | number | boolean | undefined | null]>
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of entries) {
-    if (v === undefined || v === null || v === false) {
-      continue;
-    }
-    out[k] = typeof v === "boolean" ? "1" : String(v);
-  }
-  return out;
-}
-
-/**
- * Escape XML special characters in a string.
- * Prevents XML injection when building XML via string concatenation.
- */
-export function escapeXml(str: string): string {
-  let result = "";
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    switch (ch) {
-      case "&":
-        result += "&amp;";
-        break;
-      case "<":
-        result += "&lt;";
-        break;
-      case ">":
-        result += "&gt;";
-        break;
-      case '"':
-        result += "&quot;";
-        break;
-      case "'":
-        result += "&apos;";
-        break;
-      default:
-        result += ch;
-        break;
-    }
-  }
-  return result;
-}
-
 // =============================================================================
 // Random Bytes
 // =============================================================================
 
 /**
  * Generate cryptographically secure random bytes.
- * Throws if crypto.getRandomValues is unavailable.
+ * Throws `DocxError` if `crypto.getRandomValues` is unavailable on the host.
  */
 export function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   if (typeof globalThis.crypto !== "undefined" && globalThis.crypto.getRandomValues) {
     globalThis.crypto.getRandomValues(bytes);
   } else {
-    throw new Error(
+    throw new DocxError(
       "crypto.getRandomValues is required. " +
         "This environment does not provide a cryptographically secure random number generator."
     );
@@ -279,4 +214,41 @@ export function sanitizeUrl(url: string | undefined | null): string | undefined 
     return cleaned;
   }
   return undefined;
+}
+
+/**
+ * Strip path-traversal segments and other unsafe characters from a
+ * caller-supplied media file name so it can be used as a leaf entry
+ * inside an OPC ZIP package without enabling zipslip.
+ *
+ * The previous behaviour was to forward `image.fileName` /
+ * `font.fileName` straight into `archive.add`, which let a hostile DOCX
+ * round-tripped through `readDocx` write entries like
+ * `word/media/../../etc/passwd.png` into the output package — a real
+ * attack vector when the file is later unpacked by a third-party tool.
+ *
+ * Returns a single safe leaf name. Falls back to `fallback` (default
+ * `"file.bin"`) when the cleaned name would be empty.
+ */
+export function sanitizeMediaFileName(raw: string | undefined, fallback = "file.bin"): string {
+  if (!raw) {
+    return fallback;
+  }
+  // Drop directory components — only the leaf name should ever reach
+  // the ZIP path layer.
+  const lastSep = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+  let leaf = lastSep >= 0 ? raw.substring(lastSep + 1) : raw;
+  // Strip leading dots so attribute-bearing names ("..png", ".htaccess",
+  // ".." itself) can't smuggle traversal back in via OS filesystem
+  // semantics.
+  while (leaf.startsWith(".")) {
+    leaf = leaf.substring(1);
+  }
+  // Whitelist alnum, dash, underscore, dot. Replace everything else
+  // with underscore. Empty result triggers fallback.
+  leaf = leaf.replace(/[^A-Za-z0-9._-]/g, "_");
+  // Collapse runs of dots so "foo..bin" can't be reinterpreted as
+  // traversal by a permissive consumer.
+  leaf = leaf.replace(/\.{2,}/g, ".");
+  return leaf || fallback;
 }

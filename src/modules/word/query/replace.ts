@@ -23,8 +23,9 @@
  *   The returned count equals the number of matches actually replaced.
  */
 
+import { isHyperlink, isRun } from "../core/text-utils";
 import { walkDocument } from "../core/walker";
-import type { DocxDocument, Paragraph, Run } from "../types";
+import type { DocxDocument, Paragraph, ParagraphChild, Run, StructuredDocumentTag } from "../types";
 
 // =============================================================================
 // Public API
@@ -38,7 +39,9 @@ import type { DocxDocument, Paragraph, Run } from "../types";
  * runs; the formatting of each run that survives the replacement is preserved.
  *
  * Traverses body, headers, footers, footnotes, endnotes, comments, tables, and
- * SDTs using the unified document walker.
+ * SDTs using the unified document walker. SDTs may carry inline runs without
+ * an enclosing paragraph (content controls wrapping a single Run); those
+ * inline runs are treated as a single virtual paragraph for replacement.
  *
  * @param doc - The document model to modify (mutated in place).
  * @param search - String or RegExp to find. Both are treated as global
@@ -62,6 +65,36 @@ export function replaceText(
       enterParagraph(para: Paragraph) {
         totalCount += replaceInParagraph(para, search, replacement);
         return "skip"; // We handle children ourselves
+      },
+      enterSdt(sdt: StructuredDocumentTag) {
+        // Inline SDTs may store Run-only content directly. The enclosing
+        // walker visits them, but the paragraph-oriented replaceInParagraph
+        // handler above never fires because there's no paragraph wrapper.
+        // Pull the inline runs out and treat them as a synthetic paragraph
+        // so replacement semantics match: a match spanning multiple runs
+        // inside one inline SDT still gets stitched correctly.
+        const inlineRuns: Run[] = [];
+        for (const c of sdt.content) {
+          if (
+            c &&
+            typeof c === "object" &&
+            !("type" in c) &&
+            "content" in c &&
+            Array.isArray((c as { content?: unknown }).content)
+          ) {
+            inlineRuns.push(c as Run);
+          }
+        }
+        if (inlineRuns.length === 0) {
+          return; // Paragraph/Table children are handled by the walker
+        }
+        const synthetic: Paragraph = {
+          type: "paragraph",
+          children: inlineRuns as ParagraphChild[]
+        };
+        totalCount += replaceInParagraph(synthetic, search, replacement);
+        // Don't `return "skip"` — the walker still needs to descend into
+        // any Paragraph / Table children inside the same SDT.
       }
     },
     {
@@ -97,35 +130,42 @@ interface MatchSpan {
 
 function replaceInParagraph(para: Paragraph, search: string | RegExp, replacement: string): number {
   // 1) Build segment table from text-bearing run-content nodes (in order).
-  // Hyperlinks contain runs and must be traversed too — they're a common
-  // paragraph child and the user expectation is "replace text everywhere".
+  //
+  // The visit walks anything that contributes visible text:
+  //   - Run (the obvious case)
+  //   - Hyperlink (children are runs too)
+  //   - InsertedRun / MovedToRun: these wrap a Run that DOES surface in the
+  //     rendered document. searchText / extractParagraphText already treat
+  //     them as visible, so replaceText must descend into them — otherwise
+  //     a search hit in a tracked-insert is not replaced and counts skew.
+  //   - DeletedRun / MovedFromRun: do NOT contribute visible text by
+  //     convention (they are pending deletions / moves), so they're skipped.
   const segments: TextSegment[] = [];
   let fullText = "";
-  const visit = (children: readonly unknown[]): void => {
+  const visit = (children: readonly ParagraphChild[]): void => {
     for (const child of children) {
-      // Hyperlink: recurse into its children
+      // Hyperlink: recurse into its children.
+      if (isHyperlink(child)) {
+        visit(child.children as readonly ParagraphChild[]);
+        continue;
+      }
+      // Track-change wrappers around a single run: descend through the
+      // wrapper into the inner run so visible text is still mutated.
       if (
-        child &&
-        typeof child === "object" &&
-        "type" in (child as Record<string, unknown>) &&
-        (child as { type: unknown }).type === "hyperlink" &&
-        Array.isArray((child as { children?: unknown[] }).children)
+        "type" in child &&
+        ((child as { type?: string }).type === "insertedRun" ||
+          (child as { type?: string }).type === "movedToRun")
       ) {
-        visit((child as { children: unknown[] }).children);
+        const inner = (child as { run?: ParagraphChild }).run;
+        if (inner) {
+          visit([inner]);
+        }
         continue;
       }
-      if (
-        !child ||
-        typeof child !== "object" ||
-        !("content" in (child as Record<string, unknown>))
-      ) {
+      if (!isRun(child)) {
         continue;
       }
-      const runLike = child as Run;
-      if (!Array.isArray(runLike.content)) {
-        continue;
-      }
-      for (const c of runLike.content) {
+      for (const c of child.content) {
         if (c.type !== "text") {
           continue;
         }

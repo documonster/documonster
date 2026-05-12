@@ -24,7 +24,16 @@ import type {
 
 /** Result of a text search in a document. */
 export interface SearchResult {
-  /** Paragraph index in body. */
+  /**
+   * The paragraph's visit order across the entire document, counting
+   * paragraphs reachable from the body (including those nested in tables,
+   * SDTs, text boxes, headers, footers, footnotes, endnotes and TOC
+   * caches) in walk order.
+   *
+   * This is **not** an index into `doc.body`: nested paragraphs are
+   * counted too. Use it as a stable ordinal for ordering results, not
+   * for direct array access.
+   */
   readonly paragraphIndex: number;
   /** The matched text. */
   readonly match: string;

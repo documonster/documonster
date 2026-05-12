@@ -257,4 +257,139 @@ describe("ODT module", () => {
       expect(writeOdt.length).toBe(1);
     });
   });
+
+  describe("hyperlink URL sanitisation", () => {
+    it("strips javascript: hrefs from <text:a> elements when reading ODT", async () => {
+      const doc = makeDoc([
+        {
+          type: "paragraph",
+          children: [
+            { type: "hyperlink", url: "https://safe.example", children: [makeRun("safe")] }
+          ]
+        } as Paragraph
+      ]);
+
+      // Round-trip through writer/reader to confirm safe URL survives.
+      const odtBytes = await writeOdt(doc);
+      const restored = await readOdt(odtBytes);
+      let foundSafe = false;
+      for (const block of restored.body) {
+        if (block.type === "paragraph") {
+          for (const c of (block as Paragraph).children) {
+            if ((c as { type?: string }).type === "hyperlink") {
+              const url = (c as { url?: string }).url ?? "";
+              if (url.includes("safe.example")) {
+                foundSafe = true;
+              }
+            }
+          }
+        }
+      }
+      expect(foundSafe).toBe(true);
+    });
+
+    it("drops the hyperlink wrapper when given a javascript: URL on write", async () => {
+      const doc = makeDoc([
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "hyperlink",
+              url: "javascript:alert(1)",
+              children: [makeRun("clickme")]
+            }
+          ]
+        } as Paragraph
+      ]);
+
+      const odtBytes = await writeOdt(doc);
+      // Round-trip via readOdt — if writer emitted the dangerous URL into
+      // xlink:href, readOdt would either propagate it or drop it. With
+      // sanitisation on the write path the link wrapper is gone but the
+      // inner text "clickme" survives.
+      const restored = await readOdt(odtBytes);
+      let sawDangerousLink = false;
+      let sawText = false;
+      for (const block of restored.body) {
+        if (block.type === "paragraph") {
+          for (const c of (block as Paragraph).children) {
+            if ((c as { type?: string }).type === "hyperlink") {
+              const url = (c as { url?: string }).url ?? "";
+              if (/javascript:/i.test(url)) {
+                sawDangerousLink = true;
+              }
+            } else if ("content" in (c as object)) {
+              for (const rc of (c as Run).content) {
+                if (rc.type === "text" && rc.text.includes("clickme")) {
+                  sawText = true;
+                }
+              }
+            }
+          }
+        }
+      }
+      expect(sawDangerousLink).toBe(false);
+      expect(sawText).toBe(true);
+    });
+  });
+
+  describe("image path sanitisation", () => {
+    it("rejects path traversal in image rId / fileName when writing ODT", async () => {
+      // Images carry attacker-controlled rId / fileName when they come
+      // from a round-tripped untrusted DOCX. The writer must coerce them
+      // to safe Pictures/<leaf> entries — both in the archive and in
+      // every xlink:href emitted into content.xml.
+      const doc: DocxDocument = {
+        body: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                content: [
+                  {
+                    type: "image",
+                    rId: "../../etc/passwd",
+                    width: 1000,
+                    height: 1000,
+                    name: "evil"
+                  }
+                ]
+              } as Run
+            ]
+          } as Paragraph
+        ],
+        images: [
+          {
+            rId: "../../etc/passwd",
+            fileName: "../../../boom.png",
+            data: new Uint8Array([1, 2, 3]),
+            mediaType: "png"
+          }
+        ]
+      } as unknown as DocxDocument;
+
+      const odtBytes = await writeOdt(doc);
+
+      // ODT is a ZIP; inspect entry names to confirm no traversal escaped.
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(odtBytes);
+      for (const path of entries.keys()) {
+        expect(path).not.toMatch(/\.\./);
+        if (path.startsWith("Pictures/")) {
+          // Leaf only — no nested directories.
+          expect(path.split("/").length).toBe(2);
+        }
+      }
+
+      // content.xml's xlink:href must point at the same safe entry that
+      // actually exists in the ZIP.
+      const decoder = new TextDecoder();
+      const contentXml = decoder.decode(entries.get("content.xml")!.data);
+      const m = contentXml.match(/xlink:href="(Pictures\/[^"]+)"/);
+      expect(m).toBeTruthy();
+      const referenced = m![1]!;
+      expect(referenced).not.toMatch(/\.\./);
+      expect(entries.has(referenced)).toBe(true);
+    });
+  });
 });

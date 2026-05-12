@@ -168,4 +168,43 @@ describe("resolveDataBindings", () => {
     const run = para.children[0] as Run;
     expect(run.content[0]).toEqual({ type: "text", text: "XYZ" });
   });
+
+  it("decodes XML entities in resolved values", () => {
+    // Previously the regex evaluator stripped tags but never decoded
+    // entities, so DOCX output would carry double-encoded text.
+    const sdt = makeBindingSdt("/root/v", "{abc}");
+    const doc = createDocWithSdt(sdt);
+    const data = new Map<string, string>([
+      ["abc", "<root><v>foo &amp; bar &lt;baz&gt;</v></root>"]
+    ]);
+    const result = resolveDataBindings(doc, data);
+    const newSdt = result.body[0] as StructuredDocumentTag;
+    const para = newSdt.content[0] as Paragraph;
+    const run = para.children[0] as Run;
+    expect((run.content[0] as { text: string }).text).toBe("foo & bar <baz>");
+  });
+
+  it("handles CDATA sections in customXml", () => {
+    const sdt = makeBindingSdt("/root/v", "{abc}");
+    const doc = createDocWithSdt(sdt);
+    const data = new Map<string, string>([
+      ["abc", "<root><v><![CDATA[<not-a-tag> & not-an-entity]]></v></root>"]
+    ]);
+    const result = resolveDataBindings(doc, data);
+    const newSdt = result.body[0] as StructuredDocumentTag;
+    const para = newSdt.content[0] as Paragraph;
+    const run = para.children[0] as Run;
+    expect((run.content[0] as { text: string }).text).toBe("<not-a-tag> & not-an-entity");
+  });
+
+  it("decodes entities in resolved attribute values", () => {
+    const sdt = makeBindingSdt("/root/v/@title", "{abc}");
+    const doc = createDocWithSdt(sdt);
+    const data = new Map<string, string>([["abc", '<root><v title="A &amp; B"/></root>']]);
+    const result = resolveDataBindings(doc, data);
+    const newSdt = result.body[0] as StructuredDocumentTag;
+    const para = newSdt.content[0] as Paragraph;
+    const run = para.children[0] as Run;
+    expect((run.content[0] as { text: string }).text).toBe("A & B");
+  });
 });

@@ -275,9 +275,12 @@ function matchesFormat(run: Run, criteria: FormatCriteria): boolean {
     }
   }
 
-  // Underline
+  // Underline. Word emits an explicit `"none"` underline style when the
+  // user clears underlining on a run (rather than removing the property
+  // entirely), so treat that the same as "no underline".
   if (criteria.underline !== undefined) {
-    const hasUnderline = props?.underline !== undefined && props.underline !== false;
+    const u = props?.underline;
+    const hasUnderline = u !== undefined && u !== false && u !== "none";
     if (hasUnderline !== criteria.underline) {
       return false;
     }
@@ -367,7 +370,13 @@ function matchesTextPattern(text: string, pattern: string | RegExp | undefined):
   if (typeof pattern === "string") {
     return text.includes(pattern);
   }
-  return pattern.test(text);
+  // RegExp.test() advances `lastIndex` for /g and /y flags. Mutating the
+  // caller's regex would surprise code that re-uses the same instance
+  // afterwards, so we test against a fresh clone instead. The clone is
+  // cheap (V8 caches the parsed source) and sidesteps the global-state
+  // hazard entirely.
+  const cloned = new RegExp(pattern.source, pattern.flags);
+  return cloned.test(text);
 }
 
 function getRunFontString(props: RunProperties | undefined): string | undefined {

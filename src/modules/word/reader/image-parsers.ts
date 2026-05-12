@@ -9,8 +9,9 @@ import { findChild, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 import { type Mutable } from "../core/internal-utils";
-import type { FloatingImage, InlineImageContent, RunContent } from "../types";
+import type { FloatingImage, InlineImageContent, OpaqueRunContent, RunContent } from "../types";
 import { parseOutline, parseSrcRect, parseSvgBlip, parseXfrm } from "./drawing-helpers";
+import { safeParseInt, serializeElement } from "./parse-utils";
 
 function parseDrawingContent(drawingEl: XmlElement, content: RunContent[]): void {
   // Look for wp:inline
@@ -24,9 +25,23 @@ function parseDrawingContent(drawingEl: XmlElement, content: RunContent[]): void
     const blipFillEl = picEl ? findChild(picEl, "pic:blipFill") : undefined;
     const blipEl = blipFillEl ? findChild(blipFillEl, "a:blip") : undefined;
 
-    const rId = blipEl?.attributes["r:embed"] ?? "";
-    const cx = parseInt(extentEl?.attributes["cx"] ?? "0", 10);
-    const cy = parseInt(extentEl?.attributes["cy"] ?? "0", 10);
+    const rId = blipEl?.attributes["r:embed"];
+    if (!rId) {
+      // Non-picture inline drawing (chart, SmartArt, OLE, generic shape).
+      // Preserve the entire <w:drawing>…</w:drawing> as an opaque run content
+      // so the element survives a parse → write round-trip even when the
+      // surrounding paragraph lives inside a table cell, header, footer or
+      // SDT — locations where the body-level floating-content extractor
+      // never runs.
+      content.push({
+        type: "opaqueRun",
+        rawXml: serializeElement(drawingEl)
+      } satisfies OpaqueRunContent);
+      return;
+    }
+
+    const cx = safeParseInt(extentEl?.attributes["cx"], 0);
+    const cy = safeParseInt(extentEl?.attributes["cy"], 0);
 
     const img: Mutable<InlineImageContent> = {
       type: "image",
@@ -35,7 +50,7 @@ function parseDrawingContent(drawingEl: XmlElement, content: RunContent[]): void
       height: cy,
       altText: docPrEl?.attributes["descr"],
       name: docPrEl?.attributes["name"],
-      drawingId: docPrEl ? parseInt(docPrEl.attributes["id"] ?? "1", 10) : undefined
+      drawingId: docPrEl ? safeParseInt(docPrEl.attributes["id"], 1) : undefined
     };
 
     // Parse xfrm for rotation/flip + outline
@@ -86,8 +101,8 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     return undefined;
   }
 
-  const cx = parseInt(extentEl?.attributes["cx"] ?? "0", 10);
-  const cy = parseInt(extentEl?.attributes["cy"] ?? "0", 10);
+  const cx = safeParseInt(extentEl?.attributes["cx"], 0);
+  const cy = safeParseInt(extentEl?.attributes["cy"], 0);
 
   const img: Mutable<FloatingImage> = {
     type: "floatingImage",
@@ -96,7 +111,7 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     height: cy,
     altText: docPrEl?.attributes["descr"],
     name: docPrEl?.attributes["name"],
-    drawingId: docPrEl ? parseInt(docPrEl.attributes["id"] ?? "1", 10) : undefined
+    drawingId: docPrEl ? safeParseInt(docPrEl.attributes["id"], 1) : undefined
   };
 
   // Attributes
@@ -114,32 +129,49 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
   }
   const rh = anchorEl.attributes["relativeHeight"];
   if (rh) {
-    img.relativeHeight = parseInt(rh, 10);
+    const n = parseInt(rh, 10);
+    if (Number.isFinite(n)) {
+      img.relativeHeight = n;
+    }
   }
-  // Dist*
+  // Dist* — guard each parseInt against NaN so a hostile attribute
+  // never round-trips back into the output XML as the literal "NaN"
+  // (Word rejects such files).
   const distT = anchorEl.attributes["distT"];
   if (distT) {
-    img.distT = parseInt(distT, 10);
+    const n = parseInt(distT, 10);
+    if (Number.isFinite(n)) {
+      img.distT = n;
+    }
   }
   const distB = anchorEl.attributes["distB"];
   if (distB) {
-    img.distB = parseInt(distB, 10);
+    const n = parseInt(distB, 10);
+    if (Number.isFinite(n)) {
+      img.distB = n;
+    }
   }
   const distL = anchorEl.attributes["distL"];
   if (distL) {
-    img.distL = parseInt(distL, 10);
+    const n = parseInt(distL, 10);
+    if (Number.isFinite(n)) {
+      img.distL = n;
+    }
   }
   const distR = anchorEl.attributes["distR"];
   if (distR) {
-    img.distR = parseInt(distR, 10);
+    const n = parseInt(distR, 10);
+    if (Number.isFinite(n)) {
+      img.distR = n;
+    }
   }
 
   // Simple positioning
   if (anchorEl.attributes["simplePos"] === "1") {
     const sposEl = findChild(anchorEl, "wp:simplePos");
     if (sposEl) {
-      const x = parseInt(sposEl.attributes["x"] ?? "0", 10);
-      const y = parseInt(sposEl.attributes["y"] ?? "0", 10);
+      const x = safeParseInt(sposEl.attributes["x"], 0);
+      const y = safeParseInt(sposEl.attributes["y"], 0);
       img.simplePos = { x, y };
     }
   }
@@ -154,7 +186,10 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     };
     const offsetEl = findChild(hPosEl, "wp:posOffset");
     if (offsetEl) {
-      h.offset = parseInt(textContent(offsetEl), 10);
+      const n = parseInt(textContent(offsetEl), 10);
+      if (Number.isFinite(n)) {
+        h.offset = n;
+      }
     }
     const alignEl = findChild(hPosEl, "wp:align");
     if (alignEl) {
@@ -173,7 +208,10 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
     };
     const offsetEl = findChild(vPosEl, "wp:posOffset");
     if (offsetEl) {
-      v.offset = parseInt(textContent(offsetEl), 10);
+      const n = parseInt(textContent(offsetEl), 10);
+      if (Number.isFinite(n)) {
+        v.offset = n;
+      }
     }
     const alignEl = findChild(vPosEl, "wp:align");
     if (alignEl) {
@@ -218,16 +256,28 @@ function parseFloatingImage(anchorEl: XmlElement): FloatingImage | undefined {
       if (distT || distB || distL || distR) {
         const margins: { top?: number; bottom?: number; left?: number; right?: number } = {};
         if (distT) {
-          margins.top = parseInt(distT, 10);
+          const n = parseInt(distT, 10);
+          if (Number.isFinite(n)) {
+            margins.top = n;
+          }
         }
         if (distB) {
-          margins.bottom = parseInt(distB, 10);
+          const n = parseInt(distB, 10);
+          if (Number.isFinite(n)) {
+            margins.bottom = n;
+          }
         }
         if (distL) {
-          margins.left = parseInt(distL, 10);
+          const n = parseInt(distL, 10);
+          if (Number.isFinite(n)) {
+            margins.left = n;
+          }
         }
         if (distR) {
-          margins.right = parseInt(distR, 10);
+          const n = parseInt(distR, 10);
+          if (Number.isFinite(n)) {
+            margins.right = n;
+          }
         }
         wrap.margins = margins;
       }

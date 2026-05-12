@@ -36,7 +36,13 @@ import type {
   CommentRangeStart,
   CommentRangeEnd,
   TextBox,
-  TableOfContents
+  TableOfContents,
+  AltChunk,
+  ChartContent,
+  ChartExContent,
+  CheckBox,
+  DrawingShape,
+  OpaqueDrawing
 } from "../types";
 import { isRun } from "./text-utils";
 
@@ -102,6 +108,12 @@ export interface DocxVisitor {
   visitFloatingImage?(image: FloatingImage, path: WalkPath): void;
   visitTextBox?(textBox: TextBox, path: WalkPath): VisitAction | void;
   visitTableOfContents?(toc: TableOfContents, path: WalkPath): void;
+  visitAltChunk?(chunk: AltChunk, path: WalkPath): void;
+  visitChart?(chart: ChartContent, path: WalkPath): void;
+  visitChartEx?(chart: ChartExContent, path: WalkPath): void;
+  visitCheckBox?(checkBox: CheckBox, path: WalkPath): void;
+  visitDrawingShape?(shape: DrawingShape, path: WalkPath): void;
+  visitOpaqueDrawing?(drawing: OpaqueDrawing, path: WalkPath): void;
 
   // — Paragraph-level —
   enterRun?(run: Run, path: WalkPath): VisitAction | void;
@@ -267,11 +279,23 @@ export function walkBlocks(
 // Internal Traversal
 // =============================================================================
 
+/**
+ * Maximum nesting depth permitted during traversal. Documents that
+ * legitimately nest content rarely exceed depth ~50; anything beyond
+ * `MAX_WALK_DEPTH` is almost certainly a hostile or malformed input
+ * trying to provoke a stack overflow. Hitting this limit aborts the
+ * walk gracefully (returning `"continue"`) instead of crashing the host.
+ */
+const MAX_WALK_DEPTH = 1000;
+
 function walkBodyContent(
   block: BodyContent,
   visitor: DocxVisitor,
   path: WalkPath
 ): "stop" | "continue" {
+  if (path.depth > MAX_WALK_DEPTH) {
+    return "continue";
+  }
   switch (block.type) {
     case "paragraph":
       return walkParagraph(block, visitor, path);
@@ -301,8 +325,53 @@ function walkBodyContent(
       }
       return "continue";
     }
-    case "tableOfContents":
-      visitor.visitTableOfContents?.(block as TableOfContents, path);
+    case "tableOfContents": {
+      const toc = block as TableOfContents;
+      visitor.visitTableOfContents?.(toc, path);
+      // Recurse into the cached paragraph rendering so consumers (text
+      // extraction, search/replace, validation) actually see the textual
+      // body of a TOC. The model documents this as "cached content used
+      // when fields are not updated".
+      if (toc.cachedParagraphs && toc.cachedParagraphs.length > 0) {
+        const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
+        if (
+          walkBlocks(toc.cachedParagraphs as readonly BodyContent[], visitor, innerPath) === "stop"
+        ) {
+          return "stop";
+        }
+      }
+      return "continue";
+    }
+    case "altChunk":
+      visitor.visitAltChunk?.(block as AltChunk, path);
+      return "continue";
+    case "chart":
+      visitor.visitChart?.(block as ChartContent, path);
+      return "continue";
+    case "chartEx":
+      visitor.visitChartEx?.(block as ChartExContent, path);
+      return "continue";
+    case "checkBox":
+      visitor.visitCheckBox?.(block as CheckBox, path);
+      return "continue";
+    case "drawingShape": {
+      const shape = block as DrawingShape;
+      visitor.visitDrawingShape?.(shape, path);
+      // Shapes can carry their own paragraph text (textContent). Walking
+      // it lets text-aware visitors find shape-embedded text — without
+      // this, replaceText/searchText silently skip them.
+      if (shape.textContent && shape.textContent.length > 0) {
+        const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
+        if (
+          walkBlocks(shape.textContent as readonly BodyContent[], visitor, innerPath) === "stop"
+        ) {
+          return "stop";
+        }
+      }
+      return "continue";
+    }
+    case "opaqueDrawing":
+      visitor.visitOpaqueDrawing?.(block as OpaqueDrawing, path);
       return "continue";
     default:
       return "continue";
@@ -513,12 +582,27 @@ function walkSdt(
     return "continue";
   }
 
+  // SDT.content is `(Paragraph | Run | Table)[]`. Inline (run-only) SDTs
+  // are common — content controls wrapping a single Run inside a paragraph.
+  // Previously this filter dropped them entirely, so search/replace, text
+  // extraction, and template engines silently missed text inside inline
+  // SDTs. Walk runs through walkParagraphChild so they get the same run
+  // visitor treatment as runs in any other paragraph.
   const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
-  const filtered = sdt.content.filter(
-    (c): c is Paragraph | Table => "type" in c && (c.type === "paragraph" || c.type === "table")
-  );
-  if (walkBlocks(filtered as readonly BodyContent[], visitor, innerPath) === "stop") {
-    return "stop";
+  for (let i = 0; i < sdt.content.length; i++) {
+    const item = sdt.content[i];
+    const itemPath: WalkPath = { ...innerPath, index: i };
+    if ("type" in item && (item.type === "paragraph" || item.type === "table")) {
+      const result = walkBodyContent(item as BodyContent, visitor, itemPath);
+      if (result === "stop") {
+        return "stop";
+      }
+    } else if (isRun(item)) {
+      const result = walkRun(item, visitor, itemPath);
+      if (result === "stop") {
+        return "stop";
+      }
+    }
   }
 
   visitor.leaveSdt?.(sdt, path);

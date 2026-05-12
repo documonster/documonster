@@ -8,7 +8,14 @@
 
 import type { XmlSink } from "@xml/types";
 
-import { DOCUMENT_NAMESPACES, STD_DOC_ATTRIBUTES, NS_A, NS_WPS } from "../constants";
+import {
+  DOCUMENT_NAMESPACES,
+  STD_DOC_ATTRIBUTES,
+  NS_A,
+  NS_C_CHART,
+  NS_CX_CHART,
+  NS_WPS
+} from "../constants";
 import { DocxWriteError } from "../errors";
 import type {
   DocxDocument,
@@ -65,11 +72,6 @@ function renderSdt(xml: XmlSink, sdt: StructuredDocumentTag, ctx: WordRenderCont
     // Appearance (w15:appearance for modern SDTs)
     if (p.appearance) {
       xml.leafNode("w15:appearance", { "w15:val": p.appearance });
-    } else if (p.showAs) {
-      // Back-compat mapping of legacy showAs
-      const mapped =
-        p.showAs === "boundingBox" ? "boundingBox" : p.showAs === "startEnd" ? "tags" : "hidden";
-      xml.leafNode("w15:appearance", { "w15:val": mapped });
     }
     // Show placeholder toggle
     if (p.showingPlaceholder) {
@@ -315,13 +317,11 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
 // =============================================================================
 
 function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderContext): void {
-  // If rawXml is available, use it for round-trip fidelity
-  if (shape.rawXml) {
-    xml.writeRaw(shape.rawXml);
-    return;
-  }
-
   // Wrap in w:p > w:r > w:drawing > wp:anchor > a:graphic > a:graphicData > wps:wsp
+  // Note: shape.rawXml (if present) carries advanced DrawingML fragments that
+  // belong inside wps:spPr (gradient/pattern fills, effect lists, etc.). It is
+  // NOT a substitute for the structural wrappers — earlier behaviour wrote it
+  // verbatim into w:body which produced invalid OOXML.
   xml.openNode("w:p");
   xml.openNode("w:r");
   xml.openNode("w:drawing");
@@ -420,13 +420,18 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
   xml.leafNode("a:avLst");
   xml.closeNode(); // a:prstGeom
 
-  // Fill
+  // Fill (basic + advanced). The OOXML schema requires fill children of
+  // spPr to appear before a:ln, hence advanced gradient/pattern fills are
+  // injected here rather than alongside effects.
   if (shape.noFill) {
     xml.leafNode("a:noFill");
   } else if (shape.fillColor) {
     xml.openNode("a:solidFill");
     xml.leafNode("a:srgbClr", { val: shape.fillColor });
     xml.closeNode();
+  }
+  if (shape._advancedFillXml) {
+    xml.writeRaw(shape._advancedFillXml);
   }
 
   // Outline
@@ -444,6 +449,19 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
       xml.closeNode();
     }
     xml.closeNode(); // a:ln
+  }
+
+  // Advanced effects (a:effectLst, a:scene3d, a:sp3d) follow a:ln per the
+  // OOXML schema. They were previously interleaved with fill via a single
+  // rawXml string which produced documents that violated the schema order.
+  if (shape._advancedEffectsXml) {
+    xml.writeRaw(shape._advancedEffectsXml);
+  } else if (shape.rawXml && !shape._advancedFillXml) {
+    // Backwards-compat: if the caller provided an opaque rawXml without the
+    // split fields (e.g. round-tripped from a reader), drop it after a:ln.
+    // This preserves the previous "rawXml → spPr tail" behaviour for shapes
+    // that don't go through createShape().
+    xml.writeRaw(shape.rawXml);
   }
 
   xml.closeNode(); // wps:spPr
@@ -511,9 +529,6 @@ interface InlineChartOptions {
   /** The relationship ID pointing at the chart part. */
   readonly rId: string;
 }
-
-const NS_C_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart";
-const NS_CX_CHART = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 
 function renderInlineChartDrawing(
   xml: XmlSink,

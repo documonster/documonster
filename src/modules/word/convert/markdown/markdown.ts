@@ -10,14 +10,10 @@
  * ```
  */
 
-// Primary API — Export (DOCX → Markdown)
+// Export (DOCX → Markdown)
 export { renderToMarkdown } from "./markdown-renderer";
 export type { MarkdownRenderOptions } from "./markdown-renderer";
 
-// Primary API — Import (Markdown → DOCX)
+// Import (Markdown → DOCX)
 export { markdownToDocx, markdownToDocxBody } from "./markdown-import";
 export type { MarkdownImportOptions, MarkdownImageData } from "./markdown-import";
-
-// Legacy alias (deprecated — use renderToMarkdown)
-export { docxToMarkdown } from "./markdown-converter";
-export type { MarkdownOptions } from "./markdown-converter";

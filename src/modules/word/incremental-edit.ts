@@ -9,6 +9,30 @@
  * - Update headers/footers without touching styles or images
  * - Patch specific parts (e.g. core properties metadata)
  *
+ * **Limitations and caveats — read before using `replacePart`/`deletePart`:**
+ *
+ * This API is a thin wrapper around ZIP entry mutation. It deliberately
+ * does not understand DOCX semantics:
+ *
+ * - `[Content_Types].xml` is **not** updated when you add a new part with
+ *   a previously-unseen content type. If your replacement part introduces
+ *   a new MIME type, callers must also patch `[Content_Types].xml` (or
+ *   round-trip through `readDocx` + `packageDocx` instead).
+ * - Relationship files (`*.rels`) are **not** rebuilt. Adding or deleting
+ *   a part with relationships will leave the corresponding `_rels/*.rels`
+ *   stale.
+ * - `replaceBody`, `replaceHeader`, `replaceFooter` only rewrite their
+ *   target XML part; they do **not** modify the corresponding `.rels` file
+ *   or copy in new media binaries. As a result they reject content that
+ *   would introduce new relationship IDs (images, hyperlinks, charts,
+ *   altChunks, opaque drawings carrying rIds) — use `patchDocument` /
+ *   `packageDocx` for those cases. Existing references that survive
+ *   unchanged are fine because their `.rels` entries already exist.
+ *
+ * For DOCX-aware edits (changes that may add/remove relationships or
+ * content types) use `patchDocument` or `compileTemplate`, or round-trip
+ * through `readDocx` + `packageDocx`.
+ *
  * Note: This API operates on raw ZIP entries; it does not parse the DOCX
  * model. For higher-level edits use `patchDocument` or `compileTemplate`.
  */
@@ -19,6 +43,8 @@ import { XmlWriter } from "@xml/writer";
 
 import { PartPath } from "./constants";
 import { utf8Decoder, utf8Encoder } from "./core/internal-utils";
+import { walkBlocks } from "./core/walker";
+import { DocxUnsupportedFeatureError } from "./errors";
 import type { BodyContent, DocxDocument, Paragraph, Table } from "./types";
 import { renderBodyContent, renderDocument } from "./writer/document-writer";
 import { renderHeader, renderFooter } from "./writer/header-footer-writer";
@@ -31,19 +57,32 @@ import { createRenderContext } from "./writer/render-context";
 /** A single incremental edit operation. */
 export type IncrementalEdit =
   | {
-      /** Replace a specific part by raw bytes. */
+      /**
+       * Replace a specific part by raw bytes.
+       *
+       * Caveat: does not update `[Content_Types].xml` or any `.rels` file.
+       * Adding a part with a new content type or new relationships will
+       * produce a malformed package. See the file header for details.
+       */
       readonly type: "replacePart";
       readonly path: string;
       readonly data: Uint8Array;
     }
   | {
-      /** Replace a part with a string (UTF-8 encoded). */
+      /** Replace a part with a string (UTF-8 encoded). Same caveats as `replacePart`. */
       readonly type: "replacePartText";
       readonly path: string;
       readonly text: string;
     }
   | {
-      /** Delete a specific part. */
+      /**
+       * Delete a specific part.
+       *
+       * Caveat: does not update `[Content_Types].xml` or any `.rels` file.
+       * Deleting a part that other parts reference (via rels or other XML)
+       * will leave dangling references — round-trip through readDocx +
+       * packageDocx if you need a consistent package.
+       */
       readonly type: "deletePart";
       readonly path: string;
     }
@@ -96,28 +135,35 @@ export async function editDocxIncremental(
   edits: readonly IncrementalEdit[],
   options?: IncrementalEditOptions
 ): Promise<Uint8Array> {
-  // Read all entries from the original ZIP
+  // Read all entries from the original ZIP. Some third-party ZIP writers emit
+  // entry paths with a leading "/" — strip it so lookups by canonical path
+  // (e.g. "word/document.xml") match consistently with the rest of the
+  // codebase (see readDocxPart below).
   const reader = unzip(buffer);
   const parts = new Map<string, Uint8Array>();
   for await (const entry of reader.entries()) {
-    parts.set(entry.path, await entry.bytes());
+    const normalizedPath = entry.path.replace(/^\/+/, "");
+    parts.set(normalizedPath, await entry.bytes());
   }
 
   // Apply edits
   for (const edit of edits) {
     switch (edit.type) {
       case "replacePart":
-        parts.set(edit.path, edit.data);
+        parts.set(edit.path.replace(/^\/+/, ""), edit.data);
         break;
       case "replacePartText":
-        parts.set(edit.path, utf8Encoder.encode(edit.text));
+        parts.set(edit.path.replace(/^\/+/, ""), utf8Encoder.encode(edit.text));
         break;
       case "deletePart":
-        parts.delete(edit.path);
+        parts.delete(edit.path.replace(/^\/+/, ""));
         break;
       case "replaceBody": {
         // Preserve the original document's section properties, background,
         // and document-level wrappers — only swap the children inside w:body.
+        // Reject new external references for the same reason as
+        // replaceHeader/Footer: this editor doesn't rewrite document.xml.rels.
+        assertNoExternalReferences(edit.body, "body");
         const original = parts.get(PartPath.Document);
         parts.set(
           PartPath.Document,
@@ -128,10 +174,10 @@ export async function editDocxIncremental(
         break;
       }
       case "replaceHeader":
-        parts.set(edit.path, renderHeaderFooter("header", edit.children));
+        parts.set(edit.path.replace(/^\/+/, ""), renderHeaderFooter("header", edit.children));
         break;
       case "replaceFooter":
-        parts.set(edit.path, renderHeaderFooter("footer", edit.children));
+        parts.set(edit.path.replace(/^\/+/, ""), renderHeaderFooter("footer", edit.children));
         break;
     }
   }
@@ -249,6 +295,15 @@ function renderHeaderFooter(
   kind: "header" | "footer",
   children: readonly (Paragraph | Table)[]
 ): Uint8Array {
+  // Reject content that requires fresh part-level relationships (images,
+  // external hyperlinks, charts, alt-chunks, embedded fonts, etc.). The
+  // incremental editor only rewrites individual XML parts; it does not
+  // rebuild the per-part `*.rels` file or copy in new media binaries, so
+  // any new `r:embed` / `r:id` reference would dangle. Callers wanting to
+  // add such content should use the full `patchDocument` / `packageDocx`
+  // flow instead.
+  assertNoExternalReferences(children, kind);
+
   const xml = new XmlWriter();
   if (kind === "header") {
     renderHeader(xml, { children });
@@ -256,4 +311,64 @@ function renderHeaderFooter(
     renderFooter(xml, { children });
   }
   return utf8Encoder.encode(xml.toString());
+}
+
+/**
+ * Walk a header/footer / body fragment and throw if it contains any element
+ * that needs a per-part relationship registration the incremental editor
+ * cannot perform.
+ *
+ * The list mirrors what {@link renderBodyContent} writes as `r:embed` /
+ * `r:id` / `r:link` attributes:
+ *   - inline & floating images (`r:embed` / `r:link`)
+ *   - external hyperlinks (`r:id` on `w:hyperlink`)
+ *   - charts and chart extensions (`r:id` on `w:chart` / `cx:chart`)
+ *   - alt-chunks (`r:id` on `w:altChunk`)
+ *   - opaque drawings carrying preserved relationships
+ */
+function assertNoExternalReferences(blocks: readonly BodyContent[], context: string): void {
+  let offending: string | undefined;
+  walkBlocks(blocks, {
+    enterRun(run) {
+      for (const c of run.content) {
+        if (c.type === "image") {
+          offending ??= "inline image";
+          return "stop";
+        }
+      }
+      return "continue";
+    },
+    enterHyperlink(h) {
+      if (h.url || h.rId) {
+        offending ??= "hyperlink";
+        return "stop";
+      }
+      return "continue";
+    },
+    visitFloatingImage() {
+      offending ??= "floating image";
+    },
+    visitChart() {
+      offending ??= "chart";
+    },
+    visitChartEx() {
+      offending ??= "chart (extended)";
+    },
+    visitAltChunk() {
+      offending ??= "altChunk";
+    },
+    visitOpaqueDrawing(drawing) {
+      if (drawing.referencedRIds.length > 0) {
+        offending ??= "opaque drawing with relationships";
+      }
+    }
+  });
+
+  if (offending) {
+    throw new DocxUnsupportedFeatureError(
+      `incremental ${context} replacement does not support ${offending}: ` +
+        "relationship parts (.rels) are not rewritten. Use patchDocument() or " +
+        "rebuild the document with packageDocx() instead."
+    );
+  }
 }

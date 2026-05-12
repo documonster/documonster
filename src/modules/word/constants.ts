@@ -162,6 +162,15 @@ export const NS_PKG_RELS = "http://schemas.openxmlformats.org/package/2006/relat
 /** DrawingML picture URI for graphicData. */
 export const URI_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture";
 
+/** DrawingML chart namespace (c:). */
+export const NS_C_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+/** Chart Extensions namespace (cx:) — Office 2016+ chartEx. */
+export const NS_CX_CHART = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+
+/** Flat OPC packaging namespace. */
+export const NS_PKG = "http://schemas.microsoft.com/office/2006/xmlPackage";
+
 // =============================================================================
 // Namespace Attributes (for document.xml root)
 // =============================================================================

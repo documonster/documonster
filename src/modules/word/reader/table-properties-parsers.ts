@@ -15,7 +15,7 @@ import type {
   TableLook,
   TableProperties
 } from "../types";
-import { attrInt, attrVal, findChildNs } from "./parse-utils";
+import { attrInt, attrVal, findChildNs, safeParseInt } from "./parse-utils";
 import {
   parseBorder,
   parseRevisionInfo,
@@ -76,7 +76,7 @@ function parseTableProperties(el: XmlElement): TableProperties {
 
   const indEl = findChildNs(el, "tblInd");
   if (indEl) {
-    props.indent = parseInt(indEl.attributes["w:w"] ?? indEl.attributes["w"] ?? "0", 10);
+    props.indent = safeParseInt(indEl.attributes["w:w"] ?? indEl.attributes["w"], 0);
   }
 
   const bordersEl = findChildNs(el, "tblBorders");

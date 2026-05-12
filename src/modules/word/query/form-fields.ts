@@ -4,9 +4,24 @@
  * Extract and fill form field values in a document.
  */
 
+import { isHyperlink, isRun } from "../core/text-utils";
 import { walkDocument } from "../core/walker";
 import type { DocxVisitor } from "../core/walker";
-import type { DocxDocument, BodyContent, Paragraph, Run, Table, FormField } from "../types";
+import type {
+  DocxDocument,
+  BodyContent,
+  CommentDef,
+  EndnoteDef,
+  FootnoteDef,
+  FooterDef,
+  FormField,
+  HeaderDef,
+  Paragraph,
+  ParagraphChild,
+  Run,
+  StructuredDocumentTag,
+  Table
+} from "../types";
 
 // =============================================================================
 // Types
@@ -81,7 +96,13 @@ export function extractFormFields(doc: DocxDocument): FormFieldEntry[] {
 }
 
 /**
- * Fill form field values in a document.
+ * Fill form field values throughout a document.
+ *
+ * The body, headers, footers, footnotes, endnotes and comments are all
+ * processed so a form field placed inside a header (a common case) still
+ * gets filled. Inside paragraphs the visitor descends into hyperlinks and
+ * track-change wrappers so a form field referenced from a tracked
+ * insertion is also reachable.
  *
  * @param doc - The document to fill (returns a new copy with filled values).
  * @param values - Map of field name → new value.
@@ -92,7 +113,76 @@ export function fillFormFields(
   values: ReadonlyMap<string, string | boolean | number>
 ): DocxDocument {
   const newBody = doc.body.map(block => fillFieldsInBlock(block, values));
-  return { ...doc, body: newBody };
+
+  const newHeaders = doc.headers
+    ? new Map(
+        Array.from(doc.headers, ([k, h]) => [
+          k,
+          {
+            ...h,
+            content: {
+              ...h.content,
+              children: h.content.children.map(
+                c => fillFieldsInBlock(c as BodyContent, values) as Paragraph | Table
+              )
+            }
+          } as HeaderDef
+        ])
+      )
+    : undefined;
+  const newFooters = doc.footers
+    ? new Map(
+        Array.from(doc.footers, ([k, f]) => [
+          k,
+          {
+            ...f,
+            content: {
+              ...f.content,
+              children: f.content.children.map(
+                c => fillFieldsInBlock(c as BodyContent, values) as Paragraph | Table
+              )
+            }
+          } as FooterDef
+        ])
+      )
+    : undefined;
+  const newFootnotes = doc.footnotes
+    ? doc.footnotes.map(
+        fn =>
+          ({
+            ...fn,
+            content: fn.content.map(p => fillFieldsInParagraph(p, values))
+          }) as FootnoteDef
+      )
+    : undefined;
+  const newEndnotes = doc.endnotes
+    ? doc.endnotes.map(
+        en =>
+          ({
+            ...en,
+            content: en.content.map(p => fillFieldsInParagraph(p, values))
+          }) as EndnoteDef
+      )
+    : undefined;
+  const newComments = doc.comments
+    ? doc.comments.map(
+        cm =>
+          ({
+            ...cm,
+            content: cm.content.map(p => fillFieldsInParagraph(p, values))
+          }) as CommentDef
+      )
+    : undefined;
+
+  return {
+    ...doc,
+    body: newBody,
+    ...(newHeaders ? { headers: newHeaders } : {}),
+    ...(newFooters ? { footers: newFooters } : {}),
+    ...(newFootnotes ? { footnotes: newFootnotes } : {}),
+    ...(newEndnotes ? { endnotes: newEndnotes } : {}),
+    ...(newComments ? { comments: newComments } : {})
+  };
 }
 
 // =============================================================================
@@ -127,8 +217,43 @@ function fillFieldsInBlock(
         if ("type" in c && (c.type === "paragraph" || c.type === "table")) {
           return fillFieldsInBlock(c as Paragraph | Table, values) as Paragraph | Table;
         }
+        if (
+          c &&
+          typeof c === "object" &&
+          !("type" in c) &&
+          "content" in c &&
+          Array.isArray((c as { content?: unknown }).content)
+        ) {
+          // Inline (run-only) SDT child — fill any field run-content nodes
+          // it carries directly.
+          return fillFieldsInRun(c as Run, values);
+        }
         return c;
       })
+    } as StructuredDocumentTag;
+  }
+  if (block.type === "textBox") {
+    return {
+      ...block,
+      content: block.content.map(p => fillFieldsInParagraph(p, values))
+    };
+  }
+  if (block.type === "drawingShape") {
+    if (!block.textContent || block.textContent.length === 0) {
+      return block;
+    }
+    return {
+      ...block,
+      textContent: block.textContent.map(p => fillFieldsInParagraph(p, values))
+    };
+  }
+  if (block.type === "tableOfContents") {
+    if (!block.cachedParagraphs || block.cachedParagraphs.length === 0) {
+      return block;
+    }
+    return {
+      ...block,
+      cachedParagraphs: block.cachedParagraphs.map(p => fillFieldsInParagraph(p, values))
     };
   }
   return block;
@@ -140,44 +265,77 @@ function fillFieldsInParagraph(
 ): Paragraph {
   let modified = false;
   const newChildren = para.children.map(child => {
-    if (!("content" in child)) {
+    // Hyperlink: descend into its run children.
+    if (isHyperlink(child)) {
+      let hlModified = false;
+      const newRuns = child.children.map(r => {
+        const filled = fillFieldsInRun(r, values);
+        if (filled !== r) {
+          hlModified = true;
+        }
+        return filled;
+      });
+      if (hlModified) {
+        modified = true;
+        return { ...child, children: newRuns } as ParagraphChild;
+      }
       return child;
     }
-    const run = child as Run;
-    if (!run.content) {
+    // Track-change wrappers around a run.
+    if (
+      "type" in child &&
+      ((child as { type?: string }).type === "insertedRun" ||
+        (child as { type?: string }).type === "movedToRun")
+    ) {
+      const wrapper = child as { run: Run; type: string } & ParagraphChild;
+      const filled = fillFieldsInRun(wrapper.run, values);
+      if (filled !== wrapper.run) {
+        modified = true;
+        return { ...wrapper, run: filled } as ParagraphChild;
+      }
       return child;
     }
-    let runModified = false;
-    const newContent = run.content.map(rc => {
-      if (rc.type !== "field" || !rc.formField) {
-        return rc;
-      }
-      const ff = rc.formField;
-      const name = ff.name ?? "";
-      if (!values.has(name)) {
-        return rc;
-      }
-      const newVal = values.get(name)!;
-      runModified = true;
-      let newFF: FormField;
-      if (ff.type === "text") {
-        newFF = { ...ff, default: String(newVal) };
-      } else if (ff.type === "checkBox") {
-        newFF = { ...ff, checked: Boolean(newVal) };
-      } else {
-        // dropdown: value is the selected index
-        newFF = {
-          ...ff,
-          default: typeof newVal === "number" ? newVal : parseInt(String(newVal), 10) || 0
-        };
-      }
-      return { ...rc, formField: newFF };
-    });
-    if (runModified) {
+    if (!isRun(child)) {
+      return child;
+    }
+    const filled = fillFieldsInRun(child, values);
+    if (filled !== child) {
       modified = true;
-      return { ...run, content: newContent };
     }
-    return child;
+    return filled;
   });
   return modified ? { ...para, children: newChildren } : para;
+}
+
+function fillFieldsInRun(run: Run, values: ReadonlyMap<string, string | boolean | number>): Run {
+  if (!run.content) {
+    return run;
+  }
+  let runModified = false;
+  const newContent = run.content.map(rc => {
+    if (rc.type !== "field" || !rc.formField) {
+      return rc;
+    }
+    const ff = rc.formField;
+    const name = ff.name ?? "";
+    if (!values.has(name)) {
+      return rc;
+    }
+    const newVal = values.get(name)!;
+    runModified = true;
+    let newFF: FormField;
+    if (ff.type === "text") {
+      newFF = { ...ff, default: String(newVal) };
+    } else if (ff.type === "checkBox") {
+      newFF = { ...ff, checked: Boolean(newVal) };
+    } else {
+      // dropdown: value is the selected index
+      newFF = {
+        ...ff,
+        default: typeof newVal === "number" ? newVal : parseInt(String(newVal), 10) || 0
+      };
+    }
+    return { ...rc, formField: newFF };
+  });
+  return runModified ? { ...run, content: newContent } : run;
 }

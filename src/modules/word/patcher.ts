@@ -54,22 +54,70 @@ export interface PatchOperation {
 // =============================================================================
 
 /**
- * Apply patches to a parsed document model in place.
+ * Apply patches to a parsed document model.
  *
- * Mutates the document's body, headers, footers, footnotes, endnotes, and
- * appends new images for image-typed patches.
+ * Returns a NEW {@link DocxDocument} with a fresh `body` array and a new
+ * `images` array. However, the inner content reachable from
+ * `headers` / `footers` / `footnotes` / `endnotes` and from non-replaced
+ * paragraphs/tables is mutated in place: text replacements rewrite the
+ * existing `Paragraph.children[].content[].text`, table rows/cells are
+ * patched in place, etc.
  *
- * @param doc - The document model (mutated in place).
+ * **Practical consequence**: do not keep using the input `doc` after calling
+ * this function — its inner state has been modified. Always use the return
+ * value. Concurrent use of the input `doc` from another thread/path is not
+ * supported.
+ *
+ * @param doc - The document model. Internal arrays/objects will be mutated.
  * @param patches - Patches to apply.
- * @returns The same document with patches applied (and updated images list).
+ * @returns A new {@link DocxDocument} reference with patches applied.
  */
 export function applyPatchesToDocument(
   doc: DocxDocument,
   patches: readonly PatchOperation[]
 ): DocxDocument {
+  // Build a canonical fileName → rId map so two image patches that point to
+  // the same fileName always emit the same r:embed. Without this, the first
+  // patch wins doc.images de-duplication (line 139) but a later patch with a
+  // different rId would still write its own rId into the body, producing a
+  // dangling reference and a blank image in Word.
+  const imageFileNameToRId = new Map<string, string>();
+  if (doc.images) {
+    for (const img of doc.images) {
+      if (img.rId) {
+        imageFileNameToRId.set(img.fileName, img.rId);
+      }
+    }
+  }
+  // Normalize image patches: assign each unique fileName a single rId
+  // (preferring an existing one in doc.images, otherwise the first patch's
+  // rId, otherwise a stable generated id). Rewrite all subsequent patches
+  // that share the fileName to use the same rId.
+  const normalizedPatches: PatchOperation[] = patches.map(patch => {
+    if (patch.content.type !== "image") {
+      return patch;
+    }
+    const img = patch.content.image;
+    let rId = imageFileNameToRId.get(img.fileName);
+    if (!rId) {
+      rId = img.rId ?? `rId_img_${img.fileName}`;
+      imageFileNameToRId.set(img.fileName, rId);
+    }
+    if (img.rId === rId) {
+      return patch;
+    }
+    return {
+      ...patch,
+      content: {
+        ...patch.content,
+        image: { ...img, rId }
+      }
+    } satisfies PatchOperation;
+  });
+
   // Build lookup map for quick placeholder matching
   const patchMap = new Map<string, PatchOperation>();
-  for (const patch of patches) {
+  for (const patch of normalizedPatches) {
     patchMap.set(patch.placeholder, patch);
   }
 
@@ -131,9 +179,11 @@ export function applyPatchesToDocument(
     }
   }
 
-  // Add any new images from patches
+  // Add any new images from patches. Patches were already normalized so
+  // that two patches sharing a fileName carry the same rId; this loop just
+  // unions the unique images.
   const images = doc.images ? [...doc.images] : [];
-  for (const patch of patches) {
+  for (const patch of normalizedPatches) {
     if (patch.content.type === "image") {
       const imgContent = patch.content;
       const existing = images.find(i => i.fileName === imgContent.image.fileName);
@@ -154,7 +204,17 @@ export function applyPatchesToDocument(
 // Internal helpers
 // =============================================================================
 
-/** Extract concatenated plain text from a paragraph's runs. */
+/**
+ * Extract concatenated plain text from a paragraph's runs, ignoring tabs,
+ * breaks, hyphens, fields, and any non-text run content.
+ *
+ * Intentionally **not** the same as `extractParagraphText` from
+ * `core/text-utils`: that helper expands `tab` → "\t", `break` → "\n",
+ * `noBreakHyphen` → "-", etc., which would corrupt placeholder matching.
+ * A placeholder like `{{name}}` should only match against the literal text
+ * the author wrote, not against synthetic characters injected by formatting
+ * elements.
+ */
 function paragraphText(para: Paragraph): string {
   let t = "";
   for (const child of para.children) {

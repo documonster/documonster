@@ -28,6 +28,7 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
+import { xmlEncodeAttr } from "@xml/encode";
 import { XmlWriter } from "@xml/writer";
 
 import {
@@ -37,35 +38,41 @@ import {
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES
 } from "../constants";
-import { escapeXml, utf8Encoder } from "../core/internal-utils";
-import { getFileExt, getPartRelsPath } from "../core/opc-package";
+import { sanitizeMediaFileName, utf8Encoder } from "../core/internal-utils";
+import { getFileExt, getPartRelsPath } from "../core/opc-paths";
+import { walkBlocks } from "../core/walker";
 import { DocxWriteError } from "../errors";
 import type {
+  AbstractNumbering,
+  AppProperties,
   BodyContent,
+  ChartContent,
+  ChartExContent,
+  CommentDef,
+  CoreProperties,
+  CustomProperty,
+  CustomXmlPart,
+  DocDefaults,
+  DocumentBackground,
+  DocumentSettings,
+  DocumentTheme,
+  EmbeddedFont,
+  EndnoteDef,
+  FontDef,
+  FooterDef,
+  FootnoteDef,
+  HeaderDef,
+  HeaderFooterRef,
+  Hyperlink,
+  ImageDef,
+  NumberingInstance,
+  OpaquePart,
   Paragraph,
   SectionProperties,
   StyleDef,
-  DocDefaults,
-  AbstractNumbering,
-  NumberingInstance,
-  HeaderDef,
-  FooterDef,
-  FootnoteDef,
-  EndnoteDef,
-  ImageDef,
-  FontDef,
-  DocumentSettings,
-  CoreProperties,
-  AppProperties,
-  CommentDef,
-  DocumentBackground,
-  CustomProperty,
-  Watermark,
-  DocumentTheme,
-  CustomXmlPart,
-  EmbeddedFont,
-  OpaquePart
+  Watermark
 } from "../types";
+import { renderChartPart } from "./chart-writer";
 import { renderComments, renderCommentsExtended } from "./comment-writer";
 import { buildCommonAuxiliaryParts } from "./common-parts";
 import {
@@ -78,11 +85,21 @@ import {
 import { renderBodyContent } from "./document-writer";
 import { renderHeader, renderFooter, renderWatermarkHeader } from "./header-footer-writer";
 import {
+  collectChartsFromHeaderFooter,
+  collectHyperlinksFromHeaderFooter,
+  collectHyperlinksFromNotes,
+  collectImageRidsFromContent,
+  collectImageRidsFromNotes
+} from "./reference-scanners";
+import {
   createRelationships,
   addRelationship,
   addRelationshipWithId,
-  renderRelationships
+  getRelationshipCount,
+  renderRelationships,
+  type RelationshipsState
 } from "./relationships";
+import { createRenderContext, type WordRenderContext } from "./render-context";
 import { renderSectionProperties } from "./section-writer";
 import { StreamBuf } from "./stream-buf";
 import { StringBuf } from "./string-buf";
@@ -146,6 +163,19 @@ export interface StreamingDocxOptions {
   readonly embeddedFonts?: readonly EmbeddedFont[];
   /** Opaque (unrecognized) parts preserved for round-trip fidelity. */
   readonly opaqueParts?: readonly OpaquePart[];
+  /**
+   * How to handle image references whose binary is not in `images`.
+   *
+   * - `"throw"` (default): throw `DocxWriteError` from `add*` so the caller
+   *   notices the broken reference immediately.
+   * - `"warn"`: emit a `console.warn` and skip the rId. The output will be
+   *   missing this image's relationship — useful only for tooling that
+   *   knows it's intentionally producing a partial document.
+   *
+   * The previous behaviour (silent skip) is gone because it generated
+   * invalid DOCX files.
+   */
+  readonly missingImagePolicy?: "throw" | "warn";
 }
 
 /** Progress callback for streaming writer. */
@@ -186,9 +216,59 @@ export class StreamingDocxWriter {
   private _documentStream!: StreamBuf;
   private _documentZipFile!: InstanceType<typeof ZipDeflate>;
   private _headerWritten = false;
+  /**
+   * First error reported by the underlying ZIP stream (compression failure,
+   * write-after-end, etc.). Stored synchronously by the `Zip` callback and
+   * surfaced from `finalize()` so callers receive a rejection instead of an
+   * indefinitely-pending promise.
+   */
+  private _streamError: Error | null = null;
+
+  // Relationships and render context — built up as `add()` is called so that
+  // every body element is serialized with the correct `r:id` for embedded
+  // images, hyperlinks and charts. Without these, charts crash mid-write
+  // ("Chart content was not registered with a relationship id") and
+  // hyperlinks/images dangle.
+  private _documentRels!: RelationshipsState;
+  private _renderCtx!: WordRenderContext;
+  /** Charts encountered in body content; rendered to `word/charts/chartN.xml` at finalize time. */
+  private readonly _bodyCharts: ChartContent[] = [];
+  /** ChartEx items encountered in body content. */
+  private readonly _bodyChartEx: ChartExContent[] = [];
+  /**
+   * Per-chart sequence numbers fixed at registration time. Both classes
+   * use independent monotonic counters; the writer emits
+   * `word/charts/chart{n}.xml` for the regular chart family and
+   * `word/charts/chartEx{n}.xml` for the chartEx family.
+   *
+   * The previous scheme used `chartCount + chartExCount + 1` as the
+   * sequence number for both classes, which made the rId path encoded in
+   * documentRels disagree with the path used at finalize when the writer
+   * iterated the two arrays separately. The result was relationships
+   * pointing at non-existent chart parts.
+   */
+  private readonly _chartNum = new WeakMap<object, number>();
+  private _nextChartSeq = 0;
+  private _nextChartExSeq = 0;
+  /** Hyperlink object identities already registered (to keep one rId per object). */
+  private readonly _registeredHyperlinks = new WeakSet<object>();
+  /** Image rIds already registered to documentRels (avoid duplicates). */
+  private readonly _registeredImageRIds = new Set<string>();
+  /** header map key → newly allocated rId. Populated by `_allocateHeaderFooterRIds`. */
+  private readonly _headerKeyToRid = new Map<string, string>();
+  /** footer map key → newly allocated rId. */
+  private readonly _footerKeyToRid = new Map<string, string>();
+  /** rId allocated for the auto-generated watermark header (if any). */
+  private _watermarkHeaderRid: string | undefined;
 
   constructor(options: StreamingDocxOptions = {}) {
-    this._options = options;
+    // Sanitize image/font file names up-front. They get embedded into
+    // ZIP entry paths and into rels Target attributes; a hostile name
+    // (e.g. `../../etc/passwd.png` from a round-tripped untrusted DOCX)
+    // would otherwise produce a zipslip-shaped output. Mirrors what
+    // `packageDocx` does in `shallowCopyDocForPackaging`.
+    const sanitized = sanitizeStreamingOptions(options);
+    this._options = sanitized;
     this._initZip();
   }
 
@@ -213,6 +293,11 @@ export class StreamingDocxWriter {
       this._writeDocumentHeader();
       this._headerWritten = true;
     }
+
+    // Register any chart/hyperlink/image references this element introduces
+    // BEFORE serializing it, so the per-element renderBodyContent call has a
+    // populated WordRenderContext (chart rIds, hyperlink rIds, image remap).
+    this._registerElementReferences(element);
 
     // Serialize this single element to XML and push to stream
     this._writeBodyElement(element);
@@ -267,6 +352,12 @@ export class StreamingDocxWriter {
       this._writeDocumentHeader();
     }
 
+    // Allocate header/footer rIds NOW so the section properties we render
+    // into document.xml can use the same rIds the auxiliary parts will
+    // register later. Without this the section refs and the .rels file
+    // would disagree and Word treats the references as dangling.
+    this._allocateHeaderFooterRIds();
+
     // Write document.xml footer (close </w:body></w:document>)
     this._writeDocumentFooter();
 
@@ -276,8 +367,16 @@ export class StreamingDocxWriter {
     // Add all auxiliary parts (styles, settings, etc.)
     await this._addAuxiliaryParts();
 
-    // Finalize the ZIP archive
+    // Finalize the ZIP archive. Any compression errors during the trailing
+    // central-directory write are reported via the `Zip` callback into
+    // `_streamError`; surface them as a rejection.
     this._zip.end();
+    if (this._streamError) {
+      throw new DocxWriteError(
+        `StreamingDocxWriter: ZIP finalization failed (${this._streamError.message})`,
+        { cause: this._streamError }
+      );
+    }
 
     // Assemble output
     return this._assembleOutput();
@@ -289,6 +388,17 @@ export class StreamingDocxWriter {
     this._finalized = false;
     this._headerWritten = false;
     this._outputChunks = [];
+    this._bodyCharts.length = 0;
+    this._bodyChartEx.length = 0;
+    this._nextChartSeq = 0;
+    this._nextChartExSeq = 0;
+    this._registeredImageRIds.clear();
+    this._headerKeyToRid.clear();
+    this._footerKeyToRid.clear();
+    this._watermarkHeaderRid = undefined;
+    // _registeredHyperlinks is a WeakSet; old entries become unreachable
+    // along with the body model objects they referenced — no manual clear
+    // is necessary. _chartNum is a WeakMap with the same property.
     this._initZip();
     return this;
   }
@@ -299,7 +409,22 @@ export class StreamingDocxWriter {
 
   private _initZip(): void {
     this._outputChunks = [];
-    this._zip = new Zip((_err, data, _final) => {
+    this._streamError = null;
+    this._documentRels = createRelationships();
+    this._renderCtx = createRenderContext({
+      chartRIds: new Map(),
+      imageRIdRemap: new Map(),
+      hyperlinkRIds: new WeakMap()
+    });
+    this._zip = new Zip((err, data, _final) => {
+      // The ZIP callback reports compression / framing errors out-of-band.
+      // Capture only the first error; subsequent callbacks may still be
+      // dispatched as the pipeline drains. Surfaced from `finalize()`.
+      if (err && !this._streamError) {
+        this._streamError = err;
+        // Wake up any pending `_endStream` waiter so callers don't hang.
+        this._documentStream?.emit("error", err);
+      }
       if (data && data.length > 0) {
         this._outputChunks.push(data);
       }
@@ -342,9 +467,9 @@ export class StreamingDocxWriter {
     // Background
     if (this._options.background) {
       const bg = this._options.background;
-      header += `<w:background w:color="${escapeXml(bg.color ?? "FFFFFF")}"`;
+      header += `<w:background w:color="${xmlEncodeAttr(bg.color ?? "FFFFFF")}"`;
       if (bg.themeColor) {
-        header += ` w:themeColor="${escapeXml(bg.themeColor)}"`;
+        header += ` w:themeColor="${xmlEncodeAttr(bg.themeColor)}"`;
       }
       header += `/>`;
     }
@@ -354,23 +479,353 @@ export class StreamingDocxWriter {
   }
 
   private _writeBodyElement(element: BodyContent): void {
-    // Serialize a single body element using the shared renderBodyContent function.
-    // This produces only the element XML (e.g. <w:p>...</w:p>) without wrapper tags.
+    // Serialize a single body element using the shared renderBodyContent
+    // function. We pass the writer's accumulated render context so r:embed,
+    // chart and hyperlink rIds resolve correctly. Without this, charts throw
+    // "Chart content was not registered with a relationship id" and hyperlink
+    // / image references would be missing or wrong.
     const writer = new XmlWriter();
-    renderBodyContent(writer, element);
+    renderBodyContent(writer, element, this._renderCtx);
     this._write(writer.xml);
   }
 
+  /**
+   * Scan a single body element and register any chart / hyperlink / image
+   * references it introduces against the writer's accumulated state. This
+   * must run before the element is serialized so the render context already
+   * carries the relationships the renderer will look up.
+   */
+  private _registerElementReferences(element: BodyContent): void {
+    // Direct top-level chart entries
+    if (element.type === "chart") {
+      this._registerChart(element);
+      return;
+    }
+    if (element.type === "chartEx") {
+      this._registerChartEx(element);
+      return;
+    }
+    // For paragraph-like containers we descend with the shared walker so
+    // track-change wrappers (InsertedRun / MovedToRun / hyperlink children)
+    // are also covered.
+    if (
+      element.type === "paragraph" ||
+      element.type === "table" ||
+      element.type === "sdt" ||
+      element.type === "textBox"
+    ) {
+      walkBlocks([element], {
+        enterParagraph: para => {
+          this._registerParagraphReferences(para);
+        },
+        enterRun: run => {
+          for (const c of run.content) {
+            if (c.type === "image" && c.rId) {
+              this._registerImageRId(c.rId);
+              if (c.svgRId) {
+                this._registerImageRId(c.svgRId);
+              }
+            }
+          }
+        },
+        enterHyperlink: h => {
+          this._registerHyperlink(h);
+        }
+      });
+      return;
+    }
+    if (element.type === "floatingImage" && element.rId) {
+      this._registerImageRId(element.rId);
+      if (element.svgRId) {
+        this._registerImageRId(element.svgRId);
+      }
+    }
+  }
+
+  private _registerParagraphReferences(_para: Paragraph): void {
+    // Per-paragraph property registration is not needed today — image and
+    // hyperlink registration is handled by enterRun / enterHyperlink. This
+    // hook exists so future paragraph-level relationships (numPicBullet,
+    // tabLeader image, …) can be added without changing call sites.
+  }
+
+  private _registerChart(chart: ChartContent): void {
+    if (this._renderCtx.chartRIds.has(chart)) {
+      return;
+    }
+    const num = ++this._nextChartSeq;
+    const rId = addRelationship(this._documentRels, RelType.Chart, `charts/chart${num}.xml`);
+    this._renderCtx.chartRIds.set(chart, rId);
+    this._chartNum.set(chart, num);
+    this._bodyCharts.push(chart);
+  }
+
+  private _registerChartEx(chart: ChartExContent): void {
+    if (this._renderCtx.chartRIds.has(chart)) {
+      return;
+    }
+    const num = ++this._nextChartExSeq;
+    const rId = addRelationship(this._documentRels, RelType.ChartEx, `charts/chartEx${num}.xml`);
+    this._renderCtx.chartRIds.set(chart, rId);
+    this._chartNum.set(chart, num);
+    this._bodyChartEx.push(chart);
+  }
+
+  private _registerHyperlink(h: Hyperlink): void {
+    if (!h.url || h.rId || this._registeredHyperlinks.has(h)) {
+      return;
+    }
+    const rId = addRelationship(this._documentRels, RelType.Hyperlink, h.url, "External");
+    this._renderCtx.hyperlinkRIds.set(h, rId);
+    this._registeredHyperlinks.add(h);
+  }
+
+  private _registerImageRId(rId: string): void {
+    if (this._registeredImageRIds.has(rId)) {
+      return;
+    }
+    const img = this._lookupImage(rId);
+    if (!img) {
+      // Image reference points at a binary the caller did not provide. The
+      // previous behaviour was to silently skip and emit an invalid DOCX —
+      // see the policy field on StreamingDocxOptions.
+      const policy = this._options.missingImagePolicy ?? "throw";
+      if (policy === "warn") {
+        console.warn(
+          `[StreamingDocxWriter] image rId "${rId}" referenced by content ` +
+            `but not present in options.images. Output will be missing this ` +
+            `relationship and may not open in Word.`
+        );
+        return;
+      }
+      throw new DocxWriteError(
+        `Streaming writer: image rId "${rId}" referenced by content but ` +
+          `not present in options.images. Add the image to options.images, ` +
+          `remove the reference, or set missingImagePolicy: "warn" to ` +
+          `accept a broken document.`
+      );
+    }
+    addRelationshipWithId(this._documentRels, rId, RelType.Image, `media/${img.fileName}`);
+    this._registeredImageRIds.add(rId);
+  }
+
+  private _lookupImage(rId: string): ImageDef | undefined {
+    if (!this._options.images) {
+      return undefined;
+    }
+    for (const img of this._options.images) {
+      if (img.rId === rId) {
+        return img;
+      }
+      // Round-tripped models may surface alias rIds populated by the
+      // reader for header/footer-local references that pointed at the
+      // same physical media file. Match those too so a header that uses
+      // its own rId still resolves to the binary.
+      if (img.aliasRIds && img.aliasRIds.includes(rId)) {
+        return img;
+      }
+    }
+    return undefined;
+  }
+
   private _writeDocumentFooter(): void {
-    // Write final section properties if provided (using the full section writer)
-    if (this._options.sectionProperties) {
+    // Write final section properties if provided. Header/footer references
+    // are rewritten so they refer to the rIds we just allocated in
+    // `_allocateHeaderFooterRIds`. References whose target type cannot
+    // be resolved (e.g. a custom rId for a header that isn't in the
+    // options map) are dropped rather than emitted dangling.
+    const sectIn = this._options.sectionProperties;
+    let sect = sectIn ? this._rewireSectionRefs(sectIn) : undefined;
+
+    // Auto-fill: if the caller provided headers/footers but no section
+    // references, synthesize one per type. Mirrors what the bulk
+    // packager does for builder-style usage.
+    if (
+      this._options.headers &&
+      this._options.headers.size > 0 &&
+      (!sect?.headers || sect.headers.length === 0)
+    ) {
+      const synth = this._synthesizeHeaderRefs();
+      if (synth.length > 0) {
+        sect = { ...(sect ?? {}), headers: synth };
+      }
+    }
+    if (
+      this._options.footers &&
+      this._options.footers.size > 0 &&
+      (!sect?.footers || sect.footers.length === 0)
+    ) {
+      const synth = this._synthesizeFooterRefs();
+      if (synth.length > 0) {
+        sect = { ...(sect ?? {}), footers: synth };
+      }
+    }
+    // Watermark always needs its own header reference, but Word resolves
+    // multiple `<w:headerReference w:type="default">` children
+    // implementation-defined, so we replace any existing default-type
+    // ref instead of stacking them. (User-supplied first/even refs stay.)
+    if (this._watermarkHeaderRid) {
+      const headers = sect?.headers ? [...sect.headers] : [];
+      const filtered = headers.filter(h => h.type !== "default");
+      filtered.push({ type: "default", rId: this._watermarkHeaderRid });
+      sect = { ...(sect ?? {}), headers: filtered };
+    }
+
+    if (sect) {
       const writer = new XmlWriter();
-      renderSectionProperties(writer, this._options.sectionProperties);
+      renderSectionProperties(writer, sect);
       this._write(writer.xml);
     }
 
     // Close body and document
     this._write(`</w:body></w:document>`);
+  }
+
+  /**
+   * Allocate header/footer relationship IDs deterministically (in the same
+   * order auxiliary parts will be emitted). Called once during finalize so
+   * `_writeDocumentFooter` and `_addAuxiliaryParts` agree on which rId
+   * points at which header/footer XML part.
+   */
+  private _allocateHeaderFooterRIds(): void {
+    if (this._options.headers) {
+      let idx = 1;
+      for (const [key] of this._options.headers) {
+        const rId = addRelationship(this._documentRels, RelType.Header, `header${idx}.xml`);
+        this._headerKeyToRid.set(key, rId);
+        idx++;
+      }
+      // Watermark consumes the next header slot.
+      if (this._options.watermark) {
+        this._watermarkHeaderRid = addRelationship(
+          this._documentRels,
+          RelType.Header,
+          `header${idx}.xml`
+        );
+      }
+    } else if (this._options.watermark) {
+      this._watermarkHeaderRid = addRelationship(this._documentRels, RelType.Header, "header1.xml");
+    }
+    if (this._options.footers) {
+      let idx = 1;
+      for (const [key] of this._options.footers) {
+        const rId = addRelationship(this._documentRels, RelType.Footer, `footer${idx}.xml`);
+        this._footerKeyToRid.set(key, rId);
+        idx++;
+      }
+    }
+  }
+
+  private _rewireSectionRefs(sect: SectionProperties): SectionProperties {
+    const allowedHeader = new Set(this._headerKeyToRid.values());
+    const allowedFooter = new Set(this._footerKeyToRid.values());
+
+    const resolveByTypeHeader = (type: string): string | undefined => {
+      // Try direct map key match first (e.g. user passed map key === rId).
+      // Then fall back to a same-type lookup for the common builder case
+      // where keys are "default" / "first" / "even".
+      if (this._headerKeyToRid.has(type)) {
+        return this._headerKeyToRid.get(type);
+      }
+      return undefined;
+    };
+    const resolveByTypeFooter = (type: string): string | undefined => {
+      if (this._footerKeyToRid.has(type)) {
+        return this._footerKeyToRid.get(type);
+      }
+      return undefined;
+    };
+
+    let out = sect;
+    if (sect.headers) {
+      const resolved: HeaderFooterRef[] = [];
+      for (const ref of sect.headers) {
+        if (ref.rId && allowedHeader.has(ref.rId)) {
+          resolved.push(ref);
+          continue;
+        }
+        if (ref.rId && this._headerKeyToRid.has(ref.rId)) {
+          resolved.push({ ...ref, rId: this._headerKeyToRid.get(ref.rId)! });
+          continue;
+        }
+        const byType = resolveByTypeHeader(ref.type);
+        if (byType) {
+          resolved.push({ ...ref, rId: byType });
+        }
+        // else drop — no matching part part, do not emit dangling rId.
+      }
+      if (
+        resolved.length !== sect.headers.length ||
+        resolved.some((r, i) => r !== sect.headers![i])
+      ) {
+        out = { ...out, headers: resolved };
+      }
+    }
+    if (sect.footers) {
+      const resolved: HeaderFooterRef[] = [];
+      for (const ref of sect.footers) {
+        if (ref.rId && allowedFooter.has(ref.rId)) {
+          resolved.push(ref);
+          continue;
+        }
+        if (ref.rId && this._footerKeyToRid.has(ref.rId)) {
+          resolved.push({ ...ref, rId: this._footerKeyToRid.get(ref.rId)! });
+          continue;
+        }
+        const byType = resolveByTypeFooter(ref.type);
+        if (byType) {
+          resolved.push({ ...ref, rId: byType });
+        }
+      }
+      if (
+        resolved.length !== sect.footers.length ||
+        resolved.some((r, i) => r !== sect.footers![i])
+      ) {
+        out = { ...out, footers: resolved };
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Synthesise section-property header references for every header part
+   * the caller registered. Recognised type keys (`default`/`first`/`even`)
+   * keep their semantics; any other key (round-tripped rId names from
+   * readDocx, custom strings) falls back to `"default"` so the header is
+   * actually referenced — without this fallback header parts can sit in
+   * the package as dangling content.
+   *
+   * If multiple keys map to the same logical type, only the first one is
+   * kept so we don't emit two `<w:headerReference w:type="default">`
+   * children (Word's behaviour with duplicates is implementation-defined).
+   */
+  private _synthesizeHeaderRefs(): HeaderFooterRef[] {
+    const out: HeaderFooterRef[] = [];
+    const seenTypes = new Set<string>();
+    for (const [key, rId] of this._headerKeyToRid) {
+      const type: HeaderFooterRef["type"] =
+        key === "default" || key === "first" || key === "even" ? key : "default";
+      if (seenTypes.has(type)) {
+        continue;
+      }
+      seenTypes.add(type);
+      out.push({ type, rId });
+    }
+    return out;
+  }
+  private _synthesizeFooterRefs(): HeaderFooterRef[] {
+    const out: HeaderFooterRef[] = [];
+    const seenTypes = new Set<string>();
+    for (const [key, rId] of this._footerKeyToRid) {
+      const type: HeaderFooterRef["type"] =
+        key === "default" || key === "first" || key === "even" ? key : "default";
+      if (seenTypes.has(type)) {
+        continue;
+      }
+      seenTypes.add(type);
+      out.push({ type, rId });
+    }
+    return out;
   }
 
   // ===========================================================================
@@ -393,7 +848,10 @@ export class StreamingDocxWriter {
     // Content types and relationships
     const contentTypes = createContentTypes();
     const packageRels = createRelationships();
-    const documentRels = createRelationships();
+    // Reuse the document relationships state we have been populating during
+    // add() (charts, hyperlinks, images). Adding the standard parts below
+    // augments this state.
+    const documentRels = this._documentRels;
 
     // Package relationships
     addRelationship(packageRels, RelType.OfficeDocument, "word/document.xml");
@@ -414,24 +872,82 @@ export class StreamingDocxWriter {
       addRelationship(documentRels, RelType.Numbering, "numbering.xml");
     }
 
-    // Footnotes
+    // Footnotes — including their own .rels for in-note hyperlinks/images.
     if (this._options.footnotes && this._options.footnotes.length > 0) {
       addRelationship(documentRels, RelType.Footnotes, "footnotes.xml");
       addContentTypeOverride(contentTypes, `/${PartPath.Footnotes}`, ContentType.Footnotes);
-      // XML rendering handled by buildCommonAuxiliaryParts below
+      const fnRels = createRelationships();
+      const fnLinks = collectHyperlinksFromNotes(this._options.footnotes);
+      for (const link of fnLinks) {
+        if (link.url) {
+          const linkRId = addRelationship(fnRels, RelType.Hyperlink, link.url, "External");
+          this._renderCtx.hyperlinkRIds.set(link, linkRId);
+        }
+      }
+      const fnImgs = collectImageRidsFromNotes(this._options.footnotes);
+      for (const oldRid of fnImgs) {
+        const img = this._lookupImage(oldRid);
+        if (img) {
+          addRelationshipWithId(fnRels, oldRid, RelType.Image, `media/${img.fileName}`);
+        }
+      }
+      if (getRelationshipCount(fnRels) > 0) {
+        addXmlFile(`word/_rels/footnotes.xml.rels`, xml => renderRelationships(fnRels, xml));
+      }
+      // Footnote XML rendering itself happens in buildCommonAuxiliaryParts.
     }
 
-    // Endnotes
+    // Endnotes — same treatment as footnotes.
     if (this._options.endnotes && this._options.endnotes.length > 0) {
       addRelationship(documentRels, RelType.Endnotes, "endnotes.xml");
       addContentTypeOverride(contentTypes, `/${PartPath.Endnotes}`, ContentType.Endnotes);
-      // XML rendering handled by buildCommonAuxiliaryParts below
+      const enRels = createRelationships();
+      const enLinks = collectHyperlinksFromNotes(this._options.endnotes);
+      for (const link of enLinks) {
+        if (link.url) {
+          const linkRId = addRelationship(enRels, RelType.Hyperlink, link.url, "External");
+          this._renderCtx.hyperlinkRIds.set(link, linkRId);
+        }
+      }
+      const enImgs = collectImageRidsFromNotes(this._options.endnotes);
+      for (const oldRid of enImgs) {
+        const img = this._lookupImage(oldRid);
+        if (img) {
+          addRelationshipWithId(enRels, oldRid, RelType.Image, `media/${img.fileName}`);
+        }
+      }
+      if (getRelationshipCount(enRels) > 0) {
+        addXmlFile(`word/_rels/endnotes.xml.rels`, xml => renderRelationships(enRels, xml));
+      }
     }
 
-    // Comments
+    // Comments — including their own .rels for in-comment hyperlinks/images.
     if (this._options.comments && this._options.comments.length > 0) {
       addRelationship(documentRels, RelType.Comments, "comments.xml");
       addContentTypeOverride(contentTypes, `/${PartPath.Comments}`, ContentType.Comments);
+
+      // Register hyperlink/image rels BEFORE rendering comments.xml so the
+      // emitted r:id values match the per-part .rels we are about to write.
+      const cmtRels = createRelationships();
+      const commentBodies = this._options.comments.map(c => ({ content: c.content }));
+      const cmtLinks = collectHyperlinksFromNotes(commentBodies);
+      for (const link of cmtLinks) {
+        if (link.url) {
+          const linkRId = addRelationship(cmtRels, RelType.Hyperlink, link.url, "External");
+          this._renderCtx.hyperlinkRIds.set(link, linkRId);
+        }
+      }
+      const cmtImgs = collectImageRidsFromNotes(commentBodies);
+      for (const oldRid of cmtImgs) {
+        const img = this._lookupImage(oldRid);
+        if (img) {
+          addRelationshipWithId(cmtRels, oldRid, RelType.Image, `media/${img.fileName}`);
+        }
+      }
+      if (getRelationshipCount(cmtRels) > 0) {
+        addXmlFile(`word/_rels/comments.xml.rels`, xml => renderRelationships(cmtRels, xml));
+      }
+
       addXmlFile(PartPath.Comments, xml => renderComments(xml, this._options.comments!));
       // Also write commentsExtended if any have done/parentId
       const hasExtended = this._options.comments.some(c => c.done != null || c.parentId != null);
@@ -449,33 +965,132 @@ export class StreamingDocxWriter {
     }
 
     // Headers
+    //
+    // Each header part has its own .rels file. Image / hyperlink / chart
+    // references inside header content must register against THAT part's
+    // .rels — they are not document.xml.rels relationships, so we mirror
+    // the bulk packager's behaviour here to avoid producing dangling
+    // r:embed / r:id values inside header XML.
+    //
+    // The document-level rId for each header was already allocated during
+    // `_allocateHeaderFooterRIds` so that section properties and header
+    // parts agree.
+    let nextHeaderIdx = 1;
     if (this._options.headers) {
-      let headerIdx = 1;
       for (const [, headerDef] of this._options.headers) {
+        const headerIdx = nextHeaderIdx++;
         const headerPath = PartPath.header(headerIdx);
-        addRelationship(documentRels, RelType.Header, `header${headerIdx}.xml`);
         addContentTypeOverride(contentTypes, `/${headerPath}`, ContentType.Header);
         addXmlFile(headerPath, xml => renderHeader(xml, headerDef.content));
-        headerIdx++;
+
+        const hRels = createRelationships();
+        // Images: register every rId referenced inside this header that the
+        // caller supplied a binary for. Header XML emits `r:embed` using the
+        // model rId, so we register under the same id.
+        const imgRids = collectImageRidsFromContent(headerDef.content);
+        for (const oldRid of imgRids) {
+          const img = this._lookupImage(oldRid);
+          if (img) {
+            addRelationshipWithId(hRels, oldRid, RelType.Image, `media/${img.fileName}`);
+          }
+        }
+        // Hyperlinks: same scheme as bulk packager — assign a fresh rId per
+        // header for any URL-bearing hyperlink and surface it via
+        // hyperlinkRIds so the writer emits matching r:id.
+        const hLinks = collectHyperlinksFromHeaderFooter(headerDef.content);
+        for (const link of hLinks) {
+          if (link.url) {
+            const linkRId = addRelationship(hRels, RelType.Hyperlink, link.url, "External");
+            this._renderCtx.hyperlinkRIds.set(link, linkRId);
+          }
+        }
+        // Charts: collect into _bodyCharts so a chart part is generated, and
+        // register the rel against the header's own .rels.
+        const headerCharts: ChartContent[] = [];
+        collectChartsFromHeaderFooter(headerDef.content, headerCharts);
+        for (const chartContent of headerCharts) {
+          if (this._renderCtx.chartRIds.has(chartContent)) {
+            continue;
+          }
+          const num = ++this._nextChartSeq;
+          const rId = addRelationship(hRels, RelType.Chart, `charts/chart${num}.xml`);
+          this._renderCtx.chartRIds.set(chartContent, rId);
+          this._chartNum.set(chartContent, num);
+          this._bodyCharts.push(chartContent);
+        }
+
+        if (getRelationshipCount(hRels) > 0) {
+          addXmlFile(`word/_rels/header${headerIdx}.xml.rels`, xml =>
+            renderRelationships(hRels, xml)
+          );
+        }
       }
     }
 
-    // Watermark (rendered as a special header if no headers already handle it)
-    if (this._options.watermark && !this._options.headers) {
-      const watermarkPath = PartPath.header(1);
-      addRelationship(documentRels, RelType.Header, "header1.xml");
+    // Watermark — always rendered as its own header part appended after any
+    // user-supplied headers. Its rId was allocated during
+    // `_allocateHeaderFooterRIds`.
+    if (this._options.watermark) {
+      const watermarkIdx = nextHeaderIdx++;
+      const watermarkPath = PartPath.header(watermarkIdx);
       addContentTypeOverride(contentTypes, `/${watermarkPath}`, ContentType.Header);
       addXmlFile(watermarkPath, xml => renderWatermarkHeader(xml, this._options.watermark!));
+      // Image watermarks need a per-header relationship to the image binary.
+      if (this._options.watermark.type === "image") {
+        const wmRId = this._options.watermark.rId;
+        const img = this._lookupImage(wmRId);
+        if (img) {
+          const wmRels = createRelationships();
+          addRelationshipWithId(wmRels, wmRId, RelType.Image, `media/${img.fileName}`);
+          addXmlFile(`word/_rels/header${watermarkIdx}.xml.rels`, xml =>
+            renderRelationships(wmRels, xml)
+          );
+        }
+      }
     }
 
-    // Footers
+    // Footers — document-level rIds already allocated during
+    // `_allocateHeaderFooterRIds`.
     if (this._options.footers) {
       let footerIdx = 1;
       for (const [, footerDef] of this._options.footers) {
         const footerPath = PartPath.footer(footerIdx);
-        addRelationship(documentRels, RelType.Footer, `footer${footerIdx}.xml`);
         addContentTypeOverride(contentTypes, `/${footerPath}`, ContentType.Footer);
         addXmlFile(footerPath, xml => renderFooter(xml, footerDef.content));
+
+        const fRels = createRelationships();
+        const imgRids = collectImageRidsFromContent(footerDef.content);
+        for (const oldRid of imgRids) {
+          const img = this._lookupImage(oldRid);
+          if (img) {
+            addRelationshipWithId(fRels, oldRid, RelType.Image, `media/${img.fileName}`);
+          }
+        }
+        const fLinks = collectHyperlinksFromHeaderFooter(footerDef.content);
+        for (const link of fLinks) {
+          if (link.url) {
+            const linkRId = addRelationship(fRels, RelType.Hyperlink, link.url, "External");
+            this._renderCtx.hyperlinkRIds.set(link, linkRId);
+          }
+        }
+        const footerCharts: ChartContent[] = [];
+        collectChartsFromHeaderFooter(footerDef.content, footerCharts);
+        for (const chartContent of footerCharts) {
+          if (this._renderCtx.chartRIds.has(chartContent)) {
+            continue;
+          }
+          const num = ++this._nextChartSeq;
+          const rId = addRelationship(fRels, RelType.Chart, `charts/chart${num}.xml`);
+          this._renderCtx.chartRIds.set(chartContent, rId);
+          this._chartNum.set(chartContent, num);
+          this._bodyCharts.push(chartContent);
+        }
+
+        if (getRelationshipCount(fRels) > 0) {
+          addXmlFile(`word/_rels/footer${footerIdx}.xml.rels`, xml =>
+            renderRelationships(fRels, xml)
+          );
+        }
         footerIdx++;
       }
     }
@@ -491,14 +1106,33 @@ export class StreamingDocxWriter {
       // XML rendering handled by buildCommonAuxiliaryParts below
     }
 
-    // Images
+    // Images. Only register images here that were not already registered
+    // by `_registerImageRId` during add(). For round-tripped models, the
+    // image's `aliasRIds` may have been registered earlier (when a
+    // header/footer body referenced the image under one of those alias
+    // names) — treat any of those aliases as "already registered" so we
+    // don't duplicate the relationship under the canonical rId. Images
+    // supplied via options but never referenced in body content also get
+    // registered (since the user clearly intended them to be part of the
+    // document) but with an anonymous rId.
     if (this._options.images) {
       const extensions = new Set<string>();
       for (const img of this._options.images) {
-        addRelationship(documentRels, RelType.Image, `media/${img.fileName}`);
         const ext = getFileExt(img.fileName);
         if (ext) {
           extensions.add(ext);
+        }
+        const alreadyRegistered =
+          (img.rId && this._registeredImageRIds.has(img.rId)) ||
+          (img.aliasRIds && img.aliasRIds.some(a => this._registeredImageRIds.has(a)));
+        if (alreadyRegistered) {
+          continue;
+        }
+        if (img.rId) {
+          addRelationshipWithId(documentRels, img.rId, RelType.Image, `media/${img.fileName}`);
+          this._registeredImageRIds.add(img.rId);
+        } else {
+          addRelationship(documentRels, RelType.Image, `media/${img.fileName}`);
         }
       }
       addImageContentTypeDefaults(contentTypes, extensions);
@@ -654,6 +1288,39 @@ export class StreamingDocxWriter {
       }
     }
 
+    // Write chart parts (chartN.xml + content type) for body charts
+    // registered during add(). Use the per-chart sequence number captured
+    // at registration time so the rId target encoded in documentRels and
+    // the actual ZIP entry name agree.
+    for (const chartContent of this._bodyCharts) {
+      const num = this._chartNum.get(chartContent);
+      if (num === undefined) {
+        continue; // shouldn't happen; defensive
+      }
+      const chartPath = `word/charts/chart${num}.xml`;
+      const w = new XmlWriter();
+      renderChartPart(w, chartContent.chart);
+      const data = utf8Encoder.encode(w.xml);
+      const file = new ZipDeflate(chartPath, { level });
+      this._zip.add(file);
+      file.push(data, true);
+      addContentTypeOverride(contentTypes, `/${chartPath}`, ContentType.Chart);
+    }
+
+    // Write ChartEx parts (raw cx:chartSpace XML preserved on the model)
+    for (const cxContent of this._bodyChartEx) {
+      const num = this._chartNum.get(cxContent);
+      if (num === undefined) {
+        continue;
+      }
+      const cxPath = `word/charts/chartEx${num}.xml`;
+      const data = utf8Encoder.encode(cxContent.chartExXml);
+      const file = new ZipDeflate(cxPath, { level });
+      this._zip.add(file);
+      file.push(data, true);
+      addContentTypeOverride(contentTypes, `/${cxPath}`, ContentType.ChartEx);
+    }
+
     // Write document.xml.rels
     addXmlFile(PartPath.DocumentRels, xml => renderRelationships(documentRels, xml));
 
@@ -665,8 +1332,15 @@ export class StreamingDocxWriter {
   }
 
   private _endStream(stream: StreamBuf): Promise<void> {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+      // If a prior callback already reported an error, surface it
+      // synchronously instead of waiting for an event that won't fire.
+      if (this._streamError) {
+        reject(this._streamError);
+        return;
+      }
       stream.once("zipped", () => resolve());
+      stream.once("error", (err: Error) => reject(err));
       stream.end();
     });
   }
@@ -704,4 +1378,65 @@ export class StreamingDocxWriter {
  */
 export function createDocxStream(options?: StreamingDocxOptions): StreamingDocxWriter {
   return new StreamingDocxWriter(options);
+}
+
+/**
+ * Replace any image/font file names in `options` with a leaf form that's
+ * safe to embed into a ZIP entry path. A new options object is returned;
+ * the caller's input is not mutated.
+ *
+ * Names are deduplicated within their respective collection so two
+ * different inputs that sanitise to the same string don't silently
+ * overwrite each other in the output package.
+ */
+function sanitizeStreamingOptions(options: StreamingDocxOptions): StreamingDocxOptions {
+  let next: StreamingDocxOptions = options;
+
+  if (options.images && options.images.length > 0) {
+    const used = new Set<string>();
+    let mutated = false;
+    const images = options.images.map(img => {
+      const safe = uniqueSanitizedName(img.fileName, used, "image.bin");
+      if (safe !== img.fileName) {
+        mutated = true;
+        return { ...img, fileName: safe };
+      }
+      return img;
+    });
+    if (mutated) {
+      next = { ...next, images };
+    }
+  }
+  if (options.embeddedFonts && options.embeddedFonts.length > 0) {
+    const used = new Set<string>();
+    let mutated = false;
+    const embeddedFonts = options.embeddedFonts.map(ef => {
+      const safe = uniqueSanitizedName(ef.fileName, used, "font.bin");
+      if (safe !== ef.fileName) {
+        mutated = true;
+        return { ...ef, fileName: safe };
+      }
+      return ef;
+    });
+    if (mutated) {
+      next = { ...next, embeddedFonts };
+    }
+  }
+  return next;
+}
+
+function uniqueSanitizedName(raw: string | undefined, used: Set<string>, fallback: string): string {
+  let candidate = sanitizeMediaFileName(raw, fallback);
+  if (used.has(candidate)) {
+    const dot = candidate.lastIndexOf(".");
+    const stem = dot >= 0 ? candidate.slice(0, dot) : candidate;
+    const ext = dot >= 0 ? candidate.slice(dot) : "";
+    let n = 2;
+    while (used.has(`${stem}_${n}${ext}`)) {
+      n++;
+    }
+    candidate = `${stem}_${n}${ext}`;
+  }
+  used.add(candidate);
+  return candidate;
 }

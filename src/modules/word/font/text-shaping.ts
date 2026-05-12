@@ -731,8 +731,16 @@ function applyBidiReorder(runs: ScriptRun[], baseDir: BiDiDirection): ScriptRun[
     }
   }
 
-  // Find highest level
-  const maxLevel = Math.max(...levels);
+  // Find highest level. Use an iterative max — `Math.max(...levels)`
+  // overflows the call stack once `levels.length` exceeds ~125k (V8's
+  // spread-argument limit), which is reachable for legitimately long
+  // RTL paragraphs.
+  let maxLevel = 0;
+  for (const lv of levels) {
+    if (lv > maxLevel) {
+      maxLevel = lv;
+    }
+  }
 
   // Reverse sequences of runs at each level from highest to lowest
   const result = [...runs];

@@ -11,15 +11,9 @@
  * ```
  */
 
-export {
-  renderToMarkdown,
-  markdownToDocx,
-  markdownToDocxBody,
-  docxToMarkdown
-} from "./convert/markdown/markdown";
+export { renderToMarkdown, markdownToDocx, markdownToDocxBody } from "./convert/markdown/markdown";
 export type {
   MarkdownRenderOptions,
   MarkdownImportOptions,
-  MarkdownImageData,
-  MarkdownOptions
+  MarkdownImageData
 } from "./convert/markdown/markdown";

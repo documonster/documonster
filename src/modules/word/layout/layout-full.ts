@@ -11,6 +11,7 @@
 
 import { measureTextWidth, mapToStandardFont } from "@utils/font-metrics";
 
+import { isHyperlink, isRun } from "../core/text-utils";
 import type { DocxDocument, Paragraph, ParagraphProperties, Run, Table } from "../types";
 import { layoutDocument } from "./layout";
 import type { LayoutOptions, LayoutResult } from "./layout";
@@ -373,16 +374,14 @@ interface TextSegment {
 function collectParagraphSegments(para: Paragraph): TextSegment[] {
   const segments: TextSegment[] = [];
   for (const child of para.children) {
-    if ("content" in child && Array.isArray((child as Run).content)) {
-      const run = child as Run;
-      const text = extractRunText(run);
+    if (isRun(child)) {
+      const text = layoutRunText(child);
       if (text.length > 0) {
-        segments.push({ text, properties: run.properties });
+        segments.push({ text, properties: child.properties });
       }
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
-        const text = extractRunText(run);
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
+        const text = layoutRunText(run);
         if (text.length > 0) {
           segments.push({ text, properties: run.properties });
         }
@@ -392,7 +391,17 @@ function collectParagraphSegments(para: Paragraph): TextSegment[] {
   return segments;
 }
 
-function extractRunText(run: Run): string {
+/**
+ * Extract run text for layout measurement.
+ *
+ * Differs from `extractRunText` in `core/text-utils.ts`:
+ *  - `tab` → 4 spaces (matches greedy-fit measurement; the caller does not
+ *    yet honor real tab stops here)
+ *  - non-text content (hyphens, field values) is ignored — the layout pass
+ *    does not have access to field-engine output, and ignoring them gives
+ *    a conservative (slightly under-) estimate of line width.
+ */
+function layoutRunText(run: Run): string {
   let text = "";
   for (const item of run.content) {
     if (item.type === "text") {

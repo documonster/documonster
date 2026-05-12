@@ -10,6 +10,7 @@ import type {
   BodyContent,
   Paragraph,
   ParagraphChild,
+  Run,
   Table,
   TableRow,
   TableCell,
@@ -101,6 +102,18 @@ export function acceptAllRevisions(doc: DocxDocument): number {
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
         );
         processBody(filtered as BodyContent[]);
+      } else if (block.type === "textBox") {
+        // textBox.content is `readonly Paragraph[]`
+        processBody(block.content as BodyContent[]);
+      } else if (block.type === "drawingShape") {
+        // shape text is `readonly Paragraph[]` (optional)
+        if (block.textContent && block.textContent.length > 0) {
+          processBody(block.textContent as BodyContent[]);
+        }
+      } else if (block.type === "tableOfContents") {
+        if (block.cachedParagraphs && block.cachedParagraphs.length > 0) {
+          processBody(block.cachedParagraphs as BodyContent[]);
+        }
       }
     }
   };
@@ -224,6 +237,18 @@ export function rejectAllRevisions(doc: DocxDocument): number {
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
         );
         processBody(filtered as BodyContent[]);
+      } else if (block.type === "textBox") {
+        // textBox.content is `readonly Paragraph[]`
+        processBody(block.content as BodyContent[]);
+      } else if (block.type === "drawingShape") {
+        // shape text is `readonly Paragraph[]` (optional)
+        if (block.textContent && block.textContent.length > 0) {
+          processBody(block.textContent as BodyContent[]);
+        }
+      } else if (block.type === "tableOfContents") {
+        if (block.cachedParagraphs && block.cachedParagraphs.length > 0) {
+          processBody(block.cachedParagraphs as BodyContent[]);
+        }
       }
     }
   };
@@ -304,6 +329,23 @@ function acceptRevisionsInParagraph(para: Paragraph): number {
           // Remove range markers
           count++;
           break;
+        case "hyperlink": {
+          // Hyperlink children are runs that may themselves carry tracked
+          // changes — recurse via a synthetic paragraph so we re-use the
+          // same accept logic. Other revision APIs (replaceText, fillFormFields)
+          // already descend into hyperlinks; revisions must agree.
+          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const synth = {
+            type: "paragraph",
+            children: [...hl.children]
+          } as unknown as Paragraph;
+          count += acceptRevisionsInParagraph(synth);
+          newChildren.push({
+            ...(hl as object),
+            children: synth.children
+          } as ParagraphChild);
+          break;
+        }
         default:
           newChildren.push(child);
           break;
@@ -366,6 +408,19 @@ function rejectRevisionsInParagraph(para: Paragraph): number {
         case "moveToRangeEnd":
           count++;
           break;
+        case "hyperlink": {
+          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const synth = {
+            type: "paragraph",
+            children: [...hl.children]
+          } as unknown as Paragraph;
+          count += rejectRevisionsInParagraph(synth);
+          newChildren.push({
+            ...(hl as object),
+            children: synth.children
+          } as ParagraphChild);
+          break;
+        }
         default:
           newChildren.push(child);
           break;
@@ -504,6 +559,11 @@ export function listRevisions(doc: DocxDocument): RevisionEntry[] {
           author: mt.revision.author,
           date: mt.revision.date
         });
+      } else if (typed.type === "hyperlink") {
+        // Recurse into hyperlink — its run children may carry tracked
+        // changes that the bulk acceptAll/rejectAll already process.
+        const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] };
+        visitParagraph({ type: "paragraph", children: [...hl.children] } as Paragraph);
       }
     }
   };
@@ -574,6 +634,36 @@ export function listRevisions(doc: DocxDocument): RevisionEntry[] {
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
         );
         visitBlocks(filtered as readonly BodyContent[]);
+        // Inline (Run-only) SDT children may also wrap inserted/deleted
+        // runs. We don't have a synthetic-paragraph helper here, but
+        // check each Run directly for revision wrappers via its content
+        // — the same fields paragraph runs would carry.
+        for (const c of block.content) {
+          if (
+            c &&
+            typeof c === "object" &&
+            !("type" in c) &&
+            "content" in c &&
+            Array.isArray((c as { content?: unknown }).content)
+          ) {
+            // Synthesise a single-run paragraph so existing recursion
+            // (visitParagraph) collects its revisions.
+            visitParagraph({
+              type: "paragraph",
+              children: [c as Run]
+            } as Paragraph);
+          }
+        }
+      } else if (block.type === "textBox") {
+        visitBlocks(block.content as readonly BodyContent[]);
+      } else if (block.type === "drawingShape") {
+        if (block.textContent && block.textContent.length > 0) {
+          visitBlocks(block.textContent as readonly BodyContent[]);
+        }
+      } else if (block.type === "tableOfContents") {
+        if (block.cachedParagraphs && block.cachedParagraphs.length > 0) {
+          visitBlocks(block.cachedParagraphs as readonly BodyContent[]);
+        }
       }
     }
   };
@@ -588,6 +678,23 @@ export function listRevisions(doc: DocxDocument): RevisionEntry[] {
   if (doc.footers) {
     for (const [, footer] of doc.footers) {
       visitBlocks(footer.content.children as readonly BodyContent[]);
+    }
+  }
+  // Footnotes/endnotes/comments may also contain tracked changes — keeping
+  // them in sync with acceptAllRevisions/rejectAllRevisions.
+  if (doc.footnotes) {
+    for (const note of doc.footnotes) {
+      visitBlocks(note.content as readonly BodyContent[]);
+    }
+  }
+  if (doc.endnotes) {
+    for (const note of doc.endnotes) {
+      visitBlocks(note.content as readonly BodyContent[]);
+    }
+  }
+  if (doc.comments) {
+    for (const c of doc.comments) {
+      visitBlocks(c.content as readonly BodyContent[]);
     }
   }
 
@@ -685,6 +792,21 @@ function processSingleRevision(
           }
           break;
         }
+        case "hyperlink": {
+          // Hyperlinks can wrap tracked-change runs. Recurse via a
+          // synthetic paragraph so the same id-matching logic applies.
+          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const synth = {
+            type: "paragraph",
+            children: [...hl.children]
+          } as unknown as Paragraph;
+          processParagraph(synth);
+          newChildren.push({
+            ...(hl as object),
+            children: synth.children
+          } as ParagraphChild);
+          break;
+        }
         default:
           newChildren.push(child);
       }
@@ -780,6 +902,29 @@ function processSingleRevision(
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
         );
         processBlocks(filtered as readonly BodyContent[]);
+        // Inline (Run-only) SDT children: synthesise a paragraph so the
+        // same per-run revision logic above runs against them.
+        for (const c of block.content) {
+          if (
+            c &&
+            typeof c === "object" &&
+            !("type" in c) &&
+            "content" in c &&
+            Array.isArray((c as { content?: unknown }).content)
+          ) {
+            processParagraph({ type: "paragraph", children: [c as Run] } as Paragraph);
+          }
+        }
+      } else if (block.type === "textBox") {
+        processBlocks(block.content as readonly BodyContent[]);
+      } else if (block.type === "drawingShape") {
+        if (block.textContent && block.textContent.length > 0) {
+          processBlocks(block.textContent as readonly BodyContent[]);
+        }
+      } else if (block.type === "tableOfContents") {
+        if (block.cachedParagraphs && block.cachedParagraphs.length > 0) {
+          processBlocks(block.cachedParagraphs as readonly BodyContent[]);
+        }
       }
     }
   };
@@ -794,6 +939,22 @@ function processSingleRevision(
   if (doc.footers) {
     for (const [, footer] of doc.footers) {
       processBlocks(footer.content.children as readonly BodyContent[]);
+    }
+  }
+  // Notes and comments can also contain revisions; mirror the bulk APIs.
+  if (doc.footnotes) {
+    for (const note of doc.footnotes) {
+      processBlocks(note.content as readonly BodyContent[]);
+    }
+  }
+  if (doc.endnotes) {
+    for (const note of doc.endnotes) {
+      processBlocks(note.content as readonly BodyContent[]);
+    }
+  }
+  if (doc.comments) {
+    for (const c of doc.comments) {
+      processBlocks(c.content as readonly BodyContent[]);
     }
   }
 

@@ -184,6 +184,23 @@ describe("format-search", () => {
       expect(results[1]!.text).toBe("Warning: be careful");
     });
 
+    it("matches across runs even with /g RegExp (lastIndex must not bleed)", () => {
+      // A `/g` regex retains lastIndex across `.test()` calls; a stateful
+      // pattern would silently skip matches in later runs. The implementation
+      // must reset lastIndex per call.
+      const doc = makeDoc([
+        makePara([
+          makeRun("alpha TODO one", { bold: true }),
+          makeRun("beta TODO two", { bold: true }),
+          makeRun("gamma TODO three", { bold: true })
+        ])
+      ]);
+
+      const pattern = /TODO/g;
+      const results = searchByFormat(doc, { bold: true, textMatch: pattern });
+      expect(results).toHaveLength(3);
+    });
+
     it("uses AND logic for multiple criteria (bold + italic)", () => {
       const doc = makeDoc([
         makePara([

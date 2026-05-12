@@ -6,6 +6,7 @@
 
 import type { XmlSink } from "@xml/types";
 
+import { isRun } from "../core/text-utils";
 import type {
   ParagraphProperties,
   Paragraph,
@@ -23,8 +24,7 @@ import type {
   DeletedRun,
   MovedFromRun,
   MovedToRun,
-  ParagraphFrame,
-  Run
+  ParagraphFrame
 } from "../types";
 import type { RenderHelpers } from "./render-context";
 import {
@@ -586,10 +586,8 @@ function renderParagraphChild(xml: XmlSink, child: ParagraphChild, helpers?: Ren
         break;
     }
   }
-  // Run objects don't have a .type property at the union level, but we handle
-  // them via duck typing: they have .content
-  if ("content" in child && !("type" in child)) {
-    renderRun(xml, child as Run, helpers?.imageRemap);
+  if (isRun(child)) {
+    renderRun(xml, child, helpers?.imageRemap);
   }
 }
 

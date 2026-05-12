@@ -8,8 +8,9 @@
  * Note: This API mutates the document in place for backward compatibility.
  */
 
+import { isHyperlink, isRun } from "../core/text-utils";
 import { walkDocument } from "../core/walker";
-import type { DocxDocument, Paragraph, Run, RunContent } from "../types";
+import type { DocxDocument, Paragraph, ParagraphChild, RunContent } from "../types";
 
 // =============================================================================
 // Constants
@@ -76,31 +77,32 @@ function mergeFieldsInParagraph(
   let count = 0;
 
   // Recurse into hyperlinks too — MERGEFIELDs are commonly placed inside
-  // hyperlink text (e.g. for personalized URLs).
-  const visit = (children: readonly unknown[]): void => {
+  // hyperlink text (e.g. for personalized URLs). Also descend through
+  // tracked-insert and moved-to wrappers so merge fields inside accepted
+  // tracked changes still get filled. (Deleted / movedFromRun wrappers
+  // represent removals and are skipped, matching replaceText's
+  // convention.)
+  const visit = (children: readonly ParagraphChild[]): void => {
     for (const child of children) {
-      if (
-        child &&
-        typeof child === "object" &&
-        "type" in (child as Record<string, unknown>) &&
-        (child as { type: unknown }).type === "hyperlink" &&
-        Array.isArray((child as { children?: unknown[] }).children)
-      ) {
-        visit((child as { children: unknown[] }).children);
+      if (isHyperlink(child)) {
+        visit(child.children as readonly ParagraphChild[]);
         continue;
       }
       if (
-        !child ||
-        typeof child !== "object" ||
-        !("content" in (child as Record<string, unknown>))
+        "type" in child &&
+        ((child as { type?: string }).type === "insertedRun" ||
+          (child as { type?: string }).type === "movedToRun")
       ) {
+        const inner = (child as { run?: ParagraphChild }).run;
+        if (inner) {
+          visit([inner]);
+        }
         continue;
       }
-      const runLike = child as Run;
-      if (!Array.isArray(runLike.content)) {
+      if (!isRun(child)) {
         continue;
       }
-      const content = runLike.content as RunContent[];
+      const content = child.content as RunContent[];
       for (let j = 0; j < content.length; j++) {
         const c = content[j];
         if (c.type !== "field") {
@@ -111,8 +113,18 @@ function mergeFieldsInParagraph(
           continue;
         }
         const fieldName = match[1] ?? match[2];
-        if (fieldName in data) {
-          content[j] = { type: "text", text: data[fieldName] } as RunContent;
+        // Use Object.hasOwn so prototype-chain entries (`__proto__`,
+        // `toString`, `constructor`, …) cannot bind to merge fields. With
+        // `in`, an unsanitised CSV header like `__proto__` would resolve
+        // to `Object.prototype.__proto__` and inject a non-string value
+        // (or even a function reference) into the document.
+        if (fieldName !== undefined && Object.hasOwn(data, fieldName)) {
+          const raw = (data as Record<string, unknown>)[fieldName];
+          // Coerce to string defensively — extractMergeFields advertises
+          // `Record<string, string>`, but callers commonly pass values
+          // through unfettered JSON / CSV parsers.
+          const text = typeof raw === "string" ? raw : raw == null ? "" : String(raw);
+          content[j] = { type: "text", text } as RunContent;
           count++;
         } else if (removeUnmatched) {
           content[j] = { type: "text", text: "" } as RunContent;

@@ -7,6 +7,9 @@
  * @stability experimental
  */
 
+import { parseXml } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
+
 import { DocxError } from "../errors";
 import type { DocxDocument } from "../types";
 import { fillTemplate } from "./template-engine";
@@ -60,7 +63,15 @@ export class JsonDataSource implements DataSource {
    */
   constructor(input: string | Record<string, unknown>) {
     if (typeof input === "string") {
-      const parsed = JSON.parse(input) as unknown;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(input);
+      } catch (cause) {
+        throw new DocxError(
+          `JsonDataSource: failed to parse input as JSON (${(cause as Error).message})`,
+          { cause }
+        );
+      }
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new DocxError(
           "JsonDataSource: input must parse to a JSON object (not array or null)"
@@ -349,204 +360,64 @@ interface XmlNode {
 }
 
 /**
- * Parse an XML string into a flat Record.
- * Uses a simple regex-based tokenizer — not a full XML parser, but sufficient
- * for data extraction from well-formed XML documents.
+ * Parse an XML string into a flat Record using the project's hardened
+ * SAX-backed DOM parser. The parser enforces the standard `maxDepth` and
+ * `maxEntityExpansions` limits, so this helper is safe to call on
+ * untrusted input — earlier versions used a hand-rolled regex parser
+ * with no depth limit and no protection against billion-laughs / nested
+ * element bombs.
  */
 function parseXmlToRecord(xml: string, rootTag?: string): Record<string, unknown> {
-  // Strip XML declaration and comments
-  const cleaned = xml
-    .replace(/<\?xml[^?]*\?>/g, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .trim();
-
-  // Parse into a tree
-  const root = parseXmlElement(cleaned);
+  let parsed: { root: XmlElement } | undefined;
+  try {
+    parsed = parseXml(xml);
+  } catch {
+    return {};
+  }
+  const root = parsed.root;
   if (!root) {
     return {};
   }
-
-  // If rootTag is specified and matches, use its children scope; otherwise use root directly
-  const startNode = root;
-
-  // Convert tree to Record
-  return xmlNodeToRecord(startNode);
+  // The previous regex parser ignored rootTag too; we keep that behaviour
+  // for compatibility — converting from `root` directly works regardless
+  // of whether the caller named the expected root.
+  void rootTag;
+  return xmlElementToRecord(root);
 }
 
-/**
- * Parse a single XML element and its children from a string.
- * Returns the parsed node or null if the string doesn't start with an element.
- */
-function parseXmlElement(xml: string): XmlNode | null {
-  const trimmed = xml.trim();
-  if (!trimmed.startsWith("<")) {
-    return null;
-  }
-
-  // Match opening tag
-  const openTagRegex = /^<([a-zA-Z_][\w:.-]*)((?:\s+[a-zA-Z_][\w:.-]*\s*=\s*"[^"]*")*)\s*(\/?)>/;
-  const match = openTagRegex.exec(trimmed);
-  if (!match) {
-    return null;
-  }
-
-  const tag = match[1];
-  const attrString = match[2];
-  const selfClosing = match[3] === "/";
-
-  // Parse attributes
-  const attributes: Record<string, string> = {};
-  if (attrString) {
-    const attrRegex = /([a-zA-Z_][\w:.-]*)\s*=\s*"([^"]*)"/g;
-    let attrMatch: RegExpExecArray | null;
-    while ((attrMatch = attrRegex.exec(attrString)) !== null) {
-      attributes[attrMatch[1]] = decodeXmlEntities(attrMatch[2]);
-    }
-  }
-
-  if (selfClosing) {
-    return { tag, attributes, children: [], text: "" };
-  }
-
-  // Find the content between open and close tags
-  const afterOpen = trimmed.slice(match[0].length);
-  const closeIdx = findMatchingCloseTag(afterOpen, tag);
-
-  if (closeIdx === -1) {
-    // Malformed — treat as self-closing
-    return { tag, attributes, children: [], text: "" };
-  }
-
-  const innerContent = afterOpen.slice(0, closeIdx);
-
-  // Parse children
+/** Adapter from XmlElement (DOM) to the legacy XmlNode shape. */
+function elementToXmlNode(el: XmlElement): XmlNode {
   const children: XmlNode[] = [];
-  let textContent = "";
-  let pos = 0;
-
-  while (pos < innerContent.length) {
-    // Skip whitespace
-    const nextTag = innerContent.indexOf("<", pos);
-    if (nextTag === -1) {
-      // Rest is text
-      textContent += innerContent.slice(pos);
-      break;
-    }
-
-    // Collect text before the next tag
-    if (nextTag > pos) {
-      textContent += innerContent.slice(pos, nextTag);
-    }
-
-    // Check if it's a CDATA section
-    if (innerContent.startsWith("<![CDATA[", nextTag)) {
-      const cdataEnd = innerContent.indexOf("]]>", nextTag + 9);
-      if (cdataEnd !== -1) {
-        textContent += innerContent.slice(nextTag + 9, cdataEnd);
-        pos = cdataEnd + 3;
-        continue;
-      }
-    }
-
-    // Parse child element
-    const childXml = innerContent.slice(nextTag);
-    const child = parseXmlElement(childXml);
-    if (child) {
-      children.push(child);
-      // Advance past this child element
-      const childClose = `</${child.tag}>`;
-      const selfCloseCheck = new RegExp(`^<${escapeRegexPattern(child.tag)}(?:\\s+[^>]*)?\\/>`);
-      if (selfCloseCheck.test(childXml.trim())) {
-        const selfCloseMatch = selfCloseCheck.exec(childXml.trim());
-        pos = nextTag + (selfCloseMatch ? selfCloseMatch[0].length : 0);
-        // Find actual position in innerContent
-        const selfCloseEnd = innerContent.indexOf("/>", nextTag);
-        if (selfCloseEnd !== -1) {
-          pos = selfCloseEnd + 2;
-        } else {
-          pos = nextTag + 1;
-        }
-      } else {
-        const childCloseIdx = findMatchingCloseTag(
-          innerContent.slice(nextTag + 1 + child.tag.length),
-          child.tag
-        );
-        if (childCloseIdx !== -1) {
-          // Account for opening tag length
-          const openEnd = innerContent.indexOf(">", nextTag);
-          if (openEnd !== -1) {
-            const afterChildOpen = openEnd + 1;
-            const absCloseIdx = findMatchingCloseTag(innerContent.slice(afterChildOpen), child.tag);
-            if (absCloseIdx !== -1) {
-              pos = afterChildOpen + absCloseIdx + childClose.length;
-            } else {
-              pos = nextTag + 1;
-            }
-          } else {
-            pos = nextTag + 1;
-          }
-        } else {
-          pos = nextTag + 1;
-        }
-      }
-    } else {
-      // Not a valid element; skip this character
-      pos = nextTag + 1;
+  let text = "";
+  for (const child of el.children) {
+    if (child.type === "element") {
+      children.push(elementToXmlNode(child));
+    } else if (child.type === "text" || child.type === "cdata") {
+      text += child.value;
     }
   }
-
-  return { tag, attributes, children, text: decodeXmlEntities(textContent.trim()) };
+  return {
+    tag: el.local ?? el.name.replace(/^.*:/, ""),
+    attributes: { ...el.attributes },
+    children,
+    text
+  };
 }
 
-/**
- * Find the position of the matching close tag, handling nested elements of the same name.
- */
-function findMatchingCloseTag(content: string, tag: string): number {
-  const openPattern = `<${tag}`;
-  const closePattern = `</${tag}>`;
-  let depth = 0;
-  let pos = 0;
+function xmlElementToRecord(el: XmlElement): Record<string, unknown> {
+  return xmlNodeToRecord(elementToXmlNode(el));
+}
 
-  while (pos < content.length) {
-    const nextClose = content.indexOf(closePattern, pos);
-    if (nextClose === -1) {
-      return -1;
-    }
-
-    // Count opens between pos and nextClose
-    let searchPos = pos;
-    while (searchPos < nextClose) {
-      const nextOpen = content.indexOf(openPattern, searchPos);
-      if (nextOpen === -1 || nextOpen >= nextClose) {
-        break;
-      }
-      // Verify it's actually an opening tag (followed by space, >, or /)
-      const charAfter = content[nextOpen + openPattern.length];
-      if (
-        charAfter === ">" ||
-        charAfter === " " ||
-        charAfter === "/" ||
-        charAfter === "\t" ||
-        charAfter === "\n"
-      ) {
-        // Check it's not self-closing
-        const tagEnd = content.indexOf(">", nextOpen);
-        if (tagEnd !== -1 && content[tagEnd - 1] !== "/") {
-          depth++;
-        }
-      }
-      searchPos = nextOpen + openPattern.length;
-    }
-
-    if (depth === 0) {
-      return nextClose;
-    }
-    depth--;
-    pos = nextClose + closePattern.length;
+/** Stub for the legacy entrypoint kept for tests / external callers. */
+function parseXmlElement(xml: string): XmlNode | null {
+  try {
+    return elementToXmlNode(parseXml(xml).root);
+  } catch {
+    return null;
   }
-
-  return -1;
 }
+// Suppress no-unused-vars lint — kept for binary compat with prior internal API.
+void parseXmlElement;
 
 /** Convert an XmlNode tree into a flat Record. */
 function xmlNodeToRecord(node: XmlNode): Record<string, unknown> {
@@ -596,23 +467,6 @@ function xmlNodeToRecord(node: XmlNode): Record<string, unknown> {
   }
 
   return result;
-}
-
-/** Decode basic XML entities and numeric character references. */
-function decodeXmlEntities(str: string): string {
-  return str
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-}
-
-/** Escape special regex characters in a string. */
-function escapeRegexPattern(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // =============================================================================

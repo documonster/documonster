@@ -191,4 +191,20 @@ describe("isWellFormedSignature", () => {
     const info = parseSignatureXml("<root>no signature here</root>", "sig.xml");
     expect(isWellFormedSignature(info)).toBe(false);
   });
+
+  it("recognises namespace-prefixed Signature elements", () => {
+    const xml =
+      '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+      "<ds:SignedInfo></ds:SignedInfo>" +
+      "<ds:SignatureValue>abc==</ds:SignatureValue>" +
+      "<ds:KeyInfo></ds:KeyInfo>" +
+      "</ds:Signature>";
+    const info = parseSignatureXml(xml, "sig.xml");
+    expect(isWellFormedSignature(info)).toBe(true);
+  });
+
+  it("reports cryptographicStatus 'not-verified' on every parsed signature", () => {
+    const info = parseSignatureXml(SAMPLE_SIGNATURE_XML, "sig1.xml");
+    expect(info.cryptographicStatus).toBe("not-verified");
+  });
 });

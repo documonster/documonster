@@ -20,6 +20,7 @@
  *   Half-point 24 = 12pt font; line height ~14.4pt = 288 twips (single-spaced)
  */
 
+import { isHyperlink, isRun } from "../core/text-utils";
 import type {
   BodyContent,
   DocxDocument,
@@ -335,11 +336,10 @@ function collectTokens(children: readonly ParagraphChild[]): LayoutToken[] {
   const tokens: LayoutToken[] = [];
 
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      collectRunTokens(child as Run, tokens);
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
+    if (isRun(child)) {
+      collectRunTokens(child, tokens);
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
         collectRunTokens(run, tokens);
       }
     }
@@ -487,9 +487,8 @@ function computeParagraphLineWidths(
 function getInlineImageMaxHeight(children: readonly ParagraphChild[]): number {
   let maxHeight = 0;
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      const run = child as Run;
-      for (const item of run.content) {
+    if (isRun(child)) {
+      for (const item of child.content) {
         if (item.type === "image") {
           const img = item as { type: "image"; height?: number };
           if (img.height) {
@@ -511,9 +510,8 @@ function getInlineImageMaxHeight(children: readonly ParagraphChild[]): number {
 function countFootnoteRefs(children: readonly ParagraphChild[]): number {
   let count = 0;
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      const run = child as Run;
-      for (const item of run.content) {
+    if (isRun(child)) {
+      for (const item of child.content) {
         if (item.type === "footnoteRef" || item.type === "endnoteRef") {
           count++;
         }
@@ -529,9 +527,8 @@ function countFootnoteRefs(children: readonly ParagraphChild[]): number {
 function countBreakElements(children: readonly ParagraphChild[]): number {
   let count = 0;
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      const run = child as Run;
-      for (const item of run.content) {
+    if (isRun(child)) {
+      for (const item of child.content) {
         if (item.type === "break") {
           const breakType = (item as { breakType?: string }).breakType;
           if (!breakType || breakType === "textWrapping") {
@@ -539,9 +536,8 @@ function countBreakElements(children: readonly ParagraphChild[]): number {
           }
         }
       }
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
         for (const item of run.content) {
           if (item.type === "break") {
             const breakType = (item as { breakType?: string }).breakType;
@@ -567,19 +563,15 @@ function measureParagraphTextWidth(
 ): number {
   let totalWidth = 0;
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      // Run
-      const run = child as Run;
-      const text = getRunText(run);
+    if (isRun(child)) {
+      const text = getRunText(child);
       if (text.length > 0) {
-        const fontName = getRunFontName(run);
-        const fontSize = (run.properties?.size ?? defaultFontSize) / 2; // half-pt → pt
+        const fontName = getRunFontName(child);
+        const fontSize = (child.properties?.size ?? defaultFontSize) / 2; // half-pt → pt
         totalWidth += measureFn(text, fontName, fontSize);
       }
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      // Hyperlink — has children which are Runs
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
         const text = getRunText(run);
         if (text.length > 0) {
           const fontName = getRunFontName(run);
@@ -596,17 +588,13 @@ function measureParagraphTextWidth(
 function getMaxRunFontSize(children: readonly ParagraphChild[], defaultFontSize: number): number {
   let maxSize = 0;
   for (const child of children) {
-    if ("content" in child && "properties" in child) {
-      // Run
-      const run = child as Run;
-      const size = run.properties?.size ?? defaultFontSize;
+    if (isRun(child)) {
+      const size = child.properties?.size ?? defaultFontSize;
       if (size > maxSize) {
         maxSize = size;
       }
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      // Hyperlink
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
         const size = run.properties?.size ?? defaultFontSize;
         if (size > maxSize) {
           maxSize = size;
@@ -620,9 +608,8 @@ function getMaxRunFontSize(children: readonly ParagraphChild[], defaultFontSize:
 /** 检查段落 run content 中是否有 page break */
 function hasPageBreakInRuns(children: readonly ParagraphChild[]): boolean {
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      const run = child as Run;
-      for (const item of run.content) {
+    if (isRun(child)) {
+      for (const item of child.content) {
         if (item.type === "break" && (item as { breakType?: string }).breakType === "page") {
           return true;
         }
@@ -635,9 +622,8 @@ function hasPageBreakInRuns(children: readonly ParagraphChild[]): boolean {
 /** 检查段落 run content 中是否有 column break */
 function hasColumnBreakInRuns(children: readonly ParagraphChild[]): boolean {
   for (const child of children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      const run = child as Run;
-      for (const item of run.content) {
+    if (isRun(child)) {
+      for (const item of child.content) {
         if (item.type === "break" && (item as { breakType?: string }).breakType === "column") {
           return true;
         }

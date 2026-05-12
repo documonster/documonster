@@ -7,9 +7,9 @@
  */
 
 import { findChild, findChildren } from "@xml/dom";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import type { XmlElement } from "@xml/types";
 
-import { escapeXml } from "../core/internal-utils";
 import type { ParsedRelationship } from "./reader-context";
 
 // =============================================================================
@@ -29,6 +29,21 @@ export function attrInt(el: XmlElement, name: string): number | undefined {
   }
   const n = parseInt(v, 10);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Like `parseInt(value ?? fallback, 10)` but never returns NaN: any
+ * non-numeric value falls back to `fallback`. Use this when forwarding
+ * raw attribute strings into numeric model fields — round-tripping a
+ * `NaN` back into XML produces literal `"NaN"` and corrupts the
+ * resulting DOCX.
+ */
+export function safeParseInt(value: string | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 // =============================================================================
@@ -118,7 +133,7 @@ export function boolToggle(parent: XmlElement, name: string): boolean | undefine
 export function serializeElement(el: XmlElement): string {
   let s = `<${el.name}`;
   for (const [k, v] of Object.entries(el.attributes)) {
-    s += ` ${k}="${escapeXml(v)}"`;
+    s += ` ${k}="${xmlEncodeAttr(v)}"`;
   }
   if (el.children.length === 0) {
     return s + "/>";
@@ -128,7 +143,7 @@ export function serializeElement(el: XmlElement): string {
     if (child.type === "element") {
       s += serializeElement(child);
     } else if (child.type === "text") {
-      s += escapeXml(child.value);
+      s += xmlEncode(child.value);
     }
   }
   s += `</${el.name}>`;
@@ -153,14 +168,20 @@ export function collectRIds(el: XmlElement, out: Set<string>): void {
 // Path / Relationship Helpers
 // =============================================================================
 
-export { getPartRelsPath, getFileName, getFileExt } from "../core/opc-package";
+export { getPartRelsPath, getFileName, getFileExt } from "../core/opc-paths";
 
 /**
- * Resolve a relationship target path to an absolute package-root path.
+ * Resolve an OPC relationship target against its source part.
  *
  * - Leading `/` → package root absolute
  * - `../` / `./` → resolved relative to the source part's directory
  * - Plain paths → resolved relative to the source part's directory
+ *
+ * Returns an empty string when the resolved path would escape the package
+ * root (i.e. more `..` segments than there are directories above the
+ * source). The previous behaviour silently treated extra `..` as a no-op,
+ * which let a malicious or malformed `Target` value point at an entirely
+ * different part than the directory traversal would suggest.
  */
 export function resolvePartPath(sourcePart: string, target: string): string {
   if (!target) {
@@ -174,6 +195,11 @@ export function resolvePartPath(sourcePart: string, target: string): string {
   const segs = target.split("/");
   for (const seg of segs) {
     if (seg === "..") {
+      if (baseDir.length === 0) {
+        // The target asks to step above the package root. Treat as
+        // unresolvable instead of silently swallowing the segment.
+        return "";
+      }
       baseDir.pop();
     } else if (seg !== "." && seg !== "") {
       baseDir.push(seg);

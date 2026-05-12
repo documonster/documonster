@@ -1136,6 +1136,26 @@ describe("mailMerge()", () => {
     const count = mailMerge(doc, { City: "NYC", State: "NY" });
     expect(count).toBe(2);
   });
+
+  it("should not bind to inherited Object.prototype keys (prototype pollution guard)", () => {
+    // Field names like __proto__/toString/constructor must not match unless
+    // the data object has them as OWN properties. Otherwise CSV-driven
+    // mail merges with attacker-controlled headers could pull function
+    // references out of Object.prototype and inject them into the doc.
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD __proto__ ")]));
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD toString ")]));
+    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD constructor ")]));
+    const doc = Document.build(h);
+
+    const count = mailMerge(doc, {}); // empty data — none of the prototype keys are own
+    expect(count).toBe(0);
+    // All three fields must remain unsubstituted.
+    for (let i = 0; i < 3; i++) {
+      const run = (doc.body[i] as Paragraph).children[0] as any;
+      expect(run.content[0].type).toBe("field");
+    }
+  });
 });
 
 // =============================================================================
@@ -1403,7 +1423,7 @@ describe("Round-trip: Style customStyle/hidden/locked", () => {
 
 describe("Round-trip: Math mathPreSubSuperScript", () => {
   it("should preserve m:sPre structure", async () => {
-    const { mathRun, mathPreSubSuperScript: mathPre } = await import("../document");
+    const { mathRun, mathPreSubSuperScript: mathPre } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -1557,7 +1577,7 @@ describe("Round-trip: East Asian paragraph properties", () => {
 
 describe("Round-trip: Positional tab (ptab)", () => {
   it("should preserve ptab element", async () => {
-    const { positionalTab } = await import("../document");
+    const { positionalTab } = await import("../index");
     const pt = positionalTab({
       alignment: "center",
       relativeTo: "indent",
@@ -1585,7 +1605,7 @@ describe("Round-trip: Positional tab (ptab)", () => {
 
 describe("Round-trip: Ruby text", () => {
   it("should preserve ruby annotations", async () => {
-    const { ruby: rubyFn } = await import("../document");
+    const { ruby: rubyFn } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -1751,7 +1771,7 @@ describe("Round-trip: numbering with only numId (no level)", () => {
 
 describe("Round-trip: TOC instruction options", () => {
   it("should preserve TOC field switches through round-trip", async () => {
-    const { tocField } = await import("../document");
+    const { tocField } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -2078,7 +2098,7 @@ describe("Round-trip: People (w15:people)", () => {
 
 describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
   it("should preserve phantom / group character / border box", async () => {
-    const { mathRun, mathPhantom, mathGroupChar, mathBorderBox } = await import("../document");
+    const { mathRun, mathPhantom, mathGroupChar, mathBorderBox } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -2198,6 +2218,20 @@ describe("Regression: rel.target path normalization", () => {
     const parsed = await readDocx(buffer);
     expect(parsed.headers).toBeDefined();
     expect(parsed.headers!.size).toBeGreaterThan(0);
+  });
+});
+
+describe("resolvePartPath escape rejection", () => {
+  it("returns empty string when relative target steps above package root", async () => {
+    // Pull the helper through its public location.
+    const { resolvePartPath } = await import("../reader/parse-utils");
+    // word/document.xml has only "word/" above it → "../../etc/passwd" would
+    // escape, return "".
+    expect(resolvePartPath("word/document.xml", "../../etc/passwd")).toBe("");
+    // A single .. is fine: word/document.xml → root → "media/foo.png".
+    expect(resolvePartPath("word/document.xml", "../media/foo.png")).toBe("media/foo.png");
+    // Absolute paths bypass the resolver.
+    expect(resolvePartPath("word/document.xml", "/word/styles.xml")).toBe("word/styles.xml");
   });
 });
 
@@ -2511,7 +2545,7 @@ describe("attrInt: NaN safety", () => {
 
 describe("Query API", () => {
   it("getHeadings: extracts outline from style 'Heading1'...'HeadingN'", async () => {
-    const { getHeadings } = await import("../document");
+    const { getHeadings } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -2543,7 +2577,7 @@ describe("Query API", () => {
   });
 
   it("findBookmark: locates bookmark by name", async () => {
-    const { findBookmark } = await import("../document");
+    const { findBookmark } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -2563,13 +2597,13 @@ describe("Query API", () => {
   });
 
   it("findBookmark: returns undefined for missing name", async () => {
-    const { findBookmark } = await import("../document");
+    const { findBookmark } = await import("../index");
     const doc: DocxDocument = { body: [] };
     expect(findBookmark(doc, "nothing")).toBeUndefined();
   });
 
   it("paragraphCount / countWords / tableCount", async () => {
-    const { paragraphCount, countWords, tableCount } = await import("../document");
+    const { paragraphCount, countWords, tableCount } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {
@@ -2605,7 +2639,7 @@ describe("Query API", () => {
   });
 
   it("findComment: locates comment by id", async () => {
-    const { findComment } = await import("../document");
+    const { findComment } = await import("../index");
     const doc: DocxDocument = {
       body: [],
       comments: [
@@ -2618,7 +2652,7 @@ describe("Query API", () => {
   });
 
   it("listImages / listTables / listHyperlinks", async () => {
-    const { listImages, listTables, listHyperlinks } = await import("../document");
+    const { listImages, listTables, listHyperlinks } = await import("../index");
     const doc: DocxDocument = {
       body: [
         {

@@ -268,19 +268,54 @@ function parseStyleRef(args: string): string {
 // Bookmark Collection
 // =============================================================================
 
-/** Collect all bookmarks with their text and page numbers. */
+/** Collect all bookmarks with their text and page numbers.
+ *
+ * Walks the entire document (including tables, SDTs, text boxes, etc.) so
+ * bookmarks placed inside nested structures still feed PAGEREF / TOC
+ * resolution. Page numbers come from `layout.bookmarkPages` when the
+ * layout engine has registered them; otherwise we fall back to the
+ * top-level body block's `contentPages` entry.
+ */
 function collectBookmarkInfo(doc: DocxDocument, layout: LayoutResult): Map<string, BookmarkData> {
   const map = new Map<string, BookmarkData>();
   const { contentPages } = layout;
 
-  for (let i = 0; i < doc.body.length; i++) {
-    const item = doc.body[i];
-    if (item.type === "paragraph") {
-      const text = extractParagraphText(item);
-      for (const child of item.children) {
+  // Track the current top-level body index so we can fall back to
+  // contentPages[i] when the bookmark wasn't seen by the layout pass.
+  let topLevelIndex = -1;
+
+  walkBlocks(doc.body as BodyContent[], {
+    enterParagraph(para) {
+      const text = extractParagraphText(para);
+      for (const child of para.children) {
         if (isBookmarkStart(child)) {
-          const page = layout.bookmarkPages.get(child.name) ?? contentPages[i] ?? 1;
+          const fallbackPage =
+            topLevelIndex >= 0 && contentPages[topLevelIndex] !== undefined
+              ? contentPages[topLevelIndex]!
+              : 1;
+          const page = layout.bookmarkPages.get(child.name) ?? fallbackPage;
           map.set(child.name, { text, page });
+        }
+      }
+    }
+  });
+
+  // The walker doesn't expose top-level indexing directly, so re-walk only
+  // body to keep `topLevelIndex` synchronised. The previous loop's results
+  // already reflect bookmarks via `layout.bookmarkPages` for everything
+  // layout could see; this second pass refines the fallback page for
+  // bookmarks layout missed (very rare in practice).
+  for (let i = 0; i < doc.body.length; i++) {
+    topLevelIndex = i;
+    const item = doc.body[i];
+    if (item.type !== "paragraph") {
+      continue;
+    }
+    for (const child of item.children) {
+      if (isBookmarkStart(child)) {
+        const existing = map.get(child.name);
+        if (existing && existing.page === 1 && contentPages[i] !== undefined) {
+          map.set(child.name, { ...existing, page: contentPages[i]! });
         }
       }
     }
@@ -297,25 +332,34 @@ function isBookmarkStart(child: ParagraphChild): child is BookmarkStart {
 // Heading Collection
 // =============================================================================
 
-/** Collect headings from the document for TOC generation. */
+/** Collect headings from the document for TOC generation.
+ *
+ * Walks the entire document — headings inside tables (very common) or text
+ * boxes / SDTs / TOC cached content also feed the TOC. Page numbers for
+ * top-level headings come from `layout.contentPages`; nested headings use
+ * the outer block's page or fall back to 1.
+ */
 function collectHeadings(doc: DocxDocument, layout: LayoutResult): HeadingEntry[] {
   const headings: HeadingEntry[] = [];
   const { contentPages } = layout;
 
+  // Walk body twice to track the enclosing top-level body index. First pass:
+  // record outer index per top-level block, then traverse its subtree.
   for (let i = 0; i < doc.body.length; i++) {
     const item = doc.body[i];
-    if (item.type !== "paragraph") {
-      continue;
-    }
-
-    const level = getHeadingLevel(item, doc.styles);
-    if (level !== null) {
-      headings.push({
-        text: extractParagraphText(item),
-        level,
-        page: contentPages[i] ?? 1
-      });
-    }
+    const fallbackPage = contentPages[i] ?? 1;
+    walkBlocks([item] as BodyContent[], {
+      enterParagraph(para) {
+        const level = getHeadingLevel(para, doc.styles);
+        if (level !== null) {
+          headings.push({
+            text: extractParagraphText(para),
+            level,
+            page: fallbackPage
+          });
+        }
+      }
+    });
   }
 
   return headings;
@@ -367,17 +411,24 @@ function getHeadingLevel(para: Paragraph, styles?: DocxDocument["styles"]): numb
 // SEQ Value Computation
 // =============================================================================
 
-/** Compute all SEQ field values by traversing the document in order. */
+/** Compute all SEQ field values by traversing the document in order.
+ *
+ * Walks every paragraph reachable from the body — including ones inside
+ * tables / SDTs / text boxes / TOC caches — so SEQ counters in tabular
+ * figure / table captions advance correctly. Field index ordering across
+ * nested blocks matches the document reading order produced by
+ * walkBlocks (depth-first).
+ */
 function computeSeqValues(doc: DocxDocument): Map<number, number> {
   const counters = new Map<string, number>();
   const values = new Map<number, number>();
-  let fieldIndex = 0;
+  const state = { fieldIndex: 0 };
 
-  for (const item of doc.body) {
-    if (item.type === "paragraph") {
-      fieldIndex = processSeqInParagraph(item, counters, values, fieldIndex);
+  walkBlocks(doc.body as BodyContent[], {
+    enterParagraph(para) {
+      state.fieldIndex = processSeqInParagraph(para, counters, values, state.fieldIndex);
     }
-  }
+  });
 
   return values;
 }
@@ -390,11 +441,15 @@ function processSeqInParagraph(
 ): number {
   let fieldIndex = startIndex;
 
-  for (const child of para.children) {
-    if (!isRun(child)) {
-      continue;
-    }
-    for (const content of child.content) {
+  // Walk every visible Run reachable from the paragraph — including ones
+  // nested inside hyperlinks (`<w:hyperlink>`), tracked-insertion
+  // wrappers (`<w:ins>`) and moved-to wrappers (`<w:moveTo>`). The
+  // previous implementation only saw top-level runs, so common cases
+  // like a SEQ field placed inside `Figure 1` (typically wrapped in a
+  // hyperlink for cross-references) silently skipped the SEQ counter
+  // and produced wrong figure numbering throughout the document.
+  forEachVisibleRun(para.children, run => {
+    for (const content of run.content) {
       if (content.type !== "field") {
         continue;
       }
@@ -427,9 +482,43 @@ function processSeqInParagraph(
 
       fieldIndex++;
     }
-  }
+  });
 
   return fieldIndex;
+}
+
+/**
+ * Walk every "visible" Run reachable from a paragraph child list.
+ *
+ * Visible runs are:
+ *   - bare Run children;
+ *   - Run children inside a Hyperlink wrapper;
+ *   - the inner `run` of an `insertedRun` or `movedToRun` wrapper.
+ *
+ * `deletedRun` / `movedFromRun` represent pending removals and so are
+ * skipped, matching the convention used by `extractParagraphText` and
+ * `replaceText`.
+ */
+function forEachVisibleRun(children: readonly ParagraphChild[], cb: (run: Run) => void): void {
+  for (const child of children) {
+    if (isRun(child)) {
+      cb(child);
+      continue;
+    }
+    if ("type" in child) {
+      const t = (child as { type: string }).type;
+      if (t === "hyperlink") {
+        forEachVisibleRun((child as { children: readonly ParagraphChild[] }).children, cb);
+        continue;
+      }
+      if (t === "insertedRun" || t === "movedToRun") {
+        const inner = (child as { run?: Run }).run;
+        if (inner) {
+          cb(inner);
+        }
+      }
+    }
+  }
 }
 
 // =============================================================================
@@ -565,7 +654,12 @@ function buildIndexContent(entries: IndexEntry[], args: string): string {
  * Evaluate a simple math formula expression.
  * Supports: +, -, *, /, (), numbers, and SUM(ABOVE)/SUM(LEFT).
  */
-function evaluateFormula(args: string, bodyIndex: number, doc: DocxDocument): string {
+function evaluateFormula(
+  args: string,
+  bodyIndex: number,
+  doc: DocxDocument,
+  cellCtx: CellContext | undefined
+): string {
   // Extract the number format switch \# "format"
   const formatMatch = /\\#\s*"([^"]+)"/.exec(args);
   const format = formatMatch ? formatMatch[1] : null;
@@ -575,10 +669,10 @@ function evaluateFormula(args: string, bodyIndex: number, doc: DocxDocument): st
 
   // Handle SUM(ABOVE) and SUM(LEFT)
   expr = expr.replace(/SUM\s*\(\s*ABOVE\s*\)/gi, () => {
-    return String(sumAbove(bodyIndex, doc));
+    return String(sumAbove(bodyIndex, doc, cellCtx));
   });
   expr = expr.replace(/SUM\s*\(\s*LEFT\s*\)/gi, () => {
-    return String(sumLeft(bodyIndex, doc));
+    return String(sumLeft(bodyIndex, doc, cellCtx));
   });
 
   // Evaluate the arithmetic expression
@@ -598,12 +692,21 @@ function evalArithmetic(expr: string): number | null {
     return null;
   }
 
-  try {
-    const result = parseExpression(tokens, { pos: 0 });
-    return result;
-  } catch {
+  // The parser surfaces malformed input via `ctx.error` instead of an
+  // exception so the field engine doesn't need a try/catch around what is
+  // already a control-flow path. Any token that fails to parse as a number
+  // sets the flag and the result is discarded.
+  const ctx: ParseCtx = { pos: 0, error: false };
+  const result = parseExpression(tokens, ctx);
+  if (ctx.error) {
     return null;
   }
+  return result;
+}
+
+interface ParseCtx {
+  pos: number;
+  error: boolean;
 }
 
 /** Tokenize arithmetic expression into numbers, operators, and parens. */
@@ -660,7 +763,7 @@ function isOperator(token: string | undefined): boolean {
 }
 
 /** Recursive descent parser for arithmetic expressions. */
-function parseExpression(tokens: string[], ctx: { pos: number }): number {
+function parseExpression(tokens: string[], ctx: ParseCtx): number {
   let left = parseTerm(tokens, ctx);
 
   while (ctx.pos < tokens.length) {
@@ -676,7 +779,7 @@ function parseExpression(tokens: string[], ctx: { pos: number }): number {
   return left;
 }
 
-function parseTerm(tokens: string[], ctx: { pos: number }): number {
+function parseTerm(tokens: string[], ctx: ParseCtx): number {
   let left = parseFactor(tokens, ctx);
 
   while (ctx.pos < tokens.length) {
@@ -692,7 +795,7 @@ function parseTerm(tokens: string[], ctx: { pos: number }): number {
   return left;
 }
 
-function parseFactor(tokens: string[], ctx: { pos: number }): number {
+function parseFactor(tokens: string[], ctx: ParseCtx): number {
   const token = tokens[ctx.pos];
 
   if (token === "(") {
@@ -707,14 +810,21 @@ function parseFactor(tokens: string[], ctx: { pos: number }): number {
   ctx.pos++;
   const num = parseFloat(token);
   if (isNaN(num)) {
-    throw new Error("Invalid number");
+    ctx.error = true;
+    return 0;
   }
   return num;
 }
 
-/** Sum numeric values from cells above the current cell in a table. */
-function sumAbove(bodyIndex: number, doc: DocxDocument): number {
-  const location = findCellInTable(bodyIndex, doc);
+/**
+ * Sum numeric values from cells above the current cell in a table.
+ * `cellCtx` identifies which cell the formula is being evaluated in.
+ * Without it the previous heuristic returned the first formula-bearing
+ * cell of the first table in the document, producing wrong sums whenever
+ * more than one cell carried a formula.
+ */
+function sumAbove(bodyIndex: number, doc: DocxDocument, cellCtx: CellContext | undefined): number {
+  const location = cellCtx ?? findCellInTable(bodyIndex, doc);
   if (!location) {
     return 0;
   }
@@ -732,25 +842,34 @@ function sumAbove(bodyIndex: number, doc: DocxDocument): number {
   return sum;
 }
 
-/** Sum numeric values from cells to the left of the current cell in a table. */
-function sumLeft(bodyIndex: number, doc: DocxDocument): number {
-  const location = findCellInTable(bodyIndex, doc);
+/** Sum numeric values from cells to the left of the current cell. */
+function sumLeft(bodyIndex: number, doc: DocxDocument, cellCtx: CellContext | undefined): number {
+  const location = cellCtx ?? findCellInTable(bodyIndex, doc);
   if (!location) {
     return 0;
   }
 
   const { table, rowIndex, colIndex } = location;
-  const row = table.rows[rowIndex];
   let sum = 0;
 
-  for (let c = 0; c < colIndex; c++) {
-    const cell = row?.cells[c];
-    if (cell) {
-      sum += extractCellNumericValue(cell);
+  const row = table.rows[rowIndex];
+  if (row) {
+    for (let c = 0; c < colIndex; c++) {
+      const cell = row.cells[c];
+      if (cell) {
+        sum += extractCellNumericValue(cell);
+      }
     }
   }
 
   return sum;
+}
+
+/** Cell coordinates carried into formula evaluation. */
+interface CellContext {
+  readonly table: Table;
+  readonly rowIndex: number;
+  readonly colIndex: number;
 }
 
 /**
@@ -873,7 +992,11 @@ function updateBody(
         indexEntries,
         doc,
         globalFieldIndex,
-        opts
+        opts,
+        // No cell context at the body level — formulas here can still
+        // call SUM(ABOVE/LEFT) but findCellInTable will be used as a
+        // fallback (likely returning null at the body level).
+        undefined
       );
       globalFieldIndex = result.nextFieldIndex;
       if (result.paragraph !== item) {
@@ -929,11 +1052,15 @@ function updateTableFields(
 ): { table: Table; nextFieldIndex: number } {
   let fieldIndex = startFieldIndex;
   let tableChanged = false;
-  const newRows = table.rows.map(row => {
+  const newRows = table.rows.map((row, rowIndex) => {
     let rowChanged = false;
-    const newCells = row.cells.map(cell => {
+    const newCells = row.cells.map((cell, colIndex) => {
       let cellChanged = false;
       const newContent: (Paragraph | Table)[] = [];
+      // Build the cell context once per cell so SUM(ABOVE)/SUM(LEFT)
+      // resolves against THIS cell's coordinates, not whichever cell
+      // happened to be the first formula-bearing cell in the table.
+      const cellCtx: CellContext = { table, rowIndex, colIndex };
       for (const block of cell.content) {
         if (block.type === "paragraph") {
           const result = updateParagraphFields(
@@ -946,7 +1073,8 @@ function updateTableFields(
             indexEntries,
             doc,
             fieldIndex,
-            opts
+            opts,
+            cellCtx
           );
           fieldIndex = result.nextFieldIndex;
           if (result.paragraph !== block) {
@@ -1054,20 +1182,18 @@ function updateParagraphFields(
   indexEntries: IndexEntry[],
   doc: DocxDocument,
   startFieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions }
+  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  cellCtx: CellContext | undefined
 ): { paragraph: Paragraph; nextFieldIndex: number } {
   let fieldIndex = startFieldIndex;
   let childrenChanged = false;
   const newChildren: ParagraphChild[] = [];
 
-  for (const child of para.children) {
-    if (!isRun(child)) {
-      newChildren.push(child);
-      continue;
-    }
-
+  // Helper that runs `updateRunFields` against a single Run and returns
+  // the (possibly new) Run reference.
+  const updateRun = (r: Run): Run => {
     const runResult = updateRunFields(
-      child,
+      r,
       bodyIndex,
       layout,
       bookmarkInfo,
@@ -1076,13 +1202,59 @@ function updateParagraphFields(
       indexEntries,
       doc,
       fieldIndex,
-      opts
+      opts,
+      cellCtx
     );
     fieldIndex = runResult.nextFieldIndex;
-    if (runResult.run !== child) {
-      childrenChanged = true;
+    return runResult.run;
+  };
+
+  for (const child of para.children) {
+    if (isRun(child)) {
+      const updated = updateRun(child);
+      if (updated !== child) {
+        childrenChanged = true;
+      }
+      newChildren.push(updated);
+      continue;
     }
-    newChildren.push(runResult.run);
+    // Hyperlink: descend into its run children so fields like SEQ/REF
+    // wrapped in a hyperlink are still evaluated.
+    if ("type" in child && (child as { type: string }).type === "hyperlink") {
+      const hl = child as { type: "hyperlink"; children: readonly Run[] } & object;
+      let hlChanged = false;
+      const newRuns = hl.children.map(r => {
+        const upd = updateRun(r);
+        if (upd !== r) {
+          hlChanged = true;
+        }
+        return upd;
+      });
+      if (hlChanged) {
+        childrenChanged = true;
+        newChildren.push({ ...(hl as object), children: newRuns } as unknown as ParagraphChild);
+      } else {
+        newChildren.push(child);
+      }
+      continue;
+    }
+    // Tracked-insert / moved-to wrappers: update the inner run in place.
+    if (
+      "type" in child &&
+      ((child as { type: string }).type === "insertedRun" ||
+        (child as { type: string }).type === "movedToRun")
+    ) {
+      const wrap = child as { type: string; run: Run } & object;
+      const updated = updateRun(wrap.run);
+      if (updated !== wrap.run) {
+        childrenChanged = true;
+        newChildren.push({ ...(wrap as object), run: updated } as unknown as ParagraphChild);
+      } else {
+        newChildren.push(child);
+      }
+      continue;
+    }
+    newChildren.push(child);
   }
 
   if (!childrenChanged) {
@@ -1109,7 +1281,8 @@ function updateRunFields(
   indexEntries: IndexEntry[],
   doc: DocxDocument,
   startFieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions }
+  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  cellCtx: CellContext | undefined
 ): { run: Run; nextFieldIndex: number } {
   let fieldIndex = startFieldIndex;
   let contentChanged = false;
@@ -1131,7 +1304,8 @@ function updateRunFields(
       indexEntries,
       doc,
       fieldIndex,
-      opts
+      opts,
+      cellCtx
     );
     fieldIndex++;
 
@@ -1165,7 +1339,8 @@ function computeFieldValue(
   indexEntries: IndexEntry[],
   doc: DocxDocument,
   fieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions }
+  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  cellCtx: CellContext | undefined
 ): FieldContent {
   const { type, args } = parseFieldInstruction(field.instruction);
 
@@ -1293,7 +1468,7 @@ function computeFieldValue(
     }
 
     case "=": {
-      const value = evaluateFormula(args, bodyIndex, doc);
+      const value = evaluateFormula(args, bodyIndex, doc, cellCtx);
       if (field.cachedValue === value) {
         return field;
       }

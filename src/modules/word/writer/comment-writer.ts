@@ -6,14 +6,17 @@
 
 import type { XmlSink } from "@xml/types";
 
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
+import { NS_W, NS_W15, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
 import type { CommentDef } from "../types";
 import { renderParagraph } from "./paragraph-writer";
-
-const NS_W15 = "http://schemas.microsoft.com/office/word/2012/wordml";
+import type { RenderHelpers } from "./render-context";
 
 /** Render word/comments.xml. */
-export function renderComments(xml: XmlSink, comments: readonly CommentDef[]): void {
+export function renderComments(
+  xml: XmlSink,
+  comments: readonly CommentDef[],
+  helpers?: RenderHelpers
+): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:comments", {
     "xmlns:w": NS_W,
@@ -33,7 +36,7 @@ export function renderComments(xml: XmlSink, comments: readonly CommentDef[]): v
     }
     xml.openNode("w:comment", attrs);
     for (const para of comment.content) {
-      renderParagraph(xml, para);
+      renderParagraph(xml, para, helpers);
     }
     xml.closeNode();
   }

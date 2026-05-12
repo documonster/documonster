@@ -20,12 +20,15 @@ import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
-import { utf8Decoder, utf8Encoder } from "../../core/internal-utils";
+import { sanitizeUrl, utf8Decoder, utf8Encoder } from "../../core/internal-utils";
 import { isRun } from "../../core/text-utils";
 import { DocxParseError } from "../../errors";
 import type {
   DocxDocument,
+  AbstractNumbering,
   BodyContent,
+  LevelSuffix,
+  NumberingInstance,
   Paragraph,
   ParagraphChild,
   ParagraphProperties,
@@ -599,8 +602,13 @@ function parseParagraph(
       if (local === "span") {
         children.push(parseTextSpan(child, styles));
       } else if (local === "a") {
-        // Hyperlink
-        const href = nsAttr(child, "xlink", "href");
+        // Hyperlink. Pass the href through sanitizeUrl so dangerous
+        // schemes (javascript:, vbscript:, data: with executable payloads,
+        // etc.) coming from an untrusted ODT do not survive into the DOCX
+        // model. Unsafe links degrade to plain text — the caller still sees
+        // the link's children but no clickable hyperlink is created.
+        const rawHref = nsAttr(child, "xlink", "href");
+        const safeHref = sanitizeUrl(rawHref);
         const runs: Run[] = [];
         for (const linkChild of child.children) {
           if (linkChild.type === "text") {
@@ -611,11 +619,29 @@ function parseParagraph(
             runs.push(parseTextSpan(linkChild, styles));
           }
         }
-        children.push({
-          type: "hyperlink",
-          url: href,
-          children: runs
-        });
+        if (safeHref) {
+          children.push({
+            type: "hyperlink",
+            url: safeHref,
+            children: runs
+          });
+        } else if (rawHref && rawHref.startsWith("#")) {
+          // Internal anchor — sanitizeUrl rejects fragment-only URLs but
+          // they're safe and meaningful. Preserve as a Hyperlink with
+          // `anchor` set, mirroring how DOCX represents in-document
+          // links.
+          children.push({
+            type: "hyperlink",
+            anchor: rawHref.slice(1),
+            children: runs
+          });
+        } else {
+          // Drop the wrapper — preserve text content as plain runs so no
+          // user-visible content disappears.
+          for (const r of runs) {
+            children.push(r);
+          }
+        }
       } else if (local === "s") {
         const count = parseInt(nsAttr(child, "text", "c") ?? "1", 10);
         children.push({ content: [{ type: "text", text: " ".repeat(count) }] });
@@ -993,6 +1019,66 @@ function convertStylesToStyleDefs(styles: Map<string, OdfStyle>): StyleDef[] {
 }
 
 // =============================================================================
+// ODT list numbering definition (numId=1)
+// =============================================================================
+
+/**
+ * Walk the converted body and, if any paragraph references `numbering.numId`,
+ * synthesize the corresponding `abstractNumberings` and `numberingInstances`
+ * so Word renders bullet/number markers. Without this the list paragraphs
+ * carry a `numId` that resolves to nothing in the produced document and the
+ * markers are invisible.
+ *
+ * The reader currently only emits a single bulleted abstract definition for
+ * `numId === 1` (matching parseParagraph above). Numbered/multi-level ODT
+ * lists fall back to bullets for now — preserving the visible structure is
+ * the primary goal.
+ */
+function buildOdtNumberingDefs(body: readonly BodyContent[]): {
+  abstractNumberings?: AbstractNumbering[];
+  numberingInstances?: NumberingInstance[];
+} {
+  if (!hasListParagraph(body)) {
+    return {};
+  }
+  const tabSuffix: LevelSuffix = "tab";
+  const bulletChars = ["•", "◦", "▪", "•", "◦", "▪", "•", "◦", "▪"];
+  const levels = bulletChars.map((ch, level) => ({
+    level,
+    format: "bullet" as const,
+    text: ch,
+    start: 1,
+    paragraphProperties: {
+      indent: { left: 720 * (level + 1), hanging: 360 }
+    },
+    suffix: tabSuffix
+  }));
+  return {
+    abstractNumberings: [{ abstractNumId: 1, levels }],
+    numberingInstances: [{ numId: 1, abstractNumId: 1 }]
+  };
+}
+
+function hasListParagraph(blocks: readonly BodyContent[]): boolean {
+  for (const block of blocks) {
+    if (block.type === "paragraph") {
+      if (block.properties?.numbering) {
+        return true;
+      }
+    } else if (block.type === "table") {
+      for (const row of block.rows) {
+        for (const cell of row.cells) {
+          if (hasListParagraph(cell.content as readonly BodyContent[])) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// =============================================================================
 // readOdt — Main Entry Point
 // =============================================================================
 
@@ -1195,10 +1281,108 @@ export async function readOdt(buffer: Uint8Array): Promise<DocxDocument> {
     ...(sectionProperties ? { sectionProperties } : {}),
     ...(styleDefs.length > 0 ? { styles: styleDefs } : {}),
     ...(coreProperties ? { coreProperties } : {}),
-    ...(images.length > 0 ? { images } : {})
+    ...(images.length > 0 ? { images } : {}),
+    ...buildOdtNumberingDefs(body)
   };
 
   return doc;
+}
+
+/**
+ * Build a deterministic, ZIP-safe `Pictures/` path for each image in the
+ * document. The same rId → path map is consumed by both the content
+ * writer (`xlink:href`) and the archive writer so that what we point at
+ * in content.xml actually exists in the package.
+ *
+ * Image identifiers (`rId`, `fileName`) come from arbitrary upstream
+ * input — including untrusted DOCX files round-tripped through readDocx.
+ * Without sanitisation a hostile rId like `../../etc/passwd` would
+ * produce both an out-of-tree ZIP entry name and an out-of-package
+ * `xlink:href`, which is a real vector for confusing downstream ODT
+ * readers and tooling that resolves relative paths.
+ */
+function buildOdtImagePathMap(images: readonly { rId?: string; fileName?: string }[] | undefined): {
+  byRId: Map<string, string>;
+  byFileName: Map<string, string>;
+} {
+  const byRId = new Map<string, string>();
+  const byFileName = new Map<string, string>();
+  if (!images) {
+    return { byRId, byFileName };
+  }
+  const used = new Set<string>();
+  // Allocate a unique `Pictures/<safe>` path for each image. We generate
+  // a single counter-based fallback when the preferred name is empty or
+  // collides with an entry that's already taken; the previous version
+  // double-incremented `counter` (once inside the collision loop, once
+  // after) producing sparse names like `image1.bin`, `image3.bin`, ….
+  let counter = 1;
+  const allocate = (preferred: string | undefined): string => {
+    const safeBase = sanitizeOdtPictureName(preferred);
+    let candidate = safeBase || `image${counter++}.bin`;
+    while (used.has(candidate)) {
+      // Suffix a fresh counter to disambiguate; preserve the extension
+      // when we have one so downstream readers still classify the file
+      // correctly. `_bin` was the previous fallback when no extension
+      // was available — keep that behaviour for the no-base case.
+      const c = counter++;
+      if (safeBase) {
+        const dot = safeBase.lastIndexOf(".");
+        const stem = dot >= 0 ? safeBase.slice(0, dot) : safeBase;
+        const ext = dot >= 0 ? safeBase.slice(dot) : "";
+        candidate = `${stem}_${c}${ext}`;
+      } else {
+        candidate = `image${c}.bin`;
+      }
+    }
+    used.add(candidate);
+    return `Pictures/${candidate}`;
+  };
+  for (const image of images) {
+    const path = allocate(image.fileName ?? image.rId);
+    if (image.rId) {
+      byRId.set(image.rId, path);
+    }
+    if (image.fileName) {
+      // Two distinct images might share a fileName (the inputs are
+      // attacker-controlled in the round-trip path). The first one to
+      // claim a fileName wins the byFileName lookup; later collisions
+      // are still reachable via their own rId in byRId. Without this
+      // guard the second insertion would silently overwrite the first
+      // and inline-image lookups via fileName would resolve to the
+      // wrong binary.
+      if (!byFileName.has(image.fileName)) {
+        byFileName.set(image.fileName, path);
+      }
+    }
+  }
+  return { byRId, byFileName };
+}
+
+/**
+ * Sanitise a single ODT picture file-name component. Strips path
+ * separators, parent-directory traversal, leading dots, and anything
+ * outside a conservative whitelist. Returns an empty string if no usable
+ * characters remain (caller falls back to a generated name).
+ */
+function sanitizeOdtPictureName(raw: string | undefined): string {
+  if (!raw) {
+    return "";
+  }
+  // Drop directory components — we only ever want a leaf file name.
+  const lastSep = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+  let leaf = lastSep >= 0 ? raw.substring(lastSep + 1) : raw;
+  // Strip leading dots so names like "..png" or ".htaccess" don't sneak
+  // through with attribute meaning to filesystems.
+  while (leaf.startsWith(".")) {
+    leaf = leaf.substring(1);
+  }
+  // Whitelist alnum, dash, underscore, dot. Replace everything else with
+  // underscore. Empty result triggers fallback in the caller.
+  leaf = leaf.replace(/[^A-Za-z0-9._-]/g, "_");
+  // Avoid pathological double-dot anywhere mid-name (e.g. "foo..bin").
+  leaf = leaf.replace(/\.{2,}/g, ".");
+  return leaf;
 }
 
 // =============================================================================
@@ -1223,11 +1407,16 @@ export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
   // Mimetype MUST be the first entry in the ZIP, uncompressed (ODF spec requirement)
   archive.add("mimetype", encoder.encode("application/vnd.oasis.opendocument.text"), { level: 0 });
 
+  // Compute a sanitised rId → Pictures/<safe>.<ext> map up front so the
+  // content writer and archive writer agree on every image path.
+  const imageMap = buildOdtImagePathMap(doc.images);
+
   // Collect image paths for manifest
   const imagePaths: string[] = [];
 
-  // Generate content.xml
-  const contentXml = generateContentXml(doc, imagePaths);
+  // Generate content.xml — the writer reads from imageMap so href values
+  // are guaranteed in-package and free of traversal sequences.
+  const contentXml = generateContentXml(doc, imagePaths, imageMap);
   archive.add("content.xml", encoder.encode(contentXml));
 
   // Generate styles.xml
@@ -1238,14 +1427,20 @@ export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
   const metaXml = generateMetaXml(doc);
   archive.add("meta.xml", encoder.encode(metaXml));
 
-  // Add images
+  // Add images at the sanitised paths.
   if (doc.images) {
     for (const image of doc.images) {
-      if (image.data) {
-        const imgPath = `Pictures/${image.fileName ?? image.rId}`;
-        archive.add(imgPath, image.data);
-        imagePaths.push(imgPath);
+      if (!image.data) {
+        continue;
       }
+      const imgPath =
+        (image.rId ? imageMap.byRId.get(image.rId) : undefined) ??
+        (image.fileName ? imageMap.byFileName.get(image.fileName) : undefined);
+      if (!imgPath) {
+        continue;
+      }
+      archive.add(imgPath, image.data);
+      imagePaths.push(imgPath);
     }
   }
 
@@ -1271,11 +1466,38 @@ interface OdtWriteContext {
   readonly runStyleProps: Map<string, RunProperties>;
   /** Counter for generating unique style names */
   nextRunStyleId: number;
+  /**
+   * Map from bookmark `id` → bookmark `name`. Populated as we encounter
+   * `bookmarkStart` markers so the matching `bookmarkEnd` can reference the
+   * same name (ODF requires `text:bookmark-end` to carry the same name as
+   * its `text:bookmark-start`; emitting an empty name turns every bookmark
+   * range into an isolated point in compliant readers).
+   */
+  readonly bookmarkNames: Map<number, string>;
+  /**
+   * Map from image rId → sanitised `Pictures/<safe>.<ext>` path. Built up
+   * front by `writeOdt` and consumed by inline-image writers so the
+   * `xlink:href` we emit always agrees with the entry actually added to
+   * the ZIP, and so we never let a hostile rId escape the package root.
+   */
+  readonly imagePathByRId: Map<string, string>;
+  /** Same as `imagePathByRId` but keyed by `image.fileName` for legacy lookups. */
+  readonly imagePathByFileName: Map<string, string>;
 }
 
 /** Create a new write context. */
-function createWriteContext(): OdtWriteContext {
-  return { runStyleMap: new Map(), runStyleProps: new Map(), nextRunStyleId: 1 };
+function createWriteContext(imageMap?: {
+  byRId: Map<string, string>;
+  byFileName: Map<string, string>;
+}): OdtWriteContext {
+  return {
+    runStyleMap: new Map(),
+    runStyleProps: new Map(),
+    nextRunStyleId: 1,
+    bookmarkNames: new Map(),
+    imagePathByRId: imageMap?.byRId ?? new Map(),
+    imagePathByFileName: imageMap?.byFileName ?? new Map()
+  };
 }
 
 /**
@@ -1336,9 +1558,13 @@ function getRunAutoStyleName(ctx: OdtWriteContext, props: RunProperties): string
 }
 
 /** Generate the content.xml for the ODT package. */
-function generateContentXml(doc: DocxDocument, imagePaths: string[]): string {
+function generateContentXml(
+  doc: DocxDocument,
+  imagePaths: string[],
+  imageMap?: { byRId: Map<string, string>; byFileName: Map<string, string> }
+): string {
   // First pass: write body to collect automatic run styles
-  const ctx = createWriteContext();
+  const ctx = createWriteContext(imageMap);
   const bodyWriter = new XmlWriter();
   bodyWriter.openNode("office:body");
   bodyWriter.openNode("office:text");
@@ -1635,7 +1861,20 @@ function writeParagraphChild(
 
   switch (child.type) {
     case "hyperlink": {
-      const href = child.url ?? (child.anchor ? `#${child.anchor}` : "");
+      // Defense in depth: even though hyperlinks coming through readDocx /
+      // htmlImport / odtRead are already sanitized, models can be built
+      // by hand. Run the URL through sanitizeUrl one more time before
+      // writing it into the ODT, so a malicious model can't smuggle
+      // javascript:/vbscript: URLs through this writer.
+      const rawHref = child.url ?? (child.anchor ? `#${child.anchor}` : "");
+      const href = rawHref.startsWith("#") ? rawHref : (sanitizeUrl(rawHref) ?? "");
+      if (!href) {
+        // Drop the link wrapper — write children as plain runs.
+        for (const run of child.children) {
+          writeRun(w, run, doc, imagePaths, ctx);
+        }
+        break;
+      }
       w.openNode("text:a", {
         "xlink:type": "simple",
         "xlink:href": href
@@ -1647,11 +1886,23 @@ function writeParagraphChild(
       break;
     }
     case "bookmarkStart":
+      ctx.bookmarkNames.set(child.id, child.name);
       w.leafNode("text:bookmark-start", { "text:name": child.name });
       break;
-    case "bookmarkEnd":
-      w.leafNode("text:bookmark-end", { "text:name": "" });
+    case "bookmarkEnd": {
+      const name = ctx.bookmarkNames.get(child.id);
+      if (name !== undefined) {
+        // Emit the matching name so range-aware ODT readers can pair the
+        // start/end markers correctly.
+        w.leafNode("text:bookmark-end", { "text:name": name });
+      } else {
+        // Stray end without a known start (shouldn't happen for documents
+        // produced by this library) — emit with an empty name to keep the
+        // XML well-formed.
+        w.leafNode("text:bookmark-end", { "text:name": "" });
+      }
       break;
+    }
     case "insertedRun":
       writeRun(w, child.run, doc, imagePaths, ctx);
       break;
@@ -1680,7 +1931,7 @@ function writeRun(
   }
 
   for (const content of run.content) {
-    writeRunContent(w, content, doc, imagePaths);
+    writeRunContent(w, content, doc, imagePaths, ctx);
   }
 
   if (hasProps) {
@@ -1693,7 +1944,8 @@ function writeRunContent(
   w: XmlWriter,
   content: RunContent,
   doc: DocxDocument,
-  imagePaths: string[]
+  imagePaths: string[],
+  ctx: OdtWriteContext
 ): void {
   switch (content.type) {
     case "text":
@@ -1701,8 +1953,17 @@ function writeRunContent(
       break;
     case "break":
       if (content.breakType === "page") {
-        // Page breaks need special handling in ODF (via style)
-        w.writeText("");
+        // ODF 1.2 §5.1.4 — `text:soft-page-break` is a hint that a layout
+        // page break occurs at this position. Strict semantic page breaks
+        // require `fo:break-before="page"` on the surrounding paragraph
+        // automatic style; we emit the soft hint here so the break is at
+        // least preserved (rather than silently dropped, which corrupted
+        // documents on round-trip).
+        w.leafNode("text:soft-page-break");
+      } else if (content.breakType === "column") {
+        // Column breaks degrade to a soft page break in ODF — better than
+        // dropping silently.
+        w.leafNode("text:soft-page-break");
       } else {
         w.leafNode("text:line-break");
       }
@@ -1714,9 +1975,14 @@ function writeRunContent(
       // Write inline image as draw:frame
       const widthCm = emuToCm(content.width);
       const heightCm = emuToCm(content.height);
-      const href = content.rId;
-      // Ensure image path is in Pictures/ if not already
-      const imgPath = href.startsWith("Pictures/") ? href : `Pictures/${href}`;
+      // Resolve the safe Pictures/ path that writeOdt registered when it
+      // built the image map. This keeps content.xml's xlink:href in
+      // lockstep with the actual ZIP entry name, and prevents a hostile
+      // rId from emitting a traversing `xlink:href`.
+      const mapped =
+        ctx.imagePathByRId.get(content.rId) ??
+        (content.name ? ctx.imagePathByFileName.get(content.name) : undefined);
+      const imgPath = mapped ?? `Pictures/${sanitizeOdtPictureName(content.rId) || "image.bin"}`;
 
       w.openNode("draw:frame", {
         "draw:name": content.name ?? "",

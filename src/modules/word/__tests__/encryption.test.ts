@@ -7,7 +7,13 @@
 import { describe, it, expect } from "vitest";
 
 import { readDocx } from "../reader/docx-reader";
-import { encryptDocx, isEncryptedDocx, decryptDocx } from "../security/encryption";
+import {
+  encryptDocx,
+  isEncryptedDocx,
+  decryptDocx,
+  decryptPackage,
+  parseEncryptionInfoXml
+} from "../security/encryption";
 import type { DocxDocument } from "../types";
 import { packageDocx } from "../writer/docx-packager";
 
@@ -118,5 +124,34 @@ describe("encryptDocx / decryptDocx", () => {
 
     expect(parsed.body.length).toBeGreaterThan(0);
     expect(parsed.body[0].type).toBe("paragraph");
+  }, 30000);
+});
+
+// =============================================================================
+// Resource-exhaustion guards
+// =============================================================================
+
+describe("decryptPackage — declared-size sanity check", () => {
+  it("rejects an encrypted package whose declared size exceeds the cap", async () => {
+    const doc = createMinimalDoc();
+    const original = await packageDocx(doc);
+    const password = "guard";
+    const encrypted = await encryptDocx(original, password);
+
+    // Re-extract the EncryptionInfo + EncryptedPackage from the CFB blob
+    // using the CFB reader directly so we can pass the package buffer to
+    // decryptPackage with an artificially low cap.
+    const { readCfb } = await import("../security/cfb-reader");
+    const entries = readCfb(encrypted);
+    const info = entries.find(e => e.name === "EncryptionInfo")!;
+    const pkg = entries.find(e => e.name === "EncryptedPackage")!;
+
+    // EncryptionInfo: first 8 bytes are version/flags, then UTF-8 XML.
+    const infoXml = new TextDecoder().decode(info.data.slice(8));
+    const parsed = parseEncryptionInfoXml(infoXml);
+
+    // Genuine packages decrypt to several KiB even for a tiny doc; cap at
+    // 16 bytes so the legitimate file size is rejected.
+    await expect(decryptPackage(pkg.data, parsed, password, 16)).rejects.toThrow();
   }, 30000);
 });

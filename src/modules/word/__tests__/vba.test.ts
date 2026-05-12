@@ -23,15 +23,18 @@ function makeDoc(opaqueParts?: any[]): DocxDocument {
 }
 
 function createVbaData(): Uint8Array {
-  // Create fake binary data with "ThisDocument" string embedded
+  // OLE2 compound document signature, then "ThisDocument" string embedded
+  // for the heuristic module-name scanner.
   const encoder = new TextEncoder();
+  const ole2 = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
   const prefix = new Uint8Array(50);
   const text = encoder.encode("ThisDocument");
   const suffix = new Uint8Array(50);
-  const combined = new Uint8Array(prefix.length + text.length + suffix.length);
-  combined.set(prefix, 0);
-  combined.set(text, prefix.length);
-  combined.set(suffix, prefix.length + text.length);
+  const combined = new Uint8Array(ole2.length + prefix.length + text.length + suffix.length);
+  combined.set(ole2, 0);
+  combined.set(prefix, ole2.length);
+  combined.set(text, ole2.length + prefix.length);
+  combined.set(suffix, ole2.length + prefix.length + text.length);
   return combined;
 }
 
@@ -47,7 +50,12 @@ describe("VBA Project", () => {
       expect(hasVbaProject(doc)).toBe(false);
     });
 
-    it("returns true when vbaProject.bin is present", () => {
+    it("returns true when vbaProject is present on the canonical field", () => {
+      const doc = { ...makeDoc(undefined), vbaProject: createVbaData() } as DocxDocument;
+      expect(hasVbaProject(doc)).toBe(true);
+    });
+
+    it("returns true for legacy opaqueParts placement", () => {
       const doc = makeDoc([{ path: "word/vbaProject.bin", data: createVbaData() }]);
       expect(hasVbaProject(doc)).toBe(true);
     });
@@ -71,34 +79,46 @@ describe("VBA Project", () => {
   });
 
   describe("addVbaProject", () => {
-    it("adds VBA project to document", () => {
+    it("stores binary on the canonical doc.vbaProject field", () => {
       const doc = makeDoc(undefined);
       const vbaData = createVbaData();
       const result = addVbaProject(doc, vbaData);
-
-      expect(result.opaqueParts).toBeDefined();
-      expect(result.opaqueParts!.some((p: any) => p.path === "word/vbaProject.bin")).toBe(true);
+      expect(result.vbaProject).toBeDefined();
+      expect(result.vbaProject).toBe(vbaData);
     });
 
-    it("replaces existing VBA project", () => {
+    it("rejects data without an OLE2 compound document header", () => {
+      const doc = makeDoc(undefined);
+      // No OLE2 prefix → must throw.
+      expect(() => addVbaProject(doc, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))).toThrow(
+        /OLE2/
+      );
+    });
+
+    it("removes legacy opaqueParts copies of vbaProject.bin", () => {
       const doc = makeDoc([{ path: "word/vbaProject.bin", data: new Uint8Array(10) }]);
       const newVba = createVbaData();
       const result = addVbaProject(doc, newVba);
-
-      const vbaParts = result.opaqueParts!.filter((p: any) => p.path === "word/vbaProject.bin");
-      expect(vbaParts).toHaveLength(1);
-      expect(vbaParts[0]!.data.length).toBe(newVba.length);
+      // Canonical field has the new data.
+      expect(result.vbaProject).toBe(newVba);
+      // No leftover opaque copy that the packager would now reject.
+      const stale = result.opaqueParts?.some(p => p.path === "word/vbaProject.bin");
+      expect(stale ?? false).toBe(false);
     });
   });
 
   describe("removeVbaProject", () => {
     it("removes VBA parts from document", () => {
-      const doc = makeDoc([
-        { path: "word/vbaProject.bin", data: createVbaData() },
-        { path: "word/styles.xml", data: new Uint8Array(5) }
-      ]);
+      const doc = {
+        ...makeDoc([
+          { path: "word/vbaProject.bin", data: createVbaData() },
+          { path: "word/styles.xml", data: new Uint8Array(5) }
+        ]),
+        vbaProject: createVbaData()
+      } as DocxDocument;
       const result = removeVbaProject(doc);
 
+      expect(result.vbaProject).toBeUndefined();
       expect(result.opaqueParts!.some((p: any) => p.path.includes("vbaProject"))).toBe(false);
       expect(result.opaqueParts!.some((p: any) => p.path === "word/styles.xml")).toBe(true);
     });
@@ -106,6 +126,7 @@ describe("VBA Project", () => {
     it("is a no-op for doc without VBA", () => {
       const doc = makeDoc(undefined);
       const result = removeVbaProject(doc);
+      expect(result.vbaProject).toBeUndefined();
       expect(result.opaqueParts).toBeUndefined();
     });
   });
@@ -116,14 +137,19 @@ describe("VBA Project", () => {
       expect(listVbaParts(doc)).toHaveLength(0);
     });
 
-    it("returns VBA-related parts", () => {
-      const doc = makeDoc([
-        { path: "word/vbaProject.bin", data: createVbaData() },
-        { path: "word/vbaData.xml", data: new Uint8Array(5) },
-        { path: "word/styles.xml", data: new Uint8Array(5) }
-      ]);
+    it("returns the canonical vbaProject field plus auxiliary parts", () => {
+      const vbaData = createVbaData();
+      const doc = {
+        ...makeDoc([
+          { path: "word/vbaData.xml", data: new Uint8Array(5) },
+          { path: "word/styles.xml", data: new Uint8Array(5) }
+        ]),
+        vbaProject: vbaData
+      } as DocxDocument;
       const parts = listVbaParts(doc);
       expect(parts.length).toBe(2);
+      const paths = parts.map(p => p.path).sort();
+      expect(paths).toEqual(["word/vbaData.xml", "word/vbaProject.bin"]);
     });
   });
 
@@ -133,11 +159,17 @@ describe("VBA Project", () => {
       expect(getVbaProjectData(doc)).toBeUndefined();
     });
 
-    it("returns binary data for VBA project", () => {
+    it("returns binary data for VBA project on the canonical field", () => {
+      const vbaData = createVbaData();
+      const doc = { ...makeDoc(undefined), vbaProject: vbaData } as DocxDocument;
+      const result = getVbaProjectData(doc);
+      expect(result).toBe(vbaData);
+    });
+
+    it("falls back to opaqueParts for hand-built models", () => {
       const vbaData = createVbaData();
       const doc = makeDoc([{ path: "word/vbaProject.bin", data: vbaData }]);
       const result = getVbaProjectData(doc);
-      expect(result).toBeDefined();
       expect(result).toBe(vbaData);
     });
   });

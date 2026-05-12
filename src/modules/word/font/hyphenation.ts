@@ -4264,10 +4264,15 @@ function computeHyphenPoints(
     }
   }
 
-  // Extract break points (odd levels indicate valid breaks)
-  // Offset by 1 because of the leading "."
+  // Extract break points (odd levels indicate valid breaks). The smallest
+  // valid break index is `minLeft` (a break at position p means the word
+  // splits as word[0..p] + word[p..]; minLeft characters must remain on
+  // the left so p must be >= minLeft). Earlier this loop started at
+  // `minLeft + 1`, which silently lost every potential break exactly at
+  // position `minLeft` even though the exception path (line ~73) accepted
+  // such positions — the two paths must agree.
   const points: number[] = [];
-  for (let i = minLeft + 1; i <= word.length - minRight; i++) {
+  for (let i = minLeft; i <= word.length - minRight; i++) {
     if (levels[i + 1] % 2 === 1) {
       points.push(i);
     }

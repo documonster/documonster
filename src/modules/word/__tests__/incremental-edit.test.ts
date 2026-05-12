@@ -201,3 +201,132 @@ describe("editDocxIncremental", () => {
     expect(new TextDecoder().decode(second!)).toBe("2");
   });
 });
+
+describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
+  it("replaces a header part with plain-text content", async () => {
+    const buffer = await buildDocxBuffer("body");
+    // Inject a placeholder header so we have a header part to replace.
+    const seedHeader =
+      '<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:hdr>';
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/header1.xml", text: seedHeader }
+    ]);
+
+    const newPara: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "Header replaced" }] } as Run]
+    };
+    const edited = await editDocxIncremental(seeded, [
+      { type: "replaceHeader", path: "word/header1.xml", children: [newPara] }
+    ]);
+
+    const headerXml = await readDocxPart(edited, "word/header1.xml");
+    expect(headerXml).toBeDefined();
+    const decoded = new TextDecoder().decode(headerXml!);
+    expect(decoded).toContain("<w:hdr");
+    expect(decoded).toContain("Header replaced");
+  });
+
+  it("replaces a footer part with plain-text content", async () => {
+    const buffer = await buildDocxBuffer("body");
+    const seedFooter =
+      '<?xml version="1.0"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:ftr>';
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/footer1.xml", text: seedFooter }
+    ]);
+
+    const newPara: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "Footer replaced" }] } as Run]
+    };
+    const edited = await editDocxIncremental(seeded, [
+      { type: "replaceFooter", path: "word/footer1.xml", children: [newPara] }
+    ]);
+
+    const footerXml = await readDocxPart(edited, "word/footer1.xml");
+    expect(footerXml).toBeDefined();
+    const decoded = new TextDecoder().decode(footerXml!);
+    expect(decoded).toContain("<w:ftr");
+    expect(decoded).toContain("Footer replaced");
+  });
+
+  it("rejects header content with an inline image (.rels not rewritten)", async () => {
+    const buffer = await buildDocxBuffer("body");
+    const seed =
+      '<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:hdr>';
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/header1.xml", text: seed }
+    ]);
+
+    const paraWithImage: Paragraph = {
+      type: "paragraph",
+      children: [
+        {
+          content: [
+            {
+              type: "image",
+              rId: "rId99",
+              width: 100000,
+              height: 100000
+            }
+          ]
+        } as Run
+      ]
+    };
+
+    await expect(
+      editDocxIncremental(seeded, [
+        { type: "replaceHeader", path: "word/header1.xml", children: [paraWithImage] }
+      ])
+    ).rejects.toThrow(/inline image/);
+  });
+
+  it("rejects footer content with a hyperlink (.rels not rewritten)", async () => {
+    const buffer = await buildDocxBuffer("body");
+    const seed =
+      '<?xml version="1.0"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:ftr>';
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/footer1.xml", text: seed }
+    ]);
+
+    const paraWithLink: Paragraph = {
+      type: "paragraph",
+      children: [
+        {
+          type: "hyperlink",
+          url: "https://example.com",
+          children: [{ content: [{ type: "text", text: "click" }] } as Run]
+        }
+      ]
+    };
+
+    await expect(
+      editDocxIncremental(seeded, [
+        { type: "replaceFooter", path: "word/footer1.xml", children: [paraWithLink] }
+      ])
+    ).rejects.toThrow(/hyperlink/);
+  });
+
+  it("rejects replaceBody with an inline image", async () => {
+    const buffer = await buildDocxBuffer("body");
+    const paraWithImage: Paragraph = {
+      type: "paragraph",
+      children: [
+        {
+          content: [
+            {
+              type: "image",
+              rId: "rId42",
+              width: 100000,
+              height: 100000
+            }
+          ]
+        } as Run
+      ]
+    };
+
+    await expect(
+      editDocxIncremental(buffer, [{ type: "replaceBody", body: [paraWithImage] }])
+    ).rejects.toThrow(/inline image/);
+  });
+});

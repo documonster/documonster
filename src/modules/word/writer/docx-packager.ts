@@ -11,8 +11,9 @@ import { zip } from "@archive/create-archive";
 import { XmlWriter } from "@xml/writer";
 
 import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "../constants";
-import { type Mutable } from "../core/internal-utils";
-import { getFileExt, getPartRelsPath } from "../core/opc-package";
+import { type Mutable, sanitizeMediaFileName } from "../core/internal-utils";
+import { getFileExt, getPartRelsPath } from "../core/opc-paths";
+import { isRun } from "../core/text-utils";
 import { walkBlocks } from "../core/walker";
 import { DocxWriteError } from "../errors";
 import type {
@@ -23,6 +24,7 @@ import type {
   Table,
   Hyperlink,
   HeaderFooterContent,
+  HeaderFooterRef,
   Run,
   RunContent,
   FloatingImage,
@@ -30,7 +32,9 @@ import type {
   ChartContent,
   ChartExContent,
   AltChunk,
-  ImageDef
+  EmbeddedFont,
+  ImageDef,
+  SectionProperties
 } from "../types";
 import { renderChartPart } from "./chart-writer";
 import { renderComments, renderCommentsExtended } from "./comment-writer";
@@ -56,6 +60,13 @@ import {
   renderTheme
 } from "./parts-writer";
 import {
+  collectChartsFromHeaderFooter,
+  collectHyperlinksFromHeaderFooter,
+  collectImageRidsFromContent,
+  scanChildrenForHyperlinks,
+  scanChildrenForImages
+} from "./reference-scanners";
+import {
   createRelationships,
   addRelationship,
   addRelationshipWithId,
@@ -63,7 +74,7 @@ import {
   renderRelationships
 } from "./relationships";
 import type { RelationshipsState } from "./relationships";
-import { createRenderContext } from "./render-context";
+import { createIdGenerators, createRenderContext } from "./render-context";
 import { renderStyles } from "./styles-writer";
 
 /** Render XML to string using XmlWriter. */
@@ -73,46 +84,55 @@ function renderXml(renderFn: (xml: XmlWriter) => void): string {
   return writer.xml;
 }
 
-/** Scan a Run for image rIds. */
-function scanRunForImages(run: Run, out: Set<string>): void {
-  for (const rc of run.content) {
-    if (rc.type === "image" && rc.rId) {
-      out.add(rc.rId);
-    }
-  }
-}
-
-/** Scan ParagraphChild[] for hyperlinks with URL (no rId yet). */
-function scanChildrenForHyperlinks(children: readonly ParagraphChild[], out: Hyperlink[]): void {
-  for (const child of children) {
-    if ("type" in child && child.type === "hyperlink") {
-      const h = child as Hyperlink;
-      if (h.url && !h.rId) {
-        out.push(h);
-      }
-      // Also scan hyperlink children (runs) for images — handled elsewhere
-    }
-  }
-}
-
-/** Scan ParagraphChild[] for image rIds. */
-function scanChildrenForImages(children: readonly ParagraphChild[], out: Set<string>): void {
-  for (const child of children) {
-    if ("type" in child) {
-      if (child.type === "hyperlink") {
-        const h = child as Hyperlink;
-        for (const r of h.children) {
-          scanRunForImages(r, out);
+/**
+ * Walk the document and return the highest `id` used on any
+ * `StructuredDocumentTag`. Used to seed the SDT id generator so that
+ * auto-assigned ids start strictly above any author-supplied ones — a
+ * collision would silently break repeating-section / data-binding linkage
+ * because Word matches SDTs by id.
+ */
+function scanMaxSdtId(doc: DocxDocument): number {
+  let max = 0;
+  const visit = (blocks: readonly BodyContent[]): void => {
+    for (const block of blocks) {
+      if (block.type === "sdt") {
+        const id = block.properties?.id;
+        if (typeof id === "number" && Number.isFinite(id) && id > max) {
+          max = id;
+        }
+        // SDT.content is (Paragraph | Run | Table)[]. Recurse into its
+        // tables to find nested SDTs.
+        for (const c of block.content) {
+          if ((c as { type?: string }).type === "table") {
+            visit([c as Table]);
+          }
+        }
+      } else if (block.type === "table") {
+        for (const row of block.rows) {
+          for (const cell of row.cells) {
+            visit(cell.content as readonly BodyContent[]);
+          }
         }
       }
-    } else {
-      // It's a Run (no type field)
-      scanRunForImages(child as Run, out);
+    }
+  };
+  visit(doc.body);
+  if (doc.headers) {
+    for (const [, h] of doc.headers) {
+      visit(h.content.children as readonly BodyContent[]);
     }
   }
+  if (doc.footers) {
+    for (const [, f] of doc.footers) {
+      visit(f.content.children as readonly BodyContent[]);
+    }
+  }
+  return max;
 }
 
-/** Recursively collect hyperlinks with URL from body content. */
+/**
+ * Recursively collect hyperlinks with a URL (no `rId` yet) from body content.
+ */
 function collectHyperlinks(body: readonly BodyContent[]): Hyperlink[] {
   const links: Hyperlink[] = [];
   walkBlocks(body, {
@@ -146,38 +166,6 @@ function inferContentType(ext: string): string | undefined {
     vml: "application/vnd.openxmlformats-officedocument.vmlDrawing"
   };
   return map[ext];
-}
-
-/**
- * Generic walker: visit all paragraphs within a block list, recursing into
- * tables (including nested tables), SDTs, TOC cached paragraphs, and text
- * boxes. Implemented in terms of {@link walkBlocks} so block dispatch stays
- * consistent with the rest of the module.
- */
-function walkParagraphs(blocks: readonly BodyContent[], onParagraph: (p: Paragraph) => void): void {
-  walkBlocks(blocks, {
-    enterParagraph(p) {
-      onParagraph(p);
-    }
-  });
-}
-
-/** Collect all image rIds referenced in header/footer content. */
-function collectImageRidsFromContent(content: HeaderFooterContent): Set<string> {
-  const rIds = new Set<string>();
-  walkParagraphs(content.children as readonly BodyContent[], p => {
-    scanChildrenForImages(p.children, rIds);
-  });
-  return rIds;
-}
-
-/** Collect hyperlinks from header/footer content. */
-function collectHyperlinksFromHeaderFooter(content: HeaderFooterContent): Hyperlink[] {
-  const links: Hyperlink[] = [];
-  walkParagraphs(content.children as readonly BodyContent[], p => {
-    scanChildrenForHyperlinks(p.children, links);
-  });
-  return links;
 }
 
 /** Resolve the main document part content type based on docType. */
@@ -237,12 +225,81 @@ function shallowCopyDocForPackaging(doc: DocxDocument): DocxDocument {
     ? new Map(Array.from(doc.footers.entries()).map(([k, v]) => [k, { ...v }]))
     : undefined;
 
+  // Sanitize media/font file names. The fileName attribute eventually
+  // becomes a ZIP entry name (`word/media/...`, `word/fonts/...`); a
+  // hostile DOCX read in via `readDocx` could carry a fileName like
+  // `../../etc/passwd.png`, which without sanitisation would produce a
+  // ZIP entry that escapes the package root when consumers naively
+  // unpack it (zipslip). Allocate fresh leaf names that are unique
+  // within their respective collections so two attacker-supplied names
+  // sanitising to the same string don't collide and silently overwrite
+  // each other.
+  const sanitizeImages = (
+    images: readonly ImageDef[] | undefined
+  ): readonly ImageDef[] | undefined => {
+    if (!images || images.length === 0) {
+      return images;
+    }
+    const usedNames = new Set<string>();
+    let mutated = false;
+    const result = images.map(img => {
+      const safe = uniqueSanitizedName(img.fileName, usedNames, "image.bin");
+      if (safe !== img.fileName) {
+        mutated = true;
+        return { ...img, fileName: safe };
+      }
+      return img;
+    });
+    return mutated ? result : images;
+  };
+  const sanitizeFonts = (
+    fonts: readonly EmbeddedFont[] | undefined
+  ): readonly EmbeddedFont[] | undefined => {
+    if (!fonts || fonts.length === 0) {
+      return fonts;
+    }
+    const usedNames = new Set<string>();
+    let mutated = false;
+    const result = fonts.map(ef => {
+      const safe = uniqueSanitizedName(ef.fileName, usedNames, "font.bin");
+      if (safe !== ef.fileName) {
+        mutated = true;
+        return { ...ef, fileName: safe };
+      }
+      return ef;
+    });
+    return mutated ? result : fonts;
+  };
+
   return {
     ...doc,
     body,
     headers,
-    footers
+    footers,
+    images: sanitizeImages(doc.images),
+    embeddedFonts: sanitizeFonts(doc.embeddedFonts)
   } as DocxDocument;
+}
+
+/**
+ * Returns the sanitised leaf name. If the cleaned form would collide
+ * with an entry already in `used`, a numeric suffix is appended until
+ * unique. The chosen name is added to `used`.
+ */
+function uniqueSanitizedName(raw: string | undefined, used: Set<string>, fallback: string): string {
+  let candidate = sanitizeMediaFileName(raw, fallback);
+  if (used.has(candidate)) {
+    const dot = candidate.lastIndexOf(".");
+    const stem = dot >= 0 ? candidate.slice(0, dot) : candidate;
+    const ext = dot >= 0 ? candidate.slice(dot) : "";
+    let n = 2;
+    while (used.has(`${stem}_${n}${ext}`)) {
+      n++;
+    }
+    candidate = `${stem}_${n}${ext}`;
+  }
+  used.add(candidate);
+  return candidate;
 }
 
 async function _packageDocxInner(
@@ -414,10 +471,10 @@ async function _packageDocxInner(
           let childrenCopied: ParagraphChild[] | null = null;
           for (let i = 0; i < block.children.length; i++) {
             const child = block.children[i];
-            if (!("content" in child) || !Array.isArray((child as Run).content)) {
+            if (!isRun(child)) {
               continue;
             }
-            const run = child as Run;
+            const run = child;
             let runCopied: Run | null = null;
             let contentCopied: RunContent[] | null = null;
             for (let j = 0; j < run.content.length; j++) {
@@ -611,6 +668,16 @@ async function _packageDocxInner(
   registerNoteImages(doc.footnotes, footnoteRels);
   registerNoteImages(doc.endnotes, endnoteRels);
 
+  // Comments have their own .rels part (word/_rels/comments.xml.rels).
+  // Hyperlinks/images referenced from inside comment content must register
+  // here, not in document.xml.rels — otherwise readers can't resolve them.
+  const commentRels = createRelationships();
+  if (doc.comments && doc.comments.length > 0) {
+    const commentBodies = doc.comments.map(c => ({ content: c.content }));
+    registerNoteHyperlinks(commentBodies, commentRels);
+    registerNoteImages(commentBodies, commentRels);
+  }
+
   // Process altChunk body items: register relationship and prepare data part
   const altChunks: AltChunk[] = [];
   collectAltChunks(doc.body, altChunks);
@@ -633,12 +700,45 @@ async function _packageDocxInner(
   });
 
   // Headers
+  //
+  // For each header in the model we allocate a fresh document-level rId and
+  // (re)write the rId on the header definition. Two maps are also produced
+  // for later sectionProperties rewiring:
+  //   - headerKeyToNewRid: keyed by the model's `headers` Map key (typically
+  //     the original rId from a round-trip, or "default"/"first"/"even" from
+  //     the builder).
+  //   - headerOldRidToNewRid: keyed by any rId that previously identified
+  //     this header (the map key, the value's pre-existing `rId` field) so
+  //     references that still hold the old rId can be remapped.
   let headerIndex = 1;
   const headerRelManagers = new Map<string, RelationshipsState>();
+  const headerKeyToNewRid = new Map<string, string>();
+  const headerOldRidToNewRid = new Map<string, string>();
+  // Map header `type` ("default" | "first" | "even") to its new rId, if the
+  // model only has one header per type. Used to fill in references that
+  // were created with a placeholder rId="" by callers that didn't yet know
+  // the rId (typical builder usage).
+  const headerTypeToNewRid = new Map<string, string>();
   if (doc.headers) {
     for (const [key, headerDef] of doc.headers) {
       const rId = addRelationship(documentRels, RelType.Header, `header${headerIndex}.xml`);
+      const oldRid = (headerDef as { rId?: string }).rId;
       (headerDef as { rId?: string }).rId = rId;
+      headerKeyToNewRid.set(key, rId);
+      if (key) {
+        headerOldRidToNewRid.set(key, rId);
+      }
+      if (oldRid && oldRid !== rId) {
+        headerOldRidToNewRid.set(oldRid, rId);
+      }
+      // Heuristic: if the map key looks like a header type rather than an
+      // rId, also expose it via headerTypeToNewRid so empty-rId references
+      // ({ type: "default", rId: "" }) can be resolved by type.
+      if (key === "default" || key === "first" || key === "even" || key === "odd") {
+        // Last writer wins if the caller provided multiple headers with the
+        // same type — that's already an ambiguous model.
+        headerTypeToNewRid.set(key, rId);
+      }
 
       // Create per-header relationship state for images and hyperlinks.
       // Header/footer .rels is its own id space, so we register images using
@@ -680,10 +780,24 @@ async function _packageDocxInner(
   // Footers
   let footerIndex = 1;
   const footerRelManagers = new Map<string, RelationshipsState>();
+  const footerKeyToNewRid = new Map<string, string>();
+  const footerOldRidToNewRid = new Map<string, string>();
+  const footerTypeToNewRid = new Map<string, string>();
   if (doc.footers) {
     for (const [key, footerDef] of doc.footers) {
       const rId = addRelationship(documentRels, RelType.Footer, `footer${footerIndex}.xml`);
+      const oldRid = (footerDef as { rId?: string }).rId;
       (footerDef as { rId?: string }).rId = rId;
+      footerKeyToNewRid.set(key, rId);
+      if (key) {
+        footerOldRidToNewRid.set(key, rId);
+      }
+      if (oldRid && oldRid !== rId) {
+        footerOldRidToNewRid.set(oldRid, rId);
+      }
+      if (key === "default" || key === "first" || key === "even" || key === "odd") {
+        footerTypeToNewRid.set(key, rId);
+      }
 
       // Create per-footer relationship state for images and hyperlinks.
       const fRels = createRelationships();
@@ -796,39 +910,179 @@ async function _packageDocxInner(
   // thumbnails, chart parts, alt chunks) are included.
   // word/_rels/document.xml.rels is also deferred to include chart relationships.
 
-  // Build an effective doc that includes the auto-generated watermark header
-  // reference in section properties (without mutating the caller's doc).
-  let effectiveDoc: DocxDocument = doc;
-  if (watermarkHeaderIndex !== undefined && watermarkHeaderRId) {
-    const existingHeaders = doc.sectionProperties?.headers
-      ? [...doc.sectionProperties.headers]
-      : [];
-    existingHeaders.push({
-      type: "default",
-      rId: watermarkHeaderRId
-    });
-    effectiveDoc = {
-      ...doc,
-      sectionProperties: {
-        ...doc.sectionProperties,
-        headers: existingHeaders
-      }
-    };
+  // Build an effective doc that:
+  //  (a) rewires sectionProperties header/footer references so their rId
+  //      values match the document.xml.rels entries we just generated; and
+  //  (b) includes the auto-generated watermark header reference.
+  // The caller's input doc is never mutated.
+  //
+  // Reference resolution order for each entry:
+  //   1. If `rId` is already a registered document-level header/footer rId,
+  //      keep it as-is.
+  //   2. Otherwise try `headerOldRidToNewRid[rId]` (round-trip with the
+  //      original rId still present, or the headers map keyed by old rId).
+  //   3. Otherwise fall back to `headerTypeToNewRid[type]` — this covers the
+  //      common builder pattern where users add a header by `type` and use
+  //      `rId: ""` as a placeholder.
+  // Same logic for footers.
+  const allowedHeaderRids = new Set(headerKeyToNewRid.values());
+  const allowedFooterRids = new Set(footerKeyToNewRid.values());
+
+  function resolveHeaderRef(ref: HeaderFooterRef): HeaderFooterRef | null {
+    if (ref.rId && allowedHeaderRids.has(ref.rId)) {
+      return ref;
+    }
+    const remapped = ref.rId ? headerOldRidToNewRid.get(ref.rId) : undefined;
+    if (remapped) {
+      return { ...ref, rId: remapped };
+    }
+    const byType = headerTypeToNewRid.get(ref.type);
+    if (byType) {
+      return { ...ref, rId: byType };
+    }
+    // No header part matches this reference. Drop it rather than emit a
+    // dangling r:id that no .rels entry resolves.
+    return null;
   }
 
-  // Collect charts and register relationships BEFORE rendering document.xml
+  function resolveFooterRef(ref: HeaderFooterRef): HeaderFooterRef | null {
+    if (ref.rId && allowedFooterRids.has(ref.rId)) {
+      return ref;
+    }
+    const remapped = ref.rId ? footerOldRidToNewRid.get(ref.rId) : undefined;
+    if (remapped) {
+      return { ...ref, rId: remapped };
+    }
+    const byType = footerTypeToNewRid.get(ref.type);
+    if (byType) {
+      return { ...ref, rId: byType };
+    }
+    return null;
+  }
+
+  function rewireSectionRefs(sect: SectionProperties): SectionProperties {
+    let next: SectionProperties = sect;
+    let mutated = false;
+    if (sect.headers) {
+      const resolved = sect.headers
+        .map(resolveHeaderRef)
+        .filter((r): r is HeaderFooterRef => r !== null);
+      if (
+        resolved.length !== sect.headers.length ||
+        resolved.some((r, i) => r !== sect.headers![i])
+      ) {
+        next = { ...next, headers: resolved };
+        mutated = true;
+      }
+    }
+    if (sect.footers) {
+      const resolved = sect.footers
+        .map(resolveFooterRef)
+        .filter((r): r is HeaderFooterRef => r !== null);
+      if (
+        resolved.length !== sect.footers.length ||
+        resolved.some((r, i) => r !== sect.footers![i])
+      ) {
+        next = { ...next, footers: resolved };
+        mutated = true;
+      }
+    }
+    return mutated ? next : sect;
+  }
+
+  // Snapshot top-level sectionProperties (and apply rewiring). May be
+  // undefined when the document has no top-level section properties — we
+  // only synthesize one if there are headers/footers/watermark to reference.
+  let topLevelSect: SectionProperties | undefined = doc.sectionProperties
+    ? rewireSectionRefs(doc.sectionProperties)
+    : undefined;
+
+  // Auto-fill: if the model has headers/footers but no top-level reference
+  // was authored at all, synthesize references for each header/footer type
+  // so the section actually picks them up. This only fires when the section
+  // has zero header (or zero footer) refs — explicit author intent ("only
+  // first-page header is referenced") is preserved.
+  if (
+    doc.headers &&
+    doc.headers.size > 0 &&
+    (!topLevelSect?.headers || topLevelSect.headers.length === 0)
+  ) {
+    const synthesized: HeaderFooterRef[] = [];
+    for (const [type, rId] of headerTypeToNewRid) {
+      synthesized.push({ type: type as HeaderFooterRef["type"], rId });
+    }
+    if (synthesized.length > 0) {
+      topLevelSect = { ...(topLevelSect ?? {}), headers: synthesized };
+    }
+  }
+  if (
+    doc.footers &&
+    doc.footers.size > 0 &&
+    (!topLevelSect?.footers || topLevelSect.footers.length === 0)
+  ) {
+    const synthesized: HeaderFooterRef[] = [];
+    for (const [type, rId] of footerTypeToNewRid) {
+      synthesized.push({ type: type as HeaderFooterRef["type"], rId });
+    }
+    if (synthesized.length > 0) {
+      topLevelSect = { ...(topLevelSect ?? {}), footers: synthesized };
+    }
+  }
+
+  // Apply watermark reference (added after rewiring so its rId is preserved).
+  if (watermarkHeaderIndex !== undefined && watermarkHeaderRId) {
+    const existingHeaders = topLevelSect?.headers ? [...topLevelSect.headers] : [];
+    existingHeaders.push({ type: "default", rId: watermarkHeaderRId });
+    topLevelSect = { ...(topLevelSect ?? {}), headers: existingHeaders };
+  }
+
+  // Rewire sectionProperties embedded in body paragraphs (mid-document
+  // section breaks). Only rebuild the body array if any paragraph's section
+  // properties were actually rewritten.
+  const sectionRefRewriteNeeded = doc.body.some(
+    item =>
+      item.type === "paragraph" &&
+      item.properties?.sectionProperties &&
+      ((item.properties.sectionProperties.headers &&
+        item.properties.sectionProperties.headers.length > 0) ||
+        (item.properties.sectionProperties.footers &&
+          item.properties.sectionProperties.footers.length > 0))
+  );
+
+  let effectiveBody = doc.body;
+  if (sectionRefRewriteNeeded) {
+    effectiveBody = doc.body.map(item => {
+      if (item.type !== "paragraph" || !item.properties?.sectionProperties) {
+        return item;
+      }
+      const rewired = rewireSectionRefs(item.properties.sectionProperties);
+      if (rewired === item.properties.sectionProperties) {
+        return item;
+      }
+      return {
+        ...item,
+        properties: { ...item.properties, sectionProperties: rewired }
+      };
+    });
+  }
+
+  // Always rebuild effectiveDoc when we rewired anything, otherwise keep the
+  // original reference to avoid spurious shallow copies.
+  const docNeedsCopy = topLevelSect !== doc.sectionProperties || effectiveBody !== doc.body;
+  const effectiveDoc: DocxDocument = docNeedsCopy
+    ? ({
+        ...doc,
+        ...(topLevelSect !== undefined ? { sectionProperties: topLevelSect } : {}),
+        body: effectiveBody
+      } as DocxDocument)
+    : doc;
+
+  // Collect charts and register relationships BEFORE rendering document.xml.
+  // Body charts go into document.xml.rels; charts that live inside a header
+  // or footer must be registered against THAT part's own .rels file (they
+  // are referenced from header{N}.xml / footer{N}.xml, not document.xml).
   const charts: ChartContent[] = [];
   collectCharts(doc.body, charts);
-  if (doc.headers) {
-    for (const [, h] of doc.headers) {
-      collectChartsFromHeaderFooter(h.content, charts);
-    }
-  }
-  if (doc.footers) {
-    for (const [, f] of doc.footers) {
-      collectChartsFromHeaderFooter(f.content, charts);
-    }
-  }
 
   const chartRIds: string[] = [];
   const renderCtxChartRIds = new Map<object, string>();
@@ -838,6 +1092,49 @@ async function _packageDocxInner(
     chartRIds.push(rId);
     renderCtxChartRIds.set(chartContent, rId);
   });
+
+  // Register header charts against each header's own .rels.
+  if (doc.headers) {
+    for (const [key, headerDef] of doc.headers) {
+      const headerCharts: ChartContent[] = [];
+      collectChartsFromHeaderFooter(headerDef.content, headerCharts);
+      if (headerCharts.length === 0) {
+        continue;
+      }
+      const hRels = headerRelManagers.get(key) ?? createRelationships();
+      for (const chartContent of headerCharts) {
+        const num = chartRIds.length + 1;
+        const rId = addRelationship(hRels, RelType.Chart, `charts/chart${num}.xml`);
+        chartRIds.push(rId);
+        renderCtxChartRIds.set(chartContent, rId);
+        // Also push into the global charts[] so chart{num}.xml + .rels are
+        // emitted later (chart parts themselves live under word/charts/, not
+        // co-located with the header).
+        charts.push(chartContent);
+      }
+      headerRelManagers.set(key, hRels);
+    }
+  }
+
+  // Same for footers.
+  if (doc.footers) {
+    for (const [key, footerDef] of doc.footers) {
+      const footerCharts: ChartContent[] = [];
+      collectChartsFromHeaderFooter(footerDef.content, footerCharts);
+      if (footerCharts.length === 0) {
+        continue;
+      }
+      const fRels = footerRelManagers.get(key) ?? createRelationships();
+      for (const chartContent of footerCharts) {
+        const num = chartRIds.length + 1;
+        const rId = addRelationship(fRels, RelType.Chart, `charts/chart${num}.xml`);
+        chartRIds.push(rId);
+        renderCtxChartRIds.set(chartContent, rId);
+        charts.push(chartContent);
+      }
+      footerRelManagers.set(key, fRels);
+    }
+  }
 
   // Collect ChartEx items and register relationships
   const chartExItems: ChartExContent[] = [];
@@ -850,11 +1147,18 @@ async function _packageDocxInner(
     renderCtxChartRIds.set(cxContent, rId);
   });
 
-  // Create render context for document serialization
+  // Create render context for document serialization. The id generators
+  // are seeded so any auto-assigned id (e.g. SDT) starts above the maximum
+  // value the caller already used in the model — otherwise an SDT without
+  // an explicit `id` would collide with an existing one and break
+  // dataBinding / repeating section linkage.
   const renderCtx = createRenderContext({
     chartRIds: renderCtxChartRIds,
     imageRIdRemap: imageRemap,
-    hyperlinkRIds
+    hyperlinkRIds,
+    ids: createIdGenerators({
+      sdtId: scanMaxSdtId(doc) + 1
+    })
   });
 
   // word/_rels/document.xml.rels — deferred until after all document-level
@@ -909,15 +1213,21 @@ async function _packageDocxInner(
 
     for (const ef of doc.embeddedFonts) {
       const partPath = `word/fonts/${ef.fileName}`;
+      // De-dup: two EmbeddedFont entries with the same (rId, fileName) are
+      // the same physical file (typical when callers reuse helpers like
+      // `embedFontFamily` and store the same FontDef across runs). Skip
+      // the duplicate to avoid an `archive.add` overwrite race and a
+      // `Duplicate relationship ID` from `addRelationshipWithId`.
+      if (fontTableRels.hasId(ef.rId)) {
+        continue;
+      }
       archive.add(partPath, ef.data);
 
-      // Register relationship from fontTable.xml
-      if (usedRIds.has(ef.rId)) {
-        addRelationshipWithId(fontTableRels, ef.rId, RelType.Font, `fonts/${ef.fileName}`);
-      } else {
-        // Add anyway so the embedded font isn't orphaned
-        addRelationshipWithId(fontTableRels, ef.rId, RelType.Font, `fonts/${ef.fileName}`);
-      }
+      // Register relationship from fontTable.xml. We always emit the
+      // relationship (even when no FontDef references it directly) so
+      // the embedded font part doesn't end up orphaned in the package.
+      addRelationshipWithId(fontTableRels, ef.rId, RelType.Font, `fonts/${ef.fileName}`);
+      void usedRIds;
 
       // Register content type for .odttf / .ttf
       const ext = getFileExt(ef.fileName);
@@ -1035,12 +1345,22 @@ async function _packageDocxInner(
     }
   }
 
-  // word/comments.xml
+  // word/comments.xml + comments.xml.rels
   if (hasComments) {
     archive.add(
       PartPath.Comments,
-      renderXml(xml => renderComments(xml, doc.comments!))
+      // Comments live in their own OPC part; pass helpers so embedded
+      // hyperlinks/images render with the right r:id (the rels manager
+      // below registered them under their model-original id).
+      renderXml(xml => renderComments(xml, doc.comments!, { imageRemap: new Map(), hyperlinkRIds }))
     );
+
+    if (getRelationshipCount(commentRels) > 0) {
+      archive.add(
+        "word/_rels/comments.xml.rels",
+        renderXml(xml => renderRelationships(commentRels, xml))
+      );
+    }
 
     // word/commentsExtended.xml (for done/parentId)
     const hasExtended = doc.comments!.some(c => c.done !== undefined || c.parentId !== undefined);
@@ -1203,9 +1523,101 @@ async function _packageDocxInner(
     addContentTypeOverride(contentTypes, "/word/vbaProject.bin", ContentType.VbaProject);
   }
 
-  // Write opaque (unrecognized) parts for round-trip preservation
+  // Write opaque (unrecognized) parts for round-trip preservation.
+  //
+  // Opaque parts are written as-is into the ZIP. Their paths must not
+  // collide with parts the packager itself produces — otherwise we either
+  // emit a duplicate ZIP entry (Word may pick whichever it sees first, but
+  // the produced package is no longer well-formed) or we silently overwrite
+  // the semantic part. Round-trip via `readDocx` already excludes parts
+  // that were consumed; collisions in practice come from callers that
+  // construct opaqueParts by hand. Reject the most dangerous overlaps with
+  // a clear error.
   if (doc.opaqueParts) {
+    // Exact-path reservations: any well-known core part the packager always
+    // emits, plus the parts we have already added during this run (headers,
+    // footers, charts, embedded fonts, etc).
+    const reservedExact = new Set<string>([
+      PartPath.ContentTypes,
+      PartPath.PackageRels,
+      PartPath.Document,
+      PartPath.DocumentRels,
+      PartPath.Styles,
+      "word/_rels/styles.xml.rels",
+      PartPath.Settings,
+      PartPath.FontTable,
+      "word/_rels/fontTable.xml.rels",
+      PartPath.Numbering,
+      PartPath.Footnotes,
+      "word/_rels/footnotes.xml.rels",
+      PartPath.Endnotes,
+      "word/_rels/endnotes.xml.rels",
+      PartPath.Comments,
+      "word/_rels/comments.xml.rels",
+      PartPath.CommentsExtended,
+      PartPath.People,
+      PartPath.WebSettings,
+      PartPath.Theme,
+      PartPath.CoreProps,
+      PartPath.AppProps,
+      PartPath.CustomProps,
+      PartPath.Thumbnail,
+      "word/vbaProject.bin",
+      "word/_rels/vbaProject.bin.rels"
+    ]);
+    // Headers/footers we are emitting in this run.
+    if (doc.headers) {
+      let i = 1;
+      for (const _entry of doc.headers) {
+        void _entry;
+        reservedExact.add(PartPath.header(i));
+        reservedExact.add(PartPath.headerRels(i));
+        i++;
+      }
+    }
+    if (doc.footers) {
+      let i = 1;
+      for (const _entry of doc.footers) {
+        void _entry;
+        reservedExact.add(PartPath.footer(i));
+        reservedExact.add(PartPath.footerRels(i));
+        i++;
+      }
+    }
+    // Charts emitted by this run.
+    for (let i = 1; i <= charts.length; i++) {
+      reservedExact.add(`word/charts/chart${i}.xml`);
+      reservedExact.add(`word/charts/_rels/chart${i}.xml.rels`);
+    }
+    for (let i = 1; i <= chartExItems.length; i++) {
+      reservedExact.add(`word/charts/chartEx${i}.xml`);
+    }
+    // Image media: each image has a deterministic media path.
+    if (doc.images) {
+      for (const img of doc.images) {
+        if (img.fileName) {
+          reservedExact.add(`word/media/${img.fileName}`);
+        }
+      }
+    }
+    // Embedded fonts.
+    if (doc.embeddedFonts) {
+      for (const ef of doc.embeddedFonts) {
+        if (ef.fileName) {
+          reservedExact.add(`word/fonts/${ef.fileName}`);
+        }
+      }
+    }
+
     for (const part of doc.opaqueParts) {
+      if (reservedExact.has(part.path)) {
+        throw new DocxWriteError(
+          `Opaque part path "${part.path}" conflicts with a part the packager ` +
+            `is emitting itself. Move the data into the corresponding model ` +
+            `field (e.g. doc.styles, doc.headers, doc.images) or rename the ` +
+            `opaque part.`
+        );
+      }
       archive.add(part.path, part.data);
       // Register content type: explicit > inferred by extension > skip
       const ext = getFileExt(part.path);
@@ -1320,59 +1732,27 @@ async function _packageDocxInner(
 
 /** Recursively collect altChunks from body content. */
 function collectAltChunks(body: readonly BodyContent[], out: AltChunk[]): void {
-  for (const item of body) {
-    if ("type" in item && item.type === "altChunk") {
-      out.push(item);
-    } else if ("type" in item && item.type === "table") {
-      for (const row of item.rows) {
-        for (const cell of row.cells) {
-          collectAltChunks(cell.content as readonly BodyContent[], out);
-        }
-      }
-    } else if ("type" in item && item.type === "sdt") {
-      collectAltChunks(item.content as readonly BodyContent[], out);
+  walkBlocks(body, {
+    visitAltChunk(chunk) {
+      out.push(chunk);
     }
-  }
+  });
 }
 
 /** Recursively collect chart contents from body content. */
 function collectCharts(body: readonly BodyContent[], out: ChartContent[]): void {
-  for (const item of body) {
-    if ("type" in item && item.type === "chart") {
-      out.push(item as ChartContent);
-    } else if ("type" in item && item.type === "table") {
-      for (const row of item.rows) {
-        for (const cell of row.cells) {
-          collectCharts(cell.content as readonly BodyContent[], out);
-        }
-      }
-    } else if ("type" in item && item.type === "sdt") {
-      collectCharts(item.content as readonly BodyContent[], out);
+  walkBlocks(body, {
+    visitChart(chart) {
+      out.push(chart);
     }
-  }
-}
-
-/** Collect charts from header/footer content. */
-function collectChartsFromHeaderFooter(
-  content: { children: readonly BodyContent[] },
-  out: ChartContent[]
-): void {
-  collectCharts(content.children, out);
+  });
 }
 
 /** Recursively collect ChartEx contents from body content. */
 function collectChartExItems(body: readonly BodyContent[], out: ChartExContent[]): void {
-  for (const item of body) {
-    if ("type" in item && item.type === "chartEx") {
-      out.push(item as ChartExContent);
-    } else if ("type" in item && item.type === "table") {
-      for (const row of item.rows) {
-        for (const cell of row.cells) {
-          collectChartExItems(cell.content as readonly BodyContent[], out);
-        }
-      }
-    } else if ("type" in item && item.type === "sdt") {
-      collectChartExItems(item.content as readonly BodyContent[], out);
+  walkBlocks(body, {
+    visitChartEx(chart) {
+      out.push(chart);
     }
-  }
+  });
 }

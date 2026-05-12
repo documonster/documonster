@@ -239,6 +239,86 @@ describe("DOCX Package Integrity", () => {
     expect(ct).toContain("footer");
   });
 
+  it("should produce header/footer references whose rId resolves in document.xml.rels", async () => {
+    const h = Document.create();
+    Document.setHeader(h, "default", { children: [textParagraph("My Header")] });
+    Document.setFooter(h, "default", { children: [textParagraph("My Footer")] });
+    Document.setSectionProperties(h, {
+      headers: [{ type: "default", rId: "" }],
+      footers: [{ type: "default", rId: "" }]
+    });
+    Document.addParagraph(h, "Body");
+    const bytes = await packageDocx(Document.build(h));
+    const files = await extractDocx(bytes);
+
+    const documentXml = decodeEntry(files, "word/document.xml");
+    const documentRels = decodeEntry(files, "word/_rels/document.xml.rels");
+
+    // Pull every r:id used by a headerReference/footerReference.
+    const refIdRe = /<w:(?:header|footer)Reference[^>]*r:id="([^"]+)"/g;
+    const referencedIds = new Set<string>();
+    for (const m of documentXml.matchAll(refIdRe)) {
+      referencedIds.add(m[1]!);
+    }
+    expect(referencedIds.size).toBeGreaterThanOrEqual(2);
+    // Every referenced rId must correspond to a relationship entry.
+    for (const id of referencedIds) {
+      expect(id).not.toBe("");
+      expect(documentRels).toContain(`Id="${id}"`);
+    }
+  });
+
+  it("should auto-fill section header/footer references when builder did not author them", async () => {
+    // Builder users typically call setHeader/setFooter without manually
+    // adding a HeaderFooterRef in sectionProperties. The packager should
+    // synthesize references so the section actually picks them up.
+    const h = Document.create();
+    Document.setHeader(h, "default", { children: [textParagraph("Auto Header")] });
+    Document.setFooter(h, "default", { children: [textParagraph("Auto Footer")] });
+    Document.addParagraph(h, "Body");
+    const bytes = await packageDocx(Document.build(h));
+    const files = await extractDocx(bytes);
+
+    const documentXml = decodeEntry(files, "word/document.xml");
+    const documentRels = decodeEntry(files, "word/_rels/document.xml.rels");
+
+    expect(documentXml).toMatch(/<w:headerReference[^>]*r:id="[^"]+"/);
+    expect(documentXml).toMatch(/<w:footerReference[^>]*r:id="[^"]+"/);
+
+    const refIds = [
+      ...documentXml.matchAll(/<w:(?:header|footer)Reference[^>]*r:id="([^"]+)"/g)
+    ].map(m => m[1]!);
+    for (const id of refIds) {
+      expect(documentRels).toContain(`Id="${id}"`);
+    }
+  });
+
+  it("should round-trip headers/footers with consistent rId references", async () => {
+    // Round-trip path: read a generated DOCX (which will carry its own rIds
+    // from the original packaging pass), then repackage it. The second pass
+    // assigns fresh rIds for header/footer parts, so the section-property
+    // references must be rewritten to match.
+    const h1 = Document.create();
+    Document.setHeader(h1, "default", { children: [textParagraph("Round-trip Header")] });
+    Document.setFooter(h1, "default", { children: [textParagraph("Round-trip Footer")] });
+    Document.addParagraph(h1, "Body");
+    const firstBytes = await packageDocx(Document.build(h1));
+    const parsed = await readDocx(firstBytes);
+
+    const secondBytes = await packageDocx(parsed);
+    const files = await extractDocx(secondBytes);
+    const documentXml = decodeEntry(files, "word/document.xml");
+    const documentRels = decodeEntry(files, "word/_rels/document.xml.rels");
+
+    const refIds = [
+      ...documentXml.matchAll(/<w:(?:header|footer)Reference[^>]*r:id="([^"]+)"/g)
+    ].map(m => m[1]!);
+    expect(refIds.length).toBeGreaterThanOrEqual(2);
+    for (const id of refIds) {
+      expect(documentRels).toContain(`Id="${id}"`);
+    }
+  });
+
   // ===========================================================================
   // Image parts
   // ===========================================================================
@@ -258,6 +338,42 @@ describe("DOCX Package Integrity", () => {
     // Content types should include png default
     const ct = decodeEntry(files, "[Content_Types].xml");
     expect(ct).toContain('Extension="png"');
+  });
+
+  it("should reject opaque parts whose path collides with a packager-managed part", async () => {
+    // Building a doc that already produces word/document.xml and adding an
+    // opaque entry under the same path would emit a duplicate ZIP entry.
+    // The packager must reject it loudly rather than silently corrupt.
+    const h = Document.create();
+    Document.addParagraph(h, "Body");
+    const doc = Document.build(h);
+    const docWithConflict = {
+      ...doc,
+      opaqueParts: [
+        {
+          path: "word/document.xml",
+          data: new TextEncoder().encode("<bogus/>")
+        }
+      ]
+    };
+    await expect(packageDocx(docWithConflict)).rejects.toThrow(/conflicts with a part/);
+  });
+
+  it("should reject opaque parts that collide with header parts emitted in this run", async () => {
+    const h = Document.create();
+    Document.setHeader(h, "default", { children: [textParagraph("Header")] });
+    Document.addParagraph(h, "Body");
+    const doc = Document.build(h);
+    const docWithConflict = {
+      ...doc,
+      opaqueParts: [
+        {
+          path: "word/header1.xml",
+          data: new TextEncoder().encode("<bogus/>")
+        }
+      ]
+    };
+    await expect(packageDocx(docWithConflict)).rejects.toThrow(/conflicts with a part/);
   });
 
   // ===========================================================================
@@ -315,6 +431,45 @@ describe("DOCX Package Integrity", () => {
     // Relationship should reference comments
     const rels = decodeEntry(files, "word/_rels/document.xml.rels");
     expect(rels).toContain("comments.xml");
+  });
+
+  it("emits word/_rels/comments.xml.rels for hyperlinks inside comments", async () => {
+    // Comments live in their own OPC part — relationships referenced from
+    // comment paragraphs must be written into comments.xml.rels rather than
+    // document.xml.rels, otherwise readers cannot resolve the URL.
+    const link = {
+      type: "hyperlink" as const,
+      url: "https://example.com/spec",
+      children: [{ content: [{ type: "text" as const, text: "spec" }] }]
+    };
+    const commentPara: any = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "see " }] }, link]
+    };
+    const seedDoc: any = {
+      body: [{ type: "paragraph", children: [{ content: [{ type: "text", text: "body" }] }] }],
+      comments: [{ id: 1, author: "X", content: [commentPara] }]
+    };
+    const bytes = await packageDocx(seedDoc);
+    const files = await extractDocx(bytes);
+
+    expect(files.has("word/_rels/comments.xml.rels")).toBe(true);
+    const commentsRels = decodeEntry(files, "word/_rels/comments.xml.rels");
+    expect(commentsRels).toContain("https://example.com/spec");
+    expect(commentsRels).toContain('TargetMode="External"');
+
+    // The same external URL must NOT also leak into document.xml.rels just
+    // because of the comment-internal reference.
+    const docRels = decodeEntry(files, "word/_rels/document.xml.rels");
+    expect(docRels).not.toContain("https://example.com/spec");
+
+    // Round-trip: the comment paragraph reads back with the URL.
+    const parsed = await readDocx(bytes);
+    const c = parsed.comments?.[0];
+    expect(c).toBeDefined();
+    const para = c!.content[0] as any;
+    const linkChild = para.children.find((ch: any) => ch.type === "hyperlink");
+    expect(linkChild?.url).toBe("https://example.com/spec");
   });
 
   // ===========================================================================

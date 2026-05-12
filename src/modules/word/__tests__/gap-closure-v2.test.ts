@@ -405,6 +405,73 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
     // Document should be parseable (at least paragraphs survive)
     expect(result.body.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("wraps advanced shape effects inside a valid wp:anchor / a:effectLst structure", async () => {
+    // Regression: previously the writer short-circuited on shape.rawXml and
+    // emitted bare DrawingML fragments directly under w:body. Now the writer
+    // always renders the full drawing wrapper and inserts the advanced
+    // properties (effect list, gradient, scene3d) as children of wps:spPr.
+    const shape = createRect(2000000, 1000000, {
+      fill: {
+        type: "gradient",
+        stops: [
+          { position: 0, color: "FF0000" },
+          { position: 100000, color: "0000FF" }
+        ]
+      },
+      effects: {
+        shadow: { type: "outer", color: "000000", blurRadius: 50800 },
+        softEdges: 63500
+      }
+    });
+
+    const doc = Document.create();
+    Document.addContent(doc, shape);
+    const buffer = await toBuffer(Document.build(doc));
+
+    const { unzip } = await import("@archive/read-archive");
+    const reader = unzip(buffer);
+    let documentXml = "";
+    for await (const entry of reader.entries()) {
+      if (entry.path === "word/document.xml") {
+        const bytes = await entry.bytes();
+        documentXml = new TextDecoder().decode(bytes);
+        break;
+      }
+    }
+
+    // Drawing wrappers must be present — they were missing before the fix.
+    expect(documentXml).toContain("<w:drawing>");
+    expect(documentXml).toContain("<wp:anchor");
+    expect(documentXml).toContain("<wps:spPr>");
+
+    // Effects must live inside <a:effectLst>, not as bare children of spPr
+    // (and must NOT escape the spPr block).
+    expect(documentXml).toContain("<a:effectLst>");
+    const effectLstStart = documentXml.indexOf("<a:effectLst>");
+    const spPrEnd = documentXml.indexOf("</wps:spPr>");
+    expect(effectLstStart).toBeGreaterThan(0);
+    expect(spPrEnd).toBeGreaterThan(effectLstStart);
+
+    // Gradient fill should also be inside spPr
+    const gradFillStart = documentXml.indexOf("<a:gradFill");
+    expect(gradFillStart).toBeGreaterThan(0);
+    expect(gradFillStart).toBeLessThan(spPrEnd);
+
+    // OOXML schema requires fill to precede a:ln and effects to follow it.
+    // Verify that ordering so consumers like Word don't reject the file.
+    const lnStart = documentXml.indexOf("<a:ln", documentXml.indexOf("<wps:spPr>"));
+    if (lnStart > 0) {
+      expect(gradFillStart).toBeLessThan(lnStart);
+      expect(effectLstStart).toBeGreaterThan(lnStart);
+    }
+
+    // The effect children must NOT appear directly under w:body — they used
+    // to be emitted there, producing invalid OOXML.
+    const bodyStart = documentXml.indexOf("<w:body>");
+    const drawingStart = documentXml.indexOf("<w:drawing>");
+    expect(drawingStart).toBeGreaterThan(bodyStart);
+  });
 });
 
 // =============================================================================

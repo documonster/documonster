@@ -22,8 +22,10 @@
  *   - XMLDSig: https://www.w3.org/TR/xmldsig-core/
  */
 
+import { xmlDecode } from "@xml/encode";
+
 import { utf8Decoder } from "../core/internal-utils";
-import { getFileName } from "../core/opc-package";
+import { getFileName } from "../core/opc-paths";
 
 /** Parsed digital signature metadata. */
 export interface DigitalSignatureInfo {
@@ -47,8 +49,15 @@ export interface DigitalSignatureInfo {
   readonly certificateSerialNumber?: string;
   /** Hash of the signature (base64). */
   readonly signatureValue?: string;
-  /** Whether signature is valid (requires verification). */
-  readonly valid?: boolean;
+  /**
+   * Cryptographic verification status.
+   *
+   * `"not-verified"` is the only value this module ever produces — full
+   * verification requires a complete XMLDSig + Canonical XML implementation
+   * which is intentionally out of scope. The field is exposed so callers
+   * are not tempted to interpret a missing value as "valid".
+   */
+  readonly cryptographicStatus: "not-verified";
   /** Raw XML for preservation. */
   readonly rawXml: string;
   /** Signature file name (e.g. "sig1.xml"). */
@@ -77,33 +86,34 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
     -readonly [P in keyof DigitalSignatureInfo]: DigitalSignatureInfo[P];
   } = {
     rawXml: xmlStr,
-    fileName
+    fileName,
+    cryptographicStatus: "not-verified"
   };
 
   // Extract Office-specific metadata from <SignatureInfoV1>
   const sigTextMatch = /<SignatureText[^>]*>([^<]*)<\/SignatureText>/.exec(xmlStr);
   if (sigTextMatch) {
-    info.signer = decodeEntities(sigTextMatch[1]);
+    info.signer = xmlDecode(sigTextMatch[1]);
   }
 
   const sigCommentsMatch = /<SignatureComments[^>]*>([^<]*)<\/SignatureComments>/.exec(xmlStr);
   if (sigCommentsMatch) {
-    info.signatureComments = decodeEntities(sigCommentsMatch[1]);
+    info.signatureComments = xmlDecode(sigCommentsMatch[1]);
   }
 
   const purposeMatch = /<SignaturePurpose[^>]*>([^<]*)<\/SignaturePurpose>/.exec(xmlStr);
   if (purposeMatch) {
-    info.purpose = decodeEntities(purposeMatch[1]);
+    info.purpose = xmlDecode(purposeMatch[1]);
   }
 
   const dateMatch = /<SignatureDate[^>]*>([^<]*)<\/SignatureDate>/.exec(xmlStr);
   if (dateMatch) {
-    info.signDate = dateMatch[1];
+    info.signDate = xmlDecode(dateMatch[1]);
   }
 
   const providerMatch = /<SignatureProviderUrl[^>]*>([^<]*)<\/SignatureProviderUrl>/.exec(xmlStr);
   if (providerMatch) {
-    info.providerUrl = decodeEntities(providerMatch[1]);
+    info.providerUrl = xmlDecode(providerMatch[1]);
   }
 
   // Commitment type
@@ -112,7 +122,7 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
       xmlStr
     );
   if (commitMatch) {
-    info.commitmentType = commitMatch[1];
+    info.commitmentType = xmlDecode(commitMatch[1]);
   }
 
   // Extract signature value (base64)
@@ -124,17 +134,17 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
   // Certificate details from <X509Data>
   const certSubjectMatch = /<X509SubjectName[^>]*>([^<]*)<\/X509SubjectName>/.exec(xmlStr);
   if (certSubjectMatch) {
-    info.certificateSubject = decodeEntities(certSubjectMatch[1]);
+    info.certificateSubject = xmlDecode(certSubjectMatch[1]);
   }
 
   const certIssuerMatch = /<X509IssuerName[^>]*>([^<]*)<\/X509IssuerName>/.exec(xmlStr);
   if (certIssuerMatch) {
-    info.certificateIssuer = decodeEntities(certIssuerMatch[1]);
+    info.certificateIssuer = xmlDecode(certIssuerMatch[1]);
   }
 
   const certSerialMatch = /<X509SerialNumber[^>]*>([^<]*)<\/X509SerialNumber>/.exec(xmlStr);
   if (certSerialMatch) {
-    info.certificateSerialNumber = certSerialMatch[1];
+    info.certificateSerialNumber = xmlDecode(certSerialMatch[1]);
   }
 
   return info;
@@ -164,30 +174,25 @@ export function extractSignatures(
 }
 
 /**
- * Verify that a digital signature's structural integrity is intact.
+ * Check that a parsed signature has the structural elements XMLDSig
+ * requires (`Signature`, `SignedInfo`, `SignatureValue`, `KeyInfo`).
  *
- * Note: This does NOT verify the cryptographic signature — that requires
- * access to the signer's public key and a full XMLDSig implementation.
- * Use a dedicated XMLDSig library for cryptographic verification.
+ * This is **not** a cryptographic check — see `cryptographicStatus`. It is
+ * also tolerant of namespace prefixes (`<ds:Signature>` etc.) which the
+ * previous implementation missed.
  *
- * @returns True if the signature structure is well-formed.
+ * @returns True if the signature XML carries the required elements.
  */
 export function isWellFormedSignature(info: DigitalSignatureInfo): boolean {
+  // Allow optional namespace prefix and either an attribute-bearing or
+  // self-closing form — XMLDSig signatures in real DOCX files commonly
+  // use `<ds:Signature ...>` rather than the default-namespace form.
+  const hasElement = (local: string): boolean =>
+    new RegExp(`<(?:[\\w-]+:)?${local}(?:\\s|>|/>)`).test(info.rawXml);
   return (
-    info.rawXml.includes("<Signature ") &&
-    info.rawXml.includes("<SignedInfo") &&
-    info.rawXml.includes("<SignatureValue") &&
-    info.rawXml.includes("<KeyInfo")
+    hasElement("Signature") &&
+    hasElement("SignedInfo") &&
+    hasElement("SignatureValue") &&
+    hasElement("KeyInfo")
   );
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 16)))
-    .replace(/&amp;/g, "&");
 }

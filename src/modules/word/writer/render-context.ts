@@ -3,9 +3,14 @@
  * Passed to all writer functions to provide shared state.
  */
 
-import type { PartName } from "../core/opc-package";
 import type { WordSecurityPolicy } from "../security/policy";
 import { DEFAULT_SECURITY_POLICY } from "../security/policy";
+
+/**
+ * A fully-qualified part name within the package (e.g. "/word/document.xml").
+ * Type alias kept for documentation; functionally identical to `string`.
+ */
+type PartName = string;
 
 /** ID generators for various document elements. */
 export interface IdGenerators {
@@ -103,13 +108,19 @@ export function createRenderContext(options?: {
   chartRIds?: Map<object, string>;
   imageRIdRemap?: Map<string, string>;
   hyperlinkRIds?: WeakMap<object, string>;
+  /**
+   * Pre-built ID generators. When provided, the caller is responsible for
+   * seeding them (e.g. with the maximum existing SDT id in the document so
+   * auto-assigned IDs don't collide with author-supplied ones).
+   */
+  ids?: IdGenerators;
 }): WordRenderContext {
   const securityPolicy = options?.securityPolicy ?? DEFAULT_SECURITY_POLICY;
 
   return {
     partName: options?.partName ?? "/word/document.xml",
     securityPolicy,
-    ids: createIdGenerators(),
+    ids: options?.ids ?? createIdGenerators(),
     rawXmlPolicy: securityPolicy.rawXmlPolicy ?? "preserve",
     chartRIds: options?.chartRIds ?? new Map(),
     imageRIdRemap: options?.imageRIdRemap ?? new Map(),

@@ -172,6 +172,21 @@ describe("markdownToDocxBody", () => {
       }
     });
 
+    it("respects a non-default ordered list start", () => {
+      // markdownToDocx exposes the numbering instances on the document; the
+      // list's first paragraph's numId must reference an instance whose
+      // override starts at 3.
+      const doc = markdownToDocx("3. third\n4. fourth");
+      const paragraphs = doc.body.filter(b => b.type === "paragraph") as Paragraph[];
+      expect(paragraphs).toHaveLength(2);
+      const numId = paragraphs[0].properties?.numbering?.numId;
+      expect(numId).toBeDefined();
+      const inst = doc.numberingInstances?.find(n => n.numId === numId);
+      expect(inst).toBeDefined();
+      const override = inst?.overrides?.find(o => o.level === 0);
+      expect(override?.startOverride).toBe(3);
+    });
+
     it("should handle task lists", () => {
       const body = markdownToDocxBody("- [x] Done\n- [ ] Not done");
       const paragraphs = body.filter(b => b.type === "paragraph") as Paragraph[];

@@ -5,6 +5,7 @@
  * sections, page breaks, or heading levels.
  */
 
+import { isRun } from "../core/text-utils";
 import type { DocxDocument, BodyContent, Paragraph } from "../types";
 
 // =============================================================================
@@ -128,7 +129,16 @@ function shouldSplitAfter(block: BodyContent, opts: Required<SplitOptions>): boo
 }
 
 function isHeadingLevel(para: Paragraph, level: number): boolean {
-  const style = para.properties?.style;
+  const props = para.properties;
+  // outlineLevel mirrors getHeadings()'s detection: outlineLevel 0 == H1,
+  // outlineLevel 1 == H2, etc. Levels >= 9 mean "body text" and should not
+  // qualify as headings.
+  if (props?.outlineLevel !== undefined && props.outlineLevel < 9) {
+    if (props.outlineLevel + 1 === level) {
+      return true;
+    }
+  }
+  const style = props?.style;
   if (!style) {
     return false;
   }
@@ -144,7 +154,7 @@ function isHeadingLevel(para: Paragraph, level: number): boolean {
 
 function paragraphHasExplicitPageBreakRun(para: Paragraph): boolean {
   for (const child of para.children) {
-    if (!("type" in child) && "content" in child && Array.isArray(child.content)) {
+    if (isRun(child)) {
       for (const c of child.content) {
         if (c.type === "break" && c.breakType === "page") {
           return true;

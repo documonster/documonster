@@ -137,6 +137,14 @@ function parseTableDirectory(data: Uint8Array): {
   const numTables = readU16(data, 4);
   const tables = new Map<string, TableRecord>();
 
+  // numTables comes from a u16 → max 65535. Reject directories that
+  // claim more entries than the buffer can possibly hold so we don't
+  // walk off the end and accumulate garbage records.
+  const maxRecords = Math.floor((data.length - 12) / 16);
+  if (numTables > maxRecords) {
+    return { numTables: 0, tables };
+  }
+
   for (let i = 0; i < numTables; i++) {
     const recOffset = 12 + i * 16;
     const tag = String.fromCharCode(
@@ -155,6 +163,12 @@ function parseTableDirectory(data: Uint8Array): {
 
   return { numTables, tables };
 }
+
+// Hard cap on how many codepoints we materialise from a cmap table.
+// Real fonts reach ~150K glyphs at the upper end (CJK pan-Unicode);
+// bigger numbers indicate a malformed or hostile table built to drive
+// the parser into a multi-gigabyte Map allocation.
+const CMAP_MAX_ENTRIES = 200_000;
 
 /**
  * Parse cmap format 4 (BMP characters) to build codepoint → glyph ID map.
@@ -180,6 +194,9 @@ function parseCmapFormat4(data: Uint8Array, offset: number): Map<number, number>
     }
 
     for (let c = startCode; c <= endCode; c++) {
+      if (map.size >= CMAP_MAX_ENTRIES) {
+        return map;
+      }
       let glyphId: number;
       if (idRangeOffset === 0) {
         glyphId = (c + idDelta) & 0xffff;
@@ -206,13 +223,34 @@ function parseCmapFormat12(data: Uint8Array, offset: number): Map<number, number
   const map = new Map<number, number>();
   const numGroups = readU32(data, offset + 12);
 
+  // numGroups is a u32 — without bounds it can claim 4×10⁹ groups and
+  // each group can claim a 4×10⁹-codepoint range. Reject crazy values
+  // up front. The 4-byte multiplier 12 (group record size) plus the
+  // 16-byte header puts an absolute ceiling on legitimate groups.
+  const maxGroups = Math.max(0, Math.floor((data.length - offset - 16) / 12));
+  if (numGroups > maxGroups) {
+    return map;
+  }
+
   for (let i = 0; i < numGroups; i++) {
     const groupOffset = offset + 16 + i * 12;
     const startCharCode = readU32(data, groupOffset);
     const endCharCode = readU32(data, groupOffset + 4);
     const startGlyphID = readU32(data, groupOffset + 8);
 
+    if (
+      endCharCode < startCharCode ||
+      endCharCode > 0x10ffff /* Unicode max */ ||
+      endCharCode - startCharCode > CMAP_MAX_ENTRIES
+    ) {
+      // Malformed or abusive range — skip rather than expand it.
+      continue;
+    }
+
     for (let c = startCharCode; c <= endCharCode; c++) {
+      if (map.size >= CMAP_MAX_ENTRIES) {
+        return map;
+      }
       const gid = startGlyphID + (c - startCharCode);
       map.set(c, gid);
     }
@@ -596,8 +634,12 @@ export function embedFont(options: EmbedFontOptions): EmbedFontResult {
     fileName = `${sanitizeFileName(options.name)}_${style}.${ext}`;
   }
 
-  // A placeholder rId — will be reassigned during packaging
-  const rId = `rId_embed_${sanitizeFileName(options.name)}_${style}`;
+  // Allocate a unique rId per call. The packager will register this rId
+  // verbatim in `word/_rels/fontTable.xml.rels`, so re-using the same
+  // string across calls (the previous behaviour, which keyed off the font
+  // name + style) caused `Duplicate relationship ID` errors as soon as a
+  // caller embedded two distinct files claiming the same name/style.
+  const rId = `rIdFont${nextEmbeddedFontSequence()}`;
 
   // Build the FontDef with embed key info
   const fontDef: FontDef = {
@@ -643,16 +685,25 @@ export function embedFontFamily(
   const results: EmbedFontResult[] = [];
 
   for (const [style, data] of Object.entries(variants) as [FontEmbedStyle, Uint8Array][]) {
-    if (data) {
-      results.push(
-        embedFont({
-          name,
-          data,
-          style,
-          ...options
-        })
-      );
+    // `data` can legitimately be `undefined` when the caller spreads in
+    // a partial map. The previous truthy check let an empty Uint8Array
+    // through (which is truthy) but was correct for the undefined case.
+    if (data === undefined) {
+      continue;
     }
+    if (data.byteLength === 0) {
+      // An empty buffer is never a real font. Skip rather than embed
+      // garbage that Word silently rejects.
+      continue;
+    }
+    results.push(
+      embedFont({
+        name,
+        data,
+        style,
+        ...options
+      })
+    );
   }
 
   return results;
@@ -731,4 +782,11 @@ function detectFontFormat(data: Uint8Array): string {
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** Module-level monotonic counter for embedded-font rIds. */
+let _embeddedFontSeq = 0;
+function nextEmbeddedFontSequence(): number {
+  _embeddedFontSeq++;
+  return _embeddedFontSeq;
 }

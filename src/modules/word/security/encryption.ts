@@ -18,7 +18,13 @@
  *   - ECMA-376 Part 3: Markup Compatibility and Extensibility
  */
 
-import { base64ToBytes, bytesToBase64, utf8Decoder, utf8Encoder } from "../core/internal-utils";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  randomBytes,
+  utf8Decoder,
+  utf8Encoder
+} from "../core/internal-utils";
 import { DocxDecryptionError } from "../errors";
 import { readCfb, writeCfb } from "./cfb-reader";
 
@@ -105,8 +111,20 @@ export async function deriveEncryptionKey(
   // Final: H_final = H(H + blockKey)
   const final = await sha(hash, concat(h, blockKey));
 
-  // Truncate to keySize
+  // Truncate to keySize. The hash size MUST be at least the requested
+  // key length — otherwise we'd hand WebCrypto a short key buffer that
+  // either fails AES import (`OperationError`) or produces a key the
+  // counterparty can't validate. Reject misconfigured EncryptionInfo
+  // up-front with a clear error.
   const keyBytes = info.keyBits / 8;
+  if (final.length < keyBytes) {
+    throw new Error(
+      `deriveEncryptionKey: hash output of ${final.length} bytes is too ` +
+        `short for keyBits=${info.keyBits} (need ${keyBytes}). ` +
+        `Use a hash algorithm with a larger digest size (e.g. SHA-512 ` +
+        `for keyBits ≤ 512).`
+    );
+  }
   return final.slice(0, keyBytes);
 }
 
@@ -141,8 +159,8 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashInput
     );
 
-    // Decrypt the verifier hash input
-    const verifierInput = await aesCbcDecrypt(
+    // Decrypt the verifier hash input (PKCS#7 padded by aesCbcEncrypt during write)
+    const verifierInput = await aesCbcDecryptPkcs7(
       info.encryptedVerifierHashInput,
       verifierInputKey,
       info.keySalt
@@ -159,8 +177,8 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashValue
     );
 
-    // Decrypt the verifier hash value
-    const expectedHash = await aesCbcDecrypt(
+    // Decrypt the verifier hash value (PKCS#7 padded by aesCbcEncrypt during write)
+    const expectedHash = await aesCbcDecryptPkcs7(
       info.encryptedVerifierHashValue,
       verifierValueKey,
       info.keySalt
@@ -179,22 +197,49 @@ export async function verifyPassword(
  * @param encryptedPackage - The EncryptedPackage stream from CFB.
  * @param info - Agile encryption parameters.
  * @param password - The user password.
+ * @param maxDecryptedSize - Optional upper bound on the decrypted size; if the
+ *   `totalSize` header claims a larger value, throw rather than allocate.
+ *   Defaults to 512 MiB so adversarial files cannot trigger arbitrary-size
+ *   allocations before security policy is applied at the unzip layer.
  * @returns The decrypted (unencrypted) package bytes.
  */
 export async function decryptPackage(
   encryptedPackage: Uint8Array,
   info: AgileEncryptionInfo,
-  password: string
+  password: string,
+  maxDecryptedSize: number = 512 * 1024 * 1024
 ): Promise<Uint8Array> {
   // Derive key encryption key
   const keyEncryptionKey = await deriveEncryptionKey(password, info, AGILE_BLOCK_KEYS.encryptedKey);
 
-  // Decrypt the actual package key
-  const packageKey = await aesCbcDecrypt(info.encryptedKeyValue, keyEncryptionKey, info.keySalt);
+  // Decrypt the actual package key (PKCS#7 padded by aesCbcEncrypt during write)
+  const packageKey = await aesCbcDecryptPkcs7(
+    info.encryptedKeyValue,
+    keyEncryptionKey,
+    info.keySalt
+  );
+
+  if (encryptedPackage.length < 8) {
+    throw new DocxDecryptionError("EncryptedPackage too small (missing 8-byte size header)");
+  }
 
   // First 8 bytes are the total decrypted size (uint64 LE)
   const totalSizeView = new DataView(encryptedPackage.buffer, encryptedPackage.byteOffset, 8);
   const totalSize = Number(totalSizeView.getBigUint64(0, true));
+
+  // Sanity check the declared size: it cannot legally exceed the encrypted
+  // body length, and we refuse to allocate above the configured bound.
+  const encryptedBodyLength = encryptedPackage.length - 8;
+  if (
+    !Number.isFinite(totalSize) ||
+    totalSize < 0 ||
+    totalSize > encryptedBodyLength ||
+    totalSize > maxDecryptedSize
+  ) {
+    throw new DocxDecryptionError(
+      `EncryptedPackage declared size (${totalSize}) is invalid or exceeds the maximum allowed (${maxDecryptedSize})`
+    );
+  }
 
   // Decrypt in 4096-byte segments
   const segmentSize = 4096;
@@ -214,7 +259,10 @@ export async function decryptPackage(
       await sha(mapHashName(info.hashAlgorithm), concat(info.keySalt, idxBytes))
     ).slice(0, info.blockSize);
 
-    const decSeg = await aesCbcDecrypt(segData, packageKey, segIv);
+    // Package segments use zero padding (MS-OFFCRYPTO §2.3.4.15). Web Crypto
+    // would silently mis-strip valid-looking PKCS#7 tails, so use the
+    // zero-pad-safe path here.
+    const decSeg = await aesCbcDecryptZeroPad(segData, packageKey, segIv);
     segments.push(decSeg);
   }
 
@@ -251,7 +299,14 @@ async function sha(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
-async function aesCbcDecrypt(
+/**
+ * Decrypt AES-CBC ciphertext that uses **PKCS#7 padding**.
+ *
+ * Used for the encryptedKeyValue, encryptedVerifierHashInput and
+ * encryptedVerifierHashValue blobs. Web Crypto strips PKCS#7 padding
+ * automatically.
+ */
+async function aesCbcDecryptPkcs7(
   data: Uint8Array,
   key: Uint8Array,
   iv: Uint8Array
@@ -263,22 +318,36 @@ async function aesCbcDecrypt(
     false,
     ["decrypt"]
   );
-  // Ensure IV is 16 bytes (pad with zeros if needed, truncate if longer)
   const iv16 = new Uint8Array(16);
   iv16.set(iv.slice(0, 16));
+  const result = await crypto.subtle.decrypt(
+    { name: "AES-CBC", iv: toBuffer(iv16) },
+    cryptoKey,
+    toBuffer(data)
+  );
+  return new Uint8Array(result);
+}
 
-  // NOTE: AES-CBC in Web Crypto expects PKCS#7 padding. Agile encryption
-  // uses zero-padding for the last block.
-  try {
-    const result = await crypto.subtle.decrypt(
-      { name: "AES-CBC", iv: toBuffer(iv16) },
-      cryptoKey,
-      toBuffer(data)
-    );
-    return new Uint8Array(result);
-  } catch {
-    return manualAesCbcDecrypt(data, key, iv16);
-  }
+/**
+ * Decrypt AES-CBC ciphertext that uses **zero padding** (Agile package
+ * segments).
+ *
+ * Web Crypto only supports PKCS#7. If the trailing zero-padded plaintext
+ * coincidentally satisfies a valid PKCS#7 pattern (last byte 0x01..0x10 with
+ * the matching tail), Web Crypto will silently strip those bytes and we'd
+ * lose data. To avoid that we always go through the manual path which
+ * appends a synthetic PKCS#7 padding block, lets Web Crypto strip it, then
+ * slices back to the original ciphertext length — mathematically equivalent
+ * to a true zero-pad CBC decryption.
+ */
+async function aesCbcDecryptZeroPad(
+  data: Uint8Array,
+  key: Uint8Array,
+  iv: Uint8Array
+): Promise<Uint8Array> {
+  const iv16 = new Uint8Array(16);
+  iv16.set(iv.slice(0, 16));
+  return manualAesCbcDecrypt(data, key, iv16);
 }
 
 async function manualAesCbcDecrypt(
@@ -426,18 +495,52 @@ export function parseEncryptionInfoXml(xmlStr: string): AgileEncryptionInfo {
     );
   }
 
+  // Validate numeric fields against sane ranges. EncryptionInfo XML is
+  // parsed straight from the CFB stream of an arbitrary input file, so
+  // every numeric attribute is attacker-controlled. Without bounds
+  // checks:
+  //   - spinCount: a hostile file specifying spinCount=10⁹ would freeze
+  //     the verifier-derivation loop in deriveEncryptionKey.
+  //   - hashSize/blockSize: used as slice lengths and AES IV sizes.
+  //     Outsized values silently produce wrong keys / IVs and obscure
+  //     decryption errors; negative or NaN crashes downstream.
+  // Limits are deliberately wider than what real Office files emit so we
+  // don't reject legitimate documents.
+  const spinCount = parseInt(pwdData.spinCount ?? "100000", 10);
+  if (!Number.isFinite(spinCount) || spinCount < 0 || spinCount > 10_000_000) {
+    throw new DocxDecryptionError(
+      `Invalid spinCount in EncryptionInfo: ${pwdData.spinCount} (expected 0..10_000_000)`
+    );
+  }
+  const hashSize = parseInt(pwdData.hashSize ?? "64", 10);
+  // Largest legitimate hash here is SHA-512 → 64 bytes. Cap at 128 to
+  // accommodate hypothetical extensions while still rejecting crazy values.
+  if (!Number.isFinite(hashSize) || hashSize < 1 || hashSize > 128) {
+    throw new DocxDecryptionError(
+      `Invalid hashSize in EncryptionInfo: ${pwdData.hashSize} (expected 1..128)`
+    );
+  }
+  const blockSize = parseInt(pwdData.blockSize ?? "16", 10);
+  // AES is fixed at 16; some tooling emits 8 for legacy ciphers. Anything
+  // outside [8, 64] is bogus.
+  if (!Number.isFinite(blockSize) || blockSize < 8 || blockSize > 64) {
+    throw new DocxDecryptionError(
+      `Invalid blockSize in EncryptionInfo: ${pwdData.blockSize} (expected 8..64)`
+    );
+  }
+
   return {
     cipherAlgorithm: "AES",
     cipherChaining: "ChainingModeCBC",
     keyBits: keyBitsRaw,
     hashAlgorithm: hashAlgRaw,
-    hashSize: parseInt(pwdData.hashSize ?? "64", 10),
-    spinCount: parseInt(pwdData.spinCount ?? "100000", 10),
+    hashSize,
+    spinCount,
     keySalt: base64ToBytes(requireField("saltValue")),
     encryptedVerifierHashInput: base64ToBytes(requireField("encryptedVerifierHashInput")),
     encryptedVerifierHashValue: base64ToBytes(requireField("encryptedVerifierHashValue")),
     encryptedKeyValue: base64ToBytes(requireField("encryptedKeyValue")),
-    blockSize: parseInt(pwdData.blockSize ?? "16", 10)
+    blockSize
   };
 }
 
@@ -466,10 +569,15 @@ function parseAttrs(str: string): Record<string, string> {
  *
  * @param buffer - The encrypted DOCX file (CFB format).
  * @param password - The password to decrypt with.
+ * @param maxDecryptedSize - Optional cap on the decrypted size (defaults to 512 MiB).
  * @returns The decrypted DOCX ZIP bytes (can be passed to readDocx).
  * @throws Error if the file is not encrypted, password is wrong, or decryption fails.
  */
-export async function decryptDocx(buffer: Uint8Array, password: string): Promise<Uint8Array> {
+export async function decryptDocx(
+  buffer: Uint8Array,
+  password: string,
+  maxDecryptedSize?: number
+): Promise<Uint8Array> {
   if (!isEncryptedDocx(buffer)) {
     throw new DocxDecryptionError("Not an encrypted DOCX file (CFB signature not found)");
   }
@@ -493,12 +601,18 @@ export async function decryptDocx(buffer: Uint8Array, password: string): Promise
     throw new DocxDecryptionError("CFB: EncryptedPackage stream not found");
   }
 
-  // Parse EncryptionInfo — skip version header (8 bytes: version major/minor + flags)
+  // Parse EncryptionInfo — first 4 bytes are version major + minor + flags.
   const infoData = encInfoStream.data;
-  const version = new DataView(infoData.buffer, infoData.byteOffset, 4).getUint16(0, true);
+  const versionView = new DataView(infoData.buffer, infoData.byteOffset, 4);
+  const versionMajor = versionView.getUint16(0, true);
+  const versionMinor = versionView.getUint16(2, true);
 
-  if (version === 4 || version === 0x0004) {
-    // Agile encryption (version 4.x) — XML follows after 8 bytes
+  // MS-OFFCRYPTO §2.3 distinguishes encryption families primarily by the
+  // (major, minor) pair: Agile is 4.4, Extensible is 4.3, ECMA-376 Standard
+  // Encryption is 4.2, RC4 CryptoAPI is 4.x with minor < 2, etc. We
+  // currently implement only Agile.
+  if (versionMajor === 4 && versionMinor === 4) {
+    // Agile encryption — XML follows after 8 bytes
     const xmlStr = utf8Decoder.decode(infoData.slice(8));
     const info = parseEncryptionInfoXml(xmlStr);
 
@@ -509,11 +623,12 @@ export async function decryptDocx(buffer: Uint8Array, password: string): Promise
     }
 
     // Decrypt package
-    return decryptPackage(encPkgEntry.data, info, password);
+    return decryptPackage(encPkgEntry.data, info, password, maxDecryptedSize);
   }
 
   throw new DocxDecryptionError(
-    `Unsupported encryption version: ${version}. Only Agile Encryption (v4) is supported.`
+    `Unsupported encryption version: ${versionMajor}.${versionMinor}. ` +
+      `Only Agile Encryption (4.4) is supported.`
   );
 }
 
@@ -755,13 +870,6 @@ async function encryptPackageData(
 async function getHashSize(hashName: string): Promise<number> {
   const test = await sha(hashName, new Uint8Array(0));
   return test.length;
-}
-
-/** Generate cryptographically random bytes. */
-function randomBytes(n: number): Uint8Array {
-  const buf = new Uint8Array(n);
-  crypto.getRandomValues(buf);
-  return buf;
 }
 
 /** Build the Agile EncryptionInfo XML document. */

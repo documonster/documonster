@@ -263,14 +263,6 @@ export type PageVerticalAlign = "top" | "center" | "both" | "bottom";
 /** Document grid type. */
 export type DocumentGridType = "default" | "lines" | "linesAndChars" | "snapToChars";
 
-/**
- * Page text direction.
- *
- * @deprecated Use {@link TextDirection} instead. This is an alias kept for
- * backward compatibility and will be removed in a future major version.
- */
-export type PageTextDirection = TextDirection;
-
 /** A single border definition. */
 export interface Border {
   /** Border style. */
@@ -347,7 +339,7 @@ export interface SectionProperties {
   /** Page vertical alignment. */
   readonly verticalAlign?: PageVerticalAlign;
   /** Page text direction. */
-  readonly textDirection?: PageTextDirection;
+  readonly textDirection?: TextDirection;
   /** Footnote properties for this section. */
   readonly footnoteProperties?: FootnoteProperties;
   /** Endnote properties for this section. */
@@ -1176,7 +1168,7 @@ export interface ParagraphProperties {
   /** Snap to grid. */
   readonly snapToGrid?: boolean;
   /** Text direction for paragraph. */
-  readonly textDirection?: PageTextDirection;
+  readonly textDirection?: TextDirection;
 }
 
 // =============================================================================
@@ -1946,6 +1938,18 @@ export interface DrawingShape {
   readonly rotation?: number;
   /** Raw XML string (for preserving unrecognized shape details on round-trip). */
   readonly rawXml?: string;
+  /**
+   * Advanced fill XML (gradient/pattern) — must be inserted in the spPr
+   * "fill" slot (after prstGeom, before a:ln) for OOXML schema validity.
+   * Internal: populated by createShape().
+   */
+  readonly _advancedFillXml?: string;
+  /**
+   * Advanced effects/3D XML (a:effectLst, a:scene3d, a:sp3d) — must be
+   * inserted in the spPr after a:ln to satisfy the OOXML schema order.
+   * Internal: populated by createShape().
+   */
+  readonly _advancedEffectsXml?: string;
 }
 
 // =============================================================================
@@ -2014,8 +2018,6 @@ export interface SdtProperties {
    * shows placeholder text; cleared automatically on first edit.
    */
   readonly showingPlaceholder?: boolean;
-  /** @deprecated Use `appearance` instead. Mapped to w:appearance for backwards compatibility. */
-  readonly showAs?: "boundingBox" | "startEnd" | "none";
   /** Placeholder text doc part reference. */
   readonly placeholder?: string;
   /** Data binding to Custom XML part. */
@@ -3238,8 +3240,14 @@ export interface OpaqueRelationship {
   readonly type: string;
   /** Target path (relative to source part). */
   readonly target: string;
-  /** External target mode. */
-  readonly targetMode?: "External";
+  /**
+   * Target mode for the relationship. Standard OPC values are `"External"`
+   * and `"Internal"` (with `"Internal"` typically omitted on the wire). The
+   * field is typed as `string` rather than a union so that round-trip
+   * preserves any non-standard value present in the source document — the
+   * writer surfaces this verbatim into the output `.rels` file.
+   */
+  readonly targetMode?: string;
 }
 
 /** Custom XML part (for data binding). Stored in word/customXml/. */

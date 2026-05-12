@@ -4,7 +4,13 @@
 
 import { describe, it, expect } from "vitest";
 
-import { replaceText } from "../index";
+import {
+  acceptAllRevisions,
+  fillTemplate,
+  listRevisions,
+  rejectAllRevisions,
+  replaceText
+} from "../index";
 import type { DocxDocument, Paragraph, Run } from "../types";
 
 // Helper to create a minimal document
@@ -209,5 +215,206 @@ describe("replaceText", () => {
     const count = replaceText(doc, /foo|bar/g, "X");
     expect(count).toBe(2);
     expect(extractText(doc)).toBe("X X baz");
+  });
+
+  it("descends into insertedRun and movedToRun wrappers", () => {
+    // Tracked changes wrap a Run in <w:ins> / <w:moveTo>. The inner run is
+    // visible, so search/extract see it; replace must agree.
+    const insRun = textRun("inserted ");
+    const movRun = textRun("moved");
+    const doc = createDoc([
+      {
+        type: "paragraph",
+        children: [
+          textRun("plain "),
+          { type: "insertedRun", run: insRun, revision: { id: 1, author: "x" } },
+          { type: "movedToRun", run: movRun, revision: { id: 2, author: "y" } }
+        ] as unknown as Paragraph["children"]
+      }
+    ]);
+    const count = replaceText(doc, /inserted|moved/g, "Z");
+    expect(count).toBe(2);
+    // Inner run text was rewritten in place.
+    expect((insRun.content[0] as { text: string }).text).toBe("Z ");
+    expect((movRun.content[0] as { text: string }).text).toBe("Z");
+  });
+
+  it("replaces text inside an inline (Run-only) SDT", () => {
+    // SDT.content allows (Paragraph|Run|Table)[]. An inline content
+    // control wraps just a Run — replaceText must see it.
+    const innerRun = textRun("placeholder");
+    const sdt = {
+      type: "sdt",
+      content: [innerRun],
+      properties: {}
+    } as unknown as Paragraph; // structurally typed as BodyContent for the helper
+    const doc = createDoc([sdt as any]);
+
+    const count = replaceText(doc, "placeholder", "VALUE");
+    expect(count).toBe(1);
+    expect((innerRun.content[0] as { text: string }).text).toBe("VALUE");
+  });
+
+  it("replaces a cross-run match within a single inline SDT", () => {
+    const r1 = textRun("foo");
+    const r2 = textRun("bar");
+    const sdt = {
+      type: "sdt",
+      content: [r1, r2],
+      properties: {}
+    } as unknown as Paragraph;
+    const doc = createDoc([sdt as any]);
+
+    const count = replaceText(doc, "foobar", "QUUX");
+    expect(count).toBe(1);
+    // Replacement lands in the first run; remaining run gets emptied.
+    const combined =
+      (r1.content[0] as { text: string }).text + (r2.content[0] as { text: string }).text;
+    expect(combined).toBe("QUUX");
+  });
+});
+
+// =============================================================================
+// Revisions inside hyperlinks
+// =============================================================================
+
+describe("revisions inside hyperlinks (regression)", () => {
+  it("acceptAllRevisions accepts insertedRun wrapped in a hyperlink", () => {
+    const innerRun = textRun("inserted");
+    const para = {
+      type: "paragraph",
+      children: [
+        {
+          type: "hyperlink",
+          url: "https://example.com",
+          children: [
+            {
+              type: "insertedRun",
+              run: innerRun,
+              revision: { id: 7, author: "x" }
+            }
+          ]
+        }
+      ]
+    } as unknown as Paragraph;
+    const doc = createDoc([para as any]);
+
+    const count = acceptAllRevisions(doc);
+    expect(count).toBeGreaterThan(0);
+    // Inner run was unwrapped — hyperlink now contains a Run directly.
+    const newPara = doc.body[0] as any;
+    const hl = newPara.children[0];
+    expect(hl.type).toBe("hyperlink");
+    expect(hl.children[0]).toBe(innerRun);
+  });
+
+  it("listRevisions reports a revision living inside a hyperlink", () => {
+    const para = {
+      type: "paragraph",
+      children: [
+        {
+          type: "hyperlink",
+          url: "https://example.com",
+          children: [
+            {
+              type: "deletedRun",
+              run: textRun("gone"),
+              revision: { id: 99, author: "y" }
+            }
+          ]
+        }
+      ]
+    } as unknown as Paragraph;
+    const doc = createDoc([para as any]);
+    const list = listRevisions(doc);
+    expect(list.some(r => r.id === 99 && r.type === "delete")).toBe(true);
+  });
+
+  it("rejectAllRevisions rejects deletedRun wrapped in a hyperlink (restores text)", () => {
+    const restored = textRun("orig");
+    const para = {
+      type: "paragraph",
+      children: [
+        {
+          type: "hyperlink",
+          url: "https://example.com",
+          children: [
+            {
+              type: "deletedRun",
+              run: restored,
+              revision: { id: 8, author: "x" }
+            }
+          ]
+        }
+      ]
+    } as unknown as Paragraph;
+    const doc = createDoc([para as any]);
+    rejectAllRevisions(doc);
+    const newPara = doc.body[0] as any;
+    const hl = newPara.children[0];
+    expect(hl.children[0]).toBe(restored);
+  });
+});
+
+// =============================================================================
+// Template prototype-pollution guard
+// =============================================================================
+
+describe("template engine prototype pollution guard", () => {
+  it("does not let __proto__ in JSON data leak into rendered output", () => {
+    const placeholderPara = {
+      type: "paragraph",
+      children: [textRun("X={{injected}}")]
+    } as unknown as Paragraph;
+    const doc = createDoc([
+      { type: "paragraph", children: [textRun("{{#each items}}")] } as any,
+      placeholderPara as any,
+      { type: "paragraph", children: [textRun("{{/each}}")] } as any
+    ]);
+    const items = JSON.parse('[{"__proto__":{"injected":"OOPS"},"name":"a"}]');
+    fillTemplate(doc, { items }, { strict: false });
+    let allText = "";
+    for (const block of doc.body) {
+      if ((block as any).type === "paragraph") {
+        for (const child of (block as any).children) {
+          if ("content" in child) {
+            for (const c of child.content) {
+              if (c.type === "text") {
+                allText += c.text;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(allText).not.toContain("OOPS");
+  });
+
+  it("does not surface Object.prototype.constructor via {{constructor}}", () => {
+    const placeholderPara = {
+      type: "paragraph",
+      children: [textRun("v={{constructor}}!")]
+    } as unknown as Paragraph;
+    const doc = createDoc([placeholderPara as any]);
+    // strict:false so that an unresolved placeholder doesn't throw —
+    // we want the resolver to *return undefined*, not synthesise a
+    // value from Object.prototype.
+    fillTemplate(doc, {}, { strict: false });
+    let allText = "";
+    for (const block of doc.body) {
+      if ((block as any).type === "paragraph") {
+        for (const child of (block as any).children) {
+          if ("content" in child) {
+            for (const c of child.content) {
+              if (c.type === "text") {
+                allText += c.text;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(allText).not.toMatch(/function Object/);
+    expect(allText).not.toMatch(/native code/);
   });
 });

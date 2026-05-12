@@ -7,12 +7,8 @@
 
 import type { XmlSink } from "@xml/types";
 
-import { STD_DOC_ATTRIBUTES } from "../constants";
+import { NS_A, NS_C_CHART, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
 import type { Chart, ChartAxis, ChartDataLabels, ChartSeries, ChartType } from "../types";
-
-const NS_C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
-const NS_A_LOCAL = "http://schemas.openxmlformats.org/drawingml/2006/main";
-const NS_R_LOCAL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 const CHART_TYPE_CATEGORY = {
   bar: { tag: "barChart", direction: "bar", grouping: "clustered" },
@@ -45,9 +41,9 @@ const CHART_TYPE_CATEGORY = {
 export function renderChartPart(xml: XmlSink, chart: Chart): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("c:chartSpace", {
-    "xmlns:c": NS_C,
-    "xmlns:a": NS_A_LOCAL,
-    "xmlns:r": NS_R_LOCAL
+    "xmlns:c": NS_C_CHART,
+    "xmlns:a": NS_A,
+    "xmlns:r": NS_R
   });
 
   // Date1904 (calendar base)

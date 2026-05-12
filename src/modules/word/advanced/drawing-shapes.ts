@@ -12,7 +12,8 @@
  * - Text body formatting within shapes
  */
 
-import { escapeXml } from "../core/internal-utils";
+import { xmlEncodeAttr } from "@xml/encode";
+
 import type {
   DrawingShape,
   Paragraph,
@@ -489,8 +490,11 @@ export function createShape(options: CreateShapeOptions): DrawingShape {
     noOutline = options.outline.noLine ?? false;
   }
 
-  // Serialize advanced properties that DrawingShape can't represent directly
-  const rawXml = serializeAdvancedProperties(options);
+  // Serialize advanced properties that DrawingShape can't represent directly.
+  // The writer needs them split because the OOXML schema requires fill
+  // fragments to precede a:ln while effect/3D fragments must follow it.
+  const advanced = serializeAdvancedProperties(options);
+  const rawXml = (advanced.fillXml ?? "") + (advanced.effectsXml ?? "");
 
   return {
     type: "drawingShape",
@@ -510,18 +514,25 @@ export function createShape(options: CreateShapeOptions): DrawingShape {
     wrap: options.wrap,
     behindDoc: options.behindDoc,
     rotation: options.rotation,
-    rawXml: rawXml || undefined
+    rawXml: rawXml.length > 0 ? rawXml : undefined,
+    _advancedFillXml: advanced.fillXml,
+    _advancedEffectsXml: advanced.effectsXml
   };
 }
 
 /**
- * Serialize advanced shape properties into a raw XML fragment.
- * This preserves gradient fills, effects, line details, etc. that the basic
- * DrawingShape interface cannot represent. The writer uses this rawXml during
- * rendering when present.
+ * Serialize advanced shape properties into XML fragments suitable for
+ * insertion inside `wps:spPr`. Returns them split into the two slots the
+ * OOXML schema cares about:
+ *  - `fillXml` is inserted between `a:prstGeom` and `a:ln`
+ *  - `effectsXml` is inserted after `a:ln` (effectLst → scene3d → sp3d)
  */
-function serializeAdvancedProperties(options: CreateShapeOptions): string | undefined {
-  const parts: string[] = [];
+function serializeAdvancedProperties(options: CreateShapeOptions): {
+  fillXml?: string;
+  effectsXml?: string;
+} {
+  const fillParts: string[] = [];
+  const effectParts: string[] = [];
 
   // Gradient fill
   if (options.fill && options.fill.type === "gradient") {
@@ -529,22 +540,26 @@ function serializeAdvancedProperties(options: CreateShapeOptions): string | unde
     const stops = gf.stops
       .map(
         s =>
-          `<a:gs pos="${s.position}"><a:srgbClr val="${escapeXml(s.color)}"${s.transparency ? ` alpha="${Math.round((100 - s.transparency) * 1000)}"` : ""}/></a:gs>`
+          `<a:gs pos="${s.position}"><a:srgbClr val="${xmlEncodeAttr(s.color)}"${s.transparency ? ` alpha="${Math.round((100 - s.transparency) * 1000)}"` : ""}/></a:gs>`
       )
       .join("");
     const angle = gf.angle !== undefined ? ` ang="${gf.angle}"` : "";
-    parts.push(`<a:gradFill><a:gsLst>${stops}</a:gsLst><a:lin${angle} scaled="1"/></a:gradFill>`);
+    fillParts.push(
+      `<a:gradFill><a:gsLst>${stops}</a:gsLst><a:lin${angle} scaled="1"/></a:gradFill>`
+    );
   }
 
   // Pattern fill
   if (options.fill && options.fill.type === "pattern") {
     const pf = options.fill;
-    parts.push(
-      `<a:pattFill prst="${escapeXml(pf.preset)}"><a:fgClr><a:srgbClr val="${escapeXml(pf.foregroundColor)}"/></a:fgClr><a:bgClr><a:srgbClr val="${escapeXml(pf.backgroundColor)}"/></a:bgClr></a:pattFill>`
+    fillParts.push(
+      `<a:pattFill prst="${xmlEncodeAttr(pf.preset)}"><a:fgClr><a:srgbClr val="${xmlEncodeAttr(pf.foregroundColor)}"/></a:fgClr><a:bgClr><a:srgbClr val="${xmlEncodeAttr(pf.backgroundColor)}"/></a:bgClr></a:pattFill>`
     );
   }
 
-  // Shadow effect
+  // Effects: shadow / glow / reflection / softEdges must live inside
+  // <a:effectLst>. Collect all of them then emit a single wrapper.
+  const effectChildren: string[] = [];
   if (options.effects?.shadow) {
     const s = options.effects.shadow;
     const attrs: string[] = [];
@@ -562,24 +577,22 @@ function serializeAdvancedProperties(options: CreateShapeOptions): string | unde
         ? ` <a:alpha val="${Math.round((100 - s.transparency) * 1000)}"/>`
         : "";
     const tag = s.type === "inner" ? "a:innerShdw" : "a:outerShdw";
-    parts.push(
-      `<${tag} ${attrs.join(" ")}><a:srgbClr val="${escapeXml(s.color)}">${alpha}</a:srgbClr></${tag}>`
+    effectChildren.push(
+      `<${tag} ${attrs.join(" ")}><a:srgbClr val="${xmlEncodeAttr(s.color)}">${alpha}</a:srgbClr></${tag}>`
     );
   }
 
-  // Glow effect
   if (options.effects?.glow) {
     const g = options.effects.glow;
     const alpha =
       g.transparency !== undefined
         ? `<a:alpha val="${Math.round((100 - g.transparency) * 1000)}"/>`
         : "";
-    parts.push(
-      `<a:glow rad="${g.radius}"><a:srgbClr val="${escapeXml(g.color)}">${alpha}</a:srgbClr></a:glow>`
+    effectChildren.push(
+      `<a:glow rad="${g.radius}"><a:srgbClr val="${xmlEncodeAttr(g.color)}">${alpha}</a:srgbClr></a:glow>`
     );
   }
 
-  // Reflection effect
   if (options.effects?.reflection) {
     const r = options.effects.reflection;
     const attrs: string[] = [];
@@ -601,18 +614,20 @@ function serializeAdvancedProperties(options: CreateShapeOptions): string | unde
     if (r.fadeDirection !== undefined) {
       attrs.push(`fadeDir="${r.fadeDirection}"`);
     }
-    parts.push(`<a:reflection ${attrs.join(" ")}/>`);
+    effectChildren.push(`<a:reflection ${attrs.join(" ")}/>`);
   }
 
-  // Soft edges
   if (options.effects?.softEdges) {
-    parts.push(`<a:softEdge rad="${options.effects.softEdges}"/>`);
+    effectChildren.push(`<a:softEdge rad="${options.effects.softEdges}"/>`);
   }
 
-  // 3D effect (scene3d + sp3d)
+  if (effectChildren.length > 0) {
+    effectParts.push(`<a:effectLst>${effectChildren.join("")}</a:effectLst>`);
+  }
+
+  // 3D effect (scene3d + sp3d) — both follow effectLst.
   if (options.effects?.effect3d) {
     const e = options.effects.effect3d;
-    // Camera / scene3d
     const camera = e.camera ?? "orthographicFront";
     const rotAttrs: string[] = [];
     if (e.rotX !== undefined) {
@@ -625,107 +640,34 @@ function serializeAdvancedProperties(options: CreateShapeOptions): string | unde
       rotAttrs.push(`rev="${e.rotZ}"`);
     }
     const rot = rotAttrs.length > 0 ? `<a:rot ${rotAttrs.join(" ")}/>` : "";
-    parts.push(
-      `<a:scene3d><a:camera prst="${escapeXml(camera)}">${rot}</a:camera><a:lightRig rig="threePt" dir="t"/></a:scene3d>`
+    effectParts.push(
+      `<a:scene3d><a:camera prst="${xmlEncodeAttr(camera)}">${rot}</a:camera><a:lightRig rig="threePt" dir="t"/></a:scene3d>`
     );
 
-    // Shape 3d (sp3d)
     const sp3dChildren: string[] = [];
     if (e.bevelTop) {
-      const preset = e.bevelTop.preset ? ` prst="${escapeXml(e.bevelTop.preset)}"` : "";
+      const preset = e.bevelTop.preset ? ` prst="${xmlEncodeAttr(e.bevelTop.preset)}"` : "";
       sp3dChildren.push(`<a:bevelT w="${e.bevelTop.width}" h="${e.bevelTop.height}"${preset}/>`);
     }
     if (e.bevelBottom) {
-      const preset = e.bevelBottom.preset ? ` prst="${escapeXml(e.bevelBottom.preset)}"` : "";
+      const preset = e.bevelBottom.preset ? ` prst="${xmlEncodeAttr(e.bevelBottom.preset)}"` : "";
       sp3dChildren.push(
         `<a:bevelB w="${e.bevelBottom.width}" h="${e.bevelBottom.height}"${preset}/>`
       );
     }
     if (e.extrusionColor) {
       sp3dChildren.push(
-        `<a:extrusionClr><a:srgbClr val="${escapeXml(e.extrusionColor)}"/></a:extrusionClr>`
+        `<a:extrusionClr><a:srgbClr val="${xmlEncodeAttr(e.extrusionColor)}"/></a:extrusionClr>`
       );
     }
     const extDepth = e.extrusionDepth ? ` extrusionH="${e.extrusionDepth}"` : "";
-    parts.push(`<a:sp3d${extDepth}>${sp3dChildren.join("")}</a:sp3d>`);
+    effectParts.push(`<a:sp3d${extDepth}>${sp3dChildren.join("")}</a:sp3d>`);
   }
 
-  // Outline details (dash, join, end markers)
-  if (
-    options.outline &&
-    (options.outline.dash || options.outline.headEnd || options.outline.tailEnd)
-  ) {
-    const o = options.outline;
-    const children: string[] = [];
-    if (o.dash && o.dash !== "solid") {
-      children.push(`<a:prstDash val="${escapeXml(o.dash)}"/>`);
-    }
-    if (o.join) {
-      children.push(`<a:${escapeXml(o.join)}Join/>`);
-    }
-    if (o.headEnd) {
-      children.push(
-        `<a:headEnd type="${escapeXml(o.headEnd.type)}"${o.headEnd.width ? ` w="${escapeXml(o.headEnd.width)}"` : ""}${o.headEnd.length ? ` len="${escapeXml(o.headEnd.length)}"` : ""}/>`
-      );
-    }
-    if (o.tailEnd) {
-      children.push(
-        `<a:tailEnd type="${escapeXml(o.tailEnd.type)}"${o.tailEnd.width ? ` w="${escapeXml(o.tailEnd.width)}"` : ""}${o.tailEnd.length ? ` len="${escapeXml(o.tailEnd.length)}"` : ""}/>`
-      );
-    }
-    if (children.length > 0) {
-      parts.push(`<a:lnExtra>${children.join("")}</a:lnExtra>`);
-    }
-  }
-
-  // Flip transforms
-  if (options.flipH || options.flipV) {
-    const attrs: string[] = [];
-    if (options.flipH) {
-      attrs.push('flipH="1"');
-    }
-    if (options.flipV) {
-      attrs.push('flipV="1"');
-    }
-    parts.push(`<a:xfrmExtra ${attrs.join(" ")}/>`);
-  }
-
-  // Text body advanced properties
-  if (
-    options.textBody &&
-    (options.textBody.anchor || options.textBody.margins || options.textBody.autoFit)
-  ) {
-    const tb = options.textBody;
-    const attrs: string[] = [];
-    if (tb.anchor) {
-      attrs.push(`anchor="${escapeXml(tb.anchor)}"`);
-    }
-    if (tb.wrap) {
-      attrs.push(`wrap="${escapeXml(tb.wrap)}"`);
-    }
-    if (tb.vertical) {
-      attrs.push('vert="wordArtVert"');
-    }
-    if (tb.columns) {
-      attrs.push(`numCol="${tb.columns}"`);
-    }
-    const margins: string[] = [];
-    if (tb.margins?.top !== undefined) {
-      margins.push(`tIns="${tb.margins.top}"`);
-    }
-    if (tb.margins?.bottom !== undefined) {
-      margins.push(`bIns="${tb.margins.bottom}"`);
-    }
-    if (tb.margins?.left !== undefined) {
-      margins.push(`lIns="${tb.margins.left}"`);
-    }
-    if (tb.margins?.right !== undefined) {
-      margins.push(`rIns="${tb.margins.right}"`);
-    }
-    parts.push(`<a:bodyPrExtra ${[...attrs, ...margins].join(" ")}/>`);
-  }
-
-  return parts.length > 0 ? parts.join("") : undefined;
+  return {
+    fillXml: fillParts.length > 0 ? fillParts.join("") : undefined,
+    effectsXml: effectParts.length > 0 ? effectParts.join("") : undefined
+  };
 }
 
 /**

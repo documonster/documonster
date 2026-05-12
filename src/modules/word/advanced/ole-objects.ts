@@ -14,7 +14,7 @@
  * not full OLE compound document manipulation.
  */
 
-import { getFileName } from "../core/opc-package";
+import { getFileName } from "../core/opc-paths";
 import type { DocxDocument, OpaquePart } from "../types";
 
 // =============================================================================
@@ -143,8 +143,14 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
           }
         }
       }
-      // Also check if the file path matches expected pattern for this rId
-      if (part.path.includes(rId.replace("rId", "oleObject"))) {
+      // Also check if the file path matches the expected pattern for this
+      // rId. We anchor on a non-digit boundary so `rId4` does not also
+      // match `oleObject40`, `oleObject41`, … Without the boundary, the
+      // first such adjacent file silently leaks back as if it were the
+      // requested OLE object.
+      const expectedStem = rId.replace("rId", "oleObject");
+      const oleStemRe = new RegExp(`(^|/)${escapeRegex(expectedStem)}(?:\\.[^./]+)?$`);
+      if (oleStemRe.test(part.path)) {
         return part.data;
       }
     }
@@ -156,30 +162,111 @@ export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | u
 }
 
 /**
- * Create an OLE object entry for embedding into a document.
- * The object will be stored as an opaque part for round-trip preservation.
+ * Result of `createOleEmbedding`. Contains the OLE binary part and,
+ * when a preview image was supplied, an additional media part for it
+ * plus the relationship rIds the caller should reference from the body
+ * model.
+ */
+export interface OleEmbeddingResult {
+  /** OLE binary opaque part (always present). */
+  readonly olePart: OpaquePart;
+  /** Suggested rId to use for the OLE binary in the document model. */
+  readonly oleRId: string;
+  /** Preview image media part (only when `options.previewImage` was supplied). */
+  readonly previewPart?: OpaquePart;
+  /** Suggested rId for the preview image. */
+  readonly previewRId?: string;
+}
+
+/**
+ * Create an OLE embedding plus, optionally, its preview image.
  *
- * @param data - The binary data of the OLE object.
+ * Returns an {@link OleEmbeddingResult} with one or two `OpaquePart`s plus
+ * suggested relationship IDs. Each call gets a unique counter-based file
+ * name so calling this helper repeatedly does not produce path
+ * collisions; pass `options.fileName` to force a specific name.
+ *
+ * The previous signature returned only one `OpaquePart` and silently
+ * dropped `options.previewImage` / `options.previewContentType`. That has
+ * been removed — the new shape forces callers to wire up preview parts
+ * properly when they want one.
+ *
+ * @param data - The binary data of the OLE object (OLE2 compound document).
  * @param progId - The OLE ProgId (e.g. "Excel.Sheet.12").
  * @param options - Additional options.
- * @returns An OpaquePart that can be added to doc.opaqueParts.
  */
 export function createOleEmbedding(
   data: Uint8Array,
   progId: string,
   options?: {
+    /** Override file name. Defaults to `oleObject<N>.bin` with a process-unique counter. */
     fileName?: string;
+    /** Optional preview image bytes (typically EMF or PNG). */
     previewImage?: Uint8Array;
+    /** Content type for the preview image. Required when `previewImage` is set. */
     previewContentType?: string;
+    /** Override preview file name. Defaults to `image<N>.<ext>` from previewContentType. */
+    previewFileName?: string;
   }
-): OpaquePart {
-  const fileName = options?.fileName ?? `oleObject1.bin`;
-  return {
+): OleEmbeddingResult {
+  const oleSeq = nextOleSequence();
+  const fileName = options?.fileName ?? `oleObject${oleSeq}.bin`;
+  const olePart: OpaquePart = {
     path: `word/embeddings/${fileName}`,
     data,
     contentType: "application/vnd.openxmlformats-officedocument.oleObject",
     relationships: undefined
   };
+  const oleRId = `rIdOle${oleSeq}`;
+  // progId is metadata for downstream consumers — not stored on
+  // OpaquePart but accepted in the signature so callers can pass it
+  // alongside without a separate channel. We don't need it here.
+  void progId;
+
+  if (!options?.previewImage) {
+    return { olePart, oleRId };
+  }
+  if (!options.previewContentType) {
+    throw new Error("createOleEmbedding: options.previewImage requires options.previewContentType");
+  }
+  const previewExt = previewExtFromContentType(options.previewContentType);
+  const previewSeq = nextPreviewSequence();
+  const previewFileName = options.previewFileName ?? `oleImage${previewSeq}.${previewExt}`;
+  const previewPart: OpaquePart = {
+    path: `word/media/${previewFileName}`,
+    data: options.previewImage,
+    contentType: options.previewContentType,
+    relationships: undefined
+  };
+  const previewRId = `rIdOleImg${previewSeq}`;
+  return { olePart, oleRId, previewPart, previewRId };
+}
+
+/** Module-level counters used to allocate unique file names per call. */
+let _oleSeq = 0;
+let _previewSeq = 0;
+function nextOleSequence(): number {
+  _oleSeq++;
+  return _oleSeq;
+}
+function nextPreviewSequence(): number {
+  _previewSeq++;
+  return _previewSeq;
+}
+
+function previewExtFromContentType(ct: string): string {
+  const map: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/x-emf": "emf",
+    "image/emf": "emf",
+    "image/x-wmf": "wmf",
+    "image/wmf": "wmf",
+    "image/bmp": "bmp",
+    "image/svg+xml": "svg"
+  };
+  return map[ct.toLowerCase()] ?? "bin";
 }
 
 // =============================================================================
@@ -287,4 +374,9 @@ function extractOleFromRawXml(rawXml: string): OleObject | null {
     height: heightMatch ? parseInt(heightMatch[1]!, 10) : undefined,
     rawXml
   };
+}
+
+/** Escape regex meta-characters in a literal string for use inside RegExp. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

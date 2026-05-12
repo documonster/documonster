@@ -286,7 +286,25 @@ export function matchStyleMap(
         return false;
       }
       if (cond.regex) {
-        return new RegExp(cond.value).test(value);
+        // The pattern source comes from a style-map DSL that may be
+        // attacker-controlled. We can't introspect a regex for
+        // catastrophic-backtracking risk, but we can:
+        //   1) reject the rule outright when the pattern is malformed
+        //      (the previous code threw, which broke the whole map);
+        //   2) cap the input string we feed to .test() so a quadratic
+        //      pattern can't run forever even if one slips through.
+        let re: RegExp;
+        try {
+          re = new RegExp(cond.value);
+        } catch {
+          return false;
+        }
+        const STYLE_MAP_REGEX_INPUT_CAP = 4096;
+        const limited =
+          value.length > STYLE_MAP_REGEX_INPUT_CAP
+            ? value.slice(0, STYLE_MAP_REGEX_INPUT_CAP)
+            : value;
+        return re.test(limited);
       }
       return value === cond.value;
     });

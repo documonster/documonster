@@ -27,7 +27,7 @@ import type {
   TableWidth,
   UnderlineStyle
 } from "../types";
-import { attrInt, attrVal, boolToggle, findChildNs } from "./parse-utils";
+import { attrInt, attrVal, boolToggle, findChildNs, safeParseInt } from "./parse-utils";
 
 // =============================================================================
 // Run Properties
@@ -291,7 +291,11 @@ export function parseBorder(el: XmlElement): Border {
 
 export function parseTableWidth(el: XmlElement): TableWidth {
   return {
-    value: parseInt(el.attributes["w:w"] ?? el.attributes["w"] ?? "0", 10),
+    // Reject non-numeric values (a hostile DOCX could write
+    // `<w:tblW w:w="abc"/>`); falling back to 0 keeps the model field
+    // a finite number and prevents `NaN` from being serialised back to
+    // the output XML, which Word rejects.
+    value: safeParseInt(el.attributes["w:w"] ?? el.attributes["w"], 0),
     type: (el.attributes["w:type"] ?? el.attributes["type"] ?? "dxa") as TableWidth["type"]
   };
 }
@@ -303,12 +307,15 @@ export function parseTableWidth(el: XmlElement): TableWidth {
 export function parseRevisionInfo(el: XmlElement): RevisionInfo | undefined {
   const author = attrVal(el, "author");
   const id = attrInt(el, "id");
-  if (author === undefined || id === undefined) {
-    return undefined;
-  }
+  // ECMA-376 marks `w:author` and `w:id` as optional on revision elements.
+  // Earlier we returned `undefined` if either was missing — that quietly
+  // dropped the entire `<w:ins>`/`<w:del>` body in callers that gate on
+  // this result. Fall back to a sentinel author/id so the surrounding runs
+  // are still preserved (the user-visible text is what matters; the
+  // metadata is purely informational).
   return {
-    author,
-    id,
+    author: author ?? "",
+    id: id ?? 0,
     date: attrVal(el, "date")
   };
 }

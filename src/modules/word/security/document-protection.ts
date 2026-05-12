@@ -162,7 +162,16 @@ export async function verifyProtectionPassword(
     return false;
   }
 
-  const spinCount = dp.spinCount ?? 100000;
+  // Cap spinCount: a hostile / malformed document could specify a huge
+  // value to make every verification call freeze the runtime.
+  // documentProtection is editing-restriction metadata, not a serious
+  // security boundary, but we still want a predictable upper bound on
+  // CPU time. Office UI typically writes 100_000.
+  const rawSpin = dp.spinCount ?? 100000;
+  if (!Number.isFinite(rawSpin) || rawSpin < 0 || rawSpin > 10_000_000) {
+    return false;
+  }
+  const spinCount = rawSpin;
   const computedHash = await computePasswordHash(
     password,
     dp.saltValue,
@@ -170,7 +179,30 @@ export async function verifyProtectionPassword(
     spinCount
   );
 
-  return computedHash === dp.hashValue;
+  // Constant-time string comparison so an attacker cannot recover
+  // hashValue byte-by-byte from timing differences. A short-circuit
+  // `===` would leak the longest common prefix length.
+  return constantTimeEqualString(computedHash, dp.hashValue);
+}
+
+/**
+ * Length-aware constant-time string comparison.
+ *
+ * Returns false immediately when lengths differ (length itself is not a
+ * useful side-channel — it's already known from the stored hashValue
+ * and an attacker cannot influence it). For equal-length strings it
+ * XORs every char-code into a running accumulator and checks the
+ * accumulator only at the end.
+ */
+function constantTimeEqualString(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 // =============================================================================

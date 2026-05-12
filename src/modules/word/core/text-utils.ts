@@ -7,56 +7,14 @@
  */
 
 import type {
-  BodyContent,
   Paragraph,
   ParagraphChild,
   Run,
-  Table,
   MathContent,
-  MathBlock,
-  StructuredDocumentTag,
   Hyperlink,
   InsertedRun,
-  DeletedRun,
-  MovedFromRun,
-  MovedToRun,
-  FloatingImage,
-  TextBox
+  MovedToRun
 } from "../types";
-
-// =============================================================================
-// Type Guards — Body Content
-// =============================================================================
-
-/** Check if a body content block is a Paragraph. */
-export function isParagraph(content: BodyContent): content is Paragraph {
-  return content.type === "paragraph";
-}
-
-/** Check if a body content block is a Table. */
-export function isTable(content: BodyContent): content is Table {
-  return content.type === "table";
-}
-
-/** Check if a body content block is a StructuredDocumentTag. */
-export function isSdt(content: BodyContent): content is StructuredDocumentTag {
-  return content.type === "sdt";
-}
-
-/** Check if a body content block is a MathBlock. */
-export function isMathBlock(content: BodyContent): content is MathBlock {
-  return content.type === "math";
-}
-
-/** Check if a body content block is a TextBox. */
-export function isTextBox(content: BodyContent): content is TextBox {
-  return content.type === "textBox";
-}
-
-/** Check if a body content block is a FloatingImage. */
-export function isFloatingImage(content: BodyContent): content is FloatingImage {
-  return content.type === "floatingImage";
-}
 
 // =============================================================================
 // Type Guards — Paragraph Children
@@ -82,26 +40,6 @@ export function isRun(child: ParagraphChild): child is Run {
 /** Check if a paragraph child is a Hyperlink. */
 export function isHyperlink(child: ParagraphChild): child is Hyperlink {
   return "type" in child && (child as { type: string }).type === "hyperlink";
-}
-
-/** Check if a paragraph child is an InsertedRun. */
-export function isInsertedRun(child: ParagraphChild): child is InsertedRun {
-  return "type" in child && (child as { type: string }).type === "insertedRun";
-}
-
-/** Check if a paragraph child is a DeletedRun. */
-export function isDeletedRun(child: ParagraphChild): child is DeletedRun {
-  return "type" in child && (child as { type: string }).type === "deletedRun";
-}
-
-/** Check if a paragraph child is a MovedFromRun. */
-export function isMovedFromRun(child: ParagraphChild): child is MovedFromRun {
-  return "type" in child && (child as { type: string }).type === "movedFromRun";
-}
-
-/** Check if a paragraph child is a MovedToRun. */
-export function isMovedToRun(child: ParagraphChild): child is MovedToRun {
-  return "type" in child && (child as { type: string }).type === "movedToRun";
 }
 
 // =============================================================================
@@ -274,46 +212,4 @@ export function extractMathText(content: readonly MathContent[]): string {
     }
   }
   return text;
-}
-
-// =============================================================================
-// Text Extraction — Body Content (recursive)
-// =============================================================================
-
-/**
- * Extract plain text from an array of body content blocks.
- * Paragraphs are separated by newlines, table cells by tabs.
- */
-export function extractBodyText(blocks: readonly BodyContent[]): string {
-  const lines: string[] = [];
-  collectBlockText(blocks, lines);
-  return lines.join("\n");
-}
-
-/**
- * Recursively collect text lines from body content blocks into an output array.
- */
-export function collectBlockText(blocks: readonly BodyContent[], lines: string[]): void {
-  for (const block of blocks) {
-    if (block.type === "paragraph") {
-      lines.push(extractParagraphText(block));
-    } else if (block.type === "table") {
-      for (const row of block.rows) {
-        const cellTexts: string[] = [];
-        for (const cell of row.cells) {
-          const cellLines: string[] = [];
-          collectBlockText(cell.content as readonly BodyContent[], cellLines);
-          cellTexts.push(cellLines.join(" "));
-        }
-        lines.push(cellTexts.join("\t"));
-      }
-    } else if (block.type === "sdt") {
-      const filtered = block.content.filter(
-        c => "type" in c && (c.type === "paragraph" || c.type === "table")
-      );
-      collectBlockText(filtered as readonly BodyContent[], lines);
-    } else if (block.type === "textBox" && block.content) {
-      collectBlockText(block.content as readonly BodyContent[], lines);
-    }
-  }
 }

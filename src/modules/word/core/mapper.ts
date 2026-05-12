@@ -23,6 +23,7 @@ import type {
   TableRow,
   TableCell
 } from "../types";
+import { isRun } from "./text-utils";
 import type { WalkPath } from "./walker";
 
 // =============================================================================
@@ -245,11 +246,31 @@ function mapBlocks(
   return result;
 }
 
+/**
+ * Maximum nesting depth permitted during transformation. See
+ * `core/walker.ts` for the rationale; mirrored here so map and walk
+ * share the same abuse-resistance posture.
+ */
+const MAX_MAP_DEPTH = 1000;
+
 function mapBodyContent(
   block: BodyContent,
   transformer: DocxTransformer,
   path: WalkPath
 ): BodyContent | null {
+  if (path.depth > MAX_MAP_DEPTH) {
+    // Drop the offending subtree rather than blow the stack. Returning
+    // null removes the block from its parent collection in mapBlocks.
+    return null;
+  }
+  // Per-type transformer hooks fire only for paragraph / table / sdt.
+  // Other BodyContent variants don't have a dedicated hook — callers that
+  // want to replace them whole-cloth use `transformBodyContent` in
+  // mapBlocks. We still need to recurse into their nested paragraph
+  // structures so transformParagraph / transformRun / transformRunContent
+  // visit text inside text boxes, drawing shape text, and TOC cached
+  // paragraphs. Without that, e.g. replaceText silently misses content in
+  // those structures.
   switch (block.type) {
     case "paragraph":
       return mapParagraph(block, transformer, path);
@@ -257,6 +278,90 @@ function mapBodyContent(
       return mapTable(block, transformer, path);
     case "sdt":
       return mapSdt(block as StructuredDocumentTag, transformer, path);
+    case "textBox": {
+      const tb = block as { content?: readonly Paragraph[] } & BodyContent;
+      if (!tb.content || tb.content.length === 0) {
+        return block;
+      }
+      const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
+      const mappedContent = mapBlocks(tb.content as readonly BodyContent[], transformer, innerPath);
+      if (mappedContent === (tb.content as readonly BodyContent[])) {
+        return block;
+      }
+      // textBox.content is typed as `readonly Paragraph[]`. If a
+      // `transformBodyContent` produced anything other than a paragraph
+      // (a table, an image, etc.) we'd be silently violating the type
+      // invariant — and downstream writers would crash trying to render
+      // the unexpected node. Throw loudly instead of dropping the data.
+      const filtered: Paragraph[] = [];
+      for (const b of mappedContent) {
+        if (b.type === "paragraph") {
+          filtered.push(b);
+        } else {
+          throw new Error(
+            `mapDocument: textBox.content must remain Paragraph[] but a ` +
+              `transform produced "${b.type}". Either rewrite the transform ` +
+              `to return only paragraphs here, or restructure the document ` +
+              `at the body level instead.`
+          );
+        }
+      }
+      return { ...block, content: filtered } as BodyContent;
+    }
+    case "drawingShape": {
+      const shape = block as { textContent?: readonly Paragraph[] } & BodyContent;
+      if (!shape.textContent || shape.textContent.length === 0) {
+        return block;
+      }
+      const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
+      const mappedText = mapBlocks(
+        shape.textContent as readonly BodyContent[],
+        transformer,
+        innerPath
+      );
+      if (mappedText === (shape.textContent as readonly BodyContent[])) {
+        return block;
+      }
+      const filtered: Paragraph[] = [];
+      for (const b of mappedText) {
+        if (b.type === "paragraph") {
+          filtered.push(b);
+        } else {
+          throw new Error(
+            `mapDocument: drawingShape.textContent must remain Paragraph[] ` +
+              `but a transform produced "${b.type}".`
+          );
+        }
+      }
+      return { ...block, textContent: filtered } as BodyContent;
+    }
+    case "tableOfContents": {
+      const toc = block as { cachedParagraphs?: readonly Paragraph[] } & BodyContent;
+      if (!toc.cachedParagraphs || toc.cachedParagraphs.length === 0) {
+        return block;
+      }
+      const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
+      const mappedCache = mapBlocks(
+        toc.cachedParagraphs as readonly BodyContent[],
+        transformer,
+        innerPath
+      );
+      if (mappedCache === (toc.cachedParagraphs as readonly BodyContent[])) {
+        return block;
+      }
+      const filtered: Paragraph[] = [];
+      for (const b of mappedCache) {
+        if (b.type === "paragraph") {
+          filtered.push(b);
+        } else {
+          throw new Error(
+            `mapDocument: tableOfContents.cachedParagraphs must remain ` +
+              `Paragraph[] but a transform produced "${b.type}".`
+          );
+        }
+      }
+      return { ...block, cachedParagraphs: filtered } as BodyContent;
+    }
     default:
       return block;
   }
@@ -298,9 +403,8 @@ function mapParagraphChild(
   transformer: DocxTransformer,
   path: WalkPath
 ): ParagraphChild | null {
-  // Check if it's a Run (has content array, no discriminating type)
-  if ("content" in child && Array.isArray((child as Run).content) && !("type" in child)) {
-    return mapRun(child as Run, transformer, path);
+  if (isRun(child)) {
+    return mapRun(child, transformer, path);
   }
 
   if ("type" in child) {
@@ -343,9 +447,9 @@ function mapParagraphChild(
     }
   }
 
-  // Default: treat as Run if it has `content` array
-  if ("content" in child && Array.isArray((child as Run).content)) {
-    return mapRun(child as Run, transformer, path);
+  // Default: treat as Run if isRun matches.
+  if (isRun(child)) {
+    return mapRun(child, transformer, path);
   }
 
   return child;

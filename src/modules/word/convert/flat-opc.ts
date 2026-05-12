@@ -17,16 +17,10 @@ import { parseXml } from "@xml/dom";
 import type { XmlElement, XmlNode } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
+import { NS_PKG } from "../constants";
 import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
-import { getFileExt } from "../core/opc-package";
+import { getFileExt } from "../core/opc-paths";
 import { DocxParseError } from "../errors";
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** Flat OPC package namespace. */
-const NS_PKG = "http://schemas.microsoft.com/office/2006/xmlPackage";
 
 // =============================================================================
 // Types

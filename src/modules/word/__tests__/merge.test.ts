@@ -236,4 +236,104 @@ describe("mergeDocuments", () => {
     // doc2's body paragraph numbering should NOT have been mutated.
     expect((doc2.body[0] as any).properties.numbering.numId).toBe(1);
   });
+
+  it("remaps colliding image rIds and rewrites in-body inline image references", () => {
+    // Both docs use rId10 for different images. After merge, doc2's
+    // image must get a fresh rId, AND any body run referencing rId10 in
+    // doc2 must be rewritten to point at the new rId.
+    const img1 = {
+      rId: "rId10",
+      fileName: "image1.png",
+      data: new Uint8Array([1, 2, 3]),
+      mediaType: "png"
+    };
+    const img2 = {
+      rId: "rId10",
+      fileName: "image2.png",
+      data: new Uint8Array([4, 5, 6]),
+      mediaType: "png"
+    };
+    const doc1 = {
+      body: [
+        {
+          type: "paragraph",
+          children: [{ content: [{ type: "image", rId: "rId10", width: 1, height: 1 }] }]
+        }
+      ],
+      images: [img1]
+    } as unknown as DocxDocument;
+    const doc2 = {
+      body: [
+        {
+          type: "paragraph",
+          children: [{ content: [{ type: "image", rId: "rId10", width: 1, height: 1 }] }]
+        }
+      ],
+      images: [img2]
+    } as unknown as DocxDocument;
+
+    const merged = mergeDocuments([doc1, doc2]);
+    expect(merged.images!.length).toBe(2);
+
+    // Find the rId of the new image (image2.png).
+    const img2Final = merged.images!.find(
+      i => i.fileName === "image2.png" || i.fileName === "image2_2.png"
+    )!;
+    expect(img2Final.rId).not.toBe("rId10");
+
+    // Body should now have one paragraph from doc1 (rId10), a section
+    // break paragraph, and one paragraph from doc2 referencing the
+    // remapped rId.
+    const doc2Para = merged.body[merged.body.length - 1] as any;
+    const refRId = doc2Para.children[0].content[0].rId;
+    expect(refRId).toBe(img2Final.rId);
+
+    // Original docs untouched.
+    expect((doc2.body[0] as any).children[0].content[0].rId).toBe("rId10");
+  });
+
+  it("merges and remaps colliding footnote ids", () => {
+    const doc1 = {
+      body: [
+        {
+          type: "paragraph",
+          children: [{ content: [{ type: "footnoteRef", id: 2 }] }]
+        }
+      ],
+      footnotes: [
+        {
+          id: 2,
+          content: [
+            { type: "paragraph", children: [{ content: [{ type: "text", text: "doc1-fn" }] }] }
+          ]
+        }
+      ]
+    } as unknown as DocxDocument;
+    const doc2 = {
+      body: [
+        {
+          type: "paragraph",
+          children: [{ content: [{ type: "footnoteRef", id: 2 }] }]
+        }
+      ],
+      footnotes: [
+        {
+          id: 2,
+          content: [
+            { type: "paragraph", children: [{ content: [{ type: "text", text: "doc2-fn" }] }] }
+          ]
+        }
+      ]
+    } as unknown as DocxDocument;
+
+    const merged = mergeDocuments([doc1, doc2]);
+    // Both footnotes survived.
+    expect(merged.footnotes!.length).toBe(2);
+    // doc2's footnote got a fresh id (3), and doc2's body ref now points there.
+    const fn2 = merged.footnotes![1]!;
+    expect(fn2.id).not.toBe(2);
+
+    const doc2BodyPara = merged.body[merged.body.length - 1] as any;
+    expect(doc2BodyPara.children[0].content[0].id).toBe(fn2.id);
+  });
 });

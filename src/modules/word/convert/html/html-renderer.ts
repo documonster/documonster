@@ -8,7 +8,7 @@
 
 import { resolveThemeColor } from "../../core/color-utils";
 import { bytesToBase64, sanitizeUrl } from "../../core/internal-utils";
-import { extractMathText } from "../../core/text-utils";
+import { extractMathText, isRun } from "../../core/text-utils";
 import type {
   DocxDocument,
   Paragraph,
@@ -630,8 +630,8 @@ function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
     }
   }
   // Run (no type discriminator)
-  if ("content" in child && !("type" in child)) {
-    renderRun(state, child as Run);
+  if (isRun(child)) {
+    renderRun(state, child);
   }
 }
 
@@ -1116,10 +1116,10 @@ function renderSdtHtml(state: RenderState, sdt: StructuredDocumentTag): void {
       } else if (child.type === "table") {
         renderTable(state, child);
       }
-    } else if ("content" in child) {
+    } else if (isRun(child)) {
       // Run
       state.html.push(`<span class="${state.options.classPrefix}sdt">`);
-      renderRun(state, child as Run);
+      renderRun(state, child);
       state.html.push("</span>");
     }
   }

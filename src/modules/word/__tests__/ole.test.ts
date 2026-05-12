@@ -45,16 +45,42 @@ describe("OLE embedded objects", () => {
   describe("createOleEmbedding", () => {
     it("creates an opaque part for embedding", () => {
       const data = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
-      const part = createOleEmbedding(data, "Excel.Sheet.12");
-      expect(part.path).toContain("word/embeddings/");
-      expect(part.data).toBe(data);
-      expect(part.contentType).toContain("oleObject");
+      const result = createOleEmbedding(data, "Excel.Sheet.12");
+      expect(result.olePart.path).toContain("word/embeddings/");
+      expect(result.olePart.data).toBe(data);
+      expect(result.olePart.contentType).toContain("oleObject");
+      expect(result.oleRId).toBeTruthy();
+      expect(result.previewPart).toBeUndefined();
     });
 
     it("uses custom fileName", () => {
       const data = new Uint8Array(10);
-      const part = createOleEmbedding(data, "Package", { fileName: "custom.bin" });
-      expect(part.path).toBe("word/embeddings/custom.bin");
+      const result = createOleEmbedding(data, "Package", { fileName: "custom.bin" });
+      expect(result.olePart.path).toBe("word/embeddings/custom.bin");
+    });
+
+    it("allocates unique default file names across calls", () => {
+      const a = createOleEmbedding(new Uint8Array(1), "X");
+      const b = createOleEmbedding(new Uint8Array(1), "X");
+      expect(a.olePart.path).not.toBe(b.olePart.path);
+    });
+
+    it("emits a preview media part when previewImage is provided", () => {
+      const result = createOleEmbedding(new Uint8Array(1), "Excel.Sheet.12", {
+        previewImage: new Uint8Array([1, 2, 3]),
+        previewContentType: "image/png"
+      });
+      expect(result.previewPart).toBeDefined();
+      expect(result.previewPart!.path).toMatch(/^word\/media\/.+\.png$/);
+      expect(result.previewRId).toBeTruthy();
+    });
+
+    it("throws when previewImage is given without previewContentType", () => {
+      expect(() =>
+        createOleEmbedding(new Uint8Array(1), "X", {
+          previewImage: new Uint8Array(1)
+        })
+      ).toThrow(/previewContentType/);
     });
   });
 

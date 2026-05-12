@@ -119,20 +119,44 @@ function extractParagraphTexts(body: readonly BodyContent[]): string[] {
 
 /**
  * Compute diff using LCS (Longest Common Subsequence) approach.
- * This produces an optimal edit sequence.
+ * Produces an optimal edit sequence.
+ *
+ * Memory note: the LCS DP table is `(m+1) * (n+1)` cells, each a 32-bit
+ * integer. We allocate it as a single `Uint32Array` so two 5000-paragraph
+ * documents take ~100 MB instead of ~200 MB. We also reject pairs whose
+ * product would exceed `MAX_LCS_CELLS` to avoid OOM-killing the host —
+ * callers wanting to diff arbitrarily-large documents should pre-segment
+ * by section.
  */
+const MAX_LCS_CELLS = 32_000_000; // ~128 MB at 4 bytes/cell
+
 function computeDiff(oldTexts: string[], newTexts: string[]): DiffEntry[] {
   const m = oldTexts.length;
   const n = newTexts.length;
 
-  // Build LCS table
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  if ((m + 1) * (n + 1) > MAX_LCS_CELLS) {
+    throw new Error(
+      `diffDocuments: LCS table for ${m}x${n} paragraphs exceeds ` +
+        `MAX_LCS_CELLS (${MAX_LCS_CELLS}). Diff was aborted to avoid ` +
+        `excessive memory use; consider diffing sections individually.`
+    );
+  }
+
+  // Single contiguous Uint32Array indexed as `i * (n+1) + j`. This keeps
+  // memory at one allocation and lets the runtime use SIMD-friendly
+  // contiguous reads in the hot loop below.
+  const stride = n + 1;
+  const dp = new Uint32Array((m + 1) * stride);
   for (let i = 1; i <= m; i++) {
+    const rowBase = i * stride;
+    const prevRowBase = (i - 1) * stride;
     for (let j = 1; j <= n; j++) {
       if (oldTexts[i - 1] === newTexts[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
+        dp[rowBase + j] = dp[prevRowBase + (j - 1)] + 1;
       } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        const a = dp[prevRowBase + j];
+        const b = dp[rowBase + (j - 1)];
+        dp[rowBase + j] = a >= b ? a : b;
       }
     }
   }
@@ -153,7 +177,7 @@ function computeDiff(oldTexts: string[], newTexts: string[]): DiffEntry[] {
       });
       i--;
       j--;
-    } else if (i > 0 && (j === 0 || dp[i - 1][j] >= dp[i][j - 1])) {
+    } else if (i > 0 && (j === 0 || dp[(i - 1) * stride + j] >= dp[i * stride + (j - 1)])) {
       entries.push({
         type: "deleted",
         oldIndex: i - 1,

@@ -153,6 +153,30 @@ describe("htmlToDocxBody", () => {
       }
       expect(hasHyperlink).toBe(true);
     });
+
+    it("strips javascript: URLs from <a href> in normal closed-link form", () => {
+      const blocks = htmlToDocxBody('<p><a href="javascript:alert(1)">click</a></p>');
+      const para = blocks[0] as Paragraph;
+      for (const child of para.children) {
+        if ("type" in child && (child as any).type === "hyperlink") {
+          // sanitizeUrl strips dangerous schemes — url should NOT contain
+          // "javascript:".
+          expect((child as any).url).not.toMatch(/javascript:/i);
+        }
+      }
+    });
+
+    it("strips javascript: URLs from <a href> when the tag is never closed (EOF fallback)", () => {
+      // Previously the EOF path used the raw href attribute, bypassing
+      // sanitizeUrl. Confirm the unsafe scheme is dropped on this path too.
+      const blocks = htmlToDocxBody('<p><a href="javascript:alert(1)">click');
+      const para = blocks[0] as Paragraph;
+      for (const child of para.children) {
+        if ("type" in child && (child as any).type === "hyperlink") {
+          expect((child as any).url).not.toMatch(/javascript:/i);
+        }
+      }
+    });
   });
 
   describe("lists", () => {
@@ -263,10 +287,23 @@ describe("htmlToDocxBody", () => {
       const blocks = htmlToDocxBody("<p>Text</p>", { defaultFont: "Arial" });
       const para = blocks[0] as Paragraph;
       const run = para.children[0] as Run;
-      // Font should be set on the run
-      if (run.properties?.font) {
-        expect(run.properties.font).toContain("Arial");
+      // Font should be set on the run as a FontSpec record (not bare string)
+      // so we check the relevant slots rather than relying on string `toContain`.
+      const font = run.properties?.font;
+      expect(font).toBeDefined();
+      if (typeof font === "object" && font !== null) {
+        expect(font.ascii).toBe("Arial");
+        expect(font.hAnsi).toBe("Arial");
+      } else {
+        expect(font).toBe("Arial");
       }
+    });
+
+    it("respects defaultFontSize option", () => {
+      const blocks = htmlToDocxBody("<p>Text</p>", { defaultFontSize: 28 });
+      const para = blocks[0] as Paragraph;
+      const run = para.children[0] as Run;
+      expect(run.properties?.size).toBe(28);
     });
   });
 });

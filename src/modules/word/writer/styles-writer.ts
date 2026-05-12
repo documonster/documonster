@@ -72,11 +72,43 @@ function renderTableStyleCondition(xml: XmlSink, condition: TableStyleConditiona
       renderShading(xml, condition.cellProperties.shading);
     }
     if (condition.cellProperties.borders) {
-      renderTableBordersInStyle(xml, condition.cellProperties.borders);
+      renderCellBordersInStyle(xml, condition.cellProperties.borders);
     }
     xml.closeNode();
   }
 
+  xml.closeNode();
+}
+
+/**
+ * Render cell borders inside a style definition (w:tcBorders).
+ * Cell-level border container is `w:tcBorders`, not `w:tblBorders` — using
+ * the wrong wrapper produces invalid styles.xml that Word silently ignores.
+ */
+function renderCellBordersInStyle(xml: XmlSink, borders: TableBorders): void {
+  xml.openNode("w:tcBorders");
+  for (const side of [
+    "top",
+    "left",
+    "bottom",
+    "right",
+    "insideH",
+    "insideV",
+    "start",
+    "end",
+    "tl2br",
+    "tr2bl"
+  ] as const) {
+    const b = borders[side];
+    if (b) {
+      xml.leafNode(`w:${side}`, {
+        "w:val": b.style,
+        "w:sz": String(b.size ?? 4),
+        "w:space": String(b.space ?? 0),
+        "w:color": b.color ?? "auto"
+      });
+    }
+  }
   xml.closeNode();
 }
 

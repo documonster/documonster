@@ -253,3 +253,78 @@ describe("rejectRevision", () => {
     expect(extractText(doc)).not.toContain("moved");
   });
 });
+
+describe("listRevisions / accept / reject — coverage of notes & comments", () => {
+  it("lists revisions inside footnotes", () => {
+    const ins: InsertedRun = {
+      type: "insertedRun",
+      run: textRun("inserted-fn"),
+      revision: { author: "FN", id: 50 }
+    };
+    const doc = {
+      body: [{ type: "paragraph", children: [textRun("body")] } as Paragraph],
+      footnotes: [
+        { id: 1, content: [{ type: "paragraph", children: [ins as ParagraphChild] } as Paragraph] }
+      ]
+    } as unknown as DocxDocument;
+    const revs = listRevisions(doc);
+    expect(revs).toHaveLength(1);
+    expect(revs[0].id).toBe(50);
+    expect(revs[0].author).toBe("FN");
+  });
+
+  it("lists revisions inside comments", () => {
+    const ins: InsertedRun = {
+      type: "insertedRun",
+      run: textRun("inserted-cmt"),
+      revision: { author: "Z", id: 51 }
+    };
+    const doc = {
+      body: [{ type: "paragraph", children: [textRun("b")] } as Paragraph],
+      comments: [
+        {
+          id: 1,
+          author: "X",
+          content: [{ type: "paragraph", children: [ins as ParagraphChild] } as Paragraph]
+        }
+      ]
+    } as unknown as DocxDocument;
+    const revs = listRevisions(doc);
+    expect(revs).toHaveLength(1);
+    expect(revs[0].id).toBe(51);
+  });
+
+  it("acceptRevision touches footnote content", () => {
+    const del: DeletedRun = {
+      type: "deletedRun",
+      run: textRun("doomed"),
+      revision: { author: "FN", id: 52 }
+    };
+    const fnPara = { type: "paragraph", children: [del as ParagraphChild] } as Paragraph;
+    const doc = {
+      body: [{ type: "paragraph", children: [textRun("body")] } as Paragraph],
+      footnotes: [{ id: 1, content: [fnPara] }]
+    } as unknown as DocxDocument;
+    const found = acceptRevision(doc, 52);
+    expect(found).toBe(true);
+    // After accept on a deletion the run is gone
+    expect(fnPara.children).toHaveLength(0);
+  });
+
+  it("rejectRevision touches comment content", () => {
+    const ins: InsertedRun = {
+      type: "insertedRun",
+      run: textRun("temp"),
+      revision: { author: "X", id: 53 }
+    };
+    const cmtPara = { type: "paragraph", children: [ins as ParagraphChild] } as Paragraph;
+    const doc = {
+      body: [{ type: "paragraph", children: [textRun("b")] } as Paragraph],
+      comments: [{ id: 1, author: "X", content: [cmtPara] }]
+    } as unknown as DocxDocument;
+    const found = rejectRevision(doc, 53);
+    expect(found).toBe(true);
+    // Reject on an insertion removes the run
+    expect(cmtPara.children).toHaveLength(0);
+  });
+});

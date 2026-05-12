@@ -77,7 +77,19 @@ export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyC
     ...extractedStyles,
     ...(options?.classStyles ?? {})
   };
-  parseBlocks(tokens, 0, blocks, {}, classStyles);
+
+  // Seed the inline context with the caller-supplied defaults so plain text
+  // runs actually carry the requested font/size. Without this the options
+  // were effectively ignored.
+  const initialCtx: InlineContext = {};
+  if (options?.defaultFont) {
+    initialCtx.fontFamily = options.defaultFont;
+  }
+  if (options?.defaultFontSize !== undefined) {
+    initialCtx.fontSize = options.defaultFontSize;
+  }
+
+  parseBlocks(tokens, 0, blocks, initialCtx, classStyles);
   return blocks;
 }
 
@@ -98,7 +110,11 @@ type Token = TagToken | TextToken;
 
 function tokenize(html: string): Token[] {
   const tokens: Token[] = [];
-  const re = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)\/?\s*>|([^<]+)/g;
+  // Match a tag, a comment, a CDATA block, OR a run of text. Text is
+  // anything-up-to-the-next-tag, with the addition that a `<` not followed
+  // by a tag-like character is treated as literal text (so "1 < 2" / "a<b"
+  // / "<<" survive instead of being silently swallowed).
+  const re = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)\/?\s*>|((?:[^<]|<(?![/a-zA-Z!?]))+)/g;
   const tagRe = /^<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)(\/?)\s*>$/;
   let m: RegExpExecArray | null;
 
@@ -125,12 +141,52 @@ function tokenize(html: string): Token[] {
           tokens.push({ type: "selfclose", tag, attrs });
         } else {
           tokens.push({ type: "open", tag, attrs });
+          // Raw-text elements: their body must not be parsed as markup. Skip
+          // forward to the matching close tag and either capture the body as
+          // a single text token (for <style>, which is post-processed by
+          // extractStyleRules) or discard it entirely (for <script>, etc.).
+          // Without this, embedded scripts would leak into the document body.
+          if (RAW_TEXT_ELEMENTS.has(tag)) {
+            const closeRe = new RegExp(`</${tag}\\s*>`, "i");
+            closeRe.lastIndex = re.lastIndex;
+            const startBody = re.lastIndex;
+            const closeMatch = closeRe.exec(html);
+            if (closeMatch) {
+              const body = html.slice(startBody, closeMatch.index);
+              if (RAW_TEXT_PRESERVE_BODY.has(tag)) {
+                tokens.push({ type: "text", value: body });
+              }
+              tokens.push({ type: "close", tag, attrs: {} });
+              re.lastIndex = closeMatch.index + closeMatch[0].length;
+            } else {
+              // No closing tag — discard the rest of the input for this
+              // raw-text element to avoid emitting markup as text.
+              re.lastIndex = html.length;
+            }
+          }
         }
       }
     }
   }
   return tokens;
 }
+
+/**
+ * HTML elements whose body is not parsed as markup. Their content is either
+ * preserved (style) for downstream processing or discarded entirely.
+ */
+const RAW_TEXT_ELEMENTS = new Set([
+  "script",
+  "style",
+  "noscript",
+  "iframe",
+  "noframes",
+  "textarea",
+  "title"
+]);
+
+/** Subset of RAW_TEXT_ELEMENTS whose body is kept (as a single text token). */
+const RAW_TEXT_PRESERVE_BODY = new Set(["style"]);
 
 const VOID_ELEMENTS = new Set([
   "br",
@@ -207,9 +263,26 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, "\u00A0")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
-    .replace(/&#x([a-fA-F0-9]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => safeFromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([a-fA-F0-9]+);/g, (_, n) => safeFromCodePoint(parseInt(n, 16)))
     .replace(/&([a-zA-Z]+);/g, (match, name) => HTML_ENTITIES[name] ?? match);
+}
+
+/**
+ * Convert a numeric character reference to a string. Uses fromCodePoint so
+ * astral characters (e.g. emoji like &#128512;) are encoded as a proper
+ * surrogate pair instead of a single invalid UTF-16 unit. Out-of-range or
+ * non-finite values fall back to the Unicode replacement character.
+ */
+function safeFromCodePoint(cp: number): string {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff) {
+    return "\uFFFD";
+  }
+  // Surrogate halves are not valid scalar values.
+  if (cp >= 0xd800 && cp <= 0xdfff) {
+    return "\uFFFD";
+  }
+  return String.fromCodePoint(cp);
 }
 
 /** Common HTML named entities mapped to their Unicode characters. */
@@ -1203,9 +1276,12 @@ function parseInlineTag(
         }
       }
     }
+    // EOF fallback: tokens ran out without a matching `</a>`. Use the
+    // already-sanitized href so an unclosed `<a href="javascript:...">`
+    // can't smuggle a dangerous URL into the model.
     const hyperlink: Hyperlink = {
       type: "hyperlink",
-      url: tok.attrs["href"] || "",
+      url: safeHref ?? "",
       children: innerRuns
     };
     runs.push(hyperlink);

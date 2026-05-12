@@ -3,7 +3,7 @@
  *
  * Converts Excel Workbook data into the PDF module's independent data model.
  * This is the ONLY file in the PDF module that imports from @excel.
- * It also imports from @word/excel-bridge for Word chart → ChartModel mapping.
+ * It also imports from @word/bridge/excel-bridge for Word chart → ChartModel mapping.
  *
  * @example
  * ```typescript

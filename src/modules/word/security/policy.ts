@@ -4,6 +4,31 @@
  * Defines configurable security policies that control how potentially
  * dangerous content (VBA, OLE, external targets, etc.) is handled
  * during document reading and writing.
+ *
+ * **Implementation status of each field (read this before relying on
+ * the strict preset for security guarantees):**
+ *
+ * - `preserveVbaProject` — IMPLEMENTED on the read path. When `false`
+ *   the macro binary is dropped from the returned model.
+ * - `preserveAltChunks` — IMPLEMENTED on the read path. When `false`
+ *   altChunk body items are removed before the document is returned.
+ * - `allowExternalTargets` — IMPLEMENTED on the read path. When `false`
+ *   `Hyperlink.url` is left undefined; only anchor-based hyperlinks
+ *   survive. The link wrapper and its inner runs remain.
+ * - `maxPackageSize`, `maxPartSize`, `maxPartCount`, `maxXmlDepth` —
+ *   IMPLEMENTED. Enforced during ZIP parsing / XML parsing; oversize
+ *   inputs raise `DocxLimitExceededError` instead of being processed.
+ * - `dropSignaturesOnModify` — NOT YET ENFORCED. Today the field is
+ *   advisory only; signatures are always preserved by the writer if
+ *   they live in opaqueParts. Treat the field as a documented intent.
+ * - `preserveOleObjects` — NOT YET ENFORCED. OLE binaries embedded as
+ *   opaque parts are always preserved.
+ * - `rawXmlPolicy` — NOT YET ENFORCED. opaqueRun / opaqueParagraphChild
+ *   / opaqueDrawing rawXml is always written verbatim by the writer.
+ *
+ * Pull requests welcome for the not-yet-enforced fields. Until they
+ * arrive, callers needing those guarantees should sanitise the input
+ * model themselves before serialisation.
  */
 
 // =============================================================================

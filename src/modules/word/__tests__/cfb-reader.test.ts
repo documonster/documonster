@@ -106,3 +106,54 @@ describe("writeCfb / readCfb roundtrip", () => {
     expect(found!.data.length).toBe(0);
   });
 });
+
+describe("readCfb — defends against oversized declared sizes", () => {
+  it("does not allocate beyond the buffer when a directory entry lies", () => {
+    // Build a normal CFB then corrupt the declared stream size in the
+    // directory entry to a multi-GiB value. A naive reader would attempt
+    // `new Uint8Array(huge)` and crash; the implementation must clamp.
+    const entries: CfbEntry[] = [{ name: "Stream1", data: new Uint8Array([1, 2, 3, 4]) }];
+    const buffer = writeCfb(entries);
+
+    // Directory sectors live after the FAT; rather than reverse-engineer
+    // the layout, scan for the UTF-16LE name "Stream1" and overwrite the
+    // 4-byte size field at +120 from the directory entry start (entry
+    // size = 128; name field is at offset 0).
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const utf16 = (s: string): number[] => {
+      const out: number[] = [];
+      for (const ch of s) {
+        out.push(ch.charCodeAt(0) & 0xff, (ch.charCodeAt(0) >> 8) & 0xff);
+      }
+      return out;
+    };
+    const needle = utf16("Stream1");
+    let dirEntryStart = -1;
+    for (let i = 0; i < buffer.length - needle.length; i += 1) {
+      let match = true;
+      for (let j = 0; j < needle.length; j++) {
+        if (buffer[i + j] !== needle[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        dirEntryStart = i;
+        break;
+      }
+    }
+    expect(dirEntryStart).toBeGreaterThan(0);
+
+    // size32 lives at +120 (V3 CFB) — set it to 2^31 - 1 (~2 GiB).
+    view.setUint32(dirEntryStart + 120, 0x7fffffff, true);
+
+    // The reader must terminate quickly without allocating ~2 GiB.
+    const start = Date.now();
+    const result = readCfb(buffer);
+    expect(Date.now() - start).toBeLessThan(2000);
+    const stream = result.find(e => e.name === "Stream1");
+    expect(stream).toBeDefined();
+    // Whatever data we get back must fit inside the original buffer.
+    expect(stream!.data.length).toBeLessThanOrEqual(buffer.length);
+  });
+});

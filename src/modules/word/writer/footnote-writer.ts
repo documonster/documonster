@@ -62,9 +62,14 @@ export function renderFootnotes(
     "xmlns:r": NS_R
   });
 
-  // If the caller already provided separator entries (by having any id <= 0), use those.
-  // Otherwise, synthesize the default separators.
-  const hasSeparators = footnotes.some(fn => fn.id <= 0);
+  // If the caller already provided separator entries (identified by their
+  // `type` rather than a magic id range), use those. Otherwise synthesize
+  // the default separators. Earlier we keyed off `id <= 0`, but a caller is
+  // free to use id=0 for a normal note — that would silently skip the
+  // mandatory separators and produce an invalid document.
+  const hasSeparators = footnotes.some(
+    fn => fn.type === "separator" || fn.type === "continuationSeparator"
+  );
   if (!hasSeparators) {
     renderDefaultSeparators(xml, "w:footnote");
   }
@@ -88,7 +93,9 @@ export function renderEndnotes(
     "xmlns:r": NS_R
   });
 
-  const hasSeparators = endnotes.some(en => en.id <= 0);
+  const hasSeparators = endnotes.some(
+    en => en.type === "separator" || en.type === "continuationSeparator"
+  );
   if (!hasSeparators) {
     renderDefaultSeparators(xml, "w:endnote");
   }

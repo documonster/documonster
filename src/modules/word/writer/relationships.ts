@@ -18,16 +18,23 @@ export interface Relationship {
   readonly id: string;
   readonly type: string;
   readonly target: string;
-  readonly targetMode?: "External";
+  /**
+   * OPC TargetMode. Standard values are `"External"` and `"Internal"`
+   * (with `"Internal"` typically omitted on the wire). Internally we accept
+   * any string so that round-tripped relationships preserve non-standard
+   * values verbatim; new relationships emitted by the writer's own helpers
+   * still pass `"External"` or `undefined`.
+   */
+  readonly targetMode?: string;
 }
 
 /** Rich relationship set with validation and dedup capabilities. */
 export interface RelationshipsState {
   readonly rels: readonly Relationship[];
   /** Add a relationship. If a matching (type, target, targetMode) already exists, returns its ID. */
-  add(type: string, target: string, targetMode?: "External"): string;
+  add(type: string, target: string, targetMode?: string): string;
   /** Add with a specific ID. Throws if ID already exists. */
-  addWithId(id: string, type: string, target: string, targetMode?: "External"): void;
+  addWithId(id: string, type: string, target: string, targetMode?: string): void;
   /** Find existing relationship by type and target. */
   findByTypeAndTarget(type: string, target: string): Relationship | undefined;
   /** Check if an rId is already used. */
@@ -55,7 +62,7 @@ export function createRelationships(): RelationshipsState {
       return internal._rels;
     },
 
-    add(type: string, target: string, targetMode?: "External"): string {
+    add(type: string, target: string, targetMode?: string): string {
       // Dedup: reuse existing (type, target, targetMode) if found
       const existing = internal._rels.find(
         r => r.type === type && r.target === target && r.targetMode === targetMode
@@ -63,17 +70,27 @@ export function createRelationships(): RelationshipsState {
       if (existing) {
         return existing.id;
       }
-      const id = `rId${internal._nextId++}`;
+      // Generate the next id but skip any value already taken by a
+      // previously registered non-standard id (e.g. round-tripped models
+      // sometimes carry rIds in formats other than "rId<n>", or the same
+      // numeric value was claimed by addWithId before this call).
+      let id = `rId${internal._nextId++}`;
+      while (internal._rels.some(r => r.id === id)) {
+        id = `rId${internal._nextId++}`;
+      }
       internal._rels.push({ id, type, target, targetMode });
       return id;
     },
 
-    addWithId(id: string, type: string, target: string, targetMode?: "External"): void {
+    addWithId(id: string, type: string, target: string, targetMode?: string): void {
       if (internal._rels.some(r => r.id === id)) {
         throw new DocxWriteError(`Relationship ID "${id}" already exists`);
       }
       internal._rels.push({ id, type, target, targetMode });
-      // Keep nextId above any manually-assigned IDs
+      // Keep nextId above any manually-assigned numeric IDs. This works for
+      // the common "rId<n>" form; non-standard formats (e.g. "R8") simply
+      // don't advance the counter, but the `add()` path above still skips
+      // collisions defensively.
       const num = parseInt(id.replace("rId", ""), 10);
       if (!isNaN(num) && num >= internal._nextId) {
         internal._nextId = num + 1;
@@ -138,7 +155,7 @@ export function addRelationship(
   state: RelationshipsState,
   type: string,
   target: string,
-  targetMode?: "External"
+  targetMode?: string
 ): string {
   return state.add(type, target, targetMode);
 }
@@ -149,7 +166,7 @@ export function addRelationshipWithId(
   id: string,
   type: string,
   target: string,
-  targetMode?: "External"
+  targetMode?: string
 ): void {
   state.addWithId(id, type, target, targetMode);
 }

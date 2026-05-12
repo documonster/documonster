@@ -9,8 +9,9 @@
  */
 
 import { measureTextWidth, mapToStandardFont } from "@utils/font-metrics";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
-import { escapeXml } from "../core/internal-utils";
+import { isHyperlink, isRun } from "../core/text-utils";
 import type {
   BodyContent,
   DocxDocument,
@@ -121,6 +122,18 @@ function resolveFontFamily(
   return `"${fontName}", sans-serif`;
 }
 
+/** Sanitize a string into a valid 6-digit hex color, or undefined. */
+function sanitizeHexColor(raw: string | undefined): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const stripped = raw.replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(stripped) || /^[0-9a-fA-F]{3}$/.test(stripped)) {
+    return stripped;
+  }
+  return undefined;
+}
+
 /** Get CSS color from a hex color string or "auto". */
 function resolveColor(color: string | { val: string } | undefined): string | undefined {
   if (!color) {
@@ -130,12 +143,14 @@ function resolveColor(color: string | { val: string } | undefined): string | und
     if (color === "auto") {
       return undefined;
     }
-    return `#${color}`;
+    const safe = sanitizeHexColor(color);
+    return safe ? `#${safe}` : undefined;
   }
   if (color.val === "auto") {
     return undefined;
   }
-  return `#${color.val}`;
+  const safe = sanitizeHexColor(color.val);
+  return safe ? `#${safe}` : undefined;
 }
 
 /** Determine heading level from paragraph style name. Returns 0 for non-headings. */
@@ -350,7 +365,7 @@ function renderParagraph(para: Paragraph, state: RenderState): void {
 
         // Build style attributes
         let attrs = `x="${currentX.toFixed(2)}" y="${state.cursorY.toFixed(2)}"`;
-        attrs += ` font-family="${escapeXml(fontFamily)}"`;
+        attrs += ` font-family="${xmlEncodeAttr(fontFamily)}"`;
         attrs += ` font-size="${fontSize.toFixed(1)}"`;
         if (isBold) {
           attrs += ` font-weight="bold"`;
@@ -372,7 +387,7 @@ function renderParagraph(para: Paragraph, state: RenderState): void {
           attrs += ` text-decoration="line-through"`;
         }
 
-        const escapedText = escapeXml(segment.text);
+        const escapedText = xmlEncode(segment.text);
         if (escapedText.length > 0) {
           state.elements.push(`<text ${attrs}>${escapedText}</text>`);
         }
@@ -410,17 +425,13 @@ interface TextSegment {
 function collectParagraphRuns(para: Paragraph): TextSegment[] {
   const segments: TextSegment[] = [];
   for (const child of para.children) {
-    if ("content" in child && Array.isArray(child.content)) {
-      // Run
-      const run = child as Run;
-      const text = getRunText(run);
+    if (isRun(child)) {
+      const text = getRunText(child);
       if (text.length > 0) {
-        segments.push({ text, properties: run.properties });
+        segments.push({ text, properties: child.properties });
       }
-    } else if ("children" in child && Array.isArray((child as { children?: unknown }).children)) {
-      // Hyperlink
-      const hyperlink = child as { children: readonly Run[] };
-      for (const run of hyperlink.children) {
+    } else if (isHyperlink(child)) {
+      for (const run of child.children) {
         const text = getRunText(run);
         if (text.length > 0) {
           segments.push({ text, properties: run.properties });
@@ -522,11 +533,10 @@ function measureLineWidth(segments: TextSegment[], headingScale: number): number
 /** Render inline images found in paragraph runs. */
 function renderParagraphImages(para: Paragraph, state: RenderState): void {
   for (const child of para.children) {
-    if (!("content" in child) || !Array.isArray(child.content)) {
+    if (!isRun(child)) {
       continue;
     }
-    const run = child as Run;
-    for (const item of run.content) {
+    for (const item of child.content) {
       if (item.type === "image") {
         const img = item as {
           type: "image";
@@ -541,9 +551,9 @@ function renderParagraphImages(para: Paragraph, state: RenderState): void {
         // Find image data from document
         const imgData = findImageData(state.doc, img.rId);
         if (imgData) {
-          const dataUri = `data:${imgData.mediaType};base64,${uint8ToBase64(imgData.data)}`;
+          const dataUri = `data:${imageMediaTypeToMime(imgData.mediaType)};base64,${uint8ToBase64(imgData.data)}`;
           state.elements.push(
-            `<image x="${state.marginLeftPt}" y="${state.cursorY}" width="${widthPt.toFixed(1)}" height="${heightPt.toFixed(1)}" href="${escapeXml(dataUri)}"/>`
+            `<image x="${state.marginLeftPt}" y="${state.cursorY}" width="${widthPt.toFixed(1)}" height="${heightPt.toFixed(1)}" href="${xmlEncodeAttr(dataUri)}"/>`
           );
         } else {
           // Render placeholder rectangle
@@ -572,6 +582,32 @@ function findImageData(
     }
   }
   return undefined;
+}
+
+/**
+ * Map an `ImageMediaType` value (e.g. "png", "svg") to the MIME type required
+ * by `data:` URIs. The model uses short tokens, but data URIs need full
+ * `image/<subtype>` form — without this, browsers fail to decode the SVG
+ * preview's embedded images.
+ */
+function imageMediaTypeToMime(mediaType: string): string {
+  switch (mediaType) {
+    case "svg":
+      return "image/svg+xml";
+    case "jpeg":
+    case "png":
+    case "gif":
+    case "bmp":
+    case "tiff":
+    case "webp":
+      return `image/${mediaType}`;
+    case "emf":
+      return "image/x-emf";
+    case "wmf":
+      return "image/x-wmf";
+    default:
+      return `image/${mediaType}`;
+  }
 }
 
 /** Convert Uint8Array to base64 string. */
@@ -621,9 +657,12 @@ function renderTable(table: Table, state: RenderState): void {
       // Cell background
       const shading = cell.properties?.shading;
       if (shading?.fill && shading.fill !== "auto") {
-        state.elements.push(
-          `<rect x="${cellX.toFixed(2)}" y="${rowStartY.toFixed(2)}" width="${cellWidth.toFixed(2)}" height="${rowHeight.toFixed(2)}" fill="#${shading.fill}" stroke="none"/>`
-        );
+        const safeFill = sanitizeHexColor(shading.fill);
+        if (safeFill) {
+          state.elements.push(
+            `<rect x="${cellX.toFixed(2)}" y="${rowStartY.toFixed(2)}" width="${cellWidth.toFixed(2)}" height="${rowHeight.toFixed(2)}" fill="#${safeFill}" stroke="none"/>`
+          );
+        }
       }
 
       // Render cell content (simplified — just text)
@@ -645,7 +684,7 @@ function renderTable(table: Table, state: RenderState): void {
             cellCursorY += fontSize * 1.2;
 
             let textAttrs = `x="${(cellX + cellPadding).toFixed(2)}" y="${cellCursorY.toFixed(2)}"`;
-            textAttrs += ` font-family="${escapeXml(fontFamily)}"`;
+            textAttrs += ` font-family="${xmlEncodeAttr(fontFamily)}"`;
             textAttrs += ` font-size="${fontSize.toFixed(1)}"`;
             if (isBold) {
               textAttrs += ` font-weight="bold"`;
@@ -656,7 +695,7 @@ function renderTable(table: Table, state: RenderState): void {
             const displayText =
               allText.length > maxChars ? allText.slice(0, maxChars) + "…" : allText;
 
-            state.elements.push(`<text ${textAttrs}>${escapeXml(displayText)}</text>`);
+            state.elements.push(`<text ${textAttrs}>${xmlEncode(displayText)}</text>`);
           } else {
             cellCursorY += DEFAULT_FONT_SIZE_PT * 1.2;
           }
@@ -774,7 +813,10 @@ function estimateRowHeightPt(row: TableRow, colWidths: number[], state: RenderSt
 function getTableBorderColor(table: Table): string {
   const borders = table.properties?.borders;
   if (borders?.top?.color && borders.top.color !== "auto") {
-    return `#${borders.top.color}`;
+    const safe = sanitizeHexColor(borders.top.color);
+    if (safe) {
+      return `#${safe}`;
+    }
   }
   return "#000000";
 }
@@ -799,9 +841,9 @@ function renderFloatingImage(item: BodyContent, state: RenderState): void {
 
   const imgData = findImageData(state.doc, img.rId);
   if (imgData) {
-    const dataUri = `data:${imgData.mediaType};base64,${uint8ToBase64(imgData.data)}`;
+    const dataUri = `data:${imageMediaTypeToMime(imgData.mediaType)};base64,${uint8ToBase64(imgData.data)}`;
     state.elements.push(
-      `<image x="${state.marginLeftPt}" y="${state.cursorY.toFixed(2)}" width="${widthPt.toFixed(1)}" height="${heightPt.toFixed(1)}" href="${escapeXml(dataUri)}"/>`
+      `<image x="${state.marginLeftPt}" y="${state.cursorY.toFixed(2)}" width="${widthPt.toFixed(1)}" height="${heightPt.toFixed(1)}" href="${xmlEncodeAttr(dataUri)}"/>`
     );
   } else {
     state.elements.push(
@@ -992,7 +1034,7 @@ function buildSvgDocument(
   const viewBox = `0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}`;
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth.toFixed(2)}" height="${outputHeight.toFixed(2)}" viewBox="${viewBox}">\n`;
-  svg += `  <rect width="100%" height="100%" fill="${escapeXml(bgColor)}"/>\n`;
+  svg += `  <rect width="100%" height="100%" fill="${xmlEncodeAttr(bgColor)}"/>\n`;
 
   for (const element of elements) {
     svg += `  ${element}\n`;
@@ -1060,7 +1102,7 @@ function renderLayoutParagraphToSvg(
     for (const run of line.runs) {
       const x = geometry.marginLeft + run.x;
       let attrs = `x="${x.toFixed(2)}" y="${lineY.toFixed(2)}"`;
-      attrs += ` font-family="${escapeXml(run.font)}"`;
+      attrs += ` font-family="${xmlEncodeAttr(run.font)}"`;
       attrs += ` font-size="${run.fontSize.toFixed(1)}"`;
       if (run.bold) {
         attrs += ` font-weight="bold"`;
@@ -1069,14 +1111,17 @@ function renderLayoutParagraphToSvg(
         attrs += ` font-style="italic"`;
       }
       if (run.color) {
-        attrs += ` fill="#${run.color}"`;
+        const safe = sanitizeHexColor(run.color);
+        if (safe) {
+          attrs += ` fill="#${safe}"`;
+        }
       }
       if (run.underline) {
         attrs += ` text-decoration="underline"`;
       } else if (run.strikethrough) {
         attrs += ` text-decoration="line-through"`;
       }
-      const escapedText = escapeXml(run.text);
+      const escapedText = xmlEncode(run.text);
       if (escapedText.length > 0) {
         elements.push(`<text ${attrs}>${escapedText}</text>`);
       }
@@ -1099,9 +1144,12 @@ function renderLayoutTableToSvg(
 
     // Background
     if (cell.backgroundColor) {
-      elements.push(
-        `<rect x="${cellX.toFixed(2)}" y="${cellY.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#${cell.backgroundColor}" stroke="none"/>`
-      );
+      const safeBg = sanitizeHexColor(cell.backgroundColor);
+      if (safeBg) {
+        elements.push(
+          `<rect x="${cellX.toFixed(2)}" y="${cellY.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#${safeBg}" stroke="none"/>`
+        );
+      }
     }
 
     // Border

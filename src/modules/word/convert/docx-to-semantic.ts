@@ -16,6 +16,7 @@
  * - Math content (text fallback)
  */
 
+import { isRun } from "../core/text-utils";
 import type {
   BodyContent,
   ColorSpec,
@@ -82,8 +83,11 @@ export function docxToSemantic(
     for (const img of doc.images) {
       if (img.rId && img.data) {
         const ext = img.fileName?.split(".").pop()?.toLowerCase() ?? "png";
-        const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-        imageMap.set(img.rId, { data: img.data, mimeType, fileName: img.fileName });
+        imageMap.set(img.rId, {
+          data: img.data,
+          mimeType: extToMimeType(ext),
+          fileName: img.fileName
+        });
       }
     }
   }
@@ -174,12 +178,65 @@ function convertBodyContent(
         }
         break;
       }
-      default:
-        // Skip unsupported block types (TOC, math block, shapes, etc.)
-        // Add a warning for non-trivial content
-        if (item.type !== "sdt" && item.type !== "textBox") {
-          ctx.addWarning("info", "unsupported-block", `Skipped block type: ${item.type}`);
+      case "sdt": {
+        // Structured document tags can wrap whole sections of body content
+        // (Paragraph | Table | Run). Pass through paragraph/table children
+        // recursively; bare Run children are skipped here because the
+        // semantic model has no inline-only equivalent — the warning
+        // surfaces them so downstream tooling knows to expect missing text.
+        const inner: BodyContent[] = [];
+        let dropped = 0;
+        for (const c of item.content) {
+          if ("type" in c && (c.type === "paragraph" || c.type === "table")) {
+            inner.push(c as BodyContent);
+          } else {
+            dropped++;
+          }
         }
+        if (dropped > 0) {
+          ctx.addWarning(
+            "info",
+            "sdt-inline-runs-dropped",
+            `${dropped} inline Run children of an SDT had no semantic equivalent and were skipped`
+          );
+        }
+        blocks.push(...convertBodyContent(inner, doc, ctx, imageMap));
+        break;
+      }
+      case "textBox": {
+        // Render textBox content as inline paragraphs in reading order.
+        // The semantic model has no "frame" concept; flattening preserves
+        // the text rather than dropping it.
+        blocks.push(
+          ...convertBodyContent(item.content as readonly BodyContent[], doc, ctx, imageMap)
+        );
+        break;
+      }
+      case "drawingShape": {
+        if (item.textContent && item.textContent.length > 0) {
+          blocks.push(
+            ...convertBodyContent(item.textContent as readonly BodyContent[], doc, ctx, imageMap)
+          );
+        }
+        break;
+      }
+      case "tableOfContents": {
+        if (item.cachedParagraphs && item.cachedParagraphs.length > 0) {
+          blocks.push(
+            ...convertBodyContent(
+              item.cachedParagraphs as readonly BodyContent[],
+              doc,
+              ctx,
+              imageMap
+            )
+          );
+        }
+        break;
+      }
+      default:
+        // Skip remaining block types (math block, charts, altChunks, etc.)
+        // and surface a warning so the caller can investigate gaps.
+        ctx.addWarning("info", "unsupported-block", `Skipped block type: ${item.type}`);
         break;
     }
   }
@@ -321,8 +378,8 @@ function convertParagraphChildren(
     }
 
     // Default: treat as Run
-    if ("content" in child && Array.isArray((child as Run).content)) {
-      inlines.push(...convertRun(child as Run, ctx, imageMap));
+    if (isRun(child)) {
+      inlines.push(...convertRun(child, ctx, imageMap));
     }
   }
 
@@ -474,4 +531,46 @@ function convertTable(
   }
 
   return { type: "table", rows };
+}
+
+/**
+ * Map a file extension to the canonical IANA MIME type.
+ *
+ * The previous implementation just did `image/${ext}` which produced
+ * non-canonical types like `image/tif` or `image/wmf` — those are
+ * silently rejected by browsers when the semantic document is rendered
+ * to HTML/PDF. Here we map the handful of extensions DOCX images
+ * actually use to their correct types and refuse to forward unknown
+ * extensions verbatim — they're returned as
+ * `application/octet-stream` instead so attacker-controlled file names
+ * can't smuggle a fabricated `image/<script>` Content-Type into
+ * downstream renderers.
+ */
+function extToMimeType(ext: string): string {
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "tif":
+    case "tiff":
+      return "image/tiff";
+    case "svg":
+      return "image/svg+xml";
+    case "webp":
+      return "image/webp";
+    case "emf":
+      return "image/x-emf";
+    case "wmf":
+      return "image/x-wmf";
+    default:
+      // Unknown / hostile extension: don't synthesise an `image/<x>`
+      // Content-Type from raw input.
+      return "application/octet-stream";
+  }
 }

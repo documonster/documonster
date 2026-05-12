@@ -73,10 +73,6 @@ import {
   listSections,
   toBase64,
   fillTemplateFromBuffer,
-  Field,
-  TrackChanges,
-  Sdt,
-  MathML,
   DocxWriteError,
   DocxInvalidStructureError,
   DocxUnsupportedFeatureError,
@@ -565,31 +561,6 @@ describe("fillTemplateFromBuffer", () => {
     const result = await fillTemplateFromBuffer(buffer, { name: "Alice" });
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBeGreaterThan(0);
-  });
-});
-
-// =============================================================================
-// Namespace objects
-// =============================================================================
-
-describe("Namespace objects", () => {
-  it("Field namespace contains field helpers", () => {
-    expect(typeof Field.pageNumber).toBe("function");
-    expect(typeof Field.totalPages).toBe("function");
-  });
-
-  it("TrackChanges namespace contains track change helpers", () => {
-    expect(typeof TrackChanges.insertedRun).toBe("function");
-    expect(typeof TrackChanges.deletedRun).toBe("function");
-  });
-
-  it("Sdt namespace contains SDT helpers", () => {
-    expect(typeof Sdt.create).toBe("function");
-  });
-
-  it("MathML namespace contains math helpers", () => {
-    expect(typeof MathML.block).toBe("function");
-    expect(typeof MathML.fraction).toBe("function");
   });
 });
 

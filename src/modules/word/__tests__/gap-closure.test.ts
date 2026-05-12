@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 
 import { htmlToDocxBody } from "../convert/html/html-import";
-import { docxToMarkdown } from "../convert/markdown/markdown-converter";
+import { renderToMarkdown } from "../convert/markdown/markdown-renderer";
 import {
   Document,
   textParagraph,
@@ -615,7 +615,7 @@ describe("htmlToDocxBody", () => {
 // DOCX → Markdown
 // =============================================================================
 
-describe("docxToMarkdown", () => {
+describe("renderToMarkdown", () => {
   it("should convert headings to # syntax", () => {
     const doc: DocxDocument = {
       body: [
@@ -631,7 +631,7 @@ describe("docxToMarkdown", () => {
         }
       ]
     };
-    const md = docxToMarkdown(doc);
+    const md = renderToMarkdown(doc);
     expect(md).toContain("# Title");
     expect(md).toContain("## Subtitle");
   });
@@ -649,7 +649,7 @@ describe("docxToMarkdown", () => {
         }
       ]
     };
-    const md = docxToMarkdown(doc);
+    const md = renderToMarkdown(doc);
     expect(md).toContain("**bold**");
     expect(md).toContain("*italic*");
   });
@@ -666,7 +666,7 @@ describe("docxToMarkdown", () => {
         }
       ]
     };
-    const md = docxToMarkdown(doc);
+    const md = renderToMarkdown(doc);
     expect(md).toContain("|");
     expect(md).toContain("---");
     expect(md).toContain("A");
@@ -688,7 +688,7 @@ describe("docxToMarkdown", () => {
         }
       ]
     };
-    const md = docxToMarkdown(doc);
+    const md = renderToMarkdown(doc);
     expect(md).toContain("- Item 1");
     expect(md).toContain("- Item 2");
   });

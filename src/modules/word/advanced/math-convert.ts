@@ -10,7 +10,8 @@
  * (sum/integral/product), delimiters (parentheses/brackets), and matrices.
  */
 
-import { escapeXml } from "../core/internal-utils";
+import { xmlDecode, xmlEncode } from "@xml/encode";
+
 import type {
   MathContent,
   MathDelimiter,
@@ -71,7 +72,7 @@ function convertNodeToMathML(node: MathContent): string {
     case "mathMatrix":
       return convertMatrixToMathML(node);
     case "mathAccent":
-      return `<mover accent="true"><mrow>${childrenToMathML(node.content)}</mrow><mo>${escapeXml(node.char ?? "\u0302")}</mo></mover>`;
+      return `<mover accent="true"><mrow>${childrenToMathML(node.content)}</mrow><mo>${xmlEncode(node.char ?? "\u0302")}</mo></mover>`;
     case "mathBar":
       if (node.position === "bottom") {
         return `<munder><mrow>${childrenToMathML(node.content)}</mrow><mo>&#x0332;</mo></munder>`;
@@ -83,9 +84,9 @@ function convertNodeToMathML(node: MathContent): string {
       return `<mphantom><mrow>${childrenToMathML(node.content)}</mrow></mphantom>`;
     case "mathGroupChar":
       if (node.position === "top") {
-        return `<mover><mrow>${childrenToMathML(node.base)}</mrow><mo>${escapeXml(node.char ?? "\u23DE")}</mo></mover>`;
+        return `<mover><mrow>${childrenToMathML(node.base)}</mrow><mo>${xmlEncode(node.char ?? "\u23DE")}</mo></mover>`;
       }
-      return `<munder><mrow>${childrenToMathML(node.base)}</mrow><mo>${escapeXml(node.char ?? "\u23DF")}</mo></munder>`;
+      return `<munder><mrow>${childrenToMathML(node.base)}</mrow><mo>${xmlEncode(node.char ?? "\u23DF")}</mo></munder>`;
     case "mathBorderBox":
       return `<menclose notation="box"><mrow>${childrenToMathML(node.content)}</mrow></menclose>`;
     case "mathEquationArray":
@@ -96,7 +97,7 @@ function convertNodeToMathML(node: MathContent): string {
 }
 
 function convertMathRunToMathML(node: MathRun): string {
-  const text = escapeXml(node.text);
+  const text = xmlEncode(node.text);
   // Operators and special characters
   if (isOperator(node.text)) {
     return `<mo>${text}</mo>`;
@@ -148,16 +149,16 @@ function convertRadicalToMathML(node: MathRadical): string {
 }
 
 function convertDelimiterToMathML(node: MathDelimiter): string {
-  const open = escapeXml(node.beginChar ?? "(");
-  const close = escapeXml(node.endChar ?? ")");
+  const open = xmlEncode(node.beginChar ?? "(");
+  const close = xmlEncode(node.endChar ?? ")");
   const inner = node.content
     .map(group => `<mrow>${childrenToMathML(group)}</mrow>`)
-    .join(`<mo>${escapeXml(node.separatorChar ?? "|")}</mo>`);
+    .join(`<mo>${xmlEncode(node.separatorChar ?? "|")}</mo>`);
   return `<mrow><mo>${open}</mo>${inner}<mo>${close}</mo></mrow>`;
 }
 
 function convertNaryToMathML(node: MathNary): string {
-  const operator = escapeXml(node.char ?? "\u2211");
+  const operator = xmlEncode(node.char ?? "\u2211");
   const content = childrenToMathML(node.content);
 
   const hasSub = node.sub && node.sub.length > 0 && !node.subHide;
@@ -448,8 +449,14 @@ function parseMMLTree(xml: string): MMLNode[] {
         break;
       }
       if (xml[pos + 1] === "?" || xml[pos + 1] === "!") {
-        // Skip processing instructions and comments
+        // Skip processing instructions and comments. If the closing `>` is
+        // missing the document is malformed; bail out instead of looping
+        // forever (indexOf returning -1 used to set pos = 0, hanging the CPU).
         const end = xml.indexOf(">", pos);
+        if (end === -1) {
+          pos = xml.length;
+          break;
+        }
         pos = end + 1;
         continue;
       }
@@ -475,7 +482,7 @@ function parseMMLTree(xml: string): MMLNode[] {
       const nextTag = xml.indexOf("<", pos);
       const text = nextTag === -1 ? xml.slice(pos) : xml.slice(pos, nextTag);
       if (text.trim()) {
-        nodes.push(decodeEntities(text));
+        nodes.push(xmlDecode(text));
       }
       pos = nextTag === -1 ? xml.length : nextTag;
     }
@@ -495,13 +502,19 @@ function parseMMLTreeInner(
   while (pos < xml.length) {
     if (xml[pos] === "<") {
       if (xml[pos + 1] === "/") {
-        // Closing tag
+        // Closing tag — guard against unterminated input.
         const closeEnd = xml.indexOf(">", pos);
+        if (closeEnd === -1) {
+          return { nodes, endPos: xml.length };
+        }
         pos = closeEnd + 1;
         return { nodes, endPos: pos };
       }
       if (xml[pos + 1] === "?" || xml[pos + 1] === "!") {
         const end = xml.indexOf(">", pos);
+        if (end === -1) {
+          return { nodes, endPos: xml.length };
+        }
         pos = end + 1;
         continue;
       }
@@ -525,7 +538,7 @@ function parseMMLTreeInner(
       const nextTag = xml.indexOf("<", pos);
       const text = nextTag === -1 ? xml.slice(pos) : xml.slice(pos, nextTag);
       if (text.trim()) {
-        nodes.push(decodeEntities(text));
+        nodes.push(xmlDecode(text));
       }
       pos = nextTag === -1 ? xml.length : nextTag;
     }
@@ -586,16 +599,6 @@ function getTextContent(el: MMLElement): string {
 
 function getElementChildren(el: MMLElement): MMLElement[] {
   return el.children.filter((c): c is MMLElement => typeof c !== "string");
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
 const OPERATORS = new Set([

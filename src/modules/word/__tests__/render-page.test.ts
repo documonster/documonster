@@ -210,4 +210,32 @@ describe("renderDocumentToSvg", () => {
     expect(pages.length).toBeGreaterThanOrEqual(1);
     expect(pages[0]).toContain("<svg");
   });
+
+  describe("color sanitisation", () => {
+    it("ignores non-hex run colors instead of injecting them as raw fill", () => {
+      // A malicious color carrying additional attributes/script must not
+      // make it into the SVG fill attribute.
+      const malicious = makeRun("hi", {
+        color: 'red" onclick="alert(1)'
+      } as Run["properties"]);
+      const para: Paragraph = { type: "paragraph", children: [malicious] };
+      const doc = makeDoc([para]);
+
+      const svg = renderPageToSvg(doc, 1);
+
+      // Must not contain the injected attribute.
+      expect(svg).not.toContain("onclick");
+      // Must not contain a fill attribute with the bogus value.
+      expect(svg).not.toMatch(/fill="#red" onclick="alert\(1\)"/);
+    });
+
+    it("accepts a valid 6-digit hex color", () => {
+      const colored = makeRun("hi", { color: "FF0000" } as Run["properties"]);
+      const para: Paragraph = { type: "paragraph", children: [colored] };
+      const doc = makeDoc([para]);
+
+      const svg = renderPageToSvg(doc, 1);
+      expect(svg).toContain('fill="#FF0000"');
+    });
+  });
 });

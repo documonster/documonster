@@ -140,6 +140,22 @@ describe("splitDocument", () => {
       const result = splitDocument(doc, { by: "heading", headingLevel: 1 });
       expect(result).toHaveLength(1);
     });
+
+    it("recognises outlineLevel-only headings (no Heading style)", () => {
+      // outlineLevel 0 → H1, outlineLevel 1 → H2, etc. Splitting must
+      // honour this even when no Heading style id is present.
+      const doc = createDoc([
+        para("intro"),
+        para("Chapter 1", { outlineLevel: 0 }),
+        para("body 1"),
+        para("Chapter 2", { outlineLevel: 0 })
+      ]);
+
+      const result = splitDocument(doc, { by: "heading", headingLevel: 1 });
+      expect(result).toHaveLength(3);
+      expect(paraText(result[1].body[0] as Paragraph)).toBe("Chapter 1");
+      expect(paraText(result[2].body[0] as Paragraph)).toBe("Chapter 2");
+    });
   });
 
   describe("preserveSharedParts", () => {

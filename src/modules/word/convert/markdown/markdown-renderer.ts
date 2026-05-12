@@ -6,7 +6,7 @@
  * footnotes, code spans, horizontal rules, and more.
  */
 
-import { extractMathText } from "../../core/text-utils";
+import { extractMathText, isRun } from "../../core/text-utils";
 import type {
   DocxDocument,
   BodyContent,
@@ -337,8 +337,8 @@ function renderInlineChildren(state: MdRenderState, children: readonly Paragraph
         default:
           break;
       }
-    } else if ("content" in child) {
-      result += renderRun(state, child as Run);
+    } else if (isRun(child)) {
+      result += renderRun(state, child);
     }
   }
   return result;
@@ -395,7 +395,10 @@ function renderRunContent(state: MdRenderState, content: RunContent): string {
       return content.text;
     case "break":
       if (content.breakType === "page") {
-        return "\n---\n";
+        // Page breaks are emitted at the paragraph level (see renderParagraph
+        // -> hasPageBreak). Skipping here avoids producing two thematic breaks
+        // for the same page break.
+        return "";
       }
       return "  \n";
     case "tab":
@@ -560,8 +563,8 @@ function isBlockquoteStyle(style: string | undefined): boolean {
 function isEntireParagraphMonospace(para: Paragraph): boolean {
   const runs: Run[] = [];
   for (const child of para.children) {
-    if (!("type" in child) && "content" in child) {
-      runs.push(child as Run);
+    if (isRun(child)) {
+      runs.push(child);
     }
   }
   if (runs.length === 0) {
@@ -585,8 +588,8 @@ function renderPlainInlineChildren(children: readonly ParagraphChild[]): string 
       } else if (child.type === "movedToRun") {
         result += renderPlainRun((child as MovedToRun).run);
       }
-    } else if ("content" in child) {
-      result += renderPlainRun(child as Run);
+    } else if (isRun(child)) {
+      result += renderPlainRun(child);
     }
   }
   return result;
@@ -636,9 +639,8 @@ function isThematicBreak(para: Paragraph): boolean {
 
 function hasPageBreak(para: Paragraph): boolean {
   for (const child of para.children) {
-    if ("content" in child && !("type" in child)) {
-      const run = child as Run;
-      for (const c of run.content) {
+    if (isRun(child)) {
+      for (const c of child.content) {
         if (c.type === "break" && c.breakType === "page") {
           return true;
         }
@@ -675,3 +677,7 @@ function getEndnoteText(state: MdRenderState, noteId: number): string {
   }
   return parts.join(" ");
 }
+
+// =============================================================================
+// Deprecated aliases (kept for backward compatibility)
+// =============================================================================

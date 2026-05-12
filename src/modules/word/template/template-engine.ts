@@ -366,7 +366,7 @@ function tokenize(text: string, open: string, close: string): Token[] {
 function resolvePath(data: unknown, path: string): unknown {
   if (path === ".") {
     // In loop context, "." refers to the current item stored at key "."
-    if (data != null && typeof data === "object" && "." in (data as Record<string, unknown>)) {
+    if (data != null && typeof data === "object" && Object.hasOwn(data as object, ".")) {
       return (data as Record<string, unknown>)["."];
     }
     return data;
@@ -376,6 +376,13 @@ function resolvePath(data: unknown, path: string): unknown {
   let current: unknown = data;
   for (const part of parts) {
     if (current == null || typeof current !== "object") {
+      return undefined;
+    }
+    // Use Object.hasOwn so a template path can never traverse prototype
+    // properties (`{{constructor}}`, `{{__proto__.something}}`, …) and
+    // surface JS internals into the rendered document. Arrays are
+    // handled the same way — numeric indices are own properties.
+    if (!Object.hasOwn(current as object, part)) {
       return undefined;
     }
     current = (current as Record<string, unknown>)[part];
@@ -610,6 +617,14 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         // Inline if: collect tokens until matching /if
         const condValue = resolvePath(ctx.data, token.condition);
         const { trueBranch, falseBranch, endIndex } = collectInlineIf(tokens, i);
+        if (endIndex === -1) {
+          throw new TemplateError(
+            `Unclosed inline {{#if ${token.condition}}}`,
+            `#if ${token.condition}`,
+            location,
+            { tagName: `#if ${token.condition}`, sectionPath: location }
+          );
+        }
 
         if (isTruthy(condValue)) {
           result += evaluateInlineTokens(trueBranch, ctx, location);
@@ -624,6 +639,14 @@ function evaluateInlineTokens(tokens: Token[], ctx: TemplateContext, location: s
         // Inline each: collect tokens until matching /each
         const items = resolvePath(ctx.data, token.collection);
         const { body, endIndex } = collectInlineEach(tokens, i);
+        if (endIndex === -1) {
+          throw new TemplateError(
+            `Unclosed inline {{#each ${token.collection}}}`,
+            `#each ${token.collection}`,
+            location,
+            { tagName: `#each ${token.collection}`, sectionPath: location }
+          );
+        }
 
         if (Array.isArray(items)) {
           for (let idx = 0; idx < items.length; idx++) {
@@ -652,13 +675,14 @@ function collectInlineIf(
 ): {
   trueBranch: Token[];
   falseBranch: Token[];
+  /** Index of the matching `{{/if}}` token, or -1 if no closing tag exists. */
   endIndex: number;
 } {
   let depth = 0;
   const trueBranch: Token[] = [];
   const falseBranch: Token[] = [];
   let inElse = false;
-  let endIndex = startIdx;
+  let endIndex = -1;
 
   for (let i = startIdx + 1; i < tokens.length; i++) {
     const t = tokens[i];
@@ -687,11 +711,12 @@ function collectInlineEach(
   startIdx: number
 ): {
   body: Token[];
+  /** Index of the matching `{{/each}}` token, or -1 if no closing tag exists. */
   endIndex: number;
 } {
   let depth = 0;
   const body: Token[] = [];
-  let endIndex = startIdx;
+  let endIndex = -1;
 
   for (let i = startIdx + 1; i < tokens.length; i++) {
     const t = tokens[i];
@@ -749,20 +774,37 @@ function rebuildParagraphText(para: Paragraph, newText: string): Paragraph {
     }
   }
 
-  // Build new children: keep non-run children, replace all runs with a single new run
-  const nonRunChildren: ParagraphChild[] = [];
-  for (const child of para.children) {
-    if (!isRun(child)) {
-      nonRunChildren.push(child);
-    }
-  }
-
+  // Build new children:
+  //   - replace the first Run we see with `newRun` (carrying the resolved text);
+  //   - drop every other Run (their text was already concatenated into newText);
+  //   - keep non-Run children (bookmarkStart / bookmarkEnd / commentRangeStart /
+  //     commentRangeEnd / hyperlink / insertedRun / movedToRun / etc.) at
+  //     their original index. Reordering these silently miswires bookmark and
+  //     comment ranges, since the start/end markers stop bracketing the
+  //     intended content.
   const newRun: Run = {
     properties: refProperties,
     content: [{ type: "text", text: newText }]
   };
 
-  const newChildren: ParagraphChild[] = [newRun, ...nonRunChildren];
+  const newChildren: ParagraphChild[] = [];
+  let runReplaced = false;
+  for (const child of para.children) {
+    if (isRun(child)) {
+      if (!runReplaced) {
+        newChildren.push(newRun);
+        runReplaced = true;
+      }
+      // Subsequent runs are absorbed into newRun's text — drop them.
+    } else {
+      newChildren.push(child);
+    }
+  }
+  // If the paragraph had no runs at all (rare — typically all bookmark
+  // markers), append newRun at the end so the rendered text still appears.
+  if (!runReplaced) {
+    newChildren.push(newRun);
+  }
 
   return {
     ...para,
@@ -884,30 +926,44 @@ function findClosingTableRow(
   startIdx: number,
   ctx: TemplateContext
 ): number {
-  let depth = 0;
+  // We start AFTER having seen exactly one `{{#each ...}}` token, so the
+  // virtual depth at the boundary into row `startIdx` is 1. Each row can
+  // contain any mix of `{{#each ...}}` opens and `{{/each}}` closes; we
+  // increment the depth by `opens` and decrement by `closes`. The first
+  // row where depth hits zero is the closing row.
+  //
+  // A previous implementation lumped both adjustments together and
+  // returned as soon as `depth === 0 && closes > 0`, which mis-handled
+  // rows containing two opens and one close (depth ends at 1, but the
+  // intermediate calculation hit a transient zero).
+  let depth = 1;
   for (let i = startIdx; i < rows.length; i++) {
     const text = extractRowText(rows[i]);
-    const opens = countOccurrences(text, ctx.open + "#each ");
+    let opens = countOccurrences(text, ctx.open + "#each ");
     const closes = countOccurrences(text, ctx.open + "/each" + ctx.close);
-
-    if (i === startIdx) {
-      depth += opens - 1; // Don't count the opening one
-      depth -= closes;
-    } else {
-      depth += opens;
-      depth -= closes;
+    // The opening `{{#each ...}}` of the current loop is in row
+    // startIdx; don't count it as opening a new nested loop.
+    if (i === startIdx && opens > 0) {
+      opens--;
     }
 
-    if (depth < 0) {
+    // Walk the row token-by-token in opens-then-closes order. We don't
+    // know the actual interleave from raw counts, so we apply opens
+    // first, then closes — opens always come before their matching
+    // close in valid templates, and a row that closes more than it
+    // opens (other than the top-level close in this very row) is
+    // malformed input we should still terminate on.
+    depth += opens;
+    if (depth <= 0 && opens === 0 && closes === 0) {
+      // Defensive: should never happen because we entered with depth=1.
+      return -1;
+    }
+    if (closes >= depth) {
+      // Consume `depth` worth of closes in this row; the remainder, if
+      // any, is malformed but stops the search here.
       return i;
     }
-    if (depth === 0 && closes > 0) {
-      return i;
-    }
-    // Same row contains both open and close
-    if (i === startIdx && opens > 0 && closes > 0 && depth <= 0) {
-      return i;
-    }
+    depth -= closes;
   }
   return -1;
 }
@@ -981,10 +1037,26 @@ function stripDirectivesFromRow(
 // =============================================================================
 
 function hasBlockDirective(text: string, open: string, close: string, directive: string): boolean {
+  // Block-level directives must occupy the *entire* paragraph (modulo
+  // surrounding whitespace). A paragraph like "Hello {{#if x}}A{{/if}}"
+  // contains an *inline* directive and must not be re-classified as a block
+  // directive — otherwise the engine tries to find the block close on
+  // following paragraphs and emits "Unclosed {{#if x}}" errors.
   const trimmed = text.trim();
-  // The paragraph text should essentially be just the directive
-  const pattern = open + directive;
-  return trimmed.startsWith(pattern) || trimmed.includes(pattern);
+  const opener = open + directive;
+  if (!trimmed.startsWith(opener)) {
+    return false;
+  }
+  // The opener tag must close before any other text follows. e.g. valid:
+  //   "{{#if x}}"          → block
+  //   "{{#if x}}\n"        → block
+  //   "{{#if x}}foo"       → inline (has trailing content on same paragraph)
+  const tagEnd = trimmed.indexOf(close, opener.length);
+  if (tagEnd === -1) {
+    return false;
+  }
+  const afterTag = trimmed.slice(tagEnd + close.length).trim();
+  return afterTag.length === 0;
 }
 
 function extractDirectiveArg(text: string, open: string, close: string, directive: string): string {
@@ -1074,16 +1146,28 @@ function findIfBlock(
     }
     const text = extractParagraphText(block as Paragraph);
 
-    if (hasBlockDirective(text, ctx.open, ctx.close, "#if ")) {
-      depth++;
-    } else if (
-      text.includes(ctx.open + "/if" + ctx.close) ||
-      text.includes(ctx.open + " /if " + ctx.close)
-    ) {
-      if (depth === 0) {
-        return { elseIdx, endIdx: i };
+    // A single paragraph can legitimately contain both `{{#if cond}}` and
+    // `{{/if}}` (an inline if). Count opens and closes independently so the
+    // pairing logic stays correct in that case — the previous else-if chain
+    // would advance `depth` and then skip the close, leaving the block
+    // permanently unterminated.
+    const openCount = countOccurrences(text, ctx.open + "#if ");
+    const closeCount =
+      countOccurrences(text, ctx.open + "/if" + ctx.close) +
+      countOccurrences(text, ctx.open + " /if " + ctx.close);
+
+    if (closeCount > 0) {
+      // Account for inline opens first, then balance closes against the
+      // outstanding depth.
+      depth += openCount;
+      for (let c = 0; c < closeCount; c++) {
+        if (depth === 0) {
+          return { elseIdx, endIdx: i };
+        }
+        depth--;
       }
-      depth--;
+    } else if (openCount > 0) {
+      depth += openCount;
     } else if (
       depth === 0 &&
       (text.trim() === ctx.open + "else" + ctx.close ||
@@ -1105,13 +1189,36 @@ function buildLoopData(
   index: number,
   parentData: Record<string, unknown>
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...parentData, "@index": index, ".": item };
+  // Build the loop context on a null-prototype object so that an item
+  // like `{ "__proto__": { injected: "X" } }` (which JSON.parse will
+  // produce as an own enumerable data property — a known
+  // prototype-pollution vector) cannot retarget the result's prototype
+  // and leak hidden fields into the rendered document.
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(parentData)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      // Skip dangerous keys at the parent level too.
+      continue;
+    }
+    result[key] = parentData[key];
+  }
+  result["@index"] = index;
+  result["."] = item;
 
-  // If item is an object, spread its properties so {{.name}} and {{name}} both work
+  // If item is an object, spread its OWN properties so {{.name}} and
+  // {{name}} both work. Skip the same dangerous key set defensively.
   if (item != null && typeof item === "object" && !Array.isArray(item)) {
     const obj = item as Record<string, unknown>;
     for (const key of Object.keys(obj)) {
-      result[key] = obj[key];
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        continue;
+      }
+      // Object.hasOwn ensures we never copy something that came from the
+      // prototype (Object.keys already returns only own enumerables, but
+      // belt-and-braces).
+      if (Object.hasOwn(obj, key)) {
+        result[key] = obj[key];
+      }
     }
   }
 
@@ -1366,11 +1473,48 @@ export function fillTemplateEnhanced(
     }
   }
 
-  // Second pass: standard fillTemplate on the modified doc
+  // Second pass: standard fillTemplate. Note that `fillTemplate` mutates
+  // its input doc in place (it edits `headerDef.content.children` and the
+  // body array directly), so we hand it a deep-cloned wrapper to avoid
+  // sneaking edits back into the caller's doc through shared references
+  // (`modifiedDoc.headers === doc.headers` would otherwise propagate
+  // mutations into `doc`).
   const modifiedDoc: DocxDocument = {
     ...doc,
     body: newBody,
-    images: images.length > 0 ? images : undefined
+    images: images.length > 0 ? images : undefined,
+    ...(doc.headers
+      ? {
+          headers: new Map(
+            Array.from(doc.headers, ([k, h]) => [
+              k,
+              {
+                ...h,
+                content: { ...h.content, children: [...h.content.children] }
+              }
+            ])
+          )
+        }
+      : {}),
+    ...(doc.footers
+      ? {
+          footers: new Map(
+            Array.from(doc.footers, ([k, f]) => [
+              k,
+              {
+                ...f,
+                content: { ...f.content, children: [...f.content.children] }
+              }
+            ])
+          )
+        }
+      : {}),
+    ...(doc.footnotes
+      ? { footnotes: doc.footnotes.map(fn => ({ ...fn, content: [...fn.content] })) }
+      : {}),
+    ...(doc.endnotes
+      ? { endnotes: doc.endnotes.map(en => ({ ...en, content: [...en.content] })) }
+      : {})
   };
   return fillTemplate(modifiedDoc, data, options);
 }
@@ -1393,12 +1537,15 @@ function processEnhancedBody(
       if (htmlMatch) {
         const value = resolvePath(data, htmlMatch);
         if (isTemplateHtmlChunk(value)) {
+          const seq = nextAltChunkSeq();
           const altChunk: AltChunk = {
             type: "altChunk",
-            rId: `rId_altchunk_${blockIndex}`,
+            // Use a process-monotonic sequence so two `fillTemplate`
+            // calls on the same template don't collide on rId or path.
+            rId: `rId_altchunk_${seq}`,
             contentType: value.contentType ?? "text/html",
             data: utf8Encoder.encode(value.html),
-            fileName: `afchunk${blockIndex}.html`
+            fileName: `afchunk${seq}.html`
           };
           result.push(altChunk);
           continue;
@@ -1431,14 +1578,15 @@ function processEnhancedBody(
             // Condition is truthy — resolve the image
             const value = resolvePath(data, imagePath);
             if (isTemplateImage(value)) {
-              const rId = value.image.rId ?? `rId_tpl_${value.image.fileName}`;
+              const safeFileName = sanitizeTemplateImageFileName(value.image.fileName);
+              const rId = value.image.rId ?? `rId_tpl_${nextTemplateImageSeq()}`;
               const imgContent: InlineImageContent = {
                 type: "image",
                 rId,
                 width: value.width,
                 height: value.height,
-                altText: value.altText ?? value.image.fileName,
-                name: value.image.fileName
+                altText: value.altText ?? safeFileName,
+                name: safeFileName
               };
               const newPara: Paragraph = {
                 type: "paragraph",
@@ -1446,7 +1594,7 @@ function processEnhancedBody(
                 children: [{ content: [imgContent] } as Run]
               };
               result.push(newPara);
-              collectedImages.push({ ...value.image, rId } as ImageDef);
+              collectedImages.push({ ...value.image, rId, fileName: safeFileName } as ImageDef);
               continue;
             }
           }
@@ -1454,14 +1602,15 @@ function processEnhancedBody(
         // Standard image placeholder (no conditional)
         const value = resolvePath(data, imgMatch);
         if (isTemplateImage(value)) {
-          const rId = value.image.rId ?? `rId_tpl_${value.image.fileName}`;
+          const safeFileName = sanitizeTemplateImageFileName(value.image.fileName);
+          const rId = value.image.rId ?? `rId_tpl_${nextTemplateImageSeq()}`;
           const imgContent: InlineImageContent = {
             type: "image",
             rId,
             width: value.width,
             height: value.height,
-            altText: value.altText ?? value.image.fileName,
-            name: value.image.fileName
+            altText: value.altText ?? safeFileName,
+            name: safeFileName
           };
           const newPara: Paragraph = {
             type: "paragraph",
@@ -1470,7 +1619,7 @@ function processEnhancedBody(
           };
           result.push(newPara);
           // Register image for packaging
-          collectedImages.push({ ...value.image, rId } as ImageDef);
+          collectedImages.push({ ...value.image, rId, fileName: safeFileName } as ImageDef);
           continue;
         }
       }
@@ -1672,4 +1821,46 @@ function processTableColumnLoop(
   }
 
   return { ...table, rows: newRows };
+}
+
+// =============================================================================
+// rId allocation helpers
+// =============================================================================
+//
+// Template-generated parts (alt chunks, dynamic images) need stable but
+// non-colliding rIds. Earlier versions of this module derived the rId
+// from `blockIndex` or the image's `fileName`, which collided as soon as
+// the same template was filled twice or two distinct images shared a
+// file name. We now use module-level monotonic counters so each generated
+// part gets a unique rId for the lifetime of the process.
+
+let _altChunkSeq = 0;
+let _templateImageSeq = 0;
+function nextAltChunkSeq(): number {
+  _altChunkSeq++;
+  return _altChunkSeq;
+}
+function nextTemplateImageSeq(): number {
+  _templateImageSeq++;
+  return _templateImageSeq;
+}
+
+/**
+ * Strip path-traversal segments and other unsafe characters from a
+ * caller-supplied image file name so it can be safely used as a ZIP
+ * entry path inside the package. Mirrors the equivalent helper in
+ * `convert/odt/odt.ts`.
+ */
+function sanitizeTemplateImageFileName(raw: string | undefined): string {
+  if (!raw) {
+    return "image.bin";
+  }
+  const lastSep = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+  let leaf = lastSep >= 0 ? raw.substring(lastSep + 1) : raw;
+  while (leaf.startsWith(".")) {
+    leaf = leaf.substring(1);
+  }
+  leaf = leaf.replace(/[^A-Za-z0-9._-]/g, "_");
+  leaf = leaf.replace(/\.{2,}/g, ".");
+  return leaf || "image.bin";
 }

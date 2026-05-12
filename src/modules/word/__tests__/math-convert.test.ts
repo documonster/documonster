@@ -325,3 +325,30 @@ describe("mathMLToOmml", () => {
     expect(parsed[2]!.type).toBe("mathSuperScript");
   });
 });
+
+// =============================================================================
+// Malformed input — must not hang
+// =============================================================================
+
+describe("mathMLToOmml — malformed input", () => {
+  // Each of these inputs used to trip an `indexOf(">", pos)` returning -1
+  // path that left `pos` unchanged, hanging the parser. We bound the call
+  // with a synchronous sanity check: if it returns at all, we're good.
+  const cases: { name: string; input: string }[] = [
+    { name: "lone <! prefix", input: "<!" },
+    { name: "lone <? prefix", input: "<?xml" },
+    { name: "unclosed processing instruction inside math", input: "<math><?bad" },
+    { name: "unclosed comment inside math", input: "<math><!-- nope" },
+    { name: "unterminated tag", input: "<math" }
+  ];
+
+  for (const { name, input } of cases) {
+    it(`returns instead of hanging on ${name}`, () => {
+      // The function must terminate; we don't care what it returns as long
+      // as the call returns synchronously without spinning.
+      const start = Date.now();
+      mathMLToOmml(input);
+      expect(Date.now() - start).toBeLessThan(1000);
+    });
+  }
+});

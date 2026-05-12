@@ -6,21 +6,6 @@
 
 import { BaseError, type BaseErrorOptions } from "@utils/errors";
 
-// Re-export common utilities from base
-export {
-  AbortError,
-  createAbortError,
-  isAbortError,
-  throwIfAborted,
-  createLinkedAbortController,
-  toError,
-  suppressUnhandledRejection,
-  errorToJSON,
-  getErrorChain,
-  getRootCause,
-  type BaseErrorOptions
-} from "@utils/errors";
-
 /**
  * Base class for all DOCX-related errors.
  */
@@ -83,8 +68,9 @@ export class DocxUnsupportedFeatureError extends DocxError {
 
 /**
  * Error thrown when a DOCX file is encrypted (CFB format) and no password
- * was provided. Users should use `decryptDocx()` from "excelts/word/crypto"
- * to decrypt before calling `readDocx()`.
+ * was provided. Pass `{ password }` in the second argument of `readDocx()`
+ * to decrypt automatically, or call `decryptDocx()` from "excelts/word/crypto"
+ * directly if you need lower-level access to the decrypted ZIP bytes.
  */
 export class DocxEncryptedError extends DocxError {
   override name = "DocxEncryptedError";
@@ -92,7 +78,8 @@ export class DocxEncryptedError extends DocxError {
   constructor() {
     super(
       "The document is encrypted (password-protected). " +
-        'Use decryptDocx(buffer, password) from "excelts/word/crypto" to decrypt it first.'
+        'Pass { password } to readDocx(), or use decryptDocx() from "excelts/word/crypto" ' +
+        "for lower-level decryption."
     );
   }
 }

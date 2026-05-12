@@ -87,25 +87,55 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
     difatSector = view.getUint32(off + entriesPerSector * 4, true);
   }
 
-  // Build FAT (sector allocation table)
+  // Build FAT (sector allocation table).
+  //
+  // `fatSectorCount` comes from the file header and is attacker-controlled.
+  // A hostile CFB advertising `fatSectorCount = 100_000` would push us to
+  // build a FAT array with ~12.8M Uint32 entries (~100 MB at JS object
+  // overhead). Cap it conservatively — real DOCX-encryption packages have
+  // at most a few dozen FAT sectors.
+  const MAX_FAT_ENTRIES = 1_000_000;
   const fat: number[] = [];
   for (const fatSec of difat) {
     const off = sectorOffset(fatSec);
     for (let i = 0; i < sectorSize / 4; i++) {
+      if (fat.length >= MAX_FAT_ENTRIES) {
+        throw new Error(
+          `CFB FAT exceeds maximum entry count (${MAX_FAT_ENTRIES}). ` +
+            `Aborting to avoid runaway memory consumption.`
+        );
+      }
       fat.push(view.getUint32(off + i * 4, true));
     }
   }
 
-  // Read sector chain
+  // Read sector chain.
+  //
+  // Resource limits:
+  //   - `visited` already protects against infinite cycles.
+  //   - We additionally cap the total bytes assembled per chain at 256 MB
+  //     to bound memory consumption when a malicious CFB advertises a
+  //     legitimately-shaped but enormous chain. Real DOCX-encryption
+  //     packages are well under this; the cap exists to fail fast on
+  //     hostile input rather than burn memory.
+  const MAX_CHAIN_BYTES = 256 * 1024 * 1024;
   const readChain = (startSector: number): Uint8Array => {
     const sectors: Uint8Array[] = [];
     let sector = startSector;
+    let totalBytes = 0;
     const visited = new Set<number>();
     while (sector !== ENDOFCHAIN && sector < fat.length && !visited.has(sector)) {
       visited.add(sector);
       const off = sectorOffset(sector);
       if (off + sectorSize <= buffer.length) {
         sectors.push(buffer.slice(off, off + sectorSize));
+        totalBytes += sectorSize;
+        if (totalBytes > MAX_CHAIN_BYTES) {
+          throw new Error(
+            `CFB sector chain exceeds maximum size (${MAX_CHAIN_BYTES} bytes). ` +
+              `Aborting to avoid runaway memory consumption.`
+          );
+        }
       }
       sector = fat[sector];
     }
@@ -171,19 +201,23 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
     miniStream = readChain(rootEntry.startSector);
   }
 
-  // Read a stream from mini-sectors
+  // Read a stream from mini-sectors. The declared `size` originates from a
+  // directory entry inside the file and must therefore be treated as
+  // untrusted; cap it at the actual mini-stream length to prevent malformed
+  // CFB containers from triggering oversized buffer allocations.
   const readMiniChain = (startSector: number, size: number): Uint8Array => {
     if (!miniStream) {
       return new Uint8Array(0);
     }
-    const result = new Uint8Array(size);
+    const safeSize = Math.max(0, Math.min(size, miniStream.length));
+    const result = new Uint8Array(safeSize);
     let sector = startSector;
     let pos = 0;
     const visited = new Set<number>();
-    while (sector !== ENDOFCHAIN && pos < size && !visited.has(sector)) {
+    while (sector !== ENDOFCHAIN && pos < safeSize && !visited.has(sector)) {
       visited.add(sector);
       const off = sector * miniSectorSize;
-      const copyLen = Math.min(miniSectorSize, size - pos);
+      const copyLen = Math.min(miniSectorSize, safeSize - pos);
       if (off + copyLen <= miniStream.length) {
         result.set(miniStream.slice(off, off + copyLen), pos);
       }
@@ -201,14 +235,18 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
       continue;
     } // only stream entries
 
+    // The directory's declared stream size cannot exceed the size of the
+    // backing storage. Without this clamp a malformed `size` field could
+    // request a multi-GiB allocation in `slice(0, entry.size)`.
+    const safeSize = Math.max(0, Math.min(entry.size, buffer.length));
     let data: Uint8Array;
-    if (entry.size < miniStreamCutoff) {
+    if (safeSize < miniStreamCutoff) {
       // Read from mini-stream
-      data = readMiniChain(entry.startSector, entry.size);
+      data = readMiniChain(entry.startSector, safeSize);
     } else {
       // Read from regular sectors
       const raw = readChain(entry.startSector);
-      data = raw.slice(0, entry.size);
+      data = raw.slice(0, safeSize);
     }
 
     entries.push({ name: entry.name, data });
