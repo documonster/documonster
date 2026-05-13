@@ -101,6 +101,24 @@ function _toState(handle: DocumentHandle): _DocumentState {
 }
 
 /**
+ * Ensure a numbering instance exists for the given abstractNumId and return
+ * its numId. If multiple instances reference the same abstract, the first
+ * one is returned. Used by addBulletList / addNumberedList to look up (or
+ * create) the runtime numId after they ensure the abstract definition
+ * exists. Robust against state where an abstract has no instance yet —
+ * the previous code crashed with `find(...)!.numId` in that case.
+ */
+function _ensureNumberingInstance(s: _DocumentState, abstractNumId: number): number {
+  const existing = s.numberingInstances.find(n => n.abstractNumId === abstractNumId);
+  if (existing) {
+    return existing.numId;
+  }
+  const numId = s.nextNumId++;
+  s.numberingInstances.push({ numId, abstractNumId });
+  return numId;
+}
+
+/**
  * Namespace of free functions for building DOCX documents.
  *
  * Replaces the former `DocumentBuilder` class with tree-shakeable free functions.
@@ -438,13 +456,9 @@ export const Document = {
           }
         ]
       });
-      s.numberingInstances.push({
-        numId: s.nextNumId++,
-        abstractNumId: bulletAbsId
-      });
     }
 
-    const numId = s.numberingInstances.find(n => n.abstractNumId === bulletAbsId)!.numId;
+    const numId = _ensureNumberingInstance(s, bulletAbsId);
 
     for (const item of items) {
       if (typeof item === "string") {
@@ -492,13 +506,9 @@ export const Document = {
           }
         ]
       });
-      s.numberingInstances.push({
-        numId: s.nextNumId++,
-        abstractNumId: numAbsId
-      });
     }
 
-    const numId = s.numberingInstances.find(n => n.abstractNumId === numAbsId)!.numId;
+    const numId = _ensureNumberingInstance(s, numAbsId);
 
     for (const item of items) {
       if (typeof item === "string") {

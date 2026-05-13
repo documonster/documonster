@@ -1847,14 +1847,9 @@ function buildRawChartExLegendXml(legend: any): string {
 
 function buildRawChartExDataXml(chartData: any): string {
   const parts = ["<cx:chartData>"];
-  // NOTE: `cx:externalData` is a child of `cx:chartSpace` per
-  // Chart2014's `CT_ChartSpace`, NOT of `cx:chartData`. The raw
-  // patcher used to emit it here — that produced a document Office
-  // rejected in strict mode. The structured writer and raw-patch
-  // paths now both emit externalData at the chartSpace level; any
-  // legacy `chartData.externalData` is migrated to
-  // `chartSpace.externalData` at parse time so the deprecated slot
-  // can be ignored here without data loss.
+  // `cx:externalData` is a child of `cx:chartSpace` per Chart2014's
+  // `CT_ChartSpace`, NOT of `cx:chartData`. Emitted at the chartSpace
+  // level by the structured writer; nothing for us to do here.
   for (const entry of chartData?.data ?? []) {
     parts.push(`<cx:data id="${entry.id}">`);
     if (entry.strDim) {

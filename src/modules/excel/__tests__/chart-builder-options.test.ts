@@ -262,14 +262,14 @@ describe("Chart class convenience methods", () => {
     ws.getCell("A1").value = "data";
     ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = ws.getCharts()[0];
-    expect(chart.seriesCount).toBe(1);
+    expect(chart.getSeriesCount(0)).toBe(1);
     chart.addSeries({
       index: 1,
       order: 1,
       cat: { numRef: { f: CATEGORIES } },
       val: { numRef: { f: VALUES_B } }
     } as any);
-    expect(chart.seriesCount).toBe(2);
+    expect(chart.getSeriesCount(0)).toBe(2);
   });
 
   it("removeSeries removes by index", () => {
@@ -278,10 +278,10 @@ describe("Chart class convenience methods", () => {
     ws.getCell("A1").value = "data";
     ws.addChart({ type: "bar", series: [baseSeries("S1"), baseSeries("S2", VALUES_B)] }, "C1:J10");
     const chart = ws.getCharts()[0];
-    expect(chart.seriesCount).toBe(2);
+    expect(chart.getSeriesCount(0)).toBe(2);
     const removed = chart.removeSeries(0);
     expect(removed).toBeDefined();
-    expect(chart.seriesCount).toBe(1);
+    expect(chart.getSeriesCount(0)).toBe(1);
   });
 
   it("removeSeries returns undefined for out-of-range index", () => {

@@ -189,7 +189,7 @@ interface ChartAnchorRange {
  *   `toPNG`, `unknownElements`) work uniformly. ChartTypeGroup-level
  *   APIs (`chartTypes`, `axes`, `plotArea`, `getAxis`, `categoryAxis`,
  *   `valueAxis`, `addSeries`, `removeSeries`, `getSeries`,
- *   `updateSeries`, `addSeriesFromOptions`, `seriesCount`, `mutate`,
+ *   `updateSeries`, `addSeriesFromOptions`, `getSeriesCount`, `mutate`,
  *   `setStyle`) are classic-only — ChartEx has its own topology that
  *   doesn't map cleanly onto the classic group/series abstraction;
  *   use {@link Chart.mutateChartEx} for ChartEx mutations.
@@ -1109,13 +1109,6 @@ class Chart {
   getSeriesCount(groupIndex = 0): number {
     const ctg = this.chartTypes[groupIndex];
     return ctg?.series?.length ?? 0;
-  }
-
-  /**
-   * @deprecated Use `getSeriesCount()` instead. Returns the count of series in the first chart type group.
-   */
-  get seriesCount(): number {
-    return this.getSeriesCount(0);
   }
 
   // ===========================================================================

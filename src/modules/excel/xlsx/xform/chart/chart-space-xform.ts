@@ -925,14 +925,10 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           this._renderMarker(xml, pf.marker);
         }
         // `c:pivotFmt` may carry a bare `c:dLbl` (no `c:dLbls` wrapper).
-        // Prefer the structured representation when present so callers
-        // can mutate label attributes programmatically; fall back to
-        // the captured raw bytes for files parsed before the structured
-        // slot existed.
+        // Use the structured representation so callers can mutate label
+        // attributes programmatically.
         if (pf.dLbl) {
           this._renderDataLabelEntry(xml, pf.dLbl);
-        } else if (pf.rawDLbl) {
-          xml.writeRaw(pf.rawDLbl);
         } else if (pf.dataLabels) {
           this._renderDataLabels(xml, pf.dataLabels);
         }
@@ -3920,18 +3916,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       ) {
         this.rawXmlTarget = "c:tx:trendlineLbl";
       }
-      // c:dLbl inside pivotFmt is now parsed structurally (see the
-      // `currentDataLabelEntry` branch below — `c:dLbl` open always
+      // c:dLbl inside pivotFmt is parsed structurally — see the
+      // `currentDataLabelEntry` branch below. `c:dLbl` open always
       // starts an entry, and the matching close routes it to the
       // pivotFormat or the data-labels bundle depending on the
-      // surrounding state). The previous raw-capture branch that
-      // preempted structured parsing has been removed because it
-      // made `PivotFormat.dLbl` unreachable from XML — callers could
-      // only populate the field by mutating the model directly, and
-      // the writer then had to consult both `dLbl` and the
-      // deprecated `rawDLbl` fallback. Now the parser always
-      // produces `dLbl`; `rawDLbl` remains on the type only for
-      // legacy round-trip of files parsed by older versions.
+      // surrounding state.
       return true;
     }
 
@@ -4553,9 +4542,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           // Bare `<c:dLbl>` inside `<c:pivotFmt>` (no `<c:dLbls>`
           // wrapper). Pivot samples from Excel emit a single dLbl
           // here and the structured slot on `PivotFormat.dLbl`
-          // captures it. Previously this element was raw-captured
-          // into `rawDLbl`, which made the structured field
-          // unreachable from on-disk files.
+          // captures it.
           this.currentPivotFormat.dLbl = this.currentDataLabelEntry;
           this.currentDataLabelEntry = null;
         }

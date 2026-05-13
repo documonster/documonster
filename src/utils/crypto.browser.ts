@@ -591,7 +591,9 @@ export function md5(input: Uint8Array): Uint8Array {
 
 /**
  * RC4 stream cipher.
- * @deprecated Only used for reading legacy encrypted PDFs.
+ *
+ * Required by ISO 32000 for reading PDFs encrypted with the RC4 algorithm
+ * (PDF 1.4 standard handler V=1/V=2).
  */
 export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
   const s = new Uint8Array(256);

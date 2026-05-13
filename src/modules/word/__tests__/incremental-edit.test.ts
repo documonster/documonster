@@ -330,3 +330,83 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     ).rejects.toThrow(/inline image/);
   });
 });
+
+// =============================================================================
+// replaceBody must not be confused by literal "<w:body>" / "</w:body>"
+// occurrences inside XML comments, CDATA sections, or processing
+// instructions. These are exotic but legal in the input document.xml the
+// caller supplied (e.g. an upstream tool that injected an authoring note),
+// and the previous purely-regex scan would happily slice on them, leaving
+// the output document corrupted.
+// =============================================================================
+
+describe("editDocxIncremental — replaceBody scanner robustness", () => {
+  async function bodyXmlOf(buf: Uint8Array): Promise<string> {
+    const part = await readDocxPart(buf, "word/document.xml");
+    return new TextDecoder().decode(part!);
+  }
+
+  it("ignores </w:body> sitting inside an XML comment", async () => {
+    const buffer = await buildDocxBuffer("hello");
+    const original = await bodyXmlOf(buffer);
+    // Inject a comment containing fake body tags BEFORE the real <w:body>.
+    const stitched = original.replace("<w:body", "<!-- <w:body><w:p/></w:body> --><w:body");
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/document.xml", text: stitched }
+    ]);
+
+    const newPara: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "POST-COMMENT" }] } as Run]
+    };
+    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+
+    // The decoy comment must survive untouched (proof we didn't pick the
+    // fake closing tag inside the comment) and the real body must contain
+    // the new paragraph text.
+    const after = await bodyXmlOf(edited);
+    expect(after).toContain("<!-- <w:body><w:p/></w:body> -->");
+    expect(after).toContain("POST-COMMENT");
+    expect(after).not.toContain("hello"); // original body content was swapped
+  });
+
+  it("ignores </w:body> sitting inside a CDATA section", async () => {
+    const buffer = await buildDocxBuffer("hello");
+    const original = await bodyXmlOf(buffer);
+    const stitched = original.replace("<w:body", "<![CDATA[ </w:body> ]]><w:body");
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/document.xml", text: stitched }
+    ]);
+
+    const newPara: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "POST-CDATA" }] } as Run]
+    };
+    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+
+    const after = await bodyXmlOf(edited);
+    expect(after).toContain("<![CDATA[ </w:body> ]]>");
+    expect(after).toContain("POST-CDATA");
+    expect(after).not.toContain("hello");
+  });
+
+  it("ignores <w:body inside a processing instruction", async () => {
+    const buffer = await buildDocxBuffer("hello");
+    const original = await bodyXmlOf(buffer);
+    const stitched = original.replace("<w:body", "<?fake <w:body><w:p/></w:body> ?><w:body");
+    const seeded = await editDocxIncremental(buffer, [
+      { type: "replacePartText", path: "word/document.xml", text: stitched }
+    ]);
+
+    const newPara: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "POST-PI" }] } as Run]
+    };
+    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+
+    const after = await bodyXmlOf(edited);
+    expect(after).toContain("<?fake <w:body><w:p/></w:body> ?>");
+    expect(after).toContain("POST-PI");
+    expect(after).not.toContain("hello");
+  });
+});

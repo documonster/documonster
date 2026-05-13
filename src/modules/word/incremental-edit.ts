@@ -255,17 +255,17 @@ function replaceBodyChildrenInDocumentXml(
 ): Uint8Array {
   const text = utf8Decoder.decode(original);
 
-  // Locate <w:body...> opening tag and the matching </w:body>. We intentionally
-  // search from the end for the closing tag to tolerate stray "</w:body>"
-  // mentions inside CDATA or comments — neither of which Word emits, but we
-  // stay defensive.
-  const bodyOpen = /<w:body(?:\s[^>]*)?>/.exec(text);
-  const bodyCloseIdx = text.lastIndexOf("</w:body>");
-  if (!bodyOpen || bodyCloseIdx < 0 || bodyOpen.index >= bodyCloseIdx) {
+  // Locate <w:body...> opening tag and the matching </w:body>. We must
+  // ignore any literal "<w:body" or "</w:body>" sitting inside an XML
+  // comment, CDATA section, or processing instruction — those are common
+  // in author-edited documents and confused the previous purely-regex
+  // scan.
+  const range = findBodyTagRange(text);
+  if (!range) {
     return renderBodyOnly(body);
   }
+  const { bodyStart, bodyCloseIdx } = range;
 
-  const bodyStart = bodyOpen.index + bodyOpen[0].length;
   const innerBody = text.slice(bodyStart, bodyCloseIdx);
 
   // Preserve the trailing <w:sectPr ...>...</w:sectPr> if present. Section
@@ -289,6 +289,99 @@ function replaceBodyChildrenInDocumentXml(
 
   const updated = text.slice(0, bodyStart) + newInner + text.slice(bodyCloseIdx);
   return utf8Encoder.encode(updated);
+}
+
+/**
+ * Locate the inner-text range of `<w:body>...</w:body>`, ignoring any
+ * occurrence of the literal tag inside XML comments (`<!-- ... -->`),
+ * CDATA sections (`<![CDATA[ ... ]]>`), or processing instructions
+ * (`<?...?>`). Returns the offsets of the first byte after the body open
+ * tag and the first byte of the body close tag, or `undefined` if either
+ * tag was not found.
+ *
+ * The scanner is a tiny linear pass — no lexer, no DOM. It only knows
+ * about the three "skip these contents" sections that can legitimately
+ * contain `<` and `>` characters.
+ */
+function findBodyTagRange(
+  text: string
+): { readonly bodyStart: number; readonly bodyCloseIdx: number } | undefined {
+  let bodyStart = -1;
+  let bodyCloseIdx = -1;
+  let i = 0;
+
+  while (i < text.length) {
+    const lt = text.indexOf("<", i);
+    if (lt < 0) {
+      break;
+    }
+    // Comment <!-- ... -->
+    if (text.startsWith("<!--", lt)) {
+      const end = text.indexOf("-->", lt + 4);
+      i = end < 0 ? text.length : end + 3;
+      continue;
+    }
+    // CDATA <![CDATA[ ... ]]>
+    if (text.startsWith("<![CDATA[", lt)) {
+      const end = text.indexOf("]]>", lt + 9);
+      i = end < 0 ? text.length : end + 3;
+      continue;
+    }
+    // Processing instruction <? ... ?>
+    if (text.startsWith("<?", lt)) {
+      const end = text.indexOf("?>", lt + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    // Closing tag </w:body>
+    if (text.startsWith("</w:body>", lt)) {
+      // Track the LAST close tag (matches the previous behaviour of
+      // picking up the outermost body) — there should only be one in a
+      // well-formed document anyway, but a stale match would just be
+      // overwritten by the real one.
+      bodyCloseIdx = lt;
+      i = lt + "</w:body>".length;
+      continue;
+    }
+    // Opening tag <w:body...>
+    if (text.startsWith("<w:body", lt)) {
+      const next = text.charCodeAt(lt + 7);
+      // Must be either whitespace before attributes or '>' for the bare tag,
+      // or '/' for the (rare) self-closing form. Anything else (e.g.
+      // "<w:bodyExtra") is a different element name.
+      if (
+        next === 0x20 ||
+        next === 0x09 ||
+        next === 0x0a ||
+        next === 0x0d ||
+        next === 0x3e ||
+        next === 0x2f
+      ) {
+        const gt = text.indexOf(">", lt);
+        if (gt < 0) {
+          break;
+        }
+        // Self-closing `<w:body/>` carries no children — fall back to a
+        // full render rather than trying to splice into nothing.
+        if (text.charCodeAt(gt - 1) === 0x2f) {
+          return undefined;
+        }
+        if (bodyStart < 0) {
+          bodyStart = gt + 1;
+        }
+        i = gt + 1;
+        continue;
+      }
+    }
+    // Any other tag — skip past its '>'.
+    const gt = text.indexOf(">", lt + 1);
+    i = gt < 0 ? text.length : gt + 1;
+  }
+
+  if (bodyStart < 0 || bodyCloseIdx < 0 || bodyStart >= bodyCloseIdx) {
+    return undefined;
+  }
+  return { bodyStart, bodyCloseIdx };
 }
 
 function renderHeaderFooter(

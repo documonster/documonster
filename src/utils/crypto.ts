@@ -146,7 +146,10 @@ export function aesEcbEncrypt(block: Uint8Array, key: Uint8Array): Uint8Array {
 
 /**
  * RC4 stream cipher.
- * @deprecated Only used for reading legacy encrypted PDFs.
+ *
+ * Required by ISO 32000 for reading PDFs encrypted with the RC4 algorithm
+ * (PDF 1.4 standard handler V=1/V=2). Modern Node `crypto` no longer
+ * exposes RC4, so this is a pure-JS implementation.
  */
 export function rc4(key: Uint8Array, data: Uint8Array): Uint8Array {
   // Node's crypto doesn't expose RC4 in modern versions, use pure JS

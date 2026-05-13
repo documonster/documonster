@@ -1001,7 +1001,7 @@ describe("chart round-trip via addChart API", () => {
     expect(chart.title).toBe("Quarterly Results");
     expect(chart.chartTypes.length).toBe(1);
     expect(chart.chartTypes[0].type).toBe("bar");
-    expect(chart.seriesCount).toBe(2);
+    expect(chart.getSeriesCount(0)).toBe(2);
     expect(chart.axes.length).toBe(2);
   });
 
@@ -1292,7 +1292,7 @@ describe("Chart high-level API", () => {
     );
     const chart = ws.getCharts()[0];
 
-    expect(chart.seriesCount).toBe(2);
+    expect(chart.getSeriesCount(0)).toBe(2);
     expect(chart.getSeries(0)).toBeDefined();
     expect(chart.getSeries(1)).toBeDefined();
     expect(chart.getSeries(2)).toBeUndefined();

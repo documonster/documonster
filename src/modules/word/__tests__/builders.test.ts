@@ -588,3 +588,61 @@ describe("Error classes", () => {
     expect(err.name).toBe("DocxUnsupportedFeatureError");
   });
 });
+
+// =============================================================================
+// addBulletList / addNumberedList numbering-instance robustness
+//
+// Previously the code did `find(...)!.numId` after a separate code path
+// inserted the abstract definition. If the abstract was already present
+// (e.g. a caller added it manually, or a future code path forgot to push
+// the matching instance) the `!` would crash with a TypeError. The helper
+// now lazily registers an instance whenever one is missing.
+// =============================================================================
+
+describe("addBulletList / addNumberedList: numbering-instance resilience", () => {
+  it("creates a numbering instance when an abstract exists without one", () => {
+    const h = Document.create();
+    // Inject a bullet abstract directly into the handle's state via
+    // Document.addStyle is not appropriate here — but `addStyle` is the
+    // wrong API. Instead we drive addBulletList twice: the first call
+    // registers both abstract and instance; we then strip the instance
+    // and call addBulletList again to verify it heals itself.
+    Document.addBulletList(h, ["A"]);
+    const built1 = Document.build(h);
+    expect(built1.numberingInstances?.length).toBe(1);
+
+    // Surgically remove the instance to simulate a drift scenario (this
+    // path triggered the bug).
+    type State = {
+      numberingInstances: Array<{ numId: number; abstractNumId: number }>;
+    };
+    const state = h as unknown as State;
+    state.numberingInstances = [];
+
+    // Must not throw — and must re-register an instance for the existing
+    // bullet abstract.
+    expect(() => Document.addBulletList(h, ["B"])).not.toThrow();
+    const built2 = Document.build(h);
+    expect(built2.numberingInstances?.length).toBe(1);
+    expect(built2.abstractNumberings?.length).toBe(1);
+  });
+
+  it("reuses the same numbering instance across repeated calls", () => {
+    const h = Document.create();
+    Document.addBulletList(h, ["A", "B"]);
+    Document.addBulletList(h, ["C", "D"]);
+    const built = Document.build(h);
+    // One abstract, one instance — repeated bullet calls share both.
+    expect(built.abstractNumberings?.length).toBe(1);
+    expect(built.numberingInstances?.length).toBe(1);
+  });
+
+  it("creates separate abstracts and instances for bullets vs numbered", () => {
+    const h = Document.create();
+    Document.addBulletList(h, ["A"]);
+    Document.addNumberedList(h, ["1"]);
+    const built = Document.build(h);
+    expect(built.abstractNumberings?.length).toBe(2);
+    expect(built.numberingInstances?.length).toBe(2);
+  });
+});

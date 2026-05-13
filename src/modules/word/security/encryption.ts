@@ -9,14 +9,26 @@
  * - Password-based encryption/decryption of DOCX content
  * - EncryptionInfo XML generation/parsing
  *
- * Note: A full implementation requires a CFB container reader/writer for the
- * outer compound document format. For now, we expose primitives that can be
- * combined with an external CFB library if needed.
+ * All AES and SHA primitives are delegated to `@utils/crypto`, which uses
+ * synchronous `node:crypto` APIs in Node and Web Crypto in the browser.
+ * The KDF inner loop runs ~100,000 hashes per derived key; on Node we go
+ * through the synchronous fast path so a round-trip completes in well
+ * under a second instead of the multi-second microtask churn that the
+ * old `await crypto.subtle.digest()` loop produced.
  *
  * References:
  *   - MS-OFFCRYPTO: Office Document Cryptography Structure
  *   - ECMA-376 Part 3: Markup Compatibility and Extensibility
  */
+
+import {
+  aesCbcDecrypt as aesCbcDecryptPkcs7Sync,
+  aesCbcDecryptRaw as aesCbcDecryptRawSync,
+  aesCbcEncrypt as aesCbcEncryptPkcs7Sync,
+  aesCbcEncryptRaw as aesCbcEncryptRawSync,
+  hash as hashSyncMaybe,
+  hashAsync
+} from "@utils/crypto";
 
 import {
   base64ToBytes,
@@ -77,6 +89,32 @@ export function isEncryptedDocx(buffer: Uint8Array): boolean {
 }
 
 /**
+ * Detect whether the platform's `@utils/crypto.hash` supports the requested
+ * algorithm synchronously. Node's implementation accepts every OpenSSL
+ * digest (SHA-1/256/384/512, MD5); the browser implementation only ships
+ * synchronous SHA-256 and MD5 — anything else throws.
+ *
+ * The detection result is cached per algorithm so we only pay the probe
+ * cost once.
+ */
+const _syncHashCache = new Map<string, boolean>();
+function canHashSync(algorithm: string): boolean {
+  const cached = _syncHashCache.get(algorithm);
+  if (cached !== undefined) {
+    return cached;
+  }
+  let ok = false;
+  try {
+    hashSyncMaybe(algorithm, new Uint8Array(0));
+    ok = true;
+  } catch {
+    ok = false;
+  }
+  _syncHashCache.set(algorithm, ok);
+  return ok;
+}
+
+/**
  * Derive an encryption key from a password using the agile encryption KDF.
  *
  * Per MS-OFFCRYPTO 2.3.4.11:
@@ -96,36 +134,50 @@ export async function deriveEncryptionKey(
   blockKey: Uint8Array
 ): Promise<Uint8Array> {
   const pwdBytes = stringToUtf16LE(password);
-  const hash = mapHashName(info.hashAlgorithm);
+  const hashName = mapHashName(info.hashAlgorithm);
 
-  // H_0 = H(salt + password)
-  let h = await sha(hash, concat(info.keySalt, pwdBytes));
+  // Reusable 4-byte iterator + scratch buffer to avoid per-iteration
+  // allocations inside the spin loop. The scratch holds [iter || H_{i-1}]
+  // and is rebuilt in place.
+  const iterAndPrev = new Uint8Array(4 + getHashSizeFor(hashName));
+  const iterView = new DataView(iterAndPrev.buffer, 0, 4);
 
-  // Iterate: H_i = H(iterator (4 bytes LE) + H_{i-1})
-  for (let i = 0; i < info.spinCount; i++) {
-    const iter = new Uint8Array(4);
-    new DataView(iter.buffer).setUint32(0, i, true);
-    h = await sha(hash, concat(iter, h));
+  let h: Uint8Array;
+  if (canHashSync(hashName)) {
+    // Fast path: ~100,000 synchronous digests, no microtask churn.
+    h = hashSyncMaybe(hashName, concat(info.keySalt, pwdBytes));
+    for (let i = 0; i < info.spinCount; i++) {
+      iterView.setUint32(0, i, true);
+      iterAndPrev.set(h, 4);
+      h = hashSyncMaybe(hashName, iterAndPrev);
+    }
+    h = hashSyncMaybe(hashName, concat(h, blockKey));
+  } else {
+    // Browser fallback: Web Crypto SHA-1/384/512 are async-only.
+    h = await hashAsync(hashName, concat(info.keySalt, pwdBytes));
+    for (let i = 0; i < info.spinCount; i++) {
+      iterView.setUint32(0, i, true);
+      iterAndPrev.set(h, 4);
+      h = await hashAsync(hashName, iterAndPrev);
+    }
+    h = await hashAsync(hashName, concat(h, blockKey));
   }
 
-  // Final: H_final = H(H + blockKey)
-  const final = await sha(hash, concat(h, blockKey));
-
   // Truncate to keySize. The hash size MUST be at least the requested
-  // key length — otherwise we'd hand WebCrypto a short key buffer that
-  // either fails AES import (`OperationError`) or produces a key the
-  // counterparty can't validate. Reject misconfigured EncryptionInfo
-  // up-front with a clear error.
+  // key length — otherwise we'd hand the AES layer a short key buffer
+  // that either fails import or produces a key the counterparty can't
+  // validate. Reject misconfigured EncryptionInfo up-front with a clear
+  // error.
   const keyBytes = info.keyBits / 8;
-  if (final.length < keyBytes) {
+  if (h.length < keyBytes) {
     throw new Error(
-      `deriveEncryptionKey: hash output of ${final.length} bytes is too ` +
+      `deriveEncryptionKey: hash output of ${h.length} bytes is too ` +
         `short for keyBits=${info.keyBits} (need ${keyBytes}). ` +
         `Use a hash algorithm with a larger digest size (e.g. SHA-512 ` +
         `for keyBits ≤ 512).`
     );
   }
-  return final.slice(0, keyBytes);
+  return h.slice(0, keyBytes);
 }
 
 /** Block keys as defined in MS-OFFCRYPTO 2.3.4.13. */
@@ -159,8 +211,8 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashInput
     );
 
-    // Decrypt the verifier hash input (PKCS#7 padded by aesCbcEncrypt during write)
-    const verifierInput = await aesCbcDecryptPkcs7(
+    // Decrypt the verifier hash input (PKCS#7 padded by encryption write path)
+    const verifierInput = aesCbcPkcs7Decrypt(
       info.encryptedVerifierHashInput,
       verifierInputKey,
       info.keySalt
@@ -168,7 +220,7 @@ export async function verifyPassword(
 
     // Hash the verifier input
     const hashAlg = mapHashName(info.hashAlgorithm);
-    const computedHash = await sha(hashAlg, verifierInput);
+    const computedHash = await hashAsync(hashAlg, verifierInput);
 
     // Derive verifier hash value key
     const verifierValueKey = await deriveEncryptionKey(
@@ -177,8 +229,8 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashValue
     );
 
-    // Decrypt the verifier hash value (PKCS#7 padded by aesCbcEncrypt during write)
-    const expectedHash = await aesCbcDecryptPkcs7(
+    // Decrypt the verifier hash value (PKCS#7 padded by encryption write path)
+    const expectedHash = aesCbcPkcs7Decrypt(
       info.encryptedVerifierHashValue,
       verifierValueKey,
       info.keySalt
@@ -212,12 +264,8 @@ export async function decryptPackage(
   // Derive key encryption key
   const keyEncryptionKey = await deriveEncryptionKey(password, info, AGILE_BLOCK_KEYS.encryptedKey);
 
-  // Decrypt the actual package key (PKCS#7 padded by aesCbcEncrypt during write)
-  const packageKey = await aesCbcDecryptPkcs7(
-    info.encryptedKeyValue,
-    keyEncryptionKey,
-    info.keySalt
-  );
+  // Decrypt the actual package key (PKCS#7 padded by encryption write path)
+  const packageKey = aesCbcPkcs7Decrypt(info.encryptedKeyValue, keyEncryptionKey, info.keySalt);
 
   if (encryptedPackage.length < 8) {
     throw new DocxDecryptionError("EncryptedPackage too small (missing 8-byte size header)");
@@ -246,24 +294,26 @@ export async function decryptPackage(
   const encData = encryptedPackage.slice(8);
   const segments: Uint8Array[] = [];
   const segCount = Math.ceil(encData.length / segmentSize);
+  const hashName = mapHashName(info.hashAlgorithm);
+  const idxBytes = new Uint8Array(4);
+  const idxView = new DataView(idxBytes.buffer);
 
   for (let i = 0; i < segCount; i++) {
     const segStart = i * segmentSize;
     const segEnd = Math.min(segStart + segmentSize, encData.length);
     const segData = encData.slice(segStart, segEnd);
 
-    // Segment IV is hash(salt + segment_index_LE)
-    const idxBytes = new Uint8Array(4);
-    new DataView(idxBytes.buffer).setUint32(0, i, true);
-    const segIv = (
-      await sha(mapHashName(info.hashAlgorithm), concat(info.keySalt, idxBytes))
-    ).slice(0, info.blockSize);
+    // Segment IV is hash(salt + segment_index_LE), truncated to block size.
+    idxView.setUint32(0, i, true);
+    const segIv = (await hashAsync(hashName, concat(info.keySalt, idxBytes))).slice(
+      0,
+      info.blockSize
+    );
 
-    // Package segments use zero padding (MS-OFFCRYPTO §2.3.4.15). Web Crypto
-    // would silently mis-strip valid-looking PKCS#7 tails, so use the
-    // zero-pad-safe path here.
-    const decSeg = await aesCbcDecryptZeroPad(segData, packageKey, segIv);
-    segments.push(decSeg);
+    // Package segments use zero padding (MS-OFFCRYPTO §2.3.4.15). Use the
+    // raw (no-padding) AES-CBC decrypt — never the PKCS#7 path, which
+    // would silently mis-strip valid-looking trailing zeros.
+    segments.push(aesCbcDecryptRawSync(segData, packageKey, ivToBlockSize(segIv)));
   }
 
   // Concatenate and truncate to total size
@@ -281,7 +331,11 @@ export async function decryptPackage(
 }
 
 // =============================================================================
-// Internal Crypto Helpers (use Web Crypto API)
+// Internal Crypto Helpers
+//
+// All AES and SHA work is delegated to `@utils/crypto`. Node uses
+// synchronous `node:crypto`, the browser variant uses Web Crypto / pure
+// JS — same API on both sides.
 // =============================================================================
 
 function mapHashName(name: string): string {
@@ -294,123 +348,60 @@ function mapHashName(name: string): string {
   return map[name] ?? "SHA-512";
 }
 
-async function sha(algorithm: string, data: Uint8Array): Promise<Uint8Array> {
-  const buf = await crypto.subtle.digest(algorithm, toBuffer(data));
-  return new Uint8Array(buf);
+/** Static lookup so the KDF spin loop doesn't pay a per-call cost. */
+function getHashSizeFor(hashName: string): number {
+  switch (hashName) {
+    case "SHA-1":
+      return 20;
+    case "SHA-256":
+      return 32;
+    case "SHA-384":
+      return 48;
+    case "SHA-512":
+      return 64;
+    default:
+      // Conservative upper bound: any reasonable hash output fits in 64 bytes.
+      // Callers that go through this path are misconfigured anyway and will
+      // be rejected by the keyBits sanity check after the first digest.
+      return 64;
+  }
 }
 
 /**
- * Decrypt AES-CBC ciphertext that uses **PKCS#7 padding**.
- *
- * Used for the encryptedKeyValue, encryptedVerifierHashInput and
- * encryptedVerifierHashValue blobs. Web Crypto strips PKCS#7 padding
- * automatically.
+ * Decrypt an AES-CBC blob whose plaintext was written with PKCS#7 padding.
+ * Used for the encryptedKeyValue / encryptedVerifierHashInput /
+ * encryptedVerifierHashValue blobs. The IV is truncated/extended to 16
+ * bytes per the OOXML spec.
  */
-async function aesCbcDecryptPkcs7(
-  data: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    toBuffer(key),
-    { name: "AES-CBC", length: key.length * 8 },
-    false,
-    ["decrypt"]
-  );
-  const iv16 = new Uint8Array(16);
-  iv16.set(iv.slice(0, 16));
-  const result = await crypto.subtle.decrypt(
-    { name: "AES-CBC", iv: toBuffer(iv16) },
-    cryptoKey,
-    toBuffer(data)
-  );
-  return new Uint8Array(result);
+function aesCbcPkcs7Decrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
+  return aesCbcDecryptPkcs7Sync(data, key, ivToBlockSize(iv));
 }
 
 /**
- * Decrypt AES-CBC ciphertext that uses **zero padding** (Agile package
- * segments).
- *
- * Web Crypto only supports PKCS#7. If the trailing zero-padded plaintext
- * coincidentally satisfies a valid PKCS#7 pattern (last byte 0x01..0x10 with
- * the matching tail), Web Crypto will silently strip those bytes and we'd
- * lose data. To avoid that we always go through the manual path which
- * appends a synthetic PKCS#7 padding block, lets Web Crypto strip it, then
- * slices back to the original ciphertext length — mathematically equivalent
- * to a true zero-pad CBC decryption.
+ * Encrypt with AES-CBC + PKCS#7 padding — the Agile spec's standard
+ * choice for verifier blobs and the encrypted package key.
  */
-async function aesCbcDecryptZeroPad(
-  data: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const iv16 = new Uint8Array(16);
-  iv16.set(iv.slice(0, 16));
-  return manualAesCbcDecrypt(data, key, iv16);
+function aesCbcPkcs7Encrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
+  return aesCbcEncryptPkcs7Sync(data, key, ivToBlockSize(iv));
 }
 
-async function manualAesCbcDecrypt(
-  data: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const blockSize = 16;
-  if (data.length % blockSize !== 0) {
-    throw new DocxDecryptionError("Data length must be a multiple of block size");
-  }
-
-  // Strategy: append a crafted ciphertext block that will produce valid PKCS#7
-  // padding (\x10 * 16) when decrypted, allowing Web Crypto to accept the input.
-  //
-  // For CBC decryption, the last plaintext block P_n = AES_Dec(C_n) XOR C_{n-1}.
-  // We want P_n = 0x10 repeated 16 times (full PKCS#7 padding block).
-  // So we need C_n such that AES_Dec(C_n) = C_{n-1} XOR (0x10 * 16).
-  // Equivalently, C_n = AES_Enc(C_{n-1} XOR (0x10 * 16)).
-  //
-  // We compute this using AES-CBC encrypt with IV=0 on the XOR'd block.
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    toBuffer(key),
-    { name: "AES-CBC", length: key.length * 8 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-
-  const lastCipherBlock = data.slice(data.length - blockSize);
-  const plainForPad = new Uint8Array(blockSize);
-  for (let j = 0; j < blockSize; j++) {
-    plainForPad[j] = lastCipherBlock[j] ^ 0x10;
-  }
-
-  // Encrypt to get the padding ciphertext block (use zero IV for ECB-like behavior)
-  const encResult = await crypto.subtle.encrypt(
-    { name: "AES-CBC", iv: toBuffer(new Uint8Array(16)) },
-    cryptoKey,
-    toBuffer(plainForPad)
-  );
-  // encResult = [AES_Enc(plainForPad XOR 0), PKCS_padding_block] = 32 bytes
-  const padCipherBlock = new Uint8Array(encResult).slice(0, blockSize);
-
-  // Append the crafted block to the ciphertext
-  const augmented = concat(data, padCipherBlock);
-
-  // Now decrypt with Web Crypto — the last block will be valid PKCS#7
-  const decResult = await crypto.subtle.decrypt(
-    { name: "AES-CBC", iv: toBuffer(iv) },
-    cryptoKey,
-    toBuffer(augmented)
-  );
-
-  // Web Crypto strips the padding, so we get exactly data.length bytes
-  return new Uint8Array(decResult).slice(0, data.length);
+/**
+ * Encrypt with AES-CBC and zero-padding (no PKCS#7). Used by package
+ * segment encryption: data is already padded to a 16-byte boundary by
+ * the caller, and the on-disk format does not include a PKCS#7 trailer.
+ */
+function aesCbcZeroPadEncrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
+  return aesCbcEncryptRawSync(data, key, ivToBlockSize(iv));
 }
 
-/** Convert Uint8Array to a fresh ArrayBuffer (for strict crypto.subtle typing). */
-function toBuffer(arr: Uint8Array): ArrayBuffer {
-  const buf = new ArrayBuffer(arr.length);
-  new Uint8Array(buf).set(arr);
-  return buf;
+/** Truncate or right-pad an IV to the AES block size (16 bytes). */
+function ivToBlockSize(iv: Uint8Array): Uint8Array {
+  if (iv.length === 16) {
+    return iv;
+  }
+  const out = new Uint8Array(16);
+  out.set(iv.slice(0, 16));
+  return out;
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -646,67 +637,6 @@ export interface EncryptOptions {
   readonly spinCount?: number;
 }
 
-/**
- * AES-CBC encryption without PKCS#7 padding (raw block encryption).
- *
- * Data MUST already be padded to a multiple of 16 bytes.
- * Used for package segment encryption where zero-padding is used.
- */
-async function aesCbcEncryptNoPadding(
-  data: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    toBuffer(key),
-    { name: "AES-CBC", length: key.length * 8 },
-    false,
-    ["encrypt"]
-  );
-  // Ensure IV is 16 bytes
-  const iv16 = new Uint8Array(16);
-  iv16.set(iv.slice(0, 16));
-
-  const result = await crypto.subtle.encrypt(
-    { name: "AES-CBC", iv: toBuffer(iv16) },
-    cryptoKey,
-    toBuffer(data)
-  );
-  // Web Crypto always adds PKCS#7 padding (extra 16 bytes when input is
-  // already block-aligned). Strip the trailing padding block.
-  return new Uint8Array(result, 0, data.length);
-}
-
-/**
- * AES-CBC encryption with PKCS#7 padding (standard).
- *
- * Used for encrypting verifier and key values per MS-OFFCRYPTO.
- */
-async function aesCbcEncrypt(
-  data: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    toBuffer(key),
-    { name: "AES-CBC", length: key.length * 8 },
-    false,
-    ["encrypt"]
-  );
-  // Ensure IV is 16 bytes
-  const iv16 = new Uint8Array(16);
-  iv16.set(iv.slice(0, 16));
-
-  const result = await crypto.subtle.encrypt(
-    { name: "AES-CBC", iv: toBuffer(iv16) },
-    cryptoKey,
-    toBuffer(data)
-  );
-  return new Uint8Array(result);
-}
-
 // =============================================================================
 // Encrypt DOCX
 // =============================================================================
@@ -734,7 +664,7 @@ export async function encryptDocx(
   const hashAlgorithm = options?.hashAlgorithm ?? "SHA512";
   const spinCount = options?.spinCount ?? 100000;
   const hashName = mapHashName(hashAlgorithm);
-  const hashSize = await getHashSize(hashName);
+  const hashSize = getHashSizeFor(hashName);
   const keyBytes = keyBits / 8;
   const blockSize = 16;
 
@@ -750,25 +680,25 @@ export async function encryptDocx(
   );
 
   // 3. Encrypt the package key
-  const encryptedKeyValue = await aesCbcEncrypt(packageKey, keyEncryptionKey, keySalt);
+  const encryptedKeyValue = aesCbcPkcs7Encrypt(packageKey, keyEncryptionKey, keySalt);
 
   // 4. Generate verifier: random 16 bytes, hash them, encrypt both
   const verifierInput = randomBytes(16);
-  const verifierHash = await sha(hashName, verifierInput);
+  const verifierHash = await hashAsync(hashName, verifierInput);
 
   const verifierInputKey = await deriveEncryptionKey(
     password,
     { keySalt, spinCount, hashAlgorithm, keyBits },
     AGILE_BLOCK_KEYS.verifierHashInput
   );
-  const encryptedVerifierHashInput = await aesCbcEncrypt(verifierInput, verifierInputKey, keySalt);
+  const encryptedVerifierHashInput = aesCbcPkcs7Encrypt(verifierInput, verifierInputKey, keySalt);
 
   const verifierValueKey = await deriveEncryptionKey(
     password,
     { keySalt, spinCount, hashAlgorithm, keyBits },
     AGILE_BLOCK_KEYS.verifierHashValue
   );
-  const encryptedVerifierHashValue = await aesCbcEncrypt(verifierHash, verifierValueKey, keySalt);
+  const encryptedVerifierHashValue = aesCbcPkcs7Encrypt(verifierHash, verifierValueKey, keySalt);
 
   // 5. Encrypt the ZIP data in 4096-byte segments
   const encryptedPackage = await encryptPackageData(
@@ -830,6 +760,8 @@ async function encryptPackageData(
   const segmentSize = 4096;
   const segCount = Math.ceil(data.length / segmentSize);
   const encSegments: Uint8Array[] = [];
+  const idxBytes = new Uint8Array(4);
+  const idxView = new DataView(idxBytes.buffer);
 
   for (let i = 0; i < segCount; i++) {
     const segStart = i * segmentSize;
@@ -844,12 +776,10 @@ async function encryptPackageData(
     }
 
     // Segment IV = hash(salt + segment_index_LE) truncated to blockSize
-    const idxBytes = new Uint8Array(4);
-    new DataView(idxBytes.buffer).setUint32(0, i, true);
-    const segIv = (await sha(hashName, concat(keySalt, idxBytes))).slice(0, blockSize);
+    idxView.setUint32(0, i, true);
+    const segIv = (await hashAsync(hashName, concat(keySalt, idxBytes))).slice(0, blockSize);
 
-    const encSeg = await aesCbcEncryptNoPadding(segData, packageKey, segIv);
-    encSegments.push(encSeg);
+    encSegments.push(aesCbcZeroPadEncrypt(segData, packageKey, segIv));
   }
 
   // Total size (8 bytes LE uint64) + concatenated encrypted segments
@@ -864,12 +794,6 @@ async function encryptPackageData(
     offset += seg.length;
   }
   return result;
-}
-
-/** Get hash output size in bytes for a given Web Crypto hash name. */
-async function getHashSize(hashName: string): Promise<number> {
-  const test = await sha(hashName, new Uint8Array(0));
-  return test.length;
 }
 
 /** Build the Agile EncryptionInfo XML document. */

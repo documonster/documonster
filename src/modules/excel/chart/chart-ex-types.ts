@@ -105,15 +105,6 @@ export interface ChartExSpace {
 }
 
 export interface ChartExData {
-  /**
-   * @deprecated Moved to {@link ChartExSpace.externalData} to match
-   * the Chart2014 schema (`cx:externalData` is a child of
-   * `cx:chartSpace`, not `cx:chartData`). The parser migrates legacy
-   * on-disk placements into `ChartExSpace.externalData`; this field
-   * remains on the type only to avoid breaking callers that read it
-   * directly. Write-side code no longer consults this slot.
-   */
-  externalData?: Array<{ id: string; autoUpdate?: boolean }>;
   /** Chart data (numeric/string arrays referenced by series) */
   data: ChartExDataEntry[];
 }

@@ -4273,11 +4273,8 @@ interface ConsolidatedDataEntry {
 function renderChartData(data: ChartExModel["chartSpace"]["chartData"]): string {
   const parts: string[] = [];
   parts.push("  <cx:chartData>");
-  // NOTE: `cx:externalData` used to be emitted here, but it is a
-  // child of `cx:chartSpace` (not `cx:chartData`) per the Chart2014
-  // schema. The writer now emits it at the chartSpace level; the
-  // deprecated `data.externalData` slot is ignored here so a
-  // legacy round-trip cannot double-emit it.
+  // `cx:externalData` is a child of `cx:chartSpace`, not `cx:chartData`,
+  // per the Chart2014 schema — emitted by the chartSpace renderer.
   for (const entry of data.data) {
     parts.push(renderDataEntry(entry));
   }
@@ -4509,10 +4506,8 @@ function renderChart(chart: ChartExModel["chartSpace"]["chart"]): string {
   if (chart.legend) {
     parts.push(renderLegend(chart.legend));
   }
-  // CT_Chart does NOT carry `spPr` in the ECMA-376 / Chart2014 schema
-  // — chart-frame styling lives on `CT_ChartSpace`. `chart.spPr` is a
-  // legacy type field kept for backward compat (see the @deprecated
-  // note on `ChartExChart.spPr`); do not emit it to avoid invalid XML.
+  // `CT_Chart` carries no `spPr` per the Chart2014 schema — chart-frame
+  // styling lives on `CT_ChartSpace`, emitted by the chartSpace renderer.
   if (chart.extLst) {
     parts.push(`    ${chart.extLst}`);
   }

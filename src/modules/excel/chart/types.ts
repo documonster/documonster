@@ -1721,12 +1721,6 @@ export interface PivotFormat {
    * label styling without dropping into raw XML.
    */
   dLbl?: DataLabelEntry;
-  /**
-   * @deprecated Use {@link dLbl} for structured access. Retained so
-   * files parsed before the structured slot landed continue to
-   * round-trip. Writers prefer `dLbl` when both are present.
-   */
-  rawDLbl?: string;
   /** Extension list (raw XML for round-trip). */
   extLst?: string;
 }
