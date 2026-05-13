@@ -141,6 +141,7 @@ export function validateDocument(
   validateStyleBasedOnReferences(doc.styles, addIssue);
   validateHeaderFooterReferences(doc.sectionProperties, doc.headers, doc.footers, addIssue);
   validateCommentIdUniqueness(doc.comments, addIssue);
+  validateNoteAndCommentReferences(doc, addIssue);
   validateBookmarkNameUniqueness(doc.body, addIssue);
   validateTableCellContent(doc.body, addIssue);
   validateCustomXmlPartItemIds(doc.customXmlParts, addIssue);
@@ -1381,6 +1382,121 @@ function validateCommentIdUniqueness(
     }
     ids.add(c.id);
   }
+}
+
+// =============================================================================
+// Reference Closure (footnote/endnote/comment IDs referenced in body)
+// =============================================================================
+
+/**
+ * Walk every Run.content in the document and ensure that any
+ * `footnoteRef` / `endnoteRef` / `commentReference` ids are actually
+ * defined in `doc.footnotes` / `doc.endnotes` / `doc.comments`.
+ *
+ * A dangling reference produces an XML document that opens in Word but
+ * shows a broken reference number, which is one of the more confusing
+ * failure modes for downstream tooling. We surface it as an error.
+ */
+function validateNoteAndCommentReferences(
+  doc: DocxDocument,
+  addIssue: (s: ValidationSeverity, m: string, p: string, r: string) => void
+): void {
+  // Build the id sets once.
+  const footnoteIds = new Set<number>();
+  if (doc.footnotes) {
+    for (const fn of doc.footnotes) {
+      footnoteIds.add(fn.id);
+    }
+  }
+  const endnoteIds = new Set<number>();
+  if (doc.endnotes) {
+    for (const en of doc.endnotes) {
+      endnoteIds.add(en.id);
+    }
+  }
+  const commentIds = new Set<number>();
+  if (doc.comments) {
+    for (const c of doc.comments) {
+      commentIds.add(c.id);
+    }
+  }
+
+  // Visit every run in body / headers / footers / footnotes / endnotes
+  // / comments. Footnotes themselves can reference other footnotes in
+  // theory but Word does not allow it, so we only scan the obvious
+  // surfaces.
+  const checkRun = (run: Run, path: string): void => {
+    for (const c of run.content) {
+      if (c.type === "footnoteRef") {
+        if (footnoteIds.size > 0 && !footnoteIds.has(c.id)) {
+          addIssue(
+            "error",
+            `footnoteRef points at id=${c.id} which is not defined in doc.footnotes`,
+            path,
+            "ref-footnote-missing"
+          );
+        }
+      } else if (c.type === "endnoteRef") {
+        if (endnoteIds.size > 0 && !endnoteIds.has(c.id)) {
+          addIssue(
+            "error",
+            `endnoteRef points at id=${c.id} which is not defined in doc.endnotes`,
+            path,
+            "ref-endnote-missing"
+          );
+        }
+      }
+    }
+  };
+
+  // CommentReference / commentRangeStart / commentRangeEnd live as
+  // ParagraphChild siblings (alongside runs) — scan paragraph children
+  // directly. We use the existing walker to keep dispatch consistent.
+  walkBlocks(doc.body, {
+    enterParagraph(para, path) {
+      const basePath = `body[${path.index}]`;
+      for (let i = 0; i < para.children.length; i++) {
+        const child = para.children[i]!;
+        const childPath = `${basePath}.children[${i}]`;
+        if ("type" in child) {
+          if (child.type === "commentReference") {
+            if (commentIds.size > 0 && !commentIds.has(child.id)) {
+              addIssue(
+                "error",
+                `commentReference points at id=${child.id} which is not defined in doc.comments`,
+                childPath,
+                "ref-comment-missing"
+              );
+            }
+          } else if (child.type === "commentRangeStart" || child.type === "commentRangeEnd") {
+            if (commentIds.size > 0 && !commentIds.has(child.id)) {
+              addIssue(
+                "error",
+                `${child.type} points at id=${child.id} which is not defined in doc.comments`,
+                childPath,
+                "ref-comment-range-missing"
+              );
+            }
+          } else if (child.type === "hyperlink") {
+            // Hyperlink children are runs.
+            for (const r of child.children) {
+              checkRun(r, `${childPath}.children`);
+            }
+          } else if (
+            child.type === "insertedRun" ||
+            child.type === "deletedRun" ||
+            child.type === "movedFromRun" ||
+            child.type === "movedToRun"
+          ) {
+            checkRun(child.run, `${childPath}.run`);
+          }
+        } else {
+          // Bare run.
+          checkRun(child as Run, childPath);
+        }
+      }
+    }
+  });
 }
 
 // =============================================================================

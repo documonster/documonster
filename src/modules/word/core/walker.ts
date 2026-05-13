@@ -597,7 +597,13 @@ function walkSdt(
       if (result === "stop") {
         return "stop";
       }
-    } else if (isRun(item)) {
+    } else if ("type" in item && item.type === "sdt") {
+      // Nested SDT — recurse so visitors see the inner content controls.
+      const result = walkSdt(item, visitor, itemPath);
+      if (result === "stop") {
+        return "stop";
+      }
+    } else if (!("type" in item) && isRun(item)) {
       const result = walkRun(item, visitor, itemPath);
       if (result === "stop") {
         return "stop";

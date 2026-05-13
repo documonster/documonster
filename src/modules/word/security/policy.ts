@@ -18,13 +18,27 @@
  * - `maxPackageSize`, `maxPartSize`, `maxPartCount`, `maxXmlDepth` —
  *   IMPLEMENTED. Enforced during ZIP parsing / XML parsing; oversize
  *   inputs raise `DocxLimitExceededError` instead of being processed.
- * - `dropSignaturesOnModify` — NOT YET ENFORCED. Today the field is
- *   advisory only; signatures are always preserved by the writer if
- *   they live in opaqueParts. Treat the field as a documented intent.
- * - `preserveOleObjects` — NOT YET ENFORCED. OLE binaries embedded as
- *   opaque parts are always preserved.
- * - `rawXmlPolicy` — NOT YET ENFORCED. opaqueRun / opaqueParagraphChild
- *   / opaqueDrawing rawXml is always written verbatim by the writer.
+ * - `dropSignaturesOnModify` — IMPLEMENTED. Both writers skip any opaque
+ *   parts under `_xmlsignatures/` when `true` (the default). The
+ *   `_rels/.rels` file is rebuilt from scratch by the packager, so any
+ *   sigOrigin relationship pointing at the now-absent signatures is also
+ *   removed automatically. Set `false` to keep the parts; in that case
+ *   downstream verifiers will treat the signatures as broken because the
+ *   document body has been re-emitted.
+ * - `preserveOleObjects` — IMPLEMENTED. On the read path, OLE embedding
+ *   binaries (word/embeddings/*.bin and similar) are excluded from
+ *   `opaqueParts` when `false`. On the write path (both buffered and
+ *   streaming) the same paths are skipped when emitting opaqueParts. The
+ *   relationships that referenced the binary remain in the owning part's
+ *   .rels — strip those manually if you need a fully clean document.
+ * - `rawXmlPolicy` — IMPLEMENTED on the write path. `"preserve"` (default)
+ *   writes opaque rawXml verbatim; `"strip"` skips the offending fragments
+ *   while keeping the surrounding element well-formed; `"reject"` throws
+ *   `DocxRawXmlPolicyError` so the caller can sanitise the model first.
+ *   Sites covered: opaqueRun, opaqueParagraphChild, opaqueDrawing,
+ *   drawingShape rawXml/_advancedFillXml/_advancedEffectsXml,
+ *   settings.mailMergeRawXml, theme.formatScheme.rawXml, theme.extLstXml,
+ *   webSettings.rawXml, numPicBullet.rawVmlXml.
  *
  * Pull requests welcome for the not-yet-enforced fields. Until they
  * arrive, callers needing those guarantees should sanitise the input

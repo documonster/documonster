@@ -64,8 +64,6 @@ import type {
   DocumentBackground,
   FieldContent,
   Watermark,
-  TextWatermark,
-  ImageWatermark,
   DrawingShape,
   OpaquePart,
   OpaqueRelationship,
@@ -80,6 +78,10 @@ import {
   parseChartXml,
   parseChartExXml
 } from "./chart-parser";
+import {
+  parseCommentsXml as parseCommentsXmlExternal,
+  parseCommentsExtendedXml
+} from "./comments-parser";
 import {
   parseCoreProps,
   parseAppProps,
@@ -121,6 +123,7 @@ import {
   parseTableCellMargins,
   parseTableProperties
 } from "./table-properties-parsers";
+import { detectWatermarkFromRoot } from "./watermark-parser";
 
 // =============================================================================
 // Run Content Parser
@@ -720,7 +723,7 @@ function parseSdt(
     }
   }
 
-  const content: (Paragraph | Run | Table)[] = [];
+  const content: (Paragraph | Run | Table | StructuredDocumentTag)[] = [];
   if (sdtContentEl) {
     for (const child of sdtContentEl.children) {
       if (child.type !== "element") {
@@ -734,17 +737,12 @@ function parseSdt(
       } else if (n === "r") {
         content.push(parseRun(child));
       } else if (n === "sdt") {
-        // Nested SDT (e.g. repeating section's item SDTs). The current
-        // SdtProperties.content type does not allow a nested SDT element,
-        // so flatten the inner SDT's content into the parent's content.
-        // This preserves visible body content but loses the inner SDT's
-        // own metadata (data binding, alias, …) on round-trip — better
-        // than dropping the runs entirely.
+        // Nested SDT (e.g. repeating section item SDTs). Preserve the
+        // inner SDT verbatim — including its own properties — so data
+        // binding, alias, lock and similar metadata round-trip correctly.
         const inner = parseSdt(child, ctx);
         if (inner && inner.type === "sdt") {
-          for (const c of inner.content) {
-            content.push(c);
-          }
+          content.push(inner);
         }
       }
     }
@@ -919,7 +917,46 @@ function parseParagraph(pEl: XmlElement, ctx: ReaderContext): Paragraph {
           continue; // Don't add begin/instrText runs as normal content
         }
         if (field.state === "none" && !hasFldChar) {
-          children.push(parseRun(resolved));
+          // Detect a degenerate `<w:r>` whose only meaningful child is
+          // `<w:commentReference>`. The OOXML schema requires the leaf
+          // to live inside a w:r, but at the model level we represent
+          // it as a paragraph-child `commentReference`. Hoisting here
+          // means a round-trip preserves the model shape instead of
+          // collapsing to `annotationReference`.
+          let onlyCommentRefId: number | undefined;
+          let onlyCommentRefSeen = false;
+          let hasOtherMeaningfulChild = false;
+          for (const rcc of resolved.children) {
+            if (rcc.type !== "element") {
+              continue;
+            }
+            const rccName = rcc.name.replace(/^w:/, "");
+            if (rccName === "rPr") {
+              continue;
+            }
+            if (rccName === "commentReference") {
+              if (onlyCommentRefSeen) {
+                // Multiple commentReferences in one run is malformed;
+                // fall through to the generic run parser.
+                hasOtherMeaningfulChild = true;
+                break;
+              }
+              onlyCommentRefSeen = true;
+              const idAttr = rcc.attributes["w:id"] ?? rcc.attributes["id"];
+              const id = idAttr !== undefined ? parseInt(idAttr, 10) : NaN;
+              if (!Number.isNaN(id)) {
+                onlyCommentRefId = id;
+              }
+            } else {
+              hasOtherMeaningfulChild = true;
+              break;
+            }
+          }
+          if (onlyCommentRefSeen && !hasOtherMeaningfulChild && onlyCommentRefId !== undefined) {
+            children.push({ type: "commentReference", id: onlyCommentRefId });
+          } else {
+            children.push(parseRun(resolved));
+          }
         }
         break;
       }
@@ -1285,12 +1322,11 @@ function parseTableCell(el: XmlElement, ctx: ReaderContext): TableCell {
     } else if (name === "tbl") {
       content.push(parseTable(child, ctx));
     } else if (name === "sdt") {
-      // SDT inside a table cell. TableCell.content is `(Paragraph | Table)[]`
-      // and the model doesn't carry SDT here, so flatten the SDT's inner
-      // content into the cell. We keep paragraphs/tables; bare runs/sdts
-      // not at paragraph level are dropped (they would have no valid host
-      // in the cell). This preserves visible content but loses the SDT's
-      // own metadata on round-trip — better than dropping all of it.
+      // SDT inside a table cell. The TableCell.content union does not
+      // include StructuredDocumentTag, so we flatten the SDT's inner
+      // paragraphs/tables into the cell. SDT-level metadata (data binding,
+      // alias, repeating section, …) is lost on round-trip but visible
+      // content is preserved — better than dropping the runs entirely.
       const sdt = parseSdt(child, ctx);
       if (sdt && sdt.type === "sdt") {
         for (const c of sdt.content) {
@@ -1299,6 +1335,8 @@ function parseTableCell(el: XmlElement, ctx: ReaderContext): TableCell {
           } else if ((c as { type?: string }).type === "table") {
             content.push(c as Table);
           }
+          // Run-only and nested-SDT children cannot live as direct
+          // siblings of <w:p>/<w:tbl> in a <w:tc>, so they are dropped.
         }
       }
     }
@@ -1665,190 +1703,12 @@ function parseHeaderFooterRoot(root: XmlElement, ctx: ReaderContext): HeaderFoot
 }
 
 /** Detect watermark from a header's parsed XML root element. */
-function detectWatermarkFromRoot(root: XmlElement): Watermark | undefined {
-  // Look for VML shape with id containing "WaterMark"
-  for (const pEl of root.children) {
-    if (pEl.type !== "element") {
-      continue;
-    }
-    for (const rEl of pEl.children) {
-      if (rEl.type !== "element") {
-        continue;
-      }
-      // Look for w:pict or w:r > w:pict
-      const pictEls: XmlElement[] = [];
-      const rName = rEl.name.replace(/^w:/, "");
-      if (rName === "pict") {
-        pictEls.push(rEl);
-      } else if (rName === "r") {
-        for (const rc of rEl.children) {
-          if (rc.type === "element" && rc.name.replace(/^w:/, "") === "pict") {
-            pictEls.push(rc);
-          }
-        }
-      }
-      for (const pictEl of pictEls) {
-        for (const shapeEl of pictEl.children) {
-          if (shapeEl.type !== "element") {
-            continue;
-          }
-          const shapeId = shapeEl.attributes["id"] ?? "";
-          if (!shapeId.toLowerCase().includes("watermark")) {
-            continue;
-          }
-          // Found watermark shape
-          const shapeType = shapeEl.attributes["type"] ?? "";
-          if (shapeType.includes("136")) {
-            // WordArt text watermark (shapetype 136)
-            return parseTextWatermark(shapeEl);
-          }
-          // Check for image watermark (has v:imagedata)
-          const imgData = findChild(shapeEl, "v:imagedata");
-          if (imgData) {
-            return parseImageWatermark(shapeEl, imgData);
-          }
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-function parseTextWatermark(shapeEl: XmlElement): TextWatermark {
-  const fillColor = shapeEl.attributes["fillcolor"] ?? "#C0C0C0";
-  const color = fillColor.replace(/^#/, "");
-
-  // Parse rotation from style
-  const style = shapeEl.attributes["style"] ?? "";
-  let rotation = -45;
-  const rotMatch = style.match(/rotation:\s*(-?\d+)/);
-  if (rotMatch) {
-    rotation = parseInt(rotMatch[1], 10);
-  }
-
-  // Get opacity from v:fill
-  const fillEl = findChild(shapeEl, "v:fill");
-  const opacity = fillEl?.attributes["opacity"] ?? ".5";
-  const semiTransparent = opacity !== "1";
-
-  // Get text and font from v:textpath
-  const textpathEl = findChild(shapeEl, "v:textpath");
-  const text = textpathEl?.attributes["string"] ?? "";
-  const tpStyle = textpathEl?.attributes["style"] ?? "";
-  let font: string | undefined;
-  let fontSize: number | undefined;
-  const fontMatch = tpStyle.match(/font-family:\s*"?([^";]+)"?/);
-  if (fontMatch) {
-    font = fontMatch[1].replace(/&quot;/g, "");
-  }
-  const sizeMatch = tpStyle.match(/font-size:\s*(\d+(?:\.\d+)?)\s*pt/);
-  if (sizeMatch) {
-    fontSize = Math.round(parseFloat(sizeMatch[1]) * 2); // convert pt to half-points
-  }
-
-  return {
-    type: "text",
-    text,
-    font,
-    fontSize,
-    color,
-    semiTransparent,
-    rotation
-  };
-}
-
-function parseImageWatermark(shapeEl: XmlElement, imgDataEl: XmlElement): ImageWatermark {
-  const rId = imgDataEl.attributes["r:id"] ?? "";
-  const gain = imgDataEl.attributes["gain"] ?? "";
-  const washout = gain.startsWith("19661") || gain === "";
-
-  return {
-    type: "image",
-    rId,
-    washout
-  };
-}
-
 // =============================================================================
 // Comments Parser
 // =============================================================================
 
-function parseCommentsXml(xmlStr: string, ctx: ReaderContext): CommentDef[] {
-  // Comments are a separate part — reset the field state so a body-level
-  // unterminated field does not bleed into comment parsing.
-  const savedField = ctx.field;
-  ctx.field = createFieldState();
-  try {
-    const doc = parseXml(xmlStr);
-    const root = doc.root;
-    const comments: CommentDef[] = [];
-
-    for (const commentEl of findChildrenNs(root, "comment")) {
-      const id = attrInt(commentEl, "id");
-      const author = attrVal(commentEl, "author");
-      if (id === undefined || !author) {
-        continue;
-      }
-
-      const content: Paragraph[] = [];
-      for (const child of commentEl.children) {
-        if (child.type === "element" && child.name.replace(/^w:/, "") === "p") {
-          content.push(parseParagraph(child, ctx));
-        }
-      }
-
-      const comment: Mutable<CommentDef> = { id, author, content };
-      const date = attrVal(commentEl, "date");
-      if (date) {
-        comment.date = date;
-      }
-      const initials = attrVal(commentEl, "initials");
-      if (initials) {
-        comment.initials = initials;
-      }
-      comments.push(comment);
-    }
-
-    return comments;
-  } finally {
-    ctx.field = savedField;
-  }
-}
-
-/** Parse word/commentsExtended.xml — map paraId → { done, parentId }. */
-function parseCommentsExtendedXml(
-  xmlStr: string
-): Map<string, { done?: boolean; parentId?: string }> {
-  const map = new Map<string, { done?: boolean; parentId?: string }>();
-  const doc = parseXml(xmlStr);
-  const root = doc.root;
-  for (const child of root.children) {
-    if (child.type !== "element") {
-      continue;
-    }
-    // w15:commentEx
-    const name = child.name;
-    if (!name.endsWith("commentEx")) {
-      continue;
-    }
-    const paraId = child.attributes["w15:paraId"] ?? child.attributes["paraId"];
-    if (!paraId) {
-      continue;
-    }
-    const entry: { done?: boolean; parentId?: string } = {};
-    const done = child.attributes["w15:done"] ?? child.attributes["done"];
-    if (done === "1" || done === "true") {
-      entry.done = true;
-    } else if (done === "0" || done === "false") {
-      entry.done = false;
-    }
-    const pid = child.attributes["w15:paraIdParent"] ?? child.attributes["paraIdParent"];
-    if (pid) {
-      entry.parentId = pid;
-    }
-    map.set(paraId, entry);
-  }
-  return map;
+function parseCommentsXmlFromCtx(xmlStr: string, ctx: ReaderContext): CommentDef[] {
+  return parseCommentsXmlExternal(xmlStr, ctx, parseParagraph);
 }
 
 // =============================================================================
@@ -2658,7 +2518,7 @@ async function _readDocxInner(
     } else {
       ctx.relMap = new Map();
     }
-    comments = tryParse(() => parseCommentsXml(commentsXml, ctx));
+    comments = tryParse(() => parseCommentsXmlFromCtx(commentsXml, ctx));
     ctx.relMap = savedRelMap;
   }
 
@@ -2904,6 +2764,17 @@ async function _readDocxInner(
   for (const [path, data] of entries) {
     // Skip consumed paths and all .rels files (structural)
     if (consumedPaths.has(path) || path.includes("_rels/")) {
+      continue;
+    }
+    // Honour `preserveOleObjects`: when disabled, drop OLE embedding
+    // binaries (word/embeddings/*.bin and similar) before they reach the
+    // returned model. The relationship targets remain in their parent
+    // part's .rels, so the caller is responsible for stripping or
+    // ignoring those if they need a fully-clean document.
+    if (
+      !policy.preserveOleObjects &&
+      (path.startsWith("word/embeddings/") || (path.endsWith(".bin") && path.includes("embed")))
+    ) {
       continue;
     }
     // Parse rels for this part if they exist

@@ -27,6 +27,11 @@ import type {
 import { EMU_PER_POINT } from "../units";
 import { layoutDocument } from "./layout";
 import type { LayoutResult } from "./layout";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "./layout-constants";
 import type { LayoutDocument, LayoutParagraph, LayoutTable, PageGeometry } from "./layout-model";
 
 // =============================================================================
@@ -51,12 +56,6 @@ export interface RenderOptions {
 // Internal Constants
 // =============================================================================
 
-/** Default page width (US Letter) in twips. */
-const DEFAULT_PAGE_WIDTH = 12240;
-/** Default page height (US Letter) in twips. */
-const DEFAULT_PAGE_HEIGHT = 15840;
-/** Default margin in twips (1 inch). */
-const DEFAULT_MARGIN = 1440;
 /** Conversion: twips to points. */
 const TWIPS_TO_PT = 1 / 20;
 /** Conversion: EMU to points. */
@@ -871,12 +870,12 @@ function renderPageContent(
   sectionProps: SectionProperties | undefined,
   options: RenderOptions | undefined
 ): { elements: string[]; pageWidthPt: number; pageHeightPt: number } {
-  const pageWidthPt = twipsToPt(sectionProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH);
-  const pageHeightPt = twipsToPt(sectionProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT);
-  const marginTopPt = twipsToPt(sectionProps?.margins?.top ?? DEFAULT_MARGIN);
-  const marginBottomPt = twipsToPt(sectionProps?.margins?.bottom ?? DEFAULT_MARGIN);
-  const marginLeftPt = twipsToPt(sectionProps?.margins?.left ?? DEFAULT_MARGIN);
-  const marginRightPt = twipsToPt(sectionProps?.margins?.right ?? DEFAULT_MARGIN);
+  const pageWidthPt = twipsToPt(sectionProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS);
+  const pageHeightPt = twipsToPt(sectionProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS);
+  const marginTopPt = twipsToPt(sectionProps?.margins?.top ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginBottomPt = twipsToPt(sectionProps?.margins?.bottom ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginLeftPt = twipsToPt(sectionProps?.margins?.left ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginRightPt = twipsToPt(sectionProps?.margins?.right ?? DEFAULT_PAGE_MARGIN_TWIPS);
   const contentWidthPt = pageWidthPt - marginLeftPt - marginRightPt;
   const contentHeightPt = pageHeightPt - marginTopPt - marginBottomPt;
 

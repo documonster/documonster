@@ -7,6 +7,7 @@
 import type { XmlSink } from "@xml/types";
 
 import { isRun } from "../core/text-utils";
+import { DocxRawXmlPolicyError } from "../errors";
 import type {
   ParagraphProperties,
   Paragraph,
@@ -387,7 +388,7 @@ function renderHyperlink(xml: XmlSink, link: Hyperlink, helpers?: RenderHelpers)
   }
   xml.openNode("w:hyperlink", attrs);
   for (const run of link.children) {
-    renderRun(xml, run, helpers?.imageRemap);
+    renderRun(xml, run, helpers);
   }
   xml.closeNode();
 }
@@ -442,7 +443,7 @@ function renderInsertedRun(xml: XmlSink, ins: InsertedRun, helpers?: RenderHelpe
     attrs["w:date"] = ins.revision.date;
   }
   xml.openNode("w:ins", attrs);
-  renderRun(xml, ins.run, helpers?.imageRemap);
+  renderRun(xml, ins.run, helpers);
   xml.closeNode();
 }
 
@@ -501,7 +502,7 @@ function renderMovedRun(
     attrs["w:date"] = moved.revision.date;
   }
   xml.openNode(wrapperTag, attrs);
-  renderRun(xml, moved.run, helpers?.imageRemap);
+  renderRun(xml, moved.run, helpers);
   xml.closeNode();
 }
 
@@ -578,16 +579,22 @@ function renderParagraphChild(xml: XmlSink, child: ParagraphChild, helpers?: Ren
         xml.leafNode(`w:${child.type}`, cmAttrs);
         return;
       }
-      case "opaqueParagraphChild":
-        // Write raw XML verbatim for round-trip preservation
-        xml.writeRaw(child.rawXml);
+      case "opaqueParagraphChild": {
+        const policy = helpers?.rawXmlPolicy;
+        if (policy === "reject") {
+          throw new DocxRawXmlPolicyError("opaqueParagraphChild");
+        }
+        if (policy !== "strip") {
+          xml.writeRaw(child.rawXml);
+        }
         return;
+      }
       default:
         break;
     }
   }
   if (isRun(child)) {
-    renderRun(xml, child, helpers?.imageRemap);
+    renderRun(xml, child, helpers);
   }
 }
 

@@ -121,3 +121,24 @@ export class DocxLimitExceededError extends DocxParseError {
     this.actual = actual;
   }
 }
+
+/**
+ * Error thrown when the active `WordSecurityPolicy.rawXmlPolicy` is `"reject"`
+ * and the writer encounters opaque/preserved rawXml that would otherwise have
+ * been emitted verbatim. Callers can either drop the offending model field
+ * before serialisation or relax the policy to `"strip"` / `"preserve"`.
+ */
+export class DocxRawXmlPolicyError extends DocxWriteError {
+  override name = "DocxRawXmlPolicyError";
+  /** Short label identifying the offending writer site. */
+  readonly site: string;
+
+  constructor(site: string) {
+    super(
+      `Raw XML rejected by security policy at "${site}". ` +
+        "Either remove the rawXml/opaque field from the model or set " +
+        "WordSecurityPolicy.rawXmlPolicy to 'preserve' or 'strip'."
+    );
+    this.site = site;
+  }
+}

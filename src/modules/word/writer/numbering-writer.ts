@@ -8,6 +8,7 @@
 import type { XmlSink } from "@xml/types";
 
 import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
+import { DocxRawXmlPolicyError } from "../errors";
 import type { AbstractNumbering, NumberingInstance, NumberingLevel, NumPicBullet } from "../types";
 import { EMU_PER_POINT } from "../units";
 import { renderParagraphProperties } from "./paragraph-writer";
@@ -67,7 +68,8 @@ export function renderNumbering(
   xml: XmlSink,
   abstractNums?: readonly AbstractNumbering[],
   instances?: readonly NumberingInstance[],
-  numPicBullets?: readonly NumPicBullet[]
+  numPicBullets?: readonly NumPicBullet[],
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:numbering", {
@@ -82,8 +84,13 @@ export function renderNumbering(
     for (const pb of numPicBullets) {
       xml.openNode("w:numPicBullet", { "w:numPicBulletId": String(pb.id) });
       if (pb.rawVmlXml) {
-        // Use raw VML for full fidelity
-        xml.writeRaw(pb.rawVmlXml);
+        if (rawXmlPolicy === "reject") {
+          throw new DocxRawXmlPolicyError("numPicBullet.rawVmlXml");
+        }
+        if (rawXmlPolicy !== "strip") {
+          // Use raw VML for full fidelity
+          xml.writeRaw(pb.rawVmlXml);
+        }
       } else if (pb.rId) {
         // Default VML shape with image fill
         xml.openNode("w:pict");

@@ -2,6 +2,22 @@
  * DOCX Module - Base Exports (Platform Independent)
  *
  * Shared exports for both Node.js and browser environments.
+ *
+ * Each export is annotated with a `@stability` tag:
+ *
+ * - `@stability stable` — Public API. Backwards-compatible changes only;
+ *   semver-major bumps for any breaking changes.
+ * - `@stability experimental` — Public but evolving. The shape may change
+ *   without a major version bump while we collect feedback. Consumers
+ *   should pin to exact minor versions if they rely on these.
+ * - `@stability preserve-only` — Round-trip preservation types. They exist
+ *   so reading and writing a DOCX is loss-less; the underlying schema is
+ *   not yet promised to be ergonomic. Avoid building features on top of
+ *   them unless you also handle the underlying OOXML directly.
+ *
+ * Tree-shakeable subpaths: HTML/Markdown/Excel/PDF integrations live under
+ * `excelts/word/{html,markdown,excel}` and `excelts/pdf` — they are not
+ * re-exported here so bundlers can drop them when unused.
  */
 
 // --- Stable API ---
@@ -830,6 +846,7 @@ export { createRenderContext, createIdGenerators } from "./writer/render-context
 /** @stability experimental */
 export type { DocxTransformer, MapOptions } from "./core/mapper";
 
+/** @stability experimental */
 export { mapDocument } from "./core/mapper";
 
 // --- Document Walker (experimental) ---

@@ -268,9 +268,9 @@ const md = renderToMarkdown(doc);
 import { renderToHtml } from "excelts/word/html";
 const html = renderToHtml(doc);
 
-// HTML → DOCX
-import { htmlToDocx } from "excelts/word/html";
-const doc = htmlToDocx("<h1>Hello</h1><p>World</p>");
+// HTML → DOCX body content
+import { htmlToDocxBody } from "excelts/word/html";
+const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ```
 
 ### Flat OPC Format

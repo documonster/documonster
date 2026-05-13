@@ -18,6 +18,7 @@ import type {
   DocDefaults,
   AbstractNumbering,
   NumberingInstance,
+  NumPicBullet,
   HeaderDef,
   FooterDef,
   HeaderFooterContent,
@@ -28,17 +29,23 @@ import type {
   CoreProperties,
   AppProperties,
   DocumentSettings,
+  DocumentTheme,
   FontDef,
+  EmbeddedFont,
   TableWidth,
   Emu,
   Twips,
   CommentDef,
+  CustomXmlPart,
   DocumentBackground,
   CustomPropertyValue,
+  OpaquePart,
+  PersonInfo,
   TableOfContents,
   MathContent,
   FloatingImage,
-  Watermark
+  Watermark,
+  WebSettings
 } from "../types";
 import { paragraph, textParagraph, heading } from "./paragraph-builders";
 import { pageBreak, floatingImage, mathBlock } from "./run-builders";
@@ -59,12 +66,14 @@ interface _DocumentState {
   docDefaults?: DocDefaults;
   abstractNumberings: AbstractNumbering[];
   numberingInstances: NumberingInstance[];
+  numPicBullets?: NumPicBullet[];
   headers: Map<string, HeaderDef>;
   footers: Map<string, FooterDef>;
   footnotes: FootnoteDef[];
   endnotes: EndnoteDef[];
   images: ImageDef[];
   fonts: FontDef[];
+  embeddedFonts?: EmbeddedFont[];
   settings?: DocumentSettings;
   coreProperties?: CoreProperties;
   appProperties?: AppProperties;
@@ -72,6 +81,19 @@ interface _DocumentState {
   background?: DocumentBackground;
   customProperties: Array<{ name: string; value: CustomPropertyValue }>;
   watermark?: Watermark;
+  // --- Round-trip preservation surface ---
+  // These fields aren't populated by any builder helper, but they MUST
+  // survive `Document.create()` → mutation by the caller →
+  // `Document.build()` so a `readDocx → mutate → packageDocx` workflow
+  // does not silently drop large chunks of the original package.
+  theme?: DocumentTheme;
+  webSettings?: WebSettings;
+  people?: PersonInfo[];
+  customXmlParts?: CustomXmlPart[];
+  thumbnail?: DocxDocument["thumbnail"];
+  opaqueParts?: OpaquePart[];
+  vbaProject?: Uint8Array;
+  docType?: DocxDocument["docType"];
   nextImageId: number;
   nextFootnoteId: number;
   nextEndnoteId: number;
@@ -669,6 +691,7 @@ export const Document = {
   build(doc: DocumentHandle): DocxDocument {
     const s = _toState(doc);
     return {
+      docType: s.docType,
       body: s.body,
       sectionProperties: s.sectionProperties ?? {
         pageSize: { width: 12240, height: 15840 },
@@ -678,19 +701,33 @@ export const Document = {
       docDefaults: s.docDefaults,
       abstractNumberings: s.abstractNumberings.length > 0 ? s.abstractNumberings : undefined,
       numberingInstances: s.numberingInstances.length > 0 ? s.numberingInstances : undefined,
+      numPicBullets: s.numPicBullets && s.numPicBullets.length > 0 ? s.numPicBullets : undefined,
       headers: s.headers.size > 0 ? s.headers : undefined,
       footers: s.footers.size > 0 ? s.footers : undefined,
       footnotes: s.footnotes.length > 0 ? s.footnotes : undefined,
       endnotes: s.endnotes.length > 0 ? s.endnotes : undefined,
       images: s.images.length > 0 ? s.images : undefined,
       fonts: s.fonts.length > 0 ? s.fonts : undefined,
+      embeddedFonts: s.embeddedFonts && s.embeddedFonts.length > 0 ? s.embeddedFonts : undefined,
+      customXmlParts:
+        s.customXmlParts && s.customXmlParts.length > 0 ? s.customXmlParts : undefined,
       settings: s.settings,
       coreProperties: s.coreProperties,
       appProperties: s.appProperties,
       comments: s.comments.length > 0 ? s.comments : undefined,
       background: s.background,
       customProperties: s.customProperties.length > 0 ? s.customProperties : undefined,
-      watermark: s.watermark
+      watermark: s.watermark,
+      // Round-trip preservation surface — passes through any field the
+      // caller stored on the handle, so `readDocx → mutate → packageDocx`
+      // does not silently drop these. Builder helpers don't populate
+      // them; users who need to manipulate them assign directly.
+      theme: s.theme,
+      webSettings: s.webSettings,
+      people: s.people && s.people.length > 0 ? s.people : undefined,
+      thumbnail: s.thumbnail,
+      opaqueParts: s.opaqueParts && s.opaqueParts.length > 0 ? s.opaqueParts : undefined,
+      vbaProject: s.vbaProject
     };
   }
 };

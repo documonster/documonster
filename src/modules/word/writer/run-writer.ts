@@ -7,6 +7,7 @@
 import type { XmlSink } from "@xml/types";
 
 import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "../constants";
+import { DocxRawXmlPolicyError } from "../errors";
 import type {
   RunProperties,
   RunContent,
@@ -20,6 +21,7 @@ import type {
   UnderlineSpec,
   ColorSpec
 } from "../types";
+import type { RenderHelpers } from "./render-context";
 
 /** Render a single border element. */
 export function renderBorderElement(xml: XmlSink, tagName: string, border: Border): void {
@@ -594,11 +596,7 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
 }
 
 /** Render a single piece of run content. Returns true if rendered inside a w:r, false if it creates its own runs. */
-function renderRunContent(
-  xml: XmlSink,
-  content: RunContent,
-  imageRemap?: ReadonlyMap<string, string>
-): boolean {
+function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHelpers): boolean {
   switch (content.type) {
     case "text":
       xml.openNode("w:t", { "xml:space": "preserve" });
@@ -656,13 +654,13 @@ function renderRunContent(
       // Ruby text (w:rt)
       xml.openNode("w:rt");
       for (const run of content.rubyText) {
-        renderRun(xml, run, imageRemap);
+        renderRun(xml, run, helpers);
       }
       xml.closeNode();
       // Base text (w:rubyBase)
       xml.openNode("w:rubyBase");
       for (const run of content.baseText) {
-        renderRun(xml, run, imageRemap);
+        renderRun(xml, run, helpers);
       }
       xml.closeNode();
       xml.closeNode(); // w:ruby
@@ -692,7 +690,7 @@ function renderRunContent(
     }
 
     case "image":
-      renderInlineImage(xml, content, imageRemap);
+      renderInlineImage(xml, content, helpers?.imageRemap);
       return true;
 
     case "field":
@@ -723,10 +721,18 @@ function renderRunContent(
       // Rendered as a field instruction
       return false;
 
-    case "opaqueRun":
-      // Write raw XML verbatim for round-trip preservation
-      xml.writeRaw(content.rawXml);
+    case "opaqueRun": {
+      // Honor the rawXmlPolicy from the active security policy.
+      const policy = helpers?.rawXmlPolicy;
+      if (policy === "reject") {
+        throw new DocxRawXmlPolicyError("opaqueRun");
+      }
+      if (policy !== "strip") {
+        // "preserve" (default) — write verbatim.
+        xml.writeRaw(content.rawXml);
+      }
       return true;
+    }
 
     default:
       return true;
@@ -734,7 +740,7 @@ function renderRunContent(
 }
 
 /** Render a w:r element. */
-export function renderRun(xml: XmlSink, run: Run, imageRemap?: ReadonlyMap<string, string>): void {
+export function renderRun(xml: XmlSink, run: Run, helpers?: RenderHelpers): void {
   // Separate field content that needs its own runs
   const normalContent: RunContent[] = [];
   const fieldContent: (FieldContent | RunContent)[] = [];
@@ -764,7 +770,7 @@ export function renderRun(xml: XmlSink, run: Run, imageRemap?: ReadonlyMap<strin
       renderRunProperties(xml, run.properties);
     }
     for (const content of normalContent) {
-      renderRunContent(xml, content, imageRemap);
+      renderRunContent(xml, content, helpers);
     }
     xml.closeNode();
   }

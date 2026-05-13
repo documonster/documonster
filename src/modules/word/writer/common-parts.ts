@@ -36,6 +36,7 @@ import {
   renderCustomProperties,
   renderTheme
 } from "./parts-writer";
+import type { RenderHelpers } from "./render-context";
 import { renderStyles } from "./styles-writer";
 
 // =============================================================================
@@ -57,6 +58,20 @@ export interface AuxiliaryPartsInput {
   readonly customProperties?: readonly CustomProperty[];
   readonly footnotes?: readonly FootnoteDef[];
   readonly endnotes?: readonly EndnoteDef[];
+  /**
+   * Optional render helpers passed to footnote/endnote rendering so in-note
+   * hyperlinks/images resolve to the rIds the caller has registered against
+   * the per-part .rels. Defaults to `{}`, meaning no remap and no
+   * hyperlink rIds — sufficient for documents without notes that contain
+   * external links or remapped images.
+   */
+  readonly notesHelpers?: RenderHelpers;
+  /**
+   * Raw XML output policy. When `"strip"` or `"reject"`, opaque rawXml
+   * fields on settings/theme/numbering are skipped or cause an error
+   * respectively. Defaults to `"preserve"`.
+   */
+  readonly rawXmlPolicy?: "preserve" | "strip" | "reject";
 }
 
 /** A rendered XML part ready to be written to ZIP. */
@@ -91,7 +106,7 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   // settings.xml
   parts.push({
     path: PartPath.Settings,
-    content: renderXml(xml => renderSettings(xml, input.settings))
+    content: renderXml(xml => renderSettings(xml, input.settings, input.rawXmlPolicy))
   });
 
   // fontTable.xml
@@ -103,7 +118,7 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   // theme/theme1.xml
   parts.push({
     path: PartPath.Theme,
-    content: renderXml(xml => renderTheme(xml, input.theme))
+    content: renderXml(xml => renderTheme(xml, input.theme, input.rawXmlPolicy))
   });
 
   // numbering.xml (conditional)
@@ -118,7 +133,8 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
           xml,
           input.abstractNumberings,
           input.numberingInstances,
-          input.numPicBullets
+          input.numPicBullets,
+          input.rawXmlPolicy
         )
       )
     });
@@ -128,7 +144,7 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   if (input.footnotes && input.footnotes.length > 0) {
     parts.push({
       path: PartPath.Footnotes,
-      content: renderXml(xml => renderFootnotes(xml, input.footnotes!))
+      content: renderXml(xml => renderFootnotes(xml, input.footnotes!, input.notesHelpers))
     });
   }
 
@@ -136,7 +152,7 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   if (input.endnotes && input.endnotes.length > 0) {
     parts.push({
       path: PartPath.Endnotes,
-      content: renderXml(xml => renderEndnotes(xml, input.endnotes!))
+      content: renderXml(xml => renderEndnotes(xml, input.endnotes!, input.notesHelpers))
     });
   }
 

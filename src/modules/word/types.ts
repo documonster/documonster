@@ -2083,8 +2083,15 @@ export interface StructuredDocumentTag {
   readonly type: "sdt";
   /** SDT properties. */
   readonly properties?: SdtProperties;
-  /** Content (paragraphs, runs, etc.). */
-  readonly content: readonly (Paragraph | Run | Table)[];
+  /**
+   * Content (paragraphs, runs, tables, or nested SDTs).
+   *
+   * Nested SDTs are valid OOXML — repeating sections, for instance, wrap
+   * each repeated item in its own inner `<w:sdt>`. The reader preserves
+   * the outer/inner structure verbatim and the writer recursively renders
+   * children of type `"sdt"`.
+   */
+  readonly content: readonly (Paragraph | Run | Table | StructuredDocumentTag)[];
 }
 
 // =============================================================================

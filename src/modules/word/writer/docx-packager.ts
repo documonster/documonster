@@ -11,11 +11,12 @@ import { zip } from "@archive/create-archive";
 import { XmlWriter } from "@xml/writer";
 
 import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "../constants";
-import { type Mutable, sanitizeMediaFileName } from "../core/internal-utils";
+import { type Mutable, sanitizeMediaFileName, sanitizeUrl } from "../core/internal-utils";
 import { getFileExt, getPartRelsPath } from "../core/opc-paths";
 import { isRun } from "../core/text-utils";
 import { walkBlocks } from "../core/walker";
 import { DocxWriteError } from "../errors";
+import { resolveSecurityPolicy, type WordSecurityPolicy } from "../security/policy";
 import type {
   DocxDocument,
   BodyContent,
@@ -183,6 +184,23 @@ function resolveDocumentContentType(doc: DocxDocument): string {
 }
 
 /**
+ * Options accepted by `packageDocx`.
+ *
+ * For backwards compatibility the second positional argument may also be a
+ * raw number, in which case it is interpreted as `compressionLevel` with the
+ * default security policy.
+ */
+export interface PackageDocxOptions {
+  /** ZIP compression level (0-9). Default: backend-specific (typically 6). */
+  readonly compressionLevel?: number;
+  /**
+   * Security policy controlling rawXmlPolicy, OLE/signature handling, etc.
+   * Defaults to {@link DEFAULT_SECURITY_POLICY}.
+   */
+  readonly securityPolicy?: WordSecurityPolicy;
+}
+
+/**
  * Package a DocxDocument model into a DOCX ZIP file.
  * Returns the ZIP bytes as Uint8Array.
  *
@@ -192,11 +210,15 @@ function resolveDocumentContentType(doc: DocxDocument): string {
  */
 export async function packageDocx(
   doc: DocxDocument,
-  compressionLevel?: number
+  optionsOrCompressionLevel?: PackageDocxOptions | number
 ): Promise<Uint8Array> {
+  const options: PackageDocxOptions =
+    typeof optionsOrCompressionLevel === "number"
+      ? { compressionLevel: optionsOrCompressionLevel }
+      : (optionsOrCompressionLevel ?? {});
   // Create a working copy so we never mutate the caller's doc
   const workDoc = shallowCopyDocForPackaging(doc);
-  return _packageDocxInner(workDoc, compressionLevel);
+  return _packageDocxInner(workDoc, options);
 }
 
 /**
@@ -304,9 +326,11 @@ function uniqueSanitizedName(raw: string | undefined, used: Set<string>, fallbac
 
 async function _packageDocxInner(
   doc: DocxDocument,
-  compressionLevel?: number
+  options: PackageDocxOptions
 ): Promise<Uint8Array> {
-  const archive = zip({ level: compressionLevel ?? 6 });
+  const archive = zip({ level: options.compressionLevel ?? 6 });
+  const securityPolicy = resolveSecurityPolicy(options.securityPolicy);
+  const rawXmlPolicy = securityPolicy.rawXmlPolicy;
 
   // Managers
   const contentTypes = createContentTypes();
@@ -598,7 +622,15 @@ async function _packageDocxInner(
   const hyperlinks = collectHyperlinks(doc.body);
   for (const link of hyperlinks) {
     if (link.url) {
-      const rId = addRelationship(documentRels, RelType.Hyperlink, link.url, "External");
+      // Sanitize: drop dangerous schemes (javascript:, vbscript:, data:, …)
+      // before they reach document.xml.rels. The renderer will simply emit
+      // the surrounding `<w:hyperlink>` without an `r:id`, which keeps the
+      // inner runs but does not produce a clickable target.
+      const safe = sanitizeUrl(link.url);
+      if (!safe) {
+        continue;
+      }
+      const rId = addRelationship(documentRels, RelType.Hyperlink, safe, "External");
       hyperlinkRIds.set(link, rId);
     }
   }
@@ -621,7 +653,11 @@ async function _packageDocxInner(
       }
       for (const link of links) {
         if (link.url) {
-          const rId = addRelationship(rels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const rId = addRelationship(rels, RelType.Hyperlink, safe, "External");
           hyperlinkRIds.set(link, rId);
         }
       }
@@ -678,7 +714,12 @@ async function _packageDocxInner(
     registerNoteImages(commentBodies, commentRels);
   }
 
-  // Process altChunk body items: register relationship and prepare data part
+  // Process altChunk body items: register relationship and prepare data part.
+  // We never mutate the chunk objects — the rId is published via a WeakMap
+  // that the renderer reads through the WordRenderContext. This matters for
+  // altChunks nested inside tables / SDTs which the shallow body copy did
+  // not (and intentionally cannot cheaply) clone.
+  const altChunkRIds = new WeakMap<object, string>();
   const altChunks: AltChunk[] = [];
   collectAltChunks(doc.body, altChunks);
   altChunks.forEach((chunk, i) => {
@@ -689,7 +730,7 @@ async function _packageDocxInner(
       "http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk",
       fileName
     );
-    (chunk as { rId?: string }).rId = rId;
+    altChunkRIds.set(chunk, rId);
     // Register content type
     const ct = chunk.contentType ?? "text/html";
     addContentTypeOverride(contentTypes, `/word/${fileName}`, ct);
@@ -765,7 +806,11 @@ async function _packageDocxInner(
       const hLinks = collectHyperlinksFromHeaderFooter(headerDef.content);
       for (const link of hLinks) {
         if (link.url) {
-          const linkRId = addRelationship(hRels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const linkRId = addRelationship(hRels, RelType.Hyperlink, safe, "External");
           hyperlinkRIds.set(link, linkRId);
         }
       }
@@ -819,7 +864,11 @@ async function _packageDocxInner(
       const fLinks = collectHyperlinksFromHeaderFooter(footerDef.content);
       for (const link of fLinks) {
         if (link.url) {
-          const linkRId = addRelationship(fRels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const linkRId = addRelationship(fRels, RelType.Hyperlink, safe, "External");
           hyperlinkRIds.set(link, linkRId);
         }
       }
@@ -1153,9 +1202,11 @@ async function _packageDocxInner(
   // an explicit `id` would collide with an existing one and break
   // dataBinding / repeating section linkage.
   const renderCtx = createRenderContext({
+    securityPolicy,
     chartRIds: renderCtxChartRIds,
     imageRIdRemap: imageRemap,
     hyperlinkRIds,
+    altChunkRIds,
     ids: createIdGenerators({
       sdtId: scanMaxSdtId(doc) + 1
     })
@@ -1179,7 +1230,7 @@ async function _packageDocxInner(
   // word/settings.xml
   archive.add(
     PartPath.Settings,
-    renderXml(xml => renderSettings(xml, doc.settings))
+    renderXml(xml => renderSettings(xml, doc.settings, rawXmlPolicy))
   );
 
   // word/fontTable.xml
@@ -1300,7 +1351,7 @@ async function _packageDocxInner(
   // word/theme/theme1.xml
   archive.add(
     PartPath.Theme,
-    renderXml(xml => renderTheme(xml, doc.theme))
+    renderXml(xml => renderTheme(xml, doc.theme, rawXmlPolicy))
   );
 
   // word/numbering.xml
@@ -1308,7 +1359,13 @@ async function _packageDocxInner(
     archive.add(
       PartPath.Numbering,
       renderXml(xml =>
-        renderNumbering(xml, doc.abstractNumberings, doc.numberingInstances, doc.numPicBullets)
+        renderNumbering(
+          xml,
+          doc.abstractNumberings,
+          doc.numberingInstances,
+          doc.numPicBullets,
+          rawXmlPolicy
+        )
       )
     );
   }
@@ -1320,7 +1377,7 @@ async function _packageDocxInner(
       // Footnotes are an independent OPC part — their r:id values must
       // resolve against word/_rels/footnotes.xml.rels, not document.xml.rels.
       renderXml(xml =>
-        renderFootnotes(xml, doc.footnotes!, { imageRemap: new Map(), hyperlinkRIds })
+        renderFootnotes(xml, doc.footnotes!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
       )
     );
     if (getRelationshipCount(footnoteRels) > 0) {
@@ -1335,7 +1392,9 @@ async function _packageDocxInner(
   if (hasEndnotes) {
     archive.add(
       PartPath.Endnotes,
-      renderXml(xml => renderEndnotes(xml, doc.endnotes!, { imageRemap: new Map(), hyperlinkRIds }))
+      renderXml(xml =>
+        renderEndnotes(xml, doc.endnotes!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
+      )
     );
     if (getRelationshipCount(endnoteRels) > 0) {
       archive.add(
@@ -1352,7 +1411,9 @@ async function _packageDocxInner(
       // Comments live in their own OPC part; pass helpers so embedded
       // hyperlinks/images render with the right r:id (the rels manager
       // below registered them under their model-original id).
-      renderXml(xml => renderComments(xml, doc.comments!, { imageRemap: new Map(), hyperlinkRIds }))
+      renderXml(xml =>
+        renderComments(xml, doc.comments!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
+      )
     );
 
     if (getRelationshipCount(commentRels) > 0) {
@@ -1387,7 +1448,11 @@ async function _packageDocxInner(
         // Header .rels is independent from document .rels — pass an empty
         // imageRemap so we never rewrite r:embed against the document remap.
         renderXml(xml =>
-          renderHeader(xml, headerDef.content, { imageRemap: new Map(), hyperlinkRIds })
+          renderHeader(xml, headerDef.content, {
+            imageRemap: new Map(),
+            hyperlinkRIds,
+            rawXmlPolicy
+          })
         )
       );
       // Header .rels file
@@ -1414,7 +1479,11 @@ async function _packageDocxInner(
         PartPath.footer(footerIndex),
         // Footer .rels is independent from document .rels.
         renderXml(xml =>
-          renderFooter(xml, footerDef.content, { imageRemap: new Map(), hyperlinkRIds })
+          renderFooter(xml, footerDef.content, {
+            imageRemap: new Map(),
+            hyperlinkRIds,
+            rawXmlPolicy
+          })
         )
       );
       // Footer .rels file
@@ -1481,7 +1550,7 @@ async function _packageDocxInner(
   if (doc.webSettings) {
     archive.add(
       PartPath.WebSettings,
-      renderXml(xml => renderWebSettings(xml, doc.webSettings))
+      renderXml(xml => renderWebSettings(xml, doc.webSettings, rawXmlPolicy))
     );
     addRelationship(documentRels, RelType.WebSettings, "webSettings.xml");
     addContentTypeOverride(contentTypes, `/${PartPath.WebSettings}`, ContentType.WebSettings);
@@ -1617,6 +1686,25 @@ async function _packageDocxInner(
             `field (e.g. doc.styles, doc.headers, doc.images) or rename the ` +
             `opaque part.`
         );
+      }
+      // Honour `preserveOleObjects`: drop OLE binaries before they reach
+      // the ZIP. The relationships that referenced them remain in the
+      // owning part's .rels, but no payload will be written.
+      if (
+        !securityPolicy.preserveOleObjects &&
+        (part.path.startsWith("word/embeddings/") ||
+          (part.path.endsWith(".bin") && part.path.includes("embed")))
+      ) {
+        continue;
+      }
+      // Honour `dropSignaturesOnModify`: any digital-signature part lives
+      // under `_xmlsignatures/`. Once the document has been re-serialised
+      // the signature would no longer match the new bytes, so by default
+      // we drop these parts entirely. The corresponding sigOrigin
+      // relationship from `_rels/.rels` is also gone — packageRels is
+      // rebuilt from scratch, so the dangling reference disappears too.
+      if (securityPolicy.dropSignaturesOnModify && part.path.startsWith("_xmlsignatures/")) {
+        continue;
       }
       archive.add(part.path, part.data);
       // Register content type: explicit > inferred by extension > skip

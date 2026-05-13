@@ -24,6 +24,7 @@ import {
   NS_CUSTOM,
   STD_DOC_ATTRIBUTES
 } from "../constants";
+import { DocxRawXmlPolicyError } from "../errors";
 import type {
   DocumentSettings,
   CoreProperties,
@@ -66,7 +67,11 @@ function renderSettingsNoteProperties(
 // =============================================================================
 
 /** Render word/settings.xml. */
-export function renderSettings(xml: XmlSink, settings?: DocumentSettings): void {
+export function renderSettings(
+  xml: XmlSink,
+  settings?: DocumentSettings,
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
+): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:settings", {
     "xmlns:w": NS_W,
@@ -250,7 +255,12 @@ export function renderSettings(xml: XmlSink, settings?: DocumentSettings): void 
 
   // Mail merge (round-trip preservation)
   if (settings?.mailMergeRawXml) {
-    xml.writeRaw(settings.mailMergeRawXml);
+    if (rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("settings.mailMergeRawXml");
+    }
+    if (rawXmlPolicy !== "strip") {
+      xml.writeRaw(settings.mailMergeRawXml);
+    }
   }
 
   // Write protection
@@ -595,7 +605,11 @@ export function renderCustomProperties(xml: XmlSink, properties: readonly Custom
 // =============================================================================
 
 /** Render word/theme/theme1.xml (minimal theme). */
-export function renderTheme(xml: XmlSink, theme?: DocumentTheme): void {
+export function renderTheme(
+  xml: XmlSink,
+  theme?: DocumentTheme,
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
+): void {
   const NS_A_LOCAL = "http://schemas.openxmlformats.org/drawingml/2006/main";
 
   xml.openXml(STD_DOC_ATTRIBUTES);
@@ -661,9 +675,18 @@ export function renderTheme(xml: XmlSink, theme?: DocumentTheme): void {
 
   // Format scheme - preserve raw XML if provided, otherwise minimal default
   if (theme?.formatScheme?.rawXml) {
-    xml.openNode("a:fmtScheme", { name: theme.formatScheme.name });
-    xml.writeRaw(theme.formatScheme.rawXml);
-    xml.closeNode();
+    if (rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("theme.formatScheme.rawXml");
+    }
+    if (rawXmlPolicy === "strip") {
+      // Fall back to a minimal default rather than emitting an empty
+      // a:fmtScheme — Word treats an empty format scheme as malformed.
+      renderDefaultFormatScheme(xml);
+    } else {
+      xml.openNode("a:fmtScheme", { name: theme.formatScheme.name });
+      xml.writeRaw(theme.formatScheme.rawXml);
+      xml.closeNode();
+    }
   } else {
     renderDefaultFormatScheme(xml);
   }
@@ -672,7 +695,12 @@ export function renderTheme(xml: XmlSink, theme?: DocumentTheme): void {
 
   // Extension list (round-trip preservation)
   if (theme?.extLstXml) {
-    xml.writeRaw(theme.extLstXml);
+    if (rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("theme.extLstXml");
+    }
+    if (rawXmlPolicy !== "strip") {
+      xml.writeRaw(theme.extLstXml);
+    }
   }
 
   xml.closeNode(); // a:theme
@@ -740,7 +768,11 @@ function renderDefaultFormatScheme(xml: XmlSink): void {
 // =============================================================================
 
 /** Render word/webSettings.xml. */
-export function renderWebSettings(xml: XmlSink, ws?: WebSettings): void {
+export function renderWebSettings(
+  xml: XmlSink,
+  ws?: WebSettings,
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
+): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:webSettings", { "xmlns:w": NS_W });
 
@@ -770,7 +802,12 @@ export function renderWebSettings(xml: XmlSink, ws?: WebSettings): void {
     xml.leafNode("w:useTargetMachineType");
   }
   if (ws?.rawXml) {
-    xml.writeRaw(ws.rawXml);
+    if (rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("webSettings.rawXml");
+    }
+    if (rawXmlPolicy !== "strip") {
+      xml.writeRaw(ws.rawXml);
+    }
   }
 
   xml.closeNode();

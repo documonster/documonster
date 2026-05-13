@@ -34,6 +34,40 @@ export interface RenderHelpers {
   readonly imageRemap?: ReadonlyMap<string, string>;
   /** See WordRenderContext.hyperlinkRIds. */
   readonly hyperlinkRIds?: ReadonlyWeakMap<object, string>;
+  /**
+   * Raw XML output policy. Controls how preserved/opaque rawXml fragments
+   * (opaqueRun, opaqueParagraphChild, opaqueDrawing, _advancedFillXml, …)
+   * are emitted. Defaults to `"preserve"` when undefined for backwards
+   * compatibility with callers that built helpers without a context.
+   */
+  readonly rawXmlPolicy?: "preserve" | "strip" | "reject";
+}
+
+/**
+ * Apply the `rawXmlPolicy` to a single `xml.writeRaw(...)` operation.
+ *
+ * - `"preserve"` (or undefined): write the fragment verbatim.
+ * - `"strip"`: skip writing — the surrounding wrapper element (if any) is
+ *   left empty. This is intentionally conservative: it preserves ZIP/relationship
+ *   integrity even though it may produce a structurally-incomplete element.
+ * - `"reject"`: throw `DocxRawXmlPolicyError` so the caller learns about the
+ *   opaque content instead of silently producing degraded output.
+ *
+ * Importing the error class lazily would create an import cycle; callers that
+ * need to throw should do so themselves. This helper just resolves the action.
+ */
+export type RawXmlAction = "write" | "skip" | "throw";
+export function resolveRawXmlAction(
+  policy: "preserve" | "strip" | "reject" | undefined
+): RawXmlAction {
+  switch (policy) {
+    case "strip":
+      return "skip";
+    case "reject":
+      return "throw";
+    default:
+      return "write";
+  }
 }
 
 /**
@@ -73,6 +107,14 @@ export interface WordRenderContext {
    * never mutated.
    */
   readonly hyperlinkRIds: WeakMap<object, string>;
+  /**
+   * AltChunk object → rId mapping. Populated by the packager when registering
+   * the relationship for each `w:altChunk`. Renderers prefer this map over
+   * `AltChunk.rId` so the caller's model is never mutated, including when
+   * the altChunk is nested inside a table cell or SDT and was therefore not
+   * cloned by the shallow body copy.
+   */
+  readonly altChunkRIds: WeakMap<object, string>;
 }
 
 /** Create ID generators with given starting values. */
@@ -108,6 +150,7 @@ export function createRenderContext(options?: {
   chartRIds?: Map<object, string>;
   imageRIdRemap?: Map<string, string>;
   hyperlinkRIds?: WeakMap<object, string>;
+  altChunkRIds?: WeakMap<object, string>;
   /**
    * Pre-built ID generators. When provided, the caller is responsible for
    * seeding them (e.g. with the maximum existing SDT id in the document so
@@ -124,6 +167,7 @@ export function createRenderContext(options?: {
     rawXmlPolicy: securityPolicy.rawXmlPolicy ?? "preserve",
     chartRIds: options?.chartRIds ?? new Map(),
     imageRIdRemap: options?.imageRIdRemap ?? new Map(),
-    hyperlinkRIds: options?.hyperlinkRIds ?? new WeakMap()
+    hyperlinkRIds: options?.hyperlinkRIds ?? new WeakMap(),
+    altChunkRIds: options?.altChunkRIds ?? new WeakMap()
   };
 }

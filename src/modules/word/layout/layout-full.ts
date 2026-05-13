@@ -15,6 +15,11 @@ import { isHyperlink, isRun } from "../core/text-utils";
 import type { DocxDocument, Paragraph, ParagraphProperties, Run, Table } from "../types";
 import { layoutDocument } from "./layout";
 import type { LayoutOptions, LayoutResult } from "./layout";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "./layout-constants";
 import type {
   LayoutDocument,
   LayoutPage,
@@ -69,9 +74,6 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
 // Internal: Page Building
 // =============================================================================
 
-const DEFAULT_PAGE_WIDTH_TWIPS = 12240;
-const DEFAULT_PAGE_HEIGHT_TWIPS = 15840;
-const DEFAULT_MARGIN_TWIPS = 1440;
 const DEFAULT_FONT_SIZE_PT = 12;
 
 function twipsToPt(twips: number): number {
@@ -122,10 +124,10 @@ function buildPage(
 function computePageGeometry(sectionProps: DocxDocument["sectionProperties"]): PageGeometry {
   const widthTwips = sectionProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS;
   const heightTwips = sectionProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS;
-  const marginTop = twipsToPt(sectionProps?.margins?.top ?? DEFAULT_MARGIN_TWIPS);
-  const marginBottom = twipsToPt(sectionProps?.margins?.bottom ?? DEFAULT_MARGIN_TWIPS);
-  const marginLeft = twipsToPt(sectionProps?.margins?.left ?? DEFAULT_MARGIN_TWIPS);
-  const marginRight = twipsToPt(sectionProps?.margins?.right ?? DEFAULT_MARGIN_TWIPS);
+  const marginTop = twipsToPt(sectionProps?.margins?.top ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginBottom = twipsToPt(sectionProps?.margins?.bottom ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginLeft = twipsToPt(sectionProps?.margins?.left ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  const marginRight = twipsToPt(sectionProps?.margins?.right ?? DEFAULT_PAGE_MARGIN_TWIPS);
   const width = twipsToPt(widthTwips);
   const height = twipsToPt(heightTwips);
 

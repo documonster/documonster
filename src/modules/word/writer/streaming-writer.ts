@@ -38,10 +38,11 @@ import {
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES
 } from "../constants";
-import { sanitizeMediaFileName, utf8Encoder } from "../core/internal-utils";
+import { sanitizeMediaFileName, sanitizeUrl, utf8Encoder } from "../core/internal-utils";
 import { getFileExt, getPartRelsPath } from "../core/opc-paths";
 import { walkBlocks } from "../core/walker";
 import { DocxWriteError } from "../errors";
+import type { WordSecurityPolicy } from "../security/policy";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -176,6 +177,12 @@ export interface StreamingDocxOptions {
    * invalid DOCX files.
    */
   readonly missingImagePolicy?: "throw" | "warn";
+  /**
+   * Security policy. Currently used to surface `rawXmlPolicy` to the renderers
+   * (preserve / strip / reject) so opaque rawXml fields behave consistently
+   * with the buffered `packageDocx` writer.
+   */
+  readonly securityPolicy?: WordSecurityPolicy;
 }
 
 /** Progress callback for streaming writer. */
@@ -412,6 +419,7 @@ export class StreamingDocxWriter {
     this._streamError = null;
     this._documentRels = createRelationships();
     this._renderCtx = createRenderContext({
+      securityPolicy: this._options.securityPolicy,
       chartRIds: new Map(),
       imageRIdRemap: new Map(),
       hyperlinkRIds: new WeakMap()
@@ -575,7 +583,15 @@ export class StreamingDocxWriter {
     if (!h.url || h.rId || this._registeredHyperlinks.has(h)) {
       return;
     }
-    const rId = addRelationship(this._documentRels, RelType.Hyperlink, h.url, "External");
+    // Drop dangerous schemes (javascript:, vbscript:, data:, file:, …) before
+    // they reach document.xml.rels. Mark the link as registered either way so
+    // we don't keep re-evaluating it on every flush.
+    const safe = sanitizeUrl(h.url);
+    if (!safe) {
+      this._registeredHyperlinks.add(h);
+      return;
+    }
+    const rId = addRelationship(this._documentRels, RelType.Hyperlink, safe, "External");
     this._renderCtx.hyperlinkRIds.set(h, rId);
     this._registeredHyperlinks.add(h);
   }
@@ -880,7 +896,11 @@ export class StreamingDocxWriter {
       const fnLinks = collectHyperlinksFromNotes(this._options.footnotes);
       for (const link of fnLinks) {
         if (link.url) {
-          const linkRId = addRelationship(fnRels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const linkRId = addRelationship(fnRels, RelType.Hyperlink, safe, "External");
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
         }
       }
@@ -905,7 +925,11 @@ export class StreamingDocxWriter {
       const enLinks = collectHyperlinksFromNotes(this._options.endnotes);
       for (const link of enLinks) {
         if (link.url) {
-          const linkRId = addRelationship(enRels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const linkRId = addRelationship(enRels, RelType.Hyperlink, safe, "External");
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
         }
       }
@@ -933,7 +957,11 @@ export class StreamingDocxWriter {
       const cmtLinks = collectHyperlinksFromNotes(commentBodies);
       for (const link of cmtLinks) {
         if (link.url) {
-          const linkRId = addRelationship(cmtRels, RelType.Hyperlink, link.url, "External");
+          const safe = sanitizeUrl(link.url);
+          if (!safe) {
+            continue;
+          }
+          const linkRId = addRelationship(cmtRels, RelType.Hyperlink, safe, "External");
           this._renderCtx.hyperlinkRIds.set(link, linkRId);
         }
       }
@@ -948,7 +976,13 @@ export class StreamingDocxWriter {
         addXmlFile(`word/_rels/comments.xml.rels`, xml => renderRelationships(cmtRels, xml));
       }
 
-      addXmlFile(PartPath.Comments, xml => renderComments(xml, this._options.comments!));
+      addXmlFile(PartPath.Comments, xml =>
+        renderComments(xml, this._options.comments!, {
+          imageRemap: this._renderCtx.imageRIdRemap,
+          hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+          rawXmlPolicy: this._renderCtx.rawXmlPolicy
+        })
+      );
       // Also write commentsExtended if any have done/parentId
       const hasExtended = this._options.comments.some(c => c.done != null || c.parentId != null);
       if (hasExtended) {
@@ -981,8 +1015,11 @@ export class StreamingDocxWriter {
         const headerIdx = nextHeaderIdx++;
         const headerPath = PartPath.header(headerIdx);
         addContentTypeOverride(contentTypes, `/${headerPath}`, ContentType.Header);
-        addXmlFile(headerPath, xml => renderHeader(xml, headerDef.content));
 
+        // Register relationships BEFORE rendering the header XML, otherwise
+        // the writer cannot resolve the freshly-allocated hyperlink rIds and
+        // emits dangling r:id values. addXmlFile() invokes the render
+        // callback synchronously, so the order matters.
         const hRels = createRelationships();
         // Images: register every rId referenced inside this header that the
         // caller supplied a binary for. Header XML emits `r:embed` using the
@@ -1000,7 +1037,11 @@ export class StreamingDocxWriter {
         const hLinks = collectHyperlinksFromHeaderFooter(headerDef.content);
         for (const link of hLinks) {
           if (link.url) {
-            const linkRId = addRelationship(hRels, RelType.Hyperlink, link.url, "External");
+            const safe = sanitizeUrl(link.url);
+            if (!safe) {
+              continue;
+            }
+            const linkRId = addRelationship(hRels, RelType.Hyperlink, safe, "External");
             this._renderCtx.hyperlinkRIds.set(link, linkRId);
           }
         }
@@ -1018,6 +1059,14 @@ export class StreamingDocxWriter {
           this._chartNum.set(chartContent, num);
           this._bodyCharts.push(chartContent);
         }
+
+        addXmlFile(headerPath, xml =>
+          renderHeader(xml, headerDef.content, {
+            imageRemap: this._renderCtx.imageRIdRemap,
+            hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+            rawXmlPolicy: this._renderCtx.rawXmlPolicy
+          })
+        );
 
         if (getRelationshipCount(hRels) > 0) {
           addXmlFile(`word/_rels/header${headerIdx}.xml.rels`, xml =>
@@ -1056,8 +1105,10 @@ export class StreamingDocxWriter {
       for (const [, footerDef] of this._options.footers) {
         const footerPath = PartPath.footer(footerIdx);
         addContentTypeOverride(contentTypes, `/${footerPath}`, ContentType.Footer);
-        addXmlFile(footerPath, xml => renderFooter(xml, footerDef.content));
 
+        // Register relationships BEFORE rendering. addXmlFile() runs the
+        // callback synchronously so any hyperlink rIds the renderer needs
+        // must already be in this._renderCtx.hyperlinkRIds.
         const fRels = createRelationships();
         const imgRids = collectImageRidsFromContent(footerDef.content);
         for (const oldRid of imgRids) {
@@ -1069,7 +1120,11 @@ export class StreamingDocxWriter {
         const fLinks = collectHyperlinksFromHeaderFooter(footerDef.content);
         for (const link of fLinks) {
           if (link.url) {
-            const linkRId = addRelationship(fRels, RelType.Hyperlink, link.url, "External");
+            const safe = sanitizeUrl(link.url);
+            if (!safe) {
+              continue;
+            }
+            const linkRId = addRelationship(fRels, RelType.Hyperlink, safe, "External");
             this._renderCtx.hyperlinkRIds.set(link, linkRId);
           }
         }
@@ -1085,6 +1140,14 @@ export class StreamingDocxWriter {
           this._chartNum.set(chartContent, num);
           this._bodyCharts.push(chartContent);
         }
+
+        addXmlFile(footerPath, xml =>
+          renderFooter(xml, footerDef.content, {
+            imageRemap: this._renderCtx.imageRIdRemap,
+            hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+            rawXmlPolicy: this._renderCtx.rawXmlPolicy
+          })
+        );
 
         if (getRelationshipCount(fRels) > 0) {
           addXmlFile(`word/_rels/footer${footerIdx}.xml.rels`, xml =>
@@ -1222,7 +1285,22 @@ export class StreamingDocxWriter {
 
     // Opaque (unrecognized) parts for round-trip preservation
     if (this._options.opaqueParts) {
+      const preserveOle = this._options.securityPolicy?.preserveOleObjects !== false;
+      const dropSignatures = this._options.securityPolicy?.dropSignaturesOnModify !== false;
       for (const part of this._options.opaqueParts) {
+        // Honour `preserveOleObjects`: skip OLE binaries when disabled.
+        if (
+          !preserveOle &&
+          (part.path.startsWith("word/embeddings/") ||
+            (part.path.endsWith(".bin") && part.path.includes("embed")))
+        ) {
+          continue;
+        }
+        // Honour `dropSignaturesOnModify`: signatures cease to be valid the
+        // moment the document is re-serialised, so by default we drop them.
+        if (dropSignatures && part.path.startsWith("_xmlsignatures/")) {
+          continue;
+        }
         const opaqueFile = new ZipDeflate(part.path, { level });
         this._zip.add(opaqueFile);
         opaqueFile.push(part.data, true);
@@ -1269,7 +1347,16 @@ export class StreamingDocxWriter {
       endnotes: this._options.endnotes,
       coreProperties: this._options.coreProperties,
       appProperties: this._options.appProperties,
-      customProperties: this._options.customProperties
+      customProperties: this._options.customProperties,
+      rawXmlPolicy: this._renderCtx.rawXmlPolicy,
+      // Pass the shared rId tables so in-note hyperlinks (registered earlier
+      // against footnotes.xml.rels / endnotes.xml.rels) resolve to the same
+      // rIds the renderer is about to emit.
+      notesHelpers: {
+        imageRemap: this._renderCtx.imageRIdRemap,
+        hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+        rawXmlPolicy: this._renderCtx.rawXmlPolicy
+      }
     });
 
     for (const part of commonParts) {

@@ -16,7 +16,7 @@ import {
   NS_CX_CHART,
   NS_WPS
 } from "../constants";
-import { DocxWriteError } from "../errors";
+import { DocxRawXmlPolicyError, DocxWriteError } from "../errors";
 import type {
   DocxDocument,
   BodyContent,
@@ -40,185 +40,60 @@ import { renderMathBlock } from "./math-writer";
 import { renderParagraph } from "./paragraph-writer";
 import { renderDocumentBackground } from "./parts-writer";
 import { createRenderContext, type RenderHelpers, type WordRenderContext } from "./render-context";
+import { renderRun } from "./run-writer";
+import { renderSdtPr } from "./sdt-writer";
 import { renderSectionProperties } from "./section-writer";
 import { renderTable } from "./table-writer";
 import { renderTextBox } from "./textbox-writer";
 import { renderTableOfContents } from "./toc-writer";
 
-/** Render a structured document tag. */
-function renderSdt(xml: XmlSink, sdt: StructuredDocumentTag, ctx: WordRenderContext): void {
+/**
+ * Render a structured document tag.
+ *
+ * `ctx` may be `undefined` when called from a sub-renderer that only knows
+ * about `RenderHelpers` (e.g. table cell, header/footer). In that case we
+ * still emit a syntactically valid `<w:sdt>`, but we cannot auto-assign an
+ * id from the document-wide id generator — callers that care about
+ * uniqueness should provide `properties.id` explicitly.
+ */
+export function renderSdt(
+  xml: XmlSink,
+  sdt: StructuredDocumentTag,
+  ctx: WordRenderContext | undefined,
+  helpers?: RenderHelpers
+): void {
   xml.openNode("w:sdt");
-
-  if (sdt.properties) {
-    xml.openNode("w:sdtPr");
-    const p = sdt.properties;
-    // Auto-assign ID if not provided (Word strongly expects unique IDs)
-    const sdtId = p.id ?? ctx.ids.nextSdtId();
-    xml.leafNode("w:id", { "w:val": String(sdtId) });
-    if (p.tag) {
-      xml.leafNode("w:tag", { "w:val": p.tag });
-    }
-    if (p.alias) {
-      xml.leafNode("w:alias", { "w:val": p.alias });
-    }
-    // Lock: combine lockContent + lockSdt
-    if (p.lockContent && p.lockSdt) {
-      xml.leafNode("w:lock", { "w:val": "sdtContentLocked" });
-    } else if (p.lockContent) {
-      xml.leafNode("w:lock", { "w:val": "contentLocked" });
-    } else if (p.lockSdt) {
-      xml.leafNode("w:lock", { "w:val": "sdtLocked" });
-    }
-    // Appearance (w15:appearance for modern SDTs)
-    if (p.appearance) {
-      xml.leafNode("w15:appearance", { "w15:val": p.appearance });
-    }
-    // Show placeholder toggle
-    if (p.showingPlaceholder) {
-      xml.leafNode("w:showingPlcHdr");
-    }
-    if (p.placeholder) {
-      xml.openNode("w:placeholder");
-      xml.leafNode("w:docPart", { "w:val": p.placeholder });
-      xml.closeNode();
-    }
-    if (p.temporary) {
-      xml.leafNode("w:temporary");
-    }
-    if (p.dataBinding) {
-      const bindAttrs: Record<string, string> = {
-        "w:xpath": p.dataBinding.xpath,
-        "w:storeItemID": p.dataBinding.storeItemId
-      };
-      if (p.dataBinding.prefixMappings) {
-        bindAttrs["w:prefixMappings"] = p.dataBinding.prefixMappings;
-      }
-      xml.leafNode("w:dataBinding", bindAttrs);
-    }
-    // Type discriminator markers
-    if (p.plainText) {
-      xml.leafNode("w:text");
-    }
-    if (p.richText) {
-      xml.leafNode("w:richText");
-    }
-    if (p.picture) {
-      xml.leafNode("w:picture");
-    }
-    if (p.group) {
-      xml.leafNode("w:group");
-    }
-    if (p.equation) {
-      xml.leafNode("w:equation");
-    }
-    if (p.citation) {
-      xml.leafNode("w:citation");
-    }
-    if (p.bibliography) {
-      xml.leafNode("w:bibliography");
-    }
-    if (p.repeatingSectionItem) {
-      xml.leafNode("w15:repeatingSectionItem");
-    }
-    if (p.repeatingSection) {
-      // w15:repeatingSection has child elements (not attributes) per the schema
-      const rs = p.repeatingSection;
-      const hasChildren = rs.sectionTitle !== undefined || rs.allowInsertDelete !== undefined;
-      if (hasChildren) {
-        xml.openNode("w15:repeatingSection");
-        if (rs.sectionTitle !== undefined) {
-          xml.leafNode("w15:sectionTitle", { "w15:val": rs.sectionTitle });
-        }
-        if (rs.allowInsertDelete === false) {
-          xml.leafNode("w15:doNotAllowInsertDeleteSection");
-        }
-        xml.closeNode();
-      } else {
-        xml.leafNode("w15:repeatingSection");
-      }
-    }
-    // Checkbox (w14 extension)
-    if (p.checkbox) {
-      xml.openNode("w14:checkbox");
-      xml.leafNode("w14:checked", p.checkbox.checked ? { "w14:val": "1" } : { "w14:val": "0" });
-      if (p.checkbox.checkedChar || p.checkbox.checkedFont) {
-        const cAttrs: Record<string, string> = {};
-        if (p.checkbox.checkedChar) {
-          cAttrs["w14:val"] = p.checkbox.checkedChar;
-        }
-        if (p.checkbox.checkedFont) {
-          cAttrs["w14:font"] = p.checkbox.checkedFont;
-        }
-        xml.leafNode("w14:checkedState", cAttrs);
-      }
-      if (p.checkbox.uncheckedChar || p.checkbox.uncheckedFont) {
-        const uAttrs: Record<string, string> = {};
-        if (p.checkbox.uncheckedChar) {
-          uAttrs["w14:val"] = p.checkbox.uncheckedChar;
-        }
-        if (p.checkbox.uncheckedFont) {
-          uAttrs["w14:font"] = p.checkbox.uncheckedFont;
-        }
-        xml.leafNode("w14:uncheckedState", uAttrs);
-      }
-      xml.closeNode();
-    }
-    // Dropdown list
-    if (p.dropdownList) {
-      xml.openNode("w:dropDownList");
-      for (const item of p.dropdownList) {
-        const attrs: Record<string, string> = { "w:value": item.value };
-        if (item.displayText) {
-          attrs["w:displayText"] = item.displayText;
-        }
-        xml.leafNode("w:listItem", attrs);
-      }
-      xml.closeNode();
-    }
-    // ComboBox
-    if (p.comboBox) {
-      xml.openNode("w:comboBox");
-      for (const item of p.comboBox) {
-        const attrs: Record<string, string> = { "w:value": item.value };
-        if (item.displayText) {
-          attrs["w:displayText"] = item.displayText;
-        }
-        xml.leafNode("w:listItem", attrs);
-      }
-      xml.closeNode();
-    }
-    // Date picker
-    if (p.date) {
-      const dateAttrs: Record<string, string> = {};
-      if (p.date.fullDate) {
-        dateAttrs["w:fullDate"] = p.date.fullDate;
-      }
-      xml.openNode("w:date", Object.keys(dateAttrs).length > 0 ? dateAttrs : undefined);
-      if (p.date.dateFormat) {
-        xml.leafNode("w:dateFormat", { "w:val": p.date.dateFormat });
-      }
-      if (p.date.lid) {
-        xml.leafNode("w:lid", { "w:val": p.date.lid });
-      }
-      if (p.date.storeMappedDataAs) {
-        xml.leafNode("w:storeMappedDataAs", { "w:val": p.date.storeMappedDataAs });
-      }
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
+  renderSdtPr(xml, sdt, ctx);
 
   xml.openNode("w:sdtContent");
-  const sdtHelpers: RenderHelpers | undefined = ctx
-    ? { imageRemap: ctx.imageRIdRemap, hyperlinkRIds: ctx.hyperlinkRIds }
-    : undefined;
+  // Use the explicit `helpers` argument when present (it carries the
+  // rId/policy state for the surrounding part), and otherwise derive a
+  // helpers object from the document-level ctx.
+  const sdtHelpers: RenderHelpers | undefined = helpers
+    ? helpers
+    : ctx
+      ? {
+          imageRemap: ctx.imageRIdRemap,
+          hyperlinkRIds: ctx.hyperlinkRIds,
+          rawXmlPolicy: ctx.rawXmlPolicy
+        }
+      : undefined;
   for (const child of sdt.content) {
     if ("type" in child) {
       if (child.type === "paragraph") {
         renderParagraph(xml, child, sdtHelpers);
       } else if (child.type === "table") {
         renderTable(xml, child, sdtHelpers);
+      } else if (child.type === "sdt") {
+        // Nested SDT (e.g. items inside a repeating section).
+        renderSdt(xml, child, ctx, sdtHelpers);
       }
+    } else {
+      // No `type` discriminator → it's a bare Run. Some readers (and the
+      // parser in this module) preserve a w:r directly inside w:sdtContent
+      // for run-level structured document tags. Render the run directly so
+      // round-tripping does not silently drop its text.
+      renderRun(xml, child, sdtHelpers);
     }
   }
   xml.closeNode();
@@ -238,7 +113,8 @@ export function renderBodyContent(
   const renderCtx = ctx ?? createRenderContext();
   const helpers: RenderHelpers = {
     imageRemap: renderCtx.imageRIdRemap,
-    hyperlinkRIds: renderCtx.hyperlinkRIds
+    hyperlinkRIds: renderCtx.hyperlinkRIds,
+    rawXmlPolicy: renderCtx.rawXmlPolicy
   };
   switch (content.type) {
     case "paragraph":
@@ -269,7 +145,7 @@ export function renderBodyContent(
       renderDrawingShape(xml, content as DrawingShape, renderCtx);
       break;
     case "opaqueDrawing":
-      renderOpaqueDrawing(xml, content);
+      renderOpaqueDrawing(xml, content, renderCtx);
       break;
     case "chart":
       renderChartDrawing(xml, content, renderCtx);
@@ -277,9 +153,17 @@ export function renderBodyContent(
     case "chartEx":
       renderChartExDrawing(xml, content, renderCtx);
       break;
-    case "altChunk":
-      xml.leafNode("w:altChunk", { "r:id": content.rId });
+    case "altChunk": {
+      // Prefer the rId registered on the render context (so we never have
+      // to mutate `content.rId` on the caller's model). Fall back to the
+      // model's own rId for callers who pre-assigned one (e.g. when
+      // re-rendering an already-packaged document).
+      const altRId = renderCtx.altChunkRIds.get(content) ?? content.rId;
+      if (altRId) {
+        xml.leafNode("w:altChunk", { "r:id": altRId });
+      }
       break;
+    }
   }
 }
 
@@ -431,7 +315,12 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
     xml.closeNode();
   }
   if (shape._advancedFillXml) {
-    xml.writeRaw(shape._advancedFillXml);
+    if (ctx.rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("drawingShape._advancedFillXml");
+    }
+    if (ctx.rawXmlPolicy !== "strip") {
+      xml.writeRaw(shape._advancedFillXml);
+    }
   }
 
   // Outline
@@ -455,13 +344,23 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
   // OOXML schema. They were previously interleaved with fill via a single
   // rawXml string which produced documents that violated the schema order.
   if (shape._advancedEffectsXml) {
-    xml.writeRaw(shape._advancedEffectsXml);
+    if (ctx.rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("drawingShape._advancedEffectsXml");
+    }
+    if (ctx.rawXmlPolicy !== "strip") {
+      xml.writeRaw(shape._advancedEffectsXml);
+    }
   } else if (shape.rawXml && !shape._advancedFillXml) {
     // Backwards-compat: if the caller provided an opaque rawXml without the
     // split fields (e.g. round-tripped from a reader), drop it after a:ln.
     // This preserves the previous "rawXml → spPr tail" behaviour for shapes
     // that don't go through createShape().
-    xml.writeRaw(shape.rawXml);
+    if (ctx.rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("drawingShape.rawXml");
+    }
+    if (ctx.rawXmlPolicy !== "strip") {
+      xml.writeRaw(shape.rawXml);
+    }
   }
 
   xml.closeNode(); // wps:spPr
@@ -471,7 +370,11 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
     xml.openNode("wps:txbx");
     xml.openNode("w:txbxContent");
     const txbxHelpers: RenderHelpers | undefined = ctx
-      ? { imageRemap: ctx.imageRIdRemap, hyperlinkRIds: ctx.hyperlinkRIds }
+      ? {
+          imageRemap: ctx.imageRIdRemap,
+          hyperlinkRIds: ctx.hyperlinkRIds,
+          rawXmlPolicy: ctx.rawXmlPolicy
+        }
       : undefined;
     for (const para of shape.textContent) {
       renderParagraph(xml, para, txbxHelpers);
@@ -496,7 +399,16 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
 // Opaque Drawing Writer
 // =============================================================================
 
-function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing): void {
+function renderOpaqueDrawing(xml: XmlSink, drawing: OpaqueDrawing, ctx: WordRenderContext): void {
+  if (ctx.rawXmlPolicy === "reject") {
+    throw new DocxRawXmlPolicyError("opaqueDrawing");
+  }
+  if (ctx.rawXmlPolicy === "strip") {
+    // Emit a structurally-valid empty paragraph instead of the opaque drawing.
+    xml.openNode("w:p");
+    xml.closeNode();
+    return;
+  }
   xml.openNode("w:p");
   xml.openNode("w:r");
   xml.writeRaw(drawing.rawXml);

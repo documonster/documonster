@@ -37,6 +37,11 @@ import type {
   SectionProperties,
   Table
 } from "../types";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "./layout-constants";
 
 // =============================================================================
 // Public API Types
@@ -84,12 +89,6 @@ export interface LayoutOptions {
 // Internal Constants
 // =============================================================================
 
-/** US Letter 页面宽度 (twips) */
-const DEFAULT_PAGE_WIDTH = 12240;
-/** US Letter 页面高度 (twips) */
-const DEFAULT_PAGE_HEIGHT = 15840;
-/** 默认边距 (twips) — 1 inch */
-const DEFAULT_MARGIN = 1440;
 /** 默认字号 (半磅): 24 = 12pt */
 const DEFAULT_FONT_SIZE_HALF_PT = 24;
 /** 默认每行字符数 */
@@ -109,9 +108,9 @@ const FOOTNOTE_ENTRY_HEIGHT = 300;
 
 /** 从 SectionProperties 计算可用内容高度 (twips) */
 function computeAvailableHeight(sp: SectionProperties | undefined): number {
-  const height = sp?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT;
-  const marginTop = sp?.margins?.top ?? DEFAULT_MARGIN;
-  const marginBottom = sp?.margins?.bottom ?? DEFAULT_MARGIN;
+  const height = sp?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS;
+  const marginTop = sp?.margins?.top ?? DEFAULT_PAGE_MARGIN_TWIPS;
+  const marginBottom = sp?.margins?.bottom ?? DEFAULT_PAGE_MARGIN_TWIPS;
 
   // 可用高度 = 页面高度 - 上边距 - 下边距
   // Word 中 header/footer 区域位于 margin 内部，不额外占用正文空间。
@@ -121,9 +120,9 @@ function computeAvailableHeight(sp: SectionProperties | undefined): number {
 
 /** 从 SectionProperties 计算可用内容宽度 (twips) */
 function computeAvailableWidth(sp: SectionProperties | undefined): number {
-  const width = sp?.pageSize?.width ?? DEFAULT_PAGE_WIDTH;
-  const marginLeft = sp?.margins?.left ?? DEFAULT_MARGIN;
-  const marginRight = sp?.margins?.right ?? DEFAULT_MARGIN;
+  const width = sp?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS;
+  const marginLeft = sp?.margins?.left ?? DEFAULT_PAGE_MARGIN_TWIPS;
+  const marginRight = sp?.margins?.right ?? DEFAULT_PAGE_MARGIN_TWIPS;
   const gutter = sp?.margins?.gutter ?? 0;
   return Math.max(0, width - marginLeft - marginRight - gutter);
 }
@@ -1012,10 +1011,10 @@ export function layoutDocument(doc: DocxDocument, options?: LayoutOptions): Layo
       }
       case "continuous": {
         // 如果页面设置（尺寸）改变，则需要分页
-        const currentWidth = currentSectionProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH;
-        const currentHeight = currentSectionProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT;
-        const nextWidth = nextProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH;
-        const nextHeight = nextProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT;
+        const currentWidth = currentSectionProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS;
+        const currentHeight = currentSectionProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS;
+        const nextWidth = nextProps?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS;
+        const nextHeight = nextProps?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS;
 
         if (currentWidth !== nextWidth || currentHeight !== nextHeight) {
           newPage();

@@ -58,6 +58,12 @@ export function hyperlink(
     url?: string;
     anchor?: string;
     tooltip?: string;
+    /** Document location bookmark / fragment id (`w:docLocation`). */
+    docLocation?: string;
+    /** Target frame name for web views (`w:tgtFrame`). */
+    tgtFrame?: string;
+    /** Whether the hyperlink has been visited (`w:history`). */
+    history?: boolean;
     properties?: RunProperties;
   }
 ): ParagraphChild {
@@ -67,6 +73,9 @@ export function hyperlink(
     url: options.url,
     anchor: options.anchor,
     tooltip: options.tooltip,
+    docLocation: options.docLocation,
+    tgtFrame: options.tgtFrame,
+    history: options.history,
     children: [text(linkText, options.properties ?? { color: "0563C1", underline: "single" })]
   };
 }

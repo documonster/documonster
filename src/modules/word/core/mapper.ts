@@ -528,7 +528,7 @@ function mapSdt(
 
   // Recurse into content
   const innerPath: WalkPath = { ...path, depth: path.depth + 1 };
-  const newContent: (Paragraph | Run | Table)[] = [];
+  const newContent: (Paragraph | Run | Table | StructuredDocumentTag)[] = [];
   for (let i = 0; i < current.content.length; i++) {
     const item = current.content[i];
     const itemPath: WalkPath = { ...innerPath, index: i };
@@ -539,6 +539,12 @@ function mapSdt(
       }
     } else if ("type" in item && item.type === "table") {
       const mapped = mapTable(item as Table, transformer, itemPath);
+      if (mapped !== null) {
+        newContent.push(mapped);
+      }
+    } else if ("type" in item && item.type === "sdt") {
+      // Recurse into nested SDTs (e.g. repeating-section item SDTs).
+      const mapped = mapSdt(item as StructuredDocumentTag, transformer, itemPath);
       if (mapped !== null) {
         newContent.push(mapped);
       }

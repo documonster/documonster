@@ -71,8 +71,11 @@ export function renderCommentsExtended(xml: XmlSink, comments: readonly CommentD
       continue;
     }
     const attrs: Record<string, string> = { "w15:paraId": firstPara.paraId };
-    if (c.done) {
-      attrs["w15:done"] = "1";
+    // Round-trip explicit done state. `done === false` is meaningful — it
+    // tells consumers "this comment is explicitly *not* resolved", which
+    // can differ semantically from omitting the attribute entirely.
+    if (c.done !== undefined) {
+      attrs["w15:done"] = c.done ? "1" : "0";
     }
     if (c.parentId) {
       attrs["w15:paraIdParent"] = c.parentId;
