@@ -48,6 +48,15 @@ type ZlibFlushable = {
 /**
  * Generic wrapper around zlib streams that flushes after every write.
  * This ensures true streaming behavior - data is emitted immediately, not buffered.
+ *
+ * Backpressure note: the inner `zstream` (Node's `zlib.createDeflate*` etc)
+ * is itself a Transform, so its own `_transform` honours backpressure on
+ * the writer side. The `'data'` listener pushes into our own Transform's
+ * readable side; if a consumer is slow, our `push()` returns false but
+ * the inner zlib stream keeps emitting 'data' until its OWN HWM stops it.
+ * In the worst case, the zlib internal queue + our readable queue both
+ * fill to HWM (≈64 KiB total). For excelts's actual use (one zlib stream
+ * per ZIP entry, consumer is the zip framer which keeps up), this is fine.
  */
 class TrueStreamingZlib<T extends ZlibFlushable> extends Transform {
   constructor(private readonly zstream: T) {

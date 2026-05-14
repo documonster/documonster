@@ -244,6 +244,28 @@ export interface SaxOptions {
  * Accepts strings or Uint8Array chunks.
  * Compatible with Node.js Writable, browser WritableStream wrappers,
  * and the project's own StreamBuf.
+ *
+ * **Backpressure caveat**: `write()` returns `void`. The XmlStreamWriter
+ * cannot signal or wait for backpressure on the target — it pushes
+ * chunks synchronously as the caller invokes `openNode`/`writeText`/etc.
+ *
+ * If the target is a slow sink (HTTP response, fs stream, etc), the
+ * caller is responsible for ensuring chunks are consumed at a rate
+ * matching production. Two safe patterns:
+ *
+ *   1. Wrap the target so `write()` buffers into a bounded queue and
+ *      pause your XML production loop when the queue is full.
+ *   2. Use a small in-memory buffer as the `WritableTarget`, then ship
+ *      the assembled bytes to the slow sink with proper backpressure
+ *      (e.g. via `pipeline()`).
+ *
+ * `XmlStreamWriter` is used internally by excelts's xlsx writer. The xlsx
+ * writer wraps it in a backpressure-aware zip pipeline that awaits drain
+ * BETWEEN zip entries — so memory grows at most by one entry's worth of
+ * uncompressed XML before the producer is parked. Within a single very
+ * large worksheet entry the synchronous push pattern still applies; that
+ * is the practical bound on how much a slow user sink can buffer behind
+ * the xlsx writer.
  */
 export interface WritableTarget {
   write(chunk: string | Uint8Array): void;

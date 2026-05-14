@@ -55,6 +55,11 @@ class BrowserInflateRaw extends Duplex {
   private _bytesIn = 0;
   private _bytesOut = 0;
   private _readingDone = false;
+  // Backpressure: when `push()` returns false, the reader loop parks on this
+  // resolver. `_read()` (called by Node when the consumer wants more bytes)
+  // resolves it so the loop continues. Without this, a slow consumer would
+  // cause unbounded growth of the Duplex's internal readable buffer.
+  private _readPullResolver: (() => void) | null = null;
   private _readingDonePromise: Promise<void>;
   private _resolveReadingDone!: () => void;
   // Track pending write count for proper ordering
@@ -133,6 +138,31 @@ class BrowserInflateRaw extends Duplex {
       });
   }
 
+  /**
+   * Park the reader loop until the consumer pulls more data. Resolved by
+   * the next `_read()` invocation from Node, which signals that the
+   * Duplex's readable buffer has room again.
+   */
+  private _waitForReadablePull(): Promise<void> {
+    if (this._readPullResolver) {
+      // Should not happen — only one push site at a time.
+      return Promise.resolve();
+    }
+    return new Promise<void>(resolve => {
+      this._readPullResolver = resolve;
+    });
+  }
+
+  override _read(_size: number): void {
+    // Consumer wants more bytes. Wake the reader loop if it parked on
+    // backpressure.
+    const resolver = this._readPullResolver;
+    if (resolver) {
+      this._readPullResolver = null;
+      resolver();
+    }
+  }
+
   private async _startReading(): Promise<void> {
     if (this.reading) {
       return;
@@ -147,8 +177,14 @@ class BrowserInflateRaw extends Duplex {
         }
         this._bytesOut += value.length;
 
-        // Directly push to the readable side of Duplex
-        this.push(value);
+        // Push to the Duplex's readable side. If the consumer is slow,
+        // `push()` returns false; pause our reader-loop until the consumer
+        // pulls. Without this, a fast WebStream decompressor could overrun
+        // the Duplex's readable buffer and accumulate megabytes of
+        // decompressed data with no consumer.
+        if (!this.push(value)) {
+          await this._waitForReadablePull();
+        }
       }
     } catch (e) {
       // "Junk found after end of compressed data" is expected when using data descriptors
@@ -208,6 +244,13 @@ class BrowserInflateRaw extends Duplex {
       this.writer.abort(error ?? undefined).catch(() => {});
     }
     this.reader.cancel(error ?? undefined).catch(() => {});
+    // Wake the reader-loop's backpressure waiter if any so `_startReading()`
+    // can unwind cleanly instead of hanging on a never-resolved promise.
+    const resolver = this._readPullResolver;
+    if (resolver) {
+      this._readPullResolver = null;
+      resolver();
+    }
     return super.destroy(error ?? undefined);
   }
 }

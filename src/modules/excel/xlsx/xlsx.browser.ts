@@ -345,6 +345,25 @@ class StreamingZipWriterAdapter implements IZipWriter {
           resolve();
         }
       });
+      // Forward sink errors to the zip pipeline. Without this, a user sink
+      // that errors mid-write (write failure, EPIPE, abort, etc) would leave
+      // `_finalize()` hanging forever — `writeToZip` keeps writing into a
+      // dead sink, but `_finalize`'s 'finish'/'error' listeners on the zip
+      // adapter never fire because nothing tells the adapter the sink died.
+      stream.on("error", (err: Error) => {
+        this._emit("error", err);
+        // Wake any backpressure waiters so writeToZip's `await zip.waitForDrain()`
+        // returns instead of hanging forever for a 'drain' that will never come.
+        this._needsDrain = false;
+        const resolvers = this._drainResolvers.splice(0);
+        for (const resolve of resolvers) {
+          resolve();
+        }
+        const asyncResolvers = this._pendingWriteResolvers.splice(0);
+        for (const resolve of asyncResolvers) {
+          resolve();
+        }
+      });
     }
   }
 

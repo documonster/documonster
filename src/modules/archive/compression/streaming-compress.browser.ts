@@ -87,12 +87,28 @@ interface AsyncCodecBackend {
 /**
  * Base streaming codec with unified lifecycle management.
  * Backend can emit events via the returned codec reference.
+ *
+ * Backpressure: each `write()` chains a deflate task onto `writeChain`.
+ * Without throttling, a fast producer could enqueue thousands of tasks
+ * (each retaining its input chunk) before the backend catches up. To
+ * surface backpressure to the caller, we count pending writes; once the
+ * count reaches `HIGH_WATER_MARK`, `write()` returns `false`. When the
+ * count drops back below the mark, we emit `'drain'` so callers using
+ * the standard Node Writable contract (`pipe()` / `pipeline()`) can
+ * resume. This keeps memory bounded on slow backends or slow consumers.
  */
 class AsyncStreamCodec extends EventEmitter {
+  // Allow up to this many in-flight chunks before signalling backpressure.
+  // 16 chunks × typical 64 KiB ≈ 1 MiB of in-flight retention, enough to
+  // saturate the deflate backend without unbounded growth.
+  private static readonly HIGH_WATER_MARK = 16;
+
   private ended = false;
   private destroyed = false;
   private writeChain: Promise<void> = Promise.resolve();
   private _backend: AsyncCodecBackend | null = null;
+  private _pendingWrites = 0;
+  private _needsDrain = false;
 
   setBackend(backend: AsyncCodecBackend): void {
     this._backend = backend;
@@ -116,6 +132,7 @@ class AsyncStreamCodec extends EventEmitter {
       throw new Error("Backend not initialized");
     }
 
+    this._pendingWrites++;
     const promise = this.writeChain.then(() => backend.write(chunk));
     this.writeChain = promise;
 
@@ -129,8 +146,23 @@ class AsyncStreamCodec extends EventEmitter {
         if (!this.destroyed) {
           handleError(this, err, callback);
         }
+      })
+      .finally(() => {
+        this._pendingWrites--;
+        if (
+          this._needsDrain &&
+          this._pendingWrites < AsyncStreamCodec.HIGH_WATER_MARK &&
+          !this.destroyed
+        ) {
+          this._needsDrain = false;
+          this.emit("drain");
+        }
       });
 
+    if (this._pendingWrites >= AsyncStreamCodec.HIGH_WATER_MARK) {
+      this._needsDrain = true;
+      return false;
+    }
     return true;
   }
 

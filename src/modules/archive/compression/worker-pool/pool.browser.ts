@@ -672,11 +672,12 @@ export class WorkerPool {
    */
   private _handleWorkerError(poolWorker: PoolWorker, event: ErrorEvent): void {
     const taskId = poolWorker.currentTaskId;
+    const session = poolWorker.streamSession;
 
     // Terminate the failed worker
     this._terminateWorker(poolWorker);
 
-    // Fail the current task if any
+    // Fail the current batch task if any
     if (taskId !== null) {
       const task = this._pendingTasks.get(taskId);
       if (task) {
@@ -685,6 +686,30 @@ export class WorkerPool {
         this._failedTasks++;
         task.reject(new Error(event.message || "Worker error"));
       }
+    }
+
+    // CRITICAL: a worker hosting a streaming session can die from an
+    // uncaught error in the worker script, OOM, CSP violation, page
+    // unload, etc. The session is NOT in `_pendingTasks` (those are
+    // batch-only) — without this, the session's `resolveStart` /
+    // slot waiter / drain waiter / `onError` are never called and the
+    // caller (AsyncStreamCodec.write/end) hangs forever. Wake every
+    // promise we own and report the error to the codec.
+    if (session) {
+      const error = new Error(event.message || "Worker terminated unexpectedly");
+      session.ended = true;
+      session.rejectStart?.(error);
+      session.rejectStart = null;
+      session.resolveStart = null;
+      this._resolveSlotWaiter(session);
+      this._resolveDrainWaiter(session);
+      try {
+        session.onError(error);
+      } catch {
+        // The onError callback is user-supplied; if it throws we still
+        // want to keep cleaning up the pool.
+      }
+      poolWorker.streamSession = null;
     }
 
     // Try to process remaining tasks

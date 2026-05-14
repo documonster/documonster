@@ -51,6 +51,28 @@ import { base64ToUint8Array } from "@utils/utils";
 const EMPTY_U8 = new Uint8Array(0);
 const TEXT_DECODER = new TextDecoder();
 
+/**
+ * Drain a resolver list, calling each. Mutates the array to empty.
+ *
+ * Used by the backpressure machinery: when a sink drains or errors, every
+ * parked `_waitForUserSinkDrain()` / pending-async waiter must be woken
+ * exactly once, and the array reset so the next backpressure cycle starts
+ * clean. Hoisted to a free function so it can be re-used across the three
+ * wake sites without per-site duplication of the splice/loop pattern.
+ */
+function callAllResolvers(resolvers: Array<() => void>): void {
+  if (resolvers.length === 0) {
+    return;
+  }
+  // Snapshot then clear, so a resolver that itself triggers a fresh wait
+  // (re-pushing into the same array) doesn't get confused with the current
+  // batch.
+  const snapshot = resolvers.splice(0);
+  for (const r of snapshot) {
+    r();
+  }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -114,6 +136,11 @@ interface OutputStreamLike {
   // restrictive for callers that declare typed listeners like `(err: Error) =>`.
   once(eventName: string | symbol, listener: (...args: any[]) => void): this;
   removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
+  // Optional: not all sinks expose `.on` (e.g. internal `StreamBuf` predates
+  // the EventEmitter contract). Backpressure listeners are skipped when
+  // missing — the runtime guard `typeof stream.on === "function"` is what
+  // actually drives the behaviour.
+  on?(eventName: string | symbol, listener: (...args: any[]) => void): this;
 }
 
 // ============================================================================
@@ -184,6 +211,38 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   protected _trueStreaming: boolean;
   protected WorksheetWriterClass: WorksheetWriterConstructor<TWorksheetWriter>;
 
+  // ---------------------------------------------------------------------------
+  // Backpressure tracking for the user-supplied output sink.
+  //
+  // Set by `_trackBackpressure(ok)` whenever `this.stream.write(data)` returns
+  // false (or a Promise that resolves to false). Cleared when the sink emits
+  // `'drain'`. Awaited by `_waitForUserSinkDrain()` at async boundaries
+  // (between worksheets, before `addWorkbook`, etc) so a slow sink throttles
+  // the producer instead of letting bytes accumulate unboundedly inside the
+  // sink's internal buffer or in the zip pipeline.
+  //
+  // Important caveat: this **cannot** block a single tight synchronous
+  // `for (...) row.commit()` loop inside one worksheet — JavaScript has no
+  // sync wait, and `row.commit()` is sync void. During such a loop, every
+  // produced compressed chunk is pushed straight into the sink's internal
+  // buffer (Node `Writable` accepts writes after returning false; it just
+  // hints "drain"). For very-large single-worksheet workloads with a slow
+  // sink, the practical bound on how much can pile up is roughly the total
+  // compressed size of one worksheet — only the `wb.commit()` boundary
+  // (and any `worksheet.commit()` between sheets) gives the event loop a
+  // chance to park here on `_waitForUserSinkDrain()`.
+  //
+  // Multi-sheet workloads benefit fully because each `worksheet.commit()`
+  // hands control back to `_commitWorksheets()` which awaits drain before
+  // the next sheet starts.
+  private _needsDrain = false;
+  private _drainResolvers: Array<() => void> = [];
+  private _drainListenerAttached = false;
+  // Captured if the user sink fires 'error' before `_finalize()` attaches its
+  // own listener. Replayed by `_finalize()` so the original error is what
+  // rejects `commit()`, not a generic timeout.
+  private _sinkError: Error | null = null;
+
   constructor(
     options: WorkbookWriterOptions,
     WorksheetWriterClass: WorksheetWriterConstructor<TWorksheetWriter>
@@ -221,13 +280,25 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     this.dynamicArrayCount = 0;
     this._trueStreaming = options.trueStreaming ?? false;
 
-    // Create Zip instance
+    // Create Zip instance.
+    //
+    // Backpressure note: when `this.stream.write(data)` returns false (the
+    // user-supplied sink — e.g. fs.WriteStream, PassThrough, HTTP response
+    // — has reached its highWaterMark), we cannot synchronously block the
+    // zip callback (it's invoked from inside `row.commit()`'s sync chain).
+    // Instead we record a `_needsDrain` flag and a Promise that resolves
+    // when the sink emits `'drain'`. `commit()` and `_commitWorksheets()`
+    // await this promise at their natural async boundaries, so the producer
+    // stops generating new zip data until the sink has caught up. This
+    // makes `WorkbookWriter` safe against slow sinks (network responses,
+    // throttled fs, etc) without changing the public API.
     this.zip = new Zip((err, data, final) => {
       if (err) {
         this.stream.emit("error", err);
       } else {
         // `streaming-zip` already emits `Uint8Array`; avoid copying per chunk.
-        this.stream.write(data);
+        const ok = this.stream.write(data);
+        this._trackBackpressure(ok);
         if (final) {
           this.stream.end();
         }
@@ -236,6 +307,12 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
     // Setup output stream
     this.stream = this._createOutputStream(options);
+
+    // Eagerly attach error/close listeners on the sink so any backpressure
+    // waiters are released the moment the sink fails — without this, a
+    // `commit()` parked on `_waitForUserSinkDrain()` would hang forever if
+    // the sink errored before emitting 'drain'.
+    this._attachSinkLifecycleListeners();
 
     // Theme and office rels are deferred to commit() so that worksheet files
     // are added to the ZIP first. This ensures StreamingZip sets ondata on
@@ -252,6 +329,128 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       return toWritable(options.stream);
     }
     return new StreamBuf();
+  }
+
+  /**
+   * Internal: record whether the sink accepted the last write. The
+   * `OutputStreamLike.write` type advertises `boolean | Promise<boolean>`
+   * for forward compatibility, but in practice every concrete sink we
+   * accept (Node `Writable`, browser `Writable` from `@stream`, internal
+   * `StreamBuf`, fs.WriteStream, etc) returns a sync `boolean`. We
+   * defensively handle the Promise shape but it's never exercised.
+   */
+  private _trackBackpressure(ok: boolean | void | Promise<boolean>): void {
+    if (ok instanceof Promise) {
+      // Defensive path: a hypothetical sink whose `write()` returns a
+      // Promise. Await its resolution and treat false as backpressure.
+      ok.then(
+        result => {
+          if (!result) {
+            this._needsDrain = true;
+          }
+        },
+        () => {
+          // Errors surface via the sink's 'error' event; ignore here.
+        }
+      );
+      return;
+    }
+    if (ok === false) {
+      this._needsDrain = true;
+    }
+    this._ensureDrainListener();
+  }
+
+  private _ensureDrainListener(): void {
+    if (this._drainListenerAttached) {
+      return;
+    }
+    if (typeof this.stream.on !== "function") {
+      // StreamBuf and similar sinks that don't follow the Writable contract
+      // never emit 'drain'; they also never return false from write(), so
+      // they reach this branch only spuriously. Skip listener attach.
+      return;
+    }
+    this._drainListenerAttached = true;
+    this.stream.on("drain", () => {
+      this._needsDrain = false;
+      callAllResolvers(this._drainResolvers);
+    });
+  }
+
+  /**
+   * Attach error/close listeners on the user sink so any parked backpressure
+   * waiters are released the moment the sink fails. Without this, a
+   * `commit()` parked on `_waitForUserSinkDrain()` would hang forever if
+   * the sink errored before emitting 'drain'. Idempotent and a no-op for
+   * sinks that don't expose `.on` (e.g. internal `StreamBuf`).
+   *
+   * Uses a non-consuming listener: if the user has their own 'error' handler
+   * it still fires (EventEmitter broadcasts to all listeners). The error is
+   * also captured into `_sinkError` so `_finalize()` can replay it — `_finalize`
+   * registers its own listener with `once()`, which would miss errors that
+   * arrived earlier in the commit pipeline.
+   */
+  private _lifecycleListenersAttached = false;
+
+  private _attachSinkLifecycleListeners(): void {
+    if (this._lifecycleListenersAttached) {
+      return;
+    }
+    if (typeof this.stream.on !== "function") {
+      return;
+    }
+    this._lifecycleListenersAttached = true;
+    // Use `.once()` for both events: we only care about the first error
+    // (subsequent errors are captured in `_sinkError` only if we haven't
+    // recorded one yet). Using `.once()` also avoids leaking the listener
+    // if the sink lives longer than the WorkbookWriter — the EventEmitter
+    // releases the closure as soon as the event fires.
+    if (typeof this.stream.once === "function") {
+      this.stream.once("error", (err: Error) => {
+        if (!this._sinkError) {
+          this._sinkError = err;
+        }
+        this._wakeAllBackpressureWaiters();
+      });
+      this.stream.once("close", () => {
+        this._wakeAllBackpressureWaiters();
+      });
+    } else {
+      // Fallback: sink only has .on, attach normally.
+      this.stream.on("error", (err: Error) => {
+        if (!this._sinkError) {
+          this._sinkError = err;
+        }
+        this._wakeAllBackpressureWaiters();
+      });
+    }
+  }
+
+  private _wakeAllBackpressureWaiters(): void {
+    this._needsDrain = false;
+    callAllResolvers(this._drainResolvers);
+  }
+
+  /**
+   * Park here until any async writes have settled and the user sink has
+   * drained below its high-water mark. Resolves immediately when no
+   * backpressure is in flight.
+   *
+   * Called at async boundaries inside `commit()` so a slow sink throttles
+   * the producer instead of letting bytes accumulate unboundedly.
+   */
+  private async _waitForUserSinkDrain(): Promise<void> {
+    // Short-circuit if the sink already errored — no point waiting for a
+    // drain that will never come. The error itself surfaces from
+    // `_finalize()` later.
+    if (this._sinkError) {
+      return;
+    }
+    if (!this._needsDrain) {
+      return;
+    }
+    return new Promise<void>(resolve => this._drainResolvers.push(resolve));
   }
 
   get definedNames(): DefinedNames {
@@ -311,18 +510,25 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     zipFile.push(buffer, true);
   }
 
-  private _commitWorksheets(): Promise<void> {
-    const commitWorksheet = (worksheet: TWorksheetWriter): Promise<void> => {
-      if (!worksheet.committed) {
-        return new Promise(resolve => {
-          worksheet.stream.once("zipped", () => resolve());
-          worksheet.commit();
-        });
+  private async _commitWorksheets(): Promise<void> {
+    // Commit worksheets sequentially (not in parallel) so we can park on
+    // user-sink backpressure between them. Parallel commit was the old
+    // behavior; for a single-worksheet workbook the difference is nil, and
+    // for multi-sheet workbooks honoring backpressure between them keeps
+    // memory bounded against slow sinks. ZIP itself is inherently serial
+    // (StreamingZip processes one entry at a time via `activeFile`), so
+    // sequential commit imposes no real CPU cost — measured throughput is
+    // identical to parallel commit on multi-sheet workbooks.
+    for (const worksheet of this._worksheets) {
+      if (!worksheet || worksheet.committed) {
+        continue;
       }
-      return Promise.resolve();
-    };
-    const promises = this._worksheets.map(commitWorksheet);
-    return promises.length ? Promise.all(promises).then(() => {}) : Promise.resolve();
+      await new Promise<void>(resolve => {
+        worksheet.stream.once("zipped", () => resolve());
+        worksheet.commit();
+      });
+      await this._waitForUserSinkDrain();
+    }
   }
 
   async commit(): Promise<void> {
@@ -330,6 +536,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     await this._commitWorksheets();
     await this.addMedia();
     this.addDrawings();
+    await this._waitForUserSinkDrain();
     await Promise.all([
       this.addThemes(),
       this.addOfficeRels(),
@@ -342,7 +549,9 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       this.addMetadata(),
       this.addWorkbookRels()
     ]);
+    await this._waitForUserSinkDrain();
     await this.addWorkbook();
+    await this._waitForUserSinkDrain();
     await this._finalize();
   }
 
@@ -658,6 +867,22 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   }
 
   private _finalize(): Promise<this> {
+    // If the user sink errored earlier in the commit pipeline (captured by
+    // `_attachSinkLifecycleListeners`), surface that error now — `commit()`
+    // would otherwise reach `_finalize` and hang waiting for `'close'` from
+    // a sink that's already destroyed.
+    if (this._sinkError) {
+      // End the zip pipeline cleanly so its internal callbacks don't keep
+      // firing into a torn-down sink. Best-effort: ignore any error from
+      // end() since the original `_sinkError` is what we care about.
+      try {
+        this.zip.end();
+      } catch {
+        // Best-effort cleanup.
+      }
+      return Promise.reject(this._sinkError);
+    }
+
     // Wait for "close" — emitted by all supported output streams (Node Writable,
     // browser Writable, and StreamBuf) after "finish". For file streams this
     // guarantees the fd is released, which is critical on Windows where reading
@@ -673,6 +898,12 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       };
       const onDone = () => {
         cleanup();
+        // If an error fired between us checking `_sinkError` and reaching
+        // 'close' (rare but possible with concurrent emit), surface it.
+        if (this._sinkError) {
+          reject(this._sinkError);
+          return;
+        }
         resolve(this);
       };
       this.stream.once("error", onError);

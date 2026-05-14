@@ -732,7 +732,30 @@ export abstract class WorkbookReaderBase<
     stream: Readable
   ): AsyncIterableIterator<ParseEvent<TWorksheetReader, THyperlinkReader> | WaitingWorksheetEntry> {
     const zip = createParse({ forceStream: true });
-    stream.on("error", (err: Error) => zip.emit("error", err));
+    // Bidirectional error propagation, guarded against re-entry: each side
+    // marks itself "settled" before forwarding so the partner's destroy/emit
+    // doesn't bounce the error back into an infinite loop.
+    let propagating = false;
+    stream.on("error", (err: Error) => {
+      if (propagating) {
+        return;
+      }
+      propagating = true;
+      zip.emit("error", err);
+    });
+    zip.on("error", (err: Error) => {
+      if (propagating) {
+        return;
+      }
+      propagating = true;
+      try {
+        if (typeof (stream as any).destroy === "function") {
+          (stream as any).destroy(err);
+        }
+      } catch {
+        // Best-effort cleanup; original error already on `zip`.
+      }
+    });
     stream.pipe(zip);
 
     for await (const entry of iterateStream(zip)) {

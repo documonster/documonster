@@ -98,6 +98,16 @@ class WorkbookReader extends WorkbookReaderBase<
       };
       tempStream.write = trackWrite as typeof tempStream.write;
 
+      // Forward source errors to the temp file stream so:
+      //   - the file write doesn't silently leak when zip parsing fails
+      //   - `writePromise` rejects with the original cause instead of hanging
+      // Without this, an `error` on `entry` (e.g. zip corruption / decryption
+      // failure) becomes an uncaught exception in Node ≥ 16.
+      entry.on("error", err => {
+        tempStream.destroy(err);
+        reject(err);
+      });
+
       entry.pipe(tempStream);
     });
 

@@ -596,6 +596,65 @@ function isReadableStream(input: unknown): input is IReadable<any> {
 // CSV Helper Functions (Internal)
 // =============================================================================
 
+/**
+ * Iterate worksheet rows lazily — yields `{row, rowNumber}` for every row
+ * with values, in sheet order. Reaches into the worksheet's internal
+ * `_rows` array directly so we don't have to materialise the whole row
+ * set up front (matters for very large worksheets piped to slow sinks).
+ *
+ * Note: `_rows` is 0-based but XLSX row numbers are 1-based. Row N lives
+ * at `_rows[N - 1]`, so the yielded `rowNumber` is `i + 1`.
+ */
+function* iterateWorksheetRows(worksheet: any): Generator<{ row: any; rowNumber: number }> {
+  const rows = (worksheet as { _rows?: any[] })._rows;
+  if (!rows || rows.length === 0) {
+    return;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row && row.hasValues) {
+      yield { row, rowNumber: i + 1 };
+    }
+  }
+}
+
+/**
+ * Build a `() => Promise<void>` that resolves on the next `'drain'` event
+ * of `emitter`, but rejects promptly if `'error'` or `'close'` fires first.
+ *
+ * Without the error/close races, a producer parked on `once('drain')`
+ * would hang forever after the downstream sink errors mid-write — the
+ * Transform is destroyed and never emits drain again.
+ */
+function createDrainRacer(emitter: {
+  once(event: string, listener: (...args: any[]) => void): void;
+  off(event: string, listener: (...args: any[]) => void): void;
+}): () => Promise<void> {
+  return () =>
+    new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        emitter.off("drain", onDrain);
+        emitter.off("error", onError);
+        emitter.off("close", onClose);
+      };
+      const onDrain = (): void => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: Error): void => {
+        cleanup();
+        reject(err);
+      };
+      const onClose = (): void => {
+        cleanup();
+        reject(new Error("stream closed before drain"));
+      };
+      emitter.once("drain", onDrain);
+      emitter.once("error", onError);
+      emitter.once("close", onClose);
+    });
+}
+
 function buildParserOptions(options?: CsvOptions): Partial<CsvParseOptions> {
   return {
     delimiter: options?.delimiter ?? ",",
@@ -1151,25 +1210,59 @@ class Workbook {
     const includeEmptyRows = options?.includeEmptyRows !== false;
     const formatter = new CsvFormatterStream(buildFormatterOptions(options));
 
-    if (worksheet) {
-      setTimeout(() => {
+    if (!worksheet) {
+      setTimeout(() => formatter.end(), 0);
+      return formatter;
+    }
+
+    // Drive rows asynchronously so the formatter's backpressure signal can
+    // throttle production. The drain wait races against `'error'` / `'close'`
+    // so a downstream sink failure unwinds the producer instead of hanging.
+    const awaitFormatterDrain = createDrainRacer(formatter);
+
+    const writeAndDrain = (values: any[]): Promise<void> | void => {
+      if (formatter.write(values)) {
+        return;
+      }
+      return awaitFormatterDrain();
+    };
+
+    (async () => {
+      try {
         let lastRow = 1;
-        worksheet.eachRow((row: any, rowNumber: number) => {
+        // Iterate worksheet rows lazily — no snapshot. Each row's `values`
+        // are mapped at iteration time, so already-yielded data is GC-able
+        // as the consumer drains the formatter.
+        for (const { row, rowNumber } of iterateWorksheetRows(worksheet)) {
+          if (formatter.destroyed) {
+            return;
+          }
+          // First slot is the 1-based padding cell — skip without mutating
+          // the row (mutating would corrupt subsequent reads / writes).
+          const dataValues = row.values.slice(1).map(map);
+
           if (includeEmptyRows) {
             while (lastRow++ < rowNumber - 1) {
-              formatter.write([]);
+              const p = writeAndDrain([]);
+              if (p) {
+                await p;
+              }
+              if (formatter.destroyed) {
+                return;
+              }
             }
           }
-          const { values } = row;
-          values.shift();
-          formatter.write(values.map(map));
+          const p = writeAndDrain(dataValues);
+          if (p) {
+            await p;
+          }
           lastRow = rowNumber;
-        });
+        }
         formatter.end();
-      }, 0);
-    } else {
-      setTimeout(() => formatter.end(), 0);
-    }
+      } catch (err) {
+        formatter.destroy(err instanceof Error ? err : new Error(String(err)));
+      }
+    })();
 
     return formatter;
   }
@@ -1398,21 +1491,50 @@ class Workbook {
     const formatter = new CsvFormatterStream(buildFormatterOptions(options));
     const pipelinePromise = pipeline(formatter, stream);
 
-    let lastRow = 1;
-    worksheet.eachRow((row: any, rowNumber: number) => {
-      if (includeEmptyRows) {
-        while (lastRow++ < rowNumber - 1) {
-          formatter.write([]);
-        }
-      }
-      const { values } = row;
-      values.shift();
-      formatter.write(values.map(map));
-      lastRow = rowNumber;
-    });
+    // Race drain against error / close so a mid-stream sink failure makes
+    // `writeAndDrain` reject (and the for-loop unwind) instead of hanging
+    // on a 'drain' the destroyed formatter will never emit.
+    const awaitFormatterDrain = createDrainRacer(formatter);
 
-    formatter.end();
-    await pipelinePromise;
+    const writeAndDrain = async (values: any[]): Promise<void> => {
+      if (!formatter.write(values)) {
+        await awaitFormatterDrain();
+      }
+    };
+
+    try {
+      let lastRow = 1;
+      // Iterate worksheet rows directly without pre-collecting them. The
+      // Workbook model is already in memory, so reaching into `_rows` here
+      // adds no per-row allocation — just a Row reference per iteration,
+      // immediately reassigned. The async loop honours formatter
+      // backpressure between rows so the formatter's internal buffer can't
+      // grow unbounded against a slow sink.
+      for (const { row, rowNumber } of iterateWorksheetRows(worksheet)) {
+        // First slot is the 1-based padding cell — skip without mutating
+        // the row (mutating would corrupt subsequent reads / writes).
+        const dataValues = row.values.slice(1).map(map);
+
+        if (includeEmptyRows) {
+          while (lastRow++ < rowNumber - 1) {
+            await writeAndDrain([]);
+          }
+        }
+        await writeAndDrain(dataValues);
+        lastRow = rowNumber;
+      }
+
+      formatter.end();
+      await pipelinePromise;
+    } catch (err) {
+      // Sink errored mid-write (or pipeline tore down for any reason).
+      // Destroy the formatter so the pipeline unwinds, swallow the
+      // pipeline rejection (the original error is what we want to surface),
+      // and rethrow.
+      formatter.destroy(err instanceof Error ? err : new Error(String(err)));
+      await pipelinePromise.catch(() => {});
+      throw err;
+    }
   }
 
   /**

@@ -204,7 +204,19 @@ export interface IDuplex<TRead = any, TWrite = any> extends IReadable<TRead>, IW
 /**
  * Options for pull stream (reserved for future use)
  */
-export type PullStreamOptions = object;
+export type PullStreamOptions = {
+  /**
+   * Buffer high-water mark in bytes. When the readable buffer exceeds this
+   * size, `write()` returns `false` to signal backpressure to the producer.
+   * Once the buffer drops back to the low-water mark (half the HWM), a
+   * `'drain'` event is emitted. Defaults to `Infinity` (no backpressure).
+   *
+   * Set this when the stream is fed by a fast producer with a slow `pull()`
+   * consumer to keep memory bounded — the legacy default of `Infinity`
+   * preserves existing behaviour for callers that drain promptly.
+   */
+  highWaterMark?: number;
+};
 
 /**
  * Pull stream interface - allows pulling data on demand

@@ -1744,15 +1744,18 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
    * archive.addFile("large-file.bin");
    * archive.addDirectory("./data");
    *
-   * // Stream to a file
+   * // Recommended: pipeTo() handles backpressure end-to-end.
+   * await archive.pipeTo(createWriteStream("output.zip"));
+   *
+   * // Or stream manually — REMEMBER to honor backpressure on the sink:
+   * import { once } from "node:events";
    * const writeStream = createWriteStream("output.zip");
    * for await (const chunk of archive.stream()) {
-   *   writeStream.write(chunk);
+   *   if (!writeStream.write(chunk)) {
+   *     await once(writeStream, "drain");
+   *   }
    * }
    * writeStream.end();
-   *
-   * // Or use pipeTo() for simpler file output
-   * await archive.pipeTo(createWriteStream("output.zip"));
    * ```
    */
   stream(options: ArchiveStreamOptions = {}): AsyncIterable<Uint8Array> {
@@ -3519,25 +3522,84 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
           clearConsumedChunks();
         }
 
+        // Eagerly attach an error listener so a mid-stream gzip failure is
+        // captured and surfaced (instead of becoming an uncaught exception
+        // when the listener-less Transform emits 'error' during our drain
+        // await below). Stored in a closure variable so the drain await can
+        // race against it.
+        let gzipError: Error | null = null;
+        const onGzipError = (err: Error) => {
+          if (!gzipError) {
+            gzipError = err;
+          }
+        };
+        gzipStream.on("error", onGzipError);
+
         // Collect gzip output
         gzipStream.on("data", (chunk: Uint8Array) => {
           chunks.push(chunk);
         });
 
-        // Pipe tar chunks through gzip
-        for await (const tarChunk of tarIterable) {
-          gzipStream.write(tarChunk);
-          // Yield any available gzip output
-          for (const chunk of drainChunks()) {
-            yield chunk;
+        try {
+          // Pipe tar chunks through gzip. Honor `gzipStream.write()`'s
+          // backpressure signal so the gzip Transform's internal buffer
+          // can't grow unbounded if tar produces faster than gzip deflates.
+          for await (const tarChunk of tarIterable) {
+            if (gzipError) {
+              // gzipError is captured as an Error (the closure annotation
+              // says `Error | null`); rethrow rather than wrap to preserve
+              // the original stack and message.
+              // oxlint-disable-next-line no-throw-literal
+              throw gzipError;
+            }
+            if (!gzipStream.write(tarChunk)) {
+              // Race drain vs error so a mid-stream gzip failure rejects
+              // promptly instead of leaving us parked on a 'drain' that
+              // will never fire.
+              await new Promise<void>((resolve, reject) => {
+                const cleanup = () => {
+                  gzipStream.off("drain", onDrain);
+                  gzipStream.off("error", onError);
+                };
+                const onDrain = () => {
+                  cleanup();
+                  resolve();
+                };
+                const onError = (err: Error) => {
+                  cleanup();
+                  reject(err);
+                };
+                gzipStream.once("drain", onDrain);
+                gzipStream.once("error", onError);
+              });
+            }
+            // Yield any available gzip output
+            for (const chunk of drainChunks()) {
+              yield chunk;
+            }
           }
-        }
 
-        // Finalize gzip stream
-        await new Promise<void>((resolve, reject) => {
-          gzipStream.on("error", reject);
-          gzipStream.end(() => resolve());
-        });
+          // Finalize gzip stream — re-use the existing onGzipError listener
+          // for the end() callback path, but wrap it as a Promise that
+          // rejects on either error or accepts on end.
+          await new Promise<void>((resolve, reject) => {
+            if (gzipError) {
+              reject(gzipError);
+              return;
+            }
+            const onEndError = (err: Error) => {
+              gzipStream.off("error", onEndError);
+              reject(err);
+            };
+            gzipStream.once("error", onEndError);
+            gzipStream.end(() => {
+              gzipStream.off("error", onEndError);
+              resolve();
+            });
+          });
+        } finally {
+          gzipStream.off("error", onGzipError);
+        }
 
         // Yield remaining chunks
         for (const chunk of drainChunks()) {

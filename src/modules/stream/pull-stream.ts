@@ -27,9 +27,23 @@ export class PullStream extends EventEmitter {
   protected finished: boolean = false;
   protected _match?: number;
   private _destroyed: boolean = false;
+  // Backpressure: when buffer length exceeds highWaterMark, `write()` returns
+  // false so producers know to slow down. `'drain'` fires once the buffer
+  // drops below half the HWM (low-water mark). Defaults to Infinity for
+  // backward compatibility — callers that opt in by passing `highWaterMark`
+  // get bounded memory, callers that don't keep the legacy unbounded behaviour.
+  private _highWaterMark: number = Infinity;
+  private _needsDrain: boolean = false;
 
-  constructor(_options: PullStreamOptions = {}) {
+  constructor(options: PullStreamOptions = {}) {
     super();
+    if (
+      options.highWaterMark !== undefined &&
+      options.highWaterMark > 0 &&
+      Number.isFinite(options.highWaterMark)
+    ) {
+      this._highWaterMark = options.highWaterMark;
+    }
   }
 
   /** Reset the internal buffer to empty. */
@@ -60,7 +74,11 @@ export class PullStream extends EventEmitter {
   }
 
   /**
-   * Write data to the stream
+   * Write data to the stream.
+   *
+   * Returns `false` when the buffer's readable size exceeds `highWaterMark`
+   * (backpressure signal). Producers should pause and resume on the next
+   * `'drain'` event.
    */
   write(chunk: Uint8Array): boolean {
     if (this._destroyed) {
@@ -71,7 +89,7 @@ export class PullStream extends EventEmitter {
     const chunkLen = chunk.length;
     if (chunkLen === 0) {
       this.emit("chunk");
-      return true;
+      return !this._needsDrain;
     }
 
     // Fast path: first write can reuse caller buffer without copy.
@@ -80,7 +98,7 @@ export class PullStream extends EventEmitter {
       this._bufferReadIndex = 0;
       this._bufferWriteIndex = chunkLen;
       this.emit("chunk");
-      return true;
+      return this._evaluateBackpressure();
     }
 
     const required = this._bufferWriteIndex + chunkLen;
@@ -88,7 +106,7 @@ export class PullStream extends EventEmitter {
       this._buffer.set(chunk, this._bufferWriteIndex);
       this._bufferWriteIndex += chunkLen;
       this.emit("chunk");
-      return true;
+      return this._evaluateBackpressure();
     }
 
     // Need a new buffer. We keep previously returned views stable by allocating.
@@ -105,7 +123,37 @@ export class PullStream extends EventEmitter {
     this._bufferReadIndex = 0;
     this._bufferWriteIndex = nextLength;
     this.emit("chunk");
+    return this._evaluateBackpressure();
+  }
+
+  /**
+   * Set `_needsDrain` based on current buffer size, return whether the
+   * producer should keep writing (true) or pause (false).
+   */
+  private _evaluateBackpressure(): boolean {
+    const readable = this._bufferWriteIndex - this._bufferReadIndex;
+    if (readable >= this._highWaterMark) {
+      this._needsDrain = true;
+      return false;
+    }
     return true;
+  }
+
+  /**
+   * Internal: subclasses or pull paths must call this after consuming bytes
+   * (advancing `_bufferReadIndex`) to potentially emit `'drain'`. Idempotent
+   * and free when no backpressure is in effect.
+   */
+  protected _maybeEmitDrain(): void {
+    if (!this._needsDrain) {
+      return;
+    }
+    const readable = this._bufferWriteIndex - this._bufferReadIndex;
+    // Low-water mark = half of HWM (classic Node Writable behaviour).
+    if (readable * 2 < this._highWaterMark) {
+      this._needsDrain = false;
+      this.emit("drain");
+    }
   }
 
   /**
@@ -192,6 +240,7 @@ export class PullStream extends EventEmitter {
             this._resetBuffer();
           }
 
+          this._maybeEmitDrain();
           resolve(result);
           return;
         }
@@ -255,6 +304,7 @@ export class PullStream extends EventEmitter {
           if (this._bufferReadIndex === this._bufferWriteIndex) {
             this._resetBuffer();
           }
+          this._maybeEmitDrain();
           resolve(result);
           return;
         }
