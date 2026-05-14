@@ -367,12 +367,26 @@ function renderHyperlink(xml: XmlSink, link: Hyperlink, helpers?: RenderHelpers)
   // Resolve the relationship id: prefer the packager-provided WeakMap (so we
   // never need the model to carry the rId), fall back to whatever the model
   // already had (e.g. round-tripped DOCX where the reader populated rId).
-  const resolvedRId = helpers?.hyperlinkRIds?.get(link) ?? link.rId;
+  // Resolve r:id. Prefer the packager-assigned rId from the helpers map
+  // (it's the only one guaranteed to exist in the rebuilt .rels file).
+  // Fall back to the model's `rId` only when no packager-assigned id is
+  // present — this happens for purely model-internal references such as
+  // anchor-only hyperlinks.
+  const resolvedRId = helpers?.hyperlinkRIds?.get(link) ?? (link.url ? undefined : link.rId);
   if (resolvedRId) {
     attrs["r:id"] = resolvedRId;
   }
   if (link.anchor) {
     attrs["w:anchor"] = link.anchor;
+  }
+  // CT_Hyperlink (ECMA-376 §17.16.22) requires r:id OR w:anchor — when
+  // neither is present, emit the children as bare runs to avoid a schema
+  // violation that some validators flag.
+  if (!resolvedRId && !link.anchor) {
+    for (const run of link.children) {
+      renderRun(xml, run, helpers);
+    }
+    return;
   }
   if (link.tooltip) {
     attrs["w:tooltip"] = link.tooltip;

@@ -1,0 +1,227 @@
+/**
+ * Word Example 11 — Footnotes, Endnotes & Comments
+ *
+ * Covers:
+ *   - Footnote with simple text content
+ *   - Footnote with rich content (multiple paragraphs, formatting)
+ *   - Endnote
+ *   - Comment range (start + reference + end)
+ *   - Reply-style threaded comments via parentId
+ *   - Multiple comments overlapping the same range
+ *   - Edge cases: comment with empty body, comment without range
+ *     (just a reference at a point)
+ *
+ * Output: tmp/word-examples/11-footnotes-endnotes-comments.docx
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  Document,
+  paragraph,
+  textParagraph,
+  text,
+  bold,
+  italic,
+  commentRangeStart,
+  commentRangeEnd,
+  commentReference,
+  toBuffer
+} from "../index";
+import type { Run } from "../index";
+
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/word-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+
+const doc = Document.create();
+Document.useDefaultStyles(doc);
+
+Document.addHeading(doc, "Footnotes, Endnotes & Comments", 1);
+
+// ---------------------------------------------------------------------------
+// 1. Footnotes
+// ---------------------------------------------------------------------------
+Document.addHeading(doc, "1. Footnotes", 2);
+
+// Simple footnote
+const fn1 = Document.addFootnote(doc, "First footnote — citation goes here.");
+
+// Rich footnote (multiple paragraphs)
+const fn2 = Document.addFootnote(doc, [
+  paragraph([italic("First paragraph "), text("of a richly formatted footnote.")]),
+  paragraph([
+    text("Second paragraph (with "),
+    bold("bold"),
+    text(" and an URL: "),
+    text("https://example.com", { color: "0563C1", underline: "single" }),
+    text(").")
+  ])
+]);
+
+// Reference the footnotes inline
+const footnoteRef = (id: number): Run => ({
+  properties: { vertAlign: "superscript" },
+  content: [{ type: "footnoteRef", id }]
+});
+
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    text("This sentence has a footnote"),
+    footnoteRef(fn1),
+    text(" attached, and another"),
+    footnoteRef(fn2),
+    text(" with rich content.")
+  ])
+);
+
+// ---------------------------------------------------------------------------
+// 2. Endnotes
+// ---------------------------------------------------------------------------
+Document.addHeading(doc, "2. Endnotes", 2);
+
+const en1 = Document.addEndnote(doc, "First endnote — appears at the end of the document.");
+const en2 = Document.addEndnote(doc, [
+  paragraph([text("A multi-paragraph endnote. "), text("Endnotes typically collect citations.")])
+]);
+
+const endnoteRef = (id: number): Run => ({
+  properties: { vertAlign: "superscript" },
+  content: [{ type: "endnoteRef", id }]
+});
+
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    text("This sentence references endnote one"),
+    endnoteRef(en1),
+    text(", and another endnote"),
+    endnoteRef(en2),
+    text(" follows here.")
+  ])
+);
+
+// ---------------------------------------------------------------------------
+// 3. Comments
+// ---------------------------------------------------------------------------
+Document.addHeading(doc, "3. Comments (review)", 2);
+
+// Three independent comments
+const c1 = Document.addComment(doc, "Alice", "Should we capitalise this term?", {
+  initials: "AB",
+  date: "2026-05-01T09:00:00Z"
+});
+const c2 = Document.addComment(doc, "Bob", "Agreed — also rephrase the second sentence.", {
+  initials: "BC",
+  date: "2026-05-01T10:30:00Z"
+});
+const c3 = Document.addComment(doc, "Alice", "Done.", {
+  initials: "AB",
+  date: "2026-05-01T11:00:00Z"
+});
+
+// Body content with overlapping comment ranges
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    commentRangeStart(c1),
+    text("This entire sentence is the target of comment 1."),
+    commentRangeEnd(c1),
+    commentReference(c1),
+    text(" Following normal text. "),
+    commentRangeStart(c2),
+    commentRangeStart(c3),
+    text("Both c2 and c3 cover this fragment."),
+    commentRangeEnd(c2),
+    commentRangeEnd(c3),
+    commentReference(c2),
+    commentReference(c3),
+    text(" End of paragraph.")
+  ])
+);
+
+// Comment without range — point reference
+const pointComment = Document.addComment(
+  doc,
+  "Reviewer",
+  "Inserted-at-point comment (no range — pinned to this caret position)."
+);
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    text("Point-style comment placed mid-sentence "),
+    commentReference(pointComment),
+    text(" — the sticky note has no underlined range.")
+  ])
+);
+
+// Edge case: comment with empty body (Word still renders the marker)
+const emptyComment = Document.addComment(doc, "Carol", "");
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    commentRangeStart(emptyComment),
+    text("Even empty-bodied comments produce a valid review marker."),
+    commentRangeEnd(emptyComment),
+    commentReference(emptyComment)
+  ])
+);
+
+// ---------------------------------------------------------------------------
+// 4. Edge case: many footnote references inside a single table cell
+//    (the writer must serialise each ref into the same cell paragraph).
+// ---------------------------------------------------------------------------
+Document.addHeading(doc, "4. Multiple footnotes inside one table cell", 2);
+const fnA = Document.addFootnote(doc, "Footnote A — first citation in the cell.");
+const fnB = Document.addFootnote(doc, "Footnote B — second citation in the cell.");
+const fnC = Document.addFootnote(doc, "Footnote C — third citation in the cell.");
+Document.addTableElement(doc, {
+  type: "table",
+  properties: { width: { value: 5000, type: "pct" } },
+  rows: [
+    {
+      cells: [
+        { content: [textParagraph("Source")] },
+        {
+          content: [
+            paragraph([
+              text("Cited multiple times: "),
+              footnoteRef(fnA),
+              text(", "),
+              footnoteRef(fnB),
+              text(", "),
+              footnoteRef(fnC)
+            ])
+          ]
+        }
+      ]
+    }
+  ]
+});
+
+// ---------------------------------------------------------------------------
+// 5. Edge case: 100 footnotes in one document — stress the numbering pipeline
+// ---------------------------------------------------------------------------
+Document.addHeading(doc, "5. 100 footnotes (stress)", 2);
+const stressIds: number[] = [];
+for (let i = 1; i <= 100; i++) {
+  stressIds.push(Document.addFootnote(doc, `Stress footnote #${i}`));
+}
+Document.addParagraphElement(
+  doc,
+  paragraph([text(`There are ${stressIds.length} footnotes attached to this paragraph.`)])
+);
+// Reference every 10th one inline so the file actually links them
+const sampledRefs = stressIds.filter((_, idx) => idx % 10 === 0).map(footnoteRef);
+Document.addParagraphElement(
+  doc,
+  paragraph([text("Sampled refs:"), ...sampledRefs.flatMap(r => [text(" "), r])])
+);
+
+const buf = await toBuffer(Document.build(doc));
+fs.writeFileSync(path.join(outDir, "11-footnotes-endnotes-comments.docx"), buf);
+console.log(`  → 11-footnotes-endnotes-comments.docx (${buf.length} bytes)`);

@@ -20,6 +20,7 @@ import {
   commentRangeEnd,
   commentReference
 } from "@word/index";
+import type { Table } from "@word/index";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 import { describe, it, expect } from "vitest";
@@ -456,7 +457,6 @@ describe("DOCX XML Compliance", () => {
   describe("table structure compliance", () => {
     it("should produce w:tbl with w:tblPr, w:tblGrid, w:tr, w:tc, and w:p", async () => {
       const h = Document.create();
-      // Provide columnWidths so that w:tblGrid is emitted
       Document.addTable(
         h,
         [
@@ -499,6 +499,179 @@ describe("DOCX XML Compliance", () => {
         expect(paras.length).toBeGreaterThan(0);
       }
     });
+
+    it("should auto-synthesize w:tblGrid when columnWidths is omitted", async () => {
+      // ECMA-376 §17.4.49 requires <w:tblGrid> with at least one
+      // <w:gridCol>. Word rejects packages where the element is missing.
+      const h = Document.create();
+      Document.addTable(h, [
+        ["A", "B", "C"],
+        ["1", "2", "3"]
+      ]);
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+      const tbl = findChild(findChild(parseEntry(files, "word/document.xml"), "w:body")!, "w:tbl")!;
+      const tblGrid = findChild(tbl, "w:tblGrid");
+      expect(tblGrid).toBeDefined();
+      const gridCols = findChildren(tblGrid!, "w:gridCol");
+      expect(gridCols.length).toBe(3);
+      // All gridCol widths must be positive — Word treats w="0" as
+      // invalid in dxa context.
+      for (const c of gridCols) {
+        expect(parseInt(c.attributes["w:w"]!, 10)).toBeGreaterThan(0);
+      }
+    });
+
+    it("should ensure every w:tc emits a <w:tcPr><w:tcW/>", async () => {
+      // Word strict mode rejects table cells without <w:tcW>.
+      const h = Document.create();
+      Document.addTable(h, [["only"]]);
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+      const tbl = findChild(findChild(parseEntry(files, "word/document.xml"), "w:body")!, "w:tbl")!;
+      const tc = findChild(findChild(tbl, "w:tr")!, "w:tc")!;
+      const tcPr = findChild(tc, "w:tcPr");
+      expect(tcPr).toBeDefined();
+      expect(findChild(tcPr!, "w:tcW")).toBeDefined();
+    });
+
+    it("should append a trailing <w:p> when a cell ends with a nested table", async () => {
+      // ECMA-376 §17.4.66 requires every CT_Tc to end with a <w:p>.
+      const inner: Table = {
+        type: "table",
+        properties: { width: { value: 5000, type: "pct" } },
+        rows: [{ cells: [{ content: [{ type: "paragraph", children: [] }] }] }]
+      };
+      const outer: Table = {
+        type: "table",
+        properties: { width: { value: 5000, type: "pct" } },
+        rows: [{ cells: [{ content: [inner] }] }]
+      };
+      const h = Document.create();
+      Document.addTableElement(h, outer);
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+      const outerTbl = findChild(
+        findChild(parseEntry(files, "word/document.xml"), "w:body")!,
+        "w:tbl"
+      )!;
+      const outerCell = findChild(findChild(outerTbl, "w:tr")!, "w:tc")!;
+      const outerCellChildren = outerCell.children.filter(c => c.type === "element");
+      // Last child of every cell must be <w:p>
+      const lastChild = outerCellChildren[outerCellChildren.length - 1];
+      expect(lastChild.type).toBe("element");
+      if (lastChild.type === "element") {
+        expect(lastChild.name).toBe("w:p");
+      }
+    });
+
+    it("should insert a separator <w:p> between two adjacent <w:tbl> blocks at body level", async () => {
+      // ECMA-376 §17.13.5.34: a <w:tbl> must be followed by a paragraph
+      // (or a section break) before the next <w:tbl> may appear.
+      const h = Document.create();
+      Document.addTable(h, [["A"]]);
+      Document.addTable(h, [["B"]]);
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+      const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
+      const elementChildren = body.children.filter(c => c.type === "element");
+      const elementNames = elementChildren.map(c => (c.type === "element" ? c.name : ""));
+      // Walk and assert no two consecutive <w:tbl> exist (sectPr at the
+      // tail is fine).
+      for (let i = 1; i < elementNames.length; i++) {
+        if (elementNames[i] === "w:tbl") {
+          expect(elementNames[i - 1]).not.toBe("w:tbl");
+        }
+      }
+    });
+  });
+
+  // ===========================================================================
+  // CT_Body terminal-element rules — body must end with <w:p> or <w:sectPr>,
+  // and headers/footers must contain at least one <w:p>.
+  // ===========================================================================
+
+  describe("body terminal-element compliance", () => {
+    it("emits a default <w:sectPr> when the model omits sectionProperties", async () => {
+      const doc = {
+        body: [{ type: "paragraph", children: [] }]
+      } as any;
+      const bytes = await packageDocx(doc);
+      const files = await extractDocx(bytes);
+      const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
+      const sectPr = findChild(body, "w:sectPr");
+      expect(sectPr).toBeDefined();
+      // Default page size must be present
+      expect(findChild(sectPr!, "w:pgSz")).toBeDefined();
+    });
+
+    it("synthesises a <w:p> when the model body is empty", async () => {
+      const doc = { body: [] } as any;
+      const bytes = await packageDocx(doc);
+      const files = await extractDocx(bytes);
+      const body = findChild(parseEntry(files, "word/document.xml"), "w:body")!;
+      // Must contain at least one <w:p>
+      const ps = findChildren(body, "w:p");
+      expect(ps.length).toBeGreaterThan(0);
+    });
+
+    it("synthesises a <w:p> in headers/footers with empty children", async () => {
+      const h = Document.create();
+      Document.useDefaultStyles(h);
+      Document.addParagraph(h, "body");
+      Document.setHeader(h, "default", { children: [] });
+      Document.setFooter(h, "default", { children: [] });
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+      const headerName = [...files.keys()].find(n => /^word\/header\d+\.xml$/.test(n))!;
+      const footerName = [...files.keys()].find(n => /^word\/footer\d+\.xml$/.test(n))!;
+      const headerXml = decoder.decode(files.get(headerName)!);
+      const footerXml = decoder.decode(files.get(footerName)!);
+      // Both must contain at least one <w:p>
+      expect(/<w:p[\s/>]/.test(headerXml)).toBe(true);
+      expect(/<w:p[\s/>]/.test(footerXml)).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // Field cached values must respect the same <w:t> newline rule.
+  // ===========================================================================
+
+  describe("field cached value compliance", () => {
+    it("splits cachedValue containing \\n into <w:t>+<w:br/>", async () => {
+      // Regression: index/TOC fields cached multi-line strings as
+      // `<w:t>line1\nline2</w:t>` which Word rejects.
+      const doc = {
+        body: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                content: [
+                  {
+                    type: "field",
+                    instruction: " INDEX ",
+                    cachedValue: "alpha\tp1\nbeta\tp2"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      } as any;
+      const bytes = await packageDocx(doc);
+      const files = await extractDocx(bytes);
+      const docXml = decoder.decode(files.get("word/document.xml")!);
+      // Cached value must NOT contain a literal newline inside a <w:t>
+      const wtMatches = docXml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) ?? [];
+      for (const m of wtMatches) {
+        expect(/[\r\n]/.test(m)).toBe(false);
+      }
+      // …and Word's required <w:br/> must appear once between the segments
+      expect(docXml).toContain("alpha\tp1");
+      expect(docXml).toContain("beta\tp2");
+      expect(docXml).toMatch(/<w:br\s*\/>/);
+    });
   });
 
   // ===========================================================================
@@ -530,6 +703,24 @@ describe("DOCX XML Compliance", () => {
       expect(matchingRel).toBeDefined();
       expect(matchingRel!.attributes["TargetMode"]).toBe("External");
       expect(matchingRel!.attributes["Target"]).toBe("https://example.com");
+    });
+
+    it("should degrade hyperlink without r:id and without anchor to bare runs (avoid CT_Hyperlink schema violation)", async () => {
+      const h = Document.create();
+      Document.addContent(h, paragraph([hyperlink("plain text", {})]));
+      const bytes = await packageDocx(Document.build(h));
+      const files = await extractDocx(bytes);
+
+      const root = parseEntry(files, "word/document.xml");
+      const body = findChild(root, "w:body")!;
+
+      // No w:hyperlink should be emitted (since neither r:id nor w:anchor is present).
+      const hyps = findDescendants(body, "w:hyperlink");
+      expect(hyps.length).toBe(0);
+
+      // The run text must still be present, just unwrapped.
+      const xmlText = new TextDecoder().decode(files.get("word/document.xml")!);
+      expect(xmlText).toContain("plain text");
     });
   });
 

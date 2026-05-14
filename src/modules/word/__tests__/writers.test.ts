@@ -362,6 +362,46 @@ describe("renderRun", () => {
     expect(aPos).toBeLessThan(tabPos);
     expect(tabPos).toBeLessThan(bPos);
   });
+
+  it("splits text containing \\n into multiple <w:t> with <w:br/> between", () => {
+    // OOXML's CT_Text forbids U+000A inside its value; Word rejects the
+    // file. The writer should transparently split on newlines.
+    const run: Run = { content: [{ type: "text", text: "line1\nline2\nline3" }] };
+    const xml = new XmlWriter();
+    renderRun(xml, run);
+    const output = xml.toString();
+    // Original text with literal \n must NOT survive
+    expect(output.includes("line1\nline2")).toBe(false);
+    // We expect three <w:t> segments and two <w:br/>
+    expect((output.match(/<w:t[^>]*>line\d<\/w:t>/g) ?? []).length).toBe(3);
+    expect((output.match(/<w:br\/>/g) ?? []).length).toBe(2);
+  });
+
+  it("normalises CRLF / lone CR to <w:br/>", () => {
+    const run: Run = { content: [{ type: "text", text: "a\r\nb\rc" }] };
+    const xml = new XmlWriter();
+    renderRun(xml, run);
+    const output = xml.toString();
+    // Two breaks (one between a/b, one between b/c) and three text parts
+    expect((output.match(/<w:br\/>/g) ?? []).length).toBe(2);
+    expect(output.includes(">a<")).toBe(true);
+    expect(output.includes(">b<")).toBe(true);
+    expect(output.includes(">c<")).toBe(true);
+    // No raw CR/LF should leak into the XML payload of any <w:t>
+    expect(/[\r\n]/.test(output.replace(/(?<=>)[\s\S]*?(?=<)/g, ""))).toBe(false);
+  });
+
+  it("skips empty segments around newlines (does not emit empty <w:t>)", () => {
+    const run: Run = { content: [{ type: "text", text: "\nfoo\n" }] };
+    const xml = new XmlWriter();
+    renderRun(xml, run);
+    const output = xml.toString();
+    expect((output.match(/<w:t[^>]*>foo<\/w:t>/g) ?? []).length).toBe(1);
+    // 2 breaks (leading and trailing newlines), 1 text segment
+    expect((output.match(/<w:br\/>/g) ?? []).length).toBe(2);
+    // No empty <w:t></w:t> nor <w:t/> emitted
+    expect(/<w:t[^>]*><\/w:t>|<w:t[^>]*\/>/.test(output)).toBe(false);
+  });
 });
 
 describe("renderRunProperties", () => {
@@ -577,8 +617,8 @@ describe("renderTable", () => {
     const output = xml.toString();
     expect(output).toContain("<w:tbl>");
     expect(output).toContain("</w:tbl>");
-    expect((output.match(/<w:tr/g) ?? []).length).toBe(2);
-    expect((output.match(/<w:tc/g) ?? []).length).toBe(4);
+    expect((output.match(/<w:tr[ >]/g) ?? []).length).toBe(2);
+    expect((output.match(/<w:tc[ >]/g) ?? []).length).toBe(4);
     expect(output).toContain(">A<");
     expect(output).toContain(">D<");
   });

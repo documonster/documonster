@@ -69,6 +69,7 @@ import type {
   Paragraph,
   Run,
   RunProperties,
+  StyleDef,
   Table,
   TableRow,
   TableCell,
@@ -159,8 +160,40 @@ export function excelToDocx(workbook: Workbook, options?: ExcelToDocxOptions): D
     body.push(textParagraph("(Empty workbook)"));
   }
 
+  // Register the heading styles we actually used (plus Normal as the
+  // basedOn root). Without these entries Word logs "missing referenced
+  // style" warnings on every heading inserted by the bridge.
+  const styles: StyleDef[] = [
+    { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true }
+  ];
+  const usedHeadingLevels = new Set<number>();
+  if (opts.includeTitlePage) {
+    usedHeadingLevels.add(1);
+  }
+  if (opts.includeSheetHeadings) {
+    usedHeadingLevels.add(opts.sheetHeadingLevel);
+  }
+  for (const lvl of usedHeadingLevels) {
+    styles.push({
+      type: "paragraph",
+      styleId: `Heading${lvl}`,
+      name: `heading ${lvl}`,
+      basedOn: "Normal",
+      next: "Normal",
+      qFormat: true,
+      uiPriority: 9,
+      runProperties: {
+        font: "Calibri Light",
+        color: lvl <= 2 ? "2F5496" : "1F3763",
+        size: lvl === 1 ? 32 : lvl === 2 ? 26 : 24,
+        bold: true
+      }
+    });
+  }
+
   return {
     body,
+    styles,
     coreProperties: {
       title: workbook.creator ? `${workbook.creator} - Export` : "Excel Export",
       creator: workbook.lastModifiedBy ?? workbook.creator,

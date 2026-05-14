@@ -425,7 +425,14 @@ async function _packageDocxInner(
       if (!modelRId) {
         return addRelationship(documentRels, RelType.Image, target);
       }
-      if (documentRels.hasId(modelRId)) {
+      // OOXML / OPC permits any xs:ID as a Relationship Id, but
+      // Microsoft Word enforces the conventional `rId<N>` shape and
+      // rejects the package when it encounters anything else (e.g. the
+      // `__img_<N>` placeholders our builders emit). Allocate a fresh
+      // canonical rId whenever the model id departs from that pattern,
+      // and remap content references through `imageRIdRemap`.
+      const isCanonicalRId = /^rId\d+$/.test(modelRId);
+      if (!isCanonicalRId || documentRels.hasId(modelRId)) {
         const newId = addRelationship(documentRels, RelType.Image, target);
         imageRemap.set(modelRId, newId);
         return newId;
@@ -890,13 +897,25 @@ async function _packageDocxInner(
     watermarkHeaderRId = addRelationship(documentRels, RelType.Header, `header${wmHdrIdx}.xml`);
     watermarkHeaderIndex = wmHdrIdx;
 
-    // If image watermark, add image relationship in header .rels
+    // If image watermark, add image relationship in header .rels.
+    // Watermark .rels live in their own id space, but Word still expects
+    // the conventional `rId<N>` form. Allocate a fresh canonical id
+    // (preferring an `addRelationship` auto-allocation) when the model
+    // supplied a non-canonical id like `__img_1`.
     if (doc.watermark.type === "image") {
       const wmRels = createRelationships();
       const wmRId = doc.watermark.rId;
       const img = imageByRid.get(wmRId);
       if (img) {
-        addRelationshipWithId(wmRels, wmRId, RelType.Image, `media/${img.fileName}`);
+        const isCanonical = /^rId\d+$/.test(wmRId);
+        if (isCanonical) {
+          addRelationshipWithId(wmRels, wmRId, RelType.Image, `media/${img.fileName}`);
+        } else {
+          // Allocate a fresh rId<N> in the header .rels and remap the
+          // model id so the header writer emits the right r:embed.
+          const allocated = addRelationship(wmRels, RelType.Image, `media/${img.fileName}`);
+          imageRemap.set(wmRId, allocated);
+        }
       }
       watermarkHeaderRels = wmRels;
     }
@@ -1502,9 +1521,17 @@ async function _packageDocxInner(
 
   // Watermark header
   if (watermarkHeaderIndex !== undefined && doc.watermark) {
+    // For image watermarks the model rId may have been remapped onto a
+    // canonical `rId<N>` form when registering the watermark .rels (so
+    // Word accepts the package). Pass the remapped value through so the
+    // VML shape's r:id attribute matches the .rels entry.
+    const watermarkImageRId =
+      doc.watermark.type === "image"
+        ? (imageRemap.get(doc.watermark.rId) ?? doc.watermark.rId)
+        : undefined;
     archive.add(
       PartPath.header(watermarkHeaderIndex),
-      renderXml(xml => renderWatermarkHeader(xml, doc.watermark!))
+      renderXml(xml => renderWatermarkHeader(xml, doc.watermark!, watermarkImageRId))
     );
     if (watermarkHeaderRels && getRelationshipCount(watermarkHeaderRels) > 0) {
       archive.add(

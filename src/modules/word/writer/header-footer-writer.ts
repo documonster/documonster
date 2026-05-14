@@ -27,12 +27,22 @@ import { renderTable } from "./table-writer";
 
 /** Render content blocks (shared between header and footer). */
 function renderContent(xml: XmlSink, content: HeaderFooterContent, helpers?: RenderHelpers): void {
+  let emitted = 0;
   for (const child of content.children) {
     if (child.type === "paragraph") {
       renderParagraph(xml, child, helpers);
+      emitted++;
     } else if (child.type === "table") {
       renderTable(xml, child, helpers);
+      emitted++;
     }
+  }
+  // OOXML requires every header/footer part to contain at least one
+  // <w:p>. When the caller passes an empty children array we still emit
+  // a placeholder so Word does not refuse to load the package.
+  if (emitted === 0) {
+    xml.openNode("w:p");
+    xml.closeNode();
   }
 }
 
@@ -87,12 +97,11 @@ export function renderWatermarkHeader(xml: XmlSink, watermark: Watermark, imageR
     "xmlns:w10": NS_W10
   });
 
-  // Watermark goes in a paragraph with a single pict run
+  // Watermark goes in a paragraph with a single pict run. Skip pPr
+  // entirely — emitting an empty <w:pStyle/> without @w:val is a hard
+  // schema violation Word rejects, and the default style is good enough
+  // for an auto-generated watermark header.
   xml.openNode("w:p");
-  xml.openNode("w:pPr");
-  xml.openNode("w:pStyle");
-  xml.closeNode();
-  xml.closeNode(); // pPr
 
   xml.openNode("w:r");
   xml.openNode("w:pict");

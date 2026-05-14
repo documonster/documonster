@@ -610,12 +610,120 @@ export const Document = {
         paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
         runProperties: { font: "Calibri Light", color: "1F3763", size: 24 }
       },
+      // Heading 4-9 — Word's built-in latent styles. Required so that every
+      // call to addHeading(doc, text, level) where level > 3 resolves to a
+      // defined paragraph style instead of leaving an undefined pStyle ref.
+      {
+        type: "paragraph",
+        styleId: "Heading4",
+        name: "heading 4",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { italic: true, color: "2F5496", size: 22 }
+      },
+      {
+        type: "paragraph",
+        styleId: "Heading5",
+        name: "heading 5",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { color: "2F5496", size: 22 }
+      },
+      {
+        type: "paragraph",
+        styleId: "Heading6",
+        name: "heading 6",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { italic: true, color: "1F3763", size: 22 }
+      },
+      {
+        type: "paragraph",
+        styleId: "Heading7",
+        name: "heading 7",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { color: "1F3763", size: 22 }
+      },
+      {
+        type: "paragraph",
+        styleId: "Heading8",
+        name: "heading 8",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { color: "272727", size: 21 }
+      },
+      {
+        type: "paragraph",
+        styleId: "Heading9",
+        name: "heading 9",
+        basedOn: "Normal",
+        next: "Normal",
+        qFormat: true,
+        uiPriority: 9,
+        unhideWhenUsed: true,
+        paragraphProperties: { keepNext: true, keepLines: true, spacing: { before: 40, after: 0 } },
+        runProperties: { italic: true, color: "272727", size: 21 }
+      },
+      {
+        // Word's zero-formatting base character style. Every other character
+        // style (Hyperlink, HeaderChar, FooterChar, MyEmphasis, …) bases on
+        // it; without this anchor, Word may decline to apply rStyle
+        // references emitted by field/run writers.
+        type: "character",
+        styleId: "DefaultParagraphFont",
+        name: "Default Paragraph Font",
+        uiPriority: 1,
+        semiHidden: true,
+        unhideWhenUsed: true
+      },
       {
         type: "character",
         styleId: "Hyperlink",
         name: "Hyperlink",
+        basedOn: "DefaultParagraphFont",
         uiPriority: 99,
+        unhideWhenUsed: true,
         runProperties: { color: "0563C1", underline: "single" }
+      },
+      {
+        // Word's built-in zero-formatting base table style. Required so
+        // that styles like TableGrid (which sets `basedOn: "TableNormal"`)
+        // resolve cleanly without dangling-reference validation warnings.
+        type: "table",
+        styleId: "TableNormal",
+        name: "Normal Table",
+        uiPriority: 99,
+        semiHidden: true,
+        unhideWhenUsed: true,
+        tableProperties: {
+          cellMargins: {
+            top: { value: 0, type: "dxa" },
+            bottom: { value: 0, type: "dxa" },
+            left: { value: 108, type: "dxa" },
+            right: { value: 108, type: "dxa" }
+          }
+        }
       },
       {
         type: "table",
@@ -624,6 +732,61 @@ export const Document = {
         basedOn: "TableNormal",
         uiPriority: 39,
         tableProperties: { borders: gridBorders(4, "auto") }
+      },
+      // Header / Footer paragraph styles. Word ships these as latent
+      // built-ins; emitting them explicitly avoids "unknown style" warnings
+      // when callers attach `style: "Header"` / `"Footer"` to header/footer
+      // paragraphs (e.g. page-number footers, multi-cell title-bars).
+      // The default tabs (center at 4536 twips, right at 9072 twips) are
+      // what Word's "Insert > Header" preset uses so headers/footers laid
+      // out with center+right tabs render in the expected positions.
+      {
+        type: "paragraph",
+        styleId: "Header",
+        name: "header",
+        basedOn: "Normal",
+        link: "HeaderChar",
+        uiPriority: 99,
+        unhideWhenUsed: true,
+        paragraphProperties: {
+          spacing: { after: 0, line: 240, lineRule: "auto" },
+          tabs: [
+            { position: 4536, type: "center" },
+            { position: 9072, type: "right" }
+          ]
+        }
+      },
+      {
+        type: "character",
+        styleId: "HeaderChar",
+        name: "Header Char",
+        basedOn: "DefaultParagraphFont",
+        link: "Header",
+        uiPriority: 99
+      },
+      {
+        type: "paragraph",
+        styleId: "Footer",
+        name: "footer",
+        basedOn: "Normal",
+        link: "FooterChar",
+        uiPriority: 99,
+        unhideWhenUsed: true,
+        paragraphProperties: {
+          spacing: { after: 0, line: 240, lineRule: "auto" },
+          tabs: [
+            { position: 4536, type: "center" },
+            { position: 9072, type: "right" }
+          ]
+        }
+      },
+      {
+        type: "character",
+        styleId: "FooterChar",
+        name: "Footer Char",
+        basedOn: "DefaultParagraphFont",
+        link: "Footer",
+        uiPriority: 99
       }
     );
   },

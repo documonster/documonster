@@ -576,6 +576,40 @@ describe("OOXML coverage — math (OMML)", () => {
     expect(frac.numerator).toBeDefined();
     expect(frac.denominator).toBeDefined();
   });
+
+  it("wraps m:oMathPara inside <w:p> rather than at body level", async () => {
+    // CT_OMathPara is a member of EG_PContent, NOT EG_BlockLevelElts.
+    // Word rejects packages that emit <m:oMathPara> directly under
+    // <w:body>. Verify the writer wraps it in <w:p>.
+    const h = Document.create();
+    Document.addContent(h, {
+      type: "math",
+      content: [{ type: "mathRun", text: "x = 1" }]
+    });
+    const bytes = await packageDocx(Document.build(h));
+    // Round-trip through readDocx must yield a body-level math block (the
+    // reader unwraps the <w:p>-wrapped oMathPara back into a flat math
+    // block) — this guarantees both sides agree on the shape.
+    const parsed = await readDocx(bytes);
+    const mathBlocks = parsed.body.filter(b => b.type === "math");
+    expect(mathBlocks.length).toBe(1);
+  });
+
+  it("does not emit empty <m:oMath/> for an empty math block", async () => {
+    // Schema CT_OMath requires at least one OMathArg child. An empty
+    // <m:oMath/> is rejected by Word; the writer must skip the math
+    // markup entirely for an empty content array. Round-trip through
+    // readDocx — if the writer emitted invalid XML the parser would
+    // either throw or yield a different shape.
+    const h = Document.create();
+    Document.addContent(h, { type: "math", content: [] });
+    const bytes = await packageDocx(Document.build(h));
+    // The package must be readable
+    const parsed = await readDocx(bytes);
+    // Body level should contain no math block (empty math is dropped) and
+    // no <m:oMath> XML. We assert both.
+    expect(parsed.body.filter(b => b.type === "math").length).toBe(0);
+  });
 });
 
 describe("OOXML coverage — paraId / textId on paragraph", () => {

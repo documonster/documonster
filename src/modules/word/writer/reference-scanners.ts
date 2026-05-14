@@ -43,9 +43,15 @@ export function scanChildrenForImages(children: readonly ParagraphChild[], out: 
 }
 
 /**
- * Recursively collect hyperlinks with a URL (no `rId` yet) from a list of
- * paragraph children. Descends into track-change wrappers so an inserted
- * hyperlink isn't dropped.
+ * Recursively collect external-URL hyperlinks from a list of paragraph
+ * children. Descends into track-change wrappers so an inserted hyperlink
+ * isn't dropped.
+ *
+ * Always emits hyperlinks that carry a `url`, regardless of whether the
+ * model already has an `rId`. Reader-supplied `rId`s are stale once the
+ * package is repackaged because the relationship table is rebuilt from
+ * scratch — the packager assigns its own canonical `rId<N>` and exposes
+ * it via the `hyperlinkRIds` WeakMap, which the renderer consults.
  */
 export function scanChildrenForHyperlinks(
   children: readonly ParagraphChild[],
@@ -53,7 +59,7 @@ export function scanChildrenForHyperlinks(
 ): void {
   walkBlocks([{ type: "paragraph", children } as Paragraph], {
     enterHyperlink(h) {
-      if (h.url && !h.rId) {
+      if (h.url) {
         out.push(h);
       }
     }

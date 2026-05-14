@@ -386,6 +386,13 @@ function renderTableCellProperties(
 
   if (cPr.width) {
     renderTableWidth(xml, "w:tcW", cPr.width);
+  } else {
+    // OOXML's CT_TcPr.tcW is technically optional, but Word treats a
+    // missing <w:tcW> as a hard schema violation: it triggers the
+    // "content unreadable" repair dialog and silently drops the table.
+    // Emit a w:type="auto" placeholder so Word lays the cell out using
+    // the table-level grid widths.
+    xml.leafNode("w:tcW", { "w:w": "0", "w:type": "auto" });
   }
 
   if (cPr.gridSpan !== undefined && cPr.gridSpan > 1) {
@@ -492,11 +499,22 @@ function renderTableCellProperties(
 function renderTableCell(xml: XmlSink, cell: TableCell, helpers?: RenderHelpers): void {
   xml.openNode("w:tc");
 
+  // OOXML CT_Tc requires a <w:tcPr> with at least <w:tcW> for Word to
+  // accept the cell. If the model didn't supply any cell properties we
+  // synthesise a minimal <w:tcPr><w:tcW w:type="auto"/></w:tcPr>; if it
+  // did, renderTableCellProperties handles the missing-tcW fallback.
   if (cell.properties) {
     renderTableCellProperties(xml, cell.properties);
+  } else {
+    xml.openNode("w:tcPr");
+    xml.leafNode("w:tcW", { "w:w": "0", "w:type": "auto" });
+    xml.closeNode();
   }
 
-  // Cell must contain at least one paragraph
+  // OOXML §17.4.66 (CT_Tc) requires every table cell to *end* with a
+  // <w:p>. An empty cell needs at least one <w:p>, and a cell whose last
+  // block is a nested <w:tbl> must have a trailing <w:p> after it — Word
+  // (and LibreOffice) reject the document otherwise.
   if (cell.content.length === 0) {
     xml.openNode("w:p");
     xml.closeNode();
@@ -507,6 +525,11 @@ function renderTableCell(xml: XmlSink, cell: TableCell, helpers?: RenderHelpers)
       } else if (block.type === "table") {
         renderTable(xml, block, helpers);
       }
+    }
+    const last = cell.content[cell.content.length - 1];
+    if (last && last.type === "table") {
+      xml.openNode("w:p");
+      xml.closeNode();
     }
   }
 
@@ -575,18 +598,77 @@ export function renderTable(xml: XmlSink, table: Table, helpers?: RenderHelpers)
     renderTableProperties(xml, table.properties);
   }
 
-  // Column grid
+  // Column grid. ECMA-376 §17.4.49 requires <w:tblGrid> with at least one
+  // <w:gridCol>. When the caller did not supply explicit column widths we
+  // synthesise the grid by inferring the column count from the widest row
+  // (counting gridSpan + gridBefore + gridAfter) and dividing the table
+  // width evenly. This keeps the package valid for Word / LibreOffice
+  // even when authors used the convenience builders that don't compute
+  // a grid up front.
+  xml.openNode("w:tblGrid");
   if (table.columnWidths && table.columnWidths.length > 0) {
-    xml.openNode("w:tblGrid");
     for (const w of table.columnWidths) {
       xml.leafNode("w:gridCol", { "w:w": String(w) });
     }
-    xml.closeNode();
+  } else {
+    const columnCount = Math.max(1, computeTableColumnCount(table));
+    const totalWidth = inferTableWidthInTwips(table.properties);
+    const colWidth = Math.max(1, Math.floor(totalWidth / columnCount));
+    for (let i = 0; i < columnCount; i++) {
+      xml.leafNode("w:gridCol", { "w:w": String(colWidth) });
+    }
   }
+  xml.closeNode();
 
   for (const row of table.rows) {
     renderTableRow(xml, row, helpers);
   }
 
   xml.closeNode();
+}
+
+/**
+ * Count the number of grid columns the table requires.
+ *
+ * Each cell occupies `gridSpan` columns (default 1); each row may also
+ * declare `gridBefore` / `gridAfter` to leave empty grid units on its sides.
+ * The grid must be wide enough for every row, so we take the maximum.
+ */
+function computeTableColumnCount(table: Table): number {
+  let max = 1;
+  for (const row of table.rows) {
+    let count = row.properties?.gridBefore ?? 0;
+    for (const cell of row.cells) {
+      count += cell.properties?.gridSpan ?? 1;
+    }
+    count += row.properties?.gridAfter ?? 0;
+    if (count > max) {
+      max = count;
+    }
+  }
+  return max;
+}
+
+/**
+ * Pick a sensible total width (in twips) for a synthesised tblGrid.
+ *
+ * - If the table specifies a `dxa` width, use it directly.
+ * - If it specifies a `pct` width, treat it as a fraction of a default
+ *   page text area (US Letter minus 1" margins = 9 360 twips). A 5000/pct
+ *   value (= 100%) maps to the full text area.
+ * - Otherwise default to the same 9 360 twips.
+ */
+function inferTableWidthInTwips(props?: Table["properties"]): number {
+  const TEXT_AREA_TWIPS = 9360;
+  const w = props?.width;
+  if (!w) {
+    return TEXT_AREA_TWIPS;
+  }
+  if (w.type === "dxa" && typeof w.value === "number" && w.value > 0) {
+    return w.value;
+  }
+  if (w.type === "pct" && typeof w.value === "number" && w.value > 0) {
+    return Math.round((w.value / 5000) * TEXT_AREA_TWIPS);
+  }
+  return TEXT_AREA_TWIPS;
 }

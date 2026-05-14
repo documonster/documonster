@@ -64,7 +64,7 @@ Document.setSectionProperties(doc, {
 });
 
 // Headers/Footers
-Document.setHeader(doc, "default", { content: [textParagraph("Page Header")] });
+Document.setHeader(doc, "default", { children: [textParagraph("Page Header")] });
 
 // Build & export
 const model = Document.build(doc);

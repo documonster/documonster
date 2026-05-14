@@ -183,13 +183,47 @@ export function renderDocument(xml: XmlSink, doc: DocxDocument, ctx?: WordRender
 
   xml.openNode("w:body");
 
+  // Word / OOXML require a `<w:p>` to separate two adjacent `<w:tbl>` blocks
+  // (per ECMA-376 §17.13.5.34: a table must be followed by a paragraph or
+  // section break before the next table can begin). When a model contains
+  // back-to-back tables we synthesise an empty paragraph between them so
+  // the output remains valid in Word.
+  // Likewise the last `EG_BlockLevelElts` of a body must be a paragraph
+  // (or `sectPr`); if the model body is empty we emit a single `<w:p>` so
+  // Word does not see `<w:body/>`.
+  let prevWasTable = false;
+  let bodyHadAnything = false;
   for (const content of doc.body) {
+    const isTable = content.type === "table";
+    if (isTable && prevWasTable) {
+      xml.openNode("w:p");
+      xml.closeNode();
+    }
     renderBodyContent(xml, content, renderCtx);
+    prevWasTable = isTable;
+    bodyHadAnything = true;
   }
 
-  // Final section properties (goes directly in w:body)
+  // If the model produced no body content at all, write one empty
+  // paragraph so the body satisfies CT_Body's "ends with a paragraph or
+  // sectPr" rule.
+  if (!bodyHadAnything) {
+    xml.openNode("w:p");
+    xml.closeNode();
+  }
+
+  // Final section properties. If the caller didn't supply any we still
+  // write a default one (US Letter, 1" margins) — CT_Body must terminate
+  // with a `<w:sectPr>` so Word knows the page geometry. Without this
+  // some Word builds open the document but render every paragraph at
+  // page-zero size, while LibreOffice silently rejects the package.
   if (doc.sectionProperties) {
     renderSectionProperties(xml, doc.sectionProperties);
+  } else {
+    renderSectionProperties(xml, {
+      pageSize: { width: 12240, height: 15840 },
+      margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+    });
   }
 
   xml.closeNode(); // w:body
@@ -276,8 +310,9 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
     xml.leafNode("wp:wrapTopAndBottom");
   }
 
+  const drawingId = ctx.ids.nextDocPrId();
   const docPrAttrs: Record<string, string> = {
-    id: String(ctx.ids.nextDocPrId()),
+    id: String(drawingId),
     name: shape.name ?? "Shape"
   };
   if (shape.altText) {
@@ -285,10 +320,24 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
   }
   xml.leafNode("wp:docPr", docPrAttrs);
 
+  // wp:cNvGraphicFramePr is optional in the schema but Word and
+  // LibreOffice expect it on every wp:anchor; without it some readers
+  // refuse to load the drawing. Empty content is sufficient.
+  xml.leafNode("wp:cNvGraphicFramePr");
+
   xml.openNode("a:graphic", { "xmlns:a": NS_A });
   xml.openNode("a:graphicData", { uri: NS_WPS });
 
   xml.openNode("wps:wsp");
+
+  // Non-visual properties — required by the wordprocessingShape schema
+  // (CT_WordprocessingShape.cNvPr + cNvSpPr). The id must match
+  // wp:docPr/@id so Word treats them as the same logical object.
+  xml.leafNode("wps:cNvPr", {
+    id: String(drawingId),
+    name: shape.name ?? "Shape"
+  });
+  xml.leafNode("wps:cNvSpPr");
 
   // Shape properties
   xml.openNode("wps:spPr");

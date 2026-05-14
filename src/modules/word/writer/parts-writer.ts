@@ -299,15 +299,26 @@ export function renderSettings(
     }
   }
 
+  // Resolve compatibilityMode value: prefer an explicit entry in
+  // settings.compatSettings, then settings.compatibilityMode, then 15.
+  // Then emit every additional compatSetting (skipping the duplicate
+  // compatibilityMode entry to avoid two w:compatSetting elements with
+  // the same name — Word treats the first as authoritative, which would
+  // hide a user-supplied mode behind the default 15).
+  const explicitMode = settings?.compatSettings?.find(s => s.name === "compatibilityMode");
+  const compatibilityModeVal = explicitMode?.val ?? String(settings?.compatibilityMode ?? 15);
   xml.leafNode("w:compatSetting", {
     "w:name": "compatibilityMode",
     "w:uri": "http://schemas.microsoft.com/office/word",
-    "w:val": String(settings?.compatibilityMode ?? 15)
+    "w:val": compatibilityModeVal
   });
 
-  // Additional compatSettings
+  // Additional compatSettings (excluding compatibilityMode — already written)
   if (settings?.compatSettings) {
     for (const cs of settings.compatSettings) {
+      if (cs.name === "compatibilityMode") {
+        continue;
+      }
       xml.leafNode("w:compatSetting", {
         "w:name": cs.name,
         "w:uri": cs.uri,

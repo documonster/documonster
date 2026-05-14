@@ -105,6 +105,30 @@ describe("VBA Project", () => {
       const stale = result.opaqueParts?.some(p => p.path === "word/vbaProject.bin");
       expect(stale ?? false).toBe(false);
     });
+
+    it("promotes a plain document to macroEnabledDocument so the .docm content type matches", () => {
+      // Word rejects packages that carry a vbaProject.bin but declare
+      // their main part as the plain wordprocessingml document type.
+      const doc = makeDoc(undefined);
+      expect(doc.docType).toBeUndefined();
+      const result = addVbaProject(doc, createVbaData());
+      expect(result.docType).toBe("macroEnabledDocument");
+    });
+
+    it("promotes a template to macroEnabledTemplate", () => {
+      const doc: DocxDocument = { ...makeDoc(undefined), docType: "template" };
+      const result = addVbaProject(doc, createVbaData());
+      expect(result.docType).toBe("macroEnabledTemplate");
+    });
+
+    it("preserves an already-macroEnabled docType unchanged", () => {
+      const doc: DocxDocument = {
+        ...makeDoc(undefined),
+        docType: "macroEnabledDocument"
+      };
+      const result = addVbaProject(doc, createVbaData());
+      expect(result.docType).toBe("macroEnabledDocument");
+    });
   });
 
   describe("removeVbaProject", () => {
@@ -128,6 +152,27 @@ describe("VBA Project", () => {
       const result = removeVbaProject(doc);
       expect(result.vbaProject).toBeUndefined();
       expect(result.opaqueParts).toBeUndefined();
+    });
+
+    it("demotes macroEnabledDocument back to document on removal", () => {
+      const doc: DocxDocument = {
+        ...makeDoc(undefined),
+        docType: "macroEnabledDocument",
+        vbaProject: createVbaData()
+      };
+      const result = removeVbaProject(doc);
+      expect(result.docType).toBe("document");
+      expect(result.vbaProject).toBeUndefined();
+    });
+
+    it("demotes macroEnabledTemplate back to template on removal", () => {
+      const doc: DocxDocument = {
+        ...makeDoc(undefined),
+        docType: "macroEnabledTemplate",
+        vbaProject: createVbaData()
+      };
+      const result = removeVbaProject(doc);
+      expect(result.docType).toBe("template");
     });
   });
 

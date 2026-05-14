@@ -326,4 +326,46 @@ describe("StreamingDocxWriter", () => {
     const headerKeys = [...files.keys()].filter(p => /^word\/header\d+\.xml$/.test(p));
     expect(headerKeys.length).toBe(2);
   });
+
+  // ===========================================================================
+  // OOXML compliance for empty / minimal streams (regression for Word
+  // refusing to open packages that lacked the bare-minimum body / sectPr /
+  // Content_Types entries).
+  // ===========================================================================
+
+  it("finalising an empty stream produces a body with at least one <w:p>", async () => {
+    // Word rejects <w:body/> with no <w:p>. Make sure the writer fills
+    // the gap when the caller streamed zero elements.
+    const stream = createDocxStream();
+    const bytes = await stream.finalize();
+    const files = await extract(bytes);
+    const docXml = files.get("word/document.xml")!;
+    expect(docXml).toBeDefined();
+    expect(/<w:p\s*\/>/.test(docXml) || /<w:p>\s*<\/w:p>/.test(docXml)).toBe(true);
+  });
+
+  it("always emits a final <w:sectPr> even when sectionProperties is omitted", async () => {
+    // ECMA-376 CT_Body requires a final sectPr; without it Word does
+    // not know the page geometry and falls back to error-prone defaults.
+    const stream = createDocxStream();
+    stream.add(textParagraph("body"));
+    const bytes = await stream.finalize();
+    const docXml = (await extract(bytes)).get("word/document.xml")!;
+    expect(docXml).toContain("<w:sectPr");
+    expect(docXml).toContain("<w:pgSz");
+  });
+
+  it("[Content_Types].xml declares core/app properties Overrides", async () => {
+    // _rels/.rels references docProps/core.xml + docProps/app.xml on
+    // every package. If the corresponding Override entries are missing,
+    // Word/LibreOffice refuse to open the file at the OPC layer.
+    const stream = createDocxStream();
+    stream.add(textParagraph("body"));
+    const bytes = await stream.finalize();
+    const ct = (await extract(bytes)).get("[Content_Types].xml")!;
+    expect(ct).toContain('PartName="/docProps/core.xml"');
+    expect(ct).toContain("application/vnd.openxmlformats-package.core-properties+xml");
+    expect(ct).toContain('PartName="/docProps/app.xml"');
+    expect(ct).toContain("application/vnd.openxmlformats-officedocument.extended-properties+xml");
+  });
 });

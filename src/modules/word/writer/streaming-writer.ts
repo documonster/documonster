@@ -224,6 +224,13 @@ export class StreamingDocxWriter {
   private _documentZipFile!: InstanceType<typeof ZipDeflate>;
   private _headerWritten = false;
   /**
+   * Whether the previously-written body element was a `<w:tbl>`. Tracked
+   * so we can insert a separator `<w:p>` between adjacent tables — Word
+   * rejects (and silently merges) two `<w:tbl>` blocks that share no
+   * paragraph between them per ECMA-376 §17.13.5.34.
+   */
+  private _prevWasTable = false;
+  /**
    * First error reported by the underlying ZIP stream (compression failure,
    * write-after-end, etc.). Stored synchronously by the `Zip` callback and
    * surfaced from `finalize()` so callers receive a rejection instead of an
@@ -306,9 +313,19 @@ export class StreamingDocxWriter {
     // populated WordRenderContext (chart rIds, hyperlink rIds, image remap).
     this._registerElementReferences(element);
 
+    // ECMA-376 §17.13.5.34: a `<w:tbl>` must be followed by a paragraph
+    // (or section break) before the next `<w:tbl>` may begin. When the
+    // caller streams two adjacent tables we synthesise an empty
+    // separator paragraph between them so Word does not collapse them
+    // into a single malformed tbl.
+    if (element.type === "table" && this._prevWasTable) {
+      this._writeSeparatorParagraph();
+    }
+
     // Serialize this single element to XML and push to stream
     this._writeBodyElement(element);
     this._elementCount++;
+    this._prevWasTable = element.type === "table";
 
     if (this._onProgress && this._elementCount % (this._options.chunkSize ?? 1000) === 0) {
       this._onProgress({ elementsWritten: this._elementCount, phase: "body" });
@@ -394,6 +411,7 @@ export class StreamingDocxWriter {
     this._elementCount = 0;
     this._finalized = false;
     this._headerWritten = false;
+    this._prevWasTable = false;
     this._outputChunks = [];
     this._bodyCharts.length = 0;
     this._bodyChartEx.length = 0;
@@ -495,6 +513,15 @@ export class StreamingDocxWriter {
     const writer = new XmlWriter();
     renderBodyContent(writer, element, this._renderCtx);
     this._write(writer.xml);
+  }
+
+  /**
+   * Emit an empty `<w:p/>` to separate two adjacent tables. Required by
+   * ECMA-376 §17.13.5.34 — Word rejects packages where two `<w:tbl>`
+   * elements appear without a paragraph between them.
+   */
+  private _writeSeparatorParagraph(): void {
+    this._write("<w:p/>");
   }
 
   /**
@@ -645,6 +672,14 @@ export class StreamingDocxWriter {
   }
 
   private _writeDocumentFooter(): void {
+    // Word rejects a `<w:body/>` that contains no `<w:p>`. Synthesise an
+    // empty paragraph when the caller streamed zero elements so the
+    // package opens cleanly. (Bulk packager handles this implicitly via
+    // `Document.build`'s default body element list.)
+    if (this._elementCount === 0) {
+      this._write("<w:p/>");
+    }
+
     // Write final section properties if provided. Header/footer references
     // are rewritten so they refer to the rIds we just allocated in
     // `_allocateHeaderFooterRIds`. References whose target type cannot
@@ -690,6 +725,16 @@ export class StreamingDocxWriter {
     if (sect) {
       const writer = new XmlWriter();
       renderSectionProperties(writer, sect);
+      this._write(writer.xml);
+    } else {
+      // OOXML CT_Body requires a final <w:sectPr> so Word knows the page
+      // geometry. When the caller didn't provide one, fall back to the
+      // same default that Document.build() uses (US Letter, 1" margins).
+      const writer = new XmlWriter();
+      renderSectionProperties(writer, {
+        pageSize: { width: 12240, height: 15840 },
+        margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+      });
       this._write(writer.xml);
     }
 
@@ -873,6 +918,15 @@ export class StreamingDocxWriter {
     addRelationship(packageRels, RelType.OfficeDocument, "word/document.xml");
     addRelationship(packageRels, RelType.CoreProperties, "docProps/core.xml");
     addRelationship(packageRels, RelType.ExtendedProperties, "docProps/app.xml");
+
+    // [Content_Types].xml MUST declare every part. The package
+    // relationships file references docProps/core.xml + docProps/app.xml
+    // even when the caller didn't supply explicit metadata, so we must
+    // register their content types up-front; otherwise Word/LibreOffice
+    // refuse to open the file (rejected at the OPC layer before any
+    // schema validation).
+    addContentTypeOverride(contentTypes, `/${PartPath.CoreProps}`, ContentType.CoreProperties);
+    addContentTypeOverride(contentTypes, `/${PartPath.AppProps}`, ContentType.ExtendedProperties);
 
     // Document relationships
     addRelationship(documentRels, RelType.Styles, "styles.xml");

@@ -1593,6 +1593,16 @@ function makeParagraph(children: ParagraphChild[], properties?: ParagraphPropert
 
 function defaultMarkdownStyles() {
   return [
+    // Normal — the base every other style here points at via basedOn.
+    // Without it, Word logs a "missing referenced style" warning when
+    // opening the document.
+    {
+      type: "paragraph" as const,
+      styleId: "Normal",
+      name: "Normal",
+      isDefault: true,
+      qFormat: true
+    },
     {
       type: "paragraph" as const,
       styleId: "Heading1",

@@ -280,6 +280,69 @@ describe("htmlToDocxBody", () => {
       expect(blocks.length).toBeGreaterThan(0);
       expect(paraText(blocks[0])).toContain("Quoted text");
     });
+
+    it("strips <!doctype>, comments, and <head> contents from the body", () => {
+      // Regression: tokenize() used to emit `!doctype html>` as text and
+      // parseBlocks rendered <title>/<meta> as runs.
+      const html = `<!doctype html>
+        <html>
+          <head>
+            <title>Page title</title>
+            <meta charset="utf-8"/>
+            <link rel="stylesheet" href="x.css"/>
+            <style>.x { color: red }</style>
+          </head>
+          <body>
+            <p>Body</p>
+          </body>
+        </html>`;
+      const blocks = htmlToDocxBody(html);
+      const allText = blocks.map(paraText).join("\n");
+      expect(allText).toContain("Body");
+      // None of the head-only content should leak into the body
+      expect(allText).not.toContain("Page title");
+      expect(allText).not.toContain("doctype");
+      expect(allText).not.toContain(".x");
+      expect(allText).not.toContain("stylesheet");
+    });
+
+    it("strips HTML comments", () => {
+      const html = `<p>before</p><!-- hidden --><p>after</p>`;
+      const blocks = htmlToDocxBody(html);
+      const allText = blocks.map(paraText).join("|");
+      expect(allText).not.toContain("hidden");
+      expect(allText).toContain("before");
+      expect(allText).toContain("after");
+    });
+
+    it("data: image URI does not become a non-canonical r:embed reference", () => {
+      // Previously the importer set `rId: "data:image/png;base64,..."`,
+      // which Word rejects. Make sure the placeholder image either
+      // surfaces an empty rId (skipped at render time) or is omitted.
+      const dataUri =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+      const blocks = htmlToDocxBody(`<p><img src="${dataUri}" alt="dot"/></p>`);
+      // Walk every InlineImageContent and assert no rId carries a data URI
+      const imageRIds: string[] = [];
+      for (const block of blocks) {
+        if (block.type !== "paragraph") {
+          continue;
+        }
+        for (const child of block.children) {
+          if ("content" in child) {
+            for (const c of child.content) {
+              if (c.type === "image") {
+                imageRIds.push(c.rId);
+              }
+            }
+          }
+        }
+      }
+      // Either no image content, or rId is empty placeholder (never the data URI)
+      for (const rId of imageRIds) {
+        expect(rId.startsWith("data:")).toBe(false);
+      }
+    });
   });
 
   describe("options", () => {

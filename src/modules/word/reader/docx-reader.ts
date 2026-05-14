@@ -1923,6 +1923,31 @@ function parseDocumentXml(
 
     switch (name) {
       case "p": {
+        // Per OOXML schema (CT_OMathPara is a member of EG_PContent), a
+        // body-level math block is encoded as a paragraph containing a
+        // single m:oMathPara child. Detect that shape and surface it as
+        // a top-level MathBlock so the document model stays flat — the
+        // writer reverses this by re-wrapping math blocks in <w:p>.
+        const mathParaChildren = child.children.filter(
+          c => c.type === "element" && c.name === "m:oMathPara"
+        );
+        const otherChildren = child.children.filter(c => {
+          if (c.type !== "element") {
+            return false;
+          }
+          // pPr is allowed; everything else (runs, hyperlinks, etc.) means
+          // we're NOT a synthetic math wrapper and must keep the paragraph.
+          return c.name !== "w:pPr" && c.name !== "m:oMathPara";
+        });
+        if (mathParaChildren.length > 0 && otherChildren.length === 0) {
+          for (const oMathPara of mathParaChildren) {
+            if (oMathPara.type === "element") {
+              body.push(parseMathBlock(oMathPara));
+            }
+          }
+          break;
+        }
+
         const para = parseParagraph(child, ctx);
         // Extract floating content from this paragraph element and insert
         // immediately after it to preserve document position.

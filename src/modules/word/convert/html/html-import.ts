@@ -110,15 +110,25 @@ type Token = TagToken | TextToken;
 
 function tokenize(html: string): Token[] {
   const tokens: Token[] = [];
-  // Match a tag, a comment, a CDATA block, OR a run of text. Text is
-  // anything-up-to-the-next-tag, with the addition that a `<` not followed
-  // by a tag-like character is treated as literal text (so "1 < 2" / "a<b"
-  // / "<<" survive instead of being silently swallowed).
-  const re = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)\/?\s*>|((?:[^<]|<(?![/a-zA-Z!?]))+)/g;
+  // Strip HTML comments, doctype declarations and SGML processing
+  // instructions before tokenising — none of them should appear as text
+  // in the document body. The previous regex treated `<!doctype html>`
+  // as a text node containing `"!doctype html>"`.
+  const stripped = html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+    .replace(/<\?[\s\S]*?\?>/g, "");
+
+  // Match a tag, OR a run of text. Text is anything-up-to-the-next-tag,
+  // with the addition that a `<` not followed by a tag-like character is
+  // treated as literal text (so "1 < 2" / "a<b" / "<<" survive instead
+  // of being silently swallowed).
+  const re = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)\/?\s*>|((?:[^<]|<(?![/a-zA-Z]))+)/g;
   const tagRe = /^<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)(\/?)\s*>$/;
   let m: RegExpExecArray | null;
 
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(stripped)) !== null) {
     const fullMatch = m[0];
     if (m[3] !== undefined) {
       // Text node
@@ -150,9 +160,9 @@ function tokenize(html: string): Token[] {
             const closeRe = new RegExp(`</${tag}\\s*>`, "i");
             closeRe.lastIndex = re.lastIndex;
             const startBody = re.lastIndex;
-            const closeMatch = closeRe.exec(html);
+            const closeMatch = closeRe.exec(stripped);
             if (closeMatch) {
-              const body = html.slice(startBody, closeMatch.index);
+              const body = stripped.slice(startBody, closeMatch.index);
               if (RAW_TEXT_PRESERVE_BODY.has(tag)) {
                 tokens.push({ type: "text", value: body });
               }
@@ -161,7 +171,7 @@ function tokenize(html: string): Token[] {
             } else {
               // No closing tag — discard the rest of the input for this
               // raw-text element to avoid emitting markup as text.
-              re.lastIndex = html.length;
+              re.lastIndex = stripped.length;
             }
           }
         }
@@ -896,6 +906,62 @@ function parseBlocks(
 
     // Open or self-close tag
     const tag = tok.type === "open" || tok.type === "selfclose" ? tok.tag : "";
+
+    // Document scaffolding (<html>, <body>) is transparent — descend into
+    // its children. <head> and its leaf children carry no body-text and
+    // are skipped entirely so their whitespace/newlines don't leak as
+    // empty paragraphs into the document.
+    if (tag === "html" || tag === "body") {
+      if (tok.type === "open") {
+        flushPending();
+        i = parseBlocks(tokens, i + 1, blocks, parentCtx, classStyles);
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (tag === "head") {
+      // Fast-forward to </head>; ignore everything in between (titles,
+      // meta, link, etc.). <style> bodies were already extracted by
+      // tokenize+extractStyleRules and stripped from the token stream
+      // through RAW_TEXT_ELEMENTS handling.
+      if (tok.type === "open") {
+        let depth = 1;
+        i++;
+        while (i < tokens.length && depth > 0) {
+          const t = tokens[i];
+          if (t.type === "open" && t.tag === "head") {
+            depth++;
+          } else if (t.type === "close" && t.tag === "head") {
+            depth--;
+          }
+          i++;
+        }
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (tag === "title" || tag === "meta" || tag === "link" || tag === "base") {
+      // Should never reach here because <head> handler swallows them, but
+      // guard against malformed HTML where they appear at body level.
+      if (tok.type === "open") {
+        let depth = 1;
+        i++;
+        while (i < tokens.length && depth > 0) {
+          const t = tokens[i];
+          if (t.type === "open" && t.tag === tag) {
+            depth++;
+          } else if (t.type === "close" && t.tag === tag) {
+            depth--;
+          }
+          i++;
+        }
+        continue;
+      }
+      i++;
+      continue;
+    }
 
     if (tag === "br") {
       if (!pendingInline) {
@@ -1893,28 +1959,19 @@ function buildImageContent(attrs: Record<string, string>): InlineImageContent | 
   const widthEmu = (width || 100) * EMU_PER_PX;
   const heightEmu = (height || 100) * EMU_PER_PX;
 
-  // Data URL: base64-encoded image
-  if (src.startsWith("data:")) {
-    // Extract the data URI — use it as the rId (the builder/packager must handle it)
+  // Both data: and http(s) URLs become placeholders. The DOCX writer needs
+  // a real ImageDef registered in `doc.images` plus a corresponding
+  // relationship; htmlToDocxBody returns BodyContent[] only and cannot do
+  // that registration. We surface the original src in the alt text so the
+  // user can post-process if they need real embedded images.
+  if (src.startsWith("data:") || src.startsWith("http://") || src.startsWith("https://")) {
     return {
       type: "image",
-      rId: src, // Embed the full data URI as rId for downstream processing
+      rId: "", // empty rId → renderer treats this as a placeholder
       width: widthEmu,
       height: heightEmu,
-      altText: alt || undefined,
+      altText: alt || `[Image placeholder: ${src.slice(0, 64)}${src.length > 64 ? "…" : ""}]`,
       name: alt || "image"
-    };
-  }
-
-  // Remote URL: http(s):// — create a placeholder with altText
-  if (src.startsWith("http://") || src.startsWith("https://")) {
-    return {
-      type: "image",
-      rId: "", // Empty rId signals a placeholder
-      width: widthEmu,
-      height: heightEmu,
-      altText: alt || `[Remote image: ${src}]`,
-      name: alt || "remote-image"
     };
   }
 

@@ -1081,4 +1081,126 @@ describe("DOCX Package Integrity", () => {
     // Floating image must still be present.
     expect(parsed3.body.some(b => b.type === "floatingImage")).toBe(true);
   });
+
+  // ===========================================================================
+  // OOXML compliance: relationship Id form + Word-strict requirements
+  // ===========================================================================
+
+  it("remaps non-canonical image rIds to rId<N> in the .rels file", async () => {
+    // The builder allocates internal rId placeholders such as "__img_1"
+    // which are legal xs:ID per OPC §11.3 but Word rejects packages that
+    // declare relationships outside the conventional `rId<N>` form. The
+    // packager must rewrite them.
+    const h = Document.create();
+    Document.addImage(h, MINI_PNG, "png", 914400, 914400);
+    const bytes = await packageDocx(Document.build(h));
+    const files = await extractDocx(bytes);
+    const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
+    const docXml = decodeEntry(files, "word/document.xml");
+    // No relationship Id may carry the builder's internal placeholder
+    expect(relsXml).not.toMatch(/Id="__img_/);
+    // Every Id attribute in the .rels must match rId<digits>
+    const ids = Array.from(relsXml.matchAll(/Id="([^"]+)"/g)).map(m => m[1]);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(id).toMatch(/^rId\d+$/);
+    }
+    // The body's r:embed must reference a real (rId<N>) relationship
+    const embedMatch = /r:embed="(rId\d+)"/.exec(docXml);
+    expect(embedMatch).not.toBeNull();
+    expect(relsXml).toContain(`Id="${embedMatch![1]}"`);
+  });
+
+  it("re-allocates hyperlink rIds even when the model already has rId set", async () => {
+    // The reader carries an `rId` on every hyperlink it parses, but those
+    // ids are stale once the package is repackaged because the relationship
+    // table is rebuilt from scratch. The writer must always allocate a
+    // fresh rId for url-bearing hyperlinks and surface it via the
+    // hyperlinkRIds WeakMap rather than emit `r:id="<stale>"`.
+    const h = Document.create();
+    Document.addParagraphElement(h, {
+      type: "paragraph",
+      children: [
+        {
+          type: "hyperlink",
+          rId: "rId-from-other-doc",
+          url: "https://example.com/anchor",
+          children: [{ content: [{ type: "text", text: "link" }] }]
+        }
+      ]
+    } as any);
+    const bytes = await packageDocx(Document.build(h));
+    const files = await extractDocx(bytes);
+    const docXml = decodeEntry(files, "word/document.xml");
+    const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
+
+    const linkMatch = /<w:hyperlink[^>]*r:id="([^"]+)"/.exec(docXml);
+    expect(linkMatch).not.toBeNull();
+    const usedRId = linkMatch![1];
+    // The body must NOT carry the model's stale id
+    expect(usedRId).not.toBe("rId-from-other-doc");
+    expect(usedRId).toMatch(/^rId\d+$/);
+    // …and the .rels file must declare exactly that fresh id, pointing at
+    // the original URL.
+    const relMatch = new RegExp(`Id="${usedRId}"[^>]*Target="https://example.com/anchor"`, "i");
+    expect(relsXml).toMatch(relMatch);
+  });
+
+  it("watermark header does not emit an empty <w:pStyle/>", async () => {
+    // Empty <w:pStyle/> is a hard schema violation Word rejects. The
+    // watermark-header writer used to emit one when no pStyle val was
+    // available.
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "body");
+    Document.setWatermark(h, {
+      type: "text",
+      text: "DRAFT",
+      color: "C0C0C0",
+      fontSize: 144
+    });
+    const built = Document.build(h);
+    expect(built.watermark).toBeDefined();
+    const bytes = await packageDocx(built);
+    const files = await extractDocx(bytes);
+    // Find the auto-generated watermark header part.
+    const headerName = [...files.keys()].find(
+      n => n.startsWith("word/header") && n.endsWith(".xml")
+    );
+    expect(headerName).toBeDefined();
+    const headerXml = decodeEntry(files, headerName!);
+    // Reject any <w:pStyle/> without a w:val attribute
+    expect(/<w:pStyle\s*\/>/.test(headerXml)).toBe(false);
+    expect(/<w:pStyle(?![^>]*w:val=)/.test(headerXml)).toBe(false);
+  });
+
+  it("image-watermark header rels remap non-canonical rId to rId<N>", async () => {
+    // Word also enforces canonical rId<N> form inside per-header rels,
+    // not just inside word/_rels/document.xml.rels. The watermark
+    // header path used to emit `__img_<N>` verbatim.
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "body");
+    const imgInfo = Document.addImage(h, MINI_PNG, "png", 914400, 914400, {
+      altText: "watermark source"
+    });
+    // Pop the inline paragraph the helper inserted so we keep just one body p.
+    Document.removeContent(h, Document.getContentCount(h) - 1);
+    Document.setWatermark(h, { type: "image", rId: imgInfo.rId, scale: 100 });
+
+    const bytes = await packageDocx(Document.build(h));
+    const files = await extractDocx(bytes);
+
+    const headerRelsName = [...files.keys()].find(n =>
+      /^word\/_rels\/header\d+\.xml\.rels$/.test(n)
+    );
+    expect(headerRelsName).toBeDefined();
+    const relsXml = decodeEntry(files, headerRelsName!);
+    // Must NOT carry the model's internal placeholder
+    expect(relsXml).not.toMatch(/Id="__img_/);
+    const ids = Array.from(relsXml.matchAll(/Id="([^"]+)"/g)).map(m => m[1]);
+    for (const id of ids) {
+      expect(id).toMatch(/^rId\d+$/);
+    }
+  });
 });

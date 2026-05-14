@@ -2,6 +2,7 @@
  * DOCX Module - Drawing Shapes Tests
  */
 
+import { extractAll } from "@archive/unzip/extract";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -14,7 +15,8 @@ import {
   createCallout,
   createStar,
   createShape,
-  Document
+  Document,
+  packageDocx
 } from "../index";
 
 describe("Drawing shapes", () => {
@@ -173,6 +175,47 @@ describe("Drawing shapes", () => {
       expect(shapes.length).toBe(1);
       expect((shapes[0] as any).shapeType).toBe("rect");
       expect((shapes[0] as any).fillColor).toBe("00FF00");
+    });
+
+    it("emits wsp:cNvPr and wsp:cNvSpPr inside every wsp:wsp (Word strict requirement)", async () => {
+      const doc = Document.create();
+      Document.addContent(
+        doc,
+        createRect(914400, 457200, {
+          fill: { type: "solid", color: "C00000" },
+          altText: "alt"
+        })
+      );
+      const bytes = await packageDocx(Document.build(doc));
+      const files = await extractAll(bytes);
+      const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
+
+      // Schema CT_WordprocessingShape requires both children before spPr
+      expect(docXml).toContain("<wps:wsp>");
+      expect(docXml).toContain("<wps:cNvPr");
+      expect(docXml).toContain("<wps:cNvSpPr");
+
+      // The cNvPr id MUST equal the surrounding wp:docPr id so Word treats
+      // them as the same logical drawing object.
+      const docPrId = /<wp:docPr id="(\d+)"/.exec(docXml)?.[1];
+      const cnvPrId = /<wps:cNvPr id="(\d+)"/.exec(docXml)?.[1];
+      expect(docPrId).toBeDefined();
+      expect(cnvPrId).toBe(docPrId);
+    });
+
+    it("emits wp:cNvGraphicFramePr inside wp:anchor for shapes", async () => {
+      // Without wp:cNvGraphicFramePr, Word and LibreOffice refuse to load
+      // the drawing.
+      const doc = Document.create();
+      Document.addContent(
+        doc,
+        createEllipse(457200, 457200, { fill: { type: "solid", color: "1F4E79" } })
+      );
+      const bytes = await packageDocx(Document.build(doc));
+      const files = await extractAll(bytes);
+      const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
+      expect(docXml).toContain("<wp:anchor");
+      expect(docXml).toContain("<wp:cNvGraphicFramePr");
     });
   });
 });

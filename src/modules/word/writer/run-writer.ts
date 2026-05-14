@@ -543,6 +543,33 @@ function renderFfData(xml: XmlSink, ff: FormField): void {
   xml.closeNode(); // ffData
 }
 
+/**
+ * Emit a UTF-8 text payload as one or more `<w:t>` elements separated by
+ * `<w:br/>` whenever the source contains a newline. OOXML's CT_Text
+ * forbids `\n` / `\r` inside its value — Word silently rejects packages
+ * that contain them. Used by both run text content and field cached
+ * values.
+ */
+function writeTextWithBreaks(xml: XmlSink, value: string): void {
+  if (value.indexOf("\n") < 0 && value.indexOf("\r") < 0) {
+    xml.openNode("w:t", { "xml:space": "preserve" });
+    xml.writeText(value);
+    xml.closeNode();
+    return;
+  }
+  const segments = value.replace(/\r\n?/g, "\n").split("\n");
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i].length > 0) {
+      xml.openNode("w:t", { "xml:space": "preserve" });
+      xml.writeText(segments[i]);
+      xml.closeNode();
+    }
+    if (i < segments.length - 1) {
+      xml.leafNode("w:br");
+    }
+  }
+}
+
 /** Render a field code (PAGE, NUMPAGES, etc.). Inherits run properties from the containing run. */
 function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): void {
   // Helper to emit inherited rPr in each field sub-run
@@ -582,9 +609,7 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
   if (field.cachedValue !== undefined) {
     xml.openNode("w:r");
     emitRPr();
-    xml.openNode("w:t");
-    xml.writeText(field.cachedValue);
-    xml.closeNode();
+    writeTextWithBreaks(xml, field.cachedValue);
     xml.closeNode();
   }
 
@@ -599,9 +624,12 @@ function renderField(xml: XmlSink, field: FieldContent, rPr?: RunProperties): vo
 function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHelpers): boolean {
   switch (content.type) {
     case "text":
-      xml.openNode("w:t", { "xml:space": "preserve" });
-      xml.writeText(content.text);
-      xml.closeNode();
+      // OOXML's <w:t> is a string with no embedded line breaks (the schema
+      // forbids U+000A / U+000D inside its text node). Authors writing
+      // multi-line cell labels conventionally pass `\n` in the source string;
+      // we split those into multiple <w:t> + <w:br/> pairs so Word renders a
+      // soft line break instead of rejecting the file.
+      writeTextWithBreaks(xml, content.text);
       return true;
 
     case "break":
@@ -690,6 +718,18 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
     }
 
     case "image":
+      // Skip placeholder images (rId === ""). They originate from import
+      // pipelines like html-import that don't register the underlying
+      // ImageDef — emitting <w:drawing> with a missing r:embed produces a
+      // dangling reference Word rejects.
+      if (!content.rId) {
+        if (content.altText) {
+          xml.openNode("w:t", { "xml:space": "preserve" });
+          xml.writeText(content.altText);
+          xml.closeNode();
+        }
+        return true;
+      }
       renderInlineImage(xml, content, helpers?.imageRemap);
       return true;
 

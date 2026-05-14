@@ -470,11 +470,32 @@ function renderMathEquationArray(xml: XmlSink, eqArr: MathEquationArray): void {
   xml.closeNode();
 }
 
-/** Render a math block (m:oMathPara > m:oMath). Body-level math. */
+/**
+ * Render a math block (`m:oMathPara` containing one `m:oMath`).
+ *
+ * The OOXML schema only allows `m:oMathPara` inside a paragraph
+ * (`EG_PContent` includes `m:oMathPara`); it must not appear directly as
+ * a `EG_BlockLevelElts`. We therefore wrap it in `<w:p>` so the result is
+ * valid at the body level.
+ *
+ * Empty math blocks (`content.length === 0`) skip rendering altogether —
+ * an empty `<m:oMath/>` violates the schema (it requires at least one
+ * `OMathArg` child).
+ */
 export function renderMathBlock(xml: XmlSink, math: MathBlock): void {
+  if (math.content.length === 0) {
+    // Emit an empty paragraph so the surrounding body still contains a
+    // valid block, but skip the math markup entirely.
+    xml.openNode("w:p");
+    xml.closeNode();
+    return;
+  }
+
+  xml.openNode("w:p");
   xml.openNode("m:oMathPara", { "xmlns:m": NS_M });
   xml.openNode("m:oMath");
   renderMathContents(xml, math.content);
+  xml.closeNode();
   xml.closeNode();
   xml.closeNode();
 }

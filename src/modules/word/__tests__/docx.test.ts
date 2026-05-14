@@ -1726,6 +1726,30 @@ describe("Round-trip: Settings compat flags + compatSettings", () => {
     expect(overrideCs).toBeDefined();
     expect(parsed.settings?.compatFlags?.some(f => f.name === "useFELayout")).toBe(true);
   });
+
+  it("should not duplicate the compatibilityMode w:compatSetting (writer dedupe)", async () => {
+    const { extractAll } = await import("@archive/unzip/extract");
+    const doc: DocxDocument = {
+      body: [{ type: "paragraph", children: [{ content: [] } as any] }],
+      settings: {
+        // Explicit mode 14 via compatSettings — must NOT be overridden by
+        // a second auto-emitted compatibilityMode entry that defaults to 15.
+        compatSettings: [
+          {
+            name: "compatibilityMode",
+            uri: "http://schemas.microsoft.com/office/word",
+            val: "14"
+          }
+        ]
+      }
+    };
+    const buffer = await packageDocx(doc);
+    const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/settings.xml")!.data);
+    const matches = xml.match(/w:name="compatibilityMode"/g) ?? [];
+    expect(matches.length).toBe(1);
+    expect(xml).toContain('w:val="14"');
+    expect(xml).not.toContain('w:val="15"');
+  });
 });
 
 // =============================================================================
@@ -2885,5 +2909,134 @@ describe("Template Engine", () => {
     const result = fillTemplate(doc, { title: "My Doc" });
     const headerContent = result.headers!.get("default")!.content.children;
     expect(getText(headerContent[0] as Paragraph)).toBe("Header: My Doc");
+  });
+});
+
+describe("useDefaultStyles: built-in latent styles", () => {
+  it("should register every style commonly referenced by example documents", async () => {
+    // useDefaultStyles must define every styleId that other helpers (and
+    // examples) attach via `style: "..."` — otherwise Word emits a "style
+    // not defined" warning and may render the paragraph with fallback
+    // formatting (e.g. page-number footers becoming invisible because they
+    // inherit unknown vertical metrics).
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    const built = Document.build(h);
+    const ids = (built.styles ?? []).map(s => s.styleId);
+    for (const required of [
+      "Normal",
+      "Heading1",
+      "Heading2",
+      "Heading3",
+      "Hyperlink",
+      "TableNormal",
+      "TableGrid",
+      "Header",
+      "HeaderChar",
+      "Footer",
+      "FooterChar"
+    ]) {
+      expect(ids).toContain(required);
+    }
+  });
+
+  it("should pair Header/HeaderChar and Footer/FooterChar via link (round-trippable)", async () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    const built = Document.build(h);
+    const styles = built.styles ?? [];
+    const header = styles.find(s => s.styleId === "Header");
+    const headerChar = styles.find(s => s.styleId === "HeaderChar");
+    const footer = styles.find(s => s.styleId === "Footer");
+    const footerChar = styles.find(s => s.styleId === "FooterChar");
+    expect(header?.link).toBe("HeaderChar");
+    expect(headerChar?.link).toBe("Header");
+    expect(footer?.link).toBe("FooterChar");
+    expect(footerChar?.link).toBe("Footer");
+    // Linked character styles must also have basedOn pointing somewhere
+    // sensible; Word UI requires it for the "Linked" badge.
+    expect(headerChar?.basedOn).toBeDefined();
+    expect(footerChar?.basedOn).toBeDefined();
+  });
+
+  it("should write Header/Footer styles into styles.xml so they survive packaging", async () => {
+    const { extractAll } = await import("@archive/unzip/extract");
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    const buffer = await packageDocx(Document.build(h));
+    const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/styles.xml")!.data);
+    expect(xml).toContain('w:styleId="Header"');
+    expect(xml).toContain('w:styleId="HeaderChar"');
+    expect(xml).toContain('w:styleId="Footer"');
+    expect(xml).toContain('w:styleId="FooterChar"');
+  });
+});
+
+describe("Paragraph bidi (RTL)", () => {
+  it("should emit <w:bidi/> for paragraphs with properties.bidi=true", async () => {
+    const { extractAll } = await import("@archive/unzip/extract");
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraphElement(h, paragraph([text("اَلْعَرَبِيَّةُ")], { bidi: true }));
+    Document.addParagraphElement(
+      h,
+      paragraph([text("Heading in RTL")], { style: "Heading1", bidi: true })
+    );
+    Document.addParagraphElement(h, paragraph([text("ltr fallback")]));
+
+    const buffer = await packageDocx(Document.build(h));
+    const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
+
+    // Both bidi paragraphs must serialize <w:bidi/> inside their pPr; the
+    // non-bidi paragraph must not.
+    const bidiCount = (xml.match(/<w:bidi\/>/g) ?? []).length;
+    expect(bidiCount).toBe(2);
+
+    // The bidi flag must coexist with pStyle="Heading1" (i.e. heading
+    // styling does not strip the property).
+    expect(xml).toMatch(/<w:pPr>\s*<w:pStyle w:val="Heading1"\/>\s*<w:bidi\/>/);
+  });
+
+  it("should round-trip paragraph bidi through readDocx", async () => {
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([text("RTL")], { bidi: true }));
+    const buffer = await packageDocx(Document.build(h));
+    const parsed = await readDocx(buffer);
+    const para = parsed.body[0] as Paragraph;
+    expect(para.properties?.bidi).toBe(true);
+  });
+});
+
+describe("Hyperlink-style cross-reference fields", () => {
+  // Per ECMA-376 §17.16.5.57 (REF) / §17.16.5.45 (PAGEREF) the \h flag
+  // makes Word render the field result as a hyperlink — but Word renders
+  // that behaviour only when the field is updated (F9). The cached value
+  // shipped in the docx itself is *not* automatically painted blue when
+  // Word first opens the file, regardless of any rPr we emit on the
+  // fldChar runs. To make the cached value display as a hyperlink at first
+  // open, the caller must wrap the field in a <w:hyperlink w:anchor> as
+  // §17.16.5.57 already specifies for the runtime behaviour. The builders
+  // therefore stay pure (no hidden styling injection) and the example uses
+  // the explicit <w:hyperlink> wrapper.
+  it("should NOT inject any visual styling into refField / pageRefField / noteRefField runs", async () => {
+    const { refField, pageRefField, noteRefField } = await import("../index");
+    const ref = refField("intro", { hyperlink: true, cachedValue: "Introduction" });
+    const pref = pageRefField("intro", { hyperlink: true, cachedValue: "1" });
+    const noteRef = noteRefField("fn1", { hyperlink: true, cachedValue: "1" });
+    for (const run of [ref, pref, noteRef]) {
+      expect(run.properties?.style).toBeUndefined();
+      expect(run.properties?.color).toBeUndefined();
+      expect(run.properties?.underline).toBeUndefined();
+    }
+  });
+
+  it("should emit \\h flag in the instruction text when hyperlink: true", async () => {
+    const { refField, pageRefField, noteRefField } = await import("../index");
+    const ref = refField("intro", { hyperlink: true, cachedValue: "x" });
+    const pref = pageRefField("intro", { hyperlink: true, cachedValue: "x" });
+    const noteRef = noteRefField("fn1", { hyperlink: true, cachedValue: "x" });
+    expect((ref.content[0] as { instruction: string }).instruction).toContain("\\h");
+    expect((pref.content[0] as { instruction: string }).instruction).toContain("\\h");
+    expect((noteRef.content[0] as { instruction: string }).instruction).toContain("\\h");
   });
 });

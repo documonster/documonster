@@ -88,6 +88,35 @@ interface MdRenderState {
 // =============================================================================
 
 function renderBlock(state: MdRenderState, item: BodyContent): void {
+  // GFM requires a blank line between block-level transitions (e.g. a
+  // list followed by a table, or a paragraph followed by a code block).
+  // List items deliberately do NOT push a trailing blank line so they
+  // stack tightly; we instead inject one here whenever a non-list
+  // block follows a list — and also between two adjacent lists of
+  // different ordering (- vs 1.) since GFM otherwise merges them.
+  const prev = state.lines.length > 0 ? state.lines[state.lines.length - 1] : "";
+  const prevIsList = /^(\s*)([-*+]|\d+[.)])\s/.test(prev);
+  const currentIsList = item.type === "paragraph" && isListItemParagraph(state.doc, item);
+  if (prev !== "" && prevIsList) {
+    if (!currentIsList) {
+      state.lines.push("");
+    } else if (item.type === "paragraph") {
+      // Same-list-type tightness: if the previous list marker matches
+      // (both bullet OR both ordered), keep them tight. Otherwise emit
+      // a blank line so GFM doesn't merge them into one mixed list.
+      const prevIsBullet = /^(\s*)[-*+]\s/.test(prev);
+      const prevIsOrdered = /^(\s*)\d+[.)]\s/.test(prev);
+      const numRef = item.properties?.numbering;
+      if (numRef) {
+        const format = getListFormat(state.doc, numRef.numId, numRef.level);
+        const currentIsBullet = format === "bullet";
+        if ((prevIsBullet && !currentIsBullet) || (prevIsOrdered && currentIsBullet)) {
+          state.lines.push("");
+        }
+      }
+    }
+  }
+
   switch (item.type) {
     case "paragraph":
       renderParagraph(state, item);
@@ -557,6 +586,17 @@ function isBlockquoteStyle(style: string | undefined): boolean {
   }
   const lower = style.toLowerCase();
   return lower.includes("quote") || lower.includes("blockquote");
+}
+
+/**
+ * Whether a body-level Paragraph would render as a Markdown list item.
+ * Used by renderBlock to decide whether to inject a blank-line separator
+ * between adjacent block types — list items stack tightly, but a list
+ * must be followed by a blank line before any other block-level element.
+ */
+function isListItemParagraph(doc: DocxDocument, para: Paragraph): boolean {
+  void doc;
+  return para.properties?.numbering !== undefined;
 }
 
 /** Check if the entire paragraph uses a monospace font (all runs). */

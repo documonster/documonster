@@ -135,8 +135,20 @@ export function addVbaProject(doc: DocxDocument, vbaProjectBin: Uint8Array): Doc
   const filteredParts = doc.opaqueParts
     ? doc.opaqueParts.filter(p => !isVbaPart(p.path))
     : undefined;
+  // Word rejects a package that carries a vbaProject.bin but is declared
+  // in [Content_Types].xml as the plain wordprocessingml document type.
+  // Promote a regular `document`/`template` doc to its macro-enabled
+  // counterpart so the content-type matches the .docm/.dotm extension
+  // the user is about to write.
+  let nextDocType = doc.docType;
+  if (nextDocType === undefined || nextDocType === "document") {
+    nextDocType = "macroEnabledDocument";
+  } else if (nextDocType === "template") {
+    nextDocType = "macroEnabledTemplate";
+  }
   return {
     ...doc,
+    docType: nextDocType,
     vbaProject: vbaProjectBin,
     ...(filteredParts !== undefined
       ? { opaqueParts: filteredParts.length > 0 ? filteredParts : undefined }
@@ -151,7 +163,15 @@ export function addVbaProject(doc: DocxDocument, vbaProjectBin: Uint8Array): Doc
  * @returns A new document without VBA parts.
  */
 export function removeVbaProject(doc: DocxDocument): DocxDocument {
-  const next: DocxDocument = { ...doc, vbaProject: undefined };
+  // Demote the content type alongside removing the binary so the package
+  // is identified as a plain .docx/.dotx going forward.
+  let nextDocType = doc.docType;
+  if (nextDocType === "macroEnabledDocument") {
+    nextDocType = "document";
+  } else if (nextDocType === "macroEnabledTemplate") {
+    nextDocType = "template";
+  }
+  const next: DocxDocument = { ...doc, docType: nextDocType, vbaProject: undefined };
   if (doc.opaqueParts) {
     const filteredParts = doc.opaqueParts.filter(p => !isVbaPart(p.path));
     return {

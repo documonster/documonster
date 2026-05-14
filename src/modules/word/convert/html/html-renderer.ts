@@ -717,7 +717,11 @@ function renderRun(state: RenderState, run: Run): void {
       const fontName =
         typeof rPr.font === "string" ? rPr.font : (rPr.font.ascii ?? rPr.font.eastAsia);
       if (fontName) {
-        styles.push(`font-family:"${fontName}"`);
+        // The value is interpolated into a `style="..."` attribute, so
+        // wrap font names containing whitespace or punctuation in
+        // single quotes — embedding double quotes here would close the
+        // surrounding HTML attribute and produce invalid markup.
+        styles.push(`font-family:'${fontName.replace(/'/g, "")}'`);
       }
     }
     if (rPr.doubleStrike) {
@@ -817,7 +821,7 @@ function renderRunContentHtml(state: RenderState, content: RunContent): void {
       try {
         const code = parseInt(content.char, 16);
         state.html.push(
-          `<span style="font-family:${escapeHtml(content.font)}">${String.fromCodePoint(code)}</span>`
+          `<span style="font-family:'${escapeHtml(content.font).replace(/&#39;/g, "")}'">${String.fromCodePoint(code)}</span>`
         );
       } catch {
         state.html.push(escapeHtml(content.char));

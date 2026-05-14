@@ -22,6 +22,7 @@ import type {
   ParagraphChild,
   Run,
   RunContent,
+  StyleDef,
   Table,
   TableCell,
   TableOfContents
@@ -88,11 +89,19 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
   // Update body content
   const newBody = updateBody(doc, layout, bookmarkInfo, seqValues, styleIndex, indexEntries, opts);
 
-  if (newBody === doc.body) {
-    return doc;
+  // If TOC was updated, register the TOC1..TOCn paragraph styles so the
+  // cached TOC entries don't reference undefined styles. Only do this when
+  // the document actually contains a <toc> — otherwise we'd mutate doc
+  // shape for no reason and break === comparisons in callers.
+  let nextDoc: DocxDocument = doc;
+  if (newBody !== doc.body) {
+    nextDoc = { ...doc, body: newBody };
   }
-
-  return { ...doc, body: newBody };
+  if (opts.updateToc && doc.body.some(item => item.type === "tableOfContents")) {
+    const headings = collectHeadings(doc, layout);
+    nextDoc = ensureTocStyles(nextDoc, headings);
+  }
+  return nextDoc;
 }
 
 /**
@@ -104,6 +113,15 @@ export function updateTableOfContents(
   doc: DocxDocument,
   options?: FieldUpdateOptions
 ): DocxDocument {
+  // Skip the entire pipeline (including TOC style registration) when the
+  // document has no <toc> block at all — callers rely on `updateTableOfContents`
+  // returning the same reference in that case so they can detect "nothing
+  // changed" with a `===` check.
+  const hasToc = doc.body.some(item => item.type === "tableOfContents");
+  if (!hasToc) {
+    return doc;
+  }
+
   const layout = layoutDocument(doc, options?.layoutOptions);
   const headings = collectHeadings(doc, layout);
 
@@ -115,11 +133,50 @@ export function updateTableOfContents(
   });
 
   const changed = newBody.some((item, i) => item !== doc.body[i]);
-  if (!changed) {
+  const stage1: DocxDocument = changed ? { ...doc, body: newBody } : doc;
+  return ensureTocStyles(stage1, headings);
+}
+
+/**
+ * Register TOC1..TOCn paragraph styles for every heading level present in
+ * the document. The cached TOC paragraphs reference these styles by id, so
+ * if they aren't defined Word logs a "missing referenced style" warning on
+ * every TOC entry.
+ */
+function ensureTocStyles(doc: DocxDocument, headings: HeadingEntry[]): DocxDocument {
+  if (headings.length === 0) {
     return doc;
   }
-
-  return { ...doc, body: newBody };
+  const usedTocLevels = new Set<number>();
+  for (const h of headings) {
+    usedTocLevels.add(Math.max(1, Math.min(9, h.level)));
+  }
+  const existingStyles = doc.styles ?? [];
+  const definedIds = new Set(existingStyles.map(s => s.styleId));
+  const stylesToAdd: StyleDef[] = [];
+  for (const lvl of usedTocLevels) {
+    const id = `TOC${lvl}`;
+    if (definedIds.has(id)) {
+      continue;
+    }
+    stylesToAdd.push({
+      type: "paragraph",
+      styleId: id,
+      name: `toc ${lvl}`,
+      basedOn: "Normal",
+      next: "Normal",
+      uiPriority: 39,
+      unhideWhenUsed: true,
+      paragraphProperties: {
+        spacing: { after: 100 },
+        indent: { left: (lvl - 1) * 220 }
+      }
+    });
+  }
+  if (stylesToAdd.length === 0) {
+    return doc;
+  }
+  return { ...doc, styles: [...existingStyles, ...stylesToAdd] };
 }
 
 // =============================================================================
