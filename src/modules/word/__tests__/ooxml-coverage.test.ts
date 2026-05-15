@@ -279,6 +279,70 @@ describe("OOXML coverage — RunProperties", () => {
       throw new Error("expected font to round-trip as a FontSpec object");
     }
   });
+
+  it("round-trips eastAsianLayout with combine + brackets (ECMA-376 §17.3.2.10)", async () => {
+    const props: RunProperties = {
+      eastAsianLayout: { id: 7, combine: true, combineBrackets: "round" }
+    };
+    const h = Document.create();
+    Document.addParagraphElement(
+      h,
+      paragraph([{ properties: props, content: [{ type: "text", text: "漢字" }] }])
+    );
+    const bytes = await packageDocx(Document.build(h));
+    const parsed = await readDocx(bytes);
+
+    const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
+    const r = findFirstRun(para)!.properties!;
+    expect(r.eastAsianLayout).toBeDefined();
+    expect(r.eastAsianLayout!.id).toBe(7);
+    expect(r.eastAsianLayout!.combine).toBe(true);
+    expect(r.eastAsianLayout!.combineBrackets).toBe("round");
+    expect(r.eastAsianLayout!.vert).toBeUndefined();
+  });
+
+  it("round-trips eastAsianLayout with vert + vertCompress", async () => {
+    const props: RunProperties = {
+      eastAsianLayout: { vert: true, vertCompress: true }
+    };
+    const h = Document.create();
+    Document.addParagraphElement(
+      h,
+      paragraph([{ properties: props, content: [{ type: "text", text: "縦書き" }] }])
+    );
+    const bytes = await packageDocx(Document.build(h));
+    const parsed = await readDocx(bytes);
+
+    const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
+    const r = findFirstRun(para)!.properties!;
+    expect(r.eastAsianLayout).toBeDefined();
+    expect(r.eastAsianLayout!.vert).toBe(true);
+    expect(r.eastAsianLayout!.vertCompress).toBe(true);
+    expect(r.eastAsianLayout!.combine).toBeUndefined();
+  });
+
+  it("rejects malformed combineBrackets values (defensive)", async () => {
+    // Manually construct a minimal docx-shaped XML with an invalid bracket
+    // value; reader must drop the bracket (and ideally keep `combine`)
+    // rather than propagate garbage into the model.
+    const props: RunProperties = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- intentional bad input
+      eastAsianLayout: { combine: true, combineBrackets: "evil" as any }
+    };
+    const h = Document.create();
+    Document.addParagraphElement(
+      h,
+      paragraph([{ properties: props, content: [{ type: "text", text: "x" }] }])
+    );
+    // Writer: serialises whatever the model carries (round-trip preservation).
+    // Reader: validates the attribute value.
+    const bytes = await packageDocx(Document.build(h));
+    const parsed = await readDocx(bytes);
+    const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
+    const r = findFirstRun(para)!.properties!;
+    expect(r.eastAsianLayout?.combine).toBe(true);
+    expect(r.eastAsianLayout?.combineBrackets).toBeUndefined();
+  });
 });
 
 describe("OOXML coverage — SDT properties", () => {

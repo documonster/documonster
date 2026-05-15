@@ -60,6 +60,8 @@ export type {
   UnderlineSpec,
   TextEffect,
   EmphasisMarkType,
+  EastAsianCombineBrackets,
+  EastAsianLayoutSpec,
   ColorSpec,
   RunProperties,
 
@@ -730,7 +732,7 @@ export type { LayoutResult, LayoutOptions } from "./layout/layout";
 /** @stability experimental */
 export { layoutDocumentFull } from "./layout/layout-full";
 /** @stability experimental */
-export type { FullLayoutOptions } from "./layout/layout-full";
+export type { FullLayoutOptions, PageGeometryOverride } from "./layout/layout-full";
 
 /** @stability experimental */
 export { updateFields, updateTableOfContents } from "./advanced/field-engine";
@@ -867,12 +869,25 @@ export type {
   LayoutDocument,
   LayoutPage,
   PageGeometry,
+  PageContent,
   LayoutParagraph,
   LayoutTable,
   LayoutTableCell,
   LayoutImage,
   LayoutFloat,
+  LayoutFloatWrap,
+  LayoutTextBox,
+  LayoutShape,
+  LayoutChart,
+  LayoutSdt,
+  LayoutMath,
+  LayoutCheckBox,
+  LayoutTableOfContents,
+  LayoutAltChunk,
+  LayoutOpaqueDrawing,
   LineBox,
+  LineBoxItem,
+  PositionedInlineImage,
   PositionedRun
 } from "./layout/layout-model";
 

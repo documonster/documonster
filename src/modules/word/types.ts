@@ -455,6 +455,33 @@ export type TextEffect =
 /** Emphasis mark type. */
 export type EmphasisMarkType = "dot" | "comma" | "circle" | "underDot" | "none";
 
+/** Bracket style used when combining East Asian characters into a composite cell. */
+export type EastAsianCombineBrackets = "none" | "round" | "square" | "angle" | "curly";
+
+/**
+ * East Asian typographic layout overrides for a run (ECMA-376 §17.3.2.10
+ * `<w:eastAsianLayout>`). Used for Japanese/Korean classical layout to
+ * combine consecutive characters into a single display cell, render
+ * vertically, or compress vertical glyphs.
+ *
+ * The layout/render-page modules render runs carrying this property in
+ * standard horizontal direction (vert/vertCompress are not visualised);
+ * reader and writer round-trip the property losslessly so the source
+ * intent is preserved across edits.
+ */
+export interface EastAsianLayoutSpec {
+  /** Tracking id; pairs with `rPrChange` revisions. */
+  readonly id?: number;
+  /** Combine consecutive characters into one composite display cell. */
+  readonly combine?: boolean;
+  /** Bracket style used when combining (defaults to `none`). */
+  readonly combineBrackets?: EastAsianCombineBrackets;
+  /** Render the run vertically (top-to-bottom). */
+  readonly vert?: boolean;
+  /** Compress vertical glyphs into half-width cells. */
+  readonly vertCompress?: boolean;
+}
+
 /** Color specification with optional theme support. */
 export interface ColorSpec {
   /** Hex RGB color value (e.g. "FF0000") or "auto". */
@@ -542,6 +569,8 @@ export interface RunProperties {
   readonly effect?: TextEffect;
   /** Emphasis mark (East Asian typography). */
   readonly emphasisMark?: EmphasisMarkType;
+  /** East Asian layout overrides (combine, vertical, etc.). ECMA-376 §17.3.2.10. */
+  readonly eastAsianLayout?: EastAsianLayoutSpec;
   /** Character border (border around individual run). */
   readonly border?: Border;
   /** Fit text: force text to fit a specific width (in twips). */

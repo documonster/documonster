@@ -281,6 +281,10 @@
       }
     },
     "./word/excel": {
+      "browser": {
+        "types": "./dist/browser/modules/word/excel.d.ts",
+        "default": "./dist/browser/modules/word/excel.js"
+      },
       "import": {
         "types": "./dist/types/modules/word/excel.d.ts",
         "default": "./dist/esm/modules/word/excel.js"

@@ -303,7 +303,29 @@ export function renderRunPropertiesContents(
     xml.leafNode("w:lang", attrs);
   }
 
-  // 25. eastAsianLayout (not yet supported; placeholder)
+  // 25. eastAsianLayout (ECMA-376 §17.3.2.10)
+  if (rPr.eastAsianLayout) {
+    const ea = rPr.eastAsianLayout;
+    const attrs: Record<string, string> = {};
+    if (ea.id != null) {
+      attrs["w:id"] = String(ea.id);
+    }
+    if (ea.combine) {
+      attrs["w:combine"] = "1";
+    }
+    if (ea.combineBrackets) {
+      attrs["w:combineBrackets"] = ea.combineBrackets;
+    }
+    if (ea.vert) {
+      attrs["w:vert"] = "1";
+    }
+    if (ea.vertCompress) {
+      attrs["w:vertCompress"] = "1";
+    }
+    if (Object.keys(attrs).length > 0) {
+      xml.leafNode("w:eastAsianLayout", attrs);
+    }
+  }
 
   // 26. specVanish
   if (rPr.specVanish) {

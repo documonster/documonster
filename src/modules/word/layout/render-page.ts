@@ -32,7 +32,23 @@ import {
   DEFAULT_PAGE_MARGIN_TWIPS,
   DEFAULT_PAGE_WIDTH_TWIPS
 } from "./layout-constants";
-import type { LayoutDocument, LayoutParagraph, LayoutTable, PageGeometry } from "./layout-model";
+import type {
+  LayoutChart,
+  LayoutCheckBox,
+  LayoutDocument,
+  LayoutFloat,
+  LayoutImage,
+  LayoutMath,
+  LayoutParagraph,
+  LayoutRect,
+  LayoutSdt,
+  LayoutShape,
+  LayoutTable,
+  LayoutTableOfContents,
+  LayoutTextBox,
+  PageContent,
+  PageGeometry
+} from "./layout-model";
 
 // =============================================================================
 // Public API Types
@@ -1073,7 +1089,29 @@ export function renderPageFromLayout(
   const { geometry } = page;
   const elements: string[] = [];
 
-  // Render each positioned content element
+  // Header / footer paragraphs and tables come with layout-y already
+  // expressed as a page-absolute offset (the layout engine adds the
+  // section's `pgMar.header` to header content and starts footer
+  // content at `pageHeight - pgMar.footer`). Use a geometry with
+  // `marginTop: 0` so SVG y-coordinates resolve straight from
+  // layout-y. Tables in header / footer are uncommon but legal —
+  // dispatch through the same renderers used for body content.
+  const bandGeometry: PageGeometry = { ...geometry, marginTop: 0 };
+  if (page.header) {
+    for (const item of page.header) {
+      if (item.type === "paragraph") {
+        renderLayoutParagraphToSvg(item, bandGeometry, elements);
+      } else {
+        renderLayoutTableToSvg(item, bandGeometry, elements);
+      }
+    }
+  }
+
+  // Render each positioned content element. Every PageContent variant is
+  // handled — most non-paragraph/table types degrade to a placeholder rect
+  // (charts, shapes, opaque drawings), an inline glyph (check-boxes, math),
+  // or a recursive descent (text-boxes, SDTs). Adding a new PageContent
+  // variant is a build error here until a case is added.
   for (const item of page.content) {
     switch (item.type) {
       case "paragraph":
@@ -1082,8 +1120,77 @@ export function renderPageFromLayout(
       case "table":
         renderLayoutTableToSvg(item, geometry, elements);
         break;
-      default:
+      case "image":
+        renderLayoutImageToSvg(item, geometry, elements);
         break;
+      case "float":
+        renderLayoutFloatToSvg(item, geometry, elements);
+        break;
+      case "textBox":
+        renderLayoutTextBoxToSvg(item, geometry, elements);
+        break;
+      case "shape":
+        renderLayoutShapeToSvg(item, geometry, elements);
+        break;
+      case "chart":
+        renderLayoutChartToSvg(item, geometry, elements);
+        break;
+      case "sdt":
+        renderLayoutSdtToSvg(item, geometry, elements);
+        break;
+      case "math":
+        renderLayoutMathToSvg(item, geometry, elements);
+        break;
+      case "checkBox":
+        renderLayoutCheckBoxToSvg(item, geometry, elements);
+        break;
+      case "tableOfContents":
+        renderLayoutTocToSvg(item, geometry, elements);
+        break;
+      case "altChunk":
+        renderLayoutPlaceholderToSvg(item.rect, geometry, `[${item.contentType}]`, elements);
+        break;
+      case "opaqueDrawing":
+        renderLayoutPlaceholderToSvg(item.rect, geometry, "[drawing]", elements);
+        break;
+      default: {
+        const _exhaustive: never = item;
+        throw new Error(
+          `renderPageFromLayout: unhandled PageContent ${(_exhaustive as { type: string }).type}`
+        );
+      }
+    }
+  }
+
+  // Footer — `bandGeometry` (declared near the header above) shares the
+  // same "layout-y is page-absolute" rule for both bands.
+  if (page.footer) {
+    for (const item of page.footer) {
+      if (item.type === "paragraph") {
+        renderLayoutParagraphToSvg(item, bandGeometry, elements);
+      } else {
+        renderLayoutTableToSvg(item, bandGeometry, elements);
+      }
+    }
+  }
+
+  // Footnote separator (drawn above the footnote area; see ECMA-376
+  // §17.11.10). Same coordinate convention as bands: the layout y
+  // value is page-absolute.
+  if (page.footnoteSeparator) {
+    const sep = page.footnoteSeparator;
+    const ruleWidth = sep.kind === "separator" ? geometry.contentWidth / 3 : geometry.contentWidth;
+    const x1 = geometry.marginLeft;
+    const x2 = x1 + ruleWidth;
+    elements.push(
+      `<line x1="${x1.toFixed(2)}" y1="${sep.y.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${sep.y.toFixed(2)}" stroke="black" stroke-width="0.5"/>`
+    );
+  }
+
+  // Footnote area paragraphs (page-absolute y, like header/footer).
+  if (page.footnoteArea) {
+    for (const para of page.footnoteArea) {
+      renderLayoutParagraphToSvg(para, bandGeometry, elements);
     }
   }
 
@@ -1098,9 +1205,37 @@ function renderLayoutParagraphToSvg(
 ): void {
   for (const line of para.lines) {
     const lineY = geometry.marginTop + para.rect.y + line.y + line.baseline;
-    for (const run of line.runs) {
+    const lineTopY = geometry.marginTop + para.rect.y + line.y;
+    for (const item of line.runs) {
+      if (item.type === "image") {
+        // Inline image: bottom-aligned within the line, matching
+        // Word's default for in-line images. Empty data → emit
+        // nothing rather than an invalid <image href> with empty src.
+        if (item.data.length === 0) {
+          continue;
+        }
+        const x = geometry.marginLeft + item.x;
+        const yBottom = lineTopY + Math.min(line.height, item.height);
+        const yTop = yBottom - item.height;
+        const dataUri = `data:${item.mimeType};base64,${bytesToBase64(item.data)}`;
+        elements.push(
+          `<image x="${x.toFixed(2)}" y="${yTop.toFixed(2)}" width="${item.width.toFixed(2)}" height="${item.height.toFixed(2)}" href="${xmlEncodeAttr(dataUri)}"/>`
+        );
+        continue;
+      }
+      const run = item;
       const x = geometry.marginLeft + run.x;
-      let attrs = `x="${x.toFixed(2)}" y="${lineY.toFixed(2)}"`;
+      // Sub/superscript: shift the SVG baseline. SVG y-axis points
+      // downward (opposite of PDF), so superscript moves UP (smaller
+      // y) and subscript moves DOWN (larger y) — opposite signs from
+      // the PDF code.
+      let runY = lineY;
+      if (run.verticalAlign === "superscript") {
+        runY = lineY - run.fontSize * 0.33;
+      } else if (run.verticalAlign === "subscript") {
+        runY = lineY + run.fontSize * 0.33;
+      }
+      let attrs = `x="${x.toFixed(2)}" y="${runY.toFixed(2)}"`;
       attrs += ` font-family="${xmlEncodeAttr(run.font)}"`;
       attrs += ` font-size="${run.fontSize.toFixed(1)}"`;
       if (run.bold) {
@@ -1178,4 +1313,307 @@ function renderLayoutTableToSvg(
       }
     }
   }
+}
+
+// =============================================================================
+// SVG renderers — extended PageContent variants
+// =============================================================================
+
+function absRect(rect: LayoutRect, geometry: PageGeometry): LayoutRect {
+  return {
+    x: geometry.marginLeft + rect.x,
+    y: geometry.marginTop + rect.y,
+    width: rect.width,
+    height: rect.height
+  };
+}
+
+function pushPlaceholder(
+  abs: LayoutRect,
+  fillStroke: { fill?: string; stroke?: string; strokeWidth?: number },
+  elements: string[]
+): void {
+  const fill = fillStroke.fill ?? "none";
+  const stroke = fillStroke.stroke ?? "#bbbbbb";
+  const sw = (fillStroke.strokeWidth ?? 0.5).toFixed(2);
+  elements.push(
+    `<rect x="${abs.x.toFixed(2)}" y="${abs.y.toFixed(2)}" width="${abs.width.toFixed(2)}" height="${abs.height.toFixed(2)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`
+  );
+}
+
+function renderLayoutImageToSvg(
+  img: LayoutImage,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  const abs = absRect(img.rect, geometry);
+  if (img.data.length === 0) {
+    pushPlaceholder(abs, { stroke: "#888888" }, elements);
+    return;
+  }
+  const dataUri = `data:${img.mimeType};base64,${bytesToBase64(img.data)}`;
+  elements.push(
+    `<image x="${abs.x.toFixed(2)}" y="${abs.y.toFixed(2)}" width="${abs.width.toFixed(2)}" height="${abs.height.toFixed(2)}" href="${xmlEncodeAttr(dataUri)}"/>`
+  );
+}
+
+function renderLayoutFloatToSvg(
+  float: LayoutFloat,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  // Floats currently always wrap a LayoutImage. Behind-text floats render
+  // before main content in document order; SVG is painters-algorithm so a
+  // dedicated z-ordering pass would belong upstream — for now rendering
+  // order matches `page.content` order which is good enough.
+  if (float.content.type === "image") {
+    renderLayoutImageToSvg(float.content, geometry, elements);
+  } else {
+    renderLayoutParagraphToSvg(float.content, geometry, elements);
+  }
+}
+
+function renderLayoutTextBoxToSvg(
+  tb: LayoutTextBox,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  const abs = absRect(tb.rect, geometry);
+  const safeStroke = tb.border ? sanitizeHexColor(tb.border.color) : undefined;
+  const safeFill = tb.background ? sanitizeHexColor(tb.background) : undefined;
+  pushPlaceholder(
+    abs,
+    {
+      fill: safeFill ? `#${safeFill}` : undefined,
+      stroke: safeStroke ? `#${safeStroke}` : undefined,
+      strokeWidth: tb.border?.width
+    },
+    elements
+  );
+  // Translate inner content by the text-box origin and recurse through the
+  // generic SVG dispatcher so nested content (paragraphs, tables, even
+  // shapes) renders correctly.
+  const innerGeometry: PageGeometry = {
+    ...geometry,
+    marginLeft: geometry.marginLeft + tb.rect.x,
+    marginTop: geometry.marginTop + tb.rect.y
+  };
+  renderPageContentList(tb.content, innerGeometry, elements);
+}
+
+function renderLayoutShapeToSvg(
+  shape: LayoutShape,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  const abs = absRect(shape.rect, geometry);
+  const fill = shape.fillColor ? `#${sanitizeHexColor(shape.fillColor)}` : "none";
+  const stroke = shape.strokeColor ? `#${sanitizeHexColor(shape.strokeColor)}` : "#888888";
+  const sw = (shape.strokeWidth ?? 0.75).toFixed(2);
+
+  // Map a few common preset shapes; everything else falls back to a rect.
+  if (shape.preset === "ellipse" || shape.preset === "oval") {
+    const cx = (abs.x + abs.width / 2).toFixed(2);
+    const cy = (abs.y + abs.height / 2).toFixed(2);
+    const rx = (abs.width / 2).toFixed(2);
+    const ry = (abs.height / 2).toFixed(2);
+    elements.push(
+      `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`
+    );
+  } else if (shape.preset === "line") {
+    elements.push(
+      `<line x1="${abs.x.toFixed(2)}" y1="${abs.y.toFixed(2)}" x2="${(abs.x + abs.width).toFixed(2)}" y2="${(abs.y + abs.height).toFixed(2)}" stroke="${stroke}" stroke-width="${sw}"/>`
+    );
+  } else {
+    elements.push(
+      `<rect x="${abs.x.toFixed(2)}" y="${abs.y.toFixed(2)}" width="${abs.width.toFixed(2)}" height="${abs.height.toFixed(2)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`
+    );
+  }
+
+  if (shape.textContent && shape.textContent.length > 0) {
+    const innerGeometry: PageGeometry = {
+      ...geometry,
+      marginLeft: geometry.marginLeft + shape.rect.x,
+      marginTop: geometry.marginTop + shape.rect.y
+    };
+    renderPageContentList(shape.textContent, innerGeometry, elements);
+  }
+}
+
+function renderLayoutChartToSvg(
+  chart: LayoutChart,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  const abs = absRect(chart.rect, geometry);
+  if (chart.svg) {
+    // Inline a pre-rendered SVG fragment inside a <g> with an absolute
+    // translate so it ends up at the right page coordinates.
+    elements.push(
+      `<g transform="translate(${abs.x.toFixed(2)} ${abs.y.toFixed(2)})">${chart.svg}</g>`
+    );
+    return;
+  }
+  pushPlaceholder(abs, { stroke: "#666666" }, elements);
+  if (chart.title) {
+    const cx = abs.x + abs.width / 2;
+    const cy = abs.y + abs.height / 2;
+    elements.push(
+      `<text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="Helvetica" font-size="10" fill="#444444">${xmlEncode(chart.title)}</text>`
+    );
+  }
+}
+
+function renderLayoutSdtToSvg(sdt: LayoutSdt, geometry: PageGeometry, elements: string[]): void {
+  // SDT is transparent visually; recurse into its children using the
+  // page-relative geometry but offset by the SDT's own rect.
+  const innerGeometry: PageGeometry = {
+    ...geometry,
+    marginLeft: geometry.marginLeft + sdt.rect.x,
+    marginTop: geometry.marginTop + sdt.rect.y
+  };
+  renderPageContentList(sdt.content, innerGeometry, elements);
+}
+
+function renderLayoutMathToSvg(math: LayoutMath, geometry: PageGeometry, elements: string[]): void {
+  const abs = absRect(math.rect, geometry);
+  // Render the plain-text fallback. Renderers that want true math display
+  // can read `math.mathML` from the layout document directly.
+  elements.push(
+    `<text x="${abs.x.toFixed(2)}" y="${(abs.y + abs.height * 0.8).toFixed(2)}" font-family="serif" font-style="italic" font-size="${(abs.height * 0.7).toFixed(1)}" fill="#000">${xmlEncode(math.text)}</text>`
+  );
+}
+
+function renderLayoutCheckBoxToSvg(
+  cb: LayoutCheckBox,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  const abs = absRect(cb.rect, geometry);
+  // Draw the actual square so the rendered output is independent of font
+  // availability.
+  elements.push(
+    `<rect x="${abs.x.toFixed(2)}" y="${abs.y.toFixed(2)}" width="${abs.height.toFixed(2)}" height="${abs.height.toFixed(2)}" fill="white" stroke="#000" stroke-width="0.75"/>`
+  );
+  if (cb.checked) {
+    const x1 = abs.x + abs.height * 0.2;
+    const y1 = abs.y + abs.height * 0.55;
+    const x2 = abs.x + abs.height * 0.45;
+    const y2 = abs.y + abs.height * 0.8;
+    const x3 = abs.x + abs.height * 0.85;
+    const y3 = abs.y + abs.height * 0.2;
+    elements.push(
+      `<polyline points="${x1.toFixed(2)},${y1.toFixed(2)} ${x2.toFixed(2)},${y2.toFixed(2)} ${x3.toFixed(2)},${y3.toFixed(2)}" fill="none" stroke="#000" stroke-width="1"/>`
+    );
+  }
+}
+
+function renderLayoutTocToSvg(
+  toc: LayoutTableOfContents,
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  // TOC is a list of LayoutParagraphs; render them with a y-offset by the
+  // TOC's own rect.
+  const innerGeometry: PageGeometry = {
+    ...geometry,
+    marginLeft: geometry.marginLeft + toc.rect.x,
+    marginTop: geometry.marginTop + toc.rect.y
+  };
+  for (const p of toc.entries) {
+    renderLayoutParagraphToSvg(p, innerGeometry, elements);
+  }
+}
+
+function renderLayoutPlaceholderToSvg(
+  rect: LayoutRect,
+  geometry: PageGeometry,
+  label: string,
+  elements: string[]
+): void {
+  const abs = absRect(rect, geometry);
+  pushPlaceholder(abs, { stroke: "#888888" }, elements);
+  const cx = abs.x + abs.width / 2;
+  const cy = abs.y + abs.height / 2;
+  elements.push(
+    `<text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="central" font-family="Helvetica" font-size="9" fill="#666">${xmlEncode(label)}</text>`
+  );
+}
+
+/** Recursive dispatch helper used by container variants (SDT, TextBox, Shape). */
+function renderPageContentList(
+  items: readonly PageContent[],
+  geometry: PageGeometry,
+  elements: string[]
+): void {
+  for (const item of items) {
+    switch (item.type) {
+      case "paragraph":
+        renderLayoutParagraphToSvg(item, geometry, elements);
+        break;
+      case "table":
+        renderLayoutTableToSvg(item, geometry, elements);
+        break;
+      case "image":
+        renderLayoutImageToSvg(item, geometry, elements);
+        break;
+      case "float":
+        renderLayoutFloatToSvg(item, geometry, elements);
+        break;
+      case "textBox":
+        renderLayoutTextBoxToSvg(item, geometry, elements);
+        break;
+      case "shape":
+        renderLayoutShapeToSvg(item, geometry, elements);
+        break;
+      case "chart":
+        renderLayoutChartToSvg(item, geometry, elements);
+        break;
+      case "sdt":
+        renderLayoutSdtToSvg(item, geometry, elements);
+        break;
+      case "math":
+        renderLayoutMathToSvg(item, geometry, elements);
+        break;
+      case "checkBox":
+        renderLayoutCheckBoxToSvg(item, geometry, elements);
+        break;
+      case "tableOfContents":
+        renderLayoutTocToSvg(item, geometry, elements);
+        break;
+      case "altChunk":
+        renderLayoutPlaceholderToSvg(item.rect, geometry, `[${item.contentType}]`, elements);
+        break;
+      case "opaqueDrawing":
+        renderLayoutPlaceholderToSvg(item.rect, geometry, "[drawing]", elements);
+        break;
+      default: {
+        const _exhaustive: never = item;
+        throw new Error(
+          `renderPageContentList: unhandled PageContent ${(_exhaustive as { type: string }).type}`
+        );
+      }
+    }
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Same approach as core/internal-utils.ts to stay browser-friendly.
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  if (typeof globalThis.btoa === "function") {
+    return globalThis.btoa(binary);
+  }
+  // Node fallback
+  const buf = (
+    globalThis as {
+      Buffer?: { from(data: string, enc: string): { toString(enc: string): string } };
+    }
+  ).Buffer;
+  if (buf) {
+    return buf.from(binary, "binary").toString("base64");
+  }
+  throw new Error("btoa / Buffer unavailable; cannot encode image data");
 }

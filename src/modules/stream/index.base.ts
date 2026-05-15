@@ -62,7 +62,7 @@ export {
 
 export { StreamStateError, StreamTypeError, UnsupportedStreamTypeError } from "@stream/errors";
 
-// Internal utilities exposed for cross-module use (e.g. archive)
+// Internal utilities exposed for cross-module use (e.g. archive, word/excel writers)
 export {
   isReadableStream,
   isWritableStream,
@@ -74,4 +74,6 @@ export {
   eventedReadableToAsyncIterableNoDestroy,
   type EventedReadableLike
 } from "@stream/internal/evented-readable-to-async-iterable";
+export { SinkAdapter } from "@stream/internal/sink-adapter";
+export type { AnySink, NodeWritableLike, DuckSinkLike } from "@stream/internal/sink-adapter";
 export type { EventEmitterLike } from "@stream/types";

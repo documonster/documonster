@@ -19,6 +19,8 @@ import { type Mutable } from "../core/internal-utils";
 import type {
   Border,
   ColorSpec,
+  EastAsianCombineBrackets,
+  EastAsianLayoutSpec,
   FontSpec,
   RevisionInfo,
   RunProperties,
@@ -229,6 +231,14 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
     rPr.emphasisMark = attrVal(emEl, "val") as RunProperties["emphasisMark"];
   }
 
+  const eaLayoutEl = findChildNs(rPrEl, "eastAsianLayout");
+  if (eaLayoutEl) {
+    const ea = parseEastAsianLayout(eaLayoutEl);
+    if (ea) {
+      rPr.eastAsianLayout = ea;
+    }
+  }
+
   const bdrEl = findChildNs(rPrEl, "bdr");
   if (bdrEl) {
     rPr.border = parseBorder(bdrEl);
@@ -249,6 +259,58 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
   }
 
   return rPr;
+}
+
+// =============================================================================
+// East Asian Layout
+// =============================================================================
+
+const VALID_COMBINE_BRACKETS: ReadonlySet<string> = new Set([
+  "none",
+  "round",
+  "square",
+  "angle",
+  "curly"
+]);
+
+/**
+ * Interpret an OOXML on/off attribute (ECMA-376 §17.17.4): a value of
+ * `"1"`, `"true"`, `"on"` or the empty string is true; `"0"`, `"false"`,
+ * `"off"` is false; missing yields undefined.
+ */
+function attrOnOff(el: XmlElement, name: string): boolean | undefined {
+  const v = attrVal(el, name);
+  if (v == null) {
+    return undefined;
+  }
+  if (v === "0" || v === "false" || v === "off") {
+    return false;
+  }
+  return true;
+}
+
+function parseEastAsianLayout(el: XmlElement): EastAsianLayoutSpec | undefined {
+  const spec: Mutable<EastAsianLayoutSpec> = {};
+
+  const id = attrInt(el, "id");
+  if (id != null) {
+    spec.id = id;
+  }
+  if (attrOnOff(el, "combine") === true) {
+    spec.combine = true;
+  }
+  const brackets = attrVal(el, "combineBrackets");
+  if (brackets && VALID_COMBINE_BRACKETS.has(brackets)) {
+    spec.combineBrackets = brackets as EastAsianCombineBrackets;
+  }
+  if (attrOnOff(el, "vert") === true) {
+    spec.vert = true;
+  }
+  if (attrOnOff(el, "vertCompress") === true) {
+    spec.vertCompress = true;
+  }
+
+  return Object.keys(spec).length > 0 ? (spec as EastAsianLayoutSpec) : undefined;
 }
 
 // =============================================================================

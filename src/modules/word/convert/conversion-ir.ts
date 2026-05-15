@@ -98,6 +98,58 @@ export type SemanticBlock =
       readonly width?: number;
       readonly height?: number;
       readonly caption?: string;
+    }
+  | {
+      /**
+       * Block-level mathematical expression. `text` is a plain-text
+       * fallback (always present); `mathML` is the full MathML
+       * representation when the converter could derive one.
+       */
+      readonly type: "math";
+      readonly text: string;
+      readonly mathML?: string;
+    }
+  | {
+      /**
+       * A chart reference. The chart binary is preserved in `assets` only
+       * when the source provided a rendered SVG; otherwise consumers
+       * should fall back to the `title` / `altText` for a textual
+       * placeholder.
+       */
+      readonly type: "chart";
+      readonly chartId: string;
+      readonly title?: string;
+      readonly altText?: string;
+      /** Asset id of an SVG rendering, when available. */
+      readonly svgAssetId?: string;
+    }
+  | {
+      /** Inline check-box state (carries `<w:checkBox>` semantics). */
+      readonly type: "checkBox";
+      readonly checked: boolean;
+      readonly label?: string;
+    }
+  | {
+      /**
+       * Embedded foreign content (`<w:altChunk>`): HTML, RTF, plain text,
+       * etc. The renderer can either inline the data directly (when it
+       * knows how to handle `contentType`) or fall back to a placeholder.
+       */
+      readonly type: "embed";
+      readonly contentType: string;
+      readonly data?: Uint8Array;
+      readonly fileName?: string;
+    }
+  | {
+      /**
+       * Opaque OOXML drawing markup that cannot be safely flattened into
+       * the semantic model. Carried verbatim so consumers that want full
+       * fidelity (e.g. an OOXML→OOXML pipeline) can preserve the source
+       * markup; markdown / html renderers may emit a placeholder instead.
+       */
+      readonly type: "raw";
+      readonly format: "ooxml-drawing";
+      readonly xml: string;
     };
 
 /** Paragraph style properties (resolved, not inherited). */

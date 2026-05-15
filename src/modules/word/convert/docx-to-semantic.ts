@@ -16,14 +16,21 @@
  * - Math content (text fallback)
  */
 
-import { isRun } from "../core/text-utils";
+import { ommlToMathML } from "../advanced/math-convert";
+import { extractMathText, isRun } from "../core/text-utils";
 import type {
+  AltChunk,
   BodyContent,
+  ChartContent,
+  ChartExContent,
+  CheckBox,
   ColorSpec,
   DocxDocument,
   FontSpec,
   Hyperlink,
   InlineImageContent,
+  MathBlock,
+  OpaqueDrawing,
   Paragraph,
   ParagraphChild,
   Run,
@@ -156,7 +163,8 @@ function convertBodyContent(
 ): SemanticBlock[] {
   const blocks: SemanticBlock[] = [];
 
-  for (const item of body) {
+  for (let bodyIndex = 0; bodyIndex < body.length; bodyIndex++) {
+    const item = body[bodyIndex];
     switch (item.type) {
       case "paragraph":
         blocks.push(convertParagraph(item, doc, ctx, imageMap));
@@ -230,14 +238,105 @@ function convertBodyContent(
               imageMap
             )
           );
+        } else {
+          // No cached paragraphs (TOC was never updated). Emit a placeholder
+          // so the user-visible flow still acknowledges the TOC; encourage
+          // calling `updateTableOfContents()` before conversion.
+          blocks.push({
+            type: "paragraph",
+            children: [{ type: "text", text: "[Table of Contents]" }]
+          });
+          ctx.addWarning(
+            "info",
+            "toc-not-cached",
+            "Table of contents has no cached paragraphs; output contains a placeholder. Run updateTableOfContents() before conversion to populate."
+          );
         }
         break;
       }
-      default:
-        // Skip remaining block types (math block, charts, altChunks, etc.)
-        // and surface a warning so the caller can investigate gaps.
-        ctx.addWarning("info", "unsupported-block", `Skipped block type: ${item.type}`);
+      case "math": {
+        // Block-level math equation. Always provide a plain-text fallback so
+        // markdown / plain-text consumers have something to emit; attach
+        // MathML when conversion succeeds.
+        const mb = item as MathBlock;
+        const text = extractMathText(mb.content);
+        let mathML: string | undefined;
+        try {
+          mathML = ommlToMathML(mb.content);
+        } catch (err) {
+          ctx.addWarning(
+            "info",
+            "math-mathml-failed",
+            `Failed to convert math block to MathML: ${(err as Error).message}`
+          );
+        }
+        blocks.push({ type: "math", text, mathML });
         break;
+      }
+      case "chart":
+      case "chartEx": {
+        const c = item as ChartContent | ChartExContent;
+        // chartId is meant to be a stable, unique reference handle —
+        // not a human-readable label. Use the body position so two
+        // charts with the same title still get distinct ids; fall
+        // back to the source `name` when present (docx authoring
+        // tools typically set a stable name like "Chart 3"); finally
+        // synthesise from the position.
+        const chartId = c.name ?? `chart-body-${bodyIndex}`;
+        const title = c.type === "chart" ? c.chart?.title : undefined;
+        blocks.push({
+          type: "chart",
+          chartId,
+          title,
+          altText: c.altText
+        });
+        break;
+      }
+      case "checkBox": {
+        const cb = item as CheckBox;
+        blocks.push({ type: "checkBox", checked: cb.checked === true });
+        break;
+      }
+      case "altChunk": {
+        const ac = item as AltChunk;
+        if (!ac.contentType) {
+          // ECMA-376 §17.17.1: the altChunk's content type comes from
+          // the related part's `[Content_Types].xml` override. A
+          // missing `contentType` after parsing means the source
+          // document is malformed (the override isn't there) — surface
+          // a warning so callers don't silently consume the
+          // octet-stream fallback as if it were the real type.
+          ctx.addWarning(
+            "warning",
+            "altchunk-missing-content-type",
+            `altChunk (rId=${ac.rId}) has no contentType; defaulted to application/octet-stream. Source document is missing the <Override ContentType="…"/> entry.`
+          );
+        }
+        blocks.push({
+          type: "embed",
+          contentType: ac.contentType ?? "application/octet-stream",
+          data: ac.data,
+          fileName: ac.fileName
+        });
+        break;
+      }
+      case "opaqueDrawing": {
+        const od = item as OpaqueDrawing;
+        blocks.push({ type: "raw", format: "ooxml-drawing", xml: od.rawXml });
+        break;
+      }
+      default: {
+        // Compile-time exhaustiveness guard: adding a new BodyContent variant
+        // without a corresponding case here is now a build error rather than
+        // a silent runtime drop.
+        const _exhaustive: never = item;
+        ctx.addWarning(
+          "warning",
+          "internal-bug",
+          `Unhandled BodyContent variant: ${(_exhaustive as { type: string }).type}`
+        );
+        break;
+      }
     }
   }
 

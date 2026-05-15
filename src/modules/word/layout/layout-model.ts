@@ -6,6 +6,12 @@
  *
  * The layout engine (`layout.ts`) produces this model from a DocxDocument.
  * Renderers consume it to produce visual output.
+ *
+ * Coverage: every variant of `BodyContent` from `../types` produces a
+ * corresponding `PageContent` variant. The compile-time exhaustiveness
+ * check in `layout-full.ts` enforces this — adding a new BodyContent
+ * type is a build error until a corresponding PageContent variant is
+ * added here and a layout function is wired up.
  */
 
 /** A point in page coordinates (origin: top-left of page content area). */
@@ -24,24 +30,63 @@ export interface LayoutRect {
 
 /** A positioned text run within a line box. */
 export interface PositionedRun {
+  readonly type?: "text"; // optional discriminator (default = text)
   readonly text: string;
   readonly x: number; // x offset from line start
   readonly width: number;
   readonly font: string;
-  readonly fontSize: number; // points
+  readonly fontSize: number; // points (already scaled for sub/superscript)
   readonly bold?: boolean;
   readonly italic?: boolean;
   readonly color?: string; // hex RGB
   readonly underline?: boolean;
   readonly strikethrough?: boolean;
+  /**
+   * Vertical alignment relative to the line's baseline. When
+   * `"superscript"` or `"subscript"`, the run's `fontSize` is already
+   * shrunk (~0.65× of the source size) and renderers must shift the
+   * draw baseline by `±fontSize × 0.33` so the glyphs sit above /
+   * below the surrounding text in the conventional way.
+   */
+  readonly verticalAlign?: "superscript" | "subscript";
 }
+
+/**
+ * A positioned inline image within a line box. Width and height are
+ * already in points (the layout engine converts from EMU). `data` /
+ * `mimeType` come from the document's image registry — a missing rId
+ * yields an empty `data` byte array so renderers can draw a
+ * placeholder without crashing.
+ */
+export interface PositionedInlineImage {
+  readonly type: "image";
+  readonly x: number; // x offset from line start
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array;
+  readonly mimeType: string;
+  readonly altText?: string;
+}
+
+/**
+ * Item within a `LineBox` — either a positioned text run or an
+ * inline image. The latter is rendered alongside text using the same
+ * line's baseline.
+ */
+export type LineBoxItem = PositionedRun | PositionedInlineImage;
 
 /** A line box — a single line of text within a paragraph. */
 export interface LineBox {
   readonly y: number; // y offset from paragraph start
   readonly height: number;
   readonly baseline: number; // distance from top of line to baseline
-  readonly runs: readonly PositionedRun[];
+  /**
+   * Items on the line. For backwards-compatibility the field is still
+   * named `runs`, but its element type now includes inline images.
+   * Renderers that previously assumed every entry was a text run
+   * should narrow on `item.type === "image"` first.
+   */
+  readonly runs: readonly LineBoxItem[];
   readonly alignment: "left" | "center" | "right" | "justify";
 }
 
@@ -83,6 +128,29 @@ export interface LayoutImage {
   readonly data: Uint8Array;
   readonly mimeType: string;
   readonly altText?: string;
+  readonly sourceIndex: number;
+}
+
+/**
+ * How a {@link LayoutFloat} interacts with the surrounding text flow.
+ * Mirrors ECMA-376 `<wp:wrapXxx>` elements without prescribing a
+ * particular implementation: the layout engine consumes `topAndBottom`
+ * to push the in-flow cursor below the float; other styles are
+ * preserved here for downstream renderers (or future per-line
+ * exclusion-zone wrapping) and currently degrade to no wrap on the
+ * built-in body cursor.
+ */
+export interface LayoutFloatWrap {
+  readonly style: "square" | "tight" | "through" | "topAndBottom" | "none";
+  /** Which side(s) text may flow on (square/tight/through only). */
+  readonly side?: "bothSides" | "left" | "right" | "largest";
+  /** Padding around the float in points. */
+  readonly margins?: {
+    readonly top?: number;
+    readonly bottom?: number;
+    readonly left?: number;
+    readonly right?: number;
+  };
 }
 
 /** A positioned floating object on a page. */
@@ -91,10 +159,146 @@ export interface LayoutFloat {
   readonly rect: LayoutRect;
   readonly content: LayoutImage | LayoutParagraph;
   readonly behindText?: boolean;
+  /**
+   * Wrap behaviour declared by the source. Layout consumes
+   * `topAndBottom` to advance the body cursor over the float; other
+   * styles are recorded but the body wrap is not performed (renderers
+   * may implement their own per-line exclusion if required).
+   */
+  readonly wrap?: LayoutFloatWrap;
+  readonly sourceIndex: number;
+}
+
+/** A positioned text-box (frame containing flowed body content). */
+export interface LayoutTextBox {
+  readonly type: "textBox";
+  readonly rect: LayoutRect;
+  /** Inner content already positioned relative to `rect`. */
+  readonly content: readonly PageContent[];
+  readonly border?: { readonly width: number; readonly color: string };
+  readonly background?: string;
+  readonly sourceIndex: number;
+}
+
+/** A positioned drawing shape (rectangle, ellipse, callout, …). */
+export interface LayoutShape {
+  readonly type: "shape";
+  readonly rect: LayoutRect;
+  /** OOXML preset shape type (e.g. "rect", "ellipse", "rightArrow"). */
+  readonly preset: string;
+  readonly fillColor?: string;
+  readonly strokeColor?: string;
+  readonly strokeWidth?: number;
+  /** Optional inner text-content positioned relative to the shape. */
+  readonly textContent?: readonly PageContent[];
+  readonly sourceIndex: number;
+}
+
+/** A positioned chart placeholder. */
+export interface LayoutChart {
+  readonly type: "chart";
+  readonly rect: LayoutRect;
+  /** Chart family — selects the renderer to use. */
+  readonly chartKind: "chart" | "chartEx";
+  /** Optional pre-rendered SVG (eagerly-rendered charts). */
+  readonly svg?: string;
+  /** Title from the source chart, if any. */
+  readonly title?: string;
+  readonly altText?: string;
+  /**
+   * Original `ChartContent` / `ChartExContent` payload from the source
+   * document. Carried so renderers (PDF, custom) can hand the rich data
+   * to plug-in chart renderers without re-walking the docx body.
+   *
+   * Typed as `unknown` here to keep `layout-model` free of optional
+   * `import type { ChartContent }` cycles; consumers narrow as needed.
+   */
+  readonly source?: unknown;
+  readonly sourceIndex: number;
+}
+
+/** A positioned structured-document-tag (transparent flow container). */
+export interface LayoutSdt {
+  readonly type: "sdt";
+  readonly rect: LayoutRect;
+  readonly content: readonly PageContent[];
+  readonly tag?: string;
+  readonly alias?: string;
+  readonly sourceIndex: number;
+}
+
+/** A positioned math block. */
+export interface LayoutMath {
+  readonly type: "math";
+  readonly rect: LayoutRect;
+  /** Plain-text fallback — always present. */
+  readonly text: string;
+  /** MathML rendering — present when conversion succeeded. */
+  readonly mathML?: string;
+  readonly sourceIndex: number;
+}
+
+/** A positioned check-box glyph. */
+export interface LayoutCheckBox {
+  readonly type: "checkBox";
+  readonly rect: LayoutRect;
+  readonly checked: boolean;
+  /** Glyph used for the box (Unicode fallback when font is unavailable). */
+  readonly glyph: string;
+  readonly fontSize: number;
+  readonly sourceIndex: number;
+}
+
+/** A positioned table-of-contents stub. */
+export interface LayoutTableOfContents {
+  readonly type: "tableOfContents";
+  readonly rect: LayoutRect;
+  /** Cached entries when the source document has them; empty otherwise. */
+  readonly entries: readonly LayoutParagraph[];
+  readonly sourceIndex: number;
+}
+
+/**
+ * Embedded foreign content (`<w:altChunk>`). Layout cannot interpret HTML
+ * / RTF / etc.; consumers either render the foreign payload themselves
+ * (HTML inside an `<svg:foreignObject>`, for instance) or fall back to
+ * a placeholder.
+ */
+export interface LayoutAltChunk {
+  readonly type: "altChunk";
+  readonly rect: LayoutRect;
+  readonly contentType: string;
+  readonly fileName?: string;
+  readonly sourceIndex: number;
+}
+
+/**
+ * Opaque drawing markup that the document model could not normalise.
+ * Carried verbatim so high-fidelity renderers (e.g. an OOXML→OOXML
+ * pipeline) can preserve the source markup.
+ */
+export interface LayoutOpaqueDrawing {
+  readonly type: "opaqueDrawing";
+  readonly rect: LayoutRect;
+  readonly rawXml: string;
+  readonly sourceIndex: number;
 }
 
 /** Content that appears on a single page. */
-export type PageContent = LayoutParagraph | LayoutTable | LayoutImage | LayoutFloat;
+export type PageContent =
+  | LayoutParagraph
+  | LayoutTable
+  | LayoutImage
+  | LayoutFloat
+  | LayoutTextBox
+  | LayoutShape
+  | LayoutChart
+  | LayoutSdt
+  | LayoutMath
+  | LayoutCheckBox
+  | LayoutTableOfContents
+  | LayoutAltChunk
+  | LayoutOpaqueDrawing;
 
 /** Page geometry (margins, dimensions). */
 export interface PageGeometry {
@@ -114,9 +318,42 @@ export interface LayoutPage {
   readonly pageNumber: number;
   readonly geometry: PageGeometry;
   readonly content: readonly PageContent[];
-  readonly header?: readonly LayoutParagraph[];
-  readonly footer?: readonly LayoutParagraph[];
+  /**
+   * Header band content: paragraphs and (uncommonly) tables, laid out
+   * with y starting at the section's `pgMar.header` distance from the
+   * page top, x measured from `marginLeft`. Renderers translate the
+   * band into page coordinates by treating layout-y as relative to
+   * the page top (not the content area). `LayoutTable.cells` carry
+   * absolute x relative to the band's origin.
+   */
+  readonly header?: readonly (LayoutParagraph | LayoutTable)[];
+  /** Footer band content; symmetric to `header`. */
+  readonly footer?: readonly (LayoutParagraph | LayoutTable)[];
   readonly footnoteArea?: readonly LayoutParagraph[];
+  /**
+   * Visual separator drawn between body and footnote area
+   * (ECMA-376 §17.11.10).
+   *
+   * - `kind: "separator"` — drawn on pages that introduce their own
+   *   newly-referenced footnotes; per Microsoft Word convention this
+   *   is a short horizontal rule taking ~⅓ of the content width.
+   * - `kind: "continuationSeparator"` — drawn on pages whose
+   *   footnote area only carries notes deferred from a previous page;
+   *   the rule spans the full content width to signal continuation.
+   *
+   * `y` is in page-absolute coordinates (same convention as
+   * `footnoteArea[i].rect.y`) and points at the line's vertical
+   * position. Renderers stroke a 0.5pt black line at this y;
+   * the rule's left edge is `geometry.marginLeft` and its width is
+   * `kind === "separator" ? geometry.contentWidth / 3 :
+   * geometry.contentWidth`.
+   *
+   * Absent on pages with no footnote content.
+   */
+  readonly footnoteSeparator?: {
+    readonly y: number;
+    readonly kind: "separator" | "continuationSeparator";
+  };
 }
 
 /** The complete layout result — a document broken into positioned pages. */

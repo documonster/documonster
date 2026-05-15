@@ -10,24 +10,31 @@
  * - `StreamBuf` — event-driven pipe from XML to ZIP
  * - `StringBuf` — efficient XML string builder with buffer reuse
  *
- * Data flow:
+ * Data flow with sink (true end-to-end streaming):
  * ```
- * add(paragraph) → XML serialization → StreamBuf → ZipDeflate → Zip → _outputChunks
+ * add(paragraph) → XML → StreamBuf → ZipDeflate → Zip
+ *                                                     ↓ (per-chunk callback)
+ *                                            await SinkAdapter.write(chunk)
+ *                                                     ↓
+ *                                           user-supplied WritableStream /
+ *                                           Node Writable / duck-typed sink
  * ```
  *
- * Memory profile, honestly stated:
- *   The body model itself is NOT retained — each element is serialized and
- *   compressed as it arrives, so the peak per-element XML/compression state
- *   is O(largest_single_element). HOWEVER, the compressed ZIP output bytes
- *   are accumulated in `_outputChunks` and only assembled in `finalize()`,
- *   which means total memory is still O(compressed_docx_size). This class
- *   does NOT yet expose an end-to-end sink (WritableStream / AsyncIterable)
- *   to the caller — callers receive the assembled `Uint8Array` from
- *   `finalize()`. Treat this writer as "streaming on the input side, buffered
- *   on the output side". Adding a true output sink is tracked separately.
+ * Memory profile:
+ *   - Body model is never retained: each element is serialised and
+ *     compressed as it arrives, so peak per-element memory is
+ *     O(largest_single_element).
+ *   - When `options.sink` is provided, compressed bytes are pushed
+ *     into the sink as soon as they are produced (with backpressure
+ *     awaited via {@link SinkAdapter}). Total writer-side memory then
+ *     stays O(largest_part) regardless of final DOCX size.
+ *   - When `options.sink` is omitted, compressed bytes accumulate in
+ *     `_outputChunks` and `finalize()` returns the assembled
+ *     `Uint8Array`. Total memory is O(compressed_docx_size).
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
+import { SinkAdapter, type AnySink } from "@stream/internal/sink-adapter";
 import { xmlEncodeAttr } from "@xml/encode";
 import { XmlWriter } from "@xml/writer";
 
@@ -183,6 +190,32 @@ export interface StreamingDocxOptions {
    * with the buffered `packageDocx` writer.
    */
   readonly securityPolicy?: WordSecurityPolicy;
+
+  /**
+   * Output sink. When provided, compressed bytes flow through it as soon
+   * as the underlying ZIP pipeline produces them, with backpressure
+   * awaited via {@link SinkAdapter}. Total writer-side memory then
+   * stays O(largest_part) regardless of final DOCX size.
+   *
+   * Accepts:
+   *  - Web `WritableStream<Uint8Array>` (browser, Deno, modern Node)
+   *  - Node `Writable` (`fs.createWriteStream`, http response, …)
+   *  - Any duck-typed object exposing `write(chunk)` + `end()` plus
+   *    `once("drain"|"error"|"close"|"finish", …)` listeners
+   *
+   * When the sink is provided, {@link StreamingDocxWriter.finalize}
+   * resolves to a zero-length `Uint8Array` (the bytes have already
+   * been delivered to the sink — the empty return is a sentinel that
+   * keeps `finalize`'s return type stable across both modes). Use
+   * {@link StreamingDocxWriter.addAsync} (instead of
+   * {@link StreamingDocxWriter.add}) when you want each `add` call to
+   * await actual sink drain — that gives true end-to-end backpressure
+   * for tight production loops.
+   *
+   * When omitted, behaviour is unchanged: compressed bytes accumulate
+   * internally and `finalize()` returns the assembled `Uint8Array`.
+   */
+  readonly sink?: AnySink;
 }
 
 /** Progress callback for streaming writer. */
@@ -202,11 +235,18 @@ export type StreamingProgressCallback = (info: {
  * into the ZIP pipeline as they arrive, so the body **model** is not retained
  * after each `add()`.
  *
- * Note on memory: the compressed ZIP output is currently accumulated into an
- * internal byte chunk list and assembled into a single `Uint8Array` at
- * `finalize()` time, so peak memory is bounded by the compressed DOCX size,
- * not the input model size. End-to-end output streaming (WritableStream /
- * AsyncIterable sink) is not implemented yet.
+ * When constructed with `options.sink`, compressed bytes are pushed into
+ * the sink as soon as the ZIP layer produces them, with backpressure
+ * awaited via {@link SinkAdapter}; in this mode peak memory is
+ * O(largest_part) and `finalize()` resolves to a zero-length
+ * `Uint8Array` (the bytes are already in the sink). Without a sink,
+ * compressed bytes accumulate in `_outputChunks` and `finalize()`
+ * returns the assembled `Uint8Array` (peak memory
+ * O(compressed_docx_size)).
+ *
+ * Use {@link addAsync} (instead of {@link add}) when driving the sink
+ * variant to obtain true end-to-end backpressure: each call awaits all
+ * pending sink writes before resolving.
  */
 export class StreamingDocxWriter {
   private readonly _options: StreamingDocxOptions;
@@ -219,7 +259,16 @@ export class StreamingDocxWriter {
 
   // ZIP infrastructure
   private _zip!: InstanceType<typeof Zip>;
+  /** Compressed-byte accumulator used when no `sink` is supplied. */
   private _outputChunks: Uint8Array[] = [];
+  /** Sink-mode adapter (set when `options.sink` is provided). */
+  private _sinkAdapter?: SinkAdapter;
+  /**
+   * Promise chain serialising every sink write. The `Zip` callback fires
+   * synchronously, so we queue chunks via `.then(...)` and let
+   * `addAsync` / `finalize` await the chain.
+   */
+  private _pendingDrain: Promise<void> = Promise.resolve();
   private _documentStream!: StreamBuf;
   private _documentZipFile!: InstanceType<typeof ZipDeflate>;
   private _headerWritten = false;
@@ -302,6 +351,19 @@ export class StreamingDocxWriter {
       throw new DocxWriteError("StreamingDocxWriter: cannot add elements after finalize()");
     }
 
+    // Sink-mode early failure: if a previous chunk already failed to
+    // reach the sink, surface that immediately rather than letting the
+    // caller keep streaming work that will be discarded. Buffered mode
+    // keeps the legacy behaviour of deferring all error reporting to
+    // `finalize()` because there is no live consumer that could be
+    // disrupted by silent queueing.
+    if (this._sinkAdapter && this._streamError) {
+      throw new DocxWriteError(
+        `StreamingDocxWriter: sink already failed (${this._streamError.message})`,
+        { cause: this._streamError }
+      );
+    }
+
     // Write document.xml header on first element
     if (!this._headerWritten) {
       this._writeDocumentHeader();
@@ -342,6 +404,43 @@ export class StreamingDocxWriter {
     return this;
   }
 
+  /**
+   * Async variant of {@link add}. After serialising the element, awaits
+   * any pending writes to the configured `sink` so callers driving large
+   * input get true end-to-end backpressure rather than letting the
+   * sink-write queue grow unbounded inside the writer.
+   *
+   * Without `options.sink` this is equivalent to `add` (resolving
+   * synchronously after element serialisation).
+   *
+   * Throws if the sink reports an error: previous queued writes whose
+   * rejection was captured into `_streamError` surface here.
+   */
+  async addAsync(element: BodyContent): Promise<this> {
+    this.add(element);
+    if (this._sinkAdapter) {
+      await this._pendingDrain;
+      if (this._streamError) {
+        throw new DocxWriteError(
+          `StreamingDocxWriter: sink write failed (${this._streamError.message})`,
+          { cause: this._streamError }
+        );
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Async variant of {@link addMany}. Awaits `addAsync` for each element
+   * so backpressure is honoured between every body element.
+   */
+  async addManyAsync(elements: readonly BodyContent[]): Promise<this> {
+    for (const el of elements) {
+      await this.addAsync(el);
+    }
+    return this;
+  }
+
   /** Add a paragraph with simple text content. */
   addText(content: string, properties?: Paragraph["properties"]): this {
     return this.add({
@@ -357,9 +456,15 @@ export class StreamingDocxWriter {
   }
 
   /**
-   * Finalize the document and return the DOCX bytes.
-   * Writes the document.xml footer, then adds all auxiliary parts
-   * (styles, numbering, headers, footers, etc.) and closes the ZIP.
+   * Finalize the document.
+   *
+   * - Without `options.sink`: returns the assembled `Uint8Array`
+   *   containing the full DOCX file.
+   * - With `options.sink`: drains any pending sink writes, calls
+   *   `sink.end()`, and resolves to a zero-length `Uint8Array`. The
+   *   DOCX bytes have already been delivered to the sink — the empty
+   *   return is a sentinel signalling "writer is done; consumer keeps
+   *   the data".
    */
   async finalize(): Promise<Uint8Array> {
     if (this._finalized) {
@@ -395,6 +500,12 @@ export class StreamingDocxWriter {
     // central-directory write are reported via the `Zip` callback into
     // `_streamError`; surface them as a rejection.
     this._zip.end();
+
+    // In sink mode the Zip callback queued every chunk onto _pendingDrain;
+    // wait for that promise chain to complete before declaring the writer
+    // finished. In buffered mode this is a no-op (resolved promise).
+    await this._pendingDrain;
+
     if (this._streamError) {
       throw new DocxWriteError(
         `StreamingDocxWriter: ZIP finalization failed (${this._streamError.message})`,
@@ -402,12 +513,32 @@ export class StreamingDocxWriter {
       );
     }
 
-    // Assemble output
+    if (this._sinkAdapter) {
+      // Close the sink so the consumer knows the byte stream is complete.
+      // Errors raised during close (e.g. underlying file system) propagate.
+      await this._sinkAdapter.end();
+      return EMPTY_U8;
+    }
+
+    // Buffered mode: assemble and return the DOCX bytes.
     return this._assembleOutput();
   }
 
   /** Reset the writer for reuse. */
+  /**
+   * Reset the writer for reuse.
+   *
+   * Throws when the writer was constructed with an `options.sink`: a
+   * sink can only be `end()`ed once, so reusing the same writer would
+   * produce an undefined byte stream. Construct a new writer (with a
+   * new sink) for each document instead.
+   */
   reset(): this {
+    if (this._sinkAdapter) {
+      throw new DocxWriteError(
+        "StreamingDocxWriter: reset() is not supported in sink mode; create a new writer instance per document."
+      );
+    }
     this._elementCount = 0;
     this._finalized = false;
     this._headerWritten = false;
@@ -435,6 +566,10 @@ export class StreamingDocxWriter {
   private _initZip(): void {
     this._outputChunks = [];
     this._streamError = null;
+    this._pendingDrain = Promise.resolve();
+    if (this._options.sink && !this._sinkAdapter) {
+      this._sinkAdapter = new SinkAdapter(this._options.sink);
+    }
     this._documentRels = createRelationships();
     this._renderCtx = createRenderContext({
       securityPolicy: this._options.securityPolicy,
@@ -452,7 +587,28 @@ export class StreamingDocxWriter {
         this._documentStream?.emit("error", err);
       }
       if (data && data.length > 0) {
-        this._outputChunks.push(data);
+        if (this._sinkAdapter) {
+          // The Zip callback runs synchronously and cannot await, so we
+          // chain each sink write onto a single drain promise. Producers
+          // either:
+          //   (a) call `addAsync()` / `finalize()` which await the chain,
+          //   (b) ignore backpressure and let chunks queue in memory until
+          //       the next await point, capped by the sink's own queueing.
+          // First-error capture: a rejected write is collapsed into
+          // `_streamError` so subsequent writes are skipped quickly.
+          this._pendingDrain = this._pendingDrain.then(() => {
+            if (this._streamError) {
+              return;
+            }
+            return this._sinkAdapter!.write(data).catch((e: unknown) => {
+              if (!this._streamError) {
+                this._streamError = e instanceof Error ? e : new Error(String(e));
+              }
+            });
+          });
+        } else {
+          this._outputChunks.push(data);
+        }
       }
     });
 

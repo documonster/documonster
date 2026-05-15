@@ -28,6 +28,7 @@ import type {
   ChartTrendline,
   ChartTrendlineType,
   ChartType,
+  Emu,
   OpaqueDrawing
 } from "../types";
 import {
@@ -40,6 +41,39 @@ import {
 // Chart Reader
 // =============================================================================
 
+/**
+ * Recover the `<wp:extent cx="…" cy="…"/>` dimensions from the raw
+ * `<w:drawing>` markup that was preserved on `OpaqueDrawing`. The
+ * reader serialises the parent `wp:anchor` / `wp:inline` element when
+ * it doesn't recognise the inner content; chart parts re-parse it
+ * here so the size makes it onto the upgraded `ChartContent`.
+ *
+ * Returns `undefined` when no `<wp:extent>` element is present (the
+ * drawing might be malformed) or when its dimensions are zero —
+ * downstream callers then fall back to default sizing.
+ *
+ * Attribute order is unspecified in ECMA-376 / XML, so we extract
+ * `cx` and `cy` independently.
+ */
+function extractDrawingExtent(rawXml: string): { width: Emu; height: Emu } | undefined {
+  const extentMatch = /<wp:extent\b([^>]*)>/.exec(rawXml);
+  if (!extentMatch) {
+    return undefined;
+  }
+  const attrs = extentMatch[1];
+  const cxMatch = /\bcx="(\d+)"/.exec(attrs);
+  const cyMatch = /\bcy="(\d+)"/.exec(attrs);
+  if (!cxMatch || !cyMatch) {
+    return undefined;
+  }
+  const cx = parseInt(cxMatch[1], 10);
+  const cy = parseInt(cyMatch[1], 10);
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || cx <= 0 || cy <= 0) {
+    return undefined;
+  }
+  return { width: cx, height: cy };
+}
+
 /** Replace OpaqueDrawing items referencing chart rIds with ChartContent. */
 function replaceOpaqueCharts(body: BodyContent[], chartRIdToChart: Map<string, Chart>): void {
   for (let i = 0; i < body.length; i++) {
@@ -48,7 +82,18 @@ function replaceOpaqueCharts(body: BodyContent[], chartRIdToChart: Map<string, C
       const chartRId = findChartRIdInDrawing(item, chartRIdToChart);
       if (chartRId) {
         const chart = chartRIdToChart.get(chartRId)!;
-        body[i] = { type: "chart", chart } as ChartContent;
+        // Recover the drawing extent so the chart is sized correctly
+        // when laid out / rendered. The chart-writer reads
+        // `chart.width` / `chart.height` to emit `<wp:extent>` so we
+        // close the loop by writing them back into the same fields.
+        // Don't clobber values the chart parser may have already
+        // deduced from the inner `c:chart` payload.
+        const extent = extractDrawingExtent(item.rawXml);
+        const enrichedChart =
+          extent && chart.width == null && chart.height == null
+            ? { ...chart, width: extent.width, height: extent.height }
+            : chart;
+        body[i] = { type: "chart", chart: enrichedChart } as ChartContent;
       }
     }
   }
