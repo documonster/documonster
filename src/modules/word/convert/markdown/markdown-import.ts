@@ -89,9 +89,22 @@ export function markdownToDocx(markdown: string, options?: MarkdownImportOptions
 /**
  * Convert a Markdown string into an array of DOCX body content blocks.
  *
+ * **Caveat — body content is not self-contained.**
+ *   - **Lists** (bullet / numbered / task) reference numbering ids that
+ *     live in document-level `abstractNumberings` + `numberingInstances`,
+ *     which this helper does NOT return.
+ *   - **Block quotes** reference the named `Quote` style.
+ *   - **Code blocks** reference the named code styles.
+ *
+ * Splicing markdown that uses any of these constructs into a document that
+ * lacks the matching numbering / styles yields invalid OOXML. Either keep
+ * the input flat (paragraphs + headings + inline formatting) before
+ * splicing, or use the higher-level {@link markdownToDocx} which returns a
+ * complete `DocxDocument` with the supporting definitions populated.
+ *
  * @param markdown - The GFM Markdown string.
  * @param options - Optional conversion settings.
- * @returns Array of BodyContent blocks.
+ * @returns Array of BodyContent blocks (no numbering / styles attached).
  */
 export function markdownToDocxBody(
   markdown: string,

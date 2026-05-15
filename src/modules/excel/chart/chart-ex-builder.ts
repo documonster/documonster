@@ -850,8 +850,13 @@ function validateChartExOptions(opts: AddChartExOptions): void {
     validateBinning(binning);
   }
   opts.series.forEach((series, i) => {
-    if (!series.values) {
-      throw new ChartOptionsError(`chartEx.series[${i}].values is required.`);
+    // A series must reference its data either via a worksheet formula
+    // (`values`) or via cached literal values (`literalValues`). Headless
+    // chart pipelines (e.g. the Word `buildWordChartExXml` bridge) ship
+    // only `literalValues` because there is no underlying worksheet to
+    // reference.
+    if (!series.values && !series.literalValues?.length) {
+      throw new ChartOptionsError(`chartEx.series[${i}].values or literalValues is required.`);
     }
     if (series.literalValues?.some(value => !Number.isFinite(value))) {
       throw new ChartOptionsError(

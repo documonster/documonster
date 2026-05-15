@@ -31,7 +31,14 @@ import {
   patchDocument,
   validateDocument,
   isDocxError,
+  DocxError,
+  DocxParseError,
+  DocxWriteError,
+  DocxMissingPartError,
+  DocxInvalidStructureError,
+  DocxUnsupportedFeatureError,
   DocxEncryptedError,
+  DocxLimitExceededError,
   encryptDocx
 } from "../index";
 import type { Table } from "../index";
@@ -251,4 +258,54 @@ fs.mkdirSync(outDir, { recursive: true });
   const buf = await toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "many-bookmarks.docx"), buf);
   console.log(`  many-bookmarks.docx: ${buf.length} bytes (1 000 bookmarks)`);
+}
+
+// ---------------------------------------------------------------------------
+// 11. Error class taxonomy — demonstrate the full DocxError hierarchy.
+//
+// Hierarchy (each class extends the one to its left):
+//   DocxError
+//   ├── DocxParseError
+//   │   ├── DocxMissingPartError
+//   │   ├── DocxInvalidStructureError
+//   │   └── DocxLimitExceededError
+//   ├── DocxWriteError
+//   ├── DocxUnsupportedFeatureError
+//   └── DocxEncryptedError  (+ DocxDecryptionError)
+//
+// Application code should catch the most specific class it can act on, and
+// fall back to `isDocxError(err)` for unknown DOCX failures. All classes
+// preserve the standard `cause` chain.
+// ---------------------------------------------------------------------------
+{
+  const cases: { name: string; err: DocxError }[] = [
+    { name: "DocxError", err: new DocxError("base error") },
+    { name: "DocxParseError", err: new DocxParseError("malformed XML in document.xml") },
+    { name: "DocxWriteError", err: new DocxWriteError("failed to write docProps") },
+    { name: "DocxMissingPartError", err: new DocxMissingPartError("word/document.xml") },
+    {
+      name: "DocxInvalidStructureError",
+      err: new DocxInvalidStructureError("<w:body> has no children")
+    },
+    {
+      name: "DocxUnsupportedFeatureError",
+      err: new DocxUnsupportedFeatureError("vendor extension foo:Bar")
+    },
+    { name: "DocxEncryptedError", err: new DocxEncryptedError() },
+    { name: "DocxLimitExceededError", err: new DocxLimitExceededError("packageSize", 100, 200) }
+  ];
+  for (const { name, err } of cases) {
+    const isParse = err instanceof DocxParseError;
+    const isWrite = err instanceof DocxWriteError;
+    const isAny = isDocxError(err);
+    console.log(
+      `  ${name.padEnd(28)} parse=${isParse ? "Y" : "n"} write=${isWrite ? "Y" : "n"} docx=${isAny ? "Y" : "n"} :: ${err.message.slice(0, 50)}`
+    );
+  }
+  // Show that limit-exceeded carries structured fields downstream callers
+  // can branch on without parsing the message.
+  const limit = new DocxLimitExceededError("partCount", 1000, 1500);
+  console.log(
+    `  DocxLimitExceededError fields: limit=${limit.limit} max=${limit.maximum} actual=${limit.actual}`
+  );
 }

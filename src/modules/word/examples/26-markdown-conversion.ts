@@ -22,7 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Document, toBuffer, readDocx, cmToEmu } from "../index";
-import { markdownToDocx, renderToMarkdown } from "../markdown";
+import { markdownToDocx, markdownToDocxBody, renderToMarkdown } from "../markdown";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -176,4 +176,46 @@ console.log(`  → 26-md-setext.md`);
   const md2 = renderToMarkdown(Document.build(d));
   fs.writeFileSync(path.join(outDir, "26-md-from-docx.md"), md2);
   console.log(`  → 26-md-from-docx.md`);
+}
+
+// ---------------------------------------------------------------------------
+// 5. markdownToDocxBody — same parser, returns BodyContent[] only.
+//    Useful when you want to splice Markdown content into an existing
+//    DOCX you've already built (templates, headers/footers, etc.) rather
+//    than producing a stand-alone document.
+//
+//    Caveat: lists, blockquotes and code blocks in DOCX rely on
+//    document-level numbering AND named styles (Quote, code styles, etc.)
+//    that this function does NOT return. Splicing such markdown into a
+//    document that lacks the matching styles / numbering yields invalid
+//    OOXML. Either keep the input simple (paragraphs + headings + inline
+//    formatting) — as below — or import the same definitions from
+//    `markdownToDocx`'s output before splicing.
+// ---------------------------------------------------------------------------
+{
+  const fragmentMd = [
+    "## Imported fragment",
+    "",
+    "First paragraph with **bold** and *italic* text.",
+    "",
+    "Second paragraph with [a link](https://example.com) inline.",
+    "",
+    "### Sub-heading",
+    "",
+    "Final paragraph — end of fragment."
+  ].join("\n");
+  const body = markdownToDocxBody(fragmentMd);
+
+  const host = Document.create();
+  Document.useDefaultStyles(host);
+  Document.addHeading(host, "Host document", 1);
+  Document.addParagraph(host, "Below is content spliced in from Markdown:");
+  for (const item of body) {
+    Document.addContent(host, item);
+  }
+  Document.addParagraph(host, "(End of imported fragment.)");
+  const buf3 = await toBuffer(Document.build(host));
+  fs.writeFileSync(path.join(outDir, "26-md-fragment-spliced.docx"), buf3);
+  console.log(`  markdownToDocxBody → ${body.length} body items spliced into host doc`);
+  console.log(`  → 26-md-fragment-spliced.docx`);
 }

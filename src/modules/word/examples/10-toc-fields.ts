@@ -46,6 +46,7 @@ import {
   quoteField,
   includeTextField,
   includePictureField,
+  tocField,
   toBuffer
 } from "../index";
 
@@ -85,6 +86,25 @@ Document.addTableOfContents(doc, {
     textParagraph("4. Computed fields\t4")
   ]
 });
+Document.addParagraphElement(doc, paragraph([pageBreak()]));
+
+// ---------------------------------------------------------------------------
+// 1b. tocField() run-helper — same TOC field, but as a Run inside a paragraph
+//     instead of a top-level helper. Useful when embedding a TOC field
+//     mid-paragraph (e.g. inside a SDT) or composing custom TOC layouts.
+// ---------------------------------------------------------------------------
+Document.addParagraphElement(
+  doc,
+  paragraph([
+    bold("Inline TOC field: "),
+    tocField({
+      headingLevels: "1-2",
+      hyperlink: true,
+      tabLeader: ".",
+      cachedValue: "(updates on field refresh)"
+    })
+  ])
+);
 Document.addParagraphElement(doc, paragraph([pageBreak()]));
 
 // ---------------------------------------------------------------------------

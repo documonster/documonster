@@ -24,7 +24,9 @@ import {
   writeCfb,
   parseEncryptionInfoXml,
   AGILE_BLOCK_KEYS,
-  verifyPassword
+  verifyPassword,
+  decryptPackage,
+  deriveEncryptionKey
 } from "../crypto";
 import type { CfbEntry } from "../crypto";
 import { Document, toBuffer, encryptDocx } from "../index";
@@ -118,6 +120,35 @@ if (infoEntry) {
 
   const wrong = await verifyPassword("wrong-pw", info);
   log(`  verifyPassword("wrong-pw"):    ${wrong}`);
+
+  // 5. deriveEncryptionKey — the per-block key derivation that powers
+  //    verifyPassword and decryptPackage. Useful when implementing custom
+  //    encryption workflows (e.g. re-keying without re-encrypting the
+  //    package data, or interoperating with non-OOXML CFB containers).
+  //    Each entry in AGILE_BLOCK_KEYS gives a different key for a different
+  //    purpose: encryptedKey, dataIntegrity, verifierHashInput, verifierHashValue.
+  const dataIntegrityKey = await deriveEncryptionKey(
+    password,
+    info,
+    AGILE_BLOCK_KEYS.dataIntegrityKey
+  );
+  log(
+    `  deriveEncryptionKey(dataIntegrityKey) → ${dataIntegrityKey.length} bytes (keyBits=${info.keyBits})`
+  );
+
+  // 6. decryptPackage — the lowest-level decryption primitive, taking the
+  //    raw EncryptedPackage stream + the parsed info + the password and
+  //    returning the decrypted ZIP bytes. `decryptDocx()` is a thin wrapper
+  //    around this; using it directly is useful when the encrypted bytes
+  //    arrive separately from the EncryptionInfo (e.g. from a streaming
+  //    source) or when integrating with a non-OOXML container.
+  const encryptedPackage = encryptedEntries.find(e => e.name === "EncryptedPackage");
+  if (encryptedPackage) {
+    const decrypted = await decryptPackage(encryptedPackage.data, info, password);
+    log(
+      `  decryptPackage → ${decrypted.length} bytes (matches plain=${decrypted.length === plain.length})`
+    );
+  }
 } else {
   log(`  WARN: EncryptionInfo stream not found`);
 }

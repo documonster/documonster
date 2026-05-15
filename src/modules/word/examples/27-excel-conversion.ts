@@ -17,8 +17,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Workbook } from "../../../index";
-import { excelToDocx, extractTablesToExcel } from "../excel";
+import {
+  excelToDocx,
+  extractTablesToExcel,
+  buildWordChartExXml,
+  generateChartEmbeddedXlsx,
+  renderWordChartSvg,
+  wordChartToChartModel
+} from "../excel";
 import { Document, toBuffer, readDocx } from "../index";
+import type { Chart } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -147,3 +155,84 @@ for (const tbl of tables) {
 }
 await wb2.xlsx.writeFile(path.join(outDir, "05-extracted.xlsx"));
 console.log(`  → 05-extracted.xlsx`);
+
+// ---------------------------------------------------------------------------
+// 6. Low-level chart bridge helpers — used internally by the writer when a
+//    Chart appears in a Word document. They are exposed as public API so
+//    callers can pre-build chart XML / SVG / embedded xlsx workbooks
+//    independently of the document writer (e.g. when generating standalone
+//    chart parts for templates or for off-line rendering).
+// ---------------------------------------------------------------------------
+{
+  // 6a. wordChartToChartModel — convert a Word `Chart` definition into the
+  //     internal ChartModel used by the Excel chart renderer. Useful when
+  //     you want to reuse Excel's chart rendering pipeline against a
+  //     Word-defined chart (e.g. for headless preview generation, or for
+  //     pre-computing geometry). The returned object's shape mirrors
+  //     `excelts/excel`'s ChartModel — opaque here but introspectable
+  //     by anyone who wants to drill in via the Excel module.
+  const sampleChart: Chart = {
+    type: "column",
+    title: "Quarterly revenue",
+    series: [
+      {
+        name: "FY-25",
+        categories: ["Q1", "Q2", "Q3", "Q4"],
+        values: [1.2, 1.5, 1.8, 2.1]
+      }
+    ],
+    legend: "r"
+  };
+  const model = wordChartToChartModel(sampleChart);
+  // Top-level reachable fields of the ChartModel (the rich data lives on
+  // model.chart.plotArea / model.chart.legend / model.chart.title).
+  console.log(
+    `  wordChartToChartModel → has chart=${"chart" in model ? "Y" : "n"}, plotArea=${"plotArea" in model.chart ? "Y" : "n"}, title=${model.chart.title ? "Y" : "n"}`
+  );
+
+  // 6b. renderWordChartSvg — render the same chart to an SVG string. Useful
+  //     for embedding charts into HTML exports or for generating preview
+  //     thumbnails. The function returns a self-contained SVG document.
+  const svg = renderWordChartSvg(sampleChart);
+  fs.writeFileSync(path.join(outDir, "06-chart-preview.svg"), svg);
+  console.log(`  → 06-chart-preview.svg (${svg.length} chars)`);
+
+  // 6c. generateChartEmbeddedXlsx — generate the embedded xlsx workbook that
+  //     Word stores alongside a chart so the user can edit chart data in
+  //     Excel. The workbook contains a single Sheet1 with categories in
+  //     column A and series values in columns B+.
+  const embeddedXlsx = await generateChartEmbeddedXlsx([
+    {
+      name: "FY-25",
+      categories: ["Q1", "Q2", "Q3", "Q4"],
+      values: [1.2, 1.5, 1.8, 2.1]
+    },
+    {
+      name: "FY-26 forecast",
+      categories: ["Q1", "Q2", "Q3", "Q4"],
+      values: [1.4, 1.7, 2.1, 2.4]
+    }
+  ]);
+  fs.writeFileSync(path.join(outDir, "06-chart-data.xlsx"), embeddedXlsx);
+  console.log(`  → 06-chart-data.xlsx (${embeddedXlsx.length} bytes)`);
+
+  // 6d. buildWordChartExXml — render a ChartEx (cx: namespace, Office 2016+)
+  //     chart to its full XML representation. ChartEx covers chart types
+  //     classic OOXML can't express (sunburst, treemap, waterfall, funnel,
+  //     histogram, pareto, boxWhisker, regionMap).
+  const chartExXml = buildWordChartExXml({
+    type: "sunburst",
+    title: "Population by region",
+    showLegend: true,
+    legendPosition: "r",
+    series: [
+      {
+        name: "Population",
+        categories: ["Asia/China", "Asia/India", "Europe/Germany", "Europe/France"],
+        values: [1400, 1300, 84, 67]
+      }
+    ]
+  });
+  fs.writeFileSync(path.join(outDir, "06-chartex.xml"), chartExXml);
+  console.log(`  → 06-chartex.xml (${chartExXml.length} chars)`);
+}

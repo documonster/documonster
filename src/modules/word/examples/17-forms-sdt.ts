@@ -35,6 +35,7 @@ import {
   formCheckboxField,
   formDropdownField,
   structuredDocumentTag,
+  checkBox,
   extractFormFields,
   fillFormFields,
   resolveDataBindings,
@@ -196,6 +197,22 @@ fs.mkdirSync(outDir, { recursive: true });
       tag: "received",
       alias: "Received",
       checkbox: { checked: false }
+    })
+  );
+
+  // Body-level CheckBox via the standalone checkBox() builder. This emits a
+  // bare <w14:checkbox> at body level (not wrapped in an SDT) — useful for
+  // very simple, non-bound check states such as inline lists. Defaults to
+  // ☒/☐ glyphs from MS Gothic; pass custom glyphs via {checkedState,
+  // uncheckedState} for ✓/✗ or any other character.
+  Document.addContent(doc, checkBox({ checked: true }));
+  Document.addContent(doc, checkBox({ checked: false }));
+  Document.addContent(
+    doc,
+    checkBox({
+      checked: true,
+      checkedState: { value: "✓", font: "Arial" },
+      uncheckedState: { value: "✗", font: "Arial" }
     })
   );
 

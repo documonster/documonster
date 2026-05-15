@@ -603,6 +603,38 @@ describe("ChartEx modern chart types", () => {
     const ws2 = wb2.getWorksheet("Sheet1")!;
     expect(ws2.getCharts()).toHaveLength(8);
   });
+
+  // -------------------------------------------------------------------------
+  // Regression: a headless ChartEx series may carry only `literalValues` and
+  // skip the worksheet `values` formula. This is the contract used by Word's
+  // `buildWordChartExXml` bridge — there is no underlying worksheet to point
+  // at, so values are inlined as cached literals. Earlier the validator
+  // required `values` unconditionally, breaking every Word ChartEx render.
+  // -------------------------------------------------------------------------
+  it("buildChartExModel accepts headless series with only literalValues", () => {
+    const m = buildChartExModel({
+      type: "sunburst",
+      title: "headless",
+      series: [
+        {
+          name: "Data",
+          values: "", // no worksheet reference
+          literalCategories: ["A", "B", "C"],
+          literalValues: [1, 2, 3]
+        }
+      ]
+    });
+    expect(m.chartSpace.chart.plotArea.plotAreaRegion?.series).toHaveLength(1);
+  });
+
+  it("buildChartExModel still rejects series with neither values nor literalValues", () => {
+    expect(() =>
+      buildChartExModel({
+        type: "sunburst",
+        series: [{ name: "x", values: "" }]
+      })
+    ).toThrow(/values or literalValues is required/);
+  });
 });
 
 // ---------------------------------------------------------------------------

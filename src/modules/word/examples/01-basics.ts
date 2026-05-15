@@ -29,7 +29,31 @@ import {
   noBreakHyphen,
   softHyphen,
   carriageReturn,
-  toBuffer
+  heading,
+  toBuffer,
+  // Inverse unit conversions — useful when round-tripping values out of OOXML
+  twipsToInches,
+  twipsToCm,
+  twipsToPt,
+  emuToInches,
+  emuToCm,
+  emuToPx,
+  halfPointToPt,
+  eighthPointToPt,
+  spacingToLineMultiplier,
+  tablePctToPercent,
+  inchesToTwips,
+  cmToTwips,
+  ptToTwips,
+  inchesToEmu,
+  cmToEmu,
+  pxToEmu,
+  ptToEmu,
+  ptToHalfPoint,
+  ptToEighthPoint,
+  lineMultiplierToSpacing,
+  percentToTablePct,
+  mmToTwips
 } from "../index";
 
 const outDir = path.resolve(
@@ -66,6 +90,13 @@ Document.addParagraph(doc, "");
 // All heading levels
 for (const lvl of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
   Document.addHeading(doc, `Heading level ${lvl}`, lvl);
+}
+
+// Same thing through the standalone heading() builder — which produces a
+// fully-formed Paragraph object you can compose, store or transform before
+// inserting. Useful when generating headings programmatically.
+for (const lvl of [1, 2, 3] as const) {
+  Document.addParagraphElement(doc, heading(`Built via heading() — level ${lvl}`, lvl));
 }
 
 // Tabs and positional tabs
@@ -166,6 +197,47 @@ Document.addParagraphElement(
 // example above tests that we don't crash on accidental input.
 Document.addParagraph(doc, "Trailing spaces follow →   ");
 Document.addParagraph(doc, "Control char dropped: [\u0007] bell, [\u0001] SOH.");
+
+// ---------------------------------------------------------------------------
+// Unit conversion helpers — every forward / inverse pair must round-trip
+// inside its declared precision so callers can freely move between OOXML's
+// native units (twips, EMU, half-points, eighth-points, line-spacing 240ths,
+// table-pct fiftieths) and human-friendly units (inches, cm, mm, pt, px,
+// percent). The values below are the assertions that keep the helpers honest
+// for downstream consumers.
+// ---------------------------------------------------------------------------
+{
+  const checks: [string, number, number][] = [
+    ["inchesToTwips(2) == 2880", inchesToTwips(2), 2880],
+    ["twipsToInches(2880) == 2", twipsToInches(2880), 2],
+    ["cmToTwips(2.54) ≈ inchesToTwips(1)", cmToTwips(2.54), inchesToTwips(1)],
+    ["twipsToCm(1440) ≈ 2.54", Number(twipsToCm(1440).toFixed(2)), 2.54],
+    ["ptToTwips(12) == 240", ptToTwips(12), 240],
+    ["twipsToPt(240) == 12", twipsToPt(240), 12],
+    ["mmToTwips(254) == cmToTwips(25.4)", mmToTwips(254), cmToTwips(25.4)],
+    ["inchesToEmu(1) == 914400", inchesToEmu(1), 914_400],
+    ["emuToInches(914400) == 1", emuToInches(914_400), 1],
+    ["cmToEmu(2.54) == inchesToEmu(1)", cmToEmu(2.54), inchesToEmu(1)],
+    ["emuToCm(914400) ≈ 2.54", Number(emuToCm(914_400).toFixed(2)), 2.54],
+    ["ptToEmu(72) == inchesToEmu(1)", ptToEmu(72), inchesToEmu(1)],
+    ["pxToEmu(96) == inchesToEmu(1)", pxToEmu(96), inchesToEmu(1)],
+    ["emuToPx(914400) == 96", emuToPx(914_400), 96],
+    ["ptToHalfPoint(12) == 24", ptToHalfPoint(12), 24],
+    ["halfPointToPt(24) == 12", halfPointToPt(24), 12],
+    ["ptToEighthPoint(1.5) == 12", ptToEighthPoint(1.5), 12],
+    ["eighthPointToPt(12) == 1.5", eighthPointToPt(12), 1.5],
+    ["lineMultiplierToSpacing(1.5) == 360", lineMultiplierToSpacing(1.5), 360],
+    ["spacingToLineMultiplier(360) == 1.5", spacingToLineMultiplier(360), 1.5],
+    ["percentToTablePct(75) == 3750", percentToTablePct(75), 3750],
+    ["tablePctToPercent(3750) == 75", tablePctToPercent(3750), 75]
+  ];
+  for (const [name, got, want] of checks) {
+    if (Math.abs(got - want) > 0.01) {
+      throw new Error(`Unit-conversion regression: ${name} → got ${got}, want ${want}`);
+    }
+  }
+  console.log(`  unit-conversion round-trips: ${checks.length} checks ✓`);
+}
 
 // ---------------------------------------------------------------------------
 // Build & write
