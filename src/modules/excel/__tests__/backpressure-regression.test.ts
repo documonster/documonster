@@ -14,15 +14,49 @@ import { describe, it, expect } from "vitest";
 
 import { Workbook, WorkbookWriter } from "../../../index";
 
+/**
+ * Build a sink that completes each write asynchronously after yielding the
+ * event loop a fixed number of times.
+ *
+ * We deliberately avoid `setTimeout(cb, n)` here. Windows clamps every
+ * setTimeout delay to its system timer resolution (~15.6ms), so a "1ms"
+ * write becomes a 15.6ms write — and these tests, which produce
+ * 10_000–20_000 row-sized chunks (no zip middleware to batch them), get
+ * inflated past the 60s deadlock-detection timeout. The CI failure looks
+ * like a deadlock but is really just timer-resolution-induced slowdown.
+ *
+ * setImmediate is event-loop driven, has no timer-resolution dependency,
+ * and behaves identically on Node + Bun across Linux/macOS/Windows. The
+ * only thing the backpressure path actually needs from a "slow sink" is
+ * that the write callback fires on a *later* turn of the event loop
+ * rather than synchronously — that is what makes write() return false
+ * and forces the producer onto the 'drain' path. yieldCount controls how
+ * many event-loop turns we wait before completing each write, widening
+ * the window in which a broken backpressure implementation would buffer
+ * unbounded data. This preserves the original "drastically slow
+ * consumer" testing intent without the wall-clock dependency.
+ */
+function createSlowAsyncSink(options: { highWaterMark: number; yieldCount?: number }): Writable {
+  const yieldCount = options.yieldCount ?? 4;
+  return new Writable({
+    highWaterMark: options.highWaterMark,
+    write(_chunk: Uint8Array, _enc, cb) {
+      let remaining = yieldCount;
+      const next = (): void => {
+        if (remaining-- <= 0) {
+          cb();
+          return;
+        }
+        setImmediate(next);
+      };
+      setImmediate(next);
+    }
+  });
+}
+
 describe("streaming write backpressure", () => {
   it("WorkbookWriter does not deadlock with a slow sink (50k rows)", async () => {
-    const slowSink = new Writable({
-      highWaterMark: 4 * 1024,
-      write(_chunk: Uint8Array, _enc, cb) {
-        // Slow consumer: 1ms per write
-        setTimeout(cb, 1);
-      }
-    });
+    const slowSink = createSlowAsyncSink({ highWaterMark: 4 * 1024 });
 
     const wb = new WorkbookWriter({
       stream: slowSink,
@@ -43,10 +77,10 @@ describe("streaming write backpressure", () => {
     }
     ws.commit();
 
-    // If backpressure is broken, this either OOMs or deadlocks.
-    // 60s is generous; in practice this should finish within ~5-10s
-    // (50k × 1ms per zip-flush event ≈ a few hundred sink writes, but
-    // most will overlap/batch).
+    // If backpressure is broken, this either OOMs or deadlocks. 60s is
+    // generous; in practice this should finish well under that on every
+    // platform now that we no longer rely on setTimeout's wall-clock
+    // resolution to simulate a slow consumer.
     const timer = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error("WorkbookWriter deadlocked / too slow")), 60_000);
     });
@@ -86,12 +120,7 @@ describe("streaming write backpressure", () => {
       ws.addRow([`row-${i}`, i, i * 3.14]);
     }
 
-    const slowSink = new Writable({
-      highWaterMark: 1024,
-      write(_chunk: Uint8Array, _enc, cb) {
-        setTimeout(cb, 1);
-      }
-    });
+    const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
 
     const timer = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error("writeCsv deadlocked")), 60_000);
@@ -159,13 +188,7 @@ describe("streaming write backpressure", () => {
       ws.addRow([`row-${i}`, i, "x".repeat(200)]);
     }
 
-    const slowSink = new Writable({
-      highWaterMark: 1024,
-      write(_chunk: Uint8Array, _enc, cb) {
-        // Slow consumer: 1ms per chunk
-        setTimeout(cb, 1);
-      }
-    });
+    const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
 
     const csvStream = wb.createCsvReadStream();
     csvStream.pipe(slowSink as any);

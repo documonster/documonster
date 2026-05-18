@@ -114,11 +114,16 @@ function tokenize(html: string): Token[] {
   // instructions before tokenising — none of them should appear as text
   // in the document body. The previous regex treated `<!doctype html>`
   // as a text node containing `"!doctype html>"`.
-  const stripped = html
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!doctype[^>]*>/gi, "")
-    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
-    .replace(/<\?[\s\S]*?\?>/g, "");
+  //
+  // We use a single linear scan rather than chained `.replace()` calls so
+  // we are immune to two CodeQL findings:
+  //   - Incomplete multi-character sanitization: chained replaces let
+  //     payloads such as `<!--<!--x-->-->` leak through (each pass only
+  //     removes one layer, leaving `-->` behind).
+  //   - Polynomial regular expression on uncontrolled data: lazy
+  //     quantifiers like `<!--[\s\S]*?-->` exhibit catastrophic
+  //     backtracking on adversarial input.
+  const stripped = stripSgmlNoise(html);
 
   // Match a tag, OR a run of text. Text is anything-up-to-the-next-tag,
   // with the addition that a `<` not followed by a tag-like character is
@@ -179,6 +184,94 @@ function tokenize(html: string): Token[] {
     }
   }
   return tokens;
+}
+
+/**
+ * Strip HTML comments, doctype declarations, CDATA sections and SGML
+ * processing instructions in a single linear scan.
+ *
+ * A linear scan (vs. chained `String.prototype.replace` with regular
+ * expressions) is required for two reasons:
+ *
+ * 1. **Incomplete multi-character sanitization** — chained replaces are
+ *    each one pass; an attacker can nest the syntax (e.g.
+ *    `<!--<!--x-->-->`) so the outer marker survives after the inner
+ *    one is removed.
+ * 2. **Catastrophic backtracking** — lazy quantifiers such as
+ *    `<!--[\s\S]*?-->` are polynomial-time on adversarial input
+ *    (very long unterminated comments).
+ *
+ * The scan is O(n) in the input length and removes nested constructs by
+ * not advancing past the closing marker into already-emitted text.
+ */
+function stripSgmlNoise(input: string): string {
+  let out = "";
+  let i = 0;
+  const n = input.length;
+  while (i < n) {
+    if (input.charCodeAt(i) !== 0x3c /* '<' */) {
+      out += input[i];
+      i++;
+      continue;
+    }
+    // Comment: <!-- ... -->
+    // If the closing `-->` is missing the input is malformed. The
+    // previous regex (`/<!--[\s\S]*?-->/g`) simply did not match in that
+    // case and left the text in place; we preserve that behaviour rather
+    // than swallowing the rest of the document, which would silently
+    // change the parse for legitimate inputs that happen to contain a
+    // stray `<!--`.
+    if (input.startsWith("<!--", i)) {
+      const end = input.indexOf("-->", i + 4);
+      if (end < 0) {
+        out += "<";
+        i++;
+        continue;
+      }
+      i = end + 3;
+      continue;
+    }
+    // CDATA: <![CDATA[ ... ]]>
+    if (input.startsWith("<![CDATA[", i)) {
+      const end = input.indexOf("]]>", i + 9);
+      if (end < 0) {
+        out += "<";
+        i++;
+        continue;
+      }
+      i = end + 3;
+      continue;
+    }
+    // Doctype: <!doctype ...> (case-insensitive)
+    if (
+      input.charCodeAt(i + 1) === 0x21 /* '!' */ &&
+      input.slice(i + 2, i + 9).toLowerCase() === "doctype"
+    ) {
+      const end = input.indexOf(">", i + 9);
+      if (end < 0) {
+        out += "<";
+        i++;
+        continue;
+      }
+      i = end + 1;
+      continue;
+    }
+    // Processing instruction: <? ... ?>
+    if (input.charCodeAt(i + 1) === 0x3f /* '?' */) {
+      const end = input.indexOf("?>", i + 2);
+      if (end < 0) {
+        out += "<";
+        i++;
+        continue;
+      }
+      i = end + 2;
+      continue;
+    }
+    // Not an SGML noise construct — emit the '<' literally and continue.
+    out += "<";
+    i++;
+  }
+  return out;
 }
 
 /**
@@ -266,16 +359,28 @@ function parseHtmlAttrs(str: string): Record<string, string> {
 }
 
 function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, "\u00A0")
-    .replace(/&#(\d+);/g, (_, n) => safeFromCodePoint(parseInt(n, 10)))
-    .replace(/&#x([a-fA-F0-9]+);/g, (_, n) => safeFromCodePoint(parseInt(n, 16)))
-    .replace(/&([a-zA-Z]+);/g, (match, name) => HTML_ENTITIES[name] ?? match);
+  // Decode every entity in a single pass. Chaining `.replace()` calls
+  // (first `&amp;` → `&`, then `&lt;` → `<`, …) re-runs the later
+  // replacements over the output of the earlier ones, so input like
+  // `&amp;lt;` would round-trip to `<` instead of the intended `&lt;`.
+  // CodeQL flags this as "Double escaping or unescaping". A single
+  // alternation guarantees each source position is decoded at most once.
+  return text.replace(
+    /&(?:#(\d+)|#[xX]([a-fA-F0-9]+)|([a-zA-Z][a-zA-Z0-9]*));/g,
+    (match, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+      if (dec !== undefined) {
+        return safeFromCodePoint(parseInt(dec, 10));
+      }
+      if (hex !== undefined) {
+        return safeFromCodePoint(parseInt(hex, 16));
+      }
+      if (name !== undefined) {
+        const replacement = HTML_ENTITIES[name];
+        return replacement ?? match;
+      }
+      return match;
+    }
+  );
 }
 
 /**
@@ -297,6 +402,17 @@ function safeFromCodePoint(cp: number): string {
 
 /** Common HTML named entities mapped to their Unicode characters. */
 const HTML_ENTITIES: Record<string, string> = {
+  // Core XML/HTML entities — these used to be handled as standalone
+  // chained `.replace()` calls in `decodeHtmlEntities`. They must live
+  // in this table so the single-pass decoder can resolve them without
+  // re-running over already-decoded output (CodeQL "double unescaping").
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00A0",
+
   // Punctuation & Typography
   mdash: "\u2014",
   ndash: "\u2013",

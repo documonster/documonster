@@ -1715,7 +1715,10 @@ function resolveColorHex(
   if (typeof color === "string") {
     return color;
   }
-  if (typeof color === "object" && color !== null && "value" in (color as object)) {
+  // The `!color` check above already discarded `null`; an additional
+  // `color !== null` test was always true and CodeQL flagged it as a
+  // comparison between inconvertible types.
+  if (typeof color === "object" && "value" in (color as object)) {
     return (color as { value: string }).value;
   }
   return undefined;

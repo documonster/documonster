@@ -279,35 +279,171 @@ function parseIfField(args: string): {
   trueText: string;
   falseText: string;
 } | null {
-  // Pattern: expr1 = expr2 "trueText" "falseText"
-  // Supports both quoted and unquoted operands.
-  // Two-character operators must come first or `<=` would match `<` only.
-  const match = /^"?([^"=<>!]*?)"?\s*(<=|>=|<>|=|<|>)\s*"?([^"]*?)"?\s+"([^"]*)"\s+"([^"]*)"/.exec(
-    args
-  );
-  if (match) {
-    return {
-      left: match[1].trim(),
-      operator: match[2],
-      right: match[3].trim(),
-      trueText: match[4],
-      falseText: match[5]
-    };
+  // Hand-rolled parser used in place of the previous chained regex
+  // (`/^"?([^"=<>!]*?)"?\s*(<=|>=|<>|=|<|>)\s*"?([^"]*?)"?\s+"([^"]*)"\s+"([^"]*)"/`).
+  // CodeQL flagged that regex as polynomial-redos. The grammar is also
+  // permissive in ways the regex captured implicitly: real Word IF
+  // fields contain operands such as `MERGEFIELD foo` (with internal
+  // whitespace) and operands wrapped in quotes. The scanner below
+  // mirrors the regex's accepted shape:
+  //
+  //   args := SP* leftOperand SP* op SP* rightOperand SP+ "trueText" SP+ "falseText" …
+  //
+  // where `leftOperand` runs up to the first comparison operator that
+  // is not inside a quoted span, and `rightOperand` runs up to the
+  // first `"` that begins the trueText literal.
+
+  // 1. Find the comparison operator outside any quoted span.
+  const opPos = findIfOperator(args, 0);
+  if (!opPos) {
+    return null;
   }
 
-  // Simpler pattern without quotes on operands
-  const simpleMatch = /^(\S+)\s*(<=|>=|<>|=|<|>)\s*(\S+)\s+"([^"]*)"\s+"([^"]*)"/.exec(args);
-  if (simpleMatch) {
-    return {
-      left: simpleMatch[1],
-      operator: simpleMatch[2],
-      right: simpleMatch[3],
-      trueText: simpleMatch[4],
-      falseText: simpleMatch[5]
-    };
+  // 2. Left operand: everything before the operator, with surrounding
+  //    whitespace and outer quotes stripped.
+  const left = stripOuterQuotes(args.slice(0, opPos.start).trim());
+
+  // 3. Right operand: text between the operator and the first quoted
+  //    literal, with surrounding whitespace and outer quotes stripped.
+  let cursor = opPos.next;
+  // Scan to the next `"` that is not the immediate value-quoted operand.
+  // We have to be careful: the right operand itself may be quoted, e.g.
+  // `1 = "bar" "y" "n"`. To match the previous regex we adopt: skip
+  // whitespace, optionally consume one quoted span as the right operand,
+  // otherwise consume up to the next whitespace+`"` boundary.
+  cursor = skipSpaces(args, cursor);
+  let right: string;
+  if (args.charCodeAt(cursor) === 0x22 /* '"' */) {
+    const close = args.indexOf('"', cursor + 1);
+    if (close < 0) {
+      return null;
+    }
+    right = args.slice(cursor + 1, close);
+    cursor = close + 1;
+  } else {
+    // Read until the next `"` (which begins the trueText literal).
+    const nextQuote = args.indexOf('"', cursor);
+    if (nextQuote < 0) {
+      return null;
+    }
+    right = args.slice(cursor, nextQuote).trim();
+    cursor = nextQuote;
   }
 
+  // 4. trueText (required quoted string).
+  cursor = skipSpaces(args, cursor);
+  const trueRead = readQuotedString(args, cursor);
+  if (!trueRead) {
+    return null;
+  }
+  cursor = skipSpaces(args, trueRead.next);
+
+  // 5. falseText (required quoted string).
+  const falseRead = readQuotedString(args, cursor);
+  if (!falseRead) {
+    return null;
+  }
+
+  return {
+    left,
+    operator: opPos.value,
+    right,
+    trueText: trueRead.value,
+    falseText: falseRead.value
+  };
+}
+
+/**
+ * Find the first IF-field comparison operator (`<=`, `>=`, `<>`, `=`,
+ * `<`, `>`) starting at `from`, skipping over any quoted (`"…"`) spans
+ * so that operators inside operand strings are not mistaken for the
+ * top-level comparator.
+ *
+ * Bare `!` is reported as "no operator" rather than absorbed into the
+ * preceding operand: the previous regex excluded `!` from the left
+ * operand character class, so `1 != 1 …` was rejected outright. We
+ * preserve that rejection here to avoid silently parsing `!=` (not a
+ * Word IF-field operator) as `=` with `!` glued to the left operand.
+ */
+function findIfOperator(
+  s: string,
+  from: number
+): { start: number; next: number; value: string } | null {
+  const n = s.length;
+  let i = from;
+  while (i < n) {
+    const c = s.charCodeAt(i);
+    if (c === 0x22 /* '"' */) {
+      // Skip quoted span.
+      const close = s.indexOf('"', i + 1);
+      if (close < 0) {
+        return null;
+      }
+      i = close + 1;
+      continue;
+    }
+    if (c === 0x21 /* '!' */) {
+      // Reject `!` outside quotes — matches the previous regex behaviour.
+      return null;
+    }
+    if (c === 0x3c /* '<' */) {
+      const next = s.charCodeAt(i + 1);
+      if (next === 0x3d) {
+        return { start: i, next: i + 2, value: "<=" };
+      }
+      if (next === 0x3e) {
+        return { start: i, next: i + 2, value: "<>" };
+      }
+      return { start: i, next: i + 1, value: "<" };
+    }
+    if (c === 0x3e /* '>' */) {
+      if (s.charCodeAt(i + 1) === 0x3d) {
+        return { start: i, next: i + 2, value: ">=" };
+      }
+      return { start: i, next: i + 1, value: ">" };
+    }
+    if (c === 0x3d /* '=' */) {
+      return { start: i, next: i + 1, value: "=" };
+    }
+    i++;
+  }
   return null;
+}
+
+/**
+ * Strip a single matched pair of outer quotes (`"…"`) from a trimmed
+ * operand. Mirrors the implicit `"?…"?` shape of the original regex.
+ */
+function stripOuterQuotes(s: string): string {
+  if (s.length >= 2 && s.charCodeAt(0) === 0x22 && s.charCodeAt(s.length - 1) === 0x22) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function skipSpaces(s: string, from: number): number {
+  const n = s.length;
+  let i = from;
+  while (i < n) {
+    const c = s.charCodeAt(i);
+    if (c !== 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) {
+      break;
+    }
+    i++;
+  }
+  return i;
+}
+
+/** Read a quoted (`"…"`) string starting at `from`, or return null. */
+function readQuotedString(s: string, from: number): { value: string; next: number } | null {
+  if (s.charCodeAt(from) !== 0x22 /* '"' */) {
+    return null;
+  }
+  const close = s.indexOf('"', from + 1);
+  if (close < 0) {
+    return null;
+  }
+  return { value: s.slice(from + 1, close), next: close + 1 };
 }
 
 /** Parse STYLEREF field to get the style name. */

@@ -389,14 +389,52 @@ function parseTarget(targetStr: string): MappingTarget | null {
     const tagName = tagMatch[1]!;
     const className = tagMatch[2] ? tagMatch[2].substring(1).replace(/\./g, " ") : undefined;
 
-    // Parse attributes [key=value]
+    // Parse attributes [key=value]. Implemented as a linear scan rather
+    // than a global regex so that adversarial mapping strings cannot
+    // trigger CodeQL's `js/polynomial-redos`. The regex form
+    // `/\[([^=]+)=([^\]]+)\]/g` exhibits backtracking on inputs like
+    // `[xxxxxxxxxxxxx`.
     let attributes: Record<string, string> | undefined;
-    if (tagMatch[3]) {
+    const attrSection = tagMatch[3];
+    if (attrSection) {
       attributes = {};
-      const attrRegex = /\[([^=]+)=([^\]]+)\]/g;
-      let attrMatch: RegExpExecArray | null;
-      while ((attrMatch = attrRegex.exec(tagMatch[3])) !== null) {
-        attributes[attrMatch[1]!] = attrMatch[2]!.replace(/^['"]|['"]$/g, "");
+      const len = attrSection.length;
+      let i = 0;
+      while (i < len) {
+        if (attrSection.charCodeAt(i) !== 0x5b /* '[' */) {
+          i++;
+          continue;
+        }
+        const eq = attrSection.indexOf("=", i + 1);
+        const close = attrSection.indexOf("]", i + 1);
+        if (close < 0) {
+          break;
+        }
+        if (eq < 0 || eq > close) {
+          // No `=` inside this `[...]` — skip past it.
+          i = close + 1;
+          continue;
+        }
+        const key = attrSection.slice(i + 1, eq);
+        const rawValue = attrSection.slice(eq + 1, close);
+        // Strip a single leading and trailing quote (' or "). Two
+        // independent linear strips replace the previous
+        // `/^['"]|['"]$/g` regex.
+        let v = rawValue;
+        if (v.length >= 2) {
+          const first = v.charCodeAt(0);
+          if (first === 0x27 || first === 0x22) {
+            v = v.slice(1);
+          }
+        }
+        if (v.length >= 1) {
+          const last = v.charCodeAt(v.length - 1);
+          if (last === 0x27 || last === 0x22) {
+            v = v.slice(0, -1);
+          }
+        }
+        attributes[key] = v;
+        i = close + 1;
       }
     }
 

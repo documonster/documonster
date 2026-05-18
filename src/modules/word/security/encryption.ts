@@ -445,15 +445,19 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  * @returns Parsed agile encryption info.
  */
 export function parseEncryptionInfoXml(xmlStr: string): AgileEncryptionInfo {
-  // Simple regex-based extraction for the key <keyEncryptors><keyEncryptor>... element
-  const keyDataMatch = /<keyData\s([\s\S]*?)\/>/.exec(xmlStr);
-  const pwdEncryptorMatch = /<p:encryptedKey\s([\s\S]*?)\/>/.exec(xmlStr);
+  // Locate the `<keyData ... />` and `<p:encryptedKey ... />` elements
+  // with a linear scan. Using regular expressions with lazy `[\s\S]*?`
+  // quantifiers triggers CodeQL's polynomial-regex warning because the
+  // input is attacker-controlled (a hostile EncryptionInfo XML stream
+  // with very long unterminated tags caused catastrophic backtracking).
+  const keyDataAttrs = extractSelfClosingTagAttrs(xmlStr, "keyData");
+  const pwdAttrs = extractSelfClosingTagAttrs(xmlStr, "p:encryptedKey");
 
-  if (!keyDataMatch || !pwdEncryptorMatch) {
+  if (!keyDataAttrs || !pwdAttrs) {
     throw new DocxDecryptionError("Invalid EncryptionInfo XML - missing keyData or encryptedKey");
   }
 
-  const pwdData = parseAttrs(pwdEncryptorMatch[1]);
+  const pwdData = pwdAttrs;
 
   // Required cryptographic fields — empty/missing values cannot decrypt and
   // produce confusing CryptoOperation errors downstream. Fail fast with a
@@ -535,12 +539,110 @@ export function parseEncryptionInfoXml(xmlStr: string): AgileEncryptionInfo {
   };
 }
 
+/**
+ * Find a `<tagName ... />` element and return its parsed attributes, or
+ * `null` if no such self-closing element exists.
+ *
+ * Uses a linear scan instead of a regex with `[\s\S]*?` to avoid
+ * catastrophic backtracking on adversarial EncryptionInfo XML.
+ */
+function extractSelfClosingTagAttrs(xml: string, tagName: string): Record<string, string> | null {
+  const needle = `<${tagName}`;
+  let from = 0;
+  while (from <= xml.length) {
+    const start = xml.indexOf(needle, from);
+    if (start < 0) {
+      return null;
+    }
+    const after = start + needle.length;
+    const ch = xml.charCodeAt(after);
+    // Require a whitespace, '/' or '>' after the tag name so `<keyDataExtra`
+    // does not match `<keyData`.
+    if (ch !== 0x20 && ch !== 0x09 && ch !== 0x0a && ch !== 0x0d && ch !== 0x2f && ch !== 0x3e) {
+      from = after;
+      continue;
+    }
+    // Find the closing '>' from `start`. Bail out if there isn't one.
+    const close = xml.indexOf(">", after);
+    if (close < 0) {
+      return null;
+    }
+    // The element must be self-closing: the char before '>' is '/'.
+    if (xml.charCodeAt(close - 1) !== 0x2f) {
+      from = close + 1;
+      continue;
+    }
+    const inner = xml.slice(after, close - 1);
+    return parseAttrs(inner);
+  }
+  return null;
+}
+
+/**
+ * Parse XML-style attributes (`name="value"`) from a fragment. Implemented
+ * as a single linear scan rather than a global regex so attacker-controlled
+ * input cannot trigger polynomial-time backtracking (CodeQL js/polynomial-redos).
+ */
 function parseAttrs(str: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const re = /(\w+)="([^"]*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(str)) !== null) {
-    attrs[match[1]] = match[2];
+  const n = str.length;
+  let i = 0;
+  while (i < n) {
+    // Skip whitespace.
+    while (i < n) {
+      const c = str.charCodeAt(i);
+      if (c !== 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) {
+        break;
+      }
+      i++;
+    }
+    if (i >= n) {
+      break;
+    }
+    // Read attribute name (\w+ equivalent: [A-Za-z0-9_]+).
+    const nameStart = i;
+    while (i < n) {
+      const c = str.charCodeAt(i);
+      const isWord =
+        (c >= 0x30 && c <= 0x39) || // 0-9
+        (c >= 0x41 && c <= 0x5a) || // A-Z
+        (c >= 0x61 && c <= 0x7a) || // a-z
+        c === 0x5f; // _
+      if (!isWord) {
+        break;
+      }
+      i++;
+    }
+    if (i === nameStart) {
+      // Not at an attribute — advance one char so we make progress.
+      i++;
+      continue;
+    }
+    const name = str.slice(nameStart, i);
+    // Expect `="` exactly. Anything else means we resync to the next
+    // whitespace and try again — robust to malformed input.
+    if (i + 1 >= n || str.charCodeAt(i) !== 0x3d || str.charCodeAt(i + 1) !== 0x22) {
+      // Skip to next whitespace.
+      while (i < n) {
+        const c = str.charCodeAt(i);
+        if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) {
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    i += 2; // past `="`
+    // Read until next `"`.
+    const valStart = i;
+    const valEnd = str.indexOf('"', i);
+    if (valEnd < 0) {
+      // Unterminated value — store what we have and stop.
+      attrs[name] = str.slice(valStart);
+      break;
+    }
+    attrs[name] = str.slice(valStart, valEnd);
+    i = valEnd + 1;
   }
   return attrs;
 }

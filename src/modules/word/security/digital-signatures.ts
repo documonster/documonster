@@ -90,64 +90,201 @@ export function parseSignatureXml(xmlStr: string, fileName: string): DigitalSign
     cryptographicStatus: "not-verified"
   };
 
-  // Extract Office-specific metadata from <SignatureInfoV1>
-  const sigTextMatch = /<SignatureText[^>]*>([^<]*)<\/SignatureText>/.exec(xmlStr);
-  if (sigTextMatch) {
-    info.signer = xmlDecode(sigTextMatch[1]);
+  // Each `<TagName ...>...</TagName>` lookup used to be a regex of the
+  // form `/<Tag[^>]*>([^<]*)<\/Tag>/.exec(xmlStr)`. Although `[^>]*` and
+  // `[^<]*` are linear in isolation, running ten such regexes against
+  // attacker-controlled signature XML triggers CodeQL's
+  // `js/polynomial-redos` rule. `extractTextElement` performs the same
+  // job in a single linear scan and cannot exhibit super-linear runtime.
+  const signer = extractTextElement(xmlStr, "SignatureText");
+  if (signer !== undefined) {
+    info.signer = xmlDecode(signer);
   }
 
-  const sigCommentsMatch = /<SignatureComments[^>]*>([^<]*)<\/SignatureComments>/.exec(xmlStr);
-  if (sigCommentsMatch) {
-    info.signatureComments = xmlDecode(sigCommentsMatch[1]);
+  const sigComments = extractTextElement(xmlStr, "SignatureComments");
+  if (sigComments !== undefined) {
+    info.signatureComments = xmlDecode(sigComments);
   }
 
-  const purposeMatch = /<SignaturePurpose[^>]*>([^<]*)<\/SignaturePurpose>/.exec(xmlStr);
-  if (purposeMatch) {
-    info.purpose = xmlDecode(purposeMatch[1]);
+  const purpose = extractTextElement(xmlStr, "SignaturePurpose");
+  if (purpose !== undefined) {
+    info.purpose = xmlDecode(purpose);
   }
 
-  const dateMatch = /<SignatureDate[^>]*>([^<]*)<\/SignatureDate>/.exec(xmlStr);
-  if (dateMatch) {
-    info.signDate = xmlDecode(dateMatch[1]);
+  const signDate = extractTextElement(xmlStr, "SignatureDate");
+  if (signDate !== undefined) {
+    info.signDate = xmlDecode(signDate);
   }
 
-  const providerMatch = /<SignatureProviderUrl[^>]*>([^<]*)<\/SignatureProviderUrl>/.exec(xmlStr);
-  if (providerMatch) {
-    info.providerUrl = xmlDecode(providerMatch[1]);
+  const providerUrl = extractTextElement(xmlStr, "SignatureProviderUrl");
+  if (providerUrl !== undefined) {
+    info.providerUrl = xmlDecode(providerUrl);
   }
 
-  // Commitment type
-  const commitMatch =
-    /<CommitmentType[^>]*>\s*<CommitmentTypeIndication[^>]*>\s*<CommitmentTypeId>([^<]*)<\/CommitmentTypeId>/.exec(
-      xmlStr
-    );
-  if (commitMatch) {
-    info.commitmentType = xmlDecode(commitMatch[1]);
+  // Commitment type — nested element. Read the full `<CommitmentType>`
+  // body (which contains nested elements, hence `allowAngleBrackets`)
+  // then look for `<CommitmentTypeId>` inside.
+  const commitmentBlock = extractTextElement(xmlStr, "CommitmentType", {
+    allowAngleBrackets: true
+  });
+  if (commitmentBlock !== undefined) {
+    const commitmentId = extractTextElement(commitmentBlock, "CommitmentTypeId");
+    if (commitmentId !== undefined) {
+      info.commitmentType = xmlDecode(commitmentId);
+    }
   }
 
-  // Extract signature value (base64)
-  const sigValMatch = /<SignatureValue[^>]*>([^]*?)<\/SignatureValue>/.exec(xmlStr);
-  if (sigValMatch) {
-    info.signatureValue = sigValMatch[1].trim();
+  // Signature value (base64 — may legitimately span newlines, so don't strip).
+  const signatureValue = extractTextElement(xmlStr, "SignatureValue", { allowAngleBrackets: true });
+  if (signatureValue !== undefined) {
+    info.signatureValue = signatureValue.trim();
   }
 
   // Certificate details from <X509Data>
-  const certSubjectMatch = /<X509SubjectName[^>]*>([^<]*)<\/X509SubjectName>/.exec(xmlStr);
-  if (certSubjectMatch) {
-    info.certificateSubject = xmlDecode(certSubjectMatch[1]);
+  const certSubject = extractTextElement(xmlStr, "X509SubjectName");
+  if (certSubject !== undefined) {
+    info.certificateSubject = xmlDecode(certSubject);
   }
 
-  const certIssuerMatch = /<X509IssuerName[^>]*>([^<]*)<\/X509IssuerName>/.exec(xmlStr);
-  if (certIssuerMatch) {
-    info.certificateIssuer = xmlDecode(certIssuerMatch[1]);
+  const certIssuer = extractTextElement(xmlStr, "X509IssuerName");
+  if (certIssuer !== undefined) {
+    info.certificateIssuer = xmlDecode(certIssuer);
   }
 
-  const certSerialMatch = /<X509SerialNumber[^>]*>([^<]*)<\/X509SerialNumber>/.exec(xmlStr);
-  if (certSerialMatch) {
-    info.certificateSerialNumber = xmlDecode(certSerialMatch[1]);
+  const certSerial = extractTextElement(xmlStr, "X509SerialNumber");
+  if (certSerial !== undefined) {
+    info.certificateSerialNumber = xmlDecode(certSerial);
   }
 
   return info;
+}
+
+/**
+ * Find the first occurrence of `<tagName ...>...</tagName>` in `xml` and
+ * return the inner text (verbatim — the caller is responsible for entity
+ * decoding via `xmlDecode`).
+ *
+ * Implemented as a linear index scan rather than a regex match. The previous
+ * regex-based implementation tripped CodeQL's polynomial-regex detector
+ * because the input is attacker-controlled signature XML.
+ *
+ * @param xml - The XML text to search.
+ * @param tagName - Local element name (no namespace prefix). The match
+ *   ignores any namespace prefix actually present in the document.
+ * @param options.allowAngleBrackets - When true, the inner text is read up
+ *   to the literal `</tagName>` close tag rather than the next `<`. This
+ *   is appropriate for elements like `SignatureValue` where the body is
+ *   base64 and cannot legitimately contain `<` anyway, but lets the function
+ *   tolerate accidental whitespace/newlines that some signers insert.
+ */
+function extractTextElement(
+  xml: string,
+  tagName: string,
+  options: { allowAngleBrackets?: boolean } = {}
+): string | undefined {
+  const n = xml.length;
+  let from = 0;
+  while (from < n) {
+    const lt = xml.indexOf("<", from);
+    if (lt < 0) {
+      return undefined;
+    }
+    // Skip an optional namespace prefix: <ns:Tag ...>.
+    let nameStart = lt + 1;
+    // Look ahead for either the bare tag name or `prefix:tagName`. We do
+    // a forward scan rather than an unbounded regex match.
+    const colon = xml.indexOf(":", nameStart);
+    const ws = findTagNameEnd(xml, nameStart);
+    if (colon > 0 && colon < ws) {
+      nameStart = colon + 1;
+    }
+    if (
+      xml.slice(nameStart, nameStart + tagName.length) !== tagName ||
+      !isTagNameBoundary(xml.charCodeAt(nameStart + tagName.length))
+    ) {
+      from = lt + 1;
+      continue;
+    }
+    // Found `<…tagName`. Find the closing `>` of the open tag.
+    const openEnd = xml.indexOf(">", nameStart + tagName.length);
+    if (openEnd < 0) {
+      return undefined;
+    }
+    // Self-closing? Then the element has no text content.
+    if (xml.charCodeAt(openEnd - 1) === 0x2f /* '/' */) {
+      return "";
+    }
+    const bodyStart = openEnd + 1;
+    if (options.allowAngleBrackets) {
+      // Search for the matching close tag (allowing namespace prefix).
+      const closeIdx = findCloseTag(xml, bodyStart, tagName);
+      if (closeIdx < 0) {
+        return undefined;
+      }
+      return xml.slice(bodyStart, closeIdx);
+    }
+    // Default behaviour: text content has no `<`. Stop at the next `<`.
+    const lt2 = xml.indexOf("<", bodyStart);
+    if (lt2 < 0) {
+      return undefined;
+    }
+    return xml.slice(bodyStart, lt2);
+  }
+  return undefined;
+}
+
+function findTagNameEnd(xml: string, start: number): number {
+  const n = xml.length;
+  let i = start;
+  while (i < n) {
+    const c = xml.charCodeAt(i);
+    if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d || c === 0x2f || c === 0x3e) {
+      return i;
+    }
+    i++;
+  }
+  return n;
+}
+
+function isTagNameBoundary(c: number): boolean {
+  return (
+    c === 0x20 || // space
+    c === 0x09 || // tab
+    c === 0x0a || // LF
+    c === 0x0d || // CR
+    c === 0x2f || // '/'
+    c === 0x3e // '>'
+  );
+}
+
+function findCloseTag(xml: string, from: number, tagName: string): number {
+  const n = xml.length;
+  let i = from;
+  while (i < n) {
+    const lt = xml.indexOf("</", i);
+    if (lt < 0) {
+      return -1;
+    }
+    let p = lt + 2;
+    // Optional namespace prefix
+    const colon = xml.indexOf(":", p);
+    const gt = xml.indexOf(">", p);
+    if (gt < 0) {
+      return -1;
+    }
+    if (colon > 0 && colon < gt) {
+      p = colon + 1;
+    }
+    if (
+      xml.slice(p, p + tagName.length) === tagName &&
+      // Allow trailing whitespace before '>' but require a boundary char.
+      isTagNameBoundary(xml.charCodeAt(p + tagName.length))
+    ) {
+      return lt;
+    }
+    i = lt + 2;
+  }
+  return -1;
 }
 
 /**

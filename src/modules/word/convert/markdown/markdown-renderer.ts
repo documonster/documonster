@@ -246,8 +246,13 @@ function renderTable(state: MdRenderState, table: Table): void {
           cellParts.push(renderInlineChildren(state, block.children).trim());
         }
       }
-      // Escape pipe characters to prevent table structure corruption
-      rowTexts.push(cellParts.join(" ").replace(/\|/g, "\\|"));
+      // Escape pipe characters to prevent table structure corruption.
+      // Backslashes must be escaped *first*: replacing `|` first leaves
+      // a literal `\|` in the source untouched, but a subsequent
+      // `\` → `\\` pass would then double-escape it into `\\|`,
+      // breaking GFM tables. CodeQL flags the single-pass form as
+      // "Incomplete string escaping or encoding".
+      rowTexts.push(cellParts.join(" ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|"));
     }
     grid.push(rowTexts);
   }
@@ -544,7 +549,10 @@ function isMonospaceFont(font: unknown): boolean {
   if (typeof font === "string") {
     return isMonospaceFontName(font);
   }
-  if (typeof font === "object" && font !== null) {
+  // `!font` above already discarded `null`; `font !== null` here was
+  // therefore always true and CodeQL flagged it as a comparison
+  // between inconvertible types.
+  if (typeof font === "object") {
     const f = font as Record<string, unknown>;
     return (
       isMonospaceFontName(f.ascii as string | undefined) ||

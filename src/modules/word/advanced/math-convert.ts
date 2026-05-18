@@ -454,7 +454,8 @@ function parseMMLTree(xml: string): MMLNode[] {
         // forever (indexOf returning -1 used to set pos = 0, hanging the CPU).
         const end = xml.indexOf(">", pos);
         if (end === -1) {
-          pos = xml.length;
+          // Malformed input — stop parsing. (`pos` is unused after the
+          // outer loop terminates, so no further assignment is needed.)
           break;
         }
         pos = end + 1;
