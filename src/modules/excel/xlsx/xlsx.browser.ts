@@ -4848,13 +4848,23 @@ function escapeAttr(value: string): string {
 /**
  * XLSX class - handles Excel file operations
  * Works in both Node.js and Browser environments
+ *
+ * Generic over the concrete `Workbook` type so a Node subclass that extends
+ * `XLSX<NodeWorkbook>` automatically narrows `load()` / `read()` /
+ * `loadFromFiles()` / etc. to return the Node `Workbook` (which exposes
+ * `xlsx.readFile` / `xlsx.writeFile`). Without this, those methods are
+ * inherited unchanged and surface the browser `Workbook` type to Node
+ * consumers — see issue #160.
+ *
+ * The default type parameter keeps the public XLSX surface unchanged for
+ * external callers (`new XLSX(workbook)` is still typed as `XLSX<Workbook>`).
  */
-class XLSX {
-  declare public workbook: Workbook;
+class XLSX<TWorkbook extends Workbook = Workbook> {
+  declare public workbook: TWorkbook;
 
   static RelType = RelType;
 
-  constructor(workbook: Workbook) {
+  constructor(workbook: TWorkbook) {
     this.workbook = workbook;
   }
 
@@ -4989,7 +4999,7 @@ class XLSX {
   /**
    * Read workbook from a stream
    */
-  async read(stream: IParseStream, options?: XlsxReadOptions): Promise<Workbook> {
+  async read(stream: IParseStream, options?: XlsxReadOptions): Promise<TWorkbook> {
     // Collect all stream data into a single buffer
     const chunks: Uint8Array[] = [];
 
@@ -5023,7 +5033,7 @@ class XLSX {
   /**
    * Write workbook to a stream
    */
-  async write(stream: IWritableStream, options?: XlsxWriteOptions): Promise<XLSX> {
+  async write(stream: IWritableStream, options?: XlsxWriteOptions): Promise<this> {
     options = options || {};
 
     options.zip = options.zip || {};
@@ -5032,7 +5042,7 @@ class XLSX {
     const zip = this.createZipWriter(options.zip);
     zip.pipe(stream);
     await this.writeToZip(zip, options);
-    return this._finalize(zip) as Promise<XLSX>;
+    return this._finalize(zip);
   }
 
   /**
@@ -5050,7 +5060,7 @@ class XLSX {
   async load(
     data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
     options?: XlsxReadOptions
-  ): Promise<Workbook> {
+  ): Promise<TWorkbook> {
     if (data === null || data === undefined) {
       throw new ExcelFileError(
         "<input>",
@@ -5095,7 +5105,7 @@ class XLSX {
   /**
    * Internal: Load from Uint8Array buffer
    */
-  protected async loadBuffer(buffer: Uint8Array, options?: XlsxReadOptions): Promise<Workbook> {
+  protected async loadBuffer(buffer: Uint8Array, options?: XlsxReadOptions): Promise<TWorkbook> {
     const parser = new ZipParser(buffer);
     const filesMap = await parser.extractAll();
 
@@ -5320,7 +5330,7 @@ class XLSX {
   protected async loadFromZipEntries(
     entries: AsyncIterable<ZipEntryLike>,
     options?: XlsxOptions
-  ): Promise<any> {
+  ): Promise<TWorkbook> {
     const model: any = this.createEmptyModel();
 
     for await (const entry of entries) {
@@ -6349,7 +6359,7 @@ class XLSX {
   async loadFromFiles(
     zipData: Record<string, Uint8Array>,
     options?: XlsxReadOptions
-  ): Promise<Workbook> {
+  ): Promise<TWorkbook> {
     const model: any = this.createEmptyModel();
 
     const entries = Object.keys(zipData).map(name => ({

@@ -55,7 +55,13 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
-import type { Workbook } from "@excel/workbook";
+// Use the browser base class so the public `excelToDocx(workbook)` signature
+// is callable from both the Node entry (where `Workbook` is the Node subclass
+// — trivially assignable to the base) and the browser entry (where `Workbook`
+// is already the base). Importing the Node alias `@excel/workbook` would force
+// browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
+// XLSX surface intentionally omits — see issue #160.
+import type { Workbook } from "@excel/workbook.browser";
 import type { Worksheet } from "@excel/worksheet";
 
 import { type Mutable } from "../core/internal-utils";

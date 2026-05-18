@@ -6,12 +6,20 @@
  * - writeFile: Write to file path
  * - Constructor injects readFileAsync for filename-based media loading
  *
- * Inherited from XLSX:
+ * Inherited from XLSX (and narrowed to the Node `Workbook` type via the
+ * `XLSXBase<Workbook>` generic):
  * - read: Read from stream
  * - write: Write to stream
  * - load: Load from buffer
  * - writeBuffer: Write to buffer (Uint8Array)
  * - addMedia: Supports buffer, base64, and filename (via readFileAsync)
+ *
+ * The `<Workbook>` type argument is what makes `wb.xlsx.load(buf)` /
+ * `wb.xlsx.read(stream)` return the *Node* Workbook (which exposes
+ * `xlsx.readFile` / `xlsx.writeFile`) instead of the browser base class.
+ * Without the generic, the inherited methods would be typed against the
+ * browser `Workbook` and Node consumers chaining off the returned value
+ * would lose access to the Node-only file APIs — issue #160.
  */
 
 import { Parse, type ZipEntry } from "@archive/unzip/stream";
@@ -24,7 +32,7 @@ import type { ReadableLike } from "@stream/types";
 import { toError } from "@utils/errors";
 import { fileExists, readFileBytes, createReadStream, createWriteStream } from "@utils/fs";
 
-class XLSX extends XLSXBase {
+class XLSX extends XLSXBase<Workbook> {
   constructor(workbook: Workbook) {
     super(workbook);
     // Provide file reading capability for addMedia
