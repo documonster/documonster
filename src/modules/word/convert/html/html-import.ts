@@ -197,7 +197,8 @@ function tokenize(html: string): Token[] {
       if (text) {
         tokens.push({ type: "text", value: text });
       }
-      i = n;
+      // `break` exits the loop directly; no need to assign `i = n`
+      // first (CodeQL js/useless-assignment-to-local).
       break;
     }
 
@@ -613,9 +614,9 @@ function parseHtmlAttrs(str: string): Record<string, string> {
     if (q === 0x22 /* '"' */ || q === 0x27 /* "'" */) {
       const close = str.indexOf(q === 0x22 ? '"' : "'", j + 1);
       if (close < 0) {
+        // Unterminated quoted value — take whatever is left and stop.
         attrs[name] = str.slice(j + 1);
-        i = n;
-        continue;
+        break;
       }
       attrs[name] = str.slice(j + 1, close);
       i = close + 1;
