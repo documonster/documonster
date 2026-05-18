@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import { deobfuscateFont } from "../font/font-obfuscation";
 import { embedFont, embedFontFamily, addEmbeddedFonts, Document } from "../index";
 import type { DocxDocument } from "../types";
 
@@ -25,9 +26,10 @@ function createFakeTtfData(size = 100): Uint8Array {
 describe("Font embedding", () => {
   describe("embedFont with obfuscation", () => {
     it("produces ODTTF output", () => {
+      const original = createFakeTtfData();
       const result = embedFont({
         name: "TestFont",
-        data: createFakeTtfData(),
+        data: original,
         style: "regular",
         obfuscate: true
       });
@@ -35,9 +37,29 @@ describe("Font embedding", () => {
       expect(result.fontDef.name).toBe("TestFont");
       expect(result.embeddedFont.fileName).toMatch(/\.odttf$/);
       expect(result.embeddedFont.fontKey).toBeDefined();
-      expect(result.embeddedFont.data.length).toBeGreaterThan(0);
-      // Obfuscated data should differ from original at the beginning
-      expect(result.embeddedFont.data[10]).not.toBe(createFakeTtfData()[10]);
+      expect(result.embeddedFont.data.length).toBe(original.length);
+
+      // The previous assertion (`obfuscated[10] !== original[10]`) was
+      // ~0.4% flaky: ODTTF XORs the first 32 bytes with a 16-byte
+      // GUID-derived key, and whenever the GUID byte at position 10
+      // happened to be 0x00 the byte-10 assertion would fail.
+      //
+      // Verify the actual contract instead: ODTTF obfuscation is a
+      // reversible transform whose inverse is `deobfuscateFont` keyed
+      // by the returned `fontKey`. Round-tripping must yield the
+      // original bytes exactly. This:
+      //   - Catches algorithmic mistakes (wrong byte range, wrong
+      //     GUID reorder, wrong key reuse) that a single-byte or
+      //     range-inequality assertion would miss.
+      //   - Cannot be flaky: the assertion does not depend on any
+      //     specific GUID byte being non-zero.
+      const fontKey = result.embeddedFont.fontKey!;
+      const roundTrip = deobfuscateFont(result.embeddedFont.data, fontKey);
+      expect(roundTrip).toEqual(original);
+
+      // Spec: only the first 32 bytes are obfuscated. Bytes beyond
+      // that must already match the input without applying the key.
+      expect(result.embeddedFont.data.subarray(32)).toEqual(original.subarray(32));
     });
   });
 
