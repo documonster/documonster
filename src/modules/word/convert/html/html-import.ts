@@ -125,65 +125,263 @@ function tokenize(html: string): Token[] {
   //     backtracking on adversarial input.
   const stripped = stripSgmlNoise(html);
 
-  // Match a tag, OR a run of text. Text is anything-up-to-the-next-tag,
-  // with the addition that a `<` not followed by a tag-like character is
-  // treated as literal text (so "1 < 2" / "a<b" / "<<" survive instead
-  // of being silently swallowed).
-  const re = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)\/?\s*>|((?:[^<]|<(?![/a-zA-Z]))+)/g;
-  const tagRe = /^<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^>]*?)?)(\/?)\s*>$/;
-  let m: RegExpExecArray | null;
-
-  while ((m = re.exec(stripped)) !== null) {
-    const fullMatch = m[0];
-    if (m[3] !== undefined) {
-      // Text node
-      const text = decodeHtmlEntities(m[3]);
+  // The tokenizer is implemented as a linear index scan rather than a
+  // global regex (`/<\/?…(?:\s+[^>]*?)?\/?\s*>|((?:[^<]|…)+)/g`). The
+  // previous regex form combined an optional lazy attribute span with
+  // an optional `\/?` and optional trailing whitespace, which CodeQL
+  // flagged as polynomial-redos: an adversarial payload such as
+  // `<a` followed by many spaces but no closing `>` triggered
+  // catastrophic backtracking.
+  //
+  // The scan below is strictly O(n):
+  //   - At every position we either advance one character or jump
+  //     forward to the next `<` / `>` via a single `indexOf`.
+  //   - Attribute parsing is delegated to `parseHtmlAttrs`, which is
+  //     itself a linear scanner.
+  const n = stripped.length;
+  let i = 0;
+  while (i < n) {
+    // Scan a text run: everything up to the next position that begins
+    // a tag (`<` followed by a letter, or `</` followed by a letter).
+    // Bare `<` characters and unfinished tag-like fragments are kept
+    // inside the text run so that input such as `1 < 2`, `a<b<c`,
+    // `<<<<` or `<unfinished` (with no closing `>` anywhere) is not
+    // shattered into a stream of single-character runs.
+    if (stripped.charCodeAt(i) !== 0x3c /* '<' */ || !isTagStart(stripped, i)) {
+      const textEnd = scanTextEnd(stripped, i);
+      const raw = stripped.slice(i, textEnd);
+      const text = decodeHtmlEntities(raw);
       if (text) {
         tokens.push({ type: "text", value: text });
       }
-    } else {
-      const tagMatch = tagRe.exec(fullMatch);
-      if (tagMatch) {
-        const isClose = tagMatch[1] === "/";
-        const tag = tagMatch[2].toLowerCase();
-        const attrStr = tagMatch[3];
-        const selfClose = tagMatch[4] === "/" || VOID_ELEMENTS.has(tag);
-        const attrs = parseHtmlAttrs(attrStr);
+      i = textEnd;
+      if (i >= n) {
+        break;
+      }
+      // Fall through: position `i` is now at a real tag start.
+    }
 
-        if (isClose) {
-          tokens.push({ type: "close", tag, attrs: {} });
-        } else if (selfClose) {
-          tokens.push({ type: "selfclose", tag, attrs });
-        } else {
-          tokens.push({ type: "open", tag, attrs });
-          // Raw-text elements: their body must not be parsed as markup. Skip
-          // forward to the matching close tag and either capture the body as
-          // a single text token (for <style>, which is post-processed by
-          // extractStyleRules) or discard it entirely (for <script>, etc.).
-          // Without this, embedded scripts would leak into the document body.
-          if (RAW_TEXT_ELEMENTS.has(tag)) {
-            const closeRe = new RegExp(`</${tag}\\s*>`, "i");
-            closeRe.lastIndex = re.lastIndex;
-            const startBody = re.lastIndex;
-            const closeMatch = closeRe.exec(stripped);
-            if (closeMatch) {
-              const body = stripped.slice(startBody, closeMatch.index);
-              if (RAW_TEXT_PRESERVE_BODY.has(tag)) {
-                tokens.push({ type: "text", value: body });
-              }
-              tokens.push({ type: "close", tag, attrs: {} });
-              re.lastIndex = closeMatch.index + closeMatch[0].length;
-            } else {
-              // No closing tag — discard the rest of the input for this
-              // raw-text element to avoid emitting markup as text.
-              re.lastIndex = stripped.length;
-            }
-          }
+    // We are at '<' that introduces a tag (guaranteed by the
+    // `isTagStart` check above).
+    const next = stripped.charCodeAt(i + 1);
+    const isClose = next === 0x2f; /* '/' */
+    const nameStart = isClose ? i + 2 : i + 1;
+    // Defensive: the loop guard above should already ensure this, but
+    // keep the check so a future refactor cannot silently turn a bare
+    // `<` into an attempted tag parse.
+    if (!isAsciiAlpha(stripped.charCodeAt(nameStart))) {
+      tokens.push({ type: "text", value: "<" });
+      i++;
+      continue;
+    }
+
+    // Read the tag name: [A-Za-z][A-Za-z0-9]*.
+    let p = nameStart + 1;
+    while (p < n) {
+      const c = stripped.charCodeAt(p);
+      if (!isAsciiAlpha(c) && !isAsciiDigit(c)) {
+        break;
+      }
+      p++;
+    }
+    const tagName = stripped.slice(nameStart, p).toLowerCase();
+
+    // Find the closing '>' of the tag. We have to be careful not to
+    // mistake a '>' inside a quoted attribute value for the tag end.
+    const tagEnd = findTagEnd(stripped, p);
+    if (tagEnd < 0) {
+      // No closing '>' — the rest of the input is malformed; treat the
+      // remainder as text. (Original regex would simply not match and
+      // leave the same characters as text via the alternation.)
+      const text = decodeHtmlEntities(stripped.slice(i));
+      if (text) {
+        tokens.push({ type: "text", value: text });
+      }
+      i = n;
+      break;
+    }
+
+    // Inside [p, tagEnd) lie attributes (and possibly a trailing '/').
+    let inner = stripped.slice(p, tagEnd);
+    // Detect self-close: trailing '/'. Strip it so it is not parsed as
+    // an attribute name.
+    let selfClose = false;
+    // Trim trailing whitespace, then a single '/'.
+    let innerEnd = inner.length;
+    while (innerEnd > 0 && isHtmlSpace(inner.charCodeAt(innerEnd - 1))) {
+      innerEnd--;
+    }
+    if (innerEnd > 0 && inner.charCodeAt(innerEnd - 1) === 0x2f) {
+      selfClose = true;
+      innerEnd--;
+    }
+    inner = inner.slice(0, innerEnd);
+
+    if (isClose) {
+      tokens.push({ type: "close", tag: tagName, attrs: {} });
+      i = tagEnd + 1;
+      continue;
+    }
+
+    const attrs = parseHtmlAttrs(inner);
+    const isVoidElement = VOID_ELEMENTS.has(tagName);
+    if (selfClose || isVoidElement) {
+      tokens.push({ type: "selfclose", tag: tagName, attrs });
+      i = tagEnd + 1;
+      continue;
+    }
+
+    tokens.push({ type: "open", tag: tagName, attrs });
+    i = tagEnd + 1;
+
+    // Raw-text elements: their body must not be parsed as markup.
+    if (RAW_TEXT_ELEMENTS.has(tagName)) {
+      const closeIdx = findRawTextClose(stripped, i, tagName);
+      if (closeIdx === null) {
+        // No closing tag — discard the rest of the input for this
+        // raw-text element to avoid emitting markup as text.
+        i = n;
+      } else {
+        const body = stripped.slice(i, closeIdx.bodyEnd);
+        if (RAW_TEXT_PRESERVE_BODY.has(tagName)) {
+          tokens.push({ type: "text", value: body });
         }
+        tokens.push({ type: "close", tag: tagName, attrs: {} });
+        i = closeIdx.next;
       }
     }
   }
   return tokens;
+}
+
+function isAsciiAlpha(c: number): boolean {
+  return (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+}
+
+function isAsciiDigit(c: number): boolean {
+  return c >= 0x30 && c <= 0x39;
+}
+
+function isHtmlSpace(c: number): boolean {
+  return c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d || c === 0x0c;
+}
+
+/**
+ * Scan forward from `from` to the position of the next '<' that
+ * introduces a tag (i.e. is followed by `[a-zA-Z]` or `/[a-zA-Z]`).
+ * A bare '<' (e.g. in `1 < 2`) is included in the text run.
+ */
+function scanTextEnd(s: string, from: number): number {
+  const n = s.length;
+  let i = from;
+  while (i < n) {
+    const lt = s.indexOf("<", i);
+    if (lt < 0) {
+      return n;
+    }
+    if (isTagStart(s, lt)) {
+      return lt;
+    }
+    // Bare '<' or `</` not followed by a letter — keep scanning.
+    i = lt + 1;
+  }
+  return n;
+}
+
+/**
+ * Return true if position `pos` in `s` is `<` followed by a letter
+ * (open tag) or `</` followed by a letter (close tag). Used to
+ * distinguish "real" tag starts from literal `<` characters.
+ */
+function isTagStart(s: string, pos: number): boolean {
+  if (s.charCodeAt(pos) !== 0x3c /* '<' */) {
+    return false;
+  }
+  const next = s.charCodeAt(pos + 1);
+  if (isAsciiAlpha(next)) {
+    return true;
+  }
+  if (next === 0x2f /* '/' */ && isAsciiAlpha(s.charCodeAt(pos + 2))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Find the index of the '>' that closes the tag opened just before
+ * `from`. Honours quoted attribute values so that `<a href="x>y">`
+ * does not stop at the '>' inside quotes.
+ *
+ * Returns -1 if no closing '>' is found before EOF.
+ */
+function findTagEnd(s: string, from: number): number {
+  const n = s.length;
+  let i = from;
+  while (i < n) {
+    const c = s.charCodeAt(i);
+    if (c === 0x22 /* '"' */ || c === 0x27 /* "'" */) {
+      const close = s.indexOf(c === 0x22 ? '"' : "'", i + 1);
+      if (close < 0) {
+        return -1;
+      }
+      i = close + 1;
+      continue;
+    }
+    if (c === 0x3e /* '>' */) {
+      return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Find the closing tag for a raw-text element (e.g. `</script>`),
+ * starting at `from`. Returns the position immediately after the
+ * close tag (`next`) plus the position where the body ends (`bodyEnd`,
+ * i.e. the start of the close-tag literal).
+ *
+ * Implemented with a linear scan (no dynamic `RegExp`) so that
+ * adversarial bodies cannot trigger super-linear runtime.
+ */
+function findRawTextClose(
+  s: string,
+  from: number,
+  tagName: string
+): { bodyEnd: number; next: number } | null {
+  const n = s.length;
+  let i = from;
+  while (i < n) {
+    const lt = s.indexOf("</", i);
+    if (lt < 0) {
+      return null;
+    }
+    const after = lt + 2;
+    // Compare tag name case-insensitively.
+    let ok = true;
+    for (let k = 0; k < tagName.length; k++) {
+      const a = s.charCodeAt(after + k);
+      const aLower = a >= 0x41 && a <= 0x5a ? a + 0x20 : a;
+      if (aLower !== tagName.charCodeAt(k)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      i = after;
+      continue;
+    }
+    // Skip any trailing whitespace before '>'.
+    let p = after + tagName.length;
+    while (p < n && isHtmlSpace(s.charCodeAt(p))) {
+      p++;
+    }
+    if (p < n && s.charCodeAt(p) === 0x3e /* '>' */) {
+      return { bodyEnd: lt, next: p + 1 };
+    }
+    i = after;
+  }
+  return null;
 }
 
 /**
@@ -348,12 +546,88 @@ function extractStyleRules(tokens: Token[]): Record<string, string> {
   return result;
 }
 
+/**
+ * Parse HTML-style attributes from the inside of a start tag, e.g.
+ * `class="x" id='y' disabled href=foo`.
+ *
+ * Implemented as a linear scan rather than the previous global regex
+ * `/([a-zA-Z_][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))?/g` so
+ * adversarial start-tag content cannot trigger polynomial-redos
+ * (CodeQL js/polynomial-redos). Behaviour matches the regex form on
+ * well-formed inputs:
+ *   - Attribute names lower-cased.
+ *   - Double-quoted, single-quoted and unquoted values supported.
+ *   - Boolean attributes (no `=`) yield an empty string value.
+ */
 function parseHtmlAttrs(str: string): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const re = /([a-zA-Z_][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))?/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(str)) !== null) {
-    attrs[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? "";
+  const n = str.length;
+  let i = 0;
+  while (i < n) {
+    // Skip whitespace.
+    while (i < n && isHtmlSpace(str.charCodeAt(i))) {
+      i++;
+    }
+    if (i >= n) {
+      break;
+    }
+    // Read attribute name: [A-Za-z_][\w-]*.
+    const nameStart = i;
+    const first = str.charCodeAt(i);
+    if (!isAsciiAlpha(first) && first !== 0x5f /* '_' */) {
+      // Not a valid attribute-name start — skip one char and resync.
+      i++;
+      continue;
+    }
+    i++;
+    while (i < n) {
+      const c = str.charCodeAt(i);
+      if (isAsciiAlpha(c) || isAsciiDigit(c) || c === 0x5f /* '_' */ || c === 0x2d /* '-' */) {
+        i++;
+        continue;
+      }
+      break;
+    }
+    const name = str.slice(nameStart, i).toLowerCase();
+
+    // Optional `\s*=\s*` then a value.
+    let j = i;
+    while (j < n && isHtmlSpace(str.charCodeAt(j))) {
+      j++;
+    }
+    if (j >= n || str.charCodeAt(j) !== 0x3d /* '=' */) {
+      // Boolean attribute.
+      attrs[name] = "";
+      continue;
+    }
+    j++; // past '='
+    while (j < n && isHtmlSpace(str.charCodeAt(j))) {
+      j++;
+    }
+    if (j >= n) {
+      attrs[name] = "";
+      i = j;
+      continue;
+    }
+    const q = str.charCodeAt(j);
+    if (q === 0x22 /* '"' */ || q === 0x27 /* "'" */) {
+      const close = str.indexOf(q === 0x22 ? '"' : "'", j + 1);
+      if (close < 0) {
+        attrs[name] = str.slice(j + 1);
+        i = n;
+        continue;
+      }
+      attrs[name] = str.slice(j + 1, close);
+      i = close + 1;
+      continue;
+    }
+    // Unquoted value: run of non-whitespace.
+    const valStart = j;
+    while (j < n && !isHtmlSpace(str.charCodeAt(j))) {
+      j++;
+    }
+    attrs[name] = str.slice(valStart, j);
+    i = j;
   }
   return attrs;
 }
