@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.5](https://github.com/cjnoname/excelts/compare/v9.5.4...v9.5.5) (2026-05-18)
+
+
+### Features
+
+* **word, pdf:** Complete the layout pipeline and harden 13 round-trip / streaming gaps ([bc5b67f](https://github.com/cjnoname/excelts/commit/bc5b67f73a15cdf59f37da998256f891cd506826))
+* **word:** Consolidate and harden the word module ([895541e](https://github.com/cjnoname/excelts/commit/895541e80cbc2cfcc2ea271e60aad0b403ea362c))
+* **word:** Split word-complete example into 47 focused examples ([fd0d3eb](https://github.com/cjnoname/excelts/commit/fd0d3eb6ee6216dd5530c98bfebe734e107e5291))
+
+
+### Bug Fixes
+
+* **stream:** Comprehensive backpressure / deadlock hardening across all stream output paths ([3870df2](https://github.com/cjnoname/excelts/commit/3870df2bd135816edcf99803f6c11cf2f44ae683))
+* Word patcher/incremental-edit correctness, agile-encryption perf, and deprecated cleanup ([fc27453](https://github.com/cjnoname/excelts/commit/fc274531c550d8d04760e172069681b56df7c958))
+* **word, excel:** Close example coverage gaps and fix two latent bridge bugs ([0ac4945](https://github.com/cjnoname/excelts/commit/0ac49451ef2185b3b674331d1552c03bff46fe87))
+* **word:** Broad round-trip correctness, security policy enforcement, and OOXML coverage ([ff6bec9](https://github.com/cjnoname/excelts/commit/ff6bec9a3351d2d4d82c4b6ff5b4de1782cfe53e))
+* **word:** Four rounds of deep audit fixes across the word module ([f669d62](https://github.com/cjnoname/excelts/commit/f669d6208dc2329518558d5a0cc03fe6c9e39a8d))
+
+
+### Miscellaneous Chores
+
+* **excel:** Narrow XLSX return types to the concrete Workbook subclass ([#160](https://github.com/cjnoname/excelts/issues/160)) ([4380b6e](https://github.com/cjnoname/excelts/commit/4380b6e539d3085f988473e399386069843abff1))
+
 ## [9.5.4](https://github.com/cjnoname/excelts/compare/v9.5.3...v9.5.4) (2026-05-08)
 
 
