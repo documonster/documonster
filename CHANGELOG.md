@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.6](https://github.com/cjnoname/excelts/compare/v9.5.5...v9.5.6) (2026-05-19)
+
+
+### Bug Fixes
+
+* **formula:** Correct merged-cell handling in aggregates and dynamic-array spills ([8359737](https://github.com/cjnoname/excelts/commit/8359737db47de7d41c3eeb15724c84e04226bd5d))
+* **html-import:** Remove unnecessary assignment in tokenizer function ([4f4832b](https://github.com/cjnoname/excelts/commit/4f4832b1d140ac0fce9fa4f13fa77bfbf323339a))
+* **pdf:** Stop reading every system font when a covering match is already found ([3e16c3c](https://github.com/cjnoname/excelts/commit/3e16c3cd6cb60ce028fe4173d79f4a07593de0a5))
+* **security:** Replace regex-based XML extraction with linear scans to prevent polynomial-time backtracking vulnerabilities ([351bfae](https://github.com/cjnoname/excelts/commit/351bfae567bc726934a887dab2dc8d7be5bbb131))
+* **word:** Optimize encryption info parsing by replacing regex with linear scans to avoid catastrophic backtracking in XML processing ([351bfae](https://github.com/cjnoname/excelts/commit/351bfae567bc726934a887dab2dc8d7be5bbb131))
+* **word:** Rewrite HTML tokenizer and attribute parser as linear scans to eliminate polynomial-redos ([d0f5dac](https://github.com/cjnoname/excelts/commit/d0f5dac3fc4520bdc99c7ab844f0ee025d39dba7))
+* **word:** Streamline HTML import processing by consolidating multiple regex replacements into a single linear scan for better efficiency ([351bfae](https://github.com/cjnoname/excelts/commit/351bfae567bc726934a887dab2dc8d7be5bbb131))
+
+
+### Code Refactoring
+
+* **word:** Enhance markdown rendering by ensuring proper escaping of pipe characters to prevent table structure corruption ([351bfae](https://github.com/cjnoname/excelts/commit/351bfae567bc726934a887dab2dc8d7be5bbb131))
+* **word:** Improve parsing of field conditions and attributes using linear scans instead of regex to enhance performance and security ([351bfae](https://github.com/cjnoname/excelts/commit/351bfae567bc726934a887dab2dc8d7be5bbb131))
+
 ## [9.5.5](https://github.com/cjnoname/excelts/compare/v9.5.4...v9.5.5) (2026-05-18)
 
 
