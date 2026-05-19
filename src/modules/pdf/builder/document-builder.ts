@@ -25,7 +25,7 @@ import { PdfContentStream } from "../core/pdf-stream";
 import { PdfWriter } from "../core/pdf-writer";
 import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
 import { FontManager } from "../font/font-manager";
-import { discoverSystemFontCandidates } from "../font/system-fonts";
+import { iterateSystemFontCandidates } from "../font/system-fonts";
 import { parseTtf } from "../font/ttf-parser";
 import { wrapTextLines, emitTextWithMatrix, alphaGsName } from "../render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "../types";
@@ -1414,7 +1414,7 @@ export class PdfDocumentBuilder {
       if (nonWinAnsi.size > 0) {
         // Try auto-discovery unless the caller opted out.
         if (!this._disableFontAutoDiscovery) {
-          for (const candidate of discoverSystemFontCandidates()) {
+          for (const candidate of iterateSystemFontCandidates()) {
             try {
               const testTtf = parseTtf(candidate);
               const allCovered = [...nonWinAnsi].every(cp => testTtf.cmap.has(cp));

@@ -17,7 +17,7 @@ import { PdfContentStream, isWinAnsiCodePoint } from "../core/pdf-stream";
 import { PdfWriter } from "../core/pdf-writer";
 import { PdfError, PdfRenderError } from "../errors";
 import { FontManager, resolvePdfFontName } from "../font/font-manager";
-import { discoverSystemFontCandidates } from "../font/system-fonts";
+import { iterateSystemFontCandidates } from "../font/system-fonts";
 import { parseTtf } from "../font/ttf-parser";
 import {
   PageSizes,
@@ -98,8 +98,11 @@ function prepareExport(workbook: PdfWorkbook, options?: PdfExportOptions): Expor
     // Collect non-WinAnsi code points from the document (single pass)
     const nonWinAnsi = collectNonWinAnsiCodePoints(sheets);
     if (nonWinAnsi.size > 0) {
-      // Try system font candidates in preference order until one covers all chars
-      for (const candidate of discoverSystemFontCandidates()) {
+      // Try system font candidates lazily in preference order until one
+      // covers all chars. Iterating instead of materializing the full
+      // candidate list lets us stop the moment a match is found, which
+      // avoids the cost of recursively scanning every system font dir.
+      for (const candidate of iterateSystemFontCandidates()) {
         try {
           const testTtf = parseTtf(candidate);
           const allCovered = [...nonWinAnsi].every(cp => testTtf.cmap.has(cp));
