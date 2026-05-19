@@ -1239,6 +1239,25 @@ class Worksheet {
   }
 
   /**
+   * Read-only enumeration of every merged region on this sheet
+   * (1-based, inclusive). Consumed by the formula engine's snapshot
+   * builder to detect `#SPILL!` conflicts. See issue #162 follow-up.
+   */
+  get mergedRegions(): ReadonlyArray<{
+    readonly top: number;
+    readonly left: number;
+    readonly bottom: number;
+    readonly right: number;
+  }> {
+    return Object.values(this._merges).map(merge => ({
+      top: merge.top,
+      left: merge.left,
+      bottom: merge.bottom,
+      right: merge.right
+    }));
+  }
+
+  /**
    * Scan the range and if any cell is part of a merge, un-merge the group.
    * Note this function can affect multiple merges and merge-blocks are
    * atomic - either they're all merged or all un-merged.

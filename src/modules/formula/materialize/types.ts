@@ -34,18 +34,28 @@ export type FormulaResultLike = number | string | boolean | Date | CellErrorValu
 // ============================================================================
 
 /**
- * Numeric cell-type tag exposed by host cells. The engine only compares
- * against `Null` and `Formula`; any other value is treated as a scalar
- * literal.
+ * Numeric cell-type tag exposed by host cells. The engine compares
+ * against `Null`, `Merge`, and `Formula`; any other value is treated as
+ * a scalar literal.
+ *
+ * `Merge` identifies a non-master cell inside a merged region. The
+ * host's in-memory model may proxy `cell.value` from slaves to the
+ * master (see `MergeValue` in `@excel/cell`), so the snapshot builder
+ * must filter merge slaves out — otherwise range aggregates count the
+ * master's value once per slave. See issue #162.
  *
  * Kept as inline numeric literals (not an enum) so this file stays free
  * of runtime dependencies. The `const` object and `type` alias share a
  * name via TypeScript's declaration merging — the value form
  * (`CellValueTypeLike.Null`, `CellValueTypeLike.Formula`) is used at
  * comparison sites, the type form annotates `CellLike.type`.
+ *
+ * The numeric values must stay in sync with `ValueType` in
+ * `@excel/enums`, which is what `@excel/cell` writes into `cell.type`.
  */
 export const CellValueTypeLike = {
   Null: 0,
+  Merge: 1,
   Formula: 6
 } as const;
 
@@ -141,6 +151,12 @@ export interface WorksheetLike {
   findCell(row: number, col: number): CellLike | undefined;
   getCell(row: number, col: number): CellLike;
   getTables?(): TableRefLike[];
+  /**
+   * Read-only enumeration of the worksheet's merged regions (1-based,
+   * inclusive). Optional for hosts that don't model merge state — the
+   * snapshot builder treats absence as "no merges".
+   */
+  readonly mergedRegions?: readonly DimensionsLike[];
 }
 
 /**

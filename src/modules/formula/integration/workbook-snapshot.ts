@@ -174,6 +174,21 @@ export interface WorksheetSnapshot {
 
   /** Tables defined in this worksheet. */
   readonly tables: readonly TableSnapshot[];
+
+  // ── Merged Regions ──
+
+  /**
+   * Merged regions on this worksheet, as 1-based inclusive rectangles.
+   * Consulted by the writeback planner to reject `#SPILL!` conflicts;
+   * the evaluator does not need this since merge slaves are already
+   * filtered out of `cells`.
+   */
+  readonly mergedRegions: readonly {
+    readonly top: number;
+    readonly left: number;
+    readonly bottom: number;
+    readonly right: number;
+  }[];
 }
 
 // ============================================================================

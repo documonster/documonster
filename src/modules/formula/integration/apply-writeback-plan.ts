@@ -163,8 +163,14 @@ function applySpillWrite(workbook: WorkbookLike, op: SpillWrite): void {
           sourceCell.result = snapshotValueToResult(val);
         }
       } else {
-        // Ghost cell: set value (not result)
+        // Ghost cell: set value (not result). Defence in depth — the
+        // plan builder rejects spills onto merged regions, so a Merge
+        // type here is unreachable; guard anyway because writing
+        // through `MergeValue`'s setter would clobber the master.
         const targetCell = ws.getCell(targetRow, targetCol);
+        if (targetCell.type === CellValueTypeLike.Merge) {
+          continue;
+        }
         targetCell.value = snapshotValueToRaw(val);
       }
     }
@@ -189,9 +195,17 @@ function applyCleanupWrite(workbook: WorkbookLike, op: CleanupWrite): void {
   }
   for (const { row, col } of op.cells) {
     const cell = ws.findCell(row, col);
-    if (cell) {
-      cell.value = null;
+    if (!cell) {
+      continue;
     }
+    // Defence in depth: writing `null` to a merge slave would forward
+    // through `MergeValue`'s setter and wipe the master's value. The
+    // plan builder already skips merged regions in `collectStaleGhosts`,
+    // so this guard is belt-and-suspenders.
+    if (cell.type === CellValueTypeLike.Merge) {
+      continue;
+    }
+    cell.value = null;
   }
 }
 

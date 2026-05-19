@@ -132,13 +132,25 @@ function buildWorksheetSnapshot(ws: WorksheetLike, date1904: boolean): Worksheet
 
   const tables = buildTables(ws);
 
+  // Defensive copy — snapshot must not alias host-owned arrays.
+  const hostMergedRegions = ws.mergedRegions;
+  const mergedRegions = hostMergedRegions
+    ? hostMergedRegions.map(r => ({
+        top: r.top,
+        left: r.left,
+        bottom: r.bottom,
+        right: r.right
+      }))
+    : [];
+
   return {
     id: ws.id,
     name: ws.name,
     dimensions,
     cells,
     hiddenRows,
-    tables
+    tables,
+    mergedRegions
   };
 }
 
@@ -156,6 +168,15 @@ function buildCellSnapshot(
 
   // Skip truly empty cells
   if (cellType === CellValueTypeLike.Null) {
+    return null;
+  }
+
+  // Skip merge slaves — Excel treats them as blank for formula
+  // purposes, but the host's `MergeValue` proxy would forward
+  // `cell.value` from the master, so letting them into `cells` would
+  // double-count master values in range aggregates. See issue #162
+  // and the `Merge` case in `CellValueTypeLike`.
+  if (cellType === CellValueTypeLike.Merge) {
     return null;
   }
 

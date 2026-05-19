@@ -66,7 +66,8 @@ function makeWorksheet(
     dimensions: null,
     cells: new Map(),
     hiddenRows: new Set(),
-    tables
+    tables,
+    mergedRegions: []
   };
 }
 

@@ -21,7 +21,11 @@
 import { parseRefRange } from "../compile/address-utils";
 import type { CompiledFormula } from "../compile/compiled-formula";
 import type { FormulaInstance } from "../integration/formula-instance";
-import type { WorkbookSnapshot, SnapshotCellValue } from "../integration/workbook-snapshot";
+import type {
+  WorkbookSnapshot,
+  WorksheetSnapshot,
+  SnapshotCellValue
+} from "../integration/workbook-snapshot";
 import {
   snapshotCellKey,
   spillCellKeyFromId,
@@ -350,6 +354,15 @@ function buildSpillWrite(
     return "error";
   }
 
+  // Reject if the source cell itself sits inside a merged region.
+  // Excel reports #SPILL! whenever a dynamic-array formula is placed
+  // in a merged cell, even when the ghosts land outside the merge.
+  // The ghost loop below skips `(r=0, c=0)` and the master's value is
+  // already in `cells`, so it would not catch this case.
+  if (isInMergedRegion(ws, inst.row, inst.col)) {
+    return "error";
+  }
+
   // Check spill availability: verify all target ghost cells are unoccupied
   for (let r = 0; r < arr.height; r++) {
     for (let c = 0; c < arr.width; c++) {
@@ -363,6 +376,17 @@ function buildSpillWrite(
       // Another spill in this calc pass already claimed this cell —
       // report #SPILL! rather than silently overwrite.
       if (activeSpillTargets.has(targetKey)) {
+        return "error";
+      }
+
+      // Refuse to spill onto any cell that belongs to a merged region.
+      // The cell itself may be a merge slave — which the snapshot
+      // builder filters out of `ws.cells`, so the value/formula checks
+      // below would treat it as empty — but writing there would mutate
+      // the master via `MergeValue`'s setter in `@excel/cell` and
+      // silently corrupt the merge. Excel reports `#SPILL!` whenever a
+      // dynamic-array result tries to land in a merge.
+      if (isInMergedRegion(ws, targetRow, targetCol)) {
         return "error";
       }
 
@@ -475,6 +499,19 @@ function collectStaleGhosts(
       }
       const targetRow = region.sourceRow + r;
       const targetCol = region.sourceCol + c;
+      // If the user (or a previous edit) has placed this former ghost
+      // inside a merged region, skip it. The cell is now either a merge
+      // master (carrying the user's intentional value) or a merge slave
+      // (whose `cell.value = null` writeback would forward through
+      // `MergeValue`'s setter and clobber the master). Either way,
+      // cleanup must not touch it. The snapshot builder filters merge
+      // slaves out of `ws.cells` (see issue #162), so the
+      // `isGhostUnmodified` check below would otherwise miss this case
+      // — `cell` would be `undefined`, which currently means
+      // "unmodified, safe to wipe".
+      if (isInMergedRegion(ws, targetRow, targetCol)) {
+        continue;
+      }
       const targetKey = spillCellKeyFromId(region.worksheetId, targetRow, targetCol);
       const cell = ws.cells.get(snapshotCellKey(targetRow, targetCol));
       if (isGhostUnmodified(cell, targetKey, previousGhosts)) {
@@ -513,6 +550,23 @@ function emitPreviousSpillCleanup(
     sheetId,
     cells: cleanupCells
   } satisfies CleanupWrite);
+}
+
+/**
+ * Test whether `(row, col)` falls inside any merged region of `ws`.
+ *
+ * Linear scan — merge counts per sheet are small in practice. The
+ * snapshot builder filters merge slaves out of `ws.cells`, so callers
+ * use this helper to recover the "is this cell part of a merge?"
+ * signal that the cell map alone no longer carries.
+ */
+function isInMergedRegion(ws: WorksheetSnapshot, row: number, col: number): boolean {
+  for (const region of ws.mergedRegions) {
+    if (row >= region.top && row <= region.bottom && col >= region.left && col <= region.right) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isGhostUnmodified(
