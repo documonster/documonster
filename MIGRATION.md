@@ -111,10 +111,10 @@ Use `CsvOptions` (for workbook-level CSV) or `CsvParseOptions` / `CsvFormatOptio
 
 ```ts
 // Before
-import type { CsvReadOptions, CsvWriteOptions } from "@cj-tech-master/excelts";
+import type { CsvReadOptions, CsvWriteOptions } from "@cjnoname/excelts";
 
 // After
-import type { CsvOptions } from "@cj-tech-master/excelts";
+import type { CsvOptions } from "@cjnoname/excelts";
 ```
 
 ---
@@ -123,7 +123,7 @@ import type { CsvOptions } from "@cj-tech-master/excelts";
 
 ### What changed
 
-The CSV module has been restructured from `csv-core.ts` / `csv-stream.ts` into a modular `csv/` directory. The standalone functions (`parseCsv`, `formatCsv`, `parseCsvStream`) were previously internal-only; they are now publicly exported via the `@cj-tech-master/excelts/csv` subpath. The old `parseCsvStream()` async generator is replaced by `parseCsvRows()`.
+The CSV module has been restructured from `csv-core.ts` / `csv-stream.ts` into a modular `csv/` directory. The standalone functions (`parseCsv`, `formatCsv`, `parseCsvStream`) were previously internal-only; they are now publicly exported via the `@cjnoname/excelts/csv` subpath. The old `parseCsvStream()` async generator is replaced by `parseCsvRows()`.
 
 `CsvParserStream` and `CsvFormatterStream` remain available from the main entry point, and two new factory functions have been added.
 
@@ -140,7 +140,7 @@ import {
   CsvFormatterStream,
   createCsvParserStream,
   createCsvFormatterStream
-} from "@cj-tech-master/excelts/csv";
+} from "@cjnoname/excelts/csv";
 
 // Stream classes also available from main entry
 import {
@@ -148,7 +148,7 @@ import {
   CsvFormatterStream,
   createCsvParserStream,
   createCsvFormatterStream
-} from "@cj-tech-master/excelts";
+} from "@cjnoname/excelts";
 ```
 
 New standalone capabilities:
@@ -246,10 +246,10 @@ The `BufferChunk` class has been renamed to `ByteChunk`.
 
 ```ts
 // Before
-import { BufferChunk } from "@cj-tech-master/excelts";
+import { BufferChunk } from "@cjnoname/excelts";
 
 // After
-import { ByteChunk } from "@cj-tech-master/excelts";
+import { ByteChunk } from "@cjnoname/excelts";
 ```
 
 ---
@@ -264,11 +264,11 @@ The `normalizeWritable` function (also exported as `Writeable`) has been replace
 
 ```ts
 // Before
-import { Writeable } from "@cj-tech-master/excelts";
+import { Writeable } from "@cjnoname/excelts";
 const writable = Writeable(target);
 
 // After
-import { toWritable } from "@cj-tech-master/excelts";
+import { toWritable } from "@cjnoname/excelts";
 const writable = toWritable(target);
 ```
 
@@ -308,7 +308,7 @@ import {
   toUint8Array,
   stringToUint8Array,
   uint8ArrayToString
-} from "@cj-tech-master/excelts";
+} from "@cjnoname/excelts";
 ```
 
 For others (`textEncoder`, `textDecoder`, `uint8ArrayEquals`, `uint8ArrayIndexOf`, `uint8ArraySlice`, `bufferToString`), import from the internal `@utils/binary` module if needed.
@@ -330,7 +330,7 @@ Use `onceEvent` instead (new export):
 import { once } from "...stream module...";
 
 // After
-import { onceEvent } from "@cj-tech-master/excelts/stream";
+import { onceEvent } from "@cjnoname/excelts/stream";
 ```
 
 ---
@@ -454,14 +454,14 @@ The browser entry point (`index.browser.ts`) no longer re-exports archive APIs (
 
 ### How to migrate
 
-Use the new `@cj-tech-master/excelts/zip` subpath export:
+Use the new `@cjnoname/excelts/zip` subpath export:
 
 ```ts
 // Before
-import { zip, unzip, ZipArchive, ZipReader, crc32 } from "@cj-tech-master/excelts";
+import { zip, unzip, ZipArchive, ZipReader, crc32 } from "@cjnoname/excelts";
 
 // After (browser)
-import { zip, unzip, ZipArchive, ZipReader, crc32 } from "@cj-tech-master/excelts/zip";
+import { zip, unzip, ZipArchive, ZipReader, crc32 } from "@cjnoname/excelts/zip";
 ```
 
 The Node.js entry point is unaffected — archive APIs are still re-exported there.
@@ -478,10 +478,10 @@ The `Image` interface has been renamed to `ImageData`. A deprecated type alias `
 
 ```ts
 // Before
-import type { Image } from "@cj-tech-master/excelts";
+import type { Image } from "@cjnoname/excelts";
 
 // After
-import type { ImageData } from "@cj-tech-master/excelts";
+import type { ImageData } from "@cjnoname/excelts";
 ```
 
 The `Workbook.addImage()` parameter type is now `ImageData` instead of `Image`.
@@ -498,10 +498,10 @@ The `ZipOptions` interface (used in `WorkbookWriterOptions`) has been renamed to
 
 ```ts
 // Before
-import type { ZipOptions } from "@cj-tech-master/excelts";
+import type { ZipOptions } from "@cjnoname/excelts";
 
 // After
-import type { WorkbookZipOptions } from "@cj-tech-master/excelts";
+import type { WorkbookZipOptions } from "@cjnoname/excelts";
 ```
 
 ---
@@ -548,7 +548,7 @@ try {
 }
 
 // After
-import { MergeConflictError, isExcelError } from "@cj-tech-master/excelts";
+import { MergeConflictError, isExcelError } from "@cjnoname/excelts";
 
 try {
   worksheet.mergeCells("A1:B2");
@@ -672,7 +672,7 @@ The `EventEmitter` class (moved to `@utils/event-emitter`) now has closer Node.j
 
 - If you relied on `emit("error")` silently returning `false`, you must now add an error listener.
 - If you relied on listener errors being caught and re-emitted, add your own try/catch in listeners.
-- The `EventListener` type is no longer exported from `@utils/event-emitter`, but is still available from the stream module (`@cj-tech-master/excelts/stream`).
+- The `EventListener` type is no longer exported from `@utils/event-emitter`, but is still available from the stream module (`@cjnoname/excelts/stream`).
 
 ### How to migrate
 
@@ -693,21 +693,21 @@ Three new subpath exports have been added to `package.json`:
 
 | Subpath                          | Description                                         |
 | -------------------------------- | --------------------------------------------------- |
-| `@cj-tech-master/excelts/zip`    | Archive module (ZIP, TAR, compression, encryption)  |
-| `@cj-tech-master/excelts/csv`    | CSV module (parse, format, stream, utilities)       |
-| `@cj-tech-master/excelts/stream` | Stream module (cross-platform streaming primitives) |
+| `@cjnoname/excelts/zip`    | Archive module (ZIP, TAR, compression, encryption)  |
+| `@cjnoname/excelts/csv`    | CSV module (parse, format, stream, utilities)       |
+| `@cjnoname/excelts/stream` | Stream module (cross-platform streaming primitives) |
 
 ### How to use
 
 ```ts
 // Import only the archive module
-import { ZipArchive, ZipReader, TarArchive } from "@cj-tech-master/excelts/zip";
+import { ZipArchive, ZipReader, TarArchive } from "@cjnoname/excelts/zip";
 
 // Import only the CSV module
-import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
+import { parseCsv, formatCsv, CsvParserStream } from "@cjnoname/excelts/csv";
 
 // Import only the stream module
-import { Readable, Writable, Transform, pipeline } from "@cj-tech-master/excelts/stream";
+import { Readable, Writable, Transform, pipeline } from "@cjnoname/excelts/stream";
 ```
 
 Each subpath supports `import` (ESM), `require` (CJS), and browser-specific conditions.
@@ -774,7 +774,7 @@ Add `await` to every call site:
 
 ```ts
 // Before
-import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
+import { pdf, readPdf, excelToPdf } from "@cjnoname/excelts/pdf";
 
 const bytes = pdf([
   ["Name", "Age"],
@@ -796,13 +796,13 @@ If you were using the short-lived `*Async` variants, drop the suffix:
 
 ```ts
 // Before
-import { pdfAsync, readPdfAsync, excelToPdfAsync } from "@cj-tech-master/excelts/pdf";
+import { pdfAsync, readPdfAsync, excelToPdfAsync } from "@cjnoname/excelts/pdf";
 
 const bytes = await pdfAsync(data);
 const result = await readPdfAsync(pdfBytes);
 
 // After
-import { pdf, readPdf, excelToPdf } from "@cj-tech-master/excelts/pdf";
+import { pdf, readPdf, excelToPdf } from "@cjnoname/excelts/pdf";
 
 const bytes = await pdf(data);
 const result = await readPdf(pdfBytes);
@@ -822,7 +822,7 @@ The changes below were introduced after the v9.2.1 release. Consumers upgrading 
 
 Also introduced in this window (**purely additive — no migration needed**, included here for awareness):
 
-- **Formula calculation engine** at the `@cj-tech-master/excelts/formula` subpath — 433 Excel functions, tokenizer/parser, dependency graph, dynamic-array spill. Opt-in via `installFormulaEngine()` or used functionally via `calculateFormulas(workbookLike)`. The engine has zero excel runtime dependencies and can drive any `WorkbookLike` host.
+- **Formula calculation engine** at the `@cjnoname/excelts/formula` subpath — 433 Excel functions, tokenizer/parser, dependency graph, dynamic-array spill. Opt-in via `installFormulaEngine()` or used functionally via `calculateFormulas(workbookLike)`. The engine has zero excel runtime dependencies and can drive any `WorkbookLike` host.
 - **`Workbook.calculateFormulas()`** — requires `installFormulaEngine()` from the formula subpath first; throws with a pointer to the installer otherwise.
 - **Dynamic-array formulas** — `FILTER`, `SORT`, `UNIQUE`, `XLOOKUP`, `SEQUENCE`, spill-error detection, ghost cells.
 - **External workbook links** — `[Book.xlsx]Sheet!A1` now round-trips through load/save.
@@ -1071,7 +1071,7 @@ cell.displayText; // "04-12-19" (new)
 Or format a raw value without a cell:
 
 ```ts
-import { formatCellValue, getCellDisplayText } from "@cj-tech-master/excelts";
+import { formatCellValue, getCellDisplayText } from "@cjnoname/excelts";
 
 formatCellValue(new Date(Date.UTC(2019, 3, 12)), "dd.mm.yyyy"); // "12.04.2019"
 getCellDisplayText(cell, "dd.mm.yyyy"); // applies override only when numFmt is a date format

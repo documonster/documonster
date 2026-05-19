@@ -7,7 +7,7 @@
  * defined-name text like `OFFSET(Sheet1!$A$1,0,0,3,1)` is a parseable
  * formula or opaque content to preserve verbatim. The only authoritative
  * answer comes from the formula tokenizer + parser, which ship in the
- * `@cj-tech-master/excelts/formula` subpath and are an opt-in
+ * `@cjnoname/excelts/formula` subpath and are an opt-in
  * dependency.
  *
  * This file is a tiny passive registration slot — a single `let` with

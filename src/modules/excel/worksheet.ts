@@ -3,7 +3,7 @@ import type { Cell, FormulaResult, FormulaValueData } from "@excel/cell";
 // than imported directly. See `chart-host-registry.ts` and
 // `chart/install.ts` for the registration protocol. Types are pulled
 // in via `import type` so bundlers emit zero runtime chart code unless
-// the consumer imports `@cj-tech-master/excelts/chart`.
+// the consumer imports `@cjnoname/excelts/chart`.
 import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
 import type { ChartSupport } from "@excel/chart-host-registry";
 import type { Chart, ChartAnchorModel } from "@excel/chart/chart";

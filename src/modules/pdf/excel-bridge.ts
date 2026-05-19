@@ -27,7 +27,7 @@ import type {
 // `@pkg/pdf` can do excel-to-PDF conversion without statically pulling
 // ~1.2 MB of chart rendering code into every consumer's bundle.
 // Consumers that convert workbooks with charts must call
-// `installChartSupport()` from `@cj-tech-master/excelts/chart` before
+// `installChartSupport()` from `@cjnoname/excelts/chart` before
 // invoking `excelToPdf()`.
 import { getChartSupport } from "@excel/chart-host-registry";
 import type { Chartsheet } from "@excel/chartsheet";
@@ -95,7 +95,7 @@ export async function excelToPdf(
   // reflect the latest cell values (fixes stale cached results from XLSX).
   //
   // The formula engine is opt-in: callers who import
-  // `@cj-tech-master/excelts/formula` get automatic recalculation here; callers
+  // `@cjnoname/excelts/formula` get automatic recalculation here; callers
   // who don't import it fall back to whatever cached results the XLSX
   // shipped with (safe for workbooks last saved by Excel itself).
   tryInvokeFormulaEngine(workbook);
@@ -170,7 +170,7 @@ export interface ChartToPdfOptions {
  * Lives in `excel-bridge.ts` because invoking the PDF builder from the
  * chart module would cross the Layer 4 → Layer 5 import boundary
  * documented in `AGENTS.md`. Consumers import it from
- * `@cj-tech-master/excelts/pdf` alongside `excelToPdf`.
+ * `@cjnoname/excelts/pdf` alongside `excelToPdf`.
  */
 export async function chartToPdf(
   chart: Chart,

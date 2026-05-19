@@ -6,22 +6,22 @@ A full-featured, zero-dependency PDF engine built from scratch in pure TypeScrip
 
 ```typescript
 // Write — standalone
-import { pdf } from "@cj-tech-master/excelts/pdf";
+import { pdf } from "@cjnoname/excelts/pdf";
 
 // Write — from Excel
-import { excelToPdf } from "@cj-tech-master/excelts/pdf";
+import { excelToPdf } from "@cjnoname/excelts/pdf";
 
 // Read — extract text, images, metadata
-import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readPdf } from "@cjnoname/excelts/pdf";
 
 // Build — free-form PDF with text, shapes, annotations, forms
-import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+import { PdfDocumentBuilder } from "@cjnoname/excelts/pdf";
 
 // Edit — overlay content, fill forms, merge, sign
-import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+import { PdfEditor } from "@cjnoname/excelts/pdf";
 
 // Sign — digital signatures (verify and create)
-import { verifyPdfSignature, signPdf } from "@cj-tech-master/excelts/pdf";
+import { verifyPdfSignature, signPdf } from "@cjnoname/excelts/pdf";
 ```
 
 ## Features
@@ -103,7 +103,7 @@ import { verifyPdfSignature, signPdf } from "@cj-tech-master/excelts/pdf";
 ### Read a PDF
 
 ```typescript
-import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readPdf } from "@cjnoname/excelts/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
@@ -184,7 +184,7 @@ for (const page of result.pages) {
 The simplest way to generate PDFs from Excel workbooks:
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("Sales");
@@ -211,7 +211,7 @@ window.open(url);
 ### Read XLSX, Export PDF
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 await workbook.xlsx.readFile("report.xlsx");
@@ -228,7 +228,7 @@ const pdf = await excelToPdf(workbook, {
 Generate PDFs from plain data — no Excel module, no Map objects, no boilerplate:
 
 ```typescript
-import { pdf } from "@cj-tech-master/excelts/pdf";
+import { pdf } from "@cjnoname/excelts/pdf";
 
 // Simplest — pass a 2D array
 const bytes = await pdf([
@@ -334,7 +334,7 @@ const bytes = await pdf(data, {
 Create PDFs with precise control over text, shapes, and layout:
 
 ```typescript
-import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+import { PdfDocumentBuilder } from "@cjnoname/excelts/pdf";
 
 const doc = new PdfDocumentBuilder();
 doc.setMetadata({ title: "My Report", author: "excelts" });
@@ -382,7 +382,7 @@ const bytes = await doc.build();
 Overlay content, fill forms, merge documents, and manipulate pages:
 
 ```typescript
-import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+import { PdfEditor } from "@cjnoname/excelts/pdf";
 
 const editor = PdfEditor.load(existingPdfBytes);
 
@@ -423,7 +423,7 @@ import {
   verifyPdfSignature,
   signPdf,
   buildSignatureDictPlaceholder
-} from "@cj-tech-master/excelts/pdf";
+} from "@cjnoname/excelts/pdf";
 
 // Verify a signature
 const result = await verifyPdfSignature(pdfBytes, signatureHex, byteRange);
@@ -818,10 +818,10 @@ The PDF module is fully tree-shakeable. If you don't import any PDF exports, the
 
 ```typescript
 // Only imports Excel core — PDF module is NOT included
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 // Imports Excel + PDF bridge
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cjnoname/excelts";
 ```
 
 ---
@@ -864,7 +864,7 @@ npx tsx src/modules/pdf/examples/pdf-signatures.ts
 Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdfResult>`.
 
 ```typescript
-import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readPdf } from "@cjnoname/excelts/pdf";
 
 // Basic
 const result = await readPdf(pdfBytes);
@@ -908,7 +908,7 @@ await pdf([["A", 1]], { showGridLines: true, pageSize: "A4" });
 Convert an Excel `Workbook` to PDF. Returns `Promise<Uint8Array>`.
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 // ... build workbook ...
@@ -920,7 +920,7 @@ const bytes = await excelToPdf(workbook, { showGridLines: true });
 Build free-form PDFs with text, vector graphics, annotations, and form fields.
 
 ```typescript
-import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+import { PdfDocumentBuilder } from "@cjnoname/excelts/pdf";
 
 const doc = new PdfDocumentBuilder();
 doc.setMetadata({ title, author, subject, creator });
@@ -954,7 +954,7 @@ const bytes = await doc.build(); // Returns Promise<Uint8Array>
 Edit existing PDFs — overlay content, fill forms, merge, split, and sign.
 
 ```typescript
-import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+import { PdfEditor } from "@cjnoname/excelts/pdf";
 
 const editor = PdfEditor.load(pdfBytes, { password? });
 
@@ -994,7 +994,7 @@ const pages = await editor.splitPages();      // Split into individual PDFs
 Verify a digital signature. Returns `Promise<SignatureVerificationResult>`.
 
 ```typescript
-import { verifyPdfSignature } from "@cj-tech-master/excelts/pdf";
+import { verifyPdfSignature } from "@cjnoname/excelts/pdf";
 
 const result = await verifyPdfSignature(pdfBytes, sigHex, [0, off1, off2, len2]);
 // result.valid            — boolean
@@ -1008,7 +1008,7 @@ const result = await verifyPdfSignature(pdfBytes, sigHex, [0, off1, off2, len2])
 Sign a PDF containing a signature placeholder. Returns `Promise<Uint8Array>`.
 
 ```typescript
-import { signPdf, buildSignatureDictPlaceholder } from "@cj-tech-master/excelts/pdf";
+import { signPdf, buildSignatureDictPlaceholder } from "@cjnoname/excelts/pdf";
 
 // Step 1: Build placeholder
 const { dictString, placeholder } = buildSignatureDictPlaceholder({
@@ -1024,7 +1024,7 @@ const signed = await signPdf(pdfWithPlaceholder, certificate, privateKey);
 Parse an SVG path `d` attribute into an array of `PathOp` objects for `drawPath()`.
 
 ```typescript
-import { parseSvgPath } from "@cj-tech-master/excelts/pdf";
+import { parseSvgPath } from "@cjnoname/excelts/pdf";
 
 const ops = parseSvgPath("M10 10 L90 10 L50 80 Z");
 page.drawPath(ops, { fill: { r: 1, g: 0, b: 0 } });
@@ -1039,7 +1039,7 @@ import {
   PdfFontError, // Font parsing/embedding failures
   PdfStructureError, // PDF structure assembly failures
   isPdfError // Type guard: (err: unknown) => err is PdfError
-} from "@cj-tech-master/excelts";
+} from "@cjnoname/excelts";
 ```
 
 All errors extend `BaseError` with `cause` chain support:

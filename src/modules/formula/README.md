@@ -57,8 +57,8 @@ See `functions/` for the full list; `runtime/function-registry.ts` is the regist
 ### Paired with `Workbook` (most common)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "@cjnoname/excelts";
+import { installFormulaEngine } from "@cjnoname/excelts/formula";
 
 // Call once at startup — wires the engine into Workbook.calculateFormulas(),
 // the PDF bridge's automatic recalc, and strict defined-name classification
@@ -83,7 +83,7 @@ have to use the excel module at all. A bundle that imports only
 `calculateFormulas` pulls zero excel runtime code.
 
 ```typescript
-import { calculateFormulas, type WorkbookLike } from "@cj-tech-master/excelts/formula";
+import { calculateFormulas, type WorkbookLike } from "@cjnoname/excelts/formula";
 
 // Your own data — any object implementing WorkbookLike works.
 // No Workbook class, no installFormulaEngine() required.
@@ -106,8 +106,8 @@ specific instance without touching process-global state, inject a
 probe explicitly:
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { createFormulaSyntaxProbe } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "@cjnoname/excelts";
+import { createFormulaSyntaxProbe } from "@cjnoname/excelts/formula";
 
 const wb = new Workbook({ formulaSyntaxProbe: createFormulaSyntaxProbe() });
 await wb.xlsx.load(buffer);
@@ -118,7 +118,7 @@ await wb.xlsx.load(buffer);
 ### Tokenise / parse without evaluating
 
 ```typescript
-import { tokenize, parse } from "@cj-tech-master/excelts/formula";
+import { tokenize, parse } from "@cjnoname/excelts/formula";
 
 const tokens = tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
 const ast = parse(tokens); // throws on syntax errors
@@ -126,7 +126,7 @@ const ast = parse(tokens); // throws on syntax errors
 
 ## Why a separate subpath?
 
-The formula engine is ~200 KB minified. Most callers of `@cj-tech-master/excelts`
+The formula engine is ~200 KB minified. Most callers of `@cjnoname/excelts`
 only read and write XLSX files and let Excel recalculate on open — pulling
 the engine into those bundles unconditionally would be a large, invisible
 cost.

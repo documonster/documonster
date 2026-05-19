@@ -5,7 +5,7 @@
 零依赖、跨平台的归档工具包，用于创建、读取和编辑 ZIP 和 TAR 归档。
 
 ```typescript
-import { zip, unzip, ZipArchive, ZipReader } from "@cj-tech-master/excelts/zip";
+import { zip, unzip, ZipArchive, ZipReader } from "@cjnoname/excelts/zip";
 ```
 
 ## 功能特性
@@ -29,7 +29,7 @@ import { zip, unzip, ZipArchive, ZipReader } from "@cj-tech-master/excelts/zip";
 ### 创建 ZIP
 
 ```typescript
-import { zip, ZipArchive } from "@cj-tech-master/excelts/zip";
+import { zip, ZipArchive } from "@cjnoname/excelts/zip";
 
 // 便捷函数
 const archive = zip();
@@ -48,7 +48,7 @@ const bytes = await archive.bytes();
 ### 读取 ZIP
 
 ```typescript
-import { unzip, ZipReader } from "@cj-tech-master/excelts/zip";
+import { unzip, ZipReader } from "@cjnoname/excelts/zip";
 
 const reader = unzip(zipBytes);
 for await (const entry of reader.entries()) {
@@ -66,7 +66,7 @@ const data = await reader.bytes("hello.txt");
 ### 编辑 ZIP
 
 ```typescript
-import { editZip } from "@cj-tech-master/excelts/zip";
+import { editZip } from "@cjnoname/excelts/zip";
 
 const editor = await editZip(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
@@ -84,7 +84,7 @@ const output = await editor.bytes();
 工厂函数，创建新的 `ZipArchive` 或 `TarArchive`。
 
 ```typescript
-import { zip } from "@cj-tech-master/excelts/zip";
+import { zip } from "@cjnoname/excelts/zip";
 
 const archive = zip(); // ZipArchive
 const tarArchive = zip({ format: "tar" }); // TarArchive
@@ -95,7 +95,7 @@ const tarArchive = zip({ format: "tar" }); // TarArchive
 流式 ZIP 归档构建器，支持链式调用。
 
 ```typescript
-import { ZipArchive } from "@cj-tech-master/excelts/zip";
+import { ZipArchive } from "@cjnoname/excelts/zip";
 
 const archive = new ZipArchive({ level: 6, reproducible: true });
 
@@ -150,7 +150,7 @@ for await (const chunk of op.iterable) { ... }
 打开归档进行读取。
 
 ```typescript
-import { unzip } from "@cj-tech-master/excelts/zip";
+import { unzip } from "@cjnoname/excelts/zip";
 
 const reader = unzip(zipBytes);
 const reader = unzip(zipBytes, { password: "secret" });
@@ -162,7 +162,7 @@ const reader = unzip(tarBytes, { format: "tar" });
 流式 ZIP 读取器，支持随机访问。
 
 ```typescript
-import { ZipReader } from "@cj-tech-master/excelts/zip";
+import { ZipReader } from "@cjnoname/excelts/zip";
 
 const reader = new ZipReader(zipBytes);
 
@@ -222,7 +222,7 @@ entry.discard();                  // 跳过不读取
 对现有 ZIP 归档进行文件系统式编辑。未变更的条目高效直通传递（保留原始压缩字节）。
 
 ```typescript
-import { editZip, editZipUrl, ZipEditor } from "@cj-tech-master/excelts/zip";
+import { editZip, editZipUrl, ZipEditor } from "@cjnoname/excelts/zip";
 
 // 从字节
 const editor = await editZip(zipBytes, {
@@ -243,7 +243,7 @@ editor.rename("a.txt", "b.txt");      // 重命名条目
 editor.setComment("Updated archive"); // 设置归档注释
 
 // 可复用的编辑计划
-import { ZipEditPlan } from "@cj-tech-master/excelts/zip";
+import { ZipEditPlan } from "@cjnoname/excelts/zip";
 
 const plan = new ZipEditPlan();
 plan.set("config.json", newConfig);
@@ -263,7 +263,7 @@ for await (const chunk of editor.stream()) { ... }
 通过 HTTP Range 请求读取 ZIP 文件 — 只下载你需要的条目。
 
 ```typescript
-import { RemoteZipReader } from "@cj-tech-master/excelts/zip";
+import { RemoteZipReader } from "@cjnoname/excelts/zip";
 
 const reader = await RemoteZipReader.open("https://example.com/large.zip");
 
@@ -323,7 +323,7 @@ import {
   decompressAuto,
   decompressAutoSync,
   detectCompressionFormat
-} from "@cj-tech-master/excelts/zip";
+} from "@cjnoname/excelts/zip";
 
 // DEFLATE-RAW（ZIP 文件使用）
 const compressed = await compress(data, { level: 9 });
@@ -354,7 +354,7 @@ import {
   createZlibStream,
   createUnzlibStream,
   hasDeflateRaw
-} from "@cj-tech-master/excelts/zip";
+} from "@cjnoname/excelts/zip";
 
 // DEFLATE-RAW 流式
 const deflater = createDeflateStream({ level: 6 });
@@ -375,7 +375,7 @@ hasDeflateRaw(); // Node.js 中为 true，浏览器取决于 CompressionStream
 ### CRC32
 
 ```typescript
-import { crc32, crc32Update, crc32Finalize } from "@cj-tech-master/excelts/zip";
+import { crc32, crc32Update, crc32Finalize } from "@cjnoname/excelts/zip";
 
 // 一次性
 const checksum = crc32(data);
@@ -396,7 +396,7 @@ const checksum = crc32Finalize(state);
 ### 创建 TAR 归档
 
 ```typescript
-import { tar, TarArchive } from "@cj-tech-master/excelts/zip";
+import { tar, TarArchive } from "@cjnoname/excelts/zip";
 
 // 便捷函数
 const tarBytes = await tar(
@@ -418,7 +418,7 @@ for await (const chunk of archive.stream()) { ... }
 ### 读取 TAR 归档
 
 ```typescript
-import { unzip, TarReader } from "@cj-tech-master/excelts/zip";
+import { unzip, TarReader } from "@cjnoname/excelts/zip";
 
 // 通过统一 API
 const reader = unzip(tarBytes, { format: "tar" });
@@ -438,7 +438,7 @@ const paths = await reader.list();
 ### TAR + GZIP（仅 Node.js）
 
 ```typescript
-import { targz, TarGzArchive, parseTarGz, untargz } from "@cj-tech-master/excelts/zip";
+import { targz, TarGzArchive, parseTarGz, untargz } from "@cjnoname/excelts/zip";
 
 // 创建 .tar.gz
 const tgzBytes = await targz(
@@ -469,7 +469,7 @@ const files = await untargz(tgzBytes);
 高级 `ArchiveFile` 类，支持磁盘 I/O、glob 模式、目录遍历和提取。
 
 ```typescript
-import { ArchiveFile } from "@cj-tech-master/excelts/zip";
+import { ArchiveFile } from "@cjnoname/excelts/zip";
 
 // 从零创建
 const af = new ArchiveFile();
@@ -515,7 +515,7 @@ await tar.writeToFile("archive.tar");
 支持 ZIP 传统加密（旧版）和 AES-256 加密。
 
 ```typescript
-import { ZipArchive, unzip, RemoteZipReader } from "@cj-tech-master/excelts/zip";
+import { ZipArchive, unzip, RemoteZipReader } from "@cjnoname/excelts/zip";
 
 // 加密条目（读取时自动处理）
 const reader = unzip(encryptedZip, { password: "secret" });
@@ -550,7 +550,7 @@ import {
   RangeNotSupportedError,
   HttpRangeError,
   AbortError
-} from "@cj-tech-master/excelts/zip";
+} from "@cjnoname/excelts/zip";
 ```
 
 ---

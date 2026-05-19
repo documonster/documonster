@@ -4,7 +4,7 @@
  * A tiny indirection layer that lets `Workbook.calculateFormulas()` and
  * the PDF bridge invoke a full formula engine **only if the host
  * application has opted in** by calling `installFormulaEngine()` from
- * `@cj-tech-master/excelts/formula`.
+ * `@cjnoname/excelts/formula`.
  *
  * ## Why a registry
  *
@@ -33,7 +33,7 @@ let installed: FormulaEngine | null = null;
 
 /**
  * Install a formula engine implementation. Called from
- * `installFormulaEngine()` in the `@cj-tech-master/excelts/formula`
+ * `installFormulaEngine()` in the `@cjnoname/excelts/formula`
  * subpath.
  *
  * Re-installing is allowed — the last registration wins. This keeps
@@ -58,7 +58,7 @@ export function invokeFormulaEngine(workbook: WorkbookLike): void {
   if (!installed) {
     throw new Error(
       "No formula engine is installed. " +
-        "Call `installFormulaEngine()` from `@cj-tech-master/excelts/formula` " +
+        "Call `installFormulaEngine()` from `@cjnoname/excelts/formula` " +
         "once at startup to enable `Workbook.calculateFormulas()` and " +
         "automatic recalculation during `excelToPdf()`."
     );

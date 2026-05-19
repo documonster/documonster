@@ -79,11 +79,11 @@ Node.js-compatible Readable/Writable/Transform/Duplex that works identically in 
 ## Installation
 
 ```bash
-npm install @cj-tech-master/excelts
+npm install @cjnoname/excelts
 # or
-pnpm add @cj-tech-master/excelts
+pnpm add @cjnoname/excelts
 # or
-bun add @cj-tech-master/excelts
+bun add @cjnoname/excelts
 ```
 
 Each module is available as a standalone subpath export. All subpaths support `browser`, `import` (ESM), and `require` (CJS) conditions.
@@ -91,7 +91,7 @@ Each module is available as a standalone subpath export. All subpaths support `b
 ## Quick Start
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 // Create
 const workbook = new Workbook();
@@ -106,20 +106,20 @@ await wb.xlsx.readFile("output.xlsx");
 wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
 
 // PDF — generate from data, no Workbook needed
-import { pdf } from "@cj-tech-master/excelts/pdf";
+import { pdf } from "@cjnoname/excelts/pdf";
 const pdfBytes = await pdf([
   ["Product", "Revenue"],
   ["Widget", 1000]
 ]);
 
 // PDF — read text, images, and metadata from any PDF
-import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readPdf } from "@cjnoname/excelts/pdf";
 const result = await readPdf(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
 
 // PDF — build free-form PDFs with text, shapes, SVG paths
-import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+import { PdfDocumentBuilder } from "@cjnoname/excelts/pdf";
 const doc = new PdfDocumentBuilder();
 const page = doc.addPage();
 page.drawText("Hello!", { x: 72, y: 770, fontSize: 24 });
@@ -127,39 +127,39 @@ page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
 page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
 
 // PDF — edit existing PDFs (overlay, merge, fill forms)
-import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+import { PdfEditor } from "@cjnoname/excelts/pdf";
 const editor = PdfEditor.load(existingPdf);
 editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
 editor.setFormField("name", "Jane");
 editor.copyPagesFrom(otherPdf);
 
 // CSV — parse and format
-import { parseCsv, formatCsv } from "@cj-tech-master/excelts/csv";
+import { parseCsv, formatCsv } from "@cjnoname/excelts/csv";
 const rows = parseCsv("name,age\nAlice,30", { headers: true });
 const csv = formatCsv([{ name: "Bob", age: 25 }], { headers: true });
 
 // XML — parse, query, write
-import { parseXml, queryAll, XmlWriter } from "@cj-tech-master/excelts/xml";
+import { parseXml, queryAll, XmlWriter } from "@cjnoname/excelts/xml";
 const titles = queryAll(parseXml(xmlString).root, "book/title");
 
 // ZIP — create and extract
-import { zip, unzip } from "@cj-tech-master/excelts/zip";
+import { zip, unzip } from "@cjnoname/excelts/zip";
 const archive = await zip().add("hello.txt", "Hello!").bytes();
 
 // Markdown — parse and format tables
-import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown, formatMarkdown } from "@cjnoname/excelts/markdown";
 const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Formula — opt-in calculation engine (kept out of the base bundle)
 //
 // Mode A: paired with Workbook — enables wb.calculateFormulas()
-import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+import { installFormulaEngine } from "@cjnoname/excelts/formula";
 installFormulaEngine(); // once at startup
 sheet.getCell("A4").value = { formula: "SUM(A1:A3)" };
 workbook.calculateFormulas(); // now populates cell.result
 
 // Mode B: standalone — pure function, zero excel runtime, any WorkbookLike
-import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+import { calculateFormulas } from "@cjnoname/excelts/formula";
 calculateFormulas(anyWorkbookLikeObject);
 ```
 
@@ -169,17 +169,17 @@ ExcelTS has native browser support with **zero configuration** for modern bundle
 
 ```typescript
 // Bundlers (Vite, Webpack, Rollup, esbuild) — just import
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer();
 ```
 
 ```html
 <!-- Script tag (no bundler) -->
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/@cjnoname/excelts/dist/iife/excelts.iife.min.js"></script>
 ```
 
 > The IIFE bundle does not include the formula calculation engine. Use
-> ESM + `@cj-tech-master/excelts/formula` if you need
+> ESM + `@cjnoname/excelts/formula` if you need
 > `Workbook.calculateFormulas()`.
 
 For older browsers without native `CompressionStream` API, ExcelTS automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.

@@ -18,7 +18,7 @@ import { parseNumberFromCsv, type DecimalSeparator } from "@csv/utils/number";
 // Chart runtime accessed through the host-registry slot; see
 // `chart-host-registry.ts` and `chart/install.ts`. Keeps chart code
 // out of consumer bundles when they don't import
-// `@cj-tech-master/excelts/chart`.
+// `@cjnoname/excelts/chart`.
 import { getChartSupport } from "@excel/chart-host-registry";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
@@ -2279,7 +2279,7 @@ class Workbook {
    * to this method, or a clear error will be thrown explaining what to do.
    *
    * ```ts
-   * import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+   * import { installFormulaEngine } from "@cjnoname/excelts/formula";
    *
    * installFormulaEngine();                   // once, at startup
    *
@@ -2291,7 +2291,7 @@ class Workbook {
    * use the functional equivalent directly:
    *
    * ```ts
-   * import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+   * import { calculateFormulas } from "@cjnoname/excelts/formula";
    * calculateFormulas(workbook);
    * ```
    */
@@ -2348,7 +2348,7 @@ class Workbook {
    *                each `calculateFormulas()` call regardless.
    *
    * ```ts
-   * import { rvNumber } from "@cj-tech-master/excelts/formula";
+   * import { rvNumber } from "@cjnoname/excelts/formula";
    * workbook.registerFunction("DOUBLE", ([x]) => {
    *   return rvNumber((x as any).value * 2);
    * }, { minArity: 1, maxArity: 1 });

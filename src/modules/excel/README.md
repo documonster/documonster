@@ -36,7 +36,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 ### Creating a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("My Sheet");
@@ -56,7 +56,7 @@ const buffer = await workbook.xlsx.writeBuffer();
 ### Reading a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 
@@ -291,7 +291,7 @@ ExcelTS includes a structured chart API, raw XML preservation for templates, and
 > **Setup:** Chart support is opt-in to keep bundle size minimal. Call `installChartSupport()` once at startup before using any chart API (`addChart`, `addLineChart`, chart load/write, etc.):
 >
 > ```typescript
-> import { installChartSupport } from "@cj-tech-master/excelts/chart";
+> import { installChartSupport } from "@cjnoname/excelts/chart";
 > installChartSupport(); // once, at startup
 > ```
 >
@@ -358,7 +358,7 @@ import {
   EXCEL_CHART_EX_PRESETS,
   applyChartPreset,
   applyChartExPreset
-} from "@cj-tech-master/excelts/chart";
+} from "@cjnoname/excelts/chart";
 
 // 99 classic presets + 10 ChartEx presets (Excel UI aliases)
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
@@ -667,7 +667,7 @@ ws.addChart(
 ### Preview Export
 
 ```typescript
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { chartToPdf } from "@cjnoname/excelts/pdf";
 
 const chart = ws.getCharts()[0];
 
@@ -686,7 +686,7 @@ const pdf = await chartToPdf(chart, {
 });
 
 // Inspect the vector-vs-raster decision explicitly:
-import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
+import { canRenderChartExAsVectorPdf } from "@cjnoname/excelts/chart";
 if (chart.chartExModel) {
   console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
 }
@@ -882,7 +882,7 @@ These features would require multi-week investments with a low payoff for a prev
 - **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all go through `drawChartExPdf`, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
 - **Raster opt-in** — any ChartEx type can be rasterised on demand with `chartToPdf(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text or vector scalability.
 
-Use `chartToPdf(chart, options)` from `@cj-tech-master/excelts/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
+Use `chartToPdf(chart, options)` from `@cjnoname/excelts/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
 
 **Pivot chart note:** ExcelTS supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
 
@@ -913,7 +913,7 @@ Full API mapping tables are in dedicated docs, one per library:
 Export any workbook to PDF with zero external dependencies:
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, excelToPdf } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("Report");
@@ -971,7 +971,7 @@ const pdf = await excelToPdf(workbook, {
 ## CSV Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 import fs from "fs";
 
 const workbook = new Workbook();
@@ -998,7 +998,7 @@ await workbook.readCsv(arrayBuffer);
 ## Markdown Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 
@@ -1019,7 +1019,7 @@ const bytes = workbook.writeMarkdownBuffer();
 Read large XLSX files with minimal memory usage:
 
 ```typescript
-import { WorkbookReader } from "@cj-tech-master/excelts";
+import { WorkbookReader } from "@cjnoname/excelts";
 
 const reader = new WorkbookReader("large-file.xlsx", {
   worksheets: "emit",
@@ -1041,7 +1041,7 @@ for await (const worksheet of reader) {
 Write large XLSX files row by row:
 
 ```typescript
-import { WorkbookWriter } from "@cj-tech-master/excelts";
+import { WorkbookWriter } from "@cjnoname/excelts";
 
 const workbook = new WorkbookWriter({
   filename: "output.xlsx",
@@ -1061,7 +1061,7 @@ await workbook.commit();
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
-import { WorkbookWriter, WorkbookReader } from "@cj-tech-master/excelts";
+import { WorkbookWriter, WorkbookReader } from "@cjnoname/excelts";
 
 // Write to Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -1106,7 +1106,7 @@ for await (const ws of reader) {
 ### Using with Bundlers (Vite, Webpack, Rollup, esbuild)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 const sheet = workbook.addWorksheet("Sheet1");
@@ -1122,7 +1122,7 @@ const url = URL.createObjectURL(blob);
 ### Using with Script Tags
 
 ```html
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/@cjnoname/excelts/dist/iife/excelts.iife.min.js"></script>
 <script>
   const { Workbook } = ExcelTS;
   const wb = new Workbook();
@@ -1175,7 +1175,7 @@ import {
   errorToJSON,
   getErrorChain,
   getRootCause
-} from "@cj-tech-master/excelts";
+} from "@cjnoname/excelts";
 ```
 
 ## Examples

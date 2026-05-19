@@ -911,7 +911,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **archive:** Gzip/Zlib compression (`gzip()`, `gunzip()`, `zlib()`, `unzlib()`)
 - **archive:** ZIP64 large file support
 - **archive:** progress/abort support for all archive operations
-- **stream:** new subpath export `@cj-tech-master/excelts/stream`
+- **stream:** new subpath export `@cjnoname/excelts/stream`
 - **stream:** cross-platform stream error classes (`StreamError`, `StreamStateError`, `StreamTypeError`)
 - **stream:** type guards (`isReadableStream`, `isWritableStream`, `isAsyncIterable`, `isTransformStream`)
 - **excel:** structured error hierarchy (16 typed error classes extending `ExcelError`)
@@ -928,7 +928,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **stream:** binary utilities (`textEncoder`, `stringToUint8Array`, etc.) no longer re-exported from stream module (moved to `@utils/binary`)
 - **stream:** `ReadWriteBufferOptions` type
 - **archive:** `UnzipEntry.isDirectory` (replaced by `UnzipEntry.type: "file" | "directory" | "symlink"`)
-- **archive:** archive APIs removed from browser main entry (use `@cj-tech-master/excelts/zip` subpath instead)
+- **archive:** archive APIs removed from browser main entry (use `@cjnoname/excelts/zip` subpath instead)
 
 ### Breaking Changes
 
@@ -940,7 +940,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **stream:** `normalizeWritable` / `Writeable` replaced by `toWritable`
 - **stream:** `BufferedStream.toUint8Array()` now consumes the buffer (resets to empty after call)
 - **archive:** `UnzipEntry.isDirectory` removed; use `entry.type === "directory"` instead
-- **archive:** archive APIs removed from browser main entry; use `@cj-tech-master/excelts/zip` subpath
+- **archive:** archive APIs removed from browser main entry; use `@cjnoname/excelts/zip` subpath
 - **excel:** `Image` type renamed to `ImageData` (deprecated alias preserved)
 - **excel:** `ZipOptions` renamed to `WorkbookZipOptions` (deprecated alias preserved)
 - **eventemitter:** `emit("error")` now throws if no listener (matches Node.js behavior)

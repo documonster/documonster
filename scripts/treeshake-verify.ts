@@ -181,7 +181,7 @@ const scenarios: Scenario[] = [
   // PDF legitimately depends on archive/compression for zlib/deflate.
   // `excelToPdf` legitimately references the formula registry glue
   // (host-registry.ts) so that an app that also imports
-  // `@cj-tech-master/excelts/formula` gets automatic recalc before
+  // `@cjnoname/excelts/formula` gets automatic recalc before
   // render — see the root Workbook scenario for the rationale.
   s("/pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive")),
   s(

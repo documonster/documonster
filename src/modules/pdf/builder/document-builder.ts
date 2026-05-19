@@ -6,7 +6,7 @@
  *
  * @example Basic usage:
  * ```typescript
- * import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+ * import { PdfDocumentBuilder } from "@cjnoname/excelts/pdf";
  *
  * const doc = new PdfDocumentBuilder();
  * const page = doc.addPage({ width: 595, height: 842 }); // A4

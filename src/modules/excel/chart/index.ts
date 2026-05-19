@@ -6,7 +6,7 @@
  * 1. **Functional, zero-side-effect** — tree-shakeable access to
  *    chart builders, renderers, presets and parsers:
  *    ```ts
- *    import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
+ *    import { buildChartModel, renderChartSvg } from "@cjnoname/excelts/chart";
  *    const model = buildChartModel(options);
  *    const svg   = renderChartSvg(model);
  *    ```
@@ -16,7 +16,7 @@
  *    `workbook.xlsx.writeFile()` chart-cache population, and chart
  *    reconstruction during XLSX load:
  *    ```ts
- *    import { installChartSupport } from "@cj-tech-master/excelts/chart";
+ *    import { installChartSupport } from "@cjnoname/excelts/chart";
  *    installChartSupport();                    // once, at startup
  *    worksheet.addChart(options, "A1:D20");    // now works
  *    ```

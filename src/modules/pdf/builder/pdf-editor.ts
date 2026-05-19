@@ -14,7 +14,7 @@
  *
  * @example Edit an existing PDF:
  * ```typescript
- * import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+ * import { PdfEditor } from "@cjnoname/excelts/pdf";
  *
  * const editor = PdfEditor.load(existingPdfBytes);
  * editor.getPage(0).drawText("APPROVED", { x: 200, y: 400, fontSize: 48, color: { r: 0, g: 0.5, b: 0 } });

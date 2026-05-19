@@ -52,7 +52,7 @@ wb.close()
 **TypeScript (ExcelTS):**
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const wb = new Workbook();
 const ws = wb.addWorksheet("Sales");
@@ -254,7 +254,7 @@ const png = await chart.toPNG({ width: 640, height: 360, scale: 2 });
 writeFileSync("chart.png", png);
 
 // Standalone PDF — classic chart uses vector path, ChartEx uses vector too
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { chartToPdf } from "@cjnoname/excelts/pdf";
 const pdf = await chartToPdf(chart, { title: "Quarterly revenue" });
 writeFileSync("chart.pdf", pdf);
 ```

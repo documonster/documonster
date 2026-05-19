@@ -5,7 +5,7 @@
  *
  * 1. **Functional, zero-side-effect**:
  *    ```ts
- *    import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+ *    import { calculateFormulas } from "@cjnoname/excelts/formula";
  *    calculateFormulas(workbook);
  *    ```
  *    Perfect tree-shaking: unused exports are dropped, no module
@@ -15,7 +15,7 @@
  * 2. **Engine installation**, to enable `Workbook.calculateFormulas()`
  *    and automatic recalculation in `excelToPdf()`:
  *    ```ts
- *    import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+ *    import { installFormulaEngine } from "@cjnoname/excelts/formula";
  *    installFormulaEngine();                // once, at startup
  *    workbook.calculateFormulas();          // now works
  *    ```

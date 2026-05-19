@@ -16,7 +16,7 @@ export { DataValidations } from "@excel/data-validations";
 export { FormCheckbox } from "@excel/form-control";
 // Note: the formula engine lives at the `./formula` subpath so it stays
 // out of bundles that only need to read / write XLSX files. Import
-// `@cj-tech-master/excelts/formula` to enable `Workbook.calculateFormulas()`
+// `@cjnoname/excelts/formula` to enable `Workbook.calculateFormulas()`
 // and automatic recalculation in `excelToPdf()`.
 
 // =============================================================================
@@ -160,7 +160,7 @@ export type { SheetToJSONOptions, AddJSONOptions, AddAOAOptions } from "@excel/w
 // Chart programmatic surface (builders, renderers, presets, parsers,
 // install function) lives at the `./chart` subpath so it stays out of
 // bundles that only need to read / write XLSX files. Import
-// `@cj-tech-master/excelts/chart` to use chart APIs — and call
+// `@cjnoname/excelts/chart` to use chart APIs — and call
 // `installChartSupport()` once at startup to enable
 // `worksheet.addChart()`, chart-cache population during write, and
 // chart reconstruction during XLSX load.

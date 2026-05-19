@@ -5012,7 +5012,7 @@ async function main(): Promise<void> {
   writeFileSync(PDF_PATH, pdfBytes);
 
   // Single-chart PDF via the high-level `chartToPdf` helper — the
-  // canonical entry point from the `@cj-tech-master/excelts/pdf` bundle.
+  // canonical entry point from the `@cjnoname/excelts/pdf` bundle.
   const firstChart = gallery.getCharts()[0];
   const solo = await chartToPdf(firstChart, {
     title: "Solo chart PDF",

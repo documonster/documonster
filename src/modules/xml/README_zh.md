@@ -5,7 +5,7 @@
 零依赖、跨平台的 XML 工具包，支持流式和缓冲两种模式的读写。
 
 ```typescript
-import { XmlWriter, SaxParser, parseXml, query } from "@cj-tech-master/excelts/xml";
+import { XmlWriter, SaxParser, parseXml, query } from "@cjnoname/excelts/xml";
 ```
 
 ## 功能特性
@@ -27,7 +27,7 @@ import { XmlWriter, SaxParser, parseXml, query } from "@cj-tech-master/excelts/x
 ### 写入 XML（缓冲模式）
 
 ```typescript
-import { XmlWriter, StdDocAttributes } from "@cj-tech-master/excelts/xml";
+import { XmlWriter, StdDocAttributes } from "@cjnoname/excelts/xml";
 
 const w = new XmlWriter();
 w.openXml(StdDocAttributes);
@@ -44,7 +44,7 @@ console.log(w.xml);
 ### 写入 XML（流式模式）
 
 ```typescript
-import { XmlStreamWriter } from "@cj-tech-master/excelts/xml";
+import { XmlStreamWriter } from "@cjnoname/excelts/xml";
 
 const chunks: string[] = [];
 const target = { write: (chunk: string) => chunks.push(chunk) };
@@ -60,7 +60,7 @@ sw.closeNode();
 ### 读取 XML（SAX — 流式）
 
 ```typescript
-import { SaxParser } from "@cj-tech-master/excelts/xml";
+import { SaxParser } from "@cjnoname/excelts/xml";
 
 const parser = new SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
@@ -73,7 +73,7 @@ parser.close();
 ### 读取 XML（DOM — 缓冲模式）
 
 ```typescript
-import { parseXml, findChild, textContent, attr } from "@cj-tech-master/excelts/xml";
+import { parseXml, findChild, textContent, attr } from "@cjnoname/excelts/xml";
 
 const doc = parseXml('<root><item id="1">hello</item></root>');
 const item = findChild(doc.root, "item");
@@ -88,7 +88,7 @@ console.log(textContent(item!)); // "hello"
 两种入口适用于不同场景：
 
 ```typescript
-import { parseXml, toPlainObject, parseXmlToObject } from "@cj-tech-master/excelts/xml";
+import { parseXml, toPlainObject, parseXmlToObject } from "@cjnoname/excelts/xml";
 
 // 方式 1：已有 DOM 树
 const doc = parseXml('<root attr="1"><item>a</item><item>b</item></root>');
@@ -118,7 +118,7 @@ const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root
 ### 查询引擎
 
 ```typescript
-import { parseXml, query, queryAll } from "@cj-tech-master/excelts/xml";
+import { parseXml, query, queryAll } from "@cjnoname/excelts/xml";
 
 const doc = parseXml("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
 const first = query(doc.root, "a/b"); // 第一个 <b> 元素
@@ -131,7 +131,7 @@ const deep = queryAll(doc.root, "a//b"); // <a> 下任意深度的 <b>
 ### 编码/解码
 
 ```typescript
-import { xmlEncode, xmlDecode } from "@cj-tech-master/excelts/xml";
+import { xmlEncode, xmlDecode } from "@cjnoname/excelts/xml";
 
 xmlEncode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
 xmlDecode("&lt;hello&gt;"); // "<hello>"
@@ -343,7 +343,7 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
 ### 查询引擎
 
 ```typescript
-import { query, queryAll } from "@cj-tech-master/excelts/xml";
+import { query, queryAll } from "@cjnoname/excelts/xml";
 ```
 
 | 语法           | 描述                               |
@@ -426,7 +426,7 @@ import { query, queryAll } from "@cj-tech-master/excelts/xml";
 ### 示例
 
 ```typescript
-import { SaxParser, parseXml } from "@cj-tech-master/excelts/xml";
+import { SaxParser, parseXml } from "@cjnoname/excelts/xml";
 
 // 默认：严格模式 — 遇到 0x7F 时抛出异常
 parseXml("<root>hello\x7fworld</root>");

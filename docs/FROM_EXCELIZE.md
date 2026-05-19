@@ -65,7 +65,7 @@ func main() {
 **TypeScript:**
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const wb = new Workbook();
 const ws = wb.addWorksheet("Sheet1");

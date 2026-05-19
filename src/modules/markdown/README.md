@@ -5,7 +5,7 @@
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
 ```typescript
-import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cjnoname/excelts/markdown";
 ```
 
 ## Features
@@ -28,7 +28,7 @@ import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master
 ### Parsing
 
 ```typescript
-import { parseMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown } from "@cjnoname/excelts/markdown";
 
 const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
@@ -47,7 +47,7 @@ const doc = parseMarkdown("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 ### Formatting
 
 ```typescript
-import { formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { formatMarkdown } from "@cjnoname/excelts/markdown";
 
 formatMarkdown(
   ["Name", "Age"],
@@ -77,7 +77,7 @@ formatMarkdown(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ### Workbook Integration
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cjnoname/excelts";
 
 const workbook = new Workbook();
 
@@ -210,7 +210,7 @@ formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
 ## Errors
 
 ```typescript
-import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
+import { MarkdownParseError } from "@cjnoname/excelts/markdown";
 
 try {
   parseMarkdown("no table here");

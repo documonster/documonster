@@ -14,7 +14,7 @@ import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 // Chart serialisation / deserialisation goes through the chart-host-registry
 // slot so the chart module is only pulled into consumer bundles when they
-// explicitly `import "@cj-tech-master/excelts/chart"`. Type imports are
+// explicitly `import "@cjnoname/excelts/chart"`. Type imports are
 // erased at runtime; runtime entry points route through `getChartSupport()`.
 import { getChartSupport } from "@excel/chart-host-registry";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";

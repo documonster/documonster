@@ -5,7 +5,7 @@
  * `Chartsheet` call into chart-building, chart-rendering and chart
  * cache-population code **only if the host application has opted in**
  * by calling `installChartSupport()` from
- * `@cj-tech-master/excelts/chart`.
+ * `@cjnoname/excelts/chart`.
  *
  * ## Why a registry
  *
@@ -21,7 +21,7 @@
  * pulls it in (~1 KB) but does NOT pull in the chart implementation;
  * the implementation only arrives once someone calls
  * `installChartSupport()`, which bundlers resolve to the
- * `@cj-tech-master/excelts/chart` subpath import graph.
+ * `@cjnoname/excelts/chart` subpath import graph.
  *
  * If chart-manipulating APIs (`worksheet.addChart()`, `workbook.writeFile()`
  * with charts, etc.) are called without `installChartSupport()` having
@@ -79,7 +79,7 @@ import type { ChartSpaceXform } from "./xlsx/xform/chart/chart-space-xform";
 /**
  * Runtime chart functions the excel module needs from the chart
  * module. Populated by `installChartSupport()` from
- * `@cj-tech-master/excelts/chart`.
+ * `@cjnoname/excelts/chart`.
  *
  * Using `typeof <fn>` keeps the signatures in lockstep with the real
  * implementations — add an argument to `buildChartModel` and this
@@ -160,7 +160,7 @@ let installed: ChartSupport | null = null;
 
 /**
  * Install a chart runtime implementation. Called from
- * `installChartSupport()` in the `@cj-tech-master/excelts/chart`
+ * `installChartSupport()` in the `@cjnoname/excelts/chart`
  * subpath.
  *
  * Re-installing is allowed — the last registration wins. Passing
@@ -184,7 +184,7 @@ export function getChartSupport(): ChartSupport {
   if (!installed) {
     throw new Error(
       "No chart support is installed. " +
-        "Call `installChartSupport()` from `@cj-tech-master/excelts/chart` " +
+        "Call `installChartSupport()` from `@cjnoname/excelts/chart` " +
         "once at startup to enable chart creation, loading, and " +
         "serialisation during `workbook.xlsx.writeFile()`."
     );
