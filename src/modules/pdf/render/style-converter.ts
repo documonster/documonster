@@ -324,38 +324,51 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
 // =============================================================================
 
 /**
- * Map border styles to PDF line widths.
+ * Map border styles to PDF line widths (in points).
+ *
+ * Values match Excel's actual border weights as used historically by this
+ * library (pre-#154). PR #154 doubled every width (0.25 → 0.5, 0.5 → 1,
+ * 1 → 2) to make `thin` and `medium` more visually distinct in PDF
+ * viewers, but that change made all borders heavier than Excel itself
+ * (issue #164). The 2× ratio between thin/medium and the 4× ratio between
+ * thin/thick are preserved with the lighter values, so styles remain
+ * distinguishable while matching Excel.
+ *
+ *   hair   = 0.1 pt
+ *   thin   = 0.25 pt   (also dotted, dashed, dashDot, dashDotDot, slantDashDot, double)
+ *   medium = 0.5 pt    (also mediumDashed, mediumDashDot, mediumDashDotDot)
+ *   thick  = 1   pt
  */
 export function borderStyleToLineWidth(style: string): number {
   switch (style) {
-    case "thin":
-      return 0.5;
-    case "medium":
-      return 1.0;
-    case "thick":
-      return 2.0;
-    case "double":
-      return 0.5;
     case "hair":
-      return 0.2;
+      return 0.1;
+    case "thin":
+      return 0.25;
+    case "medium":
+      return 0.5;
+    case "thick":
+      return 1;
+    case "double":
+      return 0.25;
     case "dotted":
-      return 0.5;
+      return 0.25;
     case "dashed":
-      return 0.5;
+      return 0.25;
     case "dashDot":
-      return 0.5;
+      return 0.25;
     case "dashDotDot":
-      return 0.5;
+      return 0.25;
     case "slantDashDot":
-      return 0.5;
+      return 0.25;
     case "mediumDashed":
-      return 1.0;
-    case "mediumDashDot":
-      return 1.0;
-    case "mediumDashDotDot":
-      return 1.0;
-    default:
       return 0.5;
+    case "mediumDashDot":
+      return 0.5;
+    case "mediumDashDotDot":
+      return 0.5;
+    default:
+      return 0.25;
   }
 }
 

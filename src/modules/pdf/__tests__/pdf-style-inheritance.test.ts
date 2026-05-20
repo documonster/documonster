@@ -313,8 +313,8 @@ describe("PDF style rendering", () => {
       const content = decompressPdfContent(pdf);
 
       // The PDF should contain stroke operations for the medium border on D1
-      // Medium border width = 1.0, so look for setLineWidth(1) → "1 w"
-      expect(content).toContain("1 w");
+      // Medium border width = 0.5, so look for setLineWidth(0.5) → "0.5 w"
+      expect(content).toContain("0.5 w");
     });
 
     it("should include cells with fill beyond value-based dimensions", async () => {
@@ -366,9 +366,9 @@ describe("PDF style rendering", () => {
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
 
-      // thin = 0.5pt, medium = 1.0pt — both should appear in PDF content
+      // thin = 0.25pt, medium = 0.5pt — both should appear in PDF content
+      expect(content).toContain("0.25 w");
       expect(content).toContain("0.5 w");
-      expect(content).toContain("1 w");
     });
 
     it("should produce distinct widths for thin, medium, and thick", async () => {
@@ -388,9 +388,9 @@ describe("PDF style rendering", () => {
       const content = decompressPdfContent(pdf);
 
       // All three widths should be distinct and present
+      expect(content).toContain("0.25 w");
       expect(content).toContain("0.5 w");
       expect(content).toContain("1 w");
-      expect(content).toContain("2 w");
     });
   });
 
