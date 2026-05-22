@@ -3,6 +3,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "bundler",
+    "rootDir": "./src",
     "outDir": "./dist/cjs",
     "declaration": false,
     "verbatimModuleSyntax": false

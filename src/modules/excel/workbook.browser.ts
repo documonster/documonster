@@ -3046,6 +3046,16 @@ class Workbook {
     this._tableNames.clear();
     value.worksheets.forEach(worksheetModel => {
       const { id, name, state } = worksheetModel;
+      // API invariant: `_worksheets` is keyed by a positive integer
+      // sheet id. A worksheet model with a missing or non-integer id
+      // would be stored under a string pseudo key like `"undefined"`
+      // or `"NaN"`, making it unreachable via `getWorksheet(name)`
+      // (issue #166). The xlsx reconciler enforces the same invariant
+      // before reaching this point; programmatic callers assigning
+      // `model` directly with a malformed payload land here instead.
+      if (!Number.isInteger(id) || (id as number) <= 0) {
+        return;
+      }
       const orderNo = value.sheets && value.sheets.findIndex(ws => ws.id === id);
       const worksheet = (this._worksheets[id] = new Worksheet({
         id,

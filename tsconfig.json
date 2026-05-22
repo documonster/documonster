@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "rootDir": "./src",
     "paths": {
       "@archive": ["./src/modules/archive/index.ts"],
       "@excel/*": ["./src/modules/excel/*"],

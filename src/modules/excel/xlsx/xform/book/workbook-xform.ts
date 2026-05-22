@@ -1,4 +1,5 @@
 import { colCache } from "@excel/utils/col-cache";
+import { resolveRelTarget } from "@excel/utils/ooxml-paths";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DefinedNamesXform } from "@excel/xlsx/xform/book/defined-name-xform";
 import { ExternalReferenceXform } from "@excel/xlsx/xform/book/external-reference-xform";
@@ -16,6 +17,13 @@ class WorkbookXform extends BaseXform {
   declare public parser: any;
   declare public map: { [key: string]: any };
 
+  /**
+   * The `<sheet>` xform shared with the `sheets` ListXform. Held as a
+   * field so `parseOpen` can pass workbook-level state (the prefixes
+   * bound to the OOXML relationships namespace) into it.
+   */
+  private readonly _sheetXform = new WorksheetXform();
+
   constructor() {
     super();
 
@@ -28,7 +36,7 @@ class WorkbookXform extends BaseXform {
         count: false,
         childXform: new WorkbookViewXform()
       }),
-      sheets: new ListXform({ tag: "sheets", count: false, childXform: new WorksheetXform() }),
+      sheets: new ListXform({ tag: "sheets", count: false, childXform: this._sheetXform }),
       definedNames: new ListXform({
         tag: "definedNames",
         count: false,
@@ -193,6 +201,11 @@ class WorkbookXform extends BaseXform {
     }
     switch (node.name) {
       case "workbook":
+        // Capture every prefix the workbook root binds to the OOXML
+        // relationships namespace so nested `<sheet>` parsing can
+        // read the relationship id under any of them. Falls back to
+        // the conventional `r` if the workbook declares no binding.
+        this._sheetXform.relationshipsPrefixes = WorkbookXform._findRelationshipsPrefixes(node);
         return true;
       default:
         this.parser = this.map[node.name];
@@ -201,6 +214,18 @@ class WorkbookXform extends BaseXform {
         }
         return true;
     }
+  }
+
+  private static _findRelationshipsPrefixes(node: any): readonly string[] {
+    const RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const attrs = node.attributes ?? {};
+    const prefixes: string[] = [];
+    for (const attrName of Object.keys(attrs)) {
+      if (attrName.startsWith("xmlns:") && attrs[attrName] === RELATIONSHIPS_NS) {
+        prefixes.push(attrName.slice("xmlns:".length));
+      }
+    }
+    return prefixes.length > 0 ? prefixes : ["r"];
   }
 
   parseText(text: string): void {
@@ -275,7 +300,7 @@ class WorkbookXform extends BaseXform {
         sheetPosition += 1;
         return;
       }
-      const target = `xl/${rel.Target.replace(/^(\s|\/xl\/)+/, "")}`;
+      const target = resolveRelTarget("xl", rel.Target);
 
       // Check if this is a chartsheet
       const chartsheetMatch = /xl\/chartsheets\/sheet(\d+)\.xml/.exec(target);
@@ -310,6 +335,32 @@ class WorkbookXform extends BaseXform {
 
     // Store reconciled chartsheets on the model
     model.chartsheetsList = chartsheetsList;
+
+    // Drop unbound worksheet parts. The reader (xlsx.browser.ts)
+    // collects every `xl/worksheets/sheetN.xml` it sees in the zip,
+    // because zip entries arrive in arbitrary order relative to
+    // workbook.xml. The authoritative `<sheets>` list is only
+    // available here, post-parse — so this is the first point at
+    // which we can prune worksheet parts that no `<sheet>` element
+    // claims through a working rel binding.
+    //
+    // Without pruning, such worksheets propagate downstream with
+    // `id`/`name`/`state` all `undefined`, landing under the literal
+    // string key `"undefined"` in `Workbook._worksheets` and becoming
+    // unreachable via `getWorksheet(name)` (issue #166). OOXML treats
+    // the workbook's `<sheets>` element as the single source of truth
+    // for which parts belong to the workbook; we follow that contract
+    // strictly. Genuinely-cursed workbooks reach this branch only when
+    // their `<sheet>` declarations are themselves missing or broken;
+    // namespace-prefix and Target-path quirks are handled upstream
+    // (the relationships-prefix lookup in sheet-xform and
+    // resolveRelTarget above), so a normal Excel-authored file never
+    // loses sheets here.
+    if (Array.isArray(model.worksheets)) {
+      model.worksheets = model.worksheets.filter(
+        (ws: any) => ws && Number.isInteger(ws.id) && ws.id > 0
+      );
+    }
 
     // reconcile print areas
     const definedNames: any[] = [];
