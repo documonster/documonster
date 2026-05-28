@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.9](https://github.com/cjnoname/excelts/compare/v9.5.8...v9.5.9) (2026-05-28)
+
+
+### Bug Fixes
+
+* **excel:** Support multiple print areas and normalise print references ([#168](https://github.com/cjnoname/excelts/issues/168)) ([faabb36](https://github.com/cjnoname/excelts/commit/faabb36d02708c7d42ead12c2b303ae3b28ab019))
+
 ## [9.5.8](https://github.com/cjnoname/excelts/compare/v9.5.7...v9.5.8) (2026-05-22)
 
 
