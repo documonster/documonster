@@ -93,7 +93,17 @@ const colCache: ColCache = {
     let l3: number;
     let n = 1;
     if (level >= 4) {
-      throw new ColumnOutOfBoundsError(level, "Excel supports columns from 1 to 16384");
+      // Defensive invariant: Excel's column space (XFD = 16,384) caps at
+      // three letters, so neither `l2n` nor `n2l` should ever ask for a
+      // higher level. Both callers validate before reaching here; if
+      // this branch fires it indicates a programming error in a future
+      // caller, not a user input problem — surface that clearly rather
+      // than reusing `ColumnOutOfBoundsError` (which would lie about
+      // the offending column, since `level` is a letter-count, not a
+      // column number).
+      throw new Error(
+        `colCache._fill: invariant violated — level ${level} exceeds the 3-letter cap; callers must validate before invoking _fill`
+      );
     }
     if (this._l2nFill < 1 && level >= 1) {
       while (n <= 26) {
@@ -134,6 +144,16 @@ const colCache: ColCache = {
   },
   l2n(l: string): number {
     if (!this._l2n[l]) {
+      // Excel's column space stops at XFD (16,384) — three letters is
+      // the maximum width any valid column letter can have. Reject
+      // longer inputs explicitly here, BEFORE handing the length to
+      // `_fill`, so the thrown error carries the actual offending
+      // letter (`AAAA`) rather than the level integer (`4`) — matching
+      // what the equivalent `n2l(n > 16384)` and `decodeAddress` paths
+      // already report.
+      if (l.length > 3) {
+        throw new ColumnOutOfBoundsError(l, "Excel supports columns from 1 to 16384");
+      }
       this._fill(l.length);
     }
     if (!this._l2n[l]) {

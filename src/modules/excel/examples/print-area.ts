@@ -26,7 +26,7 @@ for (let row = 1; row <= 10; row++) {
 
 ws.pageSetup.printTitlesColumn = "A:A";
 ws.pageSetup.printTitlesRow = "1:1";
-// ws.pageSetup.printArea = "A1:B10"; // printArea not supported
+ws.pageSetup.printArea = "A1:B10";
 
 try {
   await wb.xlsx.writeFile(filename);

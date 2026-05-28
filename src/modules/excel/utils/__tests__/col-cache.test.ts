@@ -81,6 +81,16 @@ describe("colCache", () => {
     }).toThrow(Error);
   });
 
+  it("l2n carries the offending letter (not its length) in the error message", () => {
+    // Regression: `l2n("AAAA")` used to delegate the bounds check to
+    // `_fill(level)`, which then threw `ColumnOutOfBoundsError(level)`
+    // — the *length* of the input, not the input itself. Users saw
+    // "Column 4 is out of bounds" for an `AAAA` lookup, which is
+    // misleading (column 4 is actually `D`, a perfectly valid column).
+    expect(() => colCache.l2n("AAAA")).toThrow(/Column AAAA/);
+    expect(() => colCache.l2n("ZZZZZ")).toThrow(/Column ZZZZZ/);
+  });
+
   it("validates addresses properly", () => {
     expect(colCache.validateAddress("A1")).toBeTruthy();
     expect(colCache.validateAddress("AA10")).toBeTruthy();

@@ -1,6 +1,7 @@
 import fs from "fs";
 
 import { extractAll } from "@archive/unzip/extract";
+import { createZip } from "@archive/zip/zip-bytes";
 import { testUtils } from "@excel/__tests__/shared";
 import { ValueType } from "@excel/enums";
 import { makeTestDataPath, testFilePath } from "@test/utils";
@@ -725,6 +726,521 @@ describe("Workbook", () => {
 
       const ws2 = wb2.getWorksheet("Sheet1")!;
       expect(ws2.pageSetup.printArea).toBe("A1:A1");
+    });
+
+    it("multiple printAreas on a single sheet round-trip correctly", async () => {
+      // Issue #168: multiple print areas in a single worksheet must round-trip.
+      // Per ECMA-376 §18.2.5 the (name, localSheetId) pair on `<definedName>`
+      // must be unique, so multiple print areas collapse into ONE
+      // `<definedName name="_xlnm.Print_Area">` whose text is a comma-
+      // separated list of ranges (Excel's native format). The
+      // worksheet-level `printArea` field uses `&&` as the multi-range
+      // separator (legacy excelts convention, preserved for backwards
+      // compatibility); both `&&` and `,` are accepted on input.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      for (let r = 1; r <= 10; r++) {
+        for (let c = 1; c <= 5; c++) {
+          ws.getCell(r, c).value = `${r}-${c}`;
+        }
+      }
+      ws.pageSetup.printArea = "A1:B5&&D1:E10";
+
+      const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "multiple printAreas" });
+
+      // Inspect workbook.xml to confirm a single `<definedName>` with both
+      // ranges, not two duplicate elements (which would violate OOXML).
+      const zipData = await extractAll(new Uint8Array(buffer));
+      const workbookData = zipData.get("xl/workbook.xml");
+      const workbookContent = new TextDecoder().decode(workbookData?.data);
+      const printAreaMatches = workbookContent.match(/<definedName name="_xlnm.Print_Area"[^>]*>/g);
+      expect(printAreaMatches).toHaveLength(1);
+      // The writer normalises every range to canonical `$col$row:$col$row`
+      // form (matching what Excel itself emits), regardless of how the
+      // user spelled the input.
+      expect(workbookContent).toContain("$A$1:$B$5,&apos;Sheet1&apos;!$D$1:$E$10");
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      const ws2 = wb2.getWorksheet("Sheet1")!;
+      expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
+    });
+
+    it("printArea with comma separator (Excel's native syntax) is accepted", async () => {
+      // Users pasting from Excel may use `,` as the separator. We accept
+      // both `,` and `&&` on write; the round-tripped form uses `&&` for
+      // backwards compatibility.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Sheet1");
+      ws.getCell("A1").value = "test";
+      ws.pageSetup.printArea = "A1:B5,D1:E10";
+
+      const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "comma-separated printArea" });
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      const ws2 = wb2.getWorksheet("Sheet1")!;
+      expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
+    });
+
+    it("multiple printAreas survive across separate sheets", async () => {
+      // Each sheet keeps its own `_xlnm.Print_Area` defined name (with its
+      // own `localSheetId`), so multi-range entries on one sheet must not
+      // bleed into other sheets.
+      const wb = new Workbook();
+      const ws1 = wb.addWorksheet("S1");
+      const ws2 = wb.addWorksheet("S2");
+      ws1.getCell("A1").value = "x";
+      ws2.getCell("A1").value = "y";
+      ws1.pageSetup.printArea = "A1:B2&&D1:E2";
+      ws2.pageSetup.printArea = "A1:C3";
+
+      const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "per-sheet multiple printAreas" });
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      expect(wb2.getWorksheet("S1")!.pageSetup.printArea).toBe("A1:B2&&D1:E2");
+      expect(wb2.getWorksheet("S2")!.pageSetup.printArea).toBe("A1:C3");
+    });
+
+    it("multiple printAreas on a sheet with a comma in its name round-trip correctly", async () => {
+      // Sheet names containing commas are quoted in OOXML
+      // (`'Q1, Forecast'!$A$1:$B$5`). The reader must split on top-level
+      // commas only — splitting on every comma would shred the sheet name.
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Q1, Forecast");
+      ws.getCell("A1").value = "x";
+      ws.pageSetup.printArea = "A1:B5&&D1:E10";
+
+      const buffer = await wb.xlsx.writeBuffer();
+      await expectValidXlsx(buffer, { label: "comma-named sheet printAreas" });
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      const ws2 = wb2.getWorksheet("Q1, Forecast")!;
+      expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
+    });
+
+    describe("printArea / printTitles input normalisation", () => {
+      // Regression: the previous string-concatenation writer produced
+      // corrupt OOXML for several user-input shapes Excel itself accepts:
+      //   - lowercase `a1:b5`        -> `$a1:$b5` (read-back returned NaN)
+      //   - already-anchored `$A$1`  -> `$$A$1` (Excel rejects double-$)
+      //   - sheet-prefixed input     -> `$Sheet1!A1:$B5` (corrupt)
+      //   - whitespace `A1 : B5`     -> `$A1 :$ B5` (corrupt)
+      //   - row-relative `A1:B5`     -> `$A1:$B5` (drifts when rows
+      //                                 inserted above the print area)
+      // The writer now routes every input through `parsePrintReference`
+      // — a hand-rolled parser that recognises all four legal Excel
+      // print-reference shapes (cell, range, whole-row, whole-column)
+      // and emits Excel's canonical `$col$row[:$col$row]` shape.
+      const cases: Array<{ input: string; expectedRoundTrip: string; xmlContains: string }> = [
+        { input: "a1:b5", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "$A$1:$B$5", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "$A1:$B5", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "A1 : B5", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "  A1:B5  ", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "Sheet1!A1:B5", expectedRoundTrip: "A1:B5", xmlContains: "$A$1:$B$5" },
+        { input: "A1", expectedRoundTrip: "A1:A1", xmlContains: "$A$1:$A$1" }
+      ];
+      for (const { input, expectedRoundTrip, xmlContains } of cases) {
+        it(`printArea input ${JSON.stringify(input)} normalises to canonical OOXML`, async () => {
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("S");
+          ws.getCell("A1").value = "x";
+          ws.pageSetup.printArea = input;
+
+          const buffer = await wb.xlsx.writeBuffer();
+          await expectValidXlsx(buffer, { label: `printArea normalise ${input}` });
+
+          const zipData = await extractAll(new Uint8Array(buffer));
+          const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+          // Output never contains the broken double-`$` or row-relative
+          // forms that the old string-concat writer used to emit.
+          expect(workbookContent).not.toMatch(/\$\$[A-Z]/);
+          expect(workbookContent).toContain(xmlContains);
+
+          const wb2 = new Workbook();
+          await wb2.xlsx.load(buffer);
+          expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe(expectedRoundTrip);
+        });
+      }
+
+      it("printTitlesRow input with $ does not produce $$ output", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printTitlesRow = "$1:$2";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "printTitlesRow $1:$2" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).not.toMatch(/\$\$\d/);
+        expect(workbookContent).toContain("$1:$2");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printTitlesRow).toBe("1:2");
+      });
+
+      it("printTitlesColumn input with $ and lowercase normalises", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printTitlesColumn = "$a:$b";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "printTitlesColumn $a:$b" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).not.toMatch(/\$\$[A-Za-z]/);
+        expect(workbookContent).toContain("$A:$B");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printTitlesColumn).toBe("A:B");
+      });
+
+      it("printTitlesRow with a column-shaped value keeps backwards-compatible auto-routing", async () => {
+        // Long-standing quirk: the OOXML reader infers the axis from the
+        // emitted reference, so users who set `printTitlesRow = "A:B"`
+        // got the value silently re-classified onto `printTitlesColumn`
+        // on round-trip. Preserve that behaviour rather than silently
+        // dropping the entry — strict enforcement would be a regression.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printTitlesRow = "A:B";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "row=A:B legacy" });
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        const ps = wb2.getWorksheet("S")!.pageSetup;
+        expect(ps.printTitlesRow).toBeUndefined();
+        expect(ps.printTitlesColumn).toBe("A:B");
+      });
+
+      it("malformed printArea input is dropped, not written as corrupt XML", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        // Garbage input — neither an address nor a range.
+        ws.pageSetup.printArea = "not-a-range!!";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "garbage printArea" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).not.toContain("Print_Area");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBeUndefined();
+      });
+
+      it("whole-row printArea (1:5) round-trips", async () => {
+        // Excel UI allows selecting entire rows as a print area. Emitted
+        // OOXML form is `'Sheet'!$1:$5`. The earlier writer mangled this
+        // to `$1:$5` *without* the sheet prefix and the read side then
+        // returned `NaN:NaN`; the parser-driven writer handles it.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "1:5";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "whole-row printArea" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).toContain("$1:$5");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe("1:5");
+      });
+
+      it("whole-column printArea (A:C) round-trips", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A:C";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "whole-column printArea" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).toContain("$A:$C");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe("A:C");
+      });
+
+      it("mixed printArea forms (cell, range, whole-row, whole-column) coexist", async () => {
+        // All four shapes can appear in the same comma-separated
+        // OOXML `<definedName>`; verify the multi-range pipeline accepts
+        // each shape and the read path preserves them all.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A1&&B2:C3&&5:7&&E:F";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "mixed shapes" });
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        // Cell promotes to A1:A1 (degenerate range); other shapes
+        // round-trip verbatim.
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe("A1:A1&&B2:C3&&5:7&&E:F");
+      });
+
+      it("OOXML with bare-cell `<...>'S'!$A$1</...>` reads back as A1:A1", async () => {
+        // Excel sometimes emits a bare cell (no `:`) when the print
+        // area is a single cell. The reader must recognise that as a
+        // legitimate print area and surface it as `A1:A1` on the
+        // worksheet API (matching the writer's promote-cell-to-range
+        // policy).
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        const m: any = wb.model;
+        m.definedNames = [
+          { name: "_xlnm.Print_Area", localSheetId: 0, ranges: [], rawText: "'S'!$A$1" }
+        ];
+        wb.model = m;
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "bare-cell OOXML" });
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe("A1:A1");
+      });
+
+      it("printArea with column past XFD throws ColumnOutOfBoundsError on write", async () => {
+        // `AAAA` is column 18,279 — past Excel's hard XFD (16,384) limit.
+        // Excel cannot represent the column at all, so emitting it would
+        // produce a workbook Excel rejects. We surface the same error
+        // type `getCell("AAAA1")` already throws so the user finds out
+        // immediately rather than discovering the print area silently
+        // disappeared from the saved file. The error message must carry
+        // the offending letter (`AAAA`) so the user can locate the
+        // mistake — the legacy `_fill(level)` path used to report
+        // `Column 4 is out of bounds` (the letter count), which lied.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A1:AAAA5";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Column AAAA is out of bounds/);
+      });
+
+      it("whole-column printArea past XFD throws with the letter in the message", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "AAAA:AAAB";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Column AAAA is out of bounds/);
+      });
+
+      it("printTitlesColumn past XFD throws with the letter in the message", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printTitlesColumn = "AAAA:AAAB";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Column AAAA is out of bounds/);
+      });
+
+      it("loading a workbook whose OOXML carries an out-of-bounds column drops the bad range without aborting the load", async () => {
+        // A file authored by another tool (or hand-edited) might
+        // contain a print-area `<definedName>` whose body references
+        // a column past XFD. We must NOT let that single corrupt entry
+        // take out the whole load — drop it silently and let the rest
+        // of the workbook reconcile normally. Mirrors how the validator
+        // reports such cells as errors but the parser still returns a
+        // usable model.
+        //
+        // First write a clean workbook, then patch its `xl/workbook.xml`
+        // to inject a `<definedName>` that mixes a bad (out-of-XFD)
+        // range and a good range. The good range must survive the load.
+        const cleanWb = new Workbook();
+        cleanWb.addWorksheet("Sheet1").getCell("A1").value = "x";
+        const cleanBuf = await cleanWb.xlsx.writeBuffer();
+
+        const entries = await extractAll(new Uint8Array(cleanBuf));
+        const wbXmlText = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
+        // Inject `<definedNames>` immediately before `<calcPr>` (the
+        // OOXML-mandated position) so the patched workbook stays valid
+        // and the reconcile path actually sees the bad name.
+        const patched = wbXmlText.replace(
+          /<calcPr/,
+          `<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'Sheet1'!$AAAA$1:$AAAA$5,'Sheet1'!$A$1:$B$5</definedName></definedNames><calcPr`
+        );
+        const zipFiles: Array<{ name: string; data: Uint8Array }> = [];
+        for (const [path, file] of entries) {
+          zipFiles.push({
+            name: path,
+            data: path === "xl/workbook.xml" ? new TextEncoder().encode(patched) : file.data
+          });
+        }
+        const patchedBuffer = await createZip(zipFiles);
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(patchedBuffer);
+        // Bad range dropped, good range kept.
+        expect(wb2.getWorksheet("Sheet1")!.pageSetup.printArea).toBe("A1:B5");
+      });
+
+      it("user-supplied sheet-prefixed input with comma in the sheet name is split correctly", async () => {
+        // Regression: a quote-aware split is required so commas *inside*
+        // a quoted sheet name (`'Q1, Forecast'!A1:B5`) are not treated
+        // as range separators. The legacy `split(/&&|,/)` shredded such
+        // inputs and lost every range — now they round-trip cleanly.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("Q1, Forecast");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "'Q1, Forecast'!A1:B5,'Q1, Forecast'!D1:E10";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "comma-in-name sheet-prefixed input" });
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("Q1, Forecast")!.pageSetup.printArea).toBe("A1:B5&&D1:E10");
+      });
+
+      it("user-supplied sheet-prefixed input with `&&` in the sheet name is split correctly", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("A&&B");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "'A&&B'!A1:B5&&'A&&B'!D1:E10";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "ampersand-in-name sheet-prefixed input" });
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("A&&B")!.pageSetup.printArea).toBe("A1:B5&&D1:E10");
+      });
+
+      it("reversed range endpoints are canonicalised to top-left:bottom-right", async () => {
+        // Excel's UI never produces `B5:A1`, but a hand-authored input
+        // might. Downstream consumers (PDF layout, range loops) assume
+        // `s.r <= e.r && s.c <= e.c`, so the writer normalises here.
+        const cases: Array<{ input: string; expected: string }> = [
+          { input: "B5:A1", expected: "A1:B5" },
+          { input: "5:1", expected: "1:5" },
+          { input: "C:A", expected: "A:C" }
+        ];
+        for (const { input, expected } of cases) {
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("S");
+          ws.getCell("A1").value = "x";
+          ws.pageSetup.printArea = input;
+          const buffer = await wb.xlsx.writeBuffer();
+          await expectValidXlsx(buffer, { label: `reversed ${input}` });
+          const wb2 = new Workbook();
+          await wb2.xlsx.load(buffer);
+          expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe(expected);
+        }
+      });
+
+      it("row 0 is rejected — Excel rows are 1-indexed", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A0:B5";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Row 0 is out of bounds/);
+      });
+
+      it("whole-row 0 input (e.g. `0:5`) is rejected", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "0:5";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Row 0 is out of bounds/);
+      });
+
+      it("row past Excel's 1048576 limit is rejected", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A1:B1048577";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(
+          /Row 1048577 is out of bounds.*1 to 1048576/
+        );
+      });
+
+      it("printTitlesRow past the row limit is rejected", async () => {
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printTitlesRow = "1:1048577";
+
+        await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/Row 1048577 is out of bounds/);
+      });
+
+      it("leading-zero row inputs are normalised to canonical integers", async () => {
+        // OOXML expects `$A$1`, not `$A$001`. Excel tolerates the latter
+        // on read, but emitting it makes the file look hand-edited and
+        // confuses tooling that does string equality on cell refs.
+        const wb = new Workbook();
+        const ws = wb.addWorksheet("S");
+        ws.getCell("A1").value = "x";
+        ws.pageSetup.printArea = "A001:B005";
+
+        const buffer = await wb.xlsx.writeBuffer();
+        await expectValidXlsx(buffer, { label: "leading-zero row" });
+        const zipData = await extractAll(new Uint8Array(buffer));
+        const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
+        expect(workbookContent).toContain("$A$1:$B$5");
+        expect(workbookContent).not.toContain("$A$001");
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(buffer);
+        expect(wb2.getWorksheet("S")!.pageSetup.printArea).toBe("A1:B5");
+      });
+
+      it("loading a workbook with a row past the limit drops the bad range without aborting", async () => {
+        // Mirror image of the column-OOB read-side test: a hand-edited
+        // file with a row past 1048576 must not abort the load. The
+        // `try/catch` around `parsePrintReference` in the read path
+        // catches `RowOutOfBoundsError` the same way it catches
+        // `ColumnOutOfBoundsError`.
+        const cleanWb = new Workbook();
+        cleanWb.addWorksheet("Sheet1").getCell("A1").value = "x";
+        const cleanBuf = await cleanWb.xlsx.writeBuffer();
+
+        const entries = await extractAll(new Uint8Array(cleanBuf));
+        const wbXmlText = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
+        const patched = wbXmlText.replace(
+          /<calcPr/,
+          `<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'Sheet1'!$A$1:$B$99999999,'Sheet1'!$A$1:$B$5</definedName></definedNames><calcPr`
+        );
+        const zipFiles: Array<{ name: string; data: Uint8Array }> = [];
+        for (const [path, file] of entries) {
+          zipFiles.push({
+            name: path,
+            data: path === "xl/workbook.xml" ? new TextEncoder().encode(patched) : file.data
+          });
+        }
+        const patchedBuffer = await createZip(zipFiles);
+
+        const wb2 = new Workbook();
+        await wb2.xlsx.load(patchedBuffer);
+        expect(wb2.getWorksheet("Sheet1")!.pageSetup.printArea).toBe("A1:B5");
+      });
     });
 
     it("single-column printTitlesColumn without colon round-trips correctly", async () => {

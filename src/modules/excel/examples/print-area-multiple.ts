@@ -26,7 +26,9 @@ for (let row = 1; row <= 10; row++) {
 
 ws.pageSetup.printTitlesColumn = "A:A";
 ws.pageSetup.printTitlesRow = "1:1";
-// ws.pageSetup.printArea = "A1:B5&&A6:B10"; // printArea not supported
+// Multiple print areas: separate ranges with `&&` (excelts convention)
+// or `,` (Excel's native syntax). Both round-trip correctly.
+ws.pageSetup.printArea = "A1:B5&&A6:B10";
 
 try {
   await wb.xlsx.writeFile(filename);
