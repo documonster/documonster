@@ -16,6 +16,7 @@ The rest of the API (workbook metadata, worksheets, rows, cells, styles, merges,
 | Preserve c15/c16 vendor extensions    | ✓ byte-preserved on clean load; silently lost on any edit | ✓ byte-preserved clean; raw-patched for safe edits; `templateMode: "strict"` fails loudly when a rebuild would drop unknown XML |
 | Chart inside chartsheet               | ✗                                                         | `workbook.addChartsheet(name, { chart: { … } })`                                                                                |
 | Pivot chart metadata                  | ✗                                                         | `worksheet.addPivotChart(...)` with drop-zones, field buttons, `c14:pivotOptions`, `c16:pivotOptions16`                         |
+| External (linked) images              | ✗ embeds bytes only                                       | `workbook.addImage({ link })` references a URL/file path (`TargetMode="External"`, `<a:blip r:link>`) — no bytes stored         |
 
 ## Translation cookbook
 

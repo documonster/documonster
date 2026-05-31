@@ -1,3 +1,4 @@
+import { isExternalImage } from "@excel/utils/drawing-utils";
 import {
   OOXML_PATHS,
   chartsheetPath,
@@ -33,6 +34,11 @@ class ContentTypesXform extends BaseXform {
     const mediaHash: { [key: string]: boolean } = {};
     (model.media ?? []).forEach((medium: any) => {
       if (medium.type === "image") {
+        // External (linked) images add no part to the package, so they need
+        // no Default content-type registration.
+        if (isExternalImage(medium)) {
+          return;
+        }
         const imageType = medium.extension;
         if (!mediaHash[imageType]) {
           mediaHash[imageType] = true;

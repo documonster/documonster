@@ -75,6 +75,12 @@ const examples: ExampleTest[] = [
     outputFiles: ["src/modules/excel/examples/data/checkbox.xlsx"],
     args: ["src/modules/excel/examples/data/checkbox.xlsx"]
   },
+  {
+    file: "src/modules/excel/examples/images-external.ts",
+    description: "External (linked) images — referenced, not embedded",
+    outputFiles: ["tmp/images-external.xlsx"],
+    args: ["tmp/images-external.xlsx"]
+  },
   // Formula engine examples — one per function category.
   {
     file: "src/modules/formula/examples/formula-math.ts",

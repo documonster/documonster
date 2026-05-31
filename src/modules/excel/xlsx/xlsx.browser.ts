@@ -28,7 +28,7 @@ import {
   ChartOptionsError
 } from "@excel/errors";
 import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
-import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
+import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
   commentsPath,
@@ -586,6 +586,8 @@ export interface WorkbookMediaLike {
   filename?: string;
   buffer?: Uint8Array;
   base64?: string;
+  /** External link target — when set, the image is referenced, not embedded. */
+  link?: string;
 }
 
 export interface MediaModel {
@@ -5416,6 +5418,13 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       model.media.map(async (medium: WorkbookMediaLike) => {
         if (medium.type !== "image") {
           throw new ImageError("Unsupported media");
+        }
+
+        // External (linked) images carry only a `link` target — no bytes are
+        // written into the package; the relationship (TargetMode="External")
+        // references the image in place.
+        if (isExternalImage(medium)) {
+          return;
         }
 
         // Preserve legacy behavior: `${undefined}` becomes "undefined" in template strings

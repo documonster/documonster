@@ -16,7 +16,7 @@
 - **公式和计算值** — 共享公式、定义名称
 - **数据验证** — 列表、整数、小数、日期、文本长度、自定义
 - **条件格式** — 单元格值、色阶、数据条、图标集
-- **图片** — JPEG、PNG、GIF，支持单单元格和双单元格锚点
+- **图片** — JPEG、PNG、GIF，支持单单元格和双单元格锚点；可嵌入或通过 URL/文件路径外链
 - **超链接** — 内部链接、外部链接、邮件链接
 - **数据透视表** — 读取和保留数据透视表定义
 - **图表** — 创建/读取/编辑 classic chart、ChartEx 现代图表、组合图、数据透视图、图表工作表，并提供 SVG/PNG/PDF 预览
@@ -190,6 +190,47 @@ worksheet.addImage(imageId, {
   br: { col: 3, row: 5 }
 });
 ```
+
+#### 嵌入式 vs. 外链式（linked）图片
+
+`workbook.addImage` 有两种注册方式：
+
+- **嵌入式** —— 传 `buffer`、`base64` 或 `filename`。图片字节会写入 `.xlsx`
+  包内（`xl/media/imageN.ext`）。文件自包含，但每张图片都会增大文件体积。
+- **外链式（external）** —— 只传 `link`（URL 或本地文件路径）。不存储任何字节，
+  包内只保留一个 `TargetMode="External"` 的关系，图片通过 `<a:blip r:link>` 引用。
+  文件体积保持很小，图片在 Excel 打开工作簿时解析。
+
+若同时提供字节和 `link`，**嵌入式优先**。
+
+```typescript
+// 来自 URL 的外链图片 —— 不会写入 xl/media/。
+const urlId = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
+worksheet.addImage(urlId, "B2:D6");
+
+// 来自本地文件路径的外链图片（Excel 打开时解析）。
+const fileId = workbook.addImage({ extension: "png", link: "file:///C:/images/logo.png" });
+worksheet.addImage(fileId, "F2:H6");
+```
+
+外链图片同样支持叠加（overlay）水印：
+
+```typescript
+const wmId = workbook.addImage({ extension: "png", link: "https://example.com/draft.png" });
+worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
+```
+
+**注意事项**（这是 Excel 本身的限制，并非本库限制）：
+
+- 外链图片是易失的 —— 一旦目标移动或工作簿被转发，Excel 会显示破图占位符。
+  需要自包含文件时请使用嵌入式。
+- 现代 Excel 出于安全考虑，可能拒绝自动加载远程 URL 图片。
+- 只有**单元格图片**和**叠加（overlay）水印**可以外链。工作表**背景图**
+  （`addBackgroundImage`）和**页眉/页脚（VML）水印**（`addWatermark({ mode: "header" })`）
+  **不能**外链 —— 传入外链图片会抛 `ImageError`（Excel 打开时会丢弃这种背景图）。
+  这两种请使用嵌入式图片。
+
+可运行示例见 [`images-external.ts`](examples/images-external.ts)。
 
 ### 表格
 

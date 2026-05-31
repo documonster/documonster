@@ -9,6 +9,8 @@ interface PicModel {
   rId?: string;
   /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */
   alphaModFix?: number;
+  /** When true, render the picture as an external linked image (`r:link`). */
+  external?: boolean;
   [key: string]: any;
 }
 
@@ -42,7 +44,8 @@ class PicXform extends BaseXform {
     // Pass alphaModFix through to blipFill → blip
     this.map["xdr:blipFill"].render(xmlStream, {
       rId: model.rId,
-      alphaModFix: model.alphaModFix
+      alphaModFix: model.alphaModFix,
+      external: model.external
     });
     this.map["xdr:spPr"].render(xmlStream, model);
 

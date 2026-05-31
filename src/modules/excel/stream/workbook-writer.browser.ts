@@ -19,7 +19,7 @@ import type {
   WorkbookProtection,
   AddWorksheetOptions
 } from "@excel/types";
-import { filterDrawingAnchors } from "@excel/utils/drawing-utils";
+import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import {
   drawingPath,
   drawingRelsPath,
@@ -564,6 +564,23 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return this._worksheets.length || 1;
   }
 
+  /**
+   * Register an image with the workbook and return its numeric id.
+   *
+   * Supply `buffer`/`base64`/`filename` to **embed** the bytes, or only `link`
+   * (a URL or local file path) to reference it **externally** — in which case
+   * no bytes are written into the package and the relationship is emitted with
+   * `TargetMode="External"`. If both are provided, embedding wins.
+   *
+   * Linked images work with cell pictures and overlay watermarks; worksheet
+   * background images and header/footer (VML) watermarks cannot be linked.
+   *
+   * @example
+   * ```typescript
+   * const id = wb.addImage({ extension: "png", link: "https://example.com/logo.png" });
+   * ws.addImage(id, "B2:D6");
+   * ```
+   */
   addImage(image: ImageData): number {
     const id = this.media.length;
     const medium: Medium = {
@@ -699,6 +716,11 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return Promise.all(
       this.media.map(async medium => {
         if (medium.type === "image") {
+          // External (linked) images carry only a `link` target — no bytes
+          // are written into the package.
+          if (isExternalImage(medium)) {
+            return;
+          }
           const filename = mediaPath(medium.name);
           if (medium.buffer) {
             this._addFile(medium.buffer, filename);

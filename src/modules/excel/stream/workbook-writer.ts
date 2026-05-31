@@ -12,6 +12,7 @@ import {
   type ZlibOptions
 } from "@excel/stream/workbook-writer.browser";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
+import { isExternalImage } from "@excel/utils/drawing-utils";
 import { mediaPath } from "@excel/utils/ooxml-paths";
 import { readFileBytes, createWriteStream } from "@utils/fs";
 
@@ -56,6 +57,11 @@ class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
     return Promise.all(
       this.media.map(async medium => {
         if (medium.type === "image") {
+          // External (linked) images carry only a `link` target — no bytes
+          // are written into the package.
+          if (isExternalImage(medium)) {
+            return;
+          }
           const filename = mediaPath(medium.name);
           // Node.js: support loading from file
           if (medium.filename) {

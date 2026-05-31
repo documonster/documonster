@@ -679,6 +679,23 @@ export interface ImageData {
   base64?: string;
   filename?: string;
   buffer?: Buffer;
+  /**
+   * Reference the image as an **external link** instead of embedding its bytes.
+   *
+   * When set (and `buffer`/`base64`/`filename` are all omitted), the image is
+   * written as a linked DrawingML picture (`<a:blip r:link>`) whose relationship
+   * uses `TargetMode="External"`. No bytes are stored in the `.xlsx` package, so
+   * the file size stays small. The value may be either:
+   *
+   * - an absolute/relative URL (e.g. `"https://example.com/logo.png"`), or
+   * - a local file path (e.g. `"file:///C:/images/logo.png"` or `"images/logo.png"`).
+   *
+   * Note: Excel treats linked images as volatile — a moved/missing target shows a
+   * broken-image placeholder, and modern Excel may not auto-load remote URLs for
+   * security reasons. Use embedding (`buffer`/`base64`) when self-contained files
+   * are required.
+   */
+  link?: string;
 }
 
 export interface ImagePosition {
