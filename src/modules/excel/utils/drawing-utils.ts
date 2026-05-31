@@ -19,6 +19,11 @@ export interface DrawingAnchor {
     hyperlinks?: { tooltip?: string; rId: string };
     /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */
     alphaModFix?: number;
+    /**
+     * When true, the picture references an external linked image
+     * (`<a:blip r:link>`) instead of an embedded one (`<a:blip r:embed>`).
+     */
+    external?: boolean;
   };
   range: any;
 }
@@ -44,6 +49,20 @@ interface ImageMedium {
 }
 
 /**
+ * Minimal shape of a book-level media entry needed by the embed-vs-link
+ * decision and image-rel construction. Carries the optional link target plus
+ * the three mutually-exclusive embedded byte sources.
+ */
+export interface MediaLike {
+  name?: string;
+  extension?: string;
+  link?: string;
+  buffer?: unknown;
+  base64?: unknown;
+  filename?: unknown;
+}
+
+/**
  * Resolves a media filename into the drawing-level relative target path.
  *
  * In the non-streaming path, media entries have separate `name` and `extension`
@@ -64,14 +83,73 @@ export function resolveMediaTarget(medium: { name?: string; extension?: string }
   return mediaRelTargetFromRels(filename);
 }
 
+/**
+ * Determine whether a media entry is an **external (linked) image** rather than
+ * an embedded one. An external image carries a `link` target and supplies no
+ * embedded bytes (`buffer`/`base64`/`filename`). Embedding always takes
+ * precedence: if any byte source is present the image is embedded even if a
+ * `link` was also provided.
+ */
+export function isExternalImage(medium: MediaLike): boolean {
+  return !!medium.link && medium.buffer == null && medium.base64 == null && medium.filename == null;
+}
+
+/**
+ * Best-effort image extension inference from an external link's path.
+ *
+ * Normalises to the extension vocabulary used by `ImageData`
+ * (`"jpeg" | "png" | "gif"`); unknown extensions fall back to `"png"`.
+ * The extension is advisory only for linked images — the relationship
+ * Target carries the real reference — but keeping it within the documented
+ * set avoids surprising consumers that branch on `medium.extension`.
+ */
+export function inferExternalImageExtension(link: string): "jpeg" | "png" | "gif" {
+  const match = /\.([a-zA-Z0-9]{2,5})(?:[?#].*)?$/.exec(link);
+  const ext = match ? match[1].toLowerCase() : "";
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "jpeg";
+    case "gif":
+      return "gif";
+    case "png":
+    default:
+      return "png";
+  }
+}
+
 // =============================================================================
 // Anchor / Rel Building
 // =============================================================================
 
+/**
+ * Build an image relationship for the given rId, choosing between an embedded
+ * package target (`../media/imageN.ext`) and an external link target
+ * (`TargetMode="External"`) based on whether the image is external.
+ *
+ * Shared by the drawing, background, and watermark write paths so the
+ * embed-vs-link decision lives in exactly one place.
+ */
+export function buildImageRel(rId: string, bookImage: MediaLike): DrawingRel {
+  if (isExternalImage(bookImage)) {
+    return {
+      Id: rId,
+      Type: RelType.Image,
+      Target: bookImage.link as string,
+      TargetMode: "External"
+    };
+  }
+  return {
+    Id: rId,
+    Type: RelType.Image,
+    Target: resolveMediaTarget(bookImage)
+  };
+}
+
 /** Options for {@link buildDrawingAnchorsAndRels}. */
 interface BuildDrawingOptions {
   /** Look up a book-level image by its id. Return `undefined` if not found. */
-  getBookImage: (imageId: string | number) => { name?: string; extension?: string } | undefined;
+  getBookImage: (imageId: string | number) => MediaLike | undefined;
 
   /** Generate the next unique rId string for the drawing rels. */
   nextRId: (rels: DrawingRel[]) => string;
@@ -105,21 +183,21 @@ export function buildDrawingAnchorsAndRels(
       continue;
     }
 
+    // An external (linked) image has a `link` target and no embedded bytes.
+    const isExternal = isExternalImage(bookImage);
+
     // Deduplicate: reuse rId if same imageId already has a drawing rel
     let rIdImage = imageRIdMap[imageId];
     if (!rIdImage) {
       rIdImage = options.nextRId(rels);
       imageRIdMap[imageId] = rIdImage;
-      rels.push({
-        Id: rIdImage,
-        Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
-        Target: resolveMediaTarget(bookImage)
-      });
+      rels.push(buildImageRel(rIdImage, bookImage));
     }
 
     const anchor: DrawingAnchor = {
       picture: {
-        rId: rIdImage
+        rId: rIdImage,
+        ...(isExternal ? { external: true } : {})
       },
       range: medium.range
     };

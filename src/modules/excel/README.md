@@ -16,7 +16,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Formulas and calculated values** — shared formulas, defined names
 - **Data validation** — list, whole, decimal, date, textLength, custom
 - **Conditional formatting** — cell value, color scale, data bar, icon set
-- **Images** — JPEG, PNG, GIF with one-cell and two-cell anchors
+- **Images** — JPEG, PNG, GIF with one-cell and two-cell anchors; embedded or external (linked) via URL/file path
 - **Hyperlinks** — internal, external, email
 - **Pivot tables** — read and preserve pivot table definitions
 - **Charts** — create/read/edit classic charts, ChartEx modern charts, combo charts, pivot charts, chartsheets, and zero-dependency SVG/PNG/PDF previews (deterministic, not Excel-pixel-perfect — see [Rendering scope](#rendering-scope))
@@ -190,6 +190,50 @@ worksheet.addImage(imageId, {
   br: { col: 3, row: 5 }
 });
 ```
+
+#### Embedded vs. external (linked) images
+
+`workbook.addImage` registers an image one of two ways:
+
+- **Embedded** — pass `buffer`, `base64`, or `filename`. The bytes are written
+  into the `.xlsx` package (`xl/media/imageN.ext`). Self-contained, but the file
+  grows with every image.
+- **Linked (external)** — pass only `link` (a URL or local file path). No bytes
+  are stored; the package keeps a relationship with `TargetMode="External"` and
+  the picture is rendered via `<a:blip r:link>`. The file stays small and the
+  image is resolved by Excel when the workbook is opened.
+
+If both bytes and a `link` are provided, **embedding wins**.
+
+```typescript
+// Linked picture from a URL — nothing is written to xl/media/.
+const urlId = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
+worksheet.addImage(urlId, "B2:D6");
+
+// Linked picture from a local file path (resolved by Excel on open).
+const fileId = workbook.addImage({ extension: "png", link: "file:///C:/images/logo.png" });
+worksheet.addImage(fileId, "F2:H6");
+```
+
+Linked images also work as overlay watermarks:
+
+```typescript
+const wmId = workbook.addImage({ extension: "png", link: "https://example.com/draft.png" });
+worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
+```
+
+**Caveats** (inherent to Excel, not this library):
+
+- Linked images are volatile — if the target moves or the workbook is shared,
+  Excel shows a broken-image placeholder. Use embedding for self-contained files.
+- Modern Excel may refuse to auto-load remote URLs for security reasons.
+- Only **cell pictures** and **overlay watermarks** may be linked. Worksheet
+  **background** images (`addBackgroundImage`) and **header/footer (VML)**
+  watermarks (`addWatermark({ mode: "header" })`) **cannot** be linked — they
+  throw an `ImageError` if given a linked image (Excel drops such backgrounds on
+  open). Use an embedded image for those.
+
+See the runnable [`images-external.ts`](examples/images-external.ts) example.
 
 ### Tables
 

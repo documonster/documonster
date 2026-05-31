@@ -1,3 +1,4 @@
+import { inferExternalImageExtension } from "@excel/utils/drawing-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 abstract class BaseCellAnchorXform extends BaseXform {
@@ -43,6 +44,15 @@ abstract class BaseCellAnchorXform extends BaseXform {
       if (!rel) {
         return undefined;
       }
+
+      // External (linked) image: the relationship uses TargetMode="External"
+      // and there is no media part in the package. Synthesize a media entry
+      // carrying the `link` target so it round-trips and surfaces on the
+      // worksheet as an external image. Entries are deduplicated by link.
+      if (rel.TargetMode === "External" || model.external) {
+        return this.reconcileExternalPicture(rel.Target, options);
+      }
+
       const match = rel.Target.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
       if (match) {
         const name = match[1];
@@ -56,6 +66,31 @@ abstract class BaseCellAnchorXform extends BaseXform {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Resolve (or create) the media entry for an external linked image. The
+   * synthesized entry is appended to `options.media` and indexed by its link
+   * so repeated references to the same external image share one entry.
+   */
+  private reconcileExternalPicture(link: string, options: any): any {
+    if (!link) {
+      return undefined;
+    }
+    const indexKey = `external:${link}`;
+    let mediaId = options.mediaIndex[indexKey];
+    if (mediaId === undefined) {
+      mediaId = options.media.length;
+      const medium = {
+        type: "image",
+        extension: inferExternalImageExtension(link),
+        link,
+        index: mediaId
+      };
+      options.media.push(medium);
+      options.mediaIndex[indexKey] = mediaId;
+    }
+    return options.media[mediaId];
   }
 }
 

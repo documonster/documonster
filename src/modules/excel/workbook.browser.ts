@@ -79,6 +79,8 @@ export interface WorkbookMedia {
   buffer?: ExcelBuffer | Uint8Array;
   base64?: string;
   name?: string;
+  /** External link target — when set, the image is referenced, not embedded. */
+  link?: string;
 }
 
 /** Internal model type for serialization */
@@ -2392,7 +2394,42 @@ class Workbook {
   // ===========================================================================
 
   /**
-   * Add Image to Workbook and return the id
+   * Register an image with the workbook and return its numeric id. Pass the id
+   * to {@link Worksheet.addImage}, {@link Worksheet.addBackgroundImage}, or
+   * {@link Worksheet.addWatermark} to place it.
+   *
+   * The image is either **embedded** or **linked (external)**:
+   *
+   * - **Embedded** — supply `buffer`, `base64`, or `filename`. The bytes are
+   *   written into the `.xlsx` package (`xl/media/imageN.ext`). Self-contained,
+   *   but inflates file size.
+   * - **Linked (external)** — supply only `link` (a URL or local file path).
+   *   No bytes are stored; the package keeps a relationship with
+   *   `TargetMode="External"` and the picture is rendered via `<a:blip r:link>`.
+   *   Keeps the file small, but the image is resolved by Excel at open time.
+   *
+   * If both bytes and a `link` are provided, **embedding wins**.
+   *
+   * Linked images work with **cell pictures** ({@link Worksheet.addImage}) and
+   * **overlay watermarks** ({@link Worksheet.addWatermark} with `mode:
+   * "overlay"`). Worksheet background images and header/footer (VML) watermarks
+   * cannot be linked — they require an embedded image.
+   *
+   * Note: Excel treats linked images as volatile — a moved/missing target
+   * shows a broken-image placeholder, and modern Excel may not auto-load
+   * remote URLs for security reasons. Prefer embedding for self-contained files.
+   *
+   * @example Embedded image
+   * ```typescript
+   * const id = workbook.addImage({ buffer: pngBytes, extension: "png" });
+   * worksheet.addImage(id, "B2:D6");
+   * ```
+   *
+   * @example Linked (external) image — no bytes stored
+   * ```typescript
+   * const id = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
+   * worksheet.addImage(id, "B2:D6");
+   * ```
    */
   addImage(image: ImageData): number {
     const id = this.media.length;

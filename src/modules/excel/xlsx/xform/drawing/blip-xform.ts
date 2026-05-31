@@ -4,6 +4,11 @@ interface BlipModel {
   rId: string;
   /** Alpha modulation (opacity) as OOXML percentage (e.g. 15000 = 15%). */
   alphaModFix?: number;
+  /**
+   * When true, the blip references an external linked image via `r:link`
+   * instead of an embedded one via `r:embed`.
+   */
+  external?: boolean;
 }
 
 class BlipXform extends BaseXform<BlipModel> {
@@ -17,11 +22,13 @@ class BlipXform extends BaseXform<BlipModel> {
   }
 
   render(xmlStream: any, model: BlipModel): void {
+    // External (linked) images use `r:link`; embedded images use `r:embed`.
+    const relAttr = model.external ? "r:link" : "r:embed";
     if (model.alphaModFix !== undefined && model.alphaModFix < 100000) {
       // Render as open/close node with a:alphaModFix child
       xmlStream.openNode(this.tag, {
         "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        "r:embed": model.rId,
+        [relAttr]: model.rId,
         cstate: "print"
       });
       xmlStream.leafNode("a:alphaModFix", { amt: String(model.alphaModFix) });
@@ -29,7 +36,7 @@ class BlipXform extends BaseXform<BlipModel> {
     } else {
       xmlStream.leafNode(this.tag, {
         "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-        "r:embed": model.rId,
+        [relAttr]: model.rId,
         cstate: "print"
       });
     }
@@ -37,11 +44,16 @@ class BlipXform extends BaseXform<BlipModel> {
 
   parseOpen(node: any): boolean {
     switch (node.name) {
-      case this.tag:
-        this.model = {
-          rId: node.attributes["r:embed"]
-        };
+      case this.tag: {
+        // A blip may carry `r:embed` (embedded) or `r:link` (external linked).
+        const link = node.attributes["r:link"];
+        if (link !== undefined) {
+          this.model = { rId: link, external: true };
+        } else {
+          this.model = { rId: node.attributes["r:embed"] };
+        }
         return true;
+      }
       case "a:alphaModFix":
         if (node.attributes.amt) {
           this.model!.alphaModFix = parseInt(node.attributes.amt, 10);

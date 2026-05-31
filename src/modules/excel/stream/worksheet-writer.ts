@@ -2,7 +2,12 @@ import { Anchor } from "@excel/anchor";
 import type { Cell } from "@excel/cell";
 import { Column } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
-import { ExcelStreamStateError, MergeConflictError, RowOutOfBoundsError } from "@excel/errors";
+import {
+  ExcelStreamStateError,
+  ImageError,
+  MergeConflictError,
+  RowOutOfBoundsError
+} from "@excel/errors";
 import { Dimensions } from "@excel/range";
 import { Row } from "@excel/row";
 import { SheetCommentsWriter } from "@excel/stream/sheet-comments-writer";
@@ -11,6 +16,7 @@ import type { Medium as WriterMedium } from "@excel/stream/workbook-writer";
 import { colCache } from "@excel/utils/col-cache";
 import {
   buildDrawingAnchorsAndRels,
+  isExternalImage,
   type DrawingAnchor,
   type DrawingRel
 } from "@excel/utils/drawing-utils";
@@ -689,6 +695,14 @@ class WorksheetWriter {
   // =========================================================================
 
   addBackgroundImage(imageId: string | number): void {
+    const bookImage = this._workbook.getImage(Number(imageId));
+    if (bookImage && isExternalImage(bookImage)) {
+      throw new ImageError(
+        "Background images cannot be external (linked) images. " +
+          "Use an embedded image (buffer/base64/filename). " +
+          "External images are only supported for cell pictures and overlay watermarks."
+      );
+    }
     this._background = {
       imageId: Number(imageId)
     };
@@ -724,8 +738,30 @@ class WorksheetWriter {
   /**
    * Add a watermark to the worksheet using an image from `WorkbookWriter.addImage()`.
    * Supports overlay mode (DrawingML with transparency) and header mode (VML behind content).
+   *
+   * `mode: "overlay"` supports external (linked) images; `mode: "header"` does
+   * not — VML header/footer images require embedded media, so a linked image
+   * with `mode: "header"` throws an `ImageError`.
+   *
+   * @throws {ImageError} If `mode: "header"` is used with an external (linked) image.
    */
   addWatermark(options: WatermarkOptions): void {
+    const mode = options.mode ?? "overlay";
+
+    // Validate BEFORE mutating any state: VML header/footer images use
+    // embedded media; external (linked) images are not representable here.
+    // Reject them up front so a failed call leaves existing watermark media
+    // untouched (no partial mutation).
+    if (mode === "header") {
+      const bookImage = this._workbook.getImage(Number(options.imageId));
+      if (bookImage && isExternalImage(bookImage)) {
+        throw new ImageError(
+          "Header watermark images cannot be external (linked) images. " +
+            "Use an embedded image (buffer/base64/filename), or use overlay mode for linked images."
+        );
+      }
+    }
+
     // Remove existing watermark entries (both stored type tags)
     this._media = this._media.filter(m => (m as any)._watermarkTag !== true);
 
@@ -734,7 +770,7 @@ class WorksheetWriter {
 
     this._watermark = {
       imageId: String(options.imageId),
-      mode: options.mode ?? "overlay",
+      mode,
       opacity,
       headerWidth: options.headerWidth,
       headerHeight: options.headerHeight,
@@ -1115,6 +1151,8 @@ class WorksheetWriter {
         if (!image) {
           return;
         }
+        // Background images are always embedded — external (linked) images are
+        // rejected up front in addBackgroundImage (Excel drops them).
         const pictureId = this._sheetRelsWriter.addMedia({
           Target: mediaRelTargetFromRels(image.name),
           Type: RelType.Image

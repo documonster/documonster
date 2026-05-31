@@ -28,7 +28,7 @@ import type {
 import { Column, type ColumnModel, type ColumnDefn } from "@excel/column";
 import { DataValidations } from "@excel/data-validations";
 import { Enums } from "@excel/enums";
-import { MergeConflictError, TableError } from "@excel/errors";
+import { ImageError, MergeConflictError, TableError } from "@excel/errors";
 import {
   FormCheckbox,
   type FormCheckboxModel,
@@ -65,6 +65,7 @@ import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/ad
 import { getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache, type DecodedRange } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import { isExternalImage } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
 import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import {
@@ -1764,9 +1765,22 @@ class Worksheet {
   }
 
   /**
-   * Using the image id from `Workbook.addImage`, set the background to the worksheet
+   * Using the image id from `Workbook.addImage`, set the background to the worksheet.
+   *
+   * The image must be **embedded** (`buffer`/`base64`/`filename`). Worksheet
+   * background pictures (`<picture r:id>`) do not support external (linked)
+   * images — Excel silently drops a background whose relationship uses
+   * `TargetMode="External"`, so this rejects linked images up front.
    */
   addBackgroundImage(imageId: string | number): void {
+    const bookImage = this._workbook.getImage(imageId);
+    if (bookImage && isExternalImage(bookImage)) {
+      throw new ImageError(
+        "Background images cannot be external (linked) images. " +
+          "Use an embedded image (buffer/base64/filename). " +
+          "External images are only supported for cell pictures and overlay watermarks."
+      );
+    }
     const model = {
       type: "background",
       imageId: String(imageId)
@@ -1794,7 +1808,14 @@ class Worksheet {
    *   Visible in Page Layout view and when printed. Renders behind cell content.
    *   Transparency must be baked into the image (PNG with alpha channel).
    *
+   * **External (linked) images:** `mode: "overlay"` supports external images
+   * (registered via `workbook.addImage({ link })`). `mode: "header"` does
+   * **not** — VML header/footer images require embedded media, so passing a
+   * linked image with `mode: "header"` throws an `ImageError`. Use an embedded
+   * image (`buffer`/`base64`/`filename`) or switch to `mode: "overlay"`.
+   *
    * @param options - Watermark configuration
+   * @throws {ImageError} If `mode: "header"` is used with an external (linked) image.
    *
    * @example Overlay watermark with transparency:
    * ```typescript
@@ -1809,12 +1830,28 @@ class Worksheet {
    * ```
    */
   addWatermark(options: WatermarkOptions): void {
+    const mode = options.mode ?? "overlay";
+
+    // Validate BEFORE mutating any state: VML header/footer images use
+    // embedded media (`<v:imagedata o:relid>`); external (linked) images are
+    // not representable here. Reject them up front so a failed call leaves the
+    // existing watermark untouched (no partial mutation).
+    if (mode === "header") {
+      const bookImage = this._workbook.getImage(options.imageId);
+      if (bookImage && isExternalImage(bookImage)) {
+        throw new ImageError(
+          "Header watermark images cannot be external (linked) images. " +
+            "Use an embedded image (buffer/base64/filename), or use overlay mode for linked images."
+        );
+      }
+    }
+
     // Remove any existing watermark media entries first
     this._media = this._media.filter(m => m.type !== "watermark" && m.type !== "headerImage");
 
     this._watermark = {
       imageId: String(options.imageId),
-      mode: options.mode ?? "overlay",
+      mode,
       opacity: options.opacity,
       headerWidth: options.headerWidth,
       headerHeight: options.headerHeight,
@@ -1830,7 +1867,7 @@ class Worksheet {
       };
       this._media.push(new Image(this, model as any));
     } else {
-      // Header mode: add as a "headerImage" media entry for the VML pipeline
+      // Header mode: add as a "headerImage" media entry for the VML pipeline.
       const model = {
         type: "headerImage",
         imageId: String(options.imageId),

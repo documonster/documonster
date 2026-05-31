@@ -1,5 +1,10 @@
 import { colCache } from "@excel/utils/col-cache";
-import { buildDrawingAnchorsAndRels, resolveMediaTarget } from "@excel/utils/drawing-utils";
+import {
+  buildDrawingAnchorsAndRels,
+  buildImageRel,
+  isExternalImage,
+  resolveMediaTarget
+} from "@excel/utils/drawing-utils";
 import {
   chartRelTargetFromDrawing,
   chartExRelTargetFromDrawing,
@@ -454,17 +459,23 @@ class WorkSheetXform extends BaseXform {
       }
     });
 
-    // Handle background images
+    // Handle background images. Background pictures are always embedded —
+    // external (linked) images are rejected in addBackgroundImage because Excel
+    // drops a background whose relationship uses TargetMode="External".
     backgroundMedia.forEach(medium => {
-      const rId = nextRid(rels);
       const bookImage = options.media[medium.imageId];
+      // Guard against an invalid imageId — same as the image/watermark paths.
+      if (!bookImage) {
+        return;
+      }
+      const rId = nextRid(rels);
       rels.push({
         Id: rId,
         Type: RelType.Image,
         Target: resolveMediaTarget(bookImage)
       });
       model.background = { rId };
-      model.image = options.media[medium.imageId];
+      model.image = bookImage;
     });
 
     // Handle embedded images — create drawing model using shared utility
@@ -516,12 +527,9 @@ class WorkSheetXform extends BaseXform {
         if (!bookImage) {
           continue;
         }
+        const isExternal = isExternalImage(bookImage);
         const rIdImage = nextRid(drawing.rels);
-        drawing.rels.push({
-          Id: rIdImage,
-          Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
-          Target: resolveMediaTarget(bookImage)
-        });
+        drawing.rels.push(buildImageRel(rIdImage, bookImage));
         // Convert opacity (0-1) to OOXML percentage (0-100000), clamped
         const rawOpacity = medium.opacity !== undefined ? medium.opacity : 0.15;
         const clampedOpacity = Math.max(0, Math.min(1, rawOpacity));
@@ -536,7 +544,8 @@ class WorkSheetXform extends BaseXform {
         drawing.anchors.push({
           picture: {
             rId: rIdImage,
-            alphaModFix
+            alphaModFix,
+            ...(isExternal ? { external: true } : {})
           },
           // Cover the full data area with extra margin
           range: {
