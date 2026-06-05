@@ -1940,6 +1940,8 @@ export interface DrawingShape {
   readonly noOutline?: boolean;
   /** Text content inside the shape. */
   readonly textContent?: readonly Paragraph[];
+  /** Vertical anchoring of the text body inside the shape (a:bodyPr/@anchor). */
+  readonly textBodyAnchor?: "t" | "ctr" | "b" | "just" | "dist";
   /** Alternative text. */
   readonly altText?: string;
   /** Shape name. */
@@ -1965,6 +1967,10 @@ export interface DrawingShape {
   readonly behindDoc?: boolean;
   /** Rotation in 60,000ths of a degree. */
   readonly rotation?: number;
+  /** Flip the shape horizontally (a:xfrm/@flipH). */
+  readonly flipHorizontal?: boolean;
+  /** Flip the shape vertically (a:xfrm/@flipV). */
+  readonly flipVertical?: boolean;
   /** Raw XML string (for preserving unrecognized shape details on round-trip). */
   readonly rawXml?: string;
   /**

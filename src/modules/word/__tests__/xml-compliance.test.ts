@@ -16,6 +16,7 @@ import {
   bold,
   italic,
   hyperlink,
+  floatingImage,
   commentRangeStart,
   commentRangeEnd,
   commentReference
@@ -957,6 +958,158 @@ describe("DOCX XML Compliance", () => {
       // The blip has an r:embed attribute referencing the image
       const blipWithEmbed = blips.find(b => b.attributes["r:embed"] !== undefined);
       expect(blipWithEmbed).toBeDefined();
+    });
+  });
+
+  describe("drawing object id (wp:docPr/@id) uniqueness", () => {
+    /**
+     * Word requires every drawing object id (wp:docPr/@id, and the matching
+     * pic:cNvPr/@id) to be a unique positive integer across the *entire*
+     * document — body, headers, footers, footnotes, endnotes, comments and
+     * text boxes share one id space. Duplicate or zero ids make Word raise the
+     * "unreadable content / needs repair" dialog.
+     *
+     * Regression: floating images (and any inline image whose model carried no
+     * `drawingId`) all fell back to a hard-coded id=1, colliding with inline
+     * images that did carry ids. See tmp/word-examples/07-images.docx, which
+     * emitted eight `<wp:docPr id="1">` elements.
+     */
+    function collectDocPrIds(files: Map<string, Uint8Array>): { ids: string[]; cNv: string[] } {
+      const ids: string[] = [];
+      const cNv: string[] = [];
+      for (const [path, data] of files) {
+        if (!path.endsWith(".xml")) {
+          continue;
+        }
+        if (!/word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/.test(path)) {
+          continue;
+        }
+        const root = parseXml(decoder.decode(data)).root;
+        for (const el of findDescendants(root, "wp:docPr")) {
+          const id = el.attributes["id"];
+          if (id !== undefined) {
+            ids.push(id);
+          }
+        }
+        for (const el of findDescendants(root, "pic:cNvPr")) {
+          const id = el.attributes["id"];
+          if (id !== undefined) {
+            cNv.push(id);
+          }
+        }
+      }
+      return { ids, cNv };
+    }
+
+    it("assigns unique, non-zero ids even when the model has duplicate/unset drawingId", async () => {
+      // Two inline images that BOTH claim drawingId=1 (duplicate in the model),
+      // plus a floating image with no drawingId at all (would have defaulted to 1).
+      const doc = {
+        images: [
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image1.png", rId: "rIdImg1" },
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image2.png", rId: "rIdImg2" },
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image3.png", rId: "rIdImg3" }
+        ],
+        body: [
+          paragraph([
+            {
+              content: [
+                {
+                  type: "image" as const,
+                  rId: "rIdImg1",
+                  width: 914400,
+                  height: 914400,
+                  drawingId: 1
+                }
+              ]
+            }
+          ]),
+          paragraph([
+            {
+              content: [
+                {
+                  type: "image" as const,
+                  rId: "rIdImg2",
+                  width: 914400,
+                  height: 914400,
+                  drawingId: 1
+                }
+              ]
+            }
+          ]),
+          floatingImage({ rId: "rIdImg3", width: 914400, height: 914400 })
+        ]
+      };
+
+      const bytes = await packageDocx(doc);
+      const files = await extractDocx(bytes);
+      const { ids, cNv } = collectDocPrIds(files);
+
+      expect(ids.length).toBe(3);
+      // All unique
+      expect(new Set(ids).size).toBe(ids.length);
+      // All positive non-zero integers
+      for (const id of ids) {
+        const n = Number(id);
+        expect(Number.isInteger(n)).toBe(true);
+        expect(n).toBeGreaterThan(0);
+      }
+      // pic:cNvPr ids mirror the docPr ids (same logical object)
+      expect(new Set(cNv)).toEqual(new Set(ids));
+    });
+
+    it("keeps ids unique across body, headers and footers (shared id space)", async () => {
+      const headerContent = {
+        children: [
+          paragraph([
+            {
+              content: [{ type: "image" as const, rId: "rIdHdr", width: 914400, height: 914400 }]
+            }
+          ])
+        ]
+      };
+      const footerContent = {
+        children: [
+          paragraph([
+            {
+              content: [{ type: "image" as const, rId: "rIdFtr", width: 914400, height: 914400 }]
+            }
+          ])
+        ]
+      };
+
+      const doc = {
+        images: [
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image1.png", rId: "rIdBody" },
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image2.png", rId: "rIdHdr" },
+          { data: MINI_PNG, mediaType: "png" as const, fileName: "image3.png", rId: "rIdFtr" }
+        ],
+        headers: new Map([["h1", { content: headerContent }]]),
+        footers: new Map([["f1", { content: footerContent }]]),
+        body: [
+          paragraph([
+            {
+              content: [{ type: "image" as const, rId: "rIdBody", width: 914400, height: 914400 }]
+            }
+          ])
+        ]
+      };
+
+      const bytes = await packageDocx(doc as never);
+      const files = await extractDocx(bytes);
+      const { ids } = collectDocPrIds(files);
+
+      // Confirm the header/footer images actually rendered (otherwise the
+      // uniqueness check below would pass vacuously).
+      const headerRoot = parseEntry(files, "word/header1.xml");
+      const footerRoot = parseEntry(files, "word/document.xml");
+      void footerRoot;
+      expect(findDescendants(headerRoot, "wp:docPr").length).toBe(1);
+      expect(findDescendants(parseEntry(files, "word/footer1.xml"), "wp:docPr").length).toBe(1);
+
+      // One image in body, one in a header, one in a footer.
+      expect(ids.length).toBe(3);
+      expect(new Set(ids).size).toBe(3);
     });
   });
 });

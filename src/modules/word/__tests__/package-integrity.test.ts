@@ -890,6 +890,69 @@ describe("DOCX Package Integrity", () => {
   });
 
   // ===========================================================================
+  // SVG without an explicit fallback must still get a synthesized raster blip
+  // ===========================================================================
+
+  it("synthesizes a PNG raster fallback for SVG images lacking fallbackData", async () => {
+    // a:blip cannot reference an SVG directly (Word renders it broken). When
+    // the caller supplies an SVG with no fallbackData, the packager must
+    // auto-generate a raster fallback so a:blip targets a PNG and the SVG is
+    // attached via asvg:svgBlip.
+    const SVG_DATA = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+    );
+    const doc: any = {
+      body: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              content: [
+                {
+                  type: "image",
+                  rId: "imgSvgNoFb",
+                  width: 914400,
+                  height: 914400,
+                  drawingId: 1,
+                  name: "P"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      images: [
+        {
+          rId: "imgSvgNoFb",
+          fileName: "image1.svg",
+          mediaType: "svg",
+          data: SVG_DATA
+          // NOTE: no fallbackData on purpose.
+        }
+      ]
+    };
+
+    const bytes = await packageDocx(doc);
+    const files = await extractDocx(bytes);
+
+    // A synthesized raster fallback PNG must be present in the package.
+    const fallbackKey = [...files.keys()].find(k => /word\/media\/.*_fallback\.png$/.test(k));
+    expect(fallbackKey).toBeDefined();
+
+    const docXml = decodeEntry(files, "word/document.xml");
+    // a:blip must reference a relationship; asvg:svgBlip must be present.
+    expect(docXml).toMatch(/<a:blip[^>]*r:embed="([^"]+)"/);
+    expect(docXml).toMatch(/asvg:svgBlip[^>]*r:embed="([^"]+)"/);
+
+    // The a:blip target must be the PNG fallback, and the svgBlip the SVG.
+    const rels = decodeEntry(files, "word/_rels/document.xml.rels");
+    const blipId = docXml.match(/<a:blip[^>]*r:embed="([^"]+)"/)![1];
+    const svgId = docXml.match(/asvg:svgBlip[^>]*r:embed="([^"]+)"/)![1];
+    expect(rels).toMatch(new RegExp(`Id="${blipId}"[^>]*Target="[^"]*_fallback\\.png"`));
+    expect(rels).toMatch(new RegExp(`Id="${svgId}"[^>]*Target="[^"]*\\.svg"`));
+  });
+
+  // ===========================================================================
   // altChunk target must not be written twice (was: also kept in opaqueParts)
   // ===========================================================================
 

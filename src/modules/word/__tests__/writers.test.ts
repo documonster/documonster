@@ -16,6 +16,7 @@ import type {
   NumberingInstance,
   Paragraph,
   Run,
+  SectionProperties,
   StyleDef,
   Table
 } from "../types";
@@ -38,6 +39,7 @@ import {
   renderRelationships
 } from "../writer/relationships";
 import { renderRun, renderRunProperties, renderShading } from "../writer/run-writer";
+import { renderSectionProperties } from "../writer/section-writer";
 import { StringBuf } from "../writer/string-buf";
 import { renderStyles } from "../writer/styles-writer";
 import { renderTable } from "../writer/table-writer";
@@ -869,5 +871,108 @@ describe("renderNumbering", () => {
     const xml = new XmlWriter();
     renderNumbering(xml, abstractNums, []);
     expect(xml.toString()).toContain('<w:numFmt w:val="bullet"/>');
+  });
+});
+
+// =============================================================================
+// Section Properties (w:sectPr)
+// =============================================================================
+
+describe("renderSectionProperties", () => {
+  /** Return the order in which the given local element names appear in xml. */
+  function orderOf(xml: string, names: string[]): string[] {
+    return names
+      .map(n => ({ n, pos: xml.indexOf(`<w:${n}`) }))
+      .filter(e => e.pos >= 0)
+      .sort((a, b) => a.pos - b.pos)
+      .map(e => e.n);
+  }
+
+  it("emits sectPr children in the OOXML schema order", () => {
+    // A section that exercises every ordering-sensitive child at once.
+    const sect: SectionProperties = {
+      headers: [{ type: "default", rId: "rId10" }],
+      footers: [{ type: "default", rId: "rId11" }],
+      footnoteProperties: { numFmt: "decimal" },
+      endnoteProperties: { numFmt: "lowerRoman" },
+      breakType: "nextPage",
+      pageSize: { width: 11906, height: 16838 },
+      margins: { top: 720, bottom: 720, left: 720, right: 720 },
+      pageBorders: {
+        display: "allPages",
+        top: { style: "single", size: 4, color: "000000" }
+      },
+      lineNumbers: { countBy: 1, start: 1, restart: "newPage" },
+      pageNumbering: { start: 1, format: "lowerRoman" },
+      columns: { count: 2, space: 720, equalWidth: true },
+      formProtection: true,
+      verticalAlign: "center",
+      titlePage: true,
+      textDirection: "lrTb",
+      bidi: true,
+      rtlGutter: true,
+      docGrid: { type: "lines", linePitch: 360 }
+    };
+    const xml = new XmlWriter();
+    renderSectionProperties(xml, sect);
+    const out = xml.toString();
+
+    // The canonical CT_SectPr sequence (subset present in this section).
+    const expected = [
+      "headerReference",
+      "footerReference",
+      "footnotePr",
+      "endnotePr",
+      "type",
+      "pgSz",
+      "pgMar",
+      "pgBorders",
+      "lnNumType",
+      "pgNumType",
+      "cols",
+      "formProt",
+      "vAlign",
+      "titlePg",
+      "textDirection",
+      "bidi",
+      "rtlGutter",
+      "docGrid"
+    ];
+    expect(orderOf(out, expected)).toEqual(expected);
+  });
+
+  it("places lnNumType before pgNumType and cols after pgNumType", () => {
+    const sect: SectionProperties = {
+      pageSize: { width: 11906, height: 16838 },
+      margins: { top: 720, bottom: 720, left: 720, right: 720 },
+      pageNumbering: { start: 1, format: "lowerRoman" },
+      lineNumbers: { countBy: 1 },
+      columns: { count: 1 }
+    };
+    const xml = new XmlWriter();
+    renderSectionProperties(xml, sect);
+    const out = xml.toString();
+    const ln = out.indexOf("<w:lnNumType");
+    const pn = out.indexOf("<w:pgNumType");
+    const cols = out.indexOf("<w:cols");
+    expect(ln).toBeGreaterThanOrEqual(0);
+    expect(pn).toBeGreaterThan(ln);
+    expect(cols).toBeGreaterThan(pn);
+  });
+
+  it("places footnotePr/endnotePr before type and pgSz", () => {
+    const sect: SectionProperties = {
+      footnoteProperties: { numFmt: "decimal" },
+      endnoteProperties: { numFmt: "decimal" },
+      breakType: "nextPage",
+      pageSize: { width: 11906, height: 16838 },
+      margins: { top: 720, bottom: 720, left: 720, right: 720 }
+    };
+    const xml = new XmlWriter();
+    renderSectionProperties(xml, sect);
+    const out = xml.toString();
+    expect(out.indexOf("<w:footnotePr")).toBeLessThan(out.indexOf("<w:type"));
+    expect(out.indexOf("<w:endnotePr")).toBeLessThan(out.indexOf("<w:type"));
+    expect(out.indexOf("<w:type")).toBeLessThan(out.indexOf("<w:pgSz"));
   });
 });

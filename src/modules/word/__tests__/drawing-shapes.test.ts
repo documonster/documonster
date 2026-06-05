@@ -16,7 +16,8 @@ import {
   createStar,
   createShape,
   Document,
-  packageDocx
+  packageDocx,
+  textParagraph
 } from "../index";
 
 describe("Drawing shapes", () => {
@@ -157,6 +158,41 @@ describe("Drawing shapes", () => {
 
       expect(shape.noFill).toBe(true);
       expect(shape.fillColor).toBeUndefined();
+    });
+
+    it("maps flipH/flipV and textBody anchor onto the model", () => {
+      const shape = createShape({
+        shapeType: "rightArrow",
+        width: 914400,
+        height: 457200,
+        flipH: true,
+        flipV: true,
+        textBody: { anchor: "ctr", paragraphs: [textParagraph("hi")] }
+      });
+      expect(shape.flipHorizontal).toBe(true);
+      expect(shape.flipVertical).toBe(true);
+      expect(shape.textBodyAnchor).toBe("ctr");
+      expect(shape.textContent?.length).toBe(1);
+    });
+
+    it("emits flipH/flipV in a:xfrm and anchor in wps:bodyPr", async () => {
+      const doc = Document.create();
+      Document.addContent(
+        doc,
+        createShape({
+          shapeType: "rightArrow",
+          width: 914400,
+          height: 457200,
+          flipH: true,
+          fill: { type: "solid", color: "C00000" },
+          textBody: { anchor: "ctr", paragraphs: [textParagraph("X")] }
+        })
+      );
+      const bytes = await packageDocx(Document.build(doc));
+      const files = await extractAll(bytes);
+      const docXml = new TextDecoder().decode(files.get("word/document.xml")!.data);
+      expect(docXml).toMatch(/<a:xfrm[^>]*flipH="1"/);
+      expect(docXml).toMatch(/<wps:bodyPr[^>]*anchor="ctr"/);
     });
   });
 

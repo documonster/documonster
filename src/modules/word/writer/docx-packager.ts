@@ -144,6 +144,25 @@ function collectHyperlinks(body: readonly BodyContent[]): Hyperlink[] {
   return links;
 }
 
+/**
+ * A minimal valid 1×1 transparent PNG.
+ *
+ * Used as an automatic raster fallback for SVG images that ship without an
+ * explicit `fallbackData`. In OOXML, `a:blip/@r:embed` must reference a raster
+ * image — Microsoft Word does not rasterize an SVG referenced directly by
+ * `a:blip`, so an SVG without a raster fallback renders as a broken/empty
+ * picture. By always pairing the SVG (`asvg:svgBlip`) with a raster blip we
+ * guarantee the drawing is renderable everywhere: SVG-aware Word shows the
+ * vector, older readers show the raster placeholder.
+ */
+const SVG_RASTER_FALLBACK_PNG = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x02, 0x00,
+  0x00, 0x05, 0x00, 0x01, 0xe2, 0x26, 0x05, 0x9b, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+  0xae, 0x42, 0x60, 0x82
+]);
+
 /** Infer a content type for an opaque part based on its file extension. */
 function inferContentType(ext: string): string | undefined {
   const map: Record<string, string> = {
@@ -444,7 +463,12 @@ async function _packageDocxInner(
     for (const img of doc.images) {
       const oldRid = img.rId;
 
-      if (img.mediaType === "svg" && img.fallbackData) {
+      if (img.mediaType === "svg") {
+        // SVG must always be paired with a raster fallback that `a:blip`
+        // references; Word cannot rasterize an SVG referenced directly by
+        // a:blip. If the caller did not provide one, synthesize a minimal
+        // transparent PNG so the drawing is still valid and renderable.
+        const fallbackData = img.fallbackData ?? SVG_RASTER_FALLBACK_PNG;
         // Main rId points at the PNG fallback (the raster image consumed by
         // a:blip).
         const baseName = img.fileName.replace(/\.[^.]+$/, "");
@@ -462,7 +486,7 @@ async function _packageDocxInner(
           imageExtensions.add(ext);
         }
 
-        svgFallbacks.push({ fallbackFileName, data: img.fallbackData });
+        svgFallbacks.push({ fallbackFileName, data: fallbackData });
       } else {
         registerImageRel(oldRid, `media/${img.fileName}`);
         const ext = getFileExt(img.fileName);
@@ -1396,7 +1420,12 @@ async function _packageDocxInner(
       // Footnotes are an independent OPC part — their r:id values must
       // resolve against word/_rels/footnotes.xml.rels, not document.xml.rels.
       renderXml(xml =>
-        renderFootnotes(xml, doc.footnotes!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
+        renderFootnotes(xml, doc.footnotes!, {
+          imageRemap: new Map(),
+          hyperlinkRIds,
+          nextDocPrId: renderCtx.ids.nextDocPrId,
+          rawXmlPolicy
+        })
       )
     );
     if (getRelationshipCount(footnoteRels) > 0) {
@@ -1412,7 +1441,12 @@ async function _packageDocxInner(
     archive.add(
       PartPath.Endnotes,
       renderXml(xml =>
-        renderEndnotes(xml, doc.endnotes!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
+        renderEndnotes(xml, doc.endnotes!, {
+          imageRemap: new Map(),
+          hyperlinkRIds,
+          nextDocPrId: renderCtx.ids.nextDocPrId,
+          rawXmlPolicy
+        })
       )
     );
     if (getRelationshipCount(endnoteRels) > 0) {
@@ -1431,7 +1465,12 @@ async function _packageDocxInner(
       // hyperlinks/images render with the right r:id (the rels manager
       // below registered them under their model-original id).
       renderXml(xml =>
-        renderComments(xml, doc.comments!, { imageRemap: new Map(), hyperlinkRIds, rawXmlPolicy })
+        renderComments(xml, doc.comments!, {
+          imageRemap: new Map(),
+          hyperlinkRIds,
+          nextDocPrId: renderCtx.ids.nextDocPrId,
+          rawXmlPolicy
+        })
       )
     );
 
@@ -1470,6 +1509,7 @@ async function _packageDocxInner(
           renderHeader(xml, headerDef.content, {
             imageRemap: new Map(),
             hyperlinkRIds,
+            nextDocPrId: renderCtx.ids.nextDocPrId,
             rawXmlPolicy
           })
         )
@@ -1501,6 +1541,7 @@ async function _packageDocxInner(
           renderFooter(xml, footerDef.content, {
             imageRemap: new Map(),
             hyperlinkRIds,
+            nextDocPrId: renderCtx.ids.nextDocPrId,
             rawXmlPolicy
           })
         )

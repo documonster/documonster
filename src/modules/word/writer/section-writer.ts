@@ -118,6 +118,17 @@ export function renderSectionProperties(
 ): void {
   xml.openNode("w:sectPr");
 
+  // NOTE: Child element ordering below is dictated by the OOXML schema
+  // (ISO/IEC 29500 — CT_SectPr / EG_SectPrContents). Microsoft Word rejects
+  // (or silently "repairs") documents whose sectPr children are out of order,
+  // so the sequence here MUST stay:
+  //   headerReference*, footerReference*, footnotePr, endnotePr, type, pgSz,
+  //   pgMar, paperSrc, pgBorders, lnNumType, pgNumType, cols, formProt,
+  //   vAlign, noEndnote, titlePg, textDirection, bidi, rtlGutter, docGrid,
+  //   printerSettings
+  // (headerReference/footerReference come from EG_HdrFtrReferences, which the
+  // schema places ahead of EG_SectPrContents.)
+
   // Header references
   if (sect.headers) {
     for (const ref of sect.headers) {
@@ -130,6 +141,16 @@ export function renderSectionProperties(
     for (const ref of sect.footers) {
       renderHeaderFooterRef(xml, "w:footerReference", ref);
     }
+  }
+
+  // Footnote properties
+  if (sect.footnoteProperties) {
+    renderNoteProperties(xml, "w:footnotePr", sect.footnoteProperties);
+  }
+
+  // Endnote properties
+  if (sect.endnoteProperties) {
+    renderNoteProperties(xml, "w:endnotePr", sect.endnoteProperties);
   }
 
   // Section break type
@@ -168,31 +189,7 @@ export function renderSectionProperties(
     renderPageBorders(xml, sect.pageBorders);
   }
 
-  // Columns
-  if (sect.columns) {
-    renderColumns(xml, sect.columns);
-  } else {
-    xml.leafNode("w:cols", { "w:space": String(DEFAULT_COLUMN_SPACE) });
-  }
-
-  // Title page (different first page header/footer)
-  if (sect.titlePage) {
-    xml.leafNode("w:titlePg");
-  }
-
-  // Page numbering
-  if (sect.pageNumbering) {
-    const attrs: Record<string, string> = {};
-    if (sect.pageNumbering.start !== undefined) {
-      attrs["w:start"] = String(sect.pageNumbering.start);
-    }
-    if (sect.pageNumbering.format) {
-      attrs["w:fmt"] = sect.pageNumbering.format;
-    }
-    xml.leafNode("w:pgNumType", attrs);
-  }
-
-  // Line numbers
+  // Line numbers (must precede pgNumType per schema)
   if (sect.lineNumbers) {
     const attrs: Record<string, string> = {};
     if (sect.lineNumbers.countBy !== undefined) {
@@ -210,9 +207,39 @@ export function renderSectionProperties(
     xml.leafNode("w:lnNumType", attrs);
   }
 
+  // Page numbering
+  if (sect.pageNumbering) {
+    const attrs: Record<string, string> = {};
+    if (sect.pageNumbering.start !== undefined) {
+      attrs["w:start"] = String(sect.pageNumbering.start);
+    }
+    if (sect.pageNumbering.format) {
+      attrs["w:fmt"] = sect.pageNumbering.format;
+    }
+    xml.leafNode("w:pgNumType", attrs);
+  }
+
+  // Columns
+  if (sect.columns) {
+    renderColumns(xml, sect.columns);
+  } else {
+    xml.leafNode("w:cols", { "w:space": String(DEFAULT_COLUMN_SPACE) });
+  }
+
+  // Form protection
+  if (sect.formProtection) {
+    xml.leafNode("w:formProt", { "w:val": "1" });
+  }
+
   // Vertical alignment
   if (sect.verticalAlign) {
     xml.leafNode("w:vAlign", { "w:val": sect.verticalAlign });
+  }
+
+  // Title page (different first page header/footer) — schema places this
+  // after vAlign/noEndnote and before textDirection.
+  if (sect.titlePage) {
+    xml.leafNode("w:titlePg");
   }
 
   // Text direction
@@ -228,21 +255,6 @@ export function renderSectionProperties(
   // RTL gutter
   if (sect.rtlGutter) {
     xml.leafNode("w:rtlGutter");
-  }
-
-  // Form protection
-  if (sect.formProtection) {
-    xml.leafNode("w:formProt", { "w:val": "1" });
-  }
-
-  // Footnote properties
-  if (sect.footnoteProperties) {
-    renderNoteProperties(xml, "w:footnotePr", sect.footnoteProperties);
-  }
-
-  // Endnote properties
-  if (sect.endnoteProperties) {
-    renderNoteProperties(xml, "w:endnotePr", sect.endnoteProperties);
   }
 
   // Document grid

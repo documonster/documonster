@@ -395,9 +395,26 @@ export function tocField(options?: {
   tcLevels?: string;
   /** Hyperlinks for entries. */
   hyperlink?: boolean;
-  /** Right-align page numbers. */
+  /**
+   * Right-align page numbers.
+   *
+   * NOTE: Right-aligned page numbers are the TOC default — they come from the
+   * right-aligned tab stop in the TOC paragraph styles, not from a field
+   * switch. The `\z` switch does NOT mean "right align": per ECMA-376 it
+   * *hides* the tab leader and page numbers in Web layout view. Mapping this
+   * option to `\z` therefore broke the layout, so we no longer emit it.
+   */
   rightAlignedPageNumbers?: boolean;
-  /** Use tab leader (default "." dots). */
+  /**
+   * Tab leader style between an entry and its page number.
+   *
+   * NOTE: The dotted leader is already the TOC default (a tab stop with dot
+   * leader defined by the TOC paragraph styles). The TOC field has no switch
+   * for choosing the leader glyph — the `\p` switch sets the *separator
+   * character* (replacing the tab entirely), which would DISABLE the leader
+   * dots and the right-aligned page number. We therefore do not translate
+   * this option into `\p`; the leader is controlled by the TOC styles.
+   */
   tabLeader?: "." | "-" | "_" | " ";
   /** Suppress page numbers. */
   noPageNumbers?: boolean;
@@ -418,12 +435,8 @@ export function tocField(options?: {
   if (options?.hyperlink) {
     instruction += "\\h ";
   }
-  if (options?.rightAlignedPageNumbers) {
-    instruction += "\\z ";
-  }
-  if (options?.tabLeader) {
-    instruction += `\\p "${options.tabLeader}" `;
-  }
+  // Intentionally NOT emitting `\z` for rightAlignedPageNumbers — see note above.
+  // Intentionally NOT emitting `\p` for tabLeader — see the field note above.
   if (options?.noPageNumbers) {
     instruction += "\\n ";
   }

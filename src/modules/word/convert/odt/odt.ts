@@ -1402,7 +1402,12 @@ function sanitizeOdtPictureName(raw: string | undefined): string {
  */
 export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
   const encoder = utf8Encoder;
-  const archive = zip();
+  // `noSort: true` preserves insertion order. The ODF spec (OpenDocument
+  // v1.2 part 3, §3.3) requires the `mimetype` entry to be the FIRST entry in
+  // the package and STORED (uncompressed) so the file type can be detected by
+  // magic bytes. The default ZipArchive behaviour sorts entries alphabetically,
+  // which would push `mimetype` after `content.xml` and break ODF detection.
+  const archive = zip({ noSort: true });
 
   // Mimetype MUST be the first entry in the ZIP, uncompressed (ODF spec requirement)
   archive.add("mimetype", encoder.encode("application/vnd.oasis.opendocument.text"), { level: 0 });

@@ -355,6 +355,24 @@ function parseDrawingShape(
         shape.noOutline = true;
       }
     }
+
+    // Parse transform (rotation / flip) from a:xfrm
+    const xfrmEl = findChild(spPrEl, "a:xfrm") ?? findChildNs(spPrEl, "xfrm");
+    if (xfrmEl) {
+      const rot = xfrmEl.attributes["rot"];
+      if (rot) {
+        const n = parseInt(rot, 10);
+        if (!Number.isNaN(n)) {
+          shape.rotation = n;
+        }
+      }
+      if (xfrmEl.attributes["flipH"] === "1") {
+        shape.flipHorizontal = true;
+      }
+      if (xfrmEl.attributes["flipV"] === "1") {
+        shape.flipVertical = true;
+      }
+    }
   }
 
   // Parse text content (wps:txbx > w:txbxContent)
@@ -372,6 +390,13 @@ function parseDrawingShape(
     if (paras.length > 0) {
       shape.textContent = paras;
     }
+  }
+
+  // Parse text body vertical anchor (wps:bodyPr/@anchor)
+  const bodyPrEl = findChild(wspEl, "wps:bodyPr") ?? findChildNs(wspEl, "bodyPr");
+  const anchorAttr = bodyPrEl?.attributes["anchor"];
+  if (anchorAttr === "t" || anchorAttr === "ctr" || anchorAttr === "b") {
+    shape.textBodyAnchor = anchorAttr;
   }
 
   // Parse positioning

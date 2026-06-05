@@ -35,6 +35,21 @@ export interface RenderHelpers {
   /** See WordRenderContext.hyperlinkRIds. */
   readonly hyperlinkRIds?: ReadonlyWeakMap<object, string>;
   /**
+   * Allocates the next document-wide unique drawing object id, used for
+   * `wp:docPr/@id` (and the matching `pic:cNvPr/@id` / `wps:cNvPr/@id`).
+   *
+   * Word requires every drawing object id to be a unique positive integer
+   * across the entire document — including body, headers, footers, footnotes,
+   * endnotes, comments and text boxes. The packager seeds a single counter on
+   * the render context and exposes it here so every drawing renderer draws
+   * from the same id space, regardless of what (possibly duplicate or unset)
+   * `drawingId` the model carries.
+   *
+   * When undefined (e.g. a standalone renderer call without a context),
+   * renderers fall back to the model's `drawingId` or `1`.
+   */
+  readonly nextDocPrId?: () => number;
+  /**
    * Raw XML output policy. Controls how preserved/opaque rawXml fragments
    * (opaqueRun, opaqueParagraphChild, opaqueDrawing, _advancedFillXml, …)
    * are emitted. Defaults to `"preserve"` when undefined for backwards

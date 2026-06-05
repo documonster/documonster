@@ -240,6 +240,24 @@ describe("Field helpers", () => {
     expect((run.content[0] as any).instruction).toContain("\\h");
   });
 
+  it("tocField does not emit \\p for tabLeader (would disable dot leader)", () => {
+    // The dotted leader is the TOC default; `\p` sets a single separator char
+    // and would DISABLE the leader + right-aligned page number.
+    const run = tocField({ headingLevels: "1-3", tabLeader: "." });
+    const instr = (run.content[0] as any).instruction as string;
+    expect(instr).toContain("TOC");
+    expect(instr).not.toContain("\\p");
+  });
+
+  it("tocField does not emit \\z for rightAlignedPageNumbers", () => {
+    // `\z` hides the leader/page numbers in Web layout view — it is NOT a
+    // right-align switch. Right alignment is the TOC default via styles.
+    const run = tocField({ headingLevels: "1-3", rightAlignedPageNumbers: true });
+    const instr = (run.content[0] as any).instruction as string;
+    expect(instr).toContain("TOC");
+    expect(instr).not.toContain("\\z");
+  });
+
   it("tcField", () => {
     const run = tcField("Entry", { level: 2 });
     expect((run.content[0] as any).instruction).toContain("TC");

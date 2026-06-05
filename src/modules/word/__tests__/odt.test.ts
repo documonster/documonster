@@ -126,6 +126,36 @@ describe("ODT module", () => {
       expect(result).toBeInstanceOf(Uint8Array);
       expect(result.length).toBeGreaterThan(0);
     });
+
+    // ODF v1.2 part 3, §3.3: when a `mimetype` file is present it MUST be the
+    // first entry in the package and stored uncompressed (no compression, no
+    // extra field) so the format can be detected from the file's magic bytes.
+    // Regression: the ZIP archiver sorts entries alphabetically by default,
+    // which pushed `mimetype` after `content.xml` and broke ODF detection.
+    it("places `mimetype` as the first ZIP entry, stored uncompressed", async () => {
+      const doc = makeDoc([makeParagraph("ordering"), makeParagraph("content")]);
+      const bytes = await writeOdt(doc);
+
+      // Parse the first local file header.
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      // Local file header signature: PK\x03\x04
+      expect(dv.getUint32(0, true)).toBe(0x04034b50);
+      const compressionMethod = dv.getUint16(8, true); // 0 = STORED, 8 = DEFLATE
+      const nameLen = dv.getUint16(26, true);
+      const extraLen = dv.getUint16(28, true);
+      const nameBytes = bytes.subarray(30, 30 + nameLen);
+      const firstName = new TextDecoder().decode(nameBytes);
+
+      expect(firstName).toBe("mimetype");
+      expect(compressionMethod).toBe(0); // STORED
+      expect(extraLen).toBe(0); // no extra field
+      // The stored bytes are exactly the mimetype string.
+      const dataStart = 30 + nameLen + extraLen;
+      const mime = new TextDecoder().decode(
+        bytes.subarray(dataStart, dataStart + "application/vnd.oasis.opendocument.text".length)
+      );
+      expect(mime).toBe("application/vnd.oasis.opendocument.text");
+    });
   });
 
   describe("readOdt", () => {

@@ -371,9 +371,10 @@ export function renderShading(xml: XmlSink, shd: Shading): void {
 function renderInlineImage(
   xml: XmlSink,
   img: InlineImageContent,
-  imageRemap?: ReadonlyMap<string, string>
+  imageRemap?: ReadonlyMap<string, string>,
+  nextDocPrId?: () => number
 ): void {
-  const drawingId = img.drawingId ?? 1;
+  const drawingId = nextDocPrId?.() ?? img.drawingId ?? 1;
   const name = img.name ?? "Picture";
 
   // Resolve the relationship id used in r:embed: prefer a packager-provided
@@ -752,7 +753,7 @@ function renderRunContent(xml: XmlSink, content: RunContent, helpers?: RenderHel
         }
         return true;
       }
-      renderInlineImage(xml, content, helpers?.imageRemap);
+      renderInlineImage(xml, content, helpers?.imageRemap, helpers?.nextDocPrId);
       return true;
 
     case "field":

@@ -262,14 +262,14 @@ export const Document = {
     mediaType: ImageMediaType,
     width: Emu,
     height: Emu,
-    options?: { altText?: string; name?: string }
+    options?: { altText?: string; name?: string; fallbackData?: Uint8Array }
   ): { rId: string; drawingId: number } {
     const s = _toState(doc);
     const fileName = `image${s.nextImageId}.${mediaType}`;
     const rId = `__img_${s.nextImageId}`;
     const drawingId = s.nextDrawingId++;
 
-    s.images.push({ data, mediaType, fileName, rId });
+    s.images.push({ data, mediaType, fileName, rId, fallbackData: options?.fallbackData });
 
     s.body.push(
       paragraph([
@@ -317,13 +317,14 @@ export const Document = {
       rotation?: number;
       flipHorizontal?: boolean;
       flipVertical?: boolean;
+      fallbackData?: Uint8Array;
     }
   ): string {
     const s = _toState(doc);
     const fileName = `image${s.nextImageId}.${mediaType}`;
     const rId = `__img_${s.nextImageId}`;
 
-    s.images.push({ data, mediaType, fileName, rId });
+    s.images.push({ data, mediaType, fileName, rId, fallbackData: options?.fallbackData });
 
     s.body.push(
       floatingImage({

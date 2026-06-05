@@ -32,11 +32,24 @@ describe("Unit conversions", () => {
     it("should handle zero", () => {
       expect(cmToTwips(0)).toBe(0);
     });
+
+    it("should produce canonical A4 twips (matches A4_PAGE_WIDTH/HEIGHT)", () => {
+      // A4 = 210mm × 297mm. Canonical OOXML twips are 11906 × 16838.
+      expect(cmToTwips(21)).toBe(11906);
+      expect(cmToTwips(29.7)).toBe(16838);
+    });
   });
 
   describe("twipsToCm", () => {
-    it("should convert 567 twips to 1 cm", () => {
-      expect(twipsToCm(567)).toBe(1);
+    it("should convert 1 inch worth of twips (1440) to 2.54 cm", () => {
+      expect(twipsToCm(1440)).toBeCloseTo(2.54, 6);
+    });
+
+    it("should round-trip cm → twips → cm", () => {
+      // cmToTwips rounds to an integer twip, so the round-trip is accurate to
+      // within half a twip (≈0.001 cm).
+      expect(twipsToCm(cmToTwips(1))).toBeCloseTo(1, 2);
+      expect(twipsToCm(cmToTwips(21))).toBeCloseTo(21, 2);
     });
 
     it("should handle zero", () => {

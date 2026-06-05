@@ -15,9 +15,10 @@ import { DEFAULT_RELATIVE_HEIGHT, DEFAULT_WRAP_MARGIN_EMU } from "../units";
 export function renderFloatingImage(
   xml: XmlSink,
   img: FloatingImage,
-  imageRemap?: ReadonlyMap<string, string>
+  imageRemap?: ReadonlyMap<string, string>,
+  nextDocPrId?: () => number
 ): void {
-  const drawingId = img.drawingId ?? 1;
+  const drawingId = nextDocPrId?.() ?? img.drawingId ?? 1;
   const name = img.name ?? "Picture";
   // Resolve relationship id used in r:embed via packager-provided remap.
   const embedRId = imageRemap?.get(img.rId) ?? img.rId;

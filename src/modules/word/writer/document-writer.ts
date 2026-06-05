@@ -75,6 +75,7 @@ export function renderSdt(
       ? {
           imageRemap: ctx.imageRIdRemap,
           hyperlinkRIds: ctx.hyperlinkRIds,
+          nextDocPrId: ctx.ids.nextDocPrId,
           rawXmlPolicy: ctx.rawXmlPolicy
         }
       : undefined;
@@ -114,6 +115,7 @@ export function renderBodyContent(
   const helpers: RenderHelpers = {
     imageRemap: renderCtx.imageRIdRemap,
     hyperlinkRIds: renderCtx.hyperlinkRIds,
+    nextDocPrId: renderCtx.ids.nextDocPrId,
     rawXmlPolicy: renderCtx.rawXmlPolicy
   };
   switch (content.type) {
@@ -124,7 +126,7 @@ export function renderBodyContent(
       renderTable(xml, content, helpers);
       break;
     case "floatingImage":
-      renderFloatingImage(xml, content, renderCtx.imageRIdRemap);
+      renderFloatingImage(xml, content, renderCtx.imageRIdRemap, renderCtx.ids.nextDocPrId);
       break;
     case "tableOfContents":
       renderTableOfContents(xml, content);
@@ -343,7 +345,17 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
   xml.openNode("wps:spPr");
 
   // Transform
-  xml.openNode("a:xfrm", shape.rotation ? { rot: String(shape.rotation) } : {});
+  const xfrmAttrs: Record<string, string> = {};
+  if (shape.rotation) {
+    xfrmAttrs["rot"] = String(shape.rotation);
+  }
+  if (shape.flipHorizontal) {
+    xfrmAttrs["flipH"] = "1";
+  }
+  if (shape.flipVertical) {
+    xfrmAttrs["flipV"] = "1";
+  }
+  xml.openNode("a:xfrm", Object.keys(xfrmAttrs).length > 0 ? xfrmAttrs : {});
   xml.leafNode("a:off", { x: "0", y: "0" });
   xml.leafNode("a:ext", { cx: String(shape.width), cy: String(shape.height) });
   xml.closeNode(); // a:xfrm
@@ -422,6 +434,7 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
       ? {
           imageRemap: ctx.imageRIdRemap,
           hyperlinkRIds: ctx.hyperlinkRIds,
+          nextDocPrId: ctx.ids.nextDocPrId,
           rawXmlPolicy: ctx.rawXmlPolicy
         }
       : undefined;
@@ -432,8 +445,12 @@ function renderDrawingShape(xml: XmlSink, shape: DrawingShape, ctx: WordRenderCo
     xml.closeNode(); // wps:txbx
   }
 
-  // Body properties (required)
-  xml.leafNode("wps:bodyPr");
+  // Body properties (required). The vertical text anchor lives on a:bodyPr/@anchor.
+  if (shape.textBodyAnchor) {
+    xml.leafNode("wps:bodyPr", { anchor: shape.textBodyAnchor });
+  } else {
+    xml.leafNode("wps:bodyPr");
+  }
 
   xml.closeNode(); // wps:wsp
   xml.closeNode(); // a:graphicData

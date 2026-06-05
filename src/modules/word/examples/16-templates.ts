@@ -262,7 +262,18 @@ function buildTemplate(): DocxDocument {
 //    integrations that need a flat string-replacement model.
 // ---------------------------------------------------------------------------
 {
-  const tpl = buildTemplate();
+  // Use a template whose ONLY placeholders are the ones we patch — patchDocument
+  // is a flat literal-string replacement API and does not understand template
+  // control syntax ({{#if}}, {{#each}}, …). Feeding it the full invoice template
+  // would leave all the control/loop tags unresolved in the output (they would
+  // show up verbatim in Word). A focused template keeps the produced document
+  // clean while still demonstrating the round-trip + patch workflow.
+  const d = Document.create();
+  Document.useDefaultStyles(d);
+  Document.addHeading(d, "Invoice for {{customer.name}}", 1);
+  Document.addParagraph(d, "Date: {{date}}");
+  Document.addParagraph(d, "Project: {{project}}");
+  const tpl = Document.build(d);
   const tplBuf = await toBuffer(tpl);
   // Round-trip: read it back, then patch with named placeholders that
   // happen to match the {{...}} tokens. patchDocument doesn't understand

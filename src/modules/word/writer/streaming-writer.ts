@@ -1190,6 +1190,7 @@ export class StreamingDocxWriter {
         renderComments(xml, this._options.comments!, {
           imageRemap: this._renderCtx.imageRIdRemap,
           hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+          nextDocPrId: this._renderCtx.ids.nextDocPrId,
           rawXmlPolicy: this._renderCtx.rawXmlPolicy
         })
       );
@@ -1274,6 +1275,7 @@ export class StreamingDocxWriter {
           renderHeader(xml, headerDef.content, {
             imageRemap: this._renderCtx.imageRIdRemap,
             hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+            nextDocPrId: this._renderCtx.ids.nextDocPrId,
             rawXmlPolicy: this._renderCtx.rawXmlPolicy
           })
         );
@@ -1355,6 +1357,7 @@ export class StreamingDocxWriter {
           renderFooter(xml, footerDef.content, {
             imageRemap: this._renderCtx.imageRIdRemap,
             hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+            nextDocPrId: this._renderCtx.ids.nextDocPrId,
             rawXmlPolicy: this._renderCtx.rawXmlPolicy
           })
         );
@@ -1565,6 +1568,7 @@ export class StreamingDocxWriter {
       notesHelpers: {
         imageRemap: this._renderCtx.imageRIdRemap,
         hyperlinkRIds: this._renderCtx.hyperlinkRIds,
+        nextDocPrId: this._renderCtx.ids.nextDocPrId,
         rawXmlPolicy: this._renderCtx.rawXmlPolicy
       }
     });

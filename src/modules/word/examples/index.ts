@@ -25,11 +25,11 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-// Clean output directory so each run produces a fresh, deterministic result.
+// Ensure the output directory exists. We intentionally do NOT wipe it so that
+// hand-written companion files (e.g. CHECKLIST.md) placed alongside the
+// generated artifacts survive a re-run. Each example overwrites its own
+// outputs in place.
 const outDir = path.resolve(here, "../../../../tmp/word-examples");
-if (fs.existsSync(outDir)) {
-  fs.rmSync(outDir, { recursive: true, force: true });
-}
 fs.mkdirSync(outDir, { recursive: true });
 
 console.log(`Running ${files.length} word examples → ${outDir}\n`);

@@ -507,6 +507,7 @@ export function createShape(options: CreateShapeOptions): DrawingShape {
     outlineWidth,
     noOutline,
     textContent: options.textBody?.paragraphs,
+    textBodyAnchor: options.textBody?.anchor,
     altText: options.altText,
     name: options.name,
     horizontalPosition: options.horizontalPosition,
@@ -514,6 +515,8 @@ export function createShape(options: CreateShapeOptions): DrawingShape {
     wrap: options.wrap,
     behindDoc: options.behindDoc,
     rotation: options.rotation,
+    flipHorizontal: options.flipH,
+    flipVertical: options.flipV,
     rawXml: rawXml.length > 0 ? rawXml : undefined,
     _advancedFillXml: advanced.fillXml,
     _advancedEffectsXml: advanced.effectsXml

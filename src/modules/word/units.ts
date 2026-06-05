@@ -12,10 +12,16 @@
 export const TWIPS_PER_INCH = 1440;
 /** Twips per point. */
 export const TWIPS_PER_POINT = 20;
-/** Twips per centimeter (approximate). */
-export const TWIPS_PER_CM = 567;
-/** Twips per millimeter (approximate). */
-export const TWIPS_PER_MM = 56.7;
+/**
+ * Twips per centimeter, derived exactly from 1 inch = 2.54 cm = 1440 twips
+ * (= 566.9291…). Using the exact factor — rather than the rounded 567 — keeps
+ * metric page sizes aligned with their canonical twip values, e.g.
+ * `cmToTwips(21)` → 11906 and `cmToTwips(29.7)` → 16838 (A4), matching
+ * `A4_PAGE_WIDTH` / `A4_PAGE_HEIGHT` in constants.ts.
+ */
+export const TWIPS_PER_CM = TWIPS_PER_INCH / 2.54;
+/** Twips per millimeter, derived exactly from {@link TWIPS_PER_CM}. */
+export const TWIPS_PER_MM = TWIPS_PER_CM / 10;
 
 /** EMU (English Metric Units) per inch — DrawingML coordinate space. */
 export const EMU_PER_INCH = 914_400;
