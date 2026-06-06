@@ -82,11 +82,14 @@ Document.addParagraphElement(
   ])
 );
 
-// "history" attribute (visited link styling)
+// "history" attribute → visited-link styling. With history:true the builder
+// references the FollowedHyperlink character style (and emits the standard
+// visited purple as direct formatting), so the link renders purple, in
+// contrast to the blue unvisited links above.
 Document.addParagraphElement(
   doc,
   paragraph([
-    text("This link will display as visited: "),
+    text("This link is styled as visited (purple): "),
     hyperlink("visited", { url: "https://example.com/visited", history: true })
   ])
 );

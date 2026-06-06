@@ -708,6 +708,19 @@ export const Document = {
         runProperties: { color: "0563C1", underline: "single" }
       },
       {
+        // Word's built-in "visited hyperlink" character style. Referenced by
+        // hyperlinks created with `history: true` so visited links render in
+        // the standard purple instead of the unvisited blue.
+        type: "character",
+        styleId: "FollowedHyperlink",
+        name: "FollowedHyperlink",
+        basedOn: "DefaultParagraphFont",
+        uiPriority: 99,
+        semiHidden: true,
+        unhideWhenUsed: true,
+        runProperties: { color: "954F72", underline: "single" }
+      },
+      {
         // Word's built-in zero-formatting base table style. Required so
         // that styles like TableGrid (which sets `basedOn: "TableNormal"`)
         // resolve cleanly without dangling-reference validation warnings.

@@ -197,6 +197,42 @@ describe("DOCX Builder Helpers", () => {
     expect((link as any).type).toBe("hyperlink");
   });
 
+  it("should style an unvisited hyperlink with the Hyperlink character style", () => {
+    const link = hyperlink("Click me", { url: "https://example.com" }) as any;
+    const rPr = link.children[0].properties;
+    expect(rPr.style).toBe("Hyperlink");
+    expect(rPr.color).toBe("0563C1");
+    expect(rPr.underline).toBe("single");
+  });
+
+  it("should style a visited (history) hyperlink with the FollowedHyperlink style", () => {
+    const link = hyperlink("seen", { url: "https://example.com", history: true }) as any;
+    const rPr = link.children[0].properties;
+    expect(rPr.style).toBe("FollowedHyperlink");
+    expect(rPr.color).toBe("954F72");
+    expect(rPr.underline).toBe("single");
+  });
+
+  it("should let explicit properties override the default hyperlink styling", () => {
+    const link = hyperlink("custom", {
+      url: "https://example.com",
+      properties: { color: "FF0000" }
+    }) as any;
+    expect(link.children[0].properties.color).toBe("FF0000");
+    expect(link.children[0].properties.style).toBeUndefined();
+  });
+
+  it("useDefaultStyles should define Hyperlink and FollowedHyperlink styles", () => {
+    const d = Document.create();
+    Document.useDefaultStyles(d);
+    const built = Document.build(d);
+    const ids = (built.styles ?? []).map(s => s.styleId);
+    expect(ids).toContain("Hyperlink");
+    expect(ids).toContain("FollowedHyperlink");
+    const followed = (built.styles ?? []).find(s => s.styleId === "FollowedHyperlink");
+    expect((followed as any)?.runProperties?.color).toBe("954F72");
+  });
+
   it("should create bookmarks", () => {
     const start = bookmarkStart(0, "test");
     const end = bookmarkEnd(0);

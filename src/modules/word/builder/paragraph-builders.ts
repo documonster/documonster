@@ -67,6 +67,15 @@ export function hyperlink(
     properties?: RunProperties;
   }
 ): ParagraphChild {
+  // Reference the built-in character style so the colour is governed by the
+  // style table (and follows the theme) — Hyperlink for unvisited links,
+  // FollowedHyperlink for visited ones (`history: true`). We also emit the
+  // matching colour + underline as direct formatting so the link still renders
+  // correctly when the document has no style table (Word does the same).
+  const visited = options.history === true;
+  const defaultProps: RunProperties = visited
+    ? { style: "FollowedHyperlink", color: "954F72", underline: "single" }
+    : { style: "Hyperlink", color: "0563C1", underline: "single" };
   return {
     type: "hyperlink",
     rId: options.rId,
@@ -76,7 +85,7 @@ export function hyperlink(
     docLocation: options.docLocation,
     tgtFrame: options.tgtFrame,
     history: options.history,
-    children: [text(linkText, options.properties ?? { color: "0563C1", underline: "single" })]
+    children: [text(linkText, options.properties ?? defaultProps)]
   };
 }
 
