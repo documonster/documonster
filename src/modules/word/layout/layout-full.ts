@@ -89,6 +89,18 @@ export interface PageGeometryOverride {
   readonly marginBottom?: number;
   readonly marginLeft?: number;
   readonly marginRight?: number;
+  /**
+   * Distance of the header band from the top edge of the page, in
+   * points. Overrides the section's `pgMar.header`. Header paragraphs
+   * are laid out starting at this y-offset from the page top.
+   */
+  readonly headerMargin?: number;
+  /**
+   * Distance of the footer band from the bottom edge of the page, in
+   * points. Overrides the section's `pgMar.footer`. The footer band's
+   * top is placed at `pageHeight - footerMargin`.
+   */
+  readonly footerMargin?: number;
 }
 
 /** Options for the full layout engine. */
@@ -627,7 +639,7 @@ function layoutFootnotes(
     }
   }
 
-  const footerOffsetPt = geometry.height - twipsToPt(doc.sectionProperties?.margins?.footer ?? 720);
+  const footerOffsetPt = geometry.height - geometry.footerOffset;
   /**
    * Vertical room available for the footnote stack on this page.
    * The stack must sit between `bodyBottomPageY` (top) and
@@ -886,7 +898,7 @@ function layoutHeader(
   if (!part) {
     return [];
   }
-  const headerOffsetPt = twipsToPt(doc.sectionProperties?.margins?.header ?? 720);
+  const headerOffsetPt = geometry.headerOffset;
   return layoutHeaderFooterChildren(
     part.content.children,
     headerOffsetPt,
@@ -922,7 +934,7 @@ function layoutFooter(
   // where `pgMar.header` is the absolute offset of the band from the
   // page top). Renderers consume both bands with the same
   // "treat layout-y as page-y" rule.
-  const footerOffsetPt = geometry.height - twipsToPt(doc.sectionProperties?.margins?.footer ?? 720);
+  const footerOffsetPt = geometry.height - geometry.footerOffset;
   return layoutHeaderFooterChildren(
     part.content.children,
     footerOffsetPt,
@@ -975,6 +987,11 @@ function computePageGeometry(
   const sectionMarginBottom = twipsToPt(sectionProps?.margins?.bottom ?? DEFAULT_PAGE_MARGIN_TWIPS);
   const sectionMarginLeft = twipsToPt(sectionProps?.margins?.left ?? DEFAULT_PAGE_MARGIN_TWIPS);
   const sectionMarginRight = twipsToPt(sectionProps?.margins?.right ?? DEFAULT_PAGE_MARGIN_TWIPS);
+  // Header / footer band offsets. Word's default `pgMar.header` /
+  // `pgMar.footer` is 720 twips (0.5") — the same default used by the
+  // header / footer layout helpers historically.
+  const sectionHeaderOffset = twipsToPt(sectionProps?.margins?.header ?? 720);
+  const sectionFooterOffset = twipsToPt(sectionProps?.margins?.footer ?? 720);
 
   // Per-axis override: callers (PDF bridge, custom hosts) may want to
   // pin the page size or margin on one axis without disturbing the
@@ -985,6 +1002,8 @@ function computePageGeometry(
   const marginBottom = override?.marginBottom ?? sectionMarginBottom;
   const marginLeft = override?.marginLeft ?? sectionMarginLeft;
   const marginRight = override?.marginRight ?? sectionMarginRight;
+  const headerOffset = override?.headerMargin ?? sectionHeaderOffset;
+  const footerOffset = override?.footerMargin ?? sectionFooterOffset;
 
   return {
     width,
@@ -994,7 +1013,9 @@ function computePageGeometry(
     marginLeft,
     marginRight,
     contentWidth: width - marginLeft - marginRight,
-    contentHeight: height - marginTop - marginBottom
+    contentHeight: height - marginTop - marginBottom,
+    headerOffset,
+    footerOffset
   };
 }
 
@@ -1233,7 +1254,21 @@ function layoutTable(
   imageMap?: ReadonlyMap<string, ImageDef>
 ): LayoutTable {
   const numCols = table.rows.length > 0 ? table.rows[0].cells.length : 0;
-  const colWidth = numCols > 0 ? contentWidth / numCols : contentWidth;
+
+  // Resolve per-column widths (in points). Prefer the table's explicit
+  // `columnWidths` (twips) — populated e.g. by the Excel→Word bridge —
+  // scaled to fit the available content width so a table authored wider
+  // than the page still renders proportionally. Fall back to equal
+  // division when no column widths are declared. This mirrors the
+  // sister layout engine in `layout.ts` (which also honours
+  // `columnWidths` + `gridSpan`).
+  const colWidths = resolveColumnWidthsPt(table, numCols, contentWidth);
+  // Prefix sums so a cell at column `ci` starts at `colOffsets[ci]` and
+  // a `gridSpan` cell can sum the widths it covers.
+  const colOffsets: number[] = [0];
+  for (let i = 0; i < colWidths.length; i++) {
+    colOffsets.push(colOffsets[i] + colWidths[i]);
+  }
 
   const cells: LayoutTableCell[] = [];
   let cursorY = 0;
@@ -1242,9 +1277,16 @@ function layoutTable(
     const row = table.rows[ri];
     let maxRowHeight = DEFAULT_FONT_SIZE_PT * 1.5; // minimum row height
 
+    // Track the grid column each cell occupies, honouring gridSpan so a
+    // 2-wide cell pushes the next cell two grid columns to the right.
+    let gridCol = 0;
     for (let ci = 0; ci < row.cells.length; ci++) {
       const cell = row.cells[ci];
-      const cellX = ci * colWidth;
+      const span = Math.max(1, cell.properties?.gridSpan ?? 1);
+      const startCol = Math.min(gridCol, colWidths.length - 1);
+      const endCol = Math.min(gridCol + span, colWidths.length);
+      const cellX = colOffsets[startCol] ?? 0;
+      const cellWidth = (colOffsets[endCol] ?? contentWidth) - cellX;
       const cellContent: (LayoutParagraph | LayoutTable)[] = [];
       let cellCursorY = 2; // cell padding top
 
@@ -1253,15 +1295,22 @@ function layoutTable(
           const laid = layoutParagraph(
             block,
             cellCursorY,
-            colWidth - 4,
+            cellWidth - 4,
             options,
             undefined,
             imageMap
           );
           cellContent.push({ ...laid, sourceIndex: -1 });
           cellCursorY = laid.rect.y + laid.rect.height;
+        } else if (block.type === "table") {
+          // Nested table: lay it out within the cell's content width and
+          // stack it below preceding content. The PDF/SVG renderers
+          // already translate nested `LayoutTable` rects by the cell
+          // origin, so emitting it here is all that's needed.
+          const laidNested = layoutTable(block, cellCursorY, cellWidth - 4, -1, options, imageMap);
+          cellContent.push(laidNested);
+          cellCursorY = laidNested.rect.y + laidNested.rect.height;
         }
-        // nested tables skipped for simplicity
       }
 
       const cellHeight = cellCursorY + 2; // cell padding bottom
@@ -1270,11 +1319,13 @@ function layoutTable(
       }
 
       cells.push({
-        rect: { x: cellX, y: startY + cursorY, width: colWidth, height: cellHeight },
+        rect: { x: cellX, y: startY + cursorY, width: cellWidth, height: cellHeight },
         row: ri,
         col: ci,
         content: cellContent
       });
+
+      gridCol += span;
     }
 
     // Normalize cell heights to row max
@@ -1293,6 +1344,34 @@ function layoutTable(
     cells,
     sourceIndex
   };
+}
+
+/**
+ * Resolve a table's per-column widths in points.
+ *
+ * If `table.columnWidths` (twips) is present and covers all columns, it
+ * is used and proportionally scaled to fit `contentWidth` (so a table
+ * authored wider than the page shrinks to fit rather than overflowing).
+ * Otherwise the content width is divided equally among the columns.
+ */
+function resolveColumnWidthsPt(table: Table, numCols: number, contentWidth: number): number[] {
+  if (numCols <= 0) {
+    return [];
+  }
+  const declared = table.columnWidths;
+  if (declared && declared.length >= numCols) {
+    const pts = declared.slice(0, numCols).map(twipsToPt);
+    const total = pts.reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      // Scale to fit the content width (shrink overflow, expand
+      // under-wide tables to use the full measure — matching how Word
+      // distributes a table set to a percentage / auto width).
+      const scale = contentWidth / total;
+      return pts.map(w => w * scale);
+    }
+  }
+  const equal = contentWidth / numCols;
+  return new Array(numCols).fill(equal);
 }
 
 // =============================================================================

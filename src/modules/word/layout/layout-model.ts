@@ -311,6 +311,18 @@ export interface PageGeometry {
   /** Usable content area. */
   readonly contentWidth: number;
   readonly contentHeight: number;
+  /**
+   * Distance of the header band from the top edge of the page, in
+   * points (ECMA-376 `pgMar.header`). Header paragraphs are laid out
+   * starting at this y-offset from the page top.
+   */
+  readonly headerOffset: number;
+  /**
+   * Distance of the footer band from the bottom edge of the page, in
+   * points (ECMA-376 `pgMar.footer`). The footer band's top sits at
+   * `height - footerOffset`.
+   */
+  readonly footerOffset: number;
 }
 
 /** A fully laid-out page. */

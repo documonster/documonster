@@ -38,6 +38,7 @@ import {
   type FullLayoutOptions,
   type PageGeometryOverride
 } from "@word/layout/layout-full";
+import type { LayoutChart } from "@word/layout/layout-model";
 import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/types";
 
 import type { PdfPageBuilder } from "./builder/document-builder";
@@ -62,19 +63,21 @@ export interface DocxToPdfOptions {
   /** Default font size in points (default: 11). */
   readonly defaultFontSize?: number;
   /**
-   * Header margin from top edge in points (default: 36).
+   * Header band distance from the top edge of the page, in points
+   * (default: section's `pgMar.header`, or 36pt / 0.5").
    *
-   * @deprecated Currently has no effect on the layout-driven render
-   * path: header paragraphs are rendered into the page's `marginTop`
-   * strip starting at y=0 without an additional offset. Influence
-   * header placement by widening `marginTop` instead.
+   * Header paragraphs are laid out starting at this y-offset from the
+   * page top. Overriding it moves the entire header band — useful when
+   * the source document declares no section properties or you want to
+   * tighten / loosen the header position without touching `marginTop`.
    */
   readonly headerMargin?: number;
   /**
-   * Footer margin from bottom edge in points (default: 36).
+   * Footer band distance from the bottom edge of the page, in points
+   * (default: section's `pgMar.footer`, or 36pt / 0.5").
    *
-   * @deprecated See {@link DocxToPdfOptions.headerMargin}. Footer
-   * paragraphs are rendered starting at `pageHeight - marginBottom`.
+   * The footer band's top sits at `pageHeight - footerMargin`. The
+   * footnote stack (if any) is placed directly above this line.
    */
   readonly footerMargin?: number;
   /**
@@ -98,14 +101,17 @@ export interface DocxToPdfOptions {
    * destination rectangle in PDF coordinates. The implementation
    * should draw the chart into the rectangle.
    *
-   * Return `false` to decline a chart (the translator then falls back
-   * to its built-in placeholder rendering: an outlined rectangle with
-   * the chart title centred). Return `void` or `true` to indicate the
-   * chart was handled.
+   * Return `false` to decline a chart. The translator then falls back
+   * to the built-in layout-aware Excel renderer (which also handles
+   * `chartEx` charts), then to the inline `LayoutChart.svg` if present,
+   * and finally to a placeholder rectangle with the chart title
+   * centred. Return `void` or `true` to indicate the chart was handled.
    *
-   * Note: `chartEx` charts never reach this callback because there is
-   * no `Chart` instance to pass; they always render through the
-   * translator's built-in path.
+   * Note: `chartEx` charts (sunburst / treemap / waterfall / funnel /
+   * boxWhisker / …) never reach this `Chart`-typed callback because
+   * there is no classic `Chart` instance to pass. They are rendered by
+   * the built-in layout-aware renderer instead (full vector output when
+   * `installChartSupport()` has been called).
    */
   readonly chartRenderer?: (
     chart: Chart,
@@ -130,18 +136,26 @@ export async function docxToPdf(
   //    section's margins are applied unless the caller overrode them.
   const layoutOptions = mapToLayoutOptions(doc, options);
 
-  // 2. Auto-detect chart support: if no explicit chartRenderer is
-  //    provided, try to import the high-quality Excel-based renderer.
-  let chartRendererForChart = options?.chartRenderer;
-  if (!chartRendererForChart) {
-    try {
-      const mod = await import("./excel-bridge");
-      if (typeof mod.createWordChartPdfRenderer === "function") {
-        chartRendererForChart = mod.createWordChartPdfRenderer();
-      }
-    } catch {
-      // Chart support not available — placeholder rendering takes over.
+  // 2. Try to obtain the built-in, layout-aware Excel chart renderer.
+  //    It handles BOTH classic `<c:chart>` and modern `<cx:chartSpace>`
+  //    ChartEx families (sunburst / treemap / waterfall / …). It is used
+  //    directly when the caller supplies no `chartRenderer`, and as the
+  //    fallback for ChartEx (which the public `Chart`-typed callback
+  //    cannot express) or whenever a user callback declines a chart.
+  let builtInLayoutRenderer:
+    | ((
+        chart: LayoutChart,
+        page: PdfPageBuilder,
+        rect: { x: number; y: number; width: number; height: number }
+      ) => boolean | void)
+    | undefined;
+  try {
+    const mod = await import("./excel-bridge");
+    if (typeof mod.createWordLayoutChartPdfRenderer === "function") {
+      builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer();
     }
+  } catch {
+    // Chart support not available — placeholder rendering takes over.
   }
 
   // 3. Run the layout engine. Everything from line wrapping to page
@@ -149,32 +163,43 @@ export async function docxToPdf(
   const layout = layoutDocumentFull(doc, layoutOptions);
 
   // 4. Build a render-options object for the PDF translator. The
-  //    chartRenderer adaptation: layout produces `LayoutChart` (which
-  //    contains the original `ChartContent` in `source`); the public
-  //    chartRenderer API takes the inner `Chart` model. We unwrap so
-  //    existing callers keep working unchanged.
+  //    chart-rendering precedence is:
+  //      a. classic chart + user callback → user callback (its `false`
+  //         return falls through to the built-in layout renderer);
+  //      b. ChartEx, or classic chart with no user callback, or a
+  //         declined user callback → built-in layout-aware renderer;
+  //      c. neither available / both decline → translator fallback
+  //         (inline SVG, then a titled placeholder box).
+  const userChartRenderer = options?.chartRenderer;
   const renderOptions: RenderLayoutOptions = {
     title: doc.coreProperties?.title,
     author: doc.coreProperties?.creator,
     subject: doc.coreProperties?.subject,
     defaultFont: options?.defaultFont ?? "Helvetica",
     defaultFontSize: options?.defaultFontSize ?? 11,
-    chartRenderer: chartRendererForChart
-      ? (layoutChart, page, rect): boolean | void => {
-          const src = layoutChart.source as ChartContent | ChartExContent | undefined;
-          if (src && src.type === "chart") {
-            // Forward the user's return value so a renderer that knows
-            // how to draw classic charts but declines a particular
-            // family (e.g. unsupported axis combination) gets the
-            // translator's placeholder fallback.
-            return chartRendererForChart!(src.chart, page, rect);
+    chartRenderer:
+      userChartRenderer || builtInLayoutRenderer
+        ? (layoutChart, page, rect): boolean | void => {
+            const src = layoutChart.source as ChartContent | ChartExContent | undefined;
+            // (a) Classic chart with a user-supplied callback: honour it
+            //     first. Only fall through to the built-in renderer when
+            //     it explicitly declines (`false`).
+            if (userChartRenderer && src && src.type === "chart") {
+              const handled = userChartRenderer(src.chart, page, rect);
+              if (handled !== false) {
+                return handled;
+              }
+            }
+            // (b) Built-in layout-aware renderer handles classic charts
+            //     without a user callback AND all ChartEx charts.
+            if (builtInLayoutRenderer) {
+              return builtInLayoutRenderer(layoutChart, page, rect);
+            }
+            // (c) Decline so the translator's placeholder runs instead of
+            //     leaving a blank slot.
+            return false;
           }
-          // ChartEx (or absent source) cannot be passed to the user's
-          // `Chart`-typed callback. Decline so the translator's
-          // placeholder runs instead of leaving a blank slot.
-          return false;
-        }
-      : undefined
+        : undefined
   };
 
   const builder = renderLayoutDocumentToPdf(layout, renderOptions);
@@ -193,13 +218,11 @@ export async function docxToPdf(
  * portrait-oriented numbers); otherwise the layout engine's defaults
  * (US Letter, 1-inch margins) take over.
  *
- * `headerMargin` / `footerMargin` are accepted for API compatibility
- * with the previous flow renderer but currently have no effect on the
- * layout-driven path: the layout engine does not yet position header /
- * footer paragraphs against custom inset values, and forwarding the
- * field would silently mislead callers. Pre-existing documents that
- * rely on those parameters still get the section's `headerMargin` /
- * `footerMargin` from sectionProperties when they exist.
+ * `headerMargin` / `footerMargin` are forwarded to the layout engine
+ * as header / footer band offsets (ECMA-376 `pgMar.header` /
+ * `pgMar.footer`). When omitted, the section's own header / footer
+ * margins apply; when neither exists the engine default of 36pt (0.5")
+ * is used.
  */
 function mapToLayoutOptions(
   doc: DocxDocument,
@@ -234,7 +257,12 @@ function mapToLayoutOptions(
     marginTop: options?.marginTop ?? sectionMarginTopPt,
     marginBottom: options?.marginBottom ?? sectionMarginBottomPt,
     marginLeft: options?.marginLeft ?? sectionMarginLeftPt,
-    marginRight: options?.marginRight ?? sectionMarginRightPt
+    marginRight: options?.marginRight ?? sectionMarginRightPt,
+    // Header / footer offsets: only forward an explicit caller value.
+    // Leaving these undefined lets the layout engine fall back to the
+    // section's `pgMar.header` / `pgMar.footer` (then the 36pt default).
+    headerMargin: options?.headerMargin,
+    footerMargin: options?.footerMargin
   };
 
   const layoutOpts: Mutable<FullLayoutOptions> = {};

@@ -260,9 +260,17 @@ if (!result.valid) {
 ### HTML/Markdown Conversion
 
 ```typescript
-// DOCX → Markdown
+// DOCX → Markdown (GFM: headings, bold/italic/strike, inline code,
+// code blocks, blockquotes, ordered/unordered lists, tables with
+// alignment, links, images, footnotes)
 import { renderToMarkdown } from "excelts/word/markdown";
 const md = renderToMarkdown(doc);
+const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
+
+// Markdown → DOCX (full document or body fragment)
+import { markdownToDocx, markdownToDocxBody } from "excelts/word/markdown";
+const doc = markdownToDocx("# Title\n\nHello **world**");
+const bodyItems = markdownToDocxBody("- a\n- b");
 
 // DOCX → HTML
 import { renderToHtml } from "excelts/word/html";
@@ -282,6 +290,90 @@ import { parseFlatOpc, toFlatOpc, isFlatOpc } from "excelts/word";
 const flatXml = toFlatOpc(doc);
 const doc = parseFlatOpc(flatXmlString);
 ```
+
+### Excel → Word
+
+Convert an Excel `Workbook` into a `DocxDocument`, mapping worksheets to
+Word tables with cell formatting (fonts, colours, alignment, fills,
+borders), column widths, rich-text runs, and an optional title page.
+Hidden sheets are skipped; rows/columns can be capped.
+
+```typescript
+import { excelToDocx, extractTablesToExcel } from "excelts/word/excel";
+import { packageDocx } from "excelts/word";
+
+// Workbook → DocxDocument (all visible sheets, formatting preserved)
+const doc = excelToDocx(workbook);
+const docxBytes = await packageDocx(doc);
+
+// With options: a title page, only some sheets, capped dimensions
+const doc2 = excelToDocx(workbook, {
+  titlePage: { title: "Q3 Report", subtitle: "Sales" },
+  sheets: ["Summary", 2], // by name or zero-based index
+  maxRows: 100,
+  maxColumns: 12,
+  preserveFormatting: true
+});
+
+// Reverse direction: pull the tables out of a DOCX into a Workbook
+const extracted = extractTablesToExcel(doc);
+```
+
+Charts embedded in a Word document also bridge to the Excel chart engine
+(27 chart families, classic and modern ChartEx). See
+`createWordChartPdfRenderer` / `createWordLayoutChartPdfRenderer` for the
+PDF rendering side.
+
+### Word → PDF
+
+Convert a `DocxDocument` to PDF bytes. The bridge is a thin layer over
+the shared Word layout engine, so line wrapping, pagination, tables,
+inline images, headers/footers, and floats all render identically to the
+SVG path.
+
+```typescript
+import { readDocx } from "excelts/word";
+import { docxToPdf } from "excelts/pdf";
+
+const doc = await readDocx(docxBytes);
+const pdfBytes = await docxToPdf(doc);
+
+// Override page geometry (points). Any field omitted falls back to the
+// document's section properties, then engine defaults (US Letter, 1").
+const pdf2 = await docxToPdf(doc, {
+  pageWidth: 595, // A4 width
+  pageHeight: 842, // A4 height
+  marginTop: 72,
+  marginBottom: 72,
+  marginLeft: 72,
+  marginRight: 72,
+  headerMargin: 36, // header band offset from the top edge
+  footerMargin: 36, // footer band offset from the bottom edge
+  defaultFont: "Helvetica",
+  defaultFontSize: 11
+});
+```
+
+**Charts.** When `installChartSupport()` has been called, both classic
+(`<c:chart>`) and modern ChartEx (`<cx:chartSpace>` — sunburst, treemap,
+waterfall, funnel, boxWhisker, histogram, pareto, regionMap) charts render
+as full vector PDF automatically. Without chart support installed, charts
+degrade to a titled placeholder box (no throw, no blank page). To supply
+your own classic-chart renderer:
+
+```typescript
+import { installChartSupport } from "excelts/chart";
+import { docxToPdf, createWordChartPdfRenderer } from "excelts/pdf";
+
+installChartSupport();
+const pdf = await docxToPdf(doc, {
+  chartRenderer: createWordChartPdfRenderer()
+});
+```
+
+A `chartRenderer` may return `false` to decline a particular chart; the
+bridge then falls back to the built-in vector renderer, then to the
+inline SVG / placeholder.
 
 ## OOXML Strict Format
 

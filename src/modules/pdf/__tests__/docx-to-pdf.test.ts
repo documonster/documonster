@@ -7,6 +7,8 @@
  * requested `pageWidth` / `pageHeight` / `margin*`.
  */
 
+import { installChartSupport, uninstallChartSupport } from "@excel/chart/install";
+import { buildWordChartExXml } from "@word/excel";
 import {
   Document,
   layoutDocumentFull,
@@ -115,6 +117,87 @@ describe("docxToPdf — option fidelity", () => {
     const decoded = new TextDecoder().decode(pdfBytes);
     // US Letter default (612 x 792) with no override.
     expect(decoded).toMatch(/\/MediaBox\s*\[\s*0\s+0\s+612\s+792\s*\]/);
+  });
+});
+
+describe("docxToPdf — header / footer margin fidelity", () => {
+  /**
+   * Build a document with an explicit header and footer reference so
+   * the layout engine produces header / footer bands whose y-position
+   * is governed by the header / footer margin.
+   */
+  async function buildDocWithHeaderFooter(): Promise<DocxDocument> {
+    const h = Document.create();
+    Document.addParagraphElement(h, paragraph([text("body text")]));
+    const built = Document.build(h);
+    // Inject a header and footer part + section references by hand so
+    // we exercise the real layout-header / layout-footer code paths.
+    const headerPara = paragraph([text("PAGE HEADER")]);
+    const footerPara = paragraph([text("PAGE FOOTER")]);
+    const withChrome: DocxDocument = {
+      ...built,
+      headers: new Map([["rIdH", { content: { children: [headerPara] } }]]),
+      footers: new Map([["rIdF", { content: { children: [footerPara] } }]]),
+      sectionProperties: {
+        ...built.sectionProperties,
+        headers: [{ type: "default", rId: "rIdH" }],
+        footers: [{ type: "default", rId: "rIdF" }]
+      }
+    };
+    return withChrome;
+  }
+
+  it("forwards headerMargin / footerMargin into the layout engine geometry", async () => {
+    const doc = await buildDocWithHeaderFooter();
+    const layout = layoutDocumentFull(doc, {
+      pageGeometry: { headerMargin: 20, footerMargin: 50 }
+    });
+    const g = layout.pages[0].geometry;
+    expect(g.headerOffset).toBe(20);
+    expect(g.footerOffset).toBe(50);
+  });
+
+  it("positions the header band at the requested headerMargin offset", async () => {
+    const doc = await buildDocWithHeaderFooter();
+    const tight = layoutDocumentFull(doc, { pageGeometry: { headerMargin: 10 } });
+    const loose = layoutDocumentFull(doc, { pageGeometry: { headerMargin: 100 } });
+    const tightHeader = tight.pages[0].header?.[0];
+    const looseHeader = loose.pages[0].header?.[0];
+    expect(tightHeader).toBeDefined();
+    expect(looseHeader).toBeDefined();
+    // The header band's first paragraph y starts at the header offset,
+    // so a larger headerMargin pushes the header further down the page.
+    expect(looseHeader!.rect.y).toBeGreaterThan(tightHeader!.rect.y);
+    expect(tightHeader!.rect.y).toBeCloseTo(10, 1);
+    expect(looseHeader!.rect.y).toBeCloseTo(100, 1);
+  });
+
+  it("positions the footer band relative to the requested footerMargin", async () => {
+    const doc = await buildDocWithHeaderFooter();
+    const pageHeight = 792;
+    const small = layoutDocumentFull(doc, {
+      pageGeometry: { pageHeight, footerMargin: 30 }
+    });
+    const large = layoutDocumentFull(doc, {
+      pageGeometry: { pageHeight, footerMargin: 120 }
+    });
+    const smallFooter = small.pages[0].footer?.[0];
+    const largeFooter = large.pages[0].footer?.[0];
+    expect(smallFooter).toBeDefined();
+    expect(largeFooter).toBeDefined();
+    // Footer band top = pageHeight - footerMargin. A larger footerMargin
+    // moves the footer higher up the page (smaller y).
+    expect(largeFooter!.rect.y).toBeLessThan(smallFooter!.rect.y);
+    expect(smallFooter!.rect.y).toBeCloseTo(pageHeight - 30, 1);
+    expect(largeFooter!.rect.y).toBeCloseTo(pageHeight - 120, 1);
+  });
+
+  it("docxToPdf round-trips a header/footer document end-to-end with custom margins", async () => {
+    const doc = await buildDocWithHeaderFooter();
+    const pdfBytes = await docxToPdf(doc, { headerMargin: 24, footerMargin: 24 });
+    expect(pdfBytes.length).toBeGreaterThan(100);
+    const head = new TextDecoder().decode(pdfBytes.slice(0, 5));
+    expect(head).toBe("%PDF-");
   });
 });
 
@@ -237,5 +320,84 @@ describe("docxToPdf — inline image", () => {
     // PDF content stream. Without inline-image support the body
     // would only contain text operators (Tj/TJ).
     expect(decoded).toMatch(/\/Subtype\s*\/Image/);
+  });
+});
+
+describe("docxToPdf — ChartEx (modern 2016+) rendering", () => {
+  /**
+   * Build a DOCX document containing a single ChartEx body item with
+   * real `cx:chartSpace` XML so the bridge exercises the
+   * parseChartEx → drawChartExPdf vector path.
+   */
+  function buildSunburstChartExDoc(): DocxDocument {
+    const chartExXml = buildWordChartExXml({
+      type: "sunburst",
+      title: "Population Breakdown",
+      series: [
+        {
+          name: "Pop",
+          categories: ["North", "South", "East", "West"],
+          values: [120, 80, 95, 60]
+        }
+      ]
+    });
+    return {
+      body: [
+        {
+          type: "chartEx",
+          chartExXml,
+          name: "Sunburst",
+          altText: "population sunburst",
+          width: 5_486_400,
+          height: 3_657_600
+        }
+      ],
+      styles: [],
+      abstractNumberings: [],
+      numberingInstances: [],
+      headers: new Map(),
+      footers: new Map(),
+      footnotes: [],
+      endnotes: [],
+      comments: [],
+      images: [],
+      fonts: [],
+      embeddedFonts: [],
+      customXmlParts: [],
+      customProperties: [],
+      opaqueParts: []
+    };
+  }
+
+  it("renders a ChartEx (sunburst) as vector content when chart support is installed", async () => {
+    installChartSupport();
+    const doc = buildSunburstChartExDoc();
+    const pdfBytes = await docxToPdf(doc);
+
+    expect(pdfBytes.length).toBeGreaterThan(100);
+    const head = new TextDecoder().decode(pdfBytes.slice(0, 5));
+    expect(head).toBe("%PDF-");
+
+    // A vector ChartEx render emits many path/fill operators for the
+    // ring segments. Compare against the placeholder-only render
+    // (chart support uninstalled) — the vector output must be
+    // substantially larger than the single-rectangle placeholder.
+    uninstallChartSupport();
+    const placeholderBytes = await docxToPdf(buildSunburstChartExDoc());
+    installChartSupport(); // restore for any subsequent tests
+
+    expect(pdfBytes.length).toBeGreaterThan(placeholderBytes.length);
+  });
+
+  it("falls back to the placeholder when chart support is not installed", async () => {
+    uninstallChartSupport();
+    const doc = buildSunburstChartExDoc();
+    const pdfBytes = await docxToPdf(doc);
+    // Still a valid PDF — the translator draws the titled placeholder
+    // box rather than throwing or emitting an empty page.
+    expect(pdfBytes.length).toBeGreaterThan(100);
+    const head = new TextDecoder().decode(pdfBytes.slice(0, 5));
+    expect(head).toBe("%PDF-");
+    installChartSupport(); // restore
   });
 });

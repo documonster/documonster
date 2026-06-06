@@ -29,7 +29,7 @@ import type {
 // Consumers that convert workbooks with charts must call
 // `installChartSupport()` from `@cj-tech-master/excelts/chart` before
 // invoking `excelToPdf()`.
-import { getChartSupport } from "@excel/chart-host-registry";
+import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
 import type { Chartsheet } from "@excel/chartsheet";
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
@@ -44,7 +44,12 @@ import type { Worksheet } from "@excel/worksheet";
 import { tryInvokeFormulaEngine } from "@formula/host-registry";
 import { base64ToUint8Array } from "@utils/utils.base";
 import { wordChartToChartModel } from "@word/bridge/excel-bridge";
-import type { Chart as WordChart } from "@word/types";
+import type { LayoutChart } from "@word/layout/layout-model";
+import type {
+  Chart as WordChart,
+  ChartContent as WordChartContent,
+  ChartExContent as WordChartExContent
+} from "@word/types";
 
 import { PdfDocumentBuilder, type PdfPageBuilder } from "./builder/document-builder";
 import { exportPdf } from "./render/pdf-exporter";
@@ -1445,5 +1450,77 @@ export function createWordChartPdfRenderer(): (
     const support = getChartSupport();
     const model = wordChartToChartModel(chart);
     support.drawChartPdf(page, model, rect);
+  };
+}
+
+/**
+ * Create a layout-aware chart renderer for use as the internal
+ * `RenderLayoutOptions.chartRenderer` of the Word→PDF bridge.
+ *
+ * Unlike {@link createWordChartPdfRenderer} (which only sees the inner
+ * classic `Chart` model), this renderer receives the full
+ * {@link LayoutChart} and therefore handles **both** chart families
+ * with the full Excel rendering engine:
+ *
+ * - Classic `<c:chart>` (`chartKind === "chart"`) → `wordChartToChartModel`
+ *   → `drawChartPdf` (vector).
+ * - Modern `<cx:chartSpace>` ChartEx (`chartKind === "chartEx"`,
+ *   e.g. sunburst / treemap / waterfall / funnel / boxWhisker /
+ *   histogram / pareto / regionMap) → `parseChartEx` → `drawChartExPdf`
+ *   (vector) when the layout is vector-capable, otherwise the
+ *   pre-rendered SVG carried on the `LayoutChart` is left for the
+ *   translator's fallback.
+ *
+ * Returns `false` to decline a chart so the translator's built-in
+ * fallback (inline SVG, then a titled placeholder box) takes over. This
+ * keeps "fail soft" behaviour: a chart the engine can't draw still
+ * renders *something* rather than a blank slot.
+ *
+ * Requires `installChartSupport()` to have been called.
+ */
+export function createWordLayoutChartPdfRenderer(): (
+  chart: LayoutChart,
+  page: PdfPageBuilder,
+  rect: { x: number; y: number; width: number; height: number }
+) => boolean | void {
+  return (layoutChart, page, rect) => {
+    const support = tryGetChartSupport();
+    if (!support) {
+      // Chart support not installed — decline so the Word→PDF
+      // translator falls back to the inline SVG / placeholder. This
+      // mirrors the auto-detect contract in `word-bridge.ts`, where a
+      // missing chart runtime must degrade gracefully rather than throw.
+      return false;
+    }
+    const source = layoutChart.source as WordChartContent | WordChartExContent | undefined;
+
+    if (layoutChart.chartKind === "chart") {
+      // Classic chart: prefer the structured source, fall back to nothing.
+      if (source && source.type === "chart") {
+        support.drawChartPdf(page, wordChartToChartModel(source.chart), rect);
+        return;
+      }
+      return false;
+    }
+
+    // ChartEx. Parse the carried `cx:chartSpace` XML into a ChartExModel
+    // and render it as vector PDF when the layout IDs are supported.
+    if (source && source.type === "chartEx" && source.chartExXml) {
+      let model;
+      try {
+        model = support.parseChartEx(source.chartExXml);
+      } catch {
+        return false; // Malformed XML — let the fallback path handle it.
+      }
+      if (model && support.canRenderChartExAsVectorPdf(model)) {
+        support.drawChartExPdf(page, model, rect, {
+          title: layoutChart.title
+        });
+        return;
+      }
+    }
+    // Not vector-capable (or no source): decline so the translator
+    // falls back to the inline SVG / placeholder.
+    return false;
   };
 }

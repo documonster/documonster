@@ -72,7 +72,9 @@ import type {
   ChartType as WordChartType,
   DocxDocument,
   BodyContent,
+  Hyperlink,
   Paragraph,
+  ParagraphChild,
   Run,
   RunProperties,
   StyleDef,
@@ -345,7 +347,7 @@ function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): Table
   const para: Paragraph = {
     type: "paragraph",
     properties: opts.preserveFormatting ? alignmentToParaProps(cell.alignment) : undefined,
-    children: children.length > 0 ? children : [{ content: [{ type: "text", text: "" }] }]
+    children: wrapHyperlink(cell.hyperlink, children)
   };
 
   const cellProps: Mutable<TableCellProperties> = {};
@@ -368,6 +370,30 @@ function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): Table
     content: [para],
     properties: Object.keys(cellProps).length > 0 ? cellProps : undefined
   };
+}
+
+/**
+ * Build a paragraph's children for a converted cell, wrapping the runs
+ * in a Word {@link Hyperlink} when the source Excel cell carries one.
+ *
+ * Excel cell hyperlinks are external URLs (or `#Sheet!A1` internal
+ * references). We map `#…` targets to a Word anchor and everything else
+ * to an external `url`; the packager assigns the relationship id on
+ * write. An empty cell still produces a single empty run so the table
+ * structure stays intact.
+ */
+function wrapHyperlink(
+  hyperlink: string | undefined,
+  runs: readonly Run[]
+): readonly ParagraphChild[] {
+  const children: Run[] = runs.length > 0 ? [...runs] : [{ content: [{ type: "text", text: "" }] }];
+  if (!hyperlink) {
+    return children;
+  }
+  const link: Hyperlink = hyperlink.startsWith("#")
+    ? { type: "hyperlink", anchor: hyperlink.slice(1), children }
+    : { type: "hyperlink", url: hyperlink, children };
+  return [link];
 }
 
 function cellText(cell: ExcelCell): string {
