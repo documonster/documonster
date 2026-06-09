@@ -403,14 +403,20 @@ describe("mergeDocuments", () => {
     expect(result.body).toEqual([]);
   });
 
-  it("should insert section breaks between documents", () => {
+  it("should mark section breaks on the preceding paragraph (no stray empty paragraph)", () => {
     const doc1: DocxDocument = { body: [textParagraph("A")] };
     const doc2: DocxDocument = { body: [textParagraph("B")] };
     const merged = mergeDocuments([doc1, doc2], { sectionBreak: "continuous" });
-    // Should have: paragraph "A", section break paragraph, paragraph "B"
-    expect(merged.body.length).toBe(3);
-    const sectionPara = merged.body[1] as Paragraph;
-    expect(sectionPara.properties?.sectionProperties?.breakType).toBe("continuous");
+    // A section break is carried by the sectPr of the LAST paragraph of the
+    // preceding section — not by an extra empty paragraph (which would render
+    // as a stray blank line / blank page in Word). So the body stays at 2
+    // paragraphs: "A" (now carrying the break) and "B".
+    expect(merged.body.length).toBe(2);
+    const firstPara = merged.body[0] as Paragraph;
+    expect(firstPara.properties?.sectionProperties?.breakType).toBe("continuous");
+    // The break paragraph must still hold its original content.
+    const secondPara = merged.body[1] as Paragraph;
+    expect(secondPara.properties?.sectionProperties).toBeUndefined();
   });
 });
 

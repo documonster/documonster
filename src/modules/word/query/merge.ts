@@ -118,17 +118,32 @@ export function mergeDocuments(
   for (let i = 1; i < documents.length; i++) {
     const doc = documents[i];
 
-    // Insert section break before appending next document
-    const sectionBreakPara: Paragraph = {
-      type: "paragraph",
-      properties: {
-        sectionProperties: {
-          breakType
+    // Mark a section break BEFORE appending the next document. In OOXML a
+    // section break is carried by the `sectPr` of the LAST paragraph of the
+    // preceding section — NOT by an extra empty paragraph. Appending an empty
+    // <w:p> with only a sectPr makes Word render a stray blank line / blank
+    // page. So we attach the break to the last paragraph already in the body;
+    // only if the body currently ends with a non-paragraph block (e.g. a
+    // table, which cannot carry a sectPr directly) do we fall back to a
+    // minimal carrier paragraph.
+    const lastBlock = mergedBody[mergedBody.length - 1];
+    if (lastBlock && lastBlock.type === "paragraph") {
+      const para = lastBlock as Paragraph;
+      mergedBody[mergedBody.length - 1] = {
+        ...para,
+        properties: {
+          ...para.properties,
+          sectionProperties: { ...para.properties?.sectionProperties, breakType }
         }
-      },
-      children: []
-    };
-    mergedBody.push(sectionBreakPara);
+      };
+    } else {
+      const sectionBreakPara: Paragraph = {
+        type: "paragraph",
+        properties: { sectionProperties: { breakType } },
+        children: []
+      };
+      mergedBody.push(sectionBreakPara);
+    }
 
     // Compute id remappings BEFORE cloning the body so we can rewrite refs
     // during the clone in a single pass.

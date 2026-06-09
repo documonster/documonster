@@ -74,6 +74,36 @@ describe("splitDocument", () => {
       const result = splitDocument(doc, { by: "section" });
       expect(result).toHaveLength(3);
     });
+
+    it("strips the trailing section-break sectPr from each part (no blank page)", () => {
+      // The break paragraph's sectPr carries a nextPage break used to separate
+      // it from the following section. In a standalone split document that
+      // break has nothing after it and would render a trailing blank page.
+      // splitDocument must remove the paragraph-level sectPr and promote its
+      // page setup (without breakType) to the document's section properties.
+      const sectProps: SectionProperties = {
+        breakType: "nextPage",
+        pageSize: { width: 12240, height: 15840 }
+      };
+      const doc = createDoc([
+        para("section 1 text"),
+        para("break para", { sectionProperties: sectProps }),
+        para("section 2 text")
+      ]);
+
+      const result = splitDocument(doc, { by: "section" });
+      expect(result).toHaveLength(2);
+
+      // Part 1's last paragraph must no longer carry a paragraph-level sectPr.
+      const part1 = result[0];
+      const lastPara = part1.body[part1.body.length - 1] as Paragraph;
+      expect(lastPara.properties?.sectionProperties).toBeUndefined();
+      expect(paraText(lastPara)).toBe("break para");
+
+      // The page setup is promoted to the document level, with breakType dropped.
+      expect(part1.sectionProperties?.pageSize).toEqual({ width: 12240, height: 15840 });
+      expect(part1.sectionProperties?.breakType).toBeUndefined();
+    });
   });
 
   describe("by pageBreak", () => {

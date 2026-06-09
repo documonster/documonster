@@ -170,17 +170,45 @@ function buildSplitDoc(
   segment: BodyContent[],
   opts: Required<SplitOptions>
 ): DocxDocument {
+  // When splitting by section, the segment's last paragraph carries the
+  // section break (often `nextPage`) that originally separated it from the
+  // following section. In a standalone split document that break has nothing
+  // after it, so Word renders a trailing blank page. Strip the paragraph-level
+  // sectPr and promote its page setup to the document's own section
+  // properties instead.
+  let body = segment;
+  let promotedSectPr: DocxDocument["sectionProperties"] | undefined;
+  if (opts.by === "section" && segment.length > 0) {
+    const last = segment[segment.length - 1];
+    if (last.type === "paragraph" && last.properties?.sectionProperties) {
+      const para = last as Paragraph;
+      const props = para.properties!;
+      const sectionProperties = props.sectionProperties!;
+      const restProps = { ...props };
+      delete (restProps as { sectionProperties?: unknown }).sectionProperties;
+      // Drop the inter-section break type: in a standalone document this is
+      // the (only/first) section, so a "nextPage" break would just push all
+      // content onto page 2, leaving page 1 blank.
+      const { breakType: _drop, ...sectWithoutBreak } = sectionProperties;
+      promotedSectPr = sectWithoutBreak;
+      const cleaned: Paragraph = { ...para, properties: restProps };
+      body = [...segment.slice(0, -1), cleaned];
+    }
+  }
+
   if (!opts.preserveSharedParts) {
     // Minimal split: just body + docType
     return {
       docType: source.docType,
-      body: segment
+      body,
+      ...(promotedSectPr ? { sectionProperties: promotedSectPr } : {})
     };
   }
 
   // Full split: preserve all shared parts
   return {
     ...source,
-    body: segment
+    body,
+    ...(promotedSectPr ? { sectionProperties: promotedSectPr } : {})
   };
 }
