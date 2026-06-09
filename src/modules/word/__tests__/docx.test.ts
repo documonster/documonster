@@ -233,6 +233,29 @@ describe("DOCX Builder Helpers", () => {
     expect((followed as any)?.runProperties?.color).toBe("954F72");
   });
 
+  it("renderStyles should emit tblStyleRowBandSize before tblBorders for banded table styles", () => {
+    const xml = new XmlWriter();
+    renderStyles(xml, undefined, [
+      {
+        type: "table",
+        styleId: "Banded",
+        name: "Banded",
+        tableProperties: { rowBandSize: 1, borders: gridBorders(4, "BFBFBF") },
+        tableStyleConditions: [
+          {
+            type: "evenRowBanding",
+            cellProperties: { shading: { fill: "F2F2F2", pattern: "clear" } }
+          }
+        ]
+      }
+    ]);
+    const out = xml.toString();
+    expect(out).toContain('<w:tblStyleRowBandSize w:val="1"/>');
+    // Must precede tblBorders per CT_TblPrBase ordering.
+    expect(out.indexOf("tblStyleRowBandSize")).toBeLessThan(out.indexOf("tblBorders"));
+    expect(out).toContain('w:type="band2Horz"');
+  });
+
   it("should create bookmarks", () => {
     const start = bookmarkStart(0, "test");
     const end = bookmarkEnd(0);

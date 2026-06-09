@@ -141,7 +141,13 @@ export function renderBodyContent(
       renderSdt(xml, content, renderCtx);
       break;
     case "checkBox":
+      // A checkbox renders as an inline (run-level) SDT whose sdtContent holds
+      // a run. At block level that run would be an illegal child of
+      // CT_SdtContentBlock, so wrap it in a paragraph — making it a valid
+      // run-level SDT inside a block-level paragraph.
+      xml.openNode("w:p");
       renderCheckBox(xml, content as CheckBox);
+      xml.closeNode();
       break;
     case "drawingShape":
       renderDrawingShape(xml, content as DrawingShape, renderCtx);

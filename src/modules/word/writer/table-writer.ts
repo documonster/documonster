@@ -200,6 +200,14 @@ function renderTableProperties(
     }
   }
 
+  if (tPr.rowBandSize !== undefined) {
+    xml.leafNode("w:tblStyleRowBandSize", { "w:val": String(tPr.rowBandSize) });
+  }
+
+  if (tPr.colBandSize !== undefined) {
+    xml.leafNode("w:tblStyleColBandSize", { "w:val": String(tPr.colBandSize) });
+  }
+
   if (tPr.width) {
     renderTableWidth(xml, "w:tblW", tPr.width);
   }

@@ -551,7 +551,11 @@ function renderFfData(xml: XmlSink, ff: FormField): void {
     }
     if (ff.entries) {
       for (const entry of ff.entries) {
-        xml.leafNode("w:listEntry", { "w:val": entry });
+        // Word rejects FORMDROPDOWN list entries with an empty value
+        // ("Word experienced an error trying to open the file"). Substitute a
+        // single space so an intended blank/placeholder item still renders and
+        // the entry indices (and `w:default`) stay aligned.
+        xml.leafNode("w:listEntry", { "w:val": entry === "" ? " " : entry });
       }
     }
     xml.closeNode();

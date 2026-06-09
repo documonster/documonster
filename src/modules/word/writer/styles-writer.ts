@@ -191,6 +191,17 @@ function renderStyle(xml: XmlSink, style: StyleDef): void {
   // For table styles
   if (style.tableProperties) {
     xml.openNode("w:tblPr");
+    // Per CT_TblPrBase order, band sizes precede w:tblW.
+    if (style.tableProperties.rowBandSize !== undefined) {
+      xml.leafNode("w:tblStyleRowBandSize", {
+        "w:val": String(style.tableProperties.rowBandSize)
+      });
+    }
+    if (style.tableProperties.colBandSize !== undefined) {
+      xml.leafNode("w:tblStyleColBandSize", {
+        "w:val": String(style.tableProperties.colBandSize)
+      });
+    }
     if (style.tableProperties.width) {
       xml.leafNode("w:tblW", {
         "w:w": String(style.tableProperties.width.value),

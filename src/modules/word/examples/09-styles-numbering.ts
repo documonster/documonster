@@ -109,6 +109,8 @@ const tableStyle: StyleDef = {
   uiPriority: 39,
   tableProperties: {
     borders: gridBorders(4, "BFBFBF"),
+    // One row per banding stripe so band1Horz/band2Horz alternate every row.
+    rowBandSize: 1,
     cellMargins: {
       top: { value: 60, type: "dxa" },
       bottom: { value: 60, type: "dxa" },
@@ -123,6 +125,12 @@ const tableStyle: StyleDef = {
       cellProperties: { shading: { fill: "1F4E79", pattern: "clear" } }
     },
     {
+      // Odd stripes (rows 1,3,… of the body) — white, for explicit contrast.
+      type: "oddRowBanding",
+      cellProperties: { shading: { fill: "FFFFFF", pattern: "clear" } }
+    },
+    {
+      // Even stripes (rows 2,4,…) — light grey zebra banding.
       type: "evenRowBanding",
       cellProperties: { shading: { fill: "F2F2F2", pattern: "clear" } }
     }

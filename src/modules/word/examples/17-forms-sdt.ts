@@ -1,9 +1,7 @@
 /**
- * Word Example 17 — Forms & Structured Document Tags
+ * Word Example 17 — Structured Document Tags (content controls)
  *
  * Covers:
- *   - Legacy form fields (FORMTEXT / FORMCHECKBOX / FORMDROPDOWN)
- *   - extractFormFields / fillFormFields round-trip
  *   - Modern Structured Document Tags (SDTs)
  *     · plain-text / rich-text controls
  *     · checkbox SDT (w14:checkbox)
@@ -16,10 +14,9 @@
  *     dropdown with one item, repeating section with no items.
  *
  * Output:
- *   - 17-forms-legacy.docx — original
- *   - 17-forms-legacy-filled.docx — programmatically filled
  *   - 17-sdt.docx — content controls
- *   - 17-sdt-resolved.docx — data bindings resolved
+ *   - 17-sdt-bound.docx — data bindings present (resolved by Word on open)
+ *   - 17-sdt-resolved.docx — data bindings resolved ahead of time
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -31,13 +28,8 @@ import {
   textParagraph,
   text,
   bold,
-  formTextField,
-  formCheckboxField,
-  formDropdownField,
   structuredDocumentTag,
   checkBox,
-  extractFormFields,
-  fillFormFields,
   resolveDataBindings,
   toBuffer
 } from "../index";
@@ -50,72 +42,7 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 // ===========================================================================
-// Part 1 — Legacy form fields
-// ===========================================================================
-{
-  const doc = Document.create();
-  Document.useDefaultStyles(doc);
-  Document.addHeading(doc, "Legacy form fields", 1);
-
-  Document.addParagraphElement(
-    doc,
-    paragraph([bold("Full name: "), formTextField({ name: "FullName", default: "(your name)" })])
-  );
-  Document.addParagraphElement(
-    doc,
-    paragraph([bold("Agree to terms? "), formCheckboxField({ name: "AgreeTerms", checked: false })])
-  );
-  Document.addParagraphElement(
-    doc,
-    paragraph([
-      bold("Country: "),
-      formDropdownField({
-        name: "Country",
-        entries: ["", "Australia", "Canada", "Japan"],
-        default: 0
-      })
-    ])
-  );
-  // Edge: dropdown with a single item
-  Document.addParagraphElement(
-    doc,
-    paragraph([
-      bold("Region (single option): "),
-      formDropdownField({ name: "Region", entries: ["APAC"], default: 0 })
-    ])
-  );
-
-  const built = Document.build(doc);
-
-  // Extract → render as a list
-  const fields = extractFormFields(built);
-  console.log(`  legacy form has ${fields.length} fields:`);
-  for (const f of fields) {
-    console.log(`    · ${f.name} [${f.type}] = ${JSON.stringify(f.value)}`);
-  }
-
-  // Save the empty form
-  const buf1 = await toBuffer(built);
-  fs.writeFileSync(path.join(outDir, "17-forms-legacy.docx"), buf1);
-  console.log(`  → 17-forms-legacy.docx (${buf1.length} bytes)`);
-
-  // Fill programmatically
-  const filled = fillFormFields(
-    built,
-    new Map<string, string | boolean | number>([
-      ["FullName", "Jane Q. Public"],
-      ["AgreeTerms", true],
-      ["Country", 2], // Canada
-      ["Region", 0]
-    ])
-  );
-  const buf2 = await toBuffer(filled);
-  fs.writeFileSync(path.join(outDir, "17-forms-legacy-filled.docx"), buf2);
-  console.log(`  → 17-forms-legacy-filled.docx (${buf2.length} bytes)`);
-}
-
-// ===========================================================================
-// Part 2 — Structured Document Tags (modern content controls)
+// Part 1 — Structured Document Tags (modern content controls)
 // ===========================================================================
 {
   const doc = Document.create();
@@ -255,7 +182,7 @@ fs.mkdirSync(outDir, { recursive: true });
 }
 
 // ===========================================================================
-// Part 3 — Data binding (OpenDoPE) — SDT bound to a CustomXML part
+// Part 2 — Data binding (OpenDoPE) — SDT bound to a CustomXML part
 // ===========================================================================
 {
   const doc = Document.create();

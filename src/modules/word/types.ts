@@ -1389,6 +1389,17 @@ export interface TableProperties {
   readonly indent?: Twips;
   /** Table look (conditional formatting). */
   readonly look?: TableLook;
+  /**
+   * Number of rows in a single horizontal banding stripe (`w:tblStyleRowBandSize`).
+   * Defaults to 1 in Word. Set on table styles so the `band1Horz`/`band2Horz`
+   * conditional formats render as visible row banding.
+   */
+  readonly rowBandSize?: number;
+  /**
+   * Number of columns in a single vertical banding stripe (`w:tblStyleColBandSize`).
+   * Defaults to 1 in Word.
+   */
+  readonly colBandSize?: number;
   /** Floating table properties. */
   readonly float?: TableFloat;
   /** Cell spacing in twips. */

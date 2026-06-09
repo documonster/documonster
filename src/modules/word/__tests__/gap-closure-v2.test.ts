@@ -1080,4 +1080,25 @@ describe("Integration: new features round-trip", () => {
     expect(fields[2].name).toBe("Plan");
     expect(fields[2].type).toBe("dropDown");
   });
+
+  it("FORMDROPDOWN empty list entries are written as a space (Word rejects empty val)", async () => {
+    const { extractAll } = await import("@archive/unzip/extract");
+    const doc = Document.create();
+    Document.useDefaultStyles(doc);
+    Document.addParagraphElement(
+      doc,
+      paragraph([
+        formDropdownField({ name: "Country", entries: ["", "Australia", "Canada"], default: 0 })
+      ])
+    );
+    const buffer = await toBuffer(Document.build(doc));
+    const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
+
+    // The empty entry must become a single space, never an empty value, so
+    // Word can open the document.
+    expect(xml).not.toContain('<w:listEntry w:val=""/>');
+    expect(xml).toContain('<w:listEntry w:val=" "/>');
+    expect(xml).toContain('<w:listEntry w:val="Australia"/>');
+    expect(xml).toContain('<w:listEntry w:val="Canada"/>');
+  });
 });
