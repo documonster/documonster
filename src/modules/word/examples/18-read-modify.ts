@@ -259,9 +259,31 @@ fs.writeFileSync(path.join(outDir, "03-edge.docx"), buf3);
     { headerRow: true, borders: true }
   );
 
-  // Footnote + endnote
-  Document.addFootnote(richDoc, "Footnote with PLACEHOLDER inside.");
-  Document.addEndnote(richDoc, "Endnote PLACEHOLDER.");
+  // Footnote + endnote. addFootnote/addEndnote only create the note content;
+  // we must also place a reference mark in the body, otherwise Word has
+  // nothing to anchor the note to and will not render it.
+  const fnId = Document.addFootnote(richDoc, "Footnote with PLACEHOLDER inside.");
+  Document.addParagraphElement(
+    richDoc,
+    paragraph([
+      text("Sentence with a footnote ref."),
+      {
+        properties: { vertAlign: "superscript" },
+        content: [{ type: "footnoteRef", id: fnId }]
+      }
+    ])
+  );
+  const enId = Document.addEndnote(richDoc, "Endnote PLACEHOLDER.");
+  Document.addParagraphElement(
+    richDoc,
+    paragraph([
+      text("Sentence with an endnote ref."),
+      {
+        properties: { vertAlign: "superscript" },
+        content: [{ type: "endnoteRef", id: enId }]
+      }
+    ])
+  );
 
   // Comment
   const cId = Document.addComment(richDoc, "Reviewer", "Comment body has PLACEHOLDER somewhere.");
