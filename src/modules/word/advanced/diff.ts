@@ -197,25 +197,146 @@ function computeDiff(oldTexts: string[], newTexts: string[]): DiffEntry[] {
   // Reverse since we built it backwards
   entries.reverse();
 
-  // Post-process: pair adjacent delete+add as "modified" when they're at the same position
-  const result: DiffEntry[] = [];
-  for (let k = 0; k < entries.length; k++) {
-    const curr = entries[k];
-    const next = k + 1 < entries.length ? entries[k + 1] : undefined;
+  return pairModifications(entries);
+}
 
-    if (curr.type === "deleted" && next?.type === "added") {
-      result.push({
-        type: "modified",
-        oldIndex: curr.oldIndex,
-        newIndex: next.newIndex,
-        oldText: curr.oldText,
-        newText: next.newText
-      });
-      k++; // skip next
-    } else {
-      result.push(curr);
+/**
+ * Pair deletions with insertions that represent the *same* paragraph in a
+ * modified form, based on text similarity.
+ *
+ * The LCS pass only matches paragraphs whose text is byte-identical, so when
+ * every paragraph is lightly edited it produces all-deletions + all-insertions
+ * with no "modified" at all. Within each contiguous change block (a run of
+ * deletions/insertions bounded by unchanged entries), we greedily pair each
+ * deletion with the most similar insertion whose similarity clears
+ * {@link MODIFY_SIMILARITY_THRESHOLD}. Pairs become "modified"; anything left
+ * unpaired stays a pure deletion or insertion. This yields, e.g., a recipe
+ * whose steps were all tweaked → mostly "modified", with a removed step as a
+ * pure deletion and a brand-new step as a pure insertion.
+ */
+function pairModifications(entries: DiffEntry[]): DiffEntry[] {
+  const result: DiffEntry[] = [];
+  let k = 0;
+  while (k < entries.length) {
+    const entry = entries[k];
+    if (entry.type !== "deleted" && entry.type !== "added") {
+      result.push(entry);
+      k++;
+      continue;
     }
+
+    // Collect the maximal contiguous run of deleted/added entries.
+    const dels: DiffEntry[] = [];
+    const adds: DiffEntry[] = [];
+    let j = k;
+    while (j < entries.length && (entries[j].type === "deleted" || entries[j].type === "added")) {
+      if (entries[j].type === "deleted") {
+        dels.push(entries[j]);
+      } else {
+        adds.push(entries[j]);
+      }
+      j++;
+    }
+
+    result.push(...pairChangeBlock(dels, adds));
+    k = j;
   }
 
   return result;
+}
+
+/**
+ * Pair one change block's deletions and insertions by similarity. Greedy:
+ * process deletions in order, each claiming the most similar still-unclaimed
+ * insertion above the threshold. Emits entries in old-index / new-index order.
+ */
+function pairChangeBlock(dels: DiffEntry[], adds: DiffEntry[]): DiffEntry[] {
+  const usedAdd = new Array<boolean>(adds.length).fill(false);
+  const out: DiffEntry[] = [];
+  const leftoverAdds: DiffEntry[] = [];
+
+  for (const del of dels) {
+    let bestIdx = -1;
+    let bestScore = MODIFY_SIMILARITY_THRESHOLD;
+    for (let a = 0; a < adds.length; a++) {
+      if (usedAdd[a]) {
+        continue;
+      }
+      const score = textSimilarity(del.oldText ?? "", adds[a].newText ?? "");
+      if (score >= bestScore) {
+        bestScore = score;
+        bestIdx = a;
+      }
+    }
+    if (bestIdx >= 0) {
+      usedAdd[bestIdx] = true;
+      out.push({
+        type: "modified",
+        oldIndex: del.oldIndex,
+        newIndex: adds[bestIdx].newIndex,
+        oldText: del.oldText,
+        newText: adds[bestIdx].newText
+      });
+    } else {
+      out.push(del); // pure deletion
+    }
+  }
+
+  for (let a = 0; a < adds.length; a++) {
+    if (!usedAdd[a]) {
+      leftoverAdds.push(adds[a]); // pure insertion
+    }
+  }
+
+  // Order the block by position: modifications and deletions (old order)
+  // first, then the surviving pure insertions (new order). Both arrays are
+  // already in their natural index order from the LCS walk.
+  out.push(...leftoverAdds);
+  return out;
+}
+
+/** Minimum similarity (0..1) for a delete+add to be treated as a modification. */
+const MODIFY_SIMILARITY_THRESHOLD = 0.5;
+
+/**
+ * Similarity of two strings in [0, 1], combining word-set overlap (Jaccard)
+ * with a shared-prefix bonus. Cheap and dependency-free — good enough to tell
+ * "same paragraph, lightly edited" from "completely different paragraph".
+ */
+function textSimilarity(a: string, b: string): number {
+  if (a === b) {
+    return 1;
+  }
+  if (a.length === 0 || b.length === 0) {
+    return 0;
+  }
+  const wordsA = a.toLowerCase().split(/\s+/).filter(Boolean);
+  const wordsB = b.toLowerCase().split(/\s+/).filter(Boolean);
+  if (wordsA.length === 0 || wordsB.length === 0) {
+    return 0;
+  }
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+  let intersection = 0;
+  for (const w of setA) {
+    if (setB.has(w)) {
+      intersection++;
+    }
+  }
+  const union = setA.size + setB.size - intersection;
+  const jaccard = union === 0 ? 0 : intersection / union;
+
+  // Shared-prefix bonus: paragraphs that begin the same ("Step 3: …") are very
+  // likely the same item edited, even if many words changed.
+  let prefix = 0;
+  const max = Math.min(a.length, b.length);
+  while (prefix < max && a[prefix] === b[prefix]) {
+    prefix++;
+  }
+  const prefixRatio = prefix / Math.max(a.length, b.length);
+
+  // Weight word overlap most, with shared prefix as a strong booster so
+  // "Hello World" → "Hello Earth" (half the words, same prefix) reads as a
+  // modification while unrelated text stays a delete+add.
+  return Math.min(1, jaccard * 0.7 + prefixRatio * 0.5);
 }

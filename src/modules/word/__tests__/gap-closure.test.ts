@@ -734,10 +734,65 @@ describe("diffDocuments", () => {
     const doc1: DocxDocument = { body: [textParagraph("Hello World")] };
     const doc2: DocxDocument = { body: [textParagraph("Hello Earth")] };
     const result = diffDocuments(doc1, doc2);
-    // Either modified or (deleted + added)
-    const hasChange =
-      result.summary.modified > 0 || (result.summary.added > 0 && result.summary.deleted > 0);
-    expect(hasChange).toBe(true);
+    // Lightly-edited single paragraph → one modification, not delete+add.
+    expect(result.summary.modified).toBe(1);
+    expect(result.summary.added).toBe(0);
+    expect(result.summary.deleted).toBe(0);
+  });
+
+  it("should pair similar paragraphs as modified, leaving dissimilar ones as add/delete", () => {
+    // Every paragraph is lightly edited (so LCS finds no identical lines), one
+    // line is removed, one is added. A naive LCS diff would report this as
+    // all-deleted + all-added (modified=0). Similarity pairing must instead
+    // recognise the edits.
+    const doc1: DocxDocument = {
+      body: [
+        textParagraph("Recipe"),
+        textParagraph("Step 1: Mix dry ingredients."),
+        textParagraph("Step 2: Add eggs."),
+        textParagraph("Step 3: Bake at 180°C for 25 minutes.")
+      ]
+    };
+    const doc2: DocxDocument = {
+      body: [
+        textParagraph("Recipe (revised)"),
+        textParagraph("Step 1: Mix dry ingredients in a large bowl."),
+        textParagraph("Step 3: Bake at 200°C for 30 minutes."),
+        textParagraph("Step 4: Cool before slicing.")
+      ]
+    };
+    const result = diffDocuments(doc1, doc2);
+
+    expect(result.summary.modified).toBe(3);
+    expect(result.summary.deleted).toBe(1);
+    expect(result.summary.added).toBe(1);
+
+    // The removed step is a pure deletion; the new step is a pure insertion.
+    expect(
+      result.entries.some(e => e.type === "deleted" && e.oldText === "Step 2: Add eggs.")
+    ).toBe(true);
+    expect(
+      result.entries.some(e => e.type === "added" && e.newText === "Step 4: Cool before slicing.")
+    ).toBe(true);
+    // A tweaked step is reported as a modification carrying both texts.
+    expect(
+      result.entries.some(
+        e =>
+          e.type === "modified" &&
+          e.oldText === "Step 3: Bake at 180°C for 25 minutes." &&
+          e.newText === "Step 3: Bake at 200°C for 30 minutes."
+      )
+    ).toBe(true);
+  });
+
+  it("should not pair completely unrelated paragraphs as modified", () => {
+    const doc1: DocxDocument = { body: [textParagraph("The quick brown fox")] };
+    const doc2: DocxDocument = { body: [textParagraph("Lorem ipsum dolor amet")] };
+    const result = diffDocuments(doc1, doc2);
+    // No shared words → not a modification, but a delete + an add.
+    expect(result.summary.modified).toBe(0);
+    expect(result.summary.deleted).toBe(1);
+    expect(result.summary.added).toBe(1);
   });
 });
 
