@@ -122,6 +122,50 @@ describe("splitDocument", () => {
       expect(result).toHaveLength(2);
     });
 
+    it("removes the trailing page break from each part (no blank page)", () => {
+      // The page-break paragraph that triggered the split must not survive at
+      // the end of the part, otherwise the standalone document renders a
+      // trailing blank page. A paragraph that held ONLY the page break is
+      // dropped entirely.
+      const breakOnlyPara: Paragraph = {
+        type: "paragraph",
+        children: [{ content: [{ type: "break", breakType: "page" }] } as Run]
+      };
+      const doc = createDoc([para("page 1"), breakOnlyPara, para("page 2")]);
+      const result = splitDocument(doc, { by: "pageBreak" });
+
+      expect(result).toHaveLength(2);
+      // Part 1 keeps only "page 1"; the empty break paragraph is gone.
+      expect(result[0].body).toHaveLength(1);
+      expect(paraText(result[0].body[0] as Paragraph)).toBe("page 1");
+      // No page-break run remains anywhere in part 1.
+      const part1Json = JSON.stringify(result[0].body);
+      expect(part1Json).not.toContain('"breakType":"page"');
+    });
+
+    it("keeps inline text when stripping a trailing page break", () => {
+      // A paragraph with text AND a page break keeps the text, loses the break.
+      const mixedPara: Paragraph = {
+        type: "paragraph",
+        children: [
+          {
+            content: [
+              { type: "text", text: "tail text" },
+              { type: "break", breakType: "page" }
+            ]
+          } as Run
+        ]
+      };
+      const doc = createDoc([para("head"), mixedPara, para("next")]);
+      const result = splitDocument(doc, { by: "pageBreak" });
+
+      expect(result).toHaveLength(2);
+      // Part 1 keeps both paragraphs; the trailing break is removed but "tail text" stays.
+      const part1Json = JSON.stringify(result[0].body);
+      expect(part1Json).toContain("tail text");
+      expect(part1Json).not.toContain('"breakType":"page"');
+    });
+
     it("splits at pageBreakBefore property", () => {
       const doc = createDoc([
         para("first"),

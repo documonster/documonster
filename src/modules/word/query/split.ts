@@ -6,7 +6,7 @@
  */
 
 import { isRun } from "../core/text-utils";
-import type { DocxDocument, BodyContent, Paragraph } from "../types";
+import type { DocxDocument, BodyContent, Paragraph, ParagraphChild } from "../types";
 
 // =============================================================================
 // Public API
@@ -165,6 +165,33 @@ function paragraphHasExplicitPageBreakRun(para: Paragraph): boolean {
   return false;
 }
 
+/**
+ * Return a copy of `para` with every explicit page-break run content removed.
+ * Runs left empty by the removal are dropped. Used when splitting by page
+ * break so the trailing break that separated this segment from the next does
+ * not render as a blank page in the standalone split document.
+ */
+function stripPageBreakRuns(para: Paragraph): Paragraph {
+  const newChildren: ParagraphChild[] = [];
+  for (const child of para.children) {
+    if (isRun(child)) {
+      const content = child.content.filter(c => !(c.type === "break" && c.breakType === "page"));
+      if (content.length > 0) {
+        newChildren.push({ ...child, content });
+      }
+      // Drop runs that became empty after removing the page break.
+    } else {
+      newChildren.push(child);
+    }
+  }
+  return { ...para, children: newChildren };
+}
+
+/** True when a paragraph has no children (after page-break stripping). */
+function paragraphIsEmpty(para: Paragraph): boolean {
+  return para.children.length === 0;
+}
+
 function buildSplitDoc(
   source: DocxDocument,
   segment: BodyContent[],
@@ -193,6 +220,18 @@ function buildSplitDoc(
       promotedSectPr = sectWithoutBreak;
       const cleaned: Paragraph = { ...para, properties: restProps };
       body = [...segment.slice(0, -1), cleaned];
+    }
+  } else if (opts.by === "pageBreak" && segment.length > 0) {
+    // The segment ends with the paragraph that held the splitting page break.
+    // In a standalone document that trailing page break has nothing after it
+    // and renders a blank page, so remove it. If the paragraph held only the
+    // page break, drop the now-empty paragraph entirely.
+    const last = segment[segment.length - 1];
+    if (last.type === "paragraph" && paragraphHasExplicitPageBreakRun(last)) {
+      const stripped = stripPageBreakRuns(last as Paragraph);
+      body = paragraphIsEmpty(stripped)
+        ? segment.slice(0, -1)
+        : [...segment.slice(0, -1), stripped];
     }
   }
 
