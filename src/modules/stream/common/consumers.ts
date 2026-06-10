@@ -11,9 +11,15 @@
 
 type StreamInput = AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>;
 
+// Use the `Blob` constructor's own options type (available from both
+// `@types/node` 18+ and the DOM lib) instead of the DOM-only global
+// `BlobPropertyBag`, so the emitted `.d.ts` type-checks in Node-only projects
+// without `lib: ["DOM"]`. See issue #174.
+type BlobOptions = NonNullable<ConstructorParameters<typeof Blob>[1]>;
+
 export interface StreamConsumers {
   arrayBuffer(stream: StreamInput): Promise<ArrayBuffer>;
-  blob(stream: StreamInput, options?: BlobPropertyBag): Promise<Blob>;
+  blob(stream: StreamInput, options?: BlobOptions): Promise<Blob>;
   buffer(stream: StreamInput): Promise<Uint8Array>;
   json(stream: StreamInput): Promise<unknown>;
   text(stream: StreamInput, encoding?: string): Promise<string>;
@@ -49,7 +55,7 @@ export function createConsumers(converters: StreamConverters): StreamConsumers {
       ) as ArrayBuffer;
     },
 
-    async blob(stream: StreamInput, options?: BlobPropertyBag): Promise<Blob> {
+    async blob(stream: StreamInput, options?: BlobOptions): Promise<Blob> {
       const bytes = await streamToUint8Array(stream);
       return new Blob([bytes as BlobPart], options);
     },

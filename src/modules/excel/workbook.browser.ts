@@ -351,7 +351,11 @@ interface CsvOptionsExtras {
 
   // === Network options (for URL input) ===
   requestHeaders?: Record<string, string>;
-  requestBody?: BodyInit;
+  // Use `RequestInit["body"]` (provided by both `@types/node` 18+ and the DOM
+  // lib) instead of the DOM-only global `BodyInit`, so the emitted `.d.ts`
+  // type-checks in Node-only projects without `lib: ["DOM"]`. `NonNullable`
+  // keeps the type equivalent to `BodyInit` (which excludes `null`). See #174.
+  requestBody?: NonNullable<RequestInit["body"]>;
   withCredentials?: boolean;
   signal?: AbortSignal;
 

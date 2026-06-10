@@ -62,7 +62,7 @@ export interface HttpRangeReaderOptions {
    * Whether to use credentials (cookies) for cross-origin requests.
    * @default "same-origin"
    */
-  credentials?: RequestCredentials;
+  credentials?: NonNullable<RequestInit["credentials"]>;
 
   /**
    * Optional: Pre-known file size to skip HEAD request.
@@ -144,7 +144,7 @@ export class HttpRangeReader implements RandomAccessReader {
   private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly signal?: AbortSignal;
-  private readonly credentials: RequestCredentials;
+  private readonly credentials: NonNullable<RequestInit["credentials"]>;
   private _size: number;
 
   // If the server ignores Range and returns the whole file (200), cache it.
