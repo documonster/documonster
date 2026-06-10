@@ -1729,7 +1729,13 @@ export interface MathPreSubSuperScript {
 export interface MathPhantom {
   readonly type: "mathPhantom";
   readonly content: readonly MathContent[];
-  /** Phantom shows up in the layout (default: false). */
+  /**
+   * Whether the phantom's base content is drawn. In OOXML `m:show` defaults to
+   * ON, so the base stays visible unless this is explicitly set to `false`
+   * (serialized as `<m:show m:val="0"/>`). Set `false` for the classic
+   * "occupies space but invisible" phantom; leave undefined to keep the
+   * default (visible) behaviour.
+   */
   readonly show?: boolean;
   /** Zero width (default: false). */
   readonly zeroWidth?: boolean;

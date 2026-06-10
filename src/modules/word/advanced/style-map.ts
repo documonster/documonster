@@ -208,14 +208,8 @@ export const DEFAULT_STYLE_MAP: StyleMap = {
  * ```
  */
 export function parseStyleMap(dsl: string, options?: StyleMapOptions): StyleMap {
-  const rules: StyleMappingRule[] = [];
-
-  // Include defaults if requested
-  if (options?.includeDefaults !== false && options?.base) {
-    rules.push(...options.base.rules);
-  } else if (options?.includeDefaults !== false && !options?.base) {
-    rules.push(...DEFAULT_STYLE_MAP.rules);
-  }
+  // User-defined rules from the DSL.
+  const userRules: StyleMappingRule[] = [];
 
   const lines = dsl
     .split("\n")
@@ -225,11 +219,41 @@ export function parseStyleMap(dsl: string, options?: StyleMapOptions): StyleMap 
   for (const line of lines) {
     const rule = parseRule(line);
     if (rule) {
-      rules.push(rule);
+      userRules.push(rule);
     }
   }
 
-  // Sort by priority (highest first)
+  // Default / base rules requested via `includeDefaults`.
+  const defaultRules: StyleMappingRule[] = [];
+  if (options?.includeDefaults !== false && options?.base) {
+    defaultRules.push(...options.base.rules);
+  } else if (options?.includeDefaults !== false && !options?.base) {
+    defaultRules.push(...DEFAULT_STYLE_MAP.rules);
+  }
+
+  // An explicit DSL rule should always win over a default rule for the same
+  // element — that is the whole point of providing one. Default rules,
+  // however, carry their own priorities (e.g. "Heading 1" => h1 has priority
+  // 10) that can exceed the fixed priority `parseRule` assigns to user rules.
+  // To guarantee user intent wins while preserving the relative priority
+  // ordering *within* each group, lift every user rule above the highest
+  // default priority. When there are no defaults this offset is 0 and user
+  // priorities are untouched.
+  const maxDefaultPriority = defaultRules.reduce((m, r) => Math.max(m, r.priority ?? 0), 0);
+  const userOffset = defaultRules.length > 0 ? maxDefaultPriority + 1 : 0;
+  const liftedUserRules =
+    userOffset === 0
+      ? userRules
+      : userRules.map(r => ({ ...r, priority: (r.priority ?? 0) + userOffset }));
+
+  // User rules come first so that, after a stable sort, an explicit DSL rule
+  // also wins over any default rule that happens to share its (lifted)
+  // priority. The sort below only reorders by priority; equal priorities
+  // preserve this user-before-default ordering.
+  const rules = [...liftedUserRules, ...defaultRules];
+
+  // Sort by priority (highest first). Array.prototype.sort is stable, so
+  // rules of equal priority keep their relative order (user rules first).
   rules.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
   return { rules };

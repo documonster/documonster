@@ -2208,6 +2208,32 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
     expect(border.strikeBlTr).toBe(true);
     expect(border.strikeTlBr).toBe(true);
   });
+
+  it("should preserve an explicit phantom show=false (invisible placeholder)", async () => {
+    const { mathRun, mathPhantom } = await import("../index");
+    const doc: DocxDocument = {
+      body: [
+        {
+          type: "math",
+          content: [mathPhantom([mathRun("placeholder")], { show: false, transparent: true })]
+        } as any
+      ]
+    };
+    const buffer = await packageDocx(doc);
+    // The XML must carry <m:show m:val="0"/> — omitting it leaves the base
+    // visible in Word, which defeats the "occupies space but invisible" intent.
+    const { extractAll } = await import("@archive/unzip/extract");
+    const docXml = new TextDecoder().decode(
+      (await extractAll(buffer)).get("word/document.xml")!.data
+    );
+    expect(docXml).toContain('<m:show m:val="0"/>');
+
+    const parsed = await readDocx(buffer);
+    const phant = (parsed.body[0] as any).content[0];
+    expect(phant.type).toBe("mathPhantom");
+    expect(phant.show).toBe(false);
+    expect(phant.transparent).toBe(true);
+  });
 });
 
 describe("Round-trip: Paragraph paraId/textId", () => {

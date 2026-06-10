@@ -705,7 +705,13 @@ export function mathPreSubSuperScript(
   return { type: "mathPreSubSuperScript", base, preSubScript, preSuperScript };
 }
 
-/** Create a math phantom (invisible expression that takes up space). */
+/**
+ * Create a math phantom (an expression that takes up space).
+ *
+ * Note: in OOXML the phantom base is *shown* by default. To make the classic
+ * "occupies space but invisible" phantom pass `{ show: false }`; passing only
+ * `transparent: true` is not sufficient to hide the base in Word.
+ */
 export function mathPhantom(
   content: MathContent[],
   options?: {

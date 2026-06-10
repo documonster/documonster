@@ -53,14 +53,17 @@ Document.addContent(
 
 // ---------------------------------------------------------------------------
 // 2. mathPhantom — reserves space without showing the expression. Useful for
-// alignment in equation arrays.
+// alignment in equation arrays. `show: false` (serialized as <m:show
+// m:val="0"/>) is what actually hides the base — in OOXML `show` defaults to
+// ON, so omitting it would leave the placeholder text visible. `transparent`
+// additionally marks it transparent for spacing.
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Phantom (invisible spacing)", 2);
 Document.addContent(
   doc,
   mathBlock([
     mathRun("|x| = "),
-    mathPhantom([mathRun("placeholder same width")], { transparent: true }),
+    mathPhantom([mathRun("placeholder same width")], { show: false, transparent: true }),
     mathRun(" (visible result)")
   ])
 );

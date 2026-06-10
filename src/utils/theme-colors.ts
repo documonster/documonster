@@ -148,6 +148,9 @@ export function resolveOoxmlThemeColor(
 // =============================================================================
 
 function toHex2(n: number): string {
-  const h = Math.max(0, Math.min(255, n)).toString(16);
+  // Emit uppercase hex to match the OOXML ST_HexColorRGB convention and the
+  // casing of theme scheme colors (which are stored uppercase), so a tinted /
+  // shaded result is consistent with an un-transformed passthrough.
+  const h = Math.max(0, Math.min(255, n)).toString(16).toUpperCase();
   return h.length < 2 ? "0" + h : h;
 }

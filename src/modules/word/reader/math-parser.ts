@@ -144,8 +144,14 @@ function parseMathContent(el: XmlElement): MathContent[] {
             const v = mathAttrVal(el, "val");
             return v !== "0" && v !== "false";
           };
-          if (boolAttr("show")) {
-            ph.show = true;
+          // `show` is tri-state: it may be explicitly off (`m:val="0"`), which
+          // is what makes a phantom invisible, explicitly on, or absent
+          // (defaults to on). Preserve an explicit value so a round-trip keeps
+          // the invisibility, but leave it unset when the element is absent.
+          const showEl = findMathChild(phantPrEl, "show");
+          if (showEl) {
+            const v = mathAttrVal(showEl, "val");
+            ph.show = v !== "0" && v !== "false";
           }
           if (boolAttr("zeroWid")) {
             ph.zeroWidth = true;

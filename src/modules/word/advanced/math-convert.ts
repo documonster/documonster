@@ -97,20 +97,110 @@ function convertNodeToMathML(node: MathContent): string {
 }
 
 function convertMathRunToMathML(node: MathRun): string {
-  const text = xmlEncode(node.text);
-  // Operators and special characters
-  if (isOperator(node.text)) {
-    return `<mo>${text}</mo>`;
+  const raw = node.text;
+  // A single OMML run can hold a mix of letters, digits, operators and
+  // whitespace (e.g. "a + b = "). MathML presentation markup expects each
+  // token to be wrapped in the element matching its semantic category:
+  // <mi> for identifiers, <mn> for numbers, <mo> for operators and <mtext>
+  // for runs of whitespace / other text. Tokenize the run and emit one
+  // element per token so a mixed run is no longer flattened into a single
+  // (incorrect) <mi>.
+  const normalVariant = node.properties?.italic === false;
+  const tokens = tokenizeMathRun(raw);
+
+  // Fast path / backwards-compatibility: a run that is a single token keeps
+  // producing exactly one element (e.g. "x" -> <mi>x</mi>, "42" -> <mn>42</mn>,
+  // "+" -> <mo>+</mo>), matching the historical output.
+  return tokens.map(tok => emitMathToken(tok, normalVariant)).join("");
+}
+
+type MathTokenKind = "operator" | "number" | "identifier" | "text";
+interface MathToken {
+  kind: MathTokenKind;
+  value: string;
+}
+
+function classifyMathChar(ch: string): MathTokenKind {
+  if (/\s/.test(ch)) {
+    return "text";
   }
-  // Numbers
-  if (/^\d+(\.\d+)?$/.test(node.text)) {
-    return `<mn>${text}</mn>`;
+  if (isOperator(ch)) {
+    return "operator";
   }
-  // Identifiers
-  if (node.properties?.italic === false) {
-    return `<mi mathvariant="normal">${text}</mi>`;
+  if (/[0-9.]/.test(ch)) {
+    return "number";
   }
-  return `<mi>${text}</mi>`;
+  if (/[A-Za-z]/.test(ch)) {
+    return "identifier";
+  }
+  // Letters outside ASCII (Greek, CJK, etc.) and any other symbol fall back to
+  // identifier — this matches how OMML treats variable names.
+  return "identifier";
+}
+
+function tokenizeMathRun(text: string): MathToken[] {
+  const tokens: MathToken[] = [];
+  // Use code points so astral / combined characters are not split mid-symbol.
+  const chars = Array.from(text);
+  for (const ch of chars) {
+    const kind = classifyMathChar(ch);
+    const last = tokens[tokens.length - 1];
+    // Operators are always emitted as their own token (each operator is a
+    // distinct <mo>). Numbers, identifiers and text coalesce with the
+    // previous token of the same kind so "42" stays a single <mn> and a run
+    // of spaces stays a single <mtext>.
+    if (last && last.kind === kind && kind !== "operator") {
+      last.value += ch;
+    } else {
+      tokens.push({ kind, value: ch });
+    }
+  }
+  return mergeDecimalPoints(tokens);
+}
+
+/**
+ * A "." between two digit groups is a decimal point, not an operator. The
+ * char classifier sees "." as an operator (it is a valid math operator on its
+ * own, e.g. function composition), so stitch `<number> "." <number>` back into
+ * a single number token here.
+ */
+function mergeDecimalPoints(tokens: MathToken[]): MathToken[] {
+  const out: MathToken[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    const prev = out[out.length - 1];
+    const next = tokens[i + 1];
+    if (
+      tok.kind === "operator" &&
+      tok.value === "." &&
+      prev &&
+      prev.kind === "number" &&
+      next &&
+      next.kind === "number"
+    ) {
+      prev.value += "." + next.value;
+      i++; // consume the following number token
+      continue;
+    }
+    out.push(tok);
+  }
+  return out;
+}
+
+function emitMathToken(tok: MathToken, normalVariant: boolean): string {
+  const text = xmlEncode(tok.value);
+  switch (tok.kind) {
+    case "operator":
+      return `<mo>${text}</mo>`;
+    case "number":
+      // A lone "." is not a number; treat it as an operator/text fallback.
+      return /\d/.test(tok.value) ? `<mn>${text}</mn>` : `<mo>${text}</mo>`;
+    case "text":
+      return `<mtext>${text}</mtext>`;
+    case "identifier":
+    default:
+      return normalVariant ? `<mi mathvariant="normal">${text}</mi>` : `<mi>${text}</mi>`;
+  }
 }
 
 function convertFractionToMathML(node: MathFraction): string {

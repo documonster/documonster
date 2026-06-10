@@ -211,8 +211,13 @@ function renderMathPhantom(xml: XmlSink, p: MathPhantom): void {
     p.transparent !== undefined;
   if (hasProps) {
     xml.openNode("m:phantPr");
-    if (p.show) {
-      xml.leafNode("m:show", { "m:val": "1" });
+    // `m:show` defaults to ON in OOXML (the phantom base is still drawn). To
+    // make a phantom "occupy space but stay invisible" the producer must
+    // emit `<m:show m:val="0"/>` explicitly — simply omitting it leaves the
+    // content visible. So serialize `show` whenever it is defined, mapping
+    // false → "0" and true → "1".
+    if (p.show !== undefined) {
+      xml.leafNode("m:show", { "m:val": p.show ? "1" : "0" });
     }
     if (p.zeroWidth) {
       xml.leafNode("m:zeroWid", { "m:val": "1" });
