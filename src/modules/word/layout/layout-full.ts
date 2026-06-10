@@ -19,6 +19,7 @@ import { measureTextWidth, mapToStandardFont, styledFontVariant } from "@utils/f
 
 import { ommlToMathML } from "../advanced/math-convert";
 import { extractMathText, isHyperlink, isRun } from "../core/text-utils";
+import { resolveStyle } from "../query/style-resolve";
 import type {
   AltChunk,
   BodyContent,
@@ -139,15 +140,25 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
   // fully synchronously (no `await`), so a single shared slot is safe.
   const listMarkers = computeListMarkers(doc);
   activeListMarkers = listMarkers;
+  activeDoc = doc;
   try {
     return layoutDocumentFullInner(doc, options, layoutResult, listMarkers);
   } finally {
     activeListMarkers = undefined;
+    activeDoc = undefined;
   }
 }
 
 /** Active list-marker map for the in-flight layout (see layoutDocumentFull). */
 let activeListMarkers: ReadonlyMap<Paragraph, ListMarker> | undefined;
+
+/**
+ * Active document for the in-flight layout, so `layoutParagraph` can resolve
+ * paragraph-style run properties (size/color/font) via `resolveStyle` without
+ * threading `doc` through every container function. Layout is synchronous so a
+ * single shared slot is safe.
+ */
+let activeDoc: DocxDocument | undefined;
 
 function layoutDocumentFullInner(
   doc: DocxDocument,
@@ -1301,7 +1312,13 @@ function layoutParagraph(
 ): LayoutParagraph {
   const props = para.properties;
   const spacing = props?.spacing;
-  const headingScale = getHeadingFontScale(getHeadingLevel(props));
+  // Resolve effective run properties from the paragraph's style chain. When
+  // the style supplies a concrete font size we honour it; only when it does
+  // not do we fall back to the heuristic heading scale so headings stay
+  // distinct in documents lacking a styles table.
+  const styleRunProps = activeDoc ? resolveStyle(activeDoc, para).runProperties : undefined;
+  const styleHasSize = styleRunProps?.size != null;
+  const headingScale = styleHasSize ? 1 : getHeadingFontScale(getHeadingLevel(props));
 
   // Space before
   let spaceBefore = 0;
@@ -1343,7 +1360,7 @@ function layoutParagraph(
   lineHeightPt *= headingScale;
 
   // Collect runs
-  const segments = collectParagraphSegments(para);
+  const segments = mergeStyleRunProps(collectParagraphSegments(para), styleRunProps);
   // Inject the list marker (bullet / number) as a leading text run so it
   // renders inline at the start of the first line, inheriting the first
   // text run's formatting (font / size) for visual consistency.
@@ -1768,6 +1785,25 @@ function collectParagraphSegments(para: Paragraph): ParagraphSegment[] {
     }
   }
   return segments;
+}
+
+/**
+ * Overlay resolved paragraph-style run properties under each segment's own
+ * (inline) properties, so style-defined size/color/font apply when a run does
+ * not override them. Inline run properties always win.
+ */
+function mergeStyleRunProps(
+  segments: ParagraphSegment[],
+  styleRunProps: Run["properties"] | undefined
+): ParagraphSegment[] {
+  if (!styleRunProps) {
+    return segments;
+  }
+  return segments.map(seg => {
+    const own = seg.properties;
+    const merged = own ? { ...styleRunProps, ...own } : styleRunProps;
+    return { ...seg, properties: merged } as ParagraphSegment;
+  });
 }
 
 /**

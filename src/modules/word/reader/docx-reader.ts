@@ -9,7 +9,7 @@ import { unzip } from "@archive/read-archive";
 import { parseXml, findChild, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
-import { RelType } from "../constants";
+import { RelType, ContentType } from "../constants";
 import { type Mutable, utf8Decoder } from "../core/internal-utils";
 import { isRun } from "../core/text-utils";
 import {
@@ -68,6 +68,8 @@ import type {
   OpaquePart,
   OpaqueRelationship,
   OpaqueDrawing,
+  OleObjectPart,
+  GlossaryDocument,
   Chart,
   ChartExContent,
   DocxDocumentType
@@ -2762,6 +2764,94 @@ async function _readDocxInner(
     }
   }
 
+  // Extract OLE embedded objects wired on document.xml.rels. We surface
+  // them as structured `oleObjects` so callers can query/round-trip them
+  // (getOleObjectData/extractOleObjects) without depending on the part's
+  // own .rels (OLE binaries carry no .rels — their relationship lives on
+  // document.xml.rels). The body still references each object through an
+  // opaqueDrawing carrying the same r:id. Honours `preserveOleObjects`.
+  let oleObjects: OleObjectPart[] | undefined;
+  if (policy.preserveOleObjects) {
+    const collected: OleObjectPart[] = [];
+    // progId may be recoverable from the body's <o:OLEObject ProgID="…">.
+    // The <w:object> markup is preserved either as a body-level opaqueDrawing
+    // or (more commonly) as a run-level opaqueRun inside a paragraph. Collect
+    // raw XML from both so the ProgID round-trips.
+    const progIdByRId = new Map<string, string>();
+    const scanOleMarkup = (rawXml: string): void => {
+      // Match ProgID + r:id from within the same <o:OLEObject> element so a
+      // preview <v:imagedata r:id="…"> earlier in the markup is not mistaken
+      // for the OLE binary's relationship id.
+      const oleTagRe = /<o:OLEObject\b[^>]*>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = oleTagRe.exec(rawXml)) !== null) {
+        const tag = m[0];
+        const progMatch = tag.match(/ProgID="([^"]+)"/i);
+        const ridMatch = tag.match(/r:id="([^"]+)"/i);
+        if (progMatch && ridMatch) {
+          progIdByRId.set(ridMatch[1]!, progMatch[1]!);
+        }
+      }
+    };
+    for (const item of body) {
+      if (item.type === "opaqueDrawing") {
+        scanOleMarkup(item.rawXml);
+      } else if (item.type === "paragraph") {
+        for (const child of item.children) {
+          if (isRun(child)) {
+            for (const rc of child.content) {
+              if (rc.type === "opaqueRun") {
+                scanOleMarkup(rc.rawXml);
+              }
+            }
+          }
+        }
+      }
+    }
+    for (const rel of docRels) {
+      if (rel.type !== RelType.Package) {
+        continue;
+      }
+      const olePath = resolvePartPath(documentPartPath, rel.target);
+      if (!olePath.startsWith("word/embeddings/")) {
+        continue;
+      }
+      const oleData = entries.get(olePath);
+      if (!oleData) {
+        continue;
+      }
+      consumedPaths.add(olePath);
+      collected.push({
+        path: olePath,
+        data: oleData,
+        rId: rel.id,
+        progId: progIdByRId.get(rel.id),
+        contentType: ContentType.OleObject
+      });
+    }
+    if (collected.length > 0) {
+      oleObjects = collected;
+    }
+  }
+
+  // Glossary document (Building Blocks). Carried verbatim so a read→write
+  // round-trip re-emits it (and re-registers the glossaryDocument relationship
+  // + content type) rather than dropping it into opaqueParts where the
+  // relationship would be lost. The structured `blocks` are not reverse-parsed.
+  let glossary: GlossaryDocument | undefined;
+  for (const rel of docRels) {
+    if (rel.type !== RelType.Glossary) {
+      continue;
+    }
+    const glossaryPath = resolvePartPath(documentPartPath, rel.target);
+    const glossaryData = entries.get(glossaryPath);
+    if (glossaryData) {
+      consumedPaths.add(glossaryPath);
+      glossary = { blocks: [], rawXml: decoder.decode(glossaryData) };
+    }
+    break;
+  }
+
   // Resolve altChunk data: body elements of type "altChunk" reference a rId.
   // The target file is stored in docRels + entries. We populate the altChunk
   // body item with its data here AND mark the target path as consumed so the
@@ -2884,6 +2974,8 @@ async function _readDocxInner(
     theme,
     watermark,
     opaqueParts: opaqueParts.length > 0 ? opaqueParts : undefined,
-    vbaProject
+    vbaProject,
+    oleObjects,
+    glossary
   };
 }

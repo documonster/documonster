@@ -12,6 +12,7 @@ import { measureTextWidth, mapToStandardFont } from "@utils/font-metrics";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
 import { isHyperlink, isRun } from "../core/text-utils";
+import { resolveStyle } from "../query/style-resolve";
 import type {
   BodyContent,
   DocxDocument,
@@ -286,7 +287,19 @@ function renderParagraph(para: Paragraph, state: RenderState): void {
   const props = para.properties;
   const spacing = props?.spacing;
   const headingLevel = getHeadingLevel(props);
-  const headingScale = getHeadingFontScale(headingLevel);
+
+  // Resolve the paragraph's effective run properties from the style chain
+  // (Heading1 → … → docDefaults). When the style provides a concrete font
+  // size we honour it directly; only when no style size is available do we
+  // fall back to the heuristic heading scale so headings still look distinct
+  // in documents that lack a styles table.
+  const styleRunProps = resolveStyle(state.doc, para).runProperties;
+  const styleHasSize = styleRunProps.size != null;
+  const fallbackScale = getHeadingFontScale(headingLevel);
+  const headingScale = styleHasSize ? 1 : fallbackScale;
+  // Synthesise bold for headings only in fallback mode (no real style size);
+  // otherwise the style's own bold flag governs.
+  const synthesizeHeadingBold = headingLevel > 0 && !styleHasSize;
 
   // Space before
   let spaceBefore = 0;
@@ -336,7 +349,7 @@ function renderParagraph(para: Paragraph, state: RenderState): void {
   lineHeightPt *= headingScale;
 
   // Collect runs and render as text spans on lines
-  const runs = collectParagraphRuns(para);
+  const runs = collectParagraphRuns(para, styleRunProps);
 
   if (runs.length === 0) {
     // Empty paragraph — advance by line height
@@ -372,7 +385,7 @@ function renderParagraph(para: Paragraph, state: RenderState): void {
           getRunFontName({ properties: segment.properties, content: [] }),
           state.fontsMap
         );
-        const isBold = segment.properties?.bold || headingLevel > 0;
+        const isBold = segment.properties?.bold || synthesizeHeadingBold;
         const isItalic = segment.properties?.italic;
         const color = resolveColor(segment.properties?.color);
         const underline = segment.properties?.underline;
@@ -437,19 +450,31 @@ interface TextSegment {
 }
 
 /** Collect all text segments from a paragraph's children. */
-function collectParagraphRuns(para: Paragraph): TextSegment[] {
+function collectParagraphRuns(para: Paragraph, styleRunProps?: RunProperties): TextSegment[] {
+  // Merge the resolved paragraph-style run properties as a fallback under each
+  // run's own (inline) properties, so style-defined size/color/font apply when
+  // the run does not override them.
+  const merge = (own: RunProperties | undefined): RunProperties | undefined => {
+    if (!styleRunProps) {
+      return own;
+    }
+    if (!own) {
+      return styleRunProps;
+    }
+    return { ...styleRunProps, ...own };
+  };
   const segments: TextSegment[] = [];
   for (const child of para.children) {
     if (isRun(child)) {
       const text = getRunText(child);
       if (text.length > 0) {
-        segments.push({ text, properties: child.properties });
+        segments.push({ text, properties: merge(child.properties) });
       }
     } else if (isHyperlink(child)) {
       for (const run of child.children) {
         const text = getRunText(run);
         if (text.length > 0) {
-          segments.push({ text, properties: run.properties });
+          segments.push({ text, properties: merge(run.properties) });
         }
       }
     }
@@ -685,8 +710,11 @@ function renderTable(table: Table, state: RenderState): void {
       let cellCursorY = rowStartY + cellPadding;
       for (const content of cell.content) {
         if (content.type === "paragraph") {
-          // Simplified: render first run of each paragraph
-          const runs = collectParagraphRuns(content);
+          // Simplified: render first run of each paragraph, with the
+          // paragraph style's run properties as a fallback so styled cell
+          // text (e.g. a heading paragraph) honours its size/colour/font.
+          const cellStyleRunProps = resolveStyle(state.doc, content).runProperties;
+          const runs = collectParagraphRuns(content, cellStyleRunProps);
           if (runs.length > 0) {
             const allText = runs.map(r => r.text).join("");
             const firstRun = runs[0];

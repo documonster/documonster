@@ -4,6 +4,8 @@
  * Covers:
  *   - extractOleObjects / hasOleObjects / getOleObjectData
  *   - createOleEmbedding (with optional preview image)
+ *   - addOleObject — wire the embedding into the document so it is rendered
+ *     (registers the document relationship + body <w:object> reference)
  *   - hasVbaProject / getVbaProjectInfo / getVbaProjectData
  *   - addVbaProject / removeVbaProject
  *   - listVbaParts
@@ -12,7 +14,7 @@
  * Real OLE objects need a valid OLE2 compound stream and real VBA macros
  * need a properly compiled `vbaProject.bin`.  Word will reject malformed
  * binaries when opening the file, but the writer/reader API surface still
- * round-trips the bytes faithfully.
+ * round-trips the bytes (and the OLE ProgId + relationship) faithfully.
  *
  * Output: tmp/word-examples/39-ole-vba/...
  */
@@ -30,6 +32,7 @@ import {
   hasOleObjects,
   getOleObjectData,
   createOleEmbedding,
+  addOleObject,
   hasVbaProject,
   getVbaProjectInfo,
   getVbaProjectData,
@@ -37,7 +40,6 @@ import {
   removeVbaProject,
   listVbaParts
 } from "../index";
-import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -70,7 +72,10 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
-// 2. Build a doc and inject the OLE part as opaqueParts
+// 2. Build a doc and wire the OLE object in properly.
+//    addOleObject() registers the binary (and preview) on document.xml.rels
+//    with the exact rId and inserts a body <w:object>/<o:OLEObject> that
+//    references it — so the object is visible in Word and round-trips.
 // ---------------------------------------------------------------------------
 const baseDoc = (() => {
   const dd = Document.create();
@@ -81,10 +86,7 @@ const baseDoc = (() => {
   );
   return Document.build(dd);
 })();
-const docWithOle: DocxDocument = {
-  ...baseDoc,
-  opaqueParts: [ole.olePart, ...(ole.previewPart ? [ole.previewPart] : [])]
-};
+const docWithOle = addOleObject(baseDoc, ole);
 fs.writeFileSync(path.join(outDir, "01-with-ole.docx"), await toBuffer(docWithOle));
 console.log(`  → 01-with-ole.docx`);
 
@@ -102,6 +104,9 @@ for (const obj of extraction.objects) {
 }
 const dataBack = getOleObjectData(reread, ole.oleRId);
 console.log(`  getOleObjectData(rId): ${dataBack ? `${dataBack.length} bytes` : "undefined"}`);
+if (!dataBack) {
+  throw new Error("expected getOleObjectData to resolve the wired OLE object after round-trip");
+}
 
 // ---------------------------------------------------------------------------
 // 4. VBA macros — addVbaProject / hasVbaProject / removeVbaProject

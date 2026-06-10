@@ -4,8 +4,36 @@
 
 import { describe, it, expect } from "vitest";
 
-import { hasOleObjects, extractOleObjects, createOleEmbedding, getOleObjectData } from "../index";
+import {
+  Document,
+  hasOleObjects,
+  extractOleObjects,
+  createOleEmbedding,
+  getOleObjectData,
+  addOleObject,
+  toBuffer,
+  readDocx
+} from "../index";
 import type { DocxDocument } from "../types";
+
+/** A minimal real OLE2 compound-document header so progId detection works. */
+const OLE2_HEADER = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+
+/** 1×1 PNG used as an OLE preview image in round-trip tests. */
+const PNG_1X1 = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+  0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0x99, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+  0x00, 0x00, 0x03, 0x00, 0x01, 0x5b, 0x6e, 0x5e, 0x49, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+  0x44, 0xae, 0x42, 0x60, 0x82
+]);
+
+function makeBaseDoc(): DocxDocument {
+  const d = Document.create();
+  Document.useDefaultStyles(d);
+  Document.addParagraph(d, "Body with an OLE object.");
+  return Document.build(d);
+}
 
 function makeDoc(opaqueParts?: any[]): DocxDocument {
   return {
@@ -101,6 +129,56 @@ describe("OLE embedded objects", () => {
       ]);
       const result = getOleObjectData(doc, "rId5");
       expect(result).toEqual(oleData);
+    });
+  });
+
+  describe("addOleObject + round-trip", () => {
+    it("wires the OLE object, document relationship and body reference", async () => {
+      const ole = createOleEmbedding(OLE2_HEADER, "Excel.Sheet.12");
+      const doc = addOleObject(makeBaseDoc(), ole);
+
+      // Model side: oleObjects field carries the exact rId + progId.
+      expect(doc.oleObjects).toHaveLength(1);
+      expect(doc.oleObjects![0]!.rId).toBe(ole.oleRId);
+      expect(doc.oleObjects![0]!.progId).toBe("Excel.Sheet.12");
+      // Body side: a <w:object>/<o:OLEObject> referencing the same rId.
+      expect(hasOleObjects(doc)).toBe(true);
+      expect(getOleObjectData(doc, ole.oleRId)).toEqual(OLE2_HEADER);
+
+      // Round-trip through the package.
+      const reread = await readDocx(await toBuffer(doc));
+      expect(hasOleObjects(reread)).toBe(true);
+      expect(getOleObjectData(reread, ole.oleRId)).toEqual(OLE2_HEADER);
+
+      const extraction = extractOleObjects(reread);
+      expect(extraction.objects).toHaveLength(1);
+      expect(extraction.objects[0]!.rId).toBe(ole.oleRId);
+      // progId survives because it is encoded in the body <o:OLEObject ProgID>.
+      expect(extraction.objects[0]!.progId).toBe("Excel.Sheet.12");
+    });
+
+    it("wires a preview image with its own relationship", async () => {
+      const ole = createOleEmbedding(OLE2_HEADER, "Excel.Sheet.12", {
+        previewImage: PNG_1X1,
+        previewContentType: "image/png"
+      });
+      const doc = addOleObject(makeBaseDoc(), ole);
+      expect(doc.oleObjects![0]!.previewRId).toBe(ole.previewRId);
+
+      const buf = await toBuffer(doc);
+      const reread = await readDocx(buf);
+      expect(getOleObjectData(reread, ole.oleRId)).toEqual(OLE2_HEADER);
+      // The OLE binary's rId never collides with the preview's rId.
+      expect(extractOleObjects(reread).objects[0]!.rId).toBe(ole.oleRId);
+    });
+
+    it("strips OLE binaries when preserveOleObjects is false", async () => {
+      const ole = createOleEmbedding(OLE2_HEADER, "Excel.Sheet.12");
+      const doc = addOleObject(makeBaseDoc(), ole);
+      const buf = await toBuffer(doc);
+      const reread = await readDocx(buf, { securityPolicy: { preserveOleObjects: false } });
+      expect(hasOleObjects(reread)).toBe(false);
+      expect(getOleObjectData(reread, ole.oleRId)).toBeUndefined();
     });
   });
 });

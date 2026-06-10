@@ -331,7 +331,8 @@ export type {
   OpaqueRelationship,
   OpaqueDrawing,
   OpaqueRunContent,
-  OpaqueParagraphChild
+  OpaqueParagraphChild,
+  OleObjectPart
 } from "./types";
 
 // --- Stable API ---
@@ -654,14 +655,16 @@ export {
   extractOleObjects,
   hasOleObjects,
   getOleObjectData,
-  createOleEmbedding
+  createOleEmbedding,
+  addOleObject
 } from "./advanced/ole-objects";
 /** @stability experimental */
 export type {
   OleObject,
   OleObjectType,
   OleDisplayAs,
-  OleExtractionResult
+  OleExtractionResult,
+  OleEmbeddingResult
 } from "./advanced/ole-objects";
 
 /** @stability experimental */

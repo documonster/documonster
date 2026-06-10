@@ -131,3 +131,54 @@ describe("sub / superscript layout", () => {
     }
   });
 });
+
+describe("paragraph style resolution in full layout", () => {
+  const headingStyle = {
+    type: "paragraph" as const,
+    styleId: "Heading1",
+    name: "heading 1",
+    runProperties: { size: 32, color: "2F5496", font: "Calibri Light" }
+  };
+
+  it("resolves a heading run's size, colour and font from the styles table", () => {
+    const para: Paragraph = {
+      type: "paragraph",
+      properties: { style: "Heading1" },
+      children: [plainRun("Title")]
+    };
+    const layout = layoutDocumentFull(baseDoc({ body: [para], styles: [headingStyle] }));
+    const paraItem = layout.pages[0].content[0];
+    expect(paraItem.type).toBe("paragraph");
+    if (paraItem.type !== "paragraph") {
+      return;
+    }
+    const run = paraItem.lines.flatMap(l => l.runs).find(r => r.type !== "image");
+    expect(run).toBeDefined();
+    if (!run) {
+      return;
+    }
+    // sz=32 half-points → 16pt, NOT the hardcoded 2.0× heading scale (24pt).
+    expect(run.fontSize).toBe(16);
+    expect(run.color).toBe("2F5496");
+    expect(run.font).toBe("Calibri Light");
+  });
+
+  it("falls back to the heuristic heading scale without a matching style", () => {
+    const heading: Paragraph = {
+      type: "paragraph",
+      properties: { style: "Heading1" },
+      children: [plainRun("Title")]
+    };
+    const normal: Paragraph = { type: "paragraph", children: [plainRun("Body")] };
+    const layout = layoutDocumentFull(baseDoc({ body: [heading, normal] }));
+    const runs = layout.pages[0].content
+      .filter(c => c.type === "paragraph")
+      .map(c => (c.type === "paragraph" ? c.lines.flatMap(l => l.runs)[0] : undefined));
+    const headingRun = runs[0];
+    const bodyRun = runs[1];
+    if (!headingRun || headingRun.type === "image" || !bodyRun || bodyRun.type === "image") {
+      throw new Error("expected text runs");
+    }
+    expect(headingRun.fontSize).toBeGreaterThan(bodyRun.fontSize);
+  });
+});

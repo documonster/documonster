@@ -3202,6 +3202,63 @@ export type DocxDocumentType =
   | "macroEnabledDocument"
   | "macroEnabledTemplate";
 
+// =============================================================================
+// Glossary (Building Blocks / AutoText / Quick Parts)
+// =============================================================================
+
+/** Building block gallery category. */
+export type BuildingBlockGallery =
+  | "autoText"
+  | "quickParts"
+  | "coverPages"
+  | "tableOfContents"
+  | "headers"
+  | "footers"
+  | "pageNumbers"
+  | "tables"
+  | "textBoxes"
+  | "watermarks"
+  | "equations"
+  | "bibliographies"
+  | "custom1"
+  | "custom2"
+  | "custom3"
+  | "custom4"
+  | "custom5";
+
+/** A single building block (AutoText/Quick Part) entry. */
+export interface BuildingBlock {
+  /** Name of the building block (displayed in gallery). */
+  readonly name: string;
+  /** Gallery this block belongs to. */
+  readonly gallery: BuildingBlockGallery;
+  /** Category within the gallery. */
+  readonly category?: string;
+  /** Description/tooltip. */
+  readonly description?: string;
+  /** The content of the building block. */
+  readonly content: readonly BodyContent[];
+  /** Section properties specific to this building block. */
+  readonly sectionProperties?: SectionProperties;
+  /** Unique identifier (GUID). */
+  readonly guid?: string;
+}
+
+/** The glossary document model. */
+export interface GlossaryDocument {
+  /** Building block entries. */
+  readonly blocks: readonly BuildingBlock[];
+  /** Raw parts preserved for round-trip (style, settings, fontTable). */
+  readonly rawParts?: ReadonlyMap<string, Uint8Array>;
+  /**
+   * Verbatim `word/glossary/document.xml` markup. Populated by the reader so a
+   * read→write round-trip preserves the glossary byte-faithfully even though
+   * the structured `blocks` are not reverse-parsed. When present the writer
+   * emits this verbatim and ignores `blocks`.
+   */
+  readonly rawXml?: string;
+}
+
 export interface DocxDocument {
   /**
    * Document type. Determines the content type used in the package.
@@ -3289,6 +3346,26 @@ export interface DocxDocument {
 
   /** VBA project binary (word/vbaProject.bin) for .docm/.dotm round-trip. */
   readonly vbaProject?: Uint8Array;
+
+  /**
+   * OLE embedded objects wired into the document. Unlike a bare
+   * {@link OpaquePart}, each entry here is registered by the packager as a
+   * relationship on `word/_rels/document.xml.rels` (so the `r:id` used by the
+   * body `<w:object>`/`<o:OLEObject>` markup actually resolves) and gets a
+   * `[Content_Types].xml` override. The body still references the object via
+   * an {@link OpaqueDrawing} carrying the matching `r:id`. Mirrors the
+   * `vbaProject` model-field pattern.
+   */
+  readonly oleObjects?: readonly OleObjectPart[];
+
+  /**
+   * Glossary document (Building Blocks / AutoText / Quick Parts). When set,
+   * the packager serialises it to `word/glossary/document.xml`, registers the
+   * `glossaryDocument` relationship on `document.xml.rels`, and adds the
+   * `[Content_Types].xml` override — the canonical OOXML location Word reads
+   * Quick Parts from.
+   */
+  readonly glossary?: GlossaryDocument;
 }
 
 // =============================================================================
@@ -3335,6 +3412,41 @@ export interface OpaquePart {
   readonly contentType?: string;
   /** Relationships of this part (from its .rels file). */
   readonly relationships?: readonly OpaqueRelationship[];
+}
+
+/**
+ * An OLE embedded object that the packager wires into the main document.
+ *
+ * The binary is written at {@link path}, a relationship with the exact
+ * {@link rId} is registered on `word/_rels/document.xml.rels` (so body
+ * `<w:object r:id="…">` markup resolves), and a `[Content_Types].xml`
+ * override is added. An optional preview image is wired the same way.
+ */
+export interface OleObjectPart {
+  /** Part path of the OLE binary (e.g. "word/embeddings/oleObject1.bin"). */
+  readonly path: string;
+  /** Raw OLE binary data (ideally an OLE2 compound document). */
+  readonly data: Uint8Array;
+  /**
+   * Relationship ID referenced from the body markup. Registered verbatim on
+   * the document relationships so the reference always resolves.
+   */
+  readonly rId: string;
+  /** OLE ProgId (e.g. "Excel.Sheet.12", "Package"). Carried for round-trip. */
+  readonly progId?: string;
+  /**
+   * Content type for the binary. Defaults to
+   * `application/vnd.openxmlformats-officedocument.oleObject`.
+   */
+  readonly contentType?: string;
+  /** Optional preview image part path (e.g. "word/media/oleImage1.png"). */
+  readonly previewPath?: string;
+  /** Preview image bytes (when {@link previewPath} is set). */
+  readonly previewData?: Uint8Array;
+  /** Relationship ID for the preview image, registered on the document. */
+  readonly previewRId?: string;
+  /** Content type for the preview image (e.g. "image/png"). */
+  readonly previewContentType?: string;
 }
 
 /** An opaque drawing element (e.g. chart) preserved in a paragraph. */

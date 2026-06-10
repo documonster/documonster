@@ -48,6 +48,7 @@ import {
 } from "./content-types";
 import { renderDocument } from "./document-writer";
 import { renderFootnotes, renderEndnotes } from "./footnote-writer";
+import { renderGlossaryDocument } from "./glossary-writer";
 import { renderHeader, renderFooter, renderWatermarkHeader } from "./header-footer-writer";
 import { renderNumbering } from "./numbering-writer";
 import {
@@ -1667,6 +1668,49 @@ async function _packageDocxInner(
     addContentTypeOverride(contentTypes, "/word/vbaProject.bin", ContentType.VbaProject);
   }
 
+  // OLE embedded objects (word/embeddings/*.bin + optional preview media).
+  // Each object is registered with the *exact* rId referenced from the body
+  // `<w:object r:id="…">` markup, so the reference always resolves. The
+  // `preserveOleObjects` security policy can still strip the binaries below.
+  if (doc.oleObjects && securityPolicy.preserveOleObjects) {
+    for (const ole of doc.oleObjects) {
+      archive.add(ole.path, ole.data);
+      // Target is relative to word/ (document.xml lives in word/).
+      const oleTarget = ole.path.replace(/^word\//, "");
+      addRelationshipWithId(documentRels, ole.rId, RelType.Package, oleTarget);
+      addContentTypeOverride(
+        contentTypes,
+        `/${ole.path}`,
+        ole.contentType ?? ContentType.OleObject
+      );
+      if (ole.previewPath && ole.previewData && ole.previewRId) {
+        archive.add(ole.previewPath, ole.previewData);
+        addRelationshipWithId(
+          documentRels,
+          ole.previewRId,
+          RelType.Image,
+          ole.previewPath.replace(/^word\//, "")
+        );
+        if (ole.previewContentType) {
+          addContentTypeOverride(contentTypes, `/${ole.previewPath}`, ole.previewContentType);
+        } else {
+          const ext = getFileExt(ole.previewPath);
+          const inferred = ext ? inferContentType(ext) : undefined;
+          if (inferred) {
+            addContentTypeOverride(contentTypes, `/${ole.previewPath}`, inferred);
+          }
+        }
+      }
+    }
+  }
+
+  // word/glossary/document.xml (Building Blocks / AutoText / Quick Parts)
+  if (doc.glossary && (doc.glossary.rawXml || doc.glossary.blocks.length > 0)) {
+    archive.add("word/glossary/document.xml", renderGlossaryDocument(doc.glossary));
+    addRelationship(documentRels, RelType.Glossary, "glossary/document.xml");
+    addContentTypeOverride(contentTypes, "/word/glossary/document.xml", ContentType.Glossary);
+  }
+
   // Write opaque (unrecognized) parts for round-trip preservation.
   //
   // Opaque parts are written as-is into the ZIP. Their paths must not
@@ -1707,7 +1751,9 @@ async function _packageDocxInner(
       PartPath.CustomProps,
       PartPath.Thumbnail,
       "word/vbaProject.bin",
-      "word/_rels/vbaProject.bin.rels"
+      "word/_rels/vbaProject.bin.rels",
+      "word/glossary/document.xml",
+      "word/glossary/_rels/document.xml.rels"
     ]);
     // Headers/footers we are emitting in this run.
     if (doc.headers) {
@@ -1749,6 +1795,15 @@ async function _packageDocxInner(
       for (const ef of doc.embeddedFonts) {
         if (ef.fileName) {
           reservedExact.add(`word/fonts/${ef.fileName}`);
+        }
+      }
+    }
+    // OLE embedded objects emitted by this run.
+    if (doc.oleObjects) {
+      for (const ole of doc.oleObjects) {
+        reservedExact.add(ole.path);
+        if (ole.previewPath) {
+          reservedExact.add(ole.previewPath);
         }
       }
     }

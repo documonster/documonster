@@ -14,8 +14,11 @@
  * not full OLE compound document manipulation.
  */
 
+import { xmlEncodeAttr } from "@xml/encode";
+
+import { ContentType } from "../constants";
 import { getFileName } from "../core/opc-paths";
-import type { DocxDocument, OpaquePart } from "../types";
+import type { BodyContent, DocxDocument, OleObjectPart, OpaqueDrawing, OpaquePart } from "../types";
 
 // =============================================================================
 // Types
@@ -79,14 +82,35 @@ export function extractOleObjects(doc: DocxDocument): OleExtractionResult {
   const objects: OleObject[] = [];
   const summary: Record<string, number> = {};
 
-  // Scan opaque parts for OLE embeddings
+  const pushObject = (obj: OleObject): void => {
+    objects.push(obj);
+    summary[obj.progId] = (summary[obj.progId] ?? 0) + 1;
+  };
+
+  // Structured OLE objects wired on document.xml.rels (preferred form —
+  // these carry the real rId and, when available, the round-tripped progId).
+  if (doc.oleObjects) {
+    for (const ole of doc.oleObjects) {
+      pushObject({
+        rId: ole.rId,
+        progId: ole.progId ?? detectProgIdFromData(ole.data),
+        objectType: "embedded",
+        displayAs: "icon",
+        imageRId: ole.previewRId,
+        fileName: getFileName(ole.path),
+        data: ole.data
+      });
+    }
+  }
+
+  // Scan opaque parts for OLE embeddings (legacy / hand-built documents that
+  // did not go through the structured oleObjects channel).
   if (doc.opaqueParts) {
     for (const part of doc.opaqueParts) {
       if (isOleEmbedding(part.path)) {
         const obj = parseOlePartMetadata(part);
         if (obj) {
-          objects.push(obj);
-          summary[obj.progId] = (summary[obj.progId] ?? 0) + 1;
+          pushObject(obj);
         }
       }
     }
@@ -97,11 +121,10 @@ export function extractOleObjects(doc: DocxDocument): OleExtractionResult {
     if (element.type === "opaqueDrawing") {
       const oleFromDrawing = extractOleFromRawXml(element.rawXml);
       if (oleFromDrawing) {
-        // Check if we already have this object from opaque parts
-        const exists = objects.some(o => o.rId === oleFromDrawing.rId);
+        // Check if we already have this object (by rId)
+        const exists = objects.some(o => o.rId === oleFromDrawing.rId && o.rId !== "");
         if (!exists) {
-          objects.push(oleFromDrawing);
-          summary[oleFromDrawing.progId] = (summary[oleFromDrawing.progId] ?? 0) + 1;
+          pushObject(oleFromDrawing);
         }
       }
     }
@@ -114,6 +137,9 @@ export function extractOleObjects(doc: DocxDocument): OleExtractionResult {
  * Check if a document contains any OLE embedded objects.
  */
 export function hasOleObjects(doc: DocxDocument): boolean {
+  if (doc.oleObjects && doc.oleObjects.length > 0) {
+    return true;
+  }
   if (doc.opaqueParts) {
     for (const part of doc.opaqueParts) {
       if (isOleEmbedding(part.path)) {
@@ -129,6 +155,15 @@ export function hasOleObjects(doc: DocxDocument): boolean {
  * Returns undefined if not found.
  */
 export function getOleObjectData(doc: DocxDocument, rId: string): Uint8Array | undefined {
+  // Structured OLE objects carry the exact rId used on document.xml.rels.
+  if (doc.oleObjects) {
+    for (const ole of doc.oleObjects) {
+      if (ole.rId === rId) {
+        return ole.data;
+      }
+    }
+  }
+
   if (!doc.opaqueParts) {
     return undefined;
   }
@@ -172,6 +207,8 @@ export interface OleEmbeddingResult {
   readonly olePart: OpaquePart;
   /** Suggested rId to use for the OLE binary in the document model. */
   readonly oleRId: string;
+  /** OLE ProgId the embedding was created with (e.g. "Excel.Sheet.12"). */
+  readonly progId: string;
   /** Preview image media part (only when `options.previewImage` was supplied). */
   readonly previewPart?: OpaquePart;
   /** Suggested rId for the preview image. */
@@ -214,17 +251,15 @@ export function createOleEmbedding(
   const olePart: OpaquePart = {
     path: `word/embeddings/${fileName}`,
     data,
-    contentType: "application/vnd.openxmlformats-officedocument.oleObject",
+    contentType: ContentType.OleObject,
     relationships: undefined
   };
   const oleRId = `rIdOle${oleSeq}`;
-  // progId is metadata for downstream consumers — not stored on
-  // OpaquePart but accepted in the signature so callers can pass it
-  // alongside without a separate channel. We don't need it here.
-  void progId;
+  // progId is carried back on the result so addOleObject() can persist it
+  // into the body `<o:OLEObject ProgID="…">` markup for round-trip.
 
   if (!options?.previewImage) {
-    return { olePart, oleRId };
+    return { olePart, oleRId, progId };
   }
   if (!options.previewContentType) {
     throw new Error("createOleEmbedding: options.previewImage requires options.previewContentType");
@@ -239,7 +274,96 @@ export function createOleEmbedding(
     relationships: undefined
   };
   const previewRId = `rIdOleImg${previewSeq}`;
-  return { olePart, oleRId, previewPart, previewRId };
+  return { olePart, oleRId, progId, previewPart, previewRId };
+}
+
+/**
+ * Wire an {@link OleEmbeddingResult} into a document so the OLE object is
+ * actually rendered and resolvable, returning a new {@link DocxDocument}.
+ *
+ * Unlike just stuffing the part into `opaqueParts` (which leaves the binary
+ * dangling — no relationship, no body reference), this:
+ *
+ *  - registers the OLE binary (and optional preview) on
+ *    `doc.oleObjects` so the packager emits a `word/_rels/document.xml.rels`
+ *    relationship with the exact rId and a `[Content_Types].xml` override;
+ *  - appends a body paragraph carrying a `<w:object>` / `<o:OLEObject>`
+ *    that references the same rId and embeds the ProgId, so the object is
+ *    visible in Word and round-trips through `readDocx`.
+ *
+ * @param doc - The document to add the OLE object to.
+ * @param embedding - Result from {@link createOleEmbedding}.
+ * @param options - Display geometry (defaults to a 2"×2" icon box).
+ */
+export function addOleObject(
+  doc: DocxDocument,
+  embedding: OleEmbeddingResult,
+  options?: {
+    /** Display width in points (default 96 = 2 inches at 48pt/in icon). */
+    widthPt?: number;
+    /** Display height in points (default 96). */
+    heightPt?: number;
+    /** Display mode. Default "icon". */
+    displayAs?: OleDisplayAs;
+  }
+): DocxDocument {
+  const widthPt = options?.widthPt ?? 96;
+  const heightPt = options?.heightPt ?? 96;
+  const drawAspect = (options?.displayAs ?? "icon") === "icon" ? "Icon" : "Content";
+
+  const olePartEntry: OleObjectPart = {
+    path: embedding.olePart.path,
+    data: embedding.olePart.data,
+    rId: embedding.oleRId,
+    progId: embedding.progId,
+    contentType: embedding.olePart.contentType,
+    ...(embedding.previewPart && embedding.previewRId
+      ? {
+          previewPath: embedding.previewPart.path,
+          previewData: embedding.previewPart.data,
+          previewRId: embedding.previewRId,
+          previewContentType: embedding.previewPart.contentType
+        }
+      : {})
+  };
+
+  // Build the VML-hosted <w:object>. The o:OLEObject carries ProgID + the
+  // r:id of the binary; the v:shape provides geometry and (when present) the
+  // preview image fill via v:imagedata. This is the canonical OOXML shape for
+  // an embedded OLE object (ECMA-376 §17.3.3.19 + VML).
+  const shapeId = `_ole_${embedding.oleRId}`;
+  const styleWidth = widthPt.toFixed(0);
+  const styleHeight = heightPt.toFixed(0);
+  const imageData =
+    embedding.previewRId != null
+      ? `<v:imagedata r:id="${xmlEncodeAttr(embedding.previewRId)}" o:title=""/>`
+      : "";
+  const rawXml =
+    `<w:object>` +
+    `<v:shape id="${xmlEncodeAttr(shapeId)}" type="#_x0000_t75" ` +
+    `style="width:${styleWidth}pt;height:${styleHeight}pt">` +
+    imageData +
+    `</v:shape>` +
+    `<o:OLEObject Type="Embed" ProgID="${xmlEncodeAttr(embedding.progId)}" ` +
+    `ShapeID="${xmlEncodeAttr(shapeId)}" DrawAspect="${drawAspect}" ` +
+    `r:id="${xmlEncodeAttr(embedding.oleRId)}"/>` +
+    `</w:object>`;
+
+  const referencedRIds = [embedding.oleRId];
+  if (embedding.previewRId != null) {
+    referencedRIds.push(embedding.previewRId);
+  }
+  const drawing: OpaqueDrawing = {
+    type: "opaqueDrawing",
+    rawXml,
+    referencedRIds
+  };
+
+  return {
+    ...doc,
+    body: [...doc.body, drawing as BodyContent],
+    oleObjects: [...(doc.oleObjects ?? []), olePartEntry]
+  };
 }
 
 /** Module-level counters used to allocate unique file names per call. */
@@ -347,10 +471,13 @@ function tryDecodeAscii(data: Uint8Array): string {
 }
 
 function extractOleFromRawXml(rawXml: string): OleObject | null {
-  // Parse OLE object info from raw XML using regex (lightweight)
-  const progIdMatch = rawXml.match(/ProgID="([^"]+)"/i) ?? rawXml.match(/progId="([^"]+)"/i);
-  const rIdMatch = rawXml.match(/r:id="([^"]+)"/i);
-  const typeMatch = rawXml.match(/Type="([^"]+)"/i);
+  // Pull metadata from the <o:OLEObject> element specifically, so a preview
+  // image's <v:imagedata r:id="…"> earlier in the markup is not mistaken for
+  // the OLE binary's relationship id.
+  const oleTag = rawXml.match(/<o:OLEObject\b[^>]*>/i)?.[0] ?? rawXml;
+  const progIdMatch = oleTag.match(/ProgID="([^"]+)"/i) ?? oleTag.match(/progId="([^"]+)"/i);
+  const rIdMatch = oleTag.match(/r:id="([^"]+)"/i);
+  const typeMatch = oleTag.match(/Type="([^"]+)"/i);
 
   if (!progIdMatch) {
     return null;
@@ -361,7 +488,7 @@ function extractOleFromRawXml(rawXml: string): OleObject | null {
   const objectType: OleObjectType =
     typeMatch && typeMatch[1]!.toLowerCase().includes("link") ? "linked" : "embedded";
 
-  // Extract dimensions
+  // Extract dimensions (from the surrounding shape, hence full rawXml)
   const widthMatch = rawXml.match(/(?:cx|width)="(\d+)"/i);
   const heightMatch = rawXml.match(/(?:cy|height)="(\d+)"/i);
 

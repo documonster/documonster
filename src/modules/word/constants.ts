@@ -320,7 +320,11 @@ export const ContentType = {
   ChartEx: "application/vnd.ms-office.chartEx+xml",
   Xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   CustomXml: "application/xml",
-  VbaProject: "application/vnd.ms-office.vbaProject"
+  VbaProject: "application/vnd.ms-office.vbaProject",
+  /** Glossary (Building Blocks) document part. */
+  Glossary: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml",
+  /** OLE embedded object binary. */
+  OleObject: "application/vnd.openxmlformats-officedocument.oleObject"
 } as const;
 
 /** Map from image file extension to content type. */

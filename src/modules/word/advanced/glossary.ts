@@ -4,71 +4,35 @@
  * Provides types and utilities for working with Glossary Document parts,
  * which contain AutoText entries, Quick Parts, and other Building Blocks.
  *
- * INTEGRATION STATUS: This module provides data structures and query helpers
- * for building blocks. The actual reading/writing of glossary parts from/to
- * DOCX archives is handled via the opaqueParts round-trip mechanism —
- * glossary parts in existing files are preserved as opaque parts during
- * read/write. This module is useful for:
+ * INTEGRATION STATUS: This module provides the glossary data model and query
+ * helpers. To embed a glossary in a document, assign a {@link GlossaryDocument}
+ * to `doc.glossary`; the packager then serialises it to
+ * `word/glossary/document.xml`, registers the `glossaryDocument` relationship,
+ * and adds the `[Content_Types].xml` override (the canonical OOXML location
+ * Word reads Quick Parts / AutoText from). Glossary parts in existing files are
+ * round-tripped via the same channel. This module is useful for:
  * - Building glossary data structures programmatically
  * - Querying/filtering building block collections
- * - Preparing data for future direct glossary part writing
- *
- * To add glossary content to a document currently, include it as an
- * OpaquePart with path "word/glossary/document.xml".
+ * - Assembling a glossary to attach via `doc.glossary`
  */
 
 import { generateGuid } from "../core/internal-utils";
-import type { BodyContent, SectionProperties } from "../types";
+import type {
+  BodyContent,
+  BuildingBlock,
+  BuildingBlockGallery,
+  GlossaryDocument,
+  SectionProperties
+} from "../types";
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** Building block gallery category. */
-export type BuildingBlockGallery =
-  | "autoText"
-  | "quickParts"
-  | "coverPages"
-  | "tableOfContents"
-  | "headers"
-  | "footers"
-  | "pageNumbers"
-  | "tables"
-  | "textBoxes"
-  | "watermarks"
-  | "equations"
-  | "bibliographies"
-  | "custom1"
-  | "custom2"
-  | "custom3"
-  | "custom4"
-  | "custom5";
-
-/** A single building block (AutoText/Quick Part) entry. */
-export interface BuildingBlock {
-  /** Name of the building block (displayed in gallery). */
-  readonly name: string;
-  /** Gallery this block belongs to. */
-  readonly gallery: BuildingBlockGallery;
-  /** Category within the gallery. */
-  readonly category?: string;
-  /** Description/tooltip. */
-  readonly description?: string;
-  /** The content of the building block. */
-  readonly content: readonly BodyContent[];
-  /** Section properties specific to this building block. */
-  readonly sectionProperties?: SectionProperties;
-  /** Unique identifier (GUID). */
-  readonly guid?: string;
-}
-
-/** The glossary document model. */
-export interface GlossaryDocument {
-  /** Building block entries. */
-  readonly blocks: readonly BuildingBlock[];
-  /** Raw parts preserved for round-trip (style, settings, fontTable). */
-  readonly rawParts?: ReadonlyMap<string, Uint8Array>;
-}
+// The glossary data model (BuildingBlockGallery / BuildingBlock /
+// GlossaryDocument) lives in ../types so that DocxDocument can reference it
+// without an advanced/ → types cycle. Re-exported here for API compatibility.
+export type { BuildingBlock, BuildingBlockGallery, GlossaryDocument } from "../types";
 
 // =============================================================================
 // Glossary Document Builder

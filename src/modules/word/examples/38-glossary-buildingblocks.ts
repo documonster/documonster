@@ -5,11 +5,12 @@
  * "AutoText", "Quick Parts", "Cover Pages", etc.  This example shows how
  * to construct, query and serialise them.
  *
- * Note: the writer attaches glossary content to the package via an opaque
- * part (`word/glossary/document.xml`).  This API is the supported
- * programmatic surface for working with the data; we round-trip it through
- * a hand-rolled opaque-part embed so the .docx contains the glossary in
- * the canonical OOXML location.
+ * Assigning the assembled `GlossaryDocument` to `doc.glossary` makes the
+ * packager serialise it to `word/glossary/document.xml`, register the
+ * `glossaryDocument` relationship and add the `[Content_Types].xml`
+ * override — the canonical OOXML location Word reads Quick Parts / AutoText
+ * from. The same blocks are also inlined into the body so the assembled
+ * letter is visible directly.
  *
  * Output: tmp/word-examples/38-glossary/...
  */
@@ -110,7 +111,13 @@ Document.addParagraph(d, "Body of the letter goes here. " + "Lorem ipsum… ".re
 insertBlock(signoff);
 insertBlock(disclaimer);
 
-const buf = await toBuffer(Document.build(d));
+// Attach the glossary to the document so the building blocks are *also*
+// embedded at the canonical OOXML location (word/glossary/document.xml) —
+// Word then exposes them as Quick Parts / AutoText, not just as inlined body
+// content. The packager registers the glossaryDocument relationship + content
+// type automatically.
+const builtDoc = { ...Document.build(d), glossary };
+const buf = await toBuffer(builtDoc);
 fs.writeFileSync(path.join(outDir, "01-letter-from-blocks.docx"), buf);
 console.log(`  → 01-letter-from-blocks.docx (${buf.length} bytes)`);
 

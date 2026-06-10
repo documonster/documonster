@@ -95,7 +95,7 @@ const xml = new XmlDataSource(`<?xml version="1.0"?>
 </root>`);
 const csv = new CsvDataSource("name,price\nWidget,10\nGadget,25", { rowsKey: "lineItems" });
 
-// merge with arrays merged across sources where keys collide
+// keep each source's arrays distinct where keys collide (mergeArrays: false)
 const composite = new CompositeDataSource([json, xml, csv], { mergeArrays: false });
 console.log(`  composite.getData() keys: ${Object.keys(composite.getData()).join(", ")}`);
 

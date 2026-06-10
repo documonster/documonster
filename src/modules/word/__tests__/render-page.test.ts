@@ -238,4 +238,62 @@ describe("renderDocumentToSvg", () => {
       expect(svg).toContain('fill="#FF0000"');
     });
   });
+
+  describe("style resolution", () => {
+    /** A document whose Heading1 style defines size/colour/font (like Word's). */
+    function docWithHeadingStyle(): DocxDocument {
+      return {
+        body: [makeParagraph("Title", { style: "Heading1" })],
+        styles: [
+          {
+            type: "paragraph",
+            styleId: "Heading1",
+            name: "heading 1",
+            runProperties: { size: 32, color: "2F5496", font: "Calibri Light" }
+          }
+        ]
+      } as DocxDocument;
+    }
+
+    it("renders a styled heading using the style's size, colour and font", () => {
+      const svg = renderPageToSvg(docWithHeadingStyle(), 1);
+      // sz=32 half-points → 16pt (NOT the hardcoded 24pt heading-scale value).
+      expect(svg).toContain('font-size="16.0"');
+      expect(svg).toContain('fill="#2F5496"');
+      expect(svg).toContain("Calibri Light");
+    });
+
+    it("an inline run property still overrides the resolved style", () => {
+      const doc = {
+        body: [
+          {
+            type: "paragraph",
+            properties: { style: "Heading1" },
+            children: [makeRun("Title", { color: "FF0000" } as Run["properties"])]
+          }
+        ],
+        styles: [
+          {
+            type: "paragraph",
+            styleId: "Heading1",
+            name: "heading 1",
+            runProperties: { size: 32, color: "2F5496" }
+          }
+        ]
+      } as DocxDocument;
+      const svg = renderPageToSvg(doc, 1);
+      expect(svg).toContain('fill="#FF0000"');
+      expect(svg).not.toContain('fill="#2F5496"');
+    });
+
+    it("falls back to the heuristic heading scale when there is no styles table", () => {
+      const normalDoc = makeDoc([makeParagraph("Normal")]);
+      const headingDoc = makeDoc([makeParagraph("Heading", { style: "Heading1" })]);
+      const normalSize = parseFloat(renderPageToSvg(normalDoc, 1).match(/font-size="([^"]+)"/)![1]);
+      const headingSize = parseFloat(
+        renderPageToSvg(headingDoc, 1).match(/font-size="([^"]+)"/)![1]
+      );
+      expect(headingSize).toBeGreaterThan(normalSize);
+    });
+  });
 });
