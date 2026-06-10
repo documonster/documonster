@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.0.0](https://github.com/cjnoname/excelts/compare/v9.6.1...v10.0.0) (2026-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **word:** markdownToDocx and markdownToDocxBody are now async; markdownToDocxBody returns MarkdownBodyResult instead of BodyContent[].
+
+### Features
+
+* Add support for glossary (Building Blocks) and OLE embedded objects ([19beef5](https://github.com/cjnoname/excelts/commit/19beef51eeefa2993153c0588da017f6bb07e824))
+* **excel:** Add shapes, SVG images, configurable note size, nested column keys ([ad7c201](https://github.com/cjnoname/excelts/commit/ad7c201ee12f89574836304bb9445c1168709051))
+* **word:** Embed images and footnotes in markdown-to-docx conversion ([9ec00a6](https://github.com/cjnoname/excelts/commit/9ec00a6f8a8eacf785f17101101517278ed3c5c5))
+* **word:** Enhance glossary handling with self-contained sub-documents and strict gallery validation ([d82b397](https://github.com/cjnoname/excelts/commit/d82b397d7ec93ffeb8b8b9f6a2b4921214c0beb0))
+* **word:** Enhance watermark functionality with custom dimensions and improved rendering ([b780dbb](https://github.com/cjnoname/excelts/commit/b780dbb2b488f8dc5f7c590f976a74f482b971a5))
+
+
+### Bug Fixes
+
+* **pdf:** Preserve non-WinAnsi text and improve DOCX→PDF flow fidelity ([5b34a35](https://github.com/cjnoname/excelts/commit/5b34a35c28b9c102f84af43b037632be85e0d94d))
+* **word:** Correct HTML→DOCX class style merging and list/image handling ([8264c23](https://github.com/cjnoname/excelts/commit/8264c236c048b42cd8cc9cf83ec86e49e1167972))
+* **word:** Correct list IR conversion, compat-mode round-trip, and INDEX field ([a8bf9bc](https://github.com/cjnoname/excelts/commit/a8bf9bcb692eb8768a1a56824f8557bf1f80faac))
+* **word:** Correct math phantom visibility, MathML run tokenization, style-map overrides, and theme color casing ([82e6dd6](https://github.com/cjnoname/excelts/commit/82e6dd64a3b41b7cb3bb372f714a793a2c8a2a20))
+* **word:** Hide empty degree when importing a square root from MathML ([aaf6992](https://github.com/cjnoname/excelts/commit/aaf69922cfcce4996bb6db9e26895ed999051386))
+* **word:** Preserve list structure and numbering format in ODT round-trip ([bf6736a](https://github.com/cjnoname/excelts/commit/bf6736a4aeea274b3998156d15f65edb10f251df))
+
 ## [9.6.1](https://github.com/cjnoname/excelts/compare/v9.6.0...v9.6.1) (2026-06-10)
 
 
