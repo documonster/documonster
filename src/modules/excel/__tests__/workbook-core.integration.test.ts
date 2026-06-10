@@ -593,6 +593,67 @@ describe("Workbook", () => {
         });
       });
 
+      describe("comment box size", () => {
+        it("round-trips custom comment width/height through XLSX", async () => {
+          const testFile = testFilePath("comment-size.roundtrip");
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("foo");
+          ws.getCell("A1").value = "sized comment";
+          ws.getCell("A1").note = {
+            texts: [{ text: "A large note" }],
+            width: 240,
+            height: 150
+          };
+
+          await wb.xlsx.writeFile(testFile);
+
+          const wb2 = new Workbook();
+          await wb2.xlsx.readFile(testFile);
+          const ws2 = wb2.getWorksheet("foo")!;
+          const note = ws2.getCell("A1").note as any;
+          expect(note.width).toBe(240);
+          expect(note.height).toBe(150);
+        });
+
+        it("omits width/height for default-sized comments (no model pollution)", async () => {
+          const testFile = testFilePath("comment-size.default");
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("foo");
+          ws.getCell("A1").value = "plain comment";
+          ws.getCell("A1").note = "just text";
+
+          await wb.xlsx.writeFile(testFile);
+
+          const wb2 = new Workbook();
+          await wb2.xlsx.readFile(testFile);
+          const ws2 = wb2.getWorksheet("foo")!;
+          // A plain string note round-trips back to a string.
+          expect(ws2.getCell("A1").note).toBe("just text");
+        });
+
+        it("renders default dimensions when width/height equal the defaults", async () => {
+          // Setting the exact default size is a documented no-op on the model
+          // (it is not stored back), but the emitted VML must still carry the
+          // default geometry so the rendered comment box is unchanged.
+          const wb = new Workbook();
+          const ws = wb.addWorksheet("foo");
+          ws.getCell("A1").value = "x";
+          ws.getCell("A1").note = { texts: [{ text: "n" }], width: 97.8, height: 59.1 };
+
+          const buffer = await wb.xlsx.writeBuffer();
+          const { unzip } = await import("@archive/index");
+          const reader = unzip(buffer as unknown as Uint8Array);
+          let vml = "";
+          for await (const entry of reader.entries()) {
+            if (/drawings\/vmlDrawing\d+\.vml$/.test(entry.path)) {
+              vml = new TextDecoder().decode((await entry.bytes()) ?? new Uint8Array());
+            }
+          }
+          expect(vml).toContain("width:97.8pt");
+          expect(vml).toContain("height:59.1pt");
+        });
+      });
+
       it("writeFile rejects when image file is missing", async () => {
         const testFile = testFilePath("pr-2244.missing-image");
 

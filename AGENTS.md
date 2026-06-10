@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**excelts** — zero-dependency TypeScript toolkit. Eight modules: Excel, Formula, PDF, CSV, Markdown, XML, Archive, Stream.
+**excelts** — zero-dependency TypeScript toolkit. Nine modules: Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream.
 
 - Zero runtime dependencies — never add packages to `dependencies`
 - Cross-platform: Node.js 22+ and modern browsers

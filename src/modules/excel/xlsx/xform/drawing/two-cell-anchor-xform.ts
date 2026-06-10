@@ -2,6 +2,7 @@ import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 
@@ -41,6 +42,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       "xdr:to": new CellPositionXform({ tag: "xdr:to" }),
       "xdr:pic": new PicXform(),
       "xdr:sp": new SpXform(),
+      "xdr:userShape": new ShapeXform(),
       "xdr:graphicFrame": new GraphicFrameXform(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
@@ -145,7 +147,13 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
     } else if (model.shape) {
-      this.map["xdr:sp"].render(xmlStream, model.shape);
+      // A user-visible shape routes to the dedicated ShapeXform; the legacy
+      // form-control shape (no `kind`) stays on the SpXform path.
+      if (model.shape.kind === "userShape") {
+        this.map["xdr:userShape"].render(xmlStream, model.shape);
+      } else {
+        this.map["xdr:sp"].render(xmlStream, model.shape);
+      }
     }
     this.map["xdr:clientData"].render(xmlStream, {});
 

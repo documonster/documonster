@@ -349,4 +349,99 @@ describe("Column", () => {
       expect((ws.getCell("A2").fill as any).fgColor).toEqual({ argb: "FFFF0000" });
     });
   });
+
+  // ===========================================================================
+  // Nested column-key paths (addRow / row.values with dotted keys)
+  // ===========================================================================
+
+  describe("nested column key paths", () => {
+    it("resolves dotted keys against nested objects", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [
+        { header: "Name", key: "name", width: 20 },
+        { header: "City", key: "address.city", width: 20 },
+        { header: "Zip", key: "address.zip", width: 10 }
+      ];
+      ws.addRow({ name: "Alice", address: { city: "Sydney", zip: "2000" } });
+
+      expect(ws.getCell("A2").value).toBe("Alice");
+      expect(ws.getCell("B2").value).toBe("Sydney");
+      expect(ws.getCell("C2").value).toBe("2000");
+    });
+
+    it("resolves deeply nested keys (three levels)", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [{ header: "Country", key: "address.geo.country", width: 20 }];
+      ws.addRow({ address: { geo: { country: "AU" } } });
+
+      expect(ws.getCell("A2").value).toBe("AU");
+    });
+
+    it("skips the cell when a nested path segment is missing", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [
+        { header: "Name", key: "name", width: 20 },
+        { header: "City", key: "address.city", width: 20 }
+      ];
+      // No `address` at all → the dotted column simply has no value.
+      ws.addRow({ name: "Bob" });
+
+      expect(ws.getCell("A2").value).toBe("Bob");
+      expect(ws.getCell("B2").value).toBeNull();
+    });
+
+    it("skips the cell when an intermediate segment is not an object", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [{ header: "City", key: "address.city", width: 20 }];
+      // `address` is a primitive, so `.city` cannot be followed.
+      ws.addRow({ address: "not-an-object" } as any);
+
+      expect(ws.getCell("A2").value).toBeNull();
+    });
+
+    it("prefers a literal flat key containing a dot over nested traversal", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [{ header: "Dotted", key: "a.b", width: 20 }];
+      // A flat property literally named "a.b" wins over walking a → b.
+      ws.addRow({ "a.b": "flat-wins", a: { b: "nested-loses" } } as any);
+
+      expect(ws.getCell("A2").value).toBe("flat-wins");
+    });
+
+    it("leaves plain (non-dotted) keys behaving exactly as before", () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [
+        { header: "ID", key: "id", width: 10 },
+        { header: "Name", key: "name", width: 20 }
+      ];
+      ws.addRow({ id: 7, name: "Carol" });
+
+      expect(ws.getCell("A2").value).toBe(7);
+      expect(ws.getCell("B2").value).toBe("Carol");
+    });
+
+    it("round-trips nested-key values through XLSX", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("test");
+      ws.columns = [
+        { header: "Name", key: "name", width: 20 },
+        { header: "City", key: "address.city", width: 20 }
+      ];
+      ws.addRow({ name: "Dave", address: { city: "Perth" } });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buffer);
+      const ws2 = wb2.getWorksheet("test")!;
+
+      expect(ws2.getCell("A2").value).toBe("Dave");
+      expect(ws2.getCell("B2").value).toBe("Perth");
+    });
+  });
 });

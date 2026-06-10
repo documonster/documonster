@@ -11,6 +11,8 @@ interface PicModel {
   alphaModFix?: number;
   /** When true, render the picture as an external linked image (`r:link`). */
   external?: boolean;
+  /** Relationship id of an SVG companion (asvg:svgBlip extension). */
+  svgRId?: string;
   [key: string]: any;
 }
 
@@ -45,7 +47,8 @@ class PicXform extends BaseXform {
     this.map["xdr:blipFill"].render(xmlStream, {
       rId: model.rId,
       alphaModFix: model.alphaModFix,
-      external: model.external
+      external: model.external,
+      svgRId: model.svgRId
     });
     this.map["xdr:spPr"].render(xmlStream, model);
 

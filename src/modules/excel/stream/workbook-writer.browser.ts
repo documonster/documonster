@@ -83,9 +83,16 @@ function callAllResolvers(resolvers: Array<() => void>): void {
  * Extends the public {@link ImageData} shape with the unique stored name
  * (`name`) assigned by `addImage`, and pins `type` to `"image"`.
  */
-export interface Medium extends ImageData {
+export interface Medium extends Omit<ImageData, "extension"> {
   type: "image";
   name: string;
+  /**
+   * Widened from `ImageData.extension` so an SVG companion medium can carry
+   * the `"svg"` extension (the public `addImage` input stays raster-only).
+   */
+  extension: string;
+  /** Media index of an SVG companion (raster blip + svgBlip extension). */
+  svgMediaId?: number;
 }
 
 interface CommentRef {
@@ -582,13 +589,39 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
    * ```
    */
   addImage(image: ImageData): number {
+    const { svg, ...raster } = image;
+    if (
+      svg &&
+      raster.link &&
+      raster.buffer == null &&
+      raster.base64 == null &&
+      raster.filename == null
+    ) {
+      throw new ImageError(
+        "An SVG image requires an embedded raster fallback (buffer/base64/filename); it cannot be combined with an external link."
+      );
+    }
     const id = this.media.length;
     const medium: Medium = {
-      ...image,
+      ...raster,
       type: "image" as const,
-      name: `image${id}.${image.extension}`
+      name: `image${id}.${raster.extension}`
     };
     this.media.push(medium);
+
+    if (svg) {
+      // Register the SVG companion as a second image medium and link it back to
+      // the raster blip so the drawing serializer emits the svgBlip extension.
+      const svgId = this.media.length;
+      this.media.push({
+        ...svg,
+        type: "image" as const,
+        extension: "svg",
+        name: `image${svgId}.svg`
+      });
+      medium.svgMediaId = svgId;
+    }
+
     return id;
   }
 

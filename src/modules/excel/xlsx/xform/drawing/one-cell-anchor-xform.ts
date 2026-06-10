@@ -3,6 +3,7 @@ import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 
 interface OneCellModel {
@@ -12,6 +13,7 @@ interface OneCellModel {
     ext: any;
   };
   picture?: any;
+  shape?: any;
   /** Graphic frame model (for charts and other embedded objects) */
   graphicFrame?: any;
 }
@@ -24,6 +26,7 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
       "xdr:from": new CellPositionXform({ tag: "xdr:from" }),
       "xdr:ext": new ExtXform({ tag: "xdr:ext" }),
       "xdr:pic": new PicXform(),
+      "xdr:userShape": new ShapeXform(),
       "xdr:graphicFrame": new GraphicFrameXform(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
@@ -50,6 +53,8 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
       this.map["xdr:pic"].render(xmlStream, model.picture);
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.shape?.kind === "userShape") {
+      this.map["xdr:userShape"].render(xmlStream, model.shape);
     }
     this.map["xdr:clientData"].render(xmlStream, {});
 

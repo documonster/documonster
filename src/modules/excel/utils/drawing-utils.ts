@@ -24,6 +24,12 @@ export interface DrawingAnchor {
      * (`<a:blip r:link>`) instead of an embedded one (`<a:blip r:embed>`).
      */
     external?: boolean;
+    /**
+     * Relationship id of an SVG companion. When set, the raster `a:blip`
+     * (referenced by `rId`) carries an `asvg:svgBlip` extension pointing at
+     * the SVG media via this id.
+     */
+    svgRId?: string;
   };
   range: any;
 }
@@ -60,6 +66,8 @@ export interface MediaLike {
   buffer?: unknown;
   base64?: unknown;
   filename?: unknown;
+  /** Media index of an SVG companion (raster blip + svgBlip extension). */
+  svgMediaId?: number;
 }
 
 /**
@@ -202,6 +210,24 @@ export function buildDrawingAnchorsAndRels(
       range: medium.range
     };
 
+    // SVG companion: allocate (and dedupe) a rel for the vector media, then
+    // record its rId so the blip serializer emits the asvg:svgBlip extension.
+    if (bookImage.svgMediaId !== undefined) {
+      const svgKey = `svg:${bookImage.svgMediaId}`;
+      let rIdSvg = imageRIdMap[svgKey];
+      if (!rIdSvg) {
+        const svgImage = options.getBookImage(bookImage.svgMediaId);
+        if (svgImage) {
+          rIdSvg = options.nextRId(rels);
+          imageRIdMap[svgKey] = rIdSvg;
+          rels.push(buildImageRel(rIdSvg, svgImage));
+        }
+      }
+      if (rIdSvg) {
+        anchor.picture.svgRId = rIdSvg;
+      }
+    }
+
     // Pass through watermark opacity as alphaModFix
     if (medium.opacity !== undefined) {
       const clamped = Math.max(0, Math.min(1, medium.opacity));
@@ -257,8 +283,8 @@ export function filterDrawingAnchors(anchors: any[]): any[] {
     if (a.range?.br && a.shape) {
       return true;
     }
-    // One-cell anchors need a valid picture or graphicFrame (charts)
-    if (!a.range?.br && !a.picture && !a.graphicFrame) {
+    // One-cell anchors need a valid picture, graphicFrame (charts) or shape.
+    if (!a.range?.br && !a.picture && !a.graphicFrame && !a.shape) {
       return false;
     }
     // Two-cell anchors need either picture, shape, or graphicFrame (charts)

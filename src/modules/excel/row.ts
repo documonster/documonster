@@ -282,12 +282,13 @@ class Row {
       // (e.g. DB entities). Cell.value setter handles unknown values via Value.getType
       // fallback to JSON type, so this cast is safe at runtime.
       this._worksheet.eachColumnKey((column: Column, key: string) => {
-        if (value[key] !== undefined) {
+        const resolved = resolveColumnKeyValue(value, key);
+        if (resolved !== undefined) {
           this.getCellEx({
             address: colCache.encodeAddress(this._number, column.number),
             row: this._number,
             col: column.number
-          }).value = value[key] as CellValue;
+          }).value = resolved as CellValue;
         }
       });
     }
@@ -557,6 +558,40 @@ class Row {
 
     this.style = value.style ? structuredClone(value.style) : {};
   }
+}
+
+/**
+ * Resolve a column key against a row object, supporting dotted nested paths.
+ *
+ * A key without a `.` takes the original fast path (`obj[key]`), preserving
+ * exact backward compatibility — including keys that legitimately contain a
+ * dot only as a flat property name, which still resolve via the fast path
+ * first. A dotted key (e.g. `"address.city"`) is resolved by walking each
+ * segment; if any segment is missing or not an object, the result is
+ * `undefined` (the same signal the caller already uses to skip a cell).
+ *
+ * @param obj - The row object supplied to `row.values = {...}` / `addRow({...})`.
+ * @param key - The column key, optionally a dotted path.
+ * @returns The resolved value, or `undefined` when the path cannot be followed.
+ */
+function resolveColumnKeyValue(obj: Record<string, unknown>, key: string): unknown {
+  // Fast path: a flat key (no dot) or an exact flat property match. This keeps
+  // existing behaviour identical and also lets a literal "a.b" property win
+  // over nested traversal when it is actually present on the object.
+  const direct = obj[key];
+  if (direct !== undefined || !key.includes(".")) {
+    return direct;
+  }
+
+  // Dotted path: walk segments, bailing out to undefined on any gap.
+  let current: unknown = obj;
+  for (const segment of key.split(".")) {
+    if (current === null || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
 }
 
 export { Row };

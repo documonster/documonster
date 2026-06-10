@@ -947,4 +947,156 @@ describe("Workbook", () => {
       expect(Buffer.compare(imageData, imgBuffer!.buffer as Uint8Array)).toBe(0);
     });
   });
+
+  describe("SVG with raster fallback", () => {
+    const SVG_BYTES = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#f00"/></svg>',
+      "utf8"
+    );
+
+    it("embeds an SVG picture with a raster fallback and round-trips both", async () => {
+      const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("svg");
+
+      const imageId = wb.addImage({
+        buffer: pngBytes as unknown as Buffer,
+        extension: "png",
+        svg: { buffer: SVG_BYTES }
+      });
+      ws.addImage(imageId, "B2:D5");
+
+      const file = testFilePath("workbook-svg.test");
+      await wb.xlsx.writeFile(file);
+      await expectValidXlsx(await fsReadFileAsync(file), { label: "svg-image" });
+
+      const wb2 = new Workbook();
+      await wb2.xlsx.readFile(file);
+      const ws2 = wb2.getWorksheet("svg")!;
+
+      const images = ws2.getImages();
+      expect(images).toHaveLength(1);
+
+      // Raster fallback round-trips byte-for-byte.
+      const raster = wb2.getImage(images[0].imageId!);
+      expect(raster!.extension).toBe("png");
+      expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
+
+      // The SVG companion is linked via svgMediaId and round-trips its bytes.
+      const svgMediaId = (raster as any).svgMediaId;
+      expect(typeof svgMediaId).toBe("number");
+      const svg = wb2.getImage(svgMediaId);
+      expect(svg!.extension).toBe("svg");
+      expect(Buffer.compare(SVG_BYTES, svg!.buffer as Uint8Array)).toBe(0);
+    });
+
+    it("writes the svgBlip extension and image/svg+xml content type", async () => {
+      const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("svg");
+      const imageId = wb.addImage({
+        buffer: pngBytes as unknown as Buffer,
+        extension: "png",
+        svg: { buffer: SVG_BYTES }
+      });
+      ws.addImage(imageId, "A1:B2");
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const { unzip } = await import("@archive/index");
+      const reader = unzip(buffer as unknown as Uint8Array);
+      const entries: Record<string, string> = {};
+      for await (const entry of reader.entries()) {
+        const bytes = await entry.bytes();
+        entries[entry.path] = new TextDecoder().decode(bytes ?? new Uint8Array());
+      }
+
+      // Content type registers SVG correctly (image/svg+xml, not image/svg).
+      expect(entries["[Content_Types].xml"]).toContain(
+        '<Default Extension="svg" ContentType="image/svg+xml"/>'
+      );
+
+      // The drawing carries the asvg:svgBlip extension under the raster blip.
+      const drawingKey = Object.keys(entries).find(k => /drawings\/drawing\d+\.xml$/.test(k))!;
+      const drawingXml = entries[drawingKey];
+      expect(drawingXml).toContain("asvg:svgBlip");
+      expect(drawingXml).toContain("{96DAC541-7B7A-43D3-8B79-37D633B846F1}");
+    });
+
+    it("creates only one svg relationship when the image is reused across anchors", async () => {
+      const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("svg");
+      const imageId = wb.addImage({
+        buffer: pngBytes as unknown as Buffer,
+        extension: "png",
+        svg: { buffer: SVG_BYTES }
+      });
+      ws.addImage(imageId, "A1:B2");
+      ws.addImage(imageId, "D1:E2"); // same image, second anchor
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const { unzip } = await import("@archive/index");
+      const reader = unzip(buffer as unknown as Uint8Array);
+      const entries: Record<string, string> = {};
+      for await (const entry of reader.entries()) {
+        const bytes = await entry.bytes();
+        entries[entry.path] = new TextDecoder().decode(bytes ?? new Uint8Array());
+      }
+      const relKey = Object.keys(entries).find(k =>
+        /drawings\/_rels\/drawing\d+\.xml\.rels$/.test(k)
+      )!;
+      const rels = entries[relKey];
+      // The raster + svg media are each referenced by exactly one relationship.
+      expect((rels.match(/image\d+\.png/g) ?? []).length).toBe(1);
+      expect((rels.match(/image\d+\.svg/g) ?? []).length).toBe(1);
+    });
+
+    it("survives a second write→read→write round-trip with the SVG intact", async () => {
+      const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("svg");
+      const imageId = wb.addImage({
+        buffer: pngBytes as unknown as Buffer,
+        extension: "png",
+        svg: { buffer: SVG_BYTES }
+      });
+      ws.addImage(imageId, "B2:D5");
+
+      // First round-trip.
+      const buf1 = await wb.xlsx.writeBuffer();
+      const wb2 = new Workbook();
+      await wb2.xlsx.load(buf1 as unknown as Uint8Array);
+
+      // Second round-trip from the re-read workbook.
+      const buf2 = await wb2.xlsx.writeBuffer();
+      const { unzip } = await import("@archive/index");
+      const reader = unzip(buf2 as unknown as Uint8Array);
+      const entries: Record<string, string> = {};
+      for await (const entry of reader.entries()) {
+        const bytes = await entry.bytes();
+        entries[entry.path] = new TextDecoder().decode(bytes ?? new Uint8Array());
+      }
+      const drawingKey = Object.keys(entries).find(k => /drawings\/drawing\d+\.xml$/.test(k))!;
+      expect(entries[drawingKey]).toContain("asvg:svgBlip");
+
+      const wb3 = new Workbook();
+      await wb3.xlsx.load(buf2 as unknown as Uint8Array);
+      const raster = wb3.getImage(wb3.getWorksheet("svg")!.getImages()[0].imageId!);
+      expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
+      const svgMediaId = (raster as { svgMediaId?: number }).svgMediaId;
+      expect(typeof svgMediaId).toBe("number");
+      expect(Buffer.compare(SVG_BYTES, wb3.getImage(svgMediaId!)!.buffer as Uint8Array)).toBe(0);
+    });
+
+    it("rejects an SVG combined with an external (linked) raster", () => {
+      const wb = new Workbook();
+      expect(() =>
+        wb.addImage({
+          extension: "png",
+          link: "https://example.com/x.png",
+          svg: { buffer: SVG_BYTES }
+        })
+      ).toThrow(/raster fallback/);
+    });
+  });
 });

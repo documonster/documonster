@@ -58,8 +58,27 @@ abstract class BaseCellAnchorXform extends BaseXform {
         const name = match[1];
         const mediaId = options.mediaIndex[name];
         const medium = options.media[mediaId];
+        if (!medium) {
+          return undefined;
+        }
+
+        // Resolve an SVG companion (asvg:svgBlip extension) back to its media
+        // index and record it on the raster media entry itself, so callers that
+        // look the image up by id (e.g. Workbook.getImage) surface the vector
+        // companion alongside the raster fallback.
+        if (model.svgRId) {
+          const svgRel = options.rels[model.svgRId];
+          const svgMatch = svgRel && svgRel.Target.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
+          if (svgMatch) {
+            const svgMediaId = options.mediaIndex[svgMatch[1]];
+            if (svgMediaId !== undefined) {
+              medium.svgMediaId = svgMediaId;
+            }
+          }
+        }
+
         // Preserve alphaModFix (transparency) from the picture model if present
-        if (medium && model.alphaModFix !== undefined) {
+        if (model.alphaModFix !== undefined) {
           return { ...medium, alphaModFix: model.alphaModFix };
         }
         return medium;

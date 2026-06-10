@@ -306,4 +306,36 @@ describe("Note", () => {
       expect(model.note.texts).toEqual([{ text: "   " }]);
     });
   });
+
+  // ===========================================================================
+  // Comment box size (width / height)
+  // ===========================================================================
+
+  describe("comment box size", () => {
+    it("preserves width/height through the model getter", () => {
+      const note = new Note({ texts: [{ text: "Sized" }], width: 200, height: 120 });
+      const model = note.model;
+
+      expect(model.note.width).toBe(200);
+      expect(model.note.height).toBe(120);
+    });
+
+    it("preserves width/height through a full model cycle", () => {
+      const original = new Note({ texts: [{ text: "Sized" }], width: 150.5, height: 90 });
+      const restored = new Note();
+      restored.model = original.model;
+
+      const config = restored.note as any;
+      expect(config.width).toBe(150.5);
+      expect(config.height).toBe(90);
+    });
+
+    it("leaves width/height undefined when not configured", () => {
+      const note = new Note("No size");
+      const model = note.model;
+
+      expect(model.note.width).toBeUndefined();
+      expect(model.note.height).toBeUndefined();
+    });
+  });
 });

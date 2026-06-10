@@ -29,7 +29,12 @@ import {
   type AddPivotChartsheetOptions
 } from "@excel/chartsheet";
 import { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
-import { ExcelDownloadError, ExcelNotSupportedError, WorksheetNameError } from "@excel/errors";
+import {
+  ExcelDownloadError,
+  ExcelNotSupportedError,
+  ImageError,
+  WorksheetNameError
+} from "@excel/errors";
 import { withPivotChartSource } from "@excel/pivot-chart";
 import type { PivotTable } from "@excel/pivot-table";
 import {
@@ -81,6 +86,12 @@ export interface WorkbookMedia {
   name?: string;
   /** External link target — when set, the image is referenced, not embedded. */
   link?: string;
+  /**
+   * Media index of the SVG companion for this raster image. When set, the
+   * picture is written as a raster `a:blip` plus an `asvg:svgBlip` extension
+   * referencing the SVG media at this index. Internal bookkeeping only.
+   */
+  svgMediaId?: number;
 }
 
 /** Internal model type for serialization */
@@ -2434,10 +2445,46 @@ class Workbook {
    * const id = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
    * worksheet.addImage(id, "B2:D6");
    * ```
+   *
+   * @example SVG with raster fallback — crisp in modern Excel, safe everywhere
+   * ```typescript
+   * const id = workbook.addImage({
+   *   buffer: pngFallbackBytes, // shown by older Excel / non-SVG consumers
+   *   extension: "png",
+   *   svg: { buffer: svgBytes } // shown by Excel 2016+
+   * });
+   * worksheet.addImage(id, "B2:D6");
+   * ```
    */
   addImage(image: ImageData): number {
+    const { svg, ...raster } = image;
+    if (
+      svg &&
+      raster.link &&
+      raster.buffer == null &&
+      raster.base64 == null &&
+      raster.filename == null
+    ) {
+      // An SVG companion needs an embedded raster fallback; a *linked* (external)
+      // raster has no package part to attach the svgBlip extension to.
+      throw new ImageError(
+        "An SVG image requires an embedded raster fallback (buffer/base64/filename); it cannot be combined with an external link."
+      );
+    }
     const id = this.media.length;
-    this.media.push({ ...image, type: "image" });
+    const rasterMedia: WorkbookMedia = { ...raster, type: "image" };
+    this.media.push(rasterMedia);
+
+    if (svg) {
+      // Register the SVG as a second `type: "image"` media so it flows through
+      // the existing media naming, content-types, and zip-writing paths. Link
+      // it back to the raster blip so the drawing serializer can emit the
+      // asvg:svgBlip extension.
+      const svgId = this.media.length;
+      this.media.push({ ...svg, type: "image", extension: "svg" });
+      rasterMedia.svgMediaId = svgId;
+    }
+
     return id;
   }
 

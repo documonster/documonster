@@ -71,6 +71,10 @@ export interface NoteConfig {
   protection?: { locked?: string; lockText?: string };
   editAs?: string;
   anchor?: string;
+  /** Comment box width in points. Defaults to 97.8pt when omitted. */
+  width?: number;
+  /** Comment box height in points. Defaults to 59.1pt when omitted. */
+  height?: number;
 }
 
 export interface NoteModel {

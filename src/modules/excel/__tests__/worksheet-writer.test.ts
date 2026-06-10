@@ -211,6 +211,18 @@ describe("WorksheetWriter", () => {
       expect(rows).toEqual([]);
     });
 
+    it("addRow() resolves nested column-key paths (dotted keys)", () => {
+      const { ws } = createRealWriter();
+      ws.columns = [
+        { key: "name", header: "Name" },
+        { key: "address.city", header: "City" }
+      ];
+      const row = ws.addRow({ name: "Alice", address: { city: "Sydney" } });
+
+      expect(row.getCell(1).value).toBe("Alice");
+      expect(row.getCell(2).value).toBe("Sydney");
+    });
+
     it("getRow() creates/returns a row by number", () => {
       const { ws } = createRealWriter();
       const row = ws.getRow(5);

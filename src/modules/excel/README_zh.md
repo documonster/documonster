@@ -10,13 +10,14 @@
 - **多工作表支持** — 添加、删除、重排序、复制
 - **单元格样式** — 字体、颜色、边框、填充、对齐、数字格式
 - **单元格合并和格式化** — 合并区域、富文本、超链接
-- **行列属性** — 宽度、高度、隐藏、大纲级别、自动适应
+- **行列属性** — 宽度、高度、隐藏、大纲级别、自动适应；按对象添加行时支持嵌套列 key 路径（`"address.city"`）
 - **冻结窗格和拆分视图** — 冻结行/列、在指定位置拆分
 - **富文本支持** — 单个单元格内多种字体/样式
 - **公式和计算值** — 共享公式、定义名称
 - **数据验证** — 列表、整数、小数、日期、文本长度、自定义
 - **条件格式** — 单元格值、色阶、数据条、图标集
-- **图片** — JPEG、PNG、GIF，支持单单元格和双单元格锚点；可嵌入或通过 URL/文件路径外链
+- **图片** — JPEG、PNG、GIF，支持单单元格和双单元格锚点；可嵌入或通过 URL/文件路径外链；SVG 带光栅 fallback
+- **形状** — 矩形、椭圆、线条、文本框，支持填充/轮廓/文本
 - **超链接** — 内部链接、外部链接、邮件链接
 - **数据透视表** — 读取和保留数据透视表定义
 - **图表** — 创建/读取/编辑 classic chart、ChartEx 现代图表、组合图、数据透视图、图表工作表，并提供 SVG/PNG/PDF 预览
@@ -51,6 +52,18 @@ await workbook.xlsx.writeFile("output.xlsx");
 
 // 浏览器：写入缓冲区
 const buffer = await workbook.xlsx.writeBuffer();
+```
+
+#### 按对象添加行（支持嵌套 key）
+
+当列设置了 key 时，可以从对象添加行。key 支持点号路径，从嵌套对象取值：
+
+```typescript
+sheet.columns = [
+  { header: "Name", key: "name", width: 20 },
+  { header: "City", key: "address.city", width: 20 }
+];
+sheet.addRow({ name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### 读取工作簿
@@ -232,6 +245,44 @@ worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
 
 可运行示例见 [`images-external.ts`](examples/images-external.ts)。
 
+#### SVG 图片（带光栅 fallback）
+
+Excel 通过一个光栅 `a:blip` 加 `asvg:svgBlip` 扩展来渲染 SVG 图片。本库**不做光栅化** —— 你需要同时提供 SVG 字节和想嵌入的光栅 fallback（通常是 PNG）。现代 Excel 显示清晰的 SVG，旧版本和不支持 SVG 的消费端显示光栅 fallback。
+
+```typescript
+const id = workbook.addImage({
+  buffer: pngFallbackBytes, // 光栅 fallback —— 必填
+  extension: "png",
+  svg: { buffer: svgBytes } // Excel 2016+ 显示的矢量数据
+});
+worksheet.addImage(id, "B2:D6");
+```
+
+### 形状
+
+添加锚定到单元格区域的自由绘图形状（矩形、椭圆、线条、文本框……）。形状无需媒体文件 —— 几何、填充、轮廓和可选文本标签会直接写入 drawing 部件。
+
+```typescript
+worksheet.addShape({
+  type: "rect", // rect | roundRect | ellipse | triangle | line | …
+  range: "B2:D5", // 单元格区域或 { tl, br } 锚点
+  fillColor: "FFD966", // 十六进制 RGB（省略则无填充）
+  lineColor: "000000",
+  lineWidth: 1, // 单位：磅
+  text: "Important"
+});
+
+worksheet.addShape({ type: "ellipse", range: "F2:H5", fillColor: "9DC3E6" });
+worksheet.addShape({
+  type: "line",
+  range: { tl: "B7", br: "E7" },
+  lineColor: "FF0000",
+  lineWidth: 2
+});
+```
+
+形状是只写的（读取时不解析回来），与其它非图表 drawing 内容一致。
+
 ### 表格
 
 ```typescript
@@ -312,6 +363,13 @@ worksheet.getCell("A1").note = "简单批注";
 
 worksheet.getCell("B1").note = {
   texts: [{ text: "作者：", font: { bold: true } }, { text: "这是一个富文本批注" }]
+};
+
+// 配置批注框尺寸（单位：磅）。默认 97.8 × 59.1pt。
+worksheet.getCell("C1").note = {
+  texts: [{ text: "更宽敞的批注" }],
+  width: 200,
+  height: 120
 };
 ```
 

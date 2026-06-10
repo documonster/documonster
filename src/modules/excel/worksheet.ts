@@ -45,6 +45,7 @@ import { buildSparklineGroup } from "@excel/sparkline";
 import { Table, type TableModel } from "@excel/table";
 import type {
   AddImageRange,
+  AddShapeOptions,
   AutoFilter,
   CellValue,
   ColBreak,
@@ -53,6 +54,7 @@ import type {
   IgnoredError,
   RowBreak,
   RowValues,
+  ShapeModel,
   Style,
   TableProperties,
   ThreadedComment,
@@ -175,6 +177,7 @@ interface WorksheetModel {
   views: Partial<WorksheetView>[];
   autoFilter: AutoFilter | null;
   media: ImageModel[];
+  shapes?: ShapeModel[];
   sheetProtection: SheetProtection | null;
   tables: TableModel[];
   pivotTables: PivotTable[];
@@ -226,6 +229,7 @@ class Worksheet {
   declare public views: Partial<WorksheetView>[];
   declare public autoFilter: AutoFilter | null;
   declare private _media: Image[];
+  declare private _shapes: ShapeModel[];
   declare private _charts: Chart[];
   declare private _sparklineGroups: SparklineGroup[];
   declare public sheetProtection: SheetProtection | null;
@@ -346,6 +350,9 @@ class Worksheet {
 
     // for images, etc
     this._media = [];
+
+    // for user-drawn shapes (rectangles, lines, text boxes, …)
+    this._shapes = [];
 
     // for charts
     this._charts = [];
@@ -1357,6 +1364,90 @@ class Worksheet {
     this._media.push(new Image(this, model));
   }
 
+  /**
+   * Add a free-form drawing shape (rectangle, ellipse, line, text box, …) to
+   * the worksheet, anchored to a cell range.
+   *
+   * Unlike images, shapes need no media file — the geometry, fill, outline and
+   * optional text label are written directly into the drawing part.
+   *
+   * @example
+   * ```typescript
+   * worksheet.addShape({
+   *   type: "rect",
+   *   range: "B2:D5",
+   *   fillColor: "FFD966",
+   *   lineColor: "000000",
+   *   lineWidth: 1,
+   *   text: "Important"
+   * });
+   * ```
+   */
+  addShape(options: AddShapeOptions): void {
+    const range = options.range;
+    // A shape must cover an area, mirroring images. Reject inputs that resolve
+    // to no size up front, with a clear shape-specific message — otherwise the
+    // failure surfaces much later as a confusing `ImageError` from the internal
+    // range parser when the worksheet is serialized.
+    const hasArea =
+      (typeof range === "string" && range.includes(":")) ||
+      (typeof range === "object" &&
+        range !== null &&
+        ("br" in range || "ext" in range || "pos" in range));
+    if (!hasArea) {
+      throw new ImageError(
+        'addShape requires a range covering an area: a cell range like "B2:D5", or an object with `br`, `ext`, or `pos`.'
+      );
+    }
+    this._shapes.push({
+      type: "shape",
+      shapeType: options.type ?? "rect",
+      range,
+      fillColor: options.fillColor,
+      lineColor: options.lineColor,
+      lineWidth: options.lineWidth,
+      text: options.text,
+      name: options.name
+    });
+  }
+
+  /** All shapes added to this worksheet. */
+  getShapes(): ShapeModel[] {
+    return this._shapes.slice();
+  }
+
+  /**
+   * Resolve a shape's `range` into concrete two-cell anchor coordinates,
+   * reusing the `Image` range parser so cell-address/anchor handling stays in
+   * one place. Returns a serializable ShapeModel for the worksheet xform.
+   */
+  private _resolveShapeModel(shape: ShapeModel): ShapeModel {
+    let range: Extract<ImageModel, { type: "image" }>["range"] | undefined;
+    try {
+      const probe = new Image(this, { type: "image", imageId: "", range: shape.range });
+      // The probe is always an "image" type, so its model carries `range`.
+      range = (probe.model as Extract<ImageModel, { type: "image" }>).range;
+    } catch {
+      // Range could not be parsed into an anchor (addShape validates the common
+      // cases up front; this guards exotic inputs). Drop the anchor so the
+      // serializer skips this shape rather than failing the whole worksheet.
+      range = undefined;
+    }
+    if (!range) {
+      return { ...shape, anchorRange: undefined };
+    }
+    return {
+      ...shape,
+      anchorRange: {
+        tl: range.tl,
+        br: range.br,
+        ext: range.ext,
+        pos: range.pos,
+        editAs: range.editAs
+      }
+    };
+  }
+
   getImages(): Image[] {
     return this._media.filter(m => m.type === "image");
   }
@@ -2282,6 +2373,7 @@ class Worksheet {
       views: this.views,
       autoFilter: this.autoFilter,
       media: this._media.map(medium => medium.model),
+      shapes: this._shapes.map(shape => this._resolveShapeModel(shape)),
       sheetProtection: this.sheetProtection,
       tables: Object.values(this.tables).map(table => table.model),
       pivotTables: this.pivotTables,
@@ -2355,6 +2447,7 @@ class Worksheet {
     this.views = value.views;
     this.autoFilter = value.autoFilter;
     this._media = value.media.map(medium => new Image(this, medium));
+    this._shapes = value.shapes ? value.shapes.slice() : [];
     // Restore watermark state from media entries
     this._watermark = value.watermark ?? null;
     if (!this._watermark) {

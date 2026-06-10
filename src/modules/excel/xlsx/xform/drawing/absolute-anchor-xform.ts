@@ -3,6 +3,7 @@ import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 
 /** https://en.wikipedia.org/wiki/Office_Open_XML_file_formats#DrawingML */
@@ -86,6 +87,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
       // `<xdr:absoluteAnchor><xdr:pos/><xdr:ext/><xdr:clientData/></xdr:absoluteAnchor>`
       // with no chart reference, so the anchor was ignored on open.
       "xdr:graphicFrame": new GraphicFrameXform(),
+      "xdr:userShape": new ShapeXform(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -111,6 +113,8 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
       this.map["xdr:pic"].render(xmlStream, model.picture);
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.shape?.kind === "userShape") {
+      this.map["xdr:userShape"].render(xmlStream, model.shape);
     }
     this.map["xdr:clientData"].render(xmlStream, {});
 

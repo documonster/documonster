@@ -557,7 +557,72 @@ class WorkSheetXform extends BaseXform {
       }
     }
 
-    // Handle header watermark images — VML header/footer image
+    // Handle user-drawn shapes — anchored drawing parts with no media/rel.
+    const shapes = model.shapes ?? [];
+    if (shapes.length > 0) {
+      let { drawing } = model;
+      if (!drawing) {
+        drawing = model.drawing = {
+          rId: nextRid(rels),
+          name: `drawing${++options.drawingsCount}`,
+          anchors: [],
+          rels: []
+        };
+        options.drawings.push(drawing);
+        rels.push({
+          Id: drawing.rId,
+          Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+          Target: drawingRelTargetFromWorksheet(drawing.name)
+        });
+      }
+
+      for (const shape of shapes) {
+        const anchorRange = shape.anchorRange;
+        if (!anchorRange) {
+          continue;
+        }
+        // Mirror the three image anchoring modes. `getAnchorType` (drawing
+        // xform) dispatches on `pos`/`br`: absolute when `pos` is present,
+        // two-cell when `br` is present, one-cell otherwise (needs `ext`).
+        let range: any;
+        if (anchorRange.pos) {
+          range = { pos: anchorRange.pos, ext: anchorRange.ext, editAs: "absolute" };
+        } else if (anchorRange.br) {
+          range = {
+            tl: anchorRange.tl,
+            br: anchorRange.br,
+            editAs: anchorRange.editAs ?? "oneCell"
+          };
+        } else {
+          range = {
+            tl: anchorRange.tl,
+            ext: anchorRange.ext,
+            editAs: anchorRange.editAs ?? "oneCell"
+          };
+        }
+
+        // Allocate a cNvPr id from the same monotonic space as the anchor's
+        // position in the drawing so it never collides with image/chart ids
+        // (which derive from the anchor index).
+        const cNvPrId = drawing.anchors.length + 1;
+        drawing.anchors.push({
+          range,
+          shape: {
+            kind: "userShape",
+            cNvPrId,
+            name: shape.name ?? `Shape ${cNvPrId}`,
+            shapeType: shape.shapeType,
+            fill: shape.fillColor ? { color: shape.fillColor } : undefined,
+            line:
+              shape.lineColor !== undefined || shape.lineWidth !== undefined
+                ? { color: shape.lineColor, width: shape.lineWidth }
+                : undefined,
+            text: shape.text
+          }
+        });
+      }
+    }
+
     if (headerImageMedia.length > 0) {
       const medium = headerImageMedia[0]; // Only one header image per sheet
       const bookImage = options.media[medium.imageId];

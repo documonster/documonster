@@ -58,7 +58,11 @@ class Note {
   set model(value: NoteModel) {
     const { note } = value;
     const { texts } = note;
-    if (texts && texts.length === 1 && Object.keys(texts[0]).length === 1) {
+    // A single, plain text run with no extra box geometry can be flattened
+    // back to a simple string. Custom width/height must keep the full config
+    // so the sizing survives the model round-trip.
+    const hasCustomSize = note.width !== undefined || note.height !== undefined;
+    if (texts && texts.length === 1 && Object.keys(texts[0]).length === 1 && !hasCustomSize) {
       this.note = texts[0].text;
     } else {
       this.note = note;

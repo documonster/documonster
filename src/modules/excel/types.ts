@@ -696,6 +696,24 @@ export interface ImageData {
    * are required.
    */
   link?: string;
+  /**
+   * Attach a scalable SVG alongside a raster fallback.
+   *
+   * Excel stores SVG pictures as a raster `a:blip` (the `extension`/`buffer`/
+   * `base64`/`filename` on this object — typically a PNG) plus an
+   * `asvg:svgBlip` extension pointing at the vector data. The raster image is
+   * what older Excel versions and non-SVG consumers render, so it is required;
+   * modern Excel renders the crisp SVG. This library does **not** rasterize —
+   * you supply both the SVG bytes and the raster fallback you want embedded.
+   */
+  svg?: {
+    /** SVG bytes (mutually use one of buffer/base64/filename). */
+    buffer?: Buffer;
+    /** Base64-encoded SVG. */
+    base64?: string;
+    /** Path to an `.svg` file (Node only). */
+    filename?: string;
+  };
 }
 
 export interface ImagePosition {
@@ -740,6 +758,73 @@ export type AddImageRange =
 export interface ImageHyperlinkValue {
   hyperlink: string;
   tooltip?: string;
+}
+
+// ============================================================================
+// Shape Types
+// ============================================================================
+
+/**
+ * Preset geometry for a drawing shape. Mirrors the OOXML `prst` vocabulary;
+ * the most common presets are surfaced here, but any valid preset name is
+ * accepted as a fallback `string`.
+ */
+export type ShapeType =
+  | "rect"
+  | "roundRect"
+  | "ellipse"
+  | "triangle"
+  | "line"
+  | "rightArrow"
+  | "leftArrow"
+  | "upArrow"
+  | "downArrow"
+  | "diamond"
+  | "hexagon"
+  | "star5"
+  | (string & {});
+
+/** Options for `Worksheet.addShape`. */
+export interface AddShapeOptions {
+  /** Preset geometry (defaults to `"rect"`). */
+  type?: ShapeType;
+  /** Where the shape sits — a cell range (e.g. `"B2:D5"`) or anchor object. */
+  range: AddImageRange;
+  /** Solid fill colour as hex RGB (e.g. `"FF0000"`). Omit for no fill. */
+  fillColor?: string;
+  /** Outline colour as hex RGB (e.g. `"000000"`). */
+  lineColor?: string;
+  /** Outline width in points. */
+  lineWidth?: number;
+  /** Optional centred text label. */
+  text?: string;
+  /** Display name (defaults to `"Shape N"`). */
+  name?: string;
+}
+
+/** Internal serialized model for a worksheet shape. */
+export interface ShapeModel {
+  type: "shape";
+  shapeType: string;
+  range: AddImageRange;
+  fillColor?: string;
+  lineColor?: string;
+  lineWidth?: number;
+  text?: string;
+  name?: string;
+  /**
+   * Resolved anchor coordinates, filled in by the worksheet model getter so
+   * the serializer doesn't need range-parsing logic. Mirrors the three image
+   * anchoring modes: two-cell (`tl`+`br`), one-cell (`tl`+`ext`) and absolute
+   * (`pos`+`ext`). Internal only.
+   */
+  anchorRange?: {
+    tl: { nativeCol: number; nativeColOff: number; nativeRow: number; nativeRowOff: number };
+    br?: { nativeCol: number; nativeColOff: number; nativeRow: number; nativeRowOff: number };
+    ext?: { width?: number; height?: number };
+    pos?: { x: number; y: number };
+    editAs?: string;
+  };
 }
 
 // ============================================================================

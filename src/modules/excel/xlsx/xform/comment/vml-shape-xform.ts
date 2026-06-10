@@ -8,9 +8,15 @@ interface ShapeModel {
       insetmode?: string;
       inset?: number[];
     };
+    width?: number;
+    height?: number;
   };
   refAddress?: any;
 }
+
+/** Default comment box geometry in points (matches legacy Excel notes). */
+const DEFAULT_NOTE_WIDTH_PT = 97.8;
+const DEFAULT_NOTE_HEIGHT_PT = 59.1;
 
 class VmlShapeXform extends BaseXform {
   declare public map: { [key: string]: any };
@@ -58,6 +64,21 @@ class VmlShapeXform extends BaseXform {
           editAs: "",
           protection: {}
         };
+        {
+          // Recover the comment box geometry from the VML style string
+          // (e.g. "...width:120pt;height:80pt;..."). Only surface width/height
+          // when they differ from the legacy defaults, so untouched notes keep
+          // a clean model (and stay byte-compatible with prior behaviour).
+          const style: string = node.attributes.style ?? "";
+          const width = VmlShapeXform.parseStyleLength(style, "width");
+          const height = VmlShapeXform.parseStyleLength(style, "height");
+          if (width !== undefined && width !== DEFAULT_NOTE_WIDTH_PT) {
+            this.model.width = width;
+          }
+          if (height !== undefined && height !== DEFAULT_NOTE_HEIGHT_PT) {
+            this.model.height = height;
+          }
+        }
         break;
       default:
         this.parser = this.map[node.name];
@@ -99,15 +120,31 @@ class VmlShapeXform extends BaseXform {
     }
   }
 
-  static V_SHAPE_ATTRIBUTES = (model: ShapeModel, index: number): any => ({
-    id: `_x0000_s${1025 + index}`,
-    type: "#_x0000_t202",
-    style:
-      "position:absolute; margin-left:105.3pt;margin-top:10.5pt;width:97.8pt;height:59.1pt;z-index:1;visibility:hidden",
-    fillcolor: "infoBackground [80]",
-    strokecolor: "none [81]",
-    "o:insetmode": model.note.margins && model.note.margins.insetmode
-  });
+  /**
+   * Extract a points-valued length (e.g. `width:120pt`) from a VML style
+   * string. Returns `undefined` when the property is absent or not in `pt`.
+   */
+  static parseStyleLength(style: string, prop: "width" | "height"): number | undefined {
+    const match = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([0-9.]+)pt`, "i").exec(style);
+    if (!match) {
+      return undefined;
+    }
+    const value = parseFloat(match[1]);
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  static V_SHAPE_ATTRIBUTES = (model: ShapeModel, index: number): any => {
+    const width = model.note?.width ?? DEFAULT_NOTE_WIDTH_PT;
+    const height = model.note?.height ?? DEFAULT_NOTE_HEIGHT_PT;
+    return {
+      id: `_x0000_s${1025 + index}`,
+      type: "#_x0000_t202",
+      style: `position:absolute; margin-left:105.3pt;margin-top:10.5pt;width:${width}pt;height:${height}pt;z-index:1;visibility:hidden`,
+      fillcolor: "infoBackground [80]",
+      strokecolor: "none [81]",
+      "o:insetmode": model.note.margins && model.note.margins.insetmode
+    };
+  };
 }
 
 export { VmlShapeXform };

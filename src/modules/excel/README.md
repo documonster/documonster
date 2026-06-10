@@ -10,13 +10,14 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Multiple worksheet support** — add, remove, reorder, copy
 - **Cell styling** — fonts, colors, borders, fills, alignment, number formats
 - **Cell merging and formatting** — merge ranges, rich text, hyperlinks
-- **Row and column properties** — width, height, hidden, outline level, auto-fit
+- **Row and column properties** — width, height, hidden, outline level, auto-fit; nested column-key paths (`"address.city"`) when adding rows by object
 - **Freeze panes and split views** — freeze rows/columns, split at position
 - **Rich text support** — multiple fonts/styles within a single cell
 - **Formulas and calculated values** — shared formulas, defined names
 - **Data validation** — list, whole, decimal, date, textLength, custom
 - **Conditional formatting** — cell value, color scale, data bar, icon set
-- **Images** — JPEG, PNG, GIF with one-cell and two-cell anchors; embedded or external (linked) via URL/file path
+- **Images** — JPEG, PNG, GIF with one-cell and two-cell anchors; embedded or external (linked) via URL/file path; SVG with raster fallback
+- **Shapes** — rectangles, ellipses, lines, text boxes with fill/outline/text
 - **Hyperlinks** — internal, external, email
 - **Pivot tables** — read and preserve pivot table definitions
 - **Charts** — create/read/edit classic charts, ChartEx modern charts, combo charts, pivot charts, chartsheets, and zero-dependency SVG/PNG/PDF previews (deterministic, not Excel-pixel-perfect — see [Rendering scope](#rendering-scope))
@@ -51,6 +52,19 @@ await workbook.xlsx.writeFile("output.xlsx");
 
 // Browser: write to buffer
 const buffer = await workbook.xlsx.writeBuffer();
+```
+
+#### Adding rows by object (with nested keys)
+
+When columns have keys, rows can be added from objects. Keys may use dotted
+paths to pull values from nested objects:
+
+```typescript
+sheet.columns = [
+  { header: "Name", key: "name", width: 20 },
+  { header: "City", key: "address.city", width: 20 }
+];
+sheet.addRow({ name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### Reading a Workbook
@@ -235,6 +249,50 @@ worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
 
 See the runnable [`images-external.ts`](examples/images-external.ts) example.
 
+#### SVG images (with raster fallback)
+
+Excel renders SVG pictures via a raster `a:blip` plus an `asvg:svgBlip`
+extension. This library does **not** rasterize — you supply both the SVG bytes
+and the raster fallback (typically a PNG) you want embedded. Modern Excel shows
+the crisp SVG; older versions and non-SVG consumers show the raster fallback.
+
+```typescript
+const id = workbook.addImage({
+  buffer: pngFallbackBytes, // raster fallback — required
+  extension: "png",
+  svg: { buffer: svgBytes } // vector data shown by Excel 2016+
+});
+worksheet.addImage(id, "B2:D6");
+```
+
+### Shapes
+
+Add free-form drawing shapes (rectangles, ellipses, lines, text boxes, …)
+anchored to a cell range. Shapes need no media file — geometry, fill, outline
+and an optional text label are written straight into the drawing part.
+
+```typescript
+worksheet.addShape({
+  type: "rect", // rect | roundRect | ellipse | triangle | line | …
+  range: "B2:D5", // a cell range or { tl, br } anchors
+  fillColor: "FFD966", // hex RGB (omit for no fill)
+  lineColor: "000000",
+  lineWidth: 1, // points
+  text: "Important"
+});
+
+worksheet.addShape({ type: "ellipse", range: "F2:H5", fillColor: "9DC3E6" });
+worksheet.addShape({
+  type: "line",
+  range: { tl: "B7", br: "E7" },
+  lineColor: "FF0000",
+  lineWidth: 2
+});
+```
+
+Shapes are write-only (not parsed back on read), consistent with other
+non-chart drawing content.
+
 ### Tables
 
 ```typescript
@@ -315,6 +373,13 @@ worksheet.getCell("A1").note = "Simple comment";
 
 worksheet.getCell("B1").note = {
   texts: [{ text: "Author: ", font: { bold: true } }, { text: "This is a rich text comment" }]
+};
+
+// Configure the comment box size (points). Defaults to 97.8 × 59.1pt.
+worksheet.getCell("C1").note = {
+  texts: [{ text: "A roomier note" }],
+  width: 200,
+  height: 120
 };
 ```
 

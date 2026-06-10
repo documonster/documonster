@@ -44,7 +44,9 @@ class ContentTypesXform extends BaseXform {
           mediaHash[imageType] = true;
           xmlStream.leafNode("Default", {
             Extension: imageType,
-            ContentType: `image/${imageType}`
+            // SVG's IANA media type is "image/svg+xml"; everything else follows
+            // the "image/<ext>" convention.
+            ContentType: imageType === "svg" ? "image/svg+xml" : `image/${imageType}`
           });
         }
       }

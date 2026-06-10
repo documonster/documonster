@@ -1,4 +1,6 @@
-# excelts/word — DOCX Processing Module
+# Word Module
+
+[中文](README_zh.md)
 
 Zero-dependency TypeScript library for reading, writing, and manipulating DOCX files.
 Works in Node.js 22+ and modern browsers.
@@ -6,7 +8,7 @@ Works in Node.js 22+ and modern browsers.
 ## Quick Start
 
 ```typescript
-import { Document, toBuffer, readDocx } from "excelts/word";
+import { Document, toBuffer, readDocx } from "@cj-tech-master/excelts/word";
 
 // Create a document
 const doc = Document.create();
@@ -30,7 +32,7 @@ console.log(parsed.body.length, "elements");
 ### Document Builder
 
 ```typescript
-import { Document, paragraph, text, bold, italic, heading } from "excelts/word";
+import { Document, paragraph, text, bold, italic, heading } from "@cj-tech-master/excelts/word";
 
 const doc = Document.create();
 
@@ -74,7 +76,7 @@ const bytes = await toBuffer(model);
 ### Reading Documents
 
 ```typescript
-import { readDocx, extractText, searchText } from "excelts/word";
+import { readDocx, extractText, searchText } from "@cj-tech-master/excelts/word";
 
 const doc = await readDocx(fileBuffer);
 
@@ -88,7 +90,7 @@ const results = searchText(doc, /pattern/g);
 ### Modifying Documents
 
 ```typescript
-import { readDocx, replaceText, toBuffer } from "excelts/word";
+import { readDocx, replaceText, toBuffer } from "@cj-tech-master/excelts/word";
 
 const doc = await readDocx(buffer);
 const modified = replaceText(doc, "OLD_TEXT", "NEW_TEXT");
@@ -100,7 +102,7 @@ const output = await toBuffer(modified);
 ### Template Engine
 
 ```typescript
-import { fillTemplate } from "excelts/word";
+import { fillTemplate } from "@cj-tech-master/excelts/word";
 
 const filled = fillTemplate(doc, {
   name: "John",
@@ -113,7 +115,12 @@ const filled = fillTemplate(doc, {
 ### Form Fields
 
 ```typescript
-import { extractFormFields, fillFormFields, formTextField, formCheckboxField } from "excelts/word";
+import {
+  extractFormFields,
+  fillFormFields,
+  formTextField,
+  formCheckboxField
+} from "@cj-tech-master/excelts/word";
 
 // Extract form data
 const fields = extractFormFields(doc);
@@ -133,7 +140,7 @@ const filled = fillFormFields(
 ### Data Binding (OpenDoPE)
 
 ```typescript
-import { resolveDataBindings } from "excelts/word";
+import { resolveDataBindings } from "@cj-tech-master/excelts/word";
 
 // Resolve SDT data bindings against CustomXML parts
 const resolved = resolveDataBindings(doc);
@@ -148,7 +155,7 @@ const resolved2 = resolveDataBindings(
 ### Drawing Shapes with Effects
 
 ```typescript
-import { createShape, createRect, createEllipse } from "excelts/word";
+import { createShape, createRect, createEllipse } from "@cj-tech-master/excelts/word";
 
 const shape = createShape({
   shapeType: "roundRect",
@@ -183,7 +190,7 @@ const shape = createShape({
 ### Font Embedding with Subsetting
 
 ```typescript
-import { embedFont, addEmbeddedFonts, subsetFont } from "excelts/word";
+import { embedFont, addEmbeddedFonts, subsetFont } from "@cj-tech-master/excelts/word";
 
 // Embed with automatic subsetting (only glyphs used in document)
 const result = embedFont({
@@ -200,7 +207,7 @@ const docWithFonts = addEmbeddedFonts(doc, [result]);
 ### Track Changes
 
 ```typescript
-import { acceptAllRevisions, rejectAllRevisions } from "excelts/word";
+import { acceptAllRevisions, rejectAllRevisions } from "@cj-tech-master/excelts/word";
 
 const accepted = acceptAllRevisions(doc);
 const rejected = rejectAllRevisions(doc);
@@ -209,7 +216,7 @@ const rejected = rejectAllRevisions(doc);
 ### Document Diff
 
 ```typescript
-import { diffDocuments } from "excelts/word";
+import { diffDocuments } from "@cj-tech-master/excelts/word";
 
 const diff = diffDocuments(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
@@ -218,7 +225,7 @@ const diff = diffDocuments(docA, docB);
 ### Document Merge
 
 ```typescript
-import { mergeDocuments } from "excelts/word";
+import { mergeDocuments } from "@cj-tech-master/excelts/word";
 
 const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
@@ -226,7 +233,7 @@ const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ### Streaming Writer
 
 ```typescript
-import { createDocxStream } from "excelts/word";
+import { createDocxStream } from "@cj-tech-master/excelts/word";
 
 const stream = createDocxStream();
 stream.addParagraph("Title", { style: "Heading1" });
@@ -239,7 +246,11 @@ const buffer = await stream.finalize();
 ### Document Protection
 
 ```typescript
-import { protectDocument, isDocumentProtected, verifyProtectionPassword } from "excelts/word";
+import {
+  protectDocument,
+  isDocumentProtected,
+  verifyProtectionPassword
+} from "@cj-tech-master/excelts/word";
 
 const protected = protectDocument(doc, { type: "readOnly", password: "secret" });
 const isProtected = isDocumentProtected(protected); // true
@@ -249,7 +260,7 @@ const valid = verifyProtectionPassword(protected, "secret"); // true
 ### Validation
 
 ```typescript
-import { validateDocument } from "excelts/word";
+import { validateDocument } from "@cj-tech-master/excelts/word";
 
 const result = validateDocument(doc);
 if (!result.valid) {
@@ -263,28 +274,28 @@ if (!result.valid) {
 // DOCX → Markdown (GFM: headings, bold/italic/strike, inline code,
 // code blocks, blockquotes, ordered/unordered lists, tables with
 // alignment, links, images, footnotes)
-import { renderToMarkdown } from "excelts/word/markdown";
+import { renderToMarkdown } from "@cj-tech-master/excelts/word/markdown";
 const md = renderToMarkdown(doc);
 const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX (full document or body fragment)
-import { markdownToDocx, markdownToDocxBody } from "excelts/word/markdown";
+import { markdownToDocx, markdownToDocxBody } from "@cj-tech-master/excelts/word/markdown";
 const doc = markdownToDocx("# Title\n\nHello **world**");
 const bodyItems = markdownToDocxBody("- a\n- b");
 
 // DOCX → HTML
-import { renderToHtml } from "excelts/word/html";
+import { renderToHtml } from "@cj-tech-master/excelts/word/html";
 const html = renderToHtml(doc);
 
 // HTML → DOCX body content
-import { htmlToDocxBody } from "excelts/word/html";
+import { htmlToDocxBody } from "@cj-tech-master/excelts/word/html";
 const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ```
 
 ### Flat OPC Format
 
 ```typescript
-import { parseFlatOpc, toFlatOpc, isFlatOpc } from "excelts/word";
+import { parseFlatOpc, toFlatOpc, isFlatOpc } from "@cj-tech-master/excelts/word";
 
 // Single-XML representation of a DOCX
 const flatXml = toFlatOpc(doc);
@@ -299,8 +310,8 @@ borders), column widths, rich-text runs, and an optional title page.
 Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
-import { excelToDocx, extractTablesToExcel } from "excelts/word/excel";
-import { packageDocx } from "excelts/word";
+import { excelToDocx, extractTablesToExcel } from "@cj-tech-master/excelts/word/excel";
+import { packageDocx } from "@cj-tech-master/excelts/word";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
 const doc = excelToDocx(workbook);
@@ -332,8 +343,8 @@ inline images, headers/footers, and floats all render identically to the
 SVG path.
 
 ```typescript
-import { readDocx } from "excelts/word";
-import { docxToPdf } from "excelts/pdf";
+import { readDocx } from "@cj-tech-master/excelts/word";
+import { docxToPdf } from "@cj-tech-master/excelts/pdf";
 
 const doc = await readDocx(docxBytes);
 const pdfBytes = await docxToPdf(doc);
@@ -362,8 +373,8 @@ degrade to a titled placeholder box (no throw, no blank page). To supply
 your own classic-chart renderer:
 
 ```typescript
-import { installChartSupport } from "excelts/chart";
-import { docxToPdf, createWordChartPdfRenderer } from "excelts/pdf";
+import { installChartSupport } from "@cj-tech-master/excelts/chart";
+import { docxToPdf, createWordChartPdfRenderer } from "@cj-tech-master/excelts/pdf";
 
 installChartSupport();
 const pdf = await docxToPdf(doc, {
@@ -394,7 +405,7 @@ transparently normalized to their Transitional equivalents — no user action re
 | ISO 29500 Strict       | ✅ Auto-normalized                                             |
 | Encrypted .docx        | ✅ Decrypt with password (Agile Encryption)                    |
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
-| Browser                | ✅ (import from "excelts/word/browser")                        |
+| Browser                | ✅ (import from "@cj-tech-master/excelts/word/browser")        |
 | Node.js 22+            | ✅                                                             |
 
 ## Migration from `docx` (npm)
