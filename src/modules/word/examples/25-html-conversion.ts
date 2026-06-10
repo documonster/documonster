@@ -26,7 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderToHtml, htmlToDocxBody } from "../html";
+import { renderToHtml, htmlToDocx } from "../html";
 import { Document, toBuffer, readDocx } from "../index";
 
 const outDir = path.resolve(
@@ -86,8 +86,8 @@ const inputHtml = /* html */ `
 
     <h2>Images</h2>
     <p>Inline base64 image:
-      <img alt="red dot"
-           src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC" /></p>
+      <img alt="checkerboard"
+           src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAwElEQVR4nO3QMRGAQBTE0HOCD0TgB8e4ABG/eHNDiq2TzXrO853suO7RNH9pAc0vgBbQ/AJoAc0vgBbQ/AJoAc0vgBbQ/AJoAc0vgBbQ/LX7gSm/AFpA8wugBTS/AFpA8wugBTS/AFpA8wugBTS/AFpA8wuw+4EpvwBaQPMLoAU0vwBaQPMLoAU0vwBaQPMLoAU0vwBaQPMLsPuBKb8AWkDzC6AFNL8AWkDzC6AFNL8AWkDzC6AFNL8AWkDzfx/gAwMMAf/OkDDpAAAAAElFTkSuQmCC" /></p>
 
     <h2>Code block</h2>
     <pre>function hello() {
@@ -103,14 +103,14 @@ const inputHtml = /* html */ `
   </body>
 </html>`;
 
-const body = htmlToDocxBody(inputHtml, {
+const { body, images: htmlImages } = htmlToDocx(inputHtml, {
   defaultFont: "Calibri",
   defaultFontSize: 22,
   classStyles: {
     quote: "border-left: 3px solid #1F4E79; padding-left: 12px;"
   }
 });
-console.log(`  htmlToDocxBody → ${body.length} body content blocks`);
+console.log(`  htmlToDocx → ${body.length} body content blocks, ${htmlImages.length} images`);
 
 // Wrap into a full document. htmlToDocxBody emits paragraphs that reference
 // numId=1 (bullets) and numId=2 (ordered), but it does NOT define those
@@ -124,6 +124,7 @@ for (const item of body) {
 const built = Document.build(doc);
 const finalDoc = {
   ...built,
+  images: [...(built.images ?? []), ...htmlImages],
   abstractNumberings: [
     ...(built.abstractNumberings ?? []),
     {
@@ -207,3 +208,15 @@ const frag = renderToHtml(reread, {
 });
 fs.writeFileSync(path.join(outDir, "25-html-fragment.html"), frag.html);
 console.log("  → 25-html-fragment.html");
+
+// In "filename" image mode the <img> tags reference external files by name,
+// so the HTML is only usable if those files sit next to it. Write each image
+// the fragment references out to disk using the raw bytes from the re-read
+// document model.
+const fileNames = new Set(frag.images.keys());
+for (const img of reread.images ?? []) {
+  if (fileNames.has(img.fileName)) {
+    fs.writeFileSync(path.join(outDir, img.fileName), img.data);
+    console.log(`  → ${img.fileName} (${img.data.length} bytes)`);
+  }
+}

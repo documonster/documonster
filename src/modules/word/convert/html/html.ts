@@ -15,5 +15,5 @@ export { renderToHtml } from "./html-renderer";
 export type { HtmlRenderOptions, HtmlRenderResult } from "./html-renderer";
 
 // HTML → DOCX import (HTML string → BodyContent[])
-export { htmlToDocxBody } from "./html-import";
-export type { HtmlImportOptions } from "./html-import";
+export { htmlToDocxBody, htmlToDocx } from "./html-import";
+export type { HtmlImportOptions, HtmlToDocxResult } from "./html-import";

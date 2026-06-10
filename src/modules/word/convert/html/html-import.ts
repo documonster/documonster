@@ -21,10 +21,14 @@
  * ```
  */
 
+import { base64ToUint8Array } from "@utils/utils";
+
 import { sanitizeUrl } from "../../core/internal-utils";
 import type {
   BodyContent,
   Hyperlink,
+  ImageDef,
+  ImageMediaType,
   InlineImageContent,
   Paragraph,
   ParagraphChild,
@@ -73,10 +77,7 @@ export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyC
   const tokens = tokenize(html);
   // Extract <style> rules and merge with user-provided classStyles
   const extractedStyles = extractStyleRules(tokens);
-  const classStyles: Record<string, string> = {
-    ...extractedStyles,
-    ...(options?.classStyles ?? {})
-  };
+  const classStyles = mergeClassStyles(extractedStyles, options?.classStyles ?? {});
 
   // Seed the inline context with the caller-supplied defaults so plain text
   // runs actually carry the requested font/size. Without this the options
@@ -91,6 +92,56 @@ export function htmlToDocxBody(html: string, options?: HtmlImportOptions): BodyC
 
   parseBlocks(tokens, 0, blocks, initialCtx, classStyles);
   return blocks;
+}
+
+/** Result of {@link htmlToDocx}: body content plus the images it references. */
+export interface HtmlToDocxResult {
+  /** Parsed body content blocks. */
+  readonly body: BodyContent[];
+  /**
+   * Images decoded from base64 `data:` URLs in the HTML, each with a unique
+   * rId already referenced by the matching image run in `body`. Merge these
+   * into the document model's `images` array so the pictures are embedded as
+   * real media in the package instead of dropped as placeholders.
+   */
+  readonly images: ImageDef[];
+}
+
+/**
+ * Convert an HTML string into DOCX body content **and** embedded images.
+ *
+ * Unlike {@link htmlToDocxBody}, this decodes base64 `data:` image URLs into
+ * real {@link ImageDef}s and assigns each a unique rId that the emitted image
+ * runs reference. Merge the returned `images` into your document model so the
+ * pictures are embedded rather than dropped as placeholders.
+ *
+ * @example
+ * ```ts
+ * const { body, images } = htmlToDocx(html);
+ * const doc = Document.create();
+ * for (const item of body) Document.addContent(doc, item);
+ * const built = Document.build(doc);
+ * const final = { ...built, images: [...(built.images ?? []), ...images] };
+ * const bytes = await toBuffer(final);
+ * ```
+ */
+export function htmlToDocx(html: string, options?: HtmlImportOptions): HtmlToDocxResult {
+  const blocks: BodyContent[] = [];
+  const tokens = tokenize(html);
+  const extractedStyles = extractStyleRules(tokens);
+  const classStyles = mergeClassStyles(extractedStyles, options?.classStyles ?? {});
+
+  const images: ImageDef[] = [];
+  const initialCtx: InlineContext = { imageSink: images };
+  if (options?.defaultFont) {
+    initialCtx.fontFamily = options.defaultFont;
+  }
+  if (options?.defaultFontSize !== undefined) {
+    initialCtx.fontSize = options.defaultFontSize;
+  }
+
+  parseBlocks(tokens, 0, blocks, initialCtx, classStyles);
+  return { body: blocks, images };
 }
 
 // =============================================================================
@@ -545,6 +596,26 @@ function extractStyleRules(tokens: Token[]): Record<string, string> {
     i++;
   }
   return result;
+}
+
+/**
+ * Merge two class→style maps. For classes present in both, the declarations
+ * are concatenated (extracted `<style>` rules first, caller-supplied overrides
+ * last) so the later source wins per CSS cascade while still preserving
+ * properties only declared by the other source. A plain `{ ...a, ...b }`
+ * would discard the extracted rule entirely whenever the caller supplies the
+ * same class name, silently dropping e.g. `font-style`/`color` from `<style>`.
+ */
+function mergeClassStyles(
+  extracted: Record<string, string>,
+  overrides: Record<string, string>
+): Record<string, string> {
+  const merged: Record<string, string> = { ...extracted };
+  for (const [name, style] of Object.entries(overrides)) {
+    const existing = merged[name];
+    merged[name] = existing ? `${existing}; ${style}` : style;
+  }
+  return merged;
 }
 
 /**
@@ -1227,6 +1298,14 @@ interface InlineContext {
   code?: boolean;
   fontFamily?: string;
   fontSize?: number;
+  /**
+   * Collector for embedded images discovered during parsing. When present,
+   * base64 `data:` image sources are decoded and pushed here as ImageDefs;
+   * the emitted InlineImageContent references the same rId. Shared by
+   * reference across the (shallow-copied) inline contexts so a single sink
+   * accumulates every image in the document.
+   */
+  imageSink?: ImageDef[];
 }
 
 const _BLOCK_TAGS = new Set([
@@ -1286,6 +1365,17 @@ function parseBlocks(
     }
 
     if (tok.type === "text") {
+      // In block context, text nodes that are pure inter-element whitespace
+      // (the newlines/indentation between block tags in pretty-printed HTML)
+      // carry no content and must be ignored — otherwise every gap between
+      // <p>/<table>/<div> tags would emit a spurious empty paragraph (and
+      // the contained newline would be rendered as a <w:br/> soft break).
+      // Whitespace that sits between inline runs is preserved by the inline
+      // parser, which handles it separately.
+      if (tok.value.trim() === "") {
+        i++;
+        continue;
+      }
       if (!pendingInline) {
         pendingInline = { runs: [], ctx: parentCtx };
       }
@@ -1648,7 +1738,7 @@ function parseInlineTag(
     if (tag === "br") {
       runs.push({ content: [{ type: "break" }] } as Run);
     } else if (tag === "img") {
-      const imgContent = buildImageContent(tok.attrs);
+      const imgContent = buildImageContent(tok.attrs, ctx);
       if (imgContent) {
         runs.push({ content: [imgContent] } as Run);
       } else {
@@ -1711,13 +1801,15 @@ function parseInlineTag(
         innerRuns.push(makeRun(t.value, { ...ctx }));
         i++;
       } else if (t.type === "close") {
+        // Mismatched close tag — close the hyperlink here but do NOT
+        // consume the token; let the caller handle the block boundary.
         const hyperlink: Hyperlink = {
           type: "hyperlink",
           url: safeHref ?? "",
           children: innerRuns
         };
         runs.push(hyperlink);
-        return i + 1;
+        return i;
       } else {
         const childRuns: ParagraphChild[] = [];
         i = parseInlineTag(tokens, i, childRuns, { ...ctx }, classStyles);
@@ -1756,7 +1848,12 @@ function parseInlineTag(
       runs.push(makeRun(t.value, newCtx));
       i++;
     } else if (t.type === "close") {
-      return i + 1;
+      // Mismatched close tag (e.g. </p> while inside an unclosed <strong>).
+      // Do NOT consume it — return the current index so the caller can
+      // handle it. Consuming a block-level close here would swallow the
+      // parent paragraph boundary and pull all following block content
+      // into this run, breaking page breaks, tables, etc.
+      return i;
     } else {
       i = parseInlineTag(tokens, i, runs, newCtx, classStyles);
     }
@@ -1856,6 +1953,15 @@ function parseListItem(
 
     // Text content
     if (tok.type === "text") {
+      // Skip structural whitespace: the indentation/newlines that sit between
+      // a nested <ul>/<ol> and the closing </li> (or at the very start of the
+      // item) are not real content. Emitting them as runs would otherwise
+      // produce a spurious empty list-item paragraph. Whitespace *between*
+      // real inline content is preserved because `children` is non-empty then.
+      if (tok.value.trim() === "" && children.length === 0) {
+        i++;
+        continue;
+      }
       children.push(makeRun(tok.value, ctx));
       i++;
       continue;
@@ -2327,7 +2433,10 @@ function mapCssBorderStyle(cssStyle: string): "single" | "double" | "dotted" | "
 // =============================================================================
 
 /** Build InlineImageContent from img attributes or return undefined if not applicable. */
-function buildImageContent(attrs: Record<string, string>): InlineImageContent | undefined {
+function buildImageContent(
+  attrs: Record<string, string>,
+  ctx?: InlineContext
+): InlineImageContent | undefined {
   const src = attrs["src"] || "";
   const alt = attrs["alt"] || "";
 
@@ -2350,11 +2459,37 @@ function buildImageContent(attrs: Record<string, string>): InlineImageContent | 
   const widthEmu = (width || 100) * EMU_PER_PX;
   const heightEmu = (height || 100) * EMU_PER_PX;
 
-  // Both data: and http(s) URLs become placeholders. The DOCX writer needs
-  // a real ImageDef registered in `doc.images` plus a corresponding
-  // relationship; htmlToDocxBody returns BodyContent[] only and cannot do
-  // that registration. We surface the original src in the alt text so the
-  // user can post-process if they need real embedded images.
+  // base64 data: URLs can be decoded and embedded as a real media file when
+  // an image sink is provided (htmlToDocx path). The decoded bytes are
+  // registered as an ImageDef and the run references the assigned rId.
+  if (src.startsWith("data:") && ctx?.imageSink) {
+    const decoded = decodeDataUrlImage(src);
+    if (decoded) {
+      const sink = ctx.imageSink;
+      const index = sink.length;
+      const rId = `htmlImg${index}`;
+      const ext = decoded.mediaType === "jpeg" ? "jpg" : decoded.mediaType;
+      sink.push({
+        data: decoded.data,
+        mediaType: decoded.mediaType,
+        fileName: `image_html_${index}.${ext}`,
+        rId
+      });
+      return {
+        type: "image",
+        rId,
+        width: widthEmu,
+        height: heightEmu,
+        altText: alt || undefined,
+        name: alt || `image${index}`
+      };
+    }
+  }
+
+  // No sink (htmlToDocxBody only returns BodyContent[] and cannot register
+  // media) or an unsupported/remote source: emit a placeholder with an empty
+  // rId. The renderer treats an empty rId as a placeholder; the original src
+  // is surfaced in the alt text so callers can post-process if needed.
   if (src.startsWith("data:") || src.startsWith("http://") || src.startsWith("https://")) {
     return {
       type: "image",
@@ -2367,6 +2502,57 @@ function buildImageContent(attrs: Record<string, string>): InlineImageContent | 
   }
 
   return undefined;
+}
+
+/** Decode a `data:image/...;base64,...` URL into bytes + media type. */
+function decodeDataUrlImage(
+  src: string
+): { data: Uint8Array; mediaType: ImageMediaType } | undefined {
+  // data:image/png;base64,XXXX
+  const match = /^data:image\/([a-z0-9.+-]+)\s*;\s*base64\s*,(.*)$/is.exec(src);
+  if (!match) {
+    return undefined;
+  }
+  const rawType = match[1].toLowerCase();
+  const b64 = match[2].replace(/\s+/g, "");
+  const mediaType = normalizeImageMediaType(rawType);
+  if (!mediaType) {
+    return undefined;
+  }
+  try {
+    const data = base64ToUint8Array(b64);
+    if (data.length === 0) {
+      return undefined;
+    }
+    return { data, mediaType };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Map a data-URL image subtype to a supported ImageMediaType. */
+function normalizeImageMediaType(subtype: string): ImageMediaType | undefined {
+  switch (subtype) {
+    case "png":
+      return "png";
+    case "jpeg":
+    case "jpg":
+      return "jpeg";
+    case "gif":
+      return "gif";
+    case "bmp":
+      return "bmp";
+    case "tiff":
+    case "tif":
+      return "tiff";
+    case "svg+xml":
+    case "svg":
+      return "svg";
+    case "webp":
+      return "webp";
+    default:
+      return undefined;
+  }
 }
 
 /** Parse an image dimension from HTML attribute value (number or "Npx"). */
@@ -2511,6 +2697,12 @@ function resolveEffectiveStyle(
 // =============================================================================
 
 function makeRun(text: string, ctx: InlineContext): Run {
+  // HTML whitespace handling: outside <pre>/<code>, runs of whitespace
+  // (including the newlines/indentation from source-code line wrapping)
+  // collapse to a single space. Inside <pre>/<code> whitespace is
+  // significant and preserved verbatim.
+  const value = ctx.code ? text : text.replace(/\s+/g, " ");
+
   const props: Record<string, unknown> = {};
   if (ctx.bold) {
     props.bold = true;
@@ -2547,7 +2739,7 @@ function makeRun(text: string, ctx: InlineContext): Run {
 
   const run: Run = {
     ...(Object.keys(props).length > 0 ? { properties: props as RunProperties } : {}),
-    content: [{ type: "text", text }]
+    content: [{ type: "text", text: value }]
   };
 
   return run;
