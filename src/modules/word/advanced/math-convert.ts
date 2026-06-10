@@ -389,7 +389,11 @@ function convertMMLElement(el: MMLElement): MathContent | MathContent[] | undefi
     }
     case "msqrt": {
       const content = convertMMLChildren(el.children);
-      return { type: "mathRadical", content } as MathRadical;
+      // A bare square root has no degree. OOXML still emits an (empty)
+      // <m:deg/>, so we must set hideDegree → <m:degHide m:val="1"/>;
+      // otherwise Word treats the empty degree as visible and draws an empty
+      // degree box (a small square) at the radical's upper-left.
+      return { type: "mathRadical", content, hideDegree: true } as MathRadical;
     }
     case "mroot": {
       const children = getElementChildren(el);

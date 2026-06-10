@@ -256,6 +256,16 @@ describe("mathMLToOmml", () => {
     const rad = result[0] as any;
     expect(rad.content[0].text).toBe("x");
     expect(rad.degree).toBeUndefined();
+    // A bare square root must hide the (empty) degree so Word does not draw an
+    // empty degree box at the radical's upper-left.
+    expect(rad.hideDegree).toBe(true);
+  });
+
+  it("should hide the degree in the OMML for an imported square root", () => {
+    const omml = mathMLToOmml("<math><msqrt><mn>2</mn></msqrt></math>");
+    const xml = ommlToMathML(omml); // sanity: round-trips back to <msqrt>
+    expect(xml).toContain("<msqrt>");
+    expect((omml[0] as any).hideDegree).toBe(true);
   });
 
   it("should parse nth root", () => {
