@@ -116,15 +116,26 @@ fs.mkdirSync(outDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // 4. validateDocument exposes structural problems
+//
+// Cross-reference checks only run once the document actually defines numbering
+// (otherwise a body that legitimately carries no numbering would be flagged).
+// So we define numId 1 and then reference the undefined numId 999: the
+// validator flags the dangling reference via the "xref-numbering-missing" rule.
 // ---------------------------------------------------------------------------
 {
-  // numId 999 is not defined — validator flags it via xref-numId-missing
   const result = validateDocument({
-    body: [textParagraph("dangling ref", { numbering: { numId: 999, level: 0 } })]
+    body: [
+      textParagraph("valid ref", { numbering: { numId: 1, level: 0 } }),
+      textParagraph("dangling ref", { numbering: { numId: 999, level: 0 } })
+    ],
+    abstractNumberings: [{ abstractNumId: 0, levels: [] }],
+    numberingInstances: [{ numId: 1, abstractNumId: 0 }]
   });
-  console.log(
-    `  validation issues for dangling numbering: ${result.issues.filter(i => i.rule.includes("numId")).length}`
-  );
+  const danglingIssues = result.issues.filter(i => i.rule === "xref-numbering-missing");
+  console.log(`  validation issues for dangling numbering: ${danglingIssues.length}`);
+  for (const issue of danglingIssues) {
+    console.log(`    · [${issue.rule}] ${issue.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
