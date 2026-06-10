@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.6.1](https://github.com/cjnoname/excelts/compare/v9.6.0...v9.6.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **excel:** Read legacy comment body written as a bare &lt;t&gt; run ([d802cba](https://github.com/cjnoname/excelts/commit/d802cba9cc8203b27a80c987587181c794b6e5fd)), closes [#173](https://github.com/cjnoname/excelts/issues/173)
+* **types:** Avoid DOM-only globals in emitted declarations ([4f21191](https://github.com/cjnoname/excelts/commit/4f21191f794fc15b27a5a20081f4ce98c079a076)), closes [#174](https://github.com/cjnoname/excelts/issues/174)
+
 ## [9.6.0](https://github.com/cjnoname/excelts/compare/v9.5.9...v9.6.0) (2026-05-31)
 
 
