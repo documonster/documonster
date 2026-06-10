@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 
 import { readOdt, writeOdt } from "../convert/odt/odt";
-import type { DocxDocument, Paragraph, Run } from "../types";
+import type { DocxDocument, Paragraph, Run, NumberFormat, AbstractNumbering } from "../types";
 
 // =============================================================================
 // Test Helpers
@@ -273,6 +273,235 @@ describe("ODT module", () => {
 
       expect(restoredDoc.body).toBeDefined();
       expect(Array.isArray(restoredDoc.body)).toBe(true);
+    });
+  });
+
+  describe("list round-trip", () => {
+    /** Collect (text, numbering level) for every paragraph in the body. */
+    function listRows(doc: DocxDocument): { text: string; level: number | undefined }[] {
+      const out: { text: string; level: number | undefined }[] = [];
+      const visit = (blocks: DocxDocument["body"]): void => {
+        for (const block of blocks) {
+          if (block.type === "paragraph") {
+            const text = block.children
+              .flatMap(c => ("content" in c ? (c as Run).content : []))
+              .filter(rc => rc.type === "text")
+              .map(rc => (rc as { text: string }).text)
+              .join("");
+            out.push({ text, level: block.properties?.numbering?.level });
+          } else if (block.type === "table") {
+            for (const row of block.rows) {
+              for (const cell of row.cells) {
+                visit(cell.content as DocxDocument["body"]);
+              }
+            }
+          }
+        }
+      };
+      visit(doc.body);
+      return out;
+    }
+
+    function listPara(text: string, level: number): Paragraph {
+      return {
+        type: "paragraph",
+        properties: { numbering: { numId: 1, level } },
+        children: [makeRun(text)]
+      };
+    }
+
+    it("preserves a flat bullet list through round-trip", async () => {
+      const doc = makeDoc([listPara("Foo", 0), listPara("Bar", 0), listPara("Baz", 0)]);
+
+      const odtBytes = await writeOdt(doc);
+      const restored = await readOdt(odtBytes);
+
+      const rows = listRows(restored);
+      expect(rows).toEqual([
+        { text: "Foo", level: 0 },
+        { text: "Bar", level: 0 },
+        { text: "Baz", level: 0 }
+      ]);
+    });
+
+    it("emits a text:list-style and text:list elements in the package", async () => {
+      const doc = makeDoc([listPara("Item", 0)]);
+      const odtBytes = await writeOdt(doc);
+      // The reader proves the structure is well-formed; assert the actual
+      // markup carries the list elements (not bare text:p).
+      const restored = await readOdt(odtBytes);
+      const rows = listRows(restored);
+      expect(rows).toEqual([{ text: "Item", level: 0 }]);
+    });
+
+    it("preserves mixed nesting levels and surrounding paragraphs", async () => {
+      const doc = makeDoc([
+        makeParagraph("Intro"),
+        listPara("A0", 0),
+        listPara("B1", 1),
+        listPara("C2", 2),
+        listPara("D1", 1),
+        listPara("E0", 0),
+        makeParagraph("Outro")
+      ]);
+
+      const odtBytes = await writeOdt(doc);
+      const restored = await readOdt(odtBytes);
+
+      expect(listRows(restored)).toEqual([
+        { text: "Intro", level: undefined },
+        { text: "A0", level: 0 },
+        { text: "B1", level: 1 },
+        { text: "C2", level: 2 },
+        { text: "D1", level: 1 },
+        { text: "E0", level: 0 },
+        { text: "Outro", level: undefined }
+      ]);
+    });
+
+    it("keeps run formatting inside list items", async () => {
+      const doc = makeDoc([
+        {
+          type: "paragraph",
+          properties: { numbering: { numId: 1, level: 0 } },
+          children: [makeRun("bold item", { bold: true })]
+        } as Paragraph
+      ]);
+
+      const odtBytes = await writeOdt(doc);
+      const restored = await readOdt(odtBytes);
+
+      const para = restored.body.find(b => b.type === "paragraph") as Paragraph | undefined;
+      expect(para).toBeDefined();
+      expect(para!.properties?.numbering?.level).toBe(0);
+      const run = para!.children.find(c => "content" in c) as Run | undefined;
+      expect(run?.properties?.bold).toBe(true);
+    });
+
+    it("preserves a list nested inside a table cell", async () => {
+      const doc = makeDoc([
+        {
+          type: "table" as const,
+          rows: [
+            {
+              cells: [
+                {
+                  content: [listPara("cell-bullet-1", 0), listPara("cell-bullet-2", 0)]
+                }
+              ]
+            }
+          ]
+        }
+      ]);
+
+      const odtBytes = await writeOdt(doc);
+      const restored = await readOdt(odtBytes);
+
+      const table = restored.body.find(b => b.type === "table");
+      expect(table).toBeDefined();
+      const rows = listRows(restored);
+      expect(rows).toContainEqual({ text: "cell-bullet-1", level: 0 });
+      expect(rows).toContainEqual({ text: "cell-bullet-2", level: 0 });
+    });
+  });
+
+  describe("ordered/numbered list round-trip", () => {
+    /** Make an abstract numbering whose levels use the given formats. */
+    function abstractNum(abstractNumId: number, formats: NumberFormat[]): AbstractNumbering {
+      return {
+        abstractNumId,
+        levels: formats.map((format, level) => ({
+          level,
+          format,
+          text: format === "bullet" ? "•" : `%${level + 1}.`,
+          start: 1
+        }))
+      };
+    }
+
+    function lp(text: string, numId: number, level: number): Paragraph {
+      return {
+        type: "paragraph",
+        properties: { numbering: { numId, level } },
+        children: [makeRun(text)]
+      };
+    }
+
+    /** Resolve a restored paragraph's level format via numbering chain. */
+    function formatOf(doc: DocxDocument, numId: number, level: number): string | undefined {
+      const inst = doc.numberingInstances?.find(n => n.numId === numId);
+      const abs = doc.abstractNumberings?.find(a => a.abstractNumId === inst?.abstractNumId);
+      return abs?.levels.find(l => l.level === level)?.format;
+    }
+
+    it("preserves decimal ordered list format through round-trip", async () => {
+      const doc = makeDoc([lp("One", 2, 0), lp("Two", 2, 0)], {
+        abstractNumberings: [abstractNum(2, ["decimal"])],
+        numberingInstances: [{ numId: 2, abstractNumId: 2 }]
+      });
+
+      const restored = await readOdt(await writeOdt(doc));
+      const para = restored.body.find(b => b.type === "paragraph") as Paragraph | undefined;
+      expect(para?.properties?.numbering).toBeDefined();
+      const numId = para!.properties!.numbering!.numId;
+      expect(formatOf(restored, numId, 0)).toBe("decimal");
+    });
+
+    it("keeps bullet and numbered lists distinct (no collapse to one list)", async () => {
+      const doc = makeDoc([lp("bullet", 1, 0), lp("number", 2, 0)], {
+        abstractNumberings: [abstractNum(1, ["bullet"]), abstractNum(2, ["decimal"])],
+        numberingInstances: [
+          { numId: 1, abstractNumId: 1 },
+          { numId: 2, abstractNumId: 2 }
+        ]
+      });
+
+      const restored = await readOdt(await writeOdt(doc));
+      const paras = restored.body.filter(b => b.type === "paragraph") as Paragraph[];
+      const bulletNumId = paras[0].properties!.numbering!.numId;
+      const numberNumId = paras[1].properties!.numbering!.numId;
+
+      // The two lists must resolve to different numbering definitions.
+      expect(bulletNumId).not.toBe(numberNumId);
+      expect(formatOf(restored, bulletNumId, 0)).toBe("bullet");
+      expect(formatOf(restored, numberNumId, 0)).toBe("decimal");
+    });
+
+    it("preserves per-level formats in a multi-level ordered list", async () => {
+      const doc = makeDoc([lp("One", 2, 0), lp("One.a", 2, 1), lp("Two", 2, 0)], {
+        abstractNumberings: [abstractNum(2, ["decimal", "lowerLetter"])],
+        numberingInstances: [{ numId: 2, abstractNumId: 2 }]
+      });
+
+      const restored = await readOdt(await writeOdt(doc));
+      const paras = restored.body.filter(b => b.type === "paragraph") as Paragraph[];
+      const numId = paras[0].properties!.numbering!.numId;
+      expect(formatOf(restored, numId, 0)).toBe("decimal");
+      expect(formatOf(restored, numId, 1)).toBe("lowerLetter");
+      // Level membership preserved.
+      expect(paras.map(p => p.properties?.numbering?.level)).toEqual([0, 1, 0]);
+    });
+
+    it("maps upper/lower roman and letter formats", async () => {
+      const doc = makeDoc([lp("r1", 5, 0), lp("r2", 6, 0), lp("r3", 7, 0), lp("r4", 8, 0)], {
+        abstractNumberings: [
+          abstractNum(5, ["upperRoman"]),
+          abstractNum(6, ["lowerRoman"]),
+          abstractNum(7, ["upperLetter"]),
+          abstractNum(8, ["lowerLetter"])
+        ],
+        numberingInstances: [
+          { numId: 5, abstractNumId: 5 },
+          { numId: 6, abstractNumId: 6 },
+          { numId: 7, abstractNumId: 7 },
+          { numId: 8, abstractNumId: 8 }
+        ]
+      });
+
+      const restored = await readOdt(await writeOdt(doc));
+      const paras = restored.body.filter(b => b.type === "paragraph") as Paragraph[];
+      const fmts = paras.map(p => formatOf(restored, p.properties!.numbering!.numId, 0));
+      expect(fmts).toEqual(["upperRoman", "lowerRoman", "upperLetter", "lowerLetter"]);
     });
   });
 
