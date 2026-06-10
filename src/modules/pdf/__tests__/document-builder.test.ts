@@ -21,6 +21,7 @@ import {
   asn1Parse
 } from "../index";
 import { generateTestCertificate } from "./test-certificate";
+import { buildTtfWithCmap } from "./ttf-test-utils";
 
 // =============================================================================
 // PdfDocumentBuilder — Free Text & Vector Drawing
@@ -362,6 +363,66 @@ describe("PdfDocumentBuilder", () => {
     void tmRegex;
   });
 
+  it("drawText applies rotation to every line of wrapped text", async () => {
+    // rotation + maxWidth must rotate each wrapped line (not silently drop
+    // the rotation). At 90° the text matrix becomes `0 1 -1 0`, and lines
+    // step along the rotated line-advance direction (local -y → page +x).
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage({ width: 400, height: 400 });
+    page.drawText("hello world foo", {
+      x: 100,
+      y: 150,
+      fontSize: 16,
+      maxWidth: 60,
+      rotation: 90
+    });
+    const bytes = await doc.build();
+    const pdfText = new TextDecoder("latin1").decode(bytes);
+    // Every wrapped line uses the rotated matrix.
+    const tms = [
+      ...pdfText.matchAll(/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) [\d.]+ [\d.]+ Tm/g)
+    ];
+    expect(tms.length).toBeGreaterThanOrEqual(2);
+    for (const m of tms) {
+      expect(Number.parseFloat(m[1])).toBeCloseTo(0, 4); // a = cos90 = 0
+      expect(Number.parseFloat(m[2])).toBeCloseTo(1, 4); // b = sin90 = 1
+      expect(Number.parseFloat(m[3])).toBeCloseTo(-1, 4); // c = -sin90 = -1
+      expect(Number.parseFloat(m[4])).toBeCloseTo(0, 4); // d = cos90 = 0
+    }
+  });
+
+  it("drawText right-aligns every wrapped line to the anchor with embedded metrics", async () => {
+    // anchor + maxWidth must right-align each wrapped line by its own width.
+    // Use an embedded font so the offset is measured with the rendering
+    // font, not the provisional Helvetica.
+    const ttf = buildTtfWithCmap([{ start: 0x20, end: 0x7a, delta: 1 - 0x20 }], 91, {
+      familyName: "AnchorWrapFont"
+    });
+    const doc = new PdfDocumentBuilder();
+    doc.embedFont(ttf);
+    const page = doc.addPage({ width: 400, height: 400 });
+    page.drawText("aaaa bb cccccc", {
+      x: 200,
+      y: 300,
+      fontSize: 12,
+      maxWidth: 60,
+      anchor: "end"
+    });
+    const bytes = await doc.build();
+    const pdfText = new TextDecoder("latin1").decode(bytes);
+    // Each line's Tm x-origin is x - lineWidth (end anchor); with differing
+    // line widths the origins must differ, all strictly less than x=200.
+    const xs = [...pdfText.matchAll(/1 0 0 1 (-?[\d.]+) [\d.]+ Tm/g)].map(m =>
+      Number.parseFloat(m[1])
+    );
+    expect(xs.length).toBeGreaterThanOrEqual(2);
+    for (const xi of xs) {
+      expect(xi).toBeLessThan(200);
+    }
+    // Lines have different widths → distinct origins (not all equal).
+    expect(new Set(xs.map(v => v.toFixed(3))).size).toBeGreaterThan(1);
+  });
+
   it("onWarning fires for unknown font family names", async () => {
     const warnings: string[] = [];
     const doc = new PdfDocumentBuilder().onWarning(msg => warnings.push(msg));
@@ -413,6 +474,170 @@ describe("PdfDocumentBuilder", () => {
     await doc.build();
     // With no embedFont call, the warning should fire.
     expect(warnings.some(w => w.includes("SimSun"))).toBe(true);
+  });
+
+  it("drawText preserves non-WinAnsi characters via an embedded CIDFont", async () => {
+    // Regression: previously `drawText` encoded text eagerly at draw time,
+    // before the font was decided. A non-WinAnsi code point such as U+2192
+    // (→) was routed through the Type1/WinAnsi fallback and silently
+    // collapsed to a space (0x20). Encoding is now deferred to build time,
+    // after fonts are resolved, so the embedded CIDFont receives every
+    // character.
+    //
+    // Build a deterministic TTF covering ASCII (0x20-0x5A) plus U+2192 so
+    // the test does not depend on host system fonts.
+    const ttf = buildTtfWithCmap(
+      [
+        // 0x20 (space) .. 0x5A ('Z') → glyphs 1..59
+        { start: 0x20, end: 0x5a, delta: 1 - 0x20 },
+        // U+2192 (→) → glyph 60
+        { start: 0x2192, end: 0x2192, delta: 60 - 0x2192 }
+      ],
+      61
+    );
+
+    const doc = new PdfDocumentBuilder();
+    doc.embedFont(ttf);
+    const page = doc.addPage({ width: 400, height: 200 });
+    page.drawText("DOCX \u2192 PDF", { x: 40, y: 150, fontSize: 16 });
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    // Embedded CIDFont must be used (Type0 + Identity-H), not Type1/WinAnsi.
+    expect(text).toContain("/Type0");
+    expect(text).toContain("Identity-H");
+
+    // The content stream must hex-encode the run through the embedded font
+    // resource and include the arrow's glyph id. The arrow maps to glyph 60
+    // (0x3C) in the source font; after subsetting it gets a new sequential
+    // CID, but the run must contain 9 two-byte CIDs (one per character,
+    // none dropped).
+    const tjMatch = text.match(/\/EF\d+ 16 Tf\s+[^\n]+Tm\s+<([0-9A-Fa-f]+)> Tj/);
+    expect(tjMatch).not.toBeNull();
+    const hex = tjMatch![1];
+    // "DOCX \u2192 PDF" is 10 code points → 10 CIDs × 4 hex chars = 40.
+    expect(hex.length).toBe(40);
+    // Every CID must be non-zero (no .notdef / dropped glyph).
+    const cids = hex.match(/.{4}/g)!;
+    expect(cids.every(c => c !== "0000")).toBe(true);
+  });
+
+  it("drawText routes a late auto-embedded font through the CIDFont (no WinAnsi space fallback)", async () => {
+    // Even when the font is discovered/embedded at build time (after the
+    // run was drawn against a Type1 resource), the deferred encoder must
+    // re-route the run through the now-available embedded font instead of
+    // emitting the stale Type1/WinAnsi bytes. We simulate the build-time
+    // embed by registering the font through the public embedFont API but
+    // drawing first — the draw still records a Type1 resource, and the
+    // deferred encode must override it.
+    const ttf = buildTtfWithCmap([{ start: 0x20, end: 0x5a, delta: 1 - 0x20 }], 60, {
+      familyName: "AsciiOnly"
+    });
+
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage();
+    // Draw before embedFont so resolveFont returns a Type1 resource name.
+    page.drawText("HELLO", { x: 40, y: 150, fontSize: 16 });
+    doc.embedFont(ttf);
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    expect(text).toContain("/Type0");
+    // The run must reference the embedded font resource, not the Type1 F1.
+    expect(text).toMatch(/\/EF\d+ 16 Tf/);
+  });
+
+  it("drawText falls back to Type3 glyphs for non-WinAnsi chars when no font covers them", async () => {
+    // With auto-discovery disabled and no embedFont, a non-WinAnsi code
+    // point that has a Type3 fallback glyph (U+2192 → is defined in
+    // type3-glyphs.ts) must render via a Type3 font, not collapse to a
+    // space. The deferred encoder splits the run into Type1 (WinAnsi) and
+    // Type3 sub-runs at build time.
+    const doc = new PdfDocumentBuilder().disableFontAutoDiscovery();
+    const page = doc.addPage({ width: 400, height: 200 });
+    page.drawText("A \u2192 B", { x: 40, y: 150, fontSize: 16 });
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    // A Type3 font must be emitted and referenced for the arrow.
+    expect(text).toContain("/Type3");
+    // No embedded CIDFont in this path.
+    expect(text).not.toContain("/Type0");
+  });
+
+  it("drawText preserves z-order between text and vector graphics", async () => {
+    // Deferred text fragments must keep their exact draw-order slot relative
+    // to eagerly-emitted graphics operators. Draw rect → text → rect and
+    // assert the operators appear in that order in the content stream.
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage({ width: 400, height: 200 });
+    page.drawRect({ x: 10, y: 10, width: 20, height: 20 });
+    page.drawText("MIDDLE", { x: 40, y: 100, fontSize: 12 });
+    page.drawRect({ x: 50, y: 50, width: 20, height: 20 });
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    const firstRect = text.indexOf("10 10 20 20 re");
+    const textOp = text.indexOf("(MIDDLE) Tj");
+    const secondRect = text.indexOf("50 50 20 20 re");
+    expect(firstRect).toBeGreaterThanOrEqual(0);
+    expect(textOp).toBeGreaterThan(firstRect);
+    expect(secondRect).toBeGreaterThan(textOp);
+  });
+
+  it("drawText anchor alignment uses the final embedded-font metrics", async () => {
+    // Anchor offset must be measured with the font that actually renders the
+    // glyphs. When a font is embedded (here up front, but the same deferred
+    // path serves build-time auto-embed), an end-anchored single character
+    // must shift left by the *embedded* advance width, not the provisional
+    // Helvetica estimate. Glyph 1 ('A') is given a 2000/1000-em advance, so
+    // at 10pt the run is 20pt wide → end anchor puts the origin at x - 20.
+    const ttf = buildTtfWithCmap([{ start: 0x41, end: 0x41, delta: 1 - 0x41 }], 2, {
+      advanceWidths: [500, 2000],
+      familyName: "WideFont"
+    });
+
+    const doc = new PdfDocumentBuilder();
+    doc.embedFont(ttf);
+    const page = doc.addPage({ width: 400, height: 200 });
+    page.drawText("A", { x: 100, y: 150, fontSize: 10, anchor: "end" });
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    // Tm translation x should be 100 - 20 = 80 (embedded width), and must NOT
+    // be the Helvetica 'A' (~6.67pt → ~93.3) the draw-time path would give.
+    const tm = text.match(/1 0 0 1 (-?[\d.]+) 150 Tm/);
+    expect(tm).not.toBeNull();
+    const originX = Number.parseFloat(tm![1]);
+    expect(originX).toBeCloseTo(80, 1);
+  });
+
+  it("drawText word-wrap uses the final embedded-font metrics", async () => {
+    // Word wrapping must break lines using the embedded font's widths. With
+    // a 2000/1000-em advance per glyph at 10pt, each character is 20pt wide.
+    // maxWidth 50 fits at most 2 chars per line (40pt) before the 3rd (60pt)
+    // overflows, so "AAA AAA" wraps to two lines. With Helvetica metrics
+    // (~6-7pt/char) it would fit on one line — proving the embedded metrics
+    // drive the break.
+    const ttf = buildTtfWithCmap([{ start: 0x41, end: 0x41, delta: 1 - 0x41 }], 2, {
+      advanceWidths: [500, 2000],
+      familyName: "WideFont2"
+    });
+
+    const doc = new PdfDocumentBuilder();
+    doc.embedFont(ttf);
+    const page = doc.addPage({ width: 400, height: 200 });
+    page.drawText("AAA AAA", { x: 20, y: 150, fontSize: 10, maxWidth: 50 });
+    const bytes = await doc.build();
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    // Two lines → two Tm ops at distinct y values (150 and 150 - leading).
+    const tmYs = [...text.matchAll(/1 0 0 1 [\d.]+ ([\d.]+) Tm/g)].map(m =>
+      Number.parseFloat(m[1])
+    );
+    expect(tmYs.length).toBe(2);
+    expect(tmYs[0]).toBeCloseTo(150, 1);
+    expect(tmYs[1]).toBeLessThan(150);
   });
 
   it("should set document metadata", async () => {
@@ -1539,6 +1764,33 @@ describe("PdfEditor — saveIncremental", () => {
     const readResult = await readPdf(result);
     expect(readResult.text).toContain("Original Content");
     expect(readResult.text).toContain("Overlay");
+  });
+
+  it("saveIncremental overlays embedded-font text without evaluating deferred text early", async () => {
+    // Regression: text is now emitted as a deferred fragment whose encoding
+    // runs at serialization time. `_hasOverlay()` must probe for content
+    // WITHOUT evaluating that fragment — evaluating it before
+    // writeFontResources would call encodeText prematurely and throw
+    // "subset mapping not available". Drawing non-WinAnsi text through an
+    // embedded font exercises exactly that path.
+    const originalPdf = await pdf([["Original Content"]]);
+    const editor = PdfEditor.load(originalPdf);
+
+    const ttf = buildTtfWithCmap(
+      [
+        { start: 0x20, end: 0x5a, delta: 1 - 0x20 },
+        { start: 0x2192, end: 0x2192, delta: 60 - 0x2192 }
+      ],
+      61
+    );
+    editor.embedFont(ttf);
+    editor.getPage(0).drawText("A \u2192 B", { x: 100, y: 400, fontSize: 16 });
+
+    // Must not throw, and the overlay must use the embedded CIDFont.
+    const result = await editor.saveIncremental();
+    const text = new TextDecoder("latin1").decode(result);
+    expect(text).toContain("/Type0");
+    expect(text).toMatch(/\/EF\d+ 16 Tf/);
   });
 
   it("should update form field values incrementally", async () => {

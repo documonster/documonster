@@ -26,7 +26,17 @@ import { pdfNumber } from "./pdf-object";
  * and non-stroking (fills/text). We provide methods for both.
  */
 export class PdfContentStream {
-  private parts: string[] = [];
+  /**
+   * Content stream fragments in draw order. Most entries are plain operator
+   * strings produced eagerly. A function entry is a *deferred* fragment:
+   * its body is only evaluated at serialization time. This is required for
+   * text whose final byte encoding depends on font decisions (embedded
+   * CIDFont vs. Type1/WinAnsi vs. Type3 fallback) that are not finalised
+   * until `PdfDocumentBuilder.build()`. Deferring keeps the fragment at its
+   * exact draw-order position (preserving z-order) while letting the actual
+   * encoding run after the font manager's state is settled.
+   */
+  private parts: Array<string | (() => string)> = [];
 
   // ===========================================================================
   // Raw Operator
@@ -38,6 +48,18 @@ export class PdfContentStream {
    */
   raw(operator: string): this {
     this.parts.push(operator);
+    return this;
+  }
+
+  /**
+   * Append a deferred fragment whose body is evaluated only at serialization
+   * time. Used by text drawing so the final byte encoding can be chosen after
+   * the document's fonts are resolved at build time. The fragment occupies its
+   * draw-order slot immediately, so z-order relative to other operators is
+   * preserved.
+   */
+  deferred(produce: () => string): this {
+    this.parts.push(produce);
     return this;
   }
 
@@ -515,10 +537,26 @@ export class PdfContentStream {
   // ===========================================================================
 
   /**
-   * Get the content stream as a string.
+   * Whether any fragment has been appended. Unlike `toString().length > 0`,
+   * this does NOT evaluate deferred fragments, so it is safe to call before
+   * fonts are resolved (e.g. when probing for overlay content during an
+   * editor save, prior to `writeFontResources`). A deferred text fragment
+   * counts as content even though its bytes are not produced yet.
+   */
+  hasContent(): boolean {
+    return this.parts.length > 0;
+  }
+
+  /**
+   * Get the content stream as a string. Deferred fragments (see `deferred`)
+   * are evaluated here, after font resolution has completed at build time.
    */
   toString(): string {
-    return this.parts.join("\n");
+    const out: string[] = [];
+    for (const part of this.parts) {
+      out.push(typeof part === "function" ? part() : part);
+    }
+    return out.join("\n");
   }
 
   /**

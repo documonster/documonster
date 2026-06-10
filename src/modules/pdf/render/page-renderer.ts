@@ -1040,7 +1040,7 @@ function drawRotatedGeneral(
   }
 }
 
-/** Emit a text string with hex encoding if available. */
+/** Emit a text string with hex encoding if available, onto a sink stream. */
 function emitText(
   stream: PdfContentStream,
   fontManager: FontManager,
@@ -1060,8 +1060,21 @@ function emitText(
  * when needed.  For each sub-run the matrix origin is advanced along the
  * text direction (cos, sin) by the rendered width.
  *
- * When `useType3` is false this collapses to a single BT/ET pair — identical
- * to the old `emitText()` path but wrapped in begin/end for convenience.
+ * The emitted operators are written as a *deferred* fragment (see
+ * `PdfContentStream.deferred`). The fragment is only evaluated at
+ * serialization time, by which point `PdfDocumentBuilder.build()` has
+ * finalised the document's fonts (auto-discovered embedded CIDFont,
+ * Type3 fallback, or plain Type1). This is essential: at draw time the
+ * font manager has not yet decided whether a non-WinAnsi code point (e.g.
+ * U+2192 →) will be served by an embedded font or a Type3 glyph, so eager
+ * encoding would irreversibly degrade those characters to spaces via the
+ * WinAnsi fallback. Deferring the encode keeps the fragment at its exact
+ * draw-order slot (preserving z-order) while choosing the correct bytes
+ * once fonts are known.
+ *
+ * The `useType3` argument is the caller's *draw-time* guess and is ignored;
+ * the deferred body recomputes the routing from the now-settled font
+ * manager state.
  */
 export function emitTextWithMatrix(
   stream: PdfContentStream,
@@ -1075,15 +1088,155 @@ export function emitTextWithMatrix(
   type1ResourceName: string,
   fontSize: number,
   fontManager: FontManager,
-  useType3: boolean
+  _useType3: boolean
 ): void {
+  stream.deferred(() =>
+    renderTextBlock(text, a, b, c, d, tx, ty, type1ResourceName, fontSize, fontManager)
+  );
+}
+
+/** Options for a deferred, font-aware text block (see `emitTextBlock`). */
+export interface TextBlockOptions {
+  /** The text to draw (may contain `\n` when `maxWidth` is set). */
+  text: string;
+  /** Left/anchor x in unrotated page space. */
+  x: number;
+  /** Baseline y of the first line in unrotated page space. */
+  y: number;
+  /** Draw-time-resolved Type1 resource name; re-routed at build time. */
+  type1ResourceName: string;
+  fontSize: number;
+  /** Horizontal anchor; applied per line (including each wrapped line). */
+  anchor: "start" | "middle" | "end";
+  /** Word-wrap width in points; enables multi-line layout when set. */
+  maxWidth?: number;
+  /** Line-height multiple applied to `fontSize` for wrapped lines. */
+  lineHeightFactor: number;
+  /** Clockwise rotation in degrees about (x, y); applied to every line. */
+  rotation: number;
+}
+
+/**
+ * Emit a text block as a single *deferred* fragment so that anchor
+ * alignment, word wrapping, and glyph encoding are all computed at
+ * serialization time — after `PdfDocumentBuilder.build()` has finalised the
+ * document's fonts.
+ *
+ * This matters because text measurement (anchor offset, line breaking) must
+ * use the *same* font that ultimately renders the glyphs. At draw time the
+ * font may still be unresolved (a non-WinAnsi run can trigger a build-time
+ * auto-embed of a system CIDFont), so measuring against the provisional
+ * Type1/Helvetica metrics would misplace centred/right-aligned text and
+ * break lines at the wrong points. Deferring keeps measurement and encoding
+ * consistent while preserving the fragment's draw-order slot (z-order).
+ */
+export function emitTextBlock(
+  stream: PdfContentStream,
+  options: TextBlockOptions,
+  fontManager: FontManager
+): void {
+  stream.deferred(() => renderTextBlockLayout(options, fontManager));
+}
+
+/**
+ * Lay out and render a text block from the font manager's *current*
+ * (build-time) state. Resolves the render resource name once and uses it for
+ * both measurement and encoding so the two never disagree.
+ *
+ * Layout is computed in the text's *local* coordinate frame — x grows along
+ * the baseline, y grows upward — then mapped to page space through the
+ * rotation matrix. This makes anchor alignment, multi-line word wrapping, and
+ * rotation compose correctly together: each line is offset by its anchor
+ * shift (along local x) and its line index (down local y), and a single
+ * rotation maps the whole block into place. Upright text (rotation 0) reduces
+ * to the identity mapping.
+ */
+function renderTextBlockLayout(options: TextBlockOptions, fontManager: FontManager): string {
+  const { text, x, y, type1ResourceName, fontSize, anchor, maxWidth, lineHeightFactor, rotation } =
+    options;
+
+  // Resolve the resource name once; measurement and rendering share it so a
+  // build-time auto-embedded CIDFont (or Type3 fallback) is measured with the
+  // metrics that will actually render the glyphs.
+  const measureResource = fontManager.resolveRenderResourceName(type1ResourceName);
+  const measure = (s: string) => fontManager.measureText(s, measureResource, fontSize);
+
+  const lines = maxWidth ? wrapTextLines(text, measure, maxWidth) : [text];
+  const leading = fontSize * lineHeightFactor;
+
+  // Rotation matrix [a b; c d] = [cos sin; -sin cos]; identity when upright.
+  const theta = (rotation * Math.PI) / 180;
+  const cos = rotation === 0 ? 1 : Math.cos(theta);
+  const sin = rotation === 0 ? 0 : Math.sin(theta);
+  const anchorFactor = anchor === "middle" ? 0.5 : anchor === "end" ? 1 : 0;
+
+  const parts: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    // Local-frame origin of this line: anchor shift along x, line index down y.
+    const localX = anchorFactor === 0 ? 0 : -measure(lines[i]) * anchorFactor;
+    const localY = -i * leading;
+    // Map local origin into page space through the rotation matrix.
+    const tx = x + localX * cos + localY * -sin;
+    const ty = y + localX * sin + localY * cos;
+    parts.push(
+      renderTextBlock(
+        lines[i],
+        cos,
+        sin,
+        -sin,
+        cos,
+        tx,
+        ty,
+        type1ResourceName,
+        fontSize,
+        fontManager
+      )
+    );
+  }
+  return parts.join("\n");
+}
+
+/**
+ * Produce the PDF operator string for a positioned text run, choosing the
+ * encoding from the font manager's *current* (build-time) state:
+ *   - embedded font  → single BT/ET with CIDFont hex encoding
+ *   - Type3 fallback → split into WinAnsi (Type1) and per-glyph Type3 runs
+ *   - neither        → single BT/ET with Type1/WinAnsi encoding
+ *
+ * Must only be called after font resolution (i.e. from a deferred fragment).
+ */
+function renderTextBlock(
+  text: string,
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  tx: number,
+  ty: number,
+  type1ResourceName: string,
+  fontSize: number,
+  fontManager: FontManager
+): string {
+  const sink = new PdfContentStream();
+
+  // Type3 splitting only applies when there is no embedded font but Type3
+  // fallback glyphs were generated. Otherwise the run renders as a single
+  // BT/ET pair, choosing the resource name from the now-settled state:
+  // if an embedded font exists (possibly auto-discovered at build time,
+  // after this run was drawn against a Type1 resource), the run must use it
+  // so `emitText` → `encodeText` produces CIDFont hex; without that switch
+  // the stale Type1 resource name would make `encodeText` return null and
+  // non-WinAnsi characters would degrade to spaces via the WinAnsi fallback.
+  const useType3 = fontManager.hasType3Fonts() && !fontManager.hasEmbeddedFont();
+
   if (!useType3) {
-    stream.beginText();
-    stream.setFont(type1ResourceName, fontSize);
-    stream.setTextMatrix(a, b, c, d, tx, ty);
-    emitText(stream, fontManager, text, type1ResourceName);
-    stream.endText();
-    return;
+    const resourceName = fontManager.resolveRenderResourceName(type1ResourceName);
+    sink.beginText();
+    sink.setFont(resourceName, fontSize);
+    sink.setTextMatrix(a, b, c, d, tx, ty);
+    emitText(sink, fontManager, text, resourceName);
+    sink.endText();
+    return sink.toString();
   }
 
   // Type3 path: split into runs and advance origin along text direction
@@ -1091,17 +1244,17 @@ export function emitTextWithMatrix(
   let curTx = tx;
   let curTy = ty;
   for (const run of runs) {
-    stream.beginText();
+    sink.beginText();
     if (run.type3) {
-      stream.setFont(run.type3.resourceName, fontSize);
-      stream.setTextMatrix(a, b, c, d, curTx, curTy);
-      stream.showTextHex(run.type3.hex);
+      sink.setFont(run.type3.resourceName, fontSize);
+      sink.setTextMatrix(a, b, c, d, curTx, curTy);
+      sink.showTextHex(run.type3.hex);
     } else {
-      stream.setFont(type1ResourceName, fontSize);
-      stream.setTextMatrix(a, b, c, d, curTx, curTy);
-      emitText(stream, fontManager, run.text, type1ResourceName);
+      sink.setFont(type1ResourceName, fontSize);
+      sink.setTextMatrix(a, b, c, d, curTx, curTy);
+      emitText(sink, fontManager, run.text, type1ResourceName);
     }
-    stream.endText();
+    sink.endText();
     const w = fontManager.measureText(
       run.text,
       run.type3?.resourceName ?? type1ResourceName,
@@ -1111,6 +1264,7 @@ export function emitTextWithMatrix(
     curTx += a * w;
     curTy += b * w;
   }
+  return sink.toString();
 }
 
 // =============================================================================

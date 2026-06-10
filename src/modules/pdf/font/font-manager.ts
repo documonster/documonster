@@ -207,28 +207,47 @@ export class FontManager {
   }
 
   /**
+   * Resolve the resource name a draw-time-resolved Type1 resource should
+   * actually render (and be measured) with, given the font manager's
+   * *current* state. If an embedded font exists (possibly auto-discovered
+   * at build time, after the text was drawn against a Type1 resource), the
+   * embedded resource name is returned so both measurement and encoding go
+   * through the CIDFont. Otherwise the original Type1 resource name is kept;
+   * `measureText` handles Type3-fallback widths internally from that name.
+   *
+   * Centralises the routing rule shared by the deferred text renderer and
+   * any deferred measurement (anchor alignment, word wrapping) so the two
+   * never disagree.
+   */
+  resolveRenderResourceName(type1ResourceName: string): string {
+    return this.embeddedFont ? this.embeddedResourceName : type1ResourceName;
+  }
+
+  /**
    * Record that a text string will be rendered, tracking its code points.
    * Must be called for every text string before writing the PDF.
+   *
+   * Two sets are maintained because font selection may be decided *after*
+   * drawing (e.g. `PdfDocumentBuilder.build()` auto-discovers and embeds a
+   * system font once it sees the accumulated non-WinAnsi code points):
+   *
+   *   - `usedCodePoints` — every code point seen, always. If an embedded
+   *     font ends up being used (whether registered up front or
+   *     auto-discovered at build time), the subset must cover all of these,
+   *     including plain ASCII, so the CIDFont can encode the full run.
+   *   - `type3CodePoints` — non-WinAnsi code points only. Drives the
+   *     build-time decision to auto-embed a system font, and the Type3
+   *     fallback when none is available.
    */
   trackText(text: string): void {
-    if (this.embeddedFont) {
-      for (let i = 0; i < text.length; i++) {
-        const cp = text.codePointAt(i)!;
-        this.usedCodePoints.add(cp);
-        if (cp > 0xffff) {
-          i++; // skip low surrogate
-        }
+    for (let i = 0; i < text.length; i++) {
+      const cp = text.codePointAt(i)!;
+      if (cp > 0xffff) {
+        i++; // skip low surrogate
       }
-    } else {
-      // No embedded font — track non-WinAnsi chars for Type3 fallback
-      for (let i = 0; i < text.length; i++) {
-        const cp = text.codePointAt(i)!;
-        if (cp > 0xffff) {
-          i++;
-        }
-        if (!isWinAnsiCodePoint(cp)) {
-          this.type3CodePoints.add(cp);
-        }
+      this.usedCodePoints.add(cp);
+      if (!isWinAnsiCodePoint(cp)) {
+        this.type3CodePoints.add(cp);
       }
     }
   }

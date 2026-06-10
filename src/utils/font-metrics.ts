@@ -327,3 +327,45 @@ export function mapToStandardFont(fontName: string): string {
   const lower = fontName.toLowerCase().trim();
   return FONT_FAMILY_MAP[lower] ?? "Helvetica";
 }
+
+/**
+ * Given a standard PDF base font and bold/italic flags, return the matching
+ * metric variant name (e.g. "Helvetica" + bold → "Helvetica-Bold"). This keeps
+ * width measurement consistent with the glyphs that are actually drawn, so
+ * bold/italic runs are measured with their true (wider) metrics rather than
+ * the regular ones. Falls back to the base name when a variant is unknown.
+ */
+export function styledFontVariant(baseFont: string, bold?: boolean, italic?: boolean): string {
+  const std = mapToStandardFont(baseFont);
+  if (!bold && !italic) {
+    return std;
+  }
+
+  // Determine the family from the resolved standard name.
+  const isTimes = std.startsWith("Times");
+  const isCourier = std.startsWith("Courier");
+
+  let candidate: string;
+  if (isTimes) {
+    // Times family uses -Roman / -Bold / -Italic / -BoldItalic.
+    if (bold && italic) {
+      candidate = "Times-BoldItalic";
+    } else if (bold) {
+      candidate = "Times-Bold";
+    } else {
+      candidate = "Times-Italic";
+    }
+  } else {
+    // Helvetica / Courier families use -Bold / -Oblique / -BoldOblique.
+    const family = isCourier ? "Courier" : "Helvetica";
+    if (bold && italic) {
+      candidate = `${family}-BoldOblique`;
+    } else if (bold) {
+      candidate = `${family}-Bold`;
+    } else {
+      candidate = `${family}-Oblique`;
+    }
+  }
+
+  return candidate in FONT_DESCRIPTORS ? candidate : std;
+}

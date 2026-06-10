@@ -15,13 +15,14 @@
  * is a build error, never a silent drop.
  */
 
-import { measureTextWidth, mapToStandardFont } from "@utils/font-metrics";
+import { measureTextWidth, mapToStandardFont, styledFontVariant } from "@utils/font-metrics";
 
 import { ommlToMathML } from "../advanced/math-convert";
 import { extractMathText, isHyperlink, isRun } from "../core/text-utils";
 import type {
   AltChunk,
   BodyContent,
+  Border,
   ChartContent,
   ChartExContent,
   CheckBox,
@@ -36,9 +37,11 @@ import type {
   Paragraph,
   ParagraphChild,
   ParagraphProperties,
+  NumberFormat,
   Run,
   StructuredDocumentTag,
   Table,
+  TableBorders,
   TableOfContents,
   TextBox
 } from "../types";
@@ -128,6 +131,30 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
   // First pass: get page assignments via the existing lightweight layout
   const layoutResult = layoutDocument(doc, options);
 
+  // Resolve list markers once over the whole document so ordered-list
+  // counters increment correctly across pages. Stored in a module-level
+  // context so that every `layoutParagraph` call — including those reached
+  // through tables, text boxes, SDTs, footnotes, etc. — can render markers
+  // without threading the map through every container function. Layout runs
+  // fully synchronously (no `await`), so a single shared slot is safe.
+  const listMarkers = computeListMarkers(doc);
+  activeListMarkers = listMarkers;
+  try {
+    return layoutDocumentFullInner(doc, options, layoutResult, listMarkers);
+  } finally {
+    activeListMarkers = undefined;
+  }
+}
+
+/** Active list-marker map for the in-flight layout (see layoutDocumentFull). */
+let activeListMarkers: ReadonlyMap<Paragraph, ListMarker> | undefined;
+
+function layoutDocumentFullInner(
+  doc: DocxDocument,
+  options: FullLayoutOptions | undefined,
+  layoutResult: LayoutResult,
+  listMarkers: ReadonlyMap<Paragraph, ListMarker>
+): LayoutDocument {
   // Second pass: compute precise positions for each page. Footnote
   // ids that don't fit on a given page are carried over to the next
   // (a later page may still have room thanks to less body content
@@ -137,7 +164,7 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
   let pendingFootnoteIds: readonly number[] = [];
 
   for (let pageNum = 1; pageNum <= bodyPageCount; pageNum++) {
-    const result = buildPage(doc, pageNum, layoutResult, options, pendingFootnoteIds);
+    const result = buildPage(doc, pageNum, layoutResult, options, pendingFootnoteIds, listMarkers);
     pages.push(result.page);
     pendingFootnoteIds = result.deferredFootnoteIds;
   }
@@ -156,7 +183,8 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
       // content; only the carried footnote queue renders.
       layoutResult,
       options,
-      pendingFootnoteIds
+      pendingFootnoteIds,
+      listMarkers
     );
     pages.push(overflowResult.page);
   }
@@ -338,7 +366,8 @@ function buildPage(
   pageNumber: number,
   layout: LayoutResult,
   options: FullLayoutOptions | undefined,
-  pendingFootnoteIds: readonly number[]
+  pendingFootnoteIds: readonly number[],
+  listMarkers?: ReadonlyMap<Paragraph, ListMarker>
 ): BuildPageResult {
   const sectionProps = doc.sectionProperties;
   const geometry = computePageGeometry(sectionProps, options?.pageGeometry);
@@ -384,7 +413,8 @@ function buildPage(
           geometry.contentWidth,
           options,
           pageContext,
-          imageMap
+          imageMap,
+          listMarkers
         );
         content.push({ ...laid, sourceIndex: i });
         cursorY = laid.rect.y + laid.rect.height;
@@ -1036,13 +1066,238 @@ function computeSectionBreaks(layout: LayoutResult): number[] {
 // Internal: Paragraph Layout
 // =============================================================================
 
+/** A resolved list marker for a numbered/bulleted paragraph. */
+interface ListMarker {
+  /** Marker text including trailing spacing (e.g. "•  ", "1.  ", "a.  "). */
+  readonly text: string;
+  /** Left indent in points for the list level. */
+  readonly indentPt: number;
+}
+
+/**
+ * Resolve list markers for every numbered / bulleted paragraph in the
+ * document, in reading order, so ordered-list counters increment correctly
+ * across paragraphs (and reset when a lower level reappears). Returns a map
+ * keyed by the paragraph object.
+ *
+ * Markers are derived from `paragraph.properties.numbering` → the matching
+ * `NumberingInstance` → its `AbstractNumbering` level definition. Bullet
+ * levels emit their symbol; ordered levels emit a counter formatted per the
+ * level's `NumberFormat` (decimal / lower-upper letter / lower-upper roman),
+ * falling back to decimal for formats we don't render numerically.
+ */
+function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
+  const markers = new Map<Paragraph, ListMarker>();
+  const instances = doc.numberingInstances;
+  const abstracts = doc.abstractNumberings;
+  if (!instances || !abstracts || instances.length === 0 || abstracts.length === 0) {
+    return markers;
+  }
+
+  const instById = new Map(instances.map(n => [n.numId, n]));
+  const absById = new Map(abstracts.map(a => [a.abstractNumId, a]));
+
+  // Per (numId) counters, one slot per level. Counters reset at deeper
+  // levels when a shallower level advances.
+  const counters = new Map<number, number[]>();
+  // numIds whose list was interrupted by non-list content since their last
+  // item; the next item with that numId restarts its numbering. This makes
+  // two visually separate ordered lists (sharing a numId, separated by a
+  // plain paragraph) each start at 1 — matching user expectation rather than
+  // running a single continuous sequence.
+  const interrupted = new Set<number>();
+  // numIds seen at least once, so we know which to mark interrupted.
+  const seenNumIds = new Set<number>();
+
+  // Flatten paragraphs into document reading order (descending into tables),
+  // so list continuity is judged across the whole body, not per-cell.
+  const orderedParagraphs: Paragraph[] = [];
+  const walk = (items: readonly BodyContent[] | readonly (Paragraph | Table)[]): void => {
+    for (const item of items) {
+      if (item.type === "paragraph") {
+        orderedParagraphs.push(item);
+      } else if (item.type === "table") {
+        for (const row of item.rows) {
+          for (const cell of row.cells) {
+            walk(cell.content);
+          }
+        }
+      }
+    }
+  };
+
+  const resolveParagraphMarker = (para: Paragraph): void => {
+    const numbering = para.properties?.numbering;
+    if (!numbering) {
+      // Non-list paragraph: any list seen so far is now interrupted, so a
+      // later paragraph reusing the same numId restarts its sequence.
+      for (const id of seenNumIds) {
+        interrupted.add(id);
+      }
+      return;
+    }
+    const inst = instById.get(numbering.numId);
+    if (!inst) {
+      return;
+    }
+    const abs = absById.get(inst.abstractNumId);
+    if (!abs) {
+      return;
+    }
+    const level = numbering.level ?? 0;
+    const levelDef =
+      inst.overrides?.find(o => o.level === level)?.levelDef ??
+      abs.levels.find(l => l.level === level);
+    if (!levelDef) {
+      return;
+    }
+
+    seenNumIds.add(numbering.numId);
+    const indentPt = (level + 1) * 36; // 0.5" per level
+
+    if (levelDef.format === "bullet") {
+      // Bullet symbol. Word authors bullets with Symbol/Wingdings private-use
+      // code points (e.g. U+F0B7 ·, U+F0A7 ▪) that PDF standard fonts can't
+      // render. Normalize the common ones to WinAnsi-renderable equivalents;
+      // fall back to a round bullet when empty or unknown.
+      const symbol = normalizeBulletGlyph(levelDef.text);
+      markers.set(para, { text: `${symbol}  `, indentPt });
+      // A bullet item does not clear the interruption flag for ordered
+      // siblings, but it is itself a list item — keep it out of `interrupted`.
+      interrupted.delete(numbering.numId);
+      return;
+    }
+
+    // Ordered list: advance this level's counter and reset deeper levels.
+    let levelCounts = counters.get(numbering.numId);
+    if (!levelCounts) {
+      levelCounts = [];
+      counters.set(numbering.numId, levelCounts);
+    }
+    // If this numId's run was interrupted by non-list content, restart it.
+    if (interrupted.has(numbering.numId)) {
+      levelCounts.length = 0;
+      interrupted.delete(numbering.numId);
+    }
+    const startOverride = inst.overrides?.find(o => o.level === level)?.startOverride;
+    const start = startOverride ?? levelDef.start ?? 1;
+    if (levelCounts[level] === undefined) {
+      levelCounts[level] = start;
+    } else {
+      levelCounts[level] += 1;
+    }
+    // Reset any deeper levels.
+    for (let l = level + 1; l < levelCounts.length; l++) {
+      levelCounts[l] = undefined as unknown as number;
+    }
+
+    const counter = levelCounts[level];
+    const numeral = formatListCounter(counter, levelDef.format);
+    // Honour the level's `text` template (e.g. "%1.") when present; else
+    // fall back to "<n>.".
+    const text = levelDef.text ? levelDef.text.replace(/%\d+/g, numeral) : `${numeral}.`;
+    markers.set(para, { text: `${text}  `, indentPt });
+  };
+
+  walk(doc.body);
+  for (const para of orderedParagraphs) {
+    resolveParagraphMarker(para);
+  }
+  return markers;
+}
+
+/** Normalize a Word bullet glyph to a WinAnsi-renderable equivalent. */
+function normalizeBulletGlyph(text: string | undefined): string {
+  if (!text || text.length === 0) {
+    return "\u2022"; // round bullet
+  }
+  const cp = text.codePointAt(0)!;
+  switch (cp) {
+    // Symbol-font private-use code points Word emits for default bullets.
+    case 0xf0b7: // Symbol "·" → round bullet
+    case 0x00b7: // middle dot
+      return "\u2022";
+    case 0xf0a7: // Symbol filled small square
+    case 0xf0a8:
+      return "\u25aa";
+    case 0xf0fc: // Wingdings check
+      return "\u2713";
+    default:
+      // Already a renderable glyph (e.g. "o", "-", "•") — keep it.
+      return text;
+  }
+}
+
+/** Format an ordered-list counter per its OOXML number format. */
+function formatListCounter(n: number, format: NumberFormat): string {
+  switch (format) {
+    case "lowerLetter":
+      return toAlpha(n).toLowerCase();
+    case "upperLetter":
+      return toAlpha(n).toUpperCase();
+    case "lowerRoman":
+      return toRoman(n).toLowerCase();
+    case "upperRoman":
+      return toRoman(n).toUpperCase();
+    case "decimalZero":
+      return n < 10 ? `0${n}` : String(n);
+    default:
+      // decimal and any non-numeric/locale formats we don't render.
+      return String(n);
+  }
+}
+
+/** 1 → "A", 26 → "Z", 27 → "AA" (spreadsheet-style alpha). */
+function toAlpha(n: number): string {
+  let s = "";
+  let v = n;
+  while (v > 0) {
+    const rem = (v - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    v = Math.floor((v - 1) / 26);
+  }
+  return s || "A";
+}
+
+/** Convert a positive integer to a Roman numeral (uppercase). */
+function toRoman(n: number): string {
+  if (n <= 0) {
+    return String(n);
+  }
+  const table: [number, string][] = [
+    [1000, "M"],
+    [900, "CM"],
+    [500, "D"],
+    [400, "CD"],
+    [100, "C"],
+    [90, "XC"],
+    [50, "L"],
+    [40, "XL"],
+    [10, "X"],
+    [9, "IX"],
+    [5, "V"],
+    [4, "IV"],
+    [1, "I"]
+  ];
+  let v = n;
+  let s = "";
+  for (const [val, sym] of table) {
+    while (v >= val) {
+      s += sym;
+      v -= val;
+    }
+  }
+  return s;
+}
+
 function layoutParagraph(
   para: Paragraph,
   startY: number,
   contentWidth: number,
   options?: FullLayoutOptions,
   pageContext?: PageLayoutContext,
-  imageMap?: ReadonlyMap<string, ImageDef>
+  imageMap?: ReadonlyMap<string, ImageDef>,
+  listMarkers?: ReadonlyMap<Paragraph, ListMarker>
 ): LayoutParagraph {
   const props = para.properties;
   const spacing = props?.spacing;
@@ -1057,7 +1312,15 @@ function layoutParagraph(
   }
 
   const indent = props?.indent;
-  const leftIndentPt = indent?.left ? twipsToPt(indent.left) : 0;
+  // Prefer an explicitly threaded map; fall back to the active layout's
+  // shared map so list markers also render inside tables, text boxes, SDTs,
+  // footnotes, etc. (whose layoutParagraph calls don't thread it through).
+  const marker = (listMarkers ?? activeListMarkers)?.get(para);
+  // List paragraphs are indented by their numbering level; the marker text
+  // is injected as a leading run below. An explicit paragraph indent (rare on
+  // list items) still wins when larger.
+  const markerIndentPt = marker ? marker.indentPt : 0;
+  const leftIndentPt = Math.max(indent?.left ? twipsToPt(indent.left) : 0, markerIndentPt);
   const firstLineIndentPt = indent?.firstLine ? twipsToPt(indent.firstLine) : 0;
   const alignment = props?.alignment ?? "left";
 
@@ -1081,6 +1344,19 @@ function layoutParagraph(
 
   // Collect runs
   const segments = collectParagraphSegments(para);
+  // Inject the list marker (bullet / number) as a leading text run so it
+  // renders inline at the start of the first line, inheriting the first
+  // text run's formatting (font / size) for visual consistency.
+  if (marker) {
+    let firstRunProps: Run["properties"];
+    for (const s of segments) {
+      if (!("type" in s) || s.type === undefined) {
+        firstRunProps = (s as TextSegment).properties;
+        break;
+      }
+    }
+    segments.unshift({ text: marker.text, properties: firstRunProps });
+  }
   const fullAvailableWidth = contentWidth - leftIndentPt;
 
   // When a page has wrap exclusions (square / tight / through floats)
@@ -1139,7 +1415,11 @@ function layoutParagraph(
         }
       } else {
         const fontSize = getRunFontSizePt(seg.properties) * headingScale;
-        const fontName = mapToStandardFont(resolveRunFontName(seg.properties));
+        const fontName = styledFontVariant(
+          resolveRunFontName(seg.properties),
+          seg.properties?.bold,
+          seg.properties?.italic
+        );
         lineWidth += measureTextWidth(seg.text, fontName, fontSize);
       }
     }
@@ -1172,7 +1452,11 @@ function layoutParagraph(
       }
       const fontSize = getRunFontSizePt(seg.properties) * headingScale;
       const fontName = resolveRunFontName(seg.properties);
-      const measuredFont = mapToStandardFont(fontName);
+      const measuredFont = styledFontVariant(
+        fontName,
+        seg.properties?.bold,
+        seg.properties?.italic
+      );
       const segWidth = measureTextWidth(seg.text, measuredFont, fontSize);
 
       runs.push({
@@ -1322,7 +1606,15 @@ function layoutTable(
         rect: { x: cellX, y: startY + cursorY, width: cellWidth, height: cellHeight },
         row: ri,
         col: ci,
-        content: cellContent
+        content: cellContent,
+        borders: resolveCellBorders(
+          table.properties?.borders,
+          cell.properties?.borders,
+          ri === 0,
+          ri === table.rows.length - 1,
+          startCol === 0,
+          endCol >= colWidths.length
+        )
       });
 
       gridCol += span;
@@ -1343,6 +1635,58 @@ function layoutTable(
     rect: { x: 0, y: startY, width: contentWidth, height: cursorY },
     cells,
     sourceIndex
+  };
+}
+
+/**
+ * Resolve the four visible borders of a table cell into layout-model form
+ * (`{ width: pt, color: hex }`). A cell's own border wins; otherwise the
+ * table-level border applies — outer edges use `top/left/bottom/right`, inner
+ * edges use `insideH/insideV`. OOXML border `size` is in eighths of a point.
+ */
+function resolveCellBorders(
+  tableBorders: TableBorders | undefined,
+  cellBorders: TableBorders | undefined,
+  isTopRow: boolean,
+  isBottomRow: boolean,
+  isLeftCol: boolean,
+  isRightCol: boolean
+): LayoutTableCell["borders"] {
+  const edge = (
+    cellEdge: Border | undefined,
+    outerEdge: Border | undefined,
+    innerEdge: Border | undefined,
+    isOuter: boolean
+  ): { width: number; color: string } | undefined => {
+    const b = cellEdge ?? (isOuter ? outerEdge : innerEdge);
+    if (!b || b.style === "none" || b.style === "nil") {
+      return undefined;
+    }
+    // `size` is in eighths of a point; default to a hairline (0.5pt) when
+    // a border is declared without an explicit size.
+    const width = b.size != null ? b.size / 8 : 0.5;
+    const color = !b.color || b.color === "auto" ? "000000" : b.color;
+    return { width: Math.max(0.25, width), color };
+  };
+
+  const top = edge(cellBorders?.top, tableBorders?.top, tableBorders?.insideH, isTopRow);
+  const bottom = edge(
+    cellBorders?.bottom,
+    tableBorders?.bottom,
+    tableBorders?.insideH,
+    isBottomRow
+  );
+  const left = edge(cellBorders?.left, tableBorders?.left, tableBorders?.insideV, isLeftCol);
+  const right = edge(cellBorders?.right, tableBorders?.right, tableBorders?.insideV, isRightCol);
+
+  if (!top && !bottom && !left && !right) {
+    return undefined;
+  }
+  return {
+    ...(top ? { top } : {}),
+    ...(bottom ? { bottom } : {}),
+    ...(left ? { left } : {}),
+    ...(right ? { right } : {})
   };
 }
 
@@ -1499,7 +1843,11 @@ function wrapSegmentsToLinesWithExclusions(
       continue;
     }
     const fontSize = getRunFontSizePt(seg.properties) * headingScale;
-    const fontName = mapToStandardFont(resolveRunFontName(seg.properties));
+    const fontName = styledFontVariant(
+      resolveRunFontName(seg.properties),
+      seg.properties?.bold,
+      seg.properties?.italic
+    );
     // Split on runs of whitespace, keeping the whitespace tokens so
     // wrapping can decide whether to drop trailing space at line end.
     const tokens = seg.text.split(/(\s+)/);
@@ -1674,14 +2022,22 @@ function wrapSegmentsToLines(
 
     const text = segment.text;
     const fontSize = getRunFontSizePt(segment.properties) * headingScale;
-    const fontName = mapToStandardFont(resolveRunFontName(segment.properties));
+    const fontName = styledFontVariant(
+      resolveRunFontName(segment.properties),
+      segment.properties?.bold,
+      segment.properties?.italic
+    );
     const segmentWidth = measureTextWidth(text, fontName, fontSize);
 
-    if (currentLineWidth + segmentWidth <= effectiveWidth || currentLine.length === 0) {
+    if (currentLineWidth + segmentWidth <= effectiveWidth) {
+      // Whole segment fits on the current line — fast path.
       currentLine.push(segment);
       currentLineWidth += segmentWidth;
     } else {
-      // Word-level splitting
+      // Segment does not fit — split it into words and wrap. The inner
+      // loop's `currentLine.length === 0 && bufferedText.length === 0`
+      // guard guarantees at least one word per line (preventing a dead
+      // loop when even a single word is wider than the line).
       const words = text.split(/(\s+)/);
       let bufferedText = "";
       let bufferedWidth = 0;

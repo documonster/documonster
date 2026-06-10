@@ -27,7 +27,7 @@ import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
 import { FontManager } from "../font/font-manager";
 import { iterateSystemFontCandidates } from "../font/system-fonts";
 import { parseTtf } from "../font/ttf-parser";
-import { wrapTextLines, emitTextWithMatrix, alphaGsName } from "../render/page-renderer";
+import { emitTextBlock, alphaGsName } from "../render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "../types";
 import { writeImageXObject } from "./image-utils";
 
@@ -538,101 +538,34 @@ export class PdfPageBuilder {
     const italic = options.italic ?? false;
     const fontFamily = options.fontFamily ?? "Helvetica";
 
-    // Resolve font
+    // Resolve the provisional Type1 resource and record the run's code
+    // points. The text is emitted as a deferred block so anchor alignment,
+    // word wrapping, and glyph encoding are all computed at build time —
+    // after fonts are finalised (a non-WinAnsi run may trigger a build-time
+    // auto-embed of a system CIDFont). Measuring against the provisional
+    // metrics here would misplace anchored text and break lines wrongly.
     const resourceName = this._fontManager.resolveFont(fontFamily, bold, italic);
-
     this._fontManager.trackText(text);
 
-    const useType3 = this._fontManager.hasType3Fonts() && !this._fontManager.hasEmbeddedFont();
-
-    // Resolve anchor into an adjusted x before any matrix math. We use the
-    // same font/size combination the stream will render with, so the
-    // alignment is correct for the actual glyphs (not a fallback
-    // estimate). Single-line drawing only — wrapped text ignores anchor
-    // because the wrapper re-splits by the caller's supplied x.
-    const anchor = options.anchor ?? "start";
-    const resolvedX =
-      anchor === "start" || options.maxWidth
-        ? options.x
-        : options.x -
-          this._fontManager.measureText(text, resourceName, fontSize) *
-            (anchor === "middle" ? 0.5 : 1);
-
-    if (options.maxWidth) {
-      // Word-wrap (reuses the shared wrapTextLines from page-renderer)
-      const measure = (s: string) => this._fontManager.measureText(s, resourceName, fontSize);
-      const lines = wrapTextLines(text, measure, options.maxWidth);
-      const leading = fontSize * lineHeightFactor;
-
-      this._stream.save();
-      this._applyAlpha(color.a);
-      this._stream.setFillColor(color);
-
-      for (let i = 0; i < lines.length; i++) {
-        const lineY = options.y - i * leading;
-        emitTextWithMatrix(
-          this._stream,
-          lines[i],
-          1,
-          0,
-          0,
-          1,
-          options.x,
-          lineY,
-          resourceName,
-          fontSize,
-          this._fontManager,
-          useType3
-        );
-      }
-
-      this._stream.restore();
-    } else {
-      // Single line
-      this._stream.save();
-      this._applyAlpha(color.a);
-      this._stream.setFillColor(color);
-      const rotation = options.rotation ?? 0;
-      if (rotation === 0) {
-        emitTextWithMatrix(
-          this._stream,
-          text,
-          1,
-          0,
-          0,
-          1,
-          resolvedX,
-          options.y,
-          resourceName,
-          fontSize,
-          this._fontManager,
-          useType3
-        );
-      } else {
-        // Build the rotation matrix around (x, y). `emitTextWithMatrix`
-        // accepts the full 2×3 text matrix, so we pre-multiply the
-        // rotation with the translation so one call positions and
-        // rotates the glyph sequence in a single Tm op.
-        const theta = (rotation * Math.PI) / 180;
-        const cos = Math.cos(theta);
-        const sin = Math.sin(theta);
-        emitTextWithMatrix(
-          this._stream,
-          text,
-          cos,
-          sin,
-          -sin,
-          cos,
-          resolvedX,
-          options.y,
-          resourceName,
-          fontSize,
-          this._fontManager,
-          useType3
-        );
-      }
-      this._stream.restore();
-    }
+    this._stream.save();
+    this._applyAlpha(color.a);
+    this._stream.setFillColor(color);
+    emitTextBlock(
+      this._stream,
+      {
+        text,
+        x: options.x,
+        y: options.y,
+        type1ResourceName: resourceName,
+        fontSize,
+        anchor: options.anchor ?? "start",
+        maxWidth: options.maxWidth,
+        lineHeightFactor,
+        rotation: options.rotation ?? 0
+      },
+      this._fontManager
+    );
+    this._stream.restore();
 
     return this;
   }

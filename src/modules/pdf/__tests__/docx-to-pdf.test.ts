@@ -401,3 +401,181 @@ describe("docxToPdf — ChartEx (modern 2016+) rendering", () => {
     installChartSupport(); // restore
   });
 });
+
+describe("docxToPdf — flow layout fidelity", () => {
+  // Collect every positioned text run across all pages, in order.
+  function allTextRuns(doc: DocxDocument, opts?: Parameters<typeof layoutDocumentFull>[1]) {
+    const layout = layoutDocumentFull(doc, opts);
+    const runs: { text: string; x: number; y: number; bold?: boolean }[] = [];
+    for (const page of layout.pages) {
+      for (const c of page.content as readonly { type: string }[]) {
+        if (c.type !== "paragraph") {
+          continue;
+        }
+        const para = c as unknown as {
+          lines: readonly { y: number; runs: readonly Record<string, unknown>[] }[];
+        };
+        for (const line of para.lines) {
+          for (const r of line.runs) {
+            if (typeof r.text === "string") {
+              runs.push({
+                text: r.text,
+                x: r.x as number,
+                y: line.y,
+                bold: r.bold as boolean | undefined
+              });
+            }
+          }
+        }
+      }
+    }
+    return runs;
+  }
+
+  it("wraps a long paragraph across multiple lines (no overflow on one line)", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addParagraph(h, "word ".repeat(200));
+    const runs = allTextRuns(Document.build(h), {
+      pageGeometry: { pageWidth: 419.5, pageHeight: 595.3 }
+    });
+    // The single 1000-char paragraph must be broken into many runs sitting on
+    // distinct y positions, not packed onto one line.
+    const distinctY = new Set(runs.map(r => Math.round(r.y)));
+    expect(runs.length).toBeGreaterThan(5);
+    expect(distinctY.size).toBeGreaterThan(5);
+  });
+
+  it("emits bullet markers for an unordered list", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addBulletList(h, ["First", "Second", "Third"]);
+    const runs = allTextRuns(Document.build(h));
+    const markerRuns = runs.filter(r => r.text.includes("\u2022"));
+    // One bullet marker per item, normalized to a WinAnsi-renderable bullet.
+    expect(markerRuns.length).toBe(3);
+  });
+
+  it("emits incrementing numeric markers for an ordered list", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addNumberedList(h, ["A", "B", "C"]);
+    const runs = allTextRuns(Document.build(h));
+    const joined = runs.map(r => r.text).join("|");
+    expect(joined).toContain("1.");
+    expect(joined).toContain("2.");
+    expect(joined).toContain("3.");
+  });
+
+  it("measures bold runs wider than the same text unbolded", () => {
+    // Two identical-text paragraphs, one bold, one not. The run after the
+    // bold word must sit further right than after the plain word, proving
+    // bold metrics drive layout measurement. ("bold" is wider in
+    // Helvetica-Bold than Helvetica; "WWWW" happens to be equal-width.)
+    const boldDoc = Document.create();
+    Document.useDefaultStyles(boldDoc);
+    Document.addParagraphElement(boldDoc, paragraph([text("bold", { bold: true }), text("|")]));
+    const plainDoc = Document.create();
+    Document.useDefaultStyles(plainDoc);
+    Document.addParagraphElement(plainDoc, paragraph([text("bold"), text("|")]));
+
+    const boldPipe = allTextRuns(Document.build(boldDoc)).find(r => r.text === "|");
+    const plainPipe = allTextRuns(Document.build(plainDoc)).find(r => r.text === "|");
+    expect(boldPipe).toBeDefined();
+    expect(plainPipe).toBeDefined();
+    // The "|" after the bold word starts further right than after plain.
+    expect(boldPipe!.x).toBeGreaterThan(plainPipe!.x);
+  });
+
+  it("populates table cell borders when the table declares borders", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addTable(
+      h,
+      [
+        ["H1", "H2"],
+        ["a", "b"]
+      ],
+      { headerRow: true, borders: true }
+    );
+    const layout = layoutDocumentFull(Document.build(h));
+    let cellsWithBorders = 0;
+    for (const page of layout.pages) {
+      for (const c of page.content as readonly { type: string }[]) {
+        if (c.type !== "table") {
+          continue;
+        }
+        const tbl = c as unknown as { cells: readonly { borders?: unknown }[] };
+        for (const cell of tbl.cells) {
+          if (cell.borders) {
+            cellsWithBorders++;
+          }
+        }
+      }
+    }
+    // All four cells should carry resolved borders.
+    expect(cellsWithBorders).toBe(4);
+  });
+
+  it("restarts ordered-list numbering after a non-list paragraph interrupts it", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addNumberedList(h, ["one", "two"]);
+    Document.addParagraph(h, "an interrupting paragraph");
+    Document.addNumberedList(h, ["alpha", "beta"]);
+    const runs = allTextRuns(Document.build(h));
+    const markers = runs.map(r => r.text.trim()).filter(t => /^\d+\.$/.test(t));
+    // Two separate lists each start at 1, not a single 1..4 run.
+    expect(markers).toEqual(["1.", "2.", "1.", "2."]);
+  });
+
+  it("renders list markers for a list inside a table cell", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    // Seed a bullet numbering definition via a top-level list.
+    Document.addBulletList(h, ["seed"]);
+    const seeded = Document.build(h);
+    const seedPara = seeded.body.find(
+      (b): b is Extract<typeof b, { type: "paragraph" }> =>
+        b.type === "paragraph" && b.properties?.numbering !== undefined
+    );
+    const numId = seedPara?.properties?.numbering?.numId;
+    expect(numId).toBeDefined();
+
+    // Add a table whose cell paragraph reuses that bullet numbering.
+    const cellPara = paragraph([text("InCell")], {
+      numbering: { numId: numId!, level: 0 }
+    });
+    Document.addTableElement(h, table([row([cell([cellPara])])]));
+
+    const layout = layoutDocumentFull(Document.build(h));
+    let bulletInCell = false;
+    const visit = (items: readonly { type: string }[]): void => {
+      for (const c of items) {
+        if (c.type === "paragraph") {
+          const para = c as unknown as {
+            lines: readonly { runs: readonly Record<string, unknown>[] }[];
+          };
+          const joined = para.lines
+            .flatMap(l => l.runs)
+            .map(r => (typeof r.text === "string" ? r.text : ""))
+            .join("");
+          if (joined.includes("InCell") && joined.includes("\u2022")) {
+            bulletInCell = true;
+          }
+        } else if (c.type === "table") {
+          const tbl = c as unknown as {
+            cells: readonly { content: readonly { type: string }[] }[];
+          };
+          for (const cl of tbl.cells) {
+            visit(cl.content);
+          }
+        }
+      }
+    };
+    for (const page of layout.pages) {
+      visit(page.content as readonly { type: string }[]);
+    }
+    expect(bulletInCell).toBe(true);
+  });
+});

@@ -214,7 +214,7 @@ export class PdfEditorPage {
   /** @internal */
   _hasOverlay(): boolean {
     return (
-      this._overlay._stream.toString().length > 0 ||
+      this._overlay._stream.hasContent() ||
       this._overlay._images.length > 0 ||
       this._overlay._builderAnnotations.length > 0 ||
       this._overlay._formFields.length > 0
