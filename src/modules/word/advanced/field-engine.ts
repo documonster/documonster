@@ -84,7 +84,7 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
   const styleIndex = buildStyleIndex(doc);
 
   // Collect INDEX entries (XE fields) from all body content
-  const indexEntries = collectIndexEntries(doc);
+  const indexEntries = collectIndexEntries(doc, layout);
 
   // Update body content
   const newBody = updateBody(doc, layout, bookmarkInfo, seqValues, styleIndex, indexEntries, opts);
@@ -772,24 +772,34 @@ function findStyleRef(
 // Index Entry Collection (for INDEX field)
 // =============================================================================
 
-/** Collect all XE (Index Entry) fields from the document body. */
-function collectIndexEntries(doc: DocxDocument): IndexEntry[] {
+/**
+ * Collect all XE (Index Entry) fields from the document body, tagging each
+ * with the page it falls on. Page numbers come from `layout.contentPages`
+ * keyed by the enclosing top-level body index (the same mechanism used for
+ * headings/TOC); entries inside nested structures inherit their outer block's
+ * page, falling back to 1 when layout produced no page for that block.
+ */
+function collectIndexEntries(doc: DocxDocument, layout: LayoutResult): IndexEntry[] {
   const entries: IndexEntry[] = [];
+  const { contentPages } = layout;
 
-  walkBlocks(doc.body, {
-    visitRunContent(content) {
-      if (content.type !== "field") {
-        return;
-      }
-      const { type, args } = parseFieldInstruction(content.instruction);
-      if (type === "XE") {
-        const term = parseXeTerm(args);
-        if (term) {
-          entries.push({ term, page: 1 });
+  for (let i = 0; i < doc.body.length; i++) {
+    const page = contentPages[i] ?? 1;
+    walkBlocks([doc.body[i]] as BodyContent[], {
+      visitRunContent(content) {
+        if (content.type !== "field") {
+          return;
+        }
+        const { type, args } = parseFieldInstruction(content.instruction);
+        if (type === "XE") {
+          const term = parseXeTerm(args);
+          if (term) {
+            entries.push({ term, page });
+          }
         }
       }
-    }
-  });
+    });
+  }
 
   return entries;
 }
@@ -810,21 +820,39 @@ function buildIndexContent(entries: IndexEntry[], args: string): string {
     return "";
   }
 
-  // Sort entries alphabetically by term
-  const sorted = [...entries].sort((a, b) => a.term.localeCompare(b.term));
+  // Merge entries that share the same term: a term marked on several pages
+  // produces a single index line listing each distinct page (Word behaviour),
+  // e.g. "widget, 1, 4" rather than two separate "widget" rows.
+  const byTerm = new Map<string, Set<number>>();
+  for (const entry of entries) {
+    let pages = byTerm.get(entry.term);
+    if (!pages) {
+      pages = new Set<number>();
+      byTerm.set(entry.term, pages);
+    }
+    pages.add(entry.page);
+  }
+
+  // Sort terms alphabetically; within each term sort pages numerically.
+  const merged = [...byTerm.entries()]
+    .map(([term, pages]) => ({ term, pages: [...pages].sort((a, b) => a - b) }))
+    .sort((a, b) => a.term.localeCompare(b.term));
+
+  const formatEntry = (e: { term: string; pages: number[] }): string =>
+    `${e.term}\t${e.pages.join(", ")}`;
 
   // Check for \h switch (group by first letter with headings)
   const grouped = /\\h\b/i.test(args);
 
   if (!grouped) {
-    return sorted.map(e => `${e.term}\t${e.page}`).join("\n");
+    return merged.map(formatEntry).join("\n");
   }
 
   // Group by first letter
   const lines: string[] = [];
   let currentLetter = "";
 
-  for (const entry of sorted) {
+  for (const entry of merged) {
     const letter = entry.term.charAt(0).toUpperCase();
     if (letter !== currentLetter) {
       currentLetter = letter;
@@ -833,7 +861,7 @@ function buildIndexContent(entries: IndexEntry[], args: string): string {
       }
       lines.push(currentLetter);
     }
-    lines.push(`${entry.term}\t${entry.page}`);
+    lines.push(formatEntry(entry));
   }
 
   return lines.join("\n");

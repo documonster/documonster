@@ -10,13 +10,16 @@
 import { describe, it, expect } from "vitest";
 
 import { docxToSemantic } from "../convert/docx-to-semantic";
+import type { Mutable } from "../core/internal-utils";
 import type {
   AltChunk,
   ChartContent,
   CheckBox,
   DocxDocument,
   MathBlock,
+  NumberFormat,
   OpaqueDrawing,
+  Paragraph,
   TableOfContents
 } from "../types";
 
@@ -197,5 +200,130 @@ describe("docxToSemantic — full BodyContent coverage", () => {
     ];
     const { context } = docxToSemantic(minimalDoc(items));
     expect(context.warnings.filter(w => w.code === "unsupported-block")).toEqual([]);
+  });
+});
+
+// =============================================================================
+// List aggregation (numbering → semantic list blocks)
+// =============================================================================
+
+/** Build a doc whose numbering id `numId` resolves to the given format. */
+const docWithNumbering = (
+  body: DocxDocument["body"],
+  formats: ReadonlyArray<{ numId: number; format: NumberFormat }>
+): DocxDocument => {
+  const doc = minimalDoc(body) as Mutable<DocxDocument>;
+  doc.abstractNumberings = formats.map(f => ({
+    abstractNumId: f.numId,
+    levels: [
+      { level: 0, format: f.format, text: f.format === "bullet" ? "\u2022" : "%1." },
+      { level: 1, format: f.format, text: f.format === "bullet" ? "\u25e6" : "%2." }
+    ]
+  }));
+  doc.numberingInstances = formats.map(f => ({ numId: f.numId, abstractNumId: f.numId }));
+  return doc;
+};
+
+const listPara = (text: string, numId: number, level: number): Paragraph => ({
+  type: "paragraph",
+  properties: { numbering: { numId, level } },
+  children: [{ content: [{ type: "text", text }] }]
+});
+
+describe("docxToSemantic — list aggregation", () => {
+  it("aggregates consecutive bullet paragraphs into one unordered list", () => {
+    const doc = docWithNumbering(
+      [listPara("First", 1, 0), listPara("Second", 1, 0), listPara("Third", 1, 0)],
+      [{ numId: 1, format: "bullet" }]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks).toHaveLength(1);
+    const block = document.blocks[0];
+    expect(block.type).toBe("list");
+    if (block.type === "list") {
+      expect(block.ordered).toBe(false);
+      expect(block.items).toHaveLength(3);
+      expect(block.items.map(i => (i.children[0] as { text: string }).text)).toEqual([
+        "First",
+        "Second",
+        "Third"
+      ]);
+    }
+  });
+
+  it("classifies decimal numbering as an ordered list", () => {
+    const doc = docWithNumbering(
+      [listPara("Step 1", 2, 0), listPara("Step 2", 2, 0)],
+      [{ numId: 2, format: "decimal" }]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks).toHaveLength(1);
+    const block = document.blocks[0];
+    expect(block.type === "list" && block.ordered).toBe(true);
+  });
+
+  it("splits adjacent unordered and ordered runs into separate sibling lists", () => {
+    const doc = docWithNumbering(
+      [listPara("a", 1, 0), listPara("b", 1, 0), listPara("1", 2, 0), listPara("2", 2, 0)],
+      [
+        { numId: 1, format: "bullet" },
+        { numId: 2, format: "decimal" }
+      ]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks).toHaveLength(2);
+    expect(document.blocks[0].type === "list" && document.blocks[0].ordered).toBe(false);
+    expect(document.blocks[1].type === "list" && document.blocks[1].ordered).toBe(true);
+  });
+
+  it("nests deeper-level items as a subList of the preceding item", () => {
+    const doc = docWithNumbering(
+      [listPara("Parent", 1, 0), listPara("Child", 1, 1), listPara("Sibling", 1, 0)],
+      [{ numId: 1, format: "bullet" }]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks).toHaveLength(1);
+    const block = document.blocks[0];
+    expect(block.type).toBe("list");
+    if (block.type === "list") {
+      expect(block.items).toHaveLength(2);
+      const parent = block.items[0];
+      expect((parent.children[0] as { text: string }).text).toBe("Parent");
+      expect(parent.subList?.type).toBe("list");
+      if (parent.subList?.type === "list") {
+        expect(parent.subList.items).toHaveLength(1);
+        expect((parent.subList.items[0].children[0] as { text: string }).text).toBe("Child");
+      }
+      expect((block.items[1].children[0] as { text: string }).text).toBe("Sibling");
+    }
+  });
+
+  it("keeps a non-list paragraph between two lists as its own block", () => {
+    const doc = docWithNumbering(
+      [
+        listPara("a", 1, 0),
+        { type: "paragraph", children: [{ content: [{ type: "text", text: "gap" }] }] },
+        listPara("b", 1, 0)
+      ],
+      [{ numId: 1, format: "bullet" }]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks.map(b => b.type)).toEqual(["list", "paragraph", "list"]);
+  });
+
+  it("treats a numbered heading as a heading, not a list item", () => {
+    const doc = docWithNumbering(
+      [
+        {
+          type: "paragraph",
+          properties: { style: "Heading1", numbering: { numId: 1, level: 0 } },
+          children: [{ content: [{ type: "text", text: "Numbered heading" }] }]
+        }
+      ],
+      [{ numId: 1, format: "decimal" }]
+    );
+    const { document } = docxToSemantic(doc);
+    expect(document.blocks).toHaveLength(1);
+    expect(document.blocks[0].type).toBe("heading");
   });
 });

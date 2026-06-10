@@ -11,7 +11,8 @@
  * - Hyperlink extraction
  * - Image registration into ConversionContext
  * - Table structure with merge (colSpan/rowSpan)
- * - List/numbering detection (basic)
+ * - List/numbering detection: consecutive numbered paragraphs are aggregated
+ *   into ordered/unordered `list` blocks with nested sub-lists by level
  * - Footnote/endnote reference and content
  * - Math content (text fallback)
  */
@@ -45,6 +46,7 @@ import type {
   SemanticBlock,
   SemanticDocument,
   SemanticInline,
+  SemanticListItem,
   SemanticNote,
   SemanticParagraphStyle,
   SemanticTableCell,
@@ -167,6 +169,26 @@ function convertBodyContent(
     const item = body[bodyIndex];
     switch (item.type) {
       case "paragraph":
+        // A run of consecutive list-item paragraphs (each carrying a
+        // numbering reference, and not a heading) is aggregated into a single
+        // semantic `list` block with nested sub-lists driven by the numbering
+        // level. This is what turns Word numbering into real <ul>/<ol> in
+        // HTML and `-`/`1.` markers in Markdown when downstream renderers
+        // consume the IR.
+        if (isListItemParagraph(item)) {
+          let end = bodyIndex;
+          while (end < body.length) {
+            const next = body[end];
+            if (next.type !== "paragraph" || !isListItemParagraph(next)) {
+              break;
+            }
+            end++;
+          }
+          const listParas = body.slice(bodyIndex, end) as Paragraph[];
+          blocks.push(...buildListBlocks(listParas, doc, ctx, imageMap));
+          bodyIndex = end - 1; // loop's ++ advances past the consumed run
+          break;
+        }
         blocks.push(convertParagraph(item, doc, ctx, imageMap));
         break;
       case "table":
@@ -341,6 +363,140 @@ function convertBodyContent(
   }
 
   return blocks;
+}
+
+// =============================================================================
+// Internal: List Aggregation
+// =============================================================================
+
+/**
+ * Whether a body paragraph should render as a list item: it carries a
+ * numbering reference and is not itself a heading (a numbered heading stays a
+ * heading, mirroring the markdown/html renderers).
+ */
+function isListItemParagraph(item: BodyContent): boolean {
+  if (item.type !== "paragraph") {
+    return false;
+  }
+  return item.properties?.numbering !== undefined && detectHeadingLevel(item) === null;
+}
+
+/**
+ * Resolve a numbering reference to its number format string (e.g. "decimal",
+ * "bullet"). Mirrors the lookup in the markdown/html renderers so the three
+ * surfaces classify ordered vs. unordered lists identically. Defaults to
+ * "bullet" when the numbering definition can't be resolved.
+ */
+function getNumberingFormat(doc: DocxDocument, numId: number, level: number): string {
+  const instance = doc.numberingInstances?.find(n => n.numId === numId);
+  if (!instance) {
+    return "bullet";
+  }
+  const abstractNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
+  if (!abstractNum) {
+    return "bullet";
+  }
+  const levelDef = abstractNum.levels.find(l => l.level === level);
+  return levelDef?.format ?? "bullet";
+}
+
+/** A number format other than "bullet"/"none" denotes an ordered list. */
+function isOrderedFormat(format: string): boolean {
+  return format !== "bullet" && format !== "none";
+}
+
+/**
+ * Build one or more semantic `list` blocks from a contiguous run of list-item
+ * paragraphs. Paragraphs are nested by their numbering `level`; a deeper level
+ * becomes a `subList` of the preceding shallower item. Adjacent items that
+ * switch between ordered and unordered at the same level start a new sibling
+ * list so the ordered/unordered distinction is preserved.
+ */
+function buildListBlocks(
+  paras: readonly Paragraph[],
+  doc: DocxDocument,
+  ctx: ConversionContext,
+  imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
+): SemanticBlock[] {
+  const { blocks } = buildListLevel(paras, 0, 0, doc, ctx, imageMap);
+  return blocks;
+}
+
+/**
+ * Consume paragraphs starting at `start` that belong to `level` (or deeper),
+ * emitting sibling lists for this level. Deeper-level paragraphs are folded
+ * into the current item's `subList` via recursion. Returns the produced blocks
+ * and the index of the first paragraph that no longer belongs to this level.
+ */
+function buildListLevel(
+  paras: readonly Paragraph[],
+  start: number,
+  level: number,
+  doc: DocxDocument,
+  ctx: ConversionContext,
+  imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
+): { blocks: SemanticBlock[]; next: number } {
+  const blocks: SemanticBlock[] = [];
+  let i = start;
+  let currentOrdered: boolean | null = null;
+  let items: SemanticListItem[] = [];
+
+  const flush = (): void => {
+    if (items.length > 0 && currentOrdered !== null) {
+      blocks.push({ type: "list", ordered: currentOrdered, items });
+      items = [];
+    }
+  };
+
+  while (i < paras.length) {
+    const para = paras[i];
+    const num = para.properties?.numbering;
+    // Defensive: callers only pass list-item paragraphs, but guard anyway.
+    if (!num) {
+      break;
+    }
+    if (num.level < level) {
+      // Belongs to a shallower list — let the caller handle it.
+      break;
+    }
+    if (num.level > level) {
+      // Deeper item with no shallower parent at this position: descend and
+      // attach the nested list to the most recent item, or synthesise an
+      // empty item to host it when there is no parent.
+      const { blocks: subBlocks, next } = buildListLevel(paras, i, num.level, doc, ctx, imageMap);
+      const subList = subBlocks[0];
+      if (items.length > 0) {
+        const last = items[items.length - 1];
+        items[items.length - 1] = { ...last, subList };
+      } else if (subList) {
+        // Promote the deeper list to this level when there is no parent item.
+        if (currentOrdered === null && subList.type === "list") {
+          currentOrdered = subList.ordered;
+        }
+        items.push({ children: [], subList });
+      }
+      i = next;
+      continue;
+    }
+
+    // num.level === level
+    const format = getNumberingFormat(doc, num.numId, num.level);
+    const ordered = isOrderedFormat(format);
+    if (currentOrdered === null) {
+      currentOrdered = ordered;
+    } else if (ordered !== currentOrdered) {
+      // Ordered/unordered switch at the same level → start a new sibling list.
+      flush();
+      currentOrdered = ordered;
+    }
+
+    const children = convertParagraphChildren(para.children, doc, ctx, imageMap);
+    items.push({ children });
+    i++;
+  }
+
+  flush();
+  return { blocks, next: i };
 }
 
 // =============================================================================

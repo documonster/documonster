@@ -10,7 +10,7 @@
  *
  * Covers:
  *   - getCompatibilityMode (defaults to 15 when nothing is stored)
- *   - setCompatibilityMode — mutates doc.settings.compatSettings
+ *   - setCompatibilityMode — mutates doc.settings.compatibilityMode
  *   - Round-trip across read/write preserves the chosen mode
  *   - Adding individual w:compat flags (e.g. doNotExpandShiftReturn)
  *
@@ -55,10 +55,10 @@ for (const mode of modes) {
   const bytes = await toBuffer(model);
   fs.writeFileSync(path.join(outDir, `compat-${mode}.docx`), bytes);
 
-  // Re-read and verify. Note: the writer normalises compat metadata when
-  // outputting modern OOXML — a doc authored for Word 2003 still opens in
-  // 2013+ as compat=15 unless the consumer additionally configures the
-  // legacy-flags surface. We log the round-trip value to surface this.
+  // Re-read and verify the chosen mode survives a full write/read round-trip.
+  // The mode is persisted as the w:compatSetting named "compatibilityMode"
+  // inside word/settings.xml and restored into settings.compatibilityMode on
+  // read, so getCompatibilityMode returns the same value we set.
   const reread = await readDocx(bytes);
   console.log(`    after round-trip: ${getCompatibilityMode(reread)}`);
 }

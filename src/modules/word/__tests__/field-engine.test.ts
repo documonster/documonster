@@ -17,7 +17,15 @@ import { describe, it, expect } from "vitest";
 
 import { updateFields, updateTableOfContents } from "../advanced/field-engine";
 import { heading, paragraph, textParagraph } from "../builder/paragraph-builders";
-import { pageNumberField, text, tocField, totalPagesField } from "../builder/run-builders";
+import {
+  indexEntryField,
+  indexField,
+  pageBreak,
+  pageNumberField,
+  text,
+  tocField,
+  totalPagesField
+} from "../builder/run-builders";
 import type { DocxDocument, FieldContent, Paragraph, Run } from "../types";
 
 function getFirstField(doc: DocxDocument): FieldContent | undefined {
@@ -133,5 +141,68 @@ describe("updateTableOfContents", () => {
     expect(toc!.cachedParagraphs).toBeDefined();
     // Expect at least one entry per heading we passed in.
     expect(toc!.cachedParagraphs!.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("updateFields — INDEX field", () => {
+  /** Find the cachedValue of the first INDEX field in the document. */
+  function findIndexCachedValue(doc: DocxDocument): string | undefined {
+    for (const block of doc.body) {
+      if (block.type !== "paragraph") {
+        continue;
+      }
+      for (const child of block.children) {
+        if (!("content" in child) || !Array.isArray((child as Run).content)) {
+          continue;
+        }
+        for (const c of (child as Run).content) {
+          if (c.type === "field" && c.instruction.includes("INDEX")) {
+            return c.cachedValue;
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  it("merges repeated terms into one line and lists real page numbers", () => {
+    // Page 1: widget. Page 2 (after a page break): gadget + widget again.
+    const doc: DocxDocument = {
+      body: [
+        paragraph([text("alpha "), indexEntryField("widget")]),
+        paragraph([pageBreak()]),
+        paragraph([text("beta "), indexEntryField("gadget"), indexEntryField("widget")]),
+        paragraph([pageBreak()]),
+        paragraph([indexField()])
+      ]
+    };
+    const updated = updateFields(doc);
+    const value = findIndexCachedValue(updated);
+    expect(value).toBeDefined();
+
+    // Two distinct terms → two lines, sorted alphabetically (gadget < widget).
+    const lines = value!.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0].startsWith("gadget\t")).toBe(true);
+    expect(lines[1].startsWith("widget\t")).toBe(true);
+
+    // widget appears on pages 1 and 2 → merged into a single line "1, 2"
+    // (no duplicate "widget" row). gadget only on page 2.
+    const widgetPages = lines[1].split("\t")[1];
+    expect(widgetPages).toBe("1, 2");
+    const gadgetPages = lines[0].split("\t")[1];
+    expect(gadgetPages).toBe("2");
+  });
+
+  it("produces no duplicate term rows when the same term is marked twice on one page", () => {
+    const doc: DocxDocument = {
+      body: [
+        paragraph([indexEntryField("widget"), text(" "), indexEntryField("widget")]),
+        paragraph([indexField()])
+      ]
+    };
+    const updated = updateFields(doc);
+    const value = findIndexCachedValue(updated);
+    expect(value).toBe("widget\t1");
   });
 });
