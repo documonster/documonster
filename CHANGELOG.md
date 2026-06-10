@@ -5,26 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [9.7.0](https://github.com/cjnoname/excelts/compare/v9.6.0...v9.7.0) (2026-06-10)
-
-
-### Features
-
-* Enhance unit conversion tests and improve twip calculations ([8b2be79](https://github.com/cjnoname/excelts/commit/8b2be79c5b2334adde16956a69ce3ee441159c5c))
-* **word,pdf:** Complete header/footer margins, ChartEx and table fidelity in conversions ([187ce4d](https://github.com/cjnoname/excelts/commit/187ce4d379044c67c04cb9f2c599cd70081e6489))
-* **word:** Add footnote and endnote references in document body ([2d1887b](https://github.com/cjnoname/excelts/commit/2d1887b76da80cadf14bf95945ff63bfdd3839ea))
-* **word:** Add hyperlink styling for visited and unvisited links ([ee61c87](https://github.com/cjnoname/excelts/commit/ee61c87601e8bb763a517baec9f02ff670a9b4bf))
-* **word:** Enhance checkbox handling and table styling with row/column band sizes ([df18bbd](https://github.com/cjnoname/excelts/commit/df18bbd7b3a87cd5841b34e772c4e10d9c322308))
-* **word:** Enhance diff algorithm to pair similar paragraphs as modified based on text similarity ([89da4d4](https://github.com/cjnoname/excelts/commit/89da4d423b261ac7c65d466629a6a3b2985d0532))
-* **word:** Implement page break stripping to prevent trailing blank pages in split documents ([050bd1c](https://github.com/cjnoname/excelts/commit/050bd1c7d1780b4c19c611a216887d84250ca65f))
-* **word:** Improve section break handling in document merge and split operations ([2b621e7](https://github.com/cjnoname/excelts/commit/2b621e72d9f1a80af99ea02a66fd4d3bb05939eb))
+## [9.6.1](https://github.com/cjnoname/excelts/compare/v9.6.0...v9.6.1) (2026-06-10)
 
 
 ### Bug Fixes
 
 * **excel:** Read legacy comment body written as a bare &lt;t&gt; run ([d802cba](https://github.com/cjnoname/excelts/commit/d802cba9cc8203b27a80c987587181c794b6e5fd)), closes [#173](https://github.com/cjnoname/excelts/issues/173)
 * **types:** Avoid DOM-only globals in emitted declarations ([4f21191](https://github.com/cjnoname/excelts/commit/4f21191f794fc15b27a5a20081f4ce98c079a076)), closes [#174](https://github.com/cjnoname/excelts/issues/174)
-* **word:** Make encrypted and protected documents openable by Word ([f0ff64c](https://github.com/cjnoname/excelts/commit/f0ff64c12e3ba3072b5754f6ebcafe29a507636a))
 
 ## [9.6.0](https://github.com/cjnoname/excelts/compare/v9.5.9...v9.6.0) (2026-05-31)
 
