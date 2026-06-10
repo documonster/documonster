@@ -2,15 +2,17 @@
  * Word Example 26 — Markdown ↔ DOCX
  *
  * Covers:
- *   - markdownToDocx — full GFM features:
+ *   - markdownToDocx — full GFM features (async):
  *     · ATX & Setext headings, paragraphs, hard line breaks
  *     · Inline emphasis, strong, strike-through, code, links, images
  *     · Bullet, ordered and task lists (`- [ ]`, `- [x]`)
  *     · Block quotes, fenced code blocks (with language), thematic breaks
  *     · Tables (with column alignment)
- *     · Reference-style links and footnotes (PHP-Markdown extra)
- *     · Custom image resolver — supply image data for `![](url)`
- *   - markdownToDocxBody — same pipeline returning only BodyContent[]
+ *     · Footnotes (`[^id]` references with `[^id]: …` definitions)
+ *     · Custom image resolver (sync or async) — supply image data for
+ *       `![](url)` and the image is embedded into word/media/
+ *   - markdownToDocxBody — same pipeline returning body + supporting
+ *     numbering / footnote / image definitions for splicing
  *   - renderToMarkdown — DOCX → GFM Markdown, choice of heading style
  *
  * Output:
@@ -118,7 +120,7 @@ const lines: string[] = [
 ];
 const md = lines.join("\n");
 
-const importedDoc = markdownToDocx(md, {
+const importedDoc = await markdownToDocx(md, {
   defaultFont: "Calibri",
   defaultFontSize: 22,
   resolveImage(url, alt) {
@@ -137,6 +139,9 @@ const importedDoc = markdownToDocx(md, {
 const buf = await toBuffer(importedDoc);
 fs.writeFileSync(path.join(outDir, "26-md-imported.docx"), buf);
 console.log(`  markdownToDocx → ${importedDoc.body.length} body items, ${buf.length} bytes`);
+console.log(
+  `  embedded images: ${importedDoc.images?.length ?? 0}, footnotes: ${importedDoc.footnotes?.length ?? 0}`
+);
 console.log(`  → 26-md-imported.docx`);
 
 // ---------------------------------------------------------------------------
@@ -179,18 +184,17 @@ console.log(`  → 26-md-setext.md`);
 }
 
 // ---------------------------------------------------------------------------
-// 5. markdownToDocxBody — same parser, returns BodyContent[] only.
+// 5. markdownToDocxBody — same parser, returns body content PLUS the
+//    supporting numbering / footnote / image definitions it references.
 //    Useful when you want to splice Markdown content into an existing
 //    DOCX you've already built (templates, headers/footers, etc.) rather
 //    than producing a stand-alone document.
 //
-//    Caveat: lists, blockquotes and code blocks in DOCX rely on
-//    document-level numbering AND named styles (Quote, code styles, etc.)
-//    that this function does NOT return. Splicing such markdown into a
-//    document that lacks the matching styles / numbering yields invalid
-//    OOXML. Either keep the input simple (paragraphs + headings + inline
-//    formatting) — as below — or import the same definitions from
-//    `markdownToDocx`'s output before splicing.
+//    The result's `body` references document-level definitions (numbering for
+//    lists, FootnoteDef for footnotes, ImageDef for images) returned in the
+//    same result object. When splicing into a host document you must merge
+//    those definitions too; here the fragment is kept to paragraphs +
+//    headings + inline formatting, so only the body needs splicing.
 // ---------------------------------------------------------------------------
 {
   const fragmentMd = [
@@ -204,18 +208,18 @@ console.log(`  → 26-md-setext.md`);
     "",
     "Final paragraph — end of fragment."
   ].join("\n");
-  const body = markdownToDocxBody(fragmentMd);
+  const fragment = await markdownToDocxBody(fragmentMd);
 
   const host = Document.create();
   Document.useDefaultStyles(host);
   Document.addHeading(host, "Host document", 1);
   Document.addParagraph(host, "Below is content spliced in from Markdown:");
-  for (const item of body) {
+  for (const item of fragment.body) {
     Document.addContent(host, item);
   }
   Document.addParagraph(host, "(End of imported fragment.)");
   const buf3 = await toBuffer(Document.build(host));
   fs.writeFileSync(path.join(outDir, "26-md-fragment-spliced.docx"), buf3);
-  console.log(`  markdownToDocxBody → ${body.length} body items spliced into host doc`);
+  console.log(`  markdownToDocxBody → ${fragment.body.length} body items spliced into host doc`);
   console.log(`  → 26-md-fragment-spliced.docx`);
 }

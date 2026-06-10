@@ -16,4 +16,8 @@ export type { MarkdownRenderOptions } from "./markdown-renderer";
 
 // Import (Markdown → DOCX)
 export { markdownToDocx, markdownToDocxBody } from "./markdown-import";
-export type { MarkdownImportOptions, MarkdownImageData } from "./markdown-import";
+export type {
+  MarkdownImportOptions,
+  MarkdownImageData,
+  MarkdownBodyResult
+} from "./markdown-import";

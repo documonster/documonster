@@ -24,7 +24,11 @@ import type {
   Alignment,
   BodyContent,
   DocxDocument,
+  Emu,
+  FootnoteDef,
   Hyperlink,
+  ImageDef,
+  ImageMediaType,
   LevelSuffix,
   NumberingInstance,
   Paragraph,
@@ -64,62 +68,105 @@ export interface MarkdownImportOptions {
 /** Resolved image data for embedding. */
 export interface MarkdownImageData {
   readonly data: Uint8Array;
-  readonly mediaType: "png" | "jpeg" | "gif" | "bmp" | "tiff" | "svg" | "webp";
+  readonly mediaType: ImageMediaType;
   readonly width?: number; // EMU
   readonly height?: number; // EMU
+  /**
+   * Raster (PNG) fallback for vector images. Required by Word for `svg`
+   * images so non-SVG-aware viewers have something to display. When the
+   * media type is `svg` and this is omitted, the packager synthesizes a
+   * transparent placeholder PNG automatically.
+   */
+  readonly fallbackData?: Uint8Array;
+}
+
+/**
+ * Result of {@link markdownToDocxBody} — the parsed body content plus the
+ * supporting document-level definitions it references.
+ *
+ * Lists, footnotes and images are *not* self-contained: a list paragraph
+ * references a numbering id, a footnote reference run references a
+ * `FootnoteDef`, and an inline image references an `ImageDef`. Splicing the
+ * `body` alone into a host document that lacks these definitions yields
+ * invalid OOXML. Merge the relevant arrays into the host document (or its
+ * builder state) alongside the body.
+ */
+export interface MarkdownBodyResult {
+  readonly body: BodyContent[];
+  readonly abstractNumberings: AbstractNumbering[];
+  readonly numberingInstances: NumberingInstance[];
+  readonly footnotes: FootnoteDef[];
+  readonly images: ImageDef[];
 }
 
 /**
  * Convert a Markdown string into a complete DocxDocument.
  *
+ * Supports the full GFM feature set including inline images (embedded via the
+ * `resolveImage` callback) and footnotes (`[^id]` references with `[^id]: …`
+ * definitions). Because image resolution and document packaging are inherently
+ * asynchronous, this function is async.
+ *
  * @param markdown - The GFM Markdown string.
  * @param options - Optional conversion settings.
- * @returns A DocxDocument ready to be packaged.
+ * @returns A Promise resolving to a DocxDocument ready to be packaged.
  */
-export function markdownToDocx(markdown: string, options?: MarkdownImportOptions): DocxDocument {
-  const { body, state } = markdownToDocxBodyInternal(markdown, options);
+export async function markdownToDocx(
+  markdown: string,
+  options?: MarkdownImportOptions
+): Promise<DocxDocument> {
+  const { body, state } = await markdownToDocxBodyInternal(markdown, options);
   return {
     body,
     styles: defaultMarkdownStyles(),
     abstractNumberings: state.abstractNumberings,
-    numberingInstances: state.numberingInstances
+    numberingInstances: state.numberingInstances,
+    ...(state.footnotes.length > 0 ? { footnotes: state.footnotes } : {}),
+    ...(state.images.length > 0 ? { images: state.images } : {})
   };
 }
 
 /**
- * Convert a Markdown string into an array of DOCX body content blocks.
+ * Convert a Markdown string into DOCX body content plus the supporting
+ * document-level definitions it references.
  *
- * **Caveat — body content is not self-contained.**
- *   - **Lists** (bullet / numbered / task) reference numbering ids that
- *     live in document-level `abstractNumberings` + `numberingInstances`,
- *     which this helper does NOT return.
- *   - **Block quotes** reference the named `Quote` style.
- *   - **Code blocks** reference the named code styles.
+ * **Caveat — body content is not self-contained.** The returned `body` may
+ * reference:
+ *   - **Numbering** (`abstractNumberings` / `numberingInstances`) — used by
+ *     bullet / numbered / task lists.
+ *   - **Footnotes** (`footnotes`) — referenced by footnote-reference runs.
+ *   - **Images** (`images`) — referenced by inline image runs.
+ *   - The named `Quote` / `CodeBlock` styles (for block quotes / code blocks).
  *
- * Splicing markdown that uses any of these constructs into a document that
- * lacks the matching numbering / styles yields invalid OOXML. Either keep
- * the input flat (paragraphs + headings + inline formatting) before
- * splicing, or use the higher-level {@link markdownToDocx} which returns a
- * complete `DocxDocument` with the supporting definitions populated.
+ * Splice the relevant arrays into your host document alongside the body, or
+ * use the higher-level {@link markdownToDocx} which returns a complete
+ * `DocxDocument` with everything populated.
  *
  * @param markdown - The GFM Markdown string.
  * @param options - Optional conversion settings.
- * @returns Array of BodyContent blocks (no numbering / styles attached).
+ * @returns A Promise resolving to the body and its supporting definitions.
  */
-export function markdownToDocxBody(
+export async function markdownToDocxBody(
   markdown: string,
   options?: MarkdownImportOptions
-): BodyContent[] {
-  return markdownToDocxBodyInternal(markdown, options).body;
+): Promise<MarkdownBodyResult> {
+  const { body, state } = await markdownToDocxBodyInternal(markdown, options);
+  return {
+    body,
+    abstractNumberings: state.abstractNumberings,
+    numberingInstances: state.numberingInstances,
+    footnotes: state.footnotes,
+    images: state.images
+  };
 }
 
 /**
  * Internal implementation: converts markdown and returns both body and state.
  */
-function markdownToDocxBodyInternal(
+async function markdownToDocxBodyInternal(
   markdown: string,
   options?: MarkdownImportOptions
-): { body: BodyContent[]; state: ConversionState } {
+): Promise<{ body: BodyContent[]; state: ConversionState }> {
   const state = createState();
   const opts: Required<Pick<MarkdownImportOptions, "codeFont" | "codeFontSize">> &
     MarkdownImportOptions = {
@@ -129,8 +176,14 @@ function markdownToDocxBodyInternal(
   };
 
   const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const blocks = parseMarkdownBlocks(lines, 0, lines.length);
-  const body = convertBlocks(blocks, opts, state);
+  // First pass: extract footnote definitions (`[^id]: …`) so references can
+  // resolve regardless of definition order, then parse the remaining blocks.
+  const { lines: contentLines, definitions } = extractFootnoteDefinitions(lines);
+  state.footnoteDefinitions = definitions;
+  const blocks = parseMarkdownBlocks(contentLines, 0, contentLines.length);
+  const body = await convertBlocks(blocks, opts, state);
+  // Emit footnote definitions that were actually referenced, in reference order.
+  await finalizeFootnotes(state, opts);
   return { body, state };
 }
 
@@ -235,6 +288,11 @@ interface ImageInline {
 interface LineBreakInline {
   type: "lineBreak";
 }
+interface FootnoteRefInline {
+  type: "footnoteRef";
+  /** The markdown footnote label (e.g. "1" from `[^1]`). */
+  label: string;
+}
 
 type InlineNode =
   | TextInline
@@ -244,7 +302,8 @@ type InlineNode =
   | CodeInline
   | LinkInline
   | ImageInline
-  | LineBreakInline;
+  | LineBreakInline
+  | FootnoteRefInline;
 
 // =============================================================================
 // Shared state for numbering (per-invocation)
@@ -256,6 +315,19 @@ interface ConversionState {
   nextNumId: number;
   bulletNumId: number | undefined;
   orderedNumId: number | undefined;
+  /** Emitted footnote definitions, in first-reference order. */
+  footnotes: FootnoteDef[];
+  /** Embedded inline images. */
+  images: ImageDef[];
+  /** Footnote definition bodies keyed by markdown label (`[^label]: …`). */
+  footnoteDefinitions: Map<string, string>;
+  /** Maps a markdown footnote label to its assigned numeric footnote id. */
+  footnoteIds: Map<string, number>;
+  /** Footnote labels in first-reference order (drives definition emission). */
+  footnoteOrder: string[];
+  nextFootnoteId: number;
+  nextImageId: number;
+  nextDrawingId: number;
 }
 
 function createState(): ConversionState {
@@ -264,8 +336,113 @@ function createState(): ConversionState {
     numberingInstances: [],
     nextNumId: 1,
     bulletNumId: undefined,
-    orderedNumId: undefined
+    orderedNumId: undefined,
+    footnotes: [],
+    images: [],
+    footnoteDefinitions: new Map(),
+    footnoteIds: new Map(),
+    footnoteOrder: [],
+    nextFootnoteId: 1,
+    nextImageId: 1,
+    nextDrawingId: 1
   };
+}
+
+// =============================================================================
+// Footnote definition extraction (first pass)
+// =============================================================================
+
+/**
+ * Matches a footnote definition line: `[^label]: content`.
+ * Continuation lines (indented under a definition) are folded in.
+ */
+const FOOTNOTE_DEF_RE = /^\[\^([^\]]+)\]:\s?(.*)$/;
+
+/**
+ * Strip footnote definitions (`[^id]: …`) out of the line stream before block
+ * parsing, returning the remaining content lines plus a label→text map. A
+ * definition may span continuation lines that are indented by at least one
+ * space; those are joined with a single space.
+ */
+function extractFootnoteDefinitions(lines: string[]): {
+  lines: string[];
+  definitions: Map<string, string>;
+} {
+  const definitions = new Map<string, string>();
+  const contentLines: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    // Preserve fenced code blocks verbatim — a `[^id]:`-looking line inside a
+    // code fence is code, not a footnote definition.
+    const fenceMatch = lines[i].match(/^(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const fence = fenceMatch[1];
+      const closeRe = new RegExp(`^${fence[0]}{${fence.length},}$`);
+      contentLines.push(lines[i]);
+      i++;
+      while (i < lines.length) {
+        contentLines.push(lines[i]);
+        const isClose = closeRe.test(lines[i].trim());
+        i++;
+        if (isClose) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    const match = lines[i].match(FOOTNOTE_DEF_RE);
+    if (match) {
+      const label = match[1];
+      const parts: string[] = [match[2]];
+      i++;
+      // Fold indented continuation lines into the definition.
+      while (i < lines.length && /^\s+\S/.test(lines[i])) {
+        parts.push(lines[i].trim());
+        i++;
+      }
+      definitions.set(label, parts.join(" ").trim());
+      continue;
+    }
+    contentLines.push(lines[i]);
+    i++;
+  }
+  return { lines: contentLines, definitions };
+}
+
+/**
+ * After conversion, emit a `FootnoteDef` for every footnote that was actually
+ * referenced, in reference order. References to undefined labels still get a
+ * footnote (with empty content) so the reference mark remains valid OOXML.
+ */
+function finalizeFootnotes(state: ConversionState, opts: ConvertOpts): Promise<void> {
+  return (async () => {
+    for (const label of state.footnoteOrder) {
+      const id = state.footnoteIds.get(label);
+      if (id === undefined) {
+        continue;
+      }
+      const text = state.footnoteDefinitions.get(label) ?? "";
+      const inlines = parseInlines(text);
+      const para = await convertParagraph(inlines, opts, state, { style: "FootnoteText" });
+      state.footnotes.push({ id, content: [para] });
+    }
+  })();
+}
+
+/**
+ * Resolve (or assign) the numeric footnote id for a markdown label, recording
+ * reference order on first use.
+ */
+function resolveFootnoteId(label: string, state: ConversionState): number {
+  const existing = state.footnoteIds.get(label);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const id = state.nextFootnoteId++;
+  state.footnoteIds.set(label, id);
+  state.footnoteOrder.push(label);
+  return id;
 }
 
 // =============================================================================
@@ -666,6 +843,16 @@ function parseInlines(text: string): InlineNode[] {
       }
     }
 
+    // Footnote reference [^label]
+    if (text[i] === "[" && text[i + 1] === "^") {
+      const result = parseFootnoteRef(text, i);
+      if (result) {
+        nodes.push(result.node);
+        i = result.end;
+        continue;
+      }
+    }
+
     // Link [text](url "title")
     if (text[i] === "[") {
       const result = parseLink(text, i);
@@ -780,6 +967,21 @@ function parseInlineCode(text: string, start: number): { node: CodeInline; end: 
   }
 
   return { node: { type: "code", text: code }, end: afterClose };
+}
+
+function parseFootnoteRef(
+  text: string,
+  start: number
+): { node: FootnoteRefInline; end: number } | null {
+  // [^label] — label may not contain ']' or whitespace.
+  const match = text.slice(start).match(/^\[\^([^\]\s]+)\]/);
+  if (!match) {
+    return null;
+  }
+  return {
+    node: { type: "footnoteRef", label: match[1] },
+    end: start + match[0].length
+  };
 }
 
 function parseImage(text: string, start: number): { node: ImageInline; end: number } | null {
@@ -1043,26 +1245,30 @@ function parseStrikethrough(
 type ConvertOpts = Required<Pick<MarkdownImportOptions, "codeFont" | "codeFontSize">> &
   MarkdownImportOptions;
 
-function convertBlocks(blocks: Block[], opts: ConvertOpts, state: ConversionState): BodyContent[] {
+async function convertBlocks(
+  blocks: Block[],
+  opts: ConvertOpts,
+  state: ConversionState
+): Promise<BodyContent[]> {
   const result: BodyContent[] = [];
   for (const block of blocks) {
-    const converted = convertBlock(block, opts, 0, state);
+    const converted = await convertBlock(block, opts, 0, state);
     result.push(...converted);
   }
   return result;
 }
 
-function convertBlock(
+async function convertBlock(
   block: Block,
   opts: ConvertOpts,
   listLevel: number,
   state: ConversionState
-): BodyContent[] {
+): Promise<BodyContent[]> {
   switch (block.type) {
     case "heading":
-      return [convertHeading(block)];
+      return [await convertHeading(block, opts, state)];
     case "paragraph":
-      return [convertParagraph(block.inlines, opts)];
+      return [await convertParagraph(block.inlines, opts, state)];
     case "blockquote":
       return convertBlockquote(block, opts, state);
     case "fencedCode":
@@ -1072,7 +1278,7 @@ function convertBlock(
     case "list":
       return convertList(block, opts, listLevel, state);
     case "table":
-      return [convertTable(block, opts)];
+      return [await convertTable(block, opts, state)];
     case "html":
       // Pass through as plain text paragraph
       return [
@@ -1083,8 +1289,12 @@ function convertBlock(
   }
 }
 
-function convertHeading(block: HeadingBlock): Paragraph {
-  const children = inlinesToRuns(block.inlines, {});
+async function convertHeading(
+  block: HeadingBlock,
+  opts: ConvertOpts,
+  state: ConversionState
+): Promise<Paragraph> {
+  const children = await inlinesToRuns(block.inlines, opts, state, true);
   return {
     type: "paragraph",
     properties: {
@@ -1095,12 +1305,13 @@ function convertHeading(block: HeadingBlock): Paragraph {
   };
 }
 
-function convertParagraph(
+async function convertParagraph(
   inlines: InlineNode[],
   opts: ConvertOpts,
+  state: ConversionState,
   props?: ParagraphProperties
-): Paragraph {
-  const children = inlinesToRuns(inlines, opts);
+): Promise<Paragraph> {
+  const children = await inlinesToRuns(inlines, opts, state, false);
   return {
     type: "paragraph",
     properties: props,
@@ -1108,15 +1319,15 @@ function convertParagraph(
   };
 }
 
-function convertBlockquote(
+async function convertBlockquote(
   block: BlockquoteBlock,
   opts: ConvertOpts,
   state: ConversionState
-): BodyContent[] {
+): Promise<BodyContent[]> {
   // Convert blockquote children with "Quote" style and left indent
   const result: BodyContent[] = [];
   for (const child of block.children) {
-    const converted = convertBlock(child, opts, 0, state);
+    const converted = await convertBlock(child, opts, 0, state);
     for (const item of converted) {
       if (item.type === "paragraph") {
         result.push({
@@ -1178,12 +1389,12 @@ function convertThematicBreak(): Paragraph {
   };
 }
 
-function convertList(
+async function convertList(
   block: ListBlock,
   opts: ConvertOpts,
   parentLevel: number,
   state: ConversionState
-): BodyContent[] {
+): Promise<BodyContent[]> {
   // Ordered lists with a non-default `start` need their own numbering
   // instance so the override actually takes effect — sharing one numId
   // across all lists would force every list to start at the same number.
@@ -1198,7 +1409,7 @@ function convertList(
     for (const child of item.children) {
       if (child.type === "list") {
         // Nested list — increase level
-        const nested = convertList(child, opts, parentLevel + 1, state);
+        const nested = await convertList(child, opts, parentLevel + 1, state);
         result.push(...nested);
       } else if (child.type === "paragraph") {
         if (firstBlock) {
@@ -1206,7 +1417,7 @@ function convertList(
           const props: ParagraphProperties = {
             numbering: { numId, level: parentLevel }
           };
-          const para = convertParagraph(child.inlines, opts, props);
+          const para = await convertParagraph(child.inlines, opts, state, props);
 
           // Handle task list checkbox prefix
           if (item.checked !== undefined) {
@@ -1226,10 +1437,10 @@ function convertList(
           const props: ParagraphProperties = {
             indent: { left: 720 * (parentLevel + 1) }
           };
-          result.push(convertParagraph(child.inlines, opts, props));
+          result.push(await convertParagraph(child.inlines, opts, state, props));
         }
       } else {
-        const converted = convertBlock(child, opts, parentLevel, state);
+        const converted = await convertBlock(child, opts, parentLevel, state);
         result.push(...converted);
         firstBlock = false;
       }
@@ -1239,11 +1450,17 @@ function convertList(
   return result;
 }
 
-function convertTable(block: TableBlock, opts: ConvertOpts): Table {
+async function convertTable(
+  block: TableBlock,
+  opts: ConvertOpts,
+  state: ConversionState
+): Promise<Table> {
   const colCount = block.headers.length;
 
   // Header row
-  const headerCells: TableCell[] = block.headers.map((cell, ci) => {
+  const headerCells: TableCell[] = [];
+  for (let ci = 0; ci < block.headers.length; ci++) {
+    const cell = block.headers[ci];
     const cellProps: TableCellProperties = {
       shading: { fill: "F0F0F0" },
       verticalAlign: "center"
@@ -1251,7 +1468,7 @@ function convertTable(block: TableBlock, opts: ConvertOpts): Table {
     const paraProps: ParagraphProperties = {
       alignment: block.alignments[ci]
     };
-    const para = convertParagraph(cell, opts, paraProps);
+    const para = await convertParagraph(cell, opts, state, paraProps);
     // Bold header text
     const boldPara: Paragraph = {
       ...para,
@@ -1262,22 +1479,23 @@ function convertTable(block: TableBlock, opts: ConvertOpts): Table {
         return child;
       })
     };
-    return { properties: cellProps, content: [boldPara] };
-  });
+    headerCells.push({ properties: cellProps, content: [boldPara] });
+  }
 
   // Data rows
-  const dataRows: TableRow[] = block.rows.map(rowCells => {
+  const dataRows: TableRow[] = [];
+  for (const rowCells of block.rows) {
     const cells: TableCell[] = [];
     for (let ci = 0; ci < colCount; ci++) {
       const cellInlines = ci < rowCells.length ? rowCells[ci] : [];
       const paraProps: ParagraphProperties = {
         alignment: block.alignments[ci]
       };
-      const para = convertParagraph(cellInlines, opts, paraProps);
+      const para = await convertParagraph(cellInlines, opts, state, paraProps);
       cells.push({ content: [para] });
     }
-    return { cells };
-  });
+    dataRows.push({ cells });
+  }
 
   const allRows: TableRow[] = [
     { properties: { tableHeader: true }, cells: headerCells },
@@ -1309,46 +1527,78 @@ function convertTable(block: TableBlock, opts: ConvertOpts): Table {
 // Inline to Run Conversion
 // =============================================================================
 
-function inlinesToRuns(inlines: InlineNode[], opts: Partial<ConvertOpts>): ParagraphChild[] {
+async function inlinesToRuns(
+  inlines: InlineNode[],
+  opts: ConvertOpts,
+  state: ConversionState,
+  isHeading: boolean
+): Promise<ParagraphChild[]> {
   const result: ParagraphChild[] = [];
   for (const node of inlines) {
-    inlineToRuns(node, result, {}, opts);
+    await inlineToRuns(node, result, {}, opts, state, isHeading);
   }
   return result;
 }
 
-function inlineToRuns(
+async function inlineToRuns(
   node: InlineNode,
   output: ParagraphChild[],
   inheritedProps: RunProperties,
-  opts: Partial<ConvertOpts>
-): void {
+  opts: ConvertOpts,
+  state: ConversionState,
+  isHeading: boolean
+): Promise<void> {
   switch (node.type) {
     case "text": {
-      const textProps: RunProperties = {
-        ...inheritedProps,
-        ...(opts.defaultFont && !inheritedProps.font ? { font: opts.defaultFont } : {}),
-        ...(opts.defaultFontSize && !inheritedProps.size ? { size: opts.defaultFontSize } : {})
-      };
+      // Headings derive their font/size from the named Heading style; only
+      // body text picks up the document default font/size.
+      const textProps: RunProperties = isHeading
+        ? inheritedProps
+        : {
+            ...inheritedProps,
+            ...(opts.defaultFont && !inheritedProps.font ? { font: opts.defaultFont } : {}),
+            ...(opts.defaultFontSize && !inheritedProps.size ? { size: opts.defaultFontSize } : {})
+          };
       output.push(makeRun(node.text, textProps));
       break;
     }
 
     case "bold":
       for (const child of node.children) {
-        inlineToRuns(child, output, { ...inheritedProps, bold: true }, opts);
+        await inlineToRuns(
+          child,
+          output,
+          { ...inheritedProps, bold: true },
+          opts,
+          state,
+          isHeading
+        );
       }
       break;
 
     case "italic":
       for (const child of node.children) {
-        inlineToRuns(child, output, { ...inheritedProps, italic: true }, opts);
+        await inlineToRuns(
+          child,
+          output,
+          { ...inheritedProps, italic: true },
+          opts,
+          state,
+          isHeading
+        );
       }
       break;
 
     case "strikethrough":
       for (const child of node.children) {
-        inlineToRuns(child, output, { ...inheritedProps, strike: true }, opts);
+        await inlineToRuns(
+          child,
+          output,
+          { ...inheritedProps, strike: true },
+          opts,
+          state,
+          isHeading
+        );
       }
       break;
 
@@ -1367,11 +1617,13 @@ function inlineToRuns(
       const linkChildren: Run[] = [];
       for (const child of node.children) {
         const tempOutput: ParagraphChild[] = [];
-        inlineToRuns(
+        await inlineToRuns(
           child,
           tempOutput,
           { ...inheritedProps, color: "0563C1", underline: "single" },
-          opts
+          opts,
+          state,
+          isHeading
         );
         for (const run of tempOutput) {
           if ("content" in run) {
@@ -1390,22 +1642,81 @@ function inlineToRuns(
       break;
     }
 
-    case "image":
-      // Images require async resolution — for sync API we insert a placeholder
-      // The resolveImage callback in options would be used in an async variant
-      output.push(
-        makeRun(`[Image: ${node.alt || node.url}]`, {
-          ...inheritedProps,
-          italic: true,
-          color: "666666"
-        })
-      );
+    case "image": {
+      const run = await resolveImageRun(node, inheritedProps, opts, state);
+      output.push(run);
       break;
+    }
+
+    case "footnoteRef": {
+      const id = resolveFootnoteId(node.label, state);
+      output.push({
+        properties: { ...inheritedProps, style: "FootnoteReference" },
+        content: [{ type: "footnoteRef", id }]
+      });
+      break;
+    }
 
     case "lineBreak":
       output.push(makeRun("", undefined, [{ type: "break" }]));
       break;
   }
+}
+
+/**
+ * Resolve an inline image. If `resolveImage` returns image data, embed it as a
+ * real `InlineImageContent` run and register the media in `state.images`;
+ * otherwise fall back to an italic `[Image: alt]` placeholder so the output
+ * remains valid.
+ */
+async function resolveImageRun(
+  node: ImageInline,
+  inheritedProps: RunProperties,
+  opts: ConvertOpts,
+  state: ConversionState
+): Promise<Run> {
+  const data = opts.resolveImage ? await opts.resolveImage(node.url, node.alt) : undefined;
+  if (!data) {
+    return makeRun(`[Image: ${node.alt || node.url}]`, {
+      ...inheritedProps,
+      italic: true,
+      color: "666666"
+    });
+  }
+
+  const n = state.nextImageId++;
+  const fileName = `image${n}.${imageExtension(data.mediaType)}`;
+  const rId = `mdimg${n}`;
+  // For SVG, the packager auto-splits the PNG fallback into its own media
+  // part, assigns a second relationship, and back-fills `svgRId` on the inline
+  // image — so we only ever push a single ImageDef and a single rId here.
+  state.images.push({
+    data: data.data,
+    mediaType: data.mediaType,
+    fileName,
+    rId,
+    ...(data.fallbackData ? { fallbackData: data.fallbackData } : {})
+  });
+
+  const DEFAULT_DIM = 914400 as Emu; // 1 inch fallback when no size given
+  return {
+    content: [
+      {
+        type: "image",
+        rId,
+        width: (data.width ?? DEFAULT_DIM) as Emu,
+        height: (data.height ?? DEFAULT_DIM) as Emu,
+        altText: node.alt || undefined,
+        name: node.alt || fileName,
+        drawingId: state.nextDrawingId++
+      }
+    ]
+  };
+}
+
+/** Map an image media type to its word/media/ file extension. */
+function imageExtension(mediaType: ImageMediaType): string {
+  return mediaType === "jpeg" ? "jpg" : mediaType;
 }
 
 // =============================================================================
@@ -1684,6 +1995,22 @@ function defaultMarkdownStyles() {
       name: "Code Block",
       basedOn: "Normal",
       runProperties: { font: "Courier New", size: 20 }
+    },
+    {
+      // Character style applied to the in-text footnote reference mark so it
+      // renders as a superscript number, matching Word's built-in style.
+      type: "character" as const,
+      styleId: "FootnoteReference",
+      name: "footnote reference",
+      runProperties: { vertAlign: "superscript" as const }
+    },
+    {
+      // Paragraph style for footnote body text (smaller font, like Word).
+      type: "paragraph" as const,
+      styleId: "FootnoteText",
+      name: "footnote text",
+      basedOn: "Normal",
+      runProperties: { size: 20 }
     }
   ];
 }

@@ -341,7 +341,7 @@ describe("Med-3: markdown import paragraph + table boundary", () => {
 | h1 | h2 |
 | --- | --- |
 | a | b |`;
-    const doc = markdownToDocx(md);
+    const doc = await markdownToDocx(md);
     const types = doc.body.map(b => b.type);
     expect(types).toContain("paragraph");
     expect(types).toContain("table");

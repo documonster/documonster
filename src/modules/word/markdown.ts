@@ -15,5 +15,6 @@ export { renderToMarkdown, markdownToDocx, markdownToDocxBody } from "./convert/
 export type {
   MarkdownRenderOptions,
   MarkdownImportOptions,
-  MarkdownImageData
+  MarkdownImageData,
+  MarkdownBodyResult
 } from "./convert/markdown/markdown";
