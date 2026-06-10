@@ -17,6 +17,15 @@ export interface CfbEntry {
   readonly name: string;
   /** Stream data. */
   readonly data: Uint8Array;
+  /**
+   * Optional storage path for the stream. Each element is a storage
+   * (directory) name; the stream lives inside the nested storages.
+   * For example `path: ["\u0006DataSpaces", "TransformInfo"]` with
+   * `name: "..."` places the stream at
+   * `\u0006DataSpaces/TransformInfo/<name>`. Omit or use `[]` for a
+   * top-level stream under the root storage.
+   */
+  readonly path?: readonly string[];
 }
 
 /** CFB file signature: D0CF11E0A1B11AE1. */
@@ -259,12 +268,69 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
 // CFB Writer (v3, sector size 512)
 // =============================================================================
 
+const MINI_SECTOR_SIZE = 64;
+const MINI_STREAM_CUTOFF = 4096;
+const NOSTREAM = 0xffffffff;
+
+/** Internal directory-tree node used while assembling the CFB. */
+interface DirNode {
+  name: string;
+  /** 1 = storage, 2 = stream, 5 = root. */
+  type: number;
+  data?: Uint8Array;
+  children: DirNode[];
+  // Filled in during serialization:
+  left: number;
+  right: number;
+  child: number;
+  startSector: number;
+  size: number;
+}
+
+/** Create a directory node with the sibling/child pointers in their unset state. */
+function makeDirNode(name: string, type: number, data?: Uint8Array): DirNode {
+  return {
+    name,
+    type,
+    data,
+    children: [],
+    left: NOSTREAM,
+    right: NOSTREAM,
+    child: NOSTREAM,
+    startSector: ENDOFCHAIN,
+    size: data?.length ?? 0
+  };
+}
+
+/**
+ * MS-CFB sibling ordering: compare by UTF-16 code-unit length first, then
+ * by upper-cased code units. This is the exact ordering Office uses to lay
+ * out the red-black directory tree; getting it wrong makes Word reject the
+ * container even though the bytes are otherwise valid.
+ */
+function compareCfbNames(a: string, b: string): number {
+  if (a.length !== b.length) {
+    return a.length - b.length;
+  }
+  const ua = a.toUpperCase();
+  const ub = b.toUpperCase();
+  if (ua < ub) {
+    return -1;
+  }
+  if (ua > ub) {
+    return 1;
+  }
+  return 0;
+}
+
 /**
  * Write a set of named stream entries into a CFB (OLE2 Compound File) container.
  *
- * Produces a minimal v3 CFB with 512-byte sectors. Does not use mini-streams
- * (all data is stored in regular sectors). This is suitable for encrypted Office
- * documents where every stream exceeds 4096 bytes.
+ * Produces a v3 CFB with 512-byte sectors. Streams smaller than 4096 bytes are
+ * stored in the mini-stream (64-byte mini-sectors) exactly as Office does;
+ * larger streams use regular sectors. Entries may declare a `path` to nest the
+ * stream inside one or more storages — required for the `\u0006DataSpaces`
+ * structure that Office demands in encrypted documents.
  *
  * @param entries - Named stream entries to include.
  * @returns The CFB file as a Uint8Array.
@@ -273,220 +339,293 @@ export function writeCfb(entries: readonly CfbEntry[]): Uint8Array {
   const SECTOR_SIZE = 512;
   const DIR_ENTRY_SIZE = 128;
 
-  // Compute sector count for each entry
-  const entrySectors = entries.map(e => Math.ceil(e.data.length / SECTOR_SIZE));
+  // ---------------------------------------------------------------------------
+  // 1. Build the directory tree (root storage + nested storages + streams).
+  // ---------------------------------------------------------------------------
+  const root = makeDirNode("Root Entry", 5);
 
-  // Directory entries: Root Entry + one per stream entry
-  const dirEntryCount = 1 + entries.length;
-  const dirSectors = Math.ceil((dirEntryCount * DIR_ENTRY_SIZE) / SECTOR_SIZE);
+  const getOrCreateStorage = (parent: DirNode, name: string): DirNode => {
+    let node = parent.children.find(c => c.type === 1 && c.name === name);
+    if (!node) {
+      node = makeDirNode(name, 1);
+      parent.children.push(node);
+    }
+    return node;
+  };
 
-  // Total data sectors
-  const totalDataSectors = entrySectors.reduce((a, b) => a + b, 0);
+  for (const entry of entries) {
+    let parent = root;
+    for (const seg of entry.path ?? []) {
+      parent = getOrCreateStorage(parent, seg);
+    }
+    parent.children.push(makeDirNode(entry.name, 2, entry.data));
+  }
 
-  // FAT entries needed: directory sectors + data sectors + FAT sectors themselves
-  // We solve iteratively since FAT sectors count depends on total sector count
+  // ---------------------------------------------------------------------------
+  // 2. Flatten the tree into a directory-entry array in DFS order and assign
+  //    each node a directory index. Build the red-black sibling tree for each
+  //    storage's children using the CFB name ordering.
+  // ---------------------------------------------------------------------------
+  const dir: DirNode[] = [];
+  const assignIndices = (node: DirNode): void => {
+    dir.push(node);
+    for (const child of node.children) {
+      assignIndices(child);
+    }
+  };
+  assignIndices(root);
+  const indexOf = new Map<DirNode, number>();
+  dir.forEach((n, i) => indexOf.set(n, i));
+
+  // Build a balanced BST over the (sorted) sibling list. We produce a valid
+  // search tree; Office does not require strict red-black balancing, only a
+  // consistent ordering, so a balanced BST is accepted.
+  const buildSiblingTree = (siblings: DirNode[]): number => {
+    const sorted = siblings.slice().sort((a, b) => compareCfbNames(a.name, b.name));
+    const build = (lo: number, hi: number): number => {
+      if (lo > hi) {
+        return NOSTREAM;
+      }
+      const mid = (lo + hi) >> 1;
+      const node = sorted[mid];
+      node.left = build(lo, mid - 1);
+      node.right = build(mid + 1, hi);
+      return indexOf.get(node)!;
+    };
+    return build(0, sorted.length - 1);
+  };
+
+  // Root + every storage gets a child pointer to the tree root of its children.
+  const linkChildren = (node: DirNode): void => {
+    if (node.children.length > 0) {
+      node.child = buildSiblingTree(node.children);
+    }
+    for (const child of node.children) {
+      linkChildren(child);
+    }
+  };
+  linkChildren(root);
+
+  // ---------------------------------------------------------------------------
+  // 3. Split streams into mini-stream (<4096) vs regular sectors. The
+  //    mini-stream itself is a chain of regular sectors owned by the root entry.
+  // ---------------------------------------------------------------------------
+  const streamNodes = dir.filter(n => n.type === 2);
+  const miniNodes = streamNodes.filter(n => n.size > 0 && n.size < MINI_STREAM_CUTOFF);
+  const regularNodes = streamNodes.filter(n => n.size >= MINI_STREAM_CUTOFF);
+
+  // Assemble the mini-stream and the mini-FAT.
+  let miniStream = new Uint8Array(0);
+  const miniFat: number[] = [];
+  {
+    const parts: Uint8Array[] = [];
+    let miniSectorIdx = 0;
+    let totalLen = 0;
+    for (const node of miniNodes) {
+      const sectorCount = Math.ceil(node.size / MINI_SECTOR_SIZE);
+      node.startSector = miniSectorIdx;
+      for (let i = 0; i < sectorCount; i++) {
+        miniFat.push(i < sectorCount - 1 ? miniSectorIdx + 1 : ENDOFCHAIN);
+        miniSectorIdx++;
+      }
+      const padded = new Uint8Array(sectorCount * MINI_SECTOR_SIZE);
+      padded.set(node.data!);
+      parts.push(padded);
+      totalLen += padded.length;
+    }
+    miniStream = new Uint8Array(totalLen);
+    let off = 0;
+    for (const p of parts) {
+      miniStream.set(p, off);
+      off += p.length;
+    }
+  }
+  root.size = miniStream.length;
+
+  // ---------------------------------------------------------------------------
+  // 4. Lay out regular sectors.
+  //    Layout order in file: [FAT sectors][Directory][MiniFAT][MiniStream][Regular streams]
+  //    We compute counts first, then assign sector indices, then fill the FAT.
+  // ---------------------------------------------------------------------------
+  const dirSectors = Math.ceil((dir.length * DIR_ENTRY_SIZE) / SECTOR_SIZE);
+
+  const miniFatBytes = miniFat.length * 4;
+  const miniFatSectors = miniFatBytes > 0 ? Math.ceil(miniFatBytes / SECTOR_SIZE) : 0;
+
+  const miniStreamSectors = miniStream.length > 0 ? Math.ceil(miniStream.length / SECTOR_SIZE) : 0;
+
+  const regularSectorCounts = regularNodes.map(n => Math.ceil(n.size / SECTOR_SIZE));
+  const totalRegularStreamSectors = regularSectorCounts.reduce((a, b) => a + b, 0);
+
+  const nonFatSectors = dirSectors + miniFatSectors + miniStreamSectors + totalRegularStreamSectors;
+
+  // Solve for the number of FAT sectors (each FAT sector indexes 128 sectors).
   let fatSectors = 1;
   while (true) {
-    const totalSectors = dirSectors + totalDataSectors + fatSectors;
-    const fatCapacity = fatSectors * (SECTOR_SIZE / 4);
-    if (fatCapacity >= totalSectors) {
+    const totalSectors = nonFatSectors + fatSectors;
+    if (fatSectors * (SECTOR_SIZE / 4) >= totalSectors) {
       break;
     }
     fatSectors++;
   }
 
-  const totalSectors = dirSectors + totalDataSectors + fatSectors;
-  const fileSize = (1 + totalSectors) * SECTOR_SIZE; // +1 for header sector
+  // The header stores up to 109 DIFAT entries inline; beyond that a DIFAT
+  // sector chain is required, which this minimal writer does not emit. Bail
+  // out rather than silently produce a corrupt container. 109 FAT sectors
+  // cover ~6.8 MB of sectors → tens of MB of stream data, far larger than any
+  // realistic EncryptedPackage.
+  if (fatSectors > 109) {
+    throw new DocxParseError(
+      `CFB writer: ${fatSectors} FAT sectors exceeds the 109-entry header DIFAT ` +
+        `limit (input too large for the minimal v3 writer).`
+    );
+  }
+
+  const totalSectors = nonFatSectors + fatSectors;
+  const fileSize = (1 + totalSectors) * SECTOR_SIZE; // +1 header sector
   const output = new Uint8Array(fileSize);
   const view = new DataView(output.buffer);
 
-  // --- Header (sector 0 area, 512 bytes) ---
-  // Signature
+  // Assign sector ranges.
+  let cursor = 0;
+  const fatStart = cursor;
+  cursor += fatSectors;
+  const dirStart = cursor;
+  cursor += dirSectors;
+  const miniFatStart = miniFatSectors > 0 ? cursor : ENDOFCHAIN;
+  cursor += miniFatSectors;
+  const miniStreamStart = miniStreamSectors > 0 ? cursor : ENDOFCHAIN;
+  cursor += miniStreamSectors;
+
+  // Regular stream start sectors.
+  for (let i = 0; i < regularNodes.length; i++) {
+    regularNodes[i].startSector = cursor;
+    cursor += regularSectorCounts[i];
+  }
+  root.startSector = miniStreamStart;
+
+  // ---------------------------------------------------------------------------
+  // 5. Header.
+  // ---------------------------------------------------------------------------
   const sig = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
   for (let i = 0; i < 8; i++) {
     output[i] = sig[i];
   }
-
-  // Minor version = 0x003E, Major version = 0x0003 (v3)
-  view.setUint16(24, 0x003e, true);
-  view.setUint16(26, 0x0003, true);
-
-  // Byte order = 0xFFFE (little-endian)
-  view.setUint16(28, 0xfffe, true);
-
-  // Sector size power = 9 (2^9 = 512)
-  view.setUint16(30, 9, true);
-
-  // Mini sector size power = 6 (2^6 = 64)
-  view.setUint16(32, 6, true);
-
-  // Total sectors in directory (v3: must be 0)
-  view.setUint32(40, 0, true);
-
-  // Total FAT sectors
+  view.setUint16(24, 0x003e, true); // minor version
+  view.setUint16(26, 0x0003, true); // major version (v3)
+  view.setUint16(28, 0xfffe, true); // byte order LE
+  view.setUint16(30, 9, true); // sector shift (2^9 = 512)
+  view.setUint16(32, 6, true); // mini sector shift (2^6 = 64)
+  view.setUint32(40, 0, true); // number of directory sectors (v3: 0)
   view.setUint32(44, fatSectors, true);
+  view.setUint32(48, dirStart, true); // first directory sector
+  view.setUint32(52, 0, true); // transaction signature
+  view.setUint32(56, MINI_STREAM_CUTOFF, true); // mini stream cutoff
+  view.setUint32(60, miniFatStart, true); // first mini-FAT sector
+  view.setUint32(64, miniFatSectors, true); // mini-FAT sector count
+  view.setUint32(68, ENDOFCHAIN, true); // first DIFAT sector
+  view.setUint32(72, 0, true); // DIFAT sector count
 
-  // First directory sector SECT
-  // Layout: [FAT sectors] [Directory sectors] [Data sectors]
-  const firstDirSector = fatSectors;
-  view.setUint32(48, firstDirSector, true);
-
-  // Transaction signature number
-  view.setUint32(52, 0, true);
-
-  // Mini stream cutoff = 0 (all streams stored in regular sectors)
-  view.setUint32(56, 0, true);
-
-  // First mini FAT sector = ENDOFCHAIN (none)
-  view.setUint32(60, ENDOFCHAIN, true);
-
-  // Mini FAT sector count = 0
-  view.setUint32(64, 0, true);
-
-  // First DIFAT sector = ENDOFCHAIN (none needed, <=109 FAT sectors)
-  view.setUint32(68, ENDOFCHAIN, true);
-
-  // DIFAT sector count = 0
-  view.setUint32(72, 0, true);
-
-  // DIFAT array in header (109 entries starting at offset 76)
+  // DIFAT in header (109 entries): point at the FAT sectors.
   for (let i = 0; i < 109; i++) {
-    view.setUint32(76 + i * 4, i < fatSectors ? i : FREESECT, true);
+    view.setUint32(76 + i * 4, i < fatSectors ? fatStart + i : FREESECT, true);
   }
 
-  // --- Build FAT ---
-  const fatOffset = SECTOR_SIZE; // FAT starts at sector 0 in file
-  const fatView = new DataView(output.buffer, fatOffset, fatSectors * SECTOR_SIZE);
-
-  // Initialize all FAT entries to FREESECT
-  for (let i = 0; i < fatSectors * (SECTOR_SIZE / 4); i++) {
+  // ---------------------------------------------------------------------------
+  // 6. FAT.
+  // ---------------------------------------------------------------------------
+  const fatFileOffset = (1 + fatStart) * SECTOR_SIZE;
+  const fatEntryCount = fatSectors * (SECTOR_SIZE / 4);
+  const fatView = new DataView(output.buffer, fatFileOffset, fatSectors * SECTOR_SIZE);
+  for (let i = 0; i < fatEntryCount; i++) {
     fatView.setUint32(i * 4, FREESECT, true);
   }
 
-  let sectorIdx = 0;
+  // Helper: write a chain of `count` sectors starting at `start` into the FAT.
+  const writeFatChain = (start: number, count: number): void => {
+    for (let i = 0; i < count; i++) {
+      const sec = start + i;
+      fatView.setUint32(sec * 4, i < count - 1 ? sec + 1 : ENDOFCHAIN, true);
+    }
+  };
 
-  // FAT sectors themselves are marked as 0xFFFFFFFD (FATSECT)
+  // FAT sectors themselves are marked FATSECT (0xFFFFFFFD).
   for (let i = 0; i < fatSectors; i++) {
-    fatView.setUint32(sectorIdx * 4, 0xfffffffd, true);
-    sectorIdx++;
+    fatView.setUint32((fatStart + i) * 4, 0xfffffffd, true);
+  }
+  writeFatChain(dirStart, dirSectors);
+  if (miniFatSectors > 0) {
+    writeFatChain(miniFatStart, miniFatSectors);
+  }
+  if (miniStreamSectors > 0) {
+    writeFatChain(miniStreamStart, miniStreamSectors);
+  }
+  for (let i = 0; i < regularNodes.length; i++) {
+    writeFatChain(regularNodes[i].startSector, regularSectorCounts[i]);
   }
 
-  // Directory sectors chain
-  for (let i = 0; i < dirSectors; i++) {
-    const next = i < dirSectors - 1 ? sectorIdx + 1 : ENDOFCHAIN;
-    fatView.setUint32(sectorIdx * 4, next, true);
-    sectorIdx++;
+  // ---------------------------------------------------------------------------
+  // 7. Directory entries.
+  // ---------------------------------------------------------------------------
+  const dirFileOffset = (1 + dirStart) * SECTOR_SIZE;
+  for (let i = 0; i < dir.length; i++) {
+    const node = dir[i];
+    const off = dirFileOffset + i * DIR_ENTRY_SIZE;
+
+    // UTF-16LE name (max 31 chars + null terminator).
+    const nameLen = Math.min(node.name.length, 31);
+    for (let j = 0; j < nameLen; j++) {
+      view.setUint16(off + j * 2, node.name.charCodeAt(j), true);
+    }
+    view.setUint16(off + nameLen * 2, 0, true); // null terminator
+    view.setUint16(off + 64, (nameLen + 1) * 2, true); // name byte length
+
+    output[off + 66] = node.type; // object type
+    output[off + 67] = 1; // color = black
+    view.setUint32(off + 68, node.left, true); // left sibling
+    view.setUint32(off + 72, node.right, true); // right sibling
+    view.setUint32(off + 76, node.child, true); // child
+
+    // CLSID (16 bytes) left zero. State bits / timestamps left zero.
+    view.setUint32(off + 116, node.startSector, true);
+    // Size: 8 bytes in v4; in v3 the low 4 bytes hold the size and the high
+    // 4 bytes must be zero (already zero-initialized).
+    view.setUint32(off + 120, node.size, true);
+  }
+  // Pad any unused directory slots in the last directory sector with
+  // free/unknown entries (type 0, siblings NOSTREAM) so readers don't trip.
+  const dirSlots = dirSectors * (SECTOR_SIZE / DIR_ENTRY_SIZE);
+  for (let i = dir.length; i < dirSlots; i++) {
+    const off = dirFileOffset + i * DIR_ENTRY_SIZE;
+    view.setUint32(off + 68, NOSTREAM, true);
+    view.setUint32(off + 72, NOSTREAM, true);
+    view.setUint32(off + 76, NOSTREAM, true);
   }
 
-  // Data sectors for each entry
-  const entryStartSectors: number[] = [];
-  for (let e = 0; e < entries.length; e++) {
-    entryStartSectors.push(sectorIdx);
-    for (let i = 0; i < entrySectors[e]; i++) {
-      const next = i < entrySectors[e] - 1 ? sectorIdx + 1 : ENDOFCHAIN;
-      fatView.setUint32(sectorIdx * 4, next, true);
-      sectorIdx++;
+  // ---------------------------------------------------------------------------
+  // 8. Mini-FAT.
+  // ---------------------------------------------------------------------------
+  if (miniFatSectors > 0) {
+    const mfOffset = (1 + miniFatStart) * SECTOR_SIZE;
+    const mfCapacity = miniFatSectors * (SECTOR_SIZE / 4);
+    const mfView = new DataView(output.buffer, mfOffset, miniFatSectors * SECTOR_SIZE);
+    for (let i = 0; i < mfCapacity; i++) {
+      mfView.setUint32(i * 4, i < miniFat.length ? miniFat[i] : FREESECT, true);
     }
   }
 
-  // --- Write Directory ---
-  const dirFileOffset = (1 + firstDirSector) * SECTOR_SIZE;
-
-  // Helper: write UTF-16LE name into directory entry
-  const writeDirName = (off: number, name: string): void => {
-    for (let i = 0; i < name.length && i < 31; i++) {
-      view.setUint16(off + i * 2, name.charCodeAt(i), true);
-    }
-    // Null terminator
-    view.setUint16(off + name.length * 2, 0, true);
-    // Name size in bytes (including null terminator)
-    view.setUint16(off + 64, (name.length + 1) * 2, true);
-  };
-
-  // Root Entry (index 0)
-  const rootOff = dirFileOffset;
-  writeDirName(rootOff, "Root Entry");
-  output[rootOff + 66] = 5; // type = root storage
-  output[rootOff + 67] = 1; // color = black
-  // Child (left/right/child SIDs) - set up a simple tree
-  view.setUint32(rootOff + 68, 0xffffffff, true); // left sibling
-  view.setUint32(rootOff + 72, 0xffffffff, true); // right sibling
-  // Root entry child points to first entry (or 0xFFFFFFFF if none)
-  if (entries.length > 0) {
-    // Build a balanced-ish tree: use the middle entry as child
-    const rootChild = entries.length === 1 ? 1 : Math.ceil(entries.length / 2);
-    view.setUint32(rootOff + 76, rootChild, true);
-  } else {
-    view.setUint32(rootOff + 76, 0xffffffff, true);
-  }
-  // Start sector = ENDOFCHAIN (no mini-stream)
-  view.setUint32(rootOff + 116, ENDOFCHAIN, true);
-  // Size = 0
-  view.setUint32(rootOff + 120, 0, true);
-
-  // Stream entries (index 1..N)
-  // Build as a red-black tree: simple approach — balanced binary tree
-  // For small entry counts (2-3), just arrange siblings
-  const buildTree = (indices: number[]): { leftSib: number; rightSib: number; root: number }[] => {
-    // Map each entry to its left/right sibling
-    const nodes: { leftSib: number; rightSib: number; root: number }[] = indices.map(idx => ({
-      leftSib: 0xffffffff,
-      rightSib: 0xffffffff,
-      root: idx
-    }));
-
-    if (indices.length <= 1) {
-      return nodes;
-    }
-
-    // Simple sorted insertion: entry at mid is root, left half is left subtree, right half is right subtree
-    const assignTree = (arr: number[]): number => {
-      if (arr.length === 0) {
-        return 0xffffffff;
-      }
-      const mid = Math.floor(arr.length / 2);
-      const midIdx = arr[mid];
-      const nodeEntry = nodes.find(n => n.root === midIdx)!;
-      nodeEntry.leftSib = assignTree(arr.slice(0, mid));
-      nodeEntry.rightSib = assignTree(arr.slice(mid + 1));
-      return midIdx;
-    };
-
-    assignTree(indices);
-    return nodes;
-  };
-
-  const dirIndices = entries.map((_, i) => i + 1); // 1-based directory indices
-  const treeNodes = buildTree(dirIndices);
-
-  for (let e = 0; e < entries.length; e++) {
-    const entryOff = dirFileOffset + (e + 1) * DIR_ENTRY_SIZE;
-    writeDirName(entryOff, entries[e].name);
-    output[entryOff + 66] = 2; // type = stream
-    output[entryOff + 67] = 1; // color = black
-
-    const node = treeNodes.find(n => n.root === e + 1)!;
-    view.setUint32(entryOff + 68, node.leftSib, true); // left sibling
-    view.setUint32(entryOff + 72, node.rightSib, true); // right sibling
-    view.setUint32(entryOff + 76, 0xffffffff, true); // child (streams have none)
-
-    // Start sector
-    view.setUint32(entryOff + 116, entryStartSectors[e], true);
-    // Size (32-bit for v3)
-    view.setUint32(entryOff + 120, entries[e].data.length, true);
+  // ---------------------------------------------------------------------------
+  // 9. Mini-stream data.
+  // ---------------------------------------------------------------------------
+  if (miniStreamSectors > 0) {
+    output.set(miniStream, (1 + miniStreamStart) * SECTOR_SIZE);
   }
 
-  // Update root entry child to the tree root
-  if (entries.length > 0) {
-    const sortedIndices = dirIndices.slice();
-    const mid = Math.floor(sortedIndices.length / 2);
-    view.setUint32(rootOff + 76, sortedIndices[mid], true);
-  }
-
-  // --- Write Data Sectors ---
-  for (let e = 0; e < entries.length; e++) {
-    const dataFileOffset = (1 + entryStartSectors[e]) * SECTOR_SIZE;
-    output.set(entries[e].data, dataFileOffset);
+  // ---------------------------------------------------------------------------
+  // 10. Regular stream data.
+  // ---------------------------------------------------------------------------
+  for (const node of regularNodes) {
+    output.set(node.data!, (1 + node.startSector) * SECTOR_SIZE);
   }
 
   return output;

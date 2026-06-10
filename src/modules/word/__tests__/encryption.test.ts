@@ -88,6 +88,42 @@ describe("encryptDocx / decryptDocx", () => {
     expect(decrypted[1]).toBe(0x4b); // K
   }, 30000);
 
+  it("emits the \\x06DataSpaces structure Office requires", async () => {
+    // Word rejects an encrypted DOCX that lacks the DataSpaces map even
+    // when the password is correct; these streams (MS-OFFCRYPTO §2.3.2)
+    // must always be present alongside EncryptionInfo/EncryptedPackage.
+    const doc = createMinimalDoc();
+    const original = await packageDocx(doc);
+    const encrypted = await encryptDocx(original, "pw");
+
+    const { readCfb } = await import("../security/cfb-reader");
+    const names = readCfb(encrypted).map(e => e.name);
+    expect(names).toContain("EncryptionInfo");
+    expect(names).toContain("EncryptedPackage");
+    expect(names).toContain("Version");
+    expect(names).toContain("DataSpaceMap");
+    expect(names).toContain("StrongEncryptionDataSpace");
+    expect(names).toContain("\u0006Primary");
+  }, 30000);
+
+  it("writes a non-empty dataIntegrity HMAC (Word verifies it on open)", async () => {
+    // An empty <dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>
+    // makes Word treat the file as corrupt even with the right password.
+    const doc = createMinimalDoc();
+    const original = await packageDocx(doc);
+    const encrypted = await encryptDocx(original, "pw");
+
+    const { readCfb } = await import("../security/cfb-reader");
+    const infoStream = readCfb(encrypted).find(e => e.name === "EncryptionInfo")!;
+    const xml = new TextDecoder().decode(infoStream.data.slice(8));
+    const match = xml.match(
+      /<dataIntegrity encryptedHmacKey="([^"]*)" encryptedHmacValue="([^"]*)"/
+    );
+    expect(match).not.toBeNull();
+    expect(match![1].length).toBeGreaterThan(0);
+    expect(match![2].length).toBeGreaterThan(0);
+  }, 30000);
+
   it("encrypts with custom options (256-bit AES)", async () => {
     const doc = createMinimalDoc();
     const original = await packageDocx(doc);

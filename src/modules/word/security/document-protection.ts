@@ -255,7 +255,13 @@ async function computePasswordHash(
 
   let hash = new Uint8Array(await crypto.subtle.digest(algName, initial));
 
-  // Iterative hashing: Hi = Hash(LE_int32(i) + Hi-1)
+  // Iterative hashing (ISO/IEC 29500 §18.3.1.13 / MS-OFFCRYPTO §2.3.7.1):
+  //   Hi = Hash(Hi-1 + LE_uint32(i))
+  // The iterator is appended AFTER the previous hash, not prepended. Getting
+  // the order wrong produces a hash Word cannot reproduce, so Word treats the
+  // document as unprotected (offering "Start Enforcing Protection" instead of
+  // prompting for the password). This matches the Excel encryptor, which is
+  // verified interoperable with Office.
   for (let i = 0; i < spinCount; i++) {
     const iterBytes = new Uint8Array(4);
     iterBytes[0] = i & 0xff;
@@ -263,9 +269,9 @@ async function computePasswordHash(
     iterBytes[2] = (i >> 16) & 0xff;
     iterBytes[3] = (i >> 24) & 0xff;
 
-    const combined = new Uint8Array(4 + hash.length);
-    combined.set(iterBytes, 0);
-    combined.set(hash, 4);
+    const combined = new Uint8Array(hash.length + 4);
+    combined.set(hash, 0);
+    combined.set(iterBytes, hash.length);
 
     hash = new Uint8Array(await crypto.subtle.digest(algName, combined));
   }

@@ -43,7 +43,17 @@ function makeDoc(): ReturnType<typeof Document.build> {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Read-only with password (SHA-256, 100k spin)
+// 1. Read-only edit restriction with password (SHA-256, 100k spin)
+//
+//    NOTE on how this shows up in Word:
+//    `protectDocument({ edit: "readOnly" })` writes OOXML
+//    <w:documentProtection> — an *editing restriction*, NOT "mark as
+//    final" and NOT whole-file encryption. Word does NOT pop up a password
+//    dialog when opening the file. Instead the document opens read-only;
+//    to make edits you go to the Review tab → "Restrict Editing" →
+//    "Stop Protection", at which point Word prompts for the password
+//    (`swordfish`). (Some Word builds also surface a "Restrict Editing"
+//    task pane automatically.)
 // ---------------------------------------------------------------------------
 const readOnlyProtected = await protectDocument(makeDoc(), {
   edit: "readOnly",

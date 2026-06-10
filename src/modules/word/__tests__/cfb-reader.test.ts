@@ -105,6 +105,49 @@ describe("writeCfb / readCfb roundtrip", () => {
     expect(found).toBeDefined();
     expect(found!.data.length).toBe(0);
   });
+
+  it("roundtrips streams nested inside storages (DataSpaces-style)", () => {
+    const small = new Uint8Array(40).map((_, i) => i & 0xff); // < 4096 → mini-stream
+    const big = new Uint8Array(5000).map((_, i) => (i * 7) & 0xff); // regular sector
+    const entries: CfbEntry[] = [
+      { name: "Version", path: ["\u0006DataSpaces"], data: small },
+      {
+        name: "StrongEncryptionDataSpace",
+        path: ["\u0006DataSpaces", "DataSpaceInfo"],
+        data: small
+      },
+      {
+        name: "\u0006Primary",
+        path: ["\u0006DataSpaces", "TransformInfo", "StrongEncryptionTransform"],
+        data: small
+      },
+      { name: "EncryptedPackage", data: big }
+    ];
+
+    const buffer = writeCfb(entries);
+    const readBack = readCfb(buffer);
+
+    const names = readBack.map(e => e.name);
+    expect(names).toContain("Version");
+    expect(names).toContain("StrongEncryptionDataSpace");
+    expect(names).toContain("\u0006Primary");
+    expect(names).toContain("EncryptedPackage");
+
+    // Mini-stream entry round-trips byte-for-byte.
+    const version = readBack.find(e => e.name === "Version")!;
+    expect(Array.from(version.data)).toEqual(Array.from(small));
+    // Regular-sector entry round-trips byte-for-byte.
+    const pkg = readBack.find(e => e.name === "EncryptedPackage")!;
+    expect(Array.from(pkg.data)).toEqual(Array.from(big));
+  });
+
+  it("throws rather than emit a corrupt container when the input needs a DIFAT chain", () => {
+    // The minimal writer only fills the 109 inline DIFAT slots. A stream large
+    // enough to require >109 FAT sectors (~7 MB) must fail loudly instead of
+    // silently producing a file no reader can parse.
+    const huge = new Uint8Array(8 * 1024 * 1024);
+    expect(() => writeCfb([{ name: "EncryptedPackage", data: huge }])).toThrow(/DIFAT/);
+  });
 });
 
 describe("readCfb — defends against oversized declared sizes", () => {

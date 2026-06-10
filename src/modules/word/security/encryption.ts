@@ -22,9 +22,7 @@
  */
 
 import {
-  aesCbcDecrypt as aesCbcDecryptPkcs7Sync,
   aesCbcDecryptRaw as aesCbcDecryptRawSync,
-  aesCbcEncrypt as aesCbcEncryptPkcs7Sync,
   aesCbcEncryptRaw as aesCbcEncryptRawSync,
   hash as hashSyncMaybe,
   hashAsync
@@ -39,6 +37,7 @@ import {
 } from "../core/internal-utils";
 import { DocxDecryptionError } from "../errors";
 import { readCfb, writeCfb } from "./cfb-reader";
+import type { CfbEntry } from "./cfb-reader";
 
 /** Agile encryption parameters. */
 export interface AgileEncryptionInfo {
@@ -211,16 +210,20 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashInput
     );
 
-    // Decrypt the verifier hash input (PKCS#7 padded by encryption write path)
-    const verifierInput = aesCbcPkcs7Decrypt(
+    // Decrypt the verifier hash input. MS-OFFCRYPTO §2.3.4.13 specifies
+    // these blobs are AES-CBC with the plaintext zero-padded to the block
+    // boundary — NOT PKCS#7. Using a PKCS#7 decrypt would mis-strip bytes
+    // and break interop with Word / msoffcrypto.
+    const verifierInput = aesCbcRawDecrypt(
       info.encryptedVerifierHashInput,
       verifierInputKey,
       info.keySalt
     );
 
-    // Hash the verifier input
+    // Hash the verifier input. The plaintext is exactly 16 bytes (saltSize),
+    // so trim any zero padding before hashing.
     const hashAlg = mapHashName(info.hashAlgorithm);
-    const computedHash = await hashAsync(hashAlg, verifierInput);
+    const computedHash = await hashAsync(hashAlg, verifierInput.slice(0, info.blockSize));
 
     // Derive verifier hash value key
     const verifierValueKey = await deriveEncryptionKey(
@@ -229,8 +232,8 @@ export async function verifyPassword(
       AGILE_BLOCK_KEYS.verifierHashValue
     );
 
-    // Decrypt the verifier hash value (PKCS#7 padded by encryption write path)
-    const expectedHash = aesCbcPkcs7Decrypt(
+    // Decrypt the verifier hash value (zero-padded AES-CBC, see above).
+    const expectedHash = aesCbcRawDecrypt(
       info.encryptedVerifierHashValue,
       verifierValueKey,
       info.keySalt
@@ -264,8 +267,12 @@ export async function decryptPackage(
   // Derive key encryption key
   const keyEncryptionKey = await deriveEncryptionKey(password, info, AGILE_BLOCK_KEYS.encryptedKey);
 
-  // Decrypt the actual package key (PKCS#7 padded by encryption write path)
-  const packageKey = aesCbcPkcs7Decrypt(info.encryptedKeyValue, keyEncryptionKey, info.keySalt);
+  // Decrypt the actual package key. Zero-padded AES-CBC per MS-OFFCRYPTO
+  // §2.3.4.13 (NOT PKCS#7); the key is exactly keyBits/8 bytes.
+  const packageKey = aesCbcRawDecrypt(info.encryptedKeyValue, keyEncryptionKey, info.keySalt).slice(
+    0,
+    info.keyBits / 8
+  );
 
   if (encryptedPackage.length < 8) {
     throw new DocxDecryptionError("EncryptedPackage too small (missing 8-byte size header)");
@@ -368,27 +375,19 @@ function getHashSizeFor(hashName: string): number {
 }
 
 /**
- * Decrypt an AES-CBC blob whose plaintext was written with PKCS#7 padding.
- * Used for the encryptedKeyValue / encryptedVerifierHashInput /
- * encryptedVerifierHashValue blobs. The IV is truncated/extended to 16
- * bytes per the OOXML spec.
+ * Decrypt an AES-CBC blob written with zero padding (no PKCS#7). Used for
+ * the encryptedKeyValue / encryptedVerifierHashInput / encryptedVerifierHashValue
+ * blobs, per MS-OFFCRYPTO §2.3.4.13. The IV is truncated/extended to 16 bytes.
  */
-function aesCbcPkcs7Decrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-  return aesCbcDecryptPkcs7Sync(data, key, ivToBlockSize(iv));
-}
-
-/**
- * Encrypt with AES-CBC + PKCS#7 padding — the Agile spec's standard
- * choice for verifier blobs and the encrypted package key.
- */
-function aesCbcPkcs7Encrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
-  return aesCbcEncryptPkcs7Sync(data, key, ivToBlockSize(iv));
+function aesCbcRawDecrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
+  return aesCbcDecryptRawSync(data, key, ivToBlockSize(iv));
 }
 
 /**
  * Encrypt with AES-CBC and zero-padding (no PKCS#7). Used by package
- * segment encryption: data is already padded to a 16-byte boundary by
- * the caller, and the on-disk format does not include a PKCS#7 trailer.
+ * segment encryption and the verifier / key blobs: data is already padded
+ * to a 16-byte boundary by the caller, and the on-disk format does not
+ * include a PKCS#7 trailer.
  */
 function aesCbcZeroPadEncrypt(data: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array {
   return aesCbcEncryptRawSync(data, key, ivToBlockSize(iv));
@@ -404,11 +403,53 @@ function ivToBlockSize(iv: Uint8Array): Uint8Array {
   return out;
 }
 
+/** Right-pad data with zeros so its length is a multiple of `blockSize`. */
+function padToBlock(data: Uint8Array, blockSize: number): Uint8Array {
+  if (data.length % blockSize === 0) {
+    return data;
+  }
+  const out = new Uint8Array(Math.ceil(data.length / blockSize) * blockSize);
+  out.set(data);
+  return out;
+}
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const result = new Uint8Array(a.length + b.length);
   result.set(a, 0);
   result.set(b, a.length);
   return result;
+}
+
+/** HMAC block size (in bytes) for the supported hash algorithms. */
+function hmacBlockSize(hashName: string): number {
+  // SHA-1 / SHA-256 use a 512-bit (64-byte) block; SHA-384 / SHA-512 use a
+  // 1024-bit (128-byte) block.
+  return hashName === "SHA-384" || hashName === "SHA-512" ? 128 : 64;
+}
+
+/**
+ * Compute HMAC(hashName, key, message) using the generic hash primitive.
+ * Implemented here (rather than in @utils/crypto, which only ships
+ * hmacSha256) so agile encryption can use SHA-512 etc. for the data
+ * integrity HMAC that Word verifies on open.
+ */
+async function hmac(hashName: string, key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+  const blockSize = hmacBlockSize(hashName);
+  // Keys longer than the block size are hashed down first.
+  let k = key.length > blockSize ? await hashAsync(hashName, key) : key;
+  if (k.length < blockSize) {
+    const padded = new Uint8Array(blockSize);
+    padded.set(k);
+    k = padded;
+  }
+  const ipad = new Uint8Array(blockSize);
+  const opad = new Uint8Array(blockSize);
+  for (let i = 0; i < blockSize; i++) {
+    ipad[i] = k[i] ^ 0x36;
+    opad[i] = k[i] ^ 0x5c;
+  }
+  const inner = await hashAsync(hashName, concat(ipad, message));
+  return hashAsync(hashName, concat(opad, inner));
 }
 
 function stringToUtf16LE(s: string): Uint8Array {
@@ -781,8 +822,13 @@ export async function encryptDocx(
     AGILE_BLOCK_KEYS.encryptedKey
   );
 
-  // 3. Encrypt the package key
-  const encryptedKeyValue = aesCbcPkcs7Encrypt(packageKey, keyEncryptionKey, keySalt);
+  // 3. Encrypt the package key. MS-OFFCRYPTO §2.3.4.13: these blobs use
+  //    zero-padded AES-CBC (no PKCS#7). packageKey is already block-aligned.
+  const encryptedKeyValue = aesCbcZeroPadEncrypt(
+    padToBlock(packageKey, blockSize),
+    keyEncryptionKey,
+    keySalt
+  );
 
   // 4. Generate verifier: random 16 bytes, hash them, encrypt both
   const verifierInput = randomBytes(16);
@@ -793,14 +839,22 @@ export async function encryptDocx(
     { keySalt, spinCount, hashAlgorithm, keyBits },
     AGILE_BLOCK_KEYS.verifierHashInput
   );
-  const encryptedVerifierHashInput = aesCbcPkcs7Encrypt(verifierInput, verifierInputKey, keySalt);
+  const encryptedVerifierHashInput = aesCbcZeroPadEncrypt(
+    padToBlock(verifierInput, blockSize),
+    verifierInputKey,
+    keySalt
+  );
 
   const verifierValueKey = await deriveEncryptionKey(
     password,
     { keySalt, spinCount, hashAlgorithm, keyBits },
     AGILE_BLOCK_KEYS.verifierHashValue
   );
-  const encryptedVerifierHashValue = aesCbcPkcs7Encrypt(verifierHash, verifierValueKey, keySalt);
+  const encryptedVerifierHashValue = aesCbcZeroPadEncrypt(
+    padToBlock(verifierHash, blockSize),
+    verifierValueKey,
+    keySalt
+  );
 
   // 5. Encrypt the ZIP data in 4096-byte segments
   const encryptedPackage = await encryptPackageData(
@@ -809,6 +863,35 @@ export async function encryptDocx(
     keySalt,
     hashName,
     blockSize
+  );
+
+  // 5b. Data integrity (MS-OFFCRYPTO §2.3.4.14). Word verifies this HMAC on
+  //     open; an empty or missing value makes it report the file as corrupt.
+  //       - hmacKey: random, hashSize bytes (padded to block size).
+  //       - encryptedHmacKey  = AES-CBC(packageKey, IV0, hmacKey)
+  //       - hmacValue = HMAC(hashAlg, hmacKey, encryptedPackage)  (entire
+  //         stream including the 8-byte size prefix)
+  //       - encryptedHmacValue = AES-CBC(packageKey, IV1, hmacValue)
+  //     IV0 = H(keySalt + blockKeyDataIntegrityKey)[:blockSize]
+  //     IV1 = H(keySalt + blockKeyDataIntegrityValue)[:blockSize]
+  const hmacKey = randomBytes(hashSize);
+  const ivHmacKey = (
+    await hashAsync(hashName, concat(keySalt, AGILE_BLOCK_KEYS.dataIntegrityKey))
+  ).slice(0, blockSize);
+  const ivHmacValue = (
+    await hashAsync(hashName, concat(keySalt, AGILE_BLOCK_KEYS.dataIntegrityValue))
+  ).slice(0, blockSize);
+
+  const encryptedHmacKey = aesCbcZeroPadEncrypt(
+    padToBlock(hmacKey, blockSize),
+    packageKey,
+    ivHmacKey
+  );
+  const hmacValue = await hmac(hashName, hmacKey, encryptedPackage);
+  const encryptedHmacValue = aesCbcZeroPadEncrypt(
+    padToBlock(hmacValue, blockSize),
+    packageKey,
+    ivHmacValue
   );
 
   // 6. Generate EncryptionInfo XML
@@ -821,7 +904,9 @@ export async function encryptDocx(
     keySalt,
     encryptedVerifierHashInput,
     encryptedVerifierHashValue,
-    encryptedKeyValue
+    encryptedKeyValue,
+    encryptedHmacKey,
+    encryptedHmacValue
   });
 
   // Prepend 8-byte version header: version 4.4 + flags 0x40
@@ -833,8 +918,12 @@ export async function encryptDocx(
   encInfoView.setUint32(4, 0x40, true); // flags (agile)
   encInfoStream.set(xmlBytes, 8);
 
-  // 7. Package into CFB
+  // 7. Package into CFB.
+  //    Office requires the \x06DataSpaces structure (MS-OFFCRYPTO §2.3.2)
+  //    in addition to EncryptionInfo + EncryptedPackage; without it Word
+  //    rejects the file as corrupt even when the password is correct.
   const cfbBytes = writeCfb([
+    ...buildDataSpacesStreams(),
     { name: "EncryptionInfo", data: encInfoStream },
     { name: "EncryptedPackage", data: encryptedPackage }
   ]);
@@ -845,6 +934,130 @@ export async function encryptDocx(
 // =============================================================================
 // Encrypt Helpers
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+// \x06DataSpaces structure (MS-OFFCRYPTO §2.3.2)
+//
+// Office encrypted documents wrap the EncryptedPackage in a DataSpaces map so
+// the consumer knows which transform (StrongEncryption) was applied. The four
+// streams below are byte-for-byte what Office writes for password-based agile
+// encryption. Word validates this structure on open; omitting it makes the
+// file "corrupt" even with the correct password.
+// -----------------------------------------------------------------------------
+
+/** Encode a UTF-8 length-prefixed unicode string (UNICODE-LP-P4):
+ *  [4-byte LE byte length of UTF-16LE payload][UTF-16LE chars][pad to 4-byte boundary]. */
+function lengthPrefixedUtf16(str: string): Uint8Array {
+  const chars = stringToUtf16LE(str);
+  const padded = Math.ceil(chars.length / 4) * 4;
+  const out = new Uint8Array(4 + padded);
+  new DataView(out.buffer).setUint32(0, chars.length, true);
+  out.set(chars, 4);
+  return out;
+}
+
+/** Concatenate several byte arrays. */
+function concatAll(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((s, p) => s + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+/** Build the four \x06DataSpaces streams Office requires for agile encryption. */
+function buildDataSpacesStreams(): CfbEntry[] {
+  const DATASPACES = "\u0006DataSpaces";
+
+  // --- Version stream (DataSpaceVersionInfo) ---
+  // FeatureIdentifier "Microsoft.Container.DataSpaces" + reader/updater/writer
+  // version (each major=1, minor=0).
+  const versionStream = concatAll(
+    lengthPrefixedUtf16("Microsoft.Container.DataSpaces"),
+    u16le(1),
+    u16le(0), // reader version
+    u16le(1),
+    u16le(0), // updater version
+    u16le(1),
+    u16le(0) // writer version
+  );
+
+  // --- DataSpaceMap stream ---
+  // Header: HeaderLength(8) + EntryCount(1) followed by one MapEntry.
+  // MapEntry: EntryLength + ReferenceComponentCount(1) +
+  //           [ReferenceComponent: type(0=stream) + LP name "EncryptedPackage"] +
+  //           LP DataSpaceName "StrongEncryptionDataSpace".
+  const refName = lengthPrefixedUtf16("EncryptedPackage");
+  const dsName = lengthPrefixedUtf16("StrongEncryptionDataSpace");
+  const refComponent = concatAll(u32le(0), refName); // 0 = stream component
+  const mapEntryBody = concatAll(u32le(1), refComponent, dsName); // 1 reference component
+  const entryLength = 4 + mapEntryBody.length; // include the EntryLength field itself
+  const mapEntry = concatAll(u32le(entryLength), mapEntryBody);
+  const dataSpaceMap = concatAll(u32le(8), u32le(1), mapEntry); // headerLen=8, entryCount=1
+
+  // --- DataSpaceInfo/StrongEncryptionDataSpace stream (DataSpaceDefinition) ---
+  // HeaderLength(8) + TransformReferenceCount(1) + LP transform name.
+  const transformName = lengthPrefixedUtf16("StrongEncryptionTransform");
+  const dataSpaceDefinition = concatAll(u32le(8), u32le(1), transformName);
+
+  // --- TransformInfo/StrongEncryptionTransform/\x06Primary stream ---
+  // TransformInfoHeader:
+  //   TransformLength + TransformType(1) + LP TransformId +
+  //   LP TransformName + reader/updater/writer versions.
+  // Followed by EncryptionTransformInfo:
+  //   LP EncryptionName + EncryptionBlockSize(4) + CipherMode(4).
+  const transformId = lengthPrefixedUtf16("{FF9A3F03-56EF-4613-BDD5-5A41C1D07246}");
+  const transformNamePrimary = lengthPrefixedUtf16("Microsoft.Container.EncryptionTransform");
+  const headerBody = concatAll(
+    u32le(1), // TransformType = 1
+    transformId,
+    transformNamePrimary,
+    u16le(1),
+    u16le(0), // reader version
+    u16le(1),
+    u16le(0), // updater version
+    u16le(1),
+    u16le(0) // writer version
+  );
+  const transformLength = 4 + headerBody.length; // include the length field itself
+  const transformHeader = concatAll(u32le(transformLength), headerBody);
+  const encryptionTransformInfo = concatAll(
+    lengthPrefixedUtf16(""), // EncryptionName (empty for agile)
+    u32le(0), // EncryptionBlockSize
+    u32le(0) // CipherMode
+  );
+  const primary = concatAll(transformHeader, encryptionTransformInfo);
+
+  return [
+    { name: "Version", path: [DATASPACES], data: versionStream },
+    { name: "DataSpaceMap", path: [DATASPACES], data: dataSpaceMap },
+    {
+      name: "StrongEncryptionDataSpace",
+      path: [DATASPACES, "DataSpaceInfo"],
+      data: dataSpaceDefinition
+    },
+    {
+      name: "\u0006Primary",
+      path: [DATASPACES, "TransformInfo", "StrongEncryptionTransform"],
+      data: primary
+    }
+  ];
+}
+
+function u16le(n: number): Uint8Array {
+  const b = new Uint8Array(2);
+  new DataView(b.buffer).setUint16(0, n, true);
+  return b;
+}
+
+function u32le(n: number): Uint8Array {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, n, true);
+  return b;
+}
 
 /**
  * Encrypt the package data in 4096-byte segments.
@@ -909,6 +1122,8 @@ function buildEncryptionInfoXml(params: {
   encryptedVerifierHashInput: Uint8Array;
   encryptedVerifierHashValue: Uint8Array;
   encryptedKeyValue: Uint8Array;
+  encryptedHmacKey: Uint8Array;
+  encryptedHmacValue: Uint8Array;
 }): string {
   const {
     keyBits,
@@ -919,13 +1134,17 @@ function buildEncryptionInfoXml(params: {
     keySalt,
     encryptedVerifierHashInput,
     encryptedVerifierHashValue,
-    encryptedKeyValue
+    encryptedKeyValue,
+    encryptedHmacKey,
+    encryptedHmacValue
   } = params;
 
   const saltB64 = bytesToBase64(keySalt);
   const vhiB64 = bytesToBase64(encryptedVerifierHashInput);
   const vhvB64 = bytesToBase64(encryptedVerifierHashValue);
   const ekvB64 = bytesToBase64(encryptedKeyValue);
+  const hmacKeyB64 = bytesToBase64(encryptedHmacKey);
+  const hmacValB64 = bytesToBase64(encryptedHmacValue);
 
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
@@ -935,7 +1154,7 @@ function buildEncryptionInfoXml(params: {
     `<keyData saltSize="16" blockSize="${blockSize}" keyBits="${keyBits}" ` +
     `hashSize="${hashSize}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" ` +
     `hashAlgorithm="${hashAlgorithm}" saltValue="${saltB64}"/>\r\n` +
-    '<dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>\r\n' +
+    `<dataIntegrity encryptedHmacKey="${hmacKeyB64}" encryptedHmacValue="${hmacValB64}"/>\r\n` +
     "<keyEncryptors>\r\n" +
     '<keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">\r\n' +
     `<p:encryptedKey spinCount="${spinCount}" saltSize="16" blockSize="${blockSize}" ` +
