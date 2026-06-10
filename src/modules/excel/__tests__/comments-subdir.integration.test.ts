@@ -150,6 +150,40 @@ describe("Comments subdirectory layout", () => {
     expect(ws2.getCell("A1").comment?.author).toBe("Author");
   });
 
+  it("reads legacy comment body written as a bare <t> (no <r> run)", async () => {
+    // openpyxl/LibreOffice store the comment body as <text><t>...</t></text>
+    // with no <r> run wrapper. Rewrite our generated comments file to that
+    // shape and verify the body survives the read.
+    const flatBuffer = await buildCommentsXlsx();
+
+    const { extractAll } = await import("@archive/unzip/extract");
+    const entries = await extractAll(flatBuffer);
+    const archive = new ZipArchive({ level: 0, reproducible: true });
+
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+
+    for (const [name, entry] of entries) {
+      if (/^xl\/comments\d+\.xml$/.test(name)) {
+        let xml = decoder.decode(entry.data);
+        // Replace <r>...<t>TEXT</t></r> runs with a bare <t>TEXT</t>
+        xml = xml.replace(/<r>(?:(?!<\/r>).)*?<t[^>]*>([^<]*)<\/t><\/r>/g, "<t>$1</t>");
+        archive.add(name, encoder.encode(xml));
+        continue;
+      }
+      archive.add(name, entry.data);
+    }
+
+    const repackedBuffer = await archive.bytes();
+    const wb = new Workbook();
+    await wb.xlsx.load(repackedBuffer);
+    const ws = wb.getWorksheet("Sheet1")!;
+
+    expect(ws.getCell("A1").note).toContain("Comment by Alice");
+    expect(ws.getCell("B2").note).toContain("Comment by Bob");
+    expect(ws.getCell("A1").comment?.author).toBe("Alice");
+  });
+
   it("merges VML metadata correctly even when VML shape order differs from comments", async () => {
     const flatBuffer = await buildCommentsXlsx();
 

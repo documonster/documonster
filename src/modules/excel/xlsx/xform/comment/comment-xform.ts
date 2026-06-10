@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
+import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 
 interface NoteText {
   font?: any;
@@ -20,6 +21,7 @@ interface CommentModel {
 class CommentXform extends BaseXform<CommentModel> {
   declare public parser: any;
   declare private _richTextXform?: RichTextXform;
+  declare private _textXform?: TextXform;
 
   constructor(model?: CommentModel) {
     super();
@@ -35,6 +37,13 @@ class CommentXform extends BaseXform<CommentModel> {
       this._richTextXform = new RichTextXform();
     }
     return this._richTextXform;
+  }
+
+  get textXform(): TextXform {
+    if (!this._textXform) {
+      this._textXform = new TextXform();
+    }
+    return this._textXform;
   }
 
   render(xmlStream: any, model?: CommentModel): void {
@@ -74,6 +83,13 @@ class CommentXform extends BaseXform<CommentModel> {
         this.parser = this.richTextXform;
         this.parser.parseOpen(node);
         return true;
+      case "t":
+        // Legacy comments (e.g. produced by openpyxl/LibreOffice) may store the
+        // body as a bare <t> directly under <text> with no <r> run wrapper.
+        // This is valid for the CT_Rst type, so treat it like a run without font.
+        this.parser = this.textXform;
+        this.parser.parseOpen(node);
+        return true;
       default:
         return false;
     }
@@ -86,17 +102,25 @@ class CommentXform extends BaseXform<CommentModel> {
   }
 
   parseClose(name: string): boolean {
+    if (this.parser) {
+      if (!this.parser.parseClose(name)) {
+        // The active sub-parser has finished. Collect its result.
+        if (this.parser === this._richTextXform) {
+          // <r> run: model is already a { font?, text } run.
+          this.model!.note.texts.push(this.parser.model);
+        } else {
+          // Bare <t> body (e.g. openpyxl/LibreOffice): wrap the plain string
+          // as a single run without font, mirroring a <r><t> run.
+          this.model!.note.texts.push({ text: this.parser.model });
+        }
+        this.parser = undefined;
+      }
+      return true;
+    }
     switch (name) {
       case "comment":
         return false;
-      case "r":
-        this.model!.note.texts.push(this.parser.model);
-        this.parser = undefined;
-        return true;
       default:
-        if (this.parser) {
-          this.parser.parseClose(name);
-        }
         return true;
     }
   }
