@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.1.0](https://github.com/cjnoname/excelts/compare/v10.0.0...v10.1.0) (2026-06-10)
+
+
+### Features
+
+* Add minimumReleaseAgeExclude for TypeScript native preview versions ([dd90a9f](https://github.com/cjnoname/excelts/commit/dd90a9f040ce2043e21020184f7be13c3d1be3e9))
+
 ## [10.0.0](https://github.com/cjnoname/excelts/compare/v9.6.1...v10.0.0) (2026-06-10)
 
 
