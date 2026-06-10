@@ -2,7 +2,7 @@
 
 [![构建状态](https://github.com/cjnoname/excelts/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cjnoname/excelts/actions/workflows/ci.yml) &nbsp; [English](README.md)
 
-TypeScript 生态在文档和数据处理领域长期存在碎片化问题。处理 Excel、PDF、CSV、XML、ZIP 和流式操作，往往需要分别引入不同的包；到了浏览器端又要换一套方案；流式处理还得再额外接入一个适配库。这些库的 API 风格、质量和维护状态参差不齐，给每个需要组合使用它们的项目都带来了额外的负担。
+TypeScript 生态在文档和数据处理领域长期存在碎片化问题。要处理电子表格、文档、PDF 以及围绕它们的各种数据和归档格式，往往需要分别引入不同的包；到了浏览器端又要换一套方案；流式处理还得再额外接入一个适配库。这些库的 API 风格、质量和维护状态参差不齐，给每个需要组合使用它们的项目都带来了额外的负担。
 
 ExcelTS 正是为了解决这个问题而生。一个包、一套 API、一份代码 — 在 Node.js、Bun 和浏览器中行为完全一致。流式处理是每个模块的一等公民，而非通过第三方适配器后期拼装的附属品。目标很简单：安装一次，按需导入，在任何环境下都获得相同的可靠体验 — 同时将流式处理的性能发挥到极致。
 

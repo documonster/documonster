@@ -415,9 +415,8 @@ export function writeCfb(entries: readonly CfbEntry[]): Uint8Array {
   const regularNodes = streamNodes.filter(n => n.size >= MINI_STREAM_CUTOFF);
 
   // Assemble the mini-stream and the mini-FAT.
-  let miniStream = new Uint8Array(0);
   const miniFat: number[] = [];
-  {
+  const miniStream = (() => {
     const parts: Uint8Array[] = [];
     let miniSectorIdx = 0;
     let totalLen = 0;
@@ -433,13 +432,14 @@ export function writeCfb(entries: readonly CfbEntry[]): Uint8Array {
       parts.push(padded);
       totalLen += padded.length;
     }
-    miniStream = new Uint8Array(totalLen);
+    const stream = new Uint8Array(totalLen);
     let off = 0;
     for (const p of parts) {
-      miniStream.set(p, off);
+      stream.set(p, off);
       off += p.length;
     }
-  }
+    return stream;
+  })();
   root.size = miniStream.length;
 
   // ---------------------------------------------------------------------------

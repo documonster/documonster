@@ -5,6 +5,37 @@
 Zero-dependency TypeScript library for reading, writing, and manipulating DOCX files.
 Works in Node.js 22+ and modern browsers.
 
+## Features
+
+- **Create, read, and modify DOCX files** — full WordprocessingML support
+- **Document builder** — paragraphs, headings, rich text runs (bold/italic/underline/color/highlight)
+- **Tables** — styles, borders, cell merges (horizontal + vertical), nested tables
+- **Images** — inline and floating (JPEG, PNG, GIF, BMP, TIFF, SVG with raster fallback)
+- **Lists** — bulleted, numbered, multi-level
+- **Page layout** — sections, page size/orientation/margins, columns, breaks
+- **Headers and footers** — default, first, even
+- **Hyperlinks and bookmarks** — external, internal, cross-references
+- **Table of contents** — field-driven, with cached entries
+- **Footnotes, endnotes, and comments** — including threaded/extended comments
+- **Fields** — PAGE/NUMPAGES, TOC, INDEX/XE, REF, SEQ, STYLEREF, formulas, and more
+- **Math** — OMML equations (fractions, radicals, matrices, n-ary, …)
+- **Drawing shapes** — preset geometries with fill, line, gradient, shadow/glow/3-D effects
+- **Charts** — opaque preservation plus a from-scratch builder; bridge to the Excel chart engine
+- **Track changes** — accept/reject insertions, deletions, moves, and property changes
+- **Templates** — `{{variable}}`, `{{#if}}`, `{{#each}}`, mail merge, template patching
+- **Form fields and content controls (SDT)** — extract and fill; OpenDoPE data binding
+- **Font embedding** — with automatic glyph subsetting
+- **Document protection** — read-only/comments/forms with password
+- **Encryption** — decrypt password-protected DOCX (Agile Encryption)
+- **Digital signatures** — detection and metadata extraction
+- **Conversion** — DOCX ↔ HTML, DOCX ↔ Markdown, Excel → Word, Word → PDF
+- **Flat OPC** — single-XML `.xml` representation round-trip
+- **Diff and merge** — compare two documents, combine multiple documents
+- **Streaming writer** — `createDocxStream()` for large documents
+- **Validation** — structural checks with severity-tagged issues
+- **OOXML Strict** — transparent normalization to Transitional on read
+- **Browser support** — the same `@cj-tech-master/excelts/word` import works in Node.js and browsers
+
 ## Quick Start
 
 ```typescript
@@ -302,6 +333,32 @@ const flatXml = toFlatOpc(doc);
 const doc = parseFlatOpc(flatXmlString);
 ```
 
+### Encryption & Signatures
+
+Low-level cryptography helpers live on the `@cj-tech-master/excelts/word/crypto`
+subpath so they stay out of bundles that only read/write plain DOCX.
+
+```typescript
+import {
+  isEncryptedDocx,
+  decryptDocx,
+  encryptDocx,
+  extractSignatures,
+  hasDigitalSignatures
+} from "@cj-tech-master/excelts/word/crypto";
+
+// Decrypt a password-protected DOCX (Agile Encryption)
+if (isEncryptedDocx(bytes)) {
+  const plain = await decryptDocx(bytes, "password");
+}
+
+// Encrypt a DOCX with a password
+const encrypted = await encryptDocx(docxBytes, "password");
+
+// Inspect embedded XMLDSig signatures (read-only; no verification)
+const signatures = extractSignatures(opaqueParts);
+```
+
 ### Excel → Word
 
 Convert an Excel `Workbook` into a `DocxDocument`, mapping worksheets to
@@ -331,9 +388,8 @@ const extracted = extractTablesToExcel(doc);
 ```
 
 Charts embedded in a Word document also bridge to the Excel chart engine
-(27 chart families, classic and modern ChartEx). See
-`createWordChartPdfRenderer` / `createWordLayoutChartPdfRenderer` for the
-PDF rendering side.
+(27 chart families, classic and modern ChartEx). See `createWordChartPdfRenderer`
+for the PDF rendering side.
 
 ### Word → PDF
 
@@ -405,7 +461,7 @@ transparently normalized to their Transitional equivalents — no user action re
 | ISO 29500 Strict       | ✅ Auto-normalized                                             |
 | Encrypted .docx        | ✅ Decrypt with password (Agile Encryption)                    |
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
-| Browser                | ✅ (import from "@cj-tech-master/excelts/word/browser")        |
+| Browser                | ✅ (same `@cj-tech-master/excelts/word` import)                |
 | Node.js 22+            | ✅                                                             |
 
 ## Migration from `docx` (npm)

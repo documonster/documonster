@@ -5,6 +5,37 @@
 零依赖的 TypeScript 库，用于读取、写入和操作 DOCX 文件。
 支持 Node.js 22+ 和现代浏览器。
 
+## 功能
+
+- **创建、读取和修改 DOCX 文件** — 完整的 WordprocessingML 支持
+- **文档构建器** — 段落、标题、富文本 run（粗体/斜体/下划线/颜色/高亮）
+- **表格** — 样式、边框、单元格合并（水平 + 垂直）、嵌套表格
+- **图片** — 内联和浮动（JPEG、PNG、GIF、BMP、TIFF，SVG 带光栅 fallback）
+- **列表** — 无序、有序、多级
+- **页面布局** — 分节、页面尺寸/方向/边距、分栏、分隔符
+- **页眉和页脚** — 默认、首页、奇偶页
+- **超链接和书签** — 外部链接、内部链接、交叉引用
+- **目录** — 基于域，带缓存条目
+- **脚注、尾注和批注** — 包括线程/扩展批注
+- **域（field）** — PAGE/NUMPAGES、TOC、INDEX/XE、REF、SEQ、STYLEREF、公式等
+- **数学公式** — OMML 公式（分数、根式、矩阵、n 元运算符……）
+- **绘图形状** — 预设几何，支持填充、线条、渐变、阴影/发光/3D 特效
+- **图表** — 不透明保留 + 从零构建；桥接到 Excel 图表引擎
+- **修订追踪** — 接受/拒绝插入、删除、移动和属性变更
+- **模板** — `{{variable}}`、`{{#if}}`、`{{#each}}`、邮件合并、模板修补
+- **表单字段和内容控件（SDT）** — 提取和填充；OpenDoPE 数据绑定
+- **字体嵌入** — 自动字形子集化
+- **文档保护** — 只读/批注/表单，带密码
+- **加密** — 解密受密码保护的 DOCX（Agile Encryption）
+- **数字签名** — 检测和元数据提取
+- **转换** — DOCX ↔ HTML、DOCX ↔ Markdown、Excel → Word、Word → PDF
+- **Flat OPC** — 单一 XML `.xml` 表示形式往返
+- **比对和合并** — 比较两个文档、合并多个文档
+- **流式写入器** — `createDocxStream()` 处理大文档
+- **校验** — 结构检查，带严重级别标记
+- **OOXML Strict** — 读取时透明归一化为 Transitional
+- **浏览器支持** — 同一个 `@cj-tech-master/excelts/word` 导入在 Node.js 和浏览器中均可用
+
 ## 快速开始
 
 ```typescript
@@ -302,6 +333,32 @@ const flatXml = toFlatOpc(doc);
 const doc = parseFlatOpc(flatXmlString);
 ```
 
+### 加密与签名
+
+底层加密工具位于 `@cj-tech-master/excelts/word/crypto` 子路径，因此不会被打进
+只读写普通 DOCX 的 bundle。
+
+```typescript
+import {
+  isEncryptedDocx,
+  decryptDocx,
+  encryptDocx,
+  extractSignatures,
+  hasDigitalSignatures
+} from "@cj-tech-master/excelts/word/crypto";
+
+// 解密受密码保护的 DOCX（Agile Encryption）
+if (isEncryptedDocx(bytes)) {
+  const plain = await decryptDocx(bytes, "password");
+}
+
+// 用密码加密 DOCX
+const encrypted = await encryptDocx(docxBytes, "password");
+
+// 检查嵌入的 XMLDSig 签名（只读；不做验证）
+const signatures = extractSignatures(opaqueParts);
+```
+
 ### Excel → Word
 
 将 Excel `Workbook` 转换为 `DocxDocument`，把工作表映射为
@@ -331,7 +388,7 @@ const extracted = extractTablesToExcel(doc);
 
 嵌入在 Word 文档中的图表也会桥接到 Excel 图表引擎
 （27 个图表系列，经典图表与现代 ChartEx）。PDF 渲染侧参见
-`createWordChartPdfRenderer` / `createWordLayoutChartPdfRenderer`。
+`createWordChartPdfRenderer`。
 
 ### Word → PDF
 
@@ -389,19 +446,19 @@ const pdf = await docxToPdf(doc, {
 
 ## 兼容性
 
-| 特性             | 支持情况                                             |
-| ---------------- | ---------------------------------------------------- |
-| .docx（读取）    | ✅ 广泛（常见元素结构化；未知部件保留）              |
-| .docx（写入）    | ✅ 广泛（常见元素；未知部件以不透明形式写出）        |
-| .dotx（模板）    | ✅                                                   |
-| .docm（宏）      | ✅ 往返（保留 VBA，不执行/不编辑）                   |
-| .dotm（宏模板）  | ✅ 往返                                              |
-| Flat OPC（.xml） | ✅                                                   |
-| ISO 29500 Strict | ✅ 自动归一化                                        |
-| 加密的 .docx     | ✅ 用密码解密（Agile Encryption）                    |
-| 数字签名         | 🔍 检测与元数据提取（不签名/不验证）                 |
-| 浏览器           | ✅（从 "@cj-tech-master/excelts/word/browser" 导入） |
-| Node.js 22+      | ✅                                                   |
+| 特性             | 支持情况                                         |
+| ---------------- | ------------------------------------------------ |
+| .docx（读取）    | ✅ 广泛（常见元素结构化；未知部件保留）          |
+| .docx（写入）    | ✅ 广泛（常见元素；未知部件以不透明形式写出）    |
+| .dotx（模板）    | ✅                                               |
+| .docm（宏）      | ✅ 往返（保留 VBA，不执行/不编辑）               |
+| .dotm（宏模板）  | ✅ 往返                                          |
+| Flat OPC（.xml） | ✅                                               |
+| ISO 29500 Strict | ✅ 自动归一化                                    |
+| 加密的 .docx     | ✅ 用密码解密（Agile Encryption）                |
+| 数字签名         | 🔍 检测与元数据提取（不签名/不验证）             |
+| 浏览器           | ✅（同一个 `@cj-tech-master/excelts/word` 导入） |
+| Node.js 22+      | ✅                                               |
 
 ## 从 `docx`（npm）迁移
 
