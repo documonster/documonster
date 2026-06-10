@@ -2229,6 +2229,10 @@ export interface ImageWatermark {
   readonly scale?: number;
   /** Washout effect. */
   readonly washout?: boolean;
+  /** Display width in points. Defaults to 415.2pt (full body width). */
+  readonly widthPt?: number;
+  /** Display height in points. Defaults to 415.2pt scaled to image ratio, or 233.5pt. */
+  readonly heightPt?: number;
 }
 
 /** Watermark (text or image). */

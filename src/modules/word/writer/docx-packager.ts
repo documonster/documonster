@@ -1271,9 +1271,16 @@ async function _packageDocxInner(
   );
 
   // word/settings.xml
+  // When the document defines a page background, Word only paints it if
+  // <w:displayBackgroundShape/> is present in settings. Inject it
+  // automatically so setBackground() actually shows up on screen.
+  const settingsForRender =
+    doc.background && !doc.settings?.displayBackgroundShape
+      ? { ...(doc.settings ?? {}), displayBackgroundShape: true }
+      : doc.settings;
   archive.add(
     PartPath.Settings,
-    renderXml(xml => renderSettings(xml, doc.settings, rawXmlPolicy))
+    renderXml(xml => renderSettings(xml, settingsForRender, rawXmlPolicy))
   );
 
   // word/fontTable.xml

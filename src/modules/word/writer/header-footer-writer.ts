@@ -97,13 +97,18 @@ export function renderWatermarkHeader(xml: XmlSink, watermark: Watermark, imageR
     "xmlns:w10": NS_W10
   });
 
-  // Watermark goes in a paragraph with a single pict run. Skip pPr
-  // entirely — emitting an empty <w:pStyle/> without @w:val is a hard
-  // schema violation Word rejects, and the default style is good enough
-  // for an auto-generated watermark header.
+  // Watermark lives in a paragraph styled as a Header, matching what
+  // Microsoft Word emits. The run carries <w:noProof/> so the WordArt
+  // text is not spell-checked.
   xml.openNode("w:p");
+  xml.openNode("w:pPr");
+  xml.leafNode("w:pStyle", { "w:val": "Header" });
+  xml.closeNode(); // pPr
 
   xml.openNode("w:r");
+  xml.openNode("w:rPr");
+  xml.leafNode("w:noProof");
+  xml.closeNode(); // rPr
   xml.openNode("w:pict");
 
   if (watermark.type === "text") {
@@ -122,41 +127,79 @@ export function renderWatermarkHeader(xml: XmlSink, watermark: Watermark, imageR
 function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
   const color = wm.color ?? "C0C0C0";
   const font = wm.font ?? "Calibri";
-  const fontSize = wm.fontSize ?? 1; // half-points; Word uses pt string in style
-  const fontPt = fontSize / 2;
   const rotation = wm.rotation ?? -45;
-  const opacity = wm.semiTransparent !== false ? ".5" : "1";
 
-  // VML shape for text watermark (PowerWash / WASHOUT style)
-  xml.leafNode("v:shapetype", {
+  // Full WordArt shapetype definition (t136) exactly as Microsoft Word
+  // emits it. Word for Mac will NOT render the text path unless the
+  // shapetype carries the formula/path/textpath/handles/lock children —
+  // an empty <v:shapetype/> produces an invisible watermark.
+  xml.openNode("v:shapetype", {
     id: "_x0000_t136",
     coordsize: "21600,21600",
     "o:spt": "136",
+    adj: "10800",
     path: "m@7,l@8,m@5,21600l@6,21600e"
   });
+  xml.openNode("v:formulas");
+  for (const eqn of [
+    "sum #0 0 10800",
+    "prod #0 2 1",
+    "sum 21600 0 @1",
+    "sum 0 0 @2",
+    "sum 21600 0 @3",
+    "if @0 @3 0",
+    "if @0 21600 @1",
+    "if @0 0 @2",
+    "if @0 @4 21600",
+    "mid @5 @6",
+    "mid @8 @5",
+    "mid @7 @8",
+    "mid @6 @7",
+    "sum @6 0 @5"
+  ]) {
+    xml.leafNode("v:f", { eqn });
+  }
+  xml.closeNode(); // formulas
+  xml.leafNode("v:path", {
+    textpathok: "t",
+    "o:connecttype": "custom",
+    "o:connectlocs": "@9,0;@10,10800;@11,21600;@12,10800",
+    "o:connectangles": "270,180,90,0"
+  });
+  xml.leafNode("v:textpath", { on: "t", fitshape: "t" });
+  xml.openNode("v:handles");
+  xml.leafNode("v:h", { position: "#0,bottomRight", xrange: "6629,14971" });
+  xml.closeNode(); // handles
+  xml.leafNode("o:lock", { "v:ext": "edit", text: "t", shapetype: "t" });
+  xml.closeNode(); // shapetype
 
+  // The watermark shape itself. Word fixes font-size at 1pt and relies on
+  // fitshape="t" to scale the text to fill the shape box; rotation is
+  // applied on the shape via the style string.
   const style =
     `position:absolute;margin-left:0;margin-top:0;width:468pt;height:234pt;` +
-    `rotation:${rotation};z-index:-251658752;mso-position-horizontal:center;` +
-    `mso-position-horizontal-relative:margin;mso-position-vertical:center;` +
-    `mso-position-vertical-relative:margin`;
+    `${rotation ? `rotation:${rotation};` : ""}z-index:-251658752;` +
+    `mso-position-horizontal:center;mso-position-horizontal-relative:margin;` +
+    `mso-position-vertical:center;mso-position-vertical-relative:margin`;
 
   xml.openNode("v:shape", {
     id: "PowerPlusWaterMarkObject",
     "o:spid": "_x0000_s2049",
     type: "#_x0000_t136",
+    alt: "",
     style,
     "o:allowincell": "f",
     fillcolor: `#${color}`,
     stroked: "f"
   });
 
-  xml.leafNode("v:fill", { opacity });
+  if (wm.semiTransparent !== false) {
+    xml.leafNode("v:fill", { opacity: ".5" });
+  }
   xml.leafNode("v:textpath", {
-    style: `font-family:&quot;${font}&quot;;font-size:${fontPt}pt`,
+    style: `font-family:"${font}";font-size:1pt`,
     string: wm.text
   });
-  xml.leafNode("w10:wrap", { anchorx: "margin", anchory: "margin" });
 
   xml.closeNode(); // v:shape
 }
@@ -166,11 +209,54 @@ function renderImageWatermarkVml(
   wm: Watermark & { type: "image" },
   rId?: string
 ): void {
-  const scale = wm.scale ?? 100;
   const rid = rId ?? wm.rId;
+  // Default to a large area covering most of the body so the picture is
+  // actually visible. width:0;height:0 produces an invisible dot.
+  const widthPt = wm.widthPt ?? 415.2;
+  const heightPt = wm.heightPt ?? 233.5;
+
+  // Picture-frame shapetype (t75) as Microsoft Word emits it. Without a
+  // proper shapetype + non-zero size the image watermark will not render.
+  xml.openNode("v:shapetype", {
+    id: "_x0000_t75",
+    coordsize: "21600,21600",
+    "o:spt": "75",
+    "o:preferrelative": "t",
+    path: "m@4@5l@4@11@9@11@9@5xe",
+    filled: "f",
+    stroked: "f"
+  });
+  xml.openNode("v:stroke", { joinstyle: "miter" });
+  xml.closeNode();
+  xml.openNode("v:formulas");
+  for (const eqn of [
+    "if lineDrawn pixelLineWidth 0",
+    "sum @0 1 0",
+    "sum 0 0 @1",
+    "prod @2 1 2",
+    "prod @3 21600 pixelWidth",
+    "prod @3 21600 pixelHeight",
+    "sum @0 0 1",
+    "prod @6 1 2",
+    "prod @7 21600 pixelWidth",
+    "sum @8 21600 0",
+    "prod @7 21600 pixelHeight",
+    "sum @10 21600 0"
+  ]) {
+    xml.leafNode("v:f", { eqn });
+  }
+  xml.closeNode(); // formulas
+  xml.leafNode("v:path", {
+    "o:extrusionok": "f",
+    gradientshapeok: "t",
+    "o:connecttype": "rect"
+  });
+  xml.leafNode("o:lock", { "v:ext": "edit", aspectratio: "t" });
+  xml.closeNode(); // shapetype
 
   const style =
-    `position:absolute;margin-left:0;margin-top:0;width:0;height:0;` +
+    `position:absolute;margin-left:0;margin-top:0;` +
+    `width:${widthPt}pt;height:${heightPt}pt;` +
     `z-index:-251658752;mso-position-horizontal:center;` +
     `mso-position-horizontal-relative:margin;mso-position-vertical:center;` +
     `mso-position-vertical-relative:margin`;
@@ -178,7 +264,8 @@ function renderImageWatermarkVml(
   xml.openNode("v:shape", {
     id: "PowerPlusWaterMarkObject",
     "o:spid": "_x0000_s2050",
-    type: "",
+    type: "#_x0000_t75",
+    alt: "",
     style,
     "o:allowincell": "f"
   });
@@ -190,8 +277,7 @@ function renderImageWatermarkVml(
     "r:id": rid,
     "o:title": "",
     gain,
-    blacklevel,
-    ...(scale !== 100 ? { "o:detectmouseclick": "t" } : {})
+    blacklevel
   });
   xml.leafNode("w10:wrap", { anchorx: "margin", anchory: "margin" });
 
