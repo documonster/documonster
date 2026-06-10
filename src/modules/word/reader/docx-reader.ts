@@ -2834,10 +2834,15 @@ async function _readDocxInner(
     }
   }
 
-  // Glossary document (Building Blocks). Carried verbatim so a read→write
-  // round-trip re-emits it (and re-registers the glossaryDocument relationship
-  // + content type) rather than dropping it into opaqueParts where the
-  // relationship would be lost. The structured `blocks` are not reverse-parsed.
+  // Glossary document (Building Blocks). The glossary is a self-contained
+  // sub-document: word/glossary/document.xml plus its own companion parts
+  // (styles/settings/webSettings/fontTable) referenced from
+  // word/glossary/_rels/document.xml.rels. We carry document.xml verbatim as
+  // `rawXml` and ALL sibling glossary parts (including the .rels) verbatim in
+  // `rawParts`, so a read→write round-trip re-emits a complete, Word-valid
+  // glossary rather than dropping it (opaqueParts would lose both the
+  // glossaryDocument relationship and the companion .rels). The structured
+  // `blocks` are not reverse-parsed.
   let glossary: GlossaryDocument | undefined;
   for (const rel of docRels) {
     if (rel.type !== RelType.Glossary) {
@@ -2846,8 +2851,17 @@ async function _readDocxInner(
     const glossaryPath = resolvePartPath(documentPartPath, rel.target);
     const glossaryData = entries.get(glossaryPath);
     if (glossaryData) {
-      consumedPaths.add(glossaryPath);
-      glossary = { blocks: [], rawXml: decoder.decode(glossaryData) };
+      // Collect every word/glossary/** part (document.xml, its .rels and all
+      // companions) verbatim, and mark them consumed so they are not also
+      // emitted via opaqueParts.
+      const rawParts = new Map<string, Uint8Array>();
+      for (const [path, data] of entries) {
+        if (path.startsWith("word/glossary/")) {
+          rawParts.set(path, data);
+          consumedPaths.add(path);
+        }
+      }
+      glossary = { blocks: [], rawXml: decoder.decode(glossaryData), rawParts };
     }
     break;
   }

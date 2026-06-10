@@ -34,13 +34,15 @@ import { renderBodyContent } from "./document-writer";
 /**
  * Map the friendly {@link BuildingBlockGallery} token to the OOXML
  * `ST_DocPartGallery` value used in `<w:gallery w:val="…">` (ECMA-376
- * §17.18.23).
+ * §17.18.23). Values MUST be exact enum members — Word rejects (and silently
+ * discards) the entire glossary if it sees an out-of-enum gallery value.
+ * There is no plain "quickParts" value; Quick Parts map to "custQuickParts".
  */
 const GALLERY_TO_OOXML: Record<BuildingBlockGallery, string> = {
   autoText: "autoTxt",
-  quickParts: "quickParts",
+  quickParts: "custQuickParts",
   coverPages: "coverPg",
-  tableOfContents: "tocs",
+  tableOfContents: "tblOfContents",
   headers: "hdrs",
   footers: "ftrs",
   pageNumbers: "pgNum",
@@ -49,11 +51,11 @@ const GALLERY_TO_OOXML: Record<BuildingBlockGallery, string> = {
   watermarks: "watermarks",
   equations: "eq",
   bibliographies: "bib",
-  custom1: "custGal1",
-  custom2: "custGal2",
-  custom3: "custGal3",
-  custom4: "custGal4",
-  custom5: "custGal5"
+  custom1: "custom1",
+  custom2: "custom2",
+  custom3: "custom3",
+  custom4: "custom4",
+  custom5: "custom5"
 };
 
 /** Render a {@link GlossaryDocument} to a `word/glossary/document.xml` string. */
@@ -82,23 +84,25 @@ function renderGlossary(xml: XmlSink, glossary: GlossaryDocument): void {
 function renderDocPart(xml: XmlSink, block: GlossaryDocument["blocks"][number]): void {
   xml.openNode("w:docPart");
 
-  // docPartPr
+  // CT_DocPartPr — child order is fixed by the schema (ECMA-376 §17.12.1):
+  // name → style → category → types → behaviors → description → guid.
+  // Emitting these out of order makes Word reject the package on open.
   xml.openNode("w:docPartPr");
   xml.leafNode("w:name", { "w:val": block.name });
   xml.openNode("w:category");
   xml.leafNode("w:name", { "w:val": block.category ?? "General" });
   xml.leafNode("w:gallery", { "w:val": GALLERY_TO_OOXML[block.gallery] ?? "placeholder" });
   xml.closeNode(); // w:category
-  // A docPart placed in the body inserts its content; "content" behaviour is
-  // the sensible default for AutoText / Quick Parts.
+  // `<w:types>` is optional; we omit it so we never emit an out-of-enum
+  // ST_DocPartType value. A docPart placed in the body inserts its content.
   xml.openNode("w:behaviors");
   xml.leafNode("w:behavior", { "w:val": "content" });
   xml.closeNode(); // w:behaviors
-  if (block.guid) {
-    xml.leafNode("w:guid", { "w:val": normaliseGuid(block.guid) });
-  }
   if (block.description) {
     xml.leafNode("w:description", { "w:val": block.description });
+  }
+  if (block.guid) {
+    xml.leafNode("w:guid", { "w:val": normaliseGuid(block.guid) });
   }
   xml.closeNode(); // w:docPartPr
 

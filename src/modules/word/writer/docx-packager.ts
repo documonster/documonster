@@ -1704,11 +1704,76 @@ async function _packageDocxInner(
     }
   }
 
-  // word/glossary/document.xml (Building Blocks / AutoText / Quick Parts)
+  // word/glossary/document.xml (Building Blocks / AutoText / Quick Parts).
+  //
+  // A glossary is a self-contained sub-document: Word expects it to carry its
+  // own styles / settings / webSettings / fontTable parts (referenced from
+  // word/glossary/_rels/document.xml.rels) rather than sharing the main
+  // document's. Omitting them makes Word discard the whole glossary on open.
+  //
+  //  - Round-tripped glossary (`rawParts` set): re-emit every captured
+  //    word/glossary/** part verbatim (document.xml, its .rels, companions).
+  //  - Freshly-built glossary: synthesise document.xml + the companion parts
+  //    + the glossary's own .rels, reusing the main document's styles/fonts so
+  //    block content (e.g. Heading1) resolves.
   if (doc.glossary && (doc.glossary.rawXml || doc.glossary.blocks.length > 0)) {
-    archive.add("word/glossary/document.xml", renderGlossaryDocument(doc.glossary));
     addRelationship(documentRels, RelType.Glossary, "glossary/document.xml");
-    addContentTypeOverride(contentTypes, "/word/glossary/document.xml", ContentType.Glossary);
+
+    if (doc.glossary.rawParts && doc.glossary.rawParts.size > 0) {
+      for (const [path, data] of doc.glossary.rawParts) {
+        archive.add(path, data);
+        if (path.endsWith(".rels")) {
+          continue; // .rels parts are typed by the Default rels content type
+        }
+        const ct =
+          path === "word/glossary/document.xml"
+            ? ContentType.Glossary
+            : inferContentType(getFileExt(path));
+        if (ct) {
+          addContentTypeOverride(contentTypes, `/${path}`, ct);
+        }
+      }
+    } else {
+      archive.add("word/glossary/document.xml", renderGlossaryDocument(doc.glossary));
+      addContentTypeOverride(contentTypes, "/word/glossary/document.xml", ContentType.Glossary);
+
+      // Synthesise the companion sub-document parts + the glossary's own rels.
+      const glossaryRels = createRelationships();
+      addRelationshipWithId(glossaryRels, "rId1", RelType.Styles, "styles.xml");
+      addRelationshipWithId(glossaryRels, "rId2", RelType.Settings, "settings.xml");
+      addRelationshipWithId(glossaryRels, "rId3", RelType.WebSettings, "webSettings.xml");
+      addRelationshipWithId(glossaryRels, "rId4", RelType.FontTable, "fontTable.xml");
+      archive.add(
+        "word/glossary/_rels/document.xml.rels",
+        renderXml(xml => renderRelationships(glossaryRels, xml))
+      );
+
+      archive.add(
+        "word/glossary/styles.xml",
+        renderXml(xml => renderStyles(xml, doc.docDefaults, doc.styles))
+      );
+      archive.add(
+        "word/glossary/settings.xml",
+        renderXml(xml => renderSettings(xml, undefined, rawXmlPolicy))
+      );
+      archive.add(
+        "word/glossary/webSettings.xml",
+        renderXml(xml => renderWebSettings(xml, undefined, rawXmlPolicy))
+      );
+      archive.add(
+        "word/glossary/fontTable.xml",
+        renderXml(xml => renderFontTable(xml, doc.fonts))
+      );
+
+      addContentTypeOverride(contentTypes, "/word/glossary/styles.xml", ContentType.Styles);
+      addContentTypeOverride(contentTypes, "/word/glossary/settings.xml", ContentType.Settings);
+      addContentTypeOverride(
+        contentTypes,
+        "/word/glossary/webSettings.xml",
+        ContentType.WebSettings
+      );
+      addContentTypeOverride(contentTypes, "/word/glossary/fontTable.xml", ContentType.FontTable);
+    }
   }
 
   // Write opaque (unrecognized) parts for round-trip preservation.
@@ -1755,6 +1820,19 @@ async function _packageDocxInner(
       "word/glossary/document.xml",
       "word/glossary/_rels/document.xml.rels"
     ]);
+    // Glossary sub-document parts (emitted either verbatim from rawParts or
+    // synthesised); reserve them so opaqueParts can't collide.
+    if (doc.glossary && (doc.glossary.rawXml || doc.glossary.blocks.length > 0)) {
+      reservedExact.add("word/glossary/styles.xml");
+      reservedExact.add("word/glossary/settings.xml");
+      reservedExact.add("word/glossary/webSettings.xml");
+      reservedExact.add("word/glossary/fontTable.xml");
+      if (doc.glossary.rawParts) {
+        for (const path of doc.glossary.rawParts.keys()) {
+          reservedExact.add(path);
+        }
+      }
+    }
     // Headers/footers we are emitting in this run.
     if (doc.headers) {
       let i = 1;
