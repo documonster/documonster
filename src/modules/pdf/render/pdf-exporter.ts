@@ -611,6 +611,7 @@ function resolveOptions(
     pageSize,
     orientation,
     margins,
+    ignorePrintArea: options?.ignorePrintArea ?? false,
     fitToPage: options?.fitToPage !== undefined ? options.fitToPage : true,
     scale: Math.max(
       0.1,

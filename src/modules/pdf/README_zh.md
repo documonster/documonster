@@ -271,6 +271,7 @@ interface PdfExportOptions {
   gridLineColor?: string; // ARGB color for grid lines (e.g. "FF3366CC")
   repeatRows?: number | false; // Number of header rows to repeat on each page
   sheets?: (string | number)[]; // Select specific sheets by name or 1-based index
+  ignorePrintArea?: boolean; // Export the full used range, ignoring each sheet's print area (default: false)
 
   // Headers & footers
   showSheetNames?: boolean; // Show sheet name at top of each page
@@ -457,6 +458,12 @@ worksheet.pageSetup.printArea = "A1:F50"; // Export only this range
 ```
 
 > **注意：** 如果设置了多区域打印范围（例如 `"A1:B5&&D1:E10"`），PDF 导出仅使用第一个区域。
+
+如需导出完整使用范围、忽略打印区域且不修改工作簿，可传入 `ignorePrintArea`：
+
+```typescript
+await excelToPdf(workbook, { ignorePrintArea: true });
+```
 
 ---
 

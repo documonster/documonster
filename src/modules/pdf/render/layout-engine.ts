@@ -277,7 +277,7 @@ function prepareLayout(
   const footerHeight = options.showPageNumbers ? 20 : 0;
   const availableHeight = contentHeight - headerHeight - footerHeight;
 
-  const printRange = getPrintRange(sheet);
+  const printRange = getPrintRange(sheet, options);
 
   // --- Step 1: Visible columns and widths ---
   const { columnWidths, visibleCols } = computeColumnWidths(sheet, printRange);
@@ -586,9 +586,12 @@ interface PrintRange {
 
 /**
  * Get the print area range from the sheet's pageSetup.
- * Returns null if no print area is set.
+ * Returns null if no print area is set, or if `ignorePrintArea` is enabled.
  */
-function getPrintRange(sheet: PdfSheetData): PrintRange | null {
+function getPrintRange(sheet: PdfSheetData, options: ResolvedPdfOptions): PrintRange | null {
+  if (options.ignorePrintArea) {
+    return null;
+  }
   const printArea = sheet.pageSetup?.printArea;
   if (!printArea || typeof printArea !== "string") {
     return null;

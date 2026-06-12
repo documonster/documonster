@@ -895,6 +895,80 @@ describe("excelToPdf", () => {
     });
   });
 
+  describe("ignorePrintArea option", () => {
+    it("should clip columns outside the print area by default", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("ClipCol");
+      ws.getCell("A1").value = "In";
+      ws.getCell("B1").value = "OutCol";
+      ws.pageSetup.printArea = "A1:A1";
+
+      const pdf = await excelToPdf(wb);
+
+      expectValidPdf(pdf);
+      const text = pdfToString(pdf);
+      expect(text).toContain("In");
+      expect(text).not.toContain("OutCol");
+    });
+
+    it("should clip rows outside the print area by default", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("ClipRow");
+      ws.getCell("A1").value = "In";
+      ws.getCell("A2").value = "OutRow";
+      ws.pageSetup.printArea = "A1:A1";
+
+      const pdf = await excelToPdf(wb);
+
+      expectValidPdf(pdf);
+      const text = pdfToString(pdf);
+      expect(text).toContain("In");
+      expect(text).not.toContain("OutRow");
+    });
+
+    it("should export columns outside the print area when ignorePrintArea is true", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("FullCol");
+      ws.getCell("A1").value = "In";
+      ws.getCell("B1").value = "OutCol";
+      ws.pageSetup.printArea = "A1:A1";
+
+      const pdf = await excelToPdf(wb, { ignorePrintArea: true });
+
+      expectValidPdf(pdf);
+      const text = pdfToString(pdf);
+      expect(text).toContain("In");
+      expect(text).toContain("OutCol");
+    });
+
+    it("should export rows outside the print area when ignorePrintArea is true", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("FullRow");
+      ws.getCell("A1").value = "In";
+      ws.getCell("A2").value = "OutRow";
+      ws.pageSetup.printArea = "A1:A1";
+
+      const pdf = await excelToPdf(wb, { ignorePrintArea: true });
+
+      expectValidPdf(pdf);
+      const text = pdfToString(pdf);
+      expect(text).toContain("In");
+      expect(text).toContain("OutRow");
+    });
+
+    it("should leave the workbook's print area unmodified", async () => {
+      const wb = new Workbook();
+      const ws = wb.addWorksheet("Untouched");
+      ws.getCell("A1").value = "InsideArea";
+      ws.getCell("B1").value = "OutsideArea";
+      ws.pageSetup.printArea = "A1:A1";
+
+      await excelToPdf(wb, { ignorePrintArea: true });
+
+      expect(ws.pageSetup.printArea).toBe("A1:A1");
+    });
+  });
+
   describe("printTitlesRow single-row format", () => {
     it("should accept single-number printTitlesRow format", async () => {
       const wb = new Workbook();

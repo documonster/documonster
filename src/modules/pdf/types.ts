@@ -435,6 +435,15 @@ export interface PdfExportOptions {
   sheets?: (string | number)[];
 
   /**
+   * Whether to ignore each worksheet's print area when exporting.
+   * When true, the entire used range of every sheet is exported, regardless
+   * of any `pageSetup.printArea` defined on the worksheet. The workbook itself
+   * is left unmodified.
+   * @default false
+   */
+  ignorePrintArea?: boolean;
+
+  /**
    * Whether to auto-fit column widths to page width.
    * When true, columns are scaled proportionally to fit the page.
    * @default true
@@ -818,6 +827,7 @@ export interface ResolvedPdfOptions {
   pageSize: PdfPageSize;
   orientation: PdfOrientation;
   margins: PdfMargins;
+  ignorePrintArea: boolean;
   fitToPage: boolean;
   scale: number;
   showGridLines: boolean;

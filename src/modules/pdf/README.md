@@ -501,6 +501,7 @@ interface PdfExportOptions {
   gridLineColor?: string; // ARGB color for grid lines (e.g. "FF3366CC")
   repeatRows?: number | false; // Number of header rows to repeat on each page
   sheets?: (string | number)[]; // Select specific sheets by name or 1-based index
+  ignorePrintArea?: boolean; // Export the full used range, ignoring each sheet's print area (default: false)
 
   // Headers & footers
   showSheetNames?: boolean; // Show sheet name at top of each page
@@ -690,6 +691,12 @@ worksheet.pageSetup.printArea = "A1:F50"; // Export only this range
 ```
 
 > **Note:** If a multi-range print area is set (e.g. `"A1:B5&&D1:E10"`), only the first range is used for PDF export.
+
+To export the full used range and ignore any print area without modifying the workbook, pass `ignorePrintArea`:
+
+```typescript
+await excelToPdf(workbook, { ignorePrintArea: true });
+```
 
 ---
 
