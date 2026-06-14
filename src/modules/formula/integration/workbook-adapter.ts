@@ -117,7 +117,11 @@ function buildWorksheetSnapshot(ws: WorksheetLike, date1904: boolean): Worksheet
     if (row.hidden) {
       hiddenRows.add(rowNumber);
     }
-    row.eachCell((cell, colNumber) => {
+    row.cells.forEach((cell, index) => {
+      if (!cell) {
+        return;
+      }
+      const colNumber = index + 1;
       const cellSnapshot = buildCellSnapshot(cell, rowNumber, colNumber, date1904);
       if (cellSnapshot) {
         cells.set(snapshotCellKey(rowNumber, colNumber), cellSnapshot);

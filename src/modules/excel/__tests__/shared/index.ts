@@ -11,9 +11,8 @@ import { splice } from "@excel/__tests__/shared/test-spliced-sheet";
 import { values } from "@excel/__tests__/shared/test-values-sheet";
 import { testWorkbookReader } from "@excel/__tests__/shared/test-workbook-reader";
 import { fix } from "@excel/__tests__/shared/tools";
-import { Column } from "@excel/column";
-import { Row } from "@excel/row";
 import { get } from "@excel/utils/under-dash";
+import { addWorksheet, createWorkbook } from "@excel/workbook";
 import { expect } from "vitest";
 
 const testSheets = {
@@ -108,69 +107,9 @@ const testUtils = {
   checkTestBookReader: testWorkbookReader.checkBook,
 
   createSheetMock(): any {
-    return {
-      _keys: {} as Record<string, any>,
-      _cells: {} as Record<string, any>,
-      rows: [] as any[],
-      columns: [] as any[],
-      properties: {
-        outlineLevelCol: 0,
-        outlineLevelRow: 0
-      },
-
-      addColumn(colNumber: number, defn?: any) {
-        const newColumn = new Column(this, colNumber, defn);
-        this.columns[colNumber - 1] = newColumn;
-        return newColumn;
-      },
-      getColumn(colNumber: number | string) {
-        let column = this.columns[(colNumber as number) - 1] || this._keys[colNumber];
-        if (!column) {
-          column = this.columns[(colNumber as number) - 1] = new Column(this, colNumber as number);
-        }
-        return column;
-      },
-      getRow(rowNumber: number) {
-        let row = this.rows[rowNumber - 1];
-        if (!row) {
-          row = this.rows[rowNumber - 1] = new Row(this, rowNumber);
-        }
-        return row;
-      },
-      getCell(rowNumber: number, colNumber: number) {
-        return this.getRow(rowNumber).getCell(colNumber);
-      },
-      getColumnKey(key: string) {
-        return this._keys[key];
-      },
-      setColumnKey(key: string, value: any) {
-        this._keys[key] = value;
-      },
-      deleteColumnKey(key: string) {
-        delete this._keys[key];
-      },
-      eachColumnKey(f: (column: any, key: string) => void) {
-        Object.entries(this._keys).forEach(([key, value]) => f(value, key));
-      },
-      eachRow(opt: any, f?: (row: any, index: number) => void) {
-        if (!f) {
-          f = opt;
-          opt = {};
-        }
-        if (opt && opt.includeEmpty) {
-          const n = this.rows.length;
-          for (let i = 1; i <= n; i++) {
-            f!(this.getRow(i), i);
-          }
-        } else {
-          this.rows.forEach((r: any, i: number) => {
-            if (r) {
-              f!(r, i + 1);
-            }
-          });
-        }
-      }
-    };
+    // Return a real worksheet record so the flat worksheet/row/column/cell
+    // functions (which read `_rows` / `_columns`) work against it.
+    return addWorksheet(createWorkbook(), "mock");
   }
 };
 

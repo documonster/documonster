@@ -8,19 +8,12 @@
  * This is about determinism/correctness, not performance.
  */
 
+import { cellSetValue, cellGetValue } from "@excel/cell";
+import { Workbook } from "@excel/index";
 import { StreamBuf } from "@excel/utils/stream-buf";
+import type { WorkbookData } from "@excel/workbook-core";
+import { getCell } from "@excel/worksheet";
 import { describe, it, expect, beforeAll } from "vitest";
-
-interface WorkbookLike {
-  addWorksheet: (name?: string) => any;
-  getWorksheet: (id?: any) => any;
-  xlsx: {
-    write: (stream: any, options?: any) => Promise<any>;
-    writeBuffer: (options?: any) => Promise<Uint8Array>;
-    load: (data: Uint8Array, options?: any) => Promise<any>;
-    read: (stream: any, options?: any) => Promise<any>;
-  };
-}
 
 interface StreamLike {
   on: (event: string, listener: (...args: any[]) => void) => any;
@@ -32,7 +25,7 @@ interface PassThroughCtor {
 }
 
 interface ParityTestContext {
-  Workbook: new () => WorkbookLike;
+  Workbook: { create: () => WorkbookData };
   PassThrough: PassThroughCtor;
 }
 
@@ -51,21 +44,21 @@ function uint8ArrayEquals(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-function buildSmallWorkbook(wb: WorkbookLike): void {
-  const ws1 = wb.addWorksheet("Sheet1");
-  ws1.getCell("A1").value = "hello";
-  ws1.getCell("B1").value = 42;
-  ws1.getCell("C1").value = 3.14;
+function buildSmallWorkbook(wb: any): void {
+  const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+  cellSetValue(getCell(ws1, "A1"), "hello");
+  cellSetValue(getCell(ws1, "B1"), 42);
+  cellSetValue(getCell(ws1, "C1"), 3.14);
 
-  ws1.getCell("A2").value = "world";
-  ws1.getCell("B2").value = -7;
-  ws1.getCell("C2").value = 0;
+  cellSetValue(getCell(ws1, "A2"), "world");
+  cellSetValue(getCell(ws1, "B2"), -7);
+  cellSetValue(getCell(ws1, "C2"), 0);
 
-  const ws2 = wb.addWorksheet("Second");
-  ws2.getCell("A1").value = "x";
-  ws2.getCell("B1").value = 1;
-  ws2.getCell("A2").value = "y";
-  ws2.getCell("B2").value = 2;
+  const ws2 = Workbook.addWorksheet(wb, "Second");
+  cellSetValue(getCell(ws2, "A1"), "x");
+  cellSetValue(getCell(ws2, "B1"), 1);
+  cellSetValue(getCell(ws2, "A2"), "y");
+  cellSetValue(getCell(ws2, "B2"), 2);
 }
 
 export function createXlsxStreamParityTests(getContext: () => ParityTestContext) {
@@ -77,18 +70,18 @@ export function createXlsxStreamParityTests(getContext: () => ParityTestContext)
     });
 
     it("write(stream) output bytes === writeBuffer() bytes", async () => {
-      const wb = new ctx.Workbook();
+      const wb = ctx.Workbook.create();
       buildSmallWorkbook(wb);
 
       const options = { zip: { level: 6, modTime: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)) } };
 
-      const bufferNonStream = await wb.xlsx.writeBuffer(options);
+      const bufferNonStream = await Workbook.toXlsxBuffer(wb, options);
 
       // In browser builds, `xlsx.write()` expects a StreamBuf-like sink with
       // synchronous `write()`/`end()`; using StreamBuf keeps behavior consistent
       // across Node and browser.
       const stream = new StreamBuf();
-      await wb.xlsx.write(stream as any, options);
+      await Workbook.writeXlsxStream(wb, stream as any, options);
       const bufferStream = stream.read() || new Uint8Array(0);
 
       expect(bufferStream.length).toBe(bufferNonStream.length);
@@ -96,35 +89,35 @@ export function createXlsxStreamParityTests(getContext: () => ParityTestContext)
     }, 30000);
 
     it("read(stream) model matches load(buffer)", async () => {
-      const wb = new ctx.Workbook();
+      const wb = ctx.Workbook.create();
       buildSmallWorkbook(wb);
 
-      const data = await wb.xlsx.writeBuffer({
+      const data = await Workbook.toXlsxBuffer(wb, {
         zip: { level: 6, modTime: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)) }
       });
 
-      const wbFromBuffer = new ctx.Workbook();
-      await wbFromBuffer.xlsx.load(data);
+      const wbFromBuffer = ctx.Workbook.create();
+      await Workbook.loadXlsx(wbFromBuffer, data);
 
-      const wbFromStream = new ctx.Workbook();
+      const wbFromStream = ctx.Workbook.create();
       const stream = new ctx.PassThrough();
       stream.end(data);
-      await wbFromStream.xlsx.read(stream as any);
+      await Workbook.readXlsxStream(wbFromStream, stream as any);
 
-      const sheet1a = wbFromBuffer.getWorksheet("Sheet1");
-      const sheet1b = wbFromStream.getWorksheet("Sheet1");
+      const sheet1a = Workbook.getWorksheet(wbFromBuffer, "Sheet1")!;
+      const sheet1b = Workbook.getWorksheet(wbFromStream, "Sheet1")!;
 
-      expect(sheet1a.getCell("A1").value).toBe("hello");
-      expect(sheet1b.getCell("A1").value).toBe("hello");
-      expect(sheet1b.getCell("B1").value).toBe(42);
-      expect(sheet1b.getCell("C1").value).toBe(3.14);
+      expect(cellGetValue(getCell(sheet1a, "A1"))).toBe("hello");
+      expect(cellGetValue(getCell(sheet1b, "A1"))).toBe("hello");
+      expect(cellGetValue(getCell(sheet1b, "B1"))).toBe(42);
+      expect(cellGetValue(getCell(sheet1b, "C1"))).toBe(3.14);
 
-      const secondA = wbFromBuffer.getWorksheet("Second");
-      const secondB = wbFromStream.getWorksheet("Second");
+      const secondA = Workbook.getWorksheet(wbFromBuffer, "Second")!;
+      const secondB = Workbook.getWorksheet(wbFromStream, "Second")!;
 
-      expect(secondA.getCell("A2").value).toBe("y");
-      expect(secondB.getCell("A2").value).toBe("y");
-      expect(secondB.getCell("B2").value).toBe(2);
+      expect(cellGetValue(getCell(secondA, "A2"))).toBe("y");
+      expect(cellGetValue(getCell(secondB, "A2"))).toBe("y");
+      expect(cellGetValue(getCell(secondB, "B2"))).toBe(2);
     }, 30000);
   });
 }

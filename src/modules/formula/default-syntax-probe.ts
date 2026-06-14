@@ -55,7 +55,7 @@
  * ```ts
  * const wb = new Workbook();
  * installFormulaEngine();            // later
- * await wb.xlsx.load(buffer);        // sees the installed probe
+ * await Workbook.loadXlsx(wb, buffer);        // sees the installed probe
  * ```
  *
  * works correctly — the probe installed before `load()` is the one

@@ -11,6 +11,9 @@
  * - Modern browsers (when bundled)
  */
 
+import { rowValues } from "@excel/row";
+import { rowCommit } from "@excel/worksheet";
+
 import { WorkbookWriter, WorkbookReader } from "../../../index";
 
 async function main(): Promise<void> {
@@ -33,9 +36,9 @@ async function main(): Promise<void> {
   });
 
   const ws = writer.addWorksheet("Sheet1");
-  ws.addRow(["Name", "Score"]).commit();
-  ws.addRow(["Alice", 98]).commit();
-  ws.addRow(["Bob", 87]).commit();
+  rowCommit(ws.addRow(["Name", "Score"]));
+  rowCommit(ws.addRow(["Alice", 98]));
+  rowCommit(ws.addRow(["Bob", 87]));
   ws.commit();
   await writer.commit();
 
@@ -53,7 +56,7 @@ async function main(): Promise<void> {
     console.log("Reading sheet:", sheet.name);
     for await (const row of sheet) {
       // Row.values includes a leading empty slot at index 0 in many sheet models.
-      console.log("Row", row.number, row.values);
+      console.log("Row", row.number, rowValues(row));
     }
   }
 }

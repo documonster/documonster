@@ -1,3 +1,4 @@
+import { cellGetValue } from "@excel/cell";
 import type { ChartExModel } from "@excel/chart/chart-ex-types";
 /**
  * Chart cache populator.
@@ -25,9 +26,13 @@ import type {
   StringReference,
   MultiLevelStringReference
 } from "@excel/chart/types";
+import { definedNamesGetRangesScoped } from "@excel/defined-names";
+import { tableDisplayName, tableModel, tableName } from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
 import type { Workbook } from "@excel/workbook";
+import { getDefinedNames, getWorksheet, getWorksheets } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
+import { getCell, getSheetName, getTables } from "@excel/worksheet";
 import { dateToExcel } from "@utils/utils.base";
 
 /**
@@ -570,7 +575,7 @@ function buildResolverContext(workbook: Workbook, contextWorksheet?: Worksheet):
     if (typeof contextWorksheet.orderNo === "number") {
       localSheetId = contextWorksheet.orderNo;
     } else {
-      const idx = workbook.worksheets.indexOf(contextWorksheet);
+      const idx = getWorksheets(workbook).indexOf(contextWorksheet);
       if (idx >= 0) {
         localSheetId = idx;
       }
@@ -637,7 +642,7 @@ function resolveReference(formula: string, ctx: ResolverContext): ResolvedRefere
     if (!sheetName) {
       return undefined;
     }
-    const ws = ctx.workbook.getWorksheet(sheetName);
+    const ws = getWorksheet(ctx.workbook, sheetName);
     if (!ws) {
       return undefined;
     }
@@ -774,7 +779,7 @@ function findDefinedName(
   if (qualified) {
     // Sheet-scoped entry on the qualifying sheet wins; fall back to
     // workbook-scoped if the sheet has no matching entry.
-    const qualifyingSheet = ctx.workbook.getWorksheet(qualified.sheetName);
+    const qualifyingSheet = getWorksheet(ctx.workbook, qualified.sheetName);
     if (qualifyingSheet) {
       // Match the scoping key used in `buildResolverContext` — always
       // prefer `orderNo` (the mixed-tab workbook position, counting
@@ -789,7 +794,7 @@ function findDefinedName(
       const sheetIdx =
         typeof qualifyingSheet.orderNo === "number"
           ? qualifyingSheet.orderNo
-          : ctx.workbook.worksheets.indexOf(qualifyingSheet);
+          : getWorksheets(ctx.workbook).indexOf(qualifyingSheet);
       if (sheetIdx >= 0) {
         const scoped = getDefinedNameRanges(ctx.workbook, qualified.name, sheetIdx);
         if (scoped) {
@@ -832,11 +837,11 @@ function getDefinedNameRanges(
   name: string,
   localSheetId: number | undefined
 ): string[] | undefined {
-  const definedNames = workbook.definedNames;
+  const definedNames = getDefinedNames(workbook);
   if (!definedNames) {
     return undefined;
   }
-  const model = definedNames.getRangesScoped(name, localSheetId);
+  const model = definedNamesGetRangesScoped(definedNames, name, localSheetId);
   if (!model.ranges || model.ranges.length === 0) {
     return undefined;
   }
@@ -968,23 +973,23 @@ function resolveStructuredReference(
   if (!parsed) {
     return undefined;
   }
-  const worksheets = [...workbook.worksheets];
+  const worksheets = [...getWorksheets(workbook)];
   if (preferredSheetName) {
     // Move the preferred sheet to the front of the search (case-insensitive).
     const target = preferredSheetName.toLowerCase();
-    const idx = worksheets.findIndex(ws => ws.name.toLowerCase() === target);
+    const idx = worksheets.findIndex(ws => getSheetName(ws).toLowerCase() === target);
     if (idx > 0) {
       worksheets.unshift(...worksheets.splice(idx, 1));
     }
   }
   for (const worksheet of worksheets) {
-    const table = worksheet
-      .getTables()
-      .find(t => t.name === parsed.tableName || t.displayName === parsed.tableName);
+    const table = getTables(worksheet).find(
+      t => tableName(t) === parsed.tableName || tableDisplayName(t) === parsed.tableName
+    );
     if (!table) {
       continue;
     }
-    const model = table.model;
+    const model = tableModel(table);
     const columnIndex = model.columns.findIndex(column => column.name === parsed.columnName);
     if (columnIndex < 0) {
       return undefined;
@@ -1161,7 +1166,7 @@ function resolveReferenceMatrix(
     if (!sheetName) {
       return undefined;
     }
-    const ws = ctx.workbook.getWorksheet(sheetName);
+    const ws = getWorksheet(ctx.workbook, sheetName);
     if (!ws) {
       return undefined;
     }
@@ -1233,8 +1238,8 @@ function splitFormulaRanges(formula: string): string[] {
 function extractCellValue(ws: Worksheet, row: number, col: number): unknown {
   // Worksheet.getCell creates sparse cell slots but does not mutate existing
   // values — safe to call.
-  const cell = ws.getCell(row, col);
-  const v = cell.value;
+  const cell = getCell(ws, row, col);
+  const v = cellGetValue(cell);
   if (v === null || v === undefined) {
     return undefined;
   }

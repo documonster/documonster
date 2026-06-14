@@ -1,96 +1,107 @@
 import { extractAll } from "@archive/unzip/extract";
 import { testUtils } from "@excel/__tests__/shared";
+import {
+  cellEffectiveType,
+  cellGetValue,
+  cellSetValue,
+  cellType,
+  cellToString,
+  cellGetModel,
+  cellToCsvString
+} from "@excel/cell";
 import { Enums } from "@excel/enums";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
+import { getCell } from "@excel/worksheet";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { describe, it, expect } from "vitest";
 
 describe("Checkbox Feature", () => {
   describe("Cell checkbox value", () => {
     it("should set checkbox value using object syntax", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
       // Set checkbox values
-      ws.getCell("A1").value = { checkbox: true };
-      ws.getCell("A2").value = { checkbox: false };
+      Cell.setValue(ws, "A1", { checkbox: true });
+      Cell.setValue(ws, "A2", { checkbox: false });
 
-      const cell1 = ws.getCell("A1");
-      const cell2 = ws.getCell("A2");
+      const cell1 = getCell(ws, "A1");
+      const cell2 = getCell(ws, "A2");
 
-      expect(cell1.value).toEqual({ checkbox: true });
-      expect(cell2.value).toEqual({ checkbox: false });
-      expect(cell1.type).toBe(Enums.ValueType.Checkbox);
-      expect(cell2.type).toBe(Enums.ValueType.Checkbox);
+      expect(cellGetValue(cell1)).toEqual({ checkbox: true });
+      expect(cellGetValue(cell2)).toEqual({ checkbox: false });
+      expect(cellType(cell1)).toBe(Enums.ValueType.Checkbox);
+      expect(cellType(cell2)).toBe(Enums.ValueType.Checkbox);
     });
 
     it("should convert checkbox to boolean in effectiveType", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
-      ws.getCell("A1").value = { checkbox: true };
+      Cell.setValue(ws, "A1", { checkbox: true });
 
-      const cell = ws.getCell("A1");
-      expect(cell.effectiveType).toBe(Enums.ValueType.Boolean);
+      const cell = getCell(ws, "A1");
+      expect(cellEffectiveType(cell)).toBe(Enums.ValueType.Boolean);
     });
 
     it("should convert checkbox to CSV correctly", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
-      ws.getCell("A1").value = { checkbox: true };
-      ws.getCell("A2").value = { checkbox: false };
+      Cell.setValue(ws, "A1", { checkbox: true });
+      Cell.setValue(ws, "A2", { checkbox: false });
 
-      expect(ws.getCell("A1").toCsvString()).toBe(1);
-      expect(ws.getCell("A2").toCsvString()).toBe(0);
+      expect(cellToCsvString(getCell(ws, "A1"))).toBe(1);
+      expect(cellToCsvString(getCell(ws, "A2"))).toBe(0);
     });
 
     it("should convert checkbox to string correctly", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
-      ws.getCell("A1").value = { checkbox: true };
-      ws.getCell("A2").value = { checkbox: false };
+      Cell.setValue(ws, "A1", { checkbox: true });
+      Cell.setValue(ws, "A2", { checkbox: false });
 
-      expect(ws.getCell("A1").toString()).toBe("true");
-      expect(ws.getCell("A2").toString()).toBe("false");
+      expect(cellToString(getCell(ws, "A1"))).toBe("true");
+      expect(cellToString(getCell(ws, "A2"))).toBe("false");
     });
   });
 
   describe("Checkbox serialization", () => {
     it("should write and read checkbox values correctly", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
       // Set various checkbox values
-      ws.getCell("A1").value = { checkbox: true };
-      ws.getCell("A2").value = { checkbox: false };
-      ws.getCell("B1").value = { checkbox: true };
-      ws.getCell("B2").value = { checkbox: false };
+      Cell.setValue(ws, "A1", { checkbox: true });
+      Cell.setValue(ws, "A2", { checkbox: false });
+      Cell.setValue(ws, "B1", { checkbox: true });
+      Cell.setValue(ws, "B2", { checkbox: false });
 
       // Write to buffer
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       // Read back
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
-      const ws2 = wb2.getWorksheet("Checkboxes");
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
+      const ws2 = Workbook.getWorksheet(wb2, "Checkboxes")!;
 
       // Verify values - checkboxes should be read back as booleans
       // because the checkbox metadata is in the style
-      expect(ws2?.getCell("A1").value).toBe(true);
-      expect(ws2?.getCell("A2").value).toBe(false);
-      expect(ws2?.getCell("B1").value).toBe(true);
-      expect(ws2?.getCell("B2").value).toBe(false);
+      expect(Cell.getValue(ws2, "A1")).toBe(true);
+      expect(Cell.getValue(ws2, "A2")).toBe(false);
+      expect(Cell.getValue(ws2, "B1")).toBe(true);
+      expect(Cell.getValue(ws2, "B2")).toBe(false);
     });
 
     it("should include featurePropertyBag in workbook when checkboxes are used", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
-      ws.getCell("A1").value = { checkbox: true };
+      Cell.setValue(ws, "A1", { checkbox: true });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       // Check that the zip contains featurePropertyBag
       const entries = await extractAll(buffer);
@@ -135,14 +146,14 @@ describe("Checkbox Feature", () => {
     });
 
     it("should not include featurePropertyBag when no checkboxes are used", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("NoCheckboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "NoCheckboxes");
 
-      ws.getCell("A1").value = "Normal text";
-      ws.getCell("A2").value = 123;
-      ws.getCell("A3").value = true; // regular boolean
+      Cell.setValue(ws, "A1", "Normal text");
+      Cell.setValue(ws, "A2", 123);
+      Cell.setValue(ws, "A3", true); // regular boolean
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       const entries = await extractAll(buffer);
 
@@ -155,13 +166,13 @@ describe("Checkbox Feature", () => {
     });
 
     it("should apply checkbox style to checkbox cells", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Checkboxes");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Checkboxes");
 
-      ws.getCell("A1").value = { checkbox: true };
-      ws.getCell("A2").value = { checkbox: false };
+      Cell.setValue(ws, "A1", { checkbox: true });
+      Cell.setValue(ws, "A2", { checkbox: false });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       const entries = await extractAll(buffer);
 
@@ -189,17 +200,17 @@ describe("Checkbox Feature", () => {
     });
 
     it("should merge checkbox with user-provided style", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("StyledCheckbox");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "StyledCheckbox");
 
-      const cell = ws.getCell("A1");
-      cell.value = { checkbox: true };
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, { checkbox: true });
       cell.style.font = { bold: true };
 
       // Sanity check: style is present on the cell model before serialization
-      expect(cell.model.style?.font?.bold).toBe(true);
+      expect(cellGetModel(cell).style?.font?.bold).toBe(true);
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer);
 
       const styles = entries.get("xl/styles.xml");
@@ -239,18 +250,18 @@ describe("Checkbox Feature", () => {
     });
 
     it("should merge checkbox with fill/border/numFmt/alignment", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("StyledCheckbox2");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "StyledCheckbox2");
 
-      const cell = ws.getCell("A1");
-      cell.value = { checkbox: true };
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, { checkbox: true });
       cell.style.font = testUtils.styles.fonts.broadwayRedOutline20;
       cell.style.border = testUtils.styles.borders.doubleRed;
       cell.style.fill = testUtils.styles.fills.blueWhiteHGrad;
       cell.style.alignment = testUtils.styles.namedAlignments.middleCentre;
       cell.style.numFmt = testUtils.styles.numFmts.numFmt1;
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -288,22 +299,22 @@ describe("Checkbox Feature", () => {
     });
 
     it("should not leak checkbox extension to non-checkbox cells", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("LeakCheck");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "LeakCheck");
 
       const sharedStyle: any = {
         font: testUtils.styles.fonts.broadwayRedOutline20
       };
 
-      const a1 = ws.getCell("A1");
-      a1.value = true;
+      const a1 = getCell(ws, "A1");
+      cellSetValue(a1, true);
       a1.style = sharedStyle;
 
-      const a2 = ws.getCell("A2");
-      a2.value = { checkbox: true };
+      const a2 = getCell(ws, "A2");
+      cellSetValue(a2, { checkbox: true });
       a2.style = sharedStyle;
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -340,18 +351,18 @@ describe("Checkbox Feature", () => {
     });
 
     it("should support multiple checkbox styles in one sheet", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("MultiCheckboxStyles");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "MultiCheckboxStyles");
 
-      const a1 = ws.getCell("A1");
-      a1.value = { checkbox: true };
+      const a1 = getCell(ws, "A1");
+      cellSetValue(a1, { checkbox: true });
       a1.style.font = { bold: true };
 
-      const a2 = ws.getCell("A2");
-      a2.value = { checkbox: false };
+      const a2 = getCell(ws, "A2");
+      cellSetValue(a2, { checkbox: false });
       a2.style.fill = testUtils.styles.fills.blueWhiteHGrad;
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -407,8 +418,8 @@ describe("Checkbox Feature", () => {
     });
 
     it("should dedupe identical checkbox styles", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("DedupeCheckboxStyles");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "DedupeCheckboxStyles");
 
       // Use the exact same style values for both checkbox cells
       const style: any = {
@@ -416,15 +427,15 @@ describe("Checkbox Feature", () => {
         numFmt: testUtils.styles.numFmts.numFmt1
       };
 
-      const a1 = ws.getCell("A1");
-      a1.value = { checkbox: true };
+      const a1 = getCell(ws, "A1");
+      cellSetValue(a1, { checkbox: true });
       a1.style = style;
 
-      const a2 = ws.getCell("A2");
-      a2.value = { checkbox: false };
+      const a2 = getCell(ws, "A2");
+      cellSetValue(a2, { checkbox: false });
       a2.style = style;
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -470,45 +481,45 @@ describe("Checkbox Feature", () => {
 
   describe("Checkbox with mixed content", () => {
     it("should handle worksheet with both checkboxes and regular values", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Mixed");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Mixed");
 
-      ws.getCell("A1").value = "Header";
-      ws.getCell("A2").value = { checkbox: true };
-      ws.getCell("A3").value = { checkbox: false };
-      ws.getCell("B1").value = 123;
-      ws.getCell("B2").value = true; // regular boolean
-      ws.getCell("C1").value = { checkbox: true };
+      Cell.setValue(ws, "A1", "Header");
+      Cell.setValue(ws, "A2", { checkbox: true });
+      Cell.setValue(ws, "A3", { checkbox: false });
+      Cell.setValue(ws, "B1", 123);
+      Cell.setValue(ws, "B2", true); // regular boolean
+      Cell.setValue(ws, "C1", { checkbox: true });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       const entries = await extractAll(buffer);
 
       expect(entries.has("xl/featurePropertyBag/featurePropertyBag.xml")).toBe(true);
 
       // Read back and verify
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
-      const ws2 = wb2.getWorksheet("Mixed");
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
+      const ws2 = Workbook.getWorksheet(wb2, "Mixed")!;
 
-      expect(ws2?.getCell("A1").value).toBe("Header");
-      expect(ws2?.getCell("A2").value).toBe(true);
-      expect(ws2?.getCell("A3").value).toBe(false);
-      expect(ws2?.getCell("B1").value).toBe(123);
-      expect(ws2?.getCell("B2").value).toBe(true);
-      expect(ws2?.getCell("C1").value).toBe(true);
+      expect(Cell.getValue(ws2, "A1")).toBe("Header");
+      expect(Cell.getValue(ws2, "A2")).toBe(true);
+      expect(Cell.getValue(ws2, "A3")).toBe(false);
+      expect(Cell.getValue(ws2, "B1")).toBe(123);
+      expect(Cell.getValue(ws2, "B2")).toBe(true);
+      expect(Cell.getValue(ws2, "C1")).toBe(true);
     });
 
     it("should handle multiple worksheets with checkboxes", async () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
 
-      const ws1 = wb.addWorksheet("Sheet1");
-      ws1.getCell("A1").value = { checkbox: true };
+      const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws1, "A1", { checkbox: true });
 
-      const ws2 = wb.addWorksheet("Sheet2");
-      ws2.getCell("B2").value = { checkbox: false };
+      const ws2 = Workbook.addWorksheet(wb, "Sheet2");
+      Cell.setValue(ws2, "B2", { checkbox: false });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       const entries = await extractAll(buffer);
 
@@ -522,10 +533,10 @@ describe("Checkbox Feature", () => {
 
   describe("Edge cases", () => {
     it("should handle empty workbook without checkboxes", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Empty");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Empty");
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
 
       const entries = await extractAll(buffer);
 
@@ -533,14 +544,14 @@ describe("Checkbox Feature", () => {
     });
 
     it("should distinguish between regular boolean and checkbox", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Test");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Test");
 
-      ws.getCell("A1").value = true; // regular boolean
-      ws.getCell("A2").value = { checkbox: true }; // checkbox
+      Cell.setValue(ws, "A1", true); // regular boolean
+      Cell.setValue(ws, "A2", { checkbox: true }); // checkbox
 
-      expect(ws.getCell("A1").type).toBe(Enums.ValueType.Boolean);
-      expect(ws.getCell("A2").type).toBe(Enums.ValueType.Checkbox);
+      expect(Cell.getType(ws, "A1")).toBe(Enums.ValueType.Boolean);
+      expect(Cell.getType(ws, "A2")).toBe(Enums.ValueType.Checkbox);
     });
   });
 });

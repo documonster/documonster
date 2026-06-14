@@ -34,6 +34,7 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
+import { _registerChart, _registerChartEx } from "@excel/worksheet";
 import { SinkAdapter, type AnySink } from "@stream/internal/sink-adapter";
 import { xmlEncodeAttr } from "@xml/encode";
 import { XmlWriter } from "@xml/writer";

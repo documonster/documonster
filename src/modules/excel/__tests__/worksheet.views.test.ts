@@ -1,7 +1,9 @@
+import { columnCollapsed, columnOutlineLevel, columnSetOutlineLevel } from "@excel/column";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { rowCollapsed, rowSetOutlineLevel } from "@excel/row";
 import type { WorksheetViewFrozen, WorksheetViewSplit } from "@excel/types";
+import { getColumn } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../index";
 
 describe("Worksheet", () => {
   describe("Views", () => {
@@ -10,32 +12,32 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("adjusts collapsed property of columns based on outlineLevel", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "sheet1");
 
-      const col1 = ws.getColumn(1);
-      const col2 = ws.getColumn(2);
-      const col3 = ws.getColumn(3);
-      expect(col1.collapsed).toBe(false);
-      expect(col2.collapsed).toBe(false);
-      expect(col3.collapsed).toBe(false);
+      const col1 = getColumn(ws, 1);
+      const col2 = getColumn(ws, 2);
+      const col3 = getColumn(ws, 3);
+      expect(columnCollapsed(col1)).toBe(false);
+      expect(columnCollapsed(col2)).toBe(false);
+      expect(columnCollapsed(col3)).toBe(false);
 
-      col1.outlineLevel = 0;
-      col2.outlineLevel = 1;
-      col3.outlineLevel = 2;
-      expect(col1.collapsed).toBe(false);
-      expect(col2.collapsed).toBe(true);
-      expect(col3.collapsed).toBe(true);
+      columnSetOutlineLevel(col1, 0);
+      columnSetOutlineLevel(col2, 1);
+      columnSetOutlineLevel(col3, 2);
+      expect(columnCollapsed(col1)).toBe(false);
+      expect(columnCollapsed(col2)).toBe(true);
+      expect(columnCollapsed(col3)).toBe(true);
 
       ws.properties.outlineLevelCol = 2;
-      expect(col1.collapsed).toBe(false);
-      expect(col2.collapsed).toBe(false);
-      expect(col3.collapsed).toBe(true);
+      expect(columnCollapsed(col1)).toBe(false);
+      expect(columnCollapsed(col2)).toBe(false);
+      expect(columnCollapsed(col3)).toBe(true);
 
       ws.properties.outlineLevelCol = 3;
-      expect(col1.collapsed).toBe(false);
-      expect(col2.collapsed).toBe(false);
-      expect(col3.collapsed).toBe(false);
+      expect(columnCollapsed(col1)).toBe(false);
+      expect(columnCollapsed(col2)).toBe(false);
+      expect(columnCollapsed(col3)).toBe(false);
     });
 
     // =========================================================================
@@ -43,47 +45,47 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("adjusts collapsed property of rows based on outlineLevel", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "sheet1");
 
-      const row1 = ws.getRow(1);
-      const row2 = ws.getRow(2);
-      const row3 = ws.getRow(3);
-      expect(row1.collapsed).toBe(false);
-      expect(row2.collapsed).toBe(false);
-      expect(row3.collapsed).toBe(false);
+      const row1 = Worksheet.getRow(ws, 1);
+      const row2 = Worksheet.getRow(ws, 2);
+      const row3 = Worksheet.getRow(ws, 3);
+      expect(rowCollapsed(row1)).toBe(false);
+      expect(rowCollapsed(row2)).toBe(false);
+      expect(rowCollapsed(row3)).toBe(false);
 
-      row1.outlineLevel = 0;
-      row2.outlineLevel = 1;
-      row3.outlineLevel = 2;
-      expect(row1.collapsed).toBe(false);
-      expect(row2.collapsed).toBe(true);
-      expect(row3.collapsed).toBe(true);
+      rowSetOutlineLevel(row1, 0);
+      rowSetOutlineLevel(row2, 1);
+      rowSetOutlineLevel(row3, 2);
+      expect(rowCollapsed(row1)).toBe(false);
+      expect(rowCollapsed(row2)).toBe(true);
+      expect(rowCollapsed(row3)).toBe(true);
 
       ws.properties.outlineLevelRow = 2;
-      expect(row1.collapsed).toBe(false);
-      expect(row2.collapsed).toBe(false);
-      expect(row3.collapsed).toBe(true);
+      expect(rowCollapsed(row1)).toBe(false);
+      expect(rowCollapsed(row2)).toBe(false);
+      expect(rowCollapsed(row3)).toBe(true);
 
       ws.properties.outlineLevelRow = 3;
-      expect(row1.collapsed).toBe(false);
-      expect(row2.collapsed).toBe(false);
-      expect(row3.collapsed).toBe(false);
+      expect(rowCollapsed(row1)).toBe(false);
+      expect(rowCollapsed(row2)).toBe(false);
+      expect(rowCollapsed(row3)).toBe(false);
     });
 
     it("sets outline levels via column headers", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "sheet1");
 
-      ws.columns = [
+      Worksheet.setColumns(ws, [
         { key: "id", width: 10, outlineLevel: 1 },
         { key: "name", width: 32, outlineLevel: 2 },
         { key: "dob", width: 10, outlineLevel: 3 }
-      ];
+      ]);
 
-      expect(ws.getColumn(1).outlineLevel).toBe(1);
-      expect(ws.getColumn(2).outlineLevel).toBe(2);
-      expect(ws.getColumn(3).outlineLevel).toBe(3);
+      expect(columnOutlineLevel(getColumn(ws, 1))).toBe(1);
+      expect(columnOutlineLevel(getColumn(ws, 2))).toBe(2);
+      expect(columnOutlineLevel(getColumn(ws, 3))).toBe(3);
     });
 
     // =========================================================================
@@ -91,8 +93,8 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("sets frozen view (split at a specific cell)", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("frozen");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "frozen");
 
       ws.views = [{ state: "frozen", xSplit: 1, ySplit: 2 }];
 
@@ -104,16 +106,16 @@ describe("Worksheet", () => {
     });
 
     it("frozen view survives XLSX round-trip", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("frozen");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "frozen");
       ws.views = [{ state: "frozen", xSplit: 0, ySplit: 1, activeCell: "A2" }];
-      ws.getCell("A1").value = "header";
+      Cell.setValue(ws, "A1", "header");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toXlsxBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("frozen")!;
+      const ws2 = Workbook.getWorksheet(wb2, "frozen")!;
       expect(ws2.views.length).toBe(1);
       const view = ws2.views[0] as Partial<WorksheetViewFrozen>;
       expect(view.state).toBe("frozen");
@@ -125,8 +127,8 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("sets split view", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("split");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "split");
 
       ws.views = [{ state: "split", xSplit: 2000, ySplit: 3000 }];
 
@@ -141,8 +143,8 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("sets showGridLines and showRowColHeaders", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("options");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "options");
 
       ws.views = [{ showGridLines: false, showRowColHeaders: false }];
 
@@ -151,8 +153,8 @@ describe("Worksheet", () => {
     });
 
     it("sets zoom factor", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("zoom");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "zoom");
 
       ws.views = [{ zoomScale: 150, zoomScaleNormal: 150 }];
 
@@ -161,8 +163,8 @@ describe("Worksheet", () => {
     });
 
     it("sets right-to-left view", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("rtl");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "rtl");
 
       ws.views = [{ rightToLeft: true }];
 
@@ -174,37 +176,37 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("default state is visible", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
 
       expect(ws.state).toBe("visible");
     });
 
     it("state can be set to hidden", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test", { state: "hidden" });
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test", { state: "hidden" });
 
       expect(ws.state).toBe("hidden");
     });
 
     it("state can be set to veryHidden", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test", { state: "veryHidden" });
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test", { state: "veryHidden" });
 
       expect(ws.state).toBe("veryHidden");
     });
 
     it("hidden state survives XLSX round-trip", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("visible");
-      wb.addWorksheet("hidden", { state: "hidden" });
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "visible");
+      Workbook.addWorksheet(wb, "hidden", { state: "hidden" });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toXlsxBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
-      expect(wb2.getWorksheet("visible")!.state).toBe("visible");
-      expect(wb2.getWorksheet("hidden")!.state).toBe("hidden");
+      expect(Workbook.getWorksheet(wb2, "visible")!.state).toBe("visible");
+      expect(Workbook.getWorksheet(wb2, "hidden")!.state).toBe("hidden");
     });
 
     // =========================================================================
@@ -212,8 +214,8 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("page setup properties can be set", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
 
       ws.pageSetup.orientation = "landscape";
       ws.pageSetup.paperSize = 9; // A4
@@ -232,8 +234,8 @@ describe("Worksheet", () => {
     });
 
     it("fitToPage is enabled when fitToWidth/fitToHeight set without explicit scale", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test", {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test", {
         pageSetup: { fitToWidth: 1, fitToHeight: 1 }
       });
 
@@ -247,8 +249,8 @@ describe("Worksheet", () => {
     // =========================================================================
 
     it("header and footer can be set", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
 
       ws.headerFooter.oddHeader = "&CPage &P of &N";
       ws.headerFooter.oddFooter = "&LConfidential&RDate: &D";

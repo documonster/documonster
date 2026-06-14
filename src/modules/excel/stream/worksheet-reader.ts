@@ -4,14 +4,16 @@
  * Works in both Node.js and Browser.
  */
 
-import { Column } from "@excel/column";
+import { cellGetValue, cellNumFmt, cellSetValue } from "@excel/cell";
+import { type ColumnData } from "@excel/column";
 import { ExcelStreamStateError } from "@excel/errors";
-import { Dimensions } from "@excel/range";
-import { Row } from "@excel/row";
+import { type RangeData, rangeCreate, rangeExpandRow } from "@excel/range";
+import { type RowData, rowCreate, rowDimensions } from "@excel/row";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
 import type { WorksheetState, CellErrorValue } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import { columnCreate, columnFromModel, rowGetCell } from "@excel/worksheet";
 import { EventEmitter } from "@utils/event-emitter";
 import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser } from "@xml/sax";
@@ -53,7 +55,7 @@ export type WorksheetEventType = RowEvent["eventType"] | HyperlinkEvent["eventTy
 /** Row event emitted during parsing */
 export interface RowEvent {
   eventType: "row";
-  value: Row;
+  value: RowData;
 }
 
 /** Hyperlink event emitted during parsing */
@@ -83,9 +85,9 @@ class WorksheetReader extends EventEmitter {
   options: InternalWorksheetOptions;
   name: string;
   state?: WorksheetState;
-  declare private _columns: Column[];
-  declare private _keys: Record<string, Column>;
-  declare private _dimensions: Dimensions;
+  declare private _columns: ColumnData[];
+  declare private _keys: Record<string, ColumnData>;
+  declare private _dimensions: RangeData;
   hyperlinks?: Record<string, WorksheetHyperlink>;
 
   constructor({ workbook, id, iterator, options }: WorksheetReaderOptions) {
@@ -102,10 +104,10 @@ class WorksheetReader extends EventEmitter {
 
     // column definitions
     this._columns = [];
-    this._keys = Object.create(null) as Record<string, Column>;
+    this._keys = Object.create(null) as Record<string, ColumnData>;
 
     // keep a record of dimensions
-    this._dimensions = new Dimensions();
+    this._dimensions = rangeCreate();
   }
 
   // destroy - not a valid operation for a streaming writer
@@ -115,7 +117,7 @@ class WorksheetReader extends EventEmitter {
   }
 
   // return the current dimensions of the reader
-  get dimensions(): Dimensions {
+  get dimensions(): RangeData {
     return this._dimensions;
   }
 
@@ -123,13 +125,13 @@ class WorksheetReader extends EventEmitter {
   // Columns
 
   // get the current columns array.
-  get columns(): Column[] {
+  get columns(): ColumnData[] {
     return this._columns;
   }
 
   // get a single column by col number. If it doesn't exist, it and any gaps before it
   // are created.
-  getColumn(c: string | number): Column {
+  getColumn(c: string | number): ColumnData {
     if (typeof c === "string") {
       // if it matches a key'd column, return that
       const col = this._keys[c];
@@ -143,17 +145,17 @@ class WorksheetReader extends EventEmitter {
     if (c > this._columns.length) {
       let n = this._columns.length + 1;
       while (n <= c) {
-        this._columns.push(new Column(this as any, n++));
+        this._columns.push(columnCreate(this as any, n++));
       }
     }
     return this._columns[c - 1];
   }
 
-  getColumnKey(key: string): Column | undefined {
+  getColumnKey(key: string): ColumnData | undefined {
     return this._keys[key];
   }
 
-  setColumnKey(key: string, value: Column): void {
+  setColumnKey(key: string, value: ColumnData): void {
     this._keys[key] = value;
   }
 
@@ -161,7 +163,7 @@ class WorksheetReader extends EventEmitter {
     delete this._keys[key];
   }
 
-  eachColumnKey(f: (column: Column, key: string) => void): void {
+  eachColumnKey(f: (column: ColumnData, key: string) => void): void {
     const keys = this._keys;
     for (const key in keys) {
       f(keys[key], key);
@@ -182,7 +184,7 @@ class WorksheetReader extends EventEmitter {
     }
   }
 
-  async *[Symbol.asyncIterator](): AsyncIterableIterator<Row> {
+  async *[Symbol.asyncIterator](): AsyncIterableIterator<RowData> {
     for await (const events of this.parse()) {
       for (let i = 0; i < events.length; i++) {
         const event = events[i]!;
@@ -233,7 +235,7 @@ class WorksheetReader extends EventEmitter {
 
     // parse state
     let cols: ParsedColumnModel[] | null = null;
-    let row: Row | null = null;
+    let row: RowData | null = null;
     let c: CellParseState | null = null;
     let current: { text: string } | null = null;
 
@@ -268,7 +270,7 @@ class WorksheetReader extends EventEmitter {
           case "row":
             if (inRows) {
               const r = parseInt(node.attributes.r, 10);
-              row = new Row(this as any, r);
+              row = rowCreate(this as any, r);
               if (node.attributes.ht) {
                 row.height = parseFloat(node.attributes.ht);
               }
@@ -362,7 +364,7 @@ class WorksheetReader extends EventEmitter {
         switch (tag.name) {
           case "cols":
             inCols = false;
-            this._columns = Column.fromModel(cols!);
+            this._columns = columnFromModel(cols!);
             break;
           case "sheetData":
             inRows = false;
@@ -370,9 +372,9 @@ class WorksheetReader extends EventEmitter {
 
           case "row":
             if (row) {
-              this._dimensions.expandRow({
+              rangeExpandRow(this._dimensions, {
                 number: row.number,
-                dimensions: row.dimensions ?? undefined
+                dimensions: rowDimensions(row) ?? undefined
               });
               (worksheetEvents ||= []).push({ eventType: "row", value: row });
             }
@@ -382,7 +384,7 @@ class WorksheetReader extends EventEmitter {
           case "c":
             if (row && c) {
               const address = colCache.decodeAddress(c.ref);
-              const cell = row.getCell(address.col);
+              const cell = rowGetCell(row, address.col);
               if (c.s !== undefined) {
                 const style = styles.getStyleModel(c.s);
                 if (style) {
@@ -414,18 +416,18 @@ class WorksheetReader extends EventEmitter {
                     cellValue.isDynamicArray = true;
                   }
                 }
-                cell.value = cellValue;
+                cellSetValue(cell, cellValue);
               } else if (c.v) {
                 switch (c.t) {
                   case "s": {
                     const index = parseInt(c.v.text, 10);
                     if (sharedStrings) {
-                      cell.value = sharedStrings[index];
+                      cellSetValue(cell, sharedStrings[index]);
                     } else {
                       // Streaming format - unresolved shared string reference
-                      (cell as { value: unknown }).value = {
+                      cellSetValue(cell, {
                         sharedString: index
-                      };
+                      } as never);
                     }
                     break;
                   }
@@ -433,27 +435,34 @@ class WorksheetReader extends EventEmitter {
                   case "inlineStr":
                     // Inline strings come from <is><t>...</t></is> which uses
                     // OOXML _xHHHH_ escaping in addition to XML entities.
-                    cell.value = c.v.text.includes("_x") ? decodeOoxmlEscape(c.v.text) : c.v.text;
+                    cellSetValue(
+                      cell,
+                      c.v.text.includes("_x") ? decodeOoxmlEscape(c.v.text) : c.v.text
+                    );
                     break;
                   case "str":
-                    cell.value = c.v.text;
+                    cellSetValue(cell, c.v.text);
                     break;
 
                   case "e":
-                    cell.value = { error: c.v.text as CellErrorValue["error"] };
+                    cellSetValue(cell, { error: c.v.text as CellErrorValue["error"] });
                     break;
 
                   case "b":
-                    cell.value = parseInt(c.v.text, 10) !== 0;
+                    cellSetValue(cell, parseInt(c.v.text, 10) !== 0);
                     break;
 
                   default: {
+                    const numFmtValue = cellNumFmt(cell);
                     const numFmtStr =
-                      typeof cell.numFmt === "string" ? cell.numFmt : cell.numFmt?.formatCode;
+                      typeof numFmtValue === "string" ? numFmtValue : numFmtValue?.formatCode;
                     if (numFmtStr && isDateFmt(numFmtStr)) {
-                      cell.value = excelToDate(parseFloat(c.v.text), properties?.model?.date1904);
+                      cellSetValue(
+                        cell,
+                        excelToDate(parseFloat(c.v.text), properties?.model?.date1904)
+                      );
                     } else {
-                      cell.value = parseFloat(c.v.text);
+                      cellSetValue(cell, parseFloat(c.v.text));
                     }
                     break;
                   }
@@ -463,9 +472,9 @@ class WorksheetReader extends EventEmitter {
                 const hyperlink = hyperlinks[c.ref];
                 if (hyperlink) {
                   // Streaming-specific: assign text and hyperlink for further processing
-                  (cell as { text: unknown }).text = cell.value;
-                  cell.value = undefined;
-                  (cell as { hyperlink: unknown }).hyperlink = hyperlink;
+                  (cell as unknown as { text: unknown }).text = cellGetValue(cell);
+                  cellSetValue(cell, undefined);
+                  (cell as unknown as { hyperlink: unknown }).hyperlink = hyperlink;
                 }
               }
               c = null;

@@ -1,8 +1,9 @@
+import { Cell, Workbook } from "@excel/index";
 import { buildSparklineGroup, parseSparklineGroups, renderSparklineGroups } from "@excel/sparkline";
 /**
  * Sparkline tests.
  */
-import { Workbook } from "@excel/workbook";
+import { addSparklineGroup, getSparklineGroups, removeSparklineGroup } from "@excel/worksheet";
 import { describe, expect, it } from "vitest";
 
 describe("Sparkline data model", () => {
@@ -125,15 +126,15 @@ describe("Sparkline data model", () => {
 
 describe("Worksheet.addSparklineGroup", () => {
   it("adds a sparkline group to a worksheet", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     // Populate data
     for (let r = 1; r <= 3; r++) {
       for (let c = 1; c <= 6; c++) {
-        ws.getCell(r, c).value = r * c;
+        Cell.setValue(ws, r, c, r * c);
       }
     }
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "line",
       sparklines: [
         { dataRef: "Sheet1!A1:F1", cellRef: "G1" },
@@ -144,69 +145,69 @@ describe("Worksheet.addSparklineGroup", () => {
       high: true,
       low: true
     });
-    expect(ws.getSparklineGroups()).toHaveLength(1);
-    expect(ws.getSparklineGroups()[0].sparklines).toHaveLength(3);
+    expect(getSparklineGroups(ws)).toHaveLength(1);
+    expect(getSparklineGroups(ws)[0].sparklines).toHaveLength(3);
   });
 
   it("removes a sparkline group", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    const g = ws.addSparklineGroup({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    const g = addSparklineGroup(ws, {
       type: "line",
       sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }]
     });
-    expect(ws.getSparklineGroups()).toHaveLength(1);
-    expect(ws.removeSparklineGroup(g)).toBe(true);
-    expect(ws.getSparklineGroups()).toHaveLength(0);
+    expect(getSparklineGroups(ws)).toHaveLength(1);
+    expect(removeSparklineGroup(ws, g)).toBe(true);
+    expect(getSparklineGroups(ws)).toHaveLength(0);
   });
 
   it("removes by index", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addSparklineGroup({ type: "line", sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }] });
-    ws.addSparklineGroup({ type: "column", sparklines: [{ dataRef: "A2:F2", cellRef: "G2" }] });
-    expect(ws.removeSparklineGroup(0)).toBe(true);
-    expect(ws.getSparklineGroups()).toHaveLength(1);
-    expect(ws.getSparklineGroups()[0].type).toBe("column");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addSparklineGroup(ws, { type: "line", sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }] });
+    addSparklineGroup(ws, { type: "column", sparklines: [{ dataRef: "A2:F2", cellRef: "G2" }] });
+    expect(removeSparklineGroup(ws, 0)).toBe(true);
+    expect(getSparklineGroups(ws)).toHaveLength(1);
+    expect(getSparklineGroups(ws)[0].type).toBe("column");
   });
 
   it("returns false for out-of-range", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addSparklineGroup({ type: "line", sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }] });
-    expect(ws.removeSparklineGroup(99)).toBe(false);
-    expect(ws.removeSparklineGroup(-1)).toBe(false);
-    expect(ws.getSparklineGroups()).toHaveLength(1);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addSparklineGroup(ws, { type: "line", sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }] });
+    expect(removeSparklineGroup(ws, 99)).toBe(false);
+    expect(removeSparklineGroup(ws, -1)).toBe(false);
+    expect(getSparklineGroups(ws)).toHaveLength(1);
   });
 
   it("supports multiple sparkline groups on one worksheet", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addSparklineGroup({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addSparklineGroup(ws, {
       type: "line",
       sparklines: [{ dataRef: "A1:F1", cellRef: "G1" }]
     });
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "column",
       sparklines: [{ dataRef: "A2:F2", cellRef: "G2" }]
     });
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "stacked",
       sparklines: [{ dataRef: "A3:F3", cellRef: "G3" }]
     });
-    expect(ws.getSparklineGroups()).toHaveLength(3);
-    expect(ws.getSparklineGroups()[0].type).toBe("line");
-    expect(ws.getSparklineGroups()[1].type).toBe("column");
-    expect(ws.getSparklineGroups()[2].type).toBe("stacked");
+    expect(getSparklineGroups(ws)).toHaveLength(3);
+    expect(getSparklineGroups(ws)[0].type).toBe("line");
+    expect(getSparklineGroups(ws)[1].type).toBe("column");
+    expect(getSparklineGroups(ws)[2].type).toBe("stacked");
   });
 
   it("persists sparklines through workbook write/read", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      ws.getCell(1, c).value = c * 10;
+      Cell.setValue(ws, 1, c, c * 10);
     }
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "line",
       sparklines: [{ dataRef: "Sheet1!A1:F1", cellRef: "G1" }],
       markers: true,
@@ -214,20 +215,20 @@ describe("Worksheet.addSparklineGroup", () => {
       lineColor: "#FF0000"
     });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     // The XML is compressed, so scan isn't direct. Just verify the write didn't throw
     // and the buffer is non-empty.
     expect(buf.byteLength).toBeGreaterThan(0);
   });
 
   it("TC3: sparkline groups survive write/read round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      ws.getCell(1, c).value = c * 10;
-      ws.getCell(2, c).value = c * 5;
+      Cell.setValue(ws, 1, c, c * 10);
+      Cell.setValue(ws, 2, c, c * 5);
     }
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "column",
       sparklines: [
         { dataRef: "Sheet1!A1:F1", cellRef: "G1" },
@@ -238,12 +239,12 @@ describe("Worksheet.addSparklineGroup", () => {
       low: true,
       lineColor: "#FF6600"
     });
-    expect(ws.getSparklineGroups()).toHaveLength(1);
+    expect(getSparklineGroups(ws)).toHaveLength(1);
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const _ws2 = wb2.getWorksheet("Sheet1")!;
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const _ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     // Sparkline groups are stored in worksheet extLst — they should round-trip
     // if the ext-lst-xform emitted them and the parser picks them up.
     // Note: full round-trip parsing of sparklines requires the parser to handle
@@ -404,33 +405,33 @@ describe("Sparkline edge cases", () => {
   });
 
   it("multiple sparkline groups survive write/read round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let c = 1; c <= 6; c++) {
-      ws.getCell(1, c).value = c * 10;
-      ws.getCell(2, c).value = c * 5;
-      ws.getCell(3, c).value = c * -2;
+      Cell.setValue(ws, 1, c, c * 10);
+      Cell.setValue(ws, 2, c, c * 5);
+      Cell.setValue(ws, 3, c, c * -2);
     }
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "line",
       sparklines: [{ dataRef: "Sheet1!A1:F1", cellRef: "G1" }],
       markers: true,
       lineColor: "#FF0000"
     });
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "column",
       sparklines: [{ dataRef: "Sheet1!A2:F2", cellRef: "G2" }],
       high: true,
       low: true
     });
-    ws.addSparklineGroup({
+    addSparklineGroup(ws, {
       type: "stacked",
       sparklines: [{ dataRef: "Sheet1!A3:F3", cellRef: "G3" }],
       negative: true
     });
-    expect(ws.getSparklineGroups()).toHaveLength(3);
+    expect(getSparklineGroups(ws)).toHaveLength(3);
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     expect(buf.byteLength).toBeGreaterThan(0);
     // Write pipeline should not throw for multiple sparkline groups
   });

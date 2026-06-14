@@ -4,6 +4,8 @@
  * Uses Node.js-specific APIs to verify TRUE streaming behavior.
  */
 
+import { rowValues } from "@excel/row";
+import { rowCommit } from "@excel/worksheet";
 import { PassThrough, Readable } from "@stream";
 import { createTrueStreamingTests } from "@stream/__tests__/streaming/true-streaming-tests";
 import { beforeAll } from "vitest";
@@ -113,7 +115,10 @@ function getNodeContext() {
         addWorksheet: (name: string) => {
           const worksheet = workbook.addWorksheet(name);
           return {
-            addRow: (data: (string | number)[]) => worksheet.addRow(data),
+            addRow: (data: (string | number)[]) => {
+              const row = worksheet.addRow(data);
+              return { commit: () => rowCommit(row) };
+            },
             commit: () => worksheet.commit()
           };
         },
@@ -133,7 +138,7 @@ function getNodeContext() {
 
       for await (const worksheet of reader) {
         for await (const row of worksheet) {
-          onRow(worksheet.name, row.number, row.values);
+          onRow(worksheet.name, row.number, rowValues(row));
         }
       }
     }

@@ -1,3 +1,5 @@
+import { Workbook } from "@excel/index"; import { cellGetValue } from "@excel/cell"; import {
+Workbook } from "@excel/index";
 <!doctype html>
 <html lang="en">
   <head>
@@ -195,7 +197,7 @@
         try {
           log("Creating workbook...");
           const { Workbook } = ExcelTS;
-          const wb = new Workbook();
+          const wb = Workbook.create();
           wb.creator = "ExcelTS Browser Test";
           wb.created = new Date();
 
@@ -300,7 +302,7 @@
 
           const arrayBuffer = await file.arrayBuffer();
           const { Workbook } = ExcelTS;
-          const wb = new Workbook();
+          const wb = Workbook.create();
           await wb.xlsx.load(arrayBuffer);
 
           let html = "<h4>Worksheets:</h4>";
@@ -316,7 +318,7 @@
               html += "<tr>";
               row.eachCell((cell, colNum) => {
                 const style = rowNum === 1 ? "background:#e5e7eb;font-weight:bold;" : "";
-                html += `<td style="border:1px solid #d1d5db;padding:4px 8px;${style}">${cell.value ?? ""}</td>`;
+                html += `<td style="border:1px solid #d1d5db;padding:4px 8px;${style}">${cellGetValue(cell) ?? ""}</td>`;
               });
               html += "</tr>";
             });
@@ -338,7 +340,7 @@
         try {
           log("Creating protected workbook...");
           const { Workbook } = ExcelTS;
-          const wb = new Workbook();
+          const wb = Workbook.create();
           const ws = wb.addWorksheet("Protected Sheet");
 
           ws.getCell("A1").value = "This sheet is protected!";
@@ -383,7 +385,7 @@
           const { Workbook } = ExcelTS;
 
           // Create
-          const wb1 = new Workbook();
+          const wb1 = Workbook.create();
           const ws1 = wb1.addWorksheet("Test");
           ws1.getCell("A1").value = "Hello";
           ws1.getCell("B1").value = 12345;
@@ -398,7 +400,7 @@
 
           // Read back
           log("Reading from buffer...");
-          const wb2 = new Workbook();
+          const wb2 = Workbook.create();
           await wb2.xlsx.load(buffer);
 
           const ws2 = wb2.getWorksheet("Test");

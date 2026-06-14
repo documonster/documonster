@@ -1,7 +1,11 @@
-import type { Row } from "@excel/row";
+import { cellGetValue } from "@excel/cell";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { type RowData, rowCellCount } from "@excel/row";
+import type { WorkbookData } from "@excel/workbook-core";
+import { rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, WorkbookReader } from "../../../index";
+import { WorkbookReader } from "../../../index";
 
 // =============================================================================
 // Helpers
@@ -11,10 +15,10 @@ import { Workbook, WorkbookReader } from "../../../index";
  * Create a minimal XLSX buffer from a builder callback.
  * Avoids filesystem I/O — fast + cross-platform.
  */
-async function buildXlsxBuffer(builder: (wb: Workbook) => void): Promise<Uint8Array> {
-  const wb = new Workbook();
+async function buildXlsxBuffer(builder: (wb: WorkbookData) => void): Promise<Uint8Array> {
+  const wb = Workbook.create();
   builder(wb);
-  return wb.xlsx.writeBuffer();
+  return Workbook.toXlsxBuffer(wb);
 }
 
 // =============================================================================
@@ -29,7 +33,7 @@ describe("WorkbookReader", () => {
   describe("input types", () => {
     it("reads from Uint8Array", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = "hello";
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hello");
       });
 
       const reader = new WorkbookReader(buffer, { worksheets: "emit" });
@@ -38,7 +42,7 @@ describe("WorkbookReader", () => {
         seen = true;
         expect(ws.name).toBe("Sheet1");
         for await (const row of ws) {
-          expect(row.getCell(1).value).toBe("hello");
+          expect(cellGetValue(rowGetCell(row, 1))).toBe("hello");
         }
       }
       expect(seen).toBe(true);
@@ -47,11 +51,11 @@ describe("WorkbookReader", () => {
     it.skipIf(typeof ReadableStream === "undefined")(
       "reads from ReadableStream<Uint8Array>",
       async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "hello";
-        ws.getCell("A2").value = 42;
-        const data = await wb.xlsx.writeBuffer();
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "hello");
+        Cell.setValue(ws, "A2", 42);
+        const data = await Workbook.toXlsxBuffer(wb);
 
         const webStream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -74,10 +78,10 @@ describe("WorkbookReader", () => {
           for await (const row of worksheet) {
             rowCount++;
             if (row.number === 1) {
-              expect(row.getCell(1).value).toBe("hello");
+              expect(cellGetValue(rowGetCell(row, 1))).toBe("hello");
             }
             if (row.number === 2) {
-              expect(row.getCell(1).value).toBe(42);
+              expect(cellGetValue(rowGetCell(row, 1))).toBe(42);
             }
           }
           expect(rowCount).toBeGreaterThan(0);
@@ -88,7 +92,7 @@ describe("WorkbookReader", () => {
 
     it("reads from ArrayBuffer", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = 99;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 99);
       });
 
       // Convert Uint8Array to ArrayBuffer
@@ -102,7 +106,7 @@ describe("WorkbookReader", () => {
       for await (const ws of reader) {
         for await (const row of ws) {
           if (row.number === 1) {
-            expect(row.getCell(1).value).toBe(99);
+            expect(cellGetValue(rowGetCell(row, 1))).toBe(99);
             found = true;
           }
         }
@@ -118,8 +122,8 @@ describe("WorkbookReader", () => {
   describe("[Symbol.asyncIterator]", () => {
     it("yields WorksheetReader instances for each sheet", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Alpha").getCell("A1").value = 1;
-        wb.addWorksheet("Beta").getCell("A1").value = 2;
+        Cell.setValue(Workbook.addWorksheet(wb, "Alpha"), "A1", 1);
+        Cell.setValue(Workbook.addWorksheet(wb, "Beta"), "A1", 2);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -146,7 +150,7 @@ describe("WorkbookReader", () => {
   describe("read() event API", () => {
     it("emits worksheet and end events", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = "test";
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "test");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -193,7 +197,7 @@ describe("WorkbookReader", () => {
   describe("reader options", () => {
     it("worksheets: 'ignore' skips worksheet parsing", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = "data";
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "data");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -216,9 +220,9 @@ describe("WorkbookReader", () => {
 
     it("sharedStrings: 'cache' enables shared string resolution", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "shared text";
-        ws.getCell("A2").value = "shared text"; // same string
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "shared text");
+        Cell.setValue(ws, "A2", "shared text"); // same string
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -228,21 +232,21 @@ describe("WorkbookReader", () => {
       });
 
       for await (const ws of reader) {
-        const rows: Row[] = [];
+        const rows: RowData[] = [];
         for await (const row of ws) {
-          rows.push(row as Row);
+          rows.push(row as RowData);
         }
-        expect(rows[0].getCell(1).value).toBe("shared text");
-        expect(rows[1].getCell(1).value).toBe("shared text");
+        expect(cellGetValue(rowGetCell(rows[0], 1))).toBe("shared text");
+        expect(cellGetValue(rowGetCell(rows[1], 1))).toBe("shared text");
       }
     });
 
     it("styles: 'cache' enables date parsing", async () => {
       const testDate = new Date(2024, 0, 15);
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = testDate;
-        ws.getCell("A1").numFmt = "yyyy-mm-dd";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", testDate);
+        Cell.setStyle(ws, "A1", { numFmt: "yyyy-mm-dd" });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -253,7 +257,7 @@ describe("WorkbookReader", () => {
 
       for await (const ws of reader) {
         for await (const row of ws) {
-          const val = row.getCell(1).value;
+          const val = cellGetValue(rowGetCell(row, 1));
           expect(val).toBeInstanceOf(Date);
         }
       }
@@ -267,9 +271,9 @@ describe("WorkbookReader", () => {
   describe("multiple worksheets", () => {
     it("reads all worksheets with correct names and data", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet A").getCell("A1").value = 100;
-        wb.addWorksheet("Sheet B").getCell("A1").value = 200;
-        wb.addWorksheet("Sheet C").getCell("A1").value = 300;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet A"), "A1", 100);
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet B"), "A1", 200);
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet C"), "A1", 300);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -281,7 +285,7 @@ describe("WorkbookReader", () => {
       const results: Array<{ name: string; value: unknown }> = [];
       for await (const ws of reader) {
         for await (const row of ws) {
-          results.push({ name: ws.name, value: row.getCell(1).value });
+          results.push({ name: ws.name, value: cellGetValue(rowGetCell(row, 1)) });
         }
       }
 
@@ -293,11 +297,11 @@ describe("WorkbookReader", () => {
 
     it("reads worksheets that have different column structures", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws1 = wb.addWorksheet("Numbers");
-        ws1.addRow([1, 2, 3]);
+        const ws1 = Workbook.addWorksheet(wb, "Numbers");
+        Worksheet.addRow(ws1, [1, 2, 3]);
 
-        const ws2 = wb.addWorksheet("Strings");
-        ws2.addRow(["a", "b", "c", "d", "e"]);
+        const ws2 = Workbook.addWorksheet(wb, "Strings");
+        Worksheet.addRow(ws2, ["a", "b", "c", "d", "e"]);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -309,7 +313,7 @@ describe("WorkbookReader", () => {
       const sheets: Array<{ name: string; colCount: number }> = [];
       for await (const ws of reader) {
         for await (const row of ws) {
-          const cellCount = row.cellCount;
+          const cellCount = rowCellCount(row);
           sheets.push({ name: ws.name, colCount: cellCount });
         }
       }
@@ -328,11 +332,11 @@ describe("WorkbookReader", () => {
   describe("hyperlinks", () => {
     it("getHyperlinkTarget() resolves hyperlink rId to target URL", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", {
           text: "Google",
           hyperlink: "https://www.google.com"
-        };
+        });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -371,7 +375,7 @@ describe("WorkbookReader", () => {
   describe("edge cases", () => {
     it("handles workbook with empty worksheet", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Empty");
+        Workbook.addWorksheet(wb, "Empty");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -382,9 +386,9 @@ describe("WorkbookReader", () => {
 
       for await (const ws of reader) {
         expect(ws.name).toBe("Empty");
-        const rows: Row[] = [];
+        const rows: RowData[] = [];
         for await (const row of ws) {
-          rows.push(row as Row);
+          rows.push(row as RowData);
         }
         expect(rows.length).toBe(0);
       }
@@ -394,7 +398,7 @@ describe("WorkbookReader", () => {
       const sheetCount = 20;
       const buffer = await buildXlsxBuffer(wb => {
         for (let i = 1; i <= sheetCount; i++) {
-          wb.addWorksheet(`Sheet${i}`).getCell("A1").value = i;
+          Cell.setValue(Workbook.addWorksheet(wb, `Sheet${i}`), "A1", i);
         }
       });
 
@@ -416,9 +420,9 @@ describe("WorkbookReader", () => {
 
     it("handles workbook with large shared string table", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
         for (let i = 1; i <= 500; i++) {
-          ws.getCell(`A${i}`).value = `unique-string-${i}`;
+          Cell.setValue(ws, `A${i}`, `unique-string-${i}`);
         }
       });
 
@@ -432,7 +436,7 @@ describe("WorkbookReader", () => {
       for await (const ws of reader) {
         for await (const row of ws) {
           rowCount++;
-          expect(row.getCell(1).value).toBe(`unique-string-${row.number}`);
+          expect(cellGetValue(rowGetCell(row, 1))).toBe(`unique-string-${row.number}`);
         }
       }
       expect(rowCount).toBe(500);
@@ -446,9 +450,9 @@ describe("WorkbookReader", () => {
   describe("worksheet name resolution", () => {
     it("preserves worksheet names with sharedStrings: 'cache'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Alpha").getCell("A1").value = 1;
-        wb.addWorksheet("Beta").getCell("A1").value = 2;
-        wb.addWorksheet("Gamma").getCell("A1").value = 3;
+        Cell.setValue(Workbook.addWorksheet(wb, "Alpha"), "A1", 1);
+        Cell.setValue(Workbook.addWorksheet(wb, "Beta"), "A1", 2);
+        Cell.setValue(Workbook.addWorksheet(wb, "Gamma"), "A1", 3);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -469,9 +473,9 @@ describe("WorkbookReader", () => {
 
     it("preserves worksheet names with sharedStrings: 'ignore'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("First Sheet").getCell("A1").value = 1;
-        wb.addWorksheet("Second Sheet").getCell("A1").value = 2;
-        wb.addWorksheet("Third Sheet").getCell("A1").value = 3;
+        Cell.setValue(Workbook.addWorksheet(wb, "First Sheet"), "A1", 1);
+        Cell.setValue(Workbook.addWorksheet(wb, "Second Sheet"), "A1", 2);
+        Cell.setValue(Workbook.addWorksheet(wb, "Third Sheet"), "A1", 3);
       });
 
       // This is the exact scenario from exceljs/exceljs#3025:
@@ -496,8 +500,8 @@ describe("WorkbookReader", () => {
 
     it("preserves worksheet names via event API with sharedStrings: 'ignore'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Report").getCell("A1").value = "data";
-        wb.addWorksheet("Summary").getCell("A1").value = "summary";
+        Cell.setValue(Workbook.addWorksheet(wb, "Report"), "A1", "data");
+        Cell.setValue(Workbook.addWorksheet(wb, "Summary"), "A1", "summary");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -523,8 +527,8 @@ describe("WorkbookReader", () => {
 
     it("preserves worksheet names with sharedStrings: 'emit'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Emit Sheet A").getCell("A1").value = 1;
-        wb.addWorksheet("Emit Sheet B").getCell("A1").value = 2;
+        Cell.setValue(Workbook.addWorksheet(wb, "Emit Sheet A"), "A1", 1);
+        Cell.setValue(Workbook.addWorksheet(wb, "Emit Sheet B"), "A1", 2);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -545,9 +549,9 @@ describe("WorkbookReader", () => {
 
     it("preserves worksheet state (hidden/veryHidden) with sharedStrings: 'ignore'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Visible");
-        wb.addWorksheet("Hidden", { state: "hidden" });
-        wb.addWorksheet("VeryHidden", { state: "veryHidden" });
+        Workbook.addWorksheet(wb, "Visible");
+        Workbook.addWorksheet(wb, "Hidden", { state: "hidden" });
+        Workbook.addWorksheet(wb, "VeryHidden", { state: "veryHidden" });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -578,17 +582,17 @@ describe("WorkbookReader", () => {
   describe("dynamic array formulas via streaming reader", () => {
     it("should read isDynamicArray flag from dynamic array formula cells", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
         for (let i = 1; i <= 5; i++) {
-          ws.getCell(`A${i}`).value = i;
+          Cell.setValue(ws, `A${i}`, i);
         }
-        ws.getCell("C1").value = {
+        Cell.setValue(ws, "C1", {
           formula: "_xlfn._xlws.FILTER(A1:A5,A1:A5>2)",
           shareType: "array",
           ref: "C1",
           result: 3,
           isDynamicArray: true
-        };
+        });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -599,8 +603,8 @@ describe("WorkbookReader", () => {
       let foundDynamicArray = false;
       for await (const ws of reader) {
         for await (const row of ws) {
-          const cell = row.getCell(3);
-          const val = cell.value as any;
+          const cell = rowGetCell(row, 3);
+          const val = cellGetValue(cell) as any;
           if (val && typeof val === "object" && val.formula && val.isDynamicArray) {
             foundDynamicArray = true;
             expect(val.formula).toContain("FILTER");
@@ -613,14 +617,14 @@ describe("WorkbookReader", () => {
 
     it("should not mark non-dynamic formulas as isDynamicArray", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = { formula: "SUM(B1:B10)", result: 55 };
-        ws.getCell("A2").value = {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", { formula: "SUM(B1:B10)", result: 55 });
+        Cell.setValue(ws, "A2", {
           formula: "{A1*2}",
           shareType: "array",
           ref: "A2",
           result: 110
-        };
+        });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -631,7 +635,7 @@ describe("WorkbookReader", () => {
       for await (const ws of reader) {
         for await (const row of ws) {
           for (let col = 1; col <= 3; col++) {
-            const val = row.getCell(col).value as any;
+            const val = cellGetValue(rowGetCell(row, col)) as any;
             if (val && typeof val === "object" && val.formula) {
               expect(val.isDynamicArray).toBeUndefined();
             }
@@ -642,22 +646,22 @@ describe("WorkbookReader", () => {
 
     it("should handle mixed CSE array + dynamic array formulas in same workbook", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
         // Legacy CSE array formula
-        ws.getCell("A1").value = {
+        Cell.setValue(ws, "A1", {
           formula: "{ROW(1:3)}",
           shareType: "array",
           ref: "A1:A3",
           result: 1
-        };
+        });
         // Dynamic array formula
-        ws.getCell("C1").value = {
+        Cell.setValue(ws, "C1", {
           formula: "_xlfn._xlws.SORT(B1:B10)",
           shareType: "array",
           ref: "C1",
           result: 1,
           isDynamicArray: true
-        };
+        });
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -669,11 +673,11 @@ describe("WorkbookReader", () => {
       let dynamicFormula: any = null;
       for await (const ws of reader) {
         for await (const row of ws) {
-          const a = row.getCell(1).value as any;
+          const a = cellGetValue(rowGetCell(row, 1)) as any;
           if (a && typeof a === "object" && a.formula) {
             cseFormula = a;
           }
-          const c = row.getCell(3).value as any;
+          const c = cellGetValue(rowGetCell(row, 3)) as any;
           if (c && typeof c === "object" && c.formula) {
             dynamicFormula = c;
           }

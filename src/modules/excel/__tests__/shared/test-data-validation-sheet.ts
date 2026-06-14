@@ -1,5 +1,9 @@
+import { addSheetTo } from "@excel/__tests__/shared/add-sheet-to";
 import dataValidationsJson from "@excel/__tests__/shared/data/data-validations.json" with { type: "json" };
 import { fix, concatenateFormula } from "@excel/__tests__/shared/tools";
+import { cellDataValidation, cellSetDataValidation, cellSetValue, cellSetName } from "@excel/cell";
+import { Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
 
 const self = {
   dataValidations: fix(dataValidationsJson),
@@ -24,103 +28,104 @@ const self = {
   },
 
   addSheet(wb: any) {
-    const ws = wb.addWorksheet("data-validations");
+    const ws = addSheetTo(wb, "data-validations");
 
     // named list
-    ws.getCell("D1").value = "Hewie";
-    ws.getCell("D1").name = "Nephews";
-    ws.getCell("E1").value = "Dewie";
-    ws.getCell("E1").name = "Nephews";
-    ws.getCell("F1").value = "Louie";
-    ws.getCell("F1").name = "Nephews";
-    ws.getCell("A1").value = concatenateFormula("Named List");
-    ws.getCell("B1").dataValidation = (self.dataValidations as any).B1;
+    cellSetValue(getCell(ws, "D1"), "Hewie");
+    cellSetName(getCell(ws, "D1"), "Nephews");
+    cellSetValue(getCell(ws, "E1"), "Dewie");
+    cellSetName(getCell(ws, "E1"), "Nephews");
+    cellSetValue(getCell(ws, "F1"), "Louie");
+    cellSetName(getCell(ws, "F1"), "Nephews");
+    cellSetValue(getCell(ws, "A1"), concatenateFormula("Named List"));
+    cellSetDataValidation(getCell(ws, "B1"), (self.dataValidations as any).B1);
 
-    ws.getCell("A3").value = concatenateFormula("Literal List");
-    ws.getCell("B3").dataValidation = (self.dataValidations as any).B3;
+    cellSetValue(getCell(ws, "A3"), concatenateFormula("Literal List"));
+    cellSetDataValidation(getCell(ws, "B3"), (self.dataValidations as any).B3);
 
-    ws.getCell("D5").value = "Tom";
-    ws.getCell("E5").value = "Dick";
-    ws.getCell("F5").value = "Harry";
-    ws.getCell("A5").value = concatenateFormula("Range List");
-    ws.getCell("B5").dataValidation = (self.dataValidations as any).B5;
+    cellSetValue(getCell(ws, "D5"), "Tom");
+    cellSetValue(getCell(ws, "E5"), "Dick");
+    cellSetValue(getCell(ws, "F5"), "Harry");
+    cellSetValue(getCell(ws, "A5"), concatenateFormula("Range List"));
+    cellSetDataValidation(getCell(ws, "B5"), (self.dataValidations as any).B5);
 
     (self.dataValidations as any).operators.forEach((operator: string, cIndex: number) => {
       const col = 3 + cIndex;
-      ws.getCell(7, col).value = concatenateFormula(operator);
+      cellSetValue(getCell(ws, 7, col), concatenateFormula(operator));
     });
     (self.dataValidations as any).types.forEach((type: string, rIndex: number) => {
       const row = 8 + rIndex;
-      ws.getCell(row, 1).value = concatenateFormula(type);
+      cellSetValue(getCell(ws, row, 1), concatenateFormula(type));
       (self.dataValidations as any).operators.forEach((operator: string, cIndex: number) => {
         const col = 3 + cIndex;
-        ws.getCell(row, col).dataValidation = self.createDataValidations(type, operator);
+        cellSetDataValidation(getCell(ws, row, col), self.createDataValidations(type, operator));
       });
     });
 
-    ws.getCell("A13").value = concatenateFormula("Prompt");
-    ws.getCell("B13").dataValidation = (self.dataValidations as any).B13;
+    cellSetValue(getCell(ws, "A13"), concatenateFormula("Prompt"));
+    cellSetDataValidation(getCell(ws, "B13"), (self.dataValidations as any).B13);
 
-    ws.getCell("D13").value = concatenateFormula("Error");
-    ws.getCell("E13").dataValidation = (self.dataValidations as any).E13;
+    cellSetValue(getCell(ws, "D13"), concatenateFormula("Error"));
+    cellSetDataValidation(getCell(ws, "E13"), (self.dataValidations as any).E13);
 
-    ws.getCell("A15").value = concatenateFormula("Terse");
-    ws.getCell("B15").dataValidation = (self.dataValidations as any).B15;
+    cellSetValue(getCell(ws, "A15"), concatenateFormula("Terse"));
+    cellSetDataValidation(getCell(ws, "B15"), (self.dataValidations as any).B15);
 
-    ws.getCell("A17").value = concatenateFormula("Decimal");
-    ws.getCell("B17").dataValidation = (self.dataValidations as any).B17;
+    cellSetValue(getCell(ws, "A17"), concatenateFormula("Decimal"));
+    cellSetDataValidation(getCell(ws, "B17"), (self.dataValidations as any).B17);
 
-    ws.getCell("A19").value = concatenateFormula("Any");
-    ws.getCell("B19").dataValidation = (self.dataValidations as any).B19;
+    cellSetValue(getCell(ws, "A19"), concatenateFormula("Any"));
+    cellSetDataValidation(getCell(ws, "B19"), (self.dataValidations as any).B19);
 
-    ws.getCell("A20").value = new Date();
-    ws.getCell("A20").dataValidation = {
+    cellSetValue(getCell(ws, "A20"), new Date());
+    cellSetDataValidation(getCell(ws, "A20"), {
       type: "date",
       operator: "greaterThan",
       showErrorMessage: true,
       allowBlank: true,
       formulae: [new Date(2016, 0, 1)]
-    };
+    });
 
     // two rows of the same validation to test dataValidation optimisation
     ["A22", "A23"].forEach(address => {
-      ws.getCell(address).value = concatenateFormula("Five Numbers");
+      cellSetValue(getCell(ws, address), concatenateFormula("Five Numbers"));
     });
     ["B22", "C22", "D22", "E22", "F22", "B23", "C23", "D23", "E23", "F23"].forEach(address => {
-      ws.getCell(address).dataValidation = JSON.parse(
-        JSON.stringify((self.dataValidations as any).shared)
+      cellSetDataValidation(
+        getCell(ws, address),
+        JSON.parse(JSON.stringify((self.dataValidations as any).shared))
       );
     });
   },
 
   checkSheet(wb: any) {
-    const ws = wb.getWorksheet("data-validations");
+    const ws = Workbook.getWorksheet(wb, "data-validations")!;
     expect(ws).toBeDefined();
 
-    expect(ws.getCell("B1").dataValidation).to.deep.equal((self.dataValidations as any).B1);
-    expect(ws.getCell("B3").dataValidation).to.deep.equal((self.dataValidations as any).B3);
-    expect(ws.getCell("B5").dataValidation).to.deep.equal((self.dataValidations as any).B5);
+    expect(cellDataValidation(getCell(ws, "B1"))).to.deep.equal((self.dataValidations as any).B1);
+    expect(cellDataValidation(getCell(ws, "B3"))).to.deep.equal((self.dataValidations as any).B3);
+    expect(cellDataValidation(getCell(ws, "B5"))).to.deep.equal((self.dataValidations as any).B5);
 
     (self.dataValidations as any).types.forEach((type: string, rIndex: number) => {
       const row = 8 + rIndex;
-      ws.getCell(row, 1).value = concatenateFormula(type);
+      cellSetValue(getCell(ws, row, 1), concatenateFormula(type));
       (self.dataValidations as any).operators.forEach((operator: string, cIndex: number) => {
         const col = 3 + cIndex;
-        expect(ws.getCell(row, col).dataValidation).to.deep.equal(
+        expect(cellDataValidation(getCell(ws, row, col))).to.deep.equal(
           self.createDataValidations(type, operator)
         );
       });
     });
 
-    expect(ws.getCell("B13").dataValidation).to.deep.equal((self.dataValidations as any).B13);
-    expect(ws.getCell("E13").dataValidation).to.deep.equal((self.dataValidations as any).E13);
-    expect(ws.getCell("B15").dataValidation).to.deep.equal((self.dataValidations as any).B15);
-    expect(ws.getCell("B17").dataValidation).to.deep.equal((self.dataValidations as any).B17);
-    expect(ws.getCell("B19").dataValidation).to.deep.equal((self.dataValidations as any).B19);
+    expect(cellDataValidation(getCell(ws, "B13"))).to.deep.equal((self.dataValidations as any).B13);
+    expect(cellDataValidation(getCell(ws, "E13"))).to.deep.equal((self.dataValidations as any).E13);
+    expect(cellDataValidation(getCell(ws, "B15"))).to.deep.equal((self.dataValidations as any).B15);
+    expect(cellDataValidation(getCell(ws, "B17"))).to.deep.equal((self.dataValidations as any).B17);
+    expect(cellDataValidation(getCell(ws, "B19"))).to.deep.equal((self.dataValidations as any).B19);
 
     // two rows of the same validation to test dataValidation optimisation
     ["B22", "C22", "D22", "E22", "F22", "B23", "C23", "D23", "E23", "F23"].forEach(address => {
-      expect(ws.getCell(address).dataValidation).to.deep.equal(
+      expect(cellDataValidation(getCell(ws, address))).to.deep.equal(
         (self.dataValidations as any).shared
       );
     });

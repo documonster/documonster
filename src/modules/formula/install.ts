@@ -27,8 +27,6 @@
  */
 
 import { setDefaultSyntaxProbe, type SyntaxProbe } from "./default-syntax-probe";
-import { registerFormulaEngine } from "./host-registry";
-import { calculateFormulas } from "./integration/calculate-formulas";
 import { parse } from "./syntax/parser";
 import { tokenize } from "./syntax/tokenizer";
 
@@ -71,9 +69,6 @@ export function createFormulaSyntaxProbe(): SyntaxProbe {
  * registration.
  */
 export function installFormulaEngine(): void {
-  registerFormulaEngine(wb => {
-    calculateFormulas(wb);
-  });
   setDefaultSyntaxProbe(createFormulaSyntaxProbe());
 }
 
@@ -86,6 +81,5 @@ export function installFormulaEngine(): void {
  * overwrite the previous registration.
  */
 export function uninstallFormulaEngine(): void {
-  registerFormulaEngine(null);
   setDefaultSyntaxProbe(null);
 }

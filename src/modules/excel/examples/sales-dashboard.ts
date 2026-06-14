@@ -35,12 +35,35 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { cellSetFont, cellSetValue } from "@excel/cell";
 import { type ChartRichText, installChartSupport } from "@excel/chart/index";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
+import { tableModel } from "@excel/table";
+import {
+  addConditionalFormatting,
+  addFunnelChart,
+  addPivotChart,
+  addPivotComboChart,
+  addPivotTable,
+  addRegionMapChart,
+  addSparklineGroup,
+  addSunburstChart,
+  addTable,
+  addTreemapChart,
+  columnSetNumFmt,
+  getCell,
+  getCharts,
+  getColumn,
+  getSheetName,
+  getSparklineGroups,
+  rowSetValues
+} from "@excel/worksheet";
 import { excelToPdf } from "@pdf/excel-bridge";
 
 installChartSupport();
 
-import { Workbook } from "../../../index";
+import { addPivotChartsheet, getChartsheets, getWorksheets } from "@excel/workbook";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 mkdirSync(OUT_DIR, { recursive: true });
@@ -193,7 +216,7 @@ function generateTransactions(): Txn[] {
 }
 
 async function main(): Promise<void> {
-  const wb = new Workbook();
+  const wb = Workbook.create();
   wb.title = "Sales Dashboard";
   wb.subject = "Regional BI dashboard";
   wb.creator = "ExcelTS sales-dashboard example";
@@ -206,7 +229,7 @@ async function main(): Promise<void> {
   // Sheet 1 — Transactions (10 000-row Table)
   // =========================================================================
 
-  const txSheet = wb.addWorksheet("Transactions", {
+  const txSheet = Workbook.addWorksheet(wb, "Transactions", {
     views: [{ state: "frozen", xSplit: 0, ySplit: 1, showGridLines: true }],
     pageSetup: {
       orientation: "landscape",
@@ -221,7 +244,7 @@ async function main(): Promise<void> {
     }
   });
 
-  const txnTable = txSheet.addTable({
+  const txnTable = addTable(txSheet, {
     name: "Transactions",
     displayName: "Transactions",
     ref: "A1",
@@ -266,15 +289,15 @@ async function main(): Promise<void> {
     ])
   });
 
-  txSheet.getColumn(1).numFmt = "yyyy-mm-dd";
-  [12, 13, 14, 15].forEach(c => (txSheet.getColumn(c).numFmt = "$#,##0.00"));
-  txSheet.getColumn(16).numFmt = "0.0%";
+  columnSetNumFmt(getColumn(txSheet, 1), "yyyy-mm-dd");
+  [12, 13, 14, 15].forEach(c => columnSetNumFmt(getColumn(txSheet, c), "$#,##0.00"));
+  columnSetNumFmt(getColumn(txSheet, 16), "0.0%");
   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].forEach(c => {
-    txSheet.getColumn(c).width = c === 1 ? 12 : c === 5 || c === 6 ? 18 : 14;
+    Column.setWidth(txSheet, c, c === 1 ? 12 : c === 5 || c === 6 ? 18 : 14);
   });
 
   // Data bar on revenue
-  txSheet.addConditionalFormatting({
+  addConditionalFormatting(txSheet, {
     ref: `L2:L${txns.length + 1}`,
     rules: [
       {
@@ -286,22 +309,25 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`Transactions table: ${txnTable.model.name}`);
+  console.log(`Transactions table: ${tableModel(txnTable).name}`);
 
   // =========================================================================
   // Sheet 2 — Pivot Core (pivot tables + pivot charts)
   // =========================================================================
 
-  const pivotSheet = wb.addWorksheet("Pivot Core", {
+  const pivotSheet = Workbook.addWorksheet(wb, "Pivot Core", {
     views: [{ state: "frozen", xSplit: 0, ySplit: 3, showGridLines: false }],
     pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1 },
     properties: { tabColor: { argb: "FF2F5496" } }
   });
 
-  pivotSheet.mergeCells("A1:P1");
-  pivotSheet.getCell("A1").value =
-    "Pivot core — revenue by region / product family / channel / year";
-  pivotSheet.getCell("A1").font = { size: 14, bold: true, color: { argb: "FF2F5496" } };
+  Worksheet.merge(pivotSheet, "A1:P1");
+  Cell.setValue(
+    pivotSheet,
+    "A1",
+    "Pivot core — revenue by region / product family / channel / year"
+  );
+  Cell.setStyle(pivotSheet, "A1", { font: { size: 14, bold: true, color: { argb: "FF2F5496" } } });
 
   // Pivot 1: Region × Year revenue
   //
@@ -309,7 +335,7 @@ async function main(): Promise<void> {
   // overlap when Excel refreshes the cache. Without distinct anchors every
   // pivot defaults to A3 and Excel reports "there's already a PivotTable
   // there" on open.
-  const regionYearPivot = pivotSheet.addPivotTable({
+  const regionYearPivot = addPivotTable(pivotSheet, {
     sourceTable: txnTable,
     rows: ["Region"],
     columns: ["Year"],
@@ -319,7 +345,8 @@ async function main(): Promise<void> {
   });
 
   // Pivot chart on that pivot — bar + data labels
-  pivotSheet.addPivotChart(
+  addPivotChart(
+    pivotSheet,
     regionYearPivot,
     {
       type: "bar",
@@ -349,7 +376,7 @@ async function main(): Promise<void> {
 
   // Pivot 2: Product family × Channel — anchored far enough below Pivot 1
   // that its expanded size (~20 rows × 6 cols) does not collide.
-  const prodChannelPivot = pivotSheet.addPivotTable({
+  const prodChannelPivot = addPivotTable(pivotSheet, {
     sourceTable: txnTable,
     rows: ["ProductFamily", "ProductLine"],
     columns: ["Channel"],
@@ -358,7 +385,8 @@ async function main(): Promise<void> {
     ref: "A20"
   });
 
-  pivotSheet.addPivotChart(
+  addPivotChart(
+    pivotSheet,
     prodChannelPivot,
     {
       type: "pie",
@@ -385,7 +413,7 @@ async function main(): Promise<void> {
   // Pivot 3: Segment × Region with page filter on Year. Anchored below Pivot 2;
   // the `Year` page filter lives at row 45, a blank separator follows, and
   // the pivot body begins at row 47.
-  const segmentRegionPivot = pivotSheet.addPivotTable({
+  const segmentRegionPivot = addPivotTable(pivotSheet, {
     sourceTable: txnTable,
     rows: ["Segment"],
     columns: ["Region"],
@@ -395,7 +423,8 @@ async function main(): Promise<void> {
     ref: "A45"
   });
 
-  pivotSheet.addPivotChart(
+  addPivotChart(
+    pivotSheet,
     segmentRegionPivot,
     {
       type: "bar",
@@ -427,7 +456,8 @@ async function main(): Promise<void> {
   );
 
   // Combo pivot chart — revenue bars + YoY growth line (secondary axis)
-  pivotSheet.addPivotComboChart(
+  addPivotComboChart(
+    pivotSheet,
     regionYearPivot,
     {
       title: "Revenue (bars) + growth (line, secondary)",
@@ -467,27 +497,28 @@ async function main(): Promise<void> {
   // Sheet 3 — Funnel + Treemap + Sunburst
   // =========================================================================
 
-  const funnelSheet = wb.addWorksheet("Pipeline", {
+  const funnelSheet = Workbook.addWorksheet(wb, "Pipeline", {
     views: [{ state: "frozen", xSplit: 0, ySplit: 2, showGridLines: false }],
     pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
     properties: { tabColor: { argb: "FFED7D31" } }
   });
 
-  funnelSheet.mergeCells("A1:L1");
-  funnelSheet.getCell("A1").value = "Sales pipeline — funnel, product hierarchy, conversion";
-  funnelSheet.getCell("A1").font = { size: 14, bold: true, color: { argb: "FFED7D31" } };
+  Worksheet.merge(funnelSheet, "A1:L1");
+  Cell.setValue(funnelSheet, "A1", "Sales pipeline — funnel, product hierarchy, conversion");
+  Cell.setStyle(funnelSheet, "A1", { font: { size: 14, bold: true, color: { argb: "FFED7D31" } } });
 
   // Synthetic funnel — realistic waterfall drop-offs
   const funnelValues = [10000, 5400, 2900, 1800, 1200, 900];
-  const funnelHidden = wb.addWorksheet("Pipeline-Data", { state: "hidden" });
-  funnelHidden.getRow(1).values = ["Stage", "Count"];
+  const funnelHidden = Workbook.addWorksheet(wb, "Pipeline-Data", { state: "hidden" });
+  rowSetValues(Worksheet.getRow(funnelHidden, 1), ["Stage", "Count"]);
   FUNNEL_STAGES.forEach((stage, i) => {
-    funnelHidden.addRow([stage, funnelValues[i]]);
+    Worksheet.addRow(funnelHidden, [stage, funnelValues[i]]);
   });
 
-  funnelSheet.getCell("A3").value = "Conversion funnel — FY25";
-  funnelSheet.getCell("A3").font = { bold: true };
-  funnelSheet.addFunnelChart(
+  Cell.setValue(funnelSheet, "A3", "Conversion funnel — FY25");
+  Cell.setStyle(funnelSheet, "A3", { font: { bold: true } });
+  addFunnelChart(
+    funnelSheet,
     {
       title: "FY25 sales conversion funnel",
       categories: `'Pipeline-Data'!$A$2:$A$${1 + FUNNEL_STAGES.length}`,
@@ -502,8 +533,8 @@ async function main(): Promise<void> {
   );
 
   // Treemap — product line nested under family
-  const treemapHidden = wb.addWorksheet("Treemap-Data", { state: "hidden" });
-  treemapHidden.getRow(1).values = ["Family", "Line", "Revenue"];
+  const treemapHidden = Workbook.addWorksheet(wb, "Treemap-Data", { state: "hidden" });
+  rowSetValues(Worksheet.getRow(treemapHidden, 1), ["Family", "Line", "Revenue"]);
   const treemapAgg = new Map<string, number>();
   for (const t of txns) {
     const k = `${t.ProductFamily}|${t.ProductLine}`;
@@ -513,11 +544,12 @@ async function main(): Promise<void> {
     const [family, line] = k.split("|");
     return [family, line, Math.round(v * 100) / 100] as const;
   });
-  treemapEntries.forEach(row => treemapHidden.addRow([row[0], row[1], row[2]]));
+  treemapEntries.forEach(row => Worksheet.addRow(treemapHidden, [row[0], row[1], row[2]]));
 
-  funnelSheet.getCell("A35").value = "Product hierarchy (treemap)";
-  funnelSheet.getCell("A35").font = { bold: true };
-  funnelSheet.addTreemapChart(
+  Cell.setValue(funnelSheet, "A35", "Product hierarchy (treemap)");
+  Cell.setStyle(funnelSheet, "A35", { font: { bold: true } });
+  addTreemapChart(
+    funnelSheet,
     {
       title: "Revenue by product family → line",
       categories: `'Treemap-Data'!$B$2:$B$${1 + treemapEntries.length}`,
@@ -534,8 +566,8 @@ async function main(): Promise<void> {
   );
 
   // Sunburst — region → country → revenue
-  const sunburstHidden = wb.addWorksheet("Sunburst-Data", { state: "hidden" });
-  sunburstHidden.getRow(1).values = ["Region", "Country", "Revenue"];
+  const sunburstHidden = Workbook.addWorksheet(wb, "Sunburst-Data", { state: "hidden" });
+  rowSetValues(Worksheet.getRow(sunburstHidden, 1), ["Region", "Country", "Revenue"]);
   const sunburstAgg = new Map<string, number>();
   for (const t of txns) {
     const k = `${t.Region}|${t.Country}`;
@@ -545,11 +577,12 @@ async function main(): Promise<void> {
     const [region, country] = k.split("|");
     return [region, country, Math.round(v * 100) / 100] as const;
   });
-  sunburstEntries.forEach(row => sunburstHidden.addRow([row[0], row[1], row[2]]));
+  sunburstEntries.forEach(row => Worksheet.addRow(sunburstHidden, [row[0], row[1], row[2]]));
 
-  funnelSheet.getCell("A67").value = "Region → country sunburst";
-  funnelSheet.getCell("A67").font = { bold: true };
-  funnelSheet.addSunburstChart(
+  Cell.setValue(funnelSheet, "A67", "Region → country sunburst");
+  Cell.setStyle(funnelSheet, "A67", { font: { bold: true } });
+  addSunburstChart(
+    funnelSheet,
     {
       title: "Revenue by region → country",
       categories: `'Sunburst-Data'!$B$2:$B$${1 + sunburstEntries.length}`,
@@ -565,18 +598,21 @@ async function main(): Promise<void> {
   );
 
   // Region map — revenue per country
-  const mapHidden = wb.addWorksheet("Map-Data", { state: "hidden" });
-  mapHidden.getRow(1).values = ["Country", "Revenue"];
+  const mapHidden = Workbook.addWorksheet(wb, "Map-Data", { state: "hidden" });
+  rowSetValues(Worksheet.getRow(mapHidden, 1), ["Country", "Revenue"]);
   const byCountry = new Map<string, number>();
   for (const t of txns) {
     byCountry.set(t.Country, (byCountry.get(t.Country) ?? 0) + t.Revenue);
   }
   const mapEntries = Array.from(byCountry.entries());
-  mapEntries.forEach(([country, rev]) => mapHidden.addRow([country, Math.round(rev * 100) / 100]));
+  mapEntries.forEach(([country, rev]) =>
+    Worksheet.addRow(mapHidden, [country, Math.round(rev * 100) / 100])
+  );
 
-  funnelSheet.getCell("A99").value = "Revenue by country (region map)";
-  funnelSheet.getCell("A99").font = { bold: true };
-  funnelSheet.addRegionMapChart(
+  Cell.setValue(funnelSheet, "A99", "Revenue by country (region map)");
+  Cell.setStyle(funnelSheet, "A99", { font: { bold: true } });
+  addRegionMapChart(
+    funnelSheet,
     {
       title: "Revenue by country",
       categories: `'Map-Data'!$A$2:$A$${1 + mapEntries.length}`,
@@ -595,32 +631,39 @@ async function main(): Promise<void> {
   // Sheet 4 — Cohort retention matrix
   // =========================================================================
 
-  const cohort = wb.addWorksheet("Cohort Retention", {
+  const cohort = Workbook.addWorksheet(wb, "Cohort Retention", {
     views: [{ state: "frozen", xSplit: 1, ySplit: 2, showGridLines: false }],
     pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
     properties: { tabColor: { argb: "FF70AD47" } }
   });
-  cohort.getColumn(1).width = 18;
+  Column.setWidth(cohort, 1, 18);
   for (let c = 2; c <= 13; c++) {
-    cohort.getColumn(c).width = 8;
+    Column.setWidth(cohort, c, 8);
   }
 
-  cohort.mergeCells("A1:M1");
-  cohort.getCell("A1").value = "Customer cohort retention (%) — synthetic";
-  cohort.getCell("A1").font = { size: 14, bold: true, color: { argb: "FF70AD47" } };
+  Worksheet.merge(cohort, "A1:M1");
+  Cell.setValue(cohort, "A1", "Customer cohort retention (%) — synthetic");
+  Cell.setStyle(cohort, "A1", { font: { size: 14, bold: true, color: { argb: "FF70AD47" } } });
 
-  cohort.getRow(2).values = ["Cohort", ...Array.from({ length: 12 }, (_, i) => `M+${i}`)];
-  cohort.getRow(2).font = { bold: true };
-  cohort.getRow(2).alignment = { horizontal: "center" };
-  cohort.getRow(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2EFDA" } };
+  rowSetValues(Worksheet.getRow(cohort, 2), [
+    "Cohort",
+    ...Array.from({ length: 12 }, (_, i) => `M+${i}`)
+  ]);
+  rowSetFont(Worksheet.getRow(cohort, 2), { bold: true });
+  rowSetAlignment(Worksheet.getRow(cohort, 2), { horizontal: "center" });
+  rowSetFill(Worksheet.getRow(cohort, 2), {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFE2EFDA" }
+  });
 
   // Generate a classic retention "triangle" — each cohort decays
   // exponentially + some jitter.
   const cohorts = ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4", "2025-Q1", "2025-Q2", "2025-Q3"];
   cohorts.forEach((c, ci) => {
     const row = 3 + ci;
-    cohort.getCell(row, 1).value = c;
-    cohort.getCell(row, 1).font = { bold: true };
+    Cell.setValue(cohort, row, 1, c);
+    Cell.setStyle(cohort, row, 1, { font: { bold: true } });
     for (let m = 0; m <= 11; m++) {
       // Cells beyond what has "happened yet" stay blank.
       if (m + ci * 3 > 20) {
@@ -629,14 +672,14 @@ async function main(): Promise<void> {
       // Base retention: 100%, 85%, 72%, 65%, 58%, 54%, 51%, 48%, 46%, 45%, 44%, 43%
       const decay = [1, 0.85, 0.72, 0.65, 0.58, 0.54, 0.51, 0.48, 0.46, 0.45, 0.44, 0.43];
       const value = decay[m] * (0.95 + rng() * 0.1);
-      cohort.getCell(row, 2 + m).value = Math.round(value * 1000) / 1000;
-      cohort.getCell(row, 2 + m).numFmt = "0.0%";
-      cohort.getCell(row, 2 + m).alignment = { horizontal: "center" };
+      Cell.setValue(cohort, row, 2 + m, Math.round(value * 1000) / 1000);
+      Cell.setStyle(cohort, row, 2 + m, { numFmt: "0.0%" });
+      Cell.setStyle(cohort, row, 2 + m, { alignment: { horizontal: "center" } });
     }
   });
 
   // Classic BI heat map — color scale across the whole matrix.
-  cohort.addConditionalFormatting({
+  addConditionalFormatting(cohort, {
     ref: `B3:M${2 + cohorts.length}`,
     rules: [
       {
@@ -656,20 +699,20 @@ async function main(): Promise<void> {
   // Sheet 5 — Regional sparklines + KPIs
   // =========================================================================
 
-  const regional = wb.addWorksheet("Regional KPIs", {
+  const regional = Workbook.addWorksheet(wb, "Regional KPIs", {
     views: [{ state: "frozen", xSplit: 1, ySplit: 2, showGridLines: false }],
     pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
     properties: { tabColor: { argb: "FFFFC000" } }
   });
-  regional.getColumn(1).width = 22;
+  Column.setWidth(regional, 1, 22);
   for (let c = 2; c <= 13; c++) {
-    regional.getColumn(c).width = 10;
+    Column.setWidth(regional, c, 10);
   }
-  [14, 15, 16].forEach(c => (regional.getColumn(c).width = 22));
+  [14, 15, 16].forEach(c => Column.setWidth(regional, c, 22));
 
-  regional.mergeCells("A1:P1");
-  regional.getCell("A1").value = "Regional KPIs — revenue trajectory + sparklines";
-  regional.getCell("A1").font = { size: 14, bold: true, color: { argb: "FFFFC000" } };
+  Worksheet.merge(regional, "A1:P1");
+  Cell.setValue(regional, "A1", "Regional KPIs — revenue trajectory + sparklines");
+  Cell.setStyle(regional, "A1", { font: { size: 14, bold: true, color: { argb: "FFFFC000" } } });
 
   const monthHeaders = [
     "Jan",
@@ -685,32 +728,36 @@ async function main(): Promise<void> {
     "Nov",
     "Dec"
   ];
-  regional.getRow(2).values = [
+  rowSetValues(Worksheet.getRow(regional, 2), [
     "Region",
     ...monthHeaders,
     "Revenue trend",
     "Units trend",
     "MoM win/loss"
-  ];
-  regional.getRow(2).font = { bold: true };
-  regional.getRow(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
+  ]);
+  rowSetFont(Worksheet.getRow(regional, 2), { bold: true });
+  rowSetFill(Worksheet.getRow(regional, 2), {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFFF2CC" }
+  });
 
   // Aggregate 2025 revenue per region × month
   REGIONS.forEach((region, ri) => {
     const row = 3 + ri;
-    regional.getCell(row, 1).value = region;
-    regional.getCell(row, 1).font = { bold: true };
+    Cell.setValue(regional, row, 1, region);
+    Cell.setStyle(regional, row, 1, { font: { bold: true } });
     for (let m = 0; m < 12; m++) {
       const v = txns
         .filter(t => t.Region === region && t.Year === 2025 && t.Month === monthHeaders[m])
         .reduce((s, t) => s + t.Revenue, 0);
-      regional.getCell(row, 2 + m).value = v;
-      regional.getCell(row, 2 + m).numFmt = "$#,##0";
+      Cell.setValue(regional, row, 2 + m, v);
+      Cell.setStyle(regional, row, 2 + m, { numFmt: "$#,##0" });
     }
   });
 
   // Revenue line sparkline
-  regional.addSparklineGroup({
+  addSparklineGroup(regional, {
     type: "line",
     markers: true,
     high: true,
@@ -730,7 +777,7 @@ async function main(): Promise<void> {
   });
 
   // Units column sparkline (reuse revenue proxy)
-  regional.addSparklineGroup({
+  addSparklineGroup(regional, {
     type: "column",
     negative: true,
     lineColor: "ED7D31",
@@ -741,7 +788,7 @@ async function main(): Promise<void> {
   });
 
   // Win/loss sparkline — month-over-month sign changes
-  const deltaSheet = wb.addWorksheet("Regional-Deltas", { state: "hidden" });
+  const deltaSheet = Workbook.addWorksheet(wb, "Regional-Deltas", { state: "hidden" });
   REGIONS.forEach((region, ri) => {
     const monthly: number[] = [];
     for (let m = 0; m < 12; m++) {
@@ -753,10 +800,10 @@ async function main(): Promise<void> {
     }
     const signs = monthly.slice(1).map((v, i) => Math.sign(v - monthly[i]));
     signs.forEach((sign, i) => {
-      deltaSheet.getCell(ri + 1, i + 1).value = sign;
+      Cell.setValue(deltaSheet, ri + 1, i + 1, sign);
     });
   });
-  regional.addSparklineGroup({
+  addSparklineGroup(regional, {
     type: "stacked",
     negative: true,
     lineColor: "70AD47",
@@ -771,17 +818,19 @@ async function main(): Promise<void> {
 
   // KPI cards row — show each segment's revenue + rating
   const kpiRow = 3 + REGIONS.length + 3;
-  regional.mergeCells(kpiRow - 1, 1, kpiRow - 1, 12);
-  regional.getCell(kpiRow - 1, 1).value = "Segment KPI cards (with icon ratings)";
-  regional.getCell(kpiRow - 1, 1).font = { size: 12, bold: true, color: { argb: "FF2F5496" } };
+  Worksheet.merge(regional, kpiRow - 1, 1, kpiRow - 1, 12);
+  Cell.setValue(regional, kpiRow - 1, 1, "Segment KPI cards (with icon ratings)");
+  Cell.setStyle(regional, kpiRow - 1, 1, {
+    font: { size: 12, bold: true, color: { argb: "FF2F5496" } }
+  });
 
-  regional.getRow(kpiRow).values = ["Segment", "Revenue", "YoY vs FY24", "Rating"];
-  regional.getRow(kpiRow).font = { bold: true };
-  regional.getRow(kpiRow).fill = {
+  rowSetValues(Worksheet.getRow(regional, kpiRow), ["Segment", "Revenue", "YoY vs FY24", "Rating"]);
+  rowSetFont(Worksheet.getRow(regional, kpiRow), { bold: true });
+  rowSetFill(Worksheet.getRow(regional, kpiRow), {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFD9E1F2" }
-  };
+  });
 
   const ratingValues: number[] = [];
   SEGMENTS.forEach((segment, si) => {
@@ -793,17 +842,17 @@ async function main(): Promise<void> {
       .filter(t => t.Segment === segment && t.Year === 2024)
       .reduce((s, t) => s + t.Revenue, 0);
     const yoy = fy24 ? (fy25 - fy24) / fy24 : 0;
-    regional.getCell(row, 1).value = segment;
-    regional.getCell(row, 2).value = fy25;
-    regional.getCell(row, 2).numFmt = "$#,##0";
-    regional.getCell(row, 3).value = yoy;
-    regional.getCell(row, 3).numFmt = "+0.0%;-0.0%";
+    Cell.setValue(regional, row, 1, segment);
+    Cell.setValue(regional, row, 2, fy25);
+    Cell.setStyle(regional, row, 2, { numFmt: "$#,##0" });
+    Cell.setValue(regional, row, 3, yoy);
+    Cell.setStyle(regional, row, 3, { numFmt: "+0.0%;-0.0%" });
     // Rating = normalised YoY
-    regional.getCell(row, 4).value = yoy;
-    regional.getCell(row, 4).numFmt = "";
+    Cell.setValue(regional, row, 4, yoy);
+    Cell.setStyle(regional, row, 4, { numFmt: "" });
     ratingValues.push(yoy);
   });
-  regional.addConditionalFormatting({
+  addConditionalFormatting(regional, {
     ref: `D${kpiRow + 1}:D${kpiRow + SEGMENTS.length}`,
     rules: [
       {
@@ -826,25 +875,28 @@ async function main(): Promise<void> {
   // Sheet 6 — Navigation hub
   // =========================================================================
 
-  const nav = wb.addWorksheet("Start", {
+  const nav = Workbook.addWorksheet(wb, "Start", {
     views: [{ state: "normal", showGridLines: false, showRowColHeaders: false }]
   });
-  nav.getColumn(1).width = 4;
-  nav.getColumn(2).width = 36;
-  nav.getColumn(3).width = 64;
+  Column.setWidth(nav, 1, 4);
+  Column.setWidth(nav, 2, 36);
+  Column.setWidth(nav, 3, 64);
 
-  nav.mergeCells("B2:C2");
-  nav.getCell("B2").value = {
+  Worksheet.merge(nav, "B2:C2");
+  Cell.setValue(nav, "B2", {
     richText: [
       { text: "Sales ", font: { size: 28, bold: true, color: { argb: "FF2F5496" } } },
       { text: "BI Dashboard", font: { size: 28, bold: true, color: { argb: "FFED7D31" } } }
     ]
-  };
+  });
 
-  nav.mergeCells("B3:C3");
-  nav.getCell("B3").value =
-    `${txns.length.toLocaleString()} transactions · ${REGIONS.length} regions · ${COUNTRIES.length} countries · ${PRODUCT_LINES.length} product lines`;
-  nav.getCell("B3").font = { italic: true, color: { argb: "FF7F7F7F" } };
+  Worksheet.merge(nav, "B3:C3");
+  Cell.setValue(
+    nav,
+    "B3",
+    `${txns.length.toLocaleString()} transactions · ${REGIONS.length} regions · ${COUNTRIES.length} countries · ${PRODUCT_LINES.length} product lines`
+  );
+  Cell.setStyle(nav, "B3", { font: { italic: true, color: { argb: "FF7F7F7F" } } });
 
   const links = [
     {
@@ -876,11 +928,11 @@ async function main(): Promise<void> {
   ];
   links.forEach((link, i) => {
     const row = 5 + i;
-    const cell = nav.getCell(row, 2);
-    cell.value = { text: link.label, hyperlink: `#'${link.sheet}'!A1` };
-    cell.font = { size: 13, color: { argb: "FF0563C1" }, underline: true };
-    nav.getCell(row, 3).value = link.desc;
-    nav.getCell(row, 3).font = { color: { argb: "FF595959" } };
+    const cell = getCell(nav, row, 2);
+    cellSetValue(cell, { text: link.label, hyperlink: `#'${link.sheet}'!A1` });
+    cellSetFont(cell, { size: 13, color: { argb: "FF0563C1" }, underline: true });
+    Cell.setValue(nav, row, 3, link.desc);
+    Cell.setStyle(nav, row, 3, { font: { color: { argb: "FF595959" } } });
   });
 
   wb.views = [
@@ -890,7 +942,7 @@ async function main(): Promise<void> {
       width: 30000,
       height: 18000,
       firstSheet: 0,
-      activeTab: wb.worksheets.findIndex(ws => ws.name === "Start"),
+      activeTab: getWorksheets(wb).findIndex(ws => getSheetName(ws) === "Start"),
       visibility: "visible"
     }
   ];
@@ -916,7 +968,7 @@ async function main(): Promise<void> {
     ]
   };
 
-  wb.addPivotChartsheet("Executive Chart", regionYearPivot, {
+  addPivotChartsheet(wb, "Executive Chart", regionYearPivot, {
     zoomToFit: true,
     pageMargins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
     pageSetup: { orientation: "landscape", paperSize: 9, horizontalDpi: 300, verticalDpi: 300 },
@@ -952,7 +1004,7 @@ async function main(): Promise<void> {
   // Write outputs
   // =========================================================================
 
-  await wb.xlsx.writeFile(XLSX_PATH);
+  await Workbook.writeXlsx(wb, XLSX_PATH);
   console.log(`XLSX → ${XLSX_PATH}`);
 
   const pdf = await excelToPdf(wb, {
@@ -974,15 +1026,15 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets           : ${wb.worksheets.length}`);
-  console.log(`  chartsheets      : ${wb.chartsheets.length}`);
+  console.log(`  sheets           : ${getWorksheets(wb).length}`);
+  console.log(`  chartsheets      : ${getChartsheets(wb).length}`);
   console.log(`  transactions     : ${txns.length}`);
   console.log(`  pivot tables     : ${pivotSheet.pivotTables?.length ?? 3} (Pivot Core sheet)`);
   console.log(
-    `  charts           : ${wb.worksheets.reduce((n, ws) => n + ws.getCharts().length, 0)}`
+    `  charts           : ${getWorksheets(wb).reduce((n, ws) => n + getCharts(ws).length, 0)}`
   );
   console.log(
-    `  sparkline groups : ${wb.worksheets.reduce((n, ws) => n + ws.getSparklineGroups().length, 0)}`
+    `  sparkline groups : ${getWorksheets(wb).reduce((n, ws) => n + getSparklineGroups(ws).length, 0)}`
   );
 }
 

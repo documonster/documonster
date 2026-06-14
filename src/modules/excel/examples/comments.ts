@@ -1,20 +1,23 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook } from "../../../index";
+import { cellSetComment, cellGetModel } from "@excel/cell";
+import { Cell, Workbook } from "@excel/index";
+import { getWorksheets, getXlsxIo } from "@excel/workbook";
+import { getCell } from "@excel/worksheet";
 
 const inputFile = fileURLToPath(new URL("./data/comments.xlsx", import.meta.url));
 const outputFile = path.join(path.dirname(inputFile), "comments-out.xlsx");
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
-wb.xlsx
+getXlsxIo(wb)
   .readFile(inputFile)
   .then(() => {
-    wb.worksheets.forEach(sheet => {
-      console.info(sheet.getCell("A1").model);
-      sheet.getCell("B2").value = "Zeb";
-      sheet.getCell("B2").comment = {
+    getWorksheets(wb).forEach(sheet => {
+      console.info(cellGetModel(getCell(sheet, "A1")));
+      Cell.setValue(sheet, "B2", "Zeb");
+      cellSetComment(getCell(sheet, "B2"), {
         texts: [
           {
             font: {
@@ -96,10 +99,10 @@ wb.xlsx
             text: "format"
           }
         ]
-      };
+      });
     });
 
-    return wb.xlsx.writeFile(outputFile);
+    return Workbook.writeXlsx(wb, outputFile);
   })
   .then(() => {
     console.log("Wrote", outputFile);

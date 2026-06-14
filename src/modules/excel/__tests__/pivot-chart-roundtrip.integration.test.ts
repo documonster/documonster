@@ -8,7 +8,7 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Workbook } from "@excel/index";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
@@ -26,9 +26,9 @@ beforeAll(async () => {
 });
 
 async function loadAndWrite(bytes: Uint8Array): Promise<{ bytes: Uint8Array; entries: EntryMap }> {
-  const wb = new Workbook();
-  await wb.xlsx.load(bytes);
-  const out = new Uint8Array(await wb.xlsx.writeBuffer());
+  const wb = Workbook.create();
+  await Workbook.loadXlsx(wb, bytes);
+  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   return { bytes: out, entries: await extractAll(out) };
 }
 
@@ -100,9 +100,9 @@ describe("Pivot chart round-trip", () => {
     const fixture = fixtures.find(f => f.id === "pivot-chart-multi-value")!;
     let bytes = fixture.bytes;
     for (let i = 0; i < 3; i++) {
-      const wb = new Workbook();
-      await wb.xlsx.load(bytes);
-      bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+      const wb = Workbook.create();
+      await Workbook.loadXlsx(wb, bytes);
+      bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
       const entries = await extractAll(bytes);
       const chartPath = [...entries.keys()].find(p => /^xl\/charts\/chart\d+[.]xml$/.test(p))!;
       const xml = entryText(entries, chartPath)!;

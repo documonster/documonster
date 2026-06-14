@@ -12,22 +12,59 @@
 // file-path streaming input) via `@excel/workbook` resolving to the
 // Node class that extends the browser base. Build-time rewriting
 // handles the JS bundle; only the types need this explicit mapping.
-export { Workbook } from "@excel/workbook.browser";
-export { Worksheet } from "@excel/worksheet";
-export { Row } from "@excel/row";
-export { Column } from "@excel/column";
-export { Cell } from "@excel/cell";
-export { Range } from "@excel/range";
-export { Image } from "@excel/image";
+export * from "@excel/workbook.browser";
+export * from "@excel/xlsx-io.browser";
+export * from "@excel/worksheet";
+export * from "@excel/row";
+export * from "@excel/column";
+export * from "@excel/cell";
+export * from "@excel/range";
+export { imageClone, imageCreate, imageModel } from "@excel/image";
+export type { ImageData, ImageModel } from "@excel/image";
 export * from "@excel/anchor";
-export { Table } from "@excel/table";
-export { Note } from "@excel/note";
-export { DataValidations } from "@excel/data-validations";
-export { FormCheckbox } from "@excel/form-control";
+export {
+  createTable,
+  tableAddColumn,
+  tableAddRow,
+  tableCommit,
+  tableGetColumn,
+  tableModel,
+  tableName,
+  tableRemoveColumns,
+  tableRemoveRows,
+  tableSetModel,
+  tableSetName,
+  type TableColumnView,
+  type TableData
+} from "@excel/table";
+export { noteCreate, noteFromModel, noteModel, isNoteData } from "@excel/note";
+export type { NoteData } from "@excel/note";
+export {
+  createDataValidations,
+  dataValidationAdd,
+  dataValidationFind,
+  dataValidationRemove
+} from "@excel/data-validations";
+export type { DataValidationsData } from "@excel/data-validations";
+export {
+  formCheckboxChecked,
+  formCheckboxCreate,
+  formCheckboxFromModel,
+  formCheckboxLink,
+  formCheckboxSetChecked,
+  formCheckboxSetLink,
+  formCheckboxSetText,
+  formCheckboxText,
+  formCheckboxVmlAnchor,
+  formCheckboxVmlCheckedValue,
+  formCheckboxVmlStyle,
+  isFormCheckbox
+} from "@excel/form-control";
+export type { FormCheckboxData } from "@excel/form-control";
 // Note: the formula engine lives at the `./formula` subpath so it stays
 // out of bundles that only need to read / write XLSX files. Import
-// `@cj-tech-master/excelts/formula` to enable `Workbook.calculateFormulas()`
-// and automatic recalculation in `excelToPdf()`.
+// `{ calculateFormulas }` from `@cj-tech-master/excelts/formula` and call
+// `calculateFormulas(workbook)` to recompute formula results.
 
 // =============================================================================
 // Enums
@@ -90,7 +127,7 @@ export { WorksheetReader } from "@excel/stream/worksheet-reader";
 // =============================================================================
 // CSV types and stream classes
 // =============================================================================
-export type { CsvOptions, CsvInput } from "@excel/workbook.browser";
+export type { CsvOptions, CsvInput } from "@excel/csv-bridge";
 export {
   CsvParserStream,
   CsvFormatterStream,
@@ -114,8 +151,28 @@ export type {
 // Additional Classes & Types
 // =============================================================================
 
-export { DefinedNames, type DefinedNameModel } from "@excel/defined-names";
-export { Chartsheet } from "@excel/chartsheet";
+export {
+  createDefinedNames,
+  definedNamesAdd,
+  definedNamesAddFormula,
+  definedNamesGetAllEntries,
+  definedNamesGetNames,
+  definedNamesModel,
+  definedNamesRemove,
+  definedNamesSetModel,
+  type DefinedNameModel
+} from "@excel/defined-names";
+export type { DefinedNamesData } from "@excel/defined-names";
+export {
+  chartsheetChart,
+  chartsheetChartExModel,
+  chartsheetChartModel,
+  chartsheetModel,
+  chartsheetName,
+  chartsheetSetName,
+  createChartsheet,
+  type ChartsheetData
+} from "@excel/chartsheet";
 export type {
   AddChartsheetOptions,
   AddPivotChartsheetOptions,

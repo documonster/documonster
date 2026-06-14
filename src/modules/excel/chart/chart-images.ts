@@ -14,6 +14,8 @@
  * binding without requiring callers to juggle rel ids manually.
  */
 
+import { type WorkbookData, addWorkbookImage, getImage } from "@excel/workbook-core";
+
 import type { ChartEntry } from "./chart.ts";
 import type {
   AddChartPictureFillImage,
@@ -25,37 +27,6 @@ import type {
   SeriesBase,
   ShapeProperties
 } from "./types.ts";
-
-/**
- * Minimal workbook surface used by {@link resolvePendingChartImages}. The
- * concrete worksheet/workbook types pull in Cell/Row/Column machinery
- * this helper has no business touching, so we work against a structural
- * slice instead to keep the chart module import-light.
- */
-export interface PictureFillHostWorkbook {
-  addImage(image: WorkbookImagePayload): number;
-  getImage(id: number | string): WorkbookMediaLike | undefined;
-}
-
-interface WorkbookMediaLike {
-  extension?: string;
-  buffer?: Uint8Array | undefined;
-  base64?: string | undefined;
-  filename?: string | undefined;
-}
-
-/**
- * Image payload accepted by `Workbook.addImage`. Named
- * `WorkbookImagePayload` — NOT `ImageData` — so we do not collide with
- * the browser's built-in `ImageData` DOM type (pixel buffer used by
- * Canvas) when this module is compiled for the browser bundle.
- */
-interface WorkbookImagePayload {
-  extension: "jpeg" | "png" | "gif";
-  base64?: string;
-  filename?: string;
-  buffer?: Uint8Array;
-}
 
 /**
  * Rel information that {@link resolvePendingChartImages} appends to the
@@ -92,7 +63,7 @@ interface WorkbookImagePayload {
  */
 export function resolvePendingChartImages(
   entry: ChartEntry,
-  workbook: PictureFillHostWorkbook,
+  workbook: WorkbookData,
   chartNumber: number
 ): void {
   const blips = collectBlipFills(entry.model);
@@ -264,11 +235,11 @@ function visitGroup(
  */
 function normaliseImage(
   image: AddChartPictureFillImage,
-  workbook: PictureFillHostWorkbook
+  workbook: WorkbookData
 ): { mediaId: number; extension: "png" | "jpeg" | "gif" } | undefined {
   // Re-use an already-registered workbook image.
   if (typeof image === "object" && !Array.isArray(image) && "workbookImageId" in image) {
-    const existing = workbook.getImage(image.workbookImageId);
+    const existing = getImage(workbook, image.workbookImageId);
     if (!existing) {
       return undefined;
     }
@@ -317,7 +288,7 @@ function normaliseImage(
       // so the rest of the chart still renders.
       return undefined;
     }
-    const id = workbook.addImage({ extension: ext, buffer: bytes });
+    const id = addWorkbookImage(workbook, { extension: ext, buffer: bytes });
     return { mediaId: id, extension: ext };
   }
 
@@ -327,7 +298,7 @@ function normaliseImage(
     if (!parsed) {
       return undefined;
     }
-    const id = workbook.addImage({ extension: parsed.extension, base64: parsed.base64 });
+    const id = addWorkbookImage(workbook, { extension: parsed.extension, base64: parsed.base64 });
     return { mediaId: id, extension: parsed.extension };
   }
 
@@ -343,12 +314,12 @@ function normaliseImage(
         view instanceof Uint8Array
           ? view
           : new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-      const id = workbook.addImage({ extension: data.extension, buffer: bytes });
+      const id = addWorkbookImage(workbook, { extension: data.extension, buffer: bytes });
       return { mediaId: id, extension: data.extension };
     }
   }
   if (typeof data.base64 === "string" && data.base64.length > 0) {
-    const id = workbook.addImage({ extension: data.extension, base64: data.base64 });
+    const id = addWorkbookImage(workbook, { extension: data.extension, base64: data.base64 });
     return { mediaId: id, extension: data.extension };
   }
   return undefined;

@@ -1,13 +1,12 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
 
 const [, , filename] = process.argv;
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
-ws.getCell("B2").value = 5;
-ws.getCell("B2").note = {
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
+Cell.setValue(ws, "B2", 5);
+Cell.setNote(ws, "B2", {
   texts: [
     {
       font: {
@@ -89,16 +88,16 @@ ws.getCell("B2").note = {
       text: "format"
     }
   ]
-};
+});
 
-ws.getCell("D2").value = "Zoo";
-ws.getCell("D2").note = "Plain Text Comment";
+Cell.setValue(ws, "D2", "Zoo");
+Cell.setNote(ws, "D2", "Plain Text Comment");
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

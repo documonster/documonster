@@ -2,13 +2,20 @@ import { ExcelError } from "@excel/errors";
 import type { Address } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 
-interface RangeModel {
+/**
+ * Plain-data range record. This is the entire state of a range — there is no
+ * class. All operations are free functions in the {@link Range} namespace.
+ */
+export interface RangeData {
   top: number;
   left: number;
   bottom: number;
   right: number;
   sheetName?: string;
 }
+
+/** @deprecated internal alias kept during the class→namespace migration. */
+export type RangeModel = RangeData;
 
 interface RowDimensions {
   min: number;
@@ -20,351 +27,269 @@ interface RowWithDimensions {
   dimensions?: RowDimensions;
 }
 
-// Input types for Range constructor and decode
-export type RangeInput = Range | RangeModel | string | number | RangeInput[];
+/** Input types accepted by {@link Range.create}. */
+export type RangeInput = RangeData | string | number | RangeInput[];
 
-// used by worksheet to calculate sheet dimensions
-class Range {
-  model: RangeModel = {
-    top: 0,
-    left: 0,
-    bottom: 0,
-    right: 0
-  };
-
-  // Constructor overloads
-  constructor();
-  constructor(range: Range);
-  constructor(model: RangeModel);
-  constructor(rangeString: string);
-  constructor(args: RangeInput[]);
-  constructor(tl: string, br: string);
-  constructor(tl: string, br: string, sheetName: string);
-  constructor(top: number, left: number, bottom: number, right: number);
-  constructor(top: number, left: number, bottom: number, right: number, sheetName: string);
-  constructor(...args: RangeInput[]) {
-    this.decode(args);
-  }
-
-  // setTLBR overloads
-  setTLBR(tl: string, br: string, sheetName?: string): void;
-  setTLBR(top: number, left: number, bottom: number, right: number, sheetName?: string): void;
-  setTLBR(
-    t: number | string,
-    l: number | string,
-    b?: number | string,
-    r?: number,
-    s?: string
-  ): void {
-    if (typeof t === "string" && typeof l === "string") {
-      // setTLBR(tl, br, s) - t and l are address strings
-      const tl = colCache.decodeAddress(t);
-      const br = colCache.decodeAddress(l);
-      this.model = {
-        top: Math.min(tl.row, br.row),
-        left: Math.min(tl.col, br.col),
-        bottom: Math.max(tl.row, br.row),
-        right: Math.max(tl.col, br.col),
-        sheetName: typeof b === "string" ? b : undefined
-      };
-    } else if (
-      typeof t === "number" &&
-      typeof l === "number" &&
-      typeof b === "number" &&
-      typeof r === "number"
-    ) {
-      // setTLBR(t, l, b, r, s) - all numbers
-      this.model = {
-        top: Math.min(t, b),
-        left: Math.min(l, r),
-        bottom: Math.max(t, b),
-        right: Math.max(l, r),
-        sheetName: s
-      };
+function serialisedSheetName(r: RangeData): string {
+  const { sheetName } = r;
+  if (sheetName) {
+    if (/^[a-zA-Z0-9]*$/.test(sheetName)) {
+      return `${sheetName}!`;
     }
+    return `'${sheetName.replace(/'/g, "''")}'!`;
   }
+  return "";
+}
 
-  private decode(argv: RangeInput[]): void {
-    switch (argv.length) {
-      case 5: // [t,l,b,r,s]
-        if (
-          typeof argv[0] === "number" &&
-          typeof argv[1] === "number" &&
-          typeof argv[2] === "number" &&
-          typeof argv[3] === "number" &&
-          typeof argv[4] === "string"
-        ) {
-          this.setTLBR(argv[0], argv[1], argv[2], argv[3], argv[4]);
-        }
-        break;
-      case 4: // [t,l,b,r]
-        if (
-          typeof argv[0] === "number" &&
-          typeof argv[1] === "number" &&
-          typeof argv[2] === "number" &&
-          typeof argv[3] === "number"
-        ) {
-          this.setTLBR(argv[0], argv[1], argv[2], argv[3]);
-        }
-        break;
-
-      case 3: // [tl,br,s]
-        if (
-          typeof argv[0] === "string" &&
-          typeof argv[1] === "string" &&
-          typeof argv[2] === "string"
-        ) {
-          this.setTLBR(argv[0], argv[1], argv[2]);
-        }
-        break;
-      case 2: // [tl,br]
-        if (typeof argv[0] === "string" && typeof argv[1] === "string") {
-          this.setTLBR(argv[0], argv[1]);
-        }
-        break;
-
-      case 1: {
-        const value = argv[0];
-        if (value instanceof Range) {
-          // copy constructor
-          this.model = {
-            top: value.model.top,
-            left: value.model.left,
-            bottom: value.model.bottom,
-            right: value.model.right,
-            sheetName: value.sheetName
-          };
-        } else if (Array.isArray(value)) {
-          // an arguments array
-          this.decode(value);
-        } else if (
-          typeof value === "object" &&
-          "top" in value &&
-          "left" in value &&
-          "bottom" in value &&
-          "right" in value
-        ) {
-          // a model
-          this.model = {
-            top: value.top,
-            left: value.left,
-            bottom: value.bottom,
-            right: value.right,
-            sheetName: value.sheetName
-          };
-        } else if (typeof value === "string") {
-          // [sheetName!]tl:br
-          const decoded = colCache.decodeEx(value);
-          if ("top" in decoded) {
-            // It's a DecodedRange
-            this.model = {
-              top: decoded.top,
-              left: decoded.left,
-              bottom: decoded.bottom,
-              right: decoded.right,
-              sheetName: decoded.sheetName
-            };
-          } else if ("row" in decoded) {
-            // It's an Address
-            this.model = {
-              top: decoded.row,
-              left: decoded.col,
-              bottom: decoded.row,
-              right: decoded.col,
-              sheetName: decoded.sheetName
-            };
-          }
-        }
-        break;
+function decodeInto(r: RangeData, argv: RangeInput[]): void {
+  switch (argv.length) {
+    case 5:
+      if (
+        typeof argv[0] === "number" &&
+        typeof argv[1] === "number" &&
+        typeof argv[2] === "number" &&
+        typeof argv[3] === "number" &&
+        typeof argv[4] === "string"
+      ) {
+        setTLBR(r, argv[0], argv[1], argv[2], argv[3], argv[4]);
       }
-
-      case 0:
-        this.model = {
-          top: 0,
-          left: 0,
-          bottom: 0,
-          right: 0
-        };
-        break;
-
-      default:
-        throw new ExcelError(`Invalid number of arguments to _getDimensions() - ${argv.length}`);
-    }
-  }
-
-  get top(): number {
-    return this.model.top || 1;
-  }
-
-  set top(value: number) {
-    this.model.top = value;
-  }
-
-  get left(): number {
-    return this.model.left || 1;
-  }
-
-  set left(value: number) {
-    this.model.left = value;
-  }
-
-  get bottom(): number {
-    return this.model.bottom || 1;
-  }
-
-  set bottom(value: number) {
-    this.model.bottom = value;
-  }
-
-  get right(): number {
-    return this.model.right || 1;
-  }
-
-  set right(value: number) {
-    this.model.right = value;
-  }
-
-  get sheetName(): string | undefined {
-    return this.model.sheetName;
-  }
-
-  set sheetName(value: string | undefined) {
-    this.model.sheetName = value;
-  }
-
-  private get _serialisedSheetName(): string {
-    const { sheetName } = this.model;
-    if (sheetName) {
-      // Plain ASCII identifiers (and the empty string) need no quoting.
-      if (/^[a-zA-Z0-9]*$/.test(sheetName)) {
-        return `${sheetName}!`;
+      break;
+    case 4:
+      if (
+        typeof argv[0] === "number" &&
+        typeof argv[1] === "number" &&
+        typeof argv[2] === "number" &&
+        typeof argv[3] === "number"
+      ) {
+        setTLBR(r, argv[0], argv[1], argv[2], argv[3]);
       }
-      // Per OOXML / Excel formula syntax, sheet names containing characters
-      // outside the bareword set are wrapped in single quotes, and any
-      // embedded apostrophes are doubled (e.g. `O'Brien` -> `'O''Brien'`).
-      return `'${sheetName.replace(/'/g, "''")}'!`;
-    }
-    return "";
-  }
-
-  expand(top: number, left: number, bottom: number, right: number): void {
-    if (!this.model.top || top < this.top) {
-      this.top = top;
-    }
-    if (!this.model.left || left < this.left) {
-      this.left = left;
-    }
-    if (!this.model.bottom || bottom > this.bottom) {
-      this.bottom = bottom;
-    }
-    if (!this.model.right || right > this.right) {
-      this.right = right;
-    }
-  }
-
-  expandRow(row: RowWithDimensions | null | undefined): void {
-    if (row) {
-      const { dimensions, number } = row;
-      if (dimensions) {
-        this.expand(number, dimensions.min, number, dimensions.max);
+      break;
+    case 3:
+      if (
+        typeof argv[0] === "string" &&
+        typeof argv[1] === "string" &&
+        typeof argv[2] === "string"
+      ) {
+        setTLBR(r, argv[0], argv[1], argv[2]);
       }
-    }
-  }
-
-  expandToAddress(addressStr: string): void {
-    const address = colCache.decodeEx(addressStr);
-    if ("row" in address && "col" in address) {
-      this.expand(address.row, address.col, address.row, address.col);
-    }
-  }
-
-  get tl(): string {
-    return colCache.n2l(this.left) + this.top;
-  }
-
-  get $t$l(): string {
-    return `$${colCache.n2l(this.left)}$${this.top}`;
-  }
-
-  get br(): string {
-    return colCache.n2l(this.right) + this.bottom;
-  }
-
-  get $b$r(): string {
-    return `$${colCache.n2l(this.right)}$${this.bottom}`;
-  }
-
-  get range(): string {
-    return `${this._serialisedSheetName + this.tl}:${this.br}`;
-  }
-
-  get $range(): string {
-    return `${this._serialisedSheetName + this.$t$l}:${this.$b$r}`;
-  }
-
-  get shortRange(): string {
-    return this.count > 1 ? this.range : this._serialisedSheetName + this.tl;
-  }
-
-  get $shortRange(): string {
-    return this.count > 1 ? this.$range : this._serialisedSheetName + this.$t$l;
-  }
-
-  get count(): number {
-    return (1 + this.bottom - this.top) * (1 + this.right - this.left);
-  }
-
-  toString(): string {
-    return this.range;
-  }
-
-  intersects(other: Range): boolean {
-    if (other.sheetName && this.sheetName && other.sheetName !== this.sheetName) {
-      return false;
-    }
-    if (other.bottom < this.top) {
-      return false;
-    }
-    if (other.top > this.bottom) {
-      return false;
-    }
-    if (other.right < this.left) {
-      return false;
-    }
-    if (other.left > this.right) {
-      return false;
-    }
-    return true;
-  }
-
-  contains(addressStr: string): boolean {
-    const address = colCache.decodeEx(addressStr);
-    if ("row" in address && "col" in address) {
-      return this.containsEx(address);
-    }
-    return false;
-  }
-
-  containsEx(address: Address): boolean {
-    if (address.sheetName && this.sheetName && address.sheetName !== this.sheetName) {
-      return false;
-    }
-    return (
-      address.row >= this.top &&
-      address.row <= this.bottom &&
-      address.col >= this.left &&
-      address.col <= this.right
-    );
-  }
-
-  forEachAddress(cb: (address: string, row: number, col: number) => void): void {
-    for (let col = this.left; col <= this.right; col++) {
-      for (let row = this.top; row <= this.bottom; row++) {
-        cb(colCache.encodeAddress(row, col), row, col);
+      break;
+    case 2:
+      if (typeof argv[0] === "string" && typeof argv[1] === "string") {
+        setTLBR(r, argv[0], argv[1]);
       }
+      break;
+    case 1: {
+      const value = argv[0];
+      if (Array.isArray(value)) {
+        decodeInto(r, value);
+      } else if (
+        typeof value === "object" &&
+        value !== null &&
+        "top" in value &&
+        "left" in value &&
+        "bottom" in value &&
+        "right" in value
+      ) {
+        r.top = value.top;
+        r.left = value.left;
+        r.bottom = value.bottom;
+        r.right = value.right;
+        r.sheetName = value.sheetName;
+      } else if (typeof value === "string") {
+        const decoded = colCache.decodeEx(value);
+        if ("top" in decoded) {
+          r.top = decoded.top;
+          r.left = decoded.left;
+          r.bottom = decoded.bottom;
+          r.right = decoded.right;
+          r.sheetName = decoded.sheetName;
+        } else if ("row" in decoded) {
+          r.top = decoded.row;
+          r.left = decoded.col;
+          r.bottom = decoded.row;
+          r.right = decoded.col;
+          r.sheetName = decoded.sheetName;
+        }
+      }
+      break;
+    }
+    case 0:
+      break;
+    default:
+      throw new ExcelError(`Invalid number of arguments to Range.create() - ${argv.length}`);
+  }
+}
+
+function setTLBR(
+  r: RangeData,
+  t: number | string,
+  l: number | string,
+  b?: number | string,
+  rt?: number,
+  s?: string
+): void {
+  if (typeof t === "string" && typeof l === "string") {
+    const tl = colCache.decodeAddress(t);
+    const br = colCache.decodeAddress(l);
+    r.top = Math.min(tl.row, br.row);
+    r.left = Math.min(tl.col, br.col);
+    r.bottom = Math.max(tl.row, br.row);
+    r.right = Math.max(tl.col, br.col);
+    r.sheetName = typeof b === "string" ? b : undefined;
+  } else if (
+    typeof t === "number" &&
+    typeof l === "number" &&
+    typeof b === "number" &&
+    typeof rt === "number"
+  ) {
+    r.top = Math.min(t, b);
+    r.left = Math.min(l, rt);
+    r.bottom = Math.max(t, b);
+    r.right = Math.max(l, rt);
+    r.sheetName = s;
+  }
+}
+
+/**
+ * Range namespace — free functions over the plain-data {@link RangeData}.
+ * Replaces the former `Range`/`Dimensions` class. Used by worksheet to
+ * compute sheet dimensions and by xforms to encode/decode A1 references.
+ */
+export function rangeCreate(...args: RangeInput[]): RangeData {
+  const r: RangeData = { top: 0, left: 0, bottom: 0, right: 0 };
+  decodeInto(r, args);
+  return r;
+}
+
+export function rangeSetTLBR(
+  r: RangeData,
+  t: number | string,
+  l: number | string,
+  b?: number | string,
+  rt?: number,
+  s?: string
+): void {
+  setTLBR(r, t, l, b, rt, s);
+}
+
+export const rangeTop = (r: RangeData): number => r.top || 1;
+
+export const rangeLeft = (r: RangeData): number => r.left || 1;
+
+export const rangeBottom = (r: RangeData): number => r.bottom || 1;
+
+export const rangeRight = (r: RangeData): number => r.right || 1;
+
+export function rangeExpand(
+  r: RangeData,
+  top: number,
+  left: number,
+  bottom: number,
+  right: number
+): void {
+  if (!r.top || top < rangeTop(r)) {
+    r.top = top;
+  }
+  if (!r.left || left < rangeLeft(r)) {
+    r.left = left;
+  }
+  if (!r.bottom || bottom > rangeBottom(r)) {
+    r.bottom = bottom;
+  }
+  if (!r.right || right > rangeRight(r)) {
+    r.right = right;
+  }
+}
+
+export function rangeExpandRow(r: RangeData, row: RowWithDimensions | null | undefined): void {
+  if (row) {
+    const { dimensions, number } = row;
+    if (dimensions) {
+      rangeExpand(r, number, dimensions.min, number, dimensions.max);
     }
   }
 }
 
-export { Range };
-export { Range as Dimensions };
+export function rangeExpandToAddress(r: RangeData, addressStr: string): void {
+  const address = colCache.decodeEx(addressStr);
+  if ("row" in address && "col" in address) {
+    rangeExpand(r, address.row, address.col, address.row, address.col);
+  }
+}
+
+export const rangeTl = (r: RangeData): string => colCache.n2l(rangeLeft(r)) + rangeTop(r);
+
+export const rangeAbsoluteTopLeft = (r: RangeData): string =>
+  `$${colCache.n2l(rangeLeft(r))}$${rangeTop(r)}`;
+
+export const rangeBr = (r: RangeData): string => colCache.n2l(rangeRight(r)) + rangeBottom(r);
+
+export const rangeAbsoluteBottomRight = (r: RangeData): string =>
+  `$${colCache.n2l(rangeRight(r))}$${rangeBottom(r)}`;
+
+export const rangeRange = (r: RangeData): string =>
+  `${serialisedSheetName(r) + rangeTl(r)}:${rangeBr(r)}`;
+
+export const rangeAbsolute = (r: RangeData): string =>
+  `${serialisedSheetName(r) + rangeAbsoluteTopLeft(r)}:${rangeAbsoluteBottomRight(r)}`;
+
+export const rangeShortRange = (r: RangeData): string =>
+  rangeCount(r) > 1 ? rangeRange(r) : serialisedSheetName(r) + rangeTl(r);
+
+export const rangeAbsoluteShort = (r: RangeData): string =>
+  rangeCount(r) > 1 ? rangeAbsolute(r) : serialisedSheetName(r) + rangeAbsoluteTopLeft(r);
+
+export const rangeCount = (r: RangeData): number =>
+  (1 + rangeBottom(r) - rangeTop(r)) * (1 + rangeRight(r) - rangeLeft(r));
+
+export const rangeToString = (r: RangeData): string => rangeRange(r);
+
+export function rangeIntersects(r: RangeData, other: RangeData): boolean {
+  if (other.sheetName && r.sheetName && other.sheetName !== r.sheetName) {
+    return false;
+  }
+  if (rangeBottom(other) < rangeTop(r)) {
+    return false;
+  }
+  if (rangeTop(other) > rangeBottom(r)) {
+    return false;
+  }
+  if (rangeRight(other) < rangeLeft(r)) {
+    return false;
+  }
+  if (rangeLeft(other) > rangeRight(r)) {
+    return false;
+  }
+  return true;
+}
+
+export function rangeContains(r: RangeData, addressStr: string): boolean {
+  const address = colCache.decodeEx(addressStr);
+  if ("row" in address && "col" in address) {
+    return rangeContainsEx(r, address);
+  }
+  return false;
+}
+
+export function rangeContainsEx(r: RangeData, address: Address): boolean {
+  if (address.sheetName && r.sheetName && address.sheetName !== r.sheetName) {
+    return false;
+  }
+  return (
+    address.row >= rangeTop(r) &&
+    address.row <= rangeBottom(r) &&
+    address.col >= rangeLeft(r) &&
+    address.col <= rangeRight(r)
+  );
+}
+
+export function rangeForEachAddress(
+  r: RangeData,
+  cb: (address: string, row: number, col: number) => void
+): void {
+  for (let col = rangeLeft(r); col <= rangeRight(r); col++) {
+    for (let row = rangeTop(r); row <= rangeBottom(r); row++) {
+      cb(colCache.encodeAddress(row, col), row, col);
+    }
+  }
+}

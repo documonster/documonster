@@ -1,7 +1,8 @@
+import { cellSetValue } from "@excel/cell";
+import { Cell, Workbook } from "@excel/index";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const TEST_FILE = testFilePath("ignored-errors.test");
@@ -9,12 +10,12 @@ const TEST_FILE = testFilePath("ignored-errors.test");
 describe("ignoredErrors", () => {
   it("round-trips ignoredErrors through write and read", async () => {
     // Create workbook with ignoredErrors
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.getCell("A1").value = "123";
-    ws.getCell("A2").value = "456";
-    ws.getCell("B1").value = "=SUM(A1:A2)";
+    Cell.setValue(ws, "A1", "123");
+    Cell.setValue(ws, "A2", "456");
+    Cell.setValue(ws, "B1", "=SUM(A1:A2)");
 
     ws.ignoredErrors = [
       { ref: "A1:A2", numberStoredAsText: true },
@@ -22,12 +23,12 @@ describe("ignoredErrors", () => {
     ];
 
     // Write
-    await wb.xlsx.writeFile(TEST_FILE);
+    await Workbook.writeXlsx(wb, TEST_FILE);
 
     // Read back
-    const wb2 = new Workbook();
-    await wb2.xlsx.readFile(TEST_FILE);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxFile(wb2, TEST_FILE);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     // Verify
     expect(ws2.ignoredErrors).toHaveLength(2);
@@ -43,24 +44,24 @@ describe("ignoredErrors", () => {
   });
 
   it("preserves empty ignoredErrors (no extra XML)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "test";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "test");
     // ignoredErrors defaults to [] — should not write <ignoredErrors> tag
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "empty ignoredErrors" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(ws2.ignoredErrors).toEqual([]);
   });
 
   it("round-trips all boolean attributes", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
 
     ws.ignoredErrors = [
       {
@@ -77,12 +78,12 @@ describe("ignoredErrors", () => {
       }
     ];
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "all-boolean ignoredErrors" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(ws2.ignoredErrors).toHaveLength(1);
     const entry = ws2.ignoredErrors[0];
@@ -106,14 +107,14 @@ describe("ignoredErrors", () => {
 
     ws.ignoredErrors = [{ ref: "A1:A100", numberStoredAsText: true }];
 
-    ws.getCell("A1").value = "123";
+    cellSetValue(ws.getCell("A1"), "123");
     ws.commit();
     await wb.commit();
 
     // Read back with standard reader
-    const wb2 = new Workbook();
-    await wb2.xlsx.readFile(TEST_FILE);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxFile(wb2, TEST_FILE);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(ws2.ignoredErrors).toHaveLength(1);
     expect(ws2.ignoredErrors[0]).toEqual({

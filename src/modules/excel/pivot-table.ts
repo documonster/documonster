@@ -1,7 +1,18 @@
 import type { PivotChartOptions } from "@excel/chart/types";
+import { type ColumnData } from "@excel/column";
 import { PivotTableError } from "@excel/errors";
-import type { Table } from "@excel/table";
+import { type RangeData, rangeCreate, rangeExpand } from "@excel/range";
+import { type RowData, rowDimensions, rowValues } from "@excel/row";
+import { tableModel, type TableData } from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
+import {
+  type WorksheetData,
+  columnValues,
+  getColumn,
+  getRow,
+  getSheetName,
+  getSheetValues
+} from "@excel/worksheet-core";
 import { range, toSortedArray } from "@utils/utils";
 
 /**
@@ -16,14 +27,26 @@ export interface PivotTableSource {
    * When present, pivotCacheDefinition uses `<worksheetSource name="..."/>` instead of ref+sheet.
    */
   tableName?: string;
-  /** Get row values by 1-indexed row number */
-  getRow(rowNumber: number): { values: unknown[] };
-  /** Get column values by 1-indexed column number */
-  getColumn(columnNumber: number): { values: unknown[] };
+  /** Get a row by 1-indexed number (worksheet RowData or a `{ values }` adapter). */
+  getRow(rowNumber: number): RowData | { values: unknown[] };
+  /** Get a column by 1-indexed number (worksheet ColumnData or a `{ values }` adapter). */
+  getColumn(columnNumber: number): ColumnData | { values: unknown[] };
   /** Get all sheet values as a sparse 2D array */
   getSheetValues(): unknown[][];
-  /** Dimensions with short range reference (e.g., "A1:E10") */
-  dimensions: { shortRange: string };
+  /** Dimensions of the source data (plain range record). */
+  dimensions: RangeData;
+}
+
+/** Extract the values array from a getRow result (RowData or `{ values }`). */
+function rowValuesOf(row: RowData | { values: unknown[] }): unknown[] {
+  return "cells" in row ? rowValues(row as RowData) : (row as { values: unknown[] }).values;
+}
+
+/** Extract the values array from a getColumn result (ColumnData or `{ values }`). */
+function columnValuesOf(col: ColumnData | { values: unknown[] }): unknown[] {
+  return "values" in col && Array.isArray((col as { values: unknown[] }).values)
+    ? (col as { values: unknown[] }).values
+    : columnValues(col as ColumnData);
 }
 
 /**
@@ -59,14 +82,18 @@ export interface PivotTableModel {
   /**
    * Source worksheet for the pivot table data.
    * Either sourceSheet or sourceTable must be provided (mutually exclusive).
+   *
+   * Accepts a {@link WorksheetData} record directly (the common case) or a
+   * pre-built {@link PivotTableSource} adapter; {@link resolveSource} wraps a
+   * bare worksheet record in an adapter automatically.
    */
-  sourceSheet?: PivotTableSource;
+  sourceSheet?: WorksheetData | PivotTableSource;
   /**
    * Source table for the pivot table data.
    * Either sourceSheet or sourceTable must be provided (mutually exclusive).
    * The table must have headerRow=true and contain at least one data row.
    */
-  sourceTable?: Table;
+  sourceTable?: TableData;
   /** Column names to use as row fields in the pivot table */
   rows: string[];
   /**
@@ -395,24 +422,24 @@ const DATA_START_INDEX = 2;
  * Creates a PivotTableSource adapter from a Table object.
  * This allows Tables to be used as pivot table data sources with the same interface as Worksheets.
  */
-function createTableSourceAdapter(table: Table): PivotTableSource {
-  const tableModel = table.model;
+function createTableSourceAdapter(table: TableData): PivotTableSource {
+  const tblModel = tableModel(table);
 
   // Validate that table has headerRow enabled (required for pivot table column names)
-  if (tableModel.headerRow === false) {
+  if (tblModel.headerRow === false) {
     throw new PivotTableError(
       "Cannot create pivot table from a table without headers. Set headerRow: true on the table."
     );
   }
 
   // Validate table has data rows
-  if (!tableModel.rows || tableModel.rows.length === 0) {
+  if (!tblModel.rows || tblModel.rows.length === 0) {
     throw new PivotTableError(
       "Cannot create pivot table from an empty table. Add data rows to the table."
     );
   }
 
-  const columnNames = tableModel.columns.map(col => col.name);
+  const columnNames = tblModel.columns.map(col => col.name);
 
   // Check for duplicate column names
   const nameSet = new Set<string>();
@@ -427,24 +454,22 @@ function createTableSourceAdapter(table: Table): PivotTableSource {
 
   // Build the full data array: headers + rows
   const headerRow = [undefined, ...columnNames]; // sparse array starting at index 1
-  const dataRows = tableModel.rows.map(row => [undefined, ...row]); // sparse array starting at index 1
+  const dataRows = tblModel.rows.map(row => [undefined, ...row]); // sparse array starting at index 1
 
   // Calculate the range reference for the table
-  const tl = tableModel.tl;
+  const tl = tblModel.tl;
   if (!tl) {
-    throw new Error(`Table "${tableModel.name}" is missing top-left cell address (tl)`);
+    throw new Error(`Table "${tblModel.name}" is missing top-left cell address (tl)`);
   }
   const startRow = tl.row;
   const startCol = tl.col;
-  const endRow = startRow + tableModel.rows.length; // header row + data rows
+  const endRow = startRow + tblModel.rows.length; // header row + data rows
   const endCol = startCol + columnNames.length - 1;
-
-  const shortRange = colCache.encode(startRow, startCol, endRow, endCol);
 
   // Use the worksheet name (not table name) for pivotCacheDefinition's worksheetSource
   // The sheet attribute in worksheetSource must reference the actual worksheet name
-  const worksheetName = table.worksheet.name;
-  const tableName = tableModel.name;
+  const worksheetName = getSheetName(table.worksheet);
+  const tableName = tblModel.name;
 
   return {
     name: worksheetName,
@@ -467,8 +492,8 @@ function createTableSourceAdapter(table: Table): PivotTableSource {
       // Values should be sparse array with header at index 1, data starting at index 2
       const values: unknown[] = [];
       values[1] = columnNames[columnNumber - 1];
-      for (let i = 0; i < tableModel.rows.length; i++) {
-        values[i + 2] = tableModel.rows[i][columnNumber - 1];
+      for (let i = 0; i < tblModel.rows.length; i++) {
+        values[i + 2] = tblModel.rows[i][columnNumber - 1];
       }
       return { values };
     },
@@ -481,7 +506,7 @@ function createTableSourceAdapter(table: Table): PivotTableSource {
       }
       return result;
     },
-    dimensions: { shortRange }
+    dimensions: rangeCreate(startRow, startCol, endRow, endCol)
   };
 }
 
@@ -502,7 +527,41 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
   if (!model.sourceSheet) {
     throw new Error("Either sourceSheet or sourceTable must be provided.");
   }
-  return model.sourceSheet;
+  // A de-classed worksheet (WorksheetData record) has no methods; wrap it in a
+  // PivotTableSource adapter that delegates to the flat worksheet functions.
+  const src = model.sourceSheet as unknown as { _rows?: unknown };
+  if (
+    src &&
+    typeof src === "object" &&
+    "_rows" in src &&
+    typeof (model.sourceSheet as { getRow?: unknown }).getRow !== "function"
+  ) {
+    const ws = model.sourceSheet as unknown as WorksheetData;
+    return {
+      name: getSheetName(ws),
+      getRow: (rowNumber: number) => getRow(ws, rowNumber),
+      getColumn: (columnNumber: number) => getColumn(ws, columnNumber),
+      getSheetValues: () => getSheetValues(ws) as unknown[][],
+      get dimensions(): RangeData {
+        return computeSourceDimensions(ws);
+      }
+    };
+  }
+  return model.sourceSheet as PivotTableSource;
+}
+
+/** Bounding range of populated cells in a worksheet record (avoids importing the heavy worksheet module). */
+function computeSourceDimensions(ws: WorksheetData): RangeData {
+  const dims = rangeCreate();
+  ws._rows.forEach(row => {
+    if (row) {
+      const rd = rowDimensions(row);
+      if (rd) {
+        rangeExpand(dims, row.number, rd.min, row.number, rd.max);
+      }
+    }
+  });
+  return dims;
 }
 
 /** Resolve a value entry to its column name string */
@@ -639,7 +698,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   const valueNames = model.values.map(resolveValueName);
 
   // Get header names from source (already resolved)
-  const headerNames = source.getRow(1).values.slice(1);
+  const headerNames = rowValuesOf(source.getRow(1)).slice(1);
 
   // Validate no empty header names (null, undefined, empty-string, or whitespace-only).
   // Note: numeric 0 and boolean false are valid headers (they coerce to "0"/"false").
@@ -810,13 +869,13 @@ function makeCacheFields(
   // Fields in valueFieldNames (but not in fieldNamesWithSharedItems) get min/max calculated.
   // Other fields are unused and get null sharedItems.
 
-  const names = source.getRow(1).values;
+  const names = rowValuesOf(source.getRow(1));
   // Use Set for O(1) lookup instead of object
   const sharedItemsFields = new Set(fieldNamesWithSharedItems);
   const valueFields = new Set(valueFieldNames);
 
   const aggregate = (columnIndex: number): SharedItemValue[] => {
-    const columnValues = source.getColumn(columnIndex).values;
+    const columnValues = columnValuesOf(source.getColumn(columnIndex));
     // Build unique values set directly, skipping header (index 0,1).
     // null/undefined are tracked separately (collapsed to a single null sentinel)
     // because Set treats each null as the same key but undefined as a separate key,
@@ -853,7 +912,7 @@ function makeCacheFields(
   const getMinMax = (
     columnIndex: number
   ): { minValue: number; maxValue: number; allInteger: boolean } | null => {
-    const columnValues = source.getColumn(columnIndex).values;
+    const columnValues = columnValuesOf(source.getColumn(columnIndex));
     let min = Infinity;
     let max = -Infinity;
     let hasNumeric = false;

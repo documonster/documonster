@@ -24,7 +24,14 @@ import {
   buildChartScene
 } from "@excel/chart";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import {
+  definedNamesAdd,
+  definedNamesAddFormula,
+  definedNamesSetModel
+} from "@excel/defined-names";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getDefinedNames } from "@excel/workbook";
+import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/worksheet";
 import { beforeAll, describe, it, expect } from "vitest";
 
 import { CATEGORIES, VALUES_B, baseSeries, ctg, pa } from "./chart-builder.helpers";
@@ -70,9 +77,9 @@ describe("trendline array", () => {
   // only linear / movingAvg were implemented. Data-space fitting now
   // produces the correct curve for every OOXML type.
   it("renderer fits exp/log/power/poly trendlines as curves, not straight lines", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       [1, 2],
       [2, 4],
       [3, 8],
@@ -80,7 +87,8 @@ describe("trendline array", () => {
       [5, 32],
       [6, 64]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "scatter",
         series: [
@@ -94,7 +102,7 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const scene = buildChartScene(model, { width: 420, height: 260 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
@@ -106,15 +114,16 @@ describe("trendline array", () => {
   });
 
   it("linear trendline produces a positive-slope line for positive-slope data", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       [1, 3],
       [2, 5],
       [3, 7],
       [4, 9]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "scatter",
         series: [
@@ -128,7 +137,7 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const scene = buildChartScene(model, { width: 400, height: 300 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
@@ -246,22 +255,22 @@ describe("extended axis options", () => {
 
 describe("Chart class convenience methods", () => {
   it("plotArea getter returns the plot area", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     expect(chart.plotArea).toBeDefined();
     expect(chart.plotArea!.chartTypes).toHaveLength(1);
     expect(chart.plotArea!.axes.length).toBeGreaterThan(0);
   });
 
   it("addSeries adds to first chart type group", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     expect(chart.getSeriesCount(0)).toBe(1);
     chart.addSeries({
       index: 1,
@@ -273,11 +282,11 @@ describe("Chart class convenience methods", () => {
   });
 
   it("removeSeries removes by index", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
-    ws.addChart({ type: "bar", series: [baseSeries("S1"), baseSeries("S2", VALUES_B)] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
+    addChart(ws, { type: "bar", series: [baseSeries("S1"), baseSeries("S2", VALUES_B)] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     expect(chart.getSeriesCount(0)).toBe(2);
     const removed = chart.removeSeries(0);
     expect(removed).toBeDefined();
@@ -285,11 +294,11 @@ describe("Chart class convenience methods", () => {
   });
 
   it("removeSeries returns undefined for out-of-range index", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     expect(chart.removeSeries(5)).toBeUndefined();
     expect(chart.removeSeries(-1)).toBeUndefined();
   });
@@ -459,20 +468,20 @@ describe("gradient and pattern fill", () => {
 
 describe("automatic chart cache population", () => {
   it("fills numRef cache from worksheet values when addChart is called", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Q1";
-    ws.getCell("A2").value = "Q2";
-    ws.getCell("A3").value = "Q3";
-    ws.getCell("A4").value = "Q4";
-    ws.getCell("B1").value = 100;
-    ws.getCell("B2").value = 200;
-    ws.getCell("B3").value = 300;
-    ws.getCell("B4").value = 400;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Q1");
+    Cell.setValue(ws, "A2", "Q2");
+    Cell.setValue(ws, "A3", "Q3");
+    Cell.setValue(ws, "A4", "Q4");
+    Cell.setValue(ws, "B1", 100);
+    Cell.setValue(ws, "B2", 200);
+    Cell.setValue(ws, "B3", 300);
+    Cell.setValue(ws, "B4", 400);
 
-    ws.addChart({ type: "bar", series: [baseSeries("Sales")] }, "C1:J10");
+    addChart(ws, { type: "bar", series: [baseSeries("Sales")] }, "C1:J10");
 
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
 
     expect(series.val.numRef.cache.points).toHaveLength(4);
@@ -482,20 +491,20 @@ describe("automatic chart cache population", () => {
   });
 
   it("fills strRef cache from category values", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Jan";
-    ws.getCell("A2").value = "Feb";
-    ws.getCell("A3").value = "Mar";
-    ws.getCell("A4").value = "Apr";
-    ws.getCell("B1").value = 10;
-    ws.getCell("B2").value = 20;
-    ws.getCell("B3").value = 30;
-    ws.getCell("B4").value = 40;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Jan");
+    Cell.setValue(ws, "A2", "Feb");
+    Cell.setValue(ws, "A3", "Mar");
+    Cell.setValue(ws, "A4", "Apr");
+    Cell.setValue(ws, "B1", 10);
+    Cell.setValue(ws, "B2", 20);
+    Cell.setValue(ws, "B3", 30);
+    Cell.setValue(ws, "B4", 40);
 
-    ws.addChart({ type: "line", series: [baseSeries("S")] }, "C1:J10");
+    addChart(ws, { type: "line", series: [baseSeries("S")] }, "C1:J10");
 
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.cat.strRef.cache.points).toHaveLength(4);
     expect(series.cat.strRef.cache.points[0]).toEqual({ index: 0, value: "Jan" });
@@ -503,19 +512,19 @@ describe("automatic chart cache population", () => {
   });
 
   it("handles missing cells by leaving gaps in cache", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "a";
-    ws.getCell("A2").value = "b";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "a");
+    Cell.setValue(ws, "A2", "b");
     // A3 intentionally left empty
-    ws.getCell("A4").value = "d";
-    ws.getCell("B1").value = 10;
+    Cell.setValue(ws, "A4", "d");
+    Cell.setValue(ws, "B1", 10);
     // B2, B3 empty
-    ws.getCell("B4").value = 40;
+    Cell.setValue(ws, "B4", 40);
 
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, "C1:J10");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
 
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     const numPoints = series.val.numRef.cache.points;
     // pointCount should include total slots
@@ -527,13 +536,14 @@ describe("automatic chart cache population", () => {
   });
 
   it("resolves references to other worksheets", () => {
-    const wb = new Workbook();
-    const data = wb.addWorksheet("Data");
-    data.getCell("A1").value = 1;
-    data.getCell("A2").value = 2;
-    data.getCell("A3").value = 3;
-    const chartWs = wb.addWorksheet("Charts");
-    chartWs.addChart(
+    const wb = Workbook.create();
+    const data = Workbook.addWorksheet(wb, "Data");
+    Cell.setValue(data, "A1", 1);
+    Cell.setValue(data, "A2", 2);
+    Cell.setValue(data, "A3", 3);
+    const chartWs = Workbook.addWorksheet(wb, "Charts");
+    addChart(
+      chartWs,
       {
         type: "bar",
         series: [
@@ -546,19 +556,20 @@ describe("automatic chart cache population", () => {
       },
       "A1:H10"
     );
-    const chart = chartWs.getCharts()[0];
+    const chart = getCharts(chartWs)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 1 });
   });
 
   it("handles sheet names with spaces (quoted)", () => {
-    const wb = new Workbook();
-    const data = wb.addWorksheet("My Data");
-    data.getCell("A1").value = 10;
-    data.getCell("A2").value = 20;
-    const chartWs = wb.addWorksheet("Chart");
-    chartWs.addChart(
+    const wb = Workbook.create();
+    const data = Workbook.addWorksheet(wb, "My Data");
+    Cell.setValue(data, "A1", 10);
+    Cell.setValue(data, "A2", 20);
+    const chartWs = Workbook.addWorksheet(wb, "Chart");
+    addChart(
+      chartWs,
       {
         type: "bar",
         series: [
@@ -571,25 +582,26 @@ describe("automatic chart cache population", () => {
       },
       "A1:H10"
     );
-    const chart = chartWs.getCharts()[0];
+    const chart = getCharts(chartWs)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(2);
   });
 
   it("populates bubble chart xVal, yVal, and bubbleSize caches", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    ws.getCell("A2").value = 2;
-    ws.getCell("A3").value = 3;
-    ws.getCell("B1").value = 10;
-    ws.getCell("B2").value = 20;
-    ws.getCell("B3").value = 30;
-    ws.getCell("C1").value = 5;
-    ws.getCell("C2").value = 10;
-    ws.getCell("C3").value = 15;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    Cell.setValue(ws, "A2", 2);
+    Cell.setValue(ws, "A3", 3);
+    Cell.setValue(ws, "B1", 10);
+    Cell.setValue(ws, "B2", 20);
+    Cell.setValue(ws, "B3", 30);
+    Cell.setValue(ws, "C1", 5);
+    Cell.setValue(ws, "C2", 10);
+    Cell.setValue(ws, "C3", 15);
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bubble",
         series: [
@@ -603,7 +615,7 @@ describe("automatic chart cache population", () => {
       },
       "D1:K10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.xVal.numRef.cache.points).toHaveLength(3);
     expect(series.yVal.numRef.cache.points).toHaveLength(3);
@@ -611,12 +623,13 @@ describe("automatic chart cache population", () => {
   });
 
   it("handles non-existent sheet gracefully", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
     // Should not throw even though NoSuchSheet doesn't exist
     expect(() => {
-      ws.addChart(
+      addChart(
+        ws,
         {
           type: "bar",
           series: [
@@ -633,24 +646,24 @@ describe("automatic chart cache population", () => {
   });
 
   it("converts boolean cell values to 0/1 for numRef", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "a";
-    ws.getCell("A2").value = "b";
-    ws.getCell("B1").value = true;
-    ws.getCell("B2").value = false;
-    ws.addChart({ type: "bar", series: [baseSeries("S", "Sheet1!$B$1:$B$2")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "a");
+    Cell.setValue(ws, "A2", "b");
+    Cell.setValue(ws, "B1", true);
+    Cell.setValue(ws, "B2", false);
+    addChart(ws, { type: "bar", series: [baseSeries("S", "Sheet1!$B$1:$B$2")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points[0].value).toBe(1);
     expect(series.val.numRef.cache.points[1].value).toBe(0);
   });
 
   it("skips already-populated caches (idempotent)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "a";
-    ws.getCell("B1").value = 100;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "a");
+    Cell.setValue(ws, "B1", 100);
 
     // Build manually so we can pre-populate
     const m = buildChartModel({
@@ -672,19 +685,20 @@ describe("automatic chart cache population", () => {
 
 describe("chart cache population — defined names", () => {
   it("resolves a workbook-scoped defined name pointing to a single column", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Jan";
-    ws.getCell("A2").value = "Feb";
-    ws.getCell("A3").value = "Mar";
-    ws.getCell("B1").value = 10;
-    ws.getCell("B2").value = 20;
-    ws.getCell("B3").value = 30;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Jan");
+    Cell.setValue(ws, "A2", "Feb");
+    Cell.setValue(ws, "A3", "Mar");
+    Cell.setValue(ws, "B1", 10);
+    Cell.setValue(ws, "B2", 20);
+    Cell.setValue(ws, "B3", 30);
 
-    wb.definedNames.add("Sheet1!$B$1:$B$3", "Sales");
-    wb.definedNames.add("Sheet1!$A$1:$A$3", "Months");
+    definedNamesAdd(getDefinedNames(wb), "Sheet1!$B$1:$B$3", "Sales");
+    definedNamesAdd(getDefinedNames(wb), "Sheet1!$A$1:$A$3", "Months");
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Months", values: "Sales" }]
@@ -692,7 +706,7 @@ describe("chart cache population — defined names", () => {
       "D1:K10"
     );
 
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 10 });
@@ -701,14 +715,15 @@ describe("chart cache population — defined names", () => {
   });
 
   it("resolves a qualified `Sheet!Name` reference", () => {
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("Data");
-    const ws2 = wb.addWorksheet("Report");
-    ws1.getCell("A1").value = 111;
-    ws1.getCell("A2").value = 222;
-    wb.definedNames.add("Data!$A$1:$A$2", "MyVals");
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "Data");
+    const ws2 = Workbook.addWorksheet(wb, "Report");
+    Cell.setValue(ws1, "A1", 111);
+    Cell.setValue(ws1, "A2", 222);
+    definedNamesAdd(getDefinedNames(wb), "Data!$A$1:$A$2", "MyVals");
 
-    ws2.addChart(
+    addChart(
+      ws2,
       {
         type: "bar",
         series: [{ name: "S", categories: "Data!$A$1:$A$2", values: "Data!MyVals" }]
@@ -716,7 +731,7 @@ describe("chart cache population — defined names", () => {
       "A1:H10"
     );
 
-    const chart = ws2.getCharts()[0];
+    const chart = getCharts(ws2)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toEqual([
       { index: 0, value: 111 },
@@ -725,30 +740,31 @@ describe("chart cache population — defined names", () => {
   });
 
   it("prefers sheet-scoped entry over workbook-scoped when both exist", () => {
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("Sheet1");
-    const ws2 = wb.addWorksheet("Sheet2");
-    ws1.getCell("A1").value = 1;
-    ws1.getCell("A2").value = 2;
-    ws2.getCell("A1").value = 100;
-    ws2.getCell("A2").value = 200;
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+    const ws2 = Workbook.addWorksheet(wb, "Sheet2");
+    Cell.setValue(ws1, "A1", 1);
+    Cell.setValue(ws1, "A2", 2);
+    Cell.setValue(ws2, "A1", 100);
+    Cell.setValue(ws2, "A2", 200);
 
     // Workbook-scoped points at Sheet1
-    wb.definedNames.model = [
+    definedNamesSetModel(getDefinedNames(wb), [
       { name: "Local", ranges: ["Sheet1!$A$1:$A$2"] },
       // Sheet-scoped on Sheet2 (localSheetId = 1 since Sheet2 is index 1 in worksheets)
       { name: "Local", ranges: ["Sheet2!$A$1:$A$2"], localSheetId: 1 }
-    ];
+    ]);
 
     // Chart on Sheet2: bare `Local` should resolve to Sheet2's scoped entry
-    ws2.addChart(
+    addChart(
+      ws2,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet2!$A$1:$A$2", values: "Local" }]
       },
       "C1:J10"
     );
-    const chart2 = ws2.getCharts()[0];
+    const chart2 = getCharts(ws2)[0];
     const series2 = chart2.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series2.val.numRef.cache.points).toEqual([
       { index: 0, value: 100 },
@@ -756,14 +772,15 @@ describe("chart cache population — defined names", () => {
     ]);
 
     // Chart on Sheet1: bare `Local` should resolve to workbook-scoped Sheet1 entry
-    ws1.addChart(
+    addChart(
+      ws1,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Local" }]
       },
       "C1:J10"
     );
-    const chart1 = ws1.getCharts()[0];
+    const chart1 = getCharts(ws1)[0];
     const series1 = chart1.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series1.val.numRef.cache.points).toEqual([
       { index: 0, value: 1 },
@@ -772,27 +789,28 @@ describe("chart cache population — defined names", () => {
   });
 
   it("expands a multi-area defined name into concatenated cells", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    ws.getCell("A2").value = 2;
-    ws.getCell("C1").value = 3;
-    ws.getCell("C2").value = 4;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    Cell.setValue(ws, "A2", 2);
+    Cell.setValue(ws, "C1", 3);
+    Cell.setValue(ws, "C2", 4);
 
     // Add two disjoint ranges under the same name — the matrix expands them
     // into two ranges that should be concatenated in order when the chart
     // is resolved.
-    wb.definedNames.add("Sheet1!$A$1:$A$2", "Multi");
-    wb.definedNames.add("Sheet1!$C$1:$C$2", "Multi");
+    definedNamesAdd(getDefinedNames(wb), "Sheet1!$A$1:$A$2", "Multi");
+    definedNamesAdd(getDefinedNames(wb), "Sheet1!$C$1:$C$2", "Multi");
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Multi" }]
       },
       "E1:L10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     // All four values should be present (order: both ranges concatenated)
     const values = (series.val.numRef.cache.points as Array<{ value: number }>).map(p => p.value);
@@ -800,9 +818,9 @@ describe("chart cache population — defined names", () => {
   });
 
   it("silently ignores unknown defined names (no crash, empty cache)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
 
     // Use the builder directly so the assertion targets the resolver, not
     // the Worksheet.addChart convenience path.
@@ -818,15 +836,15 @@ describe("chart cache population — defined names", () => {
   });
 
   it("terminates on cyclic defined names without blowing the stack", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
 
     // Build a synthetic cycle by using formula-based defined names that
     // refer to each other. The resolver should bail out, not recurse
     // forever.
-    wb.definedNames.addFormula("A", "B");
-    wb.definedNames.addFormula("B", "A");
+    definedNamesAddFormula(getDefinedNames(wb), "A", "B");
+    definedNamesAddFormula(getDefinedNames(wb), "B", "A");
 
     const m = buildChartModel({
       type: "bar",
@@ -842,12 +860,12 @@ describe("chart cache population — defined names", () => {
 
 describe("rich text writing API", () => {
   function makeChart() {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "a";
-    ws.getCell("B1").value = 1;
-    ws.addChart({ type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
-    return { wb, ws, chart: ws.getCharts()[0] };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "a");
+    Cell.setValue(ws, "B1", 1);
+    addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
+    return { wb, ws, chart: getCharts(ws)[0] };
   }
 
   it("chart.title setter accepts plain string", () => {
@@ -1040,10 +1058,10 @@ describe("rich text writing API", () => {
       ]
     };
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart2 = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // On read, rich text may come back as rawTx — the plain-string title getter
     // should still extract the concatenated text.
     expect(chart2.title).toContain("Bold");
@@ -1448,18 +1466,19 @@ describe("effect list and 3D structured", () => {
   });
 
   it("chart with structured spPr + effectList renders via xlsx round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "x";
-    ws.getCell("B1").value = 1;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "x");
+    Cell.setValue(ws, "B1", 1);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [baseSeries("S")]
       },
       "C1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Assign effect list to the first series
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     series.spPr = {
@@ -1474,10 +1493,10 @@ describe("effect list and 3D structured", () => {
         }
       }
     };
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart2 = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     const s = chart2.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     // After round-trip spPr comes back as _rawXml — parseSpPr extracts it
     const parsed = parseSpPr(s.spPr);
@@ -1492,13 +1511,14 @@ describe("effect list and 3D structured", () => {
 
 describe("anchor types and chart management", () => {
   it("addChart with oneCell anchor (tl + ext)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(
+      ws,
       { type: "bar", series: [baseSeries("S")] },
       { tl: "B2", ext: { cx: 3657600, cy: 2743200 } }
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     expect(chart.range.ext?.cx).toBe(3657600);
     expect(chart.range.ext?.cy).toBe(2743200);
     expect(chart.range.br).toBeUndefined();
@@ -1506,13 +1526,14 @@ describe("anchor types and chart management", () => {
   });
 
   it("addChart with absolute anchor (pos + ext)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(
+      ws,
       { type: "bar", series: [baseSeries("S")] },
       { pos: { x: 914400, y: 914400 }, ext: { cx: 3657600, cy: 2743200 } }
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     expect(chart.range.pos?.x).toBe(914400);
     expect(chart.range.pos?.y).toBe(914400);
     expect(chart.range.ext?.cx).toBe(3657600);
@@ -1520,25 +1541,25 @@ describe("anchor types and chart management", () => {
   });
 
   it("addChart with two-cell anchor (tl + br)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, { tl: "B2", br: "H10" });
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, { tl: "B2", br: "H10" });
+    const chart = getCharts(ws)[0];
     expect(chart.range.br).toBeDefined();
     expect(chart.range.editAs).toBe("twoCell");
   });
 
   it("Chart.clone creates a deep copy in the same worksheet", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "x";
-    ws.getCell("B1").value = 1;
-    ws.addChart({ type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
-    const original = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "x");
+    Cell.setValue(ws, "B1", 1);
+    addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
+    const original = getCharts(ws)[0];
     const clonedNumber = original.clone();
-    expect(ws.getCharts()).toHaveLength(2);
+    expect(getCharts(ws)).toHaveLength(2);
     expect(clonedNumber).not.toBe(original.chartNumber);
-    const cloned = ws.getCharts()[1];
+    const cloned = getCharts(ws)[1];
     expect(cloned.title).toBe("Original");
     // Mutate the clone — original should be unchanged
     cloned.title = "Modified";
@@ -1547,58 +1568,59 @@ describe("anchor types and chart management", () => {
   });
 
   it("Chart.copyTo copies to another worksheet", () => {
-    const wb = new Workbook();
-    const src = wb.addWorksheet("Source");
-    const dst = wb.addWorksheet("Dest");
-    src.getCell("A1").value = "x";
-    src.getCell("B1").value = 1;
-    src.addChart({ type: "bar", series: [baseSeries("S")], title: "Moved" }, "C1:J10");
-    const chart = src.getCharts()[0];
+    const wb = Workbook.create();
+    const src = Workbook.addWorksheet(wb, "Source");
+    const dst = Workbook.addWorksheet(wb, "Dest");
+    Cell.setValue(src, "A1", "x");
+    Cell.setValue(src, "B1", 1);
+    addChart(src, { type: "bar", series: [baseSeries("S")], title: "Moved" }, "C1:J10");
+    const chart = getCharts(src)[0];
     chart.copyTo(dst, "A1:H10");
-    expect(dst.getCharts()).toHaveLength(1);
-    expect(dst.getCharts()[0].title).toBe("Moved");
+    expect(getCharts(dst)).toHaveLength(1);
+    expect(getCharts(dst)[0].title).toBe("Moved");
     // Original still exists in source
-    expect(src.getCharts()).toHaveLength(1);
+    expect(getCharts(src)).toHaveLength(1);
   });
 
   it("Worksheet.removeChart by object", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, "C1:J10");
-    ws.addChart({ type: "line", series: [baseSeries("S")] }, "K1:R10");
-    const charts = ws.getCharts();
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
+    addChart(ws, { type: "line", series: [baseSeries("S")] }, "K1:R10");
+    const charts = getCharts(ws);
     expect(charts).toHaveLength(2);
-    const removed = ws.removeChart(charts[0]);
+    const removed = removeChart(ws, charts[0]);
     expect(removed).toBe(true);
-    expect(ws.getCharts()).toHaveLength(1);
-    expect(ws.getCharts()[0].chartTypes[0].type).toBe("line");
+    expect(getCharts(ws)).toHaveLength(1);
+    expect(getCharts(ws)[0].chartTypes[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart by index", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, "C1:J10");
-    ws.addChart({ type: "line", series: [baseSeries("S")] }, "K1:R10");
-    ws.removeChart(0);
-    expect(ws.getCharts()).toHaveLength(1);
-    expect(ws.getCharts()[0].chartTypes[0].type).toBe("line");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
+    addChart(ws, { type: "line", series: [baseSeries("S")] }, "K1:R10");
+    removeChart(ws, 0);
+    expect(getCharts(ws)).toHaveLength(1);
+    expect(getCharts(ws)[0].chartTypes[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart returns false for out-of-range", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, "C1:J10");
-    expect(ws.removeChart(10)).toBe(false);
-    expect(ws.removeChart(-1)).toBe(false);
-    expect(ws.getCharts()).toHaveLength(1);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
+    expect(removeChart(ws, 10)).toBe(false);
+    expect(removeChart(ws, -1)).toBe(false);
+    expect(getCharts(ws)).toHaveLength(1);
   });
 
   it("Chart.getSeries / addSeries / removeSeries with group index (combo)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "a";
-    ws.getCell("B1").value = 1;
-    ws.addComboChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "a");
+    Cell.setValue(ws, "B1", 1);
+    addComboChart(
+      ws,
       {
         groups: [
           { type: "bar", series: [baseSeries("Bar")] },
@@ -1607,7 +1629,7 @@ describe("anchor types and chart management", () => {
       },
       "C1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     expect(chart.getSeriesCount(0)).toBe(1);
     expect(chart.getSeriesCount(1)).toBe(1);
     expect(chart.totalSeriesCount).toBe(2);
@@ -1662,11 +1684,12 @@ describe("chart sidecar files", () => {
   });
 
   it("addChart writes chart style/colors sidecars from structured options", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Cat1";
-    ws.getCell("B1").value = 10;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Cat1");
+    Cell.setValue(ws, "B1", 10);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1", values: "Sheet1!$B$1" }],
@@ -1680,7 +1703,7 @@ describe("chart sidecar files", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/style1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colors1.xml")!.data);
@@ -1694,11 +1717,12 @@ describe("chart sidecar files", () => {
   });
 
   it("Chart.copyTo preserves chart style/colors sidecars across workbooks", async () => {
-    const srcWb = new Workbook();
-    const src = srcWb.addWorksheet("Src");
-    src.getCell("A1").value = "Cat1";
-    src.getCell("B1").value = 10;
-    src.addChart(
+    const srcWb = Workbook.create();
+    const src = Workbook.addWorksheet(srcWb, "Src");
+    Cell.setValue(src, "A1", "Cat1");
+    Cell.setValue(src, "B1", 10);
+    addChart(
+      src,
       {
         type: "bar",
         series: [{ name: "S", categories: "Src!$A$1", values: "Src!$B$1" }],
@@ -1708,11 +1732,11 @@ describe("chart sidecar files", () => {
       "D1:J10"
     );
 
-    const dstWb = new Workbook();
-    const dst = dstWb.addWorksheet("Dst");
-    src.getCharts()[0].copyTo(dst, "A1:H10");
+    const dstWb = Workbook.create();
+    const dst = Workbook.addWorksheet(dstWb, "Dst");
+    getCharts(src)[0].copyTo(dst, "A1:H10");
 
-    const buf = await dstWb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(dstWb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/style1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colors1.xml")!.data);
@@ -1724,11 +1748,12 @@ describe("chart sidecar files", () => {
   });
 
   it("addChartEx writes chartEx style/colors sidecars from structured options", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Cat1";
-    ws.getCell("B1").value = 10;
-    ws.addChartEx(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Cat1");
+    Cell.setValue(ws, "B1", 10);
+    addChartEx(
+      ws,
       {
         type: "histogram",
         series: [{ name: "S", values: "Sheet1!$B$1:$B$1" }],
@@ -1738,7 +1763,7 @@ describe("chart sidecar files", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/styleEx1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colorsEx1.xml")!.data);

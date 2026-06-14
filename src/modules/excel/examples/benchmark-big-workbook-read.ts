@@ -1,8 +1,10 @@
 import { ColumnSum } from "@excel/examples/utils/column-sum";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { formatNumber } from "@excel/examples/utils/utils";
+import { Workbook, Worksheet } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
 
-import { Workbook, WorkbookReader } from "../../../index";
+import { WorkbookReader } from "../../../index";
 
 if (process.argv[2] === "help") {
   console.log("Usage:");
@@ -117,12 +119,12 @@ if (useStream) {
       break;
   }
 } else {
-  const wb = new Workbook();
-  wb.xlsx
+  const wb = Workbook.create();
+  getXlsxIo(wb)
     .readFile(filename)
     .then(() => {
-      const ws = wb.getWorksheet("blort");
-      ws!.eachRow(checkRow);
+      const ws = Workbook.getWorksheet(wb, "blort")!;
+      Worksheet.eachRow(ws!, checkRow);
     })
     .then(report);
 }

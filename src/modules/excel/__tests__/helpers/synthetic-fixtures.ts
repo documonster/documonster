@@ -1,3 +1,4 @@
+import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
 /**
  * Synthetic chart fixture builders.
  *
@@ -26,8 +27,6 @@
  * log axis, pivot chart with field buttons, chartsheet hosting, raw
  * passthrough with extension XML).
  */
-
-import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import {
   applyChartPreset,
@@ -35,7 +34,15 @@ import {
   type ChartExType,
   type ExcelChartPreset
 } from "@excel/chart";
-import { Workbook } from "@excel/workbook";
+import { Workbook, Worksheet } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
+import {
+  addChart,
+  addChartEx,
+  addComboChart,
+  addPivotChart,
+  addPivotTable
+} from "@excel/worksheet";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -45,7 +52,7 @@ export interface SyntheticFixture {
   id: string;
   /** Human-readable description (e.g. "classic bar with dataLabels + trendline"). */
   description: string;
-  /** xlsx bytes ready to pass to `Workbook.xlsx.load()`. */
+  /** xlsx bytes ready to pass to `Workbook.loadXlsx(Workbook)`. */
   bytes: Uint8Array;
 }
 
@@ -232,9 +239,9 @@ const SAMPLE_ROWS: Array<Array<string | number>> = [
   ["C", "South", 12, 18, 9, 16, 10, 1, 9]
 ];
 
-function seedDataSheet(wb: Workbook): void {
-  const sheet = wb.addWorksheet("Data");
-  sheet.addRows(SAMPLE_ROWS);
+function seedDataSheet(wb: WorkbookData): void {
+  const sheet = Workbook.addWorksheet(wb, "Data");
+  Worksheet.addRows(sheet, SAMPLE_ROWS);
 }
 
 /**
@@ -277,9 +284,9 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
             ? "ctr"
             : "t";
 
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    const sheet = wb.getWorksheet("Data")!;
+    const sheet = Workbook.getWorksheet(wb, "Data")!;
 
     const baseSeries = {
       name: String(preset),
@@ -326,9 +333,9 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
       categoryAxis: noAxis ? undefined : { textRotation: -30 },
       plotAreaOptions: { layout: { manualLayout: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } } }
     });
-    sheet.addChart(options, "K1:Q12");
+    addChart(sheet, options, "K1:Q12");
 
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     const decorated = await decorateWithSyntheticMarkers(raw);
     fixtures.push({
       id: `classic-${preset}`,
@@ -357,11 +364,12 @@ export const CHART_EX_TYPES: ChartExType[] = [
 export async function buildChartExFixtures(): Promise<SyntheticFixture[]> {
   const fixtures: SyntheticFixture[] = [];
   for (const type of CHART_EX_TYPES) {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    const sheet = wb.getWorksheet("Data")!;
+    const sheet = Workbook.getWorksheet(wb, "Data")!;
 
-    sheet.addChartEx(
+    addChartEx(
+      sheet,
       {
         type,
         categories: "Data!$A$2:$A$4",
@@ -379,7 +387,7 @@ export async function buildChartExFixtures(): Promise<SyntheticFixture[]> {
       "K1:Q12"
     );
 
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     // ChartEx fixtures get both the SYNTHETIC marker comment and a
     // vendor `cx:extLst` on `cx:chartSpace`. The structured renderer
     // preserves the latter via `chartSpace.extLst` raw passthrough so
@@ -404,9 +412,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
   // 1. Stacked bar + line on a secondary axis.
   {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    wb.getWorksheet("Data")!.addComboChart(
+    addComboChart(
+      Workbook.getWorksheet(wb, "Data")!,
       {
         groups: [
           {
@@ -428,7 +437,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "combo-stacked-secondary",
       description: "stacked bar + line with secondary value axis",
@@ -438,9 +447,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
   // 2. Scatter + line combo.
   {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    wb.getWorksheet("Data")!.addComboChart(
+    addComboChart(
+      Workbook.getWorksheet(wb, "Data")!,
       {
         groups: [
           {
@@ -465,7 +475,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "combo-scatter-line",
       description: "scatter + line combo with secondary axis",
@@ -475,9 +485,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
   // 3. Log-scale value axis.
   {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    wb.getWorksheet("Data")!.addChart(
+    addChart(
+      Workbook.getWorksheet(wb, "Data")!,
       {
         type: "line",
         series: [{ categories: "Data!$A$2:$A$4", values: "Data!$G$2:$G$4" }],
@@ -486,7 +497,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "axis-log",
       description: "line chart with log10 value axis",
@@ -496,9 +507,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
   // 4. Multiple secondary axes (bar primary, line secondary, area secondary).
   {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    wb.getWorksheet("Data")!.addComboChart(
+    addComboChart(
+      Workbook.getWorksheet(wb, "Data")!,
       {
         groups: [
           {
@@ -521,7 +533,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "combo-three-groups-shared-secondary",
       description: "three combo groups, two sharing the same secondary axis",
@@ -531,9 +543,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
   // 5. 3D bar combo + line.
   {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     seedDataSheet(wb);
-    wb.getWorksheet("Data")!.addComboChart(
+    addComboChart(
+      Workbook.getWorksheet(wb, "Data")!,
       {
         groups: [
           {
@@ -549,7 +562,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "combo-3d-bar-line",
       description: "3D bar group with serAx + 2D line group",
@@ -566,10 +579,10 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
 
 export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
   const fixtures: SyntheticFixture[] = [];
-  const wb = new Workbook();
+  const wb = Workbook.create();
   seedDataSheet(wb);
 
-  wb.addChartsheet("Pie Chart Sheet", {
+  Workbook.addChartsheet(wb, "Pie Chart Sheet", {
     chart: {
       type: "pie",
       series: [{ categories: "Data!$A$2:$A$4", values: "Data!$G$2:$G$4" }],
@@ -582,7 +595,7 @@ export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
     pageSetup: { orientation: "landscape", paperSize: 9 }
   });
 
-  wb.addChartsheet("Funnel Chart Sheet", {
+  Workbook.addChartsheet(wb, "Funnel Chart Sheet", {
     chart: {
       type: "funnel",
       categories: "Data!$A$2:$A$4",
@@ -592,7 +605,7 @@ export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
     state: "visible"
   });
 
-  wb.addChartsheet("Combo Chart Sheet", {
+  Workbook.addChartsheet(wb, "Combo Chart Sheet", {
     chart: {
       groups: [
         {
@@ -611,7 +624,7 @@ export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
   });
 
   // Hidden chartsheet — exercises the `state="hidden"` write path.
-  wb.addChartsheet("Hidden Sheet", {
+  Workbook.addChartsheet(wb, "Hidden Sheet", {
     state: "hidden",
     chart: {
       type: "bar",
@@ -619,7 +632,7 @@ export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
     }
   });
 
-  const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+  const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   fixtures.push({
     id: "chartsheet-mixed",
     description: "four chartsheets (pie, funnel, combo, hidden) plus a Data worksheet",
@@ -637,24 +650,25 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
 
   // Single pivot table + chart with field buttons + refreshOnOpen.
   {
-    const wb = new Workbook();
-    const data = wb.addWorksheet("Data");
-    data.addRows([
+    const wb = Workbook.create();
+    const data = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(data, [
       ["Region", "Product", "Revenue", "Units"],
       ["West", "A", 10, 1],
       ["West", "B", 20, 2],
       ["East", "A", 30, 3],
       ["East", "B", 40, 4]
     ]);
-    const pivotSheet = wb.addWorksheet("Pivot");
-    const pivot = pivotSheet.addPivotTable({
+    const pivotSheet = Workbook.addWorksheet(wb, "Pivot");
+    const pivot = addPivotTable(pivotSheet, {
       sourceSheet: data,
       rows: ["Region"],
       columns: ["Product"],
       values: ["Revenue", "Units"],
       metric: "sum"
     });
-    pivotSheet.addPivotChart(
+    addPivotChart(
+      pivotSheet,
       pivot,
       {
         type: "bar",
@@ -677,7 +691,7 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
       },
       "D1:J12"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "pivot-chart-multi-value",
       description:
@@ -688,27 +702,28 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
 
   // Multiple pivot caches + multiple pivot charts.
   {
-    const wb = new Workbook();
-    const sales = wb.addWorksheet("Sales");
-    sales.addRows([
+    const wb = Workbook.create();
+    const sales = Workbook.addWorksheet(wb, "Sales");
+    Worksheet.addRows(sales, [
       ["Region", "Revenue"],
       ["West", 10],
       ["East", 20]
     ]);
-    const ops = wb.addWorksheet("Ops");
-    ops.addRows([
+    const ops = Workbook.addWorksheet(wb, "Ops");
+    Worksheet.addRows(ops, [
       ["Team", "Tickets"],
       ["Alpha", 100],
       ["Beta", 200]
     ]);
-    const salesPivot = wb.addWorksheet("SalesPivot");
-    const salesP = salesPivot.addPivotTable({
+    const salesPivot = Workbook.addWorksheet(wb, "SalesPivot");
+    const salesP = addPivotTable(salesPivot, {
       sourceSheet: sales,
       rows: ["Region"],
       values: ["Revenue"],
       metric: "sum"
     });
-    salesPivot.addPivotChart(
+    addPivotChart(
+      salesPivot,
       salesP,
       {
         type: "pie",
@@ -722,14 +737,15 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
       },
       "D1:J12"
     );
-    const opsPivot = wb.addWorksheet("OpsPivot");
-    const opsP = opsPivot.addPivotTable({
+    const opsPivot = Workbook.addWorksheet(wb, "OpsPivot");
+    const opsP = addPivotTable(opsPivot, {
       sourceSheet: ops,
       rows: ["Team"],
       values: ["Tickets"],
       metric: "sum"
     });
-    opsPivot.addPivotChart(
+    addPivotChart(
+      opsPivot,
       opsP,
       {
         type: "bar",
@@ -743,7 +759,7 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
       },
       "D1:J12"
     );
-    const raw = new Uint8Array(await wb.xlsx.writeBuffer());
+    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     fixtures.push({
       id: "pivot-chart-multi-cache",
       description: "two independent pivot caches each driving a pivot chart",

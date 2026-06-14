@@ -1,9 +1,10 @@
 import { ChartOptionsError } from "@excel/errors";
 import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
+import { getCell, getSheetName, getTable } from "@excel/worksheet";
 
-import type { CellValueInputType } from "../cell";
-import type { Table } from "../table";
+import { type CellValueInputType, cellSetValue } from "../cell";
+import { tableModel, type TableData } from "../table";
 import type { Worksheet } from "../worksheet";
 import type { AddChartExOptions, AddChartExSeriesOptions } from "./chart-ex-types";
 import type { AddChartOptions, AddChartSeriesOptions } from "./types";
@@ -64,17 +65,17 @@ interface ResolvedTableLayout {
 
 function resolveTableLayout(
   worksheet: Worksheet,
-  table: Table | string,
+  table: TableData | string,
   options: Pick<
     AddChartFromTableOptions,
     "categoryColumn" | "valueColumns" | "structuredReferences"
   >
 ): ResolvedTableLayout {
-  const resolved = typeof table === "string" ? worksheet.getTable(table) : table;
+  const resolved = typeof table === "string" ? getTable(worksheet, table) : table;
   if (!resolved) {
     throw new ChartOptionsError(`Table not found: ${String(table)}.`);
   }
-  const model = resolved.model;
+  const model = tableModel(resolved);
   const tableRef = colCache.decode(model.tableRef ?? model.ref);
   if (!("top" in tableRef)) {
     throw new ChartOptionsError(`Invalid table range: ${model.ref}.`);
@@ -106,7 +107,7 @@ function resolveTableLayout(
     columnNames,
     categoryIndex,
     valueColumns,
-    sheetName: worksheet.name,
+    sheetName: getSheetName(worksheet),
     structured: options.structuredReferences !== false
   };
 }
@@ -132,7 +133,7 @@ function buildColumnReference(layout: ResolvedTableLayout, columnIndex: number):
 
 export function chartOptionsFromTable(
   worksheet: Worksheet,
-  table: Table | string,
+  table: TableData | string,
   options: AddChartFromTableOptions
 ): AddChartOptions {
   const layout = resolveTableLayout(worksheet, table, options);
@@ -154,7 +155,7 @@ export function chartOptionsFromRows<T extends Record<string, unknown>>(
     throw new ChartOptionsError("chartOptionsFromRows requires at least one row.");
   }
   const staged = stageRowsIntoWorksheet(worksheet, rows, options);
-  const sheetName = worksheet.name;
+  const sheetName = getSheetName(worksheet);
   const series = staged.yKeys.map((key, i) => ({
     name: key,
     categories: absoluteRange(
@@ -377,9 +378,12 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
     includeHeaders?: boolean;
   }
 ): StagedRows<T> {
-  if (options.sheetName !== undefined && !sheetNamesEqual(options.sheetName, worksheet.name)) {
+  if (
+    options.sheetName !== undefined &&
+    !sheetNamesEqual(options.sheetName, getSheetName(worksheet))
+  ) {
     throw new ChartOptionsError(
-      `sheetName must match the target worksheet: got ${JSON.stringify(options.sheetName)}, expected ${JSON.stringify(worksheet.name)}.`
+      `sheetName must match the target worksheet: got ${JSON.stringify(options.sheetName)}, expected ${JSON.stringify(getSheetName(worksheet))}.`
     );
   }
   const start = colCache.decodeAddress(options.startCell ?? "A1");
@@ -400,15 +404,18 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
   const startCol = start.col;
   if (includeHeaders) {
     keys.forEach((key, i) => {
-      worksheet.getCell(startRow, startCol + i).value = key as unknown as CellValueInputType;
+      cellSetValue(
+        getCell(worksheet, startRow, startCol + i),
+        key as unknown as CellValueInputType
+      );
     });
   }
   const dataRowOffset = includeHeaders ? 1 : 0;
   rows.forEach((row, r) => {
     keys.forEach((key, c) => {
-      worksheet.getCell(startRow + dataRowOffset + r, startCol + c).value = coerceCellValue(
-        row[key],
-        key
+      cellSetValue(
+        getCell(worksheet, startRow + dataRowOffset + r, startCol + c),
+        coerceCellValue(row[key], key)
       );
     });
   });
@@ -564,7 +571,7 @@ export interface AddChartExFromRowsOptions<T extends Record<string, unknown>> ex
  */
 export function chartExOptionsFromTable(
   worksheet: Worksheet,
-  table: Table | string,
+  table: TableData | string,
   options: AddChartExFromTableOptions & { type: Exclude<AddChartExOptions["type"], "regionMap"> }
 ): AddChartExOptions {
   const layout = resolveTableLayout(worksheet, table, options);
@@ -590,7 +597,7 @@ export function chartExOptionsFromRows<T extends Record<string, unknown>>(
     throw new ChartOptionsError("chartExOptionsFromRows requires at least one row.");
   }
   const staged = stageRowsIntoWorksheet(worksheet, rows, options);
-  const sheetName = worksheet.name;
+  const sheetName = getSheetName(worksheet);
   const categories = absoluteRange(
     sheetName,
     staged.dataStartRow,

@@ -10,7 +10,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { Workbook } from "@excel/workbook";
+import { Workbook, Worksheet } from "@excel/index";
+import { getWorksheets } from "@excel/workbook";
+import { getSheetName } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 const TEST_DATA_DIR = path.join(__dirname, "data");
@@ -20,16 +22,16 @@ describe("HAN CELL xlsx files", () => {
     const filePath = path.join(TEST_DATA_DIR, "han-cell-namespace-prefixes.xlsx");
     const buffer = fs.readFileSync(filePath);
 
-    const workbook = new Workbook();
-    await workbook.xlsx.load(buffer);
+    const workbook = Workbook.create();
+    await Workbook.loadXlsx(workbook, buffer);
 
     // Verify the workbook structure
-    expect(workbook.worksheets.length).toBe(1);
-    expect(workbook.worksheets[0].name).toBe("no build");
+    expect(getWorksheets(workbook).length).toBe(1);
+    expect(getSheetName(getWorksheets(workbook)[0])).toBe("no build");
 
     // Verify actual cell data was parsed (shared strings resolved)
-    const worksheet = workbook.worksheets[0];
-    const rowCount = worksheet.rowCount;
+    const worksheet = getWorksheets(workbook)[0];
+    const rowCount = Worksheet.rowCount(worksheet);
     expect(rowCount).toBeGreaterThan(0);
   });
 });

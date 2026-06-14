@@ -1,10 +1,9 @@
 /**
  * Formula Calculation Engine
  *
- * Provides `calculateFormulas()` as the primary function-style entry
- * point. The same work runs when a host calls
- * `Workbook.calculateFormulas()` — both paths dispatch through the
- * engine registered via `installFormulaEngine()`.
+ * Provides `calculateFormulas()` as the sole function-style entry point
+ * for formula evaluation. Call it directly with a workbook — there is no
+ * `Workbook.calculateFormulas()` method and no host-registry indirection.
  *
  * ## Architecture
  *

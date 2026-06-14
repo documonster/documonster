@@ -18,6 +18,7 @@ import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 // erased at runtime; runtime entry points route through `getChartSupport()`.
 import { getChartSupport } from "@excel/chart-host-registry";
 import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
+import { definedNamesAddHidden, definedNamesModel } from "@excel/defined-names";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -108,16 +109,20 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { StreamBuf } from "@excel/utils/stream-buf";
 import type { Workbook, ExternalLinkModel } from "@excel/workbook.browser";
+import {
+  _collectExternalLinksForWrite,
+  _recordAutoExternalLink,
+  getWorkbookModel,
+  setWorkbookModel
+} from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
 import {
   ExternalLinkXform,
   type ParsedExternalLink
 } from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
-import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
 import {
   parsePersonList,
   parseThreadedComments,
@@ -130,20 +135,10 @@ import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
-import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
-import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
-import { PivotCacheDefinitionXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform";
-import { PivotCacheRecordsXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-records-xform";
-import {
-  PivotTableXform,
-  type ParsedPivotTableModel
-} from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
-import { ChartsheetXform } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import type { ParsedPivotTableModel } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { TableXform } from "@excel/xlsx/xform/table/table-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { PassThrough, type IEventEmitter } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
@@ -943,6 +938,10 @@ function shouldAutoValidate(explicit: boolean | undefined): boolean {
  */
 async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
   try {
+    // Dynamic import: the OOXML validator (~66 KB) is a development-only
+    // self-check that never runs in production (see `shouldAutoValidate`).
+    // Loading it lazily keeps it out of consumer bundles entirely.
+    const { validateXlsxBuffer } = await import("@excel/utils/ooxml-validator");
     const report = await validateXlsxBuffer(bytes, { maxProblems: 20 });
     if (report.ok) {
       return;
@@ -4923,7 +4922,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    * Shared by both Node.js write() and browser writeBuffer()
    */
   protected async writeToZip(zip: IZipWriter, options?: XlsxWriteOptions): Promise<void> {
-    const { model } = this.workbook;
+    const model = getWorkbookModel(this.workbook);
     this.prepareModel(model, options);
     this.prepareChartsheets(model);
     this.prepareChartExSidecars(model);
@@ -5374,8 +5373,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     }
 
-    this.reconcile(model, options);
-    this.workbook.model = model;
+    await this.reconcile(model, options);
+    setWorkbookModel(this.workbook, model);
     return this.workbook;
   }
 
@@ -5484,37 +5483,41 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   // Reconcile - shared by all platforms
   // ===========================================================================
 
-  reconcile(model: any, options?: XlsxOptions): void {
+  async reconcile(model: any, options?: XlsxOptions): Promise<void> {
     const workbookXform = new WorkbookXform();
     const worksheetXform = new WorkSheetXform(options);
-    const drawingXform = new DrawingXform();
-    const tableXform = new TableXform();
 
     workbookXform.reconcile(model);
 
-    // reconcile drawings with their rels
-    const drawingOptions: any = {
-      media: model.media,
-      mediaIndex: model.mediaIndex
-    };
-    Object.keys(model.drawings).forEach(name => {
-      const drawing = model.drawings[name];
-      const drawingRel = model.drawingRels[name];
-      if (drawingRel) {
-        drawingOptions.rels = drawingRel.reduce((o: any, rel: any) => {
-          o[rel.Id] = rel;
-          return o;
-        }, {});
-        (drawing.anchors ?? []).forEach((anchor: any) => {
-          const hyperlinks = anchor.picture && anchor.picture.hyperlinks;
-          if (hyperlinks && drawingOptions.rels[hyperlinks.rId]) {
-            hyperlinks.hyperlink = drawingOptions.rels[hyperlinks.rId].Target;
-            delete hyperlinks.rId;
-          }
-        });
-        drawingXform.reconcile(drawing, drawingOptions);
-      }
-    });
+    // reconcile drawings with their rels — DrawingXform (~34 KB) is loaded
+    // lazily so workbooks without drawings never pull it into the bundle.
+    const drawingNames = Object.keys(model.drawings);
+    if (drawingNames.length > 0) {
+      const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
+      const drawingXform = new DrawingXform();
+      const drawingOptions: any = {
+        media: model.media,
+        mediaIndex: model.mediaIndex
+      };
+      drawingNames.forEach(name => {
+        const drawing = model.drawings[name];
+        const drawingRel = model.drawingRels[name];
+        if (drawingRel) {
+          drawingOptions.rels = drawingRel.reduce((o: any, rel: any) => {
+            o[rel.Id] = rel;
+            return o;
+          }, {});
+          (drawing.anchors ?? []).forEach((anchor: any) => {
+            const hyperlinks = anchor.picture && anchor.picture.hyperlinks;
+            if (hyperlinks && drawingOptions.rels[hyperlinks.rId]) {
+              hyperlinks.hyperlink = drawingOptions.rels[hyperlinks.rId].Target;
+              delete hyperlinks.rId;
+            }
+          });
+          drawingXform.reconcile(drawing, drawingOptions);
+        }
+      });
+    }
 
     // Reconcile chart references in drawing anchors
     Object.keys(model.drawings).forEach(name => {
@@ -5546,13 +5549,19 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     });
 
-    // reconcile tables with the default styles
-    const tableOptions = {
-      styles: model.styles
-    };
-    Object.values(model.tables).forEach((table: any) => {
-      tableXform.reconcile(table, tableOptions);
-    });
+    // reconcile tables with the default styles — TableXform (~14 KB) loaded
+    // lazily so table-free workbooks don't pull it in.
+    const tables = Object.values(model.tables);
+    if (tables.length > 0) {
+      const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
+      const tableXform = new TableXform();
+      const tableOptions = {
+        styles: model.styles
+      };
+      tables.forEach((table: any) => {
+        tableXform.reconcile(table, tableOptions);
+      });
+    }
 
     // Reconcile pivot tables
     this._reconcilePivotTables(model);
@@ -5828,7 +5837,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    */
   protected _normaliseExternalLinks(model: any): void {
     // Start from user-declared links, honouring their declaration order.
-    const links = this.workbook._collectExternalLinksForWrite();
+    const links = _collectExternalLinksForWrite(this.workbook);
 
     // Fast lookup: case-insensitive target → link object in `links`.
     const byTarget = new Map<string, ExternalLinkModel>();
@@ -5887,7 +5896,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       const key = ref.workbook.toLowerCase();
       let link = scratch.byTarget.get(key);
       if (!link) {
-        const index = scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+        const index = _recordAutoExternalLink(scratch.workbook, ref.workbook, ref.sheet);
         link = {
           index,
           target: ref.workbook,
@@ -5906,7 +5915,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         // Keep the workbook cache's sheetNames in sync so subsequent
         // writes see the accumulated set.
         if (ref.sheet) {
-          scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+          _recordAutoExternalLink(scratch.workbook, ref.workbook, ref.sheet);
         }
       }
       return link.index;
@@ -6057,6 +6066,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processChartsheetEntry(stream: IParseStream, model: any, sheetNo: number): Promise<void> {
+    const { ChartsheetXform } = await import("@excel/xlsx/xform/sheet/chartsheet-xform");
     const xform = new ChartsheetXform();
     const chartsheet = await xform.parseStream(stream);
     if (chartsheet) {
@@ -6066,6 +6076,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processCommentEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
+    const { CommentsXform } = await import("@excel/xlsx/xform/comment/comments-xform");
     const xform = new CommentsXform();
     const comments = await xform.parseStream(stream);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6073,6 +6084,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processTableEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
+    const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
     const xform = new TableXform();
     const table = await xform.parseStream(stream);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6150,6 +6162,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     const data = rawData ?? (await this.collectStreamData(stream));
 
     // Parse the drawing for normal processing (images, etc.)
+    const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
     const xform = new DrawingXform();
     const xmlString = this.bufferToString(data);
     const drawing = await xform.parseStream(this.createTextStream(xmlString));
@@ -6193,6 +6206,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processVmlDrawingEntry(entry: any, model: any, zipPath: string): Promise<void> {
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const xform = new VmlDrawingXform();
     const vmlDrawing = await xform.parseStream(entry);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6200,6 +6214,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processVmlDrawingHFEntry(entry: any, model: any, _name: string): Promise<void> {
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const xform = new VmlDrawingXform();
     const vmlDrawing = await xform.parseStream(entry);
     // Store parsed header image info for reconciliation
@@ -6245,6 +6260,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processPivotTableEntry(stream: IParseStream, model: any, name: string): Promise<void> {
+    const { PivotTableXform } = await import("@excel/xlsx/xform/pivot-table/pivot-table-xform");
     const xform = new PivotTableXform();
     const pivotTable = await xform.parseStream(stream);
     if (pivotTable) {
@@ -6263,6 +6279,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     model: any,
     name: string
   ): Promise<void> {
+    const { PivotCacheDefinitionXform } =
+      await import("@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform");
     const xform = new PivotCacheDefinitionXform();
     const cacheDefinition = await xform.parseStream(stream);
     if (cacheDefinition) {
@@ -6275,6 +6293,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     model: any,
     name: string
   ): Promise<void> {
+    const { PivotCacheRecordsXform } =
+      await import("@excel/xlsx/xform/pivot-table/pivot-cache-records-xform");
     const xform = new PivotCacheRecordsXform();
     const cacheRecords = await xform.parseStream(stream);
     if (cacheRecords) {
@@ -6394,8 +6414,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     }
 
-    this.reconcile(model, options);
-    this.workbook.model = model;
+    await this.reconcile(model, options);
+    setWorkbookModel(this.workbook, model);
     return this.workbook;
   }
 
@@ -6839,9 +6859,28 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   async addWorksheets(zip: IZipWriter, model: any): Promise<void> {
     const worksheetXform = new WorkSheetXform();
     const relationshipsXform = new RelationshipsXform();
-    const commentsXform = new CommentsXform();
-    const vmlDrawingXform = new VmlDrawingXform();
-    const ctrlPropXform = new CtrlPropXform();
+
+    // Lazily load the optional comment / VML / form-control xforms only when
+    // some worksheet actually needs them, so comment/control-free workbooks
+    // never pull these (~12 KB + VML) into the bundle.
+    const needsComments = model.worksheets.some((ws: any) => ws.comments.length > 0);
+    const needsVml = model.worksheets.some(
+      (ws: any) =>
+        ws.comments.length > 0 || (ws.formControls && ws.formControls.length > 0) || ws.headerImage
+    );
+    const needsCtrlProp = model.worksheets.some(
+      (ws: any) => ws.formControls && ws.formControls.length > 0
+    );
+
+    const commentsXform = needsComments
+      ? new (await import("@excel/xlsx/xform/comment/comments-xform")).CommentsXform()
+      : null;
+    const vmlDrawingXform = needsVml
+      ? new (await import("@excel/xlsx/xform/drawing/vml-drawing-xform")).VmlDrawingXform()
+      : null;
+    const ctrlPropXform = needsCtrlProp
+      ? new (await import("@excel/xlsx/xform/drawing/ctrl-prop-xform")).CtrlPropXform()
+      : null;
 
     for (const worksheet of model.worksheets) {
       const { fileIndex } = worksheet;
@@ -6864,7 +6903,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
       // Generate comments XML (separate from VML)
       if (worksheet.comments.length > 0) {
-        await this._renderToZip(zip, commentsPath(fileIndex), commentsXform, worksheet);
+        await this._renderToZip(zip, commentsPath(fileIndex), commentsXform!, worksheet);
       }
 
       // Office 365 threaded comments sit in their own part tree
@@ -6883,7 +6922,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       const hasFormControls = worksheet.formControls && worksheet.formControls.length > 0;
 
       if (hasComments || hasFormControls) {
-        await this._renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform, {
+        await this._renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform!, {
           comments: hasComments ? worksheet.comments : [],
           formControls: hasFormControls ? worksheet.formControls : []
         });
@@ -6902,7 +6941,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         const imageRelTarget = `../media/${imageFileName}`;
 
         // Write the VML file for the header image
-        await this._renderToZip(zip, vmlDrawingHFPath(fileIndex), vmlDrawingXform, {
+        await this._renderToZip(zip, vmlDrawingHFPath(fileIndex), vmlDrawingXform!, {
           comments: [],
           formControls: [],
           headerImage: {
@@ -6925,13 +6964,18 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       // Generate ctrlProp files for form controls
       if (hasFormControls) {
         for (const control of worksheet.formControls) {
-          await this._renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform, control);
+          await this._renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform!, control);
         }
       }
     }
   }
 
   async addChartsheets(zip: IZipWriter, model: any): Promise<void> {
+    if (!model.chartsheets || model.chartsheets.length === 0) {
+      return;
+    }
+    const { ChartsheetXform } = await import("@excel/xlsx/xform/sheet/chartsheet-xform");
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const chartsheetXform = new ChartsheetXform();
     const relsXform = new RelationshipsXform();
     const vmlDrawingXform = new VmlDrawingXform();
@@ -7012,20 +7056,34 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async addDrawings(zip: IZipWriter, model: any): Promise<void> {
-    const drawingXform = new DrawingXform();
+    // Skip entirely (and avoid loading DrawingXform ~34 KB) when no worksheet
+    // has a drawing. Chartsheets emit their drawing XML verbatim (without
+    // DrawingXform), so account for them separately.
+    const hasWorksheetDrawing = model.worksheets.some((ws: any) => ws.drawing);
+    const hasChartsheetDrawing = (model.chartsheets ?? []).some(
+      (cs: any) => cs.drawingName && (cs.chartNumber || cs.chartExNumber)
+    );
+    if (!hasWorksheetDrawing && !hasChartsheetDrawing) {
+      return;
+    }
     const relsXform = new RelationshipsXform();
 
-    for (const worksheet of model.worksheets) {
-      const { drawing } = worksheet;
-      if (drawing) {
-        const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
-        const drawingForWrite = drawing.anchors
-          ? { ...drawing, anchors: filteredAnchors }
-          : drawing;
-        drawingXform.prepare(drawingForWrite);
-        await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
+    if (hasWorksheetDrawing) {
+      const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
+      const drawingXform = new DrawingXform();
 
-        await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
+      for (const worksheet of model.worksheets) {
+        const { drawing } = worksheet;
+        if (drawing) {
+          const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
+          const drawingForWrite = drawing.anchors
+            ? { ...drawing, anchors: filteredAnchors }
+            : drawing;
+          drawingXform.prepare(drawingForWrite);
+          await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
+
+          await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
+        }
       }
     }
 
@@ -7330,6 +7388,12 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async addTables(zip: IZipWriter, model: any): Promise<void> {
+    // Skip (and avoid loading TableXform ~14 KB) when no worksheet has tables.
+    const hasTable = model.worksheets.some((ws: any) => ws.tables && ws.tables.length > 0);
+    if (!hasTable) {
+      return;
+    }
+    const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
     const tableXform = new TableXform();
 
     for (const worksheet of model.worksheets) {
@@ -7383,6 +7447,16 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     if (!model.pivotTables.length) {
       return;
     }
+
+    // Dynamic import: pivot serialisation (~44 KB across the three xforms) is
+    // only reachable when the workbook actually contains pivot tables, so it
+    // stays out of bundles whose consumers never use pivots.
+    const [{ PivotCacheRecordsXform }, { PivotCacheDefinitionXform }, { PivotTableXform }] =
+      await Promise.all([
+        import("@excel/xlsx/xform/pivot-table/pivot-cache-records-xform"),
+        import("@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform"),
+        import("@excel/xlsx/xform/pivot-table/pivot-table-xform")
+      ]);
 
     const pivotCacheRecordsXform = new PivotCacheRecordsXform();
     const pivotCacheDefinitionXform = new PivotCacheDefinitionXform();
@@ -7617,23 +7691,20 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       // `<definedNames>`. See `rewriteChartExDataRefsToDefinedNames`
       // for the full rationale.
       const chartExIndex = parseInt(n, 10);
-      if (
-        Number.isFinite(chartExIndex) &&
-        model.definedNamesInstance &&
-        typeof model.definedNamesInstance.addHidden === "function"
-      ) {
+      if (Number.isFinite(chartExIndex) && model.definedNamesInstance) {
+        const dn = model.definedNamesInstance;
         getChartSupport().rewriteChartExDataRefsToDefinedNames(
           entry.model,
           chartExIndex,
           (name, ref) => {
-            model.definedNamesInstance.addHidden(ref, name);
+            definedNamesAddHidden(dn, ref, name);
           }
         );
         // Re-materialise the array snapshot so addWorkbook picks up the
         // new hidden `_xlchart.*` names. `definedNames` in the write
         // model is the serialised form (array); the rewrite added
-        // entries to the live `DefinedNames` instance on the workbook.
-        model.definedNames = model.definedNamesInstance.model;
+        // entries to the live defined-names record on the workbook.
+        model.definedNames = definedNamesModel(dn);
       }
       if (entry.model.style && !model.chartExStyles?.[n]) {
         model.chartExStyles ??= {};

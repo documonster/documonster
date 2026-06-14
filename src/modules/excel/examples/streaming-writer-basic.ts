@@ -1,3 +1,14 @@
+import {
+  cellSetAlignment,
+  cellSetBorder,
+  cellSetFill,
+  cellSetFont,
+  cellSetNumFmt,
+  cellSetValue
+} from "@excel/cell";
+import { rowSetFont } from "@excel/row";
+import { rowCommit, rowGetCell } from "@excel/worksheet";
+
 import { WorkbookWriter } from "../../../index";
 
 const filename = process.argv[2];
@@ -179,107 +190,107 @@ ws.columns = [
   }
 ];
 
-ws.getCell("A2").value = 7;
-ws.getCell("B2").value = "Hello, World!";
-ws.getCell("B2").font = fonts.comicSansUdB16;
-ws.getCell("B2").border = borders.thin;
+cellSetValue(ws.getCell("A2"), 7);
+cellSetValue(ws.getCell("B2"), "Hello, World!");
+cellSetFont(ws.getCell("B2"), fonts.comicSansUdB16);
+cellSetBorder(ws.getCell("B2"), borders.thin);
 
-ws.getCell("C2").value = -5.55;
-ws.getCell("C2").numFmt = "'£'#,##0.00;[Red]-'£'#,##0.00";
-ws.getCell("C2").font = fonts.arialBlackUI14;
+cellSetValue(ws.getCell("C2"), -5.55);
+cellSetNumFmt(ws.getCell("C2"), "'£'#,##0.00;[Red]-'£'#,##0.00");
+cellSetFont(ws.getCell("C2"), fonts.arialBlackUI14);
 
-ws.getCell("D2").value = 3.14;
-ws.getCell("D2").value = new Date();
-ws.getCell("D2").numFmt = "d-mmm-yyyy";
-ws.getCell("D2").font = fonts.comicSansUdB16;
-ws.getCell("D2").border = borders.doubleRed;
+cellSetValue(ws.getCell("D2"), 3.14);
+cellSetValue(ws.getCell("D2"), new Date());
+cellSetNumFmt(ws.getCell("D2"), "d-mmm-yyyy");
+cellSetFont(ws.getCell("D2"), fonts.comicSansUdB16);
+cellSetBorder(ws.getCell("D2"), borders.doubleRed);
 
-ws.getCell("E2").value = `${["Hello", "World"].join(", ")}!`;
-ws.getRow(2).commit();
+cellSetValue(ws.getCell("E2"), `${["Hello", "World"].join(", ")}!`);
+rowCommit(ws.getRow(2));
 
-ws.getCell("A3").value = {
+cellSetValue(ws.getCell("A3"), {
   text: "www.google.com",
   hyperlink: "http://www.google.com"
-};
-ws.getCell("A4").value = "Boo!";
-ws.getCell("C4").value = "Hoo!";
+});
+cellSetValue(ws.getCell("A4"), "Boo!");
+cellSetValue(ws.getCell("C4"), "Hoo!");
 ws.mergeCells("A4", "C4");
-ws.getRow(4).commit();
+rowCommit(ws.getRow(4));
 
-ws.getCell("A5").value = 1;
-ws.getCell("B5").value = 2;
-ws.getCell("C5").value = { formula: "A5+B5", result: 3 };
-ws.getRow(5).commit();
+cellSetValue(ws.getCell("A5"), 1);
+cellSetValue(ws.getCell("B5"), 2);
+cellSetValue(ws.getCell("C5"), { formula: "A5+B5", result: 3 });
+rowCommit(ws.getRow(5));
 
-ws.getCell("A6").value = "Hello";
-ws.getCell("B6").value = "World";
-ws.getCell("C6").value = {
+cellSetValue(ws.getCell("A6"), "Hello");
+cellSetValue(ws.getCell("B6"), "World");
+cellSetValue(ws.getCell("C6"), {
   formula: "CONCATENATE(A6,', ',B6,'!')",
   result: "Hello, World!"
-};
-ws.getCell("C6").border = borders.thickRainbow;
-ws.getRow(6).commit();
+});
+cellSetBorder(ws.getCell("C6"), borders.thickRainbow);
+rowCommit(ws.getRow(6));
 
-ws.getCell("A7").value = 1;
-ws.getCell("B7").value = 2;
-ws.getCell("C7").value = { formula: "A7+B7" };
-ws.getRow(7).commit();
+cellSetValue(ws.getCell("A7"), 1);
+cellSetValue(ws.getCell("B7"), 2);
+cellSetValue(ws.getCell("C7"), { formula: "A7+B7" });
+rowCommit(ws.getRow(7));
 
 const now = new Date();
-ws.getCell("A8").value = now;
-ws.getCell("B8").value = 0;
-ws.getCell("C8").value = { formula: "A8+B8", result: now };
-ws.getRow(8).commit();
+cellSetValue(ws.getCell("A8"), now);
+cellSetValue(ws.getCell("B8"), 0);
+cellSetValue(ws.getCell("C8"), { formula: "A8+B8", result: now });
+rowCommit(ws.getRow(8));
 
-ws.getCell("A9").value = 1.6;
-ws.getCell("A9").numFmt = "# ?/?";
-ws.getCell("B9").value = 1.6;
-ws.getCell("B9").numFmt = "h:mm:ss";
-ws.getCell("C9").value = 0.016;
-ws.getCell("C9").numFmt = "0.00%";
-ws.getCell("D9").value = 1.6;
-ws.getCell("D9").numFmt = "[Green]#,##0 ;[Red](#,##0)";
-ws.getCell("E9").value = 1.6;
-ws.getCell("E9").numFmt = "#0.000";
-ws.getCell("F9").value = 0.016;
-ws.getCell("F9").numFmt = "# ?/?%";
-ws.getRow(9).commit();
+cellSetValue(ws.getCell("A9"), 1.6);
+cellSetNumFmt(ws.getCell("A9"), "# ?/?");
+cellSetValue(ws.getCell("B9"), 1.6);
+cellSetNumFmt(ws.getCell("B9"), "h:mm:ss");
+cellSetValue(ws.getCell("C9"), 0.016);
+cellSetNumFmt(ws.getCell("C9"), "0.00%");
+cellSetValue(ws.getCell("D9"), 1.6);
+cellSetNumFmt(ws.getCell("D9"), "[Green]#,##0 ;[Red](#,##0)");
+cellSetValue(ws.getCell("E9"), 1.6);
+cellSetNumFmt(ws.getCell("E9"), "#0.000");
+cellSetValue(ws.getCell("F9"), 0.016);
+cellSetNumFmt(ws.getCell("F9"), "# ?/?%");
+rowCommit(ws.getRow(9));
 
-ws.getCell("A10").value = "<";
-ws.getCell("B10").value = ">";
-ws.getCell("C10").value = "<a>";
-ws.getCell("D10").value = "><";
-ws.getRow(10).commit();
+cellSetValue(ws.getCell("A10"), "<");
+cellSetValue(ws.getCell("B10"), ">");
+cellSetValue(ws.getCell("C10"), "<a>");
+cellSetValue(ws.getCell("D10"), "><");
+rowCommit(ws.getRow(10));
 
 ws.getRow(11).height = 40;
 alignments.forEach((alignment, index) => {
   const rowNumber = 11;
   const colNumber = index + 1;
   const cell = ws.getCell(rowNumber, colNumber);
-  cell.value = alignment.text;
-  cell.alignment = alignment.alignment;
+  cellSetValue(cell, alignment.text);
+  cellSetAlignment(cell, alignment.alignment);
 });
-ws.getRow(11).commit();
+rowCommit(ws.getRow(11));
 
 const row12 = ws.getRow(12);
 row12.height = 40;
-row12.getCell(1).value = "Blue White Horizontal Gradient";
-row12.getCell(1).fill = fills.blueWhiteHGrad;
-row12.getCell(2).value = "Red Dark Vertical";
-row12.getCell(2).fill = fills.redDarkVertical;
-row12.getCell(3).value = "Red Green Dark Trellis";
-row12.getCell(3).fill = fills.redGreenDarkTrellis;
-row12.getCell(4).value = "RGB Path Gradient";
-row12.getCell(4).fill = fills.rgbPathGrad;
+cellSetValue(rowGetCell(row12, 1), "Blue White Horizontal Gradient");
+cellSetFill(rowGetCell(row12, 1), fills.blueWhiteHGrad);
+cellSetValue(rowGetCell(row12, 2), "Red Dark Vertical");
+cellSetFill(rowGetCell(row12, 2), fills.redDarkVertical);
+cellSetValue(rowGetCell(row12, 3), "Red Green Dark Trellis");
+cellSetFill(rowGetCell(row12, 3), fills.redGreenDarkTrellis);
+cellSetValue(rowGetCell(row12, 4), "RGB Path Gradient");
+cellSetFill(rowGetCell(row12, 4), fills.rgbPathGrad);
 
 // row and column styles
-ws.getRow(13).font = fonts.arialBlackUI14;
-ws.getCell("H12").value = "Foo";
-ws.getCell("G13").value = "Foo";
-ws.getCell("H13").value = "Bar";
-ws.getCell("I13").value = "Baz";
-ws.getCell("H14").value = "Baz";
-// ws.getRow(13).commit();
+rowSetFont(ws.getRow(13), fonts.arialBlackUI14);
+cellSetValue(ws.getCell("H12"), "Foo");
+cellSetValue(ws.getCell("G13"), "Foo");
+cellSetValue(ws.getCell("H13"), "Bar");
+cellSetValue(ws.getCell("I13"), "Baz");
+cellSetValue(ws.getCell("H14"), "Baz");
+// Row.commit(ws.getRow(13));
 
 wb.commit()
   .then(() => {

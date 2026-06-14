@@ -1,12 +1,11 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
 
 const [, , filename] = process.argv;
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
-ws.getCell("B2").value = "Hello, World!";
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
+Cell.setValue(ws, "B2", "Hello, World!");
 
 ws.headerFooter.oddHeader = "&CHello, Header!";
 ws.headerFooter.oddFooter = "&CPage &P of &N";
@@ -14,7 +13,7 @@ ws.headerFooter.oddFooter = "&CPage &P of &N";
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

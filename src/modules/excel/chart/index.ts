@@ -13,7 +13,7 @@
  *    Bundlers drop everything the consumer does not reference.
  *
  * 2. **Support installation** — enables `worksheet.addChart()`,
- *    `workbook.xlsx.writeFile()` chart-cache population, and chart
+ *    `Workbook.writeXlsx(workbook)` chart-cache population, and chart
  *    reconstruction during XLSX load:
  *    ```ts
  *    import { installChartSupport } from "@cj-tech-master/excelts/chart";

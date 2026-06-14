@@ -1,3 +1,4 @@
+import * as fs from "fs";
 /**
  * Real-fixture round-trip integration tests.
  *
@@ -20,13 +21,14 @@
  *
  * Related issue: https://github.com/nickmessing/excelts/issues/41
  */
-
-import * as fs from "fs";
 import * as path from "path";
 
 import { extractAll } from "@archive/unzip/extract";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
+import { getWorksheets } from "@excel/workbook";
+import type { WorkbookData } from "@excel/workbook-core";
+import { getCharts, getSheetName } from "@excel/worksheet";
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
@@ -41,9 +43,9 @@ let sampleBuffer: Buffer;
 /**
  * Helper to load the sample file and return a workbook
  */
-async function loadSampleWorkbook(): Promise<Workbook> {
-  const workbook = new Workbook();
-  await workbook.xlsx.load(sampleBuffer);
+async function loadSampleWorkbook(): Promise<WorkbookData> {
+  const workbook = Workbook.create();
+  await Workbook.loadXlsx(workbook, sampleBuffer);
   return workbook;
 }
 
@@ -67,7 +69,7 @@ async function performRoundTrip(): Promise<{
   outputBytes: Uint8Array;
 }> {
   const workbook = await loadSampleWorkbook();
-  const outputBuffer = await workbook.xlsx.writeBuffer();
+  const outputBuffer = await Workbook.toXlsxBuffer(workbook);
   const outputBytes = new Uint8Array(outputBuffer);
 
   const inputEntries = await extractAll(new Uint8Array(sampleBuffer));
@@ -91,9 +93,9 @@ describe("Chart Round-Trip Preservation", () => {
       const workbook = await loadSampleWorkbook();
 
       // Verify workbook was loaded
-      expect(workbook.worksheets.length).toBe(2);
-      expect(workbook.worksheets.map(ws => ws.name)).toContain("Data");
-      expect(workbook.worksheets.map(ws => ws.name)).toContain("Pivot");
+      expect(getWorksheets(workbook).length).toBe(2);
+      expect(getWorksheets(workbook).map(ws => getSheetName(ws))).toContain("Data");
+      expect(getWorksheets(workbook).map(ws => getSheetName(ws))).toContain("Pivot");
 
       const { inputEntries, outputEntries } = await performRoundTrip();
 
@@ -208,7 +210,7 @@ describe("Chart Round-Trip Preservation", () => {
 
     it("optionally smoke-opens the real-fixture workbook with LibreOffice headless", async () => {
       const workbook = await loadSampleWorkbook();
-      const output = new Uint8Array(await workbook.xlsx.writeBuffer());
+      const output = new Uint8Array(await Workbook.toXlsxBuffer(workbook));
       const result = await runLibreOfficeOpenValidationAuto(
         output,
         "chart-pivot-sample-roundtrip.xlsx"
@@ -290,10 +292,10 @@ describe("Chart Round-Trip Preservation", () => {
       const workbook = await loadSampleWorkbook();
 
       // Find the worksheet that contains the chart (Pivot sheet)
-      const pivotSheet = workbook.getWorksheet("Pivot");
+      const pivotSheet = Workbook.getWorksheet(workbook, "Pivot")!;
       expect(pivotSheet).toBeDefined();
 
-      const charts = pivotSheet!.getCharts();
+      const charts = getCharts(pivotSheet!);
       expect(charts.length).toBe(1);
 
       const chart = charts[0];
@@ -311,19 +313,19 @@ describe("Chart Round-Trip Preservation", () => {
 
     it("should read chart title after setting it programmatically", async () => {
       const workbook = await loadSampleWorkbook();
-      const pivotSheet = workbook.getWorksheet("Pivot");
-      const chart = pivotSheet!.getCharts()[0];
+      const pivotSheet = Workbook.getWorksheet(workbook, "Pivot")!;
+      const chart = getCharts(pivotSheet!)[0];
 
       // Set a title
       chart.title = "Revenue by Region";
       expect(chart.title).toBe("Revenue by Region");
 
       // Round-trip and verify
-      const outputBuffer = await workbook.xlsx.writeBuffer();
-      const workbook2 = new Workbook();
-      await workbook2.xlsx.load(outputBuffer);
+      const outputBuffer = await Workbook.toXlsxBuffer(workbook);
+      const workbook2 = Workbook.create();
+      await Workbook.loadXlsx(workbook2, outputBuffer);
 
-      const chart2 = workbook2.getWorksheet("Pivot")!.getCharts()[0];
+      const chart2 = getCharts(Workbook.getWorksheet(workbook2, "Pivot")!)[0];
       expect(chart2.title).toBe("Revenue by Region");
     });
 
@@ -331,40 +333,40 @@ describe("Chart Round-Trip Preservation", () => {
       const workbook = await loadSampleWorkbook();
 
       // Get Data sheet
-      const dataSheet = workbook.getWorksheet("Data");
+      const dataSheet = Workbook.getWorksheet(workbook, "Data")!;
       expect(dataSheet).toBeDefined();
 
       // Check header row (actual values from test file)
-      expect(dataSheet!.getCell("A1").value).toBe("Custom ID");
-      expect(dataSheet!.getCell("B1").value).toBe("Customer Name");
-      expect(dataSheet!.getCell("C1").value).toBe("Region");
-      expect(dataSheet!.getCell("D1").value).toBe("Revenue");
+      expect(Cell.getValue(dataSheet!, "A1")).toBe("Custom ID");
+      expect(Cell.getValue(dataSheet!, "B1")).toBe("Customer Name");
+      expect(Cell.getValue(dataSheet!, "C1")).toBe("Region");
+      expect(Cell.getValue(dataSheet!, "D1")).toBe("Revenue");
 
       // Write and re-read
-      const outputBuffer = await workbook.xlsx.writeBuffer();
-      const workbook2 = new Workbook();
-      await workbook2.xlsx.load(outputBuffer);
+      const outputBuffer = await Workbook.toXlsxBuffer(workbook);
+      const workbook2 = Workbook.create();
+      await Workbook.loadXlsx(workbook2, outputBuffer);
 
       // Verify data preserved
-      const dataSheet2 = workbook2.getWorksheet("Data");
-      expect(dataSheet2!.getCell("A1").value).toBe("Custom ID");
-      expect(dataSheet2!.getCell("B1").value).toBe("Customer Name");
+      const dataSheet2 = Workbook.getWorksheet(workbook2, "Data")!;
+      expect(Cell.getValue(dataSheet2!, "A1")).toBe("Custom ID");
+      expect(Cell.getValue(dataSheet2!, "B1")).toBe("Customer Name");
     });
 
     it("should preserve pivot table summary values in Pivot sheet", async () => {
       const workbook = await loadSampleWorkbook();
 
       // Get Pivot sheet
-      const pivotSheet = workbook.getWorksheet("Pivot");
+      const pivotSheet = Workbook.getWorksheet(workbook, "Pivot")!;
       expect(pivotSheet).toBeDefined();
 
       // Write and re-read
-      const outputBuffer = await workbook.xlsx.writeBuffer();
-      const workbook2 = new Workbook();
-      await workbook2.xlsx.load(outputBuffer);
+      const outputBuffer = await Workbook.toXlsxBuffer(workbook);
+      const workbook2 = Workbook.create();
+      await Workbook.loadXlsx(workbook2, outputBuffer);
 
       // Verify pivot sheet still exists
-      const pivotSheet2 = workbook2.getWorksheet("Pivot");
+      const pivotSheet2 = Workbook.getWorksheet(workbook2, "Pivot")!;
       expect(pivotSheet2).toBeDefined();
     });
   });

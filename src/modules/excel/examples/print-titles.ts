@@ -1,14 +1,13 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Workbook, Worksheet } from "@excel/index";
 
 const [, , filename] = process.argv;
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("blort");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "blort");
 
 for (let row = 1; row <= 100; row++) {
   const values: string[] = [];
@@ -26,14 +25,14 @@ for (let row = 1; row <= 100; row++) {
       }
     }
   }
-  ws.addRow(values);
+  Worksheet.addRow(ws, values);
 }
 
 ws.pageSetup.printTitlesColumn = "A:A";
 ws.pageSetup.printTitlesRow = "1:1";
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

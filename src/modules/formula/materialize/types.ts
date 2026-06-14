@@ -100,13 +100,12 @@ export interface CellLike {
 export interface RowLike {
   readonly hidden?: boolean;
   /**
-   * Excel's `eachCell` accepts either a bare callback or options + callback.
+   * Sparse array of cells (0-based index = colNumber-1). Host rows are plain
+   * data records carrying their cells directly; the engine iterates this
+   * array rather than calling a method, so the contract has no behavioural
+   * dependency on the host's row representation.
    */
-  eachCell(callback: (cell: CellLike, colNumber: number) => void): void;
-  eachCell(
-    opts: { includeEmpty?: boolean },
-    callback: (cell: CellLike, colNumber: number) => void
-  ): void;
+  readonly cells: readonly (CellLike | undefined)[];
 }
 
 export interface DimensionsLike {

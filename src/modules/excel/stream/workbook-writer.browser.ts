@@ -9,7 +9,7 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { DefinedNames } from "@excel/defined-names";
+import { createDefinedNames, definedNamesModel, type DefinedNamesData } from "@excel/defined-names";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import type {
@@ -193,7 +193,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   useSharedStrings: boolean;
   sharedStrings: SharedStrings;
   styles: StylesXform;
-  private _definedNames: DefinedNames;
+  private _definedNames: DefinedNamesData;
   private _worksheets: TWorksheetWriter[];
   views: WorkbookView[];
   zipOptions?: Partial<WorkbookZipOptions>;
@@ -264,7 +264,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     this.useSharedStrings = options.useSharedStrings ?? false;
     this.sharedStrings = new SharedStrings();
     this.styles = options.useStyles ? new StylesXform(true) : new (StylesXform as any).Mock(true);
-    this._definedNames = new DefinedNames();
+    this._definedNames = createDefinedNames();
     this._worksheets = [];
     this.views = [];
 
@@ -460,7 +460,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     return new Promise<void>(resolve => this._drainResolvers.push(resolve));
   }
 
-  get definedNames(): DefinedNames {
+  get definedNames(): DefinedNamesData {
     return this._definedNames;
   }
 
@@ -907,7 +907,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   addWorkbook(): Promise<void> {
     const model = {
       worksheets: this._worksheets.filter(Boolean),
-      definedNames: this._definedNames.model,
+      definedNames: definedNamesModel(this._definedNames),
       views: this.views,
       properties: {},
       protection: this.protection,

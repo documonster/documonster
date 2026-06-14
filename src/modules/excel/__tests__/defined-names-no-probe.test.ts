@@ -20,8 +20,9 @@
  * restored in `afterAll`.
  */
 
-import { DefinedNames } from "@excel/defined-names";
-import { Workbook } from "@excel/workbook";
+import { createDefinedNames, definedNamesModel, definedNamesSetModel } from "@excel/defined-names";
+import { Workbook } from "@excel/index";
+import { getDefinedNames } from "@excel/workbook";
 import {
   createFormulaSyntaxProbe,
   installFormulaEngine,
@@ -39,8 +40,8 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   });
 
   it("classifies pure cell reference as reference even without a probe", () => {
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Single", ranges: [], rawText: "Sheet1!$A$1" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [{ name: "Single", ranges: [], rawText: "Sheet1!$A$1" }]);
 
     expect(dn.matrixMap["Single"]).toBeDefined();
     expect(dn.formulaMap["Single"]).toBeUndefined();
@@ -48,8 +49,10 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   });
 
   it("classifies comma-separated range union as reference without a probe", () => {
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Multi", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [
+      { name: "Multi", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }
+    ]);
 
     expect(dn.matrixMap["Multi"]).toBeDefined();
     expect(dn.formulaMap["Multi"]).toBeUndefined();
@@ -60,8 +63,8 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
     // With a probe this would be classified as `formula`. Without one,
     // we have no evidence the expression is parseable so we preserve
     // the raw text verbatim.
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
 
     expect(dn.opaqueMap["Dyn"]).toBeDefined();
     expect(dn.opaqueMap["Dyn"].rawText).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
@@ -70,8 +73,8 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   });
 
   it("classifies bare identifier as opaque without a probe", () => {
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Alias", ranges: [], rawText: "AnotherName" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [{ name: "Alias", ranges: [], rawText: "AnotherName" }]);
 
     expect(dn.opaqueMap["Alias"]).toBeDefined();
     expect(dn.opaqueMap["Alias"].rawText).toBe("AnotherName");
@@ -79,12 +82,12 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   });
 
   it("classifies #REF! and array/string literals as opaque without a probe", () => {
-    const dn = new DefinedNames();
-    dn.model = [
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [
       { name: "Err", ranges: [], rawText: "#REF!" },
       { name: "Str", ranges: [], rawText: '"hello"' },
       { name: "Arr", ranges: [], rawText: "{1,2;3,4}" }
-    ];
+    ]);
 
     expect(dn.opaqueMap["Err"]).toBeDefined();
     expect(dn.opaqueMap["Str"]).toBeDefined();
@@ -95,8 +98,8 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
     // With or without a probe, `OFFSET(???` should not land in
     // `formulaMap`. Previously this was incorrectly classified as
     // formula by the "non-empty => formula" fallback.
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Bad", ranges: [], rawText: "OFFSET(???" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [{ name: "Bad", ranges: [], rawText: "OFFSET(???" }]);
 
     expect(dn.opaqueMap["Bad"]).toBeDefined();
     expect(dn.formulaMap["Bad"]).toBeUndefined();
@@ -105,10 +108,10 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   it("opaque classification preserves rawText through model round-trip", () => {
     // Without a probe, OFFSET(...) is opaque. The rawText must survive
     // a model→getter round-trip so the underlying XLSX bytes are stable.
-    const dn = new DefinedNames();
-    dn.model = [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }];
+    const dn = createDefinedNames();
+    definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
 
-    const model = dn.model;
+    const model = definedNamesModel(dn);
     const entry = model.find(m => m.name === "Dyn");
     expect(entry).toBeDefined();
     expect(entry!.kind).toBe("opaque");
@@ -121,8 +124,8 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
 
   it("explicit constructor probe overrides the missing default", () => {
     const probe = createFormulaSyntaxProbe();
-    const dn = new DefinedNames(probe);
-    dn.model = [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }];
+    const dn = createDefinedNames(probe);
+    definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
 
     expect(dn.formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
     expect(dn.opaqueMap["Dyn"]).toBeUndefined();
@@ -130,10 +133,12 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
 
   it("Workbook({ formulaSyntaxProbe }) option threads through to DefinedNames", async () => {
     const probe = createFormulaSyntaxProbe();
-    const wb = new Workbook({ formulaSyntaxProbe: probe });
-    wb.definedNames.model = [{ name: "Dyn", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }];
+    const wb = Workbook.create({ formulaSyntaxProbe: probe });
+    definedNamesSetModel(getDefinedNames(wb), [
+      { name: "Dyn", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
+    ]);
 
-    expect(wb.definedNames.formulaMap["Dyn"]).toBe("SUM(Sheet1!$A$1:$A$3)");
+    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBe("SUM(Sheet1!$A$1:$A$3)");
   });
 
   // ---------------------------------------------------------------------------
@@ -141,13 +146,15 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
   // ---------------------------------------------------------------------------
 
   it("probe installed after Workbook construction is used at model-set time", () => {
-    const wb = new Workbook(); // constructed before installFormulaEngine
+    const wb = Workbook.create(); // constructed before installFormulaEngine
     installFormulaEngine(); // install *after* construction
 
     // Model assignment happens now — should see the newly-installed probe.
-    wb.definedNames.model = [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }];
+    definedNamesSetModel(getDefinedNames(wb), [
+      { name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
+    ]);
 
-    expect(wb.definedNames.formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
-    expect(wb.definedNames.opaqueMap["Dyn"]).toBeUndefined();
+    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+    expect(getDefinedNames(wb).opaqueMap["Dyn"]).toBeUndefined();
   });
 });

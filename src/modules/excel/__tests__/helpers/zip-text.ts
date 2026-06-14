@@ -1,3 +1,4 @@
+import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
 /**
  * Shared ZIP/text helpers for chart integration tests.
  *
@@ -5,9 +6,8 @@
  * `bytesEqual` / `loadRoundTrip` utilities that were previously copy-
  * pasted across every chart integration test file.
  */
-
-import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
-import { Workbook } from "@excel/workbook";
+import { Workbook } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
 
 const decoder = new TextDecoder();
 
@@ -57,13 +57,13 @@ export function bytesEqual(a: Uint8Array | undefined, b: Uint8Array | undefined)
  * shared "happy-path" load → write idiom.
  */
 export async function loadRoundTrip(bytes: Uint8Array): Promise<{
-  wb: Workbook;
+  wb: WorkbookData;
   bytes: Uint8Array;
   entries: EntryMap;
 }> {
-  const wb = new Workbook();
-  await wb.xlsx.load(bytes);
-  const out = new Uint8Array(await wb.xlsx.writeBuffer());
+  const wb = Workbook.create();
+  await Workbook.loadXlsx(wb, bytes);
+  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   const entries = await extractAll(out);
   return { wb, bytes: out, entries };
 }
@@ -75,12 +75,12 @@ export async function loadRoundTrip(bytes: Uint8Array): Promise<{
  */
 export async function loadRoundTripDiff(
   bytes: Uint8Array,
-  mutate: (wb: Workbook) => void | Promise<void>
+  mutate: (wb: WorkbookData) => void | Promise<void>
 ): Promise<{ before: EntryMap; after: EntryMap }> {
-  const wb = new Workbook();
-  await wb.xlsx.load(bytes);
+  const wb = Workbook.create();
+  await Workbook.loadXlsx(wb, bytes);
   await mutate(wb);
-  const out = new Uint8Array(await wb.xlsx.writeBuffer());
+  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   return {
     before: await extractAll(bytes),
     after: await extractAll(out)

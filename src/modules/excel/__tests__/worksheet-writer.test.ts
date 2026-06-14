@@ -1,6 +1,10 @@
+import { cellGetValue, cellSetValue } from "@excel/cell";
 import { ExcelStreamStateError } from "@excel/errors";
+import { Worksheet } from "@excel/index";
+import { rowAddPageBreak, rowCellCount } from "@excel/row";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { StreamBuf } from "@excel/utils/stream-buf";
+import { rowCommit, rowGetCell, getCell, getColumn } from "@excel/worksheet";
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
 
@@ -164,9 +168,9 @@ describe("WorksheetWriter", () => {
       const { ws } = createRealWriter();
       const row = ws.addRow([1, "hello", true]);
 
-      expect(row.getCell(1).value).toBe(1);
-      expect(row.getCell(2).value).toBe("hello");
-      expect(row.getCell(3).value).toBe(true);
+      expect(cellGetValue(rowGetCell(row, 1))).toBe(1);
+      expect(cellGetValue(rowGetCell(row, 2))).toBe("hello");
+      expect(cellGetValue(rowGetCell(row, 3))).toBe(true);
     });
 
     it("addRows() creates multiple rows", () => {
@@ -178,9 +182,9 @@ describe("WorksheetWriter", () => {
       ]);
 
       expect(rows.length).toBe(3);
-      expect(rows[0].getCell(1).value).toBe(1);
-      expect(rows[1].getCell(2).value).toBe("b");
-      expect(rows[2].getCell(1).value).toBe(3);
+      expect(cellGetValue(rowGetCell(rows[0], 1))).toBe(1);
+      expect(cellGetValue(rowGetCell(rows[1], 2))).toBe("b");
+      expect(cellGetValue(rowGetCell(rows[2], 1))).toBe(3);
       expect(rows[0].number).toBe(1);
       expect(rows[1].number).toBe(2);
       expect(rows[2].number).toBe(3);
@@ -196,13 +200,13 @@ describe("WorksheetWriter", () => {
 
       expect(rows.length).toBe(4);
       // normal array row
-      expect(rows[0].getCell(1).value).toBe(10);
+      expect(cellGetValue(rowGetCell(rows[0], 1))).toBe(10);
       // null / undefined produce empty rows
-      expect(rows[1].cellCount).toBe(0);
-      expect(rows[2].cellCount).toBe(0);
+      expect(rowCellCount(rows[1])).toBe(0);
+      expect(rowCellCount(rows[2])).toBe(0);
       // object row mapped by column keys
-      expect(rows[3].getCell(1).value).toBe("Alice");
-      expect(rows[3].getCell(2).value).toBe(30);
+      expect(cellGetValue(rowGetCell(rows[3], 1))).toBe("Alice");
+      expect(cellGetValue(rowGetCell(rows[3], 2))).toBe(30);
     });
 
     it("addRows() with empty array returns empty array", () => {
@@ -219,36 +223,36 @@ describe("WorksheetWriter", () => {
       ];
       const row = ws.addRow({ name: "Alice", address: { city: "Sydney" } });
 
-      expect(row.getCell(1).value).toBe("Alice");
-      expect(row.getCell(2).value).toBe("Sydney");
+      expect(cellGetValue(rowGetCell(row, 1))).toBe("Alice");
+      expect(cellGetValue(rowGetCell(row, 2))).toBe("Sydney");
     });
 
     it("getRow() creates/returns a row by number", () => {
       const { ws } = createRealWriter();
       const row = ws.getRow(5);
-      row.getCell(1).value = "test";
+      cellSetValue(rowGetCell(row, 1), "test");
 
       expect(row.number).toBe(5);
-      expect(row.getCell(1).value).toBe("test");
+      expect(cellGetValue(rowGetCell(row, 1))).toBe("test");
     });
 
     it("findRow() returns row if exists, undefined otherwise", () => {
       const { ws } = createRealWriter();
       expect(ws.findRow(1)).toBeUndefined();
 
-      ws.getRow(1).getCell(1).value = "data";
+      cellSetValue(rowGetCell(ws.getRow(1), 1), "data");
       expect(ws.findRow(1)).toBeDefined();
       expect(ws.findRow(2)).toBeUndefined();
     });
 
     it("lastRow returns the last non-empty row", () => {
       const { ws } = createRealWriter();
-      expect(ws.lastRow).toBeUndefined();
+      expect(Worksheet.lastRow(ws)).toBeUndefined();
 
       ws.addRow(["first"]);
       ws.addRow(["second"]);
 
-      expect(ws.lastRow).toBeDefined();
+      expect(Worksheet.lastRow(ws)).toBeDefined();
     });
   });
 
@@ -259,14 +263,14 @@ describe("WorksheetWriter", () => {
   describe("cell access", () => {
     it("getCell() by string address", () => {
       const { ws } = createRealWriter();
-      ws.getCell("B3").value = 42;
-      expect(ws.getCell("B3").value).toBe(42);
+      cellSetValue(getCell(ws, "B3"), 42);
+      expect(cellGetValue(getCell(ws, "B3"))).toBe(42);
     });
 
     it("getCell() by row and column numbers", () => {
       const { ws } = createRealWriter();
-      ws.getCell(2, 3).value = "test";
-      expect(ws.getCell(2, 3).value).toBe("test");
+      cellSetValue(getCell(ws, 2, 3), "test");
+      expect(cellGetValue(getCell(ws, 2, 3))).toBe("test");
     });
 
     it("findCell() returns undefined when no matching row exists", () => {
@@ -278,36 +282,36 @@ describe("WorksheetWriter", () => {
     it("findCell() finds cell created via getRow().getCell()", () => {
       const { ws } = createRealWriter();
       const row = ws.getRow(1);
-      row.getCell(2).value = 99;
+      cellSetValue(rowGetCell(row, 2), 99);
 
       const cell = ws.findCell(1, 2);
       expect(cell).toBeDefined();
-      expect(cell.value).toBe(99);
+      expect(cellGetValue(cell)).toBe(99);
     });
 
     it("findCell() finds cell created via addRow()", () => {
       const { ws } = createRealWriter();
       ws.addRow([10, 20, 30]);
 
-      expect(ws.findCell(1, 1)?.value).toBe(10);
-      expect(ws.findCell(1, 2)?.value).toBe(20);
-      expect(ws.findCell(1, 3)?.value).toBe(30);
+      expect(cellGetValue(ws.findCell(1, 1))).toBe(10);
+      expect(cellGetValue(ws.findCell(1, 2))).toBe(20);
+      expect(cellGetValue(ws.findCell(1, 3))).toBe(30);
     });
 
     it("findCell() with string address", () => {
       const { ws } = createRealWriter();
-      ws.getRow(1).getCell(2).value = "test";
+      cellSetValue(rowGetCell(ws.getRow(1), 2), "test");
 
       const cell = ws.findCell("B1");
       expect(cell).toBeDefined();
-      expect(cell.value).toBe("test");
+      expect(cellGetValue(cell)).toBe("test");
     });
 
     it("findCell() returns undefined for committed row", () => {
       const { ws } = createRealWriter();
       const row = ws.getRow(1);
-      row.getCell(1).value = "will be committed";
-      row.commit();
+      cellSetValue(rowGetCell(row, 1), "will be committed");
+      rowCommit(row);
 
       expect(ws.findRow(1)).toBeUndefined();
       expect(ws.findCell(1, 1)).toBeUndefined();
@@ -319,10 +323,10 @@ describe("WorksheetWriter", () => {
       ws.addRow(["r2c1", "r2c2"]);
       ws.addRow(["r3c1", "r3c2"]);
 
-      expect(ws.findCell(1, 1)?.value).toBe("r1c1");
-      expect(ws.findCell(2, 2)?.value).toBe("r2c2");
-      expect(ws.findCell(3, 1)?.value).toBe("r3c1");
-      expect(ws.findCell("B3")?.value).toBe("r3c2");
+      expect(cellGetValue(ws.findCell(1, 1))).toBe("r1c1");
+      expect(cellGetValue(ws.findCell(2, 2))).toBe("r2c2");
+      expect(cellGetValue(ws.findCell(3, 1))).toBe("r3c1");
+      expect(cellGetValue(ws.findCell("B3"))).toBe("r3c2");
     });
   });
 
@@ -338,22 +342,22 @@ describe("WorksheetWriter", () => {
         { key: "name", width: 32 }
       ];
 
-      expect(ws.getColumn("id").width).toBe(10);
-      expect(ws.getColumn("name").width).toBe(32);
-      expect(ws.getColumn(1).key).toBe("id");
-      expect(ws.getColumn(2).key).toBe("name");
+      expect(getColumn(ws, "id").width).toBe(10);
+      expect(getColumn(ws, "name").width).toBe(32);
+      expect(getColumn(ws, 1).key).toBe("id");
+      expect(getColumn(ws, 2).key).toBe("name");
     });
 
     it("getColumn() by letter", () => {
       const { ws } = createRealWriter();
-      ws.getColumn("B").width = 20;
-      expect(ws.getColumn("B").width).toBe(20);
-      expect(ws.getColumn(2).width).toBe(20);
+      getColumn(ws, "B").width = 20;
+      expect(getColumn(ws, "B").width).toBe(20);
+      expect(getColumn(ws, 2).width).toBe(20);
     });
 
     it("column key management", () => {
       const { ws } = createRealWriter();
-      const col = ws.getColumn(1);
+      const col = getColumn(ws, 1);
       ws.setColumnKey("myKey", col);
       expect(ws.getColumnKey("myKey")).toBe(col);
 
@@ -379,7 +383,7 @@ describe("WorksheetWriter", () => {
 
       const values: unknown[] = [];
       ws.eachRow((row: any) => {
-        values.push(row.getCell(1).value);
+        values.push(cellGetValue(rowGetCell(row, 1)));
       });
       expect(values).toEqual(["a", "b", "c"]);
     });
@@ -392,14 +396,14 @@ describe("WorksheetWriter", () => {
   describe("merge cells", () => {
     it("mergeCells sets values correctly", () => {
       const { ws } = createRealWriter();
-      ws.getCell("A1").value = "merged";
-      ws.getCell("B1").value = "will be replaced";
+      cellSetValue(getCell(ws, "A1"), "merged");
+      cellSetValue(getCell(ws, "B1"), "will be replaced");
       ws.mergeCells("A1:B2");
 
-      expect(ws.getCell("A1").value).toBe("merged");
-      expect(ws.getCell("B1").value).toBe("merged");
-      expect(ws.getCell("A2").value).toBe("merged");
-      expect(ws.getCell("B2").value).toBe("merged");
+      expect(cellGetValue(getCell(ws, "A1"))).toBe("merged");
+      expect(cellGetValue(getCell(ws, "B1"))).toBe("merged");
+      expect(cellGetValue(getCell(ws, "A2"))).toBe("merged");
+      expect(cellGetValue(getCell(ws, "B2"))).toBe("merged");
     });
 
     it("overlapping merges throw error", () => {
@@ -553,8 +557,8 @@ describe("WorksheetWriter", () => {
       ws.addRow(["row2"]);
       ws.addRow(["row3"]);
 
-      ws.getRow(1).addPageBreak();
-      ws.getRow(2).addPageBreak();
+      rowAddPageBreak(ws.getRow(1));
+      rowAddPageBreak(ws.getRow(2));
 
       expect(ws.rowBreaks.length).toBe(2);
     });
@@ -567,10 +571,10 @@ describe("WorksheetWriter", () => {
   describe("dimensions", () => {
     it("dimensions is accessible and is a Dimensions instance", () => {
       const { ws } = createRealWriter();
-      ws.getCell("A1").value = 1;
-      ws.getCell("C5").value = 2;
+      cellSetValue(getCell(ws, "A1"), 1);
+      cellSetValue(getCell(ws, "C5"), 2);
 
-      const dims = ws.dimensions;
+      const dims = Worksheet.dimensions(ws);
       expect(dims).toBeDefined();
       // Note: WorksheetWriter._dimensions is initialized as empty and is not
       // expanded by getCell(). This is a known limitation of the streaming writer.

@@ -1,6 +1,6 @@
 import { inflateSync } from "node:zlib";
 
-import { Workbook } from "@excel/workbook";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { readPdf } from "@pdf/reader/pdf-reader";
 import { describe, it, expect } from "vitest";
@@ -56,20 +56,20 @@ function extractClipWidths(pdfBytes: Uint8Array): number[] {
 describe("Rich text PDF rendering", () => {
   describe("rich text overflow into adjacent empty cells", () => {
     it("should expand clip rect beyond cell width for rich text overflow", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 5; // ~30pt — very narrow
-      ws.getColumn(2).width = 20; // ~113pt
-      ws.getColumn(3).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 5); // ~30pt — very narrow
+      Column.setWidth(ws, 2, 20); // ~113pt
+      Column.setWidth(ws, 3, 10);
 
       // Rich text wider than column A (~30pt), B is empty → overflow expected
-      ws.getCell("A1").value = {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "AAAA", font: { size: 8 } },
           { text: " BBBB CCCC", font: { size: 16 } }
         ]
-      };
-      ws.getCell("C1").value = "X";
+      });
+      Cell.setValue(ws, "C1", "X");
 
       const pdf = await excelToPdf(wb);
       const clipWidths = extractClipWidths(pdf);
@@ -82,18 +82,18 @@ describe("Rich text PDF rendering", () => {
     });
 
     it("should stop overflow at neighbor cell with rich text", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 5;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 5);
+      Column.setWidth(ws, 2, 10);
+      Column.setWidth(ws, 3, 10);
 
-      ws.getCell("A1").value = "OverflowingTextThatShouldBeStopped";
+      Cell.setValue(ws, "A1", "OverflowingTextThatShouldBeStopped");
       // B1 has rich text — should block A1's overflow
-      ws.getCell("B1").value = {
+      Cell.setValue(ws, "B1", {
         richText: [{ text: "Block", font: { bold: true } }]
-      };
-      ws.getCell("C1").value = "X";
+      });
+      Cell.setValue(ws, "C1", "X");
 
       const pdf = await excelToPdf(wb);
       const clipWidths = extractClipWidths(pdf);
@@ -108,20 +108,20 @@ describe("Rich text PDF rendering", () => {
 
   describe("wrap uses per-run font size", () => {
     it("should wrap small-font text with more characters per line", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 15; // ~83pt
-      ws.getRow(1).height = 60;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 15); // ~83pt
+      Row.setHeight(ws, 1, 60);
 
       // 16pt header + 7pt body. If wrap used 16pt for everything,
       // body words would each be on separate lines.
-      ws.getCell("A1").value = {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "HDR ", font: { size: 16 } },
           { text: "aaa bbb ccc ddd eee fff", font: { size: 7 } }
         ]
-      };
-      ws.getCell("A1").alignment = { wrapText: true };
+      });
+      Cell.setStyle(ws, "A1", { alignment: { wrapText: true } });
 
       const pdf = await excelToPdf(wb);
       const frags = await getFragments(pdf);
@@ -139,18 +139,18 @@ describe("Rich text PDF rendering", () => {
 
   describe("layout row height matches render for rich text wrap", () => {
     it("should auto-calculate row height correctly for rich text wrap", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 15;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 15);
       // Do NOT set explicit row height — let auto-height calculate it
 
-      ws.getCell("A1").value = {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "BIG ", font: { size: 14 } },
           { text: "tiny words that wrap at their own 7pt size", font: { size: 7 } }
         ]
-      };
-      ws.getCell("A1").alignment = { wrapText: true };
+      });
+      Cell.setStyle(ws, "A1", { alignment: { wrapText: true } });
 
       const pdf = await excelToPdf(wb);
       const frags = await getFragments(pdf);
@@ -166,27 +166,31 @@ describe("Rich text PDF rendering", () => {
 
   describe("overflow region erases underlying borders/gridlines", () => {
     it("should produce valid PDF with overflow and gridlines enabled", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 8;
-      ws.getColumn(2).width = 8;
-      ws.getColumn(3).width = 8;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 8);
+      Column.setWidth(ws, 2, 8);
+      Column.setWidth(ws, 3, 8);
 
-      ws.getCell("A1").value = "Long text that overflows into B1 and C1 area";
-      ws.getCell("A1").border = {
-        top: { style: "thin" },
-        bottom: { style: "thin" },
-        left: { style: "thin" },
-        right: { style: "thin" }
-      };
+      Cell.setValue(ws, "A1", "Long text that overflows into B1 and C1 area");
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" }
+        }
+      });
       // B1 has border but is empty — should be visually hidden by overflow
-      ws.getCell("B1").border = {
-        top: { style: "thin" },
-        bottom: { style: "thin" },
-        left: { style: "thin" },
-        right: { style: "thin" }
-      };
-      ws.getCell("C1").value = "Stop";
+      Cell.setStyle(ws, "B1", {
+        border: {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" }
+        }
+      });
+      Cell.setValue(ws, "C1", "Stop");
 
       const pdf = await excelToPdf(wb, { showGridLines: true });
       // At minimum: no crash, text is present

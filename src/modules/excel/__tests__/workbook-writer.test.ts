@@ -1,7 +1,12 @@
+import { cellSetValue } from "@excel/cell";
+import { Cell, Workbook } from "@excel/index";
+import { getDefaultFont, getWorksheets } from "@excel/workbook";
+import type { WorkbookData } from "@excel/workbook-core";
+import { rowCommit, rowGetCell } from "@excel/worksheet";
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, WorkbookWriter } from "../../../index";
+import { WorkbookWriter } from "../../../index";
 
 // =============================================================================
 // Helpers
@@ -40,13 +45,13 @@ function createMemoryWriter(options?: Record<string, unknown>): {
 async function writeAndReadBack(
   builder: (wb: InstanceType<typeof WorkbookWriter>) => void | Promise<void>,
   options?: Record<string, unknown>
-): Promise<Workbook> {
+): Promise<WorkbookData> {
   const { wb, getBuffer } = createMemoryWriter(options);
   await builder(wb);
   const buffer = await getBuffer();
 
-  const readBack = new Workbook();
-  await readBack.xlsx.load(buffer);
+  const readBack = Workbook.create();
+  await Workbook.loadXlsx(readBack, buffer);
   return readBack;
 }
 
@@ -161,7 +166,7 @@ describe("WorkbookWriter", () => {
       const wb2 = await writeAndReadBack(
         wb => {
           const ws = wb.addWorksheet("Sheet1");
-          ws.getCell("A1").value = "test";
+          cellSetValue(ws.getCell("A1"), "test");
         },
         { creator: "TestAuthor", created, modified }
       );
@@ -216,15 +221,15 @@ describe("WorkbookWriter", () => {
       const wb2 = await writeAndReadBack(
         wb => {
           const ws = wb.addWorksheet("myWorksheet");
-          ws.addRow(["Hello"]).commit();
+          rowCommit(ws.addRow(["Hello"]));
           ws.commit();
         },
         { useSharedStrings: true }
       );
 
-      const ws2 = wb2.getWorksheet("myWorksheet");
+      const ws2 = Workbook.getWorksheet(wb2, "myWorksheet")!;
       expect(ws2).toBeTruthy();
-      expect(ws2!.getCell("A1").value).toBe("Hello");
+      expect(Cell.getValue(ws2!, "A1")).toBe("Hello");
     });
 
     it("roundtrips strings containing literal _xHHHH_ patterns via shared strings", async () => {
@@ -232,19 +237,19 @@ describe("WorkbookWriter", () => {
       const wb2 = await writeAndReadBack(
         wb => {
           const ws = wb.addWorksheet("Sheet1");
-          ws.addRow(["_x000D_"]).commit();
-          ws.addRow(["Normal text"]).commit();
-          ws.addRow(["_x005F_test"]).commit();
+          rowCommit(ws.addRow(["_x000D_"]));
+          rowCommit(ws.addRow(["Normal text"]));
+          rowCommit(ws.addRow(["_x005F_test"]));
           ws.commit();
         },
         { useSharedStrings: true }
       );
 
-      const ws = wb2.getWorksheet("Sheet1");
+      const ws = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws).toBeTruthy();
-      expect(ws!.getCell("A1").value).toBe("_x000D_");
-      expect(ws!.getCell("A2").value).toBe("Normal text");
-      expect(ws!.getCell("A3").value).toBe("_x005F_test");
+      expect(Cell.getValue(ws!, "A1")).toBe("_x000D_");
+      expect(Cell.getValue(ws!, "A2")).toBe("Normal text");
+      expect(Cell.getValue(ws!, "A3")).toBe("_x005F_test");
     });
   });
 
@@ -258,23 +263,23 @@ describe("WorkbookWriter", () => {
         // Intentionally empty — no worksheets added
       });
 
-      expect(wb2.worksheets.length).toBe(0);
+      expect(getWorksheets(wb2).length).toBe(0);
     });
 
     it("produces a valid XLSX with multiple worksheets", async () => {
       const wb2 = await writeAndReadBack(wb => {
         const ws1 = wb.addWorksheet("One");
-        ws1.getCell("A1").value = 1;
+        cellSetValue(ws1.getCell("A1"), 1);
         ws1.commit();
 
         const ws2 = wb.addWorksheet("Two");
-        ws2.getCell("A1").value = 2;
+        cellSetValue(ws2.getCell("A1"), 2);
         ws2.commit();
       });
 
-      expect(wb2.worksheets.length).toBe(2);
-      expect(wb2.getWorksheet("One")!.getCell("A1").value).toBe(1);
-      expect(wb2.getWorksheet("Two")!.getCell("A1").value).toBe(2);
+      expect(getWorksheets(wb2).length).toBe(2);
+      expect(Cell.getValue(Workbook.getWorksheet(wb2, "One")!, "A1")).toBe(1);
+      expect(Cell.getValue(Workbook.getWorksheet(wb2, "Two")!, "A1")).toBe(2);
     });
   });
 
@@ -311,7 +316,7 @@ describe("WorkbookWriter", () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
       for (let i = 1; i <= 10; i++) {
-        ws.addRow([i * 10]).commit();
+        rowCommit(ws.addRow([i * 10]));
       }
       ws.addConditionalFormatting({
         ref: "A1:A10",
@@ -347,7 +352,7 @@ describe("WorkbookWriter", () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
       for (let i = 1; i <= 5; i++) {
-        ws.addRow([i * 10]).commit();
+        rowCommit(ws.addRow([i * 10]));
       }
       ws.addConditionalFormatting({
         ref: "A1:A5",
@@ -357,16 +362,16 @@ describe("WorkbookWriter", () => {
       const buffer = await getBuffer();
 
       // Read back with non-streaming reader
-      const readBack = new Workbook();
-      await readBack.xlsx.load(buffer);
-      const sheet = readBack.getWorksheet("Sheet1")!;
+      const readBack = Workbook.create();
+      await Workbook.loadXlsx(readBack, buffer);
+      const sheet = Workbook.getWorksheet(readBack, "Sheet1")!;
       const cfs = sheet.conditionalFormattings;
       expect(cfs.length).toBeGreaterThan(0);
       const dbRule = cfs[0].rules.find((r: any) => r.type === "dataBar");
       expect(dbRule).toBeDefined();
 
       // Write again with non-streaming writer and verify still valid
-      const buf2 = await readBack.xlsx.writeBuffer();
+      const buf2 = await Workbook.toXlsxBuffer(readBack);
       const xml2 = await getSheetXml(buf2);
       const id2Match = xml2.match(/<x14:id>([^<]+)<\/x14:id>/);
       expect(id2Match).not.toBeNull();
@@ -376,7 +381,7 @@ describe("WorkbookWriter", () => {
     it("should not write extLst when no ext rules exist", async () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
-      ws.addRow(["hello"]).commit();
+      rowCommit(ws.addRow(["hello"]));
       // Add a non-ext conditional formatting (cellIs rule)
       ws.addConditionalFormatting({
         ref: "A1",
@@ -416,18 +421,18 @@ describe("WorkbookWriter", () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
       for (let i = 1; i <= 5; i++) {
-        ws.addRow([i]).commit();
+        rowCommit(ws.addRow([i]));
       }
       // Add a row with a dynamic array formula
       const row = ws.addRow([]);
-      row.getCell(3).value = {
+      cellSetValue(rowGetCell(row, 3), {
         formula: "_xlfn._xlws.FILTER(A1:A5,A1:A5>2)",
         shareType: "array",
         ref: "C6",
         result: 3,
         isDynamicArray: true
-      };
-      row.commit();
+      });
+      rowCommit(row);
       ws.commit();
 
       const buffer = await getBuffer();
@@ -453,23 +458,23 @@ describe("WorkbookWriter", () => {
     it("should round-trip dynamic array formula written by streaming writer", async () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
-      ws.addRow([10]).commit();
+      rowCommit(ws.addRow([10]));
       const row = ws.addRow([]);
-      row.getCell(1).value = {
+      cellSetValue(rowGetCell(row, 1), {
         formula: "_xlfn._xlws.SORT(B1:B5)",
         shareType: "array",
         ref: "A2",
         result: 1,
         isDynamicArray: true
-      };
-      row.commit();
+      });
+      rowCommit(row);
       ws.commit();
       const buffer = await getBuffer();
 
       // Read back with non-streaming reader
-      const readBack = new Workbook();
-      await readBack.xlsx.load(buffer);
-      const cellValue = readBack.getWorksheet("Sheet1")!.getCell("A2").value as any;
+      const readBack = Workbook.create();
+      await Workbook.loadXlsx(readBack, buffer);
+      const cellValue = Cell.getValue(Workbook.getWorksheet(readBack, "Sheet1")!, "A2") as any;
       expect(cellValue.formula).toBe("_xlfn._xlws.SORT(B1:B5)");
       expect(cellValue.isDynamicArray).toBe(true);
     });
@@ -477,7 +482,7 @@ describe("WorkbookWriter", () => {
     it("should not write metadata.xml when no dynamic array formulas", async () => {
       const { wb, getBuffer } = createMemoryWriter();
       const ws = wb.addWorksheet("Sheet1");
-      ws.addRow(["hello"]).commit();
+      rowCommit(ws.addRow(["hello"]));
       ws.commit();
       const buffer = await getBuffer();
 
@@ -495,12 +500,12 @@ describe("WorkbookWriter", () => {
       const { wb, getBuffer } = createMemoryWriter({ useStyles: true });
       await wb.protect("mypass", { lockStructure: true });
       const ws = wb.addWorksheet("Sheet1");
-      ws.addRow(["data"]).commit();
+      rowCommit(ws.addRow(["data"]));
       ws.commit();
       const buffer = await getBuffer();
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
@@ -520,16 +525,16 @@ describe("WorkbookWriter", () => {
       const { wb, getBuffer } = createMemoryWriter({ useStyles: true });
       wb.defaultFont = { name: "Arial", size: 12 };
       const ws = wb.addWorksheet("Sheet1");
-      ws.addRow(["data"]).commit();
+      rowCommit(ws.addRow(["data"]));
       ws.commit();
       const buffer = await getBuffer();
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
-      expect(wb2.defaultFont).toBeDefined();
-      expect(wb2.defaultFont!.name).toBe("Arial");
-      expect(wb2.defaultFont!.size).toBe(12);
+      expect(getDefaultFont(wb2)).toBeDefined();
+      expect(getDefaultFont(wb2)!.name).toBe("Arial");
+      expect(getDefaultFont(wb2)!.size).toBe(12);
     });
   });
 });

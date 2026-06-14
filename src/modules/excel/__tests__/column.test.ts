@@ -1,8 +1,36 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { Column } from "@excel/column";
+import { cellGetValue, cellFont, cellNumFmt, cellSetValue } from "@excel/cell";
+import {
+  columnCollapsed,
+  columnEquivalentTo,
+  columnHeaderCount,
+  columnHeaders,
+  columnHidden,
+  columnIsCustomWidth,
+  columnLetter,
+  columnOutlineLevel,
+  columnSetHidden,
+  columnSetOutlineLevel,
+  columnToModel
+} from "@excel/column";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import {
+  columnEachCell,
+  columnSetDefn,
+  columnSetBorder,
+  columnSetFill,
+  columnSetFont,
+  columnSetHeader,
+  columnSetKey,
+  columnSetNumFmt,
+  columnSetValues,
+  columnValues,
+  getCell,
+  getColumn,
+  rowSetValues,
+  getColumns
+} from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../index";
 
 describe("Column", () => {
   // ===========================================================================
@@ -12,45 +40,45 @@ describe("Column", () => {
   it("creates by definition with header, key, and width", () => {
     const sheet = testUtils.createSheetMock();
 
-    sheet.addColumn(1, {
+    columnSetDefn(getColumn(sheet, 1), {
       header: "Col 1",
       key: "id1",
       width: 10
     });
 
-    expect(sheet.getColumn(1).header).toBe("Col 1");
-    expect(sheet.getColumn(1).headers).toEqual(["Col 1"]);
-    expect(sheet.getCell(1, 1).value).toBe("Col 1");
-    expect(sheet.getColumn("id1")).toBe(sheet.getColumn(1));
+    expect(getColumn(sheet, 1).header).toBe("Col 1");
+    expect(columnHeaders(getColumn(sheet, 1))).toEqual(["Col 1"]);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe("Col 1");
+    expect(getColumn(sheet, "id1")).toBe(getColumn(sheet, 1));
 
-    sheet.getRow(2).values = { id1: "Hello, World!" };
-    expect(sheet.getCell(2, 1).value).toBe("Hello, World!");
+    rowSetValues(Worksheet.getRow(sheet, 2), { id1: "Hello, World!" });
+    expect(cellGetValue(getCell(sheet, 2, 1))).toBe("Hello, World!");
   });
 
   it("maintains properties (key, number, letter, header)", () => {
     const sheet = testUtils.createSheetMock();
 
-    const column = sheet.addColumn(1);
+    const column = getColumn(sheet, 1);
 
-    column.key = "id1";
+    columnSetKey(column, "id1");
     expect(sheet._keys.id1).toBe(column);
 
     expect(column.number).toBe(1);
-    expect(column.letter).toBe("A");
+    expect(columnLetter(column)).toBe("A");
 
-    column.header = "Col 1";
-    expect(sheet.getColumn(1).header).toBe("Col 1");
-    expect(sheet.getColumn(1).headers).toEqual(["Col 1"]);
-    expect(sheet.getCell(1, 1).value).toBe("Col 1");
+    columnSetHeader(column, "Col 1");
+    expect(getColumn(sheet, 1).header).toBe("Col 1");
+    expect(columnHeaders(getColumn(sheet, 1))).toEqual(["Col 1"]);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe("Col 1");
 
-    column.header = ["Col A1", "Col A2"];
-    expect(sheet.getColumn(1).header).toEqual(["Col A1", "Col A2"]);
-    expect(sheet.getColumn(1).headers).toEqual(["Col A1", "Col A2"]);
-    expect(sheet.getCell(1, 1).value).toBe("Col A1");
-    expect(sheet.getCell(2, 1).value).toBe("Col A2");
+    columnSetHeader(column, ["Col A1", "Col A2"]);
+    expect(getColumn(sheet, 1).header).toEqual(["Col A1", "Col A2"]);
+    expect(columnHeaders(getColumn(sheet, 1))).toEqual(["Col A1", "Col A2"]);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe("Col A1");
+    expect(cellGetValue(getCell(sheet, 2, 1))).toBe("Col A2");
 
-    sheet.getRow(3).values = { id1: "Hello, World!" };
-    expect(sheet.getCell(3, 1).value).toBe("Hello, World!");
+    rowSetValues(Worksheet.getRow(sheet, 3), { id1: "Hello, World!" });
+    expect(cellGetValue(getCell(sheet, 3, 1))).toBe("Hello, World!");
   });
 
   // ===========================================================================
@@ -60,11 +88,11 @@ describe("Column", () => {
   it("creates model from columns with outlineLevels", () => {
     const sheet = testUtils.createSheetMock();
 
-    sheet.addColumn(1, { header: "Col 1", key: "id1", width: 10 });
-    sheet.addColumn(2, { header: "Col 2", key: "name", width: 10 });
-    sheet.addColumn(3, { header: "Col 2", key: "dob", width: 10, outlineLevel: 1 });
+    columnSetDefn(getColumn(sheet, 1), { header: "Col 1", key: "id1", width: 10 });
+    columnSetDefn(getColumn(sheet, 2), { header: "Col 2", key: "name", width: 10 });
+    columnSetDefn(getColumn(sheet, 3), { header: "Col 2", key: "dob", width: 10, outlineLevel: 1 });
 
-    const model = Column.toModel(sheet.columns);
+    const model = columnToModel(getColumns(sheet));
     expect(model!.length).toBe(2);
 
     expect(model![0].width).toBe(10);
@@ -82,24 +110,24 @@ describe("Column", () => {
 
   it("gets column values", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.getCell(1, 1).value = "a";
-    sheet.getCell(2, 1).value = "b";
-    sheet.getCell(4, 1).value = "d";
+    cellSetValue(getCell(sheet, 1, 1), "a");
+    cellSetValue(getCell(sheet, 2, 1), "b");
+    cellSetValue(getCell(sheet, 4, 1), "d");
 
-    expect(sheet.getColumn(1).values).toEqual([, "a", "b", , "d"]);
+    expect(columnValues(getColumn(sheet, 1))).toEqual([, "a", "b", , "d"]);
   });
 
   it("sets column values from dense array", () => {
     const sheet = testUtils.createSheetMock();
 
-    sheet.getColumn(1).values = [2, 3, 5, 7, 11];
+    columnSetValues(getColumn(sheet, 1), [2, 3, 5, 7, 11]);
 
-    expect(sheet.getCell(1, 1).value).toBe(2);
-    expect(sheet.getCell(2, 1).value).toBe(3);
-    expect(sheet.getCell(3, 1).value).toBe(5);
-    expect(sheet.getCell(4, 1).value).toBe(7);
-    expect(sheet.getCell(5, 1).value).toBe(11);
-    expect(sheet.getCell(6, 1).value).toBe(null);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe(2);
+    expect(cellGetValue(getCell(sheet, 2, 1))).toBe(3);
+    expect(cellGetValue(getCell(sheet, 3, 1))).toBe(5);
+    expect(cellGetValue(getCell(sheet, 4, 1))).toBe(7);
+    expect(cellGetValue(getCell(sheet, 5, 1))).toBe(11);
+    expect(cellGetValue(getCell(sheet, 6, 1))).toBe(null);
   });
 
   it("sets column values from explicit sparse array", () => {
@@ -109,38 +137,38 @@ describe("Column", () => {
     values[3] = 3;
     values[5] = 5;
     values[11] = 11;
-    sheet.getColumn(1).values = values;
+    columnSetValues(getColumn(sheet, 1), values);
 
-    expect(sheet.getCell(1, 1).value).toBe(null);
-    expect(sheet.getCell(2, 1).value).toBe(2);
-    expect(sheet.getCell(3, 1).value).toBe(3);
-    expect(sheet.getCell(4, 1).value).toBe(null);
-    expect(sheet.getCell(5, 1).value).toBe(5);
-    expect(sheet.getCell(6, 1).value).toBe(null);
-    expect(sheet.getCell(7, 1).value).toBe(null);
-    expect(sheet.getCell(8, 1).value).toBe(null);
-    expect(sheet.getCell(9, 1).value).toBe(null);
-    expect(sheet.getCell(10, 1).value).toBe(null);
-    expect(sheet.getCell(11, 1).value).toBe(11);
-    expect(sheet.getCell(12, 1).value).toBe(null);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 2, 1))).toBe(2);
+    expect(cellGetValue(getCell(sheet, 3, 1))).toBe(3);
+    expect(cellGetValue(getCell(sheet, 4, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 5, 1))).toBe(5);
+    expect(cellGetValue(getCell(sheet, 6, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 7, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 8, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 9, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 10, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 11, 1))).toBe(11);
+    expect(cellGetValue(getCell(sheet, 12, 1))).toBe(null);
   });
 
   it("sets column values from elision-style sparse array", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.getColumn(1).values = [, , 2, 3, , 5, , 7, , , , 11];
+    columnSetValues(getColumn(sheet, 1), [, , 2, 3, , 5, , 7, , , , 11]);
 
-    expect(sheet.getCell(1, 1).value).toBe(null);
-    expect(sheet.getCell(2, 1).value).toBe(2);
-    expect(sheet.getCell(3, 1).value).toBe(3);
-    expect(sheet.getCell(4, 1).value).toBe(null);
-    expect(sheet.getCell(5, 1).value).toBe(5);
-    expect(sheet.getCell(6, 1).value).toBe(null);
-    expect(sheet.getCell(7, 1).value).toBe(7);
-    expect(sheet.getCell(8, 1).value).toBe(null);
-    expect(sheet.getCell(9, 1).value).toBe(null);
-    expect(sheet.getCell(10, 1).value).toBe(null);
-    expect(sheet.getCell(11, 1).value).toBe(11);
-    expect(sheet.getCell(12, 1).value).toBe(null);
+    expect(cellGetValue(getCell(sheet, 1, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 2, 1))).toBe(2);
+    expect(cellGetValue(getCell(sheet, 3, 1))).toBe(3);
+    expect(cellGetValue(getCell(sheet, 4, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 5, 1))).toBe(5);
+    expect(cellGetValue(getCell(sheet, 6, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 7, 1))).toBe(7);
+    expect(cellGetValue(getCell(sheet, 8, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 9, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 10, 1))).toBe(null);
+    expect(cellGetValue(getCell(sheet, 11, 1))).toBe(11);
+    expect(cellGetValue(getCell(sheet, 12, 1))).toBe(null);
   });
 
   // ===========================================================================
@@ -150,11 +178,16 @@ describe("Column", () => {
   it("sets default column width when no explicit width given", () => {
     const sheet = testUtils.createSheetMock();
 
-    sheet.addColumn(1, { header: "Col 1", key: "id1", style: { numFmt: "0.00%" } });
-    sheet.addColumn(2, { header: "Col 2", key: "id2", style: { numFmt: "0.00%" }, width: 10 });
-    sheet.getColumn(3).numFmt = "0.00%";
+    columnSetDefn(getColumn(sheet, 1), { header: "Col 1", key: "id1", style: { numFmt: "0.00%" } });
+    columnSetDefn(getColumn(sheet, 2), {
+      header: "Col 2",
+      key: "id2",
+      style: { numFmt: "0.00%" },
+      width: 10
+    });
+    columnSetNumFmt(getColumn(sheet, 3), "0.00%");
 
-    const model = Column.toModel(sheet.columns);
+    const model = columnToModel(getColumns(sheet));
     expect(model!.length).toBe(3);
     expect(model![0].width).toBe(9); // default
     expect(model![1].width).toBe(10); // explicit
@@ -163,11 +196,11 @@ describe("Column", () => {
 
   it("isCustomWidth is true when width differs from default", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.addColumn(1, { header: "Col 1", width: 20 });
-    sheet.addColumn(2, { header: "Col 2" });
+    columnSetDefn(getColumn(sheet, 1), { header: "Col 1", width: 20 });
+    columnSetDefn(getColumn(sheet, 2), { header: "Col 2" });
 
-    expect(sheet.getColumn(1).isCustomWidth).toBe(true);
-    expect(sheet.getColumn(2).isCustomWidth).toBe(false);
+    expect(columnIsCustomWidth(getColumn(sheet, 1))).toBe(true);
+    expect(columnIsCustomWidth(getColumn(sheet, 2))).toBe(false);
   });
 
   // ===========================================================================
@@ -176,26 +209,26 @@ describe("Column", () => {
 
   it("hidden property can be set and read", () => {
     const sheet = testUtils.createSheetMock();
-    const col = sheet.addColumn(1);
+    const col = getColumn(sheet, 1);
 
-    expect(col.hidden).toBe(false);
-    col.hidden = true;
-    expect(col.hidden).toBe(true);
-    col.hidden = false;
-    expect(col.hidden).toBe(false);
+    expect(columnHidden(col)).toBe(false);
+    columnSetHidden(col, true);
+    expect(columnHidden(col)).toBe(true);
+    columnSetHidden(col, false);
+    expect(columnHidden(col)).toBe(false);
   });
 
   it("outlineLevel and collapsed interact correctly", () => {
     const sheet = testUtils.createSheetMock();
-    const col = sheet.addColumn(1);
+    const col = getColumn(sheet, 1);
 
     expect(col.outlineLevel).toBe(0);
-    expect(col.collapsed).toBe(false);
+    expect(columnCollapsed(col)).toBe(false);
 
-    col.outlineLevel = 1;
+    columnSetOutlineLevel(col, 1);
     expect(col.outlineLevel).toBe(1);
     // collapsed depends on worksheet.properties.outlineLevelCol
-    expect(col.collapsed).toBe(true);
+    expect(columnCollapsed(col)).toBe(true);
   });
 
   // ===========================================================================
@@ -204,13 +237,13 @@ describe("Column", () => {
 
   it("eachCell iterates over non-empty cells", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.getCell(1, 1).value = "a";
-    sheet.getCell(3, 1).value = "c";
-    sheet.getCell(5, 1).value = "e";
+    cellSetValue(getCell(sheet, 1, 1), "a");
+    cellSetValue(getCell(sheet, 3, 1), "c");
+    cellSetValue(getCell(sheet, 5, 1), "e");
 
     const collected: Array<{ row: number; value: unknown }> = [];
-    sheet.getColumn(1).eachCell((cell, rowNumber) => {
-      collected.push({ row: rowNumber, value: cell.value });
+    columnEachCell(getColumn(sheet, 1), (cell, rowNumber) => {
+      collected.push({ row: rowNumber, value: cellGetValue(cell) });
     });
 
     expect(collected).toEqual([
@@ -222,11 +255,11 @@ describe("Column", () => {
 
   it("eachCell with includeEmpty iterates all rows up to last", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.getCell(1, 1).value = "a";
-    sheet.getCell(3, 1).value = "c";
+    cellSetValue(getCell(sheet, 1, 1), "a");
+    cellSetValue(getCell(sheet, 3, 1), "c");
 
     const rows: number[] = [];
-    sheet.getColumn(1).eachCell({ includeEmpty: true }, (_cell, rowNumber) => {
+    columnEachCell(getColumn(sheet, 1), { includeEmpty: true }, (_cell, rowNumber) => {
       rows.push(rowNumber);
     });
 
@@ -242,20 +275,20 @@ describe("Column", () => {
 
   it("column style properties propagate to cells", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.addColumn(1, { header: "Col 1" });
-    sheet.getCell(2, 1).value = "data";
+    columnSetDefn(getColumn(sheet, 1), { header: "Col 1" });
+    cellSetValue(getCell(sheet, 2, 1), "data");
 
-    sheet.getColumn(1).font = { bold: true };
-    expect(sheet.getCell(1, 1).font).toEqual({ bold: true });
-    expect(sheet.getCell(2, 1).font).toEqual({ bold: true });
+    columnSetFont(getColumn(sheet, 1), { bold: true });
+    expect(cellFont(getCell(sheet, 1, 1))).toEqual({ bold: true });
+    expect(cellFont(getCell(sheet, 2, 1))).toEqual({ bold: true });
   });
 
   it("column numFmt propagates to cells", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.getCell(1, 1).value = 0.5;
-    sheet.getColumn(1).numFmt = "0.00%";
+    cellSetValue(getCell(sheet, 1, 1), 0.5);
+    columnSetNumFmt(getColumn(sheet, 1), "0.00%");
 
-    expect(sheet.getCell(1, 1).numFmt).toBe("0.00%");
+    expect(cellNumFmt(getCell(sheet, 1, 1))).toBe("0.00%");
   });
 
   // ===========================================================================
@@ -264,11 +297,12 @@ describe("Column", () => {
 
   it("headerCount reflects number of header rows", () => {
     const sheet = testUtils.createSheetMock();
-    const col = sheet.addColumn(1, { header: "Single" });
-    expect(col.headerCount).toBe(1);
+    const col = getColumn(sheet, 1);
+    columnSetDefn(col, { header: "Single" });
+    expect(columnHeaderCount(col)).toBe(1);
 
-    col.header = ["Row1", "Row2", "Row3"];
-    expect(col.headerCount).toBe(3);
+    columnSetHeader(col, ["Row1", "Row2", "Row3"]);
+    expect(columnHeaderCount(col)).toBe(3);
   });
 
   // ===========================================================================
@@ -277,18 +311,18 @@ describe("Column", () => {
 
   it("equivalentTo returns true for columns with same properties", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.addColumn(1, { width: 10 });
-    sheet.addColumn(2, { width: 10 });
+    columnSetDefn(getColumn(sheet, 1), { width: 10 });
+    columnSetDefn(getColumn(sheet, 2), { width: 10 });
 
-    expect(sheet.getColumn(1).equivalentTo(sheet.getColumn(2))).toBe(true);
+    expect(columnEquivalentTo(getColumn(sheet, 1), getColumn(sheet, 2))).toBe(true);
   });
 
   it("equivalentTo returns false for columns with different width", () => {
     const sheet = testUtils.createSheetMock();
-    sheet.addColumn(1, { width: 10 });
-    sheet.addColumn(2, { width: 20 });
+    columnSetDefn(getColumn(sheet, 1), { width: 10 });
+    columnSetDefn(getColumn(sheet, 2), { width: 20 });
 
-    expect(sheet.getColumn(1).equivalentTo(sheet.getColumn(2))).toBe(false);
+    expect(columnEquivalentTo(getColumn(sheet, 1), getColumn(sheet, 2))).toBe(false);
   });
 
   // ===========================================================================
@@ -296,152 +330,152 @@ describe("Column", () => {
   // ===========================================================================
 
   it("column properties survive XLSX round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("test");
-    ws.columns = [
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "test");
+    Worksheet.setColumns(ws, [
       { header: "ID", key: "id", width: 10 },
       { header: "Name", key: "name", width: 32 },
       { header: "DOB", key: "dob", width: 15, outlineLevel: 1 }
-    ];
-    ws.addRow({ id: 1, name: "Alice", dob: new Date(1990, 0, 1) });
+    ]);
+    Worksheet.addRow(ws, { id: 1, name: "Alice", dob: new Date(1990, 0, 1) });
 
-    const buffer = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
+    const buffer = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
 
-    const ws2 = wb2.getWorksheet("test")!;
-    expect(ws2.getColumn(1).width).toBe(10);
-    expect(ws2.getColumn(2).width).toBe(32);
-    expect(ws2.getColumn(3).width).toBe(15);
-    expect(ws2.getColumn(3).outlineLevel).toBe(1);
+    const ws2 = Workbook.getWorksheet(wb2, "test")!;
+    expect(Column.getWidth(ws2, 1)).toBe(10);
+    expect(Column.getWidth(ws2, 2)).toBe(32);
+    expect(Column.getWidth(ws2, 3)).toBe(15);
+    expect(columnOutlineLevel(getColumn(ws2, 3))).toBe(1);
   });
 
   describe("style isolation", () => {
     it("mutating a cell border after col.border broadcast does not leak to other cells", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.getCell("A1").value = "row1";
-      ws.getCell("A2").value = "row2";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Cell.setValue(ws, "A1", "row1");
+      Cell.setValue(ws, "A2", "row2");
 
-      ws.getColumn(1).border = { top: { style: "thin" }, bottom: { style: "thin" } };
+      columnSetBorder(getColumn(ws, 1), { top: { style: "thin" }, bottom: { style: "thin" } });
 
-      ws.getCell("A1").border!.top = { style: "thick" };
+      Cell.getStyle(ws, "A1").border!.top = { style: "thick" };
 
-      expect(ws.getCell("A1").border!.top).toEqual({ style: "thick" });
-      expect(ws.getCell("A2").border!.top).toEqual({ style: "thin" });
+      expect(Cell.getStyle(ws, "A1").border!.top).toEqual({ style: "thick" });
+      expect(Cell.getStyle(ws, "A2").border!.top).toEqual({ style: "thin" });
     });
 
     it("mutating a cell fill after col.fill broadcast does not leak to other cells", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.getCell("A1").value = "row1";
-      ws.getCell("A2").value = "row2";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Cell.setValue(ws, "A1", "row1");
+      Cell.setValue(ws, "A2", "row2");
 
-      ws.getColumn(1).fill = {
+      columnSetFill(getColumn(ws, 1), {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: "FFFF0000" }
-      };
+      });
 
-      (ws.getCell("A1").fill as any).fgColor = { argb: "FF00FF00" };
+      (Cell.getStyle(ws, "A1").fill as any).fgColor = { argb: "FF00FF00" };
 
-      expect((ws.getCell("A1").fill as any).fgColor).toEqual({ argb: "FF00FF00" });
-      expect((ws.getCell("A2").fill as any).fgColor).toEqual({ argb: "FFFF0000" });
+      expect((Cell.getStyle(ws, "A1").fill as any).fgColor).toEqual({ argb: "FF00FF00" });
+      expect((Cell.getStyle(ws, "A2").fill as any).fgColor).toEqual({ argb: "FFFF0000" });
     });
   });
 
   // ===========================================================================
-  // Nested column-key paths (addRow / row.values with dotted keys)
+  // Nested column-key paths (addRow / Row.values(row) with dotted keys)
   // ===========================================================================
 
   describe("nested column key paths", () => {
     it("resolves dotted keys against nested objects", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 },
         { header: "Zip", key: "address.zip", width: 10 }
-      ];
-      ws.addRow({ name: "Alice", address: { city: "Sydney", zip: "2000" } });
+      ]);
+      Worksheet.addRow(ws, { name: "Alice", address: { city: "Sydney", zip: "2000" } });
 
-      expect(ws.getCell("A2").value).toBe("Alice");
-      expect(ws.getCell("B2").value).toBe("Sydney");
-      expect(ws.getCell("C2").value).toBe("2000");
+      expect(Cell.getValue(ws, "A2")).toBe("Alice");
+      expect(Cell.getValue(ws, "B2")).toBe("Sydney");
+      expect(Cell.getValue(ws, "C2")).toBe("2000");
     });
 
     it("resolves deeply nested keys (three levels)", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [{ header: "Country", key: "address.geo.country", width: 20 }];
-      ws.addRow({ address: { geo: { country: "AU" } } });
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [{ header: "Country", key: "address.geo.country", width: 20 }]);
+      Worksheet.addRow(ws, { address: { geo: { country: "AU" } } });
 
-      expect(ws.getCell("A2").value).toBe("AU");
+      expect(Cell.getValue(ws, "A2")).toBe("AU");
     });
 
     it("skips the cell when a nested path segment is missing", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 }
-      ];
+      ]);
       // No `address` at all → the dotted column simply has no value.
-      ws.addRow({ name: "Bob" });
+      Worksheet.addRow(ws, { name: "Bob" });
 
-      expect(ws.getCell("A2").value).toBe("Bob");
-      expect(ws.getCell("B2").value).toBeNull();
+      expect(Cell.getValue(ws, "A2")).toBe("Bob");
+      expect(Cell.getValue(ws, "B2")).toBeNull();
     });
 
     it("skips the cell when an intermediate segment is not an object", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [{ header: "City", key: "address.city", width: 20 }];
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [{ header: "City", key: "address.city", width: 20 }]);
       // `address` is a primitive, so `.city` cannot be followed.
-      ws.addRow({ address: "not-an-object" } as any);
+      Worksheet.addRow(ws, { address: "not-an-object" } as any);
 
-      expect(ws.getCell("A2").value).toBeNull();
+      expect(Cell.getValue(ws, "A2")).toBeNull();
     });
 
     it("prefers a literal flat key containing a dot over nested traversal", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [{ header: "Dotted", key: "a.b", width: 20 }];
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [{ header: "Dotted", key: "a.b", width: 20 }]);
       // A flat property literally named "a.b" wins over walking a → b.
-      ws.addRow({ "a.b": "flat-wins", a: { b: "nested-loses" } } as any);
+      Worksheet.addRow(ws, { "a.b": "flat-wins", a: { b: "nested-loses" } } as any);
 
-      expect(ws.getCell("A2").value).toBe("flat-wins");
+      expect(Cell.getValue(ws, "A2")).toBe("flat-wins");
     });
 
     it("leaves plain (non-dotted) keys behaving exactly as before", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [
         { header: "ID", key: "id", width: 10 },
         { header: "Name", key: "name", width: 20 }
-      ];
-      ws.addRow({ id: 7, name: "Carol" });
+      ]);
+      Worksheet.addRow(ws, { id: 7, name: "Carol" });
 
-      expect(ws.getCell("A2").value).toBe(7);
-      expect(ws.getCell("B2").value).toBe("Carol");
+      expect(Cell.getValue(ws, "A2")).toBe(7);
+      expect(Cell.getValue(ws, "B2")).toBe("Carol");
     });
 
     it("round-trips nested-key values through XLSX", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.columns = [
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Worksheet.setColumns(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "City", key: "address.city", width: 20 }
-      ];
-      ws.addRow({ name: "Dave", address: { city: "Perth" } });
+      ]);
+      Worksheet.addRow(ws, { name: "Dave", address: { city: "Perth" } });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
-      const ws2 = wb2.getWorksheet("test")!;
+      const buffer = await Workbook.toXlsxBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
+      const ws2 = Workbook.getWorksheet(wb2, "test")!;
 
-      expect(ws2.getCell("A2").value).toBe("Dave");
-      expect(ws2.getCell("B2").value).toBe("Perth");
+      expect(Cell.getValue(ws2, "A2")).toBe("Dave");
+      expect(Cell.getValue(ws2, "B2")).toBe("Perth");
     });
   });
 });

@@ -6,7 +6,7 @@
  * standalone chart XML part.
  */
 
-import { Anchor, type AnchorModel } from "@excel/anchor";
+import { anchorCreate, anchorModel, type AnchorData, type AnchorModel } from "@excel/anchor";
 import type { ChartExModel } from "@excel/chart/chart-ex-types";
 import type {
   AddChartRange,
@@ -26,7 +26,15 @@ import type {
 } from "@excel/chart/types";
 import { ChartOptionsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
+import {
+  copyChartExSidecars,
+  copyChartSidecars,
+  getChartEntry,
+  getChartExStructuredEntry
+} from "@excel/workbook";
+import type { WorkbookData } from "@excel/workbook-core";
 import type { Worksheet } from "@excel/worksheet";
+import { _registerChart, _registerChartEx, getSheetWorkbook } from "@excel/worksheet";
 import { RelType } from "@excel/xlsx/rel-type";
 
 import { fillChartCaches, fillChartExCaches } from "./cache-populator";
@@ -36,7 +44,7 @@ import {
   buildChartSeriesForType
 } from "./chart-builder";
 import { renderChartExPng, renderChartExSvg } from "./chart-ex-renderer";
-import { resolvePendingChartImages, type PictureFillHostWorkbook } from "./chart-images";
+import { resolvePendingChartImages } from "./chart-images";
 import { renderChartPng, renderChartSvg, type ChartRenderOptions } from "./chart-renderer";
 import { parseTxPr } from "./shape-properties";
 
@@ -160,9 +168,9 @@ export interface ChartExEntry {
  */
 interface ChartAnchorRange {
   /** Top-left anchor (always present) */
-  tl: Anchor;
+  tl: AnchorData;
   /** Bottom-right anchor (only for twoCellAnchor) */
-  br?: Anchor;
+  br?: AnchorData;
   /** Absolute position in EMU (only for absoluteAnchor) */
   pos?: { x: number; y: number };
   /** Extent in EMU (for oneCellAnchor and absoluteAnchor) */
@@ -226,16 +234,16 @@ class Chart {
       const decoded = colCache.decode(range);
       if ("top" in decoded) {
         return {
-          tl: new Anchor(worksheet, { col: decoded.left, row: decoded.top }, -1),
-          br: new Anchor(worksheet, { col: decoded.right, row: decoded.bottom }, 0),
+          tl: anchorCreate(worksheet, { col: decoded.left, row: decoded.top }, -1),
+          br: anchorCreate(worksheet, { col: decoded.right, row: decoded.bottom }, 0),
           editAs: "twoCell"
         };
       }
       // Single cell — default to DEFAULT_CHART_WIDTH_COLS x DEFAULT_CHART_HEIGHT_ROWS.
       const addr = colCache.decodeAddress(range);
       return {
-        tl: new Anchor(worksheet, { col: addr.col, row: addr.row }, -1),
-        br: new Anchor(
+        tl: anchorCreate(worksheet, { col: addr.col, row: addr.row }, -1),
+        br: anchorCreate(
           worksheet,
           {
             col: addr.col + DEFAULT_CHART_WIDTH_COLS,
@@ -247,11 +255,11 @@ class Chart {
       };
     }
 
-    const parseAnchor = (v: { col: number; row: number } | AnchorModel | string): Anchor => {
+    const parseAnchor = (v: { col: number; row: number } | AnchorModel | string): AnchorData => {
       if (typeof v === "string") {
-        return new Anchor(worksheet, v, -1);
+        return anchorCreate(worksheet, v, -1);
       }
-      return new Anchor(worksheet, v, 0);
+      return anchorCreate(worksheet, v, 0);
     };
 
     // Absolute anchor: { pos, ext }. `ext` is mandatory — without it
@@ -268,7 +276,7 @@ class Chart {
       return {
         // Absolute anchors have no meaningful "tl" cell, but the drawing layer
         // still requires one — default to (0, 0) with the provided offsets.
-        tl: new Anchor(worksheet, { col: 0, row: 0 }, 0),
+        tl: anchorCreate(worksheet, { col: 0, row: 0 }, 0),
         pos: range.pos,
         ext: range.ext,
         editAs: range.editAs ?? "absolute"
@@ -312,8 +320,8 @@ class Chart {
       chartNumber: this.chartNumber,
       chartExNumber: this.chartExNumber,
       range: {
-        tl: this.range.tl.model,
-        br: this.range.br ? this.range.br.model : undefined,
+        tl: anchorModel(this.range.tl),
+        br: this.range.br ? anchorModel(this.range.br) : undefined,
         editAs: this.range.editAs,
         pos: this.range.pos,
         ext: this.range.ext
@@ -331,7 +339,7 @@ class Chart {
     if (this.chartNumber <= 0) {
       return undefined;
     }
-    return this.worksheet.workbook.getChartEntry(this.chartNumber)?.model;
+    return getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber)?.model;
   }
 
   /** Get the structured ChartEx model, when this chart is an Office 2016+ chartEx. */
@@ -339,7 +347,7 @@ class Chart {
     if (this.chartExNumber <= 0) {
       return undefined;
     }
-    return this.worksheet.workbook.getChartExStructuredEntry(this.chartExNumber)?.model;
+    return getChartExStructuredEntry(getSheetWorkbook(this.worksheet), this.chartExNumber)?.model;
   }
 
   /**
@@ -397,7 +405,7 @@ class Chart {
     if (this.chartNumber <= 0) {
       return undefined;
     }
-    return this.worksheet.workbook.getChartEntry(this.chartNumber)?.userShapesXml;
+    return getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber)?.userShapesXml;
   }
 
   /**
@@ -423,7 +431,7 @@ class Chart {
     if (this.chartNumber <= 0) {
       throw new ChartOptionsError("Chart.setUserShapesXml is only supported on classic charts.");
     }
-    const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+    const entry = getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber);
     if (!entry) {
       throw new ChartOptionsError(`Chart ${this.chartNumber} has no registered chart entry.`);
     }
@@ -510,7 +518,7 @@ class Chart {
     if (this.chartNumber <= 0) {
       return;
     }
-    const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+    const entry = getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber);
     if (!entry) {
       return;
     }
@@ -531,7 +539,7 @@ class Chart {
     // userShapes rel in place — producing a chart whose XML has no
     // `<c:userShapes>` reference but whose .rels still points at a
     // drawing part that is never emitted.
-    const workbook = this.worksheet.workbook;
+    const workbook = getSheetWorkbook(this.worksheet);
     const workbookChartRels = (
       workbook as unknown as {
         _chartRels?: Record<number, Array<{ Id?: string; Type?: string }>>;
@@ -1138,7 +1146,8 @@ class Chart {
     // the call sites so any rename of the Worksheet internals surfaces here.
     const registrar = targetWs as unknown as WorksheetChartRegistrar;
     if (sourceChartExModel) {
-      const newChartExNumber = registrar._registerChartEx(
+      const newChartExNumber = _registerChartEx(
+        registrar as never,
         deepClone(sourceChartExModel),
         targetRange
       );
@@ -1147,16 +1156,22 @@ class Chart {
       // every rel, so a chartEx with `cx14:` extension references or
       // embedded media ended up pointing at undefined rel ids on the
       // clone.
-      this.worksheet.workbook.copyChartExSidecars?.(
+      copyChartExSidecars(
+        getSheetWorkbook(this.worksheet),
         this.chartExNumber,
         newChartExNumber,
-        targetWs.workbook
+        getSheetWorkbook(targetWs)
       );
       return newChartExNumber;
     }
     const clonedModel = deepClone(sourceModel!);
-    const chartNumber = registrar._registerChart(clonedModel, targetRange);
-    this.worksheet.workbook.copyChartSidecars?.(this.chartNumber, chartNumber, targetWs.workbook);
+    const chartNumber = _registerChart(registrar as never, clonedModel, targetRange);
+    copyChartSidecars(
+      getSheetWorkbook(this.worksheet),
+      this.chartNumber,
+      chartNumber,
+      getSheetWorkbook(targetWs)
+    );
     // `_registerChart` creates a minimal entry (model only). Carry
     // the per-entry `userShapesXml` bytes across so annotation
     // overlays (callouts, arrows, text boxes the user drew on top of
@@ -1177,8 +1192,8 @@ class Chart {
     // chart whose XML uses `r:embed="rId{N}"` but whose .rels has
     // no matching entry, so Excel renders the picture-fill series
     // as a broken / blank fill.
-    const srcEntry = this.worksheet.workbook.getChartEntry(this.chartNumber);
-    const dstEntry = targetWs.workbook.getChartEntry(chartNumber);
+    const srcEntry = getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber);
+    const dstEntry = getChartEntry(getSheetWorkbook(targetWs), chartNumber);
     if (srcEntry && dstEntry) {
       if (srcEntry.userShapesXml) {
         dstEntry.userShapesXml = srcEntry.userShapesXml.slice();
@@ -1205,8 +1220,8 @@ class Chart {
   private _cloneRange(): AddChartRange {
     // Two-cell anchor: shift the clone right by the original's width.
     if (this.range.br) {
-      const tl = this.range.tl.model;
-      const br = this.range.br.model;
+      const tl = anchorModel(this.range.tl);
+      const br = anchorModel(this.range.br);
       const width = br.nativeCol - tl.nativeCol;
       return {
         tl: { col: br.nativeCol + 1, row: tl.nativeRow },
@@ -1286,7 +1301,7 @@ class Chart {
 
   private _markDirty(preferRawPatch = false, requireRawPatch = false): void {
     if (this.chartNumber > 0) {
-      const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+      const entry = getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber);
       if (entry) {
         entry.dirty = true;
         // Once any mutation drops `preferRawPatch`, a full rebuild is
@@ -1305,7 +1320,7 @@ class Chart {
       }
     }
     if (this.chartExNumber > 0) {
-      const entry = this.worksheet.workbook.getChartExStructuredEntry(this.chartExNumber);
+      const entry = getChartExStructuredEntry(getSheetWorkbook(this.worksheet), this.chartExNumber);
       if (entry) {
         entry.dirty = true;
         if (!preferRawPatch) {
@@ -1348,14 +1363,14 @@ class Chart {
     if (this.chartNumber <= 0) {
       return;
     }
-    const entry = this.worksheet.workbook.getChartEntry(this.chartNumber);
+    const entry = getChartEntry(getSheetWorkbook(this.worksheet), this.chartNumber);
     if (!entry) {
       return;
     }
     try {
       resolvePendingChartImages(
         entry,
-        this.worksheet.workbook as unknown as PictureFillHostWorkbook,
+        getSheetWorkbook(this.worksheet) as unknown as WorkbookData,
         this.chartNumber
       );
     } catch {
@@ -1390,7 +1405,7 @@ class Chart {
       // order and the `addChart` path in `Worksheet`).
       fillChartCaches(
         model,
-        this.worksheet.workbook as unknown as Parameters<typeof fillChartCaches>[1],
+        getSheetWorkbook(this.worksheet) as unknown as Parameters<typeof fillChartCaches>[1],
         this.worksheet as unknown as Parameters<typeof fillChartCaches>[2]
       );
     } catch {
@@ -1435,7 +1450,7 @@ class Chart {
     try {
       fillChartExCaches(
         model,
-        this.worksheet.workbook as unknown as Parameters<typeof fillChartExCaches>[1],
+        getSheetWorkbook(this.worksheet) as unknown as Parameters<typeof fillChartExCaches>[1],
         this.worksheet as unknown as Parameters<typeof fillChartExCaches>[2]
       );
     } catch {

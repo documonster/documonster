@@ -25,7 +25,41 @@ import {
   renderChartExSvg
 } from "@excel/chart";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import {
+  chartsheetChart,
+  chartsheetChartExModel,
+  chartsheetChartExNumber,
+  chartsheetChartModel,
+  chartsheetChartNumber,
+  chartsheetIsChartEx,
+  chartsheetName,
+  chartsheetPageMargins,
+  chartsheetPageSetup,
+  chartsheetSetPageSetup,
+  chartsheetSetZoomScale,
+  chartsheetZoomScale
+} from "@excel/chartsheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import {
+  addPivotChartsheet,
+  getChartEntry,
+  getChartExStructuredEntry,
+  getChartsheets,
+  getWorksheets,
+  removeChartsheet,
+  replaceChartsheetChart,
+  renameChartsheet,
+  copyChartsheet
+} from "@excel/workbook";
+import {
+  addChart,
+  addChartEx,
+  addPivotChart,
+  addPivotComboChart,
+  addPivotTable,
+  getCharts,
+  removeChart
+} from "@excel/worksheet";
 import { beforeAll, describe, it, expect } from "vitest";
 
 import { VALUES_A, VALUES_B, baseSeries, stableHash } from "./chart-builder.helpers";
@@ -39,12 +73,12 @@ beforeAll(() => {
 
 describe("ChartEx modern chart types", () => {
   function makeExWb() {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     // Populate some data
     for (let i = 1; i <= 5; i++) {
-      ws.getCell(`A${i}`).value = `Cat${i}`;
-      ws.getCell(`B${i}`).value = i * 10;
+      Cell.setValue(ws, `A${i}`, `Cat${i}`);
+      Cell.setValue(ws, `B${i}`, i * 10);
     }
     return { wb, ws };
   }
@@ -220,7 +254,8 @@ describe("ChartEx modern chart types", () => {
 
   it("addChartEx integrates with worksheet write pipeline", async () => {
     const { wb, ws } = makeExWb();
-    const num = ws.addChartEx(
+    const num = addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -230,22 +265,23 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
     expect(num).toBe(1);
-    expect(ws.getCharts()).toHaveLength(1);
-    expect(ws.getCharts()[0].isChartEx).toBe(true);
+    expect(getCharts(ws)).toHaveLength(1);
+    expect(getCharts(ws)[0].isChartEx).toBe(true);
 
     // Write and verify the XML is in the zip
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     // Load and check bytes are present
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    expect(ws2.getCharts()).toHaveLength(1);
-    expect(ws2.getCharts()[0].isChartEx).toBe(true);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    expect(getCharts(ws2)).toHaveLength(1);
+    expect(getCharts(ws2)[0].isChartEx).toBe(true);
   });
 
   it("loads chartEx into a structured model while preserving clean raw XML", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -255,10 +291,10 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     expect(chart.chartExModel).toBeDefined();
     expect(chart.title).toBe("Programmatic ChartEx");
     expect(chart.chartExModel!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId).toBe(
@@ -266,7 +302,7 @@ describe("ChartEx modern chart types", () => {
     );
 
     const inputEntries = await extractAll(new Uint8Array(buf));
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const outputEntries = await extractAll(new Uint8Array(output));
     expect(textDecoder.decode(outputEntries.get("xl/charts/chartEx1.xml")!.data)).toBe(
       textDecoder.decode(inputEntries.get("xl/charts/chartEx1.xml")!.data)
@@ -275,7 +311,8 @@ describe("ChartEx modern chart types", () => {
 
   it("addChartEx populates cached category and value points", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -284,7 +321,7 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const xml = textDecoder.decode(entries.get("xl/charts/chartEx1.xml")!.data);
 
@@ -297,7 +334,8 @@ describe("ChartEx modern chart types", () => {
 
   it("patches loaded chartEx XML after a high-level title mutation", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -307,7 +345,7 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml");
     expect(chartExEntry).toBeDefined();
@@ -321,12 +359,12 @@ describe("ChartEx modern chart types", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.title = "Updated ChartEx";
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const outputEntries = await extractAll(new Uint8Array(output));
     const outputChartExXml = textDecoder.decode(outputEntries.get("xl/charts/chartEx1.xml")!.data);
     expect(outputChartExXml).toContain(marker);
@@ -335,7 +373,8 @@ describe("ChartEx modern chart types", () => {
 
   it("preserves raw ChartEx shape, data label, and extension XML after a non-raw-patch mutation", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -345,7 +384,7 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     const chartExXml = textDecoder.decode(chartExEntry.data);
@@ -365,14 +404,14 @@ describe("ChartEx modern chart types", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutateChartEx(model => {
       model.chartSpace.chart.autoTitleDeleted = true;
     });
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const outputEntries = await extractAll(new Uint8Array(output));
     const outputChartExXml = textDecoder.decode(outputEntries.get("xl/charts/chartEx1.xml")!.data);
     expect(outputChartExXml).toContain("outerShdw");
@@ -389,7 +428,8 @@ describe("ChartEx modern chart types", () => {
 
   it("falls back to structured ChartEx re-render when raw-patch mutations include unsafe changes", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -399,7 +439,7 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     const marker = "<!-- chartEx-unsafe-raw-marker -->";
@@ -411,9 +451,9 @@ describe("ChartEx modern chart types", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutateChartEx(model => {
       model.chartSpace.chart.title = {
         text: { paragraphs: [{ runs: [{ text: "Updated" }] }] },
@@ -422,7 +462,7 @@ describe("ChartEx modern chart types", () => {
       model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
     });
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const outputEntries = await extractAll(new Uint8Array(output));
     const outputChartExXml = textDecoder.decode(outputEntries.get("xl/charts/chartEx1.xml")!.data);
     // Structured ChartEx re-render preserves leading XML comments by
@@ -435,7 +475,8 @@ describe("ChartEx modern chart types", () => {
 
   it("patches loaded ChartEx XML for data, layout, labels, shape, data points, and axes", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "waterfall",
         categories: "Sheet1!$A$1:$A$5",
@@ -445,7 +486,7 @@ describe("ChartEx modern chart types", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     const marker = "<!-- chartEx-wide-raw-patch -->";
@@ -457,9 +498,9 @@ describe("ChartEx modern chart types", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutateChartEx(
       model => {
         const data = model.chartSpace.chartData.data;
@@ -494,7 +535,7 @@ describe("ChartEx modern chart types", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const entries = await extractAll(new Uint8Array(output));
     const xml = textDecoder.decode(entries.get("xl/charts/chartEx1.xml")!.data);
     expect(xml).toContain(marker);
@@ -530,7 +571,8 @@ describe("ChartEx modern chart types", () => {
 
   it("enforces strict template mode globally for loaded ChartEx mutations", async () => {
     const { wb, ws } = makeExWb();
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -538,7 +580,7 @@ describe("ChartEx modern chart types", () => {
       },
       "D1:J10"
     );
-    const zipData = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const zipData = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     chartExEntry.data = textEncoder.encode(
       textDecoder
@@ -550,24 +592,23 @@ describe("ChartEx modern chart types", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    wb2
-      .getWorksheet("Sheet1")!
-      .getCharts()[0].chartExModel!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId =
-      "treemap";
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    getCharts(
+      Workbook.getWorksheet(wb2, "Sheet1")!
+    )[0].chartExModel!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
 
-    await expect(wb2.xlsx.writeBuffer({ strictTemplateMode: true })).rejects.toThrow(
+    await expect(Workbook.toXlsxBuffer(wb2, { strictTemplateMode: true })).rejects.toThrow(
       /strict template mode/
     );
   });
 
   it("addChartEx for each of 8 types creates a distinct chart", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let i = 1; i <= 5; i++) {
-      ws.getCell(`A${i}`).value = `C${i}`;
-      ws.getCell(`B${i}`).value = i * 10;
+      Cell.setValue(ws, `A${i}`, `C${i}`);
+      Cell.setValue(ws, `B${i}`, i * 10);
     }
 
     const types: AddChartExOptions["type"][] = [
@@ -582,7 +623,8 @@ describe("ChartEx modern chart types", () => {
     ];
     let row = 1;
     for (const type of types) {
-      ws.addChartEx(
+      addChartEx(
+        ws,
         {
           type,
           categories: "Sheet1!$A$1:$A$5",
@@ -593,15 +635,15 @@ describe("ChartEx modern chart types", () => {
       row += 12;
     }
 
-    expect(ws.getCharts()).toHaveLength(8);
-    expect(ws.getCharts().every(c => c.isChartEx)).toBe(true);
+    expect(getCharts(ws)).toHaveLength(8);
+    expect(getCharts(ws).every(c => c.isChartEx)).toBe(true);
 
     // Round-trip
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    expect(ws2.getCharts()).toHaveLength(8);
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    expect(getCharts(ws2)).toHaveLength(8);
   });
 
   // -------------------------------------------------------------------------
@@ -643,41 +685,43 @@ describe("ChartEx modern chart types", () => {
 
 describe("TC1: removeChart cleans up workbook chart entry", () => {
   it("workbook.getChartEntry returns undefined after removeChart", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    const chartNum = ws.addChart({ type: "bar", series: [baseSeries("S")] }, "C1:J10");
-    expect(wb.getChartEntry(chartNum)).toBeDefined();
-    ws.removeChart(0);
-    expect(wb.getChartEntry(chartNum)).toBeUndefined();
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    const chartNum = addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
+    expect(getChartEntry(wb, chartNum)).toBeDefined();
+    removeChart(ws, 0);
+    expect(getChartEntry(wb, chartNum)).toBeUndefined();
   });
 
   it("workbook.getChartExStructuredEntry returns undefined after removeChart", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChartEx(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChartEx(
+      ws,
       {
         type: "histogram",
         series: [{ name: "S", values: "Sheet1!$B$1:$B$3", literalValues: [1, 2, 3] }]
       },
       "C1:J10"
     );
-    const chartExNumber = ws.getCharts()[0].chartExNumber;
-    expect(wb.getChartExStructuredEntry(chartExNumber)).toBeDefined();
-    ws.removeChart(0);
-    expect(wb.getChartExStructuredEntry(chartExNumber)).toBeUndefined();
+    const chartExNumber = getCharts(ws)[0].chartExNumber;
+    expect(getChartExStructuredEntry(wb, chartExNumber)).toBeDefined();
+    removeChart(ws, 0);
+    expect(getChartExStructuredEntry(wb, chartExNumber)).toBeUndefined();
   });
 });
 
 describe("TC2: ChartEx round-trip preserves isChartEx", () => {
   it("chartEx remains isChartEx after write/read", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let i = 1; i <= 5; i++) {
-      ws.getCell(`A${i}`).value = `C${i}`;
-      ws.getCell(`B${i}`).value = i * 10;
+      Cell.setValue(ws, `A${i}`, `C${i}`);
+      Cell.setValue(ws, `B${i}`, i * 10);
     }
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$5",
@@ -686,15 +730,15 @@ describe("TC2: ChartEx round-trip preserves isChartEx", () => {
       },
       "D1:K10"
     );
-    expect(ws.getCharts()[0].isChartEx).toBe(true);
-    expect(ws.getCharts()[0].chartNumber).toBe(0);
-    expect(ws.getCharts()[0].chartExNumber).toBeGreaterThan(0);
+    expect(getCharts(ws)[0].isChartEx).toBe(true);
+    expect(getCharts(ws)[0].chartNumber).toBe(0);
+    expect(getCharts(ws)[0].chartExNumber).toBeGreaterThan(0);
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    const chart2 = ws2.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    const chart2 = getCharts(ws2)[0];
     expect(chart2.isChartEx).toBe(true);
     expect(chart2.chartNumber).toBe(0);
     expect(chart2.chartExNumber).toBeGreaterThan(0);
@@ -703,11 +747,12 @@ describe("TC2: ChartEx round-trip preserves isChartEx", () => {
 
 describe("TC2b: classic chart raw passthrough", () => {
   async function makeWorkbookWithInjectedChartXml(inject: (xml: string) => string) {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Cat1";
-    ws.getCell("B1").value = 10;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Cat1");
+    Cell.setValue(ws, "B1", 10);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "Data", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }],
@@ -716,7 +761,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       "D1:J10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartEntry = zipData.get("xl/charts/chart1.xml");
     expect(chartEntry).toBeDefined();
@@ -733,9 +778,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const output = await wb.xlsx.writeBuffer();
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const output = await Workbook.toXlsxBuffer(wb);
     const inputEntries = await extractAll(new Uint8Array(input));
     const outputEntries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(outputEntries.get("xl/charts/chart1.xml")!.data);
@@ -750,12 +795,12 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.title = "Updated";
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -769,12 +814,12 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.chartModel!.chart.legend = undefined;
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -791,12 +836,12 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.legend = { legendPos: "t", overlay: false };
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -810,9 +855,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const series = model.chart.plotArea.chartTypes[0].series[0] as BarSeries & LineSeries;
@@ -821,7 +866,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -840,9 +885,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:cat>", `${rawMarker}${rawTrendline}<c:cat>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const series = model.chart.plotArea.chartTypes[0].series[0] as BarSeries;
@@ -853,7 +898,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -870,9 +915,9 @@ describe("TC2b: classic chart raw passthrough", () => {
         .replace("</c:ser>", '<c:dLbls><c:showSerName val="1"/></c:dLbls></c:ser>')
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const group = model.chart.plotArea.chartTypes[0] as BarChartGroup;
@@ -881,7 +926,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -897,9 +942,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         model.chart.plotArea.layout = {
@@ -915,7 +960,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -931,9 +976,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("</c:chart>", `${marker}</c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         model.chart.title = {
@@ -957,7 +1002,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -977,9 +1022,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const series = model.chart.plotArea.chartTypes[0].series[0] as BarSeries & LineSeries;
@@ -1009,7 +1054,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const output = await wb.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
 
@@ -1036,17 +1081,17 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
     // Mutate a field that the raw-patch path deliberately does NOT cover:
     // swap a bar chart into a line chart. That is a structural change —
     // the whole `<c:barChart>` block becomes `<c:lineChart>` — so
     // strict mode must refuse rather than silently rebuild.
-    const group = wb.getWorksheet("Sheet1")!.getCharts()[0].chartModel!.chart.plotArea
+    const group = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0].chartModel!.chart.plotArea
       .chartTypes[0];
     (group as unknown as { type: string }).type = "line";
 
-    await expect(wb.xlsx.writeBuffer({ templateMode: "strict" })).rejects.toThrow(
+    await expect(Workbook.toXlsxBuffer(wb, { templateMode: "strict" })).rejects.toThrow(
       /strict template mode/
     );
   });
@@ -1056,13 +1101,14 @@ describe("TC2b: classic chart raw passthrough", () => {
     // Confirms both: (a) the API validates the range 1..48, (b) the
     // resulting XML carries <c:style val="N"/> on a fresh chart, and
     // (c) a subsequent round-trip preserves it on the model.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }],
@@ -1070,20 +1116,20 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     chart.setStyle(37);
     chart.setBuiltInStyle(42); // alias — must produce the same effect.
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // Last call wins — style should be 42.
     expect(chartXml).toContain('<c:style val="42"/>');
 
     // Round-trip.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.getWorksheet("Sheet1")!.getCharts()[0].chartModel!.style).toBe(42);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0].chartModel!.style).toBe(42);
 
     // Invalid ranges throw.
     expect(() => chart.setStyle(0)).toThrow(/1..48/);
@@ -1115,9 +1161,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("</c:ser>", `${ext}</c:ser>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         model.chart.title = {
@@ -1127,7 +1173,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // c15 extension preserved.
@@ -1153,9 +1199,9 @@ describe("TC2b: classic chart raw passthrough", () => {
         .replace("</c:chartSpace>", `${vendorTag}</c:chartSpace>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     const unknown = chart.chartModel!.unknownElements;
     expect(unknown).toBeDefined();
     expect(unknown!.some(e => e.name === "c15:customChartMeta")).toBe(true);
@@ -1171,20 +1217,21 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("Chart.unknownElements returns undefined for freshly-built charts", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 1],
       ["B", 2]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }]
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Freshly built — no raw XML was ever parsed.
     expect(chart.unknownElements).toBeUndefined();
   });
@@ -1203,9 +1250,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("</c:barChart>", `${vendorMarker}</c:barChart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const group = model.chart.plotArea.chartTypes[0] as BarChartGroup;
@@ -1216,7 +1263,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // Vendor marker preserved → raw-patch path was taken.
@@ -1229,20 +1276,21 @@ describe("TC2b: classic chart raw passthrough", () => {
 
   it("raw-patches pie chartTypeGroup firstSliceAng without rebuilding", async () => {
     const vendorMarker = "<!--pie-vendor-keep-->";
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "pie",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }]
       },
       "D1:J10"
     );
-    const initialBuf = await wb.xlsx.writeBuffer();
+    const initialBuf = await Workbook.toXlsxBuffer(wb);
     const initial = await extractAll(new Uint8Array(initialBuf));
     const chartEntry = initial.get("xl/charts/chart1.xml")!;
     chartEntry.data = textEncoder.encode(
@@ -1253,9 +1301,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       [...initial.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(modifiedXlsx);
-    const chart2 = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, modifiedXlsx);
+    const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart2.mutate(
       model => {
         const group = model.chart.plotArea.chartTypes[0] as PieChartGroup;
@@ -1263,7 +1311,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       { preferRawPatch: true }
     );
-    const outBuf = await wb2.xlsx.writeBuffer();
+    const outBuf = await Workbook.toXlsxBuffer(wb2);
     const out = await extractAll(new Uint8Array(outBuf));
     const outXml = textDecoder.decode(out.get("xl/charts/chart1.xml")!.data);
     expect(outXml).toContain(vendorMarker);
@@ -1271,13 +1319,14 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("raw-patches doughnut holeSize and removes the leaf when set to undefined", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "doughnut",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }],
@@ -1285,11 +1334,11 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       "D1:J10"
     );
-    const initialBuf = await wb.xlsx.writeBuffer();
+    const initialBuf = await Workbook.toXlsxBuffer(wb);
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(initialBuf);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, initialBuf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutate(
       model => {
         const group = model.chart.plotArea.chartTypes[0] as DoughnutChartGroup;
@@ -1297,7 +1346,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       { preferRawPatch: true }
     );
-    const outBuf = await wb2.xlsx.writeBuffer();
+    const outBuf = await Workbook.toXlsxBuffer(wb2);
     const out = await extractAll(new Uint8Array(outBuf));
     const outXml = textDecoder.decode(out.get("xl/charts/chart1.xml")!.data);
     // Updated in place.
@@ -1317,17 +1366,17 @@ describe("TC2b: classic chart raw passthrough", () => {
         .replace("</c:chartSpace>", `${vendorTag}</c:chartSpace>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
     // Mutate a chart-type group's top-level `type` — structural change
     // (bar → line rewrites the enclosing `<c:barChart>` tag itself),
     // outside the RawPatchPlan whitelist, so strict mode must surface
     // the unknownElements hint.
-    const group = wb.getWorksheet("Sheet1")!.getCharts()[0].chartModel!.chart.plotArea
+    const group = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0].chartModel!.chart.plotArea
       .chartTypes[0];
     (group as unknown as { type: string }).type = "line";
 
-    await expect(wb.xlsx.writeBuffer({ templateMode: "strict" })).rejects.toThrow(
+    await expect(Workbook.toXlsxBuffer(wb, { templateMode: "strict" })).rejects.toThrow(
       /c15:customChartMeta/
     );
   });
@@ -1339,9 +1388,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       xml.replace("</c:chart>", `${marker}</c:chart>`)
     );
 
-    const wb = new Workbook();
-    await wb.xlsx.load(input);
-    const chart = wb.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, input);
+    const chart = getCharts(Workbook.getWorksheet(wb, "Sheet1")!)[0];
     chart.mutate(
       model => {
         // Switching chart type is outside every raw-patch branch (the
@@ -1353,17 +1402,18 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true, requireRawPatch: true }
     );
 
-    await expect(wb.xlsx.writeBuffer()).rejects.toThrow(/requireRawPatch/);
+    await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/requireRawPatch/);
   });
 
   it("fails instead of re-rendering ChartEx when requireRawPatch cannot safely preserve template XML", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$2",
@@ -1371,7 +1421,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       "D1:J10"
     );
-    const zipData = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const zipData = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     chartExEntry.data = textEncoder.encode(
       textDecoder
@@ -1383,9 +1433,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutateChartEx(
       model => {
         model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
@@ -1393,7 +1443,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true, requireRawPatch: true }
     );
 
-    await expect(wb2.xlsx.writeBuffer()).rejects.toThrow(/requireRawPatch/);
+    await expect(Workbook.toXlsxBuffer(wb2)).rejects.toThrow(/requireRawPatch/);
   });
 
   it("parseChartEx surfaces unstructured child elements under known parents", () => {
@@ -1440,13 +1490,14 @@ describe("TC2b: classic chart raw passthrough", () => {
   it("parseChartEx leaves unknownElements undefined when every child is recognised", async () => {
     // Round-trip a freshly-built ChartEx so the XML is known to only contain
     // structured children — regression guard against false positives.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$2",
@@ -1454,7 +1505,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       "D1:J10"
     );
-    const zipData = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const zipData = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExXml = textDecoder.decode(zipData.get("xl/charts/chartEx1.xml")!.data);
 
     const model = parseChartEx(chartExXml);
@@ -1468,13 +1519,14 @@ describe("TC2b: classic chart raw passthrough", () => {
     // writer preserves the surrounding structure via raw patching rather
     // than falling through to the structural rebuild path (which would
     // regenerate series markup and drop any sibling template XML).
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10, 30],
       ["B", 20, 40]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "waterfall",
         categories: "Sheet1!$A$1:$A$2",
@@ -1485,7 +1537,7 @@ describe("TC2b: classic chart raw passthrough", () => {
     // Inject a vendor marker as a sibling of cx:series so we can detect
     // the difference between raw-patch (marker preserved) and rebuild
     // (marker discarded because unknownElements are dropped on rebuild).
-    const initial = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const initial = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExEntry = initial.get("xl/charts/chartEx1.xml")!;
     const marker = '<cx:vendorBadge val="keep-me"/>';
     chartExEntry.data = textEncoder.encode(
@@ -1496,9 +1548,9 @@ describe("TC2b: classic chart raw passthrough", () => {
       [...initial.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     const beforeOwner =
       chart.chartExModel!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].ownerIdx;
     chart.mutateChartEx(
@@ -1510,7 +1562,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       { preferRawPatch: true }
     );
 
-    const out = await extractAll(new Uint8Array(await wb2.xlsx.writeBuffer()));
+    const out = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb2)));
     const outXml = textDecoder.decode(out.get("xl/charts/chartEx1.xml")!.data);
     // ownerIdx on the first series is updated
     expect(outXml).toMatch(/<cx:series[^>]*ownerIdx="7"/);
@@ -1523,13 +1575,14 @@ describe("TC2b: classic chart raw passthrough", () => {
     // Author a loaded ChartEx file with two distinct vendor extensions at
     // different known parents; mutate structurally in a way that cannot be
     // raw-patched to force the strict-mode failure path.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$2",
@@ -1537,7 +1590,7 @@ describe("TC2b: classic chart raw passthrough", () => {
       },
       "D1:J10"
     );
-    const zipData = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const zipData = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     const originalXml = textDecoder.decode(chartExEntry.data);
     const injectedXml = originalXml
@@ -1552,16 +1605,16 @@ describe("TC2b: classic chart raw passthrough", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // Changing layoutId requires a rebuild; the raw-patch white-list cannot
     // mutate the opening tag's layoutId attribute alone.
     chart.mutateChartEx(model => {
       model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutId = "treemap";
     });
 
-    await expect(wb2.xlsx.writeBuffer({ templateMode: "strict" })).rejects.toThrow(
+    await expect(Workbook.toXlsxBuffer(wb2, { templateMode: "strict" })).rejects.toThrow(
       /cx:vendorChartMeta.*cx:vendorSeriesAnnot|cx:vendorSeriesAnnot.*cx:vendorChartMeta/
     );
   });
@@ -1569,14 +1622,14 @@ describe("TC2b: classic chart raw passthrough", () => {
 
 describe("TC2c: chartsheet API", () => {
   it("creates a classic chart chartsheet and preserves it after round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.getCell("A1").value = "Cat1";
-    ws.getCell("A2").value = "Cat2";
-    ws.getCell("B1").value = 10;
-    ws.getCell("B2").value = 20;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Cell.setValue(ws, "A1", "Cat1");
+    Cell.setValue(ws, "A2", "Cat2");
+    Cell.setValue(ws, "B1", 10);
+    Cell.setValue(ws, "B2", 20);
 
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ name: "Sales", categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }],
@@ -1584,11 +1637,11 @@ describe("TC2c: chartsheet API", () => {
       }
     });
 
-    expect(chartsheet.chartNumber).toBe(1);
-    expect(chartsheet.isChartEx).toBe(false);
-    expect(wb.chartsheets).toHaveLength(1);
+    expect(chartsheetChartNumber(chartsheet)).toBe(1);
+    expect(chartsheetIsChartEx(chartsheet)).toBe(false);
+    expect(getChartsheets(wb)).toHaveLength(1);
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/chartsheets/sheet1.xml")).toBeDefined();
     expect(entries.get("xl/chartsheets/_rels/sheet1.xml.rels")).toBeDefined();
@@ -1610,22 +1663,22 @@ describe("TC2c: chartsheet API", () => {
     );
     expect(drawingRels).toContain("../charts/chart1.xml");
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.chartsheets).toHaveLength(1);
-    expect(wb2.chartsheets[0].name).toBe("Chart Sheet");
-    expect(wb2.chartsheets[0].chartNumber).toBe(1);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(getChartsheets(wb2)).toHaveLength(1);
+    expect(chartsheetName(getChartsheets(wb2)[0])).toBe("Chart Sheet");
+    expect(chartsheetChartNumber(getChartsheets(wb2)[0])).toBe(1);
   });
 
   it("creates a chartEx chartsheet", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
     for (let i = 1; i <= 3; i++) {
-      ws.getCell(`A${i}`).value = `Cat${i}`;
-      ws.getCell(`B${i}`).value = i * 10;
+      Cell.setValue(ws, `A${i}`, `Cat${i}`);
+      Cell.setValue(ws, `B${i}`, i * 10);
     }
 
-    const chartsheet = wb.addChartsheet("Modern Chart", {
+    const chartsheet = Workbook.addChartsheet(wb, "Modern Chart", {
       chart: {
         type: "sunburst",
         categories: "Data!$A$1:$A$3",
@@ -1634,8 +1687,8 @@ describe("TC2c: chartsheet API", () => {
       }
     });
 
-    expect(chartsheet.isChartEx).toBe(true);
-    const buf = await wb.xlsx.writeBuffer();
+    expect(chartsheetIsChartEx(chartsheet)).toBe(true);
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/charts/chartEx1.xml")).toBeDefined();
     const drawingXml = textDecoder.decode(entries.get("xl/drawings/drawing1.xml")!.data);
@@ -1655,20 +1708,20 @@ describe("TC2c: chartsheet API", () => {
     expect(drawingXml).toContain("xmlns:cx");
     expect(drawingXml).toContain("cx:chart");
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.chartsheets[0].isChartEx).toBe(true);
-    expect(wb2.chartsheets[0].chartExNumber).toBe(1);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(chartsheetIsChartEx(getChartsheets(wb2)[0])).toBe(true);
+    expect(chartsheetChartExNumber(getChartsheets(wb2)[0])).toBe(1);
   });
 
   it("exposes chartsheet chart models and supports replacement/removal", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }],
@@ -1677,34 +1730,34 @@ describe("TC2c: chartsheet API", () => {
       pageMargins: { l: 0.7, r: 0.7, t: 0.75, b: 0.75, header: 0.3, footer: 0.3 },
       zoomScale: 90
     });
-    expect(chartsheet.chartModel?.chart.title).toBeDefined();
-    expect(chartsheet.pageMargins?.l).toBe(0.7);
-    chartsheet.zoomScale = 120;
-    expect(wb.getChartsheet("Chart Sheet")?.zoomScale).toBe(120);
-    expect(chartsheet.chart?.title).toBe("Original");
-    chartsheet.pageSetup = { orientation: "landscape", paperSize: 9 };
+    expect(chartsheetChartModel(chartsheet)?.chart.title).toBeDefined();
+    expect(chartsheetPageMargins(chartsheet)?.l).toBe(0.7);
+    chartsheetSetZoomScale(chartsheet, 120);
+    expect(chartsheetZoomScale(Workbook.getChartsheet(wb, "Chart Sheet")!)).toBe(120);
+    expect(chartsheetChart(chartsheet)?.title).toBe("Original");
+    chartsheetSetPageSetup(chartsheet, { orientation: "landscape", paperSize: 9 });
 
     expect(
-      wb.replaceChartsheetChart("Chart Sheet", {
+      replaceChartsheetChart(wb, "Chart Sheet", {
         type: "histogram",
         series: [{ values: "Data!$B$1:$B$2" }]
       })
     ).toBe(true);
-    const replaced = wb.getChartsheet("Chart Sheet")!;
-    expect(replaced.isChartEx).toBe(true);
-    expect(replaced.chartExModel).toBeDefined();
-    expect(wb.removeChartsheet("Chart Sheet")).toBe(true);
-    expect(wb.chartsheets).toHaveLength(0);
+    const replaced = Workbook.getChartsheet(wb, "Chart Sheet")!;
+    expect(chartsheetIsChartEx(replaced)).toBe(true);
+    expect(chartsheetChartExModel(replaced)).toBeDefined();
+    expect(Workbook.removeChartsheet(wb, "Chart Sheet")).toBe(true);
+    expect(getChartsheets(wb)).toHaveLength(0);
   });
 
   it("supports chartsheet rename, copy, wrapper replacement, and print settings round-trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }],
@@ -1712,16 +1765,20 @@ describe("TC2c: chartsheet API", () => {
       },
       pageSetup: { orientation: "landscape", paperSize: 9, copies: 2 }
     });
-    expect(chartsheet.rename("Renamed Chart")).toBe(true);
-    const copy = chartsheet.copy("Copied Chart")!;
-    expect(copy.chartNumber).not.toBe(chartsheet.chartNumber);
-    expect(copy.chart?.title).toBe("Original");
-    expect(copy.replaceChart({ type: "pie", series: [baseSeries("Pie")], title: "Pie" })).toBe(
-      true
-    );
-    expect(copy.chart?.title).toBe("Pie");
+    expect(renameChartsheet(wb, chartsheetName(chartsheet), "Renamed Chart")).toBe(true);
+    const copy = copyChartsheet(wb, chartsheetName(chartsheet), "Copied Chart")!;
+    expect(chartsheetChartNumber(copy)).not.toBe(chartsheetChartNumber(chartsheet));
+    expect(chartsheetChart(copy)?.title).toBe("Original");
+    expect(
+      replaceChartsheetChart(wb, chartsheetName(copy), {
+        type: "pie",
+        series: [baseSeries("Pie")],
+        title: "Pie"
+      })
+    ).toBe(true);
+    expect(chartsheetChart(copy)?.title).toBe("Pie");
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const sheetXml = textDecoder.decode(entries.get("xl/chartsheets/sheet1.xml")!.data);
     expect(sheetXml).toContain('orientation="landscape"');
@@ -1736,41 +1793,47 @@ describe("TC2c: chartsheet API", () => {
     expect(sheetXml).not.toContain("<printOptions");
     expect(sheetXml).not.toContain("scale=");
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.getChartsheet("Renamed Chart")?.pageSetup?.orientation).toBe("landscape");
-    expect(wb2.getChartsheet("Copied Chart")?.chart?.title).toBe("Pie");
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(chartsheetPageSetup(Workbook.getChartsheet(wb2, "Renamed Chart")!)?.orientation).toBe(
+      "landscape"
+    );
+    expect(chartsheetChart(Workbook.getChartsheet(wb2, "Copied Chart")!)?.title).toBe("Pie");
   });
 
   it("cleans up chartsheet chart parts after replacement and removal", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }],
         title: "Original"
       }
     });
-    const copied = chartsheet.copy("Copied Chart")!;
-    expect(copied.chartNumber).toBe(2);
+    const copied = copyChartsheet(wb, chartsheetName(chartsheet), "Copied Chart")!;
+    expect(chartsheetChartNumber(copied)).toBe(2);
     expect(
-      chartsheet.replaceChart({ type: "line", series: [baseSeries("Line")], title: "Line" })
+      replaceChartsheetChart(wb, chartsheetName(chartsheet), {
+        type: "line",
+        series: [baseSeries("Line")],
+        title: "Line"
+      })
     ).toBe(true);
-    expect(chartsheet.chartNumber).toBe(3);
-    expect(wb.getChartEntry(1)).toBeUndefined();
+    expect(chartsheetChartNumber(chartsheet)).toBe(3);
+    expect(getChartEntry(wb, 1)).toBeUndefined();
 
-    let entries = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    let entries = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     expect(entries.get("xl/charts/chart1.xml")).toBeUndefined();
     expect(entries.get("xl/charts/chart2.xml")).toBeDefined();
     expect(entries.get("xl/charts/chart3.xml")).toBeDefined();
 
-    expect(copied.remove()).toBe(true);
-    entries = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    expect(removeChartsheet(wb, chartsheetName(copied))).toBe(true);
+    entries = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     expect(entries.get("xl/charts/chart2.xml")).toBeUndefined();
     expect(entries.get("xl/charts/chart3.xml")).toBeDefined();
   });
@@ -1778,33 +1841,34 @@ describe("TC2c: chartsheet API", () => {
 
 describe("TC2d: high-level chart series editing API", () => {
   it("mutate APIs mark classic and ChartEx charts dirty for deep changes", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
+    const chart = getCharts(ws)[0];
     chart.mutate(model => {
       model.chart.title = undefined;
     });
-    expect(wb.getChartEntry(chart.chartNumber)!.dirty).toBe(true);
+    expect(getChartEntry(wb, chart.chartNumber)!.dirty).toBe(true);
 
-    ws.addChartEx({ type: "funnel", series: [{ values: VALUES_A }] }, "L1:R10");
-    const chartEx = ws.getCharts()[1];
+    addChartEx(ws, { type: "funnel", series: [{ values: VALUES_A }] }, "L1:R10");
+    const chartEx = getCharts(ws)[1];
     chartEx.mutateChartEx(model => {
       model.chartSpace.chart.autoTitleDeleted = true;
     });
-    expect(wb.getChartExStructuredEntry(chartEx.chartExNumber)!.dirty).toBe(true);
+    expect(getChartExStructuredEntry(wb, chartEx.chartExNumber)!.dirty).toBe(true);
   });
 
   it("updates classic chart series references by patching loaded raw XML", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "A";
-    ws.getCell("A2").value = "B";
-    ws.getCell("B1").value = 10;
-    ws.getCell("B2").value = 20;
-    ws.getCell("C1").value = 30;
-    ws.getCell("C2").value = 40;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "A");
+    Cell.setValue(ws, "A2", "B");
+    Cell.setValue(ws, "B1", 10);
+    Cell.setValue(ws, "B2", 20);
+    Cell.setValue(ws, "C1", 30);
+    Cell.setValue(ws, "C2", 40);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "Old", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }],
@@ -1813,7 +1877,7 @@ describe("TC2d: high-level chart series editing API", () => {
       "E1:K10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const marker = "<!-- excelts-series-raw-passthrough -->";
     const chartEntry = zipData.get("xl/charts/chart1.xml")!;
@@ -1825,14 +1889,14 @@ describe("TC2d: high-level chart series editing API", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     expect(chart.setSeriesName(0, "New")).toBe(true);
     expect(chart.setSeriesValues(0, "Sheet1!$C$1:$C$2")).toBe(true);
     expect(chart.setSeriesCategories(0, "Sheet1!$A$1:$A$2")).toBe(true);
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(outputChartXml).toContain(marker);
@@ -1841,11 +1905,12 @@ describe("TC2d: high-level chart series editing API", () => {
   });
 
   it("patches loaded chart XML after axis scaling and title changes", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "A";
-    ws.getCell("B1").value = 10;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "A");
+    Cell.setValue(ws, "B1", 10);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1", values: "Sheet1!$B$1" }],
@@ -1854,7 +1919,7 @@ describe("TC2d: high-level chart series editing API", () => {
       "E1:K10"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const marker = "<!-- excelts-axis-raw-passthrough -->";
     const chartEntry = zipData.get("xl/charts/chart1.xml")!;
@@ -1866,16 +1931,16 @@ describe("TC2d: high-level chart series editing API", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     const valueAxis = chart.valueAxis!;
     valueAxis.scaling = { min: 0, max: 100 };
     valueAxis.title = { text: { paragraphs: [{ runs: [{ text: "Updated Axis" }] }] } };
-    wb2.getChartEntry(chart.chartNumber)!.dirty = true;
-    wb2.getChartEntry(chart.chartNumber)!.preferRawPatch = true;
+    getChartEntry(wb2, chart.chartNumber)!.dirty = true;
+    getChartEntry(wb2, chart.chartNumber)!.preferRawPatch = true;
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const entries = await extractAll(new Uint8Array(output));
     const outputChartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(outputChartXml).toContain(marker);
@@ -1884,25 +1949,25 @@ describe("TC2d: high-level chart series editing API", () => {
   });
 
   it("returns false when updating a missing series", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart({ type: "bar", series: [baseSeries("S")] }, "E1:K10");
-    expect(ws.getCharts()[0].setSeriesValues(5, "Sheet1!$C$1:$C$2")).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(ws, { type: "bar", series: [baseSeries("S")] }, "E1:K10");
+    expect(getCharts(ws)[0].setSeriesValues(5, "Sheet1!$C$1:$C$2")).toBe(false);
   });
 });
 
 describe("TC2e: pivot chart creation", () => {
   function makePivotWorkbook() {
-    const wb = new Workbook();
-    const data = wb.addWorksheet("Sales Data");
-    data.addRows([
+    const wb = Workbook.create();
+    const data = Workbook.addWorksheet(wb, "Sales Data");
+    Worksheet.addRows(data, [
       ["Region", "Product", "Revenue", "Units"],
       ["West", "A", 10, 1],
       ["West", "B", 20, 2],
       ["East", "A", 30, 3]
     ]);
-    const pivot = wb.addWorksheet("Pivot Sheet");
-    const pivotTable = pivot.addPivotTable({
+    const pivot = Workbook.addWorksheet(wb, "Pivot Sheet");
+    const pivotTable = addPivotTable(pivot, {
       sourceSheet: data,
       rows: ["Region"],
       values: ["Revenue", "Units"],
@@ -1914,7 +1979,8 @@ describe("TC2e: pivot chart creation", () => {
   it("creates a classic pivot chart with pivotSource and pivot chart formats", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    const chartNumber = pivot.addPivotChart(
+    const chartNumber = addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "bar",
@@ -1934,7 +2000,7 @@ describe("TC2e: pivot chart creation", () => {
     expect(pivotTable.chartFormat).toBe(1);
     expect(pivotTable.chartFormats).toHaveLength(1);
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     const pivotXml = textDecoder.decode(entries.get("xl/pivotTables/pivotTable1.xml")!.data);
@@ -1950,9 +2016,9 @@ describe("TC2e: pivot chart creation", () => {
     expect(pivotXml).toContain('<chartFormat chart="0" format="0" series="1">');
     expect(pivotXml).toContain('<reference field="4294967294" count="1" selected="0">');
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart = wb2.getWorksheet("Pivot Sheet")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Pivot Sheet")!)[0];
     expect(chart.chartModel!.pivotSource).toContain("'Pivot Sheet'!PivotTable1");
   });
 
@@ -1965,7 +2031,8 @@ describe("TC2e: pivot chart creation", () => {
   it("multiple pivot charts against the same pivot get distinct fmtIds", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    pivot.addPivotChart(
+    addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "bar",
@@ -1974,7 +2041,8 @@ describe("TC2e: pivot chart creation", () => {
       },
       "D1:K12"
     );
-    pivot.addPivotChart(
+    addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "line",
@@ -1988,7 +2056,7 @@ describe("TC2e: pivot chart creation", () => {
     expect(pivotTable.chartFormats?.[0].format).toBe(0);
     expect(pivotTable.chartFormats?.[1].format).toBe(1);
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chart1Xml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     const chart2Xml = textDecoder.decode(entries.get("xl/charts/chart2.xml")!.data);
@@ -1999,7 +2067,8 @@ describe("TC2e: pivot chart creation", () => {
   it("writes structured pivot chart field buttons, filters, and refresh metadata", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    pivot.addPivotChart(
+    addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "bar",
@@ -2023,7 +2092,7 @@ describe("TC2e: pivot chart creation", () => {
     );
 
     expect(pivotTable.pivotChartOptions?.refreshOnOpen).toBe(true);
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     const cacheXml = textDecoder.decode(
@@ -2045,7 +2114,8 @@ describe("TC2e: pivot chart creation", () => {
   it("writes only the drop-zone toggles the caller explicitly sets", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    pivot.addPivotChart(
+    addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "bar",
@@ -2065,7 +2135,7 @@ describe("TC2e: pivot chart creation", () => {
       "D1:K12"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(chartXml).toContain('<c14:dropZoneSeries val="0"/>');
@@ -2079,7 +2149,8 @@ describe("TC2e: pivot chart creation", () => {
   it("creates a combo pivot chart", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    pivot.addPivotComboChart(
+    addPivotComboChart(
+      pivot,
       pivotTable,
       {
         groups: [
@@ -2110,7 +2181,7 @@ describe("TC2e: pivot chart creation", () => {
       "D1:K12"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(chartXml).toContain("<c:pivotSource>");
@@ -2122,7 +2193,7 @@ describe("TC2e: pivot chart creation", () => {
   it("creates a pivot chart chartsheet", async () => {
     const { wb, pivotTable } = makePivotWorkbook();
 
-    const chartsheet = wb.addPivotChartsheet("Pivot Chart", pivotTable, {
+    const chartsheet = addPivotChartsheet(wb, "Pivot Chart", pivotTable, {
       chart: {
         type: "bar",
         series: [
@@ -2136,8 +2207,8 @@ describe("TC2e: pivot chart creation", () => {
       }
     });
 
-    expect(chartsheet.chartNumber).toBe(1);
-    const buf = await wb.xlsx.writeBuffer();
+    expect(chartsheetChartNumber(chartsheet)).toBe(1);
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/chartsheets/sheet1.xml")).toBeDefined();
     expect(entries.get("xl/charts/chart1.xml")).toBeDefined();
@@ -2151,7 +2222,8 @@ describe("TC2e: pivot chart creation", () => {
   it("round-trips c14:pivotOptions through a full xlsx load / save cycle", async () => {
     const { wb, pivot, pivotTable } = makePivotWorkbook();
 
-    pivot.addPivotChart(
+    addPivotChart(
+      pivot,
       pivotTable,
       {
         type: "bar",
@@ -2175,10 +2247,10 @@ describe("TC2e: pivot chart creation", () => {
 
     // First save and reopen — verifies the parser recognises the c14
     // extension and hydrates the structured model from it.
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart2 = wb2.worksheets[1].getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart2 = getCharts(getWorksheets(wb2)[1])[0];
     const m2 = chart2.chartModel!;
     expect(m2.pivotOptions).toEqual({
       dropZonesVisible: true,
@@ -2191,7 +2263,7 @@ describe("TC2e: pivot chart creation", () => {
     // Second save — ensures we write exactly one c14:pivotOptions element
     // even after a full round-trip (no duplication from leaking into the
     // raw extLst cache).
-    const buf2 = await wb2.xlsx.writeBuffer();
+    const buf2 = await Workbook.toXlsxBuffer(wb2);
     const entries2 = await extractAll(new Uint8Array(buf2));
     const chartXml2 = textDecoder.decode(entries2.get("xl/charts/chart1.xml")!.data);
     expect(chartXml2).toContain("<c14:pivotOptions>");
@@ -2239,51 +2311,52 @@ describe("TC4: combo chart with categoryAxis/valueAxis options on primary group"
 
 describe("TC5: Chart.clone/copyTo round-trip", () => {
   it("cloned chart survives write/read as independent copy", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "x";
-    ws.getCell("B1").value = 100;
-    ws.addChart({ type: "bar", series: [baseSeries("Original")], title: "Source" }, "C1:J10");
-    const original = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "x");
+    Cell.setValue(ws, "B1", 100);
+    addChart(ws, { type: "bar", series: [baseSeries("Original")], title: "Source" }, "C1:J10");
+    const original = getCharts(ws)[0];
     original.clone();
-    expect(ws.getCharts()).toHaveLength(2);
+    expect(getCharts(ws)).toHaveLength(2);
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    expect(ws2.getCharts()).toHaveLength(2);
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    expect(getCharts(ws2)).toHaveLength(2);
     // Both charts should be independent
-    expect(ws2.getCharts()[0].title).toBe("Source");
-    expect(ws2.getCharts()[1].title).toBe("Source");
+    expect(getCharts(ws2)[0].title).toBe("Source");
+    expect(getCharts(ws2)[1].title).toBe("Source");
   });
 
   it("copyTo another worksheet creates independent chart", async () => {
-    const wb = new Workbook();
-    const src = wb.addWorksheet("Src");
-    const dst = wb.addWorksheet("Dst");
-    src.getCell("A1").value = 1;
-    src.addChart({ type: "pie", series: [baseSeries("P")], title: "Pie" }, "C1:J10");
-    src.getCharts()[0].copyTo(dst, "A1:H10");
-    expect(dst.getCharts()).toHaveLength(1);
+    const wb = Workbook.create();
+    const src = Workbook.addWorksheet(wb, "Src");
+    const dst = Workbook.addWorksheet(wb, "Dst");
+    Cell.setValue(src, "A1", 1);
+    addChart(src, { type: "pie", series: [baseSeries("P")], title: "Pie" }, "C1:J10");
+    getCharts(src)[0].copyTo(dst, "A1:H10");
+    expect(getCharts(dst)).toHaveLength(1);
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.getWorksheet("Src")!.getCharts()).toHaveLength(1);
-    expect(wb2.getWorksheet("Dst")!.getCharts()).toHaveLength(1);
-    expect(wb2.getWorksheet("Dst")!.getCharts()[0].title).toBe("Pie");
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Src")!)).toHaveLength(1);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Dst")!)).toHaveLength(1);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0].title).toBe("Pie");
   });
 
   it("copyTo supports chartEx charts", async () => {
-    const wb = new Workbook();
-    const src = wb.addWorksheet("Src");
-    const dst = wb.addWorksheet("Dst");
+    const wb = Workbook.create();
+    const src = Workbook.addWorksheet(wb, "Src");
+    const dst = Workbook.addWorksheet(wb, "Dst");
     for (let i = 1; i <= 3; i++) {
-      src.getCell(`A${i}`).value = `C${i}`;
-      src.getCell(`B${i}`).value = i * 10;
+      Cell.setValue(src, `A${i}`, `C${i}`);
+      Cell.setValue(src, `B${i}`, i * 10);
     }
-    src.addChartEx(
+    addChartEx(
+      src,
       {
         type: "sunburst",
         categories: "Src!$A$1:$A$3",
@@ -2293,37 +2366,38 @@ describe("TC5: Chart.clone/copyTo round-trip", () => {
       "C1:J10"
     );
 
-    const copiedNumber = src.getCharts()[0].copyTo(dst, "A1:H10");
+    const copiedNumber = getCharts(src)[0].copyTo(dst, "A1:H10");
     expect(copiedNumber).toBe(2);
-    expect(dst.getCharts()[0].isChartEx).toBe(true);
+    expect(getCharts(dst)[0].isChartEx).toBe(true);
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/charts/chartEx1.xml")).toBeDefined();
     expect(entries.get("xl/charts/chartEx2.xml")).toBeDefined();
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    expect(wb2.getWorksheet("Dst")!.getCharts()[0].isChartEx).toBe(true);
-    expect(wb2.getWorksheet("Dst")!.getCharts()[0].title).toBe("Modern");
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0].isChartEx).toBe(true);
+    expect(getCharts(Workbook.getWorksheet(wb2, "Dst")!)[0].title).toBe("Modern");
   });
 });
 
 describe("TC6: Date values in chart cache population", () => {
   it("fills numRef cache with serial numbers for Date cell values", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Label";
-    ws.getCell("B1").value = new Date(2024, 0, 1); // 2024-01-01
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Label");
+    Cell.setValue(ws, "B1", new Date(2024, 0, 1)); // 2024-01-01
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "line",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
       },
       "C1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     const points = series.val.numRef.cache.points;
     expect(points).toHaveLength(1);
@@ -2333,14 +2407,15 @@ describe("TC6: Date values in chart cache population", () => {
   });
 
   it("fills multi-level category caches", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["North", "Q1", 10],
       ["North", "Q2", 20],
       ["South", "Q1", 30]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -2354,7 +2429,7 @@ describe("TC6: Date values in chart cache population", () => {
       "E1:K10"
     );
 
-    const series = ws.getCharts()[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = getCharts(ws)[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.cat.multiLvlStrRef.cache.pointCount).toBe(3);
     expect(series.cat.multiLvlStrRef.cache.levels).toHaveLength(2);
     expect(series.cat.multiLvlStrRef.cache.levels[0].points[0]).toEqual({
@@ -2366,7 +2441,7 @@ describe("TC6: Date values in chart cache population", () => {
       value: "Q2"
     });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(chartXml).toContain("<c:multiLvlStrCache>");
@@ -2610,16 +2685,17 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx raw patch preserves template XML while updating hidden, series name, and axis bindings", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15],
       ["D", 30],
       ["E", 45]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "waterfall",
         categories: "Sheet1!$A$1:$A$5",
@@ -2628,7 +2704,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       "D1:J10"
     );
 
-    const zipData = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+    const zipData = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml")!;
     const marker = "<!-- patchable-chartEx-template -->";
     chartExEntry.data = textEncoder.encode(
@@ -2639,9 +2715,9 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       [...zipData.entries()].map(([name, file]) => ({ name, data: file.data }))
     );
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(input);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, input);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     chart.mutateChartEx(
       model => {
         const series = model.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
@@ -2652,7 +2728,7 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       { preferRawPatch: true, requireRawPatch: true }
     );
 
-    const output = await wb2.xlsx.writeBuffer();
+    const output = await Workbook.toXlsxBuffer(wb2);
     const entries = await extractAll(new Uint8Array(output));
     const xml = textDecoder.decode(entries.get("xl/charts/chartEx1.xml")!.data);
     expect(xml).toContain(marker);
@@ -3110,15 +3186,16 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
     // has always accepted multi-lvl strDims, so the round-trip invariant
     // is now: one strDim entry with three levels (continent → country
     // → city — the three `literalHierarchy` arrays) plus one numDim.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["City", "Country", "Continent", "Revenue"],
       ["NYC", "USA", "Americas", 10],
       ["LA", "USA", "Americas", 20],
       ["Toronto", "Canada", "Americas", 5]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         series: [
@@ -3135,10 +3212,10 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
       },
       "F1:L12"
     );
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart = wb2.getWorksheet("Data")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Data")!)[0];
     const data = chart.chartExModel!.chartSpace.chartData.data;
     // The category strDim carries every hierarchy level. Count
     // `<cx:lvl>` children across every `strDim` entry so the assertion
@@ -3165,9 +3242,9 @@ describe("TC7: pareto chart type in ChartEx builder", () => {
   });
 
   it("ChartEx SVG renders pareto, waterfall, funnel, hierarchy, and boxWhisker previews", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", "North", 10],
       ["B", "North", 20],
       ["C", "South", 5],

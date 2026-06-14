@@ -12,10 +12,10 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 import { installChartSupport } from "@excel/chart/install";
+import { Workbook } from "@excel/index";
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { ZipParser } from "../../archive/unzip/zip-parser";
-import { Workbook } from "../workbook";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 installChartSupport();
@@ -313,9 +313,9 @@ describe("Workbook Round-trip Preservation", () => {
     inputBuffer = fs.readFileSync(SAMPLE_FILE_PATH);
 
     // Load and save the workbook
-    const workbook = new Workbook();
-    await workbook.xlsx.load(inputBuffer);
-    outputBuffer = (await workbook.xlsx.writeBuffer()) as Buffer;
+    const workbook = Workbook.create();
+    await Workbook.loadXlsx(workbook, inputBuffer);
+    outputBuffer = (await Workbook.toXlsxBuffer(workbook)) as Buffer;
 
     // OOXML conformance gate on every round-trip output.
     await expectValidXlsx(new Uint8Array(outputBuffer));

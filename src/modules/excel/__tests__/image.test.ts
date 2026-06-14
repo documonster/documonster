@@ -8,9 +8,10 @@
  * - Hyperlinks handling
  */
 
-import { Image } from "@excel/image";
-import { Workbook } from "@excel/workbook";
-import type { Worksheet } from "@excel/worksheet";
+import { applyImageModel, imageClone, imageCreate, imageModel } from "@excel/image";
+import { Workbook } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
+import type { WorksheetData } from "@excel/worksheet-core";
 import { describe, it, expect, beforeEach } from "vitest";
 
 // =============================================================================
@@ -18,12 +19,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 // =============================================================================
 
 describe("Image", () => {
-  let workbook: Workbook;
-  let worksheet: Worksheet;
+  let workbook: WorkbookData;
+  let worksheet: WorksheetData;
 
   beforeEach(() => {
-    workbook = new Workbook();
-    worksheet = workbook.addWorksheet("Sheet1");
+    workbook = Workbook.create();
+    worksheet = Workbook.addWorksheet(workbook, "Sheet1");
   });
 
   // ===========================================================================
@@ -32,7 +33,7 @@ describe("Image", () => {
 
   describe("constructor", () => {
     it("creates image without model", () => {
-      const image = new Image(worksheet);
+      const image = imageCreate(worksheet);
       expect(image.worksheet).toBe(worksheet);
       expect(image.type).toBeUndefined();
       expect(image.imageId).toBeUndefined();
@@ -40,7 +41,7 @@ describe("Image", () => {
     });
 
     it("creates background image with model", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "background",
         imageId: "img1"
       });
@@ -49,7 +50,7 @@ describe("Image", () => {
     });
 
     it("creates positioned image with string range", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img2",
         range: "B2:D6"
@@ -61,7 +62,7 @@ describe("Image", () => {
     });
 
     it("creates positioned image with object range", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img3",
         range: {
@@ -82,24 +83,24 @@ describe("Image", () => {
 
   describe("model getter", () => {
     it("returns background model", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "background",
         imageId: "bg1"
       });
 
-      const model = image.model;
+      const model = imageModel(image);
       expect(model.type).toBe("background");
       expect(model.imageId).toBe("bg1");
     });
 
     it("returns image model with range", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img1",
         range: "A1:C3"
       });
 
-      const model = image.model;
+      const model = imageModel(image);
       expect(model.type).toBe("image");
       expect(model.imageId).toBe("img1");
       if (model.type === "image") {
@@ -110,11 +111,11 @@ describe("Image", () => {
     });
 
     it("throws error for invalid type", () => {
-      const image = new Image(worksheet);
+      const image = imageCreate(worksheet);
       image.type = "invalid";
       image.imageId = "test";
 
-      expect(() => image.model).toThrow("Invalid Image Type");
+      expect(() => imageModel(image)).toThrow("Invalid Image Type");
     });
   });
 
@@ -124,23 +125,23 @@ describe("Image", () => {
 
   describe("model setter", () => {
     it("sets background type", () => {
-      const image = new Image(worksheet);
-      image.model = {
+      const image = imageCreate(worksheet);
+      applyImageModel(image, {
         type: "background",
         imageId: "bg2"
-      };
+      });
 
       expect(image.type).toBe("background");
       expect(image.imageId).toBe("bg2");
     });
 
     it("sets image type with string range", () => {
-      const image = new Image(worksheet);
-      image.model = {
+      const image = imageCreate(worksheet);
+      applyImageModel(image, {
         type: "image",
         imageId: "img4",
         range: "B2:D4"
-      };
+      });
 
       expect(image.type).toBe("image");
       expect(image.imageId).toBe("img4");
@@ -148,15 +149,15 @@ describe("Image", () => {
     });
 
     it("sets image type with object range containing native offsets", () => {
-      const image = new Image(worksheet);
-      image.model = {
+      const image = imageCreate(worksheet);
+      applyImageModel(image, {
         type: "image",
         imageId: "img5",
         range: {
           tl: { nativeCol: 1, nativeRow: 1, nativeColOff: 100, nativeRowOff: 100 },
           br: { nativeCol: 3, nativeRow: 5, nativeColOff: 0, nativeRowOff: 0 }
         }
-      };
+      });
 
       expect(image.range).toBeDefined();
       expect(image.range!.tl.nativeCol).toBe(1);
@@ -164,15 +165,15 @@ describe("Image", () => {
     });
 
     it("sets image with ext dimensions", () => {
-      const image = new Image(worksheet);
-      image.model = {
+      const image = imageCreate(worksheet);
+      applyImageModel(image, {
         type: "image",
         imageId: "img6",
         range: {
           tl: { col: 0, row: 0 },
           ext: { width: 100, height: 200 }
         }
-      };
+      });
 
       expect(image.range!.ext).toEqual({ width: 100, height: 200 });
     });
@@ -184,7 +185,7 @@ describe("Image", () => {
 
   describe("hyperlinks", () => {
     it("sets hyperlinks from model input", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img7",
         range: {
@@ -204,7 +205,7 @@ describe("Image", () => {
     });
 
     it("includes hyperlinks in model output", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img8",
         range: {
@@ -215,15 +216,15 @@ describe("Image", () => {
         }
       });
 
-      const model = image.model;
+      const model = imageModel(image);
       if (model.type === "image") {
         expect(model.hyperlinks).toEqual({ hyperlink: "https://test.com" });
       }
     });
 
     it("handles hyperlinks in range object", () => {
-      const image = new Image(worksheet);
-      image.model = {
+      const image = imageCreate(worksheet);
+      applyImageModel(image, {
         type: "image",
         imageId: "img9",
         range: {
@@ -232,7 +233,7 @@ describe("Image", () => {
             hyperlink: "https://range-hyperlink.com"
           }
         }
-      };
+      });
 
       expect(image.range!.hyperlinks).toEqual({
         hyperlink: "https://range-hyperlink.com"
@@ -246,7 +247,7 @@ describe("Image", () => {
 
   describe("editAs property", () => {
     it("defaults to oneCell for string ranges", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img10",
         range: "A1:B2"
@@ -256,7 +257,7 @@ describe("Image", () => {
     });
 
     it("preserves editAs from object range", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img11",
         range: {
@@ -269,7 +270,7 @@ describe("Image", () => {
     });
 
     it("includes editAs in model output", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "img12",
         range: {
@@ -279,7 +280,7 @@ describe("Image", () => {
         }
       });
 
-      const model = image.model;
+      const model = imageModel(image);
       if (model.type === "image") {
         expect(model.range.editAs).toBe("twoCell");
       }
@@ -292,7 +293,7 @@ describe("Image", () => {
 
   describe("round-trip", () => {
     it("preserves data through model get/set cycle", () => {
-      const original = new Image(worksheet, {
+      const original = imageCreate(worksheet, {
         type: "image",
         imageId: "round-trip",
         range: {
@@ -306,10 +307,10 @@ describe("Image", () => {
         }
       });
 
-      const model = original.model;
+      const model = imageModel(original);
 
-      const restored = new Image(worksheet);
-      restored.model = model as any;
+      const restored = imageCreate(worksheet);
+      applyImageModel(restored, model as any);
 
       expect(restored.type).toBe(original.type);
       expect(restored.imageId).toBe(original.imageId);
@@ -323,7 +324,7 @@ describe("Image", () => {
 
   describe("clone", () => {
     it("creates a deep copy on the same worksheet", () => {
-      const original = new Image(worksheet, {
+      const original = imageCreate(worksheet, {
         type: "image",
         imageId: "clone1",
         range: {
@@ -337,7 +338,7 @@ describe("Image", () => {
         }
       });
 
-      const cloned = original.clone();
+      const cloned = imageClone(original);
 
       expect(cloned).not.toBe(original);
       expect(cloned.worksheet).toBe(original.worksheet);
@@ -352,8 +353,8 @@ describe("Image", () => {
     });
 
     it("clones to a different worksheet", () => {
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      const original = new Image(worksheet, {
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      const original = imageCreate(worksheet, {
         type: "image",
         imageId: "clone2",
         range: {
@@ -362,7 +363,7 @@ describe("Image", () => {
         }
       });
 
-      const cloned = original.clone(worksheet2);
+      const cloned = imageClone(original, worksheet2);
 
       expect(cloned.worksheet).toBe(worksheet2);
       expect(cloned.type).toBe("image");
@@ -373,12 +374,12 @@ describe("Image", () => {
     });
 
     it("clones background image (no range)", () => {
-      const original = new Image(worksheet, {
+      const original = imageCreate(worksheet, {
         type: "background",
         imageId: "bg-clone"
       });
 
-      const cloned = original.clone();
+      const cloned = imageClone(original);
 
       expect(cloned.type).toBe("background");
       expect(cloned.imageId).toBe("bg-clone");
@@ -386,7 +387,7 @@ describe("Image", () => {
     });
 
     it("clone model round-trips correctly", () => {
-      const original = new Image(worksheet, {
+      const original = imageCreate(worksheet, {
         type: "image",
         imageId: "rt-clone",
         range: {
@@ -400,9 +401,9 @@ describe("Image", () => {
         }
       });
 
-      const cloned = original.clone();
-      const originalModel = original.model;
-      const clonedModel = cloned.model;
+      const cloned = imageClone(original);
+      const originalModel = imageModel(original);
+      const clonedModel = imageModel(cloned);
 
       expect(clonedModel).toEqual(originalModel);
     });
@@ -415,12 +416,12 @@ describe("Image", () => {
   // ===========================================================================
   describe("object range with string tl/br", () => {
     it("object {tl: 'B2', br: 'D4'} matches string range 'B2:D4'", () => {
-      const stringImage = new Image(worksheet, {
+      const stringImage = imageCreate(worksheet, {
         type: "image",
         imageId: "str-range",
         range: "B2:D4"
       });
-      const objectImage = new Image(worksheet, {
+      const objectImage = imageCreate(worksheet, {
         type: "image",
         imageId: "obj-range",
         range: { tl: "B2", br: "D4" }
@@ -433,7 +434,7 @@ describe("Image", () => {
     });
 
     it("object {tl: 'A1'} resolves to 0-based native col/row", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "tl-string",
         range: { tl: "A1", ext: { width: 100, height: 100 } }
@@ -443,7 +444,7 @@ describe("Image", () => {
     });
 
     it("object {tl: {col, row}} keeps 0-based native col/row", () => {
-      const image = new Image(worksheet, {
+      const image = imageCreate(worksheet, {
         type: "image",
         imageId: "tl-object",
         range: { tl: { col: 0, row: 0 }, ext: { width: 100, height: 100 } }

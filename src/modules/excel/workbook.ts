@@ -1,10 +1,12 @@
 /**
- * Workbook - Node.js Version
+ * Workbook - Node.js entry point.
  *
- * Extends browser Workbook with Node.js file system support for CSV and Markdown operations.
+ * Re-exports the platform-independent workbook surface (record + flat
+ * functions) from `workbook.browser`, and adds the Node-only XLSX file-path
+ * IO free functions. The browser/Node split keeps Node-only `fs` and stream
+ * code out of browser bundles.
  */
 
-import { ExcelFileError } from "@excel/errors";
 import {
   WorkbookReader,
   type WorkbookReaderOptions,
@@ -13,192 +15,95 @@ import {
 import type { WorkbookReader as WorkbookReaderBrowser } from "@excel/stream/workbook-reader.browser";
 import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer";
 import type { WorkbookWriter as WorkbookWriterBrowser } from "@excel/stream/workbook-writer.browser";
-import { Workbook as WorkbookBrowser, type CsvOptions } from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
+import type { WorkbookData } from "@excel/workbook.browser";
 import { XLSX } from "@excel/xlsx/xlsx";
-import type { MarkdownOptions } from "@markdown/types";
-import {
-  fileExists,
-  createReadStream,
-  createWriteStream,
-  readFileText,
-  writeFileText
-} from "@utils/fs";
+import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
 
-// =============================================================================
-// Node.js Workbook Class
-// =============================================================================
+export * from "@excel/workbook.browser";
 
-class Workbook extends WorkbookBrowser {
-  // Declare the overridden private slot so the getter below can stash
-  // the Node-typed XLSX instance without TS complaining that we're
-  // widening the base class's private member (which would be illegal
-  // anyway — the base declares `_xlsx?: XlsxBrowser`).
-  private _xlsxNode?: XLSX;
-
-  /**
-   * xlsx file format operations — Node.js variant. Exposes the
-   * `readFile` / `writeFile` / streaming `read` / `write` methods that
-   * the browser XLSX omits. Overriding here (rather than typing the
-   * base getter as Node XLSX directly) keeps the browser
-   * `Workbook.xlsx` type clean — browser consumers see only the
-   * operations the bundle actually supports and get a TS error if
-   * they accidentally reach for file-path APIs.
-   */
-  override get xlsx(): XLSX {
-    if (!this._xlsxNode) {
-      this._xlsxNode = new XLSX(this);
-    }
-    return this._xlsxNode;
+/**
+ * Node-only xlsx IO handle for a workbook. Exposes file-path operations
+ * (`readFile` / `writeFile`) plus streaming `read` / `write` that the browser
+ * variant omits. Free function so it tree-shakes; only pulled into Node bundles.
+ */
+export function getXlsxIo(wb: WorkbookData): XLSX {
+  const slot = wb as WorkbookData & { _xlsxNode?: XLSX };
+  if (!slot._xlsxNode) {
+    slot._xlsxNode = new XLSX(wb);
   }
-
-  /**
-   * Create a streaming workbook writer — Node.js variant. Accepts the
-   * Node-only `{ filename }` option for direct file-path output in
-   * addition to the cross-platform `{ stream }` option. Overriding
-   * here (rather than typing the base factory as the Node writer)
-   * keeps the browser bundle free of Node-only stream code.
-   *
-   * The return type is declared as the browser `WorkbookWriter` to
-   * preserve static-side Liskov compatibility with the base class;
-   * downcast at the call site if the Node subclass API is needed, or
-   * use `new WorkbookWriter()` directly.
-   */
-  static override createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriterBrowser {
-    return new WorkbookWriter(options) as unknown as WorkbookWriterBrowser;
-  }
-
-  /**
-   * Create a streaming workbook reader — Node.js variant. Accepts a
-   * Node-only file-path `string` in addition to the cross-platform
-   * `CommonInput` types (buffer / readable). Overriding here keeps the
-   * browser bundle free of Node-only `fs` imports.
-   *
-   * The return type is declared as the browser `WorkbookReader` to
-   * preserve static-side Liskov compatibility with the base class.
-   * The runtime instance is the Node `WorkbookReader` subclass and
-   * handles file-path inputs transparently; downcast if the subclass
-   * API is needed, or use `new WorkbookReader()` directly.
-   */
-  static override createStreamReader(
-    input: NodeInput,
-    options?: WorkbookReaderOptions
-  ): WorkbookReaderBrowser {
-    return new WorkbookReader(input, options) as unknown as WorkbookReaderBrowser;
-  }
-
-  /**
-   * Read CSV from file (Node.js only)
-   *
-   * @example
-   * ```ts
-   * await workbook.readCsvFile("data.csv");
-   * await workbook.readCsvFile("data.csv", { delimiter: ";", sheetName: "Data" });
-   * ```
-   */
-  override async readCsvFile(filename: string, options?: CsvOptions): Promise<Worksheet> {
-    if (!(await fileExists(filename))) {
-      throw new ExcelFileError(filename, "read", "file not found");
-    }
-
-    const readStream = createReadStream(filename, {
-      encoding: "utf8",
-      highWaterMark: options?.highWaterMark ?? 64 * 1024
-    });
-
-    return this._readCsvStream(readStream, options);
-  }
-
-  /**
-   * Write CSV to file (Node.js only)
-   *
-   * @example
-   * ```ts
-   * await workbook.writeCsvFile("output.csv");
-   * await workbook.writeCsvFile("output.csv", { delimiter: ";", sheetName: "Data" });
-   * await workbook.writeCsvFile("output.csv", { append: true }); // Append mode
-   * ```
-   */
-  override async writeCsvFile(filename: string, options?: CsvOptions): Promise<void> {
-    const isAppend = options?.append && (await fileExists(filename));
-
-    const writeStream = createWriteStream(filename, {
-      encoding: (options?.encoding || "utf8") as BufferEncoding,
-      highWaterMark: options?.highWaterMark ?? 64 * 1024,
-      flags: options?.append ? "a" : "w"
-    });
-
-    // Append mode to existing file: write leading newline and skip headers
-    if (isAppend) {
-      const lineEnding = options?.lineEnding ?? "\n";
-      writeStream.write(lineEnding);
-      return this._writeCsvStream(writeStream, {
-        ...options,
-        writeHeaders: false
-      });
-    }
-
-    return this._writeCsvStream(writeStream, options);
-  }
-
-  /**
-   * Read Markdown table from file (Node.js only)
-   *
-   * @example
-   * ```ts
-   * await workbook.readMarkdownFile("table.md");
-   * await workbook.readMarkdownFile("table.md", { sheetName: "Data" });
-   * ```
-   */
-  override async readMarkdownFile(filename: string, options?: MarkdownOptions): Promise<Worksheet> {
-    if (!(await fileExists(filename))) {
-      throw new ExcelFileError(filename, "read", "file not found");
-    }
-
-    const content = await readFileText(filename);
-    return this.readMarkdown(content, options);
-  }
-
-  /**
-   * Read all Markdown tables from file, each as a separate worksheet (Node.js only)
-   *
-   * @example
-   * ```ts
-   * await workbook.readMarkdownAllFile("doc.md");
-   * await workbook.readMarkdownAllFile("doc.md", { sheetName: "Table" });
-   * ```
-   */
-  override async readMarkdownAllFile(
-    filename: string,
-    options?: MarkdownOptions
-  ): Promise<Worksheet[]> {
-    if (!(await fileExists(filename))) {
-      throw new ExcelFileError(filename, "read", "file not found");
-    }
-
-    const content = await readFileText(filename);
-    return this.readMarkdownAll(content, options);
-  }
-
-  /**
-   * Write Markdown table to file (Node.js only)
-   *
-   * @example
-   * ```ts
-   * await workbook.writeMarkdownFile("output.md");
-   * await workbook.writeMarkdownFile("output.md", { sheetName: "Data", padding: true });
-   * ```
-   */
-  override async writeMarkdownFile(filename: string, options?: MarkdownOptions): Promise<void> {
-    const markdownString = this.writeMarkdown(options);
-    await writeFileText(filename, markdownString);
-  }
+  return slot._xlsxNode;
 }
 
-export { Workbook };
+/** Node streaming workbook writer factory (accepts `{ filename }`). */
+export function createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriterBrowser {
+  return new WorkbookWriter(options) as unknown as WorkbookWriterBrowser;
+}
+
+/** Node streaming workbook reader factory (accepts a file-path string). */
+export function createStreamReader(
+  input: NodeInput,
+  options?: WorkbookReaderOptions
+): WorkbookReaderBrowser {
+  return new WorkbookReader(input, options) as unknown as WorkbookReaderBrowser;
+}
+
+// =============================================================================
+// Cross-platform + Node xlsx IO (flat functions). The Node variant binds the
+// file-capable XLSX (`readFile` / `writeFile`).
+// =============================================================================
+
+/** Serialize a workbook to xlsx bytes. */
+export function toXlsxBuffer(wb: WorkbookData, options?: XlsxWriteOptions): Promise<Uint8Array> {
+  return getXlsxIo(wb).writeBuffer(options);
+}
+
+/** Load xlsx bytes into a workbook (mutates and returns `wb`). */
+export function loadXlsx(
+  wb: WorkbookData,
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+  options?: XlsxReadOptions
+): Promise<WorkbookData> {
+  return getXlsxIo(wb).load(data, options) as unknown as Promise<WorkbookData>;
+}
+
+/** Node-only: read a workbook from an xlsx file path (mutates and returns `wb`). */
+export function readXlsxFile(
+  wb: WorkbookData,
+  filename: string,
+  options?: XlsxReadOptions
+): Promise<WorkbookData> {
+  return getXlsxIo(wb).readFile(filename, options) as unknown as Promise<WorkbookData>;
+}
+
+/** Node-only: write a workbook to an xlsx file path. */
+export function writeXlsx(
+  wb: WorkbookData,
+  filename: string,
+  options?: XlsxWriteOptions
+): Promise<void> {
+  return getXlsxIo(wb).writeFile(filename, options);
+}
+
+/** Read a workbook from a parse stream (mutates and returns `wb`). */
+export function readXlsxStream(
+  wb: WorkbookData,
+  stream: unknown,
+  options?: XlsxReadOptions
+): Promise<WorkbookData> {
+  return getXlsxIo(wb).read(stream as never, options) as unknown as Promise<WorkbookData>;
+}
+
+/** Write a workbook to a writable stream. */
+export function writeXlsxStream(
+  wb: WorkbookData,
+  stream: unknown,
+  options?: XlsxWriteOptions
+): Promise<unknown> {
+  return getXlsxIo(wb).write(stream as never, options);
+}
+
+export type { CsvOptions, CsvInput } from "@excel/csv-bridge";
 export type {
-  CsvOptions,
-  CsvInput,
   WorkbookModel,
   WorkbookMedia,
   WorkbookProtectionModel,

@@ -13,7 +13,18 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import {
+  chartsheetChart,
+  chartsheetName,
+  chartsheetPageMargins,
+  chartsheetPageSetup,
+  chartsheetState,
+  chartsheetTabSelected,
+  chartsheetZoomScale,
+  chartsheetZoomToFit
+} from "@excel/chartsheet";
+import { Workbook } from "@excel/index";
+import { getChartsheets, getWorksheets } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
@@ -34,14 +45,13 @@ describe("Chartsheet round-trip", () => {
     const { wb, bytes, entries } = await loadRoundTrip(fixture.bytes);
 
     // High-level model: 1 worksheet + 4 chartsheets.
-    expect(wb.worksheets.length).toBe(1);
-    expect(wb.chartsheets.length).toBe(4);
-    expect(wb.chartsheets.map(cs => cs.name).sort()).toEqual([
-      "Combo Chart Sheet",
-      "Funnel Chart Sheet",
-      "Hidden Sheet",
-      "Pie Chart Sheet"
-    ]);
+    expect(getWorksheets(wb).length).toBe(1);
+    expect(getChartsheets(wb).length).toBe(4);
+    expect(
+      getChartsheets(wb)
+        .map(cs => chartsheetName(cs))
+        .sort()
+    ).toEqual(["Combo Chart Sheet", "Funnel Chart Sheet", "Hidden Sheet", "Pie Chart Sheet"]);
 
     // OOXML parts: 4 chartsheets + 1 worksheet.
     const chartsheetPaths = [...entries.keys()]
@@ -79,14 +89,14 @@ describe("Chartsheet round-trip", () => {
     const [fixture] = chartsheetFixtures;
     const { wb, entries } = await loadRoundTrip(fixture.bytes);
 
-    const pie = wb.chartsheets.find(cs => cs.name === "Pie Chart Sheet")!;
+    const pie = getChartsheets(wb).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     // tabSelected omitted/false → undefined after round-trip (writer
     // skips emitting `<sheetView tabSelected="0"/>` since 0 is the
     // OOXML default).
-    expect(pie.tabSelected ?? false).toBe(false);
-    expect(pie.zoomScale).toBe(80);
-    expect(pie.zoomToFit).toBe(true);
-    expect(pie.pageMargins).toMatchObject({
+    expect(chartsheetTabSelected(pie) ?? false).toBe(false);
+    expect(chartsheetZoomScale(pie)).toBe(80);
+    expect(chartsheetZoomToFit(pie)).toBe(true);
+    expect(chartsheetPageMargins(pie)).toMatchObject({
       l: 0.7,
       r: 0.7,
       t: 0.75,
@@ -94,11 +104,11 @@ describe("Chartsheet round-trip", () => {
       header: 0.3,
       footer: 0.3
     });
-    expect(pie.pageSetup?.orientation).toBe("landscape");
-    expect(pie.pageSetup?.paperSize).toBe(9);
+    expect(chartsheetPageSetup(pie)?.orientation).toBe("landscape");
+    expect(chartsheetPageSetup(pie)?.paperSize).toBe(9);
 
-    const hidden = wb.chartsheets.find(cs => cs.name === "Hidden Sheet")!;
-    expect(hidden.state).toBe("hidden");
+    const hidden = getChartsheets(wb).find(cs => chartsheetName(cs) === "Hidden Sheet")!;
+    expect(chartsheetState(hidden)).toBe("hidden");
 
     // The XML of the Pie chartsheet should also carry the page settings.
     // Locate by index rather than name (write order matches addChartsheet
@@ -138,24 +148,24 @@ describe("Chartsheet round-trip", () => {
     const [fixture] = chartsheetFixtures;
     let bytes = fixture.bytes;
     for (let i = 0; i < 3; i++) {
-      const wb = new Workbook();
-      await wb.xlsx.load(bytes);
-      expect(wb.chartsheets.length, `pass ${i + 1}`).toBe(4);
-      bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+      const wb = Workbook.create();
+      await Workbook.loadXlsx(wb, bytes);
+      expect(getChartsheets(wb).length, `pass ${i + 1}`).toBe(4);
+      bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
       await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
     }
   });
 
   it("a high-level mutation on a chartsheet's chart re-renders without dropping page metadata", async () => {
     const [fixture] = chartsheetFixtures;
-    const wb = new Workbook();
-    await wb.xlsx.load(fixture.bytes);
-    const pie = wb.chartsheets.find(cs => cs.name === "Pie Chart Sheet")!;
-    const chart = pie.chart;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, fixture.bytes);
+    const pie = getChartsheets(wb).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
+    const chart = chartsheetChart(pie);
     expect(chart, "pie chartsheet chart accessor").toBeDefined();
     chart!.title = "Mutated Pie Title";
 
-    const out = new Uint8Array(await wb.xlsx.writeBuffer());
+    const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     const entries = await extractAll(out);
     await expectValidXlsx(out);
 
@@ -163,11 +173,11 @@ describe("Chartsheet round-trip", () => {
     expect(sheet1Xml, "page metadata still present").toMatch(/<pageSetup/);
     expect(sheet1Xml, "page metadata still present").toMatch(/<pageMargins/);
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(out);
-    const pie2 = wb2.chartsheets.find(cs => cs.name === "Pie Chart Sheet")!;
-    expect(pie2.chart).toBeDefined();
-    expect(pie2.chart!.title).toBe("Mutated Pie Title");
-    expect(pie2.zoomScale).toBe(80);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, out);
+    const pie2 = getChartsheets(wb2).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
+    expect(chartsheetChart(pie2)).toBeDefined();
+    expect(chartsheetChart(pie2)!.title).toBe("Mutated Pie Title");
+    expect(chartsheetZoomScale(pie2)).toBe(80);
   });
 });

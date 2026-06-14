@@ -1,4 +1,6 @@
-import type { Row } from "@excel/row";
+import { cellGetValue } from "@excel/cell";
+import { type RowData } from "@excel/row";
+import { rowGetCell } from "@excel/worksheet";
 
 export class ColumnSum {
   private columns: number[];
@@ -13,9 +15,9 @@ export class ColumnSum {
     }
   }
 
-  add(row: Row): void {
+  add(row: RowData): void {
     for (const column of this.columns) {
-      this.sums[column] += row.getCell(column).value as number;
+      this.sums[column] += cellGetValue(rowGetCell(row, column)) as number;
     }
     this.count++;
   }

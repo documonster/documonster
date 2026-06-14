@@ -12,80 +12,84 @@
  * for a ~10k-cell workbook.
  */
 
-import { Workbook } from "@excel/workbook";
+import { definedNamesAdd } from "@excel/defined-names";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
+import { getDefinedNames } from "@excel/workbook";
+import { addTable } from "@excel/worksheet";
 import { describe, expect, it } from "vitest";
 
 describe("workbook roundtrip: dependency chains", () => {
   it("1000-cell linear chain computes in topological order", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 1;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 1);
     for (let i = 2; i <= 1000; i++) {
-      ws.getCell(`A${i}`).value = { formula: `A${i - 1}+1`, result: 0 };
+      Cell.setValue(ws, `A${i}`, { formula: `A${i - 1}+1`, result: 0 });
     }
-    wb.calculateFormulas();
-    expect(ws.getCell("A1000").result).toBe(1000);
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1000")).toBe(1000);
   });
 
   it("diamond dependency resolves correctly", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 10;
-    ws.getCell("B1").value = { formula: "A1*2", result: 0 }; // 20
-    ws.getCell("C1").value = { formula: "A1+5", result: 0 }; // 15
-    ws.getCell("D1").value = { formula: "B1+C1", result: 0 }; // 35
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(35);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 10);
+    Cell.setValue(ws, "B1", { formula: "A1*2", result: 0 }); // 20
+    Cell.setValue(ws, "C1", { formula: "A1+5", result: 0 }); // 15
+    Cell.setValue(ws, "D1", { formula: "B1+C1", result: 0 }); // 35
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(35);
   });
 
   it("wide dependency (100 cells depend on one)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 7;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 7);
     for (let i = 1; i <= 100; i++) {
-      ws.getCell(`B${i}`).value = { formula: `A1*${i}`, result: 0 };
+      Cell.setValue(ws, `B${i}`, { formula: `A1*${i}`, result: 0 });
     }
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(7);
-    expect(ws.getCell("B50").result).toBe(350);
-    expect(ws.getCell("B100").result).toBe(700);
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(7);
+    expect(Cell.getResult(ws, "B50")).toBe(350);
+    expect(Cell.getResult(ws, "B100")).toBe(700);
   });
 
   it("deep nested formulas (100 levels deep in a single cell)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     // Build ((((((1+1)+1)+1)...)+1) 50 levels deep — well under parser's MAX_DEPTH=256
     let expr = "1";
     for (let i = 0; i < 50; i++) {
       expr = `(${expr}+1)`;
     }
-    ws.getCell("A1").value = { formula: expr, result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(51);
+    Cell.setValue(ws, "A1", { formula: expr, result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(51);
   });
 });
 
 describe("workbook roundtrip: cross-sheet references", () => {
   it("three-sheet aggregation", () => {
-    const wb = new Workbook();
-    const s1 = wb.addWorksheet("Data1");
-    const s2 = wb.addWorksheet("Data2");
-    const s3 = wb.addWorksheet("Summary");
+    const wb = Workbook.create();
+    const s1 = Workbook.addWorksheet(wb, "Data1");
+    const s2 = Workbook.addWorksheet(wb, "Data2");
+    const s3 = Workbook.addWorksheet(wb, "Summary");
     for (let i = 1; i <= 10; i++) {
-      s1.getCell(`A${i}`).value = i;
-      s2.getCell(`A${i}`).value = i * 2;
+      Cell.setValue(s1, `A${i}`, i);
+      Cell.setValue(s2, `A${i}`, i * 2);
     }
-    s3.getCell("A1").value = { formula: "SUM(Data1!A1:A10)", result: 0 };
-    s3.getCell("A2").value = { formula: "SUM(Data2!A1:A10)", result: 0 };
-    s3.getCell("A3").value = { formula: "A1+A2", result: 0 };
-    wb.calculateFormulas();
-    expect(s3.getCell("A1").result).toBe(55);
-    expect(s3.getCell("A2").result).toBe(110);
-    expect(s3.getCell("A3").result).toBe(165);
+    Cell.setValue(s3, "A1", { formula: "SUM(Data1!A1:A10)", result: 0 });
+    Cell.setValue(s3, "A2", { formula: "SUM(Data2!A1:A10)", result: 0 });
+    Cell.setValue(s3, "A3", { formula: "A1+A2", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(s3, "A1")).toBe(55);
+    expect(Cell.getResult(s3, "A2")).toBe(110);
+    expect(Cell.getResult(s3, "A3")).toBe(165);
   });
 
   it("3D reference across contiguous sheets", () => {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     // Using sheet names like "Q1" used to trigger tokenizer ambiguity
     // (Q1 is also a valid cell ref) so `Q1:Q4!` was parsed as a Name
     // instead of a SheetRef. The tokenizer was patched to look ahead
@@ -93,13 +97,13 @@ describe("workbook roundtrip: cross-sheet references", () => {
     // cell-ref-shaped-name case explicitly.
     const sheets = ["Data1", "Data2", "Data3", "Data4"];
     for (const name of sheets) {
-      const ws = wb.addWorksheet(name);
-      ws.getCell("A1").value = 100;
+      const ws = Workbook.addWorksheet(wb, name);
+      Cell.setValue(ws, "A1", 100);
     }
-    const summary = wb.addWorksheet("Total");
-    summary.getCell("A1").value = { formula: "SUM(Data1:Data4!A1)", result: 0 };
-    wb.calculateFormulas();
-    expect(summary.getCell("A1").result).toBe(400);
+    const summary = Workbook.addWorksheet(wb, "Total");
+    Cell.setValue(summary, "A1", { formula: "SUM(Data1:Data4!A1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(summary, "A1")).toBe(400);
   });
 
   it("3D reference with cell-ref-shaped names (Q1:Q4!A1)", () => {
@@ -107,29 +111,29 @@ describe("workbook roundtrip: cross-sheet references", () => {
     // tokenizer used to skip the 3D-reference branch whenever the
     // first word looked like a cell ref, leaving `Q1:Q4` parsed as a
     // range. We now use `!`-lookahead to disambiguate.
-    const wb = new Workbook();
+    const wb = Workbook.create();
     const sheets = ["Q1", "Q2", "Q3", "Q4"];
     for (const name of sheets) {
-      const ws = wb.addWorksheet(name);
-      ws.getCell("A1").value = 100;
+      const ws = Workbook.addWorksheet(wb, name);
+      Cell.setValue(ws, "A1", 100);
     }
-    const summary = wb.addWorksheet("Total");
-    summary.getCell("A1").value = { formula: "SUM(Q1:Q4!A1)", result: 0 };
-    wb.calculateFormulas();
-    expect(summary.getCell("A1").result).toBe(400);
+    const summary = Workbook.addWorksheet(wb, "Total");
+    Cell.setValue(summary, "A1", { formula: "SUM(Q1:Q4!A1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(summary, "A1")).toBe(400);
   });
 
   it("circular detection across sheets", () => {
-    const wb = new Workbook();
-    const s1 = wb.addWorksheet("A");
-    const s2 = wb.addWorksheet("B");
-    s1.getCell("A1").value = { formula: "B!A1+1", result: 0 };
-    s2.getCell("A1").value = { formula: "A!A1+1", result: 0 };
-    wb.calculateFormulas();
+    const wb = Workbook.create();
+    const s1 = Workbook.addWorksheet(wb, "A");
+    const s2 = Workbook.addWorksheet(wb, "B");
+    Cell.setValue(s1, "A1", { formula: "B!A1+1", result: 0 });
+    Cell.setValue(s2, "A1", { formula: "A!A1+1", result: 0 });
+    calculateFormulas(wb);
     // Circular: both should report a consistent fallback (0+1=1 with our
     // default non-iterative semantics).
-    expect(typeof s1.getCell("A1").result).toBe("number");
-    expect(typeof s2.getCell("A1").result).toBe("number");
+    expect(typeof Cell.getResult(s1, "A1")).toBe("number");
+    expect(typeof Cell.getResult(s2, "A1")).toBe("number");
   });
 });
 
@@ -141,138 +145,138 @@ describe("workbook roundtrip: dynamic arrays and spill", () => {
     // lets SUM read ghost values from the master's cached array
     // result before materialize writes them to the snapshot. So SUM
     // gets the full 1..5 in a single calc pass.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SEQUENCE(5)", result: 0 };
-    ws.getCell("B1").value = { formula: "SUM(A1:A5)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A5").value).toBe(5);
-    expect(ws.getCell("B1").result).toBe(15);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(5)", result: 0 });
+    Cell.setValue(ws, "B1", { formula: "SUM(A1:A5)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A5")).toBe(5);
+    expect(Cell.getResult(ws, "B1")).toBe(15);
   });
 
   it("spill shrink cleans old ghosts, then grow refills", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("B1").value = 5;
-    ws.getCell("A1").value = { formula: "SEQUENCE(B1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A5").value).toBe(5);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "B1", 5);
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(B1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A5")).toBe(5);
 
     // Shrink
-    ws.getCell("B1").value = 2;
-    wb.calculateFormulas();
-    expect(ws.getCell("A3").value).toBeFalsy();
+    Cell.setValue(ws, "B1", 2);
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A3")).toBeFalsy();
 
     // Grow back
-    ws.getCell("B1").value = 7;
-    wb.calculateFormulas();
-    expect(ws.getCell("A7").value).toBe(7);
+    Cell.setValue(ws, "B1", 7);
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A7")).toBe(7);
   });
 
   it("two side-by-side dynamic arrays don't interfere", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3)", result: 0 };
-    ws.getCell("C1").value = { formula: "SEQUENCE(3,1,10)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A3").value).toBe(3);
-    expect(ws.getCell("C3").value).toBe(12);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)", result: 0 });
+    Cell.setValue(ws, "C1", { formula: "SEQUENCE(3,1,10)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A3")).toBe(3);
+    expect(Cell.getValue(ws, "C3")).toBe(12);
   });
 
   it("dynamic array with formula reference to same spill", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SEQUENCE(5)", result: 0 };
-    ws.getCell("C1").value = { formula: "A1#*2", result: 0 }; // Spill ref
-    wb.calculateFormulas();
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(5)", result: 0 });
+    Cell.setValue(ws, "C1", { formula: "A1#*2", result: 0 }); // Spill ref
+    calculateFormulas(wb);
     // Our engine may or may not support spill-range refs; just verify
     // no crash and some number produced.
-    const r = ws.getCell("C1").result;
+    const r = Cell.getResult(ws, "C1");
     expect(r === undefined || typeof r === "number" || typeof r === "object").toBe(true);
   });
 });
 
 describe("workbook roundtrip: defined names", () => {
   it("workbook-level defined name", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 0.2;
-    wb.definedNames.add("S!A1", "TaxRate");
-    ws.getCell("B1").value = { formula: "100*TaxRate", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(20);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 0.2);
+    definedNamesAdd(getDefinedNames(wb), "S!A1", "TaxRate");
+    Cell.setValue(ws, "B1", { formula: "100*TaxRate", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(20);
   });
 
   it("defined name referencing a range", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 5; i++) {
-      ws.getCell(`A${i}`).value = i;
+      Cell.setValue(ws, `A${i}`, i);
     }
-    wb.definedNames.add("S!A1:A5", "Data");
-    ws.getCell("B1").value = { formula: "SUM(Data)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(15);
+    definedNamesAdd(getDefinedNames(wb), "S!A1:A5", "Data");
+    Cell.setValue(ws, "B1", { formula: "SUM(Data)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(15);
   });
 
   it("name used in multiple formulas", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 42;
-    wb.definedNames.add("S!A1", "Answer");
-    ws.getCell("B1").value = { formula: "Answer*2", result: 0 };
-    ws.getCell("C1").value = { formula: "Answer+8", result: 0 };
-    ws.getCell("D1").value = { formula: "B1+C1", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(84);
-    expect(ws.getCell("C1").result).toBe(50);
-    expect(ws.getCell("D1").result).toBe(134);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 42);
+    definedNamesAdd(getDefinedNames(wb), "S!A1", "Answer");
+    Cell.setValue(ws, "B1", { formula: "Answer*2", result: 0 });
+    Cell.setValue(ws, "C1", { formula: "Answer+8", result: 0 });
+    Cell.setValue(ws, "D1", { formula: "B1+C1", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(84);
+    expect(Cell.getResult(ws, "C1")).toBe(50);
+    expect(Cell.getResult(ws, "D1")).toBe(134);
   });
 });
 
 describe("workbook roundtrip: error chains", () => {
   it("error propagates through 10-level dependency chain", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "1/0", result: 0 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "1/0", result: 0 });
     for (let i = 2; i <= 10; i++) {
-      ws.getCell(`A${i}`).value = { formula: `A${i - 1}*2`, result: 0 };
+      Cell.setValue(ws, `A${i}`, { formula: `A${i - 1}*2`, result: 0 });
     }
-    wb.calculateFormulas();
-    expect(ws.getCell("A10").result).toEqual({ error: "#DIV/0!" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A10")).toEqual({ error: "#DIV/0!" });
   });
 
   it("IFERROR stops propagation at any point", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "1/0", result: 0 };
-    ws.getCell("A2").value = { formula: "A1+1", result: 0 };
-    ws.getCell("A3").value = { formula: "IFERROR(A2, 999)", result: 0 };
-    ws.getCell("A4").value = { formula: "A3*2", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A3").result).toBe(999);
-    expect(ws.getCell("A4").result).toBe(1998);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "1/0", result: 0 });
+    Cell.setValue(ws, "A2", { formula: "A1+1", result: 0 });
+    Cell.setValue(ws, "A3", { formula: "IFERROR(A2, 999)", result: 0 });
+    Cell.setValue(ws, "A4", { formula: "A3*2", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A3")).toBe(999);
+    expect(Cell.getResult(ws, "A4")).toBe(1998);
   });
 
   it("one bad cell doesn't poison unrelated cells", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "1/0", result: 0 };
-    ws.getCell("B1").value = 100;
-    ws.getCell("C1").value = { formula: "B1*2", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#DIV/0!" });
-    expect(ws.getCell("C1").result).toBe(200);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "1/0", result: 0 });
+    Cell.setValue(ws, "B1", 100);
+    Cell.setValue(ws, "C1", { formula: "B1*2", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#DIV/0!" });
+    expect(Cell.getResult(ws, "C1")).toBe(200);
   });
 });
 
 describe("workbook roundtrip: volatile recalc", () => {
   it("NOW updates on every calc", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "NOW()", result: 0 };
-    wb.calculateFormulas();
-    const r1 = ws.getCell("A1").result;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "NOW()", result: 0 });
+    calculateFormulas(wb);
+    const r1 = Cell.getResult(ws, "A1");
     expect(typeof r1).toBe("number");
     expect((r1 as number) > 0).toBe(true);
 
@@ -281,21 +285,21 @@ describe("workbook roundtrip: volatile recalc", () => {
     while (Date.now() - start < 2) {
       // spin
     }
-    wb.calculateFormulas();
-    const r2 = ws.getCell("A1").result;
+    calculateFormulas(wb);
+    const r2 = Cell.getResult(ws, "A1");
     expect(typeof r2).toBe("number");
     expect((r2 as number) >= (r1 as number)).toBe(true);
   });
 
   it("RAND stays within [0, 1)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 20; i++) {
-      ws.getCell(`A${i}`).value = { formula: "RAND()", result: 0 };
+      Cell.setValue(ws, `A${i}`, { formula: "RAND()", result: 0 });
     }
-    wb.calculateFormulas();
+    calculateFormulas(wb);
     for (let i = 1; i <= 20; i++) {
-      const r = ws.getCell(`A${i}`).result as number;
+      const r = Cell.getResult(ws, `A${i}`) as number;
       expect(r).toBeGreaterThanOrEqual(0);
       expect(r).toBeLessThan(1);
     }
@@ -304,62 +308,62 @@ describe("workbook roundtrip: volatile recalc", () => {
 
 describe("workbook roundtrip: performance sanity", () => {
   it("5000-cell SUM-chain completes in reasonable time", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 5000; i++) {
-      ws.getCell(`A${i}`).value = i;
+      Cell.setValue(ws, `A${i}`, i);
     }
-    ws.getCell("B1").value = { formula: "SUM(A1:A5000)", result: 0 };
+    Cell.setValue(ws, "B1", { formula: "SUM(A1:A5000)", result: 0 });
     const start = Date.now();
-    wb.calculateFormulas();
+    calculateFormulas(wb);
     const elapsed = Date.now() - start;
-    expect(ws.getCell("B1").result).toBe(12502500); // sum of 1..5000
+    expect(Cell.getResult(ws, "B1")).toBe(12502500); // sum of 1..5000
     expect(elapsed).toBeLessThan(5000); // 5s is generous; expect way under
   });
 
   it("1000 sibling formulas (no cross-deps) compute quickly", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 1000; i++) {
-      ws.getCell(`A${i}`).value = { formula: `${i}*2`, result: 0 };
+      Cell.setValue(ws, `A${i}`, { formula: `${i}*2`, result: 0 });
     }
     const start = Date.now();
-    wb.calculateFormulas();
+    calculateFormulas(wb);
     const elapsed = Date.now() - start;
-    expect(ws.getCell("A1000").result).toBe(2000);
+    expect(Cell.getResult(ws, "A1000")).toBe(2000);
     expect(elapsed).toBeLessThan(3000);
   });
 
   it("deep chain of 100 formulas + recalc after single change", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 1;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 1);
     for (let i = 2; i <= 100; i++) {
-      ws.getCell(`A${i}`).value = { formula: `A${i - 1}+1`, result: 0 };
+      Cell.setValue(ws, `A${i}`, { formula: `A${i - 1}+1`, result: 0 });
     }
-    wb.calculateFormulas();
-    expect(ws.getCell("A100").result).toBe(100);
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A100")).toBe(100);
 
     // Change the root; every dependent must update.
-    ws.getCell("A1").value = 1000;
-    wb.calculateFormulas();
-    expect(ws.getCell("A100").result).toBe(1099);
+    Cell.setValue(ws, "A1", 1000);
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A100")).toBe(1099);
   });
 });
 
 describe("workbook roundtrip: mixed scenarios", () => {
   it("realistic invoice workbook", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Invoice");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Invoice");
 
     // Header row
-    ws.getCell("A1").value = "Item";
-    ws.getCell("B1").value = "Qty";
-    ws.getCell("C1").value = "Price";
-    ws.getCell("D1").value = "Tax Rate";
-    ws.getCell("E1").value = "Subtotal";
-    ws.getCell("F1").value = "Tax";
-    ws.getCell("G1").value = "Total";
+    Cell.setValue(ws, "A1", "Item");
+    Cell.setValue(ws, "B1", "Qty");
+    Cell.setValue(ws, "C1", "Price");
+    Cell.setValue(ws, "D1", "Tax Rate");
+    Cell.setValue(ws, "E1", "Subtotal");
+    Cell.setValue(ws, "F1", "Tax");
+    Cell.setValue(ws, "G1", "Total");
 
     const items = [
       ["Widget", 10, 2.5, 0.08],
@@ -368,59 +372,59 @@ describe("workbook roundtrip: mixed scenarios", () => {
     ];
     items.forEach((item, i) => {
       const row = i + 2;
-      ws.getCell(`A${row}`).value = item[0];
-      ws.getCell(`B${row}`).value = item[1];
-      ws.getCell(`C${row}`).value = item[2];
-      ws.getCell(`D${row}`).value = item[3];
-      ws.getCell(`E${row}`).value = { formula: `B${row}*C${row}`, result: 0 };
-      ws.getCell(`F${row}`).value = { formula: `E${row}*D${row}`, result: 0 };
-      ws.getCell(`G${row}`).value = { formula: `E${row}+F${row}`, result: 0 };
+      Cell.setValue(ws, `A${row}`, item[0]);
+      Cell.setValue(ws, `B${row}`, item[1]);
+      Cell.setValue(ws, `C${row}`, item[2]);
+      Cell.setValue(ws, `D${row}`, item[3]);
+      Cell.setValue(ws, `E${row}`, { formula: `B${row}*C${row}`, result: 0 });
+      Cell.setValue(ws, `F${row}`, { formula: `E${row}*D${row}`, result: 0 });
+      Cell.setValue(ws, `G${row}`, { formula: `E${row}+F${row}`, result: 0 });
     });
 
-    ws.getCell("E5").value = { formula: "SUM(E2:E4)", result: 0 };
-    ws.getCell("F5").value = { formula: "SUM(F2:F4)", result: 0 };
-    ws.getCell("G5").value = { formula: "SUM(G2:G4)", result: 0 };
+    Cell.setValue(ws, "E5", { formula: "SUM(E2:E4)", result: 0 });
+    Cell.setValue(ws, "F5", { formula: "SUM(F2:F4)", result: 0 });
+    Cell.setValue(ws, "G5", { formula: "SUM(G2:G4)", result: 0 });
 
-    wb.calculateFormulas();
+    calculateFormulas(wb);
 
-    expect(ws.getCell("E2").result).toBe(25);
-    expect(ws.getCell("F2").result).toBeCloseTo(2, 5);
-    expect(ws.getCell("G2").result).toBeCloseTo(27, 5);
-    expect(ws.getCell("E5").result).toBe(150); // 25 + 75 + 50
+    expect(Cell.getResult(ws, "E2")).toBe(25);
+    expect(Cell.getResult(ws, "F2")).toBeCloseTo(2, 5);
+    expect(Cell.getResult(ws, "G2")).toBeCloseTo(27, 5);
+    expect(Cell.getResult(ws, "E5")).toBe(150); // 25 + 75 + 50
   });
 
   it("nested IF + VLOOKUP pattern", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     // Lookup table
-    ws.getCell("E1").value = "A";
-    ws.getCell("F1").value = 10;
-    ws.getCell("E2").value = "B";
-    ws.getCell("F2").value = 20;
-    ws.getCell("E3").value = "C";
-    ws.getCell("F3").value = 30;
+    Cell.setValue(ws, "E1", "A");
+    Cell.setValue(ws, "F1", 10);
+    Cell.setValue(ws, "E2", "B");
+    Cell.setValue(ws, "F2", 20);
+    Cell.setValue(ws, "E3", "C");
+    Cell.setValue(ws, "F3", 30);
 
-    ws.getCell("A1").value = "B";
-    ws.getCell("B1").value = { formula: "VLOOKUP(A1, E1:F3, 2, FALSE)", result: 0 };
-    ws.getCell("C1").value = { formula: 'IF(B1>15, "high", "low")', result: 0 };
-    wb.calculateFormulas();
+    Cell.setValue(ws, "A1", "B");
+    Cell.setValue(ws, "B1", { formula: "VLOOKUP(A1, E1:F3, 2, FALSE)", result: 0 });
+    Cell.setValue(ws, "C1", { formula: 'IF(B1>15, "high", "low")', result: 0 });
+    calculateFormulas(wb);
 
-    expect(ws.getCell("B1").result).toBe(20);
-    expect(ws.getCell("C1").result).toBe("high");
+    expect(Cell.getResult(ws, "B1")).toBe(20);
+    expect(Cell.getResult(ws, "C1")).toBe("high");
   });
 
   it("conditional sums over 100 rows", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 100; i++) {
-      ws.getCell(`A${i}`).value = i % 2 === 0 ? "even" : "odd";
-      ws.getCell(`B${i}`).value = i;
+      Cell.setValue(ws, `A${i}`, i % 2 === 0 ? "even" : "odd");
+      Cell.setValue(ws, `B${i}`, i);
     }
-    ws.getCell("D1").value = { formula: 'SUMIF(A1:A100, "even", B1:B100)', result: 0 };
-    ws.getCell("D2").value = { formula: 'COUNTIF(A1:A100, "odd")', result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(2550); // 2+4+...+100 = 2550
-    expect(ws.getCell("D2").result).toBe(50);
+    Cell.setValue(ws, "D1", { formula: 'SUMIF(A1:A100, "even", B1:B100)', result: 0 });
+    Cell.setValue(ws, "D2", { formula: 'COUNTIF(A1:A100, "odd")', result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(2550); // 2+4+...+100 = 2550
+    expect(Cell.getResult(ws, "D2")).toBe(50);
   });
 });
 
@@ -430,9 +434,9 @@ describe("workbook roundtrip: mixed scenarios", () => {
 
 describe("workbook roundtrip: tables with totals row", () => {
   it("[#Totals] resolves to the totals row", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "Sales",
       ref: "A1",
       headerRow: true,
@@ -444,18 +448,18 @@ describe("workbook roundtrip: tables with totals row", () => {
         ["Peach", 30]
       ]
     });
-    ws.getCell("D1").value = { formula: "Sales[[#Totals],[Qty]]", result: 0 };
-    wb.calculateFormulas();
+    Cell.setValue(ws, "D1", { formula: "Sales[[#Totals],[Qty]]", result: 0 });
+    calculateFormulas(wb);
     // The totals-row cell itself should hold the sum; reading via
     // structured ref should surface that cached value (60).
-    const v = ws.getCell("D1").result;
+    const v = Cell.getResult(ws, "D1");
     expect(v).not.toEqual({ error: "#REF!" });
   });
 
   it("[#All] spans header + data + totals", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "Sales",
       ref: "A1",
       headerRow: true,
@@ -467,18 +471,18 @@ describe("workbook roundtrip: tables with totals row", () => {
       ]
     });
     // COUNTA over [#All] should include header + 2 data + totals = 4 cells
-    ws.getCell("D1").value = { formula: "COUNTA(Sales[[#All],[Qty]])", result: 0 };
-    wb.calculateFormulas();
+    Cell.setValue(ws, "D1", { formula: "COUNTA(Sales[[#All],[Qty]])", result: 0 });
+    calculateFormulas(wb);
     // header + 2 data + totals = 4 non-empty cells
-    const v = ws.getCell("D1").result as number;
+    const v = Cell.getResult(ws, "D1") as number;
     expect(v).toBeGreaterThanOrEqual(3); // at minimum header + 2 data
     expect(v).toBeLessThanOrEqual(4);
   });
 
   it("[#Data] skips header and totals", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "Sales",
       ref: "A1",
       headerRow: true,
@@ -490,15 +494,15 @@ describe("workbook roundtrip: tables with totals row", () => {
         ["Peach", 30]
       ]
     });
-    ws.getCell("D1").value = { formula: "SUM(Sales[[#Data],[Qty]])", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(60);
+    Cell.setValue(ws, "D1", { formula: "SUM(Sales[[#Data],[Qty]])", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(60);
   });
 
   it("[#Totals] on a table without a totals row returns #REF!", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "NoTotals",
       ref: "A1",
       headerRow: true,
@@ -506,17 +510,17 @@ describe("workbook roundtrip: tables with totals row", () => {
       columns: [{ name: "Val" }],
       rows: [[1], [2], [3]]
     });
-    ws.getCell("C1").value = { formula: "NoTotals[[#Totals],[Val]]", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("C1").result).toEqual({ error: "#REF!" });
+    Cell.setValue(ws, "C1", { formula: "NoTotals[[#Totals],[Val]]", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "C1")).toEqual({ error: "#REF!" });
   });
 });
 
 describe("workbook roundtrip: structured reference variants", () => {
   it("Table[column] — plain column reference", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "Inventory",
       ref: "A1",
       headerRow: true,
@@ -528,15 +532,15 @@ describe("workbook roundtrip: structured reference variants", () => {
         ["C", 15]
       ]
     });
-    ws.getCell("D1").value = { formula: "SUM(Inventory[Qty])", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(30);
+    Cell.setValue(ws, "D1", { formula: "SUM(Inventory[Qty])", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(30);
   });
 
   it("Table[#Headers] returns header row only", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "HdrT",
       ref: "A1",
       headerRow: true,
@@ -544,15 +548,15 @@ describe("workbook roundtrip: structured reference variants", () => {
       columns: [{ name: "Item" }, { name: "Qty" }],
       rows: [["A", 5]]
     });
-    ws.getCell("D1").value = { formula: "COUNTA(HdrT[#Headers])", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(2); // "Item" + "Qty"
+    Cell.setValue(ws, "D1", { formula: "COUNTA(HdrT[#Headers])", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(2); // "Item" + "Qty"
   });
 
   it("Table[#All] spans every row", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addTable({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    addTable(ws, {
       name: "AllT",
       ref: "A1",
       headerRow: true,
@@ -560,8 +564,8 @@ describe("workbook roundtrip: structured reference variants", () => {
       columns: [{ name: "Val" }],
       rows: [[10], [20], [30]]
     });
-    ws.getCell("C1").value = { formula: "COUNTA(AllT[#All])", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("C1").result).toBe(4); // header + 3 data
+    Cell.setValue(ws, "C1", { formula: "COUNTA(AllT[#All])", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "C1")).toBe(4); // header + 3 data
   });
 });

@@ -1,4 +1,4 @@
-import type { Cell } from "@excel/cell";
+import { type CellData, cellGetValue, cellSetValue } from "@excel/cell";
 import { TableError } from "@excel/errors";
 import type {
   Address,
@@ -9,7 +9,8 @@ import type {
   TableStyleProperties
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
+import { getRow, getSheetWorkbook, rowGetCell } from "@excel/worksheet-core";
+import type { WorksheetData as Worksheet } from "@excel/worksheet-core";
 
 interface TableModel {
   ref: string;
@@ -132,587 +133,618 @@ interface CacheState {
   tableHeight: number;
 }
 
-class Column {
-  // wrapper around column model, allowing access and manipulation
-  readonly table: Table;
-  readonly column: TableColumnProperties;
-  readonly index: number;
+// ============================================================================
+// Table — de-classed domain model (data record + flat helpers)
+// ============================================================================
 
-  constructor(table: Table, column: TableColumnProperties, index: number) {
-    this.table = table;
-    this.column = column;
-    this.index = index;
-  }
-
-  private _set<K extends keyof TableColumnProperties>(
-    name: K,
-    value: TableColumnProperties[K]
-  ): void {
-    this.table.cacheState();
-    this.column[name] = value;
-  }
-
-  get name(): string {
-    return this.column.name;
-  }
-  set name(value: string) {
-    this._set("name", value);
-  }
-
-  get filterButton(): boolean | undefined {
-    return this.column.filterButton;
-  }
-  set filterButton(value: boolean | undefined) {
-    this.column.filterButton = value;
-  }
-
-  get style(): Partial<Style> | undefined {
-    return this.column.style;
-  }
-  set style(value: Partial<Style> | undefined) {
-    // Use _set so commit() will replay store() and propagate the new style
-    // to the on-sheet cells; a bare assignment leaves _cache empty and
-    // commit() returns early.
-    this._set("style", value);
-  }
-
-  get totalsRowLabel(): string | undefined {
-    return this.column.totalsRowLabel;
-  }
-  set totalsRowLabel(value: string | undefined) {
-    this._set("totalsRowLabel", value);
-  }
-
-  get totalsRowFunction(): TableColumnProperties["totalsRowFunction"] {
-    return this.column.totalsRowFunction;
-  }
-  set totalsRowFunction(value: TableColumnProperties["totalsRowFunction"]) {
-    this._set("totalsRowFunction", value);
-  }
-
-  get totalsRowResult(): CellValue {
-    return this.column.totalsRowResult;
-  }
-  set totalsRowResult(value: CellFormulaValue["result"]) {
-    this._set("totalsRowResult", value);
-  }
-
-  get totalsRowFormula(): string | undefined {
-    return this.column.totalsRowFormula;
-  }
-  set totalsRowFormula(value: string | undefined) {
-    this._set("totalsRowFormula", value);
-  }
+/**
+ * Plain-data worksheet table (de-classed domain model). Holds the owning
+ * worksheet, the {@link TableModel}, and an optional mutation cache. All former
+ * methods/getters/setters are flat `table*` helpers.
+ */
+export interface TableData {
+  worksheet: Worksheet;
+  table: TableModel;
+  _cache?: CacheState;
 }
 
-class Table {
-  readonly worksheet: Worksheet;
-  declare table: TableModel;
-  declare private _cache?: CacheState;
+/**
+ * View over a single table column (de-classed). Carries the owning table, the
+ * column properties record, and the column index; setters route through
+ * {@link tableCacheState} so {@link tableCommit} replays `store()`.
+ */
+export interface TableColumnView {
+  table: TableData;
+  column: TableColumnProperties;
+  index: number;
+}
 
-  constructor(worksheet: Worksheet, table?: TableModel) {
-    this.worksheet = worksheet;
-    if (table) {
-      this.table = table;
+// SUBTOTAL function codes per OOXML/Excel (see original notes):
+//   average → 101, countNums → 102, count → 103, max → 104, min → 105,
+//   stdDev → 107, var → 110, sum → 109.
+const SUBTOTAL_FUNCTIONS: Record<string, number> = {
+  average: 101,
+  countNums: 102,
+  count: 103,
+  max: 104,
+  min: 105,
+  stdDev: 107,
+  var: 110,
+  sum: 109
+};
 
-      // When loading tables from xlsx, Excel stores table ranges and cell values in the worksheet,
-      // but may not embed row data into the table definition. Hydrate rows from the worksheet so
-      // table mutations (e.g. addRow) can correctly expand table ranges and serialize.
-      if (Array.isArray(table.rows) && table.rows.length === 0 && table.tableRef) {
-        const decoded = colCache.decode(table.tableRef);
-        if ("dimensions" in decoded) {
-          const startRow = decoded.top + (table.headerRow === false ? 0 : 1);
-          const endRow = decoded.bottom - (table.totalsRow === true ? 1 : 0);
+/** Create a table bound to a worksheet, validating + storing on-sheet if a model is given. */
+export function createTable(worksheet: Worksheet, table?: TableModel): TableData {
+  const t: TableData = { worksheet, table: table as TableModel };
+  if (table) {
+    // When loading tables from xlsx, Excel stores table ranges and cell values in the worksheet,
+    // but may not embed row data into the table definition. Hydrate rows from the worksheet so
+    // table mutations (e.g. addRow) can correctly expand table ranges and serialize.
+    if (Array.isArray(table.rows) && table.rows.length === 0 && table.tableRef) {
+      const decoded = colCache.decode(table.tableRef);
+      if ("dimensions" in decoded) {
+        const startRow = decoded.top + (table.headerRow === false ? 0 : 1);
+        const endRow = decoded.bottom - (table.totalsRow === true ? 1 : 0);
 
-          if (endRow >= startRow) {
-            for (let r = startRow; r <= endRow; r++) {
-              const row = worksheet.getRow(r);
-              const values: CellValue[] = [];
-              for (let c = decoded.left; c <= decoded.right; c++) {
-                values.push(row.getCell(c).value);
-              }
-              table.rows.push(values);
+        if (endRow >= startRow) {
+          for (let r = startRow; r <= endRow; r++) {
+            const row = getRow(worksheet, r);
+            const values: CellValue[] = [];
+            for (let c = decoded.left; c <= decoded.right; c++) {
+              values.push(cellGetValue(rowGetCell(row, c)));
             }
+            table.rows.push(values);
           }
         }
       }
-      // check things are ok first
-      this.validate();
-
-      this.store();
     }
+    // check things are ok first
+    tableValidate(t);
+
+    tableStore(t);
+  }
+  return t;
+}
+
+export function tableGetFormula(t: TableData, column: TableColumnProperties): string | null {
+  if (column.totalsRowFunction === "none") {
+    return null;
+  }
+  if (column.totalsRowFunction === "custom") {
+    return column.totalsRowFormula ?? null;
+  }
+  const fnNum = column.totalsRowFunction ? SUBTOTAL_FUNCTIONS[column.totalsRowFunction] : undefined;
+  if (fnNum !== undefined) {
+    return `SUBTOTAL(${fnNum},${t.table.name}[${column.name}])`;
+  }
+  throw new TableError(`Invalid Totals Row Function: ${column.totalsRowFunction}`);
+}
+
+/** Number of columns. */
+export function tableWidth(t: TableData): number {
+  return t.table.columns.length;
+}
+
+/** Number of data rows. */
+export function tableHeight(t: TableData): number {
+  return t.table.rows.length;
+}
+
+/** Data rows + optional header row. */
+export function tableFilterHeight(t: TableData): number {
+  return tableHeight(t) + (t.table.headerRow ? 1 : 0);
+}
+
+/** Full on-sheet height (data + header + optional totals row). */
+export function tableTableHeight(t: TableData): number {
+  return tableFilterHeight(t) + (t.table.totalsRow ? 1 : 0);
+}
+
+export function tableValidate(t: TableData): void {
+  const { table } = t;
+  // set defaults and check is valid
+  const assign = <T extends object, K extends keyof T>(o: T, name: K, dflt: T[K]): void => {
+    if (o[name] === undefined) {
+      o[name] = dflt;
+    }
+  };
+  assign(table, "headerRow", true);
+  assign(table, "totalsRow", false);
+
+  assign(table, "style", {});
+  const style = table.style!;
+  assign(style, "theme", "TableStyleMedium2");
+  assign(style, "showFirstColumn", false);
+  assign(style, "showLastColumn", false);
+  assign(style, "showRowStripes", false);
+  assign(style, "showColumnStripes", false);
+
+  // Sanitize table name and displayName to comply with OOXML defined name rules.
+  // Excel UI rejects invalid names; here we auto-correct to avoid "repair" dialogs.
+  if (table.name) {
+    table.name = sanitizeTableName(table.name);
+  }
+  if (table.displayName) {
+    table.displayName = sanitizeTableName(table.displayName);
   }
 
-  // SUBTOTAL function codes per OOXML/Excel:
-  //   1/101=AVERAGE, 2/102=COUNT, 3/103=COUNTA, 4/104=MAX, 5/105=MIN,
-  //   6/106=PRODUCT, 7/107=STDEV, 8/108=STDEVP, 9/109=SUM, 10/110=VAR, 11/111=VARP.
-  // The 1xx variants also ignore manually hidden rows — Excel always uses
-  // these for totals-row injection. OOXML totalsRowFunction names map to:
-  //   average → 1 (AVERAGE)
-  //   countNums → 2 (COUNT, numeric-only)
-  //   count → 3 (COUNTA)
-  //   max → 4
-  //   min → 5
-  //   stdDev → 7 (sample std dev, per Excel's totals UI)
-  //   var → 10  (sample variance, per Excel's totals UI)
-  //   sum → 9
-  private static readonly SUBTOTAL_FUNCTIONS: Record<string, number> = {
-    average: 101,
-    countNums: 102,
-    count: 103,
-    max: 104,
-    min: 105,
-    stdDev: 107,
-    var: 110,
-    sum: 109
+  const assert = (test: boolean, message: string) => {
+    if (!test) {
+      throw new TableError(message);
+    }
+  };
+  assert(!!table.name, "Table must have a name");
+  assert(!!table.ref, "Table must have ref");
+  assert(!!table.columns, "Table must have column definitions");
+  assert(!!table.rows, "Table must have row definitions");
+
+  table.tl = colCache.decodeAddress(table.ref);
+  const { row, col } = table.tl;
+  assert(row > 0, "Table must be on valid row");
+  assert(col > 0, "Table must be on valid col");
+
+  const width = tableWidth(t);
+  const filterHeight = tableFilterHeight(t);
+  const tableHt = tableTableHeight(t);
+
+  // autoFilterRef spans the header + all data rows (excludes the optional
+  // totals row). See original notes: matches what Excel emits and avoids
+  // "Removed Records: Table" on open.
+  table.autoFilterRef = colCache.encode(row, col, row + filterHeight - 1, col + width - 1);
+
+  // tableRef is a range that includes optional headers and totals
+  table.tableRef = colCache.encode(row, col, row + tableHt - 1, col + width - 1);
+
+  table.columns.forEach((column, i) => {
+    assert(!!column.name, `Column ${i} must have a name`);
+    if (i === 0) {
+      assign(column, "totalsRowLabel", "Total");
+    } else {
+      assign(column, "totalsRowFunction", "none");
+      column.totalsRowFormula = tableGetFormula(t, column) ?? undefined;
+    }
+  });
+}
+
+export function tableStore(t: TableData): void {
+  // where the table needs to store table data, headers, footers in the sheet...
+  const assignStyle = (cell: CellData, style: Partial<Style> | undefined): void => {
+    if (style) {
+      Object.assign(cell.style, style);
+    }
   };
 
-  getFormula(column: TableColumnProperties): string | null {
-    if (column.totalsRowFunction === "none") {
-      return null;
-    }
-    if (column.totalsRowFunction === "custom") {
-      return column.totalsRowFormula ?? null;
-    }
-    const fnNum = column.totalsRowFunction
-      ? Table.SUBTOTAL_FUNCTIONS[column.totalsRowFunction]
-      : undefined;
-    if (fnNum !== undefined) {
-      return `SUBTOTAL(${fnNum},${this.table.name}[${column.name}])`;
-    }
-    throw new TableError(`Invalid Totals Row Function: ${column.totalsRowFunction}`);
+  const { worksheet, table } = t;
+  const { row, col } = table.tl!;
+  let count = 0;
+  if (table.headerRow) {
+    const r = getRow(worksheet, row + count++);
+    table.columns.forEach((column, j) => {
+      const { style, name } = column;
+      const cell = rowGetCell(r, col + j);
+      cellSetValue(cell, name);
+      assignStyle(cell, style);
+    });
   }
-
-  get width(): number {
-    // width of the table
-    return this.table.columns.length;
-  }
-
-  get height(): number {
-    // height of the table data
-    return this.table.rows.length;
-  }
-
-  get filterHeight(): number {
-    // height of the table data plus optional header row
-    return this.height + (this.table.headerRow ? 1 : 0);
-  }
-
-  get tableHeight(): number {
-    // full height of the table on the sheet
-    return this.filterHeight + (this.table.totalsRow ? 1 : 0);
-  }
-
-  validate(): void {
-    const { table } = this;
-    // set defaults and check is valid
-    const assign = <T extends object, K extends keyof T>(o: T, name: K, dflt: T[K]): void => {
-      if (o[name] === undefined) {
-        o[name] = dflt;
-      }
-    };
-    assign(table, "headerRow", true);
-    assign(table, "totalsRow", false);
-
-    assign(table, "style", {});
-    const style = table.style!;
-    assign(style, "theme", "TableStyleMedium2");
-    assign(style, "showFirstColumn", false);
-    assign(style, "showLastColumn", false);
-    assign(style, "showRowStripes", false);
-    assign(style, "showColumnStripes", false);
-
-    // Sanitize table name and displayName to comply with OOXML defined name rules.
-    // Excel UI rejects invalid names; here we auto-correct to avoid "repair" dialogs.
-    if (table.name) {
-      table.name = sanitizeTableName(table.name);
-    }
-    if (table.displayName) {
-      table.displayName = sanitizeTableName(table.displayName);
-    }
-
-    const assert = (test: boolean, message: string) => {
-      if (!test) {
-        throw new TableError(message);
-      }
-    };
-    assert(!!table.name, "Table must have a name");
-    assert(!!table.ref, "Table must have ref");
-    assert(!!table.columns, "Table must have column definitions");
-    assert(!!table.rows, "Table must have row definitions");
-
-    table.tl = colCache.decodeAddress(table.ref);
-    const { row, col } = table.tl;
-    assert(row > 0, "Table must be on valid row");
-    assert(col > 0, "Table must be on valid col");
-
-    const { width, filterHeight, tableHeight } = this;
-
-    // autoFilterRef spans the header + all data rows (excludes the
-    // optional totals row). Matches what Excel itself emits: a real
-    // `<table ref="A1:C7"><autoFilter ref="A1:C7"/>` uses the same
-    // range for both when there's no totals row, and shrinks the
-    // autoFilter by one row when a totals row is present. Emitting a
-    // single-row range (`A1:C1`) — which the library did previously —
-    // made Excel reject the entire table on open with "Removed
-    // Records: Table from /xl/tables/tableN.xml part (Table)" because
-    // the spec requires the autoFilter range to cover the filterable
-    // data.
-    table.autoFilterRef = colCache.encode(row, col, row + filterHeight - 1, col + width - 1);
-
-    // tableRef is a range that includes optional headers and totals
-    table.tableRef = colCache.encode(row, col, row + tableHeight - 1, col + width - 1);
-
-    table.columns.forEach((column, i) => {
-      assert(!!column.name, `Column ${i} must have a name`);
-      if (i === 0) {
-        assign(column, "totalsRowLabel", "Total");
+  table.rows.forEach(data => {
+    const r = getRow(worksheet, row + count++);
+    data.forEach((value, j) => {
+      const cell = rowGetCell(r, col + j);
+      const isFormulaValue = typeof value === "object" && value !== null && "formula" in value;
+      if (isFormulaValue && typeof (value as CellFormulaValue).formula === "string") {
+        const formulaValue = value as CellFormulaValue;
+        const shouldQualify = table.qualifyImplicitStructuredReferences === true;
+        cellSetValue(cell, {
+          ...formulaValue,
+          formula: shouldQualify
+            ? formulaValue.formula.replace(
+                /(^|[^A-Za-z0-9_])\[@\[?([^[\]]+?)\]?\]/g,
+                `$1${table.name}[[#This Row],[$2]]`
+              )
+            : formulaValue.formula
+        } as CellFormulaValue);
       } else {
-        assign(column, "totalsRowFunction", "none");
-        column.totalsRowFormula = this.getFormula(column) ?? undefined;
+        cellSetValue(cell, value);
       }
+
+      assignStyle(cell, table.columns[j]?.style);
     });
-  }
+  });
 
-  store(): void {
-    // where the table needs to store table data, headers, footers in
-    // the sheet...
-    const assignStyle = (cell: Cell, style: Partial<Style> | undefined): void => {
-      if (style) {
-        Object.assign(cell.style, style);
-      }
-    };
-
-    const { worksheet, table } = this;
-    const { row, col } = table.tl!;
-    let count = 0;
-    if (table.headerRow) {
-      const r = worksheet.getRow(row + count++);
-      table.columns.forEach((column, j) => {
-        const { style, name } = column;
-        const cell = r.getCell(col + j);
-        cell.value = name;
-        assignStyle(cell, style);
-      });
-    }
-    table.rows.forEach(data => {
-      const r = worksheet.getRow(row + count++);
-      data.forEach((value, j) => {
-        const cell = r.getCell(col + j);
-        const isFormulaValue = typeof value === "object" && value !== null && "formula" in value;
-        if (isFormulaValue && typeof (value as CellFormulaValue).formula === "string") {
-          const formulaValue = value as CellFormulaValue;
-          const shouldQualify = table.qualifyImplicitStructuredReferences === true;
-          cell.value = {
-            ...formulaValue,
-            formula: shouldQualify
-              ? formulaValue.formula.replace(
-                  /(^|[^A-Za-z0-9_])\[@\[?([^[\]]+?)\]?\]/g,
-                  `$1${table.name}[[#This Row],[$2]]`
-                )
-              : formulaValue.formula
-          } as CellFormulaValue;
+  if (table.totalsRow) {
+    const r = getRow(worksheet, row + count++);
+    table.columns.forEach((column, j) => {
+      const cell = rowGetCell(r, col + j);
+      if (j === 0) {
+        cellSetValue(cell, column.totalsRowLabel);
+      } else {
+        const formula = tableGetFormula(t, column);
+        if (formula) {
+          cellSetValue(cell, {
+            formula,
+            result: column.totalsRowResult
+          });
         } else {
-          cell.value = value;
+          cellSetValue(cell, null);
         }
+      }
 
-        assignStyle(cell, table.columns[j]?.style);
-      });
+      assignStyle(cell, column.style);
     });
-
-    if (table.totalsRow) {
-      const r = worksheet.getRow(row + count++);
-      table.columns.forEach((column, j) => {
-        const cell = r.getCell(col + j);
-        if (j === 0) {
-          cell.value = column.totalsRowLabel;
-        } else {
-          const formula = this.getFormula(column);
-          if (formula) {
-            cell.value = {
-              formula,
-              result: column.totalsRowResult
-            };
-          } else {
-            cell.value = null;
-          }
-        }
-
-        assignStyle(cell, column.style);
-      });
-    }
-  }
-
-  load(worksheet: Worksheet): void {
-    // where the table will read necessary features from a loaded sheet
-    const { table } = this;
-    const { row, col } = table.tl!;
-    let count = 0;
-    if (table.headerRow) {
-      const r = worksheet.getRow(row + count++);
-      table.columns.forEach((column, j) => {
-        const cell = r.getCell(col + j);
-        cell.value = column.name;
-      });
-    }
-    table.rows.forEach(data => {
-      const r = worksheet.getRow(row + count++);
-      data.forEach((value, j) => {
-        const cell = r.getCell(col + j);
-        cell.value = value;
-      });
-    });
-
-    if (table.totalsRow) {
-      const r = worksheet.getRow(row + count++);
-      table.columns.forEach((column, j) => {
-        const cell = r.getCell(col + j);
-        if (j === 0) {
-          cell.value = column.totalsRowLabel;
-        } else {
-          const formula = this.getFormula(column);
-          if (formula) {
-            cell.value = {
-              formula,
-              result: column.totalsRowResult
-            };
-          }
-        }
-      });
-    }
-  }
-
-  get model(): TableModel {
-    return this.table;
-  }
-
-  set model(value: TableModel) {
-    this.table = value;
-  }
-
-  // ================================================================
-  // TODO: Mutating methods
-  cacheState(): void {
-    if (!this._cache) {
-      this._cache = {
-        ref: this.ref,
-        width: this.width,
-        tableHeight: this.tableHeight
-      };
-    }
-  }
-
-  commit(): void {
-    // changes may have been made that might have on-sheet effects
-    if (!this._cache) {
-      return;
-    }
-
-    // check things are ok first
-    this.validate();
-
-    const ref = colCache.decodeAddress(this._cache.ref);
-    if (this.ref !== this._cache.ref) {
-      // wipe out whole table footprint at previous location
-      for (let i = 0; i < this._cache.tableHeight; i++) {
-        const row = this.worksheet.getRow(ref.row + i);
-        for (let j = 0; j < this._cache.width; j++) {
-          const cell = row.getCell(ref.col + j);
-          cell.value = null;
-        }
-      }
-    } else {
-      // clear out below table if it has shrunk
-      for (let i = this.tableHeight; i < this._cache.tableHeight; i++) {
-        const row = this.worksheet.getRow(ref.row + i);
-        for (let j = 0; j < this._cache.width; j++) {
-          const cell = row.getCell(ref.col + j);
-          cell.value = null;
-        }
-      }
-
-      // clear out to right of table if it has lost columns
-      for (let i = 0; i < this.tableHeight; i++) {
-        const row = this.worksheet.getRow(ref.row + i);
-        for (let j = this.width; j < this._cache.width; j++) {
-          const cell = row.getCell(ref.col + j);
-          cell.value = null;
-        }
-      }
-    }
-
-    this.store();
-    this._cache = undefined;
-  }
-
-  addRow(values: CellValue[], rowNumber?: number, options?: { commit?: boolean }): void {
-    // Add a row of data, either insert at rowNumber or append
-    this.cacheState();
-
-    if (rowNumber === undefined) {
-      this.table.rows.push(values);
-    } else {
-      this.table.rows.splice(rowNumber, 0, values);
-    }
-
-    if (options?.commit !== false) {
-      this.commit();
-    }
-  }
-
-  removeRows(rowIndex: number, count: number = 1, options?: { commit?: boolean }): void {
-    // Remove a rows of data
-    this.cacheState();
-    this.table.rows.splice(rowIndex, count);
-
-    if (options?.commit !== false) {
-      this.commit();
-    }
-  }
-
-  getColumn(colIndex: number): Column {
-    const column = this.table.columns[colIndex];
-    return new Column(this, column, colIndex);
-  }
-
-  addColumn(column: TableColumnProperties, values: CellValue[], colIndex?: number): void {
-    // Add a new column, including column defn and values
-    // Inserts at colNumber or adds to the right
-    this.cacheState();
-
-    if (colIndex === undefined) {
-      this.table.columns.push(column);
-      this.table.rows.forEach((row, i) => {
-        row.push(values[i]);
-      });
-    } else {
-      this.table.columns.splice(colIndex, 0, column);
-      this.table.rows.forEach((row, i) => {
-        row.splice(colIndex, 0, values[i]);
-      });
-    }
-  }
-
-  removeColumns(colIndex: number, count: number = 1): void {
-    // Remove a column with data
-    this.cacheState();
-
-    this.table.columns.splice(colIndex, count);
-    this.table.rows.forEach(row => {
-      row.splice(colIndex, count);
-    });
-  }
-
-  private _assign<T extends object, K extends keyof T>(target: T, prop: K, value: T[K]): void {
-    this.cacheState();
-    target[prop] = value;
-  }
-
-  get ref(): string {
-    return this.table.ref;
-  }
-  set ref(value: string) {
-    this._assign(this.table, "ref", value);
-  }
-
-  get name(): string {
-    return this.table.name;
-  }
-  set name(value: string) {
-    this.cacheState();
-    const newName = sanitizeTableName(value);
-    const oldName = this.table.name;
-    if (newName === oldName) {
-      return;
-    }
-    // Synchronise the worksheet's table map and the workbook-wide name set
-    // so subsequent getTable(newName)/duplicate-name checks remain correct.
-    // Falls back to a bare assignment if the worksheet hasn't registered
-    // this table (e.g. transient instances built by Worksheet.set model).
-    const ws = this.worksheet;
-    const tables = ws?.tables;
-    const tableNames = ws?.workbook?._tableNames;
-    if (tables && tables[oldName] === this) {
-      const newKey = newName.toLowerCase();
-      const oldKey = oldName.toLowerCase();
-      if (newKey !== oldKey && tableNames?.has(newKey)) {
-        throw new TableError(
-          `Table name "${newName}" already exists in the workbook (case-insensitive).`
-        );
-      }
-      delete tables[oldName];
-      tables[newName] = this;
-      if (tableNames) {
-        tableNames.delete(oldKey);
-        tableNames.add(newKey);
-      }
-    }
-    this.table.name = newName;
-  }
-
-  get displayName(): string {
-    return this.table.displayName || this.table.name;
-  }
-  set displayName(value: string) {
-    this.cacheState();
-    this.table.displayName = sanitizeTableName(value);
-  }
-
-  get headerRow(): boolean | undefined {
-    return this.table.headerRow;
-  }
-  set headerRow(value: boolean | undefined) {
-    this._assign(this.table, "headerRow", value);
-  }
-
-  get totalsRow(): boolean | undefined {
-    return this.table.totalsRow;
-  }
-  set totalsRow(value: boolean | undefined) {
-    this._assign(this.table, "totalsRow", value);
-  }
-
-  private _ensureStyle(): TableStyleProperties {
-    if (!this.table.style) {
-      this.table.style = {};
-    }
-    return this.table.style;
-  }
-
-  get theme(): TableStyleProperties["theme"] {
-    return this.table.style?.theme;
-  }
-  set theme(value: TableStyleProperties["theme"]) {
-    this._ensureStyle().theme = value;
-  }
-
-  get showFirstColumn(): boolean | undefined {
-    return this.table.style?.showFirstColumn;
-  }
-  set showFirstColumn(value: boolean | undefined) {
-    this._ensureStyle().showFirstColumn = value;
-  }
-
-  get showLastColumn(): boolean | undefined {
-    return this.table.style?.showLastColumn;
-  }
-  set showLastColumn(value: boolean | undefined) {
-    this._ensureStyle().showLastColumn = value;
-  }
-
-  get showRowStripes(): boolean | undefined {
-    return this.table.style?.showRowStripes;
-  }
-  set showRowStripes(value: boolean | undefined) {
-    this._ensureStyle().showRowStripes = value;
-  }
-
-  get showColumnStripes(): boolean | undefined {
-    return this.table.style?.showColumnStripes;
-  }
-  set showColumnStripes(value: boolean | undefined) {
-    this._ensureStyle().showColumnStripes = value;
   }
 }
 
-export { Table, sanitizeTableName, type TableModel };
+export function tableLoad(t: TableData, worksheet: Worksheet): void {
+  // where the table will read necessary features from a loaded sheet
+  const { table } = t;
+  const { row, col } = table.tl!;
+  let count = 0;
+  if (table.headerRow) {
+    const r = getRow(worksheet, row + count++);
+    table.columns.forEach((column, j) => {
+      const cell = rowGetCell(r, col + j);
+      cellSetValue(cell, column.name);
+    });
+  }
+  table.rows.forEach(data => {
+    const r = getRow(worksheet, row + count++);
+    data.forEach((value, j) => {
+      const cell = rowGetCell(r, col + j);
+      cellSetValue(cell, value);
+    });
+  });
+
+  if (table.totalsRow) {
+    const r = getRow(worksheet, row + count++);
+    table.columns.forEach((column, j) => {
+      const cell = rowGetCell(r, col + j);
+      if (j === 0) {
+        cellSetValue(cell, column.totalsRowLabel);
+      } else {
+        const formula = tableGetFormula(t, column);
+        if (formula) {
+          cellSetValue(cell, {
+            formula,
+            result: column.totalsRowResult
+          });
+        }
+      }
+    });
+  }
+}
+
+/** The underlying serialized {@link TableModel}. */
+export function tableModel(t: TableData): TableModel {
+  return t.table;
+}
+
+/** Replace the underlying {@link TableModel}. */
+export function tableSetModel(t: TableData, value: TableModel): void {
+  t.table = value;
+}
+
+export function tableCacheState(t: TableData): void {
+  if (!t._cache) {
+    t._cache = {
+      ref: tableRef(t),
+      width: tableWidth(t),
+      tableHeight: tableTableHeight(t)
+    };
+  }
+}
+
+export function tableCommit(t: TableData): void {
+  // changes may have been made that might have on-sheet effects
+  if (!t._cache) {
+    return;
+  }
+
+  // check things are ok first
+  tableValidate(t);
+
+  const ref = colCache.decodeAddress(t._cache.ref);
+  if (tableRef(t) !== t._cache.ref) {
+    // wipe out whole table footprint at previous location
+    for (let i = 0; i < t._cache.tableHeight; i++) {
+      const row = getRow(t.worksheet, ref.row + i);
+      for (let j = 0; j < t._cache.width; j++) {
+        const cell = rowGetCell(row, ref.col + j);
+        cellSetValue(cell, null);
+      }
+    }
+  } else {
+    // clear out below table if it has shrunk
+    for (let i = tableTableHeight(t); i < t._cache.tableHeight; i++) {
+      const row = getRow(t.worksheet, ref.row + i);
+      for (let j = 0; j < t._cache.width; j++) {
+        const cell = rowGetCell(row, ref.col + j);
+        cellSetValue(cell, null);
+      }
+    }
+
+    // clear out to right of table if it has lost columns
+    for (let i = 0; i < tableTableHeight(t); i++) {
+      const row = getRow(t.worksheet, ref.row + i);
+      for (let j = tableWidth(t); j < t._cache.width; j++) {
+        const cell = rowGetCell(row, ref.col + j);
+        cellSetValue(cell, null);
+      }
+    }
+  }
+
+  tableStore(t);
+  t._cache = undefined;
+}
+
+export function tableAddRow(
+  t: TableData,
+  values: CellValue[],
+  rowNumber?: number,
+  options?: { commit?: boolean }
+): void {
+  // Add a row of data, either insert at rowNumber or append
+  tableCacheState(t);
+
+  if (rowNumber === undefined) {
+    t.table.rows.push(values);
+  } else {
+    t.table.rows.splice(rowNumber, 0, values);
+  }
+
+  if (options?.commit !== false) {
+    tableCommit(t);
+  }
+}
+
+export function tableRemoveRows(
+  t: TableData,
+  rowIndex: number,
+  count: number = 1,
+  options?: { commit?: boolean }
+): void {
+  // Remove a rows of data
+  tableCacheState(t);
+  t.table.rows.splice(rowIndex, count);
+
+  if (options?.commit !== false) {
+    tableCommit(t);
+  }
+}
+
+export function tableGetColumn(t: TableData, colIndex: number): TableColumnView {
+  const column = t.table.columns[colIndex];
+  return { table: t, column, index: colIndex };
+}
+
+export function tableAddColumn(
+  t: TableData,
+  column: TableColumnProperties,
+  values: CellValue[],
+  colIndex?: number
+): void {
+  // Add a new column, including column defn and values
+  // Inserts at colNumber or adds to the right
+  tableCacheState(t);
+
+  if (colIndex === undefined) {
+    t.table.columns.push(column);
+    t.table.rows.forEach((row, i) => {
+      row.push(values[i]);
+    });
+  } else {
+    t.table.columns.splice(colIndex, 0, column);
+    t.table.rows.forEach((row, i) => {
+      row.splice(colIndex, 0, values[i]);
+    });
+  }
+}
+
+export function tableRemoveColumns(t: TableData, colIndex: number, count: number = 1): void {
+  // Remove a column with data
+  tableCacheState(t);
+
+  t.table.columns.splice(colIndex, count);
+  t.table.rows.forEach(row => {
+    row.splice(colIndex, count);
+  });
+}
+
+function tableAssign<T extends object, K extends keyof T>(
+  t: TableData,
+  target: T,
+  prop: K,
+  value: T[K]
+): void {
+  tableCacheState(t);
+  target[prop] = value;
+}
+
+export function tableRef(t: TableData): string {
+  return t.table.ref;
+}
+export function tableSetRef(t: TableData, value: string): void {
+  tableAssign(t, t.table, "ref", value);
+}
+
+export function tableName(t: TableData): string {
+  return t.table.name;
+}
+export function tableSetName(t: TableData, value: string): void {
+  tableCacheState(t);
+  const newName = sanitizeTableName(value);
+  const oldName = t.table.name;
+  if (newName === oldName) {
+    return;
+  }
+  // Synchronise the worksheet's table map and the workbook-wide name set
+  // so subsequent getTable(newName)/duplicate-name checks remain correct.
+  // Falls back to a bare assignment if the worksheet hasn't registered
+  // this table (e.g. transient instances built by Worksheet.set model).
+  const ws = t.worksheet;
+  const tables = ws?.tables;
+  const tableNames = getSheetWorkbook(ws)?._tableNames;
+  if (tables && tables[oldName] === t) {
+    const newKey = newName.toLowerCase();
+    const oldKey = oldName.toLowerCase();
+    if (newKey !== oldKey && tableNames?.has(newKey)) {
+      throw new TableError(
+        `Table name "${newName}" already exists in the workbook (case-insensitive).`
+      );
+    }
+    delete tables[oldName];
+    tables[newName] = t;
+    if (tableNames) {
+      tableNames.delete(oldKey);
+      tableNames.add(newKey);
+    }
+  }
+  t.table.name = newName;
+}
+
+export function tableDisplayName(t: TableData): string {
+  return t.table.displayName || t.table.name;
+}
+export function tableSetDisplayName(t: TableData, value: string): void {
+  tableCacheState(t);
+  t.table.displayName = sanitizeTableName(value);
+}
+
+export function tableHeaderRow(t: TableData): boolean | undefined {
+  return t.table.headerRow;
+}
+export function tableSetHeaderRow(t: TableData, value: boolean | undefined): void {
+  tableAssign(t, t.table, "headerRow", value);
+}
+
+export function tableTotalsRow(t: TableData): boolean | undefined {
+  return t.table.totalsRow;
+}
+export function tableSetTotalsRow(t: TableData, value: boolean | undefined): void {
+  tableAssign(t, t.table, "totalsRow", value);
+}
+
+function tableEnsureStyle(t: TableData): TableStyleProperties {
+  if (!t.table.style) {
+    t.table.style = {};
+  }
+  return t.table.style;
+}
+
+export function tableTheme(t: TableData): TableStyleProperties["theme"] {
+  return t.table.style?.theme;
+}
+export function tableSetTheme(t: TableData, value: TableStyleProperties["theme"]): void {
+  tableEnsureStyle(t).theme = value;
+}
+
+export function tableShowFirstColumn(t: TableData): boolean | undefined {
+  return t.table.style?.showFirstColumn;
+}
+export function tableSetShowFirstColumn(t: TableData, value: boolean | undefined): void {
+  tableEnsureStyle(t).showFirstColumn = value;
+}
+
+export function tableShowLastColumn(t: TableData): boolean | undefined {
+  return t.table.style?.showLastColumn;
+}
+export function tableSetShowLastColumn(t: TableData, value: boolean | undefined): void {
+  tableEnsureStyle(t).showLastColumn = value;
+}
+
+export function tableShowRowStripes(t: TableData): boolean | undefined {
+  return t.table.style?.showRowStripes;
+}
+export function tableSetShowRowStripes(t: TableData, value: boolean | undefined): void {
+  tableEnsureStyle(t).showRowStripes = value;
+}
+
+export function tableShowColumnStripes(t: TableData): boolean | undefined {
+  return t.table.style?.showColumnStripes;
+}
+export function tableSetShowColumnStripes(t: TableData, value: boolean | undefined): void {
+  tableEnsureStyle(t).showColumnStripes = value;
+}
+
+// --- TableColumnView accessors (former Column getters/setters) ---------------
+
+function tableColumnSet<K extends keyof TableColumnProperties>(
+  view: TableColumnView,
+  name: K,
+  value: TableColumnProperties[K]
+): void {
+  tableCacheState(view.table);
+  view.column[name] = value;
+}
+
+export function tableColumnName(view: TableColumnView): string {
+  return view.column.name;
+}
+export function tableColumnSetName(view: TableColumnView, value: string): void {
+  tableColumnSet(view, "name", value);
+}
+
+export function tableColumnFilterButton(view: TableColumnView): boolean | undefined {
+  return view.column.filterButton;
+}
+export function tableColumnSetFilterButton(
+  view: TableColumnView,
+  value: boolean | undefined
+): void {
+  view.column.filterButton = value;
+}
+
+export function tableColumnStyle(view: TableColumnView): Partial<Style> | undefined {
+  return view.column.style;
+}
+export function tableColumnSetStyle(
+  view: TableColumnView,
+  value: Partial<Style> | undefined
+): void {
+  // Route through tableColumnSet so commit() will replay store() and propagate
+  // the new style to the on-sheet cells.
+  tableColumnSet(view, "style", value);
+}
+
+export function tableColumnTotalsRowLabel(view: TableColumnView): string | undefined {
+  return view.column.totalsRowLabel;
+}
+export function tableColumnSetTotalsRowLabel(
+  view: TableColumnView,
+  value: string | undefined
+): void {
+  tableColumnSet(view, "totalsRowLabel", value);
+}
+
+export function tableColumnTotalsRowFunction(
+  view: TableColumnView
+): TableColumnProperties["totalsRowFunction"] {
+  return view.column.totalsRowFunction;
+}
+export function tableColumnSetTotalsRowFunction(
+  view: TableColumnView,
+  value: TableColumnProperties["totalsRowFunction"]
+): void {
+  tableColumnSet(view, "totalsRowFunction", value);
+}
+
+export function tableColumnTotalsRowResult(view: TableColumnView): CellValue {
+  return view.column.totalsRowResult;
+}
+export function tableColumnSetTotalsRowResult(
+  view: TableColumnView,
+  value: CellFormulaValue["result"]
+): void {
+  tableColumnSet(view, "totalsRowResult", value);
+}
+
+export function tableColumnTotalsRowFormula(view: TableColumnView): string | undefined {
+  return view.column.totalsRowFormula;
+}
+export function tableColumnSetTotalsRowFormula(
+  view: TableColumnView,
+  value: string | undefined
+): void {
+  tableColumnSet(view, "totalsRowFormula", value);
+}
+
+export { sanitizeTableName, type TableModel };

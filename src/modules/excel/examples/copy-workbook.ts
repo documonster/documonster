@@ -1,6 +1,6 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Workbook } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
 
 const filenameIn = process.argv[2];
 const filenameOut = process.argv[3];
@@ -9,11 +9,11 @@ const filenameOut = process.argv[3];
 // useful for testing for lost properties
 
 const stopwatch = new HrStopwatch();
-const wb = new Workbook();
+const wb = Workbook.create();
 stopwatch.start();
-wb.xlsx
+getXlsxIo(wb)
   .readFile(filenameIn)
-  .then(() => wb.xlsx.writeFile(filenameOut))
+  .then(() => Workbook.writeXlsx(wb, filenameOut))
   .then(() => {
     const micros = stopwatch.microseconds;
     console.log("Done.");

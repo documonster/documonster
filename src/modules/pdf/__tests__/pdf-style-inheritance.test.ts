@@ -1,6 +1,8 @@
 import { inflateSync } from "node:zlib";
 
-import { Workbook } from "@excel/workbook";
+import { cellSetAlignment, cellSetFont, cellSetValue } from "@excel/cell";
+import { Cell, Column, Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { describe, it, expect } from "vitest";
 
@@ -32,16 +34,16 @@ function decompressPdfContent(pdfBytes: Uint8Array): string {
 describe("PDF style rendering", () => {
   describe("Bug 1: Rich text inherits cell font properties", () => {
     it("should use cell font size for runs without explicit size", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 30;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 30);
 
       // Cell has font size 8, first run has no font (should inherit 8pt)
-      const cell = ws.getCell("A1");
-      cell.value = {
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, {
         richText: [{ text: "Hello " }, { text: "World", font: { size: 7 } }]
-      };
-      cell.font = { size: 8, name: "Arial" };
+      });
+      cellSetFont(cell, { size: 8, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -64,18 +66,18 @@ describe("PDF style rendering", () => {
     });
 
     it("should inherit bold from cell style for runs without explicit bold", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 30;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 30);
 
-      const cell = ws.getCell("A1");
-      cell.value = {
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, {
         richText: [
           { text: "Bold text " }, // no font → inherits cell bold
           { text: "Normal", font: { bold: false, size: 10 } } // explicit non-bold
         ]
-      };
-      cell.font = { bold: true, size: 10, name: "Arial" };
+      });
+      cellSetFont(cell, { bold: true, size: 10, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -93,18 +95,18 @@ describe("PDF style rendering", () => {
     it("should NOT inherit bold when run has its own rPr without bold", async () => {
       // Reproduces Issue #154: "Test Code" (bold from cell) + "(Tests X)" (has rPr
       // with size/color but no <b/>, so should NOT be bold)
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 30;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 30);
 
-      const cell = ws.getCell("A1");
-      cell.value = {
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, {
         richText: [
           { text: "Test Code " }, // no font → inherits cell bold
           { text: "(Tests X)", font: { size: 7, name: "Arial" } } // has rPr but no <b/>
         ]
-      };
-      cell.font = { bold: true, size: 8, name: "Arial" };
+      });
+      cellSetFont(cell, { bold: true, size: 8, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -121,18 +123,18 @@ describe("PDF style rendering", () => {
     });
 
     it("should inherit italic from cell style for runs without explicit italic", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 30;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 30);
 
-      const cell = ws.getCell("A1");
-      cell.value = {
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, {
         richText: [
           { text: "Italic " }, // no font → inherits cell italic
           { text: "Normal", font: { italic: false, size: 10 } }
         ]
-      };
-      cell.font = { italic: true, size: 10, name: "Arial" };
+      });
+      cellSetFont(cell, { italic: true, size: 10, name: "Arial" });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -148,31 +150,33 @@ describe("PDF style rendering", () => {
 
   describe("Bug 2: Text overflow hides internal vertical borders", () => {
     it("should suppress vertical borders in overflow region", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
 
       // Very narrow columns — text will overflow from A1 into B1, C1
-      ws.getColumn(1).width = 3;
-      ws.getColumn(2).width = 3;
-      ws.getColumn(3).width = 3;
-      ws.getColumn(4).width = 3;
+      Column.setWidth(ws, 1, 3);
+      Column.setWidth(ws, 2, 3);
+      Column.setWidth(ws, 3, 3);
+      Column.setWidth(ws, 4, 3);
 
       // A1 has text that overflows; B1, C1 empty
-      ws.getCell("A1").value = "A VERY LONG TEXT THAT OVERFLOWS";
-      ws.getCell("A1").font = { size: 10 };
+      Cell.setValue(ws, "A1", "A VERY LONG TEXT THAT OVERFLOWS");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       // All cells have thin borders on all sides
       for (let col = 1; col <= 4; col++) {
-        ws.getCell(1, col).border = {
-          top: { style: "thin" },
-          right: { style: "thin" },
-          bottom: { style: "thin" },
-          left: { style: "thin" }
-        };
+        Cell.setStyle(ws, 1, col, {
+          border: {
+            top: { style: "thin" },
+            right: { style: "thin" },
+            bottom: { style: "thin" },
+            left: { style: "thin" }
+          }
+        });
       }
       // D1 has text to block overflow
-      ws.getCell("D1").value = "STOP";
-      ws.getCell("D1").font = { size: 10 };
+      Cell.setValue(ws, "D1", "STOP");
+      Cell.setStyle(ws, "D1", { font: { size: 10 } });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -189,23 +193,25 @@ describe("PDF style rendering", () => {
     });
 
     it("should not suppress borders when text does not overflow", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
 
       // Wide columns — text fits
-      ws.getColumn(1).width = 40;
-      ws.getColumn(2).width = 40;
+      Column.setWidth(ws, 1, 40);
+      Column.setWidth(ws, 2, 40);
 
-      ws.getCell("A1").value = "Short";
-      ws.getCell("A1").font = { size: 10 };
+      Cell.setValue(ws, "A1", "Short");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       for (let col = 1; col <= 2; col++) {
-        ws.getCell(1, col).border = {
-          top: { style: "thin" },
-          right: { style: "thin" },
-          bottom: { style: "thin" },
-          left: { style: "thin" }
-        };
+        Cell.setStyle(ws, 1, col, {
+          border: {
+            top: { style: "thin" },
+            right: { style: "thin" },
+            bottom: { style: "thin" },
+            left: { style: "thin" }
+          }
+        });
       }
 
       const pdf = await excelToPdf(wb);
@@ -222,14 +228,16 @@ describe("PDF style rendering", () => {
 
   describe("Bug 3: Indexed colors", () => {
     it("should resolve indexed color 64 (system foreground) to black", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
 
-      ws.getCell("A1").value = "Test";
-      ws.getCell("A1").border = {
-        top: { style: "thin", color: { indexed: 64 } as any }
-      };
+      Cell.setValue(ws, "A1", "Test");
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin", color: { indexed: 64 } as any }
+        }
+      });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -239,12 +247,12 @@ describe("PDF style rendering", () => {
     });
 
     it("should resolve indexed color 10 (Red) for font color", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
 
-      ws.getCell("A1").value = "Red text";
-      ws.getCell("A1").font = { color: { indexed: 10 } as any, size: 10 };
+      Cell.setValue(ws, "A1", "Red text");
+      Cell.setStyle(ws, "A1", { font: { color: { indexed: 10 } as any, size: 10 } });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -254,12 +262,12 @@ describe("PDF style rendering", () => {
     });
 
     it("should resolve indexed color 62 (Indigo) for font color", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
 
-      ws.getCell("A1").value = "Indigo text";
-      ws.getCell("A1").font = { color: { indexed: 62 } as any, size: 10 };
+      Cell.setValue(ws, "A1", "Indigo text");
+      Cell.setStyle(ws, "A1", { font: { color: { indexed: 62 } as any, size: 10 } });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -269,17 +277,17 @@ describe("PDF style rendering", () => {
     });
 
     it("should resolve indexed color in rich text runs", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
 
-      ws.getCell("A1").value = {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Normal " },
           { text: "Blue", font: { color: { indexed: 39 } as any, size: 10 } }
         ]
-      };
-      ws.getCell("A1").font = { size: 10 };
+      });
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -291,23 +299,25 @@ describe("PDF style rendering", () => {
 
   describe("Bounds expansion for style-only cells", () => {
     it("should include cells with borders beyond value-based dimensions", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
 
       // Only A1 has a value (dimensions will report right=1)
-      ws.getCell("A1").value = "Data";
-      ws.getCell("A1").font = { size: 10 };
+      Cell.setValue(ws, "A1", "Data");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       // D1 has only a border, no value — should still be included in PDF
-      ws.getCell("D1").border = {
-        top: { style: "medium" },
-        bottom: { style: "medium" }
-      };
+      Cell.setStyle(ws, "D1", {
+        border: {
+          top: { style: "medium" },
+          bottom: { style: "medium" }
+        }
+      });
       // Set column widths so we can verify D is rendered
-      ws.getColumn(1).width = 10;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
-      ws.getColumn(4).width = 10;
+      Column.setWidth(ws, 1, 10);
+      Column.setWidth(ws, 2, 10);
+      Column.setWidth(ws, 3, 10);
+      Column.setWidth(ws, 4, 10);
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -318,21 +328,23 @@ describe("PDF style rendering", () => {
     });
 
     it("should include cells with fill beyond value-based dimensions", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-      ws.getCell("A1").value = "Data";
-      ws.getCell("A1").font = { size: 10 };
+      Cell.setValue(ws, "A1", "Data");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
 
       // C1 has only a fill — should be included
-      ws.getCell("C1").fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFFF0000" }
-      };
-      ws.getColumn(1).width = 10;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
+      Cell.setStyle(ws, "C1", {
+        fill: {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFF0000" }
+        }
+      });
+      Column.setWidth(ws, 1, 10);
+      Column.setWidth(ws, 2, 10);
+      Column.setWidth(ws, 3, 10);
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -344,24 +356,28 @@ describe("PDF style rendering", () => {
 
   describe("Issue #154: Border thickness distinction", () => {
     it("should produce visually distinct line widths for thin vs medium borders", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 15;
-      ws.getColumn(2).width = 15;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 15);
+      Column.setWidth(ws, 2, 15);
 
-      ws.getCell("A1").value = "Thin";
-      ws.getCell("A1").font = { size: 10 };
-      ws.getCell("A1").border = {
-        top: { style: "thin", color: { argb: "FF000000" } },
-        bottom: { style: "thin", color: { argb: "FF000000" } }
-      };
+      Cell.setValue(ws, "A1", "Thin");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin", color: { argb: "FF000000" } },
+          bottom: { style: "thin", color: { argb: "FF000000" } }
+        }
+      });
 
-      ws.getCell("B1").value = "Medium";
-      ws.getCell("B1").font = { size: 10 };
-      ws.getCell("B1").border = {
-        top: { style: "medium", color: { argb: "FF000000" } },
-        bottom: { style: "medium", color: { argb: "FF000000" } }
-      };
+      Cell.setValue(ws, "B1", "Medium");
+      Cell.setStyle(ws, "B1", { font: { size: 10 } });
+      Cell.setStyle(ws, "B1", {
+        border: {
+          top: { style: "medium", color: { argb: "FF000000" } },
+          bottom: { style: "medium", color: { argb: "FF000000" } }
+        }
+      });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -372,17 +388,19 @@ describe("PDF style rendering", () => {
     });
 
     it("should produce distinct widths for thin, medium, and thick", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
 
-      ws.getCell("A1").value = "Test";
-      ws.getCell("A1").font = { size: 10 };
-      ws.getCell("A1").border = {
-        top: { style: "thin", color: { argb: "FF000000" } },
-        bottom: { style: "medium", color: { argb: "FF000000" } },
-        left: { style: "thick", color: { argb: "FF000000" } }
-      };
+      Cell.setValue(ws, "A1", "Test");
+      Cell.setStyle(ws, "A1", { font: { size: 10 } });
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin", color: { argb: "FF000000" } },
+          bottom: { style: "medium", color: { argb: "FF000000" } },
+          left: { style: "thick", color: { argb: "FF000000" } }
+        }
+      });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);
@@ -396,20 +414,20 @@ describe("PDF style rendering", () => {
 
   describe("Issue #154: Rich text per-line height in wrap mode", () => {
     it("should use per-line max font size for line height in wrapped rich text", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10; // narrow to force wrapping
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10); // narrow to force wrapping
 
-      const cell = ws.getCell("A1");
-      cell.value = {
+      const cell = getCell(ws, "A1");
+      cellSetValue(cell, {
         richText: [
           { text: "Big ", font: { size: 14 } },
           { text: "text\n", font: { size: 14 } },
           { text: "small text", font: { size: 7 } }
         ]
-      };
-      cell.font = { size: 10 };
-      cell.alignment = { wrapText: true };
+      });
+      cellSetFont(cell, { size: 10 });
+      cellSetAlignment(cell, { wrapText: true });
 
       const pdf = await excelToPdf(wb);
       const content = decompressPdfContent(pdf);

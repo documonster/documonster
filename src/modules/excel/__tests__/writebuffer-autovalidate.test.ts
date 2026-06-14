@@ -1,4 +1,4 @@
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
 import { describe, expect, it, vi } from "vitest";
 
 describe("writeBuffer auto-validate hook", () => {
@@ -9,9 +9,9 @@ describe("writeBuffer auto-validate hook", () => {
     // call `expectValidXlsx()` explicitly.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const wb = new Workbook();
-    wb.addWorksheet("Sheet1").getCell("A1").value = "hello";
-    await wb.xlsx.writeBuffer();
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hello");
+    await Workbook.toXlsxBuffer(wb);
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -21,18 +21,18 @@ describe("writeBuffer auto-validate hook", () => {
     // This is the explicit opt-in path. The workbook is clean so no
     // warning surfaces, but the hook DID execute (covered by the
     // negative-case test below).
-    const wb = new Workbook();
-    wb.addWorksheet("Sheet1").getCell("A1").value = "hi";
-    const bytes = await wb.xlsx.writeBuffer({ validate: true });
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hi");
+    const bytes = await Workbook.toXlsxBuffer(wb, { validate: true });
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
 
   it("can be disabled explicitly via { validate: false }", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const wb = new Workbook();
-    wb.addWorksheet("Sheet1").getCell("A1").value = "hi";
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hi");
 
-    await wb.xlsx.writeBuffer({ validate: false });
+    await Workbook.toXlsxBuffer(wb, { validate: false });
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();

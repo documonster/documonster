@@ -2,6 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
+import { Cell, Workbook } from "@excel/index";
+import { getWorksheets } from "@excel/workbook";
+import { addTable, getTable } from "@excel/worksheet";
 /**
  * End-to-end test for OOXML _xHHHH_ escape decoding in table column headers.
  *
@@ -13,8 +16,6 @@ import { fileURLToPath } from "url";
  * into both `table.columns[].name` and the cell value visible to the user.
  */
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../index";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,24 +32,24 @@ describe("OOXML _xHHHH_ escape in table column headers (issue #94)", () => {
     const filePath = path.join(__dirname, "data/ooxml-escape-table-header.xlsx");
     const buffer = fs.readFileSync(filePath);
 
-    const wb = new Workbook();
-    await wb.xlsx.load(buffer);
-    const ws = wb.worksheets[0]!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, buffer);
+    const ws = getWorksheets(wb)[0]!;
 
     // Table column name must have the decoded newline
-    const table = ws.getTable("Table1_1");
+    const table = getTable(ws, "Table1_1");
     expect(table).toBeDefined();
     expect(table.table.columns[2].name).toBe("Col3\nnew line");
 
     // Cell value (overwritten by store()) must also have the decoded newline
-    expect(ws.getCell("C1").value).toBe("Col3\nnew line");
+    expect(Cell.getValue(ws, "C1")).toBe("Col3\nnew line");
   });
 
   it("table column header with newline survives write → read roundtrip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.addTable({
+    addTable(ws, {
       name: "TestTable",
       ref: "A1",
       headerRow: true,
@@ -64,14 +65,14 @@ describe("OOXML _xHHHH_ escape in table column headers (issue #94)", () => {
       ]
     });
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer as Buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer as Buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-    const table = ws2.getTable("TestTable");
+    const table = getTable(ws2, "TestTable");
     expect(table.table.columns[2].name).toBe("Col3\nnew line");
-    expect(ws2.getCell("C1").value).toBe("Col3\nnew line");
+    expect(Cell.getValue(ws2, "C1")).toBe("Col3\nnew line");
   });
 });

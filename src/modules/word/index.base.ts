@@ -379,7 +379,7 @@ export {
 
 // --- Stable API ---
 /** @stability stable */
-export { Document } from "./builder/document-handle";
+export * as Document from "./builder/document-handle";
 /** @stability stable */
 export type { DocumentHandle } from "./builder/document-handle";
 

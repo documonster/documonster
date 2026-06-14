@@ -1,3 +1,6 @@
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
+
 /**
  * Example: Functional / Standalone API
  *
@@ -12,8 +15,7 @@
  *   linters, formula migration tools, or static analysis that does not
  *   need to evaluate anything.
  */
-import { Workbook } from "../../../index";
-import { calculateFormulas, parse, tokenize } from "../index";
+import { parse, tokenize } from "../index";
 
 // =============================================================================
 // 1. Functional calculation — zero side effects
@@ -23,21 +25,21 @@ import { calculateFormulas, parse, tokenize } from "../index";
 // `calculateFormulas(workbook)` is self-contained and has no effect on
 // `Workbook.calculateFormulas()` (which would still throw without install).
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Func");
-ws.getCell("A1").value = 10;
-ws.getCell("A2").value = 20;
-ws.getCell("A3").value = 30;
-ws.getCell("B1").value = { formula: "SUM(A1:A3)" };
-ws.getCell("B2").value = { formula: "AVERAGE(A1:A3)" };
-ws.getCell("B3").value = { formula: "MAX(A1:A3)" };
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Func");
+Cell.setValue(ws, "A1", 10);
+Cell.setValue(ws, "A2", 20);
+Cell.setValue(ws, "A3", 30);
+Cell.setValue(ws, "B1", { formula: "SUM(A1:A3)" });
+Cell.setValue(ws, "B2", { formula: "AVERAGE(A1:A3)" });
+Cell.setValue(ws, "B3", { formula: "MAX(A1:A3)" });
 
 calculateFormulas(wb);
 
 console.log("Functional calculateFormulas():");
-console.log("  B1 =", ws.getCell("B1").result); // 60
-console.log("  B2 =", ws.getCell("B2").result); // 20
-console.log("  B3 =", ws.getCell("B3").result); // 30
+console.log("  B1 =", Cell.getResult(ws, "B1")); // 60
+console.log("  B2 =", Cell.getResult(ws, "B2")); // 20
+console.log("  B3 =", Cell.getResult(ws, "B3")); // 30
 
 // =============================================================================
 // 2. Syntax inspection — tokenize + parse

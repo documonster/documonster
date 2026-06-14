@@ -1,28 +1,28 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
+import { protect } from "@excel/worksheet";
 
 const [, , filename, password] = process.argv;
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
-ws.getCell("A1").value = "Bar";
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
+Cell.setValue(ws, "A1", "Bar");
 
 async function save() {
   const stopwatch = new HrStopwatch();
 
   stopwatch.start();
-  await ws.protect(password); // default 100000
+  await protect(ws, password); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
-  await wb.xlsx.writeFile(`${0}-${filename}`);
+  await Workbook.writeXlsx(wb, `${0}-${filename}`);
 
   // options defined but spinCount not
   stopwatch.start();
-  await ws.protect(password, { insertRows: true }); // default 100000
+  await protect(ws, password, { insertRows: true }); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
-  await wb.xlsx.writeFile(`${1}-${filename}`);
+  await Workbook.writeXlsx(wb, `${1}-${filename}`);
 
   const values = [100000, 10000, 1, 0, -1, undefined, null, NaN, Infinity, -Infinity, 31415.9265];
 
@@ -30,10 +30,10 @@ async function save() {
     const value = values[index];
 
     stopwatch.start();
-    await ws.protect(password, { spinCount: value ?? undefined });
+    await protect(ws, password, { spinCount: value ?? undefined });
     console.log(`Protection Time [spinCount ${value}]:`, stopwatch.microseconds);
 
-    await wb.xlsx.writeFile(`${index + 2}-${filename}`);
+    await Workbook.writeXlsx(wb, `${index + 2}-${filename}`);
   }
 }
 

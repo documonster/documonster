@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
 
 const [, , filename] = process.argv;
 
@@ -9,17 +8,17 @@ if (!filename) {
   process.exit(1);
 }
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("blort");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "blort");
 
-ws.getCell("B2").value = "Hello";
+Cell.setValue(ws, "B2", "Hello");
 ws.properties.defaultRowHeight = 50;
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

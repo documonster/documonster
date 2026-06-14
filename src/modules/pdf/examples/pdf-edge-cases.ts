@@ -21,7 +21,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { cellSetNumFmt } from "@excel/cell";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { rowSetFill, rowSetFont } from "@excel/row";
+import { rowGetCell } from "@excel/worksheet";
+
+import { excelToPdf } from "../../../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(
@@ -30,127 +35,147 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
 // =============================================================================
 // Sheet 1: Default Alignment by Type
 // =============================================================================
 
-const wsAlign = wb.addWorksheet("Default Alignment");
-wsAlign.columns = [
+const wsAlign = Workbook.addWorksheet(wb, "Default Alignment");
+Worksheet.setColumns(wsAlign, [
   { header: "Type", width: 15 },
   { header: "Value", width: 20 },
   { header: "Expected", width: 15 }
-];
-wsAlign.getCell("A2").value = "Text";
-wsAlign.getCell("B2").value = "Hello World";
-wsAlign.getCell("C2").value = "LEFT";
+]);
+Cell.setValue(wsAlign, "A2", "Text");
+Cell.setValue(wsAlign, "B2", "Hello World");
+Cell.setValue(wsAlign, "C2", "LEFT");
 
-wsAlign.getCell("A3").value = "Number";
-wsAlign.getCell("B3").value = 1234.56;
-wsAlign.getCell("C3").value = "RIGHT";
+Cell.setValue(wsAlign, "A3", "Number");
+Cell.setValue(wsAlign, "B3", 1234.56);
+Cell.setValue(wsAlign, "C3", "RIGHT");
 
-wsAlign.getCell("A4").value = "Date";
-wsAlign.getCell("B4").value = new Date(2025, 0, 15);
-wsAlign.getCell("B4").numFmt = "m/d/yyyy";
-wsAlign.getCell("C4").value = "RIGHT";
+Cell.setValue(wsAlign, "A4", "Date");
+Cell.setValue(wsAlign, "B4", new Date(2025, 0, 15));
+Cell.setStyle(wsAlign, "B4", { numFmt: "m/d/yyyy" });
+Cell.setValue(wsAlign, "C4", "RIGHT");
 
-wsAlign.getCell("A5").value = "Boolean";
-wsAlign.getCell("B5").value = true;
-wsAlign.getCell("C5").value = "CENTER";
+Cell.setValue(wsAlign, "A5", "Boolean");
+Cell.setValue(wsAlign, "B5", true);
+Cell.setValue(wsAlign, "C5", "CENTER");
 
-wsAlign.getCell("A6").value = "Num formula";
-wsAlign.getCell("B6").value = { formula: "1+1", result: 2 };
-wsAlign.getCell("C6").value = "RIGHT";
+Cell.setValue(wsAlign, "A6", "Num formula");
+Cell.setValue(wsAlign, "B6", { formula: "1+1", result: 2 });
+Cell.setValue(wsAlign, "C6", "RIGHT");
 
-wsAlign.getCell("A7").value = "Str formula";
-wsAlign.getCell("B7").value = { formula: 'CONCAT("a","b")', result: "ab" };
-wsAlign.getCell("C7").value = "LEFT";
+Cell.setValue(wsAlign, "A7", "Str formula");
+Cell.setValue(wsAlign, "B7", { formula: 'CONCAT("a","b")', result: "ab" });
+Cell.setValue(wsAlign, "C7", "LEFT");
 
-wsAlign.getCell("A8").value = "Bool formula";
-wsAlign.getCell("B8").value = { formula: "TRUE()", result: true };
-wsAlign.getCell("C8").value = "CENTER";
+Cell.setValue(wsAlign, "A8", "Bool formula");
+Cell.setValue(wsAlign, "B8", { formula: "TRUE()", result: true });
+Cell.setValue(wsAlign, "C8", "CENTER");
 
 // =============================================================================
 // Sheet 2: Merge Borders + Double Border
 // =============================================================================
 
-const wsMerge = wb.addWorksheet("Merge Borders");
-wsMerge.columns = [{ width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }];
+const wsMerge = Workbook.addWorksheet(wb, "Merge Borders");
+Worksheet.setColumns(wsMerge, [{ width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }]);
 
 // 4-column merge with different colored border per edge
-wsMerge.mergeCells("A1:D3");
-wsMerge.getCell("A1").value = "Merged A1:D3";
-wsMerge.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
-wsMerge.getCell("A1").border = {
-  top: { style: "thick", color: { argb: "FFFF0000" } },
-  left: { style: "thick", color: { argb: "FF00CC00" } }
-};
-wsMerge.getCell("D1").border = { right: { style: "thick", color: { argb: "FF0000FF" } } };
-wsMerge.getCell("D2").border = { right: { style: "thick", color: { argb: "FF0000FF" } } };
-wsMerge.getCell("D3").border = {
-  right: { style: "thick", color: { argb: "FF0000FF" } },
-  bottom: { style: "double", color: { argb: "FFFF00FF" } }
-};
-wsMerge.getCell("A3").border = { bottom: { style: "double", color: { argb: "FFFF00FF" } } };
-wsMerge.getCell("B3").border = { bottom: { style: "double", color: { argb: "FFFF00FF" } } };
-wsMerge.getCell("C3").border = { bottom: { style: "double", color: { argb: "FFFF00FF" } } };
+Worksheet.merge(wsMerge, "A1:D3");
+Cell.setValue(wsMerge, "A1", "Merged A1:D3");
+Cell.setStyle(wsMerge, "A1", { alignment: { horizontal: "center", vertical: "middle" } });
+Cell.setStyle(wsMerge, "A1", {
+  border: {
+    top: { style: "thick", color: { argb: "FFFF0000" } },
+    left: { style: "thick", color: { argb: "FF00CC00" } }
+  }
+});
+Cell.setStyle(wsMerge, "D1", {
+  border: { right: { style: "thick", color: { argb: "FF0000FF" } } }
+});
+Cell.setStyle(wsMerge, "D2", {
+  border: { right: { style: "thick", color: { argb: "FF0000FF" } } }
+});
+Cell.setStyle(wsMerge, "D3", {
+  border: {
+    right: { style: "thick", color: { argb: "FF0000FF" } },
+    bottom: { style: "double", color: { argb: "FFFF00FF" } }
+  }
+});
+Cell.setStyle(wsMerge, "A3", {
+  border: { bottom: { style: "double", color: { argb: "FFFF00FF" } } }
+});
+Cell.setStyle(wsMerge, "B3", {
+  border: { bottom: { style: "double", color: { argb: "FFFF00FF" } } }
+});
+Cell.setStyle(wsMerge, "C3", {
+  border: { bottom: { style: "double", color: { argb: "FFFF00FF" } } }
+});
 
 // Bordered empty cells
-wsMerge.getCell("A5").value = "Data";
-wsMerge.getCell("B5").border = {
-  top: { style: "thick", color: { argb: "FFFF0000" } },
-  right: { style: "thick", color: { argb: "FFFF0000" } },
-  bottom: { style: "thick", color: { argb: "FFFF0000" } },
-  left: { style: "thick", color: { argb: "FFFF0000" } }
-};
-wsMerge.getCell("C5").fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "FFFFFF00" }
-};
-wsMerge.getCell("C5").border = {
-  top: { style: "thin" },
-  right: { style: "thin" },
-  bottom: { style: "thin" },
-  left: { style: "thin" }
-};
+Cell.setValue(wsMerge, "A5", "Data");
+Cell.setStyle(wsMerge, "B5", {
+  border: {
+    top: { style: "thick", color: { argb: "FFFF0000" } },
+    right: { style: "thick", color: { argb: "FFFF0000" } },
+    bottom: { style: "thick", color: { argb: "FFFF0000" } },
+    left: { style: "thick", color: { argb: "FFFF0000" } }
+  }
+});
+Cell.setStyle(wsMerge, "C5", {
+  fill: {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFFFF00" }
+  }
+});
+Cell.setStyle(wsMerge, "C5", {
+  border: {
+    top: { style: "thin" },
+    right: { style: "thin" },
+    bottom: { style: "thin" },
+    left: { style: "thin" }
+  }
+});
 
 // =============================================================================
 // Sheet 3: Text Overflow + Long Word + Newlines
 // =============================================================================
 
-const wsOverflow = wb.addWorksheet("Overflow & Wrap");
-wsOverflow.columns = [{ width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }];
+const wsOverflow = Workbook.addWorksheet(wb, "Overflow & Wrap");
+Worksheet.setColumns(wsOverflow, [{ width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }]);
 
 // Overflow into empty neighbors
-wsOverflow.getCell("A1").value = "This text overflows into B1 and C1";
-wsOverflow.getCell("D1").value = "Blocker";
+Cell.setValue(wsOverflow, "A1", "This text overflows into B1 and C1");
+Cell.setValue(wsOverflow, "D1", "Blocker");
 
 // Long single word
-wsOverflow.getCell("A3").value = "Supercalifragilisticexpialidocious";
-wsOverflow.getCell("D3").value = "Stop";
+Cell.setValue(wsOverflow, "A3", "Supercalifragilisticexpialidocious");
+Cell.setValue(wsOverflow, "D3", "Stop");
 
 // Same word but wrapped
-wsOverflow.getCell("A5").value = "Supercalifragilisticexpialidocious";
-wsOverflow.getCell("A5").alignment = { wrapText: true };
+Cell.setValue(wsOverflow, "A5", "Supercalifragilisticexpialidocious");
+Cell.setStyle(wsOverflow, "A5", { alignment: { wrapText: true } });
 
 // Explicit newlines without wrapText
-wsOverflow.getCell("C5").value = "Line1\nLine2\nLine3";
+Cell.setValue(wsOverflow, "C5", "Line1\nLine2\nLine3");
 
 // Explicit newlines with wrapText
-wsOverflow.getCell("A7").value = "Wrap\nwith\nnewlines";
-wsOverflow.getCell("A7").alignment = { wrapText: true };
+Cell.setValue(wsOverflow, "A7", "Wrap\nwith\nnewlines");
+Cell.setStyle(wsOverflow, "A7", { alignment: { wrapText: true } });
 
 // =============================================================================
 // Sheet 4: Zero-Value Number Formats
 // =============================================================================
 
-const wsZero = wb.addWorksheet("Zero Formats");
-wsZero.columns = [
+const wsZero = Workbook.addWorksheet(wb, "Zero Formats");
+Worksheet.setColumns(wsZero, [
   { header: "Format", width: 30 },
   { header: "Value=0", width: 20 }
-];
+]);
 
 const zeroFormats: [string, string][] = [
   ['#,##0.00;-#,##0.00;"-"??', 'Dash + 2 spaces: "-  "'],
@@ -164,45 +189,45 @@ const zeroFormats: [string, string][] = [
   ["0.0?", '"0.0 " (trailing space)']
 ];
 for (const [fmt, desc] of zeroFormats) {
-  const row = wsZero.addRow([`${fmt}  →  ${desc}`, 0]);
-  row.getCell(2).numFmt = fmt;
+  const row = Worksheet.addRow(wsZero, [`${fmt}  →  ${desc}`, 0]);
+  cellSetNumFmt(rowGetCell(row, 2), fmt);
 }
 
 // =============================================================================
 // Sheet 5: Row Heights + fitToPage
 // =============================================================================
 
-const wsHeight = wb.addWorksheet("Row Heights");
-wsHeight.getColumn(1).width = 30;
+const wsHeight = Workbook.addWorksheet(wb, "Row Heights");
+Column.setWidth(wsHeight, 1, 30);
 
-wsHeight.getCell("A1").value = "Auto height (default)";
-const r2 = wsHeight.getRow(2);
+Cell.setValue(wsHeight, "A1", "Auto height (default)");
+const r2 = Worksheet.getRow(wsHeight, 2);
 r2.height = 40;
-wsHeight.getCell("A2").value = "Custom height = 40pt";
-wsHeight.getCell("A3").value = "Tall font (auto expand)";
-wsHeight.getCell("A3").font = { size: 24 };
-const r4 = wsHeight.getRow(4);
+Cell.setValue(wsHeight, "A2", "Custom height = 40pt");
+Cell.setValue(wsHeight, "A3", "Tall font (auto expand)");
+Cell.setStyle(wsHeight, "A3", { font: { size: 24 } });
+const r4 = Worksheet.getRow(wsHeight, 4);
 r4.height = 10;
-wsHeight.getCell("A4").value = "Cramped: height=10pt";
+Cell.setValue(wsHeight, "A4", "Cramped: height=10pt");
 
 // =============================================================================
 // Sheet 6: Error Value + Empty Styled Row + Hyperlink
 // =============================================================================
 
-const wsMixed = wb.addWorksheet("Mixed Types");
-wsMixed.getColumn(1).width = 30;
+const wsMixed = Workbook.addWorksheet(wb, "Mixed Types");
+Column.setWidth(wsMixed, 1, 30);
 
-wsMixed.getCell("A1").value = { text: "Click me (hyperlink)", hyperlink: "https://example.com" };
-wsMixed.getCell("A1").font = { color: { argb: "FF0563C1" }, underline: true };
+Cell.setValue(wsMixed, "A1", { text: "Click me (hyperlink)", hyperlink: "https://example.com" });
+Cell.setStyle(wsMixed, "A1", { font: { color: { argb: "FF0563C1" }, underline: true } });
 
-wsMixed.getCell("A2").value = { error: "#DIV/0!" } as any;
+Cell.setValue(wsMixed, "A2", { error: "#DIV/0!" } as any);
 
 // Empty row with styling
-const r3 = wsMixed.getRow(3);
-r3.font = { bold: true, size: 14 };
-r3.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCCCC" } };
+const r3 = Worksheet.getRow(wsMixed, 3);
+rowSetFont(r3, { bold: true, size: 14 });
+rowSetFill(r3, { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCCCC" } });
 
-wsMixed.getCell("A4").value = "Normal cell after styled empty row";
+Cell.setValue(wsMixed, "A4", "Normal cell after styled empty row");
 
 // =============================================================================
 // Export: multi-sheet workbook
@@ -221,13 +246,13 @@ console.log("pdf-edge-cases.pdf — 6 sheets covering advanced rendering edge ca
 // Separate file: fitToPage with 20 columns
 // =============================================================================
 
-const wbFit = new Workbook();
-const wsFit = wbFit.addWorksheet("20 Columns");
+const wbFit = Workbook.create();
+const wsFit = Workbook.addWorksheet(wbFit, "20 Columns");
 for (let c = 1; c <= 20; c++) {
-  wsFit.getColumn(c).width = 12;
-  wsFit.getCell(1, c).value = `Col ${c}`;
-  wsFit.getCell(1, c).font = { bold: true };
-  wsFit.getCell(2, c).value = c * 100;
+  Column.setWidth(wsFit, c, 12);
+  Cell.setValue(wsFit, 1, c, `Col ${c}`);
+  Cell.setStyle(wsFit, 1, c, { font: { bold: true } });
+  Cell.setValue(wsFit, 2, c, c * 100);
 }
 const fitPdf = await excelToPdf(wbFit, {
   showGridLines: true,

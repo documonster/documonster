@@ -5,121 +5,122 @@
  * CSEWrite / SpillErrorWrite / CleanupWrite operations.
  */
 
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("build-writeback-plan: scalar write", () => {
   it("ScalarWrite produced for scalar formula result", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "2+3", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(5);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "2+3", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(5);
   });
 
   it("scalar write handles string result", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: 'UPPER("abc")', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe("ABC");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: 'UPPER("abc")', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe("ABC");
   });
 
   it("scalar write handles boolean result", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "TRUE", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "TRUE", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(true);
   });
 });
 
 describe("build-writeback-plan: spill plans", () => {
   it("source cell is set via result, ghost cells via value", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3)", result: 0 };
-    wb.calculateFormulas();
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)", result: 0 });
+    calculateFormulas(wb);
     // Source cell A1: result is set (formula cell)
-    expect(ws.getCell("A1").result).toBe(1);
-    expect(ws.getCell("A1").formula).toBe("SEQUENCE(3)");
+    expect(Cell.getResult(ws, "A1")).toBe(1);
+    expect(Cell.getFormula(ws, "A1")).toBe("SEQUENCE(3)");
     // Ghost cells A2, A3: just raw values (not formulas)
-    expect(ws.getCell("A2").value).toBe(2);
-    expect(ws.getCell("A2").formula).toBeFalsy();
-    expect(ws.getCell("A3").value).toBe(3);
+    expect(Cell.getValue(ws, "A2")).toBe(2);
+    expect(Cell.getFormula(ws, "A2")).toBeFalsy();
+    expect(Cell.getValue(ws, "A3")).toBe(3);
   });
 
   it("2D spill fills rectangle", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("B2").value = { formula: "SEQUENCE(2,2)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B2").result).toBe(1);
-    expect(ws.getCell("C2").value).toBe(2);
-    expect(ws.getCell("B3").value).toBe(3);
-    expect(ws.getCell("C3").value).toBe(4);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "B2", { formula: "SEQUENCE(2,2)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B2")).toBe(1);
+    expect(Cell.getValue(ws, "C2")).toBe(2);
+    expect(Cell.getValue(ws, "B3")).toBe(3);
+    expect(Cell.getValue(ws, "C3")).toBe(4);
   });
 
   it("spill region shrinks on recalc — old ghosts cleaned up", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = 5;
-    ws.getCell("B1").value = { formula: "SEQUENCE(A1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B5").value).toBe(5);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", 5);
+    Cell.setValue(ws, "B1", { formula: "SEQUENCE(A1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "B5")).toBe(5);
 
     // Shrink
-    ws.getCell("A1").value = 2;
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(1);
-    expect(ws.getCell("B2").value).toBe(2);
+    Cell.setValue(ws, "A1", 2);
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(1);
+    expect(Cell.getValue(ws, "B2")).toBe(2);
     // B3, B4, B5 should be cleared
-    expect(ws.getCell("B3").value).toBeFalsy();
-    expect(ws.getCell("B5").value).toBeFalsy();
+    expect(Cell.getValue(ws, "B3")).toBeFalsy();
+    expect(Cell.getValue(ws, "B5")).toBeFalsy();
   });
 
   it("#SPILL! when a target cell has a value", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A3").value = "block";
-    ws.getCell("A1").value = { formula: "SEQUENCE(5)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A3", "block");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(5)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
   });
 
   it("#SPILL! does not overwrite the blocking cell", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A3").value = "block";
-    ws.getCell("A1").value = { formula: "SEQUENCE(5)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A3").value).toBe("block");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A3", "block");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(5)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A3")).toBe("block");
   });
 });
 
 describe("build-writeback-plan: persistence across calcs", () => {
   it("user modifying a ghost cell turns off spill and surfaces #SPILL!", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A2").value).toBe(2);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A2")).toBe(2);
 
     // User modifies a ghost
-    ws.getCell("A2").value = "user-content";
-    wb.calculateFormulas();
+    Cell.setValue(ws, "A2", "user-content");
+    calculateFormulas(wb);
     // SEQUENCE(3) can no longer spill — #SPILL!
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
-    expect(ws.getCell("A2").value).toBe("user-content");
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
+    expect(Cell.getValue(ws, "A2")).toBe("user-content");
   });
 });
 
 describe("build-writeback-plan: error cached results", () => {
   it("error result wraps as SnapshotErrorValue", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = { formula: "SQRT(-1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#NUM!" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", { formula: "SQRT(-1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#NUM!" });
   });
 });

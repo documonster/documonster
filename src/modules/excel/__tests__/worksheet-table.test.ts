@@ -1,9 +1,27 @@
 import { extractAll } from "@archive/unzip/extract";
-import { sanitizeTableName } from "@excel/table";
+import { cellGetValue } from "@excel/cell";
+import { Cell, Table, Workbook, Worksheet } from "@excel/index";
+import {
+  sanitizeTableName,
+  tableAddColumn,
+  tableAddRow,
+  tableColumnSetName,
+  tableColumnSetStyle,
+  tableCommit,
+  tableDisplayName,
+  tableGetColumn,
+  tableName,
+  tableRemoveColumns,
+  tableRemoveRows,
+  tableSetDisplayName,
+  tableSetHeaderRow,
+  tableSetName,
+  tableSetRef,
+  tableSetTotalsRow
+} from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
+import { getCell, getTable, removeTable, rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../index";
 
 const spliceArray = (a: any[], index: number, count: number, ...rest: any[]) => {
   const clone = [...a];
@@ -20,8 +38,8 @@ const values = [
   ["Totals", { formula: "SUBTOTAL(104,TestTable[Id])", result: 4 }, null]
 ];
 
-function addTable(ref: string, ws: any) {
-  return ws.addTable({
+function buildTable(ref: string, ws: any) {
+  return Table.add(ws, {
     name: "TestTable",
     ref,
     headerRow: true,
@@ -59,14 +77,14 @@ function checkTable(ref: string, ws: any, testValues: any[]) {
   for (let i = -1; i <= testValues.length + 1; i++) {
     const vRow = testValues[i];
     const nRow = i + a.row;
-    const row = nRow >= 1 && ws.getRow(nRow);
+    const row = nRow >= 1 && Worksheet.getRow(ws, nRow);
     if (!row) {
       continue;
     }
     for (let j = -1; j <= testValues[0].length + 1; j++) {
       const value = (vRow && vRow[j]) || null;
       const nCol = j + a.col;
-      const cellValue = nCol >= 1 && row.getCell(nCol).value;
+      const cellValue = nCol >= 1 && cellGetValue(rowGetCell(row, nCol));
       if (!cellValue) {
         continue;
       }
@@ -87,90 +105,91 @@ function checkTable(ref: string, ws: any, testValues: any[]) {
 describe("Worksheet", () => {
   describe("Table", () => {
     it("creates a table", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      buildTable("A1", ws);
 
       checkTable("A1", ws, values);
     });
 
     it("removes header", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.headerRow = false;
-      table.commit();
+      tableSetHeaderRow(table, false);
+      tableCommit(table);
 
       const newValues = spliceArray(values, 0, 1);
       checkTable("A1", ws, newValues);
     });
 
     it("removes totals", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.totalsRow = false;
-      table.commit();
+      tableSetTotalsRow(table, false);
+      tableCommit(table);
 
       const newValues = spliceArray(values, 5, 1);
       checkTable("A1", ws, newValues);
     });
 
     it("moves the table", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.ref = "C2";
-      table.commit();
+      tableSetRef(table, "C2");
+      tableCommit(table);
 
       checkTable("C2", ws, values);
     });
 
     it("removes a row", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.removeRows(1);
-      table.commit();
+      tableRemoveRows(table, 1);
+      tableCommit(table);
 
       const newValues = spliceArray(values, 2, 1);
       checkTable("A1", ws, newValues);
     });
 
     it("adds a row", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.addRow([new Date("2019-08-05"), 5, "Bird"]);
-      table.commit();
+      tableAddRow(table, [new Date("2019-08-05"), 5, "Bird"]);
+      tableCommit(table);
 
       const newValues = spliceArray(values, 5, 0, [new Date("2019-08-05"), 5, "Bird"]);
       checkTable("A1", ws, newValues);
     });
 
     it("removes a column", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.removeColumns(1);
-      table.commit();
+      tableRemoveColumns(table, 1);
+      tableCommit(table);
 
       const newValues = values.map(rVals => spliceArray(rVals, 1, 1));
       checkTable("A1", ws, newValues);
     });
 
     it("adds a column", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      table.addColumn(
+      tableAddColumn(
+        table,
         {
           name: "Letter",
           totalsRowFunction: "custom",
@@ -181,7 +200,7 @@ describe("Worksheet", () => {
         ["a", "b", "c", "d"],
         2
       );
-      table.commit();
+      tableCommit(table);
 
       const colValues = ["Letter", "a", "b", "c", "d", { formula: "ROW()", result: 6 }];
       const newValues = values.map((rVals, i) => spliceArray(rVals, 2, 0, colValues[i]));
@@ -189,13 +208,13 @@ describe("Worksheet", () => {
     });
 
     it("renames a column", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const table = addTable("A1", ws);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const table = buildTable("A1", ws);
 
-      const column = table.getColumn(1);
-      column.name = "Code";
-      table.commit();
+      const column = tableGetColumn(table, 1);
+      tableColumnSetName(column, "Code");
+      tableCommit(table);
 
       const newValues = [...values];
       newValues.splice(0, 1, ["Date", "Code", "Word"]);
@@ -209,10 +228,10 @@ describe("Worksheet", () => {
     });
 
     it("keeps implicit structured references by default", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      ws.addTable({
+      Table.add(ws, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -220,15 +239,15 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "[@A]" }]]
       });
 
-      const cellValue = ws.getRow(2).getCell(2).value;
+      const cellValue = cellGetValue(rowGetCell(Worksheet.getRow(ws, 2), 2));
       expect(cellValue).toEqual({ formula: "[@A]" });
     });
 
     it("qualifies implicit structured references when enabled", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      ws.addTable({
+      Table.add(ws, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -237,15 +256,15 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "[@A]" }]]
       });
 
-      const cellValue = ws.getRow(2).getCell(2).value;
+      const cellValue = cellGetValue(rowGetCell(Worksheet.getRow(ws, 2), 2));
       expect(cellValue).toEqual({ formula: "TestTable[[#This Row],[A]]" });
     });
 
     it("writes CONCAT([@A]) without leading @", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      worksheet.addTable({
+      Table.add(worksheet, {
         name: "table",
         ref: "A1",
         headerRow: true,
@@ -253,7 +272,7 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "CONCAT([@A])" }]]
       });
 
-      const buffer = await workbook.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(workbook);
       const zipData = await extractAll(new Uint8Array(buffer));
 
       const sheet1 = zipData.get("xl/worksheets/sheet1.xml");
@@ -270,10 +289,10 @@ describe("Worksheet", () => {
 
     it("loads a table with calculatedColumnFormula without crashing (issue #76)", async () => {
       // Create a workbook with a 3-column table
-      const wb1 = new Workbook();
-      const ws1: any = wb1.addWorksheet("Data");
+      const wb1 = Workbook.create();
+      const ws1: any = Workbook.addWorksheet(wb1, "Data");
 
-      ws1.addTable({
+      Table.add(ws1, {
         name: "CalcTable",
         ref: "A1",
         headerRow: true,
@@ -289,7 +308,7 @@ describe("Worksheet", () => {
         ]
       });
 
-      const buffer = await wb1.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(wb1);
 
       // Manually inject a <calculatedColumnFormula> child element into the table XML
       // to simulate what Excel produces for calculated columns.
@@ -316,13 +335,13 @@ describe("Worksheet", () => {
       const modifiedBuffer = await createZip(entries);
 
       // This should NOT throw: "Cannot read properties of undefined (reading 'style')"
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(modifiedBuffer);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, modifiedBuffer);
 
-      const ws2: any = wb2.getWorksheet("Data");
+      const ws2: any = Workbook.getWorksheet(wb2, "Data")!;
       expect(ws2).toBeDefined();
 
-      const table2 = ws2.getTable("CalcTable");
+      const table2 = Table.get(ws2, "CalcTable");
       expect(table2).toBeDefined();
       expect(table2.table.columns).toHaveLength(3);
       expect(table2.table.columns[0].name).toBe("Value");
@@ -331,11 +350,11 @@ describe("Worksheet", () => {
       expect(table2.table.columns[2].name).toBe("Label");
 
       // Round-trip: write and reload — calculatedColumnFormula should survive
-      const buffer2 = await wb2.xlsx.writeBuffer();
-      const wb3 = new Workbook();
-      await wb3.xlsx.load(buffer2);
-      const ws3: any = wb3.getWorksheet("Data");
-      const table3 = ws3.getTable("CalcTable");
+      const buffer2 = await Workbook.toXlsxBuffer(wb2);
+      const wb3 = Workbook.create();
+      await Workbook.loadXlsx(wb3, buffer2);
+      const ws3: any = Workbook.getWorksheet(wb3, "Data")!;
+      const table3 = Table.get(ws3, "CalcTable");
       expect(table3.table.columns[1].calculatedColumnFormula).toBe("[Value]*2");
     });
   });
@@ -448,9 +467,9 @@ describe("Worksheet", () => {
   // ========================================================================
   describe("table name sanitization integration", () => {
     it("sanitizes table name with spaces on addTable", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      const table = ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      const table = Table.add(ws, {
         name: "test table",
         ref: "A1",
         headerRow: true,
@@ -468,11 +487,11 @@ describe("Worksheet", () => {
       });
 
       // Name should have been sanitized
-      expect(table.name).toBe("test_table");
-      expect(table.displayName).toBe("test_table");
+      expect(tableName(table)).toBe("test_table");
+      expect(tableDisplayName(table)).toBe("test_table");
 
       // Should be retrievable by sanitized name
-      expect(ws.getTable("test_table")).toBe(table);
+      expect(getTable(ws, "test_table")).toBe(table);
     });
 
     it("issue #91 reproduction: writeBuffer produces valid OOXML", async () => {
@@ -483,9 +502,9 @@ describe("Worksheet", () => {
         ["test 3", 6, "a4f"]
       ];
 
-      const workbook = new Workbook();
-      const sheet = workbook.addWorksheet("test");
-      sheet.addTable({
+      const workbook = Workbook.create();
+      const sheet = Workbook.addWorksheet(workbook, "test");
+      Table.add(sheet, {
         columns: columns.map(i => ({ name: i, filterButton: true })),
         headerRow: true,
         name: "test table",
@@ -494,7 +513,7 @@ describe("Worksheet", () => {
         totalsRow: false
       });
 
-      const buffer = await workbook.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(workbook);
 
       // Verify the table XML has sanitized name
       const entries = await extractAll(new Uint8Array(buffer));
@@ -510,9 +529,9 @@ describe("Worksheet", () => {
     });
 
     it("sanitizes displayName independently when provided", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      const table = ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      const table = Table.add(ws, {
         name: "my table",
         displayName: "My Display Name",
         ref: "A1",
@@ -522,14 +541,14 @@ describe("Worksheet", () => {
         rows: [["val"]]
       });
 
-      expect(table.name).toBe("my_table");
-      expect(table.displayName).toBe("My_Display_Name");
+      expect(tableName(table)).toBe("my_table");
+      expect(tableDisplayName(table)).toBe("My_Display_Name");
     });
 
     it("sanitizes name when set via setter", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      const table = ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      const table = Table.add(ws, {
         name: "ValidName",
         ref: "A1",
         headerRow: true,
@@ -538,17 +557,17 @@ describe("Worksheet", () => {
         rows: [["val"]]
       });
 
-      table.name = "new name with spaces";
-      expect(table.name).toBe("new_name_with_spaces");
+      tableSetName(table, "new name with spaces");
+      expect(tableName(table)).toBe("new_name_with_spaces");
 
-      table.displayName = "another display name";
-      expect(table.displayName).toBe("another_display_name");
+      tableSetDisplayName(table, "another display name");
+      expect(tableDisplayName(table)).toBe("another_display_name");
     });
 
     it("sanitized name survives round-trip (write + load)", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Table.add(ws, {
         name: "my table",
         ref: "A1",
         headerRow: true,
@@ -557,20 +576,20 @@ describe("Worksheet", () => {
         rows: [["val1"], ["val2"]]
       });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toXlsxBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("test")!;
-      const table2 = (ws2 as any).getTable("my_table");
+      const ws2 = Workbook.getWorksheet(wb2, "test")!;
+      const table2 = Table.get(ws2, "my_table");
       expect(table2).toBeDefined();
-      expect(table2.name).toBe("my_table");
+      expect(tableName(table2)).toBe("my_table");
     });
 
     it("totalsRow formulas use sanitized table name", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-      ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Table.add(ws, {
         name: "sales data",
         ref: "A1",
         headerRow: true,
@@ -587,9 +606,9 @@ describe("Worksheet", () => {
 
       // The totals row formula cell should reference the sanitized name
       // Row 1 = header, rows 2-3 = data, row 4 = totals
-      const totalsCell = ws.getCell("B4");
-      expect(totalsCell.value).toBeDefined();
-      const formula = (totalsCell.value as any).formula;
+      const totalsCell = getCell(ws, "B4");
+      expect(cellGetValue(totalsCell)).toBeDefined();
+      const formula = (cellGetValue(totalsCell) as any).formula;
       expect(formula).toContain("sales_data");
       expect(formula).not.toContain("sales data");
     });
@@ -603,25 +622,25 @@ describe("Worksheet", () => {
 
   describe("table name lifecycle", () => {
     it("renaming a table updates worksheet.tables and releases the old name", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      const table = ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      const table = Table.add(ws, {
         name: "Original",
         ref: "A1",
         columns: [{ name: "Col1" }],
         rows: [["v1"]]
       });
 
-      table.name = "Renamed";
+      tableSetName(table, "Renamed");
 
-      expect(table.name).toBe("Renamed");
-      expect(ws.getTable("Renamed")).toBe(table);
-      expect(ws.getTable("Original")).toBeUndefined();
+      expect(tableName(table)).toBe("Renamed");
+      expect(getTable(ws, "Renamed")).toBe(table);
+      expect(getTable(ws, "Original")).toBeUndefined();
 
       // The old name must be free for reuse on another sheet.
-      const ws2 = wb.addWorksheet("Sheet2");
+      const ws2 = Workbook.addWorksheet(wb, "Sheet2");
       expect(() =>
-        ws2.addTable({
+        Table.add(ws2, {
           name: "Original",
           ref: "A1",
           columns: [{ name: "Col1" }],
@@ -631,15 +650,15 @@ describe("Worksheet", () => {
     });
 
     it("renaming to an existing workbook-wide name throws", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Table.add(ws, {
         name: "Existing",
         ref: "A1",
         columns: [{ name: "Col1" }],
         rows: [["v1"]]
       });
-      const t2 = ws.addTable({
+      const t2 = Table.add(ws, {
         name: "Other",
         ref: "C1",
         columns: [{ name: "Col1" }],
@@ -647,27 +666,27 @@ describe("Worksheet", () => {
       });
 
       expect(() => {
-        t2.name = "Existing";
+        tableSetName(t2, "Existing");
       }).toThrow(/already exists/i);
       // After the failed rename the table must still be reachable by its old name.
-      expect(t2.name).toBe("Other");
-      expect(ws.getTable("Other")).toBe(t2);
+      expect(tableName(t2)).toBe("Other");
+      expect(getTable(ws, "Other")).toBe(t2);
     });
 
     it("removeTable releases the workbook-wide name", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Table.add(ws, {
         name: "Temp",
         ref: "A1",
         columns: [{ name: "Col1" }],
         rows: [["v1"]]
       });
-      ws.removeTable("Temp");
+      removeTable(ws, "Temp");
 
-      const ws2 = wb.addWorksheet("Sheet2");
+      const ws2 = Workbook.addWorksheet(wb, "Sheet2");
       expect(() =>
-        ws2.addTable({
+        Table.add(ws2, {
           name: "Temp",
           ref: "A1",
           columns: [{ name: "Col1" }],
@@ -677,21 +696,21 @@ describe("Worksheet", () => {
     });
 
     it("removing a worksheet releases all of its table names", () => {
-      const wb = new Workbook();
-      const ws1 = wb.addWorksheet("Sheet1");
-      ws1.addTable({
+      const wb = Workbook.create();
+      const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+      Table.add(ws1, {
         name: "Releasable",
         ref: "A1",
         columns: [{ name: "Col1" }],
         rows: [["v1"]]
       });
 
-      wb.removeWorksheet(ws1.id);
+      Workbook.removeWorksheet(wb, ws1.id);
 
       // The name must be reusable on a brand-new sheet.
-      const ws2 = wb.addWorksheet("Sheet2");
+      const ws2 = Workbook.addWorksheet(wb, "Sheet2");
       expect(() =>
-        ws2.addTable({
+        Table.add(ws2, {
           name: "Releasable",
           ref: "A1",
           columns: [{ name: "Col1" }],
@@ -701,9 +720,9 @@ describe("Worksheet", () => {
     });
 
     it("setting column.style triggers commit() to propagate to cells", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      const table = ws.addTable({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      const table = Table.add(ws, {
         name: "Styled",
         ref: "A1",
         headerRow: true,
@@ -714,16 +733,16 @@ describe("Worksheet", () => {
         ]
       });
 
-      const col = table.getColumn(1);
-      col.style = { font: { bold: true } };
+      const col = tableGetColumn(table, 1);
+      tableColumnSetStyle(col, { font: { bold: true } });
 
       // Without cacheState() being called, commit() returns early and the
       // newly-applied style never reaches the data cells.
-      table.commit();
+      tableCommit(table);
 
       // Data cells in the second column (B2..B3) should now carry the bold font.
-      expect((ws.getCell("B2").style as any).font?.bold).toBe(true);
-      expect((ws.getCell("B3").style as any).font?.bold).toBe(true);
+      expect((Cell.getStyle(ws, "B2") as any).font?.bold).toBe(true);
+      expect((Cell.getStyle(ws, "B3") as any).font?.bold).toBe(true);
     });
   });
 });

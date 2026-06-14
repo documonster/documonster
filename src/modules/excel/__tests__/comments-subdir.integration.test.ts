@@ -7,9 +7,13 @@
  */
 
 import { ZipArchive } from "@archive/zip";
+import { cellNote, cellComment, cellSetComment } from "@excel/cell";
+import { Cell, Workbook } from "@excel/index";
+import { noteModel } from "@excel/note";
+import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, Note } from "../../../index";
+import { noteCreate } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 // =============================================================================
@@ -18,16 +22,16 @@ import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 /** Build an XLSX buffer with comments from two different authors. */
 async function buildCommentsXlsx(): Promise<Uint8Array> {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-  ws.getCell("A1").value = "Hello";
-  ws.getCell("A1").comment = new Note({ texts: [{ text: "Comment by Alice" }] }, "Alice");
+  Cell.setValue(ws, "A1", "Hello");
+  cellSetComment(getCell(ws, "A1"), noteCreate({ texts: [{ text: "Comment by Alice" }] }, "Alice"));
 
-  ws.getCell("B2").value = "World";
-  ws.getCell("B2").comment = new Note({ texts: [{ text: "Comment by Bob" }] }, "Bob");
+  Cell.setValue(ws, "B2", "World");
+  cellSetComment(getCell(ws, "B2"), noteCreate({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
 
-  const buffer = new Uint8Array(await wb.xlsx.writeBuffer());
+  const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   await expectValidXlsx(buffer, { label: "comments-subdir build" });
   return buffer;
 }
@@ -90,64 +94,64 @@ async function repackToSubdirLayout(buffer: Uint8Array): Promise<Uint8Array> {
 describe("Comments subdirectory layout", () => {
   it("round-trips comments and authors through flat layout", async () => {
     const buffer = await buildCommentsXlsx();
-    const wb = new Workbook();
-    await wb.xlsx.load(buffer);
-    const ws = wb.getWorksheet("Sheet1")!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, buffer);
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
-    const a1 = ws.getCell("A1");
-    const b2 = ws.getCell("B2");
+    const a1 = getCell(ws, "A1");
+    const b2 = getCell(ws, "B2");
 
-    expect(a1.note).toBeDefined();
-    expect(b2.note).toBeDefined();
-    expect(a1.comment?.author).toBe("Alice");
-    expect(b2.comment?.author).toBe("Bob");
+    expect(cellNote(a1)).toBeDefined();
+    expect(cellNote(b2)).toBeDefined();
+    expect(cellComment(a1)?.author).toBe("Alice");
+    expect(cellComment(b2)?.author).toBe("Bob");
   });
 
   it("reads comments from subdirectory layout with absolute rel targets", async () => {
     const flatBuffer = await buildCommentsXlsx();
     const subdirBuffer = await repackToSubdirLayout(flatBuffer);
 
-    const wb = new Workbook();
-    await wb.xlsx.load(subdirBuffer);
-    const ws = wb.getWorksheet("Sheet1")!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, subdirBuffer);
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
-    const a1 = ws.getCell("A1");
-    const b2 = ws.getCell("B2");
+    const a1 = getCell(ws, "A1");
+    const b2 = getCell(ws, "B2");
 
-    expect(a1.note).toBeDefined();
-    expect(b2.note).toBeDefined();
-    expect(a1.comment?.author).toBe("Alice");
-    expect(b2.comment?.author).toBe("Bob");
+    expect(cellNote(a1)).toBeDefined();
+    expect(cellNote(b2)).toBeDefined();
+    expect(cellComment(a1)?.author).toBe("Alice");
+    expect(cellComment(b2)?.author).toBe("Bob");
   });
 
   it("preserves comment text content from subdirectory layout", async () => {
     const flatBuffer = await buildCommentsXlsx();
     const subdirBuffer = await repackToSubdirLayout(flatBuffer);
 
-    const wb = new Workbook();
-    await wb.xlsx.load(subdirBuffer);
-    const ws = wb.getWorksheet("Sheet1")!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, subdirBuffer);
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     // Verify the actual text survived
-    const a1Note = ws.getCell("A1").note;
+    const a1Note = Cell.getNote(ws, "A1");
     expect(a1Note).toContain("Comment by Alice");
   });
 
   it("round-trips comment without explicit author (default author)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Test";
-    ws.getCell("A1").comment = new Note({ texts: [{ text: "No author set" }] });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Test");
+    cellSetComment(getCell(ws, "A1"), noteCreate({ texts: [{ text: "No author set" }] }));
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "comment-default-author" });
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-    expect(ws2.getCell("A1").note).toBeDefined();
+    expect(Cell.getNote(ws2, "A1")).toBeDefined();
     // Default author should be "Author"
-    expect(ws2.getCell("A1").comment?.author).toBe("Author");
+    expect(cellComment(getCell(ws2, "A1"))?.author).toBe("Author");
   });
 
   it("reads legacy comment body written as a bare <t> (no <r> run)", async () => {
@@ -175,13 +179,13 @@ describe("Comments subdirectory layout", () => {
     }
 
     const repackedBuffer = await archive.bytes();
-    const wb = new Workbook();
-    await wb.xlsx.load(repackedBuffer);
-    const ws = wb.getWorksheet("Sheet1")!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, repackedBuffer);
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
-    expect(ws.getCell("A1").note).toContain("Comment by Alice");
-    expect(ws.getCell("B2").note).toContain("Comment by Bob");
-    expect(ws.getCell("A1").comment?.author).toBe("Alice");
+    expect(Cell.getNote(ws, "A1")).toContain("Comment by Alice");
+    expect(Cell.getNote(ws, "B2")).toContain("Comment by Bob");
+    expect(cellComment(getCell(ws, "A1"))?.author).toBe("Alice");
   });
 
   it("merges VML metadata correctly even when VML shape order differs from comments", async () => {
@@ -218,22 +222,24 @@ describe("Comments subdirectory layout", () => {
     }
 
     const repackedBuffer = await archive.bytes();
-    const wb = new Workbook();
-    await wb.xlsx.load(repackedBuffer);
-    const ws = wb.getWorksheet("Sheet1")!;
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, repackedBuffer);
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     // Despite reversed VML order, each cell should get its own note metadata
-    const a1 = ws.getCell("A1");
-    const b2 = ws.getCell("B2");
+    const a1 = getCell(ws, "A1");
+    const b2 = getCell(ws, "B2");
 
-    expect(a1.note).toBeDefined();
-    expect(b2.note).toBeDefined();
-    expect(a1.comment?.author).toBe("Alice");
-    expect(b2.comment?.author).toBe("Bob");
+    expect(cellNote(a1)).toBeDefined();
+    expect(cellNote(b2)).toBeDefined();
+    expect(cellComment(a1)?.author).toBe("Alice");
+    expect(cellComment(b2)?.author).toBe("Bob");
 
     // Verify VML metadata (editAs) is present on both — proves merge happened
-    const a1Model = a1.comment?.model;
-    const b2Model = b2.comment?.model;
+    const a1Note = cellComment(a1);
+    const b2Note = cellComment(b2);
+    const a1Model = a1Note ? noteModel(a1Note) : undefined;
+    const b2Model = b2Note ? noteModel(b2Note) : undefined;
     expect(a1Model?.note?.editAs).toBeDefined();
     expect(b2Model?.note?.editAs).toBeDefined();
   });

@@ -1,8 +1,10 @@
-import { Workbook } from "../../../index";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
+import { getSheetName } from "@excel/worksheet";
 
 const [, , inputFile, outputFile] = process.argv;
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
 let passed = true;
 const assert = function (value, failMessage, passMessage) {
@@ -17,24 +19,24 @@ const assert = function (value, failMessage, passMessage) {
 };
 
 // assuming file created by testBookOut
-wb.xlsx
+getXlsxIo(wb)
   .readFile(inputFile)
   .then(() => {
     console.log("Loaded", inputFile);
 
-    wb.eachSheet(sheet => {
-      console.log(sheet.name);
+    Workbook.eachSheet(wb, sheet => {
+      console.log(getSheetName(sheet));
     });
 
-    const ws = wb.getWorksheet("Sheet1");
+    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     assert(ws, "Expected to find a worksheet called sheet1", "");
 
-    ws!.getCell("B1").value = new Date();
-    ws!.getCell("B1").numFmt = "hh:mm:ss";
+    Cell.setValue(ws!, "B1", new Date());
+    Cell.setStyle(ws!, "B1", { numFmt: "hh:mm:ss" });
 
-    ws!.addRow([1, "hello"]);
-    return wb.xlsx.writeFile(outputFile);
+    Worksheet.addRow(ws!, [1, "hello"]);
+    return Workbook.writeXlsx(wb, outputFile);
   })
   .then(() => {
     assert(passed, "Something went wrong", "All tests passed!");

@@ -1,8 +1,13 @@
 import { ColumnSum } from "@excel/examples/utils/column-sum";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { randomName, randomNum } from "@excel/examples/utils/utils";
+import { Workbook, Worksheet } from "@excel/index";
+import { rowSetFont } from "@excel/row";
+import { getXlsxIo } from "@excel/workbook";
+import type { WorkbookData } from "@excel/workbook-core";
+import { rowCommit } from "@excel/worksheet";
 
-import { Workbook, WorkbookWriter } from "../../../index";
+import { WorkbookWriter } from "../../../index";
 
 if (process.argv[2] === "help") {
   console.log("Usage:");
@@ -33,8 +38,8 @@ console.log(JSON.stringify(options, null, "  "));
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
-const wb = useStream ? new WorkbookWriter(options) : new Workbook();
-const ws = wb.addWorksheet("blort");
+const wb = useStream ? new WorkbookWriter(options) : Workbook.create();
+const ws = Workbook.addWorksheet(wb as WorkbookData, "blort");
 
 const fonts = {
   arialBlackUI14: {
@@ -53,7 +58,7 @@ const fonts = {
   }
 };
 
-ws.columns = [
+Worksheet.setColumns(ws, [
   { header: "Col 1", key: "key", width: 25 },
   { header: "Col 2", key: "name", width: 32 },
   { header: "Col 3", key: "age", width: 21 },
@@ -69,11 +74,11 @@ ws.columns = [
   },
   { header: "Col 9", key: "date", width: 12 },
   { header: "Col 10", key: "num4", width: 12 }
-];
+]);
 
 const colCount = new ColumnSum([3, 6, 7, 8, 10]);
 
-ws.getRow(1).font = fonts.arialBlackUI14;
+rowSetFont(Worksheet.getRow(ws, 1), fonts.arialBlackUI14);
 
 let t1 = 0;
 let t2 = 0;
@@ -83,7 +88,7 @@ let iCount = 0;
 
 function addRow() {
   sw.start();
-  const row = ws.addRow({
+  const row = Worksheet.addRow(ws, {
     key: iCount,
     name: randomName(5),
     age: randomNum(100),
@@ -97,7 +102,7 @@ function addRow() {
   });
   const lap = sw.span;
   colCount.add(row);
-  row.commit();
+  rowCommit(row);
   const end = sw.span;
 
   t1 += lap;
@@ -122,7 +127,10 @@ function allDone() {
   console.log(`addRow avg ${(t1 * 1000000) / count}\xB5s`);
   console.log(`commit avg ${(t2 * 1000000) / count}\xB5s`);
   sw.start();
-  (useStream ? (wb as WorkbookWriter).commit() : (wb as Workbook).xlsx.writeFile(filename, options))
+  (useStream
+    ? (wb as WorkbookWriter).commit()
+    : getXlsxIo(wb as WorkbookData).writeFile(filename, options)
+  )
     .then(() => {
       console.log(`Commit/writeFile: ${sw}`);
       stopwatch.stop();

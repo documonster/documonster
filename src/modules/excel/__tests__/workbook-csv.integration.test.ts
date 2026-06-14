@@ -1,140 +1,142 @@
+import { readCsv, writeCsv, writeCsvBuffer } from "@excel/csv-bridge";
+import { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getSheetName } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../index";
 
 const csvTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
 describe("Workbook", () => {
   describe("CSV", () => {
     it("differentiates between strings with leading numbers and dates when reading csv files", async () => {
-      const wb = new Workbook();
-      const worksheet = await wb.readCsvFile(csvTestDataPath("date-vs-leading-zeros.csv"));
+      const wb = Workbook.create();
+      const worksheet = await readCsvFile(wb, csvTestDataPath("date-vs-leading-zeros.csv"));
 
-      expect(worksheet.getCell("A1").value!.toString()).toBe(
+      expect(Cell.getValue(worksheet, "A1")!.toString()).toBe(
         new Date("2019-11-04T00:00:00").toString()
       );
-      expect(worksheet.getCell("A2").value!.toString()).toBe(
+      expect(Cell.getValue(worksheet, "A2")!.toString()).toBe(
         new Date("2019-11-04T00:00:00").toString()
       );
-      expect(worksheet.getCell("A3").value!.toString()).toBe(
+      expect(Cell.getValue(worksheet, "A3")!.toString()).toBe(
         new Date("2019-11-04T10:17:55").toString()
       );
-      expect(worksheet.getCell("A4").value).toBe("00210PRG1");
-      expect(worksheet.getCell("A5").value).toBe("1234-5thisisnotadate");
+      expect(Cell.getValue(worksheet, "A4")).toBe("00210PRG1");
+      expect(Cell.getValue(worksheet, "A5")).toBe("1234-5thisisnotadate");
     });
 
     it("supports encoding option on writeFile + readFile roundtrip", async () => {
       const TEST_CSV_FILE_NAME = testFilePath("csv-encoding-utf8-roundtrip", ".csv");
       const HEBREW_TEST_STRING = "משהו שכתוב בעברית";
 
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("wheee");
-      ws.getCell("A1").value = HEBREW_TEST_STRING;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "wheee");
+      Cell.setValue(ws, "A1", HEBREW_TEST_STRING);
 
-      await wb.writeCsvFile(TEST_CSV_FILE_NAME, { encoding: "UTF-8" });
+      await writeCsvFile(wb, TEST_CSV_FILE_NAME, { encoding: "UTF-8" });
 
-      const wb2 = new Workbook();
-      const ws2 = await wb2.readCsvFile(TEST_CSV_FILE_NAME);
-      expect(ws2.getCell("A1").value).toBe(HEBREW_TEST_STRING);
+      const wb2 = Workbook.create();
+      const ws2 = await readCsvFile(wb2, TEST_CSV_FILE_NAME);
+      expect(Cell.getValue(ws2, "A1")).toBe(HEBREW_TEST_STRING);
     }, 6000);
 
     describe("append mode", () => {
       it("should create new file with headers on first write", async () => {
         const TEST_FILE = testFilePath("csv-append-new-" + Date.now(), ".csv");
 
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Data");
-        ws.addRow(["Name", "Age"]);
-        ws.addRow(["Alice", 30]);
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Data");
+        Worksheet.addRow(ws, ["Name", "Age"]);
+        Worksheet.addRow(ws, ["Alice", 30]);
 
-        await wb.writeCsvFile(TEST_FILE, { append: true });
+        await writeCsvFile(wb, TEST_FILE, { append: true });
 
-        const wb2 = new Workbook();
-        const ws2 = await wb2.readCsvFile(TEST_FILE);
-        expect(ws2.rowCount).toBe(2);
-        expect(ws2.getCell("A1").value).toBe("Name");
-        expect(ws2.getCell("A2").value).toBe("Alice");
+        const wb2 = Workbook.create();
+        const ws2 = await readCsvFile(wb2, TEST_FILE);
+        expect(Worksheet.rowCount(ws2)).toBe(2);
+        expect(Cell.getValue(ws2, "A1")).toBe("Name");
+        expect(Cell.getValue(ws2, "A2")).toBe("Alice");
       });
 
       it("should append without headers to existing file", async () => {
         const TEST_FILE = testFilePath("csv-append-existing-" + Date.now(), ".csv");
 
         // First write - creates file with headers
-        const wb1 = new Workbook();
-        const ws1 = wb1.addWorksheet("Data");
-        ws1.addRow(["Name", "Age"]);
-        ws1.addRow(["Alice", 30]);
-        await wb1.writeCsvFile(TEST_FILE);
+        const wb1 = Workbook.create();
+        const ws1 = Workbook.addWorksheet(wb1, "Data");
+        Worksheet.addRow(ws1, ["Name", "Age"]);
+        Worksheet.addRow(ws1, ["Alice", 30]);
+        await writeCsvFile(wb1, TEST_FILE);
 
         // Second write - append mode (only add data rows, no header)
-        const wb2 = new Workbook();
-        const ws2 = wb2.addWorksheet("Data");
-        ws2.addRow(["Bob", 25]); // Data only, no header row
-        await wb2.writeCsvFile(TEST_FILE, { append: true });
+        const wb2 = Workbook.create();
+        const ws2 = Workbook.addWorksheet(wb2, "Data");
+        Worksheet.addRow(ws2, ["Bob", 25]); // Data only, no header row
+        await writeCsvFile(wb2, TEST_FILE, { append: true });
 
         // Read and verify
-        const wb3 = new Workbook();
-        const ws3 = await wb3.readCsvFile(TEST_FILE);
-        expect(ws3.rowCount).toBe(3); // Header + Alice + Bob
-        expect(ws3.getCell("A1").value).toBe("Name");
-        expect(ws3.getCell("A2").value).toBe("Alice");
-        expect(ws3.getCell("A3").value).toBe("Bob");
+        const wb3 = Workbook.create();
+        const ws3 = await readCsvFile(wb3, TEST_FILE);
+        expect(Worksheet.rowCount(ws3)).toBe(3); // Header + Alice + Bob
+        expect(Cell.getValue(ws3, "A1")).toBe("Name");
+        expect(Cell.getValue(ws3, "A2")).toBe("Alice");
+        expect(Cell.getValue(ws3, "A3")).toBe("Bob");
       });
 
       it("should append multiple batches correctly", async () => {
         const TEST_FILE = testFilePath("csv-append-batches-" + Date.now(), ".csv");
 
         // Initial file with header
-        const wb1 = new Workbook();
-        const ws1 = wb1.addWorksheet("Log");
-        ws1.addRow(["Time", "Event"]);
-        ws1.addRow(["10:00", "start"]);
-        await wb1.writeCsvFile(TEST_FILE);
+        const wb1 = Workbook.create();
+        const ws1 = Workbook.addWorksheet(wb1, "Log");
+        Worksheet.addRow(ws1, ["Time", "Event"]);
+        Worksheet.addRow(ws1, ["10:00", "start"]);
+        await writeCsvFile(wb1, TEST_FILE);
 
         // Append batch 1 (data only)
-        const wb2 = new Workbook();
-        const ws2 = wb2.addWorksheet("Log");
-        ws2.addRow(["10:05", "process"]);
-        await wb2.writeCsvFile(TEST_FILE, { append: true });
+        const wb2 = Workbook.create();
+        const ws2 = Workbook.addWorksheet(wb2, "Log");
+        Worksheet.addRow(ws2, ["10:05", "process"]);
+        await writeCsvFile(wb2, TEST_FILE, { append: true });
 
         // Append batch 2 (data only)
-        const wb3 = new Workbook();
-        const ws3 = wb3.addWorksheet("Log");
-        ws3.addRow(["10:10", "end"]);
-        await wb3.writeCsvFile(TEST_FILE, { append: true });
+        const wb3 = Workbook.create();
+        const ws3 = Workbook.addWorksheet(wb3, "Log");
+        Worksheet.addRow(ws3, ["10:10", "end"]);
+        await writeCsvFile(wb3, TEST_FILE, { append: true });
 
         // Verify
-        const wb4 = new Workbook();
-        const ws4 = await wb4.readCsvFile(TEST_FILE);
-        expect(ws4.rowCount).toBe(4); // Header + 3 data rows
-        expect(ws4.getCell("A1").value).toBe("Time");
-        expect(ws4.getCell("B2").value).toBe("start");
-        expect(ws4.getCell("B3").value).toBe("process");
-        expect(ws4.getCell("B4").value).toBe("end");
+        const wb4 = Workbook.create();
+        const ws4 = await readCsvFile(wb4, TEST_FILE);
+        expect(Worksheet.rowCount(ws4)).toBe(4); // Header + 3 data rows
+        expect(Cell.getValue(ws4, "A1")).toBe("Time");
+        expect(Cell.getValue(ws4, "B2")).toBe("start");
+        expect(Cell.getValue(ws4, "B3")).toBe("process");
+        expect(Cell.getValue(ws4, "B4")).toBe("end");
       });
 
       it("should respect custom lineEnding in append mode", async () => {
         const TEST_FILE = testFilePath("csv-append-crlf-" + Date.now(), ".csv");
 
         // Create file with CRLF line endings
-        const wb1 = new Workbook();
-        const ws1 = wb1.addWorksheet("Data");
-        ws1.addRow(["A", "B"]);
-        ws1.addRow([1, 2]);
-        await wb1.writeCsvFile(TEST_FILE, { lineEnding: "\r\n" });
+        const wb1 = Workbook.create();
+        const ws1 = Workbook.addWorksheet(wb1, "Data");
+        Worksheet.addRow(ws1, ["A", "B"]);
+        Worksheet.addRow(ws1, [1, 2]);
+        await writeCsvFile(wb1, TEST_FILE, { lineEnding: "\r\n" });
 
         // Append with same line ending
-        const wb2 = new Workbook();
-        const ws2 = wb2.addWorksheet("Data");
-        ws2.addRow([3, 4]);
-        await wb2.writeCsvFile(TEST_FILE, { append: true, lineEnding: "\r\n" });
+        const wb2 = Workbook.create();
+        const ws2 = Workbook.addWorksheet(wb2, "Data");
+        Worksheet.addRow(ws2, [3, 4]);
+        await writeCsvFile(wb2, TEST_FILE, { append: true, lineEnding: "\r\n" });
 
         // Read and verify
-        const wb3 = new Workbook();
-        const ws3 = await wb3.readCsvFile(TEST_FILE);
-        expect(ws3.rowCount).toBe(3);
-        expect(ws3.getCell("A3").value).toBe(3);
+        const wb3 = Workbook.create();
+        const ws3 = await readCsvFile(wb3, TEST_FILE);
+        expect(Worksheet.rowCount(ws3)).toBe(3);
+        expect(Cell.getValue(ws3, "A3")).toBe(3);
       });
     });
 
@@ -145,78 +147,78 @@ describe("Workbook", () => {
     describe("Unified API", () => {
       describe("parse()", () => {
         it("should parse CSV string", async () => {
-          const wb = new Workbook();
-          const ws = await wb.readCsv("a,b,c\n1,2,3");
+          const wb = Workbook.create();
+          const ws = await readCsv(wb, "a,b,c\n1,2,3");
 
-          expect(ws.getCell("A1").value).toBe("a");
-          expect(ws.getCell("B1").value).toBe("b");
-          expect(ws.getCell("A2").value).toBe(1);
+          expect(Cell.getValue(ws, "A1")).toBe("a");
+          expect(Cell.getValue(ws, "B1")).toBe("b");
+          expect(Cell.getValue(ws, "A2")).toBe(1);
         });
 
         it("should auto-detect semicolon delimiter", async () => {
-          const wb = new Workbook();
-          const ws = await wb.readCsv("a;b;c\n1;2;3", { delimiter: "" });
+          const wb = Workbook.create();
+          const ws = await readCsv(wb, "a;b;c\n1;2;3", { delimiter: "" });
 
-          expect(ws.getCell("A1").value).toBe("a");
-          expect(ws.getCell("B1").value).toBe("b");
-          expect(ws.getCell("C1").value).toBe("c");
-          expect(ws.getCell("A2").value).toBe(1);
+          expect(Cell.getValue(ws, "A1")).toBe("a");
+          expect(Cell.getValue(ws, "B1")).toBe("b");
+          expect(Cell.getValue(ws, "C1")).toBe("c");
+          expect(Cell.getValue(ws, "A2")).toBe(1);
         });
 
         it("should auto-detect tab delimiter", async () => {
-          const wb = new Workbook();
-          const ws = await wb.readCsv("a\tb\tc\n1\t2\t3", { delimiter: "" });
+          const wb = Workbook.create();
+          const ws = await readCsv(wb, "a\tb\tc\n1\t2\t3", { delimiter: "" });
 
-          expect(ws.getCell("A1").value).toBe("a");
-          expect(ws.getCell("B1").value).toBe("b");
-          expect(ws.getCell("C1").value).toBe("c");
+          expect(Cell.getValue(ws, "A1")).toBe("a");
+          expect(Cell.getValue(ws, "B1")).toBe("b");
+          expect(Cell.getValue(ws, "C1")).toBe("c");
         });
 
         it("should respect explicit delimiter option", async () => {
-          const wb = new Workbook();
+          const wb = Workbook.create();
           // Even though the data has commas, use semicolon delimiter
-          const ws = await wb.readCsv("a,b;c,d\n1,2;3,4", { delimiter: ";" });
+          const ws = await readCsv(wb, "a,b;c,d\n1,2;3,4", { delimiter: ";" });
 
-          expect(ws.getCell("A1").value).toBe("a,b");
-          expect(ws.getCell("B1").value).toBe("c,d");
+          expect(Cell.getValue(ws, "A1")).toBe("a,b");
+          expect(Cell.getValue(ws, "B1")).toBe("c,d");
         });
 
         it("should parse ArrayBuffer input", async () => {
-          const wb = new Workbook();
+          const wb = Workbook.create();
           const data = new TextEncoder().encode("name,value\ntest,123");
-          const ws = await wb.readCsv(data.buffer);
+          const ws = await readCsv(wb, data.buffer);
 
-          expect(ws.getCell("A1").value).toBe("name");
-          expect(ws.getCell("B2").value).toBe(123);
+          expect(Cell.getValue(ws, "A1")).toBe("name");
+          expect(Cell.getValue(ws, "B2")).toBe(123);
         });
 
         it("should parse Uint8Array input", async () => {
-          const wb = new Workbook();
+          const wb = Workbook.create();
           const data = new TextEncoder().encode("x,y\n10,20");
-          const ws = await wb.readCsv(data);
+          const ws = await readCsv(wb, data);
 
-          expect(ws.getCell("A1").value).toBe("x");
-          expect(ws.getCell("A2").value).toBe(10);
+          expect(Cell.getValue(ws, "A1")).toBe("x");
+          expect(Cell.getValue(ws, "A2")).toBe(10);
         });
 
         it("should use custom sheet name", async () => {
-          const wb = new Workbook();
-          const ws = await wb.readCsv("a,b\n1,2", { sheetName: "MySheet" });
+          const wb = Workbook.create();
+          const ws = await readCsv(wb, "a,b\n1,2", { sheetName: "MySheet" });
 
-          expect(ws.name).toBe("MySheet");
+          expect(getSheetName(ws)).toBe("MySheet");
         });
 
         it("should support headers option", async () => {
-          const wb = new Workbook();
-          const ws = await wb.readCsv("name,age\nAlice,30\nBob,25", { headers: true });
+          const wb = Workbook.create();
+          const ws = await readCsv(wb, "name,age\nAlice,30\nBob,25", { headers: true });
 
           // When headers: true, the first row becomes column headers but values are still parsed
-          expect(ws.getCell("A1").value).toBe("name");
-          expect(ws.getCell("B1").value).toBe("age");
+          expect(Cell.getValue(ws, "A1")).toBe("name");
+          expect(Cell.getValue(ws, "B1")).toBe("age");
         });
 
         it("should support headers option with stream input", async () => {
-          const wb = new Workbook();
+          const wb = Workbook.create();
           // Create a readable stream from string using async generator
           const csvData = "name,age\nAlice,30\nBob,25";
           const readable = {
@@ -227,21 +229,21 @@ describe("Workbook", () => {
             }
           };
 
-          const ws = await wb.readCsv(readable as any, { headers: true });
+          const ws = await readCsv(wb, readable as any, { headers: true });
 
           // Verify headers row is written
-          expect(ws.getCell("A1").value).toBe("name");
-          expect(ws.getCell("B1").value).toBe("age");
+          expect(Cell.getValue(ws, "A1")).toBe("name");
+          expect(Cell.getValue(ws, "B1")).toBe("age");
           // Verify data rows are converted from object to array correctly
-          expect(ws.getCell("A2").value).toBe("Alice");
-          expect(ws.getCell("B2").value).toBe(30);
-          expect(ws.getCell("A3").value).toBe("Bob");
-          expect(ws.getCell("B3").value).toBe(25);
+          expect(Cell.getValue(ws, "A2")).toBe("Alice");
+          expect(Cell.getValue(ws, "B2")).toBe(30);
+          expect(Cell.getValue(ws, "A3")).toBe("Bob");
+          expect(Cell.getValue(ws, "B3")).toBe(25);
         });
 
         it("should support decimalSeparator option", async () => {
-          const wb = new Workbook();
-          await wb.readCsv("value\n1,50\n2,75", {
+          const wb = Workbook.create();
+          await readCsv(wb, "value\n1,50\n2,75", {
             delimiter: ";",
             decimalSeparator: ","
           });
@@ -253,56 +255,56 @@ describe("Workbook", () => {
 
       describe("stringify()", () => {
         it("should convert worksheet to CSV string", () => {
-          const wb = new Workbook();
-          const ws = wb.addWorksheet("Test");
-          ws.getCell("A1").value = "hello";
-          ws.getCell("B1").value = "world";
-          ws.getCell("A2").value = 1;
-          ws.getCell("B2").value = 2;
+          const wb = Workbook.create();
+          const ws = Workbook.addWorksheet(wb, "Test");
+          Cell.setValue(ws, "A1", "hello");
+          Cell.setValue(ws, "B1", "world");
+          Cell.setValue(ws, "A2", 1);
+          Cell.setValue(ws, "B2", 2);
 
-          const csv = wb.writeCsv();
+          const csv = writeCsv(wb);
 
           expect(csv).toBe("hello,world\n1,2");
         });
 
         it("should use custom delimiter", () => {
-          const wb = new Workbook();
-          const ws = wb.addWorksheet("Test");
-          ws.getCell("A1").value = "a";
-          ws.getCell("B1").value = "b";
+          const wb = Workbook.create();
+          const ws = Workbook.addWorksheet(wb, "Test");
+          Cell.setValue(ws, "A1", "a");
+          Cell.setValue(ws, "B1", "b");
 
-          const csv = wb.writeCsv({ delimiter: ";" });
+          const csv = writeCsv(wb, { delimiter: ";" });
 
           expect(csv).toBe("a;b");
         });
 
         it("should quote fields with special characters", () => {
-          const wb = new Workbook();
-          const ws = wb.addWorksheet("Test");
-          ws.getCell("A1").value = "hello, world";
-          ws.getCell("B1").value = 'say "hi"';
+          const wb = Workbook.create();
+          const ws = Workbook.addWorksheet(wb, "Test");
+          Cell.setValue(ws, "A1", "hello, world");
+          Cell.setValue(ws, "B1", 'say "hi"');
 
-          const csv = wb.writeCsv();
+          const csv = writeCsv(wb);
 
           expect(csv).toContain('"hello, world"');
           expect(csv).toContain('"say ""hi"""');
         });
 
         it("should select worksheet by name", () => {
-          const wb = new Workbook();
-          wb.addWorksheet("Sheet1").getCell("A1").value = "first";
-          wb.addWorksheet("Sheet2").getCell("A1").value = "second";
+          const wb = Workbook.create();
+          Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "first");
+          Cell.setValue(Workbook.addWorksheet(wb, "Sheet2"), "A1", "second");
 
-          const csv = wb.writeCsv({ sheetName: "Sheet2" });
+          const csv = writeCsv(wb, { sheetName: "Sheet2" });
 
           expect(csv).toBe("second");
         });
 
         it("should return empty string for non-existent worksheet", () => {
-          const wb = new Workbook();
-          wb.addWorksheet("Test");
+          const wb = Workbook.create();
+          Workbook.addWorksheet(wb, "Test");
 
-          const csv = wb.writeCsv({ sheetName: "NonExistent" });
+          const csv = writeCsv(wb, { sheetName: "NonExistent" });
 
           expect(csv).toBe("");
         });
@@ -310,11 +312,11 @@ describe("Workbook", () => {
 
       describe("toBuffer()", () => {
         it("should convert worksheet to Uint8Array", async () => {
-          const wb = new Workbook();
-          const ws = wb.addWorksheet("Test");
-          ws.getCell("A1").value = "test";
+          const wb = Workbook.create();
+          const ws = Workbook.addWorksheet(wb, "Test");
+          Cell.setValue(ws, "A1", "test");
 
-          const buffer = await wb.writeCsvBuffer();
+          const buffer = await writeCsvBuffer(wb);
 
           expect(buffer).toBeInstanceOf(Uint8Array);
           const content = new TextDecoder().decode(buffer);
@@ -322,12 +324,12 @@ describe("Workbook", () => {
         });
 
         it("should encode UTF-8 correctly", async () => {
-          const wb = new Workbook();
-          const ws = wb.addWorksheet("Test");
-          ws.getCell("A1").value = "こんにちは";
-          ws.getCell("B1").value = "мир";
+          const wb = Workbook.create();
+          const ws = Workbook.addWorksheet(wb, "Test");
+          Cell.setValue(ws, "A1", "こんにちは");
+          Cell.setValue(ws, "B1", "мир");
 
-          const buffer = await wb.writeCsvBuffer();
+          const buffer = await writeCsvBuffer(wb);
           const content = new TextDecoder().decode(buffer);
 
           expect(content).toContain("こんにちは");

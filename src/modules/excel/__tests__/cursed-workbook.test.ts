@@ -27,7 +27,8 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createZip } from "@archive/zip/zip-bytes";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
+import { getWorksheets } from "@excel/workbook";
 import { describe, expect, it } from "vitest";
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -90,13 +91,13 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     const filePath = path.join("tmp", "cursed-workbook-alt-prefix.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    const ws = wb.getWorksheet("Real Name");
+    const ws = Workbook.getWorksheet(wb, "Real Name")!;
     expect(ws).toBeDefined();
     expect(ws!.id).toBe(1);
-    expect(ws!.getCell("A1").value).toBe("named");
+    expect(Cell.getValue(ws!, "A1")).toBe("named");
   });
 
   it("binds <sheet> when rel.Target is an absolute /xl/... path", async () => {
@@ -125,13 +126,13 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     const filePath = path.join("tmp", "cursed-workbook-absolute-target.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    const ws = wb.getWorksheet("Absolute");
+    const ws = Workbook.getWorksheet(wb, "Absolute")!;
     expect(ws).toBeDefined();
     expect(ws!.id).toBe(1);
-    expect(ws!.getCell("A1").value).toBe("abs-target");
+    expect(Cell.getValue(ws!, "A1")).toBe("abs-target");
   });
 
   it("binds <sheet> when the workbook declares multiple relationships prefixes", async () => {
@@ -162,13 +163,13 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     const filePath = path.join("tmp", "cursed-workbook-multi-prefix.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    const ws = wb.getWorksheet("Multi");
+    const ws = Workbook.getWorksheet(wb, "Multi")!;
     expect(ws).toBeDefined();
     expect(ws!.id).toBe(1);
-    expect(ws!.getCell("A1").value).toBe("multi");
+    expect(Cell.getValue(ws!, "A1")).toBe("multi");
   });
 
   it("binds <sheet> when rel.Target uses a relative './' prefix", async () => {
@@ -199,13 +200,13 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     const filePath = path.join("tmp", "cursed-workbook-dotslash-target.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    const ws = wb.getWorksheet("DotSlash");
+    const ws = Workbook.getWorksheet(wb, "DotSlash")!;
     expect(ws).toBeDefined();
     expect(ws!.id).toBe(1);
-    expect(ws!.getCell("A1").value).toBe("dot-slash");
+    expect(Cell.getValue(ws!, "A1")).toBe("dot-slash");
   });
 });
 
@@ -234,12 +235,12 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     const filePath = path.join("tmp", "cursed-workbook-empty-sheets.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
-    expect(wb.worksheets).toEqual([]);
+    expect(getWorksheets(wb)).toEqual([]);
   });
 
   it("drops a worksheet part whose <sheet> rId references no rel", async () => {
@@ -267,12 +268,12 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     const filePath = path.join("tmp", "cursed-workbook-bad-rid.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
-    expect(wb.worksheets).toEqual([]);
+    expect(getWorksheets(wb)).toEqual([]);
   });
 
   it("keeps declared sheets, drops undeclared ones in a mixed package", async () => {
@@ -302,14 +303,14 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     const filePath = path.join("tmp", "cursed-workbook-mixed.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    expect(wb.worksheets).toHaveLength(1);
-    const declared = wb.getWorksheet("Declared");
+    expect(getWorksheets(wb)).toHaveLength(1);
+    const declared = Workbook.getWorksheet(wb, "Declared")!;
     expect(declared).toBeDefined();
     expect(declared!.id).toBe(1);
-    expect(declared!.getCell("A1").value).toBe("declared");
+    expect(Cell.getValue(declared!, "A1")).toBe("declared");
 
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
@@ -343,10 +344,10 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     const filePath = path.join("tmp", "cursed-workbook-bogus-sheetid.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    expect(wb.worksheets).toEqual([]);
+    expect(getWorksheets(wb)).toEqual([]);
     const internal = wb as unknown as { _worksheets: unknown[] };
     const keys = Object.keys(internal._worksheets);
     expect(keys).not.toContain("NaN");
@@ -380,10 +381,10 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     const filePath = path.join("tmp", "cursed-workbook-phantom-target.xlsx");
     await writeFile(filePath, zipBytes);
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(filePath);
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, filePath);
 
-    expect(wb.worksheets).toEqual([]);
+    expect(getWorksheets(wb)).toEqual([]);
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
   });

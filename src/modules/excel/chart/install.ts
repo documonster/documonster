@@ -13,7 +13,7 @@
  *
  * - The chart-support slot (`@excel/chart-host-registry`) — enables
  *   `worksheet.addChart()`, `worksheet.addLineChart()`, chart cache
- *   population during `workbook.xlsx.writeFile()`, and `Chart`
+ *   population during `Workbook.writeXlsx(workbook)`, and `Chart`
  *   reconstruction during XLSX load.
  *
  * The slot accepts `null` to uninstall. See

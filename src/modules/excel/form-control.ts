@@ -117,32 +117,206 @@ export type FormControlRange =
     };
 
 // ============================================================================
-// FormCheckbox Class
+// FormCheckbox — de-classed domain model (data record + flat helpers)
 // ============================================================================
 
-class FormCheckbox {
-  declare public worksheet: Worksheet;
-  declare public model: FormCheckboxModel;
+/**
+ * Plain-data form-control checkbox: the owning worksheet plus its serialized
+ * {@link FormCheckboxModel}. Construction parses a range into anchors; the
+ * former getter/setters (`checked`/`link`/`text`) and VML helpers become flat
+ * functions.
+ */
+export interface FormCheckboxData {
+  worksheet: Worksheet;
+  model: FormCheckboxModel;
+}
 
-  constructor(worksheet: Worksheet, range: FormControlRange, options?: FormCheckboxOptions) {
-    this.worksheet = worksheet;
+/** Structural guard: is `value` a {@link FormCheckboxData} record? */
+export function isFormCheckbox(value: unknown): value is FormCheckboxData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "worksheet" in value &&
+    "model" in value &&
+    typeof (value as FormCheckboxData).model === "object"
+  );
+}
 
-    // Parse range to get anchors
-    const { tl, br } = this._parseRange(range);
+/** Convert a cell reference to absolute format (e.g., "A1" -> "$A$1"). */
+function toAbsoluteRef(ref: string): string {
+  // If already absolute, return as-is
+  if (ref.includes("$")) {
+    return ref;
+  }
+  // Parse and convert
+  const addr = colCache.decodeAddress(ref);
+  return `$${colCache.n2l(addr.col)}$${addr.row}`;
+}
 
-    // Generate shape ID (starting from 1025)
-    const existingCount = worksheet.formControls?.length ?? 0;
-    const shapeId = 1025 + existingCount;
+/** Parse a range input into top-left / bottom-right anchor positions. */
+function parseRange(range: FormControlRange): { tl: FormControlAnchor; br: FormControlAnchor } {
+  let tl: FormControlAnchor;
+  let br: FormControlAnchor;
 
-    // Parse link cell reference
-    let link: string | undefined;
-    if (options?.link) {
-      // Ensure absolute reference format
-      link = this._toAbsoluteRef(options.link);
+  if (typeof range === "string") {
+    // Parse cell reference like "B2" or range like "B2:D3"
+    const isRange = range.includes(":");
+
+    if (isRange) {
+      const decoded = colCache.decode(range);
+
+      if ("top" in decoded) {
+        // Treat 1-cell ranges (e.g., "J4:J4") as a single cell with default checkbox size.
+        if (decoded.left === decoded.right && decoded.top === decoded.bottom) {
+          const col = decoded.left - 1;
+          const row = decoded.top - 1;
+          tl = {
+            col,
+            colOff: DEFAULT_COL_OFF,
+            row,
+            rowOff: DEFAULT_ROW_OFF
+          };
+          br = {
+            col: col + 2,
+            colOff: DEFAULT_END_COL_OFF,
+            row: row + 1,
+            rowOff: DEFAULT_END_ROW_OFF
+          };
+        } else {
+          // Regular range
+          tl = {
+            col: decoded.left - 1, // Convert to 0-based
+            colOff: DEFAULT_COL_OFF,
+            row: decoded.top - 1,
+            rowOff: DEFAULT_ROW_OFF
+          };
+          br = {
+            col: decoded.right - 1,
+            colOff: DEFAULT_END_COL_OFF,
+            row: decoded.bottom - 1,
+            rowOff: DEFAULT_END_ROW_OFF
+          };
+        }
+      } else {
+        // Defensive fallback: if the cache returns an address, treat it like a single-cell ref.
+        tl = {
+          col: decoded.col - 1,
+          colOff: DEFAULT_COL_OFF,
+          row: decoded.row - 1,
+          rowOff: DEFAULT_ROW_OFF
+        };
+        br = {
+          col: decoded.col + 1,
+          colOff: DEFAULT_END_COL_OFF,
+          row: decoded.row,
+          rowOff: DEFAULT_END_ROW_OFF
+        };
+      }
+    } else {
+      // Single cell reference - create default size checkbox
+      const decoded = colCache.decodeAddress(range);
+      tl = {
+        col: decoded.col - 1,
+        colOff: DEFAULT_COL_OFF,
+        row: decoded.row - 1,
+        rowOff: DEFAULT_ROW_OFF
+      };
+      // Default size: about 2 columns wide, 1 row tall
+      br = {
+        col: decoded.col + 1,
+        colOff: DEFAULT_END_COL_OFF,
+        row: decoded.row,
+        rowOff: DEFAULT_END_ROW_OFF
+      };
+    }
+  } else if ("startCol" in range) {
+    // startCol/startRow/endCol/endRow format (0-based)
+    tl = {
+      col: range.startCol,
+      colOff: range.startColOff ?? DEFAULT_COL_OFF,
+      row: range.startRow,
+      rowOff: range.startRowOff ?? DEFAULT_ROW_OFF
+    };
+    br = {
+      col: range.endCol,
+      colOff: range.endColOff ?? DEFAULT_END_COL_OFF,
+      row: range.endRow,
+      rowOff: range.endRowOff ?? DEFAULT_END_ROW_OFF
+    };
+  } else {
+    // Object format with tl/br
+    if (typeof range.tl === "string") {
+      const decoded = colCache.decodeAddress(range.tl);
+      tl = {
+        col: decoded.col - 1,
+        colOff: DEFAULT_COL_OFF,
+        row: decoded.row - 1,
+        rowOff: DEFAULT_ROW_OFF
+      };
+    } else {
+      tl = {
+        col: range.tl.col,
+        colOff: range.tl.colOff ?? DEFAULT_COL_OFF,
+        row: range.tl.row,
+        rowOff: range.tl.rowOff ?? DEFAULT_ROW_OFF
+      };
     }
 
-    // Note: ctrlPropId is set later in worksheet-xform.ts prepare() for global uniqueness
-    this.model = {
+    if (range.br) {
+      if (typeof range.br === "string") {
+        const decoded = colCache.decodeAddress(range.br);
+        br = {
+          col: decoded.col - 1,
+          colOff: DEFAULT_END_COL_OFF,
+          row: decoded.row - 1,
+          rowOff: DEFAULT_END_ROW_OFF
+        };
+      } else {
+        br = {
+          col: range.br.col,
+          colOff: range.br.colOff ?? DEFAULT_END_COL_OFF,
+          row: range.br.row,
+          rowOff: range.br.rowOff ?? DEFAULT_END_ROW_OFF
+        };
+      }
+    } else {
+      // Default size
+      br = {
+        col: tl.col + 2,
+        colOff: DEFAULT_END_COL_OFF,
+        row: tl.row + 1,
+        rowOff: DEFAULT_END_ROW_OFF
+      };
+    }
+  }
+
+  return { tl, br };
+}
+
+/** Create a form-control checkbox bound to a worksheet from a range + options. */
+export function formCheckboxCreate(
+  worksheet: Worksheet,
+  range: FormControlRange,
+  options?: FormCheckboxOptions
+): FormCheckboxData {
+  // Parse range to get anchors
+  const { tl, br } = parseRange(range);
+
+  // Generate shape ID (starting from 1025)
+  const existingCount = worksheet.formControls?.length ?? 0;
+  const shapeId = 1025 + existingCount;
+
+  // Parse link cell reference
+  let link: string | undefined;
+  if (options?.link) {
+    // Ensure absolute reference format
+    link = toAbsoluteRef(options.link);
+  }
+
+  // Note: ctrlPropId is set later in worksheet-xform.ts prepare() for global uniqueness
+  return {
+    worksheet,
+    model: {
       shapeId,
       ctrlPropId: 0, // Placeholder, set during prepare()
       tl,
@@ -152,289 +326,90 @@ class FormCheckbox {
       text: options?.text ?? "",
       noThreeD: options?.noThreeD ?? true,
       print: options?.print ?? false
-    };
-  }
+    }
+  };
+}
 
-  /**
-   * Rebuild a FormCheckbox from a previously-serialised model (e.g. round-tripped
-   * via `worksheet.model`). The model is adopted as-is; no range parsing or shape
-   * id reassignment is performed.
-   */
-  static fromModel(worksheet: Worksheet, model: FormCheckboxModel): FormCheckbox {
-    const cb = Object.create(FormCheckbox.prototype) as FormCheckbox;
-    cb.worksheet = worksheet;
-    // Defensive shallow clone: the caller should not be able to mutate the
-    // underlying anchor objects through the original reference.
-    cb.model = {
+/**
+ * Rebuild a checkbox record from a previously-serialised model (e.g.
+ * round-tripped via `worksheet.model`). The model is adopted as-is; no range
+ * parsing or shape id reassignment is performed.
+ */
+export function formCheckboxFromModel(
+  worksheet: Worksheet,
+  model: FormCheckboxModel
+): FormCheckboxData {
+  // Defensive shallow clone: the caller should not be able to mutate the
+  // underlying anchor objects through the original reference.
+  return {
+    worksheet,
+    model: {
       ...model,
       tl: { ...model.tl },
       br: { ...model.br }
-    };
-    return cb;
-  }
-
-  /**
-   * Get the checked state
-   */
-  get checked(): boolean {
-    return this.model.checked === "Checked";
-  }
-
-  /**
-   * Set the checked state
-   */
-  set checked(value: boolean) {
-    this.model.checked = value ? "Checked" : "Unchecked";
-  }
-
-  /**
-   * Get the linked cell address
-   */
-  get link(): string | undefined {
-    return this.model.link;
-  }
-
-  /**
-   * Set the linked cell address
-   */
-  set link(value: string | undefined) {
-    this.model.link = value ? this._toAbsoluteRef(value) : undefined;
-  }
-
-  /**
-   * Get the label text
-   */
-  get text(): string {
-    return this.model.text;
-  }
-
-  /**
-   * Set the label text
-   */
-  set text(value: string) {
-    this.model.text = value;
-  }
-
-  /**
-   * Convert cell reference to absolute format (e.g., "A1" -> "$A$1")
-   */
-  private _toAbsoluteRef(ref: string): string {
-    // If already absolute, return as-is
-    if (ref.includes("$")) {
-      return ref;
     }
-    // Parse and convert
-    const addr = colCache.decodeAddress(ref);
-    return `$${colCache.n2l(addr.col)}$${addr.row}`;
-  }
-
-  /**
-   * Parse range input into anchor positions
-   */
-  private _parseRange(range: FormControlRange): { tl: FormControlAnchor; br: FormControlAnchor } {
-    let tl: FormControlAnchor;
-    let br: FormControlAnchor;
-
-    if (typeof range === "string") {
-      // Parse cell reference like "B2" or range like "B2:D3"
-      const isRange = range.includes(":");
-
-      if (isRange) {
-        const decoded = colCache.decode(range);
-
-        if ("top" in decoded) {
-          // Treat 1-cell ranges (e.g., "J4:J4") as a single cell with default checkbox size.
-          if (decoded.left === decoded.right && decoded.top === decoded.bottom) {
-            const col = decoded.left - 1;
-            const row = decoded.top - 1;
-            tl = {
-              col,
-              colOff: DEFAULT_COL_OFF,
-              row,
-              rowOff: DEFAULT_ROW_OFF
-            };
-            br = {
-              col: col + 2,
-              colOff: DEFAULT_END_COL_OFF,
-              row: row + 1,
-              rowOff: DEFAULT_END_ROW_OFF
-            };
-          } else {
-            // Regular range
-            tl = {
-              col: decoded.left - 1, // Convert to 0-based
-              colOff: DEFAULT_COL_OFF,
-              row: decoded.top - 1,
-              rowOff: DEFAULT_ROW_OFF
-            };
-            br = {
-              col: decoded.right - 1,
-              colOff: DEFAULT_END_COL_OFF,
-              row: decoded.bottom - 1,
-              rowOff: DEFAULT_END_ROW_OFF
-            };
-          }
-        } else {
-          // Defensive fallback: if the cache returns an address, treat it like a single-cell ref.
-          tl = {
-            col: decoded.col - 1,
-            colOff: DEFAULT_COL_OFF,
-            row: decoded.row - 1,
-            rowOff: DEFAULT_ROW_OFF
-          };
-          br = {
-            col: decoded.col + 1,
-            colOff: DEFAULT_END_COL_OFF,
-            row: decoded.row,
-            rowOff: DEFAULT_END_ROW_OFF
-          };
-        }
-      } else {
-        // Single cell reference - create default size checkbox
-        const decoded = colCache.decodeAddress(range);
-        tl = {
-          col: decoded.col - 1,
-          colOff: DEFAULT_COL_OFF,
-          row: decoded.row - 1,
-          rowOff: DEFAULT_ROW_OFF
-        };
-        // Default size: about 2 columns wide, 1 row tall
-        br = {
-          col: decoded.col + 1,
-          colOff: DEFAULT_END_COL_OFF,
-          row: decoded.row,
-          rowOff: DEFAULT_END_ROW_OFF
-        };
-      }
-    } else if ("startCol" in range) {
-      // startCol/startRow/endCol/endRow format (0-based)
-      tl = {
-        col: range.startCol,
-        colOff: range.startColOff ?? DEFAULT_COL_OFF,
-        row: range.startRow,
-        rowOff: range.startRowOff ?? DEFAULT_ROW_OFF
-      };
-      br = {
-        col: range.endCol,
-        colOff: range.endColOff ?? DEFAULT_END_COL_OFF,
-        row: range.endRow,
-        rowOff: range.endRowOff ?? DEFAULT_END_ROW_OFF
-      };
-    } else {
-      // Object format with tl/br
-      if (typeof range.tl === "string") {
-        const decoded = colCache.decodeAddress(range.tl);
-        tl = {
-          col: decoded.col - 1,
-          colOff: DEFAULT_COL_OFF,
-          row: decoded.row - 1,
-          rowOff: DEFAULT_ROW_OFF
-        };
-      } else {
-        tl = {
-          col: range.tl.col,
-          colOff: range.tl.colOff ?? DEFAULT_COL_OFF,
-          row: range.tl.row,
-          rowOff: range.tl.rowOff ?? DEFAULT_ROW_OFF
-        };
-      }
-
-      if (range.br) {
-        if (typeof range.br === "string") {
-          const decoded = colCache.decodeAddress(range.br);
-          br = {
-            col: decoded.col - 1,
-            colOff: DEFAULT_END_COL_OFF,
-            row: decoded.row - 1,
-            rowOff: DEFAULT_END_ROW_OFF
-          };
-        } else {
-          br = {
-            col: range.br.col,
-            colOff: range.br.colOff ?? DEFAULT_END_COL_OFF,
-            row: range.br.row,
-            rowOff: range.br.rowOff ?? DEFAULT_END_ROW_OFF
-          };
-        }
-      } else {
-        // Default size
-        br = {
-          col: tl.col + 2,
-          colOff: DEFAULT_END_COL_OFF,
-          row: tl.row + 1,
-          rowOff: DEFAULT_END_ROW_OFF
-        };
-      }
-    }
-
-    return { tl, br };
-  }
-
-  // =========================================================================
-  // Instance methods - delegate to static methods
-  // =========================================================================
-
-  /**
-   * Convert anchor to VML anchor string format
-   * Format: "fromCol, fromColOff, fromRow, fromRowOff, toCol, toColOff, toRow, toRowOff"
-   * VML uses pixels for offsets
-   */
-  getVmlAnchor(): string {
-    return FormCheckbox.getVmlAnchor(this.model);
-  }
-
-  /**
-   * Get VML style string for positioning
-   */
-  getVmlStyle(): string {
-    return FormCheckbox.getVmlStyle(this.model);
-  }
-
-  /**
-   * Get the numeric checked value for VML (0, 1, or 2)
-   */
-  getVmlCheckedValue(): number {
-    return FormCheckbox.getVmlCheckedValue(this.model);
-  }
-
-  // =========================================================================
-  // Static utility methods - can be used with FormCheckboxModel directly
-  // =========================================================================
-
-  /**
-   * Convert anchor to VML anchor string format from model
-   */
-  static getVmlAnchor(model: FormCheckboxModel): string {
-    const { tl, br } = model;
-    const tlColOff = Math.round(tl.colOff / EMU_PER_PIXEL);
-    const tlRowOff = Math.round(tl.rowOff / EMU_PER_PIXEL);
-    const brColOff = Math.round(br.colOff / EMU_PER_PIXEL);
-    const brRowOff = Math.round(br.rowOff / EMU_PER_PIXEL);
-    return `${tl.col}, ${tlColOff}, ${tl.row}, ${tlRowOff}, ${br.col}, ${brColOff}, ${br.row}, ${brRowOff}`;
-  }
-
-  /**
-   * Get VML style string for positioning from model
-   */
-  static getVmlStyle(model: FormCheckboxModel): string {
-    const marginLeft = Math.round(model.tl.colOff / EMU_PER_POINT);
-    const marginTop = Math.round(model.tl.rowOff / EMU_PER_POINT);
-    return `position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:96pt;height:18pt;z-index:1;visibility:visible`;
-  }
-
-  /**
-   * Get the numeric checked value for VML from model (0, 1, or 2)
-   */
-  static getVmlCheckedValue(model: FormCheckboxModel): number {
-    switch (model.checked) {
-      case "Checked":
-        return 1;
-      case "Mixed":
-        return 2;
-      default:
-        return 0;
-    }
-  }
+  };
 }
 
-export { FormCheckbox };
+/** Whether the checkbox is checked. */
+export function formCheckboxChecked(fc: FormCheckboxData): boolean {
+  return fc.model.checked === "Checked";
+}
+
+/** Set the checkbox checked state. */
+export function formCheckboxSetChecked(fc: FormCheckboxData, value: boolean): void {
+  fc.model.checked = value ? "Checked" : "Unchecked";
+}
+
+/** The linked cell address (absolute form), if any. */
+export function formCheckboxLink(fc: FormCheckboxData): string | undefined {
+  return fc.model.link;
+}
+
+/** Set the linked cell address (coerced to absolute form). */
+export function formCheckboxSetLink(fc: FormCheckboxData, value: string | undefined): void {
+  fc.model.link = value ? toAbsoluteRef(value) : undefined;
+}
+
+/** The label text. */
+export function formCheckboxText(fc: FormCheckboxData): string {
+  return fc.model.text;
+}
+
+/** Set the label text. */
+export function formCheckboxSetText(fc: FormCheckboxData, value: string): void {
+  fc.model.text = value;
+}
+
+/**
+ * Convert a checkbox model's anchor to the VML anchor string format:
+ * "fromCol, fromColOff, fromRow, fromRowOff, toCol, toColOff, toRow, toRowOff"
+ * (VML uses pixels for offsets).
+ */
+export function formCheckboxVmlAnchor(model: FormCheckboxModel): string {
+  const { tl, br } = model;
+  const tlColOff = Math.round(tl.colOff / EMU_PER_PIXEL);
+  const tlRowOff = Math.round(tl.rowOff / EMU_PER_PIXEL);
+  const brColOff = Math.round(br.colOff / EMU_PER_PIXEL);
+  const brRowOff = Math.round(br.rowOff / EMU_PER_PIXEL);
+  return `${tl.col}, ${tlColOff}, ${tl.row}, ${tlRowOff}, ${br.col}, ${brColOff}, ${br.row}, ${brRowOff}`;
+}
+
+/** VML positioning style string for a checkbox model. */
+export function formCheckboxVmlStyle(model: FormCheckboxModel): string {
+  const marginLeft = Math.round(model.tl.colOff / EMU_PER_POINT);
+  const marginTop = Math.round(model.tl.rowOff / EMU_PER_POINT);
+  return `position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:96pt;height:18pt;z-index:1;visibility:visible`;
+}
+
+/** Numeric VML checked value for a checkbox model (0, 1, or 2). */
+export function formCheckboxVmlCheckedValue(model: FormCheckboxModel): number {
+  switch (model.checked) {
+    case "Checked":
+      return 1;
+    case "Mixed":
+      return 2;
+    default:
+      return 0;
+  }
+}

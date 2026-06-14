@@ -5,7 +5,9 @@
  * image extraction, and metadata reading using roundtrip tests (write then read).
  */
 
-import { Workbook } from "@excel/workbook";
+import { cellSetValue } from "@excel/cell";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { rowGetCell } from "@excel/worksheet";
 import { aesCbcDecrypt, sha256 } from "@utils/crypto";
 import { describe, it, expect, beforeAll } from "vitest";
 
@@ -990,12 +992,12 @@ describe("PDF Reader - Encryption Roundtrip", () => {
 
 describe("PDF Reader - Encryption via excelToPdf", () => {
   it("should roundtrip encrypted Excel-to-PDF", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Secrets");
-    ws.getCell("A1").value = "Confidential";
-    ws.getCell("B1").value = 12345;
-    ws.getCell("A2").value = "TopSecret";
-    ws.getCell("B2").value = 67890;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Secrets");
+    Cell.setValue(ws, "A1", "Confidential");
+    Cell.setValue(ws, "B1", 12345);
+    Cell.setValue(ws, "A2", "TopSecret");
+    Cell.setValue(ws, "B2", 67890);
 
     const encrypted = await excelToPdf(wb, {
       encryption: { ownerPassword: "owner", userPassword: "user" }
@@ -1761,16 +1763,16 @@ describe("Text Reconstruction — table data should not be split into columns", 
   });
 
   it("should keep 5-column table on same lines", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Test");
-    ws.columns = [
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Test");
+    Worksheet.setColumns(ws, [
       { header: "Item", key: "item", width: 20 },
       { header: "SKU", key: "sku", width: 15 },
       { header: "Qty", key: "qty", width: 10 },
       { header: "Price", key: "price", width: 12 },
       { header: "Stock", key: "stock", width: 10 }
-    ];
-    ws.addRows([
+    ]);
+    Worksheet.addRows(ws, [
       { item: "Laptop", sku: "LP-001", qty: 42, price: 1299.99, stock: true },
       { item: "Mouse", sku: "WM-055", qty: 350, price: 29.99, stock: true }
     ]);
@@ -2032,13 +2034,13 @@ describe("PDF Reader - Annotation Extraction", () => {
 
   it("should extract annotations from roundtrip Excel PDF with hyperlinks", async () => {
     // Create a workbook with hyperlinks — the writer will create Link annotations
-    const workbook = new Workbook();
-    const sheet = workbook.addWorksheet("Links");
-    const row = sheet.addRow(["Click here"]);
-    row.getCell(1).value = {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "Links");
+    const row = Worksheet.addRow(sheet, ["Click here"]);
+    cellSetValue(rowGetCell(row, 1), {
       text: "Example",
       hyperlink: "https://example.com"
-    };
+    });
 
     const pdfBytes = await excelToPdf(workbook);
     const result = await readPdf(pdfBytes);
@@ -2633,14 +2635,14 @@ describe("PDF Reader - Table Extraction", () => {
   });
 
   it("should extract table from a multi-column Excel workbook PDF", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.columns = [
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.setColumns(ws, [
       { header: "Item", key: "item", width: 20 },
       { header: "Qty", key: "qty", width: 10 },
       { header: "Price", key: "price", width: 12 }
-    ];
-    ws.addRows([
+    ]);
+    Worksheet.addRows(ws, [
       { item: "Laptop", qty: 5, price: 999.99 },
       { item: "Mouse", qty: 50, price: 29.99 },
       { item: "Keyboard", qty: 30, price: 49.99 }

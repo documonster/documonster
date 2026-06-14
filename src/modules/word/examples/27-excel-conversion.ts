@@ -16,7 +16,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook } from "../../../index";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { rowSetFill, rowSetFont } from "@excel/row";
+import { columnSetNumFmt, getColumn } from "@excel/worksheet";
+
 import {
   excelToDocx,
   extractTablesToExcel,
@@ -26,7 +29,7 @@ import {
   wordChartToChartModel
 } from "../excel";
 import { Document, toBuffer, readDocx } from "../index";
-import type { Chart } from "../index";
+import type { Chart } from "../types";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -37,25 +40,25 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 // 1. Build a small workbook with formatting
 // ---------------------------------------------------------------------------
-const wb = new Workbook();
+const wb = Workbook.create();
 wb.creator = "OpenCode";
 wb.created = new Date("2026-05-01");
 
-const ws1 = wb.addWorksheet("Sales");
-ws1.columns = [
+const ws1 = Workbook.addWorksheet(wb, "Sales");
+Worksheet.setColumns(ws1, [
   { header: "Region", key: "region", width: 12 },
   { header: "Q1", key: "q1", width: 10 },
   { header: "Q2", key: "q2", width: 10 },
   { header: "Q3", key: "q3", width: 10 },
   { header: "Q4", key: "q4", width: 10 }
-];
+]);
 // Style header row
-ws1.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-ws1.getRow(1).fill = {
+rowSetFont(Worksheet.getRow(ws1, 1), { bold: true, color: { argb: "FFFFFFFF" } });
+rowSetFill(Worksheet.getRow(ws1, 1), {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FF1F4E79" }
-};
+});
 const data = [
   { region: "North", q1: 1200, q2: 1400, q3: 1600, q4: 1900 },
   { region: "South", q1: 900, q2: 1100, q3: 1300, q4: 1500 },
@@ -63,23 +66,23 @@ const data = [
   { region: "West", q1: 750, q2: 820, q3: 950, q4: 1100 }
 ];
 for (const r of data) {
-  ws1.addRow(r);
+  Worksheet.addRow(ws1, r);
 }
-ws1.getColumn("q1").numFmt = "$#,##0";
-ws1.getColumn("q2").numFmt = "$#,##0";
-ws1.getColumn("q3").numFmt = "$#,##0";
-ws1.getColumn("q4").numFmt = "$#,##0";
+columnSetNumFmt(getColumn(ws1, "q1"), "$#,##0");
+columnSetNumFmt(getColumn(ws1, "q2"), "$#,##0");
+columnSetNumFmt(getColumn(ws1, "q3"), "$#,##0");
+columnSetNumFmt(getColumn(ws1, "q4"), "$#,##0");
 
-const ws2 = wb.addWorksheet("Inventory");
-ws2.addRow(["Item", "Qty", "Note"]);
-ws2.addRow(["Widget", 100, "in stock"]);
-ws2.addRow(["Gadget", 0, "OUT OF STOCK"]);
-ws2.getCell("C3").font = { color: { argb: "FFC00000" }, bold: true };
+const ws2 = Workbook.addWorksheet(wb, "Inventory");
+Worksheet.addRow(ws2, ["Item", "Qty", "Note"]);
+Worksheet.addRow(ws2, ["Widget", 100, "in stock"]);
+Worksheet.addRow(ws2, ["Gadget", 0, "OUT OF STOCK"]);
+Cell.setStyle(ws2, "C3", { font: { color: { argb: "FFC00000" }, bold: true } });
 
 // Add a hidden sheet — by default excelToDocx skips it
-const ws3 = wb.addWorksheet("Internal");
+const ws3 = Workbook.addWorksheet(wb, "Internal");
 ws3.state = "hidden";
-ws3.addRow(["secret", 42]);
+Worksheet.addRow(ws3, ["secret", 42]);
 
 // ---------------------------------------------------------------------------
 // 2. Convert — default: every visible sheet, headings included
@@ -146,14 +149,14 @@ for (const t of tables) {
 }
 
 // Fold each extracted table into a sheet of a new workbook
-const wb2 = new Workbook();
+const wb2 = Workbook.create();
 for (const tbl of tables) {
-  const sheet = wb2.addWorksheet(tbl.name);
+  const sheet = Workbook.addWorksheet(wb2, tbl.name);
   for (const row of tbl.data) {
-    sheet.addRow(row);
+    Worksheet.addRow(sheet, row);
   }
 }
-await wb2.xlsx.writeFile(path.join(outDir, "05-extracted.xlsx"));
+await Workbook.writeXlsx(wb2, path.join(outDir, "05-extracted.xlsx"));
 console.log(`  → 05-extracted.xlsx`);
 
 // ---------------------------------------------------------------------------

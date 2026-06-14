@@ -16,6 +16,8 @@
  * ```
  */
 
+import { anchorCol, anchorRow } from "@excel/anchor";
+import { cellCol, cellGetValue, cellHyperlink, cellResult, cellText, cellType } from "@excel/cell";
 import type {
   Chart,
   ChartExModel,
@@ -30,9 +32,18 @@ import type {
 // `installChartSupport()` from `@cj-tech-master/excelts/chart` before
 // invoking `excelToPdf()`.
 import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
-import type { Chartsheet } from "@excel/chartsheet";
+import {
+  chartsheetChartExModel,
+  chartsheetChartModel,
+  chartsheetModel,
+  chartsheetName,
+  chartsheetPageSetup,
+  chartsheetState,
+  type ChartsheetData
+} from "@excel/chartsheet";
 import { ValueType } from "@excel/enums";
 import { formatCellValue } from "@excel/utils/cell-format";
+import { getChartsheets, getImage, getWorksheets } from "@excel/workbook";
 // Use the browser base class so the public `excelToPdf(workbook)` signature is
 // callable from both the Node entry (where `Workbook` is the Node subclass —
 // trivially assignable to the base) and the browser entry (where `Workbook` is
@@ -40,8 +51,20 @@ import { formatCellValue } from "@excel/utils/cell-format";
 // browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
 // XLSX surface intentionally omits — see issue #160.
 import type { Workbook } from "@excel/workbook.browser";
+import {
+  findRow,
+  getCell,
+  getColumn,
+  getImages,
+  getHasMerges,
+  getSheetDimensions,
+  getSheetModel,
+  getSheetName,
+  getSheetWorkbook,
+  getSparklineGroups,
+  rowEachCell
+} from "@excel/worksheet";
 import type { Worksheet } from "@excel/worksheet";
-import { tryInvokeFormulaEngine } from "@formula/host-registry";
 import { base64ToUint8Array } from "@utils/utils.base";
 import { wordChartToChartModel } from "@word/bridge/excel-bridge";
 import type { LayoutChart } from "@word/layout/layout-model";
@@ -99,11 +122,12 @@ export async function excelToPdf(
   // Recalculate all formulas before conversion so that formula results
   // reflect the latest cell values (fixes stale cached results from XLSX).
   //
-  // The formula engine is opt-in: callers who import
-  // `@cj-tech-master/excelts/formula` get automatic recalculation here; callers
-  // who don't import it fall back to whatever cached results the XLSX
-  // shipped with (safe for workbooks last saved by Excel itself).
-  tryInvokeFormulaEngine(workbook);
+  // The formula engine is opt-in via explicit injection: callers pass
+  // `{ recalculate: calculateFormulas }` (from `@cj-tech-master/excelts/formula`)
+  // to recompute; callers who don't fall back to the cached results the XLSX
+  // shipped with. This keeps the ~200 KB engine out of bundles that only
+  // export already-computed workbooks — no host-registry needed.
+  (options as { recalculate?: (wb: Workbook) => void } | undefined)?.recalculate?.(workbook);
 
   const pdfWorkbook = await excelWorkbookToPdf(workbook);
   return exportPdf(pdfWorkbook, options);
@@ -276,10 +300,10 @@ export async function chartToPdf(
  */
 async function excelWorkbookToPdf(workbook: Workbook): Promise<PdfWorkbook> {
   const worksheetResults = await Promise.all(
-    workbook.worksheets.map(ws => convertSheet(ws, workbook))
+    getWorksheets(workbook).map(ws => convertSheet(ws, workbook))
   );
   const chartsheetResults = await Promise.all(
-    workbook.chartsheets.map(cs => convertChartsheet(cs))
+    getChartsheets(workbook).map(cs => convertChartsheet(cs))
   );
 
   const combined: PdfWorkbookSheet[] = [...worksheetResults, ...chartsheetResults];
@@ -300,15 +324,15 @@ async function excelWorkbookToPdf(workbook: Workbook): Promise<PdfWorkbook> {
 // =============================================================================
 
 async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheetData> {
-  const dimensions = ws.dimensions;
-  const hasData = dimensions && dimensions.model.top > 0 && dimensions.model.left > 0;
+  const dimensions = getSheetDimensions(ws);
+  const hasData = dimensions && dimensions.top > 0 && dimensions.left > 0;
 
   const bounds = hasData
     ? {
-        top: dimensions.model.top,
-        left: dimensions.model.left,
-        bottom: dimensions.model.bottom,
-        right: dimensions.model.right
+        top: dimensions.top,
+        left: dimensions.left,
+        bottom: dimensions.bottom,
+        right: dimensions.right
       }
     : { top: 0, left: 0, bottom: 0, right: 0 };
 
@@ -316,12 +340,12 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   // but no values — these are not tracked by dimensions.
   if (hasData) {
     for (let r = bounds.top; r <= bounds.bottom; r++) {
-      const row = ws.findRow(r);
+      const row = findRow(ws, r);
       if (!row) {
         continue;
       }
-      row.eachCell({ includeEmpty: true }, cell => {
-        if (cell.col > bounds.right) {
+      rowEachCell(row, { includeEmpty: true }, cell => {
+        if (cellCol(cell) > bounds.right) {
           const hasStyle =
             cell.style &&
             ((cell.style.border &&
@@ -331,8 +355,11 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
                 cell.style.border.left)) ||
               cell.style.fill ||
               cell.style.font);
-          if (hasStyle || (cell.type !== ValueType.Null && cell.type !== ValueType.Merge)) {
-            bounds.right = cell.col;
+          if (
+            hasStyle ||
+            (cellType(cell) !== ValueType.Null && cellType(cell) !== ValueType.Merge)
+          ) {
+            bounds.right = cellCol(cell);
           }
         }
       });
@@ -343,7 +370,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   const columns = new Map<number, PdfColumnData>();
   if (hasData) {
     for (let c = bounds.left; c <= bounds.right; c++) {
-      const col = ws.getColumn(c);
+      const col = getColumn(ws, c);
       columns.set(c, {
         hidden: col.hidden || undefined,
         width: col.width ?? undefined
@@ -355,14 +382,14 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   const rows = new Map<number, PdfRowData>();
   if (hasData) {
     for (let r = bounds.top; r <= bounds.bottom; r++) {
-      const row = ws.findRow(r);
+      const row = findRow(ws, r);
       if (!row) {
         continue;
       }
 
       const cells = new Map<number, PdfCellData>();
-      row.eachCell({ includeEmpty: true }, cell => {
-        const hasValue = cell.type !== ValueType.Null && cell.type !== ValueType.Merge;
+      rowEachCell(row, { includeEmpty: true }, cell => {
+        const hasValue = cellType(cell) !== ValueType.Null && cellType(cell) !== ValueType.Merge;
         const hasStyle =
           cell.style &&
           ((cell.style.border &&
@@ -373,7 +400,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
             cell.style.fill ||
             cell.style.font);
         if (hasValue || hasStyle) {
-          cells.set(cell.col, convertCell(cell));
+          cells.set(cellCol(cell), convertCell(cell));
         }
       });
 
@@ -387,7 +414,8 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   }
 
   // Convert merges
-  const merges = ws.hasMerges && ws.model.mergeCells ? [...ws.model.mergeCells] : undefined;
+  const mergeCellsModel = getHasMerges(ws) ? getSheetModel(ws).mergeCells : undefined;
+  const merges = mergeCellsModel ? [...mergeCellsModel] : undefined;
 
   // Convert pageSetup
   const ps = ws.pageSetup;
@@ -473,7 +501,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
     // Ensure columns/rows exist for extended bounds
     for (let c = bounds.left; c <= bounds.right; c++) {
       if (!columns.has(c)) {
-        const col = ws.getColumn(c);
+        const col = getColumn(ws, c);
         columns.set(c, {
           hidden: col.hidden || undefined,
           width: col.width ?? undefined
@@ -489,7 +517,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
 
   return {
     kind: "worksheet",
-    name: ws.name,
+    name: getSheetName(ws),
     state: (ws as any).state ?? "visible",
     orderNo: (ws as any).orderNo,
     bounds,
@@ -511,7 +539,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
 // Use any-typed cell to avoid importing the Cell class directly
 // (Worksheet.eachCell provides it)
 function convertCell(cell: any): PdfCellData {
-  const type = mapValueType(cell.type);
+  const type = mapValueType(cellType(cell));
   const text = getCellDisplayText(cell);
   const style = convertCellStyle(cell.style);
 
@@ -520,9 +548,9 @@ function convertCell(cell: any): PdfCellData {
     value: convertCellValue(cell),
     text,
     style,
-    hyperlink: cell.hyperlink || undefined,
-    result: cell.result ?? undefined,
-    col: cell.col
+    hyperlink: cellHyperlink(cell) || undefined,
+    result: cellResult(cell) ?? undefined,
+    col: cellCol(cell)
   };
 }
 
@@ -562,29 +590,29 @@ function getCellDisplayText(cell: any): string {
     return "";
   }
 
-  switch (cell.type) {
+  switch (cellType(cell)) {
     case ValueType.Null:
     case ValueType.Merge:
       return "";
     case ValueType.RichText:
     case ValueType.Hyperlink:
-      return cell.text ?? "";
+      return cellText(cell) ?? "";
     case ValueType.Error: {
-      const errValue = cell.value;
-      return errValue?.error ?? cell.text ?? "";
+      const errValue = cellGetValue(cell) as { error?: string } | undefined;
+      return errValue?.error ?? cellText(cell) ?? "";
     }
     case ValueType.Formula: {
-      const result = cell.result;
+      const result = cellResult(cell);
       if (result !== undefined && result !== null) {
         if (typeof result === "object" && "error" in result) {
           return result.error;
         }
         return formatCellValueSafe(result, cell.style?.numFmt);
       }
-      return cell.text ?? "";
+      return cellText(cell) ?? "";
     }
     default: {
-      const value = cell.value;
+      const value = cellGetValue(cell);
       if (value === null || value === undefined) {
         return "";
       }
@@ -612,9 +640,11 @@ function formatCellValueSafe(
 }
 
 function convertCellValue(cell: any): unknown {
-  if (cell.type === ValueType.RichText) {
+  if (cellType(cell) === ValueType.RichText) {
     // Preserve richText structure for the PDF engine
-    const rtValue = cell.value;
+    const rtValue = cellGetValue(cell) as
+      | { richText?: Array<{ text: string; font?: any }> }
+      | undefined;
     if (rtValue?.richText) {
       return {
         richText: rtValue.richText.map((run: any) => ({
@@ -624,7 +654,7 @@ function convertCellValue(cell: any): unknown {
       };
     }
   }
-  return cell.value;
+  return cellGetValue(cell);
 }
 
 // =============================================================================
@@ -713,7 +743,7 @@ function convertAlignment(alignment: any): Partial<PdfAlignmentData> {
 // =============================================================================
 
 function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | undefined {
-  const wsImages = (ws as any).getImages?.();
+  const wsImages = getImages(ws);
   if (!wsImages || !Array.isArray(wsImages) || wsImages.length === 0) {
     return undefined;
   }
@@ -726,7 +756,7 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
     }
 
     const imageId = wsImage.imageId;
-    const mediaItem = (workbook as any).getImage?.(Number(imageId));
+    const mediaItem = getImage(workbook, Number(imageId));
     if (!mediaItem) {
       continue;
     }
@@ -752,8 +782,8 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
       format: format as "jpeg" | "png",
       range: {
         tl: {
-          col: wsImage.range.tl.col ?? 0,
-          row: wsImage.range.tl.row ?? 0,
+          col: anchorCol(wsImage.range.tl),
+          row: anchorRow(wsImage.range.tl),
           nativeCol: wsImage.range.tl.nativeCol,
           nativeRow: wsImage.range.tl.nativeRow,
           nativeColOff: wsImage.range.tl.nativeColOff,
@@ -761,8 +791,8 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
         },
         br: wsImage.range.br
           ? {
-              col: wsImage.range.br.col ?? 0,
-              row: wsImage.range.br.row ?? 0,
+              col: anchorCol(wsImage.range.br),
+              row: anchorRow(wsImage.range.br),
               nativeCol: wsImage.range.br.nativeCol,
               nativeRow: wsImage.range.br.nativeRow,
               nativeColOff: wsImage.range.br.nativeColOff,
@@ -771,8 +801,8 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
           : undefined,
         ext: wsImage.range.ext
           ? {
-              width: wsImage.range.ext.width,
-              height: wsImage.range.ext.height
+              width: wsImage.range.ext.width ?? 0,
+              height: wsImage.range.ext.height ?? 0
             }
           : undefined,
         // Images historically store ext as pixels — the layout engine
@@ -893,7 +923,7 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
  * geometry (line polyline or column bars) directly into the PDF page.
  */
 function collectSparklineCharts(ws: Worksheet): PdfSheetChart[] | undefined {
-  const groups = ws.getSparklineGroups?.();
+  const groups = getSparklineGroups(ws);
   if (!groups || groups.length === 0) {
     return undefined;
   }
@@ -985,15 +1015,17 @@ function resolveSparklineData(ws: Worksheet, dataRef: string): number[] {
   if (startRow === endRow) {
     // Horizontal range
     for (let c = startCol; c <= endCol; c++) {
-      const cell = sourceWs.getCell(startRow, c);
-      const v = typeof cell.value === "number" ? cell.value : (cell.result ?? NaN);
+      const cell = getCell(sourceWs, startRow, c);
+      const v =
+        typeof cellGetValue(cell) === "number" ? cellGetValue(cell) : (cellResult(cell) ?? NaN);
       values.push(typeof v === "number" ? v : NaN);
     }
   } else {
     // Vertical range
     for (let r = startRow; r <= endRow; r++) {
-      const cell = sourceWs.getCell(r, startCol);
-      const v = typeof cell.value === "number" ? cell.value : (cell.result ?? NaN);
+      const cell = getCell(sourceWs, r, startCol);
+      const v =
+        typeof cellGetValue(cell) === "number" ? cellGetValue(cell) : (cellResult(cell) ?? NaN);
       values.push(typeof v === "number" ? v : NaN);
     }
   }
@@ -1201,8 +1233,8 @@ function chartAnchorRange(chart: Chart): PdfAnchorRange | undefined {
 
   return {
     tl: {
-      col: tl.col ?? 0,
-      row: tl.row ?? 0,
+      col: anchorCol(tl),
+      row: anchorRow(tl),
       nativeCol: tl.nativeCol,
       nativeRow: tl.nativeRow,
       nativeColOff: tl.nativeColOff,
@@ -1210,8 +1242,8 @@ function chartAnchorRange(chart: Chart): PdfAnchorRange | undefined {
     },
     br: br
       ? {
-          col: br.col ?? 0,
-          row: br.row ?? 0,
+          col: anchorCol(br),
+          row: anchorRow(br),
           nativeCol: br.nativeCol,
           nativeRow: br.nativeRow,
           nativeColOff: br.nativeColOff,
@@ -1267,7 +1299,7 @@ function ensureChartExCachesFilled(model: ChartExModel, ws: Worksheet): void {
   try {
     getChartSupport().fillChartExCaches(
       model,
-      ws.workbook as unknown as Parameters<
+      getSheetWorkbook(ws) as unknown as Parameters<
         ReturnType<typeof getChartSupport>["fillChartExCaches"]
       >[1],
       ws as unknown as Parameters<ReturnType<typeof getChartSupport>["fillChartExCaches"]>[2]
@@ -1335,9 +1367,9 @@ const CHARTSHEET_RASTER_PX = { width: 1280, height: 720 } as const;
  *   (matches what Excel prints for a chartsheet whose chart was deleted
  *   but the sheet kept).
  */
-async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
-  const classicModel = cs.chartModel;
-  const chartExModel = cs.chartExModel;
+async function convertChartsheet(cs: ChartsheetData): Promise<PdfChartsheetData> {
+  const classicModel = chartsheetChartModel(cs);
+  const chartExModel = chartsheetChartExModel(cs);
 
   let chart: PdfChartsheetData["chart"] = {};
 
@@ -1387,7 +1419,7 @@ async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
   // Chartsheet orientation: explicit pageSetup wins. Excel's chartsheet
   // convention is landscape when unset (the CHARTSHEET_EMU_CX/CY pair in
   // xlsx.browser.ts is wider than tall), so we inherit that default.
-  const explicitOrientation = cs.pageSetup?.orientation;
+  const explicitOrientation = chartsheetPageSetup(cs)?.orientation;
   const orientation: PdfChartsheetData["orientation"] =
     explicitOrientation === "portrait" || explicitOrientation === "landscape"
       ? explicitOrientation
@@ -1397,7 +1429,7 @@ async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
   // Chartsheet's `CT_CsPageSetup` is a subset of worksheet's `CT_PageSetup`;
   // the fields we surface here are the ones the PDF renderer knows how
   // to interpret. Unknown fields are silently dropped.
-  const ps = cs.pageSetup;
+  const ps = chartsheetPageSetup(cs);
   const pageSetup: PdfPageSetupData | undefined = ps
     ? {
         orientation: ps.orientation,
@@ -1408,9 +1440,9 @@ async function convertChartsheet(cs: Chartsheet): Promise<PdfChartsheetData> {
 
   return {
     kind: "chartsheet",
-    name: cs.name,
-    state: cs.state,
-    orderNo: cs.model.orderNo,
+    name: chartsheetName(cs),
+    state: chartsheetState(cs),
+    orderNo: chartsheetModel(cs).orderNo,
     orientation,
     chart,
     pageSetup

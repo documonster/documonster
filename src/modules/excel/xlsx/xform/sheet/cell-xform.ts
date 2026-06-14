@@ -1,6 +1,6 @@
 import { Enums } from "@excel/enums";
 import { InvalidValueTypeError, ExcelError } from "@excel/errors";
-import { Range } from "@excel/range";
+import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/range";
 import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
@@ -199,9 +199,9 @@ class CellXform extends BaseXform {
           if (master.si === undefined) {
             master.shareType = "shared";
             master.si = options.siFormulae++;
-            master.range = new Range(master.address, model.address);
+            master.range = rangeCreate(master.address, model.address);
           } else if (master.range) {
-            master.range.expandToAddress(model.address);
+            rangeExpandToAddress(master.range, model.address);
           }
           model.si = master.si;
         }
@@ -218,7 +218,7 @@ class CellXform extends BaseXform {
       case "shared":
         attrs = {
           t: "shared",
-          ref: model.ref || model.range.range,
+          ref: model.ref || rangeRange(model.range),
           si: model.si
         };
         break;

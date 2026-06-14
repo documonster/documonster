@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { rowCommit } from "@excel/worksheet";
+
 /**
  * Using WorkbookWriter (streaming) for large data
  *
@@ -38,14 +40,14 @@ async function main() {
   }
 
   // Write header
-  sheet.addRow(keys).commit();
+  rowCommit(sheet.addRow(keys));
 
   // Write data rows
   console.timeLog("xlsx", "Starting to write rows...");
 
   for (let i = 0; i < ROW_COUNT; i++) {
     const row = keys.map(() => Math.random().toString());
-    sheet.addRow(row).commit();
+    rowCommit(sheet.addRow(row));
 
     // Progress indicator every 100k rows
     if ((i + 1) % 100000 === 0) {

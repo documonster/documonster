@@ -1,13 +1,14 @@
-import { Workbook } from "@excel/workbook";
+import { Workbook } from "@excel/index";
+import { addPivotTable, addTable } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("makeCacheFields", () => {
   describe("field categorization", () => {
     it("should create sharedItems for row fields", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -19,8 +20,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],
@@ -42,10 +43,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should create sharedItems for column fields", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -56,8 +57,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Row"],
         columns: ["Col"],
@@ -80,10 +81,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should create empty sharedItems for unused fields", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -94,8 +95,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Used"],
         columns: [],
@@ -123,10 +124,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should create numeric sharedItems when field is both row and value", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -141,9 +142,9 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
       // Same field "C" for both rows and values
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["C"],
         columns: ["B"],
@@ -170,10 +171,10 @@ describe("makeCacheFields", () => {
 
   describe("pivotField attributes", () => {
     it("should set dataField=1 when field is both row and value", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -184,8 +185,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["C"],
         columns: ["B"],
@@ -201,10 +202,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should set dataField=1 when field is both column and value", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -215,8 +216,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["A"],
         columns: ["C"],
@@ -234,10 +235,10 @@ describe("makeCacheFields", () => {
 
   describe("edge cases", () => {
     it("should handle all values being the same (single unique value)", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -249,8 +250,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],
@@ -268,10 +269,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should handle negative numbers in value fields", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -283,8 +284,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],
@@ -299,10 +300,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should handle decimal values", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -314,8 +315,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],
@@ -330,8 +331,8 @@ describe("makeCacheFields", () => {
     });
 
     it("should handle many columns (wide data)", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
       // Create 10 columns
       const columns: { name: string }[] = [];
@@ -344,7 +345,7 @@ describe("makeCacheFields", () => {
         ["B", 10, 20, 30, 40, 50, 60, 70, 80, 90]
       ];
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -352,8 +353,8 @@ describe("makeCacheFields", () => {
         rows
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Col1"],
         columns: [],
@@ -374,10 +375,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should handle mixed null/undefined values in data", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -390,8 +391,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],
@@ -409,10 +410,10 @@ describe("makeCacheFields", () => {
     });
 
     it("should handle zero values correctly", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet();
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook);
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         headerRow: true,
@@ -424,8 +425,8 @@ describe("makeCacheFields", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Pivot");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["Category"],
         columns: [],

@@ -1,4 +1,4 @@
-import { Range } from "@excel/range";
+import { rangeCreate, rangeTl } from "@excel/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";
@@ -18,8 +18,8 @@ const getTextFormula = model => {
     return model.formulae[0];
   }
 
-  const range = new Range(model.ref);
-  const { tl } = range;
+  const range = rangeCreate(model.ref);
+  const tl = rangeTl(range);
   switch (model.operator) {
     case "containsText":
       return `NOT(ISERROR(SEARCH("${model.text}",${tl})))`;
@@ -41,8 +41,8 @@ const getTimePeriodFormula = model => {
     return model.formulae[0];
   }
 
-  const range = new Range(model.ref);
-  const { tl } = range;
+  const range = rangeCreate(model.ref);
+  const tl = rangeTl(range);
   switch (model.timePeriod) {
     case "thisWeek":
       return `AND(TODAY()-ROUNDDOWN(${tl},0)<=WEEKDAY(TODAY())-1,ROUNDDOWN(${tl},0)-TODAY()<=7-WEEKDAY(TODAY()))`;

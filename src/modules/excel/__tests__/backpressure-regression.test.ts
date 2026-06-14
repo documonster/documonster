@@ -1,5 +1,9 @@
 import { Writable, PassThrough } from "node:stream";
 
+import { cellSetValue } from "@excel/cell";
+import { createCsvReadStream, writeCsv } from "@excel/csv-bridge";
+import { Workbook, Worksheet } from "@excel/index";
+import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Backpressure regression tests for streaming xlsx writers.
  *
@@ -12,7 +16,7 @@ import { Writable, PassThrough } from "node:stream";
  */
 import { describe, it, expect } from "vitest";
 
-import { Workbook, WorkbookWriter } from "../../../index";
+import { WorkbookWriter } from "../../../index";
 
 /**
  * Build a sink that completes each write asynchronously after yielding the
@@ -71,9 +75,9 @@ describe("streaming write backpressure", () => {
     for (let i = 1; i <= ROWS; i++) {
       const row = ws.getRow(i);
       for (let c = 1; c <= 10; c++) {
-        row.getCell(c).value = big;
+        cellSetValue(rowGetCell(row, c), big);
       }
-      row.commit();
+      rowCommit(row);
     }
     ws.commit();
 
@@ -102,8 +106,8 @@ describe("streaming write backpressure", () => {
     const ws = wb.addWorksheet("Sheet");
 
     for (let i = 1; i <= 5_000; i++) {
-      ws.getRow(i).getCell(1).value = `row-${i}`;
-      ws.getRow(i).commit();
+      cellSetValue(rowGetCell(ws.getRow(i), 1), `row-${i}`);
+      rowCommit(ws.getRow(i));
     }
     ws.commit();
 
@@ -113,11 +117,11 @@ describe("streaming write backpressure", () => {
     await Promise.race([wb.commit(), timer]);
   }, 60_000);
 
-  it("Workbook.writeCsv(stream) does not deadlock with a slow sink", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
+  it("writeCsv(Workbook, stream) does not deadlock with a slow sink", async () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
     for (let i = 1; i <= 10_000; i++) {
-      ws.addRow([`row-${i}`, i, i * 3.14]);
+      Worksheet.addRow(ws, [`row-${i}`, i, i * 3.14]);
     }
 
     const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
@@ -126,7 +130,7 @@ describe("streaming write backpressure", () => {
       setTimeout(() => reject(new Error("writeCsv deadlocked")), 60_000);
     });
 
-    await Promise.race([wb.writeCsv(slowSink) as Promise<void>, timer]);
+    await Promise.race([writeCsv(wb, slowSink) as Promise<void>, timer]);
   }, 120_000);
 
   it("WorkbookWriter rejects with the original sink error (not silently 'success')", async () => {
@@ -151,8 +155,8 @@ describe("streaming write backpressure", () => {
     const wb = new WorkbookWriter({ stream: erroringSink, trueStreaming: true });
     const ws = wb.addWorksheet("Data");
     for (let i = 1; i <= 10_000; i++) {
-      ws.getRow(i).getCell(1).value = "x".repeat(200);
-      ws.getRow(i).commit();
+      cellSetValue(rowGetCell(ws.getRow(i), 1), "x".repeat(200));
+      rowCommit(ws.getRow(i));
     }
     ws.commit();
 
@@ -179,18 +183,18 @@ describe("streaming write backpressure", () => {
     expect(msg).toContain("sink boom");
   }, 60_000);
 
-  it("Workbook.createCsvReadStream() honors downstream backpressure", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
+  it("createCsvReadStream(Workbook) honors downstream backpressure", async () => {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
     // Build enough rows that without backpressure the formatter would buffer
     // megabytes before the slow sink could drain.
     for (let i = 1; i <= 20_000; i++) {
-      ws.addRow([`row-${i}`, i, "x".repeat(200)]);
+      Worksheet.addRow(ws, [`row-${i}`, i, "x".repeat(200)]);
     }
 
     const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
 
-    const csvStream = wb.createCsvReadStream();
+    const csvStream = createCsvReadStream(wb);
     csvStream.pipe(slowSink as any);
 
     const timer = new Promise<never>((_, reject) => {
@@ -213,11 +217,11 @@ describe("streaming write backpressure", () => {
     // worksheet with a gap (rows 1, 3, 5 populated; 2 and 4 empty) and
     // verify both `writeCsv(stream)` and `createCsvReadStream()` emit the
     // right number of lines.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sparse");
-    ws.getRow(1).getCell(1).value = "row-1";
-    ws.getRow(3).getCell(1).value = "row-3";
-    ws.getRow(5).getCell(1).value = "row-5";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sparse");
+    cellSetValue(rowGetCell(Worksheet.getRow(ws, 1), 1), "row-1");
+    cellSetValue(rowGetCell(Worksheet.getRow(ws, 3), 1), "row-3");
+    cellSetValue(rowGetCell(Worksheet.getRow(ws, 5), 1), "row-5");
 
     // Path 1: writeCsv(stream) → exercises _writeCsvStream
     const collector1: string[] = [];
@@ -227,7 +231,7 @@ describe("streaming write backpressure", () => {
         cb();
       }
     });
-    await (wb.writeCsv(sink) as Promise<void>);
+    await (writeCsv(wb, sink) as Promise<void>);
     const csv1 = collector1.join("");
     // Strip any trailing newline so we get one entry per row, including
     // empty rows that the formatter renders as the empty string between
@@ -238,7 +242,7 @@ describe("streaming write backpressure", () => {
 
     // Path 2: createCsvReadStream() → exercises iterateWorksheetRows on
     // the read-stream side
-    const csvStream = wb.createCsvReadStream();
+    const csvStream = createCsvReadStream(wb);
     const chunks: Buffer[] = [];
     await new Promise<void>((resolve, reject) => {
       csvStream.on("data", (chunk: Uint8Array) => chunks.push(Buffer.from(chunk)));

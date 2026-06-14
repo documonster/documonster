@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/cell";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
+
 /**
  * Example: Logical & Conditional Formulas
  *
@@ -8,52 +13,51 @@
  * - SWITCH
  * - CHOOSE
  */
-import { Workbook } from "../../../index";
 import { installFormulaEngine } from "../index";
 
 installFormulaEngine();
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Logic");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Logic");
 
-ws.getCell("A1").value = 85;
-ws.getCell("A2").value = "OK";
-ws.getCell("A3").value = 0;
-ws.getCell("A4").value = 42;
+Cell.setValue(ws, "A1", 85);
+Cell.setValue(ws, "A2", "OK");
+Cell.setValue(ws, "A3", 0);
+Cell.setValue(ws, "A4", 42);
 
 // Basic IF
-ws.getCell("B1").value = { formula: 'IF(A1>=60, "pass", "fail")' };
+Cell.setValue(ws, "B1", { formula: 'IF(A1>=60, "pass", "fail")' });
 
 // Nested IF → grade letter
-ws.getCell("B2").value = {
+Cell.setValue(ws, "B2", {
   formula: 'IF(A1>=90,"A",IF(A1>=80,"B",IF(A1>=70,"C",IF(A1>=60,"D","F"))))'
-};
+});
 
 // Same idea with IFS — cleaner
-ws.getCell("B3").value = {
+Cell.setValue(ws, "B3", {
   formula: 'IFS(A1>=90,"A",A1>=80,"B",A1>=70,"C",A1>=60,"D",TRUE,"F")'
-};
+});
 
 // AND / OR / NOT
-ws.getCell("C1").value = { formula: "AND(A1>=60, A1<=100)" }; // TRUE
-ws.getCell("C2").value = { formula: 'OR(A2="OK", A2="YES")' }; // TRUE
-ws.getCell("C3").value = { formula: "NOT(A3)" }; // TRUE  (A3 is 0 → FALSE)
+Cell.setValue(ws, "C1", { formula: "AND(A1>=60, A1<=100)" }); // TRUE
+Cell.setValue(ws, "C2", { formula: 'OR(A2="OK", A2="YES")' }); // TRUE
+Cell.setValue(ws, "C3", { formula: "NOT(A3)" }); // TRUE  (A3 is 0 → FALSE)
 
 // IFERROR / IFNA guard against #DIV/0!, #N/A, etc.
-ws.getCell("D1").value = { formula: 'IFERROR(A4/A3, "n/a")' }; // "n/a"
-ws.getCell("D2").value = { formula: 'IFNA(VLOOKUP("x", A1:A4, 1, FALSE), "not found")' };
+Cell.setValue(ws, "D1", { formula: 'IFERROR(A4/A3, "n/a")' }); // "n/a"
+Cell.setValue(ws, "D2", { formula: 'IFNA(VLOOKUP("x", A1:A4, 1, FALSE), "not found")' });
 
 // SWITCH — dispatch on equality
-ws.getCell("E1").value = {
+Cell.setValue(ws, "E1", {
   formula: 'SWITCH(A2, "OK", 1, "WARN", 2, "ERR", 3, 0)'
-}; // 1
+}); // 1
 
 // CHOOSE — index-based dispatch (1-based)
-ws.getCell("E2").value = { formula: 'CHOOSE(2, "low", "mid", "high")' }; // "mid"
+Cell.setValue(ws, "E2", { formula: 'CHOOSE(2, "low", "mid", "high")' }); // "mid"
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 for (const addr of ["B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "E1", "E2"]) {
-  const c = ws.getCell(addr);
-  console.log(`${addr}  ${String(c.formula).padEnd(60)}  = ${JSON.stringify(c.result)}`);
+  const c = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(c)).padEnd(60)}  = ${JSON.stringify(cellResult(c))}`);
 }

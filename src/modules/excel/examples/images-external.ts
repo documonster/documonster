@@ -39,8 +39,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
+import { addWorkbookImage } from "@excel/workbook-core";
+import { addImage, addWatermark } from "@excel/worksheet";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,26 +64,29 @@ const REMOTE_URL =
 // ---------------------------------------------------------------------------
 // 1. A workbook with EXTERNAL (linked) images — no bytes embedded.
 // ---------------------------------------------------------------------------
-const wb = new Workbook();
-const ws = wb.addWorksheet("linked-images");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "linked-images");
 
-ws.getCell("A1").value = "Linked images are referenced, not embedded — the file stays small.";
-ws.getCell("A2").value =
-  "Left: local file:// link (renders here). Right: https link (Excel blocks auto-download).";
+Cell.setValue(ws, "A1", "Linked images are referenced, not embedded — the file stays small.");
+Cell.setValue(
+  ws,
+  "A2",
+  "Left: local file:// link (renders here). Right: https link (Excel blocks auto-download)."
+);
 
 // (a) A linked picture from a REAL local file — this one displays on this machine.
-const localLinkId = wb.addImage({ extension: "png", link: LOCAL_FILE_URL });
-ws.addImage(localLinkId, "B4:E11");
+const localLinkId = addWorkbookImage(wb, { extension: "png", link: LOCAL_FILE_URL });
+addImage(ws, localLinkId, "B4:E11");
 
 // (b) A linked picture from an http(s) URL — valid rel, but Excel won't fetch it.
-const urlImageId = wb.addImage({ extension: "png", link: REMOTE_URL });
-ws.addImage(urlImageId, "G4:J11");
+const urlImageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
+addImage(ws, urlImageId, "G4:J11");
 
 // (c) A linked overlay watermark on a second sheet (transparency via opacity).
-const wmSheet = wb.addWorksheet("linked-watermark");
-wmSheet.getCell("A1").value = "This sheet has a linked overlay watermark.";
-const wmImageId = wb.addImage({ extension: "png", link: LOCAL_FILE_URL });
-wmSheet.addWatermark({ imageId: wmImageId, mode: "overlay", opacity: 0.15 });
+const wmSheet = Workbook.addWorksheet(wb, "linked-watermark");
+Cell.setValue(wmSheet, "A1", "This sheet has a linked overlay watermark.");
+const wmImageId = addWorkbookImage(wb, { extension: "png", link: LOCAL_FILE_URL });
+addWatermark(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 
 // The following would THROW — background and header watermarks must be embedded:
 //   wmSheet.addWatermark({ imageId: wmImageId, mode: "header" });
@@ -92,7 +96,7 @@ wmSheet.addWatermark({ imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   console.log("Done. Wrote linked-image workbook to:", filename);
   console.log("Time taken (us):", stopwatch.microseconds);
 } catch (error) {
@@ -103,11 +107,14 @@ try {
 // ---------------------------------------------------------------------------
 // 2. Size comparison: embedded vs linked.
 // ---------------------------------------------------------------------------
-const embeddedWb = new Workbook();
-const embeddedWs = embeddedWb.addWorksheet("embedded");
-const embeddedId = embeddedWb.addImage({ buffer: fs.readFileSync(localPng), extension: "png" });
-embeddedWs.addImage(embeddedId, "B3:E10");
-const embeddedBytes = new Uint8Array(await embeddedWb.xlsx.writeBuffer());
+const embeddedWb = Workbook.create();
+const embeddedWs = Workbook.addWorksheet(embeddedWb, "embedded");
+const embeddedId = addWorkbookImage(embeddedWb, {
+  buffer: fs.readFileSync(localPng),
+  extension: "png"
+});
+addImage(embeddedWs, embeddedId, "B3:E10");
+const embeddedBytes = new Uint8Array(await Workbook.toXlsxBuffer(embeddedWb));
 
 const linkedBytes = fs.statSync(filename).size;
 console.log("");

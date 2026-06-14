@@ -1,27 +1,28 @@
 import { readFileSync } from "fs";
 
+import { Workbook } from "@excel/index";
+import { getWorksheets } from "@excel/workbook";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
 describe("DataValidations", () => {
   it("reads a workbook with dataValidation missing type", async () => {
-    const wb = new Workbook();
-    await wb.xlsx.readFile(excelTestDataPath("data-validation-missing-type.xlsx"));
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, excelTestDataPath("data-validation-missing-type.xlsx"));
 
     // Should load without error and have at least one worksheet
-    expect(wb.worksheets.length).toBeGreaterThan(0);
+    expect(getWorksheets(wb).length).toBeGreaterThan(0);
   });
 
   it("writes a full-column validation without throwing", async () => {
     const TEST_XLSX_FILE_NAME = testFilePath("data-validation-full-column.test");
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
     const range = "A2:A1048576";
     ws.dataValidations.model[range] = {
@@ -33,13 +34,13 @@ describe("DataValidations", () => {
       type: "list"
     };
 
-    await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
-    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
+    await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
 
     // Read back and verify validation survived
-    const wb2 = new Workbook();
-    await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     const dvKeys = Object.keys(ws2.dataValidations.model);
     expect(dvKeys.length).toBe(1);
     expect(ws2.dataValidations.model[dvKeys[0]]?.type).toBe("list");
@@ -48,8 +49,8 @@ describe("DataValidations", () => {
   it("reads and writes data validations", async () => {
     const TEST_XLSX_FILE_NAME = testFilePath("pr-1204.data-validations.test");
 
-    const wb = new Workbook();
-    await wb.xlsx.readFile(excelTestDataPath("data-validation-text-length.xlsx"));
+    const wb = Workbook.create();
+    await Workbook.readXlsxFile(wb, excelTestDataPath("data-validation-text-length.xlsx"));
 
     const expected = {
       E1: {
@@ -68,30 +69,30 @@ describe("DataValidations", () => {
       }
     };
 
-    const ws = wb.getWorksheet(1);
+    const ws = Workbook.getWorksheet(wb, 1)!;
     expect(ws!.dataValidations.model).toEqual(expected);
 
-    await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
-    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
+    await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
   });
 
   describe("ignoreNodes", () => {
     it("readFile ignores dataValidations without blowing up memory", async () => {
-      const wb = new Workbook();
-      await wb.xlsx.readFile(excelTestDataPath("data-validations-large.xlsx"), {
+      const wb = Workbook.create();
+      await Workbook.readXlsxFile(wb, excelTestDataPath("data-validations-large.xlsx"), {
         ignoreNodes: ["dataValidations"]
       });
       // Should load successfully and have worksheets, but no data validations
-      expect(wb.worksheets.length).toBeGreaterThan(0);
+      expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
 
     it("load(buffer) ignores dataValidations without blowing up memory", async () => {
       const buffer = readFileSync(excelTestDataPath("data-validations-large.xlsx"));
-      const wb = new Workbook();
-      await wb.xlsx.load(buffer, {
+      const wb = Workbook.create();
+      await Workbook.loadXlsx(wb, buffer, {
         ignoreNodes: ["dataValidations"]
       });
-      expect(wb.worksheets.length).toBeGreaterThan(0);
+      expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
   });
 });

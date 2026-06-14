@@ -1,3 +1,4 @@
+import { type RangeData, rangeRange } from "@excel/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 class DimensionXform extends BaseXform {
@@ -7,9 +8,10 @@ class DimensionXform extends BaseXform {
     return "dimension";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: any, model: string | RangeData | undefined): void {
     if (model) {
-      xmlStream.leafNode("dimension", { ref: model });
+      const ref = typeof model === "string" ? model : rangeRange(model);
+      xmlStream.leafNode("dimension", { ref });
     }
   }
 

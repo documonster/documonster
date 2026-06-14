@@ -18,7 +18,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -66,13 +67,13 @@ const data: ReferenceFile = JSON.parse(raw);
  * reference examples (they use either literal arrays or no refs).
  */
 function evaluate(formula: string): unknown {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("S");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "S");
   // Strip leading '=' to match the { formula: ... } API convention.
   const body = formula.startsWith("=") ? formula.slice(1) : formula;
-  ws.getCell("A1").value = { formula: body, result: 0 };
-  wb.calculateFormulas();
-  return ws.getCell("A1").result;
+  Cell.setValue(ws, "A1", { formula: body, result: 0 });
+  calculateFormulas(wb);
+  return Cell.getResult(ws, "A1");
 }
 
 /** Distinguish expected-value shapes. */

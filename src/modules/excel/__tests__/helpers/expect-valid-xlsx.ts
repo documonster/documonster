@@ -4,7 +4,7 @@
  *
  * Usage:
  *
- *   const buffer = await wb.xlsx.writeBuffer();
+ *   const buffer = await Workbook.toXlsxBuffer(wb);
  *   await expectValidXlsx(buffer);
  *
  * The helper accepts the output of `writeBuffer()` directly
@@ -18,8 +18,10 @@
  * OOXML conformance audit.
  */
 
+import { Workbook } from "@excel/index";
 import type { OoxmlValidateOptions } from "@excel/utils/ooxml-validator";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import type { WorkbookData } from "@excel/workbook-core";
 import { expect } from "vitest";
 
 export interface ExpectValidXlsxOptions extends OoxmlValidateOptions {
@@ -66,10 +68,10 @@ export async function expectValidXlsx(
  * ```
  */
 export async function expectValidWorkbook(
-  workbook: { xlsx: { writeBuffer: () => Promise<ArrayBuffer> } },
+  workbook: WorkbookData,
   options: ExpectValidXlsxOptions = {}
 ): Promise<Uint8Array> {
-  const buffer = await workbook.xlsx.writeBuffer();
+  const buffer = await Workbook.toXlsxBuffer(workbook);
   const bytes = new Uint8Array(buffer);
   await expectValidXlsx(bytes, options);
   return bytes;

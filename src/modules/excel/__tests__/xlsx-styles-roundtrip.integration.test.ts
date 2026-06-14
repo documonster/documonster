@@ -1,25 +1,25 @@
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { getUniqueTestFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("xlsx styles roundtrip", () => {
   it("writes and reads common formatting", async () => {
     const filename = getUniqueTestFilePath(import.meta.url);
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("blort");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "blort");
 
-    ws.columns = [
+    Worksheet.setColumns(ws, [
       { header: "Col 1", key: "key", width: 25 },
       { header: "Col 2", key: "name", width: 32 },
       { header: "Col 3", key: "age" }
-    ];
+    ]);
 
-    ws.getColumn(9).hidden = true;
-    ws.getCell("A16").value = "hidden";
-    ws.getRow(16).hidden = true;
+    Column.setHidden(ws, 9, true);
+    Cell.setValue(ws, "A16", "hidden");
+    Row.setHidden(ws, 16, true);
 
     const fonts = {
       comicSansUdB16: {
@@ -40,59 +40,59 @@ describe("xlsx styles roundtrip", () => {
       }
     };
 
-    ws.getCell("A2").value = 7;
-    ws.getCell("B2").value = "Hello, World!";
-    ws.getCell("B2").font = fonts.comicSansUdB16;
-    ws.getCell("B2").border = borders.thin;
+    Cell.setValue(ws, "A2", 7);
+    Cell.setValue(ws, "B2", "Hello, World!");
+    Cell.setStyle(ws, "B2", { font: fonts.comicSansUdB16 });
+    Cell.setStyle(ws, "B2", { border: borders.thin });
 
-    ws.getCell("C2").value = -5.55;
-    ws.getCell("C2").numFmt = "'£'#,##0.00;[Red]-'£'#,##0.00";
+    Cell.setValue(ws, "C2", -5.55);
+    Cell.setStyle(ws, "C2", { numFmt: "'£'#,##0.00;[Red]-'£'#,##0.00" });
 
-    ws.getCell("D2").value = new Date("2020-01-02T00:00:00.000Z");
-    ws.getCell("D2").numFmt = "d-mmm-yyyy";
+    Cell.setValue(ws, "D2", new Date("2020-01-02T00:00:00.000Z"));
+    Cell.setStyle(ws, "D2", { numFmt: "d-mmm-yyyy" });
 
-    ws.getCell("F2").value = true;
-    ws.getCell("G2").value = { error: "#N/A" };
+    Cell.setValue(ws, "F2", true);
+    Cell.setValue(ws, "G2", { error: "#N/A" });
 
-    ws.getCell("C5").value = { formula: "A2", result: 7 };
+    Cell.setValue(ws, "C5", { formula: "A2", result: 7 });
 
-    ws.getRow(11).height = 40;
-    ws.getCell(11, 1).value = "Top Left";
-    ws.getCell(11, 1).alignment = { horizontal: "left", vertical: "top" };
+    Row.setHeight(ws, 11, 40);
+    Cell.setValue(ws, 11, 1, "Top Left");
+    Cell.setStyle(ws, 11, 1, { alignment: { horizontal: "left", vertical: "top" } });
 
-    await wb.xlsx.writeFile(filename);
-    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
+    await Workbook.writeXlsx(wb, filename);
+    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.readFile(filename);
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxFile(wb2, filename);
 
-    const ws2 = wb2.getWorksheet("blort")!;
+    const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
 
-    expect(ws2.getColumn(1).width).toBe(25);
-    expect(ws2.getColumn(9).hidden).toBe(true);
-    expect(ws2.getRow(16).hidden).toBe(true);
+    expect(Column.getWidth(ws2, 1)).toBe(25);
+    expect(Column.getHidden(ws2, 9)).toBe(true);
+    expect(Row.getHidden(ws2, 16)).toBe(true);
 
-    expect(ws2.getCell("A2").value).toBe(7);
-    expect(ws2.getCell("B2").value).toBe("Hello, World!");
-    expect(ws2.getCell("B2").font).toMatchObject(fonts.comicSansUdB16);
-    expect(ws2.getCell("B2").border).toMatchObject(borders.thin);
+    expect(Cell.getValue(ws2, "A2")).toBe(7);
+    expect(Cell.getValue(ws2, "B2")).toBe("Hello, World!");
+    expect(Cell.getStyle(ws2, "B2").font).toMatchObject(fonts.comicSansUdB16);
+    expect(Cell.getStyle(ws2, "B2").border).toMatchObject(borders.thin);
 
-    expect(ws2.getCell("C2").value).toBe(-5.55);
-    expect(ws2.getCell("C2").numFmt).toBe("'£'#,##0.00;[Red]-'£'#,##0.00");
+    expect(Cell.getValue(ws2, "C2")).toBe(-5.55);
+    expect(Cell.getStyle(ws2, "C2").numFmt).toBe("'£'#,##0.00;[Red]-'£'#,##0.00");
 
-    const d2 = ws2.getCell("D2").value;
+    const d2 = Cell.getValue(ws2, "D2");
     expect(d2 instanceof Date || typeof d2 === "number").toBe(true);
-    expect(ws2.getCell("D2").numFmt).toBe("d-mmm-yyyy");
+    expect(Cell.getStyle(ws2, "D2").numFmt).toBe("d-mmm-yyyy");
 
-    expect(ws2.getCell("F2").value).toBe(true);
-    expect((ws2.getCell("G2").value as any).error).toBe("#N/A");
+    expect(Cell.getValue(ws2, "F2")).toBe(true);
+    expect((Cell.getValue(ws2, "G2") as any).error).toBe("#N/A");
 
-    expect((ws2.getCell("C5").value as any).formula).toBe("A2");
+    expect((Cell.getValue(ws2, "C5") as any).formula).toBe("A2");
 
-    expect(ws2.getRow(11).height).toBe(40);
-    expect(ws2.getCell(11, 1).value).toBe("Top Left");
-    expect(ws2.getCell(11, 1).alignment).toMatchObject({
+    expect(Row.getHeight(ws2, 11)).toBe(40);
+    expect(Cell.getValue(ws2, 11, 1)).toBe("Top Left");
+    expect(Cell.getStyle(ws2, 11, 1).alignment).toMatchObject({
       horizontal: "left",
       vertical: "top"
     });
@@ -103,29 +103,29 @@ describe("xlsx styles roundtrip", () => {
   it("styled cells retain style after roundtrip", async () => {
     const filename = getUniqueTestFilePath(import.meta.url);
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.getCell("A1").value = "Plain text";
+    Cell.setValue(ws, "A1", "Plain text");
 
-    ws.getCell("B1").value = "Styled text";
-    ws.getCell("B1").font = { bold: true };
+    Cell.setValue(ws, "B1", "Styled text");
+    Cell.setStyle(ws, "B1", { font: { bold: true } });
 
-    await wb.xlsx.writeFile(filename);
-    await expectValidXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
+    await Workbook.writeXlsx(wb, filename);
+    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.readFile(filename);
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxFile(wb2, filename);
 
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(ws2).toBeTruthy();
 
     // B1 should retain its bold style
-    expect(ws2.getCell("B1").font).toMatchObject({ bold: true });
+    expect(Cell.getStyle(ws2, "B1").font).toMatchObject({ bold: true });
 
     // A1 has no explicit style, so it may or may not have style info
     // (depending on whether the file format includes s="0" for default style)
-    const a1Value = ws2.getCell("A1").value;
+    const a1Value = Cell.getValue(ws2, "A1");
     expect(a1Value).toBe("Plain text");
   });
 });

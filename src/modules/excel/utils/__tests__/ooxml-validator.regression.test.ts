@@ -1,10 +1,10 @@
 import { ZipArchive } from "@archive";
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
+import { Cell, Workbook } from "@excel/index";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
+import { addFormCheckbox } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { Workbook } from "../../../../index";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -38,13 +38,13 @@ function rebuildZip(entries: Map<string, ExtractedFile>): Uint8Array {
 }
 
 async function makeWorkbookWithSingleCheckbox(): Promise<Uint8Array> {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-  ws.addFormCheckbox("J2:K3", { link: "D6", checked: false, text: "J2:K3" });
-  ws.getCell("D6").value = false;
+  addFormCheckbox(ws, "J2:K3", { link: "D6", checked: false, text: "J2:K3" });
+  Cell.setValue(ws, "D6", false);
 
-  return wb.xlsx.writeBuffer();
+  return Workbook.toXlsxBuffer(wb);
 }
 
 describe("OOXML validator regressions (legacy form controls)", () => {

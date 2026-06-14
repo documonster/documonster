@@ -1,3 +1,4 @@
+import { ZipParser } from "@archive/unzip/zip-parser";
 /**
  * Integration test for external workbook links ([Book]Sheet!Ref formulas).
  *
@@ -23,15 +24,14 @@
  * correctly and the file will either open with a "damaged" warning or
  * silently fall back to %USERPROFILE%\Documents.
  */
-
-import { ZipParser } from "@archive/unzip/zip-parser";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
 import { describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
-async function writeAndUnzip(wb: Workbook): Promise<Map<string, string>> {
-  const buf = await wb.xlsx.writeBuffer();
+async function writeAndUnzip(wb: WorkbookData): Promise<Map<string, string>> {
+  const buf = await Workbook.toXlsxBuffer(wb);
   await expectValidXlsx(buf, { label: "external-links writeAndUnzip" });
   const parser = new ZipParser(buf);
   const files = await parser.extractAll();
@@ -47,23 +47,23 @@ async function writeAndUnzip(wb: Workbook): Promise<Map<string, string>> {
 
 describe("external workbook links — end-to-end", () => {
   it("produces a complete externalLink part for a relative filename target", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
     // The user-facing call for external links: declare the external
     // workbook with just its bare filename — Office will resolve this
     // relative to the current workbook's directory.
-    wb.addExternalLink({
+    Workbook.addExternalLink(wb, {
       target: "测试.xlsx",
       sheetNames: ["Sheet1"],
       cachedValues: { Sheet1: { A1: 42 } }
     });
 
     // Formula uses the filename form; the library rewrites it to [1].
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       formula: "[测试.xlsx]Sheet1!A1",
       result: 42
-    };
+    });
 
     const files = await writeAndUnzip(wb);
 
@@ -119,13 +119,13 @@ describe("external workbook links — end-to-end", () => {
     // Users writing `{ formula: "[測試.xlsx]Sheet1!A1" }` without first
     // calling addExternalLink() should still get a valid file. The writer
     // must auto-upsert the missing link and rewrite the formula.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       formula: "[data.xlsx]Summary!B2",
       result: 100
-    };
+    });
 
     const files = await writeAndUnzip(wb);
     expect(files.get("xl/externalLinks/externalLink1.xml")).toBeDefined();
@@ -136,12 +136,12 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("reuses the same link when multiple formulas reference the same file", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    ws.getCell("A1").value = { formula: "[src.xlsx]S1!A1", result: 1 };
-    ws.getCell("A2").value = { formula: "[src.xlsx]S1!A2", result: 2 };
-    ws.getCell("A3").value = { formula: "[src.xlsx]S2!A1", result: 3 };
+    Cell.setValue(ws, "A1", { formula: "[src.xlsx]S1!A1", result: 1 });
+    Cell.setValue(ws, "A2", { formula: "[src.xlsx]S1!A2", result: 2 });
+    Cell.setValue(ws, "A3", { formula: "[src.xlsx]S2!A1", result: 3 });
 
     const files = await writeAndUnzip(wb);
 
@@ -156,11 +156,11 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("handles multiple external workbooks with stable indices", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    ws.getCell("A1").value = { formula: "[a.xlsx]S!A1", result: 1 };
-    ws.getCell("A2").value = { formula: "[b.xlsx]S!A1", result: 2 };
+    Cell.setValue(ws, "A1", { formula: "[a.xlsx]S!A1", result: 1 });
+    Cell.setValue(ws, "A2", { formula: "[b.xlsx]S!A1", result: 2 });
 
     const files = await writeAndUnzip(wb);
     expect(files.has("xl/externalLinks/externalLink1.xml")).toBe(true);
@@ -172,13 +172,13 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("preserves quoted-sheet external refs on round trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       formula: "'[a.xlsx]Has Space'!A1",
       result: 1
-    };
+    });
 
     const files = await writeAndUnzip(wb);
     const sheetXml = files.get("xl/worksheets/sheet1.xml")!;
@@ -187,9 +187,9 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("round-trips cached values through read → write → read", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    wb.addExternalLink({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Workbook.addExternalLink(wb, {
       target: "src.xlsx",
       sheetNames: ["Sheet1"],
       cachedValues: {
@@ -201,13 +201,13 @@ describe("external workbook links — end-to-end", () => {
         }
       }
     });
-    ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 123 };
+    Cell.setValue(ws, "A1", { formula: "[src.xlsx]Sheet1!A1", result: 123 });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "cached-values roundtrip" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks).toHaveLength(1);
     const link = wb2.externalLinks[0];
@@ -220,10 +220,10 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("emits no externalLinks artifacts when the workbook has no external refs", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    ws.getCell("A1").value = 1;
-    ws.getCell("A2").value = { formula: "A1+1", result: 2 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Cell.setValue(ws, "A1", 1);
+    Cell.setValue(ws, "A2", { formula: "A1+1", result: 2 });
 
     const files = await writeAndUnzip(wb);
     for (const name of files.keys()) {
@@ -236,12 +236,12 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("rejects overflow numeric refs gracefully (they stay in the formula, no link invented)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
     // Formula mentions [3] but the workbook only has no externalLinks.
     // We leave the formula as-is and emit no spurious link; Excel will
     // surface the error at load time (same as before).
-    ws.getCell("A1").value = { formula: "[3]Sheet1!A1+1", result: 0 };
+    Cell.setValue(ws, "A1", { formula: "[3]Sheet1!A1+1", result: 0 });
 
     const files = await writeAndUnzip(wb);
     expect(files.has("xl/externalLinks/externalLink1.xml")).toBe(false);
@@ -253,14 +253,14 @@ describe("external workbook links — end-to-end", () => {
   // resulting xlsx in tmp/ so it can be opened manually in Office/WPS for a
   // final visual check (the test itself only asserts the on-disk structure).
   it("writes a valid external link with Chinese filename", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("XYZ");
-    ws.getCell("A1").value = {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "XYZ");
+    Cell.setValue(ws, "A1", {
       formula: "[测试.xlsx]Sheet1!A1",
       result: 0
-    };
+    });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "external-link-chinese" });
 
     const { writeFile, mkdir } = await import("node:fs/promises");
@@ -269,8 +269,8 @@ describe("external workbook links — end-to-end", () => {
 
     // Reload and verify — the file we just wrote must be a valid xlsx
     // that excelts itself can read back.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks).toHaveLength(1);
     expect(wb2.externalLinks[0].target).toBe("测试.xlsx");
@@ -279,21 +279,21 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("preserves absolute file:// URLs on round trip", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    wb.addExternalLink({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Workbook.addExternalLink(wb, {
       target: "file:///Users/test/data.xlsx",
       sheetNames: ["Sheet1"]
     });
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       formula: "[file:///Users/test/data.xlsx]Sheet1!A1",
       result: 0
-    };
+    });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "absolute-file-url" });
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks[0].target).toBe("file:///Users/test/data.xlsx");
   });
@@ -302,18 +302,18 @@ describe("external workbook links — end-to-end", () => {
     // Sanity check for the `upsertSheet` logic: three formulas referencing
     // three sheets of the same external file should produce a single link
     // with all three sheet names in declaration order.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    ws.getCell("A1").value = { formula: "[ref.xlsx]Alpha!A1", result: 1 };
-    ws.getCell("A2").value = { formula: "[ref.xlsx]Beta!A1", result: 2 };
-    ws.getCell("A3").value = { formula: "[ref.xlsx]Gamma!A1", result: 3 };
-    ws.getCell("A4").value = { formula: "[ref.xlsx]Alpha!B1", result: 4 }; // dup
+    Cell.setValue(ws, "A1", { formula: "[ref.xlsx]Alpha!A1", result: 1 });
+    Cell.setValue(ws, "A2", { formula: "[ref.xlsx]Beta!A1", result: 2 });
+    Cell.setValue(ws, "A3", { formula: "[ref.xlsx]Gamma!A1", result: 3 });
+    Cell.setValue(ws, "A4", { formula: "[ref.xlsx]Alpha!B1", result: 4 }); // dup
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "multi-sheet external ref" });
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks).toHaveLength(1);
     expect(wb2.externalLinks[0].sheetNames).toEqual(["Alpha", "Beta", "Gamma"]);
@@ -325,23 +325,23 @@ describe("external workbook links — end-to-end", () => {
     // fixed-point stable: the second writeBuffer() sees formulas already
     // in `[N]Sheet!` numeric form and resolves them against the same
     // cached entry, producing identical output.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 1 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Cell.setValue(ws, "A1", { formula: "[src.xlsx]Sheet1!A1", result: 1 });
 
-    const buf1 = await wb.xlsx.writeBuffer();
+    const buf1 = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf1, { label: "repeated-writeBuffer pass 1" });
-    const buf2 = await wb.xlsx.writeBuffer();
+    const buf2 = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf2, { label: "repeated-writeBuffer pass 2" });
 
     // Public API stays empty (no user-declared links).
     expect(wb.externalLinks).toHaveLength(0);
 
     // Both buffers produce identical reload results with the expected link.
-    const wb1 = new Workbook();
-    await wb1.xlsx.load(buf1);
-    const wbb = new Workbook();
-    await wbb.xlsx.load(buf2);
+    const wb1 = Workbook.create();
+    await Workbook.loadXlsx(wb1, buf1);
+    const wbb = Workbook.create();
+    await Workbook.loadXlsx(wbb, buf2);
     expect(wb1.externalLinks).toHaveLength(1);
     expect(wbb.externalLinks).toHaveLength(1);
     expect(wb1.externalLinks[0].target).toBe("src.xlsx");
@@ -354,18 +354,18 @@ describe("external workbook links — end-to-end", () => {
     // wb.externalLinks remains empty because the auto-discovered entry
     // lives on a private cache — the public list only reflects what the
     // user explicitly declared.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 0 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Cell.setValue(ws, "A1", { formula: "[src.xlsx]Sheet1!A1", result: 0 });
 
     expect(wb.externalLinks).toHaveLength(0);
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "auto-discovered external link" });
     expect(wb.externalLinks).toHaveLength(0);
 
     // Reading it back, though, surfaces the link — the file is complete.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
     expect(wb2.externalLinks).toHaveLength(1);
     expect(wb2.externalLinks[0].target).toBe("src.xlsx");
   });
@@ -374,21 +374,21 @@ describe("external workbook links — end-to-end", () => {
     // When the user declared a link, the writer must leave the user's
     // ExternalLinkModel object intact: no rId assignment, no sheetNames
     // growth, no index renumbering that the user can observe.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    const link = wb.addExternalLink({
+    const link = Workbook.addExternalLink(wb, {
       target: "src.xlsx",
       sheetNames: ["Sheet1"]
     });
     const originalSnapshot = JSON.parse(JSON.stringify(link));
 
-    ws.getCell("A1").value = { formula: "[src.xlsx]Sheet1!A1", result: 0 };
+    Cell.setValue(ws, "A1", { formula: "[src.xlsx]Sheet1!A1", result: 0 });
     // Reference a sheet the user never declared — auto-discovery must
     // not inflate the user's sheetNames either.
-    ws.getCell("A2").value = { formula: "[src.xlsx]OtherSheet!A1", result: 0 };
+    Cell.setValue(ws, "A2", { formula: "[src.xlsx]OtherSheet!A1", result: 0 });
 
-    const mutatedBuf = await wb.xlsx.writeBuffer();
+    const mutatedBuf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(mutatedBuf, { label: "no-user-link-mutation" });
 
     expect(link.rId).toBeUndefined();
@@ -401,16 +401,16 @@ describe("external workbook links — end-to-end", () => {
   // (`xlsx.load(buffer)` → `loadFromFiles`). Both must reconcile
   // externalLinks correctly; only the buffer path was covered above.
   it("reconstructs externalLinks via the Node stream read path", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    wb.addExternalLink({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Workbook.addExternalLink(wb, {
       target: "ref.xlsx",
       sheetNames: ["Data"],
       cachedValues: { Data: { A1: 777 } }
     });
-    ws.getCell("A1").value = { formula: "[ref.xlsx]Data!A1", result: 777 };
+    Cell.setValue(ws, "A1", { formula: "[ref.xlsx]Data!A1", result: 777 });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "stream-read-path" });
 
     // Feed the bytes through a Node Readable to exercise the streaming
@@ -418,8 +418,8 @@ describe("external workbook links — end-to-end", () => {
     const { Readable } = await import("node:stream");
     const stream = Readable.from([Buffer.from(buf)]);
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.read(stream);
+    const wb2 = Workbook.create();
+    await Workbook.readXlsxStream(wb2, stream);
 
     expect(wb2.externalLinks).toHaveLength(1);
     expect(wb2.externalLinks[0].target).toBe("ref.xlsx");
@@ -429,10 +429,10 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("works with addExternalLink() + numeric-form formula [1]Sheet!A1", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
 
-    wb.addExternalLink({
+    Workbook.addExternalLink(wb, {
       target: "src.xlsx",
       sheetNames: ["Sheet1"],
       cachedValues: { Sheet1: { A1: 99 } }
@@ -441,21 +441,21 @@ describe("external workbook links — end-to-end", () => {
     // Write the formula using the numeric form directly — the user already
     // knows the index. The writer must accept it, upsert the sheet onto the
     // write-scoped copy (not the user's object), and produce a valid file.
-    ws.getCell("A1").value = { formula: "[1]Sheet1!A1", result: 99 };
+    Cell.setValue(ws, "A1", { formula: "[1]Sheet1!A1", result: 99 });
     // Reference a sheet the user didn't declare — it should appear in the
     // output but NOT on the user's original sheetNames array.
-    ws.getCell("A2").value = { formula: "[1]Extra!B2", result: 0 };
+    Cell.setValue(ws, "A2", { formula: "[1]Extra!B2", result: 0 });
 
     const originalSheetNames = [...wb.externalLinks[0].sheetNames];
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "numeric-form-formula" });
 
     // User's object must not have been mutated.
     expect(wb.externalLinks[0].sheetNames).toEqual(originalSheetNames);
 
     // Reload and verify both sheets are present in the output.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks).toHaveLength(1);
     expect(wb2.externalLinks[0].target).toBe("src.xlsx");
@@ -464,9 +464,9 @@ describe("external workbook links — end-to-end", () => {
   });
 
   it("round-trips cached error values (t='e') correctly", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Main");
-    wb.addExternalLink({
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Main");
+    Workbook.addExternalLink(wb, {
       target: "errors.xlsx",
       sheetNames: ["Sheet1"],
       cachedValues: {
@@ -481,13 +481,13 @@ describe("external workbook links — end-to-end", () => {
         }
       }
     });
-    ws.getCell("A1").value = { formula: "[errors.xlsx]Sheet1!A1", result: 0 };
+    Cell.setValue(ws, "A1", { formula: "[errors.xlsx]Sheet1!A1", result: 0 });
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "cached-error-values" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
 
     expect(wb2.externalLinks).toHaveLength(1);
     const cached = wb2.externalLinks[0].cachedValues?.Sheet1;

@@ -1,16 +1,17 @@
+import { cellSetValue } from "@excel/cell";
+import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
 describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
   it("should read a workbook from ReadableStream<Uint8Array>", async () => {
     const excelModule = await import("../../../../index.browser");
     const { Workbook, WorkbookReader } = excelModule as any;
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "hello";
-    ws.getCell("A2").value = 42;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    cellSetValue(getCell(ws, "A1"), "hello");
+    cellSetValue(getCell(ws, "A2"), 42);
 
-    const data: Uint8Array = await wb.xlsx.writeBuffer();
+    const data: Uint8Array = await Workbook.toXlsxBuffer(wb);
 
     const webStream = new ReadableStream<Uint8Array>({
       start(controller) {

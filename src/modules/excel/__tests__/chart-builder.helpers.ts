@@ -22,7 +22,8 @@ import type {
   ChartTypeGroup,
   PlotArea
 } from "@excel/chart";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { addChart, getCharts } from "@excel/worksheet";
 import { expect } from "vitest";
 
 const textDecoder = new TextDecoder();
@@ -129,13 +130,14 @@ export function readU32be(bytes: Uint8Array, offset: number): number {
  * fixture each time.
  */
 export function makeRootExportRenderedChartModel(): ChartModel {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
-  ws.addRows([
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
+  Worksheet.addRows(ws, [
     ["A", 10],
     ["B", 20]
   ]);
-  ws.addChart(
+  addChart(
+    ws,
     {
       type: "bar",
       series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }],
@@ -143,7 +145,7 @@ export function makeRootExportRenderedChartModel(): ChartModel {
     },
     "D1:J10"
   );
-  return ws.getCharts()[0].chartModel!;
+  return getCharts(ws)[0].chartModel!;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,13 +187,13 @@ export function ctg(m: ChartModel, idx = 0): ChartTypeGroup {
 
 /** Round-trip: `addChart → write → load → return Chart`. */
 export async function roundTripChart(opts: AddChartOptions) {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
-  ws.getCell("A1").value = "x";
-  ws.addChart(opts, "C1:J15");
-  const buf = await wb.xlsx.writeBuffer();
-  const wb2 = new Workbook();
-  await wb2.xlsx.load(buf);
-  const ws2 = wb2.getWorksheet("Sheet1")!;
-  return ws2.getCharts()[0];
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
+  Cell.setValue(ws, "A1", "x");
+  addChart(ws, opts, "C1:J15");
+  const buf = await Workbook.toXlsxBuffer(wb);
+  const wb2 = Workbook.create();
+  await Workbook.loadXlsx(wb2, buf);
+  const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+  return getCharts(ws2)[0];
 }

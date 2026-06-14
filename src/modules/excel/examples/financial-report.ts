@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 /**
  * Financial Report — a full multi-page corporate financial report workbook.
  *
@@ -32,14 +33,35 @@
  * Usage:
  *   npx tsx src/modules/excel/examples/financial-report.ts
  */
-
-import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import {
+  cellBorder,
+  cellSetAlignment,
+  cellSetBorder,
+  cellSetFill,
+  cellSetFont,
+  cellSetNumFmt,
+  cellSetValue,
+  cellSetDataValidation
+} from "@excel/cell";
 import { type ChartRichText } from "@excel/chart/index";
+import { definedNamesAdd } from "@excel/defined-names";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
+import { getChartsheets, getDefinedNames, getWorksheets } from "@excel/workbook";
+import {
+  addChart,
+  addComboChart,
+  addConditionalFormatting,
+  addWaterfallChart,
+  getCell,
+  getCharts,
+  protect,
+  rowSetValues
+} from "@excel/worksheet";
+import type { WorksheetData } from "@excel/worksheet-core";
 import { excelToPdf } from "@pdf/excel-bridge";
-
-import { Workbook } from "../../../index";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 mkdirSync(OUT_DIR, { recursive: true });
@@ -54,7 +76,7 @@ const CURRENCY_THOUSANDS = '"$"#,##0,_);[Red]("$"#,##0,)';
 const PERCENT = "0.0%;[Red](0.0%)";
 
 async function main(): Promise<void> {
-  const wb = new Workbook();
+  const wb = Workbook.create();
   wb.title = "FY25 Annual Report";
   wb.subject = "Financial Statements";
   wb.creator = "ExcelTS financial-report example";
@@ -65,14 +87,10 @@ async function main(): Promise<void> {
   // Shared styling helpers
   // ---------------------------------------------------------------------------
 
-  const applyHeader = (
-    ws: ReturnType<typeof wb.addWorksheet>,
-    range: string,
-    title: string
-  ): void => {
-    ws.mergeCells(range);
-    const cell = ws.getCell(range.split(":")[0]);
-    cell.value = {
+  const applyHeader = (ws: WorksheetData, range: string, title: string): void => {
+    Worksheet.merge(ws, range);
+    const cell = getCell(ws, range.split(":")[0]);
+    cellSetValue(cell, {
       richText: [
         { text: `${title}\n`, font: { size: 18, bold: true, color: { argb: "FF1F3864" } } },
         {
@@ -80,9 +98,9 @@ async function main(): Promise<void> {
           font: { size: 10, italic: true, color: { argb: "FF7F7F7F" } }
         }
       ]
-    };
-    cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    cell.fill = {
+    });
+    cellSetAlignment(cell, { horizontal: "left", vertical: "middle", wrapText: true });
+    cellSetFill(cell, {
       type: "gradient",
       gradient: "angle",
       degree: 90,
@@ -90,32 +108,32 @@ async function main(): Promise<void> {
         { position: 0, color: { argb: "FFE7F0FA" } },
         { position: 1, color: { argb: "FFFFFFFF" } }
       ]
-    };
+    });
   };
 
-  const applyYearHeader = (ws: ReturnType<typeof wb.addWorksheet>, row: number): void => {
-    ws.getCell(row, 1).value = "Line item";
+  const applyYearHeader = (ws: WorksheetData, row: number): void => {
+    Cell.setValue(ws, row, 1, "Line item");
     YEARS.forEach((y, i) => {
-      ws.getCell(row, 2 + i).value = y;
+      Cell.setValue(ws, row, 2 + i, y);
     });
-    ws.getCell(row, 2 + YEARS.length).value = "YoY %";
-    const headerRow = ws.getRow(row);
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = {
+    Cell.setValue(ws, row, 2 + YEARS.length, "YoY %");
+    const headerRow = Worksheet.getRow(ws, row);
+    rowSetFont(headerRow, { bold: true, color: { argb: "FFFFFFFF" } });
+    rowSetFill(headerRow, {
       type: "pattern",
       pattern: "solid",
       fgColor: { argb: "FF1F3864" }
-    };
-    headerRow.alignment = { horizontal: "center" };
+    });
+    rowSetAlignment(headerRow, { horizontal: "center" });
     headerRow.height = 20;
-    ws.getCell(row, 1).alignment = { horizontal: "left", indent: 1 };
+    Cell.setStyle(ws, row, 1, { alignment: { horizontal: "left", indent: 1 } });
   };
 
   // ---------------------------------------------------------------------------
   // Sheet 1 — Cover / executive summary
   // ---------------------------------------------------------------------------
 
-  const cover = wb.addWorksheet("Cover", {
+  const cover = Workbook.addWorksheet(wb, "Cover", {
     pageSetup: {
       orientation: "portrait",
       paperSize: 9,
@@ -131,24 +149,24 @@ async function main(): Promise<void> {
     },
     views: [{ state: "normal", showGridLines: false, showRowColHeaders: false }]
   });
-  cover.getColumn(1).width = 8;
-  cover.getColumn(2).width = 30;
-  cover.getColumn(3).width = 20;
-  cover.getColumn(4).width = 20;
+  Column.setWidth(cover, 1, 8);
+  Column.setWidth(cover, 2, 30);
+  Column.setWidth(cover, 3, 20);
+  Column.setWidth(cover, 4, 20);
 
-  cover.mergeCells("B2:D2");
-  cover.getCell("B2").value = "FY25 ANNUAL REPORT";
-  cover.getCell("B2").font = { size: 28, bold: true, color: { argb: "FF1F3864" } };
-  cover.getCell("B2").alignment = { horizontal: "center" };
+  Worksheet.merge(cover, "B2:D2");
+  Cell.setValue(cover, "B2", "FY25 ANNUAL REPORT");
+  Cell.setStyle(cover, "B2", { font: { size: 28, bold: true, color: { argb: "FF1F3864" } } });
+  Cell.setStyle(cover, "B2", { alignment: { horizontal: "center" } });
 
-  cover.mergeCells("B3:D3");
-  cover.getCell("B3").value = "Acme Worldwide Inc. · Fiscal Year 2025";
-  cover.getCell("B3").font = { size: 14, italic: true, color: { argb: "FF7F7F7F" } };
-  cover.getCell("B3").alignment = { horizontal: "center" };
+  Worksheet.merge(cover, "B3:D3");
+  Cell.setValue(cover, "B3", "Acme Worldwide Inc. · Fiscal Year 2025");
+  Cell.setStyle(cover, "B3", { font: { size: 14, italic: true, color: { argb: "FF7F7F7F" } } });
+  Cell.setStyle(cover, "B3", { alignment: { horizontal: "center" } });
 
-  cover.getRow(5).height = 18;
-  cover.getCell("B6").value = "Executive summary";
-  cover.getCell("B6").font = { size: 16, bold: true, color: { argb: "FF1F3864" } };
+  Row.setHeight(cover, 5, 18);
+  Cell.setValue(cover, "B6", "Executive summary");
+  Cell.setStyle(cover, "B6", { font: { size: 16, bold: true, color: { argb: "FF1F3864" } } });
 
   const execLines = [
     ["Revenue growth YoY", 0.142, PERCENT, "Strong top-line expansion"],
@@ -160,25 +178,25 @@ async function main(): Promise<void> {
   ];
   execLines.forEach((line, i) => {
     const r = 7 + i;
-    cover.getCell(r, 2).value = line[0] as string;
-    cover.getCell(r, 3).value = line[1] as number;
-    cover.getCell(r, 3).numFmt = line[2] as string;
-    cover.getCell(r, 3).font = { bold: true, color: { argb: "FF1F3864" } };
-    cover.getCell(r, 4).value = line[3] as string;
-    cover.getCell(r, 4).font = { italic: true, color: { argb: "FF7F7F7F" } };
+    Cell.setValue(cover, r, 2, line[0] as string);
+    Cell.setValue(cover, r, 3, line[1] as number);
+    Cell.setStyle(cover, r, 3, { numFmt: line[2] as string });
+    Cell.setStyle(cover, r, 3, { font: { bold: true, color: { argb: "FF1F3864" } } });
+    Cell.setValue(cover, r, 4, line[3] as string);
+    Cell.setStyle(cover, r, 4, { font: { italic: true, color: { argb: "FF7F7F7F" } } });
   });
 
   // Signature block
-  cover.mergeCells("B16:D16");
-  cover.getCell("B16").value = "Prepared by the Office of the CFO · Approved by the Board";
-  cover.getCell("B16").font = { size: 10, italic: true, color: { argb: "FF404040" } };
-  cover.getCell("B16").alignment = { horizontal: "center" };
+  Worksheet.merge(cover, "B16:D16");
+  Cell.setValue(cover, "B16", "Prepared by the Office of the CFO · Approved by the Board");
+  Cell.setStyle(cover, "B16", { font: { size: 10, italic: true, color: { argb: "FF404040" } } });
+  Cell.setStyle(cover, "B16", { alignment: { horizontal: "center" } });
 
   // ---------------------------------------------------------------------------
   // Sheet 2 — Income statement
   // ---------------------------------------------------------------------------
 
-  const income = wb.addWorksheet("Income Statement", {
+  const income = Workbook.addWorksheet(wb, "Income Statement", {
     views: [{ state: "frozen", xSplit: 1, ySplit: 4, showGridLines: false }],
     pageSetup: {
       orientation: "portrait",
@@ -194,8 +212,8 @@ async function main(): Promise<void> {
     },
     properties: { tabColor: { argb: "FF1F3864" } }
   });
-  income.getColumn(1).width = 36;
-  [2, 3, 4, 5].forEach(c => (income.getColumn(c).width = 16));
+  Column.setWidth(income, 1, 36);
+  [2, 3, 4, 5].forEach(c => Column.setWidth(income, c, 16));
 
   applyHeader(income, "A1:E2", "Income Statement");
   applyYearHeader(income, 4);
@@ -291,52 +309,55 @@ async function main(): Promise<void> {
 
   bodyRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = income.getCell(row, 1);
-    labelCell.value = def.label;
+    const labelCell = getCell(income, row, 1);
+    cellSetValue(labelCell, def.label);
     if (def.bold) {
-      labelCell.font = { bold: true };
+      cellSetFont(labelCell, { bold: true });
     }
     if (def.indent) {
-      labelCell.alignment = { horizontal: "left", indent: def.indent };
+      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
     }
 
     for (let c = 0; c < 3; c++) {
-      const cell = income.getCell(row, 2 + c);
+      const cell = getCell(income, row, 2 + c);
       if (def.formula) {
-        cell.value = { formula: def.formula[c], result: 0 };
+        cellSetValue(cell, { formula: def.formula[c], result: 0 });
       } else if (def.values) {
-        cell.value = def.values[c] as number;
+        cellSetValue(cell, def.values[c] as number);
       }
       if (def.fmt) {
-        cell.numFmt = def.fmt;
+        cellSetNumFmt(cell, def.fmt);
       }
       if (def.bold) {
-        cell.font = { bold: true };
+        cellSetFont(cell, { bold: true });
       }
       if (def.border === "top" || def.border === "both") {
-        cell.border = { ...cell.border, top: { style: "thin", color: { argb: "FF1F3864" } } };
+        cellSetBorder(cell, {
+          ...cellBorder(cell),
+          top: { style: "thin", color: { argb: "FF1F3864" } }
+        });
       }
       if (def.border === "bottom" || def.border === "both") {
-        cell.border = {
-          ...cell.border,
+        cellSetBorder(cell, {
+          ...cellBorder(cell),
           bottom: { style: "double", color: { argb: "FF1F3864" } }
-        };
+        });
       }
     }
 
     // YoY % column formula — only between year 2 and year 3
-    const yoyCell = income.getCell(row, 5);
+    const yoyCell = getCell(income, row, 5);
     if (def.formula && !def.fmt?.includes("%")) {
-      yoyCell.value = { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 };
-      yoyCell.numFmt = PERCENT;
+      cellSetValue(yoyCell, { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 });
+      cellSetNumFmt(yoyCell, PERCENT);
     } else if (def.values && !def.label.includes("margin")) {
-      yoyCell.value = { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 };
-      yoyCell.numFmt = PERCENT;
+      cellSetValue(yoyCell, { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 });
+      cellSetNumFmt(yoyCell, PERCENT);
     }
   });
 
   // Conditional formatting — red for negative values in the body
-  income.addConditionalFormatting({
+  addConditionalFormatting(income, {
     ref: "B5:D16",
     rules: [
       {
@@ -350,7 +371,7 @@ async function main(): Promise<void> {
   });
 
   // Icon-set variance arrows for the YoY column
-  income.addConditionalFormatting({
+  addConditionalFormatting(income, {
     ref: "E5:E16",
     rules: [
       {
@@ -368,9 +389,9 @@ async function main(): Promise<void> {
   });
 
   // Waterfall chart — profit bridge from FY24 → FY25
-  const bridge = wb.addWorksheet("Aggregates", { state: "hidden" });
-  bridge.getRow(1).values = ["Step", "Value"];
-  bridge.addRows([
+  const bridge = Workbook.addWorksheet(wb, "Aggregates", { state: "hidden" });
+  rowSetValues(Worksheet.getRow(bridge, 1), ["Step", "Value"]);
+  Worksheet.addRows(bridge, [
     ["FY24 Revenue", 212000],
     ["Δ Revenue", 30000],
     ["Δ COGS", -18000],
@@ -379,7 +400,8 @@ async function main(): Promise<void> {
     ["Δ Tax", -3000],
     ["FY25 Net", 0]
   ]);
-  income.addWaterfallChart(
+  addWaterfallChart(
+    income,
     {
       title: "FY24 → FY25 profit bridge (USD thousands)",
       categories: "Aggregates!$A$2:$A$8",
@@ -390,7 +412,8 @@ async function main(): Promise<void> {
   );
 
   // Combo chart — revenue bars + net margin line
-  income.addComboChart(
+  addComboChart(
+    income,
     {
       title: "Revenue vs net margin",
       groups: [
@@ -430,7 +453,7 @@ async function main(): Promise<void> {
   // Sheet 3 — Balance sheet
   // ---------------------------------------------------------------------------
 
-  const balance = wb.addWorksheet("Balance Sheet", {
+  const balance = Workbook.addWorksheet(wb, "Balance Sheet", {
     views: [{ state: "frozen", xSplit: 1, ySplit: 4, showGridLines: false }],
     pageSetup: {
       orientation: "portrait",
@@ -442,8 +465,8 @@ async function main(): Promise<void> {
     },
     properties: { tabColor: { argb: "FF2F5496" } }
   });
-  balance.getColumn(1).width = 36;
-  [2, 3, 4, 5].forEach(c => (balance.getColumn(c).width = 16));
+  Column.setWidth(balance, 1, 36);
+  [2, 3, 4, 5].forEach(c => Column.setWidth(balance, c, 16));
 
   applyHeader(balance, "A1:E2", "Balance Sheet");
   applyYearHeader(balance, 4);
@@ -510,60 +533,61 @@ async function main(): Promise<void> {
 
   balanceRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = balance.getCell(row, 1);
-    labelCell.value = def.label;
+    const labelCell = getCell(balance, row, 1);
+    cellSetValue(labelCell, def.label);
     if (def.bold) {
-      labelCell.font = { bold: true };
+      cellSetFont(labelCell, { bold: true });
     }
     if (def.indent) {
-      labelCell.alignment = { horizontal: "left", indent: def.indent };
+      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
     }
     for (let c = 0; c < 3; c++) {
-      const cell = balance.getCell(row, 2 + c);
+      const cell = getCell(balance, row, 2 + c);
       if (def.formula) {
-        cell.value = { formula: def.formula[c], result: 0 };
+        cellSetValue(cell, { formula: def.formula[c], result: 0 });
       } else if (def.values && def.label !== "") {
-        cell.value = def.values[c];
+        cellSetValue(cell, def.values[c]);
       }
-      cell.numFmt = CURRENCY_THOUSANDS;
+      cellSetNumFmt(cell, CURRENCY_THOUSANDS);
       if (def.bold) {
-        cell.font = { bold: true };
+        cellSetFont(cell, { bold: true });
       }
     }
     // YoY column
     if (def.formula) {
-      balance.getCell(row, 5).value = {
+      Cell.setValue(balance, row, 5, {
         formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
         result: 0
-      };
-      balance.getCell(row, 5).numFmt = PERCENT;
+      });
+      Cell.setStyle(balance, row, 5, { numFmt: PERCENT });
     }
   });
 
   // Styled "debt ratio" at the bottom with defined name
-  balance.getCell("A28").value = "Debt ratio (total liabilities ÷ total assets)";
-  balance.getCell("A28").font = { italic: true };
+  Cell.setValue(balance, "A28", "Debt ratio (total liabilities ÷ total assets)");
+  Cell.setStyle(balance, "A28", { font: { italic: true } });
   ["B", "C", "D"].forEach((col, i) => {
-    balance.getCell(28, 2 + i).value = {
+    Cell.setValue(balance, 28, 2 + i, {
       formula: `=${col}19/${col}12`,
       result: 0
-    };
-    balance.getCell(28, 2 + i).numFmt = PERCENT;
+    });
+    Cell.setStyle(balance, 28, 2 + i, { numFmt: PERCENT });
   });
 
-  wb.definedNames.add("'Balance Sheet'!$D$28", "CurrentDebtRatio");
+  definedNamesAdd(getDefinedNames(wb), "'Balance Sheet'!$D$28", "CurrentDebtRatio");
 
   // Segment breakdown pie chart
-  const segSheet = wb.addWorksheet("Segments", { state: "hidden" });
-  segSheet.addRow(["Segment", "Revenue", "Operating income"]);
-  segSheet.addRows([
+  const segSheet = Workbook.addWorksheet(wb, "Segments", { state: "hidden" });
+  Worksheet.addRow(segSheet, ["Segment", "Revenue", "Operating income"]);
+  Worksheet.addRows(segSheet, [
     ["Consumer", 98000, 22000],
     ["Enterprise", 82000, 31000],
     ["Services", 42000, 9500],
     ["Other", 20000, 2500]
   ]);
 
-  balance.addChart(
+  addChart(
+    balance,
     {
       type: "pie",
       title: "FY25 revenue by segment",
@@ -589,7 +613,7 @@ async function main(): Promise<void> {
   // Sheet 4 — Cash flow statement
   // ---------------------------------------------------------------------------
 
-  const cashFlow = wb.addWorksheet("Cash Flow", {
+  const cashFlow = Workbook.addWorksheet(wb, "Cash Flow", {
     views: [{ state: "frozen", xSplit: 1, ySplit: 4, showGridLines: false }],
     pageSetup: {
       orientation: "portrait",
@@ -601,8 +625,8 @@ async function main(): Promise<void> {
     },
     properties: { tabColor: { argb: "FF70AD47" } }
   });
-  cashFlow.getColumn(1).width = 40;
-  [2, 3, 4, 5].forEach(c => (cashFlow.getColumn(c).width = 16));
+  Column.setWidth(cashFlow, 1, 40);
+  [2, 3, 4, 5].forEach(c => Column.setWidth(cashFlow, c, 16));
 
   applyHeader(cashFlow, "A1:E2", "Cash Flow Statement");
   applyYearHeader(cashFlow, 4);
@@ -660,30 +684,30 @@ async function main(): Promise<void> {
   ];
   cfRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = cashFlow.getCell(row, 1);
-    labelCell.value = def.label;
+    const labelCell = getCell(cashFlow, row, 1);
+    cellSetValue(labelCell, def.label);
     if (def.bold) {
-      labelCell.font = { bold: true };
+      cellSetFont(labelCell, { bold: true });
     }
     if (def.indent) {
-      labelCell.alignment = { horizontal: "left", indent: def.indent };
+      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
     }
     for (let c = 0; c < 3; c++) {
-      const cell = cashFlow.getCell(row, 2 + c);
+      const cell = getCell(cashFlow, row, 2 + c);
       if (def.formula) {
-        cell.value = { formula: def.formula[c], result: 0 };
+        cellSetValue(cell, { formula: def.formula[c], result: 0 });
       } else if (def.values && def.label !== "") {
-        cell.value = def.values[c];
+        cellSetValue(cell, def.values[c]);
       }
-      cell.numFmt = CURRENCY_THOUSANDS;
+      cellSetNumFmt(cell, CURRENCY_THOUSANDS);
       if (def.bold) {
-        cell.font = { bold: true };
+        cellSetFont(cell, { bold: true });
       }
     }
   });
 
   // Conditional formatting — red for negative values
-  cashFlow.addConditionalFormatting({
+  addConditionalFormatting(cashFlow, {
     ref: "B5:D23",
     rules: [
       {
@@ -700,25 +724,25 @@ async function main(): Promise<void> {
   // Sheet 5 — Forecast / assumptions (protected — only assumption cells editable)
   // ---------------------------------------------------------------------------
 
-  const forecast = wb.addWorksheet("Forecast Assumptions", {
+  const forecast = Workbook.addWorksheet(wb, "Forecast Assumptions", {
     views: [{ state: "normal", showGridLines: false }],
     properties: { tabColor: { argb: "FFFFC000" } }
   });
-  forecast.getColumn(1).width = 36;
-  [2, 3, 4, 5].forEach(c => (forecast.getColumn(c).width = 16));
+  Column.setWidth(forecast, 1, 36);
+  [2, 3, 4, 5].forEach(c => Column.setWidth(forecast, c, 16));
 
   applyHeader(forecast, "A1:E2", "Forecast Assumptions");
-  forecast.getCell("A4").value = "Assumption";
-  forecast.getCell("B4").value = "FY25 actual";
-  forecast.getCell("C4").value = "FY26 plan";
-  forecast.getCell("D4").value = "FY27 plan";
-  forecast.getCell("E4").value = "Commentary";
-  forecast.getRow(4).font = { bold: true, color: { argb: "FFFFFFFF" } };
-  forecast.getRow(4).fill = {
+  Cell.setValue(forecast, "A4", "Assumption");
+  Cell.setValue(forecast, "B4", "FY25 actual");
+  Cell.setValue(forecast, "C4", "FY26 plan");
+  Cell.setValue(forecast, "D4", "FY27 plan");
+  Cell.setValue(forecast, "E4", "Commentary");
+  rowSetFont(Worksheet.getRow(forecast, 4), { bold: true, color: { argb: "FFFFFFFF" } });
+  rowSetFill(Worksheet.getRow(forecast, 4), {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFFFC000" }
-  };
+  });
 
   const assumptions = [
     {
@@ -773,30 +797,30 @@ async function main(): Promise<void> {
 
   assumptions.forEach((a, i) => {
     const row = 5 + i;
-    forecast.getCell(row, 1).value = a.label;
-    forecast.getCell(row, 2).value = a.actual;
-    forecast.getCell(row, 3).value = a.plan1;
-    forecast.getCell(row, 4).value = a.plan2;
-    forecast.getCell(row, 5).value = a.notes;
-    forecast.getCell(row, 5).font = { italic: true, color: { argb: "FF595959" } };
-    [2, 3, 4].forEach(c => (forecast.getCell(row, c).numFmt = a.fmt));
+    Cell.setValue(forecast, row, 1, a.label);
+    Cell.setValue(forecast, row, 2, a.actual);
+    Cell.setValue(forecast, row, 3, a.plan1);
+    Cell.setValue(forecast, row, 4, a.plan2);
+    Cell.setValue(forecast, row, 5, a.notes);
+    Cell.setStyle(forecast, row, 5, { font: { italic: true, color: { argb: "FF595959" } } });
+    [2, 3, 4].forEach(c => Cell.setStyle(forecast, row, c, { numFmt: a.fmt }));
 
     // Data validation on the FY26/FY27 plan cells
     [3, 4].forEach(c => {
-      forecast.getCell(row, c).dataValidation = {
+      cellSetDataValidation(getCell(forecast, row, c), {
         type: "decimal",
         operator: "between",
         formulae: [-0.5, 1.0],
         errorTitle: "Out of range",
         error: "Plan values must be between -50% and +100%",
         showErrorMessage: true
-      };
-      forecast.getCell(row, c).protection = { locked: false };
+      });
+      Cell.setStyle(forecast, row, c, { protection: { locked: false } });
     });
   });
 
   // Protect the sheet — only FY26/FY27 assumption cells editable
-  await forecast.protect("fy25-board-review", {
+  await protect(forecast, "fy25-board-review", {
     selectLockedCells: true,
     selectUnlockedCells: true,
     sort: false,
@@ -821,7 +845,7 @@ async function main(): Promise<void> {
     ]
   };
 
-  wb.addChartsheet("Board View", {
+  Workbook.addChartsheet(wb, "Board View", {
     zoomToFit: true,
     pageMargins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
     pageSetup: { orientation: "landscape", paperSize: 9, horizontalDpi: 300, verticalDpi: 300 },
@@ -865,7 +889,7 @@ async function main(): Promise<void> {
   // Write XLSX + encrypted PDF
   // ---------------------------------------------------------------------------
 
-  await wb.xlsx.writeFile(XLSX_PATH);
+  await Workbook.writeXlsx(wb, XLSX_PATH);
   console.log(`XLSX → ${XLSX_PATH}`);
 
   // Encrypted PDF — owner can do anything, users need a password
@@ -905,9 +929,11 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets      : ${wb.worksheets.length}`);
-  console.log(`  chartsheets : ${wb.chartsheets.length}`);
-  console.log(`  charts      : ${wb.worksheets.reduce((n, ws) => n + ws.getCharts().length, 0)}`);
+  console.log(`  sheets      : ${getWorksheets(wb).length}`);
+  console.log(`  chartsheets : ${getChartsheets(wb).length}`);
+  console.log(
+    `  charts      : ${getWorksheets(wb).reduce((n, ws) => n + getCharts(ws).length, 0)}`
+  );
   console.log(`  PDF bytes   : enc=${encryptedPdf.byteLength}, plain=${publicPdf.byteLength}`);
 }
 

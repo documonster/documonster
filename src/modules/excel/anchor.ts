@@ -1,5 +1,7 @@
+import { columnIsCustomWidth } from "@excel/column";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
+import type { WorksheetData as Worksheet } from "@excel/worksheet-core";
+import { getColumn, getRow } from "@excel/worksheet-core";
 
 interface AnchorModel {
   nativeCol: number;
@@ -15,6 +17,21 @@ interface SimpleAddress {
 
 type AddressInput = string | AnchorModel | SimpleAddress;
 
+/**
+ * Plain-data drawing anchor (de-classed domain model).
+ *
+ * Carries the raw OOXML anchor coordinates plus an optional worksheet used to
+ * resolve column width / row height when converting between the fractional
+ * `col`/`row` representation and the native offset representation.
+ */
+export interface AnchorData {
+  nativeCol: number;
+  nativeRow: number;
+  nativeColOff: number;
+  nativeRowOff: number;
+  worksheet?: Worksheet;
+}
+
 function isAnchorModel(value: AddressInput): value is AnchorModel {
   return (
     typeof value === "object" &&
@@ -29,116 +46,133 @@ function isSimpleAddress(value: AddressInput): value is SimpleAddress {
   return typeof value === "object" && "col" in value && "row" in value;
 }
 
-class Anchor {
-  declare public nativeCol: number;
-  declare public nativeRow: number;
-  declare public nativeColOff: number;
-  declare public nativeRowOff: number;
-  declare public worksheet?: Worksheet;
-
-  constructor(worksheet?: Worksheet, address?: AddressInput | null, offset: number = 0) {
-    this.worksheet = worksheet;
-
-    if (!address) {
-      this.nativeCol = 0;
-      this.nativeColOff = 0;
-      this.nativeRow = 0;
-      this.nativeRowOff = 0;
-    } else if (typeof address === "string") {
-      const decoded = colCache.decodeAddress(address);
-      this.nativeCol = decoded.col + offset;
-      this.nativeColOff = 0;
-      this.nativeRow = decoded.row + offset;
-      this.nativeRowOff = 0;
-    } else if (isAnchorModel(address)) {
-      this.nativeCol = address.nativeCol ?? 0;
-      this.nativeColOff = address.nativeColOff ?? 0;
-      this.nativeRow = address.nativeRow ?? 0;
-      this.nativeRowOff = address.nativeRowOff ?? 0;
-    } else if (isSimpleAddress(address)) {
-      this.col = address.col + offset;
-      this.row = address.row + offset;
-    } else {
-      this.nativeCol = 0;
-      this.nativeColOff = 0;
-      this.nativeRow = 0;
-      this.nativeRowOff = 0;
-    }
-  }
-
-  static asInstance(model: AddressInput | Anchor | null | undefined): Anchor | null {
-    if (model == null) {
-      return null;
-    }
-    if (model instanceof Anchor) {
-      return model;
-    }
-    return new Anchor(undefined, model);
-  }
-
-  get col(): number {
-    return this.nativeColOff === 0
-      ? this.nativeCol
-      : this.nativeCol + Math.min(this.colWidth - 1, this.nativeColOff) / this.colWidth;
-  }
-
-  set col(v: number) {
-    this.nativeCol = Math.floor(v);
-    const fraction = v - this.nativeCol;
-    this.nativeColOff = fraction === 0 ? 0 : Math.floor(fraction * this.colWidth);
-  }
-
-  get row(): number {
-    return this.nativeRowOff === 0
-      ? this.nativeRow
-      : this.nativeRow + Math.min(this.rowHeight - 1, this.nativeRowOff) / this.rowHeight;
-  }
-
-  set row(v: number) {
-    this.nativeRow = Math.floor(v);
-    const fraction = v - this.nativeRow;
-    this.nativeRowOff = fraction === 0 ? 0 : Math.floor(fraction * this.rowHeight);
-  }
-
-  get colWidth(): number {
-    return this.worksheet &&
-      this.worksheet.getColumn(this.nativeCol + 1) &&
-      this.worksheet.getColumn(this.nativeCol + 1).isCustomWidth
-      ? Math.floor(this.worksheet.getColumn(this.nativeCol + 1).width! * 10000)
-      : 640000;
-  }
-
-  get rowHeight(): number {
-    const height = this.worksheet?.getRow(this.nativeRow + 1)?.height;
-    return height ? Math.floor(height * 10000) : 180000;
-  }
-
-  get model(): AnchorModel {
-    return {
-      nativeCol: this.nativeCol,
-      nativeColOff: this.nativeColOff,
-      nativeRow: this.nativeRow,
-      nativeRowOff: this.nativeRowOff
-    };
-  }
-
-  set model(value: AnchorModel) {
-    this.nativeCol = value.nativeCol;
-    this.nativeColOff = value.nativeColOff;
-    this.nativeRow = value.nativeRow;
-    this.nativeRowOff = value.nativeRowOff;
-  }
-
-  clone(worksheet?: Worksheet): Anchor {
-    return new Anchor(worksheet ?? this.worksheet, this.model);
-  }
+/** Structural guard: is `value` an {@link AnchorData} record? */
+export function isAnchorData(value: unknown): value is AnchorData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "nativeCol" in value &&
+    "nativeRow" in value &&
+    "nativeColOff" in value &&
+    "nativeRowOff" in value
+  );
 }
 
-export { Anchor };
-export type { AnchorModel };
+/** Column width (EMU) at the anchor's native column, or the default 640000. */
+export function anchorColWidth(a: AnchorData): number {
+  return a.worksheet &&
+    getColumn(a.worksheet, a.nativeCol + 1) &&
+    columnIsCustomWidth(getColumn(a.worksheet, a.nativeCol + 1))
+    ? Math.floor(getColumn(a.worksheet, a.nativeCol + 1).width! * 10000)
+    : 640000;
+}
 
-type IAnchor = Pick<
-  InstanceType<typeof Anchor>,
-  "col" | "row" | "nativeCol" | "nativeRow" | "nativeColOff" | "nativeRowOff"
->;
-export type { IAnchor };
+/** Row height (EMU) at the anchor's native row, or the default 180000. */
+export function anchorRowHeight(a: AnchorData): number {
+  const height = a.worksheet ? getRow(a.worksheet, a.nativeRow + 1)?.height : undefined;
+  return height ? Math.floor(height * 10000) : 180000;
+}
+
+/** Fractional column position (native col + offset fraction). */
+export function anchorCol(a: AnchorData): number {
+  return a.nativeColOff === 0
+    ? a.nativeCol
+    : a.nativeCol + Math.min(anchorColWidth(a) - 1, a.nativeColOff) / anchorColWidth(a);
+}
+
+/** Set the fractional column position, deriving native col + offset. */
+export function anchorSetCol(a: AnchorData, v: number): void {
+  a.nativeCol = Math.floor(v);
+  const fraction = v - a.nativeCol;
+  a.nativeColOff = fraction === 0 ? 0 : Math.floor(fraction * anchorColWidth(a));
+}
+
+/** Fractional row position (native row + offset fraction). */
+export function anchorRow(a: AnchorData): number {
+  return a.nativeRowOff === 0
+    ? a.nativeRow
+    : a.nativeRow + Math.min(anchorRowHeight(a) - 1, a.nativeRowOff) / anchorRowHeight(a);
+}
+
+/** Set the fractional row position, deriving native row + offset. */
+export function anchorSetRow(a: AnchorData, v: number): void {
+  a.nativeRow = Math.floor(v);
+  const fraction = v - a.nativeRow;
+  a.nativeRowOff = fraction === 0 ? 0 : Math.floor(fraction * anchorRowHeight(a));
+}
+
+/**
+ * Create an anchor record from a worksheet + address input.
+ *
+ * `address` may be a string ("A1"), an {@link AnchorModel}, or a
+ * `{ col, row }` simple address; `offset` is added to string/simple addresses.
+ */
+export function anchorCreate(
+  worksheet?: Worksheet,
+  address?: AddressInput | null,
+  offset: number = 0
+): AnchorData {
+  const a: AnchorData = {
+    worksheet,
+    nativeCol: 0,
+    nativeColOff: 0,
+    nativeRow: 0,
+    nativeRowOff: 0
+  };
+
+  if (!address) {
+    return a;
+  }
+  if (typeof address === "string") {
+    const decoded = colCache.decodeAddress(address);
+    a.nativeCol = decoded.col + offset;
+    a.nativeRow = decoded.row + offset;
+  } else if (isAnchorModel(address)) {
+    a.nativeCol = address.nativeCol ?? 0;
+    a.nativeColOff = address.nativeColOff ?? 0;
+    a.nativeRow = address.nativeRow ?? 0;
+    a.nativeRowOff = address.nativeRowOff ?? 0;
+  } else if (isSimpleAddress(address)) {
+    anchorSetCol(a, address.col + offset);
+    anchorSetRow(a, address.row + offset);
+  }
+  return a;
+}
+
+/** Coerce an anchor model / existing anchor record into an {@link AnchorData}. */
+export function anchorAsInstance(
+  model: AddressInput | AnchorData | null | undefined
+): AnchorData | null {
+  if (model == null) {
+    return null;
+  }
+  if (isAnchorData(model)) {
+    return model;
+  }
+  return anchorCreate(undefined, model);
+}
+
+/** Serialize an anchor to its persisted {@link AnchorModel}. */
+export function anchorModel(a: AnchorData): AnchorModel {
+  return {
+    nativeCol: a.nativeCol,
+    nativeColOff: a.nativeColOff,
+    nativeRow: a.nativeRow,
+    nativeRowOff: a.nativeRowOff
+  };
+}
+
+/** Apply a persisted {@link AnchorModel} onto an anchor record in place. */
+export function anchorSetModel(a: AnchorData, value: AnchorModel): void {
+  a.nativeCol = value.nativeCol;
+  a.nativeColOff = value.nativeColOff;
+  a.nativeRow = value.nativeRow;
+  a.nativeRowOff = value.nativeRowOff;
+}
+
+/** Clone an anchor record, optionally rebinding it to a different worksheet. */
+export function anchorClone(a: AnchorData, worksheet?: Worksheet): AnchorData {
+  return anchorCreate(worksheet ?? a.worksheet, anchorModel(a));
+}
+
+export type { AnchorModel };

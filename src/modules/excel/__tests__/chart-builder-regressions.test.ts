@@ -28,7 +28,29 @@ import {
   seriesFromColumns
 } from "@excel/chart";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import {
+  chartsheetId,
+  chartsheetModel,
+  chartsheetName,
+  chartsheetSetName,
+  chartsheetWorkbookViewId,
+  chartsheetZoomToFit
+} from "@excel/chartsheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getChartEntry, getWorksheets } from "@excel/workbook";
+import {
+  addBarChart,
+  addChart,
+  addChartEx,
+  addColumnChart,
+  addComboChart,
+  addFunnelChart,
+  addHistogramChart,
+  addLineChart,
+  addPieChart,
+  addScatterChart,
+  getCharts
+} from "@excel/worksheet";
 import { beforeAll, describe, it, expect } from "vitest";
 
 const textDecoder = new TextDecoder();
@@ -44,23 +66,24 @@ describe("Second-round chart bug fixes", () => {
     // of the y-axis at `1` — a visible, nonsensical tick above the
     // data. The fix symmetrises the seed at `baseMax = 0` (or
     // `-Infinity` when includeZero is false).
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", -100],
       ["B", -50],
       ["C", -75]
     ]);
     // Use `addColumnChart` (vertical bars) so the value axis is Y and
     // `buildYLabels` emits the numeric ticks we want to validate.
-    ws.addColumnChart(
+    addColumnChart(
+      ws,
       {
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" }]
       },
       "D1:J10"
     );
-    fillChartCaches(ws.getCharts()[0].chartModel!, wb, ws);
-    const svg = renderChartSvg(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    fillChartCaches(getCharts(ws)[0].chartModel!, wb, ws);
+    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     // With the fix, the value axis spans [-100, 0] — ticks are 0,
     // -20, -40, -60, -80, -100. The bug produced max=1 so the top
     // tick was "1". Grep the SVG for a standalone "1" tick label.
@@ -73,14 +96,15 @@ describe("Second-round chart bug fixes", () => {
     // at rotY=0 (looking head-on) and zero extrusion at rotY=90°
     // (looking from the side) — inverted from what a real cabinet
     // projection does.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar3D",
         barDir: "col",
@@ -89,7 +113,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     const barSeries = scene.series.find(s => s.type === "bar");
     expect(barSeries?.type).toBe("bar");
     if (barSeries?.type === "bar") {
@@ -103,14 +127,15 @@ describe("Second-round chart bug fixes", () => {
     // negative segments (accum/totals < 0) pixelated below the plot
     // frame. Fix widens the range to {-1, 1} when any series carries
     // negatives.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 50, -10],
       ["B", 30, -20],
       ["C", 20, -30]
     ]);
-    ws.addBarChart(
+    addBarChart(
+      ws,
       {
         grouping: "percentStacked",
         series: [
@@ -120,7 +145,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     const barSeries = scene.series.filter(s => s.type === "bar");
     for (const series of barSeries) {
       if (series.type === "bar") {
@@ -138,14 +163,15 @@ describe("Second-round chart bug fixes", () => {
     // negatives) while the per-slice percent used `Math.max(0, value) /
     // total`. Mixed-sign data had asymmetric percentages that didn't
     // sum to 100%. Fix switches to `|v| / Σ|v|`.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 50],
       ["B", -10],
       ["C", 30]
     ]);
-    ws.addPieChart(
+    addPieChart(
+      ws,
       {
         series: [
           {
@@ -158,7 +184,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const svg = renderChartSvg(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     // Every slice gets a rounded percentage. Sum of authored |v|:
     // 50 + 10 + 30 = 90, so slice percentages are ~56%, 11%, 33%.
     // They should sum to 100 (± rounding).
@@ -174,14 +200,15 @@ describe("Second-round chart bug fixes", () => {
     // series, so horizontal bar charts drew vertical whiskers across
     // the bars. Fix routes the default through the `horizontal` flag
     // on the scene series.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
     ]);
-    ws.addBarChart(
+    addBarChart(
+      ws,
       {
         series: [
           {
@@ -194,8 +221,8 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    fillChartCaches(ws.getCharts()[0].chartModel!, wb, ws);
-    const scene = buildChartScene(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    fillChartCaches(getCharts(ws)[0].chartModel!, wb, ws);
+    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     const barSeries = scene.series.find(
       (s): s is Extract<typeof s, { type: "bar" }> => s.type === "bar"
     );
@@ -214,17 +241,18 @@ describe("Second-round chart bug fixes", () => {
     // threw `Cannot read properties of undefined (reading 'count')`
     // when it tried to write into `bins[-1]`. Fix injects a fallback
     // bin so at least one bucket exists.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([[5], [5], [5], [5]]);
-    ws.addChartEx(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [[5], [5], [5], [5]]);
+    addChartEx(
+      ws,
       {
         type: "histogram",
         series: [{ name: "H", values: "Sheet1!$A$1:$A$4", literalValues: [5, 5, 5, 5] }]
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartExModel!;
+    const model = getCharts(ws)[0].chartExModel!;
     // Must not throw:
     const svg = renderChartExSvg(model, { width: 400, height: 240 });
     expect(svg).toContain("<svg");
@@ -317,23 +345,24 @@ describe("Second-round chart bug fixes", () => {
     // went negative for a reversed axis (min > max after orientation
     // swap). `Math.floor(span/step) + 1` was ≤ 0, the loop never ran,
     // and the axis rendered with a single tick label.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30],
       ["D", 40],
       ["E", 50]
     ]);
-    ws.addBarChart(
+    addBarChart(
+      ws,
       {
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$5", values: "Sheet1!$B$1:$B$5" }],
         valueAxis: { orientation: "maxMin", majorUnit: 10 }
       },
       "D1:J10"
     );
-    const scene = buildChartScene(ws.getCharts()[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
     // Expect multiple tick labels — one per majorUnit step from 50 down
     // to 0 would give ~6 labels. The bug produced exactly one.
     expect(scene.yLabels.length).toBeGreaterThanOrEqual(3);
@@ -345,14 +374,15 @@ describe("Second-round chart bug fixes", () => {
     // series, silently dropping `options.xValueType: "text"`. Fix
     // uses `makeXAxisData(categories, xValueType)` to honour the
     // author's choice.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["Mon", 10, 1],
       ["Tue", 20, 2],
       ["Wed", 30, 3]
     ]);
-    ws.addScatterChart(
+    addScatterChart(
+      ws,
       {
         scatterStyle: "lineMarker",
         series: [
@@ -365,7 +395,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "E1:L10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     chart.updateSeries(0, {
       categories: "Sheet1!$A$1:$A$3",
       xValueType: "text"
@@ -386,14 +416,15 @@ describe("Second-round chart bug fixes", () => {
     // throw-away axes that were discarded seconds later. Only the
     // FIRST group's options survived. Fix applies the options onto
     // the shared axes explicitly.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10, 1],
       ["B", 20, 2],
       ["C", 30, 3]
     ]);
-    ws.addComboChart(
+    addComboChart(
+      ws,
       {
         groups: [
           {
@@ -409,7 +440,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "E1:L10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const valAx = model.chart.plotArea.axes.find(a => a.axisType === "val") as ValueAxis;
     // Options from the SECOND group should have reached the shared val
     // axis (numFmt, majorUnit). The bug silently dropped them.
@@ -422,13 +453,14 @@ describe("Second-round chart bug fixes", () => {
     // `series.spPr.line` object instead of merging field-by-field, so
     // a `{ lineDash: "dash" }` patch dropped the previously-set color
     // and width. Fix deep-merges the line sub-object.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addLineChart(
+    addLineChart(
+      ws,
       {
         series: [
           {
@@ -442,7 +474,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     chart.updateSeries(0, { lineDash: "dash" });
     const group = chart.chartModel!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: unknown[] }).series[0] as {
@@ -460,10 +492,11 @@ describe("Second-round chart bug fixes", () => {
     // every `<cx:lvl formatCode="#,##0">` on sparse / externally-filled
     // ranges. Fix spreads the existing level's `formatCode` into the
     // new object.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([[100], [200], [300]]);
-    ws.addChartEx(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [[100], [200], [300]]);
+    addChartEx(
+      ws,
       {
         type: "funnel",
         series: [
@@ -476,7 +509,7 @@ describe("Second-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartExModel!;
+    const model = getCharts(ws)[0].chartExModel!;
     // Synthetically inject a formatCode on an existing level, then
     // clear the points so the refill path re-runs and we can confirm
     // the formatCode survives.
@@ -501,17 +534,18 @@ describe("Second-round chart bug fixes", () => {
     // unresolvable reference — a formula that points at a sheet the
     // workbook doesn't have. The cache stays empty and the getter
     // must report `undefined`, not `""`.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([[100]]);
-    ws.addBarChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [[100]]);
+    addBarChart(
+      ws,
       {
         title: { formula: "NoSuchSheet!$A$1" },
         series: [{ name: "S", values: "Sheet1!$A$1:$A$1" }]
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Cache cannot be populated because the referenced sheet doesn't
     // exist — `points` stays `[]` and the getter returns `undefined`.
     expect(chart.title).toBeUndefined();
@@ -523,18 +557,19 @@ describe("Second-round chart bug fixes", () => {
     // cell through, populate the strRef cache, and surface the value
     // via `chart.title`. Users no longer have to call
     // `fillChartCaches` manually for this common case.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Q1 Sales";
-    ws.addRows([[100]]);
-    ws.addBarChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Q1 Sales");
+    Worksheet.addRows(ws, [[100]]);
+    addBarChart(
+      ws,
       {
         title: { formula: "Sheet1!$A$1" },
         series: [{ name: "S", values: "Sheet1!$A$1:$A$1" }]
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     expect(chart.title).toBe("Q1 Sales");
   });
 
@@ -583,8 +618,8 @@ describe("Second-round chart bug fixes", () => {
     // was also listed in `y`. Two identical header columns were
     // written, and the series referenced the same data as both
     // category and value with no diagnostic.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     expect(() =>
       chartOptionsFromRows(
         ws,
@@ -621,11 +656,12 @@ describe("Second-round chart bug fixes", () => {
 
 describe("Third-round chart bug fixes", () => {
   it("bar3D rejects the 2D-only `overlap` option", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([["A", 10]]);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [["A", 10]]);
     expect(() =>
-      ws.addChart(
+      addChart(
+        ws,
         {
           type: "bar3D",
           barDir: "col",
@@ -638,35 +674,36 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("line3D rejects the 2D-only `showMarker` / `smooth` / `hiLowLines` / `upDownBars` options", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([["A", 10]]);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [["A", 10]]);
     const base = {
       type: "line3D",
       series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
     };
-    expect(() => ws.addChart({ ...base, showMarker: true } as AddChartOptions, "D1:J10")).toThrow(
+    expect(() => addChart(ws, { ...base, showMarker: true } as AddChartOptions, "D1:J10")).toThrow(
       /showMarker is only valid for line and radar charts/
     );
-    expect(() => ws.addChart({ ...base, smooth: true } as AddChartOptions, "D1:J10")).toThrow(
+    expect(() => addChart(ws, { ...base, smooth: true } as AddChartOptions, "D1:J10")).toThrow(
       /smooth is only valid for line and scatter charts/
     );
-    expect(() => ws.addChart({ ...base, hiLowLines: true } as AddChartOptions, "D1:J10")).toThrow(
+    expect(() => addChart(ws, { ...base, hiLowLines: true } as AddChartOptions, "D1:J10")).toThrow(
       /hiLowLines is only valid for line and stock charts/
     );
-    expect(() => ws.addChart({ ...base, upDownBars: true } as AddChartOptions, "D1:J10")).toThrow(
+    expect(() => addChart(ws, { ...base, upDownBars: true } as AddChartOptions, "D1:J10")).toThrow(
       /upDownBars is only valid for line and stock charts/
     );
   });
 
   it("bar3D writer emits children in CT_Bar3DChart schema order", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar3D",
         barDir: "col",
@@ -677,7 +714,7 @@ describe("Third-round chart bug fixes", () => {
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // `<c:bar3DChart>` must NOT contain `<c:overlap>` / `<c:serLines>`.
@@ -695,21 +732,22 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("c:scaling emits `logBase → orientation → max → min` per schema", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 100],
       ["C", 1000]
     ]);
-    ws.addColumnChart(
+    addColumnChart(
+      ws,
       {
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" }],
         valueAxis: { min: 1, max: 10000, logBase: 10, orientation: "minMax" }
       },
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // Pick the scaling block that carries logBase — a chart has one
@@ -732,19 +770,20 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("updateSeries fill patch clears _rawXml so structural change reaches disk", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addColumnChart(
+    addColumnChart(
+      ws,
       {
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }]
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Simulate a loaded chart whose spPr was captured as raw XML.
     const group = chart.chartModel!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: BarSeries[] }).series[0];
@@ -782,11 +821,12 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("ChartEx formula title round-trips via <cx:txData>", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Sales Q1";
-    ws.addRows([["100", 100]]);
-    ws.addChartEx(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Sales Q1");
+    Worksheet.addRows(ws, [["100", 100]]);
+    addChartEx(
+      ws,
       {
         type: "waterfall",
         title: { formula: "Sheet1!$A$1" },
@@ -794,7 +834,7 @@ describe("Third-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const xml = textDecoder.decode(zipData.get("xl/charts/chartEx1.xml")!.data);
     // Writer must emit `<cx:txData>` with the formula; cache fill
@@ -866,14 +906,14 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("removeUserShapes cleans workbook-level _chartRels so the .rels file drops the entry", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([["A", 10]]);
-    ws.addColumnChart({ series: [{ name: "S", values: "Sheet1!$B$1:$B$1" }] }, "D1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [["A", 10]]);
+    addColumnChart(ws, { series: [{ name: "S", values: "Sheet1!$B$1:$B$1" }] }, "D1:J10");
+    const chart = getCharts(ws)[0];
     // Inject a synthetic userShapes rel at both locations the writer
     // reads from.
-    const entry = wb.getChartEntry(chart.chartNumber)!;
+    const entry = getChartEntry(wb, chart.chartNumber)!;
     entry.userShapesXml = new Uint8Array([0x01, 0x02]);
     entry.model.userShapesRelId = "rIdUS1";
     entry.rels = [
@@ -940,19 +980,19 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("chartsheet does NOT emit worksheet-only elements (printOptions, rowBreaks, colBreaks, pageBreaks)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    wb.addChartsheet("CS", {
+    Workbook.addChartsheet(wb, "CS", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const sheetXml = textDecoder.decode(entries.get("xl/chartsheets/sheet1.xml")!.data);
     // ECMA-376 CT_Chartsheet does not contain any of these elements.
@@ -965,13 +1005,13 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("chartsheet pageSetup only emits CT_CsPageSetup attributes (no worksheet-only fields)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    wb.addChartsheet("CS", {
+    Workbook.addChartsheet(wb, "CS", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
@@ -984,7 +1024,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
         blackAndWhite: true
       }
     });
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const sheetXml = textDecoder.decode(entries.get("xl/chartsheets/sheet1.xml")!.data);
     // Valid CT_CsPageSetup attributes should be present.
@@ -1027,20 +1067,21 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // Previously `toPNG` was non-async; the "no model available" branch
     // threw synchronously, violating its `Promise<Uint8Array>` contract.
     // Callers using `.catch()` would see an uncaught exception.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       },
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Fabricate a Chart instance that points at a non-existent chart
     // number — replicates the "no model available" branch without
     // mutating the real workbook state.
@@ -1058,18 +1099,19 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // and divergent from what Excel caches. Trigger `toString` via
     // the strRef cache path by using a category axis that resolves
     // to Date cells.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRow([new Date(Date.UTC(2023, 0, 15)), 10]);
-    ws.addRow([new Date(Date.UTC(2023, 5, 30)), 20]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRow(ws, [new Date(Date.UTC(2023, 0, 15)), 10]);
+    Worksheet.addRow(ws, [new Date(Date.UTC(2023, 5, 30)), 20]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       } as AddChartOptions,
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const model = chart.chartModel!;
     const catCache = (model.chart.plotArea.chartTypes[0] as any).series[0].categoryAxis?.strRef
       ?.cache;
@@ -1078,7 +1120,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // if the cache lives elsewhere — but the write path through
     // `toString` should NEVER emit ISO-8601. Scan the chart XML
     // directly to be thorough.
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(chartXml).not.toMatch(/\dT\d{2}:\d{2}:\d{2}\.\d{3}Z/);
@@ -1188,13 +1230,14 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     //      multiplied an already-EMU position by 9525 (a 9525×
     //      overshoot) and produced `<xdr:ext cx="NaN" cy="NaN"/>`
     //      because the key lookup missed.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    addChart(
+      ws,
       { type: "bar", series: [{ values: "Sheet1!$A$1:$A$2" }] },
       { pos: { x: 914400, y: 914400 }, ext: { cx: 3657600, cy: 2743200 } }
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const drawingXml = textDecoder.decode(entries.get("xl/drawings/drawing1.xml")!.data);
     // Chart is actually present
@@ -1216,15 +1259,15 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // ignoring any chartsheets already placed; new worksheets
     // collided with the chartsheet's orderNo, scrambling the
     // author's interleaved tab layout.
-    const wb = new Workbook();
-    wb.addWorksheet("WS1"); // orderNo 0
-    wb.addChartsheet("CS1", {
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "WS1"); // orderNo 0
+    Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
         series: [{ categories: "WS1!$A$1", values: "WS1!$A$1" }]
       }
     }); // orderNo 1
-    const ws2 = wb.addWorksheet("WS2"); // should be orderNo 2
+    const ws2 = Workbook.addWorksheet(wb, "WS2"); // should be orderNo 2
     expect(ws2.orderNo).toBe(2);
   });
 
@@ -1242,30 +1285,32 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // ChartEx charts (e.g. histogram / pareto / waterfall / funnel /
     // treemap / sunburst / box-whisker / region-map galleries) were
     // unopenable in Excel as a result.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRow(["Label", "Value"]);
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRow(ws, ["Label", "Value"]);
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15],
       ["D", 30]
     ]);
-    ws.addFunnelChart(
+    addFunnelChart(
+      ws,
       {
         categories: "Data!$A$2:$A$5",
         series: [{ values: "Data!$B$2:$B$5" }]
       },
       "D1:K15"
     );
-    ws.addHistogramChart(
+    addHistogramChart(
+      ws,
       {
         series: [{ values: "Data!$B$2:$B$5" }]
       },
       "D17:K31"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const drawingPaths = [...entries.keys()].filter(p => /^xl\/drawings\/drawing\d+\.xml$/.test(p));
     expect(drawingPaths.length).toBeGreaterThan(0);
@@ -1297,33 +1342,33 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // `workbook.xml` carried duplicate `sheetId` attributes —
     // Excel rejects such packages as corrupt with no "repair"
     // option ("We found a problem with some content…").
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("WS1"); // id 1
-    const cs1 = wb.addChartsheet("CS1", {
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "WS1"); // id 1
+    const cs1 = Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
         series: [{ categories: "WS1!$A$1", values: "WS1!$A$1" }]
       }
     }); // id 2 (via the unified _nextSheetId)
-    const ws2 = wb.addWorksheet("WS2"); // should be id 3, NOT 2
-    const cs2 = wb.addChartsheet("CS2", {
+    const ws2 = Workbook.addWorksheet(wb, "WS2"); // should be id 3, NOT 2
+    const cs2 = Workbook.addChartsheet(wb, "CS2", {
       chart: {
         type: "line",
         series: [{ categories: "WS1!$A$1", values: "WS1!$A$1" }]
       }
     }); // should be id 4, NOT 3
-    const ws3 = wb.addWorksheet("WS3"); // should be id 5
+    const ws3 = Workbook.addWorksheet(wb, "WS3"); // should be id 5
 
-    const ids = [ws1.id, cs1.id, ws2.id, cs2.id, ws3.id];
+    const ids = [ws1.id, chartsheetId(cs1), ws2.id, chartsheetId(cs2), ws3.id];
     expect(new Set(ids).size).toBe(ids.length);
     expect(ws1.id).toBe(1);
-    expect(cs1.id).toBe(2);
+    expect(chartsheetId(cs1)).toBe(2);
     expect(ws2.id).toBe(3);
-    expect(cs2.id).toBe(4);
+    expect(chartsheetId(cs2)).toBe(4);
     expect(ws3.id).toBe(5);
 
     // And the serialized workbook.xml must not carry duplicate sheetIds.
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const { extractAll } = await import("@archive/unzip/extract");
     const entries = await extractAll(new Uint8Array(buf));
     const workbookXml = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
@@ -1340,19 +1385,19 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // literal string "undefined", producing
     // `<xdr:col>undefined</xdr:col>` and making Excel drop the
     // chartsheet drawing as "Drawing shape (Removed Part)".
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    wb.addChartsheet("CS", {
+    Workbook.addChartsheet(wb, "CS", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const { extractAll } = await import("@archive/unzip/extract");
     const entries = await extractAll(new Uint8Array(buf));
     const drawingPaths = [...entries.keys()].filter(p => /^xl\/drawings\/drawing\d+\.xml$/.test(p));
@@ -1378,27 +1423,27 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // index 2) looked it up as `worksheets[2]` — which was
     // `undefined` in the compressed array — and the print area
     // silently vanished.
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("WS1");
-    ws1.addRow(["A", 1]);
-    wb.addChartsheet("CS1", {
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "WS1");
+    Worksheet.addRow(ws1, ["A", 1]);
+    Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
         series: [{ categories: "WS1!$A$1:$A$1", values: "WS1!$B$1:$B$1" }]
       }
     });
-    const ws2 = wb.addWorksheet("WS2");
-    ws2.addRows([
+    const ws2 = Workbook.addWorksheet(wb, "WS2");
+    Worksheet.addRows(ws2, [
       ["Header", "Value"],
       ["A", 10],
       ["B", 20]
     ]);
     ws2.pageSetup = { ...(ws2.pageSetup ?? {}), printArea: "A1:B3" };
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const loaded = wb2.getWorksheet("WS2");
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const loaded = Workbook.getWorksheet(wb2, "WS2")!;
     expect(loaded?.pageSetup?.printArea).toBe("A1:B3");
   });
 
@@ -1438,13 +1483,13 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // Load a workbook whose chartsheet carries extra rels
     // (legacyDrawing, picture) — the previous implementation only
     // re-emitted the drawing rel and left every other r:id dangling.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    const cs = wb.addChartsheet("CS", {
+    const cs = Workbook.addChartsheet(wb, "CS", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
@@ -1452,10 +1497,10 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     });
     // Simulate a loaded file by attaching extra rels directly to the
     // chartsheet model (the parser would normally populate this).
-    (cs.model as { relationships?: Array<Record<string, string>> }).relationships = [
+    (chartsheetModel(cs) as { relationships?: Array<Record<string, string>> }).relationships = [
       // The drawing rel the writer regenerates from `cs.drawing.rId`.
       {
-        Id: cs.model.drawing!.rId,
+        Id: chartsheetModel(cs).drawing!.rId,
         Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
         Target: "legacy-target-overridden-by-writer.xml"
       },
@@ -1467,7 +1512,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
       }
     ];
 
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const relsXml = textDecoder.decode(entries.get("xl/chartsheets/_rels/sheet1.xml.rels")!.data);
     // Extra rel must survive save.
@@ -1475,7 +1520,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     expect(relsXml).toContain("vmlDrawing99.vml");
     // Drawing rel still present with writer-computed target (not the
     // stale one we seeded above).
-    expect(relsXml).toContain(`Target="../drawings/${cs.model.drawingName}.xml"`);
+    expect(relsXml).toContain(`Target="../drawings/${chartsheetModel(cs).drawingName}.xml"`);
     expect(relsXml).not.toContain("legacy-target-overridden-by-writer.xml");
   });
 
@@ -1530,20 +1575,21 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     values: Array<number | null>,
     extraOptions: Partial<AddChartOptions> = {}
   ): string {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     categories.forEach((cat, i) => {
       const v = values[i];
       if (v === null || !Number.isFinite(v)) {
         // Blank cell → chart reads as gap (NaN through
         // `collectNumberValues`).
-        ws.addRow([cat]);
+        Worksheet.addRow(ws, [cat]);
       } else {
-        ws.addRow([cat, v]);
+        Worksheet.addRow(ws, [cat, v]);
       }
     });
     const n = categories.length;
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: chartType,
         series: [
@@ -1556,7 +1602,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       } as AddChartOptions,
       "D1:J10"
     );
-    return renderChartSvg(ws.getCharts()[0].chartModel!, { width: 640, height: 480 });
+    return renderChartSvg(getCharts(ws)[0].chartModel!, { width: 640, height: 480 });
   }
 
   it("pie slices don't collapse to the origin when a value is NaN (chart-renderer buildPieSeries)", () => {
@@ -1623,19 +1669,20 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // verbatim; a freshly-built series with `index=0` collided with
     // the existing first series' `c:idx`, producing a chart with
     // duplicate `<c:idx val="0"/>` entries that Excel collapses.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("WS");
-    ws.addRow(["A", 1, 4]);
-    ws.addRow(["B", 2, 5]);
-    ws.addRow(["C", 3, 6]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "WS");
+    Worksheet.addRow(ws, ["A", 1, 4]);
+    Worksheet.addRow(ws, ["B", 2, 5]);
+    Worksheet.addRow(ws, ["C", 3, 6]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "WS!$A$1:$A$3", values: "WS!$B$1:$B$3" }]
       },
       "E1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const { buildChartSeriesForType } = await import("@excel/chart/chart-builder");
     const extra = buildChartSeriesForType(
       "bar",
@@ -1655,11 +1702,11 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // Before: writer hard-coded `workbookViewId="0"`, and the model
     // carried no `zoomToFit` slot, silently discarding the author's
     // multi-view binding and "fit to window" setting.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRow(["A", 1]);
-    ws.addRow(["B", 2]);
-    wb.addChartsheet("Charts", {
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRow(ws, ["A", 1]);
+    Worksheet.addRow(ws, ["B", 2]);
+    Workbook.addChartsheet(wb, "Charts", {
       workbookViewId: 1,
       zoomToFit: true,
       chart: {
@@ -1667,7 +1714,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const csEntry = entries.get("xl/chartsheets/sheet1.xml");
     expect(csEntry).toBeDefined();
@@ -1676,11 +1723,11 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     expect(xml).toContain('zoomToFit="1"');
     // Round-trip through a fresh load — the new model fields must
     // survive parse and re-serialise.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const cs = wb2.getChartsheet("Charts");
-    expect(cs?.workbookViewId).toBe(1);
-    expect(cs?.zoomToFit).toBe(true);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const cs = Workbook.getChartsheet(wb2, "Charts");
+    expect(chartsheetWorkbookViewId(cs!)).toBe(1);
+    expect(chartsheetZoomToFit(cs!)).toBe(true);
   });
 
   it("chart-api.seriesFromColumns preserves structured / named references verbatim (chart-api qualifyRange)", () => {
@@ -1958,28 +2005,29 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // series but `_renderAreaSeries` dropped it on write — a round-
     // trip of an area chart with texture-filled series lost the
     // pictureFormat + stack parameters.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRow(["a", 1]);
-    ws.addRow(["b", 2]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRow(ws, ["a", 1]);
+    Worksheet.addRow(ws, ["b", 2]);
+    addChart(
+      ws,
       {
         type: "area",
         series: [{ categories: "S!$A$1:$A$2", values: "S!$B$1:$B$2" }]
       } as AddChartOptions,
       "D1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     // Inject a pictureOptions payload directly on the series — the
     // high-level API doesn't yet surface it, but the xform must
     // still round-trip whatever the model carries.
     const areaSer = chart.getSeries(0) as { pictureOptions?: unknown };
     areaSer.pictureOptions = { pictureFormat: "stack" };
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("S")!;
-    const chart2 = ws2.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "S")!;
+    const chart2 = getCharts(ws2)[0];
     const ser2 = chart2.getSeries(0) as { pictureOptions?: { pictureFormat?: string } };
     expect(ser2.pictureOptions).toBeDefined();
     expect(ser2.pictureOptions?.pictureFormat).toBe("stack");
@@ -2003,17 +2051,17 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // allocator hands a mixed tab index even when worksheets and
     // chartsheets are interleaved. Before the fix, cache-populator
     // ignored this field and computed the wrong scope.
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("WS1");
-    ws1.addRow(["x", 100]);
-    wb.addChartsheet("CS1", {
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "WS1");
+    Worksheet.addRow(ws1, ["x", 100]);
+    Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
         series: [{ categories: "WS1!$A$1:$A$1", values: "WS1!$B$1:$B$1" }]
       }
     });
-    const ws2 = wb.addWorksheet("WS2");
-    ws2.addRows([
+    const ws2 = Workbook.addWorksheet(wb, "WS2");
+    Worksheet.addRows(ws2, [
       ["Header", "Value"],
       ["A", 10],
       ["B", 20]
@@ -2022,13 +2070,13 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // (its compressed worksheets-only index). `workbook.worksheets`
     // still reports a length-2 list, so the buggy path would read 1.
     expect(ws2.orderNo).toBe(2);
-    expect(wb.worksheets.indexOf(ws2)).toBe(1);
+    expect(getWorksheets(wb).indexOf(ws2)).toBe(1);
     // The fix's invariant: `orderNo` is the authoritative
     // localSheetId source. Exercise the resolver indirectly by
     // completing a write; the cache-populator runs during render and
     // any localSheetId mismatch would throw — successful writeBuffer
     // confirms the resolver threaded the correct scope.
-    await expect(wb.xlsx.writeBuffer()).resolves.toBeDefined();
+    await expect(Workbook.toXlsxBuffer(wb)).resolves.toBeDefined();
   });
 
   it("Workbook.validateSheetName rejects worksheet/chartsheet name collisions (unified namespace)", () => {
@@ -2038,21 +2086,21 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // user call `addChartsheet("S")` then `addWorksheet("S")` and
     // end up with two tabs sharing the same name — Excel rejects it
     // on reopen.
-    const wb = new Workbook();
-    wb.addChartsheet("MySheet", {
+    const wb = Workbook.create();
+    Workbook.addChartsheet(wb, "MySheet", {
       chart: { type: "bar", series: [{ values: "Sheet1!$A$1" }] }
     });
-    expect(() => wb.addWorksheet("MySheet")).toThrow(/already exists/i);
-    expect(() => wb.addWorksheet("mysheet")).toThrow(/already exists/i);
+    expect(() => Workbook.addWorksheet(wb, "MySheet")).toThrow(/already exists/i);
+    expect(() => Workbook.addWorksheet(wb, "mysheet")).toThrow(/already exists/i);
   });
 
   it("Workbook.validateSheetName rejects backslash in chartsheet names (unified illegal-char set)", () => {
     // The old chartsheet-only regex missed the backslash, so
     // `addChartsheet("A\\B")` slipped through; Excel's Name Manager
     // itself would refuse it. Unified validation closes the gap.
-    const wb = new Workbook();
+    const wb = Workbook.create();
     expect(() =>
-      wb.addChartsheet("A\\B", {
+      Workbook.addChartsheet(wb, "A\\B", {
         chart: { type: "bar", series: [{ values: "Sheet1!$A$1" }] }
       })
     ).toThrow(/cannot include/i);
@@ -2062,20 +2110,20 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // Previously `Chartsheet.name = …` wrote to `_model.name`
     // verbatim, letting callers corrupt the model into illegal
     // states. Must now throw on invalid chars / empty / dupes.
-    const wb = new Workbook();
-    wb.addWorksheet("Existing");
-    const cs = wb.addChartsheet("Chart1", {
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "Existing");
+    const cs = Workbook.addChartsheet(wb, "Chart1", {
       chart: { type: "bar", series: [{ values: "Existing!$A$1" }] }
     });
     expect(() => {
-      cs.name = "Existing";
+      chartsheetSetName(cs, "Existing");
     }).toThrow(/already exists/i);
     expect(() => {
-      cs.name = "A/B";
+      chartsheetSetName(cs, "A/B");
     }).toThrow(/cannot include/i);
     // Legitimate rename still works.
-    cs.name = "Renamed";
-    expect(cs.name).toBe("Renamed");
+    chartsheetSetName(cs, "Renamed");
+    expect(chartsheetName(cs)).toBe("Renamed");
   });
 
   it("chartsheet-xform accepts tabSelected='true' via the shared xsd:boolean parser", async () => {
@@ -2143,11 +2191,12 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // emit `scaled="1"` on round-trip via the raw-patch path.
     // Build a chart with a gradient series fill, write, re-read the
     // raw chart XML, confirm no stray `scaled="1"` was injected.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRow(["a", 1]);
-    ws.addRow(["b", 2]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRow(ws, ["a", 1]);
+    Worksheet.addRow(ws, ["b", 2]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -2171,7 +2220,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2191,11 +2240,12 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // poke a NaN into the axis scaling, write, and confirm the
     // serialiser does NOT emit `val="NaN"` (which Excel rejects).
     void internal;
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRow(["a", 1]);
-    ws.addRow(["b", 2]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRow(ws, ["a", 1]);
+    Worksheet.addRow(ws, ["b", 2]);
+    addChart(
+      ws,
       {
         type: "bar",
         valueAxis: {
@@ -2206,7 +2256,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2222,10 +2272,11 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // Build a chart with a solid fill whose color carries a NaN
     // tint. The serialiser must drop the non-finite modifier rather
     // than emit `<a:tint val="NaN"/>`.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRow(["a", 1]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRow(ws, ["a", 1]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -2242,7 +2293,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2285,10 +2336,11 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // previously short-circuited to `_rawXml` and silently dropped
     // the mutation; `isRawXmlShape` now correctly falls back to the
     // structured path when any structured field is populated.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRow(["a", 1]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRow(ws, ["a", 1]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -2305,16 +2357,16 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     // Round-trip, then mutate directly in the structured model.
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart2 = wb2.getWorksheet("S")!.getCharts()[0];
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart2 = getCharts(Workbook.getWorksheet(wb2, "S")!)[0];
     const series = chart2.getSeries(0) as any;
     // Directly mutate the fill — no call to `setSpPrFill`. Previously
     // this edit was lost.
     series.spPr.fill = { solid: { srgb: "00FF00" } };
-    const buf2 = await wb2.xlsx.writeBuffer();
+    const buf2 = await Workbook.toXlsxBuffer(wb2);
     const entries = await extractAll(new Uint8Array(buf2));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)

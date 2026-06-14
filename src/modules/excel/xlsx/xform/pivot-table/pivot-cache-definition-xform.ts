@@ -3,6 +3,7 @@ import type {
   ParsedCacheDefinition,
   PivotTableSource
 } from "@excel/pivot-table";
+import { rangeShortRange } from "@excel/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
@@ -108,7 +109,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     // Otherwise, reference by sheet + cell range (static).
     const worksheetSourceAttrs: Record<string, string | undefined> = source.tableName
       ? { name: source.tableName }
-      : { ref: source.dimensions.shortRange, sheet: source.name };
+      : { ref: rangeShortRange(source.dimensions), sheet: source.name };
     xmlStream.leafNode("worksheetSource", worksheetSourceAttrs);
     xmlStream.closeNode();
 

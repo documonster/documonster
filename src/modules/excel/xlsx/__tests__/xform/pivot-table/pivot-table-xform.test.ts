@@ -1,6 +1,9 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
+import { Workbook } from "@excel/index";
+import type { PivotTableModel } from "@excel/pivot-table";
 import type { CellFormulaValue, CellValue } from "@excel/types";
-import { Workbook } from "@excel/workbook";
+import { getXlsxIo } from "@excel/workbook";
+import { addPivotTable, addTable } from "@excel/worksheet";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
@@ -21,15 +24,12 @@ interface PivotXml {
 
 async function buildPivotXml(
   tableDef: TableDef,
-  pivotOptions: Omit<
-    Parameters<InstanceType<typeof Workbook>["worksheets"][0]["addPivotTable"]>[0],
-    "sourceTable" | "sourceSheet"
-  >
+  pivotOptions: Omit<PivotTableModel, "sourceTable" | "sourceSheet">
 ): Promise<PivotXml> {
-  const workbook = new Workbook();
-  const worksheet = workbook.addWorksheet();
+  const workbook = Workbook.create();
+  const worksheet = Workbook.addWorksheet(workbook);
 
-  const table = worksheet.addTable({
+  const table = addTable(worksheet, {
     name: "TestTable",
     ref: "A1",
     headerRow: true,
@@ -37,10 +37,10 @@ async function buildPivotXml(
     rows: tableDef.rows
   });
 
-  const worksheet2 = workbook.addWorksheet("Pivot");
-  worksheet2.addPivotTable({ sourceTable: table, ...pivotOptions });
+  const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+  addPivotTable(worksheet2, { sourceTable: table, ...pivotOptions });
 
-  const buffer = await workbook.xlsx.writeBuffer();
+  const buffer = await getXlsxIo(workbook).writeBuffer();
   const zipData = new ZipParser(buffer as Buffer).extractAllSync();
 
   return {

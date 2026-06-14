@@ -7,7 +7,7 @@
  * ```typescript
  * // Catching and identifying errors
  * try {
- *   await workbook.xlsx.readFile('test.xlsx');
+ *   await Workbook.readXlsxFile(workbook, 'test.xlsx');
  * } catch (e) {
  *   if (isExcelError(e)) {
  *     console.error(`Excel error: ${e.message}`);

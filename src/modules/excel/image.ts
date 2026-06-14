@@ -1,4 +1,10 @@
-import { Anchor, type AnchorModel } from "@excel/anchor";
+import {
+  anchorClone,
+  anchorCreate,
+  anchorModel,
+  type AnchorData,
+  type AnchorModel
+} from "@excel/anchor";
 import { ImageError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import type { Worksheet } from "@excel/worksheet";
@@ -20,8 +26,8 @@ interface ImagePos {
 }
 
 interface ImageRange {
-  tl: Anchor;
-  br?: Anchor;
+  tl: AnchorData;
+  br?: AnchorData;
   ext?: ImageExt;
   editAs?: string;
   hyperlinks?: ImageHyperlinks;
@@ -89,7 +95,13 @@ interface ModelInput {
   applyTo?: "all" | "odd" | "even" | "first";
 }
 
-class Image {
+/**
+ * Plain-data worksheet image / background / watermark / header-image
+ * (de-classed domain model). Carries the owning worksheet plus the decoded
+ * fields; serialization (`imageModel`) and (re)hydration (`applyImageModel`)
+ * are flat helpers, mirroring the former getter/setter + clone.
+ */
+export interface ImageData {
   readonly worksheet: Worksheet;
   type?: string;
   imageId?: string;
@@ -102,151 +114,150 @@ class Image {
   headerHeight?: number;
   /** Header watermark applyTo setting. */
   applyTo?: "all" | "odd" | "even" | "first";
+}
 
-  constructor(worksheet: Worksheet, model?: ModelInput) {
-    this.worksheet = worksheet;
-    if (model) {
-      this.model = model;
-    }
+/** Create an image record, optionally hydrating it from a model input. */
+export function imageCreate(worksheet: Worksheet, model?: ModelInput): ImageData {
+  const img: ImageData = { worksheet };
+  if (model) {
+    applyImageModel(img, model);
   }
+  return img;
+}
 
-  get model(): Model {
-    switch (this.type) {
-      case "background":
+/** Serialize an image record to its persisted {@link Model}. */
+export function imageModel(img: ImageData): Model {
+  switch (img.type) {
+    case "background":
+      return {
+        type: img.type,
+        imageId: img.imageId ?? ""
+      };
+    case "watermark":
+      return {
+        type: img.type,
+        imageId: img.imageId ?? "",
+        opacity: img.opacity
+      };
+    case "headerImage":
+      return {
+        type: img.type,
+        imageId: img.imageId ?? "",
+        headerWidth: img.headerWidth,
+        headerHeight: img.headerHeight,
+        applyTo: img.applyTo
+      };
+    case "image": {
+      const range = img.range;
+      if (!range) {
+        throw new ImageError("Image has no range");
+      }
+      // Absolute positioning — no cell anchors
+      if (range.pos) {
         return {
-          type: this.type,
-          imageId: this.imageId ?? ""
-        };
-      case "watermark":
-        return {
-          type: this.type,
-          imageId: this.imageId ?? "",
-          opacity: this.opacity
-        };
-      case "headerImage":
-        return {
-          type: this.type,
-          imageId: this.imageId ?? "",
-          headerWidth: this.headerWidth,
-          headerHeight: this.headerHeight,
-          applyTo: this.applyTo
-        };
-      case "image": {
-        const range = this.range;
-        if (!range) {
-          throw new ImageError("Image has no range");
-        }
-        // Absolute positioning — no cell anchors
-        if (range.pos) {
-          return {
-            type: this.type,
-            imageId: this.imageId ?? "",
-            hyperlinks: range.hyperlinks,
-            range: {
-              tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
-              ext: range.ext,
-              pos: range.pos
-            }
-          };
-        }
-        return {
-          type: this.type,
-          imageId: this.imageId ?? "",
+          type: img.type,
+          imageId: img.imageId ?? "",
           hyperlinks: range.hyperlinks,
           range: {
-            tl: range.tl.model,
-            br: range.br?.model,
+            tl: { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 },
             ext: range.ext,
-            editAs: range.editAs
+            pos: range.pos
           }
         };
       }
-      default:
-        throw new ImageError("Invalid Image Type");
-    }
-  }
-
-  set model({
-    type,
-    imageId,
-    range,
-    hyperlinks,
-    opacity,
-    headerWidth,
-    headerHeight,
-    applyTo
-  }: ModelInput) {
-    this.type = type;
-    this.imageId = imageId;
-    this.opacity = opacity;
-    this.headerWidth = headerWidth;
-    this.headerHeight = headerHeight;
-    this.applyTo = applyTo;
-
-    if (type === "image") {
-      if (typeof range === "string") {
-        const decoded = colCache.decode(range);
-        if ("top" in decoded) {
-          // It's a Location (range like "A1:C3")
-          this.range = {
-            tl: new Anchor(this.worksheet, { col: decoded.left, row: decoded.top }, -1),
-            br: new Anchor(this.worksheet, { col: decoded.right, row: decoded.bottom }, 0),
-            editAs: "oneCell"
-          };
+      return {
+        type: img.type,
+        imageId: img.imageId ?? "",
+        hyperlinks: range.hyperlinks,
+        range: {
+          tl: anchorModel(range.tl),
+          br: range.br ? anchorModel(range.br) : undefined,
+          ext: range.ext,
+          editAs: range.editAs
         }
-      } else if (range && "pos" in range && range.pos) {
-        // Absolute positioning — preserve pos/ext, use dummy tl anchor
-        this.range = {
-          tl: new Anchor(this.worksheet, null, 0),
-          ext: range.ext,
-          hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined),
-          pos: range.pos
-        };
-      } else if (range) {
-        // Anchor inputs:
-        //   - string addresses ("A1") are 1-based; the internal Anchor uses
-        //     0-based nativeCol/nativeRow, so the top-left address is shifted
-        //     by -1. The bottom-right address is intentionally NOT shifted —
-        //     this matches the string-range path (e.g. "A1:B2") where br
-        //     anchors the cell *past* the address (i.e. its right/bottom edge).
-        //   - object inputs ({ col, row } / AnchorModel) already use the
-        //     0-based convention and are passed through as-is.
-        const tlInput = range.tl;
-        const brInput = range.br;
-        this.range = {
-          tl: new Anchor(this.worksheet, tlInput, typeof tlInput === "string" ? -1 : 0),
-          br: brInput ? new Anchor(this.worksheet, brInput, 0) : undefined,
-          ext: range.ext,
-          editAs: range.editAs,
-          hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined)
-        };
-      }
-    }
-  }
-
-  clone(worksheet?: Worksheet): Image {
-    const target = worksheet ?? this.worksheet;
-    const cloned = new Image(target);
-    cloned.type = this.type;
-    cloned.imageId = this.imageId;
-    cloned.opacity = this.opacity;
-    cloned.headerWidth = this.headerWidth;
-    cloned.headerHeight = this.headerHeight;
-    cloned.applyTo = this.applyTo;
-
-    if (this.range) {
-      cloned.range = {
-        tl: this.range.tl.clone(target),
-        br: this.range.br ? this.range.br.clone(target) : undefined,
-        ext: this.range.ext ? { ...this.range.ext } : undefined,
-        editAs: this.range.editAs,
-        hyperlinks: this.range.hyperlinks ? { ...this.range.hyperlinks } : undefined,
-        pos: this.range.pos ? { ...this.range.pos } : undefined
       };
     }
-
-    return cloned;
+    default:
+      throw new ImageError("Invalid Image Type");
   }
 }
 
-export { Image, type Model as ImageModel, type ImageModelInput };
+/** Hydrate an image record from a model input (mutates in place). */
+export function applyImageModel(
+  img: ImageData,
+  { type, imageId, range, hyperlinks, opacity, headerWidth, headerHeight, applyTo }: ModelInput
+): void {
+  img.type = type;
+  img.imageId = imageId;
+  img.opacity = opacity;
+  img.headerWidth = headerWidth;
+  img.headerHeight = headerHeight;
+  img.applyTo = applyTo;
+
+  if (type === "image") {
+    if (typeof range === "string") {
+      const decoded = colCache.decode(range);
+      if ("top" in decoded) {
+        // It's a Location (range like "A1:C3")
+        img.range = {
+          tl: anchorCreate(img.worksheet, { col: decoded.left, row: decoded.top }, -1),
+          br: anchorCreate(img.worksheet, { col: decoded.right, row: decoded.bottom }, 0),
+          editAs: "oneCell"
+        };
+      }
+    } else if (range && "pos" in range && range.pos) {
+      // Absolute positioning — preserve pos/ext, use dummy tl anchor
+      img.range = {
+        tl: anchorCreate(img.worksheet, null, 0),
+        ext: range.ext,
+        hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined),
+        pos: range.pos
+      };
+    } else if (range) {
+      // Anchor inputs:
+      //   - string addresses ("A1") are 1-based; the internal anchor uses
+      //     0-based nativeCol/nativeRow, so the top-left address is shifted
+      //     by -1. The bottom-right address is intentionally NOT shifted —
+      //     this matches the string-range path (e.g. "A1:B2") where br
+      //     anchors the cell *past* the address (i.e. its right/bottom edge).
+      //   - object inputs ({ col, row } / AnchorModel) already use the
+      //     0-based convention and are passed through as-is.
+      const tlInput = range.tl;
+      const brInput = range.br;
+      img.range = {
+        tl: anchorCreate(img.worksheet, tlInput, typeof tlInput === "string" ? -1 : 0),
+        br: brInput ? anchorCreate(img.worksheet, brInput, 0) : undefined,
+        ext: range.ext,
+        editAs: range.editAs,
+        hyperlinks: hyperlinks || ("hyperlinks" in range ? range.hyperlinks : undefined)
+      };
+    }
+  }
+}
+
+/** Clone an image record, optionally rebinding it to a different worksheet. */
+export function imageClone(img: ImageData, worksheet?: Worksheet): ImageData {
+  const target = worksheet ?? img.worksheet;
+  const cloned: ImageData = { worksheet: target };
+  cloned.type = img.type;
+  cloned.imageId = img.imageId;
+  cloned.opacity = img.opacity;
+  cloned.headerWidth = img.headerWidth;
+  cloned.headerHeight = img.headerHeight;
+  cloned.applyTo = img.applyTo;
+
+  if (img.range) {
+    cloned.range = {
+      tl: anchorClone(img.range.tl, target),
+      br: img.range.br ? anchorClone(img.range.br, target) : undefined,
+      ext: img.range.ext ? { ...img.range.ext } : undefined,
+      editAs: img.range.editAs,
+      hyperlinks: img.range.hyperlinks ? { ...img.range.hyperlinks } : undefined,
+      pos: img.range.pos ? { ...img.range.pos } : undefined
+    };
+  }
+
+  return cloned;
+}
+
+export { type Model as ImageModel, type ImageModelInput };

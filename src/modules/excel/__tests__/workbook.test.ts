@@ -1,7 +1,29 @@
 import { testUtils } from "@excel/__tests__/shared";
+import {
+  definedNamesAdd,
+  definedNamesAddFormula,
+  definedNamesGetRanges
+} from "@excel/defined-names";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { rowFont, rowNumFmt, rowSetFont, rowSetNumFmt, rowValues } from "@excel/row";
+import {
+  clearThemes,
+  getDefaultFont,
+  getDefinedNames,
+  getImage,
+  getWorkbookModel,
+  getWorksheets,
+  getXlsxIo,
+  protectWorkbook,
+  setDefaultFont,
+  setWorkbookModel,
+  unprotectWorkbook
+} from "@excel/workbook";
+import { addWorkbookImage } from "@excel/workbook-core";
+import { getSheetName, setSheetName } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, ValueType } from "../../../index";
+import { ValueType } from "../../../index";
 
 // =============================================================================
 // Tests
@@ -14,73 +36,73 @@ describe("Workbook", () => {
 
   describe("worksheet access", () => {
     it("returns undefined for non-existent sheet by name", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("first");
-      expect(wb.getWorksheet("w00t")).toBeUndefined();
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "first");
+      expect(Workbook.getWorksheet(wb, "w00t")).toBeUndefined();
     });
 
     it("returns undefined for sheet 0", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("first");
-      expect(wb.getWorksheet(0)).toBeUndefined();
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "first");
+      expect(Workbook.getWorksheet(wb, 0)).toBeUndefined();
     });
 
     it("returns correct sheet by id after accessing worksheets or eachSheet", () => {
-      const wb = new Workbook();
-      const sheet = wb.addWorksheet("first");
+      const wb = Workbook.create();
+      const sheet = Workbook.addWorksheet(wb, "first");
 
-      wb.eachSheet(() => {});
-      const numSheets = wb.worksheets.length;
+      Workbook.eachSheet(wb, () => {});
+      const numSheets = getWorksheets(wb).length;
 
       expect(numSheets).toBe(1);
-      expect(wb.getWorksheet(0)).toBeUndefined();
-      expect(wb.getWorksheet(1) === sheet).toBe(true);
+      expect(Workbook.getWorksheet(wb, 0)).toBeUndefined();
+      expect(Workbook.getWorksheet(wb, 1) === sheet).toBe(true);
     });
 
     it("returns first worksheet when called with no arguments", () => {
-      const wb = new Workbook();
-      const ws1 = wb.addWorksheet("first");
-      wb.addWorksheet("second");
+      const wb = Workbook.create();
+      const ws1 = Workbook.addWorksheet(wb, "first");
+      Workbook.addWorksheet(wb, "second");
 
-      expect(wb.getWorksheet()).toBe(ws1);
+      expect(Workbook.getWorksheet(wb)).toBe(ws1);
     });
 
     it("returns worksheet by name", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("target");
-      wb.addWorksheet("other");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "target");
+      Workbook.addWorksheet(wb, "other");
 
-      expect(wb.getWorksheet("target")).toBe(ws);
+      expect(Workbook.getWorksheet(wb, "target")).toBe(ws);
     });
 
     it("returns worksheet by name case-insensitively", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("MySheet");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "MySheet");
 
-      expect(wb.getWorksheet("MySheet")).toBe(ws);
-      expect(wb.getWorksheet("mysheet")).toBe(ws);
-      expect(wb.getWorksheet("MYSHEET")).toBe(ws);
-      expect(wb.getWorksheet("mySheet")).toBe(ws);
+      expect(Workbook.getWorksheet(wb, "MySheet")).toBe(ws);
+      expect(Workbook.getWorksheet(wb, "mysheet")).toBe(ws);
+      expect(Workbook.getWorksheet(wb, "MYSHEET")).toBe(ws);
+      expect(Workbook.getWorksheet(wb, "mySheet")).toBe(ws);
     });
 
     it("getWorksheet finds sheet that addWorksheet would reject as duplicate", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet");
 
       // getWorksheet should find the existing sheet with different casing,
       // consistent with addWorksheet which would reject "sheet" as a duplicate
-      const existing = wb.getWorksheet("sheet");
+      const existing = Workbook.getWorksheet(wb, "sheet")!;
       expect(existing).toBeDefined();
-      expect(existing!.name).toBe("Sheet");
+      expect(getSheetName(existing!)).toBe("Sheet");
     });
 
     it("returns worksheet by numeric id", () => {
-      const wb = new Workbook();
-      const ws1 = wb.addWorksheet("first");
-      const ws2 = wb.addWorksheet("second");
+      const wb = Workbook.create();
+      const ws1 = Workbook.addWorksheet(wb, "first");
+      const ws2 = Workbook.addWorksheet(wb, "second");
 
-      expect(wb.getWorksheet(ws1.id)).toBe(ws1);
-      expect(wb.getWorksheet(ws2.id)).toBe(ws2);
+      expect(Workbook.getWorksheet(wb, ws1.id)).toBe(ws1);
+      expect(Workbook.getWorksheet(wb, ws2.id)).toBe(ws2);
     });
   });
 
@@ -90,91 +112,91 @@ describe("Workbook", () => {
 
   describe("worksheet management", () => {
     it("removeWorksheet by id", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("first");
-      const ws2 = wb.addWorksheet("second");
-      wb.addWorksheet("third");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "first");
+      const ws2 = Workbook.addWorksheet(wb, "second");
+      Workbook.addWorksheet(wb, "third");
 
-      expect(wb.worksheets.length).toBe(3);
+      expect(getWorksheets(wb).length).toBe(3);
 
-      wb.removeWorksheet(ws2.id);
-      expect(wb.worksheets.length).toBe(2);
-      expect(wb.getWorksheet("second")).toBeUndefined();
-      expect(wb.getWorksheet("first")).toBeDefined();
-      expect(wb.getWorksheet("third")).toBeDefined();
+      Workbook.removeWorksheet(wb, ws2.id);
+      expect(getWorksheets(wb).length).toBe(2);
+      expect(Workbook.getWorksheet(wb, "second")).toBeUndefined();
+      expect(Workbook.getWorksheet(wb, "first")).toBeDefined();
+      expect(Workbook.getWorksheet(wb, "third")).toBeDefined();
     });
 
     it("removeWorksheet by name (string id)", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("alpha");
-      wb.addWorksheet("beta");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "alpha");
+      Workbook.addWorksheet(wb, "beta");
 
-      wb.removeWorksheet("alpha");
-      expect(wb.worksheets.length).toBe(1);
-      expect(wb.getWorksheet("alpha")).toBeUndefined();
-      expect(wb.getWorksheet("beta")).toBeDefined();
+      Workbook.removeWorksheet(wb, "alpha");
+      expect(getWorksheets(wb).length).toBe(1);
+      expect(Workbook.getWorksheet(wb, "alpha")).toBeUndefined();
+      expect(Workbook.getWorksheet(wb, "beta")).toBeDefined();
     });
 
     it("removeWorksheet by name case-insensitively", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Alpha");
-      wb.addWorksheet("Beta");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Alpha");
+      Workbook.addWorksheet(wb, "Beta");
 
-      wb.removeWorksheet("alpha");
-      expect(wb.worksheets.length).toBe(1);
-      expect(wb.getWorksheet("Alpha")).toBeUndefined();
-      expect(wb.getWorksheet("Beta")).toBeDefined();
+      Workbook.removeWorksheet(wb, "alpha");
+      expect(getWorksheets(wb).length).toBe(1);
+      expect(Workbook.getWorksheet(wb, "Alpha")).toBeUndefined();
+      expect(Workbook.getWorksheet(wb, "Beta")).toBeDefined();
     });
 
     it("worksheets getter returns sheets in order", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("A");
-      wb.addWorksheet("B");
-      wb.addWorksheet("C");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "A");
+      Workbook.addWorksheet(wb, "B");
+      Workbook.addWorksheet(wb, "C");
 
-      const names = wb.worksheets.map(ws => ws.name);
+      const names = getWorksheets(wb).map(ws => getSheetName(ws));
       expect(names).toEqual(["A", "B", "C"]);
     });
 
     it("eachSheet iterates all worksheets", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("one");
-      wb.addWorksheet("two");
-      wb.addWorksheet("three");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "one");
+      Workbook.addWorksheet(wb, "two");
+      Workbook.addWorksheet(wb, "three");
 
       const names: string[] = [];
-      wb.eachSheet(ws => names.push(ws.name));
+      Workbook.eachSheet(wb, ws => names.push(getSheetName(ws)));
       expect(names).toEqual(["one", "two", "three"]);
     });
 
     it("addWorksheet rejects case-insensitive duplicate names", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet");
 
-      expect(() => wb.addWorksheet("sheet")).toThrow(/already exists/i);
-      expect(() => wb.addWorksheet("SHEET")).toThrow(/already exists/i);
+      expect(() => Workbook.addWorksheet(wb, "sheet")).toThrow(/already exists/i);
+      expect(() => Workbook.addWorksheet(wb, "SHEET")).toThrow(/already exists/i);
     });
 
     it("allows renaming a worksheet to a different casing of the same name", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet");
 
       // Renaming "Sheet" to "SHEET" should not throw -- it's the same sheet
-      ws.name = "SHEET";
-      expect(ws.name).toBe("SHEET");
+      setSheetName(ws, "SHEET");
+      expect(getSheetName(ws)).toBe("SHEET");
 
-      ws.name = "sheet";
-      expect(ws.name).toBe("sheet");
+      setSheetName(ws, "sheet");
+      expect(getSheetName(ws)).toBe("sheet");
     });
 
     it("renaming a worksheet still rejects duplicate names with other sheets", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Alpha");
-      const ws2 = wb.addWorksheet("Beta");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Alpha");
+      const ws2 = Workbook.addWorksheet(wb, "Beta");
 
       // Renaming Beta to "alpha" (case-insensitive match with Alpha) should throw
       expect(() => {
-        ws2.name = "alpha";
+        setSheetName(ws2, "alpha");
       }).toThrow(/already exists/i);
     });
   });
@@ -185,57 +207,57 @@ describe("Workbook", () => {
 
   describe("cell types", () => {
     it("stores shared string values properly", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      ws.getCell("A1").value = "Hello, World!";
-      ws.getCell("A2").value = "Hello";
-      ws.getCell("B2").value = "World";
-      ws.getCell("C2").value = {
+      Cell.setValue(ws, "A1", "Hello, World!");
+      Cell.setValue(ws, "A2", "Hello");
+      Cell.setValue(ws, "B2", "World");
+      Cell.setValue(ws, "C2", {
         formula: 'CONCATENATE(A2, ", ", B2, "!")',
         result: "Hello, World!"
-      };
-      ws.getCell("A3").value = `${["Hello", "World"].join(", ")}!`;
+      });
+      Cell.setValue(ws, "A3", `${["Hello", "World"].join(", ")}!`);
 
       // A1 and A3 should reference the same string object
-      expect(ws.getCell("A1").value).toBe(ws.getCell("A3").value);
+      expect(Cell.getValue(ws, "A1")).toBe(Cell.getValue(ws, "A3"));
       // A1 and C2 result should share the same string
-      expect(ws.getCell("A1").value).toBe(ws.getCell("C2").result);
+      expect(Cell.getValue(ws, "A1")).toBe(Cell.getResult(ws, "C2"));
     });
 
     it("assigns cell types properly", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      ws.getCell("A1").value = 7;
-      ws.getCell("B1").value = "Hello, World!";
-      ws.getCell("C1").value = 3.14;
-      ws.getCell("D1").value = new Date();
-      ws.getCell("E1").value = {
+      Cell.setValue(ws, "A1", 7);
+      Cell.setValue(ws, "B1", "Hello, World!");
+      Cell.setValue(ws, "C1", 3.14);
+      Cell.setValue(ws, "D1", new Date());
+      Cell.setValue(ws, "E1", {
         text: "www.google.com",
         hyperlink: "http://www.google.com"
-      };
-      ws.getCell("A2").value = { formula: "A1", result: 7 };
-      ws.getCell("B2").value = {
+      });
+      Cell.setValue(ws, "A2", { formula: "A1", result: 7 });
+      Cell.setValue(ws, "B2", {
         formula: 'CONCATENATE("Hello", ", ", "World!")',
         result: "Hello, World!"
-      };
-      ws.getCell("C2").value = { formula: "D1", result: new Date() };
+      });
+      Cell.setValue(ws, "C2", { formula: "D1", result: new Date() });
 
-      expect(ws.getCell("A1").type).toBe(ValueType.Number);
-      expect(ws.getCell("B1").type).toBe(ValueType.String);
-      expect(ws.getCell("C1").type).toBe(ValueType.Number);
-      expect(ws.getCell("D1").type).toBe(ValueType.Date);
-      expect(ws.getCell("E1").type).toBe(ValueType.Hyperlink);
-      expect(ws.getCell("A2").type).toBe(ValueType.Formula);
-      expect(ws.getCell("B2").type).toBe(ValueType.Formula);
-      expect(ws.getCell("C2").type).toBe(ValueType.Formula);
+      expect(Cell.getType(ws, "A1")).toBe(ValueType.Number);
+      expect(Cell.getType(ws, "B1")).toBe(ValueType.String);
+      expect(Cell.getType(ws, "C1")).toBe(ValueType.Number);
+      expect(Cell.getType(ws, "D1")).toBe(ValueType.Date);
+      expect(Cell.getType(ws, "E1")).toBe(ValueType.Hyperlink);
+      expect(Cell.getType(ws, "A2")).toBe(ValueType.Formula);
+      expect(Cell.getType(ws, "B2")).toBe(ValueType.Formula);
+      expect(Cell.getType(ws, "C2")).toBe(ValueType.Formula);
     });
 
     it("assigns rich text", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      ws.getCell("A1").value = {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      Cell.setValue(ws, "A1", {
         richText: [
           {
             font: { size: 12, color: { theme: 0 }, name: "Calibri", family: 2, scheme: "minor" },
@@ -277,10 +299,10 @@ describe("Workbook", () => {
             text: "format"
           }
         ]
-      };
+      });
 
-      expect(ws.getCell("A1").text).toBe("This is a colorful text with in-cell format");
-      expect(ws.getCell("A1").type).toBe(ValueType.RichText);
+      expect(Cell.getText(ws, "A1")).toBe("This is a colorful text with in-cell format");
+      expect(Cell.getType(ws, "A1")).toBe(ValueType.RichText);
     });
   });
 
@@ -290,23 +312,23 @@ describe("Workbook", () => {
 
   describe("images", () => {
     it("addImage and getImage round-trip", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       const imageBuffer = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
-      const id = wb.addImage({
+      const id = addWorkbookImage(wb, {
         buffer: imageBuffer,
         extension: "png"
       });
 
       expect(typeof id).toBe("number");
-      const img = wb.getImage(id);
+      const img = getImage(wb, id);
       expect(img).toBeDefined();
       expect(img!.extension).toBe("png");
     });
 
     it("getImage returns undefined for invalid id", () => {
-      const wb = new Workbook();
-      expect(wb.getImage(999)).toBeUndefined();
+      const wb = Workbook.create();
+      expect(getImage(wb, 999)).toBeUndefined();
     });
   });
 
@@ -316,7 +338,7 @@ describe("Workbook", () => {
 
   describe("metadata", () => {
     it("creator and dates can be set and read", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       wb.creator = "Test Author";
       wb.created = new Date(2024, 0, 1);
       wb.modified = new Date(2024, 5, 15);
@@ -327,7 +349,7 @@ describe("Workbook", () => {
     });
 
     it("properties can be set", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       wb.title = "My Workbook";
       wb.subject = "Testing";
 
@@ -342,8 +364,8 @@ describe("Workbook", () => {
 
   describe("defined names", () => {
     it("definedNames is accessible", () => {
-      const wb = new Workbook();
-      expect(wb.definedNames).toBeDefined();
+      const wb = Workbook.create();
+      expect(getDefinedNames(wb)).toBeDefined();
     });
   });
 
@@ -353,7 +375,7 @@ describe("Workbook", () => {
 
   describe("views", () => {
     it("views can be set and read", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       wb.views = [
         {
           x: 0,
@@ -376,90 +398,94 @@ describe("Workbook", () => {
 
   describe("duplicateRows", () => {
     it("inserts duplicates", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      ws.getCell("A1").value = "1.1";
-      ws.getCell("A1").font = testUtils.styles.fonts.arialBlackUI14;
-      ws.getCell("B1").value = "1.2";
-      ws.getCell("B1").font = testUtils.styles.fonts.comicSansUdB16;
-      ws.getCell("C1").value = "1.3";
-      ws.getCell("C1").fill = testUtils.styles.fills.redDarkVertical;
-      ws.getRow(1).numFmt = testUtils.styles.numFmts.numFmt1;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      Cell.setValue(ws, "A1", "1.1");
+      Cell.setStyle(ws, "A1", { font: testUtils.styles.fonts.arialBlackUI14 });
+      Cell.setValue(ws, "B1", "1.2");
+      Cell.setStyle(ws, "B1", { font: testUtils.styles.fonts.comicSansUdB16 });
+      Cell.setValue(ws, "C1", "1.3");
+      Cell.setStyle(ws, "C1", { fill: testUtils.styles.fills.redDarkVertical });
+      rowSetNumFmt(Worksheet.getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
 
-      ws.getCell("A2").value = "2.1";
-      ws.getCell("A2").alignment = testUtils.styles.namedAlignments.topLeft;
-      ws.getCell("B2").value = "2.2";
-      ws.getCell("B2").alignment = testUtils.styles.namedAlignments.middleCentre;
-      ws.getCell("C2").value = "2.3";
-      ws.getCell("C2").alignment = testUtils.styles.namedAlignments.bottomRight;
-      ws.getRow(2).numFmt = testUtils.styles.numFmts.numFmt2;
+      Cell.setValue(ws, "A2", "2.1");
+      Cell.setStyle(ws, "A2", { alignment: testUtils.styles.namedAlignments.topLeft });
+      Cell.setValue(ws, "B2", "2.2");
+      Cell.setStyle(ws, "B2", { alignment: testUtils.styles.namedAlignments.middleCentre });
+      Cell.setValue(ws, "C2", "2.3");
+      Cell.setStyle(ws, "C2", { alignment: testUtils.styles.namedAlignments.bottomRight });
+      rowSetNumFmt(Worksheet.getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
 
-      ws.duplicateRow(1, 2, true);
-      expect(ws.getRow(1).values).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(ws.getRow(2).values).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(ws.getRow(3).values).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(ws.getRow(4).values).toEqual([, "2.1", "2.2", "2.3"]);
+      Worksheet.duplicateRow(ws, 1, 2, true);
+      expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, "2.1", "2.2", "2.3"]);
 
       for (let i = 1; i <= 3; i++) {
-        expect(ws.getCell(`A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
-        expect(ws.getCell(`B${i}`).font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-        expect(ws.getCell(`C${i}`).fill).toEqual(testUtils.styles.fills.redDarkVertical);
+        expect(Cell.getStyle(ws, `A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
+        expect(Cell.getStyle(ws, `B${i}`).font).toEqual(testUtils.styles.fonts.comicSansUdB16);
+        expect(Cell.getStyle(ws, `C${i}`).fill).toEqual(testUtils.styles.fills.redDarkVertical);
       }
-      expect(ws.getCell("A4").alignment).toEqual(testUtils.styles.namedAlignments.topLeft);
-      expect(ws.getCell("B4").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("C4").alignment).toEqual(testUtils.styles.namedAlignments.bottomRight);
+      expect(Cell.getStyle(ws, "A4").alignment).toEqual(testUtils.styles.namedAlignments.topLeft);
+      expect(Cell.getStyle(ws, "B4").alignment).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(Cell.getStyle(ws, "C4").alignment).toEqual(
+        testUtils.styles.namedAlignments.bottomRight
+      );
 
-      expect(ws.getRow(1).numFmt).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(ws.getRow(2).numFmt).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(ws.getRow(3).numFmt).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(ws.getRow(4).numFmt).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(rowNumFmt(Worksheet.getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(Worksheet.getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(Worksheet.getRow(ws, 3))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(Worksheet.getRow(ws, 4))).toBe(testUtils.styles.numFmts.numFmt2);
     });
 
     it("overwrites with duplicates", () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      ws.getCell("A1").value = "1.1";
-      ws.getCell("A1").font = testUtils.styles.fonts.arialBlackUI14;
-      ws.getCell("B1").value = "1.2";
-      ws.getCell("B1").font = testUtils.styles.fonts.comicSansUdB16;
-      ws.getCell("C1").value = "1.3";
-      ws.getCell("C1").fill = testUtils.styles.fills.redDarkVertical;
-      ws.getRow(1).numFmt = testUtils.styles.numFmts.numFmt1;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      Cell.setValue(ws, "A1", "1.1");
+      Cell.setStyle(ws, "A1", { font: testUtils.styles.fonts.arialBlackUI14 });
+      Cell.setValue(ws, "B1", "1.2");
+      Cell.setStyle(ws, "B1", { font: testUtils.styles.fonts.comicSansUdB16 });
+      Cell.setValue(ws, "C1", "1.3");
+      Cell.setStyle(ws, "C1", { fill: testUtils.styles.fills.redDarkVertical });
+      rowSetNumFmt(Worksheet.getRow(ws, 1), testUtils.styles.numFmts.numFmt1);
 
-      ws.getCell("A2").value = "2.1";
-      ws.getCell("A2").alignment = testUtils.styles.namedAlignments.topLeft;
-      ws.getCell("B2").value = "2.2";
-      ws.getCell("B2").alignment = testUtils.styles.namedAlignments.middleCentre;
-      ws.getCell("C2").value = "2.3";
-      ws.getCell("C2").alignment = testUtils.styles.namedAlignments.bottomRight;
-      ws.getRow(2).numFmt = testUtils.styles.numFmts.numFmt2;
+      Cell.setValue(ws, "A2", "2.1");
+      Cell.setStyle(ws, "A2", { alignment: testUtils.styles.namedAlignments.topLeft });
+      Cell.setValue(ws, "B2", "2.2");
+      Cell.setStyle(ws, "B2", { alignment: testUtils.styles.namedAlignments.middleCentre });
+      Cell.setValue(ws, "C2", "2.3");
+      Cell.setStyle(ws, "C2", { alignment: testUtils.styles.namedAlignments.bottomRight });
+      rowSetNumFmt(Worksheet.getRow(ws, 2), testUtils.styles.numFmts.numFmt2);
 
-      ws.getCell("A3").value = "3.1";
-      ws.getCell("A3").fill = testUtils.styles.fills.redGreenDarkTrellis;
-      ws.getCell("B3").value = "3.2";
-      ws.getCell("B3").fill = testUtils.styles.fills.blueWhiteHGrad;
-      ws.getCell("C3").value = "3.3";
-      ws.getCell("C3").fill = testUtils.styles.fills.rgbPathGrad;
-      ws.getRow(3).font = testUtils.styles.fonts.broadwayRedOutline20;
+      Cell.setValue(ws, "A3", "3.1");
+      Cell.setStyle(ws, "A3", { fill: testUtils.styles.fills.redGreenDarkTrellis });
+      Cell.setValue(ws, "B3", "3.2");
+      Cell.setStyle(ws, "B3", { fill: testUtils.styles.fills.blueWhiteHGrad });
+      Cell.setValue(ws, "C3", "3.3");
+      Cell.setStyle(ws, "C3", { fill: testUtils.styles.fills.rgbPathGrad });
+      rowSetFont(Worksheet.getRow(ws, 3), testUtils.styles.fonts.broadwayRedOutline20);
 
-      ws.duplicateRow(1, 1, false);
-      expect(ws.getRow(1).values).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(ws.getRow(2).values).toEqual([, "1.1", "1.2", "1.3"]);
-      expect(ws.getRow(3).values).toEqual([, "3.1", "3.2", "3.3"]);
+      Worksheet.duplicateRow(ws, 1, 1, false);
+      expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "1.1", "1.2", "1.3"]);
+      expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "3.1", "3.2", "3.3"]);
 
       for (let i = 1; i <= 2; i++) {
-        expect(ws.getCell(`A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
-        expect(ws.getCell(`A${i}`).alignment).toBeUndefined();
-        expect(ws.getCell(`B${i}`).font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-        expect(ws.getCell(`B${i}`).alignment).toBeUndefined();
-        expect(ws.getCell(`C${i}`).fill).toEqual(testUtils.styles.fills.redDarkVertical);
-        expect(ws.getCell(`C${i}`).alignment).toBeUndefined();
+        expect(Cell.getStyle(ws, `A${i}`).font).toEqual(testUtils.styles.fonts.arialBlackUI14);
+        expect(Cell.getStyle(ws, `A${i}`).alignment).toBeUndefined();
+        expect(Cell.getStyle(ws, `B${i}`).font).toEqual(testUtils.styles.fonts.comicSansUdB16);
+        expect(Cell.getStyle(ws, `B${i}`).alignment).toBeUndefined();
+        expect(Cell.getStyle(ws, `C${i}`).fill).toEqual(testUtils.styles.fills.redDarkVertical);
+        expect(Cell.getStyle(ws, `C${i}`).alignment).toBeUndefined();
       }
 
-      expect(ws.getRow(1).numFmt).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(ws.getRow(2).numFmt).toBe(testUtils.styles.numFmts.numFmt1);
-      expect(ws.getRow(3).numFmt).toBeUndefined();
-      expect(ws.getRow(3).font).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
+      expect(rowNumFmt(Worksheet.getRow(ws, 1))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(Worksheet.getRow(ws, 2))).toBe(testUtils.styles.numFmts.numFmt1);
+      expect(rowNumFmt(Worksheet.getRow(ws, 3))).toBeUndefined();
+      expect(rowFont(Worksheet.getRow(ws, 3))).toEqual(testUtils.styles.fonts.broadwayRedOutline20);
     });
   });
 
@@ -469,10 +495,10 @@ describe("Workbook", () => {
 
   describe("themes", () => {
     it("clearThemes removes internal themes", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       // Themes exist by default as undefined, but after loading an XLSX they'd be set.
       // clearThemes() should set _themes to undefined without throwing.
-      wb.clearThemes();
+      clearThemes(wb);
       expect((wb as any)._themes).toBeUndefined();
     });
   });
@@ -483,9 +509,9 @@ describe("Workbook", () => {
 
   describe("workbook protection", () => {
     it("protect() sets lockStructure by default", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect();
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb);
 
       expect(wb.protection).toBeDefined();
       expect(wb.protection!.lockStructure).toBe(true);
@@ -495,9 +521,9 @@ describe("Workbook", () => {
     });
 
     it("protect() with password generates hash fields", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect("secret");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb, "secret");
 
       expect(wb.protection).toBeDefined();
       expect(wb.protection!.lockStructure).toBe(true);
@@ -508,9 +534,9 @@ describe("Workbook", () => {
     });
 
     it("protect() with options overrides defaults", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect("pass", {
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb, "pass", {
         lockStructure: false,
         lockWindows: true,
         spinCount: 50000
@@ -522,45 +548,45 @@ describe("Workbook", () => {
     });
 
     it("protect() normalizes spinCount edge cases", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
 
       // undefined → default 100000
-      await wb.protect("a", { lockStructure: true });
+      await protectWorkbook(wb, "a", { lockStructure: true });
       expect(wb.protection!.spinCount).toBe(100000);
 
       // negative → 0
-      await wb.protect("a", { spinCount: -1 });
+      await protectWorkbook(wb, "a", { spinCount: -1 });
       expect(wb.protection!.spinCount).toBe(0);
 
       // fractional → rounded
-      await wb.protect("a", { spinCount: 1.8 });
+      await protectWorkbook(wb, "a", { spinCount: 1.8 });
       expect(wb.protection!.spinCount).toBe(2);
     });
 
     it("unprotect() removes protection", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect("secret");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb, "secret");
       expect(wb.protection).toBeDefined();
 
-      wb.unprotect();
+      unprotectWorkbook(wb);
       expect(wb.protection).toBeUndefined();
     });
 
     it("protection survives model round-trip", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect("secret", { lockWindows: true });
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb, "secret", { lockWindows: true });
 
-      const model = wb.model;
+      const model = getWorkbookModel(wb);
       expect(model.protection).toBeDefined();
       expect(model.protection!.lockStructure).toBe(true);
       expect(model.protection!.lockWindows).toBe(true);
 
-      const wb2 = new Workbook();
-      wb2.addWorksheet("Sheet1");
-      wb2.model = model;
+      const wb2 = Workbook.create();
+      Workbook.addWorksheet(wb2, "Sheet1");
+      setWorkbookModel(wb2, model);
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
       expect(wb2.protection!.lockWindows).toBe(true);
@@ -568,13 +594,13 @@ describe("Workbook", () => {
     });
 
     it("protection round-trips through XLSX write/load", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      await wb.protect("test123", { lockStructure: true });
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      await protectWorkbook(wb, "test123", { lockStructure: true });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
@@ -585,12 +611,12 @@ describe("Workbook", () => {
     });
 
     it("unprotected workbook has no protection in XLSX", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       expect(wb2.protection).toBeUndefined();
     });
@@ -602,65 +628,65 @@ describe("Workbook", () => {
 
   describe("defaultFont", () => {
     it("is undefined by default", () => {
-      const wb = new Workbook();
-      expect(wb.defaultFont).toBeUndefined();
+      const wb = Workbook.create();
+      expect(getDefaultFont(wb)).toBeUndefined();
     });
 
     it("can be set and read back", () => {
-      const wb = new Workbook();
-      wb.defaultFont = { name: "Arial", size: 12 };
+      const wb = Workbook.create();
+      setDefaultFont(wb, { name: "Arial", size: 12 });
 
-      expect(wb.defaultFont).toEqual({ name: "Arial", size: 12 });
+      expect(getDefaultFont(wb)).toEqual({ name: "Arial", size: 12 });
     });
 
     it("can be cleared by setting to undefined", () => {
-      const wb = new Workbook();
-      wb.defaultFont = { name: "Arial", size: 12 };
-      expect(wb.defaultFont).toEqual({ name: "Arial", size: 12 });
+      const wb = Workbook.create();
+      setDefaultFont(wb, { name: "Arial", size: 12 });
+      expect(getDefaultFont(wb)).toEqual({ name: "Arial", size: 12 });
 
-      wb.defaultFont = undefined;
-      expect(wb.defaultFont).toBeUndefined();
+      setDefaultFont(wb, undefined);
+      expect(getDefaultFont(wb)).toBeUndefined();
     });
 
     it("survives model round-trip", () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
-      wb.defaultFont = { name: "Times New Roman", size: 14 };
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
+      setDefaultFont(wb, { name: "Times New Roman", size: 14 });
 
-      const model = wb.model;
+      const model = getWorkbookModel(wb);
       expect(model.defaultFont).toEqual({ name: "Times New Roman", size: 14 });
 
-      const wb2 = new Workbook();
-      wb2.addWorksheet("Sheet1");
-      wb2.model = model;
-      expect(wb2.defaultFont).toEqual({ name: "Times New Roman", size: 14 });
+      const wb2 = Workbook.create();
+      Workbook.addWorksheet(wb2, "Sheet1");
+      setWorkbookModel(wb2, model);
+      expect(getDefaultFont(wb2)).toEqual({ name: "Times New Roman", size: 14 });
     });
 
     it("round-trips through XLSX write/load", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = "test";
-      wb.defaultFont = { name: "Arial", size: 12, family: 2 };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", "test");
+      setDefaultFont(wb, { name: "Arial", size: 12, family: 2 });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       // After round-trip, the default font should be preserved
-      expect(wb2.defaultFont).toBeDefined();
-      expect(wb2.defaultFont!.name).toBe("Arial");
-      expect(wb2.defaultFont!.size).toBe(12);
+      expect(getDefaultFont(wb2)).toBeDefined();
+      expect(getDefaultFont(wb2)!.name).toBe("Arial");
+      expect(getDefaultFont(wb2)!.size).toBe(12);
     });
 
     it("writes defaultFont as fontId=0 in styles.xml", async () => {
       const { extractAll } = await import("@archive/unzip/extract");
 
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = "test";
-      wb.defaultFont = { name: "Arial", size: 12 };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", "test");
+      setDefaultFont(wb, { name: "Arial", size: 12 });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await getXlsxIo(wb).writeBuffer();
       const entries = await extractAll(buffer as Uint8Array);
       const stylesXml = new TextDecoder().decode(entries.get("xl/styles.xml")!.data);
 
@@ -680,8 +706,8 @@ describe("Workbook", () => {
 
   describe("calcProperties", () => {
     it("round-trips iterate/iterateCount/iterateDelta through XLSX write/load", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
       wb.calcProperties = {
         fullCalcOnLoad: true,
         iterate: true,
@@ -689,9 +715,9 @@ describe("Workbook", () => {
         iterateDelta: 0.01
       };
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       expect(wb2.calcProperties).toBeDefined();
       expect(wb2.calcProperties.fullCalcOnLoad).toBe(true);
@@ -701,12 +727,12 @@ describe("Workbook", () => {
     });
 
     it("preserves default calcProperties when not explicitly set", async () => {
-      const wb = new Workbook();
-      wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      Workbook.addWorksheet(wb, "Sheet1");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       // Default: fullCalcOnLoad should be false, iterate fields undefined
       expect(wb2.calcProperties).toBeDefined();
@@ -723,58 +749,58 @@ describe("Workbook", () => {
 
   describe("formula-based defined names", () => {
     it("round-trips formula-based defined names through XLSX write/load", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = 1;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", 1);
 
       // Register a formula-based defined name
-      wb.definedNames.addFormula("MyFormula", "OFFSET(Sheet1!$A$1,0,0,3,1)");
+      definedNamesAddFormula(getDefinedNames(wb), "MyFormula", "OFFSET(Sheet1!$A$1,0,0,3,1)");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       // The formula-based name should survive round-trip
-      const { ranges } = wb2.definedNames.getRanges("MyFormula");
+      const { ranges } = definedNamesGetRanges(getDefinedNames(wb2), "MyFormula");
       expect(ranges).toHaveLength(1);
       expect(ranges[0]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
     });
 
     it("preserves addFormula names alongside cell-reference names", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = 1;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", 1);
 
-      wb.definedNames.add("Sheet1!$A$1:$A$3", "CellRange");
-      wb.definedNames.addFormula("FormulaName", "SUM(Sheet1!$A$1:$A$3)");
+      definedNamesAdd(getDefinedNames(wb), "Sheet1!$A$1:$A$3", "CellRange");
+      definedNamesAddFormula(getDefinedNames(wb), "FormulaName", "SUM(Sheet1!$A$1:$A$3)");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
       // Cell-reference name
-      const cellRange = wb2.definedNames.getRanges("CellRange");
+      const cellRange = definedNamesGetRanges(getDefinedNames(wb2), "CellRange");
       expect(cellRange.ranges).toHaveLength(1);
       expect(cellRange.ranges[0]).toContain("$A$1");
 
       // Formula name
-      const formulaName = wb2.definedNames.getRanges("FormulaName");
+      const formulaName = definedNamesGetRanges(getDefinedNames(wb2), "FormulaName");
       expect(formulaName.ranges).toHaveLength(1);
       expect(formulaName.ranges[0]).toBe("SUM(Sheet1!$A$1:$A$3)");
     });
 
     it("does not misclassify sheet names with parentheses as formulas", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Budget (2024)");
-      ws.getCell("A1").value = 100;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Budget (2024)");
+      Cell.setValue(ws, "A1", 100);
 
-      wb.definedNames.add("'Budget (2024)'!$A$1", "MyCell");
+      definedNamesAdd(getDefinedNames(wb), "'Budget (2024)'!$A$1", "MyCell");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await getXlsxIo(wb).writeBuffer();
+      const wb2 = Workbook.create();
+      await getXlsxIo(wb2).load(buffer);
 
-      const result = wb2.definedNames.getRanges("MyCell");
+      const result = definedNamesGetRanges(getDefinedNames(wb2), "MyCell");
       expect(result.ranges).toHaveLength(1);
       expect(result.ranges[0]).toContain("$A$1");
       // Must NOT be treated as a formula expression

@@ -1,7 +1,8 @@
+import { cellGetValue } from "@excel/cell";
+import { Workbook, Worksheet } from "@excel/index";
+import { getColumn, getCell } from "@excel/worksheet";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it, expect, beforeAll } from "vitest";
-
-import { Workbook } from "../../../index";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
@@ -13,29 +14,29 @@ describe("Workbook", () => {
     describe("Read", () => {
       let wb;
       beforeAll(() => {
-        wb = new Workbook();
-        return wb.xlsx.readFile(excelTestDataPath("gold-standard.xlsx"));
+        wb = Workbook.create();
+        return Workbook.readXlsxFile(wb, excelTestDataPath("gold-standard.xlsx"));
       });
 
       it("reads Values sheet", () => {
-        const ws = wb.getWorksheet("Values");
+        const ws = Workbook.getWorksheet(wb, "Values")!;
 
-        expect(ws.getCell("B1").value).toBe("I am Text");
-        expect(ws.getCell("B2").value).toBe(3.14);
-        expect(ws.getCell("B3").value).toBe(5);
-        expect(ws.getCell("B4").value).toEqual(new Date("2016-05-17T00:00:00.000Z"));
-        expect(ws.getCell("B5").value).toEqual({
+        expect(cellGetValue(getCell(ws, "B1"))).toBe("I am Text");
+        expect(cellGetValue(getCell(ws, "B2"))).toBe(3.14);
+        expect(cellGetValue(getCell(ws, "B3"))).toBe(5);
+        expect(cellGetValue(getCell(ws, "B4"))).toEqual(new Date("2016-05-17T00:00:00.000Z"));
+        expect(cellGetValue(getCell(ws, "B5"))).toEqual({
           formula: "B1",
           result: "I am Text"
         });
 
-        expect(ws.getCell("B6").value).toEqual({
+        expect(cellGetValue(getCell(ws, "B6"))).toEqual({
           hyperlink: "https://www.npmjs.com/package/excelts",
           text: "excelts"
         });
 
-        expect(ws.lastColumn).toBe(ws.getColumn(2));
-        expect(ws.lastRow).toBe(ws.getRow(6));
+        expect(Worksheet.lastColumn(ws)).toBe(getColumn(ws, 2));
+        expect(Worksheet.lastRow(ws)).toBe(Worksheet.getRow(ws, 6));
       });
     });
   });

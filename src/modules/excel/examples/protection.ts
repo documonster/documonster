@@ -1,29 +1,29 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
+import { protect } from "@excel/worksheet";
 
 const [, , filename, password] = process.argv;
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
-ws.getCell("A1").value = 1;
-ws.getCell("B1").value = 2;
-ws.getCell("A2").value = { formula: "A1+2", result: 3 };
-ws.getCell("B2").value = { formula: "B1+2", result: 4 };
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
+Cell.setValue(ws, "A1", 1);
+Cell.setValue(ws, "B1", 2);
+Cell.setValue(ws, "A2", { formula: "A1+2", result: 3 });
+Cell.setValue(ws, "B2", { formula: "B1+2", result: 4 });
 
-ws.getCell("B1").protection = { locked: false };
-ws.getCell("A2").protection = { locked: false };
-ws.getCell("B2").protection = { hidden: true };
+Cell.setStyle(ws, "B1", { protection: { locked: false } });
+Cell.setStyle(ws, "A2", { protection: { locked: false } });
+Cell.setStyle(ws, "B2", { protection: { hidden: true } });
 
 async function save() {
   const stopwatch = new HrStopwatch();
   stopwatch.start();
 
-  await ws.protect(password);
+  await protect(ws, password);
   console.log("Protection Time:", stopwatch.microseconds);
 
   stopwatch.start();
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   console.log("Done.");
   console.log("Time taken:", stopwatch.microseconds);
 }

@@ -1,7 +1,7 @@
-import { Workbook } from "../../../index";
-
-const workbook = new Workbook();
-workbook.xlsx
+import { Workbook } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
+const workbook = Workbook.create();
+getXlsxIo(workbook)
   .readFile("./out/template.xlsx")
   .then(stream => {
     const options = {
@@ -9,7 +9,7 @@ workbook.xlsx
       useStyles: true
     };
 
-    return stream.xlsx.writeFile("./out/template-out.xlsx", options).then(() => {
+    return Workbook.writeXlsx(stream, "./out/template-out.xlsx", options).then(() => {
       console.log("Done.");
     });
   })

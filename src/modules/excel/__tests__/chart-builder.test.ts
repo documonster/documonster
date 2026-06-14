@@ -19,7 +19,8 @@ import {
 } from "@excel/chart";
 import { type ChartSceneSeries } from "@excel/chart/index";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { addChart, addChartEx, addComboChart, getCharts } from "@excel/worksheet";
 import { beforeAll, describe, it, expect } from "vitest";
 
 import {
@@ -56,9 +57,9 @@ describe("buildChartModel — all 16 chart types", () => {
     // waterfall has subtotals + connectorLines, regionMap has projection
     // + regionLabels + geoMappingLevel. This test guards against any
     // one of them being silently dropped during build → write → load.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30],
@@ -66,7 +67,8 @@ describe("buildChartModel — all 16 chart types", () => {
       ["E", 50]
     ]);
 
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "histogram",
         series: [{ values: "Data!$B$1:$B$5", literalValues: [1, 2, 3, 4, 5] }],
@@ -74,7 +76,8 @@ describe("buildChartModel — all 16 chart types", () => {
       },
       "D1:J10"
     );
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "boxWhisker",
         categories: "Data!$A$1:$A$5",
@@ -89,7 +92,8 @@ describe("buildChartModel — all 16 chart types", () => {
       },
       "D12:J22"
     );
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "waterfall",
         categories: "Data!$A$1:$A$5",
@@ -101,7 +105,8 @@ describe("buildChartModel — all 16 chart types", () => {
       },
       "D24:J34"
     );
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "regionMap",
         series: [
@@ -120,10 +125,10 @@ describe("buildChartModel — all 16 chart types", () => {
       "D36:J46"
     );
 
-    const bytes = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(bytes);
-    const charts = wb2.getWorksheet("Data")!.getCharts();
+    const bytes = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, bytes);
+    const charts = getCharts(Workbook.getWorksheet(wb2, "Data")!);
     expect(charts.length).toBe(4);
 
     const layoutFor = (idx: number) =>
@@ -1170,10 +1175,11 @@ describe("chart round-trip via addChart API", () => {
 
 describe("combo chart round-trip via addComboChart API", () => {
   it("round-trips bar+line combo chart", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "x";
-    ws.addComboChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "x");
+    addComboChart(
+      ws,
       {
         groups: [
           { type: "bar", series: [baseSeries("Bars")], barDir: "col" },
@@ -1184,10 +1190,10 @@ describe("combo chart round-trip via addComboChart API", () => {
       "C1:J15"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(chart.title).toBe("Combo");
     expect(chart.chartTypes.length).toBe(2);
@@ -1198,10 +1204,11 @@ describe("combo chart round-trip via addComboChart API", () => {
   });
 
   it("round-trips combo with 3D group", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "x";
-    ws.addComboChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "x");
+    addComboChart(
+      ws,
       {
         groups: [
           { type: "bar3D", series: [baseSeries("3D Bars")] },
@@ -1212,10 +1219,10 @@ describe("combo chart round-trip via addComboChart API", () => {
       "C1:J15"
     );
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const chart = wb2.getWorksheet("Sheet1")!.getCharts()[0];
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(chart.title).toBe("3D Combo");
     expect(chart.chartTypes.length).toBe(2);
@@ -1230,11 +1237,11 @@ describe("combo chart round-trip via addComboChart API", () => {
 
 describe("Chart high-level API", () => {
   it("Chart.title getter/setter", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")], title: "Original" }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")], title: "Original" }, "C1:J10");
+    const chart = getCharts(ws)[0];
     expect(chart.title).toBe("Original");
 
     chart.title = "Updated";
@@ -1245,11 +1252,11 @@ describe("Chart high-level API", () => {
   });
 
   it("Chart.legend getter/setter", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
 
     expect(chart.legend).toBeDefined();
     chart.legend = undefined;
@@ -1257,22 +1264,22 @@ describe("Chart high-level API", () => {
   });
 
   it("Chart.chartTypes returns chart type groups", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "line", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "line", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
 
     expect(chart.chartTypes.length).toBe(1);
     expect(chart.chartTypes[0].type).toBe("line");
   });
 
   it("Chart.axes returns axis list", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
 
     expect(chart.axes.length).toBe(2);
     expect(chart.categoryAxis).toBeDefined();
@@ -1280,17 +1287,18 @@ describe("Chart high-level API", () => {
   });
 
   it("Chart.getSeries returns series by index", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(
+      ws,
       {
         type: "bar",
         series: [baseSeries("First"), baseSeries("Second")]
       },
       "C1:J10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
 
     expect(chart.getSeriesCount(0)).toBe(2);
     expect(chart.getSeries(0)).toBeDefined();
@@ -1299,36 +1307,36 @@ describe("Chart high-level API", () => {
   });
 
   it("Chart.spPr getter/setter", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
 
     chart.spPr = { fill: { solid: { rgb: "FFFFFF" } } } as any;
     expect(chart.spPr).toBeDefined();
   });
 
   it("Chart.chartModel returns undefined for non-existent chart entry", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
     // Manually construct a Chart with a chartExNumber to simulate chartEx
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    const chart = ws.getCharts()[0];
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    const chart = getCharts(ws)[0];
     // chartModel should be defined for a normal chart
     expect(chart.chartModel).toBeDefined();
     expect(chart.isChartEx).toBe(false);
   });
 
   it("getCharts returns all charts on the worksheet", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.getCell("A1").value = "x";
-    ws.addChart({ type: "bar", series: [baseSeries("S1")] }, "C1:J10");
-    ws.addChart({ type: "pie", series: [baseSeries("S2")] }, "L1:S10");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Cell.setValue(ws, "A1", "x");
+    addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
+    addChart(ws, { type: "pie", series: [baseSeries("S2")] }, "L1:S10");
 
-    const charts = ws.getCharts();
+    const charts = getCharts(ws);
     expect(charts.length).toBe(2);
     expect(charts[0].chartTypes[0].type).toBe("bar");
     expect(charts[1].chartTypes[0].type).toBe("pie");
@@ -1517,25 +1525,25 @@ describe("chart builder edge cases", () => {
 
 describe("multiple charts round-trip", () => {
   it("preserves multiple charts on a single worksheet", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "data";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "data");
 
-    ws.addChart({ type: "bar", series: [baseSeries("Bar")], title: "Chart 1" }, "C1:J10");
-    ws.addChart({ type: "pie", series: [baseSeries("Pie")], title: "Chart 2" }, "C12:J22");
+    addChart(ws, { type: "bar", series: [baseSeries("Bar")], title: "Chart 1" }, "C1:J10");
+    addChart(ws, { type: "pie", series: [baseSeries("Pie")], title: "Chart 2" }, "C12:J22");
 
-    expect(ws.getCharts().length).toBe(2);
+    expect(getCharts(ws).length).toBe(2);
 
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-    expect(ws2.getCharts().length).toBe(2);
-    expect(ws2.getCharts()[0].title).toBe("Chart 1");
-    expect(ws2.getCharts()[1].title).toBe("Chart 2");
-    expect(ws2.getCharts()[0].chartTypes[0].type).toBe("bar");
-    expect(ws2.getCharts()[1].chartTypes[0].type).toBe("pie");
+    expect(getCharts(ws2).length).toBe(2);
+    expect(getCharts(ws2)[0].title).toBe("Chart 1");
+    expect(getCharts(ws2)[1].title).toBe("Chart 2");
+    expect(getCharts(ws2)[0].chartTypes[0].type).toBe("bar");
+    expect(getCharts(ws2)[1].chartTypes[0].type).toBe("pie");
   });
 });
 
@@ -1573,14 +1581,15 @@ describe("builder chart-level options", () => {
   });
 
   it("renderChartSvg draws a dataTable overlay below the plot", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["Jan", 10, 20],
       ["Feb", 15, 25],
       ["Mar", 20, 30]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         dataTable: {
@@ -1596,7 +1605,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const scene = buildChartScene(model, { width: 600, height: 400 });
     expect(scene.dataTable).toBeDefined();
     const dt = scene.dataTable!;
@@ -1626,13 +1635,14 @@ describe("builder chart-level options", () => {
   });
 
   it("dataTable suppresses x-axis category labels (Excel parity)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["Q1", 10],
       ["Q2", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         dataTable: true,
@@ -1640,21 +1650,22 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const scene = buildChartScene(model, { width: 500, height: 350 });
     expect(scene.dataTable).toBeDefined();
     expect(scene.xLabels).toEqual([]);
   });
 
   it("bar3D renders a true extruded box with view3D-driven projection", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10, 5],
       ["B", 20, 15],
       ["C", 30, 25]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar3D",
         view3D: { rotX: 20, rotY: 30, depthPercent: 100, rAngAx: true },
@@ -1665,7 +1676,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     const scene = buildChartScene(model, { width: 640, height: 400 });
     const bar = scene.series.find(
       (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar"
@@ -1684,20 +1695,21 @@ describe("builder chart-level options", () => {
   });
 
   it("bar3D falls back to default view3D when model omits it", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar3D",
         series: [{ categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }]
       },
       "D1:J10"
     );
-    const model = ws.getCharts()[0].chartModel!;
+    const model = getCharts(ws)[0].chartModel!;
     expect(model.chart.view3D).toBeUndefined();
     const scene = buildChartScene(model, { width: 500, height: 350 });
     const bar = scene.series.find(
@@ -1711,14 +1723,15 @@ describe("builder chart-level options", () => {
   // overflowed the plot rectangle. Verifies the column-sum term in
   // `buildAxisContext`.
   it("stacked column y-range includes the cumulative sum, not per-series max", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["Q1", 10, 30],
       ["Q2", 20, 40],
       ["Q3", 30, 50]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         barDir: "col",
@@ -1730,7 +1743,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(ws.getCharts()[0].chartModel!, {
+    const scene = buildChartScene(getCharts(ws)[0].chartModel!, {
       width: 500,
       height: 300
     });
@@ -1753,18 +1766,19 @@ describe("builder chart-level options", () => {
   // in `fmt()` now returns `"0"` for non-finite inputs so the emitted
   // document stays parseable even if upstream filters are bypassed.
   it("renderChartSvg never emits NaN or undefined in attribute values", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRow(["A"]);
-    ws.addRow(["Single"]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRow(ws, ["A"]);
+    Worksheet.addRow(ws, ["Single"]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$A$1:$A$1" }]
       },
       "C1:J10"
     );
-    const svg = renderChartSvg(ws.getCharts()[0].chartModel!, {
+    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, {
       width: 400,
       height: 260
     });

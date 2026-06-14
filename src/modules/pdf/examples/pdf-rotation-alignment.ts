@@ -13,7 +13,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/cell";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { getCell } from "@excel/worksheet";
+
+import { excelToPdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,11 +25,11 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Rotation Alignment Test");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Rotation Alignment Test");
 
 for (let c = 1; c <= 6; c++) {
-  ws.getColumn(c).width = 12;
+  Column.setWidth(ws, c, 12);
 }
 
 const thinBorder = {
@@ -63,26 +67,26 @@ function addSection(
   cellValue: string | ((i: number) => string),
   wrap = false
 ): void {
-  ws.getCell(titleRow, 1).value = title;
-  ws.getCell(titleRow, 1).font = { bold: true, size: 14 };
-  ws.mergeCells(titleRow, 1, titleRow, 6);
+  Cell.setValue(ws, titleRow, 1, title);
+  Cell.setStyle(ws, titleRow, 1, { font: { bold: true, size: 14 } });
+  Worksheet.merge(ws, titleRow, 1, titleRow, 6);
 
   for (let c = 0; c < 6; c++) {
-    ws.getCell(headerRow, c + 1).value = headers[c];
-    ws.getCell(headerRow, c + 1).font = { size: 8 };
+    Cell.setValue(ws, headerRow, c + 1, headers[c]);
+    Cell.setStyle(ws, headerRow, c + 1, { font: { size: 8 } });
   }
 
-  ws.getRow(dataRow).height = rowHeight;
+  Row.setHeight(ws, dataRow, rowHeight);
   for (let c = 0; c < 6; c++) {
-    const cell = ws.getCell(dataRow, c + 1);
-    cell.value = typeof cellValue === "function" ? cellValue(c) : cellValue;
-    cell.alignment = {
+    const cell = getCell(ws, dataRow, c + 1);
+    cellSetValue(cell, typeof cellValue === "function" ? cellValue(c) : cellValue);
+    cellSetAlignment(cell, {
       horizontal: combos[c].h as any,
       vertical: combos[c].v as any,
       textRotation: rotation as any,
       wrapText: wrap
-    };
-    cell.border = thinBorder;
+    });
+    cellSetBorder(cell, thinBorder);
   }
 }
 
@@ -100,7 +104,7 @@ addSection("textRotation=45 tests", 13, 14, 15, 60, 45, i => `Test ${i + 1}`);
 
 // --- Write outputs ---
 (async () => {
-  await wb.xlsx.writeFile(path.join(outDir, "pdf-rotation-alignment.xlsx"));
+  await Workbook.writeXlsx(wb, path.join(outDir, "pdf-rotation-alignment.xlsx"));
   console.log("Generated pdf-rotation-alignment.xlsx");
 
   const pdfBytes = await excelToPdf(wb, { showGridLines: true, showSheetNames: true });

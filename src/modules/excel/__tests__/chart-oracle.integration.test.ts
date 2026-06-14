@@ -4,7 +4,8 @@ import { join, resolve } from "node:path";
 
 import { extractAll } from "@archive/unzip/extract";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Workbook, Worksheet } from "@excel/index";
+import { addChart, addChartEx, addComboChart } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -20,17 +21,18 @@ beforeAll(() => {
 
 describe("optional chart oracle and enterprise corpus harness", () => {
   it("optionally exports chart workbooks through LibreOffice as a visual oracle hook", async () => {
-    const workbook = new Workbook();
-    const ws = workbook.addWorksheet("Data");
-    ws.addRows([
+    const workbook = Workbook.create();
+    const ws = Workbook.addWorksheet(workbook, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       { type: "bar", series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }] },
       "D1:J10"
     );
-    const input = new Uint8Array(await workbook.xlsx.writeBuffer());
+    const input = new Uint8Array(await Workbook.toXlsxBuffer(workbook));
     await expectValidXlsx(input);
 
     const result = await runExternalOracle({
@@ -52,14 +54,15 @@ describe("optional chart oracle and enterprise corpus harness", () => {
   });
 
   it("optionally open-validates generated chart workbooks with Office-compatible binaries", async () => {
-    const workbook = new Workbook();
-    const ws = workbook.addWorksheet("Data");
-    ws.addRows([
+    const workbook = Workbook.create();
+    const ws = Workbook.addWorksheet(workbook, "Data");
+    Worksheet.addRows(ws, [
       ["A", 10, 1],
       ["B", 20, 2],
       ["C", 30, 3]
     ]);
-    ws.addComboChart(
+    addComboChart(
+      ws,
       {
         groups: [
           {
@@ -75,11 +78,12 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       },
       "E1:L12"
     );
-    ws.addChartEx(
+    addChartEx(
+      ws,
       { type: "treemap", categories: "Data!$A$1:$A$3", series: [{ values: "Data!$B$1:$B$3" }] },
       "E14:L25"
     );
-    workbook.addChartsheet("Chart Sheet", {
+    Workbook.addChartsheet(workbook, "Chart Sheet", {
       chart: {
         type: "funnel",
         categories: "Data!$A$1:$A$3",
@@ -87,7 +91,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       }
     });
 
-    const input = new Uint8Array(await workbook.xlsx.writeBuffer());
+    const input = new Uint8Array(await Workbook.toXlsxBuffer(workbook));
     await expectValidXlsx(input);
 
     const libreOffice = await runOfficeOpenValidation({
@@ -141,9 +145,9 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       const input = await readFile(join(root, entry.path));
-      const wb = new Workbook();
-      await wb.xlsx.load(input);
-      const output = await wb.xlsx.writeBuffer();
+      const wb = Workbook.create();
+      await Workbook.loadXlsx(wb, input);
+      const output = await Workbook.toXlsxBuffer(wb);
       const outBytes = new Uint8Array(output);
       const zip = await extractAll(outBytes);
       await expectValidXlsx(outBytes, { label: entry.path });

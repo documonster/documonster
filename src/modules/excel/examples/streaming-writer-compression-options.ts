@@ -1,3 +1,6 @@
+import { cellSetValue } from "@excel/cell";
+import { rowSetFont } from "@excel/row";
+
 import { WorkbookWriter } from "../../../index";
 
 const filename = process.argv[2];
@@ -22,19 +25,24 @@ ws.columns = [
   { header: "C1", width: 30 }
 ];
 
-ws.getRow(2).font = { name: "Broadway", color: { argb: "FFFF0000" }, outline: true, size: 20 };
+rowSetFont(ws.getRow(2), {
+  name: "Broadway",
+  color: { argb: "FFFF0000" },
+  outline: true,
+  size: 20
+});
 
-ws.getCell("A2").value = "A2";
-ws.getCell("B2").value = "B2";
-ws.getCell("C2").value = "C2";
-ws.getCell("A3").value = "A3";
-ws.getCell("B3").value = "B3";
-ws.getCell("C3").value = "C3";
+cellSetValue(ws.getCell("A2"), "A2");
+cellSetValue(ws.getCell("B2"), "B2");
+cellSetValue(ws.getCell("C2"), "C2");
+cellSetValue(ws.getCell("A3"), "A3");
+cellSetValue(ws.getCell("B3"), "B3");
+cellSetValue(ws.getCell("C3"), "C3");
 
 wb.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return wb2.xlsx.readFile('./wb.test2.xlsx');
+  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
 });
 
 const filename2 = process.argv[3];
@@ -55,19 +63,24 @@ ws2.columns = [
   { header: "C1", width: 30 }
 ];
 
-ws2.getRow(2).font = { name: "Broadway", color: { argb: "FFFF0000" }, outline: true, size: 20 };
+rowSetFont(ws2.getRow(2), {
+  name: "Broadway",
+  color: { argb: "FFFF0000" },
+  outline: true,
+  size: 20
+});
 
-ws2.getCell("A2").value = "A2";
-ws2.getCell("B2").value = "B2";
-ws2.getCell("C2").value = "C2";
-ws2.getCell("A3").value = "A3";
-ws2.getCell("B3").value = "B3";
-ws2.getCell("C3").value = "C3";
+cellSetValue(ws2.getCell("A2"), "A2");
+cellSetValue(ws2.getCell("B2"), "B2");
+cellSetValue(ws2.getCell("C2"), "C2");
+cellSetValue(ws2.getCell("A3"), "A3");
+cellSetValue(ws2.getCell("B3"), "B3");
+cellSetValue(ws2.getCell("C3"), "C3");
 
 wb2.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return wb2.xlsx.readFile('./wb.test2.xlsx');
+  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
 });
 
 const filename3 = process.argv[4];
@@ -85,17 +98,22 @@ ws3.columns = [
   { header: "C1", width: 30 }
 ];
 
-ws3.getRow(2).font = { name: "Broadway", color: { argb: "FFFF0000" }, outline: true, size: 20 };
+rowSetFont(ws3.getRow(2), {
+  name: "Broadway",
+  color: { argb: "FFFF0000" },
+  outline: true,
+  size: 20
+});
 
-ws3.getCell("A2").value = "A2";
-ws3.getCell("B2").value = "B2";
-ws3.getCell("C2").value = "C2";
-ws3.getCell("A3").value = "A3";
-ws3.getCell("B3").value = "B3";
-ws3.getCell("C3").value = "C3";
+cellSetValue(ws3.getCell("A2"), "A2");
+cellSetValue(ws3.getCell("B2"), "B2");
+cellSetValue(ws3.getCell("C2"), "C2");
+cellSetValue(ws3.getCell("A3"), "A3");
+cellSetValue(ws3.getCell("B3"), "B3");
+cellSetValue(ws3.getCell("C3"), "C3");
 
 wb3.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return wb2.xlsx.readFile('./wb.test2.xlsx');
+  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
 });

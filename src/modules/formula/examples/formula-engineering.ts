@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/cell";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
+
 /**
  * Example: Engineering Formulas
  *
@@ -7,40 +12,39 @@
  * - Complex numbers (COMPLEX, IMSUM, IMABS, IMARGUMENT)
  * - Special functions (ERF, BESSELJ)
  */
-import { Workbook } from "../../../index";
 import { installFormulaEngine } from "../index";
 
 installFormulaEngine();
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Eng");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Eng");
 
 // Base conversions
-ws.getCell("A1").value = { formula: "DEC2BIN(42)" }; // "101010"
-ws.getCell("A2").value = { formula: "DEC2HEX(255)" }; // "FF"
-ws.getCell("A3").value = { formula: "DEC2OCT(64)" }; // "100"
-ws.getCell("A4").value = { formula: 'BIN2DEC("101010")' }; // 42
-ws.getCell("A5").value = { formula: 'HEX2DEC("FF")' }; // 255
-ws.getCell("A6").value = { formula: 'OCT2DEC("777")' }; // 511
+Cell.setValue(ws, "A1", { formula: "DEC2BIN(42)" }); // "101010"
+Cell.setValue(ws, "A2", { formula: "DEC2HEX(255)" }); // "FF"
+Cell.setValue(ws, "A3", { formula: "DEC2OCT(64)" }); // "100"
+Cell.setValue(ws, "A4", { formula: 'BIN2DEC("101010")' }); // 42
+Cell.setValue(ws, "A5", { formula: 'HEX2DEC("FF")' }); // 255
+Cell.setValue(ws, "A6", { formula: 'OCT2DEC("777")' }); // 511
 
 // Bitwise
-ws.getCell("B1").value = { formula: "BITAND(12, 10)" }; // 8
-ws.getCell("B2").value = { formula: "BITOR(12, 10)" }; // 14
-ws.getCell("B3").value = { formula: "BITXOR(12, 10)" }; // 6
-ws.getCell("B4").value = { formula: "BITLSHIFT(1, 4)" }; // 16
-ws.getCell("B5").value = { formula: "BITRSHIFT(64, 2)" }; // 16
+Cell.setValue(ws, "B1", { formula: "BITAND(12, 10)" }); // 8
+Cell.setValue(ws, "B2", { formula: "BITOR(12, 10)" }); // 14
+Cell.setValue(ws, "B3", { formula: "BITXOR(12, 10)" }); // 6
+Cell.setValue(ws, "B4", { formula: "BITLSHIFT(1, 4)" }); // 16
+Cell.setValue(ws, "B5", { formula: "BITRSHIFT(64, 2)" }); // 16
 
 // Complex numbers (strings with "i" suffix)
-ws.getCell("C1").value = { formula: "COMPLEX(3, 4)" }; // "3+4i"
-ws.getCell("C2").value = { formula: 'IMSUM("3+4i", "1+2i")' }; // "4+6i"
-ws.getCell("C3").value = { formula: 'IMABS("3+4i")' }; // 5
-ws.getCell("C4").value = { formula: 'IMARGUMENT("1+1i")' }; // π/4 ≈ 0.7854
+Cell.setValue(ws, "C1", { formula: "COMPLEX(3, 4)" }); // "3+4i"
+Cell.setValue(ws, "C2", { formula: 'IMSUM("3+4i", "1+2i")' }); // "4+6i"
+Cell.setValue(ws, "C3", { formula: 'IMABS("3+4i")' }); // 5
+Cell.setValue(ws, "C4", { formula: 'IMARGUMENT("1+1i")' }); // π/4 ≈ 0.7854
 
 // Special functions
-ws.getCell("D1").value = { formula: "ERF(1)" }; // 0.8427
-ws.getCell("D2").value = { formula: "BESSELJ(0.5, 0)" };
+Cell.setValue(ws, "D1", { formula: "ERF(1)" }); // 0.8427
+Cell.setValue(ws, "D2", { formula: "BESSELJ(0.5, 0)" });
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 for (const addr of [
   "A1",
@@ -61,6 +65,6 @@ for (const addr of [
   "D1",
   "D2"
 ]) {
-  const c = ws.getCell(addr);
-  console.log(`${addr}  ${String(c.formula).padEnd(32)}  = ${JSON.stringify(c.result)}`);
+  const c = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(c)).padEnd(32)}  = ${JSON.stringify(cellResult(c))}`);
 }

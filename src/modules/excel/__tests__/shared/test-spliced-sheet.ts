@@ -1,116 +1,131 @@
+import { addSheetTo } from "@excel/__tests__/shared/add-sheet-to";
+import {
+  cellGetValue,
+  cellSetBorder,
+  cellSetFill,
+  cellSetNumFmt,
+  cellSetValue,
+  cellType,
+  cellName,
+  cellSetName
+} from "@excel/cell";
 import { ValueType } from "@excel/enums";
+import { Workbook, Worksheet } from "@excel/index";
+import { rowSetAlignment, rowSetBorder, rowValues } from "@excel/row";
+import { getCell, setColumns } from "@excel/worksheet";
 import { expect } from "vitest";
 
 export const splice = {
   rows: {
     removeOnly: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-remove-only");
+        const ws = addSheetTo(wb, "splice-row-remove-only");
 
-        ws.addRow(["1,1", "1,2", "1,3"]);
-        ws.addRow(["2,1", "2,2", "2,3"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.addRow(["5,1", "5,2", "5,3"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3"]);
 
-        ws.spliceRows(2, 1);
+        Worksheet.spliceRows(ws, 2, 1);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-remove-only");
+        const ws = Workbook.getWorksheet(wb, "splice-row-remove-only")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getCell("A1").value).toBe("1,1");
-        expect(ws.getCell("A1").type).toBe(ValueType.String);
-        expect(ws.getCell("B1").value).toBe("1,2");
-        expect(ws.getCell("B1").type).toBe(ValueType.String);
-        expect(ws.getCell("C1").value).toBe("1,3");
-        expect(ws.getCell("C1").type).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "A1"))).toBe("1,1");
+        expect(cellType(getCell(ws, "A1"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "B1"))).toBe("1,2");
+        expect(cellType(getCell(ws, "B1"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "C1"))).toBe("1,3");
+        expect(cellType(getCell(ws, "C1"))).toBe(ValueType.String);
 
-        expect(ws.getCell("A2").type).toBe(ValueType.Null);
-        expect(ws.getCell("B2").type).toBe(ValueType.Null);
-        expect(ws.getCell("C2").type).toBe(ValueType.Null);
+        expect(cellType(getCell(ws, "A2"))).toBe(ValueType.Null);
+        expect(cellType(getCell(ws, "B2"))).toBe(ValueType.Null);
+        expect(cellType(getCell(ws, "C2"))).toBe(ValueType.Null);
 
-        expect(ws.getCell("A3").value).toBe(4.1);
-        expect(ws.getCell("A3").type).toBe(ValueType.Number);
-        expect(ws.getCell("B3").type).toBe(ValueType.Null);
-        expect(ws.getCell("C3").value).toBe(4.3);
-        expect(ws.getCell("C3").type).toBe(ValueType.Number);
+        expect(cellGetValue(getCell(ws, "A3"))).toBe(4.1);
+        expect(cellType(getCell(ws, "A3"))).toBe(ValueType.Number);
+        expect(cellType(getCell(ws, "B3"))).toBe(ValueType.Null);
+        expect(cellGetValue(getCell(ws, "C3"))).toBe(4.3);
+        expect(cellType(getCell(ws, "C3"))).toBe(ValueType.Number);
 
-        expect(ws.getCell("A4").value).toBe("5,1");
-        expect(ws.getCell("A4").type).toBe(ValueType.String);
-        expect(ws.getCell("B4").value).toBe("5,2");
-        expect(ws.getCell("B4").type).toBe(ValueType.String);
-        expect(ws.getCell("C4").value).toBe("5,3");
-        expect(ws.getCell("C4").type).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "A4"))).toBe("5,1");
+        expect(cellType(getCell(ws, "A4"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "B4"))).toBe("5,2");
+        expect(cellType(getCell(ws, "B4"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "C4"))).toBe("5,3");
+        expect(cellType(getCell(ws, "C4"))).toBe(ValueType.String);
 
-        ws.addRow(["5,1b", "5,2b", "5,3b"]);
-        expect(ws.getCell("A5").value).toBe("5,1b");
-        expect(ws.getCell("A5").type).toBe(ValueType.String);
-        expect(ws.getCell("B5").value).toBe("5,2b");
-        expect(ws.getCell("B5").type).toBe(ValueType.String);
-        expect(ws.getCell("C5").value).toBe("5,3b");
-        expect(ws.getCell("C5").type).toBe(ValueType.String);
+        Worksheet.addRow(ws, ["5,1b", "5,2b", "5,3b"]);
+        expect(cellGetValue(getCell(ws, "A5"))).toBe("5,1b");
+        expect(cellType(getCell(ws, "A5"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "B5"))).toBe("5,2b");
+        expect(cellType(getCell(ws, "B5"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "C5"))).toBe("5,3b");
+        expect(cellType(getCell(ws, "C5"))).toBe(ValueType.String);
       }
     },
     insertFewer: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-insert-fewer");
+        const ws = addSheetTo(wb, "splice-row-insert-fewer");
 
-        ws.addRow(["1,1", "1,2", "1,3"]);
-        ws.addRow(["2,1", "2,2", "2,3"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.addRow(["5,1", "5,2", "5,3"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3"]);
 
-        ws.spliceRows(2, 2, ["one", "two", "three"]);
+        Worksheet.spliceRows(ws, 2, 2, ["one", "two", "three"]);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-insert-fewer");
+        const ws = Workbook.getWorksheet(wb, "splice-row-insert-fewer")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).toEqual([, "1,1", "1,2", "1,3"]);
-        expect(ws.getRow(2).values).toEqual([, "one", "two", "three"]);
-        expect(ws.getRow(3).values).toEqual([, 4.1, , 4.3]);
-        expect(ws.getRow(4).values).toEqual([, "5,1", "5,2", "5,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1,1", "1,2", "1,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "one", "two", "three"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, 4.1, , 4.3]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, "5,1", "5,2", "5,3"]);
       }
     },
     insertSame: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-insert-same");
+        const ws = addSheetTo(wb, "splice-row-insert-same");
 
-        ws.addRow(["1,1", "1,2", "1,3"]);
-        ws.addRow(["2,1", "2,2", "2,3"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.addRow(["5,1", "5,2", "5,3"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3"]);
 
-        ws.spliceRows(2, 2, ["one", "two", "three"], ["une", "deux", "trois"]);
+        Worksheet.spliceRows(ws, 2, 2, ["one", "two", "three"], ["une", "deux", "trois"]);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-insert-same");
+        const ws = Workbook.getWorksheet(wb, "splice-row-insert-same")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).toEqual([, "1,1", "1,2", "1,3"]);
-        expect(ws.getRow(2).values).toEqual([, "one", "two", "three"]);
-        expect(ws.getRow(3).values).toEqual([, "une", "deux", "trois"]);
-        expect(ws.getRow(4).values).toEqual([, 4.1, , 4.3]);
-        expect(ws.getRow(5).values).toEqual([, "5,1", "5,2", "5,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1,1", "1,2", "1,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "one", "two", "three"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "une", "deux", "trois"]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, 4.1, , 4.3]);
+        expect(rowValues(Worksheet.getRow(ws, 5))).toEqual([, "5,1", "5,2", "5,3"]);
       }
     },
     insertMore: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-insert-more");
+        const ws = addSheetTo(wb, "splice-row-insert-more");
 
-        ws.addRow(["1,1", "1,2", "1,3"]);
-        ws.addRow(["2,1", "2,2", "2,3"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.addRow(["5,1", "5,2", "5,3"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3"]);
 
-        ws.spliceRows(
+        Worksheet.spliceRows(
+          ws,
           2,
           2,
           ["one", "two", "three"],
@@ -120,57 +135,57 @@ export const splice = {
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-insert-more");
+        const ws = Workbook.getWorksheet(wb, "splice-row-insert-more")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).toEqual([, "1,1", "1,2", "1,3"]);
-        expect(ws.getRow(2).values).toEqual([, "one", "two", "three"]);
-        expect(ws.getRow(3).values).toEqual([, "une", "deux", "trois"]);
-        expect(ws.getRow(4).values).toEqual([, "uno", "due", "tre"]);
-        expect(ws.getRow(5).values).toEqual([, 4.1, , 4.3]);
-        expect(ws.getRow(6).values).toEqual([, "5,1", "5,2", "5,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1,1", "1,2", "1,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "one", "two", "three"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "une", "deux", "trois"]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, "uno", "due", "tre"]);
+        expect(rowValues(Worksheet.getRow(ws, 5))).toEqual([, 4.1, , 4.3]);
+        expect(rowValues(Worksheet.getRow(ws, 6))).toEqual([, "5,1", "5,2", "5,3"]);
       }
     },
     removeStyle: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-remove-style");
-        ws.addRow(["1,1", "1,2", "1,3", "1,4"]);
-        ws.addRow(["2,1", "2,2", "2,3", "2,4"]);
-        ws.addRow(["3,1", "3,2", "3,3", "3,4"]);
-        ws.addRow(["4,1", "4,2", "4,3", "4,4"]);
+        const ws = addSheetTo(wb, "splice-row-remove-style");
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3", "1,4"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3", "2,4"]);
+        Worksheet.addRow(ws, ["3,1", "3,2", "3,3", "3,4"]);
+        Worksheet.addRow(ws, ["4,1", "4,2", "4,3", "4,4"]);
 
-        ws.getCell("A1").numFmt = "# ?/?";
-        ws.getCell("B2").fill = {
+        cellSetNumFmt(getCell(ws, "A1"), "# ?/?");
+        cellSetFill(getCell(ws, "B2"), {
           type: "pattern",
           pattern: "darkVertical",
           fgColor: { argb: "FFFF0000" }
-        };
-        ws.getRow(3).border = {
+        });
+        rowSetBorder(Worksheet.getRow(ws, 3), {
           top: { style: "thin" },
           left: { style: "thin" },
           bottom: { style: "thin" },
           right: { style: "thin" }
-        };
-        ws.getRow(4).alignment = {
+        });
+        rowSetAlignment(Worksheet.getRow(ws, 4), {
           horizontal: "left",
           vertical: "middle"
-        };
+        });
 
         // remove rows 2 & 3
-        ws.spliceRows(2, 2);
+        Worksheet.spliceRows(ws, 2, 2);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-remove-style");
+        const ws = Workbook.getWorksheet(wb, "splice-row-remove-style")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
-        expect(ws.getRow(2).values).to.deep.equal([, "4,1", "4,2", "4,3", "4,4"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).to.deep.equal([, "4,1", "4,2", "4,3", "4,4"]);
 
-        expect(ws.getCell("A1").style).to.deep.equal({
+        expect(getCell(ws, "A1").style).to.deep.equal({
           numFmt: "# ?/?"
         });
-        expect(ws.getRow(2).style).to.deep.equal({
+        expect(Worksheet.getRow(ws, 2).style).to.deep.equal({
           alignment: {
             horizontal: "left",
             vertical: "middle"
@@ -180,52 +195,52 @@ export const splice = {
     },
     insertStyle: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-insert-style");
+        const ws = addSheetTo(wb, "splice-row-insert-style");
 
-        ws.addRow(["1,1", "1,2", "1,3"]);
-        ws.addRow(["2,1", "2,2", "2,3"]);
-        ws.getCell("A2").fill = {
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3"]);
+        cellSetFill(getCell(ws, "A2"), {
           type: "pattern",
           pattern: "darkVertical",
           fgColor: { argb: "FFFF0000" }
-        };
-        ws.getRow(2).alignment = {
+        });
+        rowSetAlignment(Worksheet.getRow(ws, 2), {
           horizontal: "left",
           vertical: "middle"
-        };
+        });
 
-        ws.spliceRows(2, 0, ["one", "two", "three"]);
-        ws.getCell("A2").border = {
+        Worksheet.spliceRows(ws, 2, 0, ["one", "two", "three"]);
+        cellSetBorder(getCell(ws, "A2"), {
           top: { style: "thin" },
           left: { style: "thin" },
           bottom: { style: "thin" },
           right: { style: "thin" }
-        };
+        });
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-insert-style");
+        const ws = Workbook.getWorksheet(wb, "splice-row-insert-style")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).toEqual([, "1,1", "1,2", "1,3"]);
-        expect(ws.getRow(2).values).toEqual([, "one", "two", "three"]);
-        expect(ws.getRow(3).values).toEqual([, "2,1", "2,2", "2,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).toEqual([, "1,1", "1,2", "1,3"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).toEqual([, "one", "two", "three"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, "2,1", "2,2", "2,3"]);
 
-        expect(ws.getRow(3).style.alignment).to.deep.equal({
+        expect(Worksheet.getRow(ws, 3).style.alignment).to.deep.equal({
           horizontal: "left",
           vertical: "middle"
         });
-        expect(ws.getCell("A2").style.border).to.deep.equal({
+        expect(getCell(ws, "A2").style.border).to.deep.equal({
           top: { style: "thin" },
           left: { style: "thin" },
           bottom: { style: "thin" },
           right: { style: "thin" }
         });
-        expect(ws.getCell("A3").style.alignment).to.deep.equal({
+        expect(getCell(ws, "A3").style.alignment).to.deep.equal({
           horizontal: "left",
           vertical: "middle"
         });
-        expect(ws.getCell("A3").style.fill).to.deep.equal({
+        expect(getCell(ws, "A3").style.fill).to.deep.equal({
           type: "pattern",
           pattern: "darkVertical",
           fgColor: { argb: "FFFF0000" }
@@ -234,69 +249,69 @@ export const splice = {
     },
     replaceStyle: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-row-replace-style");
-        ws.addRow(["1,1", "1,2", "1,3", "1,4"]);
-        ws.addRow(["2,1", "2,2", "2,3", "2,4"]);
-        ws.addRow(["3,1", "3,2", "3,3", "3,4"]);
+        const ws = addSheetTo(wb, "splice-row-replace-style");
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3", "1,4"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3", "2,4"]);
+        Worksheet.addRow(ws, ["3,1", "3,2", "3,3", "3,4"]);
 
-        ws.getCell("B1").numFmt = "top";
-        ws.getCell("B2").numFmt = "middle";
-        ws.getCell("B3").numFmt = "bottom";
+        cellSetNumFmt(getCell(ws, "B1"), "top");
+        cellSetNumFmt(getCell(ws, "B2"), "middle");
+        cellSetNumFmt(getCell(ws, "B3"), "bottom");
 
-        ws.getRow(1).alignment = {
+        rowSetAlignment(Worksheet.getRow(ws, 1), {
           horizontal: "left",
           vertical: "top"
-        };
-        ws.getRow(2).alignment = {
+        });
+        rowSetAlignment(Worksheet.getRow(ws, 2), {
           horizontal: "center",
           vertical: "middle"
-        };
-        ws.getRow(3).alignment = {
+        });
+        rowSetAlignment(Worksheet.getRow(ws, 3), {
           horizontal: "right",
           vertical: "bottom"
-        };
+        });
 
         // remove rows 2 & 3
-        ws.spliceRows(2, 1, ["two-one", "two-two", "two-three", "two-four"]);
+        Worksheet.spliceRows(ws, 2, 1, ["two-one", "two-two", "two-three", "two-four"]);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-row-replace-style");
+        const ws = Workbook.getWorksheet(wb, "splice-row-replace-style")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
-        expect(ws.getRow(2).values).to.deep.equal([
+        expect(rowValues(Worksheet.getRow(ws, 1))).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).to.deep.equal([
           ,
           "two-one",
           "two-two",
           "two-three",
           "two-four"
         ]);
-        expect(ws.getRow(3).values).to.deep.equal([, "3,1", "3,2", "3,3", "3,4"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).to.deep.equal([, "3,1", "3,2", "3,3", "3,4"]);
 
-        expect(ws.getCell("B1").style).to.deep.equal({
+        expect(getCell(ws, "B1").style).to.deep.equal({
           numFmt: "top",
           alignment: {
             horizontal: "left",
             vertical: "top"
           }
         });
-        expect(ws.getCell("B2").style).toEqual({});
-        expect(ws.getCell("B3").style).to.deep.equal({
+        expect(getCell(ws, "B2").style).toEqual({});
+        expect(getCell(ws, "B3").style).to.deep.equal({
           numFmt: "bottom",
           alignment: {
             horizontal: "right",
             vertical: "bottom"
           }
         });
-        expect(ws.getRow(1).style).to.deep.equal({
+        expect(Worksheet.getRow(ws, 1).style).to.deep.equal({
           alignment: {
             horizontal: "left",
             vertical: "top"
           }
         });
-        expect(ws.getRow(2).style).toEqual({});
-        expect(ws.getRow(3).style).to.deep.equal({
+        expect(Worksheet.getRow(ws, 2).style).toEqual({});
+        expect(Worksheet.getRow(ws, 3).style).to.deep.equal({
           alignment: {
             horizontal: "right",
             vertical: "bottom"
@@ -306,268 +321,347 @@ export const splice = {
     },
     removeDefinedNames: {
       addSheet(wb: any) {
-        const wsSquare = wb.addWorksheet("splice-row-remove-name-square");
-        wsSquare.addRow(["1,1", "1,2", "1,3", "1,4"]);
-        wsSquare.addRow(["2,1", "2,2", "2,3", "2,4"]);
-        wsSquare.addRow(["3,1", "3,2", "3,3", "3,4"]);
-        wsSquare.addRow(["4,1", "4,2", "4,3", "4,4"]);
+        const wsSquare = addSheetTo(wb, "splice-row-remove-name-square");
+        Worksheet.addRow(wsSquare, ["1,1", "1,2", "1,3", "1,4"]);
+        Worksheet.addRow(wsSquare, ["2,1", "2,2", "2,3", "2,4"]);
+        Worksheet.addRow(wsSquare, ["3,1", "3,2", "3,3", "3,4"]);
+        Worksheet.addRow(wsSquare, ["4,1", "4,2", "4,3", "4,4"]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3, 4].forEach(row => {
-            wsSquare.getCell(col + row).name = "square";
+            cellSetName(getCell(wsSquare, col + row), "square");
           });
         });
 
-        wsSquare.spliceRows(2, 2);
+        Worksheet.spliceRows(wsSquare, 2, 2);
 
-        const wsSingles = wb.addWorksheet("splice-row-remove-name-singles");
-        wsSingles.getCell("A1").value = "1,1";
-        wsSingles.getCell("A4").value = "4,1";
-        wsSingles.getCell("D1").value = "1,4";
-        wsSingles.getCell("D4").value = "4,4";
+        const wsSingles = addSheetTo(wb, "splice-row-remove-name-singles");
+        cellSetValue(getCell(wsSingles, "A1"), "1,1");
+        cellSetValue(getCell(wsSingles, "A4"), "4,1");
+        cellSetValue(getCell(wsSingles, "D1"), "1,4");
+        cellSetValue(getCell(wsSingles, "D4"), "4,4");
 
         ["A", "D"].forEach(col => {
           [1, 4].forEach(row => {
-            wsSingles.getCell(col + row).name = `single-${col}${row}`;
+            cellSetName(getCell(wsSingles, col + row), `single-${col}${row}`);
           });
         });
 
-        wsSingles.spliceRows(2, 2);
+        Worksheet.spliceRows(wsSingles, 2, 2);
       },
 
       checkSheet(wb: any) {
-        const wsSquare = wb.getWorksheet("splice-row-remove-name-square");
+        const wsSquare = Workbook.getWorksheet(wb, "splice-row-remove-name-square")!;
         expect(wsSquare).toBeDefined();
 
-        expect(wsSquare.getRow(1).values).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
-        expect(wsSquare.getRow(2).values).to.deep.equal([, "4,1", "4,2", "4,3", "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 1))).to.deep.equal([
+          ,
+          "1,1",
+          "1,2",
+          "1,3",
+          "1,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 2))).to.deep.equal([
+          ,
+          "4,1",
+          "4,2",
+          "4,3",
+          "4,4"
+        ]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3].forEach(row => {
             if (row === 3) {
-              expect(wsSquare.getCell(col + row).name).toBeUndefined();
+              expect(cellName(getCell(wsSquare, col + row))).toBeUndefined();
             } else {
-              expect(wsSquare.getCell(col + row).name).toBe("square");
+              expect(cellName(getCell(wsSquare, col + row))).toBe("square");
             }
           });
         });
 
-        const wsSingles = wb.getWorksheet("splice-row-remove-name-singles");
+        const wsSingles = Workbook.getWorksheet(wb, "splice-row-remove-name-singles")!;
         expect(wsSingles).toBeDefined();
 
-        expect(wsSingles.getRow(1).values).toEqual([, "1,1", , , "1,4"]);
-        expect(wsSingles.getRow(2).values).toEqual([, "4,1", , , "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 1))).toEqual([, "1,1", , , "1,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 2))).toEqual([, "4,1", , , "4,4"]);
 
-        expect(wsSingles.getCell("A1").name).toBe("single-A1");
-        expect(wsSingles.getCell("A2").name).toBe("single-A4");
-        expect(wsSingles.getCell("D1").name).toBe("single-D1");
-        expect(wsSingles.getCell("D2").name).toBe("single-D4");
+        expect(cellName(getCell(wsSingles, "A1"))).toBe("single-A1");
+        expect(cellName(getCell(wsSingles, "A2"))).toBe("single-A4");
+        expect(cellName(getCell(wsSingles, "D1"))).toBe("single-D1");
+        expect(cellName(getCell(wsSingles, "D2"))).toBe("single-D4");
       }
     },
     insertDefinedNames: {
       addSheet(wb: any) {
-        const wsSquare = wb.addWorksheet("splice-row-insert-name-square");
-        wsSquare.addRow(["1,1", "1,2", "1,3", "1,4"]);
-        wsSquare.addRow(["2,1", "2,2", "2,3", "2,4"]);
-        wsSquare.addRow(["3,1", "3,2", "3,3", "3,4"]);
-        wsSquare.addRow(["4,1", "4,2", "4,3", "4,4"]);
+        const wsSquare = addSheetTo(wb, "splice-row-insert-name-square");
+        Worksheet.addRow(wsSquare, ["1,1", "1,2", "1,3", "1,4"]);
+        Worksheet.addRow(wsSquare, ["2,1", "2,2", "2,3", "2,4"]);
+        Worksheet.addRow(wsSquare, ["3,1", "3,2", "3,3", "3,4"]);
+        Worksheet.addRow(wsSquare, ["4,1", "4,2", "4,3", "4,4"]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3, 4].forEach(row => {
-            wsSquare.getCell(col + row).name = "square";
+            cellSetName(getCell(wsSquare, col + row), "square");
           });
         });
 
-        wsSquare.spliceRows(3, 0, ["foo", "bar", "baz", "qux"]);
+        Worksheet.spliceRows(wsSquare, 3, 0, ["foo", "bar", "baz", "qux"]);
 
-        const wsSingles = wb.addWorksheet("splice-row-insert-name-singles");
-        wsSingles.getCell("A1").value = "1,1";
-        wsSingles.getCell("A4").value = "4,1";
-        wsSingles.getCell("D1").value = "1,4";
-        wsSingles.getCell("D4").value = "4,4";
+        const wsSingles = addSheetTo(wb, "splice-row-insert-name-singles");
+        cellSetValue(getCell(wsSingles, "A1"), "1,1");
+        cellSetValue(getCell(wsSingles, "A4"), "4,1");
+        cellSetValue(getCell(wsSingles, "D1"), "1,4");
+        cellSetValue(getCell(wsSingles, "D4"), "4,4");
 
         ["A", "D"].forEach(col => {
           [1, 4].forEach(row => {
-            wsSingles.getCell(col + row).name = `single-${col}${row}`;
+            cellSetName(getCell(wsSingles, col + row), `single-${col}${row}`);
           });
         });
 
-        wsSingles.spliceRows(3, 0, ["foo", "bar", "baz", "qux"]);
+        Worksheet.spliceRows(wsSingles, 3, 0, ["foo", "bar", "baz", "qux"]);
       },
 
       checkSheet(wb: any) {
-        const wsSquare = wb.getWorksheet("splice-row-insert-name-square");
+        const wsSquare = Workbook.getWorksheet(wb, "splice-row-insert-name-square")!;
         expect(wsSquare).toBeDefined();
 
-        expect(wsSquare.getRow(1).values).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
-        expect(wsSquare.getRow(2).values).to.deep.equal([, "2,1", "2,2", "2,3", "2,4"]);
-        expect(wsSquare.getRow(3).values).to.deep.equal([, "foo", "bar", "baz", "qux"]);
-        expect(wsSquare.getRow(4).values).to.deep.equal([, "3,1", "3,2", "3,3", "3,4"]);
-        expect(wsSquare.getRow(5).values).to.deep.equal([, "4,1", "4,2", "4,3", "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 1))).to.deep.equal([
+          ,
+          "1,1",
+          "1,2",
+          "1,3",
+          "1,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 2))).to.deep.equal([
+          ,
+          "2,1",
+          "2,2",
+          "2,3",
+          "2,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 3))).to.deep.equal([
+          ,
+          "foo",
+          "bar",
+          "baz",
+          "qux"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 4))).to.deep.equal([
+          ,
+          "3,1",
+          "3,2",
+          "3,3",
+          "3,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 5))).to.deep.equal([
+          ,
+          "4,1",
+          "4,2",
+          "4,3",
+          "4,4"
+        ]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3, 4, 5].forEach(row => {
             if (row === 3) {
-              expect(wsSquare.getCell(col + row).name).toBeUndefined();
+              expect(cellName(getCell(wsSquare, col + row))).toBeUndefined();
             } else {
-              expect(wsSquare.getCell(col + row).name).toBe("square");
+              expect(cellName(getCell(wsSquare, col + row))).toBe("square");
             }
           });
         });
 
-        const wsSingles = wb.getWorksheet("splice-row-insert-name-singles");
+        const wsSingles = Workbook.getWorksheet(wb, "splice-row-insert-name-singles")!;
         expect(wsSingles).toBeDefined();
-        expect(wsSingles.getRow(1).values).toEqual([, "1,1", , , "1,4"]);
-        expect(wsSingles.getRow(3).values).to.deep.equal([, "foo", "bar", "baz", "qux"]);
-        expect(wsSingles.getRow(5).values).toEqual([, "4,1", , , "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 1))).toEqual([, "1,1", , , "1,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 3))).to.deep.equal([
+          ,
+          "foo",
+          "bar",
+          "baz",
+          "qux"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 5))).toEqual([, "4,1", , , "4,4"]);
 
-        expect(wsSingles.getCell("A1").name).toBe("single-A1");
-        expect(wsSingles.getCell("A5").name).toBe("single-A4");
-        expect(wsSingles.getCell("D1").name).toBe("single-D1");
-        expect(wsSingles.getCell("D5").name).toBe("single-D4");
+        expect(cellName(getCell(wsSingles, "A1"))).toBe("single-A1");
+        expect(cellName(getCell(wsSingles, "A5"))).toBe("single-A4");
+        expect(cellName(getCell(wsSingles, "D1"))).toBe("single-D1");
+        expect(cellName(getCell(wsSingles, "D5"))).toBe("single-D4");
       }
     },
     replaceDefinedNames: {
       addSheet(wb: any) {
-        const wsSquare = wb.addWorksheet("splice-row-replace-name-square");
-        wsSquare.addRow(["1,1", "1,2", "1,3", "1,4"]);
-        wsSquare.addRow(["2,1", "2,2", "2,3", "2,4"]);
-        wsSquare.addRow(["3,1", "3,2", "3,3", "3,4"]);
-        wsSquare.addRow(["4,1", "4,2", "4,3", "4,4"]);
+        const wsSquare = addSheetTo(wb, "splice-row-replace-name-square");
+        Worksheet.addRow(wsSquare, ["1,1", "1,2", "1,3", "1,4"]);
+        Worksheet.addRow(wsSquare, ["2,1", "2,2", "2,3", "2,4"]);
+        Worksheet.addRow(wsSquare, ["3,1", "3,2", "3,3", "3,4"]);
+        Worksheet.addRow(wsSquare, ["4,1", "4,2", "4,3", "4,4"]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3, 4].forEach(row => {
-            wsSquare.getCell(col + row).name = "square";
+            cellSetName(getCell(wsSquare, col + row), "square");
           });
         });
 
-        wsSquare.spliceRows(2, 1, ["foo", "bar", "baz", "qux"]);
+        Worksheet.spliceRows(wsSquare, 2, 1, ["foo", "bar", "baz", "qux"]);
 
-        const wsSingles = wb.addWorksheet("splice-row-replace-name-singles");
-        wsSingles.getCell("A1").value = "1,1";
-        wsSingles.getCell("A4").value = "4,1";
-        wsSingles.getCell("D1").value = "1,4";
-        wsSingles.getCell("D4").value = "4,4";
+        const wsSingles = addSheetTo(wb, "splice-row-replace-name-singles");
+        cellSetValue(getCell(wsSingles, "A1"), "1,1");
+        cellSetValue(getCell(wsSingles, "A4"), "4,1");
+        cellSetValue(getCell(wsSingles, "D1"), "1,4");
+        cellSetValue(getCell(wsSingles, "D4"), "4,4");
 
         ["A", "D"].forEach(col => {
           [1, 4].forEach(row => {
-            wsSingles.getCell(col + row).name = `single-${col}${row}`;
+            cellSetName(getCell(wsSingles, col + row), `single-${col}${row}`);
           });
         });
 
-        wsSingles.spliceRows(2, 1, ["foo", "bar", "baz", "qux"]);
+        Worksheet.spliceRows(wsSingles, 2, 1, ["foo", "bar", "baz", "qux"]);
       },
 
       checkSheet(wb: any) {
-        const wsSquare = wb.getWorksheet("splice-row-replace-name-square");
+        const wsSquare = Workbook.getWorksheet(wb, "splice-row-replace-name-square")!;
         expect(wsSquare).toBeDefined();
 
-        expect(wsSquare.getRow(1).values).to.deep.equal([, "1,1", "1,2", "1,3", "1,4"]);
-        expect(wsSquare.getRow(2).values).to.deep.equal([, "foo", "bar", "baz", "qux"]);
-        expect(wsSquare.getRow(3).values).to.deep.equal([, "3,1", "3,2", "3,3", "3,4"]);
-        expect(wsSquare.getRow(4).values).to.deep.equal([, "4,1", "4,2", "4,3", "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 1))).to.deep.equal([
+          ,
+          "1,1",
+          "1,2",
+          "1,3",
+          "1,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 2))).to.deep.equal([
+          ,
+          "foo",
+          "bar",
+          "baz",
+          "qux"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 3))).to.deep.equal([
+          ,
+          "3,1",
+          "3,2",
+          "3,3",
+          "3,4"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSquare, 4))).to.deep.equal([
+          ,
+          "4,1",
+          "4,2",
+          "4,3",
+          "4,4"
+        ]);
 
         ["A", "B", "C", "D"].forEach(col => {
           [1, 2, 3, 4].forEach(row => {
             if (row === 2) {
-              expect(wsSquare.getCell(col + row).name).toBeUndefined();
+              expect(cellName(getCell(wsSquare, col + row))).toBeUndefined();
             } else {
-              expect(wsSquare.getCell(col + row).name).toBe("square");
+              expect(cellName(getCell(wsSquare, col + row))).toBe("square");
             }
           });
         });
 
-        const wsSingles = wb.getWorksheet("splice-row-replace-name-singles");
+        const wsSingles = Workbook.getWorksheet(wb, "splice-row-replace-name-singles")!;
         expect(wsSingles).toBeDefined();
 
-        expect(wsSingles.getRow(1).values).toEqual([, "1,1", , , "1,4"]);
-        expect(wsSingles.getRow(2).values).to.deep.equal([, "foo", "bar", "baz", "qux"]);
-        expect(wsSingles.getRow(4).values).toEqual([, "4,1", , , "4,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 1))).toEqual([, "1,1", , , "1,4"]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 2))).to.deep.equal([
+          ,
+          "foo",
+          "bar",
+          "baz",
+          "qux"
+        ]);
+        expect(rowValues(Worksheet.getRow(wsSingles, 4))).toEqual([, "4,1", , , "4,4"]);
 
-        expect(wsSingles.getCell("A1").name).toBe("single-A1");
-        expect(wsSingles.getCell("A4").name).toBe("single-A4");
-        expect(wsSingles.getCell("D1").name).toBe("single-D1");
-        expect(wsSingles.getCell("D4").name).toBe("single-D4");
+        expect(cellName(getCell(wsSingles, "A1"))).toBe("single-A1");
+        expect(cellName(getCell(wsSingles, "A4"))).toBe("single-A4");
+        expect(cellName(getCell(wsSingles, "D1"))).toBe("single-D1");
+        expect(cellName(getCell(wsSingles, "D4"))).toBe("single-D4");
       }
     }
   },
   columns: {
     removeOnly: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-column-remove-only");
+        const ws = addSheetTo(wb, "splice-column-remove-only");
 
-        ws.columns = [
+        setColumns(ws, [
           { key: "id", width: 10 },
           { key: "name", width: 32 },
           { key: "dob", width: 10 }
-        ];
+        ]);
 
-        ws.addRow({ id: "id1", name: "name1", dob: "dob1" });
-        ws.addRow({ id: 2, dob: "dob2" });
-        ws.addRow({ name: "name3", dob: 3 });
+        Worksheet.addRow(ws, { id: "id1", name: "name1", dob: "dob1" });
+        Worksheet.addRow(ws, { id: 2, dob: "dob2" });
+        Worksheet.addRow(ws, { name: "name3", dob: 3 });
 
-        ws.spliceColumns(2, 1);
+        Worksheet.spliceColumns(ws, 2, 1);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-column-remove-only");
+        const ws = Workbook.getWorksheet(wb, "splice-column-remove-only")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getCell("A1").value).toBe("id1");
-        expect(ws.getCell("A1").type).toBe(ValueType.String);
-        expect(ws.getCell("B1").value).toBe("dob1");
-        expect(ws.getCell("B1").type).toBe(ValueType.String);
-        expect(ws.getCell("C1").type).toBe(ValueType.Null);
+        expect(cellGetValue(getCell(ws, "A1"))).toBe("id1");
+        expect(cellType(getCell(ws, "A1"))).toBe(ValueType.String);
+        expect(cellGetValue(getCell(ws, "B1"))).toBe("dob1");
+        expect(cellType(getCell(ws, "B1"))).toBe(ValueType.String);
+        expect(cellType(getCell(ws, "C1"))).toBe(ValueType.Null);
 
-        expect(ws.getCell("A2").value).toBe(2);
-        expect(ws.getCell("A2").type).toBe(ValueType.Number);
-        expect(ws.getCell("B2").value).toBe("dob2");
-        expect(ws.getCell("B2").type).toBe(ValueType.String);
-        expect(ws.getCell("C2").type).toBe(ValueType.Null);
+        expect(cellGetValue(getCell(ws, "A2"))).toBe(2);
+        expect(cellType(getCell(ws, "A2"))).toBe(ValueType.Number);
+        expect(cellGetValue(getCell(ws, "B2"))).toBe("dob2");
+        expect(cellType(getCell(ws, "B2"))).toBe(ValueType.String);
+        expect(cellType(getCell(ws, "C2"))).toBe(ValueType.Null);
 
-        expect(ws.getCell("A3").type).toBe(ValueType.Null);
-        expect(ws.getCell("B3").value).toBe(3);
-        expect(ws.getCell("B3").type).toBe(ValueType.Number);
-        expect(ws.getCell("C3").type).toBe(ValueType.Null);
+        expect(cellType(getCell(ws, "A3"))).toBe(ValueType.Null);
+        expect(cellGetValue(getCell(ws, "B3"))).toBe(3);
+        expect(cellType(getCell(ws, "B3"))).toBe(ValueType.Number);
+        expect(cellType(getCell(ws, "C3"))).toBe(ValueType.Null);
       }
     },
     insertFewer: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-column-insert-fewer");
+        const ws = addSheetTo(wb, "splice-column-insert-fewer");
 
-        ws.addRow(["1,1", "1,2", "1,3", "1,4", "1,5"]);
-        ws.addRow(["2,1", "2,2", "2,3", "2,4", "2,5"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.getCell("E4").value = 4.5;
-        ws.addRow(["5,1", "5,2", "5,3", "5,4", "5,5"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3", "1,4", "1,5"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3", "2,4", "2,5"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        cellSetValue(getCell(ws, "E4"), 4.5);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3", "5,4", "5,5"]);
 
-        ws.spliceColumns(2, 2, ["one", "two", "three", "four", "five"]);
+        Worksheet.spliceColumns(ws, 2, 2, ["one", "two", "three", "four", "five"]);
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-column-insert-fewer");
+        const ws = Workbook.getWorksheet(wb, "splice-column-insert-fewer")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).to.deep.equal([, "1,1", "one", "1,4", "1,5"]);
-        expect(ws.getRow(2).values).to.deep.equal([, "2,1", "two", "2,4", "2,5"]);
-        expect(ws.getRow(3).values).toEqual([, , "three"]);
-        expect(ws.getRow(4).values).toEqual([, 4.1, "four", , 4.5]);
-        expect(ws.getRow(5).values).to.deep.equal([, "5,1", "five", "5,4", "5,5"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).to.deep.equal([, "1,1", "one", "1,4", "1,5"]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).to.deep.equal([, "2,1", "two", "2,4", "2,5"]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, , "three"]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).toEqual([, 4.1, "four", , 4.5]);
+        expect(rowValues(Worksheet.getRow(ws, 5))).to.deep.equal([, "5,1", "five", "5,4", "5,5"]);
       }
     },
     insertSame: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-column-insert-same");
+        const ws = addSheetTo(wb, "splice-column-insert-same");
 
-        ws.addRow(["1,1", "1,2", "1,3", "1,4", "1,5"]);
-        ws.addRow(["2,1", "2,2", "2,3", "2,4", "2,5"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.getCell("E4").value = 4.5;
-        ws.addRow(["5,1", "5,2", "5,3", "5,4", "5,5"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3", "1,4", "1,5"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3", "2,4", "2,5"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        cellSetValue(getCell(ws, "E4"), 4.5);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3", "5,4", "5,5"]);
 
-        ws.spliceColumns(
+        Worksheet.spliceColumns(
+          ws,
           2,
           2,
           ["one", "two", "three", "four", "five"],
@@ -576,28 +670,50 @@ export const splice = {
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-column-insert-same");
+        const ws = Workbook.getWorksheet(wb, "splice-column-insert-same")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).to.deep.equal([, "1,1", "one", "une", "1,4", "1,5"]);
-        expect(ws.getRow(2).values).to.deep.equal([, "2,1", "two", "deux", "2,4", "2,5"]);
-        expect(ws.getRow(3).values).toEqual([, , "three", "trois"]);
-        expect(ws.getRow(4).values).to.deep.equal([, 4.1, "four", "quatre", , 4.5]);
-        expect(ws.getRow(5).values).to.deep.equal([, "5,1", "five", "cinq", "5,4", "5,5"]);
+        expect(rowValues(Worksheet.getRow(ws, 1))).to.deep.equal([
+          ,
+          "1,1",
+          "one",
+          "une",
+          "1,4",
+          "1,5"
+        ]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).to.deep.equal([
+          ,
+          "2,1",
+          "two",
+          "deux",
+          "2,4",
+          "2,5"
+        ]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).toEqual([, , "three", "trois"]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).to.deep.equal([, 4.1, "four", "quatre", , 4.5]);
+        expect(rowValues(Worksheet.getRow(ws, 5))).to.deep.equal([
+          ,
+          "5,1",
+          "five",
+          "cinq",
+          "5,4",
+          "5,5"
+        ]);
       }
     },
     insertMore: {
       addSheet(wb: any) {
-        const ws = wb.addWorksheet("splice-column-insert-more");
+        const ws = addSheetTo(wb, "splice-column-insert-more");
 
-        ws.addRow(["1,1", "1,2", "1,3", "1,4", "1,5"]);
-        ws.addRow(["2,1", "2,2", "2,3", "2,4", "2,5"]);
-        ws.getCell("A4").value = 4.1;
-        ws.getCell("C4").value = 4.3;
-        ws.getCell("E4").value = 4.5;
-        ws.addRow(["5,1", "5,2", "5,3", "5,4", "5,5"]);
+        Worksheet.addRow(ws, ["1,1", "1,2", "1,3", "1,4", "1,5"]);
+        Worksheet.addRow(ws, ["2,1", "2,2", "2,3", "2,4", "2,5"]);
+        cellSetValue(getCell(ws, "A4"), 4.1);
+        cellSetValue(getCell(ws, "C4"), 4.3);
+        cellSetValue(getCell(ws, "E4"), 4.5);
+        Worksheet.addRow(ws, ["5,1", "5,2", "5,3", "5,4", "5,5"]);
 
-        ws.spliceColumns(
+        Worksheet.spliceColumns(
+          ws,
           2,
           2,
           ["one", "two", "three", "four", "five"],
@@ -607,14 +723,38 @@ export const splice = {
       },
 
       checkSheet(wb: any) {
-        const ws = wb.getWorksheet("splice-column-insert-more");
+        const ws = Workbook.getWorksheet(wb, "splice-column-insert-more")!;
         expect(ws).toBeDefined();
 
-        expect(ws.getRow(1).values).to.deep.equal([, "1,1", "one", "une", "uno", "1,4", "1,5"]);
-        expect(ws.getRow(2).values).to.deep.equal([, "2,1", "two", "deux", "due", "2,4", "2,5"]);
-        expect(ws.getRow(3).values).to.deep.equal([, , "three", "trois", "tre"]);
-        expect(ws.getRow(4).values).to.deep.equal([, 4.1, "four", "quatre", "quatro", , 4.5]);
-        expect(ws.getRow(5).values).to.deep.equal([
+        expect(rowValues(Worksheet.getRow(ws, 1))).to.deep.equal([
+          ,
+          "1,1",
+          "one",
+          "une",
+          "uno",
+          "1,4",
+          "1,5"
+        ]);
+        expect(rowValues(Worksheet.getRow(ws, 2))).to.deep.equal([
+          ,
+          "2,1",
+          "two",
+          "deux",
+          "due",
+          "2,4",
+          "2,5"
+        ]);
+        expect(rowValues(Worksheet.getRow(ws, 3))).to.deep.equal([, , "three", "trois", "tre"]);
+        expect(rowValues(Worksheet.getRow(ws, 4))).to.deep.equal([
+          ,
+          4.1,
+          "four",
+          "quatre",
+          "quatro",
+          ,
+          4.5
+        ]);
+        expect(rowValues(Worksheet.getRow(ws, 5))).to.deep.equal([
           ,
           "5,1",
           "five",

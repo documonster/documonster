@@ -12,77 +12,78 @@
  */
 
 import { ValueType } from "@excel/enums";
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("calculate-formulas: merged cells (issue #162)", () => {
   it("does not double-count a horizontally merged value in SUM", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B2").value = 20281.57;
-    ws.getCell("B4").value = 5887.5;
-    ws.mergeCells("B2:C2");
-    ws.mergeCells("B4:C4");
-    ws.getCell("E1").value = { formula: "SUM(B2:C9)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("E1").result).toBeCloseTo(26169.07, 4);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B2", 20281.57);
+    Cell.setValue(ws, "B4", 5887.5);
+    Worksheet.merge(ws, "B2:C2");
+    Worksheet.merge(ws, "B4:C4");
+    Cell.setValue(ws, "E1", { formula: "SUM(B2:C9)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBeCloseTo(26169.07, 4);
   });
 
   it("does not double-count a vertically merged value in SUM", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 100;
-    ws.mergeCells("A1:A3");
-    ws.getCell("B1").value = { formula: "SUM(A1:A3)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(100);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 100);
+    Worksheet.merge(ws, "A1:A3");
+    Cell.setValue(ws, "B1", { formula: "SUM(A1:A3)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(100);
   });
 
   it("counts a 2D merged value once in SUM and COUNT", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 7;
-    ws.mergeCells("A1:B2"); // 4 cells, master A1
-    ws.getCell("D1").value = { formula: "SUM(A1:B2)", result: 0 };
-    ws.getCell("D2").value = { formula: "COUNT(A1:B2)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(7);
-    expect(ws.getCell("D2").result).toBe(1);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 7);
+    Worksheet.merge(ws, "A1:B2"); // 4 cells, master A1
+    Cell.setValue(ws, "D1", { formula: "SUM(A1:B2)", result: 0 });
+    Cell.setValue(ws, "D2", { formula: "COUNT(A1:B2)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(7);
+    expect(Cell.getResult(ws, "D2")).toBe(1);
   });
 
   it("ignores merge slaves in AVERAGE", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 10;
-    ws.getCell("A2").value = 20;
-    ws.mergeCells("A1:B1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 10);
+    Cell.setValue(ws, "A2", 20);
+    Worksheet.merge(ws, "A1:B1");
     // Range A1:B2 contains: A1=10, B1=slave(of A1), A2=20, B2=blank
     // Real Excel AVERAGE = (10 + 20) / 2 = 15 (not (10+10+20)/3)
-    ws.getCell("D1").value = { formula: "AVERAGE(A1:B2)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("D1").result).toBe(15);
+    Cell.setValue(ws, "D1", { formula: "AVERAGE(A1:B2)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "D1")).toBe(15);
   });
 
   it("treats a merge slave as blank in COUNTA", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "hello";
-    ws.mergeCells("A1:C1"); // master A1, slaves B1+C1
-    ws.getCell("E1").value = { formula: "COUNTA(A1:C1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("E1").result).toBe(1);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "hello");
+    Worksheet.merge(ws, "A1:C1"); // master A1, slaves B1+C1
+    Cell.setValue(ws, "E1", { formula: "COUNTA(A1:C1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "E1")).toBe(1);
   });
 
   it("evaluates a formula stored on the master cell once", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 4;
-    ws.getCell("B1").value = { formula: "A1*5", result: 0 }; // master, =20
-    ws.mergeCells("B1:C1");
-    ws.getCell("E1").value = { formula: "SUM(B1:C1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(20);
-    expect(ws.getCell("E1").result).toBe(20);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 4);
+    Cell.setValue(ws, "B1", { formula: "A1*5", result: 0 }); // master, =20
+    Worksheet.merge(ws, "B1:C1");
+    Cell.setValue(ws, "E1", { formula: "SUM(B1:C1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(20);
+    expect(Cell.getResult(ws, "E1")).toBe(20);
   });
 });
 
@@ -92,63 +93,63 @@ describe("calculate-formulas: dynamic-array spill vs merged regions", () => {
     // merge A2:C2 (master A2). The slave proxies value writes to the
     // master via `MergeValue`, so without merge-aware spill checking
     // the spill silently corrupts A2 — see issue #162 follow-up.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A2").value = "MASTER";
-    ws.mergeCells("A2:C2");
-    ws.getCell("B1").value = { formula: "SEQUENCE(2,1)", result: 0 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A2", "MASTER");
+    Worksheet.merge(ws, "A2:C2");
+    Cell.setValue(ws, "B1", { formula: "SEQUENCE(2,1)", result: 0 });
 
-    wb.calculateFormulas();
+    calculateFormulas(wb);
 
-    expect(ws.getCell("B1").result).toEqual({ error: "#SPILL!" });
+    expect(Cell.getResult(ws, "B1")).toEqual({ error: "#SPILL!" });
     // Master must NOT have been overwritten by the spill payload.
-    expect(ws.getCell("A2").value).toBe("MASTER");
+    expect(Cell.getValue(ws, "A2")).toBe("MASTER");
     // Merge geometry must remain intact.
-    expect(ws.getCell("B2").type).toBe(ValueType.Merge);
+    expect(Cell.getType(ws, "B2")).toBe(ValueType.Merge);
   });
 
   it("a spill that fully covers a merged region (master + slaves) returns #SPILL!", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = "MERGED";
-    ws.mergeCells("B1:C1");
-    ws.getCell("A1").value = { formula: "SEQUENCE(1,3)", result: 0 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", "MERGED");
+    Worksheet.merge(ws, "B1:C1");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(1,3)", result: 0 });
 
-    wb.calculateFormulas();
+    calculateFormulas(wb);
 
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
-    expect(ws.getCell("B1").value).toBe("MERGED");
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
+    expect(Cell.getValue(ws, "B1")).toBe("MERGED");
   });
 
   it("a spill that does not touch any merged region succeeds", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("F2").value = "X";
-    ws.mergeCells("F2:G2");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "F2", "X");
+    Worksheet.merge(ws, "F2:G2");
     // Spill into A1:A3, nowhere near the merge
-    ws.getCell("A1").value = { formula: "SEQUENCE(3,1)", result: 0 };
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3,1)", result: 0 });
 
-    wb.calculateFormulas();
+    calculateFormulas(wb);
 
-    expect(ws.getCell("A1").result).toBe(1);
-    expect(ws.getCell("A2").value).toBe(2);
-    expect(ws.getCell("A3").value).toBe(3);
+    expect(Cell.getResult(ws, "A1")).toBe(1);
+    expect(Cell.getValue(ws, "A2")).toBe(2);
+    expect(Cell.getValue(ws, "A3")).toBe(3);
   });
 
   it("a spill onto an empty merged region (master holds no value) still returns #SPILL!", () => {
     // Pre-fix: the snapshot for an empty merge had every slave with
     // value=null, so the value/formula occupancy check let the spill
     // through, corrupting the master with the spill payload.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.mergeCells("A2:C2"); // master A2 has no value
-    ws.getCell("B1").value = { formula: "SEQUENCE(2,1)", result: 0 };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.merge(ws, "A2:C2"); // master A2 has no value
+    Cell.setValue(ws, "B1", { formula: "SEQUENCE(2,1)", result: 0 });
 
-    wb.calculateFormulas();
+    calculateFormulas(wb);
 
-    expect(ws.getCell("B1").result).toEqual({ error: "#SPILL!" });
+    expect(Cell.getResult(ws, "B1")).toEqual({ error: "#SPILL!" });
     // Master must remain unset — spill must not have written into it.
-    expect(ws.getCell("A2").value).toBeNull();
+    expect(Cell.getValue(ws, "A2")).toBeNull();
   });
 
   it("stale-ghost cleanup must not clobber a merge created over old ghosts", () => {
@@ -158,51 +159,51 @@ describe("calculate-formulas: dynamic-array spill vs merged regions", () => {
     // ghosts. The cleanup must NOT overwrite A2 (the new merge master)
     // nor any of its slaves (which would forward to the master via
     // `MergeValue`'s setter and silently wipe "USER").
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3,1)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A2").value).toBe(2);
-    expect(ws.getCell("A3").value).toBe(3);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3,1)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getValue(ws, "A2")).toBe(2);
+    expect(Cell.getValue(ws, "A3")).toBe(3);
 
-    ws.mergeCells("A2:B3");
-    ws.getCell("A2").value = "USER";
-    ws.getCell("A1").value = { formula: "SEQUENCE(1,1)", result: 0 };
-    wb.calculateFormulas();
+    Worksheet.merge(ws, "A2:B3");
+    Cell.setValue(ws, "A2", "USER");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(1,1)", result: 0 });
+    calculateFormulas(wb);
 
-    expect(ws.getCell("A1").result).toBe(1);
-    expect(ws.getCell("A2").value).toBe("USER");
+    expect(Cell.getResult(ws, "A1")).toBe(1);
+    expect(Cell.getValue(ws, "A2")).toBe("USER");
     // Slaves still proxy to master — confirms merge geometry is intact
-    expect(ws.getCell("B2").value).toBe("USER");
-    expect(ws.getCell("A3").value).toBe("USER");
-    expect(ws.getCell("B3").value).toBe("USER");
+    expect(Cell.getValue(ws, "B2")).toBe("USER");
+    expect(Cell.getValue(ws, "A3")).toBe("USER");
+    expect(Cell.getValue(ws, "B3")).toBe("USER");
   });
 
   it("unmerging unblocks a previously-blocked spill", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.mergeCells("B1:C1");
-    ws.getCell("A1").value = { formula: "SEQUENCE(1,3)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.merge(ws, "B1:C1");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(1,3)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
 
-    ws.unMergeCells("B1:C1");
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(1);
-    expect(ws.getCell("B1").value).toBe(2);
-    expect(ws.getCell("C1").value).toBe(3);
+    Worksheet.unmerge(ws, "B1:C1");
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(1);
+    expect(Cell.getValue(ws, "B1")).toBe(2);
+    expect(Cell.getValue(ws, "C1")).toBe(3);
   });
 
   it("a dynamic-array formula sitting in a merge master cannot spill into its own slaves", () => {
     // Pathological: user writes SEQUENCE(3,1) at A1 then merges A1:A3.
     // The spill targets A2 and A3 — both slaves of the same merge.
     // Excel reports #SPILL!.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3,1)", result: 0 };
-    ws.mergeCells("A1:A3");
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3,1)", result: 0 });
+    Worksheet.merge(ws, "A1:A3");
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
   });
 
   it("a dynamic-array source inside a merge returns #SPILL! even when ghosts land outside the merge", () => {
@@ -210,14 +211,14 @@ describe("calculate-formulas: dynamic-array spill vs merged regions", () => {
     // formula is SEQUENCE(3,1) which spills vertically into A2, A3.
     // The ghosts A2/A3 do NOT touch the merge, but Excel still reports
     // #SPILL! because the source itself is part of a merged region.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "SEQUENCE(3,1)", result: 0 };
-    ws.mergeCells("A1:B1");
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#SPILL!" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "SEQUENCE(3,1)", result: 0 });
+    Worksheet.merge(ws, "A1:B1");
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#SPILL!" });
     // Ghosts must NOT have been written.
-    expect(ws.getCell("A2").value).toBeNull();
-    expect(ws.getCell("A3").value).toBeNull();
+    expect(Cell.getValue(ws, "A2")).toBeNull();
+    expect(Cell.getValue(ws, "A3")).toBeNull();
   });
 });

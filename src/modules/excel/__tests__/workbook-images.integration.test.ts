@@ -1,10 +1,15 @@
 import fs from "fs";
 import { promisify } from "util";
 
+import { anchorCol, anchorRow } from "@excel/anchor";
+import { cellSetValue } from "@excel/cell";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getImage } from "@excel/workbook";
+import { addWorkbookImage } from "@excel/workbook-core";
+import { addBackgroundImage, addImage, getBackgroundImageId, getImages } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");
@@ -20,138 +25,138 @@ const fsReadFileAsync = promisify(fs.readFile);
 describe("Workbook", () => {
   describe("Images", () => {
     it("stores background image", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
-      const imageId = wb.addImage({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
+      const imageId = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.getCell("A1").value = "Hello, World!";
-      ws.addBackgroundImage(imageId);
+      Cell.setValue(ws, "A1", "Hello, World!");
+      addBackgroundImage(ws, imageId);
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const backgroundId2 = ws2!.getBackgroundImageId();
-      const image = wb2.getImage(backgroundId2!);
+      const backgroundId2 = getBackgroundImageId(ws2!);
+      const image = getImage(wb2, backgroundId2!);
 
       expect(Buffer.compare(imageData, image!.buffer as Uint8Array)).toBe(0);
     });
 
     it("stores embedded image and hyperlink", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      const imageId = wb.addImage({
+      const imageId = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.getCell("A1").value = "Hello, World!";
-      ws.getCell("A2").value = {
+      Cell.setValue(ws, "A1", "Hello, World!");
+      Cell.setValue(ws, "A2", {
         hyperlink: "http://www.somewhere.com",
         text: "www.somewhere.com"
-      };
-      ws.addImage(imageId, "C3:E6");
+      });
+      addImage(ws, imageId, "C3:E6");
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
-      expect(ws.getCell("A1").value).toBe("Hello, World!");
-      expect(ws.getCell("A2").value).toEqual({
+      expect(Cell.getValue(ws, "A1")).toBe("Hello, World!");
+      expect(Cell.getValue(ws, "A2")).toEqual({
         hyperlink: "http://www.somewhere.com",
         text: "www.somewhere.com"
       });
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const images = ws2!.getImages();
+      const images = getImages(ws2!);
       expect(images.length).toBe(1);
 
       const imageDesc = images[0];
-      expect(imageDesc.range!.tl.col).toBe(2);
-      expect(imageDesc.range!.tl.row).toBe(2);
-      expect(imageDesc.range!.br!.col).toBe(5);
-      expect(imageDesc.range!.br!.row).toBe(6);
+      expect(anchorCol(imageDesc.range!.tl)).toBe(2);
+      expect(anchorRow(imageDesc.range!.tl)).toBe(2);
+      expect(anchorCol(imageDesc.range!.br!)).toBe(5);
+      expect(anchorRow(imageDesc.range!.br!)).toBe(6);
 
-      const image = wb2.getImage(imageDesc.imageId!);
+      const image = getImage(wb2, imageDesc.imageId!);
       expect(Buffer.compare(imageData, image!.buffer as Uint8Array)).toBe(0);
     });
 
     it("stores embedded image with oneCell", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      const imageId = wb.addImage({
+      const imageId = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.addImage(imageId, {
+      addImage(ws, imageId, {
         tl: { col: 0.1125, row: 0.4 },
         br: { col: 2.101046875, row: 3.4 },
         editAs: "oneCell"
       });
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const images = ws2!.getImages();
+      const images = getImages(ws2!);
       expect(images.length).toBe(1);
 
       const imageDesc = images[0];
       expect(imageDesc.range!.editAs).toBe("oneCell");
 
-      const image = wb2.getImage(imageDesc.imageId!);
+      const image = getImage(wb2, imageDesc.imageId!);
       expect(Buffer.compare(imageData, image!.buffer as Uint8Array)).toBe(0);
     });
 
     it("stores embedded image with one-cell-anchor", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      const imageId = wb.addImage({
+      const imageId = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.addImage(imageId, {
+      addImage(ws, imageId, {
         tl: { col: 0.1125, row: 0.4 },
         ext: { width: 100, height: 100 },
         editAs: "oneCell"
       });
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const images = ws2!.getImages();
+      const images = getImages(ws2!);
       expect(images.length).toBe(1);
 
       const imageDesc = images[0];
@@ -159,20 +164,20 @@ describe("Workbook", () => {
       expect(imageDesc.range!.ext!.width).toBe(100);
       expect(imageDesc.range!.ext!.height).toBe(100);
 
-      const image = wb2.getImage(imageDesc.imageId!);
+      const image = getImage(wb2, imageDesc.imageId!);
       expect(Buffer.compare(imageData, image!.buffer as Uint8Array)).toBe(0);
     });
 
     it("stores embedded image with hyperlinks", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      const imageId = wb.addImage({
+      const imageId = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.addImage(imageId, {
+      addImage(ws, imageId, {
         tl: { col: 0.1125, row: 0.4 },
         ext: { width: 100, height: 100 },
         editAs: "absolute",
@@ -182,17 +187,17 @@ describe("Workbook", () => {
         }
       });
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const images = ws2!.getImages();
+      const images = getImages(ws2!);
       expect(images.length).toBe(1);
 
       const imageDesc = images[0];
@@ -205,57 +210,57 @@ describe("Workbook", () => {
         tooltip: "www.somewhere.com"
       });
 
-      const image = wb2.getImage(imageDesc.imageId!);
+      const image = getImage(wb2, imageDesc.imageId!);
       expect(Buffer.compare(imageData, image!.buffer as Uint8Array)).toBe(0);
     });
 
     it("image extensions should not be case sensitive", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("blort");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "blort");
 
-      const imageId1 = wb.addImage({
+      const imageId1 = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "png"
       });
 
-      const imageId2 = wb.addImage({
+      const imageId2 = addWorkbookImage(wb, {
         filename: IMAGE_FILENAME,
         extension: "jpeg"
       });
 
-      ws.addImage(imageId1, {
+      addImage(ws, imageId1, {
         tl: { col: 0.1125, row: 0.4 },
         ext: { width: 100, height: 100 }
       });
 
-      ws.addImage(imageId2, {
+      addImage(ws, imageId2, {
         tl: { col: 0.1125, row: 0.4 },
         br: { col: 2.101046875, row: 3.4 },
         editAs: "oneCell"
       });
 
-      await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
 
-      const ws2 = wb2.getWorksheet("blort");
+      const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
 
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const images = ws2!.getImages();
+      const images = getImages(ws2!);
       expect(images.length).toBe(2);
 
       const imageDesc1 = images[0];
       expect(imageDesc1.range!.ext!.width).toBe(100);
       expect(imageDesc1.range!.ext!.height).toBe(100);
-      const image1 = wb2.getImage(imageDesc1.imageId!);
+      const image1 = getImage(wb2, imageDesc1.imageId!);
 
       const imageDesc2 = images[1];
       expect(imageDesc2.range!.editAs).toBe("oneCell");
 
-      const image2 = wb2.getImage(imageDesc1.imageId!);
+      const image2 = getImage(wb2, imageDesc1.imageId!);
 
       expect(Buffer.compare(imageData, image1!.buffer!)).toBe(0);
       expect(Buffer.compare(imageData, image2!.buffer!)).toBe(0);
@@ -263,126 +268,126 @@ describe("Workbook", () => {
 
     describe("read-write round-trip (issue #58)", () => {
       it("does not duplicate images after read-write cycles", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, { tl: { col: 1, row: 0 }, br: { col: 2, row: 1 } });
+        addImage(ws, imgId, { tl: { col: 1, row: 0 }, br: { col: 2, row: 1 } });
 
         // First write
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
         // Read back and write again
-        await wb.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
         // Read the final file and verify images are not duplicated
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1");
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
-        const images = ws2!.getImages();
+        const images = getImages(ws2!);
         expect(images.length).toBe(1);
       });
 
       it("does not duplicate images after multiple read-write cycles", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "B2:D4");
+        addImage(ws, imgId, "B2:D4");
 
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
         // Perform 3 read-write cycles on the same workbook
         for (let i = 0; i < 3; i++) {
-          await wb.xlsx.readFile(TEST_XLSX_FILE_NAME);
-          await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+          await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
+          await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
         }
 
         // Read the final file with a fresh workbook
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1");
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
-        const images = ws2!.getImages();
+        const images = getImages(ws2!);
         expect(images.length).toBe(1);
       });
 
       it("does not duplicate when multiple images exist", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId1 = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId1, "A1:B2");
-        ws.addImage(imgId2, "C3:D4");
+        addImage(ws, imgId1, "A1:B2");
+        addImage(ws, imgId2, "C3:D4");
 
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
         // Read-write cycle
-        await wb.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1");
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
-        const images = ws2!.getImages();
+        const images = getImages(ws2!);
         expect(images.length).toBe(2);
       });
 
       it("preserves image data through read-write cycle", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "C3:E6");
+        addImage(ws, imgId, "C3:E6");
 
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
-        await wb.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1");
-        const images = ws2!.getImages();
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+        const images = getImages(ws2!);
         expect(images.length).toBe(1);
 
         const imageData = await fsReadFileAsync(IMAGE_FILENAME);
-        const image = wb2.getImage(images[0].imageId!);
+        const image = getImage(wb2, images[0].imageId!);
         expect(Buffer.compare(imageData, image!.buffer!)).toBe(0);
       });
     });
 
     describe("image range updates on row/column splice", () => {
       it("updates image range after insertRow", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "B2:D4");
+        addImage(ws, imgId, "B2:D4");
 
         // Insert a row before the image
-        ws.insertRow(1, []);
+        Worksheet.insertRow(ws, 1, []);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         expect(images.length).toBe(1);
         const img = images[0];
         // Image should shift down by 1 row (B2:D4 -> B3:D5)
@@ -394,18 +399,18 @@ describe("Workbook", () => {
       });
 
       it("does not update image range when inserting row after the image", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "A1:B2");
+        addImage(ws, imgId, "A1:B2");
 
         // Insert a row after the image
-        ws.insertRow(5, []);
+        Worksheet.insertRow(ws, 5, []);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         const img = images[0];
         // Image should not move (A1:B2 stays the same)
         // nativeRow for A1 with string range uses offset -1: row=1 -> nativeRow=0
@@ -416,18 +421,18 @@ describe("Workbook", () => {
       });
 
       it("updates image range after spliceRows with remove", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "A3:B4");
+        addImage(ws, imgId, "A3:B4");
 
         // Remove 1 row at row 1
-        ws.spliceRows(1, 1);
+        Worksheet.spliceRows(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         const img = images[0];
         // Image should shift up by 1 row (A3:B4 -> A2:B3)
         // nativeRow: row 3 -> nativeRow 2, after remove -> nativeRow 1
@@ -436,18 +441,18 @@ describe("Workbook", () => {
       });
 
       it("updates image range after spliceColumns with insert", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, "B1:C2");
+        addImage(ws, imgId, "B1:C2");
 
         // Insert a column before column B
-        ws.spliceColumns(1, 0, []);
+        Worksheet.spliceColumns(ws, 1, 0, []);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         const img = images[0];
         // Image should shift right by 1 column (B1:C2 -> C1:D2)
         // tl: col=2 with offset -1 -> nativeCol=1, after insert -> nativeCol=2
@@ -457,23 +462,23 @@ describe("Workbook", () => {
       });
 
       it("handles multiple images correctly during row splice", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId1 = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId1, "A1:A1");
-        ws.addImage(imgId2, "A3:B4");
+        addImage(ws, imgId1, "A1:A1");
+        addImage(ws, imgId2, "A3:B4");
 
         // Insert 2 rows at row 2
-        ws.spliceRows(2, 0, [], []);
+        Worksheet.spliceRows(ws, 2, 0, [], []);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // First image at A1 should not move (nativeRow 0 < start-1 = 1)
         expect(images[0].range!.tl.nativeRow).toBe(0);
         // Second image at A3 should shift down by 2 (nativeRow 2 >= start-1 = 1)
@@ -482,37 +487,37 @@ describe("Workbook", () => {
       });
 
       it("does not update background images during splice", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addBackgroundImage(imgId);
+        addBackgroundImage(ws, imgId);
 
         // Should not throw
-        ws.insertRow(1, []);
+        Worksheet.insertRow(ws, 1, []);
 
         // Background image should still exist
-        expect(ws.getBackgroundImageId()).toBeDefined();
+        expect(getBackgroundImageId(ws)).toBeDefined();
       });
     });
 
     describe("image duplication during row duplication (issue #57)", () => {
       it("duplicates images anchored to the source row", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, { tl: { col: 1, row: 0 }, br: { col: 2, row: 1 } });
-        ws.getCell("A1").value = "Row 1";
+        addImage(ws, imgId, { tl: { col: 1, row: 0 }, br: { col: 2, row: 1 } });
+        Cell.setValue(ws, "A1", "Row 1");
 
         // Duplicate row 1 twice (creates rows 2 and 3 as copies)
-        ws.duplicateRow(1, 2);
+        Worksheet.duplicateRow(ws, 1, 2);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // Original + 2 clones = 3 images
         expect(images.length).toBe(3);
 
@@ -525,21 +530,21 @@ describe("Workbook", () => {
       });
 
       it("preserves two-cell anchor span when duplicating", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
         // Image spans 2 rows: tl at row 0, br at row 2
-        ws.addImage(imgId, {
+        addImage(ws, imgId, {
           tl: { col: 0, row: 0 },
           br: { col: 2, row: 2 }
         });
 
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         expect(images.length).toBe(2);
 
         // Original: tl row 0, br row 2
@@ -552,20 +557,20 @@ describe("Workbook", () => {
       });
 
       it("duplicates one-cell anchor images (ext-based, no br)", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, {
+        addImage(ws, imgId, {
           tl: { col: 0, row: 0 },
           ext: { width: 200, height: 150 }
         });
 
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         expect(images.length).toBe(2);
 
         // Clone should have the same ext and no br
@@ -576,29 +581,29 @@ describe("Workbook", () => {
       });
 
       it("duplicates multiple images on the same source row", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId1 = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
         // Two images on row 1 (0-based row 0), different columns
-        ws.addImage(imgId1, {
+        addImage(ws, imgId1, {
           tl: { col: 0, row: 0 },
           br: { col: 1, row: 1 }
         });
-        ws.addImage(imgId2, {
+        addImage(ws, imgId2, {
           tl: { col: 3, row: 0 },
           br: { col: 4, row: 1 }
         });
 
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // 2 originals + 2 clones = 4
         expect(images.length).toBe(4);
 
@@ -610,31 +615,31 @@ describe("Workbook", () => {
       });
 
       it("does not clone images from other rows", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId1 = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
         // Image on row 1 (0-based row 0)
-        ws.addImage(imgId1, {
+        addImage(ws, imgId1, {
           tl: { col: 0, row: 0 },
           br: { col: 1, row: 1 }
         });
         // Image on row 5 (0-based row 4)
-        ws.addImage(imgId2, {
+        addImage(ws, imgId2, {
           tl: { col: 0, row: 4 },
           br: { col: 1, row: 5 }
         });
 
         // insert=true so spliceRows inserts a new row, shifting images below
-        ws.duplicateRow(1, 1, true);
+        Worksheet.duplicateRow(ws, 1, 1, true);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // 2 originals + 1 clone (from row 1 only) = 3
         expect(images.length).toBe(3);
 
@@ -645,13 +650,13 @@ describe("Workbook", () => {
       });
 
       it("preserves hyperlinks on cloned images", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.addImage(imgId, {
+        addImage(ws, imgId, {
           tl: { col: 0, row: 0 },
           ext: { width: 100, height: 100 },
           hyperlinks: {
@@ -660,9 +665,9 @@ describe("Workbook", () => {
           }
         });
 
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         expect(images.length).toBe(2);
 
         const cloned = images[1];
@@ -673,29 +678,29 @@ describe("Workbook", () => {
       });
 
       it("round-trips duplicated images through write/read", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.getCell("A1").value = "Hello";
-        ws.addImage(imgId, {
+        Cell.setValue(ws, "A1", "Hello");
+        addImage(ws, imgId, {
           tl: { col: 1, row: 0 },
           br: { col: 2, row: 1 }
         });
 
-        ws.duplicateRow(1, 2);
+        Worksheet.duplicateRow(ws, 1, 2);
 
         // Write and read back
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1");
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
-        const images = ws2!.getImages();
+        const images = getImages(ws2!);
         expect(images.length).toBe(3);
 
         // Verify positions survived round-trip
@@ -706,29 +711,29 @@ describe("Workbook", () => {
         // Verify image data is intact
         const imageData = await fsReadFileAsync(IMAGE_FILENAME);
         for (const img of images) {
-          const imgBuffer = wb2.getImage(img.imageId!);
+          const imgBuffer = getImage(wb2, img.imageId!);
           expect(Buffer.compare(imageData, imgBuffer!.buffer!)).toBe(0);
         }
       });
 
       it("works with insert mode", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        ws.getCell("A1").value = "Row 1";
-        ws.getCell("A2").value = "Row 2";
-        ws.addImage(imgId, {
+        Cell.setValue(ws, "A1", "Row 1");
+        Cell.setValue(ws, "A2", "Row 2");
+        addImage(ws, imgId, {
           tl: { col: 1, row: 0 },
           br: { col: 2, row: 1 }
         });
 
         // insert=true: inserts new rows instead of overwriting
-        ws.duplicateRow(1, 1, true);
+        Worksheet.duplicateRow(ws, 1, 1, true);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         expect(images.length).toBe(2);
 
         // Original at row 0
@@ -738,14 +743,14 @@ describe("Workbook", () => {
       });
 
       it("loads test file and duplicates row with images", async () => {
-        const wb = new Workbook();
-        await wb.xlsx.readFile(excelTestDataPath("duplicate-row-images.xlsx"));
+        const wb = Workbook.create();
+        await Workbook.readXlsxFile(wb, excelTestDataPath("duplicate-row-images.xlsx"));
 
         // The test file has a drawing on sheet3 with an image at row 12
-        const ws = wb.getWorksheet("Sheet3");
+        const ws = Workbook.getWorksheet(wb, "Sheet3")!;
         expect(ws).toBeDefined();
 
-        const imagesBefore = ws!.getImages();
+        const imagesBefore = getImages(ws!);
         const countBefore = imagesBefore.length;
         expect(countBefore).toBeGreaterThan(0);
 
@@ -754,9 +759,9 @@ describe("Workbook", () => {
         const srcRowNum = srcRow0 + 1;
 
         // Duplicate that row once (insert mode to push existing rows down)
-        ws!.duplicateRow(srcRowNum, 1, true);
+        Worksheet.duplicateRow(ws!, srcRowNum, 1, true);
 
-        const imagesAfter = ws!.getImages();
+        const imagesAfter = getImages(ws!);
         // Each image on the source row should be cloned once
         const imagesOnSrcRow = imagesBefore.filter(
           img => img.range && img.range.tl.nativeRow === srcRow0
@@ -764,42 +769,42 @@ describe("Workbook", () => {
         expect(imagesAfter.length).toBe(countBefore + imagesOnSrcRow.length);
 
         // Write and read back to verify integrity
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet3");
-        const finalImages = ws2!.getImages();
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet3")!;
+        const finalImages = getImages(ws2!);
         expect(finalImages.length).toBe(countBefore + imagesOnSrcRow.length);
       });
 
       it("overwrite mode removes images on target rows before cloning", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId1 = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
 
         // Image on row 1 (0-based row 0)
-        ws.addImage(imgId1, {
+        addImage(ws, imgId1, {
           tl: { col: 0, row: 0 },
           br: { col: 1, row: 1 }
         });
         // Image on row 2 (0-based row 1) — this will be overwritten
-        ws.addImage(imgId2, {
+        addImage(ws, imgId2, {
           tl: { col: 2, row: 1 },
           br: { col: 3, row: 2 }
         });
 
         // Overwrite mode (default): duplicate row 1 once, overwriting row 2
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // Original on row 1 + clone on row 2 = 2 (old row-2 image removed)
         expect(images.length).toBe(2);
 
@@ -813,24 +818,24 @@ describe("Workbook", () => {
       });
 
       it("overwrite mode with no source images still removes target row images", () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
-        const imgId = wb.addImage({
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const imgId = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
 
-        ws.getCell("A1").value = "Row 1 (no images)";
+        Cell.setValue(ws, "A1", "Row 1 (no images)");
         // Image on row 2 (0-based row 1)
-        ws.addImage(imgId, {
+        addImage(ws, imgId, {
           tl: { col: 0, row: 1 },
           br: { col: 1, row: 2 }
         });
 
         // Overwrite mode: duplicate row 1 once, overwriting row 2
-        ws.duplicateRow(1, 1);
+        Worksheet.duplicateRow(ws, 1, 1);
 
-        const images = ws.getImages();
+        const images = getImages(ws);
         // Old row-2 image should be removed since the row was overwritten
         expect(images.length).toBe(0);
       });
@@ -838,37 +843,37 @@ describe("Workbook", () => {
 
     describe("image deduplication", () => {
       it("deduplicates drawing rels for non-consecutive same imageId", async () => {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("Sheet1");
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
 
         // Add two different images and use the first one again (non-consecutive)
-        const imgId1 = wb.addImage({
+        const imgId1 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
-        const imgId2 = wb.addImage({
+        const imgId2 = addWorkbookImage(wb, {
           filename: IMAGE_FILENAME,
           extension: "png"
         });
 
         // Pattern: imgId1, imgId2, imgId1 — tests non-consecutive dedup
-        ws.addImage(imgId1, "A1:B2");
-        ws.addImage(imgId2, "C3:D4");
-        ws.addImage(imgId1, "E5:F6");
+        addImage(ws, imgId1, "A1:B2");
+        addImage(ws, imgId2, "C3:D4");
+        addImage(ws, imgId1, "E5:F6");
 
-        await wb.xlsx.writeFile(TEST_XLSX_FILE_NAME);
+        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.readFile(TEST_XLSX_FILE_NAME);
-        const ws2 = wb2.getWorksheet("Sheet1")!;
+        const wb2 = Workbook.create();
+        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-        const images = ws2.getImages();
+        const images = getImages(ws2);
         expect(images.length).toBe(3);
 
         // All 3 images should be valid and readable
         const imageData = await fsReadFileAsync(IMAGE_FILENAME);
         for (const img of images) {
-          const imgBuffer = wb2.getImage(img.imageId!);
+          const imgBuffer = getImage(wb2, img.imageId!);
           expect(imgBuffer).toBeDefined();
           expect(Buffer.compare(imageData, imgBuffer!.buffer!)).toBe(0);
         }
@@ -878,27 +883,27 @@ describe("Workbook", () => {
     it("round-trips absoluteAnchor image through write and read", async () => {
       const imageData = await fsReadFileAsync(IMAGE_FILENAME);
 
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("absolute");
-      const imageId = wb.addImage({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "absolute");
+      const imageId = addWorkbookImage(wb, {
         buffer: imageData,
         extension: "png"
       });
 
       // Add image with absolute positioning (pos + ext)
-      ws.addImage(imageId, {
+      addImage(ws, imageId, {
         pos: { x: 50, y: 100 },
         ext: { width: 200, height: 150 }
       });
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(wb);
       await expectValidXlsx(buffer, { label: "absoluteAnchor image" });
 
       // Read back
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
-      const ws2 = wb2.getWorksheet("absolute")!;
-      const images = ws2.getImages();
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
+      const ws2 = Workbook.getWorksheet(wb2, "absolute")!;
+      const images = getImages(ws2);
 
       expect(images).toHaveLength(1);
       const img = images[0];
@@ -909,7 +914,7 @@ describe("Workbook", () => {
       expect(img.range!.ext).toEqual({ width: 200, height: 150 });
 
       // Verify the actual image data survived
-      const imgBuffer = wb2.getImage(img.imageId!);
+      const imgBuffer = getImage(wb2, img.imageId!);
       expect(imgBuffer).toBeDefined();
       expect(Buffer.compare(imageData, imgBuffer!.buffer as Uint8Array)).toBe(0);
     });
@@ -928,21 +933,21 @@ describe("Workbook", () => {
         ext: { width: 120, height: 80 }
       });
 
-      ws.getCell("A1").value = "data";
+      cellSetValue(ws.getCell("A1"), "data");
       ws.commit();
       await wb.commit();
 
       // Read back with standard reader
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(outFile);
-      const ws2 = wb2.getWorksheet("absolute")!;
-      const images = ws2.getImages();
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, outFile);
+      const ws2 = Workbook.getWorksheet(wb2, "absolute")!;
+      const images = getImages(ws2);
 
       expect(images).toHaveLength(1);
       expect(images[0].range!.pos).toEqual({ x: 30, y: 60 });
       expect(images[0].range!.ext).toEqual({ width: 120, height: 80 });
 
-      const imgBuffer = wb2.getImage(images[0].imageId!);
+      const imgBuffer = getImage(wb2, images[0].imageId!);
       expect(imgBuffer).toBeDefined();
       expect(Buffer.compare(imageData, imgBuffer!.buffer as Uint8Array)).toBe(0);
     });
@@ -956,52 +961,52 @@ describe("Workbook", () => {
 
     it("embeds an SVG picture with a raster fallback and round-trips both", async () => {
       const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("svg");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "svg");
 
-      const imageId = wb.addImage({
+      const imageId = addWorkbookImage(wb, {
         buffer: pngBytes as unknown as Buffer,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
-      ws.addImage(imageId, "B2:D5");
+      addImage(ws, imageId, "B2:D5");
 
       const file = testFilePath("workbook-svg.test");
-      await wb.xlsx.writeFile(file);
+      await Workbook.writeXlsx(wb, file);
       await expectValidXlsx(await fsReadFileAsync(file), { label: "svg-image" });
 
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(file);
-      const ws2 = wb2.getWorksheet("svg")!;
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, file);
+      const ws2 = Workbook.getWorksheet(wb2, "svg")!;
 
-      const images = ws2.getImages();
+      const images = getImages(ws2);
       expect(images).toHaveLength(1);
 
       // Raster fallback round-trips byte-for-byte.
-      const raster = wb2.getImage(images[0].imageId!);
+      const raster = getImage(wb2, images[0].imageId!);
       expect(raster!.extension).toBe("png");
       expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
 
       // The SVG companion is linked via svgMediaId and round-trips its bytes.
       const svgMediaId = (raster as any).svgMediaId;
       expect(typeof svgMediaId).toBe("number");
-      const svg = wb2.getImage(svgMediaId);
+      const svg = getImage(wb2, svgMediaId);
       expect(svg!.extension).toBe("svg");
       expect(Buffer.compare(SVG_BYTES, svg!.buffer as Uint8Array)).toBe(0);
     });
 
     it("writes the svgBlip extension and image/svg+xml content type", async () => {
       const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("svg");
-      const imageId = wb.addImage({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "svg");
+      const imageId = addWorkbookImage(wb, {
         buffer: pngBytes as unknown as Buffer,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
-      ws.addImage(imageId, "A1:B2");
+      addImage(ws, imageId, "A1:B2");
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(wb);
       const { unzip } = await import("@archive/index");
       const reader = unzip(buffer as unknown as Uint8Array);
       const entries: Record<string, string> = {};
@@ -1024,17 +1029,17 @@ describe("Workbook", () => {
 
     it("creates only one svg relationship when the image is reused across anchors", async () => {
       const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("svg");
-      const imageId = wb.addImage({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "svg");
+      const imageId = addWorkbookImage(wb, {
         buffer: pngBytes as unknown as Buffer,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
-      ws.addImage(imageId, "A1:B2");
-      ws.addImage(imageId, "D1:E2"); // same image, second anchor
+      addImage(ws, imageId, "A1:B2");
+      addImage(ws, imageId, "D1:E2"); // same image, second anchor
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(wb);
       const { unzip } = await import("@archive/index");
       const reader = unzip(buffer as unknown as Uint8Array);
       const entries: Record<string, string> = {};
@@ -1053,22 +1058,22 @@ describe("Workbook", () => {
 
     it("survives a second write→read→write round-trip with the SVG intact", async () => {
       const pngBytes = await fsReadFileAsync(IMAGE_FILENAME);
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("svg");
-      const imageId = wb.addImage({
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "svg");
+      const imageId = addWorkbookImage(wb, {
         buffer: pngBytes as unknown as Buffer,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
-      ws.addImage(imageId, "B2:D5");
+      addImage(ws, imageId, "B2:D5");
 
       // First round-trip.
-      const buf1 = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buf1 as unknown as Uint8Array);
+      const buf1 = await Workbook.toXlsxBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buf1 as unknown as Uint8Array);
 
       // Second round-trip from the re-read workbook.
-      const buf2 = await wb2.xlsx.writeBuffer();
+      const buf2 = await Workbook.toXlsxBuffer(wb2);
       const { unzip } = await import("@archive/index");
       const reader = unzip(buf2 as unknown as Uint8Array);
       const entries: Record<string, string> = {};
@@ -1079,19 +1084,19 @@ describe("Workbook", () => {
       const drawingKey = Object.keys(entries).find(k => /drawings\/drawing\d+\.xml$/.test(k))!;
       expect(entries[drawingKey]).toContain("asvg:svgBlip");
 
-      const wb3 = new Workbook();
-      await wb3.xlsx.load(buf2 as unknown as Uint8Array);
-      const raster = wb3.getImage(wb3.getWorksheet("svg")!.getImages()[0].imageId!);
+      const wb3 = Workbook.create();
+      await Workbook.loadXlsx(wb3, buf2 as unknown as Uint8Array);
+      const raster = getImage(wb3, getImages(Workbook.getWorksheet(wb3, "svg")!)[0].imageId!);
       expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
       const svgMediaId = (raster as { svgMediaId?: number }).svgMediaId;
       expect(typeof svgMediaId).toBe("number");
-      expect(Buffer.compare(SVG_BYTES, wb3.getImage(svgMediaId!)!.buffer as Uint8Array)).toBe(0);
+      expect(Buffer.compare(SVG_BYTES, getImage(wb3, svgMediaId!)!.buffer as Uint8Array)).toBe(0);
     });
 
     it("rejects an SVG combined with an external (linked) raster", () => {
-      const wb = new Workbook();
+      const wb = Workbook.create();
       expect(() =>
-        wb.addImage({
+        addWorkbookImage(wb, {
           extension: "png",
           link: "https://example.com/x.png",
           svg: { buffer: SVG_BYTES }

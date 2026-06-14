@@ -19,9 +19,10 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { ZipEditor } from "@archive/zip";
+import { Cell, Workbook } from "@excel/index";
+import { getWorkbookModel } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const decoder = new TextDecoder();
@@ -34,10 +35,10 @@ const decoder = new TextDecoder();
  * and Content Types manifest.
  */
 async function makeXlsxWithSlicerAndTimeline(): Promise<Uint8Array> {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
-  ws.getCell("A1").value = "Dashboard";
-  const baseBuf = new Uint8Array(await wb.xlsx.writeBuffer());
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
+  Cell.setValue(ws, "A1", "Dashboard");
+  const baseBuf = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   const baseEntries = await extractAll(baseBuf);
 
   // Slicer / timeline parts synthesised here — the content is
@@ -91,25 +92,27 @@ async function makeXlsxWithSlicerAndTimeline(): Promise<Uint8Array> {
 describe("slicer + timeline raw passthrough", () => {
   it("preserves all four dashboard parts across load + save", async () => {
     const original = await makeXlsxWithSlicerAndTimeline();
-    const wb = new Workbook();
-    await wb.xlsx.load(original);
+    const wb = Workbook.create();
+    await Workbook.loadXlsx(wb, original);
 
     // After load, the workbook-level model exposes the raw bytes so
     // later callers can inspect them if needed. The expected shape is
     // a record keyed by zip path with Uint8Array values.
-    expect(Object.keys(wb.model.slicerParts ?? {})).toContain("xl/slicers/slicer1.xml");
-    expect(Object.keys(wb.model.slicerCacheParts ?? {})).toContain(
+    expect(Object.keys(getWorkbookModel(wb).slicerParts ?? {})).toContain("xl/slicers/slicer1.xml");
+    expect(Object.keys(getWorkbookModel(wb).slicerCacheParts ?? {})).toContain(
       "xl/slicerCaches/slicerCache1.xml"
     );
-    expect(Object.keys(wb.model.timelineParts ?? {})).toContain("xl/timelines/timeline1.xml");
-    expect(Object.keys(wb.model.timelineCacheParts ?? {})).toContain(
+    expect(Object.keys(getWorkbookModel(wb).timelineParts ?? {})).toContain(
+      "xl/timelines/timeline1.xml"
+    );
+    expect(Object.keys(getWorkbookModel(wb).timelineCacheParts ?? {})).toContain(
       "xl/timelineCaches/timelineCache1.xml"
     );
 
     // Round-trip: every part excelts captured must be re-emitted
     // verbatim, and the Content Types manifest must mention the new
     // content types so Excel recognises them.
-    const resaved = new Uint8Array(await wb.xlsx.writeBuffer());
+    const resaved = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     await expectValidXlsx(resaved, { label: "slicer+timeline resave" });
     const entries = await extractAll(resaved);
     expect(entries.get("xl/slicers/slicer1.xml")).toBeDefined();
@@ -133,10 +136,10 @@ describe("slicer + timeline raw passthrough", () => {
   });
 
   it("omits the dashboard content types on workbooks without slicers or timelines", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    const buf = await wb.xlsx.writeBuffer();
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    const buf = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf, { label: "empty workbook no slicer/timeline" });
     const entries = await extractAll(new Uint8Array(buf));
     const contentTypes = decoder.decode(entries.get("[Content_Types].xml")!.data);

@@ -60,6 +60,12 @@
       "markdown": [
         "dist/types/modules/markdown/index.d.ts"
       ],
+      "excel/csv": [
+        "dist/types/modules/excel/csv.node.d.ts"
+      ],
+      "excel/markdown": [
+        "dist/types/modules/excel/markdown.node.d.ts"
+      ],
       "stream": [
         "dist/types/modules/stream/index.d.ts"
       ],
@@ -113,6 +119,20 @@
     "./browser": {
       "types": "./dist/browser/index.browser.d.ts",
       "default": "./dist/browser/index.browser.js"
+    },
+    "./excel": {
+      "browser": {
+        "types": "./dist/browser/modules/excel/index.browser.d.ts",
+        "default": "./dist/browser/modules/excel/index.browser.js"
+      },
+      "import": {
+        "types": "./dist/types/modules/excel/index.d.ts",
+        "default": "./dist/esm/modules/excel/index.js"
+      },
+      "require": {
+        "types": "./dist/types/modules/excel/index.d.ts",
+        "default": "./dist/cjs/modules/excel/index.js"
+      }
     },
     "./archive": {
       "browser": {
@@ -210,6 +230,34 @@
       "require": {
         "types": "./dist/types/modules/excel/chart/index.d.ts",
         "default": "./dist/cjs/modules/excel/chart/index.js"
+      }
+    },
+    "./excel/csv": {
+      "browser": {
+        "types": "./dist/browser/modules/excel/csv.d.ts",
+        "default": "./dist/browser/modules/excel/csv.js"
+      },
+      "import": {
+        "types": "./dist/types/modules/excel/csv.node.d.ts",
+        "default": "./dist/esm/modules/excel/csv.node.js"
+      },
+      "require": {
+        "types": "./dist/types/modules/excel/csv.node.d.ts",
+        "default": "./dist/cjs/modules/excel/csv.node.js"
+      }
+    },
+    "./excel/markdown": {
+      "browser": {
+        "types": "./dist/browser/modules/excel/markdown.d.ts",
+        "default": "./dist/browser/modules/excel/markdown.js"
+      },
+      "import": {
+        "types": "./dist/types/modules/excel/markdown.node.d.ts",
+        "default": "./dist/esm/modules/excel/markdown.node.js"
+      },
+      "require": {
+        "types": "./dist/types/modules/excel/markdown.node.d.ts",
+        "default": "./dist/cjs/modules/excel/markdown.node.js"
       }
     },
     "./xml": {

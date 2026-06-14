@@ -1,11 +1,11 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-
-import { Workbook } from "../../../index";
+import { Workbook, Worksheet } from "@excel/index";
+import { addTable } from "@excel/worksheet";
 
 const [, , filename] = process.argv;
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
 
 const now = Date.now();
 const today = now - (now % 86400000);
@@ -18,9 +18,9 @@ const getRows = () => {
   return rows;
 };
 
-ws.columns = [{ key: "date", width: 16 }, { key: "number" }];
+Worksheet.setColumns(ws, [{ key: "date", width: 16 }, { key: "number" }]);
 
-ws.addTable({
+addTable(ws, {
   name: "TestTable",
   ref: "A1",
   headerRow: true,
@@ -45,7 +45,7 @@ const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeXlsx(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

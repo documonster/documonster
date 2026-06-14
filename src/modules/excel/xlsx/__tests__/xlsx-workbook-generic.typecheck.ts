@@ -16,6 +16,7 @@
 // extends `XLSX<NodeWorkbook>` and the inherited methods narrow naturally.
 
 import type { Workbook as NodeWorkbook } from "@excel/workbook";
+import { getXlsxIo } from "@excel/workbook";
 import type { Workbook as BrowserWorkbook } from "@excel/workbook.browser";
 import type { XLSX as NodeXlsx } from "@excel/xlsx/xlsx";
 import type { XLSX as BrowserXlsx } from "@excel/xlsx/xlsx.browser";
@@ -62,7 +63,7 @@ async function _issue160Screenshot(ab: ArrayBuffer): Promise<NodeWorkbook> {
   // We cannot `new Workbook()` here without circular imports, but the type of
   // `wb.xlsx.load(...)` is exactly what the user sees in their IDE.
   const loaded = await nodeXlsx.load(ab);
-  await loaded.xlsx.writeFile("out.xlsx");
+  await getXlsxIo(loaded).writeFile("out.xlsx");
   return loaded;
 }
 void _issue160Screenshot;

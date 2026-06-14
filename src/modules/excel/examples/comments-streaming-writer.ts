@@ -1,3 +1,4 @@
+import { cellSetNote, cellSetValue } from "@excel/cell";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 
 import { WorkbookWriter } from "../../../index";
@@ -6,8 +7,8 @@ const [, , filename] = process.argv;
 
 const wb = new WorkbookWriter({ filename });
 const ws = wb.addWorksheet("Foo");
-ws.getCell("B2").value = 5;
-ws.getCell("B2").note = {
+cellSetValue(ws.getCell("B2"), 5);
+cellSetNote(ws.getCell("B2"), {
   texts: [
     {
       font: {
@@ -89,10 +90,10 @@ ws.getCell("B2").note = {
       text: "format"
     }
   ]
-};
+});
 
-ws.getCell("D2").value = "Zoo";
-ws.getCell("D2").note = "Plain Text Comment";
+cellSetValue(ws.getCell("D2"), "Zoo");
+cellSetNote(ws.getCell("D2"), "Plain Text Comment");
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();

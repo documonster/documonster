@@ -19,6 +19,7 @@
  */
 
 import { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
+import { rowCommit } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("Real Excel Streaming Write - Browser", () => {
@@ -94,7 +95,7 @@ describe("Real Excel Streaming Write - Browser", () => {
 
     // Write 1000 rows - small data
     for (let i = 0; i < 1000; i++) {
-      worksheet.addRow([`Row ${i}`, i, `Data ${i}`]).commit();
+      rowCommit(worksheet.addRow([`Row ${i}`, i, `Data ${i}`]));
     }
 
     const chunksBeforeCommit = chunks.length;
@@ -152,8 +153,8 @@ describe("Real Excel Streaming Write - Browser", () => {
     const padZ = "Z".repeat(256);
 
     for (let i = 0; i < totalRows; i++) {
-      worksheet
-        .addRow([
+      rowCommit(
+        worksheet.addRow([
           `Row ${i}`,
           i,
           `Data ${i} with extra content ${padX}`,
@@ -163,7 +164,7 @@ describe("Real Excel Streaming Write - Browser", () => {
           `Column G ${i} text ${padY}`,
           `Column H ${i} end ${padZ}`
         ])
-        .commit();
+      );
 
       // Log progress every 10000 rows
       if (i > 0 && i % 10000 === 0) {
@@ -260,15 +261,15 @@ describe("Real Excel Streaming Write - Browser", () => {
     const totalRows = 20000;
     for (let i = 0; i < totalRows; i++) {
       // Make each row ~500 bytes of data
-      worksheet
-        .addRow([
+      rowCommit(
+        worksheet.addRow([
           `Row ${i}`,
           i,
           `Data ${i} - ${padX}`,
           `More ${i} - ${padY}`,
           `Extra ${i} - ${padZ}`
         ])
-        .commit();
+      );
 
       // Yield to event loop regularly so async readers can flush.
       if (i > 0 && i % 2000 === 0) {
@@ -359,7 +360,7 @@ describe("Real Excel Streaming Write - Browser", () => {
 
     // Write 500 rows with yields to event loop every 100 rows
     for (let i = 0; i < 500; i++) {
-      worksheet.addRow([`Row ${i}`, i, `Data ${i}`, `More ${i}`.repeat(20)]).commit();
+      rowCommit(worksheet.addRow([`Row ${i}`, i, `Data ${i}`, `More ${i}`.repeat(20)]));
 
       // Yield to event loop every 100 rows
       if (i > 0 && i % 100 === 0) {

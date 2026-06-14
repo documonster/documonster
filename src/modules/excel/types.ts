@@ -214,27 +214,28 @@ export interface Margins {
 // ============================================================================
 export interface PageSetup {
   margins: Margins;
-  orientation: "portrait" | "landscape";
-  horizontalDpi: number;
-  verticalDpi: number;
+  orientation: string;
+  horizontalDpi?: number;
+  verticalDpi?: number;
   fitToPage: boolean;
   fitToWidth: number;
   fitToHeight: number;
   scale: number;
-  pageOrder: "downThenOver" | "overThenDown";
+  pageOrder: string;
   blackAndWhite: boolean;
   draft: boolean;
-  cellComments: "atEnd" | "asDisplayed" | "None";
-  errors: "dash" | "blank" | "NA" | "displayed";
-  paperSize: PaperSize;
+  cellComments: string;
+  errors: string;
+  paperSize?: number;
   showRowColHeaders: boolean;
   showGridLines: boolean;
-  firstPageNumber: number;
+  firstPageNumber?: number;
   horizontalCentered: boolean;
   verticalCentered: boolean;
-  printArea: string;
-  printTitlesRow: string;
-  printTitlesColumn: string;
+  rowBreaks?: RowBreak[];
+  printArea?: string;
+  printTitlesRow?: string;
+  printTitlesColumn?: string;
 }
 
 // ============================================================================
@@ -243,12 +244,12 @@ export interface PageSetup {
 export interface HeaderFooter {
   differentFirst: boolean;
   differentOddEven: boolean;
-  oddHeader: string;
-  oddFooter: string;
-  evenHeader: string;
-  evenFooter: string;
-  firstHeader: string;
-  firstFooter: string;
+  oddHeader: string | null;
+  oddFooter: string | null;
+  evenHeader: string | null;
+  evenFooter: string | null;
+  firstHeader: string | null;
+  firstFooter: string | null;
 }
 
 // ============================================================================

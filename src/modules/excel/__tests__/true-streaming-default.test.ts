@@ -1,11 +1,13 @@
 import { Writable } from "node:stream";
 
+import { cellSetValue } from "@excel/cell";
+import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Memory bounds verification for WorkbookWriter under a paced sink.
  *
  * `WorkbookWriter` does not strictly bound memory at O(constant) when the
  * user feeds rows in a tight synchronous loop without yielding — that is
- * a fundamental JS limitation (sync `row.commit()` cannot await sink drain).
+ * a fundamental JS limitation (sync `Row.commit(row)` cannot await sink drain).
  * However it does ensure:
  *   - Memory grows roughly linearly with the deflate batch buffers, capped
  *     by the sink's drain rate.
@@ -64,9 +66,9 @@ describe("WorkbookWriter memory bounds", () => {
       for (let i = 1; i <= ROWS; i++) {
         const row = ws.getRow(i);
         for (let c = 1; c <= 10; c++) {
-          row.getCell(c).value = big;
+          cellSetValue(rowGetCell(row, c), big);
         }
-        row.commit();
+        rowCommit(row);
       }
       ws.commit();
       await wb.commit();

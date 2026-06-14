@@ -9,7 +9,7 @@ let Workbook: any;
 let PassThrough: any;
 
 beforeAll(async () => {
-  const excelModule = await import("../../../../index.browser");
+  const excelModule = await import("@excel/index.browser");
   Workbook = excelModule.Workbook;
 
   const streamModule = await import("@stream");

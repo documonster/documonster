@@ -131,7 +131,7 @@ export interface ChartSupport {
   readonly seriesFromColumns: typeof seriesFromColumns;
 
   // XLSX serialisation helpers — consumed by `xlsx.browser.ts` during
-  // `workbook.xlsx.writeFile()` / `readFile()` when charts are present.
+  // `Workbook.writeXlsx(workbook)` / `readFile()` when charts are present.
   readonly parseChartEx: typeof parseChartEx;
   readonly renderChartEx: typeof renderChartEx;
   readonly renderChartExLegendXml: typeof renderChartExLegendXml;
@@ -186,7 +186,7 @@ export function getChartSupport(): ChartSupport {
       "No chart support is installed. " +
         "Call `installChartSupport()` from `@cj-tech-master/excelts/chart` " +
         "once at startup to enable chart creation, loading, and " +
-        "serialisation during `workbook.xlsx.writeFile()`."
+        "serialisation during `Workbook.writeXlsx(workbook)`."
     );
   }
   return installed;

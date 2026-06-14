@@ -6,6 +6,8 @@
  * included here per the task brief).
  */
 
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -1962,27 +1964,25 @@ describe("error propagation across statistical family", () => {
 // via direct fn* tests). Each alias has ≥2 targeted cases.
 // ============================================================================
 
-import { Workbook } from "@excel/workbook";
-
 import { lookupFunction } from "../../runtime/function-registry";
 
 function evalFormula(formula: string): unknown {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
   // Seed a small data range so range-taking aliases have something to chew on.
-  ws.getCell("A1").value = 1;
-  ws.getCell("A2").value = 2;
-  ws.getCell("A3").value = 2;
-  ws.getCell("A4").value = 3;
-  ws.getCell("A5").value = 4;
-  ws.getCell("B1").value = 2;
-  ws.getCell("B2").value = 3;
-  ws.getCell("B3").value = 4;
-  ws.getCell("B4").value = 5;
-  ws.getCell("B5").value = 6;
-  ws.getCell("C1").value = { formula, result: 0 };
-  wb.calculateFormulas();
-  return ws.getCell("C1").result;
+  Cell.setValue(ws, "A1", 1);
+  Cell.setValue(ws, "A2", 2);
+  Cell.setValue(ws, "A3", 2);
+  Cell.setValue(ws, "A4", 3);
+  Cell.setValue(ws, "A5", 4);
+  Cell.setValue(ws, "B1", 2);
+  Cell.setValue(ws, "B2", 3);
+  Cell.setValue(ws, "B3", 4);
+  Cell.setValue(ws, "B4", 5);
+  Cell.setValue(ws, "B5", 6);
+  Cell.setValue(ws, "C1", { formula, result: 0 });
+  calculateFormulas(wb);
+  return Cell.getResult(ws, "C1");
 }
 
 describe("MODE.SNGL (alias of MODE)", () => {
@@ -2015,15 +2015,15 @@ describe("FORECAST.LINEAR (alias of FORECAST)", () => {
   });
   it("predicts with correct slope on simple ascending data", () => {
     // y = x+1; predict x=10 ⇒ 11
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let i = 1; i <= 5; i++) {
-      ws.getCell(`A${i}`).value = i;
-      ws.getCell(`B${i}`).value = i + 1;
+      Cell.setValue(ws, `A${i}`, i);
+      Cell.setValue(ws, `B${i}`, i + 1);
     }
-    ws.getCell("C1").value = { formula: "FORECAST.LINEAR(10,B1:B5,A1:A5)", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("C1").result).toBeCloseTo(11, 10);
+    Cell.setValue(ws, "C1", { formula: "FORECAST.LINEAR(10,B1:B5,A1:A5)", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "C1")).toBeCloseTo(11, 10);
   });
   it("returns #DIV/0! for zero-variance x data (same as FORECAST)", () => {
     expect(evalFormula("FORECAST.LINEAR(5,{1,2,3},{1,1,1})")).toEqual({ error: "#DIV/0!" });

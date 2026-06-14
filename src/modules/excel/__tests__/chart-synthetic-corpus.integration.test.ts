@@ -15,7 +15,8 @@
 import { extractAll } from "@archive/unzip/extract";
 import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Workbook, Worksheet } from "@excel/index";
+import { addChart, addChartEx, getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
@@ -137,11 +138,11 @@ describe("Synthetic chart corpus", () => {
           fixture.id.replace(/^classic-/, "") as Parameters<typeof applyChartPreset>[0],
           { series: [] }
         ).type;
-        const wb = new Workbook();
-        await wb.xlsx.load(fixture.bytes);
-        const sheet = wb.getWorksheet("Data");
+        const wb = Workbook.create();
+        await Workbook.loadXlsx(wb, fixture.bytes);
+        const sheet = Workbook.getWorksheet(wb, "Data")!;
         expect(sheet, fixture.id).toBeDefined();
-        const charts = sheet!.getCharts();
+        const charts = getCharts(sheet!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const loadedType = charts[0].chartModel?.chart.plotArea.chartTypes[0].type;
         expect(loadedType, `${fixture.id} expected ${expectedType}`).toBe(expectedType);
@@ -154,9 +155,9 @@ describe("Synthetic chart corpus", () => {
       const fixtures = chartExFixtures;
       for (const fixture of fixtures) {
         const layoutType = fixture.id.replace(/^chartEx-/, "");
-        const wb = new Workbook();
-        await wb.xlsx.load(fixture.bytes);
-        const charts = wb.getWorksheet("Data")!.getCharts();
+        const wb = Workbook.create();
+        await Workbook.loadXlsx(wb, fixture.bytes);
+        const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const plotArea = charts[0].chartExModel?.chartSpace.chart.plotArea;
         const firstSeries = plotArea?.plotAreaRegion?.series?.[0] ?? plotArea?.series?.[0];
@@ -212,13 +213,14 @@ describe("Synthetic chart corpus", () => {
 
   describe("audit edge cases", () => {
     it("validates rels and content types when classic + ChartEx + chartsheet all coexist", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Data");
-      ws.addRows([
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Data");
+      Worksheet.addRows(ws, [
         ["A", 10],
         ["B", 20]
       ]);
-      ws.addChart(
+      addChart(
+        ws,
         {
           type: "bar",
           series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }],
@@ -227,11 +229,12 @@ describe("Synthetic chart corpus", () => {
         },
         "D1:J10"
       );
-      ws.addChartEx(
+      addChartEx(
+        ws,
         { type: "waterfall", categories: "Data!$A$1:$A$2", series: [{ values: "Data!$B$1:$B$2" }] },
         "D12:J22"
       );
-      wb.addChartsheet("Chart Sheet", {
+      Workbook.addChartsheet(wb, "Chart Sheet", {
         chart: {
           type: "funnel",
           categories: "Data!$A$1:$A$2",
@@ -239,7 +242,7 @@ describe("Synthetic chart corpus", () => {
         }
       });
 
-      const entries = await extractAll(new Uint8Array(await wb.xlsx.writeBuffer()));
+      const entries = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
       const contentTypes = entryText(entries, "[Content_Types].xml")!;
       expect(contentTypes).toContain("/xl/charts/chart1.xml");
       expect(contentTypes).toContain("/xl/charts/chartEx1.xml");
@@ -256,17 +259,18 @@ describe("Synthetic chart corpus", () => {
     });
 
     it("reports missing cx:data id, cx:axis id, and externalData rel references", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Data");
-      ws.addRows([
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Data");
+      Worksheet.addRows(ws, [
         ["A", 10],
         ["B", 20]
       ]);
-      ws.addChartEx(
+      addChartEx(
+        ws,
         { type: "waterfall", categories: "Data!$A$1:$A$2", series: [{ values: "Data!$B$1:$B$2" }] },
         "D1:J10"
       );
-      const buffer = new Uint8Array(await wb.xlsx.writeBuffer());
+      const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
       const entries = await extractAll(buffer);
       const chartExEntry = entries.get("xl/charts/chartEx1.xml")!;
       const originalXml = new TextDecoder().decode(chartExEntry.data);

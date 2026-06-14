@@ -1,9 +1,51 @@
 import { testUtils } from "@excel/__tests__/shared";
+import {
+  cellAlignment,
+  cellBorder,
+  cellFill,
+  cellFont,
+  cellFormula,
+  cellGetValue,
+  cellNumFmt,
+  cellResult,
+  cellSetAlignment,
+  cellSetBorder,
+  cellSetFill,
+  cellSetFont,
+  cellSetNumFmt,
+  cellSetProtection,
+  cellSetValue,
+  cellType
+} from "@excel/cell";
+import { columnHeaders } from "@excel/column";
+import { Cell, Workbook } from "@excel/index";
+import {
+  rowAddPageBreak,
+  rowSetAlignment,
+  rowSetBorder,
+  rowSetFill,
+  rowSetFont,
+  rowSetNumFmt,
+  rowValues
+} from "@excel/row";
 import type { CellFormulaValue } from "@excel/types";
+import {
+  columnSetAlignment,
+  columnSetBorder,
+  columnSetDefn,
+  columnSetFill,
+  columnSetFont,
+  columnSetHeader,
+  columnSetKey,
+  columnSetNumFmt,
+  getCell,
+  rowCommit,
+  rowGetCell
+} from "@excel/worksheet";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, WorkbookWriter, ValueType } from "../../../../index";
+import { WorkbookWriter, ValueType } from "../../../../index";
 
 const CONCATENATE_HELLO_WORLD = 'CONCATENATE("Hello", ", ", "World!")';
 
@@ -16,57 +58,57 @@ describe("WorksheetWriter", () => {
       const now = new Date();
 
       // plain number
-      ws.getCell("A1").value = 7;
+      cellSetValue(ws.getCell("A1"), 7);
 
       // simple string
-      ws.getCell("B1").value = "Hello, World!";
+      cellSetValue(ws.getCell("B1"), "Hello, World!");
 
       // floating point
-      ws.getCell("C1").value = 3.14;
+      cellSetValue(ws.getCell("C1"), 3.14);
 
       // 5 will be overwritten by the current date-time
-      ws.getCell("D1").value = 5;
-      ws.getCell("D1").value = now;
+      cellSetValue(ws.getCell("D1"), 5);
+      cellSetValue(ws.getCell("D1"), now);
 
       // constructed string - will share recored with B1
-      ws.getCell("E1").value = `${["Hello", "World"].join(", ")}!`;
+      cellSetValue(ws.getCell("E1"), `${["Hello", "World"].join(", ")}!`);
 
       // hyperlink
-      ws.getCell("F1").value = {
+      cellSetValue(ws.getCell("F1"), {
         text: "www.google.com",
         hyperlink: "http://www.google.com"
-      };
+      });
 
       // number formula
-      ws.getCell("A2").value = { formula: "A1", result: 7 };
+      cellSetValue(ws.getCell("A2"), { formula: "A1", result: 7 });
 
       // string formula
-      ws.getCell("B2").value = {
+      cellSetValue(ws.getCell("B2"), {
         formula: CONCATENATE_HELLO_WORLD,
         result: "Hello, World!"
-      };
+      });
 
       // date formula
-      ws.getCell("C2").value = { formula: "D1", result: now };
+      cellSetValue(ws.getCell("C2"), { formula: "D1", result: now });
 
-      expect(ws.getCell("A1").value).toBe(7);
-      expect(ws.getCell("B1").value).toBe("Hello, World!");
-      expect(ws.getCell("C1").value).toBe(3.14);
-      expect(ws.getCell("D1").value).toBe(now);
-      expect(ws.getCell("E1").value).toBe("Hello, World!");
-      expect(ws.getCell("F1").value).toEqual({
+      expect(cellGetValue(ws.getCell("A1"))).toBe(7);
+      expect(cellGetValue(ws.getCell("B1"))).toBe("Hello, World!");
+      expect(cellGetValue(ws.getCell("C1"))).toBe(3.14);
+      expect(cellGetValue(ws.getCell("D1"))).toBe(now);
+      expect(cellGetValue(ws.getCell("E1"))).toBe("Hello, World!");
+      expect(cellGetValue(ws.getCell("F1"))).toEqual({
         text: "www.google.com",
         hyperlink: "http://www.google.com"
       });
 
-      expect(ws.getCell("A2").value).toEqual({ formula: "A1", result: 7 });
+      expect(cellGetValue(ws.getCell("A2"))).toEqual({ formula: "A1", result: 7 });
 
-      expect(ws.getCell("B2").value).toEqual({
+      expect(cellGetValue(ws.getCell("B2"))).toEqual({
         formula: CONCATENATE_HELLO_WORLD,
         result: "Hello, World!"
       });
 
-      expect(ws.getCell("C2").value).toEqual({ formula: "D1", result: now });
+      expect(cellGetValue(ws.getCell("C2"))).toEqual({ formula: "D1", result: now });
     });
 
     it("stores shared string values properly", () => {
@@ -75,22 +117,24 @@ describe("WorksheetWriter", () => {
       });
       const ws = wb.addWorksheet("blort");
 
-      ws.getCell("A1").value = "Hello, World!";
+      cellSetValue(ws.getCell("A1"), "Hello, World!");
 
-      ws.getCell("A2").value = "Hello";
-      ws.getCell("B2").value = "World";
-      ws.getCell("C2").value = {
+      cellSetValue(ws.getCell("A2"), "Hello");
+      cellSetValue(ws.getCell("B2"), "World");
+      cellSetValue(ws.getCell("C2"), {
         formula: 'CONCATENATE(A2, ", ", B2, "!")',
         result: "Hello, World!"
-      };
+      });
 
-      ws.getCell("A3").value = `${["Hello", "World"].join(", ")}!`;
+      cellSetValue(ws.getCell("A3"), `${["Hello", "World"].join(", ")}!`);
 
       // A1 and A3 should reference the same string object
-      expect(ws.getCell("A1").value).toBe(ws.getCell("A3").value);
+      expect(cellGetValue(ws.getCell("A1"))).toBe(cellGetValue(ws.getCell("A3")));
 
       // A1 and C2 should not reference the same object
-      expect(ws.getCell("A1").value).toBe((ws.getCell("C2").value as CellFormulaValue).result);
+      expect(cellGetValue(ws.getCell("A1"))).toBe(
+        (cellGetValue(ws.getCell("C2")) as CellFormulaValue).result
+      );
     });
 
     it("assigns cell types properly", () => {
@@ -98,44 +142,44 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("blort");
 
       // plain number
-      ws.getCell("A1").value = 7;
+      cellSetValue(ws.getCell("A1"), 7);
 
       // simple string
-      ws.getCell("B1").value = "Hello, World!";
+      cellSetValue(ws.getCell("B1"), "Hello, World!");
 
       // floating point
-      ws.getCell("C1").value = 3.14;
+      cellSetValue(ws.getCell("C1"), 3.14);
 
       // date-time
-      ws.getCell("D1").value = new Date();
+      cellSetValue(ws.getCell("D1"), new Date());
 
       // hyperlink
-      ws.getCell("E1").value = {
+      cellSetValue(ws.getCell("E1"), {
         text: "www.google.com",
         hyperlink: "http://www.google.com"
-      };
+      });
 
       // number formula
-      ws.getCell("A2").value = { formula: "A1", result: 7 };
+      cellSetValue(ws.getCell("A2"), { formula: "A1", result: 7 });
 
       // string formula
-      ws.getCell("B2").value = {
+      cellSetValue(ws.getCell("B2"), {
         formula: CONCATENATE_HELLO_WORLD,
         result: "Hello, World!"
-      };
+      });
 
       // date formula
-      ws.getCell("C2").value = { formula: "D1", result: new Date() };
+      cellSetValue(ws.getCell("C2"), { formula: "D1", result: new Date() });
 
-      expect(ws.getCell("A1").type).toBe(ValueType.Number);
-      expect(ws.getCell("B1").type).toBe(ValueType.String);
-      expect(ws.getCell("C1").type).toBe(ValueType.Number);
-      expect(ws.getCell("D1").type).toBe(ValueType.Date);
-      expect(ws.getCell("E1").type).toBe(ValueType.Hyperlink);
+      expect(cellType(ws.getCell("A1"))).toBe(ValueType.Number);
+      expect(cellType(ws.getCell("B1"))).toBe(ValueType.String);
+      expect(cellType(ws.getCell("C1"))).toBe(ValueType.Number);
+      expect(cellType(ws.getCell("D1"))).toBe(ValueType.Date);
+      expect(cellType(ws.getCell("E1"))).toBe(ValueType.Hyperlink);
 
-      expect(ws.getCell("A2").type).toBe(ValueType.Formula);
-      expect(ws.getCell("B2").type).toBe(ValueType.Formula);
-      expect(ws.getCell("C2").type).toBe(ValueType.Formula);
+      expect(cellType(ws.getCell("A2"))).toBe(ValueType.Formula);
+      expect(cellType(ws.getCell("B2"))).toBe(ValueType.Formula);
+      expect(cellType(ws.getCell("C2"))).toBe(ValueType.Formula);
     });
 
     it("adds columns", () => {
@@ -174,9 +218,9 @@ describe("WorksheetWriter", () => {
         { header: "D.O.B.", width: 10 }
       ];
 
-      expect(ws.getCell("A1").value).toBe("Id");
-      expect(ws.getCell("B1").value).toBe("Name");
-      expect(ws.getCell("C1").value).toBe("D.O.B.");
+      expect(cellGetValue(ws.getCell("A1"))).toBe("Id");
+      expect(cellGetValue(ws.getCell("B1"))).toBe("Name");
+      expect(cellGetValue(ws.getCell("C1"))).toBe("D.O.B.");
     });
 
     it("adds column headers by number", () => {
@@ -184,25 +228,25 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("blort");
 
       // by defn
-      ws.getColumn(1).defn = { key: "id", header: "Id", width: 10 };
+      columnSetDefn(ws.getColumn(1), { key: "id", header: "Id", width: 10 });
 
       // by property
-      ws.getColumn(2).key = "name";
-      ws.getColumn(2).header = "Name";
+      columnSetKey(ws.getColumn(2), "name");
+      columnSetHeader(ws.getColumn(2), "Name");
       ws.getColumn(2).width = 32;
 
-      expect(ws.getCell("A1").value).toBe("Id");
-      expect(ws.getCell("B1").value).toBe("Name");
+      expect(cellGetValue(ws.getCell("A1"))).toBe("Id");
+      expect(cellGetValue(ws.getCell("B1"))).toBe("Name");
 
       expect(ws.getColumn("A").key).toBe("id");
       expect(ws.getColumn(1).key).toBe("id");
       expect(ws.getColumn(1).header).toBe("Id");
-      expect(ws.getColumn(1).headers).toEqual(["Id"]);
+      expect(columnHeaders(ws.getColumn(1))).toEqual(["Id"]);
       expect(ws.getColumn(1).width).toBe(10);
 
       expect(ws.getColumn(2).key).toBe("name");
       expect(ws.getColumn(2).header).toBe("Name");
-      expect(ws.getColumn(2).headers).toEqual(["Name"]);
+      expect(columnHeaders(ws.getColumn(2))).toEqual(["Name"]);
       expect(ws.getColumn(2).width).toBe(32);
     });
 
@@ -211,25 +255,25 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("blort");
 
       // by defn
-      ws.getColumn("A").defn = { key: "id", header: "Id", width: 10 };
+      columnSetDefn(ws.getColumn("A"), { key: "id", header: "Id", width: 10 });
 
       // by property
-      ws.getColumn("B").key = "name";
-      ws.getColumn("B").header = "Name";
+      columnSetKey(ws.getColumn("B"), "name");
+      columnSetHeader(ws.getColumn("B"), "Name");
       ws.getColumn("B").width = 32;
 
-      expect(ws.getCell("A1").value).toBe("Id");
-      expect(ws.getCell("B1").value).toBe("Name");
+      expect(cellGetValue(ws.getCell("A1"))).toBe("Id");
+      expect(cellGetValue(ws.getCell("B1"))).toBe("Name");
 
       expect(ws.getColumn("A").key).toBe("id");
       expect(ws.getColumn(1).key).toBe("id");
       expect(ws.getColumn("A").header).toBe("Id");
-      expect(ws.getColumn("A").headers).toEqual(["Id"]);
+      expect(columnHeaders(ws.getColumn("A"))).toEqual(["Id"]);
       expect(ws.getColumn("A").width).toBe(10);
 
       expect(ws.getColumn("B").key).toBe("name");
       expect(ws.getColumn("B").header).toBe("Name");
-      expect(ws.getColumn("B").headers).toEqual(["Name"]);
+      expect(columnHeaders(ws.getColumn("B"))).toEqual(["Name"]);
       expect(ws.getColumn("B").width).toBe(32);
     });
 
@@ -250,16 +294,16 @@ describe("WorksheetWriter", () => {
       ws.addRow({ id: 1, name: "John Doe", dob: dateValue1 });
       ws.addRow({ id: 2, name: "Jane Doe", dob: dateValue2 });
 
-      expect(ws.getCell("A2").value).toBe(1);
-      expect(ws.getCell("B2").value).toBe("John Doe");
-      expect(ws.getCell("C2").value).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("A2"))).toBe(1);
+      expect(cellGetValue(ws.getCell("B2"))).toBe("John Doe");
+      expect(cellGetValue(ws.getCell("C2"))).toBe(dateValue1);
 
-      expect(ws.getCell("A3").value).toBe(2);
-      expect(ws.getCell("B3").value).toBe("Jane Doe");
-      expect(ws.getCell("C3").value).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("A3"))).toBe(2);
+      expect(cellGetValue(ws.getCell("B3"))).toBe("Jane Doe");
+      expect(cellGetValue(ws.getCell("C3"))).toBe(dateValue2);
 
-      expect(ws.getRow(2).values).toEqual([, 1, "John Doe", dateValue1]);
-      expect(ws.getRow(3).values).toEqual([, 2, "Jane Doe", dateValue2]);
+      expect(rowValues(ws.getRow(2))).toEqual([, 1, "John Doe", dateValue1]);
+      expect(rowValues(ws.getRow(3))).toEqual([, 2, "Jane Doe", dateValue2]);
     });
 
     it("adds rows by contiguous array", () => {
@@ -272,16 +316,16 @@ describe("WorksheetWriter", () => {
       ws.addRow([1, "John Doe", dateValue1]);
       ws.addRow([2, "Jane Doe", dateValue2]);
 
-      expect(ws.getCell("A1").value).toBe(1);
-      expect(ws.getCell("B1").value).toBe("John Doe");
-      expect(ws.getCell("C1").value).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("A1"))).toBe(1);
+      expect(cellGetValue(ws.getCell("B1"))).toBe("John Doe");
+      expect(cellGetValue(ws.getCell("C1"))).toBe(dateValue1);
 
-      expect(ws.getCell("A2").value).toBe(2);
-      expect(ws.getCell("B2").value).toBe("Jane Doe");
-      expect(ws.getCell("C2").value).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("A2"))).toBe(2);
+      expect(cellGetValue(ws.getCell("B2"))).toBe("Jane Doe");
+      expect(cellGetValue(ws.getCell("C2"))).toBe(dateValue2);
 
-      expect(ws.getRow(1).values).toEqual([, 1, "John Doe", dateValue1]);
-      expect(ws.getRow(2).values).toEqual([, 2, "Jane Doe", dateValue2]);
+      expect(rowValues(ws.getRow(1))).toEqual([, 1, "John Doe", dateValue1]);
+      expect(rowValues(ws.getRow(2))).toEqual([, 2, "Jane Doe", dateValue2]);
     });
 
     it("adds rows by sparse array", () => {
@@ -302,103 +346,115 @@ describe("WorksheetWriter", () => {
         }
       });
 
-      expect(ws.getCell("A1").value).toBe(1);
-      expect(ws.getCell("B1").value).toBe("John Doe");
-      expect(ws.getCell("D1").value).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("A1"))).toBe(1);
+      expect(cellGetValue(ws.getCell("B1"))).toBe("John Doe");
+      expect(cellGetValue(ws.getCell("D1"))).toBe(dateValue1);
 
-      expect(ws.getCell("A2").value).toBe(2);
-      expect(ws.getCell("B2").value).toBe("Jane Doe");
-      expect(ws.getCell("D2").value).toBe(dateValue2);
+      expect(cellGetValue(ws.getCell("A2"))).toBe(2);
+      expect(cellGetValue(ws.getCell("B2"))).toBe("Jane Doe");
+      expect(cellGetValue(ws.getCell("D2"))).toBe(dateValue2);
 
-      expect(ws.getCell("A3").value).toBe(3);
-      expect(ws.getCell("C3").value).toBe("Sam");
-      expect(ws.getCell("E3").value).toBe(dateValue1);
+      expect(cellGetValue(ws.getCell("A3"))).toBe(3);
+      expect(cellGetValue(ws.getCell("C3"))).toBe("Sam");
+      expect(cellGetValue(ws.getCell("E3"))).toBe(dateValue1);
 
-      expect(ws.getRow(1).values).toEqual(rows[1]);
-      expect(ws.getRow(2).values).toEqual(rows[2]);
-      expect(ws.getRow(3).values).toEqual(rows[3]);
+      expect(rowValues(ws.getRow(1))).toEqual(rows[1]);
+      expect(rowValues(ws.getRow(2))).toEqual(rows[2]);
+      expect(rowValues(ws.getRow(3))).toEqual(rows[3]);
     });
 
     it("sets row styles", () => {
       const wb = new WorkbookWriter();
       const ws = wb.addWorksheet("basket");
 
-      ws.getCell("A1").value = 5;
-      ws.getCell("A1").numFmt = testUtils.styles.numFmts.numFmt1;
-      ws.getCell("A1").font = testUtils.styles.fonts.arialBlackUI14;
+      cellSetValue(ws.getCell("A1"), 5);
+      cellSetNumFmt(ws.getCell("A1"), testUtils.styles.numFmts.numFmt1);
+      cellSetFont(ws.getCell("A1"), testUtils.styles.fonts.arialBlackUI14);
 
-      ws.getCell("C1").value = "Hello, World!";
-      ws.getCell("C1").alignment = testUtils.styles.namedAlignments.bottomRight;
-      ws.getCell("C1").border = testUtils.styles.borders.doubleRed;
-      ws.getCell("C1").fill = testUtils.styles.fills.redDarkVertical;
+      cellSetValue(ws.getCell("C1"), "Hello, World!");
+      cellSetAlignment(ws.getCell("C1"), testUtils.styles.namedAlignments.bottomRight);
+      cellSetBorder(ws.getCell("C1"), testUtils.styles.borders.doubleRed);
+      cellSetFill(ws.getCell("C1"), testUtils.styles.fills.redDarkVertical);
 
-      ws.getRow(1).numFmt = testUtils.styles.numFmts.numFmt2;
-      ws.getRow(1).font = testUtils.styles.fonts.comicSansUdB16;
-      ws.getRow(1).alignment = testUtils.styles.namedAlignments.middleCentre;
-      ws.getRow(1).border = testUtils.styles.borders.thin;
-      ws.getRow(1).fill = testUtils.styles.fills.redGreenDarkTrellis;
+      rowSetNumFmt(ws.getRow(1), testUtils.styles.numFmts.numFmt2);
+      rowSetFont(ws.getRow(1), testUtils.styles.fonts.comicSansUdB16);
+      rowSetAlignment(ws.getRow(1), testUtils.styles.namedAlignments.middleCentre);
+      rowSetBorder(ws.getRow(1), testUtils.styles.borders.thin);
+      rowSetFill(ws.getRow(1), testUtils.styles.fills.redGreenDarkTrellis);
 
-      expect(ws.getCell("A1").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("A1").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("A1").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("A1").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("A1").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("A1"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("A1"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("A1"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("A1"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("A1"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
 
       expect(ws.findCell("B1")).toBeUndefined();
 
-      expect(ws.getCell("C1").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("C1").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("C1").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("C1").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("C1").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("C1"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("C1"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("C1"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("C1"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("C1"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
 
       // when we 'get' the previously null cell, it should inherit the row styles
-      expect(ws.getCell("B1").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("B1").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("B1").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("B1").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("B1").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("B1"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("B1"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("B1"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("B1"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("B1"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
     });
 
     it("sets col styles", () => {
       const wb = new WorkbookWriter();
       const ws = wb.addWorksheet("basket");
 
-      ws.getCell("A1").value = 5;
-      ws.getCell("A1").numFmt = testUtils.styles.numFmts.numFmt1;
-      ws.getCell("A1").font = testUtils.styles.fonts.arialBlackUI14;
+      cellSetValue(ws.getCell("A1"), 5);
+      cellSetNumFmt(ws.getCell("A1"), testUtils.styles.numFmts.numFmt1);
+      cellSetFont(ws.getCell("A1"), testUtils.styles.fonts.arialBlackUI14);
 
-      ws.getCell("A3").value = "Hello, World!";
-      ws.getCell("A3").alignment = testUtils.styles.namedAlignments.bottomRight;
-      ws.getCell("A3").border = testUtils.styles.borders.doubleRed;
-      ws.getCell("A3").fill = testUtils.styles.fills.redDarkVertical;
+      cellSetValue(ws.getCell("A3"), "Hello, World!");
+      cellSetAlignment(ws.getCell("A3"), testUtils.styles.namedAlignments.bottomRight);
+      cellSetBorder(ws.getCell("A3"), testUtils.styles.borders.doubleRed);
+      cellSetFill(ws.getCell("A3"), testUtils.styles.fills.redDarkVertical);
 
-      ws.getColumn("A").numFmt = testUtils.styles.numFmts.numFmt2;
-      ws.getColumn("A").font = testUtils.styles.fonts.comicSansUdB16;
-      ws.getColumn("A").alignment = testUtils.styles.namedAlignments.middleCentre;
-      ws.getColumn("A").border = testUtils.styles.borders.thin;
-      ws.getColumn("A").fill = testUtils.styles.fills.redGreenDarkTrellis;
+      columnSetNumFmt(ws.getColumn("A"), testUtils.styles.numFmts.numFmt2);
+      columnSetFont(ws.getColumn("A"), testUtils.styles.fonts.comicSansUdB16);
+      columnSetAlignment(ws.getColumn("A"), testUtils.styles.namedAlignments.middleCentre);
+      columnSetBorder(ws.getColumn("A"), testUtils.styles.borders.thin);
+      columnSetFill(ws.getColumn("A"), testUtils.styles.fills.redGreenDarkTrellis);
 
-      expect(ws.getCell("A1").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("A1").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("A1").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("A1").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("A1").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("A1"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("A1"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("A1"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("A1"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("A1"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
 
       expect(ws.findRow(2)).toBeUndefined();
 
-      expect(ws.getCell("A3").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("A3").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("A3").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("A3").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("A3").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("A3"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("A3"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("A3"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("A3"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("A3"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
 
       // when we 'get' the previously null cell, it should inherit the column styles
-      expect(ws.getCell("A2").numFmt).toBe(testUtils.styles.numFmts.numFmt2);
-      expect(ws.getCell("A2").font).toEqual(testUtils.styles.fonts.comicSansUdB16);
-      expect(ws.getCell("A2").alignment).toEqual(testUtils.styles.namedAlignments.middleCentre);
-      expect(ws.getCell("A2").border).toEqual(testUtils.styles.borders.thin);
-      expect(ws.getCell("A2").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
+      expect(cellNumFmt(ws.getCell("A2"))).toBe(testUtils.styles.numFmts.numFmt2);
+      expect(cellFont(ws.getCell("A2"))).toEqual(testUtils.styles.fonts.comicSansUdB16);
+      expect(cellAlignment(ws.getCell("A2"))).toEqual(
+        testUtils.styles.namedAlignments.middleCentre
+      );
+      expect(cellBorder(ws.getCell("A2"))).toEqual(testUtils.styles.borders.thin);
+      expect(cellFill(ws.getCell("A2"))).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
     });
   });
 
@@ -408,22 +464,22 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("blort");
 
       // initial values
-      ws.getCell("A1").value = "A1";
-      ws.getCell("B1").value = "B1";
-      ws.getCell("A2").value = "A2";
-      ws.getCell("B2").value = "B2";
+      cellSetValue(ws.getCell("A1"), "A1");
+      cellSetValue(ws.getCell("B1"), "B1");
+      cellSetValue(ws.getCell("A2"), "A2");
+      cellSetValue(ws.getCell("B2"), "B2");
 
       ws.mergeCells("A1:B2");
 
-      expect(ws.getCell("A1").value).toBe("A1");
-      expect(ws.getCell("B1").value).toBe("A1");
-      expect(ws.getCell("A2").value).toBe("A1");
-      expect(ws.getCell("B2").value).toBe("A1");
+      expect(cellGetValue(ws.getCell("A1"))).toBe("A1");
+      expect(cellGetValue(ws.getCell("B1"))).toBe("A1");
+      expect(cellGetValue(ws.getCell("A2"))).toBe("A1");
+      expect(cellGetValue(ws.getCell("B2"))).toBe("A1");
 
-      expect(ws.getCell("A1").type).toBe(ValueType.String);
-      expect(ws.getCell("B1").type).toBe(ValueType.Merge);
-      expect(ws.getCell("A2").type).toBe(ValueType.Merge);
-      expect(ws.getCell("B2").type).toBe(ValueType.Merge);
+      expect(cellType(ws.getCell("A1"))).toBe(ValueType.String);
+      expect(cellType(ws.getCell("B1"))).toBe(ValueType.Merge);
+      expect(cellType(ws.getCell("A2"))).toBe(ValueType.Merge);
+      expect(cellType(ws.getCell("B2"))).toBe(ValueType.Merge);
     });
 
     it("does not allow overlapping merges", () => {
@@ -459,17 +515,17 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("blort");
 
       // initial values
-      ws.getCell("A1").value = "A1";
-      ws.getCell("B1").value = "B1";
-      ws.getCell("A2").value = "A2";
-      ws.getCell("B2").value = "B2";
-      ws.getCell("A3").value = "A3";
-      ws.getCell("B3").value = "B3";
+      cellSetValue(ws.getCell("A1"), "A1");
+      cellSetValue(ws.getCell("B1"), "B1");
+      cellSetValue(ws.getCell("A2"), "A2");
+      cellSetValue(ws.getCell("B2"), "B2");
+      cellSetValue(ws.getCell("A3"), "A3");
+      cellSetValue(ws.getCell("B3"), "B3");
 
       let row = ws.getRow(1);
-      row.addPageBreak();
+      rowAddPageBreak(row);
       row = ws.getRow(2);
-      row.addPageBreak();
+      rowAddPageBreak(row);
       expect(ws.rowBreaks.length).toBe(2);
     });
   });
@@ -477,35 +533,35 @@ describe("WorksheetWriter", () => {
   // String formula result with date format should not be converted to date
   describe("String formula result with date format", () => {
     it("preserves string formula result with date format", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
 
       // Set up a cell with text and date format (mmm-yy)
-      ws.getCell("A1").value = "test";
-      ws.getCell("A1").numFmt = "mmm-yy";
+      Cell.setValue(ws, "A1", "test");
+      Cell.setStyle(ws, "A1", { numFmt: "mmm-yy" });
 
       // Set up a formula that references the text cell
-      ws.getCell("A2").value = { formula: "A1", result: "test" };
-      ws.getCell("A2").numFmt = "mmm-yy";
+      Cell.setValue(ws, "A2", { formula: "A1", result: "test" });
+      Cell.setStyle(ws, "A2", { numFmt: "mmm-yy" });
 
       // Write to buffer
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toXlsxBuffer(wb);
 
       // Read back
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const wb2 = Workbook.create();
+      await Workbook.loadXlsx(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("Sheet1")!;
+      const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
       // Verify A1 is preserved as string
-      expect(ws2.getCell("A1").value).toBe("test");
-      expect(ws2.getCell("A1").numFmt).toBe("mmm-yy");
+      expect(Cell.getValue(ws2, "A1")).toBe("test");
+      expect(Cell.getStyle(ws2, "A1").numFmt).toBe("mmm-yy");
 
       // Verify A2 formula result is preserved as string, not converted to Invalid Date
-      const cellA2 = ws2.getCell("A2");
-      expect(cellA2.formula).toBe("A1");
-      expect(cellA2.result).toBe("test");
-      expect(typeof cellA2.result).toBe("string");
+      const cellA2 = getCell(ws2, "A2");
+      expect(cellFormula(cellA2)).toBe("A1");
+      expect(cellResult(cellA2)).toBe("test");
+      expect(typeof cellResult(cellA2)).toBe("string");
     });
   });
 
@@ -522,15 +578,15 @@ describe("WorksheetWriter", () => {
       const ws = wb.addWorksheet("test");
 
       // Add some data
-      ws.getCell("A1").value = "Name";
-      ws.getCell("B1").value = "Age";
-      ws.getCell("C1").value = "City";
-      ws.getRow(1).commit();
+      cellSetValue(ws.getCell("A1"), "Name");
+      cellSetValue(ws.getCell("B1"), "Age");
+      cellSetValue(ws.getCell("C1"), "City");
+      rowCommit(ws.getRow(1));
 
-      ws.getCell("A2").value = "John";
-      ws.getCell("B2").value = 30;
-      ws.getCell("C2").value = "NYC";
-      ws.getRow(2).commit();
+      cellSetValue(ws.getCell("A2"), "John");
+      cellSetValue(ws.getCell("B2"), 30);
+      cellSetValue(ws.getCell("C2"), "NYC");
+      rowCommit(ws.getRow(2));
 
       // Set autoFilter
       ws.autoFilter = { from: "A1", to: "C1" };
@@ -542,10 +598,10 @@ describe("WorksheetWriter", () => {
       await wb.commit();
 
       // Read it back and verify it's valid
-      const wb2 = new Workbook();
-      await wb2.xlsx.readFile(testFile);
+      const wb2 = Workbook.create();
+      await Workbook.readXlsxFile(wb2, testFile);
 
-      const ws2 = wb2.getWorksheet("test")!;
+      const ws2 = Workbook.getWorksheet(wb2, "test")!;
       expect(ws2).toBeDefined();
 
       // Verify autoFilter is present and correct
@@ -558,12 +614,12 @@ describe("WorksheetWriter", () => {
       expect(ws2.sheetProtection!.autoFilter).toBe(true);
 
       // Verify data is intact
-      expect(ws2.getCell("A1").value).toBe("Name");
-      expect(ws2.getCell("B1").value).toBe("Age");
-      expect(ws2.getCell("C1").value).toBe("City");
-      expect(ws2.getCell("A2").value).toBe("John");
-      expect(ws2.getCell("B2").value).toBe(30);
-      expect(ws2.getCell("C2").value).toBe("NYC");
+      expect(Cell.getValue(ws2, "A1")).toBe("Name");
+      expect(Cell.getValue(ws2, "B1")).toBe("Age");
+      expect(Cell.getValue(ws2, "C1")).toBe("City");
+      expect(Cell.getValue(ws2, "A2")).toBe("John");
+      expect(Cell.getValue(ws2, "B2")).toBe(30);
+      expect(Cell.getValue(ws2, "C2")).toBe("NYC");
     });
 
     it("protect should work with streaming workbook writer", async () => {
@@ -574,10 +630,10 @@ describe("WorksheetWriter", () => {
 
       const sheet = workbook.addWorksheet("data");
       const row = sheet.addRow(["readonly cell"]);
-      row.getCell(1).protection = {
+      cellSetProtection(rowGetCell(row, 1), {
         locked: true
-      };
-      row.commit();
+      });
+      rowCommit(row);
 
       expect(sheet.protect).toBeDefined();
 
@@ -588,9 +644,9 @@ describe("WorksheetWriter", () => {
       sheet.commit();
       await workbook.commit();
 
-      const checkBook = new Workbook();
-      await checkBook.xlsx.readFile(testFile);
-      const checkSheet = checkBook.getWorksheet("data");
+      const checkBook = Workbook.create();
+      await Workbook.readXlsxFile(checkBook, testFile);
+      const checkSheet = Workbook.getWorksheet(checkBook, "data")!;
       expect(checkSheet).toBeDefined();
       expect(checkSheet!.sheetProtection!.spinCount).toBe(1);
     });

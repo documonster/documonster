@@ -1,10 +1,18 @@
 import fs from "fs";
 
 import { testUtils } from "@excel/__tests__/shared";
+import { anchorCol, anchorRow, anchorColWidth, anchorRowHeight } from "@excel/anchor";
+import { cellGetValue, cellType, cellText, cellGetModel, cellHyperlink } from "@excel/cell";
+import { columnIsCustomWidth } from "@excel/column";
+import { Cell, Image, Workbook, Worksheet } from "@excel/index";
+import { rowFont, rowSetFont, rowValues } from "@excel/row";
+import type { CellHyperlinkValue } from "@excel/types";
+import { getWorksheets } from "@excel/workbook";
+import { getCell, rowCommit, getColumn } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 
-import { ValueType, Workbook, WorkbookReader, WorkbookWriter } from "../../../../index";
+import { ValueType, WorkbookReader, WorkbookWriter } from "../../../../index";
 
 const streamTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
@@ -15,9 +23,9 @@ const TEST_FILE_NAME = testFilePath("wb-xlsx-reader.test");
 describe("WorkbookReader", () => {
   describe("Serialise", () => {
     it("xlsx file", async () => {
-      const wb = testUtils.createTestBook(new Workbook(), "xlsx");
+      const wb = testUtils.createTestBook(Workbook.create(), "xlsx");
 
-      await wb.xlsx.writeFile(TEST_FILE_NAME);
+      await Workbook.writeXlsx(wb, TEST_FILE_NAME);
       await testUtils.checkTestBookReader(TEST_FILE_NAME);
     }, 30000);
   });
@@ -25,47 +33,51 @@ describe("WorkbookReader", () => {
   describe("#readFile", () => {
     describe("Row limit", () => {
       it("should bail out if the file contains more rows than the limit", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         // The Fibonacci sheet has 19 rows
         await expect(
-          workbook.xlsx.readFile(streamTestDataPath("fibonacci.xlsx"), { maxRows: 10 })
+          Workbook.readXlsxFile(workbook, streamTestDataPath("fibonacci.xlsx"), { maxRows: 10 })
         ).rejects.toThrow("Max row count (10) exceeded");
       });
 
       it("should fail fast on a huge file", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         await expect(
-          workbook.xlsx.readFile(streamTestDataPath("huge.xlsx"), { maxRows: 100 })
+          Workbook.readXlsxFile(workbook, streamTestDataPath("huge.xlsx"), { maxRows: 100 })
         ).rejects.toThrow("Max row count (100) exceeded");
       }, 30000);
 
       it("should parse fine if the limit is not exceeded", async () => {
-        const workbook = new Workbook();
-        await workbook.xlsx.readFile(streamTestDataPath("fibonacci.xlsx"), { maxRows: 20 });
-        expect(workbook.worksheets.length).toBeGreaterThan(0);
+        const workbook = Workbook.create();
+        await Workbook.readXlsxFile(workbook, streamTestDataPath("fibonacci.xlsx"), {
+          maxRows: 20
+        });
+        expect(getWorksheets(workbook).length).toBeGreaterThan(0);
       });
     });
 
     describe("Column limit", () => {
       it("should bail out if the file contains more cells than the limit", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         // The many-columns sheet has 20 columns in row 2
         await expect(
-          workbook.xlsx.readFile(streamTestDataPath("many-columns.xlsx"), { maxCols: 15 })
+          Workbook.readXlsxFile(workbook, streamTestDataPath("many-columns.xlsx"), { maxCols: 15 })
         ).rejects.toThrow("Max column count (15) exceeded");
       });
 
       it("should fail fast on a huge file", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         await expect(
-          workbook.xlsx.readFile(streamTestDataPath("huge.xlsx"), { maxCols: 10 })
+          Workbook.readXlsxFile(workbook, streamTestDataPath("huge.xlsx"), { maxCols: 10 })
         ).rejects.toThrow("Max column count (10) exceeded");
       }, 30000);
 
       it("should parse fine if the limit is not exceeded", async () => {
-        const workbook = new Workbook();
-        await workbook.xlsx.readFile(streamTestDataPath("many-columns.xlsx"), { maxCols: 40 });
-        expect(workbook.worksheets.length).toBeGreaterThan(0);
+        const workbook = Workbook.create();
+        await Workbook.readXlsxFile(workbook, streamTestDataPath("many-columns.xlsx"), {
+          maxCols: 40
+        });
+        expect(getWorksheets(workbook).length).toBeGreaterThan(0);
       });
     });
   });
@@ -73,21 +85,29 @@ describe("WorkbookReader", () => {
   describe("#read", () => {
     describe("Row limit", () => {
       it("should bail out if the file contains more rows than the limit", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         // The Fibonacci sheet has 19 rows
         await expect(
-          workbook.xlsx.read(fs.createReadStream(streamTestDataPath("fibonacci.xlsx")), {
-            maxRows: 10
-          })
+          Workbook.readXlsxStream(
+            workbook,
+            fs.createReadStream(streamTestDataPath("fibonacci.xlsx")),
+            {
+              maxRows: 10
+            }
+          )
         ).rejects.toThrow("Max row count (10) exceeded");
       });
 
       it("should parse fine if the limit is not exceeded", async () => {
-        const workbook = new Workbook();
-        await workbook.xlsx.read(fs.createReadStream(streamTestDataPath("fibonacci.xlsx")), {
-          maxRows: 20
-        });
-        expect(workbook.worksheets.length).toBeGreaterThan(0);
+        const workbook = Workbook.create();
+        await Workbook.readXlsxStream(
+          workbook,
+          fs.createReadStream(streamTestDataPath("fibonacci.xlsx")),
+          {
+            maxRows: 20
+          }
+        );
+        expect(getWorksheets(workbook).length).toBeGreaterThan(0);
       });
     });
   });
@@ -96,26 +116,40 @@ describe("WorkbookReader", () => {
     let wb;
 
     beforeEach(async () => {
-      wb = new Workbook();
-      await wb.xlsx.readFile(streamTestDataPath("test-row-styles.xlsx"));
+      wb = Workbook.create();
+      await Workbook.readXlsxFile(wb, streamTestDataPath("test-row-styles.xlsx"));
     });
 
     it("edit styles of single row instead of all", () => {
-      const ws = wb.getWorksheet(1);
+      const ws = Workbook.getWorksheet(wb, 1)!;
 
-      ws.eachRow((row, rowNo) => {
+      Worksheet.eachRow(ws, (row, rowNo) => {
         if (rowNo % 5 === 0) {
-          row.font = { color: { argb: "00ff00" } };
+          rowSetFont(row, { color: { argb: "00ff00" } });
         }
       });
 
-      expect(ws.getRow(3).font.color.argb).toBe(ws.getRow(6).font.color.argb);
-      expect(ws.getRow(6).font.color.argb).toBe(ws.getRow(9).font.color.argb);
-      expect(ws.getRow(9).font.color.argb).toBe(ws.getRow(12).font.color.argb);
-      expect(ws.getRow(12).font.color.argb).not.toBe(ws.getRow(15).font.color.argb);
-      expect(ws.getRow(15).font.color.argb).not.toBe(ws.getRow(18).font.color.argb);
-      expect(ws.getRow(15).font.color.argb).toBe(ws.getRow(10).font.color.argb);
-      expect(ws.getRow(10).font.color.argb).toBe(ws.getRow(5).font.color.argb);
+      expect(rowFont(Worksheet.getRow(ws, 3))!.color!.argb).toBe(
+        rowFont(Worksheet.getRow(ws, 6))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 6))!.color!.argb).toBe(
+        rowFont(Worksheet.getRow(ws, 9))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 9))!.color!.argb).toBe(
+        rowFont(Worksheet.getRow(ws, 12))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 12))!.color!.argb).not.toBe(
+        rowFont(Worksheet.getRow(ws, 15))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 15))!.color!.argb).not.toBe(
+        rowFont(Worksheet.getRow(ws, 18))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 15))!.color!.argb).toBe(
+        rowFont(Worksheet.getRow(ws, 10))!.color!.argb
+      );
+      expect(rowFont(Worksheet.getRow(ws, 10))!.color!.argb).toBe(
+        rowFont(Worksheet.getRow(ws, 5))!.color!.argb
+      );
     });
   });
 
@@ -124,49 +158,54 @@ describe("WorkbookReader", () => {
     let cell;
 
     beforeAll(async () => {
-      const workbook = new Workbook();
-      await workbook.xlsx.read(fs.createReadStream(streamTestDataPath("formulas.xlsx")));
-      worksheet = workbook.getWorksheet();
+      const workbook = Workbook.create();
+      await Workbook.readXlsxStream(
+        workbook,
+        fs.createReadStream(streamTestDataPath("formulas.xlsx"))
+      );
+      worksheet = Workbook.getWorksheet(workbook)!;
     });
 
     describe("with a cell that contains a regular formula", () => {
       beforeEach(() => {
-        cell = worksheet.getCell("A2");
+        cell = getCell(worksheet, "A2");
       });
 
       it("should be classified as a formula cell", () => {
-        expect(cell.type).toBe(ValueType.Formula);
+        expect(cellType(cell)).toBe(ValueType.Formula);
       });
 
       it("should have text corresponding to the evaluated formula result", () => {
-        expect(cell.text).toBe("someone@example.com");
+        expect(cellText(cell)).toBe("someone@example.com");
       });
 
       it("should have the formula source", () => {
-        expect(cell.model.formula).toBe('_xlfn.CONCAT("someone","@example.com")');
+        expect(cellGetModel(cell).formula).toBe('_xlfn.CONCAT("someone","@example.com")');
       });
     });
 
     describe("with a cell that contains a hyperlinked formula", () => {
       beforeEach(() => {
-        cell = worksheet.getCell("A1");
+        cell = getCell(worksheet, "A1");
       });
 
       it("should be classified as a formula cell", () => {
-        expect(cell.type).toBe(ValueType.Hyperlink);
+        expect(cellType(cell)).toBe(ValueType.Hyperlink);
       });
 
       it("should have text corresponding to the evaluated formula result", () => {
-        expect(cell.value.text).toBe("someone@example.com");
+        expect((cellGetValue(cell) as CellHyperlinkValue).text).toBe("someone@example.com");
       });
 
       it("should have the formula source", () => {
-        expect(cell.model.formula).toBe('_xlfn.CONCAT("someone","@example.com")');
+        expect(cellGetModel(cell).formula).toBe('_xlfn.CONCAT("someone","@example.com")');
       });
 
       it("should contain the linked url", () => {
-        expect(cell.value.hyperlink).toBe("mailto:someone@example.com");
-        expect(cell.hyperlink).toBe("mailto:someone@example.com");
+        expect((cellGetValue(cell) as CellHyperlinkValue).hyperlink).toBe(
+          "mailto:someone@example.com"
+        );
+        expect(cellHyperlink(cell)).toBe("mailto:someone@example.com");
       });
     });
   });
@@ -175,16 +214,17 @@ describe("WorkbookReader", () => {
     let worksheet;
 
     beforeAll(async () => {
-      const workbook = new Workbook();
-      await workbook.xlsx.read(
+      const workbook = Workbook.create();
+      await Workbook.readXlsxStream(
+        workbook,
         fs.createReadStream(streamTestDataPath("shared_string_with_escape.xlsx"))
       );
-      worksheet = workbook.getWorksheet();
+      worksheet = Workbook.getWorksheet(workbook)!;
     });
 
     it("should decode the underscore", () => {
-      const cell = worksheet.getCell("A1");
-      expect(cell.value).toBe("_x000D_");
+      const cell = getCell(worksheet, "A1");
+      expect(cellGetValue(cell)).toBe("_x000D_");
     });
   });
 
@@ -203,7 +243,7 @@ describe("WorkbookReader", () => {
       await new Promise<void>((resolve, reject) => {
         workbookReader.on("worksheet", worksheet =>
           worksheet.on("row", row => {
-            expect(row.values[1]).toBe("_x000D_");
+            expect(rowValues(row)[1]).toBe("_x000D_");
             resolve();
           })
         );
@@ -221,7 +261,7 @@ describe("WorkbookReader", () => {
       });
 
       const sheet = workbook.addWorksheet("data");
-      sheet.addRow(["_x000D_", "Normal", "_x000a_test"]).commit();
+      rowCommit(sheet.addRow(["_x000D_", "Normal", "_x000a_test"]));
       sheet.commit();
       await workbook.commit();
 
@@ -235,9 +275,9 @@ describe("WorkbookReader", () => {
       await new Promise<void>((resolve, reject) => {
         workbookReader.on("worksheet", worksheet =>
           worksheet.on("row", row => {
-            expect(row.values[1]).toBe("_x000D_");
-            expect(row.values[2]).toBe("Normal");
-            expect(row.values[3]).toBe("_x000a_test");
+            expect(rowValues(row)[1]).toBe("_x000D_");
+            expect(rowValues(row)[2]).toBe("Normal");
+            expect(rowValues(row)[3]).toBe("_x000a_test");
             resolve();
           })
         );
@@ -249,21 +289,21 @@ describe("WorkbookReader", () => {
 
   describe("with a spreadsheet that contains shared formulas", () => {
     it("should read shared formula models from a file", async () => {
-      const wb = new Workbook();
-      await wb.xlsx.readFile(streamTestDataPath("fibonacci.xlsx"));
+      const wb = Workbook.create();
+      await Workbook.readXlsxFile(wb, streamTestDataPath("fibonacci.xlsx"));
 
-      const ws = wb.getWorksheet("fib");
+      const ws = Workbook.getWorksheet(wb, "fib")!;
 
-      expect(ws!.getCell("A4").value).toEqual({
+      expect(Cell.getValue(ws!, "A4")).toEqual({
         formula: "A3+1",
         shareType: "shared",
         ref: "A4:A19",
         result: 4
       });
-      expect(ws!.getCell("A5").value).toEqual({ sharedFormula: "A4", result: 5 });
+      expect(Cell.getValue(ws!, "A5")).toEqual({ sharedFormula: "A4", result: 5 });
 
-      expect(ws!.getCell("A4").type).toBe(ValueType.Formula);
-      expect(ws!.getCell("A5").type).toBe(ValueType.Formula);
+      expect(Cell.getType(ws!, "A4")).toBe(ValueType.Formula);
+      expect(Cell.getType(ws!, "A5")).toBe(ValueType.Formula);
     });
   });
 
@@ -332,7 +372,7 @@ describe("WorkbookReader", () => {
 
       await new Promise<void>((resolve, reject) => {
         workbookReader.on("worksheet", worksheet => {
-          worksheet.on("row", row => rows.push(row.values[1]));
+          worksheet.on("row", row => rows.push(rowValues(row)[1]));
         });
         workbookReader.on("end", resolve);
         workbookReader.on("error", reject);
@@ -384,7 +424,7 @@ describe("WorkbookReader", () => {
       });
 
       const sheet = workbook.addWorksheet("data");
-      sheet.addRow(rowData).commit();
+      rowCommit(sheet.addRow(rowData));
       sheet.commit();
       await workbook.commit();
 
@@ -399,8 +439,8 @@ describe("WorkbookReader", () => {
       await new Promise<void>((resolve, reject) => {
         workbookReader.on("worksheet", worksheet =>
           worksheet.on("row", row => {
-            expect(row.values[1]).toEqual(rowData[0]);
-            expect(row.values[2]).toBe(rowData[1]);
+            expect(rowValues(row)[1]).toEqual(rowData[0]);
+            expect(rowValues(row)[2]).toBe(rowData[1]);
             resolve();
           })
         );
@@ -423,10 +463,10 @@ describe("WorkbookReader", () => {
     });
 
     it("should reject the promise with the XML parse error", async () => {
-      const workbook = new Workbook();
-      await expect(workbook.xlsx.readFile(streamTestDataPath("invalid-xml.xlsx"))).rejects.toThrow(
-        "3:1: text data outside of root node."
-      );
+      const workbook = Workbook.create();
+      await expect(
+        Workbook.readXlsxFile(workbook, streamTestDataPath("invalid-xml.xlsx"))
+      ).rejects.toThrow("3:1: text data outside of root node.");
 
       // Wait a tick to verify no unhandled rejection fires
       await new Promise(setImmediate);
@@ -436,10 +476,10 @@ describe("WorkbookReader", () => {
 
   describe("with a spreadsheet that is missing some files in the zip container", () => {
     it("should not break", async () => {
-      const workbook = new Workbook();
-      await workbook.xlsx.readFile(streamTestDataPath("missing-bits.xlsx"));
+      const workbook = Workbook.create();
+      await Workbook.readXlsxFile(workbook, streamTestDataPath("missing-bits.xlsx"));
       // Should load gracefully despite missing zip entries
-      expect(workbook.worksheets.length).toBeGreaterThanOrEqual(0);
+      expect(getWorksheets(workbook).length).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -447,49 +487,52 @@ describe("WorkbookReader", () => {
     let worksheet;
 
     beforeAll(async () => {
-      const workbook = new Workbook();
-      await workbook.xlsx.read(fs.createReadStream(streamTestDataPath("images.xlsx")));
-      worksheet = workbook.getWorksheet();
+      const workbook = Workbook.create();
+      await Workbook.readXlsxStream(
+        workbook,
+        fs.createReadStream(streamTestDataPath("images.xlsx"))
+      );
+      worksheet = Workbook.getWorksheet(workbook)!;
     });
 
     describe("with image`s tl anchor", () => {
       it("should have at least one image in the test file", () => {
-        expect(worksheet.getImages().length).toBeGreaterThan(0);
+        expect(Image.list(worksheet).length).toBeGreaterThan(0);
       });
 
       it("Should integer part of col equals nativeCol", () => {
-        worksheet.getImages().forEach(image => {
-          expect(Math.floor(image.range.tl.col)).toBe(image.range.tl.nativeCol);
+        Image.list(worksheet).forEach(image => {
+          expect(Math.floor(anchorCol(image.range!.tl))).toBe(image.range!.tl.nativeCol);
         });
       });
       it("Should integer part of row equals nativeRow", () => {
-        worksheet.getImages().forEach(image => {
-          expect(Math.floor(image.range.tl.row)).toBe(image.range.tl.nativeRow);
+        Image.list(worksheet).forEach(image => {
+          expect(Math.floor(anchorRow(image.range!.tl))).toBe(image.range!.tl.nativeRow);
         });
       });
       it("Should anchor width equals to column width when custom", () => {
         const ws = worksheet;
 
-        ws.getImages().forEach(image => {
-          const col = ws.getColumn(image.range.tl.nativeCol + 1);
+        Image.list(ws).forEach(image => {
+          const col = getColumn(ws, image.range!.tl.nativeCol + 1);
 
-          if (col.isCustomWidth) {
-            expect(image.range.tl.colWidth).toBe(Math.floor(col.width * 10000));
+          if (columnIsCustomWidth(col)) {
+            expect(anchorColWidth(image.range!.tl)).toBe(Math.floor(col.width! * 10000));
           } else {
-            expect(image.range.tl.colWidth).toBe(640000);
+            expect(anchorColWidth(image.range!.tl)).toBe(640000);
           }
         });
       });
       it("Should anchor height equals to row height", () => {
         const ws = worksheet;
 
-        ws.getImages().forEach(image => {
-          const row = ws.getRow(image.range.tl.nativeRow + 1);
+        Image.list(ws).forEach(image => {
+          const row = Worksheet.getRow(ws, image.range!.tl.nativeRow + 1);
 
           if (row.height != null) {
-            expect(image.range.tl.rowHeight).toBe(Math.floor(row.height * 10000));
+            expect(anchorRowHeight(image.range!.tl)).toBe(Math.floor(row.height * 10000));
           } else {
-            expect(image.range.tl.rowHeight).toBe(180000);
+            expect(anchorRowHeight(image.range!.tl)).toBe(180000);
           }
         });
       });
@@ -497,42 +540,42 @@ describe("WorkbookReader", () => {
 
     describe("with image`s br anchor", () => {
       it("should have at least one image in the test file", () => {
-        expect(worksheet.getImages().length).toBeGreaterThan(0);
+        expect(Image.list(worksheet).length).toBeGreaterThan(0);
       });
 
       it("Should integer part of col equals nativeCol", () => {
-        worksheet.getImages().forEach(image => {
-          expect(Math.floor(image.range.br.col)).toBe(image.range.br.nativeCol);
+        Image.list(worksheet).forEach(image => {
+          expect(Math.floor(anchorCol(image.range!.br!))).toBe(image.range!.br!.nativeCol);
         });
       });
       it("Should integer part of row equals nativeRow", () => {
-        worksheet.getImages().forEach(image => {
-          expect(Math.floor(image.range.br.row)).toBe(image.range.br.nativeRow);
+        Image.list(worksheet).forEach(image => {
+          expect(Math.floor(anchorRow(image.range!.br!))).toBe(image.range!.br!.nativeRow);
         });
       });
       it("Should anchor width equals to column width when custom", () => {
         const ws = worksheet;
 
-        ws.getImages().forEach(image => {
-          const col = ws.getColumn(image.range.br.nativeCol + 1);
+        Image.list(ws).forEach(image => {
+          const col = getColumn(ws, image.range!.br!.nativeCol + 1);
 
-          if (col.isCustomWidth) {
-            expect(image.range.br.colWidth).toBe(Math.floor(col.width * 10000));
+          if (columnIsCustomWidth(col)) {
+            expect(anchorColWidth(image.range!.br!)).toBe(Math.floor(col.width! * 10000));
           } else {
-            expect(image.range.br.colWidth).toBe(640000);
+            expect(anchorColWidth(image.range!.br!)).toBe(640000);
           }
         });
       });
       it("Should anchor height equals to row height", () => {
         const ws = worksheet;
 
-        ws.getImages().forEach(image => {
-          const row = ws.getRow(image.range.br.nativeRow + 1);
+        Image.list(ws).forEach(image => {
+          const row = Worksheet.getRow(ws, image.range!.br!.nativeRow + 1);
 
           if (row.height != null) {
-            expect(image.range.br.rowHeight).toBe(Math.floor(row.height * 10000));
+            expect(anchorRowHeight(image.range!.br!)).toBe(Math.floor(row.height * 10000));
           } else {
-            expect(image.range.br.rowHeight).toBe(180000);
+            expect(anchorRowHeight(image.range!.br!)).toBe(180000);
           }
         });
       });
@@ -540,9 +583,12 @@ describe("WorkbookReader", () => {
   });
   describe("with a spreadsheet containing a defined name that kinda looks like it contains a range", () => {
     it("should not crash", async () => {
-      const workbook = new Workbook();
-      await workbook.xlsx.read(fs.createReadStream(streamTestDataPath("bogus-defined-name.xlsx")));
-      expect(workbook.worksheets.length).toBeGreaterThanOrEqual(0);
+      const workbook = Workbook.create();
+      await Workbook.readXlsxStream(
+        workbook,
+        fs.createReadStream(streamTestDataPath("bogus-defined-name.xlsx"))
+      );
+      expect(getWorksheets(workbook).length).toBeGreaterThanOrEqual(0);
     });
   });
 });

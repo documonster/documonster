@@ -11,30 +11,41 @@
  *     a `CellRichTextValue` object where a string is promised
  */
 
+import {
+  cellGetValue,
+  cellHyperlink,
+  cellText,
+  cellType,
+  cellGetModel,
+  cellToString
+} from "@excel/cell";
+import { writeCsv } from "@excel/csv-bridge";
+import { Cell, Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, ValueType } from "../../../index";
+import { ValueType } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("Hyperlink + RichText round-trip (issue #142)", () => {
   it("preserves rich-text display on a hyperlink through writeBuffer → load", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
     // Public input shape: rich-text hyperlink — no `text`, no cast required.
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       richText: [{ text: "bold ", font: { bold: true } }, { text: "plain" }],
       hyperlink: "https://example.com"
-    };
+    });
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "rich-text hyperlink sharedStrings" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    const cell = ws2.getCell("A1");
-    const v = cell.value;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    const cell = getCell(ws2, "A1");
+    const v = cellGetValue(cell);
 
     // Output shape always carries `text` and `hyperlink`.
     if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
@@ -49,26 +60,26 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     expect(v.richText!.map(r => r.text).join("")).toBe("bold plain");
 
     // cell.text must always be a string
-    expect(typeof cell.text).toBe("string");
-    expect(cell.text).toBe("bold plain");
-    expect(cell.toString()).toBe("bold plain");
+    expect(typeof cellText(cell)).toBe("string");
+    expect(cellText(cell)).toBe("bold plain");
+    expect(cellToString(cell)).toBe("bold plain");
   });
 
   it("keeps cell.value.text as string for plain-text hyperlinks (no richText)", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       text: "www.example.com",
       hyperlink: "https://www.example.com"
-    };
+    });
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "plain hyperlink" });
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
 
-    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value;
+    const v = Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
     if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
       throw new Error("expected a hyperlink value");
     }
@@ -83,24 +94,24 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     // Before the fix, rich-text payloads collided under "[object Object]" in
     // the SharedStrings hash — this test confirms two equal rich-text hyperlinks
     // share one entry after the hash-key fix.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
     const value = {
       richText: [{ text: "same", font: { bold: true } }],
       hyperlink: "https://example.com"
     };
-    ws.getCell("A1").value = value;
-    ws.getCell("A2").value = value;
+    Cell.setValue(ws, "A1", value);
+    Cell.setValue(ws, "A2", value);
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buffer, { label: "rich-text hyperlink dedup" });
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-    const a1 = ws2.getCell("A1").value;
-    const a2 = ws2.getCell("A2").value;
+    const a1 = Cell.getValue(ws2, "A1");
+    const a2 = Cell.getValue(ws2, "A2");
     if (
       typeof a1 !== "object" ||
       a1 === null ||
@@ -122,16 +133,16 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     // `[object Object]` because the hyperlink branch inspected
     // `value.text || value.hyperlink` on an object with only `richText`.
     // The rewritten mapper routes hyperlink cells to the URL branch.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       richText: [{ text: "display ", font: { italic: true } }, { text: "text" }],
       hyperlink: "https://example.com"
-    };
-    ws.getCell("B1").value = "plain";
+    });
+    Cell.setValue(ws, "B1", "plain");
 
-    const csv = wb.writeCsv();
+    const csv = writeCsv(wb);
     // URL for the hyperlink cell, not "[object Object]" nor JSON
     expect(csv).toContain("https://example.com");
     expect(csv).not.toContain("[object Object]");
@@ -144,58 +155,58 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     // is: the cell surfaces as a Hyperlink (display = formula result), but
     // `cell.model.formula` is preserved so the formula re-emits on write
     // and survives the round-trip.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
     // Public input shape for formula + hyperlink — no `cell.model` poking,
     // no type assertions required.
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       formula: "1+2",
       result: 3,
       hyperlink: "https://example.com/formula-link"
-    };
+    });
 
-    const buf1 = await wb.xlsx.writeBuffer();
+    const buf1 = await Workbook.toXlsxBuffer(wb);
     await expectValidXlsx(buf1, { label: "formula+hyperlink pass 1" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf1);
-    const a1 = wb2.getWorksheet("Sheet1")!.getCell("A1");
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf1);
+    const a1 = getCell(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
 
     // Public surface: classified as Hyperlink with the formula result as text
-    expect(a1.type).toBe(ValueType.Hyperlink);
-    expect(a1.hyperlink).toBe("https://example.com/formula-link");
+    expect(cellType(a1)).toBe(ValueType.Hyperlink);
+    expect(cellHyperlink(a1)).toBe("https://example.com/formula-link");
     // Formula source preserved on the model so a second write round-trips it
-    expect(a1.model.formula).toBe("1+2");
+    expect(cellGetModel(a1).formula).toBe("1+2");
 
     // Second round-trip — formula must still be present
-    const buf2 = await wb2.xlsx.writeBuffer();
+    const buf2 = await Workbook.toXlsxBuffer(wb2);
     await expectValidXlsx(buf2, { label: "formula+hyperlink pass 2" });
-    const wb3 = new Workbook();
-    await wb3.xlsx.load(buf2);
-    const a1b = wb3.getWorksheet("Sheet1")!.getCell("A1");
-    expect(a1b.type).toBe(ValueType.Hyperlink);
-    expect(a1b.hyperlink).toBe("https://example.com/formula-link");
-    expect(a1b.model.formula).toBe("1+2");
+    const wb3 = Workbook.create();
+    await Workbook.loadXlsx(wb3, buf2);
+    const a1b = getCell(Workbook.getWorksheet(wb3, "Sheet1")!, "A1");
+    expect(cellType(a1b)).toBe(ValueType.Hyperlink);
+    expect(cellHyperlink(a1b)).toBe("https://example.com/formula-link");
+    expect(cellGetModel(a1b).formula).toBe("1+2");
   });
 
   it("supports rich-text hyperlinks inline (useSharedStrings: false)", async () => {
     // When shared strings are disabled, the cell renderer must fall back
     // to the inlineStr rich-text representation rather than dropping runs.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    ws.getCell("A1").value = {
+    Cell.setValue(ws, "A1", {
       richText: [{ text: "bold ", font: { bold: true } }, { text: "plain" }],
       hyperlink: "https://example.com"
-    };
+    });
 
-    const buffer = await wb.xlsx.writeBuffer({ useSharedStrings: false });
+    const buffer = await Workbook.toXlsxBuffer(wb, { useSharedStrings: false });
     await expectValidXlsx(buffer, { label: "rich-text hyperlink inline" });
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
-    const v = wb2.getWorksheet("Sheet1")!.getCell("A1").value;
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buffer);
+    const v = Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
     if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
       throw new Error("expected a hyperlink value");
     }

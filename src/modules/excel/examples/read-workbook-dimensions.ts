@@ -1,14 +1,16 @@
-import { Workbook } from "../../../index";
+import { Workbook, Worksheet } from "@excel/index";
+import { getXlsxIo } from "@excel/workbook";
+import { getSheetName } from "@excel/worksheet";
 
 const filename = process.argv[2];
 
-const workbook = new Workbook();
-workbook.xlsx
+const workbook = Workbook.create();
+getXlsxIo(workbook)
   .readFile(filename)
   .then(() => {
-    workbook.eachSheet(worksheet => {
+    Workbook.eachSheet(workbook, worksheet => {
       console.log(
-        `Sheet ${worksheet.id} - ${worksheet.name}, Dims=${JSON.stringify(worksheet.dimensions)}`
+        `Sheet ${worksheet.id} - ${getSheetName(worksheet)}, Dims=${JSON.stringify(Worksheet.dimensions(worksheet))}`
       );
     });
   })

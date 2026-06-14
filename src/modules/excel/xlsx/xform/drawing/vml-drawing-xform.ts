@@ -1,4 +1,9 @@
-import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
+import {
+  formCheckboxVmlAnchor,
+  formCheckboxVmlCheckedValue,
+  formCheckboxVmlStyle,
+  type FormCheckboxModel
+} from "@excel/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { StdDocAttributes } from "@xml/writer";
@@ -187,7 +192,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     const shapeAttrs: Record<string, string> = {
       id: `_x0000_s${control.shapeId}`,
       type: "#_x0000_t201",
-      style: FormCheckbox.getVmlStyle(control),
+      style: formCheckboxVmlStyle(control),
       "o:insetmode": "auto",
       fillcolor: "buttonFace [67]",
       strokecolor: "windowText [64]",
@@ -228,7 +233,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
 
     // Anchor position
     xmlStream.openNode("x:Anchor");
-    xmlStream.writeText(FormCheckbox.getVmlAnchor(control));
+    xmlStream.writeText(formCheckboxVmlAnchor(control));
     xmlStream.closeNode();
 
     // Protection / text locking
@@ -253,7 +258,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     }
 
     // Checked state (0 = unchecked, 1 = checked, 2 = mixed)
-    xmlStream.leafNode("x:Checked", undefined, String(FormCheckbox.getVmlCheckedValue(control)));
+    xmlStream.leafNode("x:Checked", undefined, String(formCheckboxVmlCheckedValue(control)));
 
     // Cell address (0-based row/column)
     xmlStream.leafNode("x:Row", undefined, String(control.tl.row));

@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/cell";
+import { calculateFormulas } from "@excel/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
+import { getCell } from "@excel/worksheet";
+
 /**
  * Example: Date & Time Formulas
  *
@@ -13,44 +18,43 @@
  * engine works with those serials; set `cell.numFmt` when reading back if
  * you need a formatted display.
  */
-import { Workbook } from "../../../index";
 import { installFormulaEngine } from "../index";
 
 installFormulaEngine();
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Dates");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Dates");
 
 // Fixed reference points so the example is deterministic
-ws.getCell("A1").value = { formula: "DATE(2026, 4, 18)" };
-ws.getCell("A2").value = { formula: "DATE(2026, 12, 25)" };
-ws.getCell("A3").value = { formula: "TIME(14, 30, 0)" };
+Cell.setValue(ws, "A1", { formula: "DATE(2026, 4, 18)" });
+Cell.setValue(ws, "A2", { formula: "DATE(2026, 12, 25)" });
+Cell.setValue(ws, "A3", { formula: "TIME(14, 30, 0)" });
 
 // Extract components
-ws.getCell("B1").value = { formula: "YEAR(A1)" }; // 2026
-ws.getCell("B2").value = { formula: "MONTH(A1)" }; // 4
-ws.getCell("B3").value = { formula: "DAY(A1)" }; // 18
-ws.getCell("B4").value = { formula: "HOUR(A3)" }; // 14
+Cell.setValue(ws, "B1", { formula: "YEAR(A1)" }); // 2026
+Cell.setValue(ws, "B2", { formula: "MONTH(A1)" }); // 4
+Cell.setValue(ws, "B3", { formula: "DAY(A1)" }); // 18
+Cell.setValue(ws, "B4", { formula: "HOUR(A3)" }); // 14
 
 // Weekday / week-of-year
-ws.getCell("C1").value = { formula: "WEEKDAY(A1, 2)" }; // 1..7, Mon=1
-ws.getCell("C2").value = { formula: "WEEKNUM(A1)" };
-ws.getCell("C3").value = { formula: "ISOWEEKNUM(A1)" };
+Cell.setValue(ws, "C1", { formula: "WEEKDAY(A1, 2)" }); // 1..7, Mon=1
+Cell.setValue(ws, "C2", { formula: "WEEKNUM(A1)" });
+Cell.setValue(ws, "C3", { formula: "ISOWEEKNUM(A1)" });
 
 // Duration
-ws.getCell("D1").value = { formula: 'DATEDIF(A1, A2, "D")' }; // 251 days
-ws.getCell("D2").value = { formula: "DAYS(A2, A1)" }; // 251
-ws.getCell("D3").value = { formula: "EOMONTH(A1, 0)" }; // last day of April 2026
-ws.getCell("D4").value = { formula: "EDATE(A1, 6)" }; // 6 months later
+Cell.setValue(ws, "D1", { formula: 'DATEDIF(A1, A2, "D")' }); // 251 days
+Cell.setValue(ws, "D2", { formula: "DAYS(A2, A1)" }); // 251
+Cell.setValue(ws, "D3", { formula: "EOMONTH(A1, 0)" }); // last day of April 2026
+Cell.setValue(ws, "D4", { formula: "EDATE(A1, 6)" }); // 6 months later
 
 // Business days
-ws.getCell("E1").value = { formula: "NETWORKDAYS(A1, A2)" };
-ws.getCell("E2").value = { formula: "WORKDAY(A1, 10)" }; // 10 business days out
+Cell.setValue(ws, "E1", { formula: "NETWORKDAYS(A1, A2)" });
+Cell.setValue(ws, "E2", { formula: "WORKDAY(A1, 10)" }); // 10 business days out
 
 // Formatting (YYYY-MM-DD)
-ws.getCell("F1").value = { formula: 'TEXT(A1, "yyyy-mm-dd")' };
+Cell.setValue(ws, "F1", { formula: 'TEXT(A1, "yyyy-mm-dd")' });
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 for (const addr of [
   "B1",
@@ -68,6 +72,6 @@ for (const addr of [
   "E2",
   "F1"
 ]) {
-  const c = ws.getCell(addr);
-  console.log(`${addr}  ${String(c.formula).padEnd(32)}  = ${JSON.stringify(c.result)}`);
+  const c = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(c)).padEnd(32)}  = ${JSON.stringify(cellResult(c))}`);
 }

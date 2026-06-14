@@ -1,7 +1,11 @@
-import type { Row } from "@excel/row";
+import { cellFont, cellGetValue, cellNumFmt, cellSetValue } from "@excel/cell";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { type RowData } from "@excel/row";
+import type { WorkbookData } from "@excel/workbook-core";
+import { rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { Workbook, WorkbookReader, ExcelStreamStateError } from "../../../index";
+import { WorkbookReader, ExcelStreamStateError } from "../../../index";
 
 // =============================================================================
 // Helpers
@@ -11,10 +15,10 @@ import { Workbook, WorkbookReader, ExcelStreamStateError } from "../../../index"
  * Create a minimal XLSX buffer from a builder callback.
  * Avoids filesystem I/O — fast + cross-platform.
  */
-async function buildXlsxBuffer(builder: (wb: Workbook) => void): Promise<Uint8Array> {
-  const wb = new Workbook();
+async function buildXlsxBuffer(builder: (wb: WorkbookData) => void): Promise<Uint8Array> {
+  const wb = Workbook.create();
   builder(wb);
-  return wb.xlsx.writeBuffer();
+  return Workbook.toXlsxBuffer(wb);
 }
 
 /** Result of streaming a single worksheet */
@@ -22,7 +26,7 @@ interface SheetResult {
   name: string;
   id: number | string;
   sheetNo: number;
-  rows: Row[];
+  rows: RowData[];
   dimensions: unknown;
   columns: unknown[];
 }
@@ -47,9 +51,9 @@ async function readAllSheets(
 
   const sheets: SheetResult[] = [];
   for await (const ws of reader) {
-    const rows: Row[] = [];
+    const rows: RowData[] = [];
     for await (const row of ws) {
-      rows.push(row as Row);
+      rows.push(row as RowData);
     }
     sheets.push({
       name: ws.name,
@@ -89,7 +93,7 @@ describe("WorksheetReader", () => {
   describe("lifecycle", () => {
     it("destroy() throws ExcelStreamStateError", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 1);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -115,7 +119,7 @@ describe("WorksheetReader", () => {
   describe("properties", () => {
     it("has correct name from workbook metadata", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("MySheet").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "MySheet"), "A1", 1);
       });
       const sheet = await readFirstSheet(buffer);
       expect(sheet.name).toBe("MySheet");
@@ -123,7 +127,7 @@ describe("WorksheetReader", () => {
 
     it("exposes sheet id and sheetNo", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("First").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "First"), "A1", 1);
       });
       const sheet = await readFirstSheet(buffer);
       expect(sheet.id).toBeDefined();
@@ -138,9 +142,9 @@ describe("WorksheetReader", () => {
   describe("dimensions", () => {
     it("reflects the parsed data extent", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 1;
-        ws.getCell("C3").value = 2;
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 1);
+        Cell.setValue(ws, "C3", 2);
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -156,12 +160,12 @@ describe("WorksheetReader", () => {
   describe("columns", () => {
     it("returns column definitions after parsing", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.columns = [
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Worksheet.setColumns(ws, [
           { header: "ID", key: "id", width: 10 },
           { header: "Name", key: "name", width: 32 }
-        ];
-        ws.addRow({ id: 1, name: "Alice" });
+        ]);
+        Worksheet.addRow(ws, { id: 1, name: "Alice" });
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -171,7 +175,7 @@ describe("WorksheetReader", () => {
 
     it("getColumn() by number creates columns on demand", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 1);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -194,7 +198,7 @@ describe("WorksheetReader", () => {
 
     it("getColumn() by letter resolves correctly", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 1);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -216,7 +220,7 @@ describe("WorksheetReader", () => {
 
     it("column key management works correctly", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = 1;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 1);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -256,56 +260,56 @@ describe("WorksheetReader", () => {
   describe("cell value types", () => {
     it("parses numbers", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 42;
-        ws.getCell("B1").value = 3.14;
-        ws.getCell("C1").value = -100;
-        ws.getCell("D1").value = 0;
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 42);
+        Cell.setValue(ws, "B1", 3.14);
+        Cell.setValue(ws, "C1", -100);
+        Cell.setValue(ws, "D1", 0);
       });
       const sheet = await readFirstSheet(buffer);
       const row = sheet.rows[0];
 
-      expect(row.getCell(1).value).toBe(42);
-      expect(row.getCell(2).value).toBe(3.14);
-      expect(row.getCell(3).value).toBe(-100);
-      expect(row.getCell(4).value).toBe(0);
+      expect(cellGetValue(rowGetCell(row, 1))).toBe(42);
+      expect(cellGetValue(rowGetCell(row, 2))).toBe(3.14);
+      expect(cellGetValue(rowGetCell(row, 3))).toBe(-100);
+      expect(cellGetValue(rowGetCell(row, 4))).toBe(0);
     });
 
     it("parses strings via shared strings", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "hello";
-        ws.getCell("B1").value = "world";
-        ws.getCell("A2").value = "hello"; // duplicate — same shared string
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "hello");
+        Cell.setValue(ws, "B1", "world");
+        Cell.setValue(ws, "A2", "hello"); // duplicate — same shared string
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe("hello");
-      expect(sheet.rows[0].getCell(2).value).toBe("world");
-      expect(sheet.rows[1].getCell(1).value).toBe("hello");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe("hello");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 2))).toBe("world");
+      expect(cellGetValue(rowGetCell(sheet.rows[1], 1))).toBe("hello");
     });
 
     it("parses booleans", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = true;
-        ws.getCell("B1").value = false;
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", true);
+        Cell.setValue(ws, "B1", false);
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe(true);
-      expect(sheet.rows[0].getCell(2).value).toBe(false);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe(true);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 2))).toBe(false);
     });
 
     it("parses dates when numFmt indicates a date format", async () => {
       const testDate = new Date(2024, 0, 15); // Jan 15, 2024
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = testDate;
-        ws.getCell("A1").numFmt = "yyyy-mm-dd";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", testDate);
+        Cell.setStyle(ws, "A1", { numFmt: "yyyy-mm-dd" });
       });
       const sheet = await readFirstSheet(buffer);
-      const cellValue = sheet.rows[0].getCell(1).value;
+      const cellValue = cellGetValue(rowGetCell(sheet.rows[0], 1));
 
       expect(cellValue).toBeInstanceOf(Date);
       expect((cellValue as Date).getFullYear()).toBe(2024);
@@ -313,12 +317,12 @@ describe("WorksheetReader", () => {
 
     it("parses formulas with numeric results", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 10;
-        ws.getCell("A2").value = { formula: "A1*2", result: 20 };
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 10);
+        Cell.setValue(ws, "A2", { formula: "A1*2", result: 20 });
       });
       const sheet = await readFirstSheet(buffer);
-      const val = sheet.rows[1].getCell(1).value as { formula: string; result: number };
+      const val = cellGetValue(rowGetCell(sheet.rows[1], 1)) as { formula: string; result: number };
 
       expect(val.formula).toBe("A1*2");
       expect(val.result).toBe(20);
@@ -326,14 +330,14 @@ describe("WorksheetReader", () => {
 
     it("parses formulas with string results", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", {
           formula: 'CONCATENATE("Hello", " ", "World")',
           result: "Hello World"
-        };
+        });
       });
       const sheet = await readFirstSheet(buffer);
-      const val = sheet.rows[0].getCell(1).value as { formula: string; result: string };
+      const val = cellGetValue(rowGetCell(sheet.rows[0], 1)) as { formula: string; result: string };
 
       expect(val.formula).toContain("CONCATENATE");
       expect(val.result).toBe("Hello World");
@@ -341,11 +345,11 @@ describe("WorksheetReader", () => {
 
     it("parses error values", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = { error: "#DIV/0!" as any };
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", { error: "#DIV/0!" as any });
       });
       const sheet = await readFirstSheet(buffer);
-      const val = sheet.rows[0].getCell(1).value as { error: string };
+      const val = cellGetValue(rowGetCell(sheet.rows[0], 1)) as { error: string };
 
       expect(val.error).toBe("#DIV/0!");
     });
@@ -358,11 +362,13 @@ describe("WorksheetReader", () => {
         ]
       };
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = richText;
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", richText);
       });
       const sheet = await readFirstSheet(buffer);
-      const val = sheet.rows[0].getCell(1).value as { richText: Array<{ text: string }> };
+      const val = cellGetValue(rowGetCell(sheet.rows[0], 1)) as {
+        richText: Array<{ text: string }>;
+      };
 
       expect(val).toHaveProperty("richText");
       expect(val.richText.length).toBe(2);
@@ -378,10 +384,10 @@ describe("WorksheetReader", () => {
   describe("row properties", () => {
     it("parses row height", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        const row = ws.getRow(1);
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        const row = Worksheet.getRow(ws, 1);
         row.height = 30;
-        row.getCell(1).value = "tall row";
+        cellSetValue(rowGetCell(row, 1), "tall row");
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -390,9 +396,9 @@ describe("WorksheetReader", () => {
 
     it("parses row number correctly for sparse rows", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "row1";
-        ws.getCell("A5").value = "row5"; // rows 2-4 are empty
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "row1");
+        Cell.setValue(ws, "A5", "row5"); // rows 2-4 are empty
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -410,18 +416,18 @@ describe("WorksheetReader", () => {
   describe("styles", () => {
     it("parses cell styles when styles are cached", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 42;
-        ws.getCell("A1").font = { bold: true, size: 14 };
-        ws.getCell("A1").numFmt = "0.00%";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 42);
+        Cell.setStyle(ws, "A1", { font: { bold: true, size: 14 } });
+        Cell.setStyle(ws, "A1", { numFmt: "0.00%" });
       });
       const sheet = await readFirstSheet(buffer);
-      const cell = sheet.rows[0].getCell(1);
+      const cell = rowGetCell(sheet.rows[0], 1);
 
-      expect(cell.value).toBe(42);
-      expect(cell.font).toBeDefined();
-      expect(cell.font!.bold).toBe(true);
-      expect(cell.numFmt).toBe("0.00%");
+      expect(cellGetValue(cell)).toBe(42);
+      expect(cellFont(cell)).toBeDefined();
+      expect(cellFont(cell)!.bold).toBe(true);
+      expect(cellNumFmt(cell)).toBe("0.00%");
     });
   });
 
@@ -432,35 +438,35 @@ describe("WorksheetReader", () => {
   describe("multi-column data", () => {
     it("correctly maps cells to columns across multiple rows", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.addRow([1, "Alice", true]);
-        ws.addRow([2, "Bob", false]);
-        ws.addRow([3, "Charlie", true]);
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Worksheet.addRow(ws, [1, "Alice", true]);
+        Worksheet.addRow(ws, [2, "Bob", false]);
+        Worksheet.addRow(ws, [3, "Charlie", true]);
       });
       const sheet = await readFirstSheet(buffer);
 
       expect(sheet.rows.length).toBe(3);
-      expect(sheet.rows[0].getCell(1).value).toBe(1);
-      expect(sheet.rows[0].getCell(2).value).toBe("Alice");
-      expect(sheet.rows[0].getCell(3).value).toBe(true);
-      expect(sheet.rows[2].getCell(1).value).toBe(3);
-      expect(sheet.rows[2].getCell(2).value).toBe("Charlie");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe(1);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 2))).toBe("Alice");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 3))).toBe(true);
+      expect(cellGetValue(rowGetCell(sheet.rows[2], 1))).toBe(3);
+      expect(cellGetValue(rowGetCell(sheet.rows[2], 2))).toBe("Charlie");
     });
 
     it("handles sparse rows (cells with gaps)", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 1;
-        ws.getCell("D1").value = 4; // B1, C1 are empty
-        ws.getCell("A2").value = "start";
-        ws.getCell("F2").value = "end"; // B2-E2 are empty
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 1);
+        Cell.setValue(ws, "D1", 4); // B1, C1 are empty
+        Cell.setValue(ws, "A2", "start");
+        Cell.setValue(ws, "F2", "end"); // B2-E2 are empty
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe(1);
-      expect(sheet.rows[0].getCell(4).value).toBe(4);
-      expect(sheet.rows[1].getCell(1).value).toBe("start");
-      expect(sheet.rows[1].getCell(6).value).toBe("end");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe(1);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 4))).toBe(4);
+      expect(cellGetValue(rowGetCell(sheet.rows[1], 1))).toBe("start");
+      expect(cellGetValue(rowGetCell(sheet.rows[1], 6))).toBe("end");
     });
   });
 
@@ -471,20 +477,20 @@ describe("WorksheetReader", () => {
   describe("multiple worksheets", () => {
     it("reads all worksheets in order with correct names and data", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("First").getCell("A1").value = "sheet1";
-        wb.addWorksheet("Second").getCell("A1").value = "sheet2";
-        wb.addWorksheet("Third").getCell("A1").value = "sheet3";
+        Cell.setValue(Workbook.addWorksheet(wb, "First"), "A1", "sheet1");
+        Cell.setValue(Workbook.addWorksheet(wb, "Second"), "A1", "sheet2");
+        Cell.setValue(Workbook.addWorksheet(wb, "Third"), "A1", "sheet3");
       });
 
       const sheets = await readAllSheets(buffer);
 
       expect(sheets.length).toBe(3);
       expect(sheets[0].name).toBe("First");
-      expect(sheets[0].rows[0].getCell(1).value).toBe("sheet1");
+      expect(cellGetValue(rowGetCell(sheets[0].rows[0], 1))).toBe("sheet1");
       expect(sheets[1].name).toBe("Second");
-      expect(sheets[1].rows[0].getCell(1).value).toBe("sheet2");
+      expect(cellGetValue(rowGetCell(sheets[1].rows[0], 1))).toBe("sheet2");
       expect(sheets[2].name).toBe("Third");
-      expect(sheets[2].rows[0].getCell(1).value).toBe("sheet3");
+      expect(cellGetValue(rowGetCell(sheets[2].rows[0], 1))).toBe("sheet3");
     });
   });
 
@@ -495,9 +501,9 @@ describe("WorksheetReader", () => {
   describe("read() event API", () => {
     it("emits 'row' events and 'finished' at the end", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "one";
-        ws.getCell("A2").value = "two";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "one");
+        Cell.setValue(ws, "A2", "two");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -506,25 +512,27 @@ describe("WorksheetReader", () => {
         styles: "cache"
       });
 
-      const result = await new Promise<{ rows: Row[]; finished: boolean }>((resolve, reject) => {
-        const rows: Row[] = [];
-        let finished = false;
+      const result = await new Promise<{ rows: RowData[]; finished: boolean }>(
+        (resolve, reject) => {
+          const rows: RowData[] = [];
+          let finished = false;
 
-        reader.on("worksheet", worksheet => {
-          worksheet.on("row", (row: Row) => rows.push(row));
-          worksheet.on("finished", () => {
-            finished = true;
-            resolve({ rows, finished });
+          reader.on("worksheet", worksheet => {
+            worksheet.on("row", (row: RowData) => rows.push(row));
+            worksheet.on("finished", () => {
+              finished = true;
+              resolve({ rows, finished });
+            });
           });
-        });
-        reader.on("error", reject);
-        reader.read();
-      });
+          reader.on("error", reject);
+          reader.read();
+        }
+      );
 
       expect(result.finished).toBe(true);
       expect(result.rows.length).toBe(2);
-      expect(result.rows[0].getCell(1).value).toBe("one");
-      expect(result.rows[1].getCell(1).value).toBe("two");
+      expect(cellGetValue(rowGetCell(result.rows[0], 1))).toBe("one");
+      expect(cellGetValue(rowGetCell(result.rows[1], 1))).toBe("two");
     });
   });
 
@@ -535,12 +543,12 @@ describe("WorksheetReader", () => {
   describe("hyperlinks", () => {
     it("caches hyperlinks when hyperlinks option is 'cache'", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", {
           text: "Google",
           hyperlink: "https://www.google.com"
-        };
-        ws.getCell("A2").value = "no link";
+        });
+        Cell.setValue(ws, "A2", "no link");
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -552,9 +560,9 @@ describe("WorksheetReader", () => {
       });
 
       for await (const ws of reader) {
-        const rows: Row[] = [];
+        const rows: RowData[] = [];
         for await (const row of ws) {
-          rows.push(row as Row);
+          rows.push(row as RowData);
         }
         expect(rows.length).toBe(2);
 
@@ -576,18 +584,18 @@ describe("WorksheetReader", () => {
   describe("large dataset", () => {
     it("handles 1000 rows without issues", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
         for (let i = 1; i <= 1000; i++) {
-          ws.addRow([i, `name-${i}`, i * 1.5]);
+          Worksheet.addRow(ws, [i, `name-${i}`, i * 1.5]);
         }
       });
       const sheet = await readFirstSheet(buffer);
 
       expect(sheet.rows.length).toBe(1000);
-      expect(sheet.rows[0].getCell(1).value).toBe(1);
-      expect(sheet.rows[999].getCell(1).value).toBe(1000);
-      expect(sheet.rows[999].getCell(2).value).toBe("name-1000");
-      expect(sheet.rows[999].getCell(3).value).toBe(1500);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe(1);
+      expect(cellGetValue(rowGetCell(sheet.rows[999], 1))).toBe(1000);
+      expect(cellGetValue(rowGetCell(sheet.rows[999], 2))).toBe("name-1000");
+      expect(cellGetValue(rowGetCell(sheet.rows[999], 3))).toBe(1500);
     });
   });
 
@@ -598,7 +606,7 @@ describe("WorksheetReader", () => {
   describe("edge cases", () => {
     it("handles an empty worksheet", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Empty");
+        Workbook.addWorksheet(wb, "Empty");
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -608,55 +616,55 @@ describe("WorksheetReader", () => {
     it("handles XML special characters in string values", async () => {
       const specialStr = "xml chars: & < > \" '";
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = specialStr;
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", specialStr);
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe(specialStr);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe(specialStr);
     });
 
     it("handles OOXML _xHHHH_ escape patterns in strings", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        wb.addWorksheet("Sheet1").getCell("A1").value = "_x000D_";
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "_x000D_");
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe("_x000D_");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe("_x000D_");
     });
 
     it("handles mixed value types in a single row", async () => {
       const now = new Date(2024, 5, 15);
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = 42;
-        ws.getCell("B1").value = "text";
-        ws.getCell("C1").value = true;
-        ws.getCell("D1").value = now;
-        ws.getCell("D1").numFmt = "yyyy-mm-dd";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 42);
+        Cell.setValue(ws, "B1", "text");
+        Cell.setValue(ws, "C1", true);
+        Cell.setValue(ws, "D1", now);
+        Cell.setStyle(ws, "D1", { numFmt: "yyyy-mm-dd" });
       });
       const sheet = await readFirstSheet(buffer);
       const row = sheet.rows[0];
 
-      expect(row.getCell(1).value).toBe(42);
-      expect(row.getCell(2).value).toBe("text");
-      expect(row.getCell(3).value).toBe(true);
-      expect(row.getCell(4).value).toBeInstanceOf(Date);
+      expect(cellGetValue(rowGetCell(row, 1))).toBe(42);
+      expect(cellGetValue(rowGetCell(row, 2))).toBe("text");
+      expect(cellGetValue(rowGetCell(row, 3))).toBe(true);
+      expect(cellGetValue(rowGetCell(row, 4))).toBeInstanceOf(Date);
     });
 
     it("handles unicode and CJK characters", async () => {
       const buffer = await buildXlsxBuffer(wb => {
-        const ws = wb.addWorksheet("Sheet1");
-        ws.getCell("A1").value = "你好世界";
-        ws.getCell("B1").value = "日本語テスト";
-        ws.getCell("C1").value = "한국어";
-        ws.getCell("D1").value = "Ñoño Año";
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "你好世界");
+        Cell.setValue(ws, "B1", "日本語テスト");
+        Cell.setValue(ws, "C1", "한국어");
+        Cell.setValue(ws, "D1", "Ñoño Año");
       });
       const sheet = await readFirstSheet(buffer);
 
-      expect(sheet.rows[0].getCell(1).value).toBe("你好世界");
-      expect(sheet.rows[0].getCell(2).value).toBe("日本語テスト");
-      expect(sheet.rows[0].getCell(3).value).toBe("한국어");
-      expect(sheet.rows[0].getCell(4).value).toBe("Ñoño Año");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 1))).toBe("你好世界");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 2))).toBe("日本語テスト");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 3))).toBe("한국어");
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 4))).toBe("Ñoño Año");
     });
   });
 });

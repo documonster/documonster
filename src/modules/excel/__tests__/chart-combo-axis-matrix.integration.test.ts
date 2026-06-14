@@ -1,3 +1,4 @@
+import { extractAll } from "@archive/unzip/extract";
 /**
  * Combo / axis matrix integration tests.
  *
@@ -6,10 +7,10 @@
  * exercise — log-scale value axis, multiple secondary axes, axis-id
  * uniqueness, scatter+line combos, and 3D combo groups.
  */
-
-import { extractAll } from "@archive/unzip/extract";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { Workbook } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
+import { getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
@@ -25,14 +26,14 @@ beforeAll(async () => {
 });
 
 async function loadFixture(bytes: Uint8Array): Promise<{
-  wb: Workbook;
+  wb: WorkbookData;
   out: Uint8Array;
   entries: EntryMap;
   chartXml: string;
 }> {
-  const wb = new Workbook();
-  await wb.xlsx.load(bytes);
-  const out = new Uint8Array(await wb.xlsx.writeBuffer());
+  const wb = Workbook.create();
+  await Workbook.loadXlsx(wb, bytes);
+  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
   const entries = await extractAll(out);
   return { wb, out, entries, chartXml: entryText(entries, "xl/charts/chart1.xml")! };
 }
@@ -87,7 +88,7 @@ describe("Chart combo / axis matrix", () => {
     expect(chartXml).toMatch(/<c:min val="1"\/>/);
     expect(chartXml).toMatch(/<c:max val="100"\/>/);
 
-    const chart = wb.getWorksheet("Data")!.getCharts()[0];
+    const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
     const valueAxis = chart.chartModel?.chart.plotArea.axes.find(a => a.axisType === "val");
     expect(valueAxis, "value axis").toBeDefined();
     expect(valueAxis!.scaling?.logBase).toBe(10);
@@ -147,9 +148,9 @@ describe("Chart combo / axis matrix", () => {
   it("audit baseline passes for every combo/axis fixture", async () => {
     const fixtures = comboAxisFixtures;
     for (const fixture of fixtures) {
-      const wb = new Workbook();
-      await wb.xlsx.load(fixture.bytes);
-      const out = new Uint8Array(await wb.xlsx.writeBuffer());
+      const wb = Workbook.create();
+      await Workbook.loadXlsx(wb, fixture.bytes);
+      const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
       await expectValidXlsx(out, { label: fixture.id });
     }
   });

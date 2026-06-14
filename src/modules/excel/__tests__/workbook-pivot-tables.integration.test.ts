@@ -1,12 +1,13 @@
 import fs from "fs";
 import { promisify } from "util";
 
+import { Column, Workbook, Worksheet } from "@excel/index";
+import type { WorkbookData } from "@excel/workbook-core";
 import { describe, it, expect } from "vitest";
 
 const fsReadFileAsync = promisify(fs.readFile);
 import { ZipParser } from "@archive/unzip/zip-parser";
 
-import { Workbook } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const PIVOT_TABLE_FILEPATHS = [
@@ -17,6 +18,7 @@ const PIVOT_TABLE_FILEPATHS = [
   "xl/pivotTables/_rels/pivotTable1.xml.rels"
 ];
 
+import { addPivotTable, addTable } from "@excel/worksheet";
 import { testFilePath } from "@test/utils";
 
 const TEST_XLSX_FILEPATH = testFilePath("workbook-pivot.test");
@@ -27,16 +29,16 @@ const TEST_XLSX_TABLE_FILEPATH = testFilePath("workbook-pivot-table.test");
 // ---------------------------------------------------------------------------
 type ZipEntries = Record<string, Uint8Array>;
 
-async function writeThenParseZip(workbook: Workbook): Promise<ZipEntries>;
-async function writeThenParseZip(workbook: Workbook, filePath: string): Promise<ZipEntries>;
-async function writeThenParseZip(workbook: Workbook, filePath?: string): Promise<ZipEntries> {
+async function writeThenParseZip(workbook: WorkbookData): Promise<ZipEntries>;
+async function writeThenParseZip(workbook: WorkbookData, filePath: string): Promise<ZipEntries>;
+async function writeThenParseZip(workbook: WorkbookData, filePath?: string): Promise<ZipEntries> {
   if (filePath) {
-    await workbook.xlsx.writeFile(filePath);
+    await Workbook.writeXlsx(workbook, filePath);
     const buffer = await fsReadFileAsync(filePath);
     await expectValidXlsx(buffer, { label: `writeThenParseZip ${filePath}` });
     return new ZipParser(buffer).extractAllSync();
   }
-  const buffer = await workbook.xlsx.writeBuffer();
+  const buffer = await Workbook.toXlsxBuffer(workbook);
   await expectValidXlsx(buffer, { label: "writeThenParseZip buffer" });
   return new ZipParser(buffer as Buffer).extractAllSync();
 }
@@ -61,13 +63,13 @@ const TEST_DATA = [
 describe("Workbook", () => {
   describe("Pivot Tables", () => {
     it("if pivot table added with sourceSheet, then certain xml and rels files are added", async () => {
-      const workbook = new Workbook();
+      const workbook = Workbook.create();
 
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -82,12 +84,12 @@ describe("Workbook", () => {
     });
 
     it("if pivot table added with sourceTable, then certain xml and rels files are added", async () => {
-      const workbook = new Workbook();
+      const workbook = Workbook.create();
 
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
       // Create a table with the same data structure as TEST_DATA
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }, { name: "E" }],
@@ -101,8 +103,8 @@ describe("Workbook", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["A", "B"],
         columns: ["C"],
@@ -117,12 +119,12 @@ describe("Workbook", () => {
     });
 
     it("if pivot table NOT added, then certain xml and rels files are not added", async () => {
-      const workbook = new Workbook();
+      const workbook = Workbook.create();
 
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      workbook.addWorksheet("Sheet2");
+      Workbook.addWorksheet(workbook, "Sheet2");
 
       const zipData = await writeThenParseZip(workbook, TEST_XLSX_FILEPATH);
       for (const filepath of PIVOT_TABLE_FILEPATHS) {
@@ -131,11 +133,11 @@ describe("Workbook", () => {
     });
 
     it("throws error if neither sourceSheet nor sourceTable is provided", () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
       expect(() => {
-        worksheet.addPivotTable({
+        addPivotTable(worksheet, {
           rows: ["A"],
           columns: ["B"],
           values: ["C"],
@@ -145,22 +147,22 @@ describe("Workbook", () => {
     });
 
     it("throws error if both sourceSheet and sourceTable are provided", () => {
-      const workbook = new Workbook();
+      const workbook = Workbook.create();
 
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const table = worksheet1.addTable({
+      const table = addTable(worksheet1, {
         name: "TestTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }],
         rows: [["a1", "b1", "c1"]]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           sourceTable: table,
           rows: ["A"],
@@ -172,20 +174,20 @@ describe("Workbook", () => {
     });
 
     it("throws error if header name not found in sourceTable", () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "TestTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }],
         rows: [["a1", "b1", "c1"]]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: ["NonExistent"],
@@ -196,20 +198,20 @@ describe("Workbook", () => {
     });
 
     it("throws error if sourceTable has no data rows", () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "EmptyTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }],
         rows: [] // empty rows
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: ["B"],
@@ -220,20 +222,20 @@ describe("Workbook", () => {
     });
 
     it("throws error if sourceTable has duplicate column names", () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "DuplicateColumnsTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "A" }], // duplicate 'A'
         rows: [["a1", "b1", "a2"]]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: ["B"],
@@ -246,11 +248,11 @@ describe("Workbook", () => {
     });
 
     it("works with sourceTable not starting at A1", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
       // Table starting at C5 instead of A1
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "OffsetTable",
         ref: "C5",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }, { name: "E" }],
@@ -261,8 +263,8 @@ describe("Workbook", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["A"],
         columns: ["B"],
@@ -278,10 +280,10 @@ describe("Workbook", () => {
     });
 
     it("supports multiple values when columns is empty", async () => {
-      const workbook = new Workbook();
-      const worksheet = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-      const table = worksheet.addTable({
+      const table = addTable(worksheet, {
         name: "MultiValuesTable",
         ref: "A1",
         columns: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }, { name: "E" }],
@@ -293,8 +295,8 @@ describe("Workbook", () => {
         ]
       });
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceTable: table,
         rows: ["A", "B"],
         columns: [], // Empty columns - allows multiple values
@@ -310,12 +312,12 @@ describe("Workbook", () => {
     });
 
     it("supports empty columns with single value", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: [], // Empty columns
@@ -331,12 +333,12 @@ describe("Workbook", () => {
     });
 
     it("supports multiple values with non-empty columns (field x=-2 appended)", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
-      worksheet2.addPivotTable({
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A"],
         columns: ["B"], // Non-empty columns
@@ -357,14 +359,14 @@ describe("Workbook", () => {
     });
 
     it("throws error if no values specified", () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -377,14 +379,14 @@ describe("Workbook", () => {
     // R8-T2: Additional validate() branch coverage
 
     it("throws error if no rows specified", () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: [],
           columns: ["B"],
@@ -395,18 +397,18 @@ describe("Workbook", () => {
     });
 
     it("throws error for empty header name in source sheet", () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
       // Header row with an empty string header
-      worksheet1.addRows([
+      Worksheet.addRows(worksheet1, [
         ["A", "", "C"],
         ["a1", "b1", "c1"]
       ]);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["C"],
@@ -416,17 +418,17 @@ describe("Workbook", () => {
     });
 
     it("throws error for whitespace-only header name in source sheet", () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows([
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, [
         ["A", "   ", "C"],
         ["a1", "b1", "c1"]
       ]);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["C"],
@@ -436,14 +438,14 @@ describe("Workbook", () => {
     });
 
     it("throws error for duplicate value field names", () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       expect(() => {
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["D", "D"],
@@ -453,17 +455,17 @@ describe("Workbook", () => {
     });
 
     it("supports applyWidthHeightFormats option to preserve column widths", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       // Set custom column widths before creating pivot table
-      worksheet2.getColumn(1).width = 30;
-      worksheet2.getColumn(2).width = 15;
+      Column.setWidth(worksheet2, 1, 30);
+      Column.setWidth(worksheet2, 2, 15);
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -479,13 +481,13 @@ describe("Workbook", () => {
     });
 
     it("defaults applyWidthHeightFormats to 1 when not specified", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -501,14 +503,14 @@ describe("Workbook", () => {
     });
 
     it("supports omitting columns (Excel uses 'Values' as column field)", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
       // Create pivot table without specifying columns
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         // columns is omitted - should default to []
@@ -523,12 +525,12 @@ describe("Workbook", () => {
     });
 
     it("handles XML special characters in pivot table data", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
 
       // Data with XML special characters: &, <, >, ", '
       // Use special characters in both row fields AND value field names
-      worksheet1.addRows([
+      Worksheet.addRows(worksheet1, [
         ["Company", "Product", "Sales & Revenue"],
         ["Johnson & Johnson", "Drug A", 1000],
         ["BioTech <Special>", "Drug B", 1500],
@@ -536,9 +538,9 @@ describe("Workbook", () => {
         ["Gene's Labs", "Drug D", 1800]
       ]);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["Company"],
         columns: ["Product"],
@@ -568,11 +570,11 @@ describe("Workbook", () => {
     });
 
     it("handles null and undefined values in pivot table data", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
 
       // Data with null/undefined values
-      worksheet1.addRows([
+      Worksheet.addRows(worksheet1, [
         ["Region", "Territory", "Amount"],
         ["North", "NE", 1000],
         ["South", null, 1500], // null territory
@@ -580,9 +582,9 @@ describe("Workbook", () => {
         ["West", "NW", 2200]
       ]);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["Region", "Territory"], // Territory has null/undefined values
         values: ["Amount"],
@@ -605,11 +607,11 @@ describe("Workbook", () => {
     });
 
     it("supports multiple pivot tables from same source data", async () => {
-      const workbook = new Workbook();
+      const workbook = Workbook.create();
 
       // Create source data with multiple dimensions
-      const sourceSheet = workbook.addWorksheet("Sales Data");
-      sourceSheet.addRows([
+      const sourceSheet = Workbook.addWorksheet(workbook, "Sales Data");
+      Worksheet.addRows(sourceSheet, [
         ["Region", "Product", "Salesperson", "Quarter", "Revenue", "Units"],
         ["North", "Widget A", "Alice", "Q1", 10000, 100],
         ["South", "Widget B", "Bob", "Q1", 15000, 150],
@@ -620,8 +622,8 @@ describe("Workbook", () => {
       ]);
 
       // First pivot table: Revenue by Region and Product
-      const pivot1Sheet = workbook.addWorksheet("Pivot 1 - Region x Product");
-      pivot1Sheet.addPivotTable({
+      const pivot1Sheet = Workbook.addWorksheet(workbook, "Pivot 1 - Region x Product");
+      addPivotTable(pivot1Sheet, {
         sourceSheet,
         rows: ["Region", "Product"],
         columns: ["Quarter"],
@@ -630,8 +632,8 @@ describe("Workbook", () => {
       });
 
       // Second pivot table: Units by Salesperson (completely different fields)
-      const pivot2Sheet = workbook.addWorksheet("Pivot 2 - Salesperson");
-      pivot2Sheet.addPivotTable({
+      const pivot2Sheet = Workbook.addWorksheet(workbook, "Pivot 2 - Salesperson");
+      addPivotTable(pivot2Sheet, {
         sourceSheet,
         rows: ["Salesperson"],
         columns: ["Quarter"],
@@ -640,8 +642,8 @@ describe("Workbook", () => {
       });
 
       // Third pivot table: Another different configuration
-      const pivot3Sheet = workbook.addWorksheet("Pivot 3 - Product x Region");
-      pivot3Sheet.addPivotTable({
+      const pivot3Sheet = Workbook.addWorksheet(workbook, "Pivot 3 - Product x Region");
+      addPivotTable(pivot3Sheet, {
         sourceSheet,
         rows: ["Product"],
         columns: ["Region"],
@@ -672,13 +674,13 @@ describe("Workbook", () => {
     });
 
     it("supports 'count' metric for pivot tables", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -696,13 +698,13 @@ describe("Workbook", () => {
     });
 
     it("defaults to 'sum' metric when not specified", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -719,13 +721,13 @@ describe("Workbook", () => {
     });
 
     it("supports 'average' metric for pivot tables", async () => {
-      const workbook = new Workbook();
-      const worksheet1 = workbook.addWorksheet("Sheet1");
-      worksheet1.addRows(TEST_DATA);
+      const workbook = Workbook.create();
+      const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+      Worksheet.addRows(worksheet1, TEST_DATA);
 
-      const worksheet2 = workbook.addWorksheet("Sheet2");
+      const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
-      worksheet2.addPivotTable({
+      addPivotTable(worksheet2, {
         sourceSheet: worksheet1,
         rows: ["A", "B"],
         columns: ["C"],
@@ -750,12 +752,12 @@ describe("Workbook", () => {
 
       it("preserves pivot table through load/save cycle", async () => {
         // Step 1: Create workbook with pivot table
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A", "B"],
           columns: ["C"],
@@ -764,11 +766,11 @@ describe("Workbook", () => {
         });
 
         // Step 2: Save to file
-        await workbook.xlsx.writeFile(ROUNDTRIP_FILEPATH);
+        await Workbook.writeXlsx(workbook, ROUNDTRIP_FILEPATH);
 
         // Step 3: Read the file back
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(ROUNDTRIP_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, ROUNDTRIP_FILEPATH);
 
         // Step 4: Check that loaded workbook has pivot tables
         expect(loadedWorkbook.pivotTables.length).toBe(1);
@@ -787,14 +789,14 @@ describe("Workbook", () => {
 
       it("preserves multiple pivot tables through load/save cycle", async () => {
         // Step 1: Create workbook with multiple pivot tables
-        const workbook = new Workbook();
-        const sourceSheet = workbook.addWorksheet("Source");
-        sourceSheet.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const sourceSheet = Workbook.addWorksheet(workbook, "Source");
+        Worksheet.addRows(sourceSheet, TEST_DATA);
 
-        const pivotSheet = workbook.addWorksheet("Pivots");
+        const pivotSheet = Workbook.addWorksheet(workbook, "Pivots");
 
         // Add two pivot tables
-        pivotSheet.addPivotTable({
+        addPivotTable(pivotSheet, {
           sourceSheet: sourceSheet,
           rows: ["A"],
           columns: ["C"],
@@ -802,7 +804,7 @@ describe("Workbook", () => {
           metric: "sum"
         });
 
-        pivotSheet.addPivotTable({
+        addPivotTable(pivotSheet, {
           sourceSheet: sourceSheet,
           rows: ["B"],
           columns: ["C"],
@@ -814,11 +816,11 @@ describe("Workbook", () => {
 
         // Step 2: Save
         const MULTI_PIVOT_PATH = testFilePath("workbook-multi-pivot-roundtrip.test");
-        await workbook.xlsx.writeFile(MULTI_PIVOT_PATH);
+        await Workbook.writeXlsx(workbook, MULTI_PIVOT_PATH);
 
         // Step 3: Load
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(MULTI_PIVOT_PATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, MULTI_PIVOT_PATH);
 
         // Step 4: Verify both pivot tables are loaded
         expect(loadedWorkbook.pivotTables.length).toBe(2);
@@ -836,17 +838,17 @@ describe("Workbook", () => {
 
       it("preserves pivot table cache fields correctly", async () => {
         // Create workbook with specific data
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows([
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, [
           ["Category", "Value"],
           ["Alpha", 100],
           ["Beta", 200],
           ["Alpha", 150]
         ]);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["Category"],
           columns: [],
@@ -855,11 +857,11 @@ describe("Workbook", () => {
         });
 
         const CACHE_FILEPATH = testFilePath("workbook-pivot-cache.test");
-        await workbook.xlsx.writeFile(CACHE_FILEPATH);
+        await Workbook.writeXlsx(workbook, CACHE_FILEPATH);
 
         // Load and verify cache fields
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(CACHE_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, CACHE_FILEPATH);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -870,12 +872,12 @@ describe("Workbook", () => {
       });
 
       it("preserves pivot table data fields correctly", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -884,11 +886,11 @@ describe("Workbook", () => {
         });
 
         const DATAFIELD_FILEPATH = testFilePath("workbook-pivot-datafields.test");
-        await workbook.xlsx.writeFile(DATAFIELD_FILEPATH);
+        await Workbook.writeXlsx(workbook, DATAFIELD_FILEPATH);
 
         // Load and verify data fields
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(DATAFIELD_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, DATAFIELD_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.dataFields).toBeDefined();
@@ -898,12 +900,12 @@ describe("Workbook", () => {
       });
 
       it("preserves count metric through load/save", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -912,23 +914,23 @@ describe("Workbook", () => {
         });
 
         const COUNT_FILEPATH = testFilePath("workbook-pivot-count.test");
-        await workbook.xlsx.writeFile(COUNT_FILEPATH);
+        await Workbook.writeXlsx(workbook, COUNT_FILEPATH);
 
         // Load and verify metric
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(COUNT_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, COUNT_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.metric).toBe("count");
       });
 
       it("preserves applyWidthHeightFormats option", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["C"],
@@ -937,27 +939,27 @@ describe("Workbook", () => {
         });
 
         const FORMATS_FILEPATH = testFilePath("workbook-pivot-formats.test");
-        await workbook.xlsx.writeFile(FORMATS_FILEPATH);
+        await Workbook.writeXlsx(workbook, FORMATS_FILEPATH);
 
         // Load and verify
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(FORMATS_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, FORMATS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.applyWidthHeightFormats).toBe("0");
       });
 
       it("preserves XML special characters in cache field names", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows([
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, [
           ["Name<>", "Value&"],
           ["Test'1", 100],
           ['Test"2', 200]
         ]);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["Name<>"],
           columns: [],
@@ -966,11 +968,11 @@ describe("Workbook", () => {
         });
 
         const SPECIAL_CHARS_FILEPATH = testFilePath("workbook-pivot-special-chars.test");
-        await workbook.xlsx.writeFile(SPECIAL_CHARS_FILEPATH);
+        await Workbook.writeXlsx(workbook, SPECIAL_CHARS_FILEPATH);
 
         // Load and verify special characters are preserved
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(SPECIAL_CHARS_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, SPECIAL_CHARS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.cacheFields[0].name).toBe("Name<>");
@@ -978,12 +980,12 @@ describe("Workbook", () => {
       });
 
       it("handles pivot table with shared items", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A", "B"], // These columns will have shared items
           columns: ["C"],
@@ -992,10 +994,10 @@ describe("Workbook", () => {
         });
 
         const SHARED_ITEMS_FILEPATH = testFilePath("workbook-pivot-shared-items.test");
-        await workbook.xlsx.writeFile(SHARED_ITEMS_FILEPATH);
+        await Workbook.writeXlsx(workbook, SHARED_ITEMS_FILEPATH);
 
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(SHARED_ITEMS_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, SHARED_ITEMS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         // Check that row fields have shared items
@@ -1014,12 +1016,12 @@ describe("Workbook", () => {
 
       it("should correctly load and save pivot tables with high cacheId values", async () => {
         // Create a workbook with pivot table
-        const workbook = new Workbook();
-        const sheet1 = workbook.addWorksheet("Data");
-        sheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const sheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(sheet1, TEST_DATA);
 
-        const sheet2 = workbook.addWorksheet("Pivot");
-        sheet2.addPivotTable({
+        const sheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(sheet2, {
           sourceSheet: sheet1,
           rows: ["A"],
           columns: ["C"],
@@ -1028,11 +1030,11 @@ describe("Workbook", () => {
         });
 
         // Save it
-        await workbook.xlsx.writeFile(NON_SEQ_CACHE_FILEPATH);
+        await Workbook.writeXlsx(workbook, NON_SEQ_CACHE_FILEPATH);
 
         // Load and resave
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(NON_SEQ_CACHE_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, NON_SEQ_CACHE_FILEPATH);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -1044,11 +1046,11 @@ describe("Workbook", () => {
 
         // Save again
         const RESAVED_FILEPATH = testFilePath("workbook-pivot-non-seq-cache-resaved.test");
-        await loadedWorkbook.xlsx.writeFile(RESAVED_FILEPATH);
+        await Workbook.writeXlsx(loadedWorkbook, RESAVED_FILEPATH);
 
         // Load the resaved file
-        const finalWorkbook = new Workbook();
-        await finalWorkbook.xlsx.readFile(RESAVED_FILEPATH);
+        const finalWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(finalWorkbook, RESAVED_FILEPATH);
 
         // Verify pivot table is still intact
         expect(finalWorkbook.pivotTables.length).toBe(1);
@@ -1069,10 +1071,10 @@ describe("Workbook", () => {
 
     describe("minimal rowItems/colItems (required by Excel)", () => {
       it("emits minimal rowItems and colItems — refreshOnLoad rebuilds full expansion", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet("table");
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook, "table");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "table",
           ref: "A1",
           headerRow: true,
@@ -1087,8 +1089,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: ["B"],
@@ -1119,10 +1121,10 @@ describe("Workbook", () => {
       });
 
       it("emits minimal colItems when columns is empty with single value", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet("table");
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook, "table");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "table",
           ref: "A1",
           headerRow: true,
@@ -1133,8 +1135,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: [], // empty columns
@@ -1157,10 +1159,10 @@ describe("Workbook", () => {
       });
 
       it("emits colFields with field x=-2 and multi-value colItems when columns is empty with multiple values", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet("table");
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook, "table");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "table",
           ref: "A1",
           headerRow: true,
@@ -1171,8 +1173,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: [], // empty columns
@@ -1202,11 +1204,11 @@ describe("Workbook", () => {
 
     describe("worksheetSource uses table name attribute", () => {
       it("uses table name (not sheet+ref) in pivotCacheDefinition worksheetSource", async () => {
-        const workbook = new Workbook();
+        const workbook = Workbook.create();
         // Create a worksheet named "DataSheet" with a table named "MyTable"
-        const worksheet = workbook.addWorksheet("DataSheet");
+        const worksheet = Workbook.addWorksheet(workbook, "DataSheet");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "MyTable", // Table name is different from worksheet name
           ref: "A1",
           headerRow: true,
@@ -1217,8 +1219,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("PivotSheet");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "PivotSheet");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["Col1"],
           columns: ["Col2"],
@@ -1243,10 +1245,10 @@ describe("Workbook", () => {
 
     describe("same field in rows and values", () => {
       it("handles numeric field used as both row and value field correctly", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet();
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook);
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "table",
           ref: "A1",
           headerRow: true,
@@ -1261,9 +1263,9 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
         // Use same field "C" for both rows and values
-        worksheet2.addPivotTable({
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["C"],
           columns: ["B"],
@@ -1300,10 +1302,10 @@ describe("Workbook", () => {
       });
 
       it("handles same numeric field used as both row and column", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet();
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook);
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "table",
           ref: "A1",
           headerRow: true,
@@ -1316,8 +1318,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["B"],
           columns: ["A"],
@@ -1345,12 +1347,12 @@ describe("Workbook", () => {
 
     describe("Page Fields (Report Filters)", () => {
       it("creates pivot table with a single page field", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1378,12 +1380,12 @@ describe("Workbook", () => {
       });
 
       it("creates pivot table with multiple page fields", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["E"],
@@ -1409,12 +1411,12 @@ describe("Workbook", () => {
       });
 
       it("creates pivot table with pages, rows, columns, and values combined", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1447,13 +1449,13 @@ describe("Workbook", () => {
       });
 
       it("adjusts location ref when page fields are present", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
         // Without page fields: location starts at A3
-        const ws2 = workbook.addWorksheet("NoPagesSheet");
-        ws2.addPivotTable({
+        const ws2 = Workbook.addWorksheet(workbook, "NoPagesSheet");
+        addPivotTable(ws2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1462,8 +1464,8 @@ describe("Workbook", () => {
         });
 
         // With 1 page field: location starts at A5 (3 + 1 page + 1 separator)
-        const ws3 = workbook.addWorksheet("OnePageSheet");
-        ws3.addPivotTable({
+        const ws3 = Workbook.addWorksheet(workbook, "OnePageSheet");
+        addPivotTable(ws3, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1473,8 +1475,8 @@ describe("Workbook", () => {
         });
 
         // With 2 page fields: location starts at A6 (3 + 2 pages + 1 separator)
-        const ws4 = workbook.addWorksheet("TwoPagesSheet");
-        ws4.addPivotTable({
+        const ws4 = Workbook.addWorksheet(workbook, "TwoPagesSheet");
+        addPivotTable(ws4, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1499,12 +1501,12 @@ describe("Workbook", () => {
       });
 
       it("page fields have sharedItems in cache definition", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["E"],
@@ -1524,14 +1526,14 @@ describe("Workbook", () => {
       });
 
       it("throws error for invalid page field name", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             values: ["E"],
@@ -1542,14 +1544,14 @@ describe("Workbook", () => {
       });
 
       it("throws error when same field appears in rows and columns", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: ["A"],
@@ -1562,14 +1564,14 @@ describe("Workbook", () => {
       });
 
       it("throws error when same field appears in rows and pages", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             values: ["E"],
@@ -1582,14 +1584,14 @@ describe("Workbook", () => {
       });
 
       it("throws error when same field appears in columns and pages", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: ["B"],
@@ -1603,15 +1605,15 @@ describe("Workbook", () => {
       });
 
       it("allows same field in values and another axis area", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         // This should NOT throw - values can overlap with axis areas (dataField="1")
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             values: ["A"],
@@ -1621,12 +1623,12 @@ describe("Workbook", () => {
       });
 
       it("no pageFields element when pages is empty", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1649,12 +1651,12 @@ describe("Workbook", () => {
 
       it("preserves page fields through load/save roundtrip", async () => {
         // Step 1: Create workbook with page fields
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1665,11 +1667,11 @@ describe("Workbook", () => {
 
         // Step 2: Save
         const filePath = testFilePath("workbook-pivot-page-roundtrip1.test");
-        await workbook.xlsx.writeFile(filePath);
+        await Workbook.writeXlsx(workbook, filePath);
 
         // Step 3: Load
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(filePath);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, filePath);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -1693,10 +1695,10 @@ describe("Workbook", () => {
       });
 
       it("supports page fields with sourceTable", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet("Sheet1");
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "TestTable",
           ref: "A1",
           columns: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }, { name: "E" }],
@@ -1708,8 +1710,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           values: ["E"],
@@ -1726,12 +1728,12 @@ describe("Workbook", () => {
       });
 
       it("supports 3 page fields with correct location offset", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           values: ["E"],
@@ -1756,12 +1758,12 @@ describe("Workbook", () => {
 
     describe("sourceSheet with multiple values", () => {
       it("supports sourceSheet with multiple values and no columns", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -1782,12 +1784,12 @@ describe("Workbook", () => {
       });
 
       it("supports sourceSheet with multiple values + pages", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -1811,9 +1813,9 @@ describe("Workbook", () => {
 
     describe("deep row nesting", () => {
       it("supports 4-level row nesting", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows([
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, [
           ["L1", "L2", "L3", "L4", "Value"],
           ["a", "b", "c", "d", 10],
           ["a", "b", "c", "e", 20],
@@ -1821,8 +1823,8 @@ describe("Workbook", () => {
           ["h", "i", "j", "k", 40]
         ]);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["L1", "L2", "L3", "L4"],
           columns: [],
@@ -1845,10 +1847,10 @@ describe("Workbook", () => {
 
     describe("multiple values with columns (columns>0 && values>1)", () => {
       it("supports multiple values with non-empty columns using sourceTable", async () => {
-        const workbook = new Workbook();
-        const worksheet = workbook.addWorksheet("Sheet1");
+        const workbook = Workbook.create();
+        const worksheet = Workbook.addWorksheet(workbook, "Sheet1");
 
-        const table = worksheet.addTable({
+        const table = addTable(worksheet, {
           name: "TestTable",
           ref: "A1",
           columns: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }, { name: "E" }],
@@ -1860,8 +1862,8 @@ describe("Workbook", () => {
           ]
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: ["B"],
@@ -1882,12 +1884,12 @@ describe("Workbook", () => {
       });
 
       it("supports multiple values with columns and pages combined", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -1926,12 +1928,12 @@ describe("Workbook", () => {
 
       for (const { metric, display, hasSubtotal } of ALL_METRICS) {
         it(`supports '${metric}' metric with display name "${display} of D"`, async () => {
-          const workbook = new Workbook();
-          const worksheet1 = workbook.addWorksheet("Sheet1");
-          worksheet1.addRows(TEST_DATA);
+          const workbook = Workbook.create();
+          const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+          Worksheet.addRows(worksheet1, TEST_DATA);
 
-          const worksheet2 = workbook.addWorksheet("Sheet2");
-          worksheet2.addPivotTable({
+          const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: ["C"],
@@ -1952,12 +1954,12 @@ describe("Workbook", () => {
 
     describe("per-value metric overrides", () => {
       it("supports per-value metrics with PivotTableValue objects", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -1977,12 +1979,12 @@ describe("Workbook", () => {
       });
 
       it("supports mixed string and PivotTableValue in values array", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -2002,12 +2004,12 @@ describe("Workbook", () => {
       });
 
       it("supports per-value metrics with columns and pages", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: ["B"],
@@ -2031,12 +2033,12 @@ describe("Workbook", () => {
       });
 
       it("preserves per-value metrics through load/save", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Data");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Pivot");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(worksheet2, {
           sourceSheet: worksheet1,
           rows: ["A"],
           columns: [],
@@ -2047,11 +2049,11 @@ describe("Workbook", () => {
         });
 
         const PERVALUE_FILEPATH = testFilePath("workbook-pivot-pervalue.test");
-        await workbook.xlsx.writeFile(PERVALUE_FILEPATH);
+        await Workbook.writeXlsx(workbook, PERVALUE_FILEPATH);
 
         // Load and verify
-        const loadedWorkbook = new Workbook();
-        await loadedWorkbook.xlsx.readFile(PERVALUE_FILEPATH);
+        const loadedWorkbook = Workbook.create();
+        await Workbook.readXlsxFile(loadedWorkbook, PERVALUE_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.valueMetrics).toBeDefined();
@@ -2061,11 +2063,11 @@ describe("Workbook", () => {
       });
 
       it("supports sourceTable with per-value metrics", async () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const table = worksheet1.addTable({
+        const table = addTable(worksheet1, {
           name: "MetricTable",
           ref: "A1",
           headerRow: true,
@@ -2073,8 +2075,8 @@ describe("Workbook", () => {
           rows: TEST_DATA.slice(1)
         });
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
-        worksheet2.addPivotTable({
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
+        addPivotTable(worksheet2, {
           sourceTable: table,
           rows: ["A"],
           columns: [],
@@ -2096,14 +2098,14 @@ describe("Workbook", () => {
 
     describe("intra-axis duplicate field validation (bug #3)", () => {
       it("throws error when same field appears twice in rows", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A", "A"],
             columns: ["B"],
@@ -2114,14 +2116,14 @@ describe("Workbook", () => {
       });
 
       it("throws error when same field appears twice in columns", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: ["B", "B"],
@@ -2132,14 +2134,14 @@ describe("Workbook", () => {
       });
 
       it("throws error when same field appears twice in pages", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             values: ["E"],
@@ -2152,14 +2154,14 @@ describe("Workbook", () => {
 
     describe("invalid metric validation (bug #4)", () => {
       it("throws error for invalid table-wide metric", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: ["B"],
@@ -2170,14 +2172,14 @@ describe("Workbook", () => {
       });
 
       it("throws error for invalid per-value metric", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
-        const worksheet2 = workbook.addWorksheet("Sheet2");
+        const worksheet2 = Workbook.addWorksheet(workbook, "Sheet2");
 
         expect(() => {
-          worksheet2.addPivotTable({
+          addPivotTable(worksheet2, {
             sourceSheet: worksheet1,
             rows: ["A"],
             columns: [],
@@ -2190,9 +2192,9 @@ describe("Workbook", () => {
       });
 
       it("accepts all valid metric strings without throwing", () => {
-        const workbook = new Workbook();
-        const worksheet1 = workbook.addWorksheet("Sheet1");
-        worksheet1.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const worksheet1 = Workbook.addWorksheet(workbook, "Sheet1");
+        Worksheet.addRows(worksheet1, TEST_DATA);
 
         const validMetrics = [
           "sum",
@@ -2209,9 +2211,9 @@ describe("Workbook", () => {
         ] as const;
 
         for (const metric of validMetrics) {
-          const ws = workbook.addWorksheet(`M_${metric}`);
+          const ws = Workbook.addWorksheet(workbook, `M_${metric}`);
           expect(() => {
-            ws.addPivotTable({
+            addPivotTable(ws, {
               sourceSheet: worksheet1,
               rows: ["A"],
               columns: [],
@@ -2230,27 +2232,27 @@ describe("Workbook", () => {
     describe("R9-B1: tableNumber collision avoidance", () => {
       it("assigns non-colliding tableNumber when loaded tables have non-contiguous numbering", async () => {
         // Step 1: Create 3 pivot tables → tableNumbers 1, 2, 3
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws1 = workbook.addWorksheet("P1");
-        ws1.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        const ws1 = Workbook.addWorksheet(workbook, "P1");
+        addPivotTable(ws1, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
-        const ws2 = workbook.addWorksheet("P2");
-        ws2.addPivotTable({ sourceSheet: source, rows: ["B"], values: ["D"], metric: "sum" });
+        const ws2 = Workbook.addWorksheet(workbook, "P2");
+        addPivotTable(ws2, { sourceSheet: source, rows: ["B"], values: ["D"], metric: "sum" });
 
-        const ws3 = workbook.addWorksheet("P3");
-        ws3.addPivotTable({ sourceSheet: source, rows: ["C"], values: ["D"], metric: "sum" });
+        const ws3 = Workbook.addWorksheet(workbook, "P3");
+        addPivotTable(ws3, { sourceSheet: source, rows: ["C"], values: ["D"], metric: "sum" });
 
         expect(workbook.pivotTables.map(pt => pt.tableNumber)).toEqual([1, 2, 3]);
 
         // Step 2: Save → Load (loaded tables keep their tableNumbers)
         const filepath = testFilePath("r9-b1-table-number.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         expect(loaded.pivotTables.length).toBe(3);
         expect(loaded.pivotTables.map(pt => pt.tableNumber).sort((a, b) => a - b)).toEqual([
@@ -2258,9 +2260,9 @@ describe("Workbook", () => {
         ]);
 
         // Step 3: Add a new pivot table to the loaded workbook
-        const newSource = loaded.getWorksheet("Data")!;
-        const newWs = loaded.addWorksheet("P4");
-        newWs.addPivotTable({ sourceSheet: newSource, rows: ["A"], values: ["E"], metric: "sum" });
+        const newSource = Workbook.getWorksheet(loaded, "Data")!;
+        const newWs = Workbook.addWorksheet(loaded, "P4");
+        addPivotTable(newWs, { sourceSheet: newSource, rows: ["A"], values: ["E"], metric: "sum" });
 
         // The new table should get tableNumber 4 (max(1,2,3)+1)
         const newPivot = loaded.pivotTables[3];
@@ -2278,12 +2280,12 @@ describe("Workbook", () => {
       });
 
       it("handles first-ever pivot table getting tableNumber 1", () => {
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivot");
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivot");
 
-        ws.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
         expect(workbook.pivotTables[0].tableNumber).toBe(1);
       });
     });
@@ -2291,18 +2293,18 @@ describe("Workbook", () => {
     describe("R9-B4+B5: loaded pivot table without cacheRecords", () => {
       it("writes correctly when loaded pivot table has no cacheRecords", async () => {
         // Step 1: Create a normal pivot table and save
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivot");
-        ws.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-b4-no-records.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
         // Step 2: Load and artificially remove cacheRecords (simulating OLAP scenario)
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         const pivot = loaded.pivotTables[0];
         expect(pivot.cacheRecords).toBeDefined();
@@ -2334,18 +2336,18 @@ describe("Workbook", () => {
     describe("R9-B3: cache definition rels rId consistency", () => {
       it("writes rels Id matching cache definition r:id", async () => {
         // Create and save a pivot table
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivot");
-        ws.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-b3-rid-consistency.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
         // Load, then save again
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         const zipData = await writeThenParseZip(loaded);
 
@@ -2371,22 +2373,22 @@ describe("Workbook", () => {
     describe("R9-B6: shared cache deduplication", () => {
       it("does not duplicate cache files when pivot tables share the same cacheId", async () => {
         // Create a workbook with a pivot table
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws1 = workbook.addWorksheet("Pivot1");
-        ws1.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        const ws1 = Workbook.addWorksheet(workbook, "Pivot1");
+        addPivotTable(ws1, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
-        const ws2 = workbook.addWorksheet("Pivot2");
-        ws2.addPivotTable({ sourceSheet: source, rows: ["B"], values: ["E"], metric: "count" });
+        const ws2 = Workbook.addWorksheet(workbook, "Pivot2");
+        addPivotTable(ws2, { sourceSheet: source, rows: ["B"], values: ["E"], metric: "count" });
 
         // Save and load (so pivot tables get loaded with their own cacheIds)
         const filepath = testFilePath("r9-b6-shared-cache.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         // Force both pivot tables to share the same cacheId (simulate shared cache)
         const pivot1 = loaded.pivotTables[0];
@@ -2436,25 +2438,25 @@ describe("Workbook", () => {
     describe("R9-T5: mixed loaded + new pivot tables", () => {
       it("correctly writes both loaded and new pivot tables in the same workbook", async () => {
         // Step 1: Create and save a workbook with one pivot table
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivot1");
-        ws.addPivotTable({ sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivot1");
+        addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-t5-mixed.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
         // Step 2: Load and add another new pivot table
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         expect(loaded.pivotTables.length).toBe(1);
         expect(loaded.pivotTables[0].isLoaded).toBe(true);
 
-        const loadedSource = loaded.getWorksheet("Data")!;
-        const newWs = loaded.addWorksheet("Pivot2");
-        newWs.addPivotTable({
+        const loadedSource = Workbook.getWorksheet(loaded, "Data")!;
+        const newWs = Workbook.addWorksheet(loaded, "Pivot2");
+        addPivotTable(newWs, {
           sourceSheet: loadedSource,
           rows: ["B"],
           values: ["E"],
@@ -2490,10 +2492,10 @@ describe("Workbook", () => {
         expect(cacheRelMatches.length).toBe(2);
 
         // Step 4: Load the result again and verify integrity
-        const buffer = await loaded.xlsx.writeBuffer();
+        const buffer = await Workbook.toXlsxBuffer(loaded);
         await expectValidXlsx(buffer, { label: "R9-T5 final load" });
-        const final = new Workbook();
-        await final.xlsx.load(buffer as Buffer);
+        const final = Workbook.create();
+        await Workbook.loadXlsx(final, buffer as Buffer);
 
         expect(final.pivotTables.length).toBe(2);
         final.pivotTables.forEach(pt => {
@@ -2507,11 +2509,11 @@ describe("Workbook", () => {
     describe("R9-B8: pivotCacheDefinitionRels parsing optimization", () => {
       it("roundtrips correctly without parsing cache definition rels", async () => {
         // Verify that skipping cache def rels parsing doesn't break roundtrip
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivot");
-        ws.addPivotTable({
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivot");
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["A"],
           columns: ["B"],
@@ -2520,11 +2522,11 @@ describe("Workbook", () => {
         });
 
         const filepath = testFilePath("r9-b8-rels-skip.test");
-        await workbook.xlsx.writeFile(filepath);
+        await Workbook.writeXlsx(workbook, filepath);
 
         // Load (this will skip parsing cache def rels per R9-B8)
-        const loaded = new Workbook();
-        await loaded.xlsx.readFile(filepath);
+        const loaded = Workbook.create();
+        await Workbook.readXlsxFile(loaded, filepath);
 
         // Verify pivot table is fully functional
         const pivot = loaded.pivotTables[0];
@@ -2543,14 +2545,14 @@ describe("Workbook", () => {
 
     describe("explicit ref (anchor) for multiple pivots on one sheet", () => {
       it("honours model.ref when writing the <location> element", async () => {
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws = workbook.addWorksheet("Pivots");
+        const ws = Workbook.addWorksheet(workbook, "Pivots");
         // Pivot anchored at C7 — rows=["A"] (1 row field) + values=["E"] (1 data col)
         // => body spans C7:D8 (rows.length=1 so endCol = C+1 = D).
-        ws.addPivotTable({
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["A"],
           values: ["E"],
@@ -2568,14 +2570,14 @@ describe("Workbook", () => {
       });
 
       it("shifts the body by pageOffset when page filters are present", async () => {
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws = workbook.addWorksheet("Pivots");
+        const ws = Workbook.addWorksheet(workbook, "Pivots");
         // 1 page filter → pageOffset = 2 (page row + blank). Anchor at A10
         // puts the page field at row 10 and the pivot body at A12.
-        ws.addPivotTable({
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["A"],
           values: ["E"],
@@ -2595,26 +2597,26 @@ describe("Workbook", () => {
         // Regression: previously every new pivot defaulted to column A row
         // 3 + pageOffset, so stacking pivots on a single sheet caused Excel
         // to report "there's already a PivotTable there" on refresh.
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws = workbook.addWorksheet("Stacked");
-        ws.addPivotTable({
+        const ws = Workbook.addWorksheet(workbook, "Stacked");
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["A"],
           values: ["D"],
           metric: "sum",
           ref: "A3"
         });
-        ws.addPivotTable({
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["B"],
           values: ["D"],
           metric: "sum",
           ref: "A20"
         });
-        ws.addPivotTable({
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["C"],
           values: ["D"],
@@ -2644,12 +2646,12 @@ describe("Workbook", () => {
       });
 
       it("accepts a range and reduces it to the top-left cell", async () => {
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
 
-        const ws = workbook.addWorksheet("Pivots");
-        ws.addPivotTable({
+        const ws = Workbook.addWorksheet(workbook, "Pivots");
+        addPivotTable(ws, {
           sourceSheet: source,
           rows: ["A"],
           values: ["E"],
@@ -2664,13 +2666,13 @@ describe("Workbook", () => {
       });
 
       it("rejects malformed ref values with a PivotTableError", async () => {
-        const workbook = new Workbook();
-        const source = workbook.addWorksheet("Data");
-        source.addRows(TEST_DATA);
-        const ws = workbook.addWorksheet("Pivots");
+        const workbook = Workbook.create();
+        const source = Workbook.addWorksheet(workbook, "Data");
+        Worksheet.addRows(source, TEST_DATA);
+        const ws = Workbook.addWorksheet(workbook, "Pivots");
 
         expect(() =>
-          ws.addPivotTable({
+          addPivotTable(ws, {
             sourceSheet: source,
             rows: ["A"],
             values: ["E"],
@@ -2681,7 +2683,7 @@ describe("Workbook", () => {
 
         // Column-only refs are not a cell address either.
         expect(() =>
-          ws.addPivotTable({
+          addPivotTable(ws, {
             sourceSheet: source,
             rows: ["A"],
             values: ["E"],

@@ -1,24 +1,24 @@
 /**
- * Excel Note Class Unit Tests
+ * Excel Note Unit Tests
  *
- * Tests for the Note class (cell comments):
- * - Construction with string and object inputs
- * - Model getter with default config merging
- * - Model setter with text extraction
- * - Static factory method
+ * Tests for cell-comment (note) helpers (de-classed domain model):
+ * - Creation with string and object inputs
+ * - Model serialization with default config merging (`noteModel`)
+ * - Model deserialization with text extraction (`noteFromModel`)
+ * - Structural guard (`isNoteData`)
  */
 
-import { Note } from "@excel/note";
+import { isNoteData, noteCreate, noteFromModel, noteModel } from "@excel/note";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
-// Constructor Tests
+// noteCreate Tests
 // =============================================================================
 
 describe("Note", () => {
-  describe("constructor", () => {
+  describe("noteCreate", () => {
     it("creates note with string", () => {
-      const note = new Note("Hello World");
+      const note = noteCreate("Hello World");
       expect(note.note).toBe("Hello World");
     });
 
@@ -27,32 +27,30 @@ describe("Note", () => {
         texts: [{ text: "First line" }, { text: "Second line" }],
         editAs: "oneCells"
       };
-      const note = new Note(config);
+      const note = noteCreate(config);
       expect(note.note).toEqual(config);
     });
 
     it("creates note without argument", () => {
-      const note = new Note();
+      const note = noteCreate();
       expect(note.note).toBeUndefined();
     });
   });
 
   // ===========================================================================
-  // Model Getter Tests
+  // noteModel (serialization) Tests
   // ===========================================================================
 
-  describe("model getter", () => {
+  describe("noteModel", () => {
     it("converts string to model with texts array", () => {
-      const note = new Note("Simple note");
-      const model = note.model;
+      const model = noteModel(noteCreate("Simple note"));
 
       expect(model.type).toBe("note");
       expect(model.note.texts).toEqual([{ text: "Simple note" }]);
     });
 
     it("merges default configs for string input", () => {
-      const note = new Note("Test");
-      const model = note.model;
+      const model = noteModel(noteCreate("Test"));
 
       // Should have default margins
       expect(model.note.margins).toBeDefined();
@@ -69,10 +67,11 @@ describe("Note", () => {
     });
 
     it("merges default configs for object input", () => {
-      const note = new Note({
-        texts: [{ text: "Custom" }]
-      });
-      const model = note.model;
+      const model = noteModel(
+        noteCreate({
+          texts: [{ text: "Custom" }]
+        })
+      );
 
       // Should merge defaults
       expect(model.note.margins).toBeDefined();
@@ -81,120 +80,126 @@ describe("Note", () => {
     });
 
     it("preserves custom config over defaults", () => {
-      const note = new Note({
-        texts: [{ text: "Custom" }],
-        editAs: "oneCell",
-        protection: {
-          locked: "False"
-        }
-      });
-      const model = note.model;
+      const model = noteModel(
+        noteCreate({
+          texts: [{ text: "Custom" }],
+          editAs: "oneCell",
+          protection: {
+            locked: "False"
+          }
+        })
+      );
 
       expect(model.note.editAs).toBe("oneCell");
       expect(model.note.protection!.locked).toBe("False");
     });
+
+    it("applies the full default config block (margins + protection + editAs)", () => {
+      // Replaces the former `Note.DEFAULT_CONFIGS` static-shape assertion:
+      // verify the exact defaults are materialized on a plain note.
+      const model = noteModel(noteCreate("x"));
+      expect(model.note.margins).toEqual({
+        insetmode: "auto",
+        inset: [0.13, 0.13, 0.25, 0.25]
+      });
+      expect(model.note.protection).toEqual({
+        locked: "True",
+        lockText: "True"
+      });
+      expect(model.note.editAs).toBe("absolute");
+      expect(model.type).toBe("note");
+    });
   });
 
   // ===========================================================================
-  // Model Setter Tests
+  // noteFromModel (deserialization) Tests
   // ===========================================================================
 
-  describe("model setter", () => {
+  describe("noteFromModel", () => {
     it("extracts simple text from single-text model", () => {
-      const note = new Note();
-      note.model = {
+      const note = noteFromModel({
         type: "note",
         note: {
           texts: [{ text: "Extracted text" }]
         }
-      };
+      });
 
       expect(note.note).toBe("Extracted text");
     });
 
     it("preserves full config for complex texts", () => {
-      const note = new Note();
       const complexNote = {
         texts: [{ text: "Bold", font: { bold: true } }, { text: " and normal" }],
         editAs: "absolute"
       };
-      note.model = {
+      const note = noteFromModel({
         type: "note",
         note: complexNote
-      };
+      });
 
       expect(note.note).toEqual(complexNote);
     });
 
     it("preserves full config for multi-text notes", () => {
-      const note = new Note();
       const multiText = {
         texts: [{ text: "Line 1" }, { text: "Line 2" }]
       };
-      note.model = {
+      const note = noteFromModel({
         type: "note",
         note: multiText
-      };
+      });
 
       expect(note.note).toEqual(multiText);
     });
-  });
 
-  // ===========================================================================
-  // Static fromModel Tests
-  // ===========================================================================
-
-  describe("fromModel", () => {
-    it("creates Note instance from model", () => {
+    it("creates a note record from model", () => {
       const model = {
-        type: "note",
+        type: "note" as const,
         note: {
           texts: [{ text: "From model" }]
         }
       };
 
-      const note = Note.fromModel(model);
+      const note = noteFromModel(model);
 
-      expect(note).toBeInstanceOf(Note);
+      expect(isNoteData(note)).toBe(true);
       expect(note.note).toBe("From model");
     });
 
     it("handles complex model", () => {
       const model = {
-        type: "note",
+        type: "note" as const,
         note: {
           texts: [{ text: "Complex", font: { size: 14 } }],
           editAs: "oneCell"
         }
       };
 
-      const note = Note.fromModel(model);
+      const note = noteFromModel(model);
 
-      expect(note).toBeInstanceOf(Note);
+      expect(isNoteData(note)).toBe(true);
       expect(note.note).toEqual(model.note);
     });
   });
 
   // ===========================================================================
-  // DEFAULT_CONFIGS Tests
+  // isNoteData guard Tests
   // ===========================================================================
 
-  describe("DEFAULT_CONFIGS", () => {
-    it("has correct default values", () => {
-      expect(Note.DEFAULT_CONFIGS).toEqual({
-        type: "note",
-        note: {
-          margins: {
-            insetmode: "auto",
-            inset: [0.13, 0.13, 0.25, 0.25]
-          },
-          protection: {
-            locked: "True",
-            lockText: "True"
-          },
-          editAs: "absolute"
-        }
-      });
+  describe("isNoteData", () => {
+    it("recognizes a note record", () => {
+      expect(isNoteData(noteCreate("x"))).toBe(true);
+      expect(isNoteData(noteCreate())).toBe(true);
+    });
+
+    it("rejects a raw NoteConfig (has texts, not author)", () => {
+      expect(isNoteData({ texts: [{ text: "x" }] })).toBe(false);
+    });
+
+    it("rejects non-objects", () => {
+      expect(isNoteData(undefined)).toBe(false);
+      expect(isNoteData(null)).toBe(false);
+      expect(isNoteData("string")).toBe(false);
     });
   });
 
@@ -203,13 +208,13 @@ describe("Note", () => {
   // ===========================================================================
 
   describe("author round-trip", () => {
-    it("preserves author through model getter", () => {
-      const note = new Note("x", "Alice");
-      expect(note.model.author).toBe("Alice");
+    it("preserves author through noteModel", () => {
+      const note = noteCreate("x", "Alice");
+      expect(noteModel(note).author).toBe("Alice");
     });
 
-    it("preserves author through fromModel", () => {
-      const note = Note.fromModel({
+    it("preserves author through noteFromModel", () => {
+      const note = noteFromModel({
         type: "note",
         note: { texts: [{ text: "x" }] },
         author: "Bob"
@@ -218,24 +223,24 @@ describe("Note", () => {
     });
 
     it("preserves author through full model cycle", () => {
-      const original = new Note("Hello", "Alice");
-      const restored = Note.fromModel(original.model);
+      const original = noteCreate("Hello", "Alice");
+      const restored = noteFromModel(noteModel(original));
       expect(restored.author).toBe("Alice");
     });
 
     it("preserves empty string author", () => {
-      const note = new Note("x", "");
-      const model = note.model;
+      const note = noteCreate("x", "");
+      const model = noteModel(note);
       expect(model.author).toBe("");
 
-      const restored = Note.fromModel(model);
+      const restored = noteFromModel(model);
       expect(restored.author).toBe("");
     });
 
     it("omits author from model when undefined", () => {
-      const note = new Note("x");
-      expect(note.model.author).toBeUndefined();
-      expect("author" in note.model).toBe(false);
+      const model = noteModel(noteCreate("x"));
+      expect(model.author).toBeUndefined();
+      expect("author" in model).toBe(false);
     });
   });
 
@@ -245,11 +250,8 @@ describe("Note", () => {
 
   describe("round-trip", () => {
     it("preserves simple string through model cycle", () => {
-      const original = new Note("Test note");
-      const model = original.model;
-
-      const restored = new Note();
-      restored.model = model;
+      const model = noteModel(noteCreate("Test note"));
+      const restored = noteFromModel(model);
 
       expect(restored.note).toBe("Test note");
     });
@@ -260,11 +262,8 @@ describe("Note", () => {
         editAs: "oneCell",
         protection: { locked: "False", lockText: "False" }
       };
-      const original = new Note(config);
-      const model = original.model;
-
-      const restored = new Note();
-      restored.model = model;
+      const model = noteModel(noteCreate(config));
+      const restored = noteFromModel(model);
 
       // Complex config should be preserved
       expect(typeof restored.note).toBe("object");
@@ -279,30 +278,22 @@ describe("Note", () => {
 
   describe("edge cases", () => {
     it("handles empty string", () => {
-      const note = new Note("");
-      const model = note.model;
-
+      const model = noteModel(noteCreate(""));
       expect(model.note.texts).toEqual([{ text: "" }]);
     });
 
     it("handles multiline text", () => {
-      const note = new Note("Line 1\nLine 2\nLine 3");
-      const model = note.model;
-
+      const model = noteModel(noteCreate("Line 1\nLine 2\nLine 3"));
       expect(model.note.texts).toEqual([{ text: "Line 1\nLine 2\nLine 3" }]);
     });
 
     it("handles unicode text", () => {
-      const note = new Note("你好世界 🎉");
-      const model = note.model;
-
+      const model = noteModel(noteCreate("你好世界 🎉"));
       expect(model.note.texts).toEqual([{ text: "你好世界 🎉" }]);
     });
 
     it("handles whitespace-only text", () => {
-      const note = new Note("   ");
-      const model = note.model;
-
+      const model = noteModel(noteCreate("   "));
       expect(model.note.texts).toEqual([{ text: "   " }]);
     });
   });
@@ -312,18 +303,16 @@ describe("Note", () => {
   // ===========================================================================
 
   describe("comment box size", () => {
-    it("preserves width/height through the model getter", () => {
-      const note = new Note({ texts: [{ text: "Sized" }], width: 200, height: 120 });
-      const model = note.model;
+    it("preserves width/height through noteModel", () => {
+      const model = noteModel(noteCreate({ texts: [{ text: "Sized" }], width: 200, height: 120 }));
 
       expect(model.note.width).toBe(200);
       expect(model.note.height).toBe(120);
     });
 
     it("preserves width/height through a full model cycle", () => {
-      const original = new Note({ texts: [{ text: "Sized" }], width: 150.5, height: 90 });
-      const restored = new Note();
-      restored.model = original.model;
+      const model = noteModel(noteCreate({ texts: [{ text: "Sized" }], width: 150.5, height: 90 }));
+      const restored = noteFromModel(model);
 
       const config = restored.note as any;
       expect(config.width).toBe(150.5);
@@ -331,8 +320,7 @@ describe("Note", () => {
     });
 
     it("leaves width/height undefined when not configured", () => {
-      const note = new Note("No size");
-      const model = note.model;
+      const model = noteModel(noteCreate("No size"));
 
       expect(model.note.width).toBeUndefined();
       expect(model.note.height).toBeUndefined();

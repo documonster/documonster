@@ -2,6 +2,8 @@ import { getChartSupport } from "@excel/chart-host-registry";
 import type { Chart } from "@excel/chart/chart";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
 import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/types";
+import { getChartEntry, getChartExStructuredEntry, validateSheetName } from "@excel/workbook-core";
+import type { WorkbookData } from "@excel/workbook-core";
 import type { Worksheet } from "@excel/worksheet";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
@@ -51,254 +53,211 @@ export interface AddPivotChartsheetOptions extends ChartsheetOptions {
 
 /**
  * Minimal `Worksheet`-shaped proxy used exclusively to back the `Chart`
- * instance returned from {@link Chartsheet.chart}.
+ * instance returned from {@link chartsheetChart}.
  *
- * A chartsheet is a top-level sheet that hosts a single chart without a
- * surrounding grid — there are no rows, columns, tables, merges, or
- * drawings underneath it. `Chart`, however, assumes it lives inside a
- * `Worksheet` so it can walk up to the workbook, copy relationship
- * sidecars, and compute anchor geometry.
+ * A chartsheet hosts a single chart without a surrounding grid. `Chart`
+ * assumes it lives inside a `Worksheet`, so this proxy forwards the
+ * `workbook`/`_workbook` pointers and reports a synthetic `id`/`name`, while
+ * every grid-centric method throws a descriptive error so accidental reach
+ * through fails loudly instead of silently corrupting state.
  *
- * Previous versions fabricated an empty `{ workbook, name } as any` to
- * satisfy that type. That escape hatch was a correctness trap: calling
- * {@link Chart.copyTo} or anything that invoked `worksheet.getRow` on a
- * chartsheet-backed Chart would throw because the underlying object had
- * none of the real methods.
- *
- * `ChartsheetChartHost` replaces the cast with a first-class proxy that:
- *   - forwards the `workbook` pointer so `Chart` can reach its model,
- *     sidecars, and copyChartSidecars helper;
- *   - reports a synthetic `id`/`name` so diagnostics stay sensible;
- *   - throws a clear, descriptive error from every grid-centric method so
- *     any accidental reach through fails loudly instead of silently
- *     corrupting state (`getRow`, `addRow`, `getColumn`, `addTable`, …).
- *
- * Callers should prefer {@link Chartsheet.chartModel} /
- * {@link Chartsheet.chartExModel} to reach the underlying data directly.
+ * This is an internal interface-adapter (not a domain model): it carries
+ * runtime methods because `Chart` calls them, so it is built by a factory
+ * returning a closure object rather than a plain record.
  */
-class ChartsheetChartHost {
+interface ChartsheetChartHost {
   readonly id: number;
   readonly name: string;
-  readonly workbook: ChartsheetWorkbook;
+  readonly workbook: WorkbookData;
+  readonly _workbook: WorkbookData;
+  getRow(rowNumber: number): never;
+  addRow(): never;
+  addRows(): never;
+  getColumn(colNumber: number): never;
+  getCell(): never;
+  addTable(): never;
+  getTables(): never;
+}
 
-  constructor(workbook: ChartsheetWorkbook, chartsheetId: number, chartsheetName: string) {
-    this.id = chartsheetId;
-    this.name = chartsheetName;
-    this.workbook = workbook;
-  }
-
-  private _unsupported(method: string): never {
+function createChartsheetChartHost(
+  workbook: WorkbookData,
+  chartsheetId: number,
+  chartsheetName: string
+): ChartsheetChartHost {
+  const unsupported = (method: string): never => {
     throw new Error(
       `${method}() is not supported on a Chart attached to a chartsheet. ` +
-        `Use the Chartsheet APIs (chartsheet.chartModel, chartsheet.replaceChart, …) instead.`
+        `Use the Chartsheet APIs (Chartsheet.chartModel, Chartsheet.replaceChart, …) instead.`
     );
-  }
+  };
+  return {
+    id: chartsheetId,
+    name: chartsheetName,
+    workbook,
+    _workbook: workbook,
+    getRow: (_rowNumber: number) => unsupported("Worksheet.getRow"),
+    addRow: () => unsupported("Worksheet.addRow"),
+    addRows: () => unsupported("Worksheet.addRows"),
+    getColumn: (_colNumber: number) => unsupported("Worksheet.getColumn"),
+    getCell: () => unsupported("Worksheet.getCell"),
+    addTable: () => unsupported("Worksheet.addTable"),
+    getTables: () => unsupported("Worksheet.getTables")
+  };
+}
 
-  // Grid operations — explicitly fail fast rather than silently returning
-  // undefined-ish values that could feed bad data into anchor math.
-  getRow(_rowNumber: number): never {
-    this._unsupported("Worksheet.getRow");
-  }
-  addRow(): never {
-    this._unsupported("Worksheet.addRow");
-  }
-  addRows(): never {
-    this._unsupported("Worksheet.addRows");
-  }
-  getColumn(_colNumber: number): never {
-    this._unsupported("Worksheet.getColumn");
-  }
-  getCell(): never {
-    this._unsupported("Worksheet.getCell");
-  }
-  addTable(): never {
-    this._unsupported("Worksheet.addTable");
-  }
-  getTables(): never {
-    this._unsupported("Worksheet.getTables");
+// ============================================================================
+// Chartsheet — de-classed domain model (data record + flat helpers)
+// ============================================================================
+
+/**
+ * Plain-data chartsheet (de-classed domain model). Holds the
+ * {@link ChartsheetModel} and an optional owning workbook; all former
+ * getters/setters are flat `chartsheet*` helpers.
+ */
+export interface ChartsheetData {
+  _model: ChartsheetModel;
+  _workbook?: WorkbookData;
+}
+
+/** Create a chartsheet record from a model + optional owning workbook. */
+export function createChartsheet(model: ChartsheetModel, workbook?: WorkbookData): ChartsheetData {
+  return { _model: model, _workbook: workbook };
+}
+
+export function chartsheetId(cs: ChartsheetData): number {
+  return cs._model.id;
+}
+
+export function chartsheetSheetNo(cs: ChartsheetData): number {
+  return cs._model.sheetNo;
+}
+
+export function chartsheetName(cs: ChartsheetData): string {
+  return cs._model.name;
+}
+
+export function chartsheetSetName(cs: ChartsheetData, value: string): void {
+  // Go through the workbook's unified validator so a chartsheet can never
+  // silently land on a name that collides with a worksheet (or another
+  // chartsheet), includes illegal characters, or exceeds Excel's 31-char limit.
+  if (cs._workbook) {
+    cs._model.name = validateSheetName(cs._workbook, value, cs._model);
+  } else {
+    cs._model.name = value;
   }
 }
 
-class Chartsheet {
-  private readonly _model: ChartsheetModel;
-  private readonly _workbook?: ChartsheetWorkbook;
-
-  constructor(model: ChartsheetModel, workbook?: ChartsheetWorkbook) {
-    this._model = model;
-    this._workbook = workbook;
-  }
-
-  get id(): number {
-    return this._model.id;
-  }
-
-  get sheetNo(): number {
-    return this._model.sheetNo;
-  }
-
-  get name(): string {
-    return this._model.name;
-  }
-
-  set name(value: string) {
-    // Go through the workbook's unified validator so a chartsheet can
-    // never silently land on a name that collides with a worksheet (or
-    // another chartsheet), includes illegal characters, or exceeds
-    // Excel's 31-char limit. Previously this setter just wrote
-    // `this._model.name = value` verbatim, letting callers corrupt the
-    // model into a state Excel would reject on reopen.
-    if (this._workbook) {
-      this._model.name = this._workbook.validateSheetName(value, this._model);
-    } else {
-      this._model.name = value;
-    }
-  }
-
-  get state(): ChartsheetModel["state"] {
-    return this._model.state;
-  }
-
-  set state(value: ChartsheetModel["state"]) {
-    this._model.state = value;
-  }
-
-  get chartNumber(): number | undefined {
-    return this._model.chartNumber;
-  }
-
-  get chartExNumber(): number | undefined {
-    return this._model.chartExNumber;
-  }
-
-  get chartModel(): ChartModel | undefined {
-    return this._model.chartNumber
-      ? this._workbook?.getChartEntry(this._model.chartNumber)?.model
-      : undefined;
-  }
-
-  get chartExModel(): ChartExModel | undefined {
-    return this._model.chartExNumber
-      ? this._workbook?.getChartExStructuredEntry(this._model.chartExNumber)?.model
-      : undefined;
-  }
-
-  /**
-   * Return the `Chart` wrapper for this chartsheet's single chart.
-   *
-   * The wrapper's `.worksheet` field is a {@link ChartsheetChartHost}
-   * rather than a real `Worksheet` — grid operations on it will throw a
-   * descriptive error. For anything grid-related, use the underlying
-   * {@link chartModel}/{@link chartExModel} directly or go through the
-   * `Chartsheet` methods ({@link replaceChart}, {@link rename}, …).
-   */
-  get chart(): Chart | undefined {
-    if (!this._workbook || (!this._model.chartNumber && !this._model.chartExNumber)) {
-      return undefined;
-    }
-    const host = new ChartsheetChartHost(this._workbook, this._model.id, this._model.name);
-    // The `Chart` constructor types its first argument as `Worksheet`, but
-    // internally it only touches `worksheet.workbook`, `worksheet.id`, and
-    // `worksheet.name` from that position (plus anchor helpers that we've
-    // stubbed above). Casting is safe here because the host deliberately
-    // implements that exact contract and loudly rejects anything else.
-    return getChartSupport().createChart(
-      host as unknown as Worksheet,
-      { chartNumber: this._model.chartNumber, chartExNumber: this._model.chartExNumber },
-      CHARTSHEET_ANCHOR_RANGE
-    );
-  }
-
-  get isChartEx(): boolean {
-    return !!this._model.chartExNumber;
-  }
-
-  get model(): ChartsheetModel {
-    return this._model;
-  }
-
-  get pageMargins(): ChartsheetModel["pageMargins"] {
-    return this._model.pageMargins;
-  }
-
-  set pageMargins(value: ChartsheetModel["pageMargins"]) {
-    this._model.pageMargins = value;
-  }
-
-  get pageSetup(): ChartsheetModel["pageSetup"] {
-    return this._model.pageSetup;
-  }
-
-  set pageSetup(value: ChartsheetModel["pageSetup"]) {
-    this._model.pageSetup = value;
-  }
-
-  get tabSelected(): boolean | undefined {
-    return this._model.tabSelected;
-  }
-
-  set tabSelected(value: boolean | undefined) {
-    this._model.tabSelected = value;
-  }
-
-  get zoomScale(): number | undefined {
-    return this._model.zoomScale;
-  }
-
-  set zoomScale(value: number | undefined) {
-    this._model.zoomScale = value;
-  }
-
-  get workbookViewId(): number | undefined {
-    return this._model.workbookViewId;
-  }
-
-  set workbookViewId(value: number | undefined) {
-    this._model.workbookViewId = value;
-  }
-
-  get zoomToFit(): boolean | undefined {
-    return this._model.zoomToFit;
-  }
-
-  set zoomToFit(value: boolean | undefined) {
-    this._model.zoomToFit = value;
-  }
-
-  rename(name: string): boolean {
-    return this._workbook?.renameChartsheet(this.name, name) ?? false;
-  }
-
-  remove(): boolean {
-    return this._workbook?.removeChartsheet(this.name) ?? false;
-  }
-
-  copy(name?: string): Chartsheet | undefined {
-    return this._workbook?.copyChartsheet(this.name, name);
-  }
-
-  replaceChart(chart: AddChartsheetOptions["chart"]): boolean {
-    return this._workbook?.replaceChartsheetChart(this.name, chart) ?? false;
-  }
+export function chartsheetState(cs: ChartsheetData): ChartsheetModel["state"] {
+  return cs._model.state;
 }
 
-interface ChartsheetWorkbook {
-  getChartEntry(chartNumber: number): { model: ChartModel } | undefined;
-  getChartExStructuredEntry(chartExNumber: number): { model: ChartExModel } | undefined;
-  renameChartsheet(nameOrIndex: string | number, name: string): boolean;
-  removeChartsheet(nameOrIndex: string | number): boolean;
-  copyChartsheet(nameOrIndex: string | number, name?: string): Chartsheet | undefined;
-  replaceChartsheetChart(
-    nameOrIndex: string | number,
-    chart: AddChartsheetOptions["chart"]
-  ): boolean;
-  /**
-   * Validate a sheet name against Excel's unified namespace (both
-   * worksheets and chartsheets). See `Workbook.validateSheetName` for
-   * the full contract. Declared here so `Chartsheet.name` setter can
-   * route through it without widening the narrow host interface to
-   * the full `Workbook` type.
-   */
-  validateSheetName(name: string, existing?: { name: string }): string;
+export function chartsheetSetState(cs: ChartsheetData, value: ChartsheetModel["state"]): void {
+  cs._model.state = value;
 }
 
-export { Chartsheet };
+export function chartsheetChartNumber(cs: ChartsheetData): number | undefined {
+  return cs._model.chartNumber;
+}
+
+export function chartsheetChartExNumber(cs: ChartsheetData): number | undefined {
+  return cs._model.chartExNumber;
+}
+
+export function chartsheetChartModel(cs: ChartsheetData): ChartModel | undefined {
+  return cs._model.chartNumber
+    ? (cs._workbook ? getChartEntry(cs._workbook, cs._model.chartNumber) : undefined)?.model
+    : undefined;
+}
+
+export function chartsheetChartExModel(cs: ChartsheetData): ChartExModel | undefined {
+  return cs._model.chartExNumber
+    ? (cs._workbook ? getChartExStructuredEntry(cs._workbook, cs._model.chartExNumber) : undefined)
+        ?.model
+    : undefined;
+}
+
+/**
+ * Return the `Chart` wrapper for this chartsheet's single chart.
+ *
+ * The wrapper's `.worksheet` field is a {@link ChartsheetChartHost} rather
+ * than a real `Worksheet` — grid operations on it will throw a descriptive
+ * error. For anything grid-related, use {@link chartsheetChartModel} /
+ * {@link chartsheetChartExModel} directly.
+ */
+export function chartsheetChart(cs: ChartsheetData): Chart | undefined {
+  if (!cs._workbook || (!cs._model.chartNumber && !cs._model.chartExNumber)) {
+    return undefined;
+  }
+  const host = createChartsheetChartHost(cs._workbook, cs._model.id, cs._model.name);
+  // The `Chart` constructor types its first argument as `Worksheet`, but
+  // internally it only touches `worksheet.workbook`, `worksheet.id`, and
+  // `worksheet.name` (plus anchor helpers the host stubs). Casting is safe
+  // because the host implements that exact contract and rejects anything else.
+  return getChartSupport().createChart(
+    host as unknown as Worksheet,
+    { chartNumber: cs._model.chartNumber, chartExNumber: cs._model.chartExNumber },
+    CHARTSHEET_ANCHOR_RANGE
+  );
+}
+
+export function chartsheetIsChartEx(cs: ChartsheetData): boolean {
+  return !!cs._model.chartExNumber;
+}
+
+export function chartsheetModel(cs: ChartsheetData): ChartsheetModel {
+  return cs._model;
+}
+
+export function chartsheetPageMargins(cs: ChartsheetData): ChartsheetModel["pageMargins"] {
+  return cs._model.pageMargins;
+}
+
+export function chartsheetSetPageMargins(
+  cs: ChartsheetData,
+  value: ChartsheetModel["pageMargins"]
+): void {
+  cs._model.pageMargins = value;
+}
+
+export function chartsheetPageSetup(cs: ChartsheetData): ChartsheetModel["pageSetup"] {
+  return cs._model.pageSetup;
+}
+
+export function chartsheetSetPageSetup(
+  cs: ChartsheetData,
+  value: ChartsheetModel["pageSetup"]
+): void {
+  cs._model.pageSetup = value;
+}
+
+export function chartsheetTabSelected(cs: ChartsheetData): boolean | undefined {
+  return cs._model.tabSelected;
+}
+
+export function chartsheetSetTabSelected(cs: ChartsheetData, value: boolean | undefined): void {
+  cs._model.tabSelected = value;
+}
+
+export function chartsheetZoomScale(cs: ChartsheetData): number | undefined {
+  return cs._model.zoomScale;
+}
+
+export function chartsheetSetZoomScale(cs: ChartsheetData, value: number | undefined): void {
+  cs._model.zoomScale = value;
+}
+
+export function chartsheetWorkbookViewId(cs: ChartsheetData): number | undefined {
+  return cs._model.workbookViewId;
+}
+
+export function chartsheetSetWorkbookViewId(cs: ChartsheetData, value: number | undefined): void {
+  cs._model.workbookViewId = value;
+}
+
+export function chartsheetZoomToFit(cs: ChartsheetData): boolean | undefined {
+  return cs._model.zoomToFit;
+}
+
+export function chartsheetSetZoomToFit(cs: ChartsheetData, value: boolean | undefined): void {
+  cs._model.zoomToFit = value;
+}

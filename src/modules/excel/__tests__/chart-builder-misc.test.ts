@@ -1,3 +1,4 @@
+import { extractAll } from "@archive/unzip/extract";
 /**
  * Chart builder tests — BUG / ROBUST regressions + miscellaneous chartEx structural + chartToPdf bridge.
  *
@@ -5,8 +6,6 @@
  * so vitest transform/import stays fast in full-suite runs.
  * Shared helpers and imports live in `chart-builder.helpers.ts`.
  */
-
-import { extractAll } from "@archive/unzip/extract";
 import type { AddChartOptions } from "@excel/chart";
 import {
   buildChartModel,
@@ -18,7 +17,12 @@ import {
   renderChartEx
 } from "@excel/chart";
 import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/workbook";
+import { chartsheetChart } from "@excel/chartsheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getChartEntry } from "@excel/workbook";
+import { addWorkbookImage } from "@excel/workbook-core";
+import { addChart, addChartEx, getCharts } from "@excel/worksheet";
+import type { WorksheetData } from "@excel/worksheet-core";
 import { beforeAll, describe, it, expect } from "vitest";
 
 import { VALUES_B, baseSeries, bubbleSeries, ctg, scatterSeries } from "./chart-builder.helpers";
@@ -53,9 +57,9 @@ describe("BUG-11: funnel chart has no axes", () => {
 
 describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
   it("chart cache-populator uses the canonical Excel serial for Date cells", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Cat";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Cat");
     // `Date.UTC(1900, 2, 1)` pins the instant to midnight UTC so the
     // computed serial is timezone-independent — a previous version
     // used `new Date(1900, 2, 1)` (local time) which silently flipped
@@ -64,15 +68,16 @@ describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
     // fake Feb 29, 1900 the 1900 date system keeps for Lotus
     // compatibility). We assert the integer part so accidental
     // sub-day fractions from future refactors don't false-fail.
-    ws.getCell("B1").value = new Date(Date.UTC(1900, 2, 1));
-    ws.addChart(
+    Cell.setValue(ws, "B1", new Date(Date.UTC(1900, 2, 1)));
+    addChart(
+      ws,
       {
         type: "line",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
       },
       "C1:J10"
     );
-    const series = ws.getCharts()[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = getCharts(ws)[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     const serial = series.val.numRef.cache.points[0].value;
     expect(Math.floor(serial)).toBe(61);
   });
@@ -80,21 +85,21 @@ describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
 
 describe("ROBUST-6: _renderTxPr includes rotation", () => {
   it("chart axis textRotation round-trips through structured txPr", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    addChart(
+      ws,
       { type: "bar", series: [baseSeries("S")], categoryAxis: { textRotation: -45 } },
       "C1:J10"
     );
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
     // After round-trip, axis txPr should contain rotation
-    const catAx = wb2
-      .getWorksheet("Sheet1")!
-      .getCharts()[0]
-      .chartModel!.chart.plotArea.axes.find(a => a.axisType === "cat")!;
+    const catAx = getCharts(
+      Workbook.getWorksheet(wb2, "Sheet1")!
+    )[0].chartModel!.chart.plotArea.axes.find(a => a.axisType === "cat")!;
     // txPr comes back as raw XML — check it contains rot="-2700000" (−45° × 60000)
     expect(catAx.txPr?._rawXml || "").toContain("-2700000");
   });
@@ -106,18 +111,19 @@ describe("supplementary edge cases", () => {
   });
 
   it("cache populator handles cells with null/undefined values", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Cat";
-    ws.getCell("B1").value = null;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Cat");
+    Cell.setValue(ws, "B1", null);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
       },
       "C1:J10"
     );
-    const series = ws.getCharts()[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = getCharts(ws)[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
     // null value should produce empty cache points (nothing at index 0)
     expect(series.val.numRef.cache.points).toHaveLength(0);
     expect(series.val.numRef.cache.pointCount).toBe(1);
@@ -163,12 +169,12 @@ describe("supplementary edge cases", () => {
       "surface3D",
       "ofPie"
     ];
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
     for (let i = 1; i <= 4; i++) {
-      ws.getCell(`A${i}`).value = `Cat${i}`;
-      ws.getCell(`B${i}`).value = i * 10;
-      ws.getCell(`C${i}`).value = i * 5;
+      Cell.setValue(ws, `A${i}`, `Cat${i}`);
+      Cell.setValue(ws, `B${i}`, i * 10);
+      Cell.setValue(ws, `C${i}`, i * 5);
     }
     let row = 1;
     for (const type of types) {
@@ -188,17 +194,17 @@ describe("supplementary edge cases", () => {
                   ]
                 }
               : { type, series: [baseSeries("S")] };
-      ws.addChart(opts, { tl: { col: 4, row }, br: { col: 12, row: row + 9 } });
+      addChart(ws, opts, { tl: { col: 4, row }, br: { col: 12, row: row + 9 } });
       row += 12;
     }
-    expect(ws.getCharts()).toHaveLength(16);
-    const buf = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buf);
-    const ws2 = wb2.getWorksheet("Sheet1")!;
-    expect(ws2.getCharts()).toHaveLength(16);
+    expect(getCharts(ws)).toHaveLength(16);
+    const buf = await Workbook.toXlsxBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.loadXlsx(wb2, buf);
+    const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
+    expect(getCharts(ws2)).toHaveLength(16);
     for (let i = 0; i < types.length; i++) {
-      expect(ws2.getCharts()[i].chartTypes[0].type).toBe(types[i]);
+      expect(getCharts(ws2)[i].chartTypes[0].type).toBe(types[i]);
     }
   });
 });
@@ -431,12 +437,13 @@ describe("bar chart pictureFill.image (high-level)", () => {
   ]);
 
   it("resolves a raw Uint8Array into a workbook media entry and chart rel", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 10;
-    ws.getCell("A2").value = 20;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 10);
+    Cell.setValue(ws, "A2", 20);
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -456,7 +463,7 @@ describe("bar chart pictureFill.image (high-level)", () => {
 
     // The chart entry should carry a freshly allocated rel pointing at
     // the newly registered media entry.
-    const entry = wb.getChartEntry(1)!;
+    const entry = getChartEntry(wb, 1)!;
     expect(entry.rels).toBeDefined();
     const imageRels = (entry.rels ?? []).filter(r => r.Type.endsWith("/relationships/image"));
     expect(imageRels).toHaveLength(1);
@@ -472,7 +479,7 @@ describe("bar chart pictureFill.image (high-level)", () => {
 
     // Full round-trip: the xlsx output contains the image part and the
     // chart XML references it via <a:blip r:embed="rIdN"/>.
-    const buf = await wb.xlsx.writeBuffer();
+    const buf = await Workbook.toXlsxBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/media/image1.png")).toBeDefined();
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
@@ -485,12 +492,13 @@ describe("bar chart pictureFill.image (high-level)", () => {
   });
 
   it("reuses an existing workbook image via workbookImageId", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    const imageId = wb.addImage({ extension: "png", buffer: PNG_MAGIC });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    const imageId = addWorkbookImage(wb, { extension: "png", buffer: PNG_MAGIC });
 
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -505,35 +513,37 @@ describe("bar chart pictureFill.image (high-level)", () => {
 
     // Only one media entry — the existing one.
     expect(wb.media).toHaveLength(1);
-    const entry = wb.getChartEntry(1)!;
+    const entry = getChartEntry(wb, 1)!;
     const imageRel = (entry.rels ?? []).find(r => r.Type.endsWith("/relationships/image"));
     expect(imageRel?.Target).toBe(`../media/image${imageId + 1}.png`);
   });
 
   it("accepts a data URL base64 string and infers extension", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 42;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 42);
     // 1x1 transparent GIF
     const gifData =
       "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ values: "Sheet1!$A$1:$A$1", pictureFill: { image: gifData } }]
       },
       "C1:J10"
     );
-    const entry = wb.getChartEntry(1)!;
+    const entry = getChartEntry(wb, 1)!;
     const imageRel = (entry.rels ?? []).find(r => r.Type.endsWith("/relationships/image"));
     expect(imageRel?.Target).toMatch(/\.gif$/);
   });
 
   it("still honours a manually-supplied relationshipId (no auto allocation)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -545,7 +555,7 @@ describe("bar chart pictureFill.image (high-level)", () => {
       },
       "C1:J10"
     );
-    const entry = wb.getChartEntry(1)!;
+    const entry = getChartEntry(wb, 1)!;
     const series = entry.model.chart.plotArea.chartTypes[0].series[0] as {
       spPr?: { fill?: { blip?: { relationshipId?: string } } };
     };
@@ -616,12 +626,12 @@ describe("scatter/bubble xValueType", () => {
 
 describe("Chartsheet.chart worksheet proxy", () => {
   it("exposes chartModel through the proxy without throwing", async () => {
-    const wb = new Workbook();
-    wb.addWorksheet("Data").addRows([
+    const wb = Workbook.create();
+    Worksheet.addRows(Workbook.addWorksheet(wb, "Data"), [
       ["A", 1],
       ["B", 2]
     ]);
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
@@ -630,27 +640,27 @@ describe("Chartsheet.chart worksheet proxy", () => {
 
     // `chart` returns a real Chart bound to a host proxy, and
     // reads/writes to chart-level properties work through it.
-    const chart = chartsheet.chart!;
+    const chart = chartsheetChart(chartsheet)!;
     expect(chart.chartNumber).toBe(1);
     expect(chart.chartModel?.chart.plotArea).toBeDefined();
   });
 
   it("host proxy rejects grid operations with a helpful error", () => {
-    const wb = new Workbook();
-    wb.addWorksheet("Data").addRows([["X", 1]]);
-    const chartsheet = wb.addChartsheet("Chart Sheet", {
+    const wb = Workbook.create();
+    Worksheet.addRows(Workbook.addWorksheet(wb, "Data"), [["X", 1]]);
+    const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
         series: [{ categories: "Data!$A$1", values: "Data!$B$1" }]
       }
     });
-    const chart = chartsheet.chart!;
+    const chart = chartsheetChart(chartsheet)!;
     // Grid-centric calls (getRow / getColumn / addTable …) must not
     // silently no-op on the proxy — they should throw so the caller
     // notices the mis-use instead of ending up with a corrupted workbook.
-    expect(() => (chart.worksheet as { getRow: (n: number) => unknown }).getRow(1)).toThrow(
-      /not supported on a Chart attached to a chartsheet/
-    );
+    expect(() =>
+      (chart.worksheet as unknown as { getRow: (n: number) => unknown }).getRow(1)
+    ).toThrow(/not supported on a Chart attached to a chartsheet/);
   });
 });
 
@@ -663,14 +673,15 @@ describe("renderChartSvg auto-injects effectList filters", () => {
     // Build a bar chart whose series carries an outer shadow effect —
     // the same shape Excel emits when the user sets Series Format →
     // Shadow in the chart pane.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -693,7 +704,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       },
       "D1:K10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const svg = chart.toSVG({ width: 400, height: 200 });
 
     // The SVG must contain a <defs> block with a <filter> inside.
@@ -708,16 +719,17 @@ describe("renderChartSvg auto-injects effectList filters", () => {
   });
 
   it("deduplicates filters when multiple series share the same effect list", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10, 20],
       ["B", 20, 30]
     ]);
     const sharedEffect = {
       glow: { radius: 38100, color: { srgb: "FF0000" } }
     };
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -735,7 +747,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       },
       "D1:K10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const svg = chart.toSVG({ width: 400, height: 200 });
     // Exactly one <filter> definition even though two series share it.
     const filterDefs = (svg.match(/<filter id="excelts-fx-/g) ?? []).length;
@@ -746,17 +758,18 @@ describe("renderChartSvg auto-injects effectList filters", () => {
   });
 
   it("omits <defs> entirely when no series carry an effectList", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([["A", 1]]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [["A", 1]]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ categories: "Sheet1!$A$1", values: "Sheet1!$B$1" }]
       },
       "D1:K10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const svg = chart.toSVG({ width: 400, height: 200 });
     expect(svg).not.toContain("<defs>");
     expect(svg).not.toContain("<filter");
@@ -766,10 +779,11 @@ describe("renderChartSvg auto-injects effectList filters", () => {
   it("builds filter for glow / innerShadow / softEdge / reflection / blur", () => {
     // Exhaust the effect list surface so regressions in any single
     // effect show up as a distinct assertion failure.
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([["A", 5]]);
-    ws.addChart(
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [["A", 5]]);
+    addChart(
+      ws,
       {
         type: "bar",
         series: [
@@ -801,7 +815,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       },
       "D1:K10"
     );
-    const chart = ws.getCharts()[0];
+    const chart = getCharts(ws)[0];
     const svg = chart.toSVG({ width: 400, height: 200 });
     // Every filter primitive ends up somewhere in the single generated
     // <filter> element.
@@ -879,14 +893,15 @@ describe("shape-properties structured DrawingML geometry", () => {
 describe("chartToPdf bridge", () => {
   it("produces a valid 1-page PDF for a classic chart via the vector path", async () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" }],
@@ -894,7 +909,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    const bytes = await chartToPdf(ws.getCharts()[0]);
+    const bytes = await chartToPdf(getCharts(ws)[0]);
     // PDF magic bytes.
     expect(bytes.length).toBeGreaterThan(500);
     const head = new TextDecoder("latin1").decode(bytes.slice(0, 8));
@@ -912,9 +927,9 @@ describe("chartToPdf bridge", () => {
 
   it("renders regionMap ChartEx via the vector path by default and via the raster path when forceRaster is set", async () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -924,7 +939,8 @@ describe("chartToPdf bridge", () => {
     // drawRect / drawCircle / drawText now. The raster path is still
     // reachable via `forceRaster: true` for callers who want
     // pixel-identical output to the SVG preview.
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "regionMap",
         series: [
@@ -939,7 +955,7 @@ describe("chartToPdf bridge", () => {
     );
 
     // Default: vector path, no image XObject.
-    const vectorBytes = await chartToPdf(ws.getCharts()[0]);
+    const vectorBytes = await chartToPdf(getCharts(ws)[0]);
     expect(vectorBytes.length).toBeGreaterThan(500);
     const vectorHead = new TextDecoder("latin1").decode(vectorBytes.slice(0, 8));
     expect(vectorHead.startsWith("%PDF-")).toBe(true);
@@ -948,7 +964,7 @@ describe("chartToPdf bridge", () => {
     expect(vectorBody).toContain("/Helvetica");
 
     // Opt-in raster: same chart rendered via the PNG → image XObject route.
-    const rasterBytes = await chartToPdf(ws.getCharts()[0], { forceRaster: true });
+    const rasterBytes = await chartToPdf(getCharts(ws)[0], { forceRaster: true });
     expect(rasterBytes.length).toBeGreaterThan(500);
     const rasterHead = new TextDecoder("latin1").decode(rasterBytes.slice(0, 8));
     expect(rasterHead.startsWith("%PDF-")).toBe(true);
@@ -959,14 +975,15 @@ describe("chartToPdf bridge", () => {
   it("sunburst and treemap ChartEx charts use the vector PDF path (no image XObject)", async () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     for (const layout of ["sunburst", "treemap"] as const) {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.addRows([
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Worksheet.addRows(ws, [
         ["A", 10],
         ["B", 20],
         ["C", 15]
       ]);
-      ws.addChartEx(
+      addChartEx(
+        ws,
         {
           type: layout,
           categories: "Sheet1!$A$1:$A$3",
@@ -974,7 +991,7 @@ describe("chartToPdf bridge", () => {
         },
         "D1:J10"
       );
-      const bytes = await chartToPdf(ws.getCharts()[0], { title: `${layout} vector` });
+      const bytes = await chartToPdf(getCharts(ws)[0], { title: `${layout} vector` });
       const body = new TextDecoder("latin1").decode(bytes);
       // Vector path: no image XObject, but the PDF must still carry a
       // content stream wide enough to hold the slice/rect drawing ops.
@@ -997,12 +1014,13 @@ describe("chartToPdf bridge", () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     const fixtures: Array<{
       name: string;
-      build: (ws: ReturnType<Workbook["addWorksheet"]>) => void;
+      build: (ws: WorksheetData) => void;
     }> = [
       {
         name: "waterfall",
         build: ws =>
-          ws.addChartEx(
+          addChartEx(
+            ws,
             {
               type: "waterfall",
               categories: "S!$A$1:$A$4",
@@ -1015,7 +1033,8 @@ describe("chartToPdf bridge", () => {
       {
         name: "funnel",
         build: ws =>
-          ws.addChartEx(
+          addChartEx(
+            ws,
             {
               type: "funnel",
               categories: "S!$A$1:$A$4",
@@ -1027,7 +1046,8 @@ describe("chartToPdf bridge", () => {
       {
         name: "histogram",
         build: ws =>
-          ws.addChartEx(
+          addChartEx(
+            ws,
             {
               type: "histogram",
               series: [{ values: "S!$B$1:$B$4", literalValues: [1, 2, 3, 4, 5, 6, 7, 8] }],
@@ -1039,7 +1059,8 @@ describe("chartToPdf bridge", () => {
       {
         name: "pareto",
         build: ws =>
-          ws.addChartEx(
+          addChartEx(
+            ws,
             {
               type: "pareto",
               categories: "S!$A$1:$A$4",
@@ -1057,7 +1078,8 @@ describe("chartToPdf bridge", () => {
       {
         name: "boxWhisker",
         build: ws =>
-          ws.addChartEx(
+          addChartEx(
+            ws,
             {
               type: "boxWhisker",
               categories: "S!$A$1:$A$6",
@@ -1069,9 +1091,9 @@ describe("chartToPdf bridge", () => {
       }
     ];
     for (const fixture of fixtures) {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("S");
-      ws.addRows([
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "S");
+      Worksheet.addRows(ws, [
         ["A", 10],
         ["B", 20],
         ["C", 15],
@@ -1080,7 +1102,7 @@ describe("chartToPdf bridge", () => {
         ["F", 25]
       ]);
       fixture.build(ws);
-      const bytes = await chartToPdf(ws.getCharts()[0], { title: `${fixture.name} vector` });
+      const bytes = await chartToPdf(getCharts(ws)[0], { title: `${fixture.name} vector` });
       const body = new TextDecoder("latin1").decode(bytes);
       expect(body).not.toMatch(/\/Subtype\s+\/Image/);
       expect(body).toContain("/Helvetica");
@@ -1090,14 +1112,15 @@ describe("chartToPdf bridge", () => {
 
   it("forceRaster on a ChartEx chart keeps the raster path even for vectorable layouts", async () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "sunburst",
         categories: "Sheet1!$A$1:$A$3",
@@ -1105,20 +1128,21 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    const bytes = await chartToPdf(ws.getCharts()[0], { forceRaster: true });
+    const bytes = await chartToPdf(getCharts(ws)[0], { forceRaster: true });
     const body = new TextDecoder("latin1").decode(bytes);
     expect(body).toMatch(/\/Subtype\s+\/Image/);
   });
 
   it("forceRaster on a classic chart routes through the PNG path", async () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Worksheet.addRows(ws, [
       ["A", 10],
       ["B", 20]
     ]);
-    ws.addChart(
+    addChart(
+      ws,
       {
         type: "bar",
         series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }],
@@ -1126,7 +1150,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    const bytes = await chartToPdf(ws.getCharts()[0], { forceRaster: true });
+    const bytes = await chartToPdf(getCharts(ws)[0], { forceRaster: true });
     const body = new TextDecoder("latin1").decode(bytes);
     // Raster path embedded an image XObject.
     expect(body).toMatch(/\/Subtype\s+\/Image/);
@@ -1164,11 +1188,12 @@ describe("chartToPdf bridge", () => {
         return this;
       }
     };
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
     // A distribution with three clear outliers (very large jumps) so
     // boxStats flags them regardless of quartileMethod.
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "boxWhisker",
         series: [
@@ -1182,7 +1207,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, ws.getCharts()[0].chartExModel!, {
+    drawChartExPdf(surface, getCharts(ws)[0].chartExModel!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1216,15 +1241,16 @@ describe("chartToPdf bridge", () => {
         return this;
       }
     };
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("S");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "S");
+    Worksheet.addRows(ws, [
       ["A", 100],
       ["B", 80],
       ["C", 50],
       ["D", 20]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "funnel",
         categories: "S!$A$1:$A$4",
@@ -1232,7 +1258,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, ws.getCharts()[0].chartExModel!, {
+    drawChartExPdf(surface, getCharts(ws)[0].chartExModel!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1282,14 +1308,15 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
         return this;
       }
     };
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Geo");
-    ws.addRows([
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Geo");
+    Worksheet.addRows(ws, [
       ["USA", 300],
       ["CAN", 150],
       ["MEX", 80]
     ]);
-    ws.addChartEx(
+    addChartEx(
+      ws,
       {
         type: "regionMap",
         categories: "Geo!$A$1:$A$3",
@@ -1336,7 +1363,7 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
     };
     drawChartExPdf(
       surface,
-      ws.getCharts()[0].chartExModel!,
+      getCharts(ws)[0].chartExModel!,
       { x: 0, y: 0, width: 400, height: 300 },
       { regionMap: { topology, objectName: "countries", match: "id" } }
     );

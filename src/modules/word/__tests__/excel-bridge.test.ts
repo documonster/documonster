@@ -1,3 +1,6 @@
+import { Cell, Workbook, Worksheet } from "@excel/index";
+import { rowSetFont } from "@excel/row";
+import type { WorkbookData } from "@excel/workbook-core";
 /**
  * Tests for the Word ↔ Excel bridge helpers exposed at `excelts/word/excel`.
  *
@@ -22,7 +25,6 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { Workbook } from "../../../index";
 import {
   buildWordChartExXml,
   excelToDocx,
@@ -32,8 +34,7 @@ import {
   wordChartToChartModel
 } from "../excel";
 import { Document } from "../index";
-import type { Chart } from "../index";
-import type { BodyContent, Paragraph, Run, Table } from "../types";
+import type { BodyContent, Chart, Paragraph, Run, Table } from "../types";
 
 /** Find all top-level tables in a converted DocxDocument body. */
 function tablesOf(body: readonly BodyContent[]): Table[] {
@@ -206,13 +207,13 @@ describe("buildWordChartExXml", () => {
 // =============================================================================
 
 describe("excelToDocx — sheet → table conversion", () => {
-  function buildWorkbook(): Workbook {
-    const wb = new Workbook();
+  function buildWorkbook(): WorkbookData {
+    const wb = Workbook.create();
     wb.creator = "Tester";
-    const ws = wb.addWorksheet("Sales");
-    ws.addRow(["Region", "Revenue"]);
-    ws.addRow(["North", 1200]);
-    ws.addRow(["South", 900]);
+    const ws = Workbook.addWorksheet(wb, "Sales");
+    Worksheet.addRow(ws, ["Region", "Revenue"]);
+    Worksheet.addRow(ws, ["North", 1200]);
+    Worksheet.addRow(ws, ["South", 900]);
     return wb;
   }
 
@@ -238,7 +239,7 @@ describe("excelToDocx — sheet → table conversion", () => {
 
   it("preserves bold cell formatting as a run property", () => {
     const wb = buildWorkbook();
-    wb.getWorksheet("Sales")!.getRow(1).font = { bold: true };
+    rowSetFont(Worksheet.getRow(Workbook.getWorksheet(wb, "Sales")!, 1), { bold: true });
     const doc = excelToDocx(wb, { preserveFormatting: true });
     const t = tablesOf(doc.body)[0];
     expect(firstRun(t, 0, 0)?.properties?.bold).toBe(true);
@@ -246,7 +247,7 @@ describe("excelToDocx — sheet → table conversion", () => {
 
   it("drops formatting when preserveFormatting is false", () => {
     const wb = buildWorkbook();
-    wb.getWorksheet("Sales")!.getRow(1).font = { bold: true };
+    rowSetFont(Worksheet.getRow(Workbook.getWorksheet(wb, "Sales")!, 1), { bold: true });
     const doc = excelToDocx(wb, { preserveFormatting: false });
     const t = tablesOf(doc.body)[0];
     expect(firstRun(t, 0, 0)?.properties?.bold).toBeUndefined();
@@ -254,9 +255,9 @@ describe("excelToDocx — sheet → table conversion", () => {
 
   it("skips hidden sheets by default", () => {
     const wb = buildWorkbook();
-    const hidden = wb.addWorksheet("Secret");
+    const hidden = Workbook.addWorksheet(wb, "Secret");
     hidden.state = "hidden";
-    hidden.addRow(["classified", 42]);
+    Worksheet.addRow(hidden, ["classified", 42]);
     const doc = excelToDocx(wb);
     // Only the visible "Sales" sheet should produce a table.
     expect(tablesOf(doc.body)).toHaveLength(1);
@@ -264,8 +265,8 @@ describe("excelToDocx — sheet → table conversion", () => {
 
   it("selects only the requested sheets", () => {
     const wb = buildWorkbook();
-    const ws2 = wb.addWorksheet("Inventory");
-    ws2.addRow(["Item", "Qty"]);
+    const ws2 = Workbook.addWorksheet(wb, "Inventory");
+    Worksheet.addRow(ws2, ["Item", "Qty"]);
     const doc = excelToDocx(wb, { sheets: ["Inventory"], includeSheetHeadings: false });
     const tables = tablesOf(doc.body);
     expect(tables).toHaveLength(1);
@@ -273,12 +274,12 @@ describe("excelToDocx — sheet → table conversion", () => {
   });
 
   it("caps rows and columns", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Big");
-    ws.addRow(["a", "b", "c", "d"]);
-    ws.addRow([1, 2, 3, 4]);
-    ws.addRow([5, 6, 7, 8]);
-    ws.addRow([9, 10, 11, 12]);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Big");
+    Worksheet.addRow(ws, ["a", "b", "c", "d"]);
+    Worksheet.addRow(ws, [1, 2, 3, 4]);
+    Worksheet.addRow(ws, [5, 6, 7, 8]);
+    Worksheet.addRow(ws, [9, 10, 11, 12]);
     const doc = excelToDocx(wb, { maxRows: 2, maxColumns: 2 });
     const t = tablesOf(doc.body)[0];
     expect(t.rows).toHaveLength(2);
@@ -292,9 +293,9 @@ describe("excelToDocx — sheet → table conversion", () => {
   });
 
   it("preserves a cell hyperlink as a Word hyperlink (URL not lost)", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Links");
-    ws.getCell("A1").value = { text: "OpenAI", hyperlink: "https://openai.com" };
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Links");
+    Cell.setValue(ws, "A1", { text: "OpenAI", hyperlink: "https://openai.com" });
     const doc = excelToDocx(wb, { includeSheetHeadings: false });
     const t = tablesOf(doc.body)[0];
     const para = t.rows[0].cells[0].content[0] as Paragraph;
@@ -333,10 +334,10 @@ describe("extractTablesToExcel — Word table → 2D data", () => {
   });
 
   it("round-trips excelToDocx → extractTablesToExcel", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Data");
-    ws.addRow(["x", "y"]);
-    ws.addRow([1, 2]);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Data");
+    Worksheet.addRow(ws, ["x", "y"]);
+    Worksheet.addRow(ws, [1, 2]);
     const doc = excelToDocx(wb, { includeSheetHeadings: false });
     const tables = extractTablesToExcel(doc);
     expect(tables).toHaveLength(1);
