@@ -1,5 +1,5 @@
 import type { NoteConfig, NoteModel } from "@excel/cell";
-import { deepMerge } from "@excel/utils/under-dash";
+import { deepMerge } from "@utils/object";
 
 /**
  * Plain-data representation of a cell comment (note).

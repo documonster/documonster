@@ -1,6 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
-import { isEqual } from "@excel/utils/under-dash";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { deepEqual } from "@utils/object";
 import { parseBoolean, dateToExcel, excelToDate } from "@utils/utils";
 
 function assign(definedName: any, attributes: any, name: string, defaultValue?: any): void {
@@ -68,7 +68,7 @@ function optimiseDataValidations(model: any): any[] {
       const otherAddress = colCache.encodeAddress(addr.row + i, col);
       if (
         !regularModel[otherAddress] ||
-        !isEqual(regularModel[addr.address], regularModel[otherAddress])
+        !deepEqual(regularModel[addr.address], regularModel[otherAddress])
       ) {
         return false;
       }
@@ -92,7 +92,7 @@ function optimiseDataValidations(model: any): any[] {
         let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
         while (
           regularModel[otherAddress] &&
-          isEqual(dv.dataValidation, regularModel[otherAddress])
+          deepEqual(dv.dataValidation, regularModel[otherAddress])
         ) {
           height++;
           otherAddress = colCache.encodeAddress(addr.row + height, addr.col);

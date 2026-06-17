@@ -11,9 +11,21 @@ import { splice } from "@excel/__tests__/shared/test-spliced-sheet";
 import { values } from "@excel/__tests__/shared/test-values-sheet";
 import { testWorkbookReader } from "@excel/__tests__/shared/test-workbook-reader";
 import { fix } from "@excel/__tests__/shared/tools";
-import { get } from "@excel/utils/under-dash";
 import { addWorksheet, createWorkbook } from "@excel/workbook";
 import { expect } from "vitest";
+
+/** Local test helper: dotted-path getter (replaces the retired under-dash `get`). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function get<T = any>(obj: unknown, path: string, defaultValue?: T): T {
+  let result: unknown = obj;
+  for (const key of path.split(".")) {
+    if (result == null) {
+      return defaultValue as T;
+    }
+    result = (result as Record<string, unknown>)[key];
+  }
+  return (result ?? defaultValue) as T;
+}
 
 const testSheets = {
   dataValidations,

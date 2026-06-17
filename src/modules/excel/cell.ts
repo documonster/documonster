@@ -35,7 +35,6 @@ import { getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
 import { slideFormula } from "@excel/utils/shared-formula";
-import { escapeHtml } from "@excel/utils/under-dash";
 import type { Workbook } from "@excel/workbook";
 import type { Worksheet } from "@excel/worksheet";
 
@@ -432,7 +431,16 @@ export const cellText = (c: CellData): string => c._value.toString();
 export const cellDisplayText = (c: CellData): string =>
   getCellDisplayText({ value: c._value.value, numFmt: c.style.numFmt, text: c._value.toString() });
 
-export const cellHtml = (c: CellData): string => escapeHtml(cellText(c));
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  '"': "&quot;",
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;"
+};
+const HTML_ESCAPE_RE = /["&<>]/g;
+
+export const cellHtml = (c: CellData): string =>
+  cellText(c).replace(HTML_ESCAPE_RE, ch => HTML_ESCAPE_MAP[ch]);
 
 export function cellView(c: CellData): {
   readonly value: CellValueType;

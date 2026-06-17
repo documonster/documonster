@@ -29,9 +29,9 @@ import {
 import type { SharedStrings } from "@excel/utils/shared-strings";
 import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import type { StreamBuf } from "@excel/utils/stream-buf";
-import { StringBuf } from "@excel/utils/string-buf";
 import { columnCreate, columnSetDefn, rowGetCellEx, rowSetValues } from "@excel/worksheet";
 import { RelType } from "@excel/xlsx/rel-type";
+import { StringBuf } from "@utils/string-buf";
 
 const xmlBuffer = /* @__PURE__ */ new StringBuf();
 

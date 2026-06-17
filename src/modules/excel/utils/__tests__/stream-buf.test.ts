@@ -3,7 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { StreamBuf } from "@excel/utils/stream-buf";
-import { StringBuf } from "@excel/utils/string-buf";
+import { StringBuf } from "@utils/string-buf";
 import { describe, it, expect } from "vitest";
 
 const __filename = fileURLToPath(import.meta.url);

@@ -1,10 +1,10 @@
 import util from "util";
 
-import { isEqual } from "@excel/utils/under-dash";
+import { deepEqual } from "@utils/object";
 import { describe, it, expect } from "vitest";
 
-describe("under-dash", () => {
-  describe("isEqual", () => {
+describe("@utils/object", () => {
+  describe("deepEqual", () => {
     function showVal(o: any) {
       return util.inspect(o, { compact: true });
     }
@@ -34,8 +34,8 @@ describe("under-dash", () => {
 
       for (const c of cases) {
         const assertion = `${c.label}: ${showVal(c.a)} ${c.expected ? "==" : "!="} ${showVal(c.b)}`;
-        expect(isEqual(c.a, c.b), assertion).toBe(c.expected);
-        expect(isEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
+        expect(deepEqual(c.a, c.b), assertion).toBe(c.expected);
+        expect(deepEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
       }
     });
 
@@ -64,8 +64,8 @@ describe("under-dash", () => {
 
       for (const c of cases) {
         const assertion = `${c.label}: ${showVal(c.a)} ${c.expected ? "==" : "!="} ${showVal(c.b)}`;
-        expect(isEqual(c.a, c.b), assertion).toBe(c.expected);
-        expect(isEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
+        expect(deepEqual(c.a, c.b), assertion).toBe(c.expected);
+        expect(deepEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
       }
     });
 
@@ -102,8 +102,8 @@ describe("under-dash", () => {
 
       for (const c of cases) {
         const assertion = `${c.label}: ${showVal(c.a)} ${c.expected ? "==" : "!="} ${showVal(c.b)}`;
-        expect(isEqual(c.a, c.b), assertion).toBe(c.expected);
-        expect(isEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
+        expect(deepEqual(c.a, c.b), assertion).toBe(c.expected);
+        expect(deepEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
       }
     });
   });

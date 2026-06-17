@@ -10,8 +10,8 @@ import type {
   ColBreak
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import { isEqual } from "@excel/utils/under-dash";
 import type { Worksheet } from "@excel/worksheet";
+import { deepEqual } from "@utils/object";
 
 /** Header value type - can be a single value or array for multi-row headers */
 export type ColumnHeaderValue = CellValue | CellValue[];
@@ -116,7 +116,7 @@ export function columnEquivalentTo(c: ColumnData, other: ColumnData): boolean {
     c.width === other.width &&
     columnHidden(c) === columnHidden(other) &&
     columnOutlineLevel(c) === columnOutlineLevel(other) &&
-    isEqual(c.style, other.style)
+    deepEqual(c.style, other.style)
   );
 }
 
@@ -126,7 +126,7 @@ export function columnEquivalentToModel(c: ColumnData, model: ColumnModel): bool
     columnHidden(c) === model.hidden &&
     columnOutlineLevel(c) === model.outlineLevel &&
     c.bestFit === model.bestFit &&
-    isEqual(c.style, model.style)
+    deepEqual(c.style, model.style)
   );
 }
 
