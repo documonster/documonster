@@ -71,358 +71,193 @@ function s(
 }
 
 const scenarios: Scenario[] = [
-  // Root entry (Node)
-  s("root: dateToExcel", PKG_NAME, ["dateToExcel"], ALL_MODULES),
-  s("root: BaseError", PKG_NAME, ["BaseError"], ALL_MODULES),
+  // -------------------------------------------------------------------------
+  // /excel subpath — namespace API. Importing a single namespace must not
+  // pull pdf / formula-engine / csv / archive unless that namespace needs it.
+  // -------------------------------------------------------------------------
   s(
-    "root: encodeCell",
-    PKG_NAME,
-    ["encodeCell"],
-    [...allModulesExcept("excel"), "modules/excel/workbook", "modules/excel/worksheet"]
-  ),
-  s(
-    "root: Workbook (no pdf/formula leak)",
-    PKG_NAME,
-    ["Workbook"],
-    // A `Workbook` import *must* pull the two glue files from the
-    // formula module — they declare the registry that
-    // `Workbook.calculateFormulas()` and `defined-names` dispatch
-    // through. That is ~3.9 KB total, orders of magnitude smaller than
-    // the engine itself (~200 KB), which stays out of the bundle unless
-    // `installFormulaEngine` is imported. Assert on the engine source
-    // tree, not the glue.
+    "/excel: Cell (no chart/pdf/formula-engine)",
+    `${PKG_NAME}/excel`,
+    ["Cell"],
     [
       "modules/pdf/",
-      "modules/formula/syntax/",
+      "modules/excel/chart/",
       "modules/formula/runtime/",
       "modules/formula/functions/",
-      "modules/formula/compile/",
-      "modules/formula/materialize/",
       "modules/formula/integration/"
     ]
   ),
   s(
-    "root: excelToPdf (no csv/formula leak)",
-    PKG_NAME,
-    ["excelToPdf"],
+    "/excel: Workbook (no pdf/formula-engine)",
+    `${PKG_NAME}/excel`,
+    ["Workbook"],
+    // NOTE: `Workbook` currently also pulls the chart renderer, because
+    // `worksheet.ts` statically imports `chart-handle` (createChart /
+    // registerChart) and that module references the SVG/PNG renderers for
+    // `chartToSVG`/`chartToPNG`. Decoupling worksheet↔chart-renderer is a
+    // known follow-up optimisation; this scenario locks the rest of the
+    // contract (no pdf, no formula evaluator).
     [
-      "modules/csv/",
-      "modules/formula/syntax/",
+      "modules/pdf/",
       "modules/formula/runtime/",
       "modules/formula/functions/",
-      "modules/formula/compile/",
-      "modules/formula/materialize/",
       "modules/formula/integration/"
     ]
   ),
   s(
-    "root: CsvParserStream (no pdf/archive leak)",
-    PKG_NAME,
-    ["CsvParserStream"],
-    ["modules/pdf/", "modules/archive/"]
+    "/excel: Chart (no pdf leak; chart builder allowed)",
+    `${PKG_NAME}/excel`,
+    ["Chart"],
+    ["modules/pdf/", "modules/csv/"]
+  ),
+  s(
+    "/excel: Address (minimal, no module trees)",
+    `${PKG_NAME}/excel`,
+    ["Address"],
+    ["modules/pdf/", "modules/excel/chart/", "modules/formula/", "modules/csv/", "modules/word/"]
   ),
 
-  // /archive subpath (Node)
-  s("/archive: ZipArchive", `${PKG_NAME}/archive`, ["ZipArchive"], NOT_EXCEL_PDF_CSV),
-  s("/archive: ZipReader", `${PKG_NAME}/archive`, ["ZipReader"], NOT_EXCEL_PDF_CSV),
+  // -------------------------------------------------------------------------
+  // /word subpath — namespace API. Builders must not pull archive/xml/io.
+  // (rspack tree-shakes barrels less aggressively — esbuild+rolldown only.)
+  // -------------------------------------------------------------------------
+  {
+    name: "/word: Build (no archive / xml parser / io leak)",
+    importFrom: `${PKG_NAME}/word`,
+    imports: ["Build"],
+    // The tiny `xml/encode` util (~3 KB, XML escaping) is an intrinsic
+    // dependency of content-node builders; the heavy xml parser/writer/sax
+    // and the archive packager must stay out.
+    mustNotInclude: [
+      "modules/archive/",
+      "modules/xml/dom",
+      "modules/xml/sax",
+      "modules/xml/writer",
+      "modules/xml/stream-writer",
+      "modules/word/writer/docx-packager",
+      "modules/word/reader/docx-reader"
+    ],
+    excludeBundlers: ["rspack"]
+  },
+  {
+    name: "/word: Document (no archive / xml parser / io leak)",
+    importFrom: `${PKG_NAME}/word`,
+    imports: ["Document"],
+    mustNotInclude: [
+      "modules/archive/",
+      "modules/xml/dom",
+      "modules/xml/sax",
+      "modules/xml/writer",
+      "modules/xml/stream-writer",
+      "modules/word/writer/docx-packager",
+      "modules/word/reader/docx-reader"
+    ],
+    excludeBundlers: ["rspack"]
+  },
+  s(
+    "/word: Io (pulls archive+xml, no pdf/csv/formula-engine)",
+    `${PKG_NAME}/word`,
+    ["Io"],
+    // NOTE: `Io` includes `merge`/`split`/`updateFields`, whose layout +
+    // bridge dependencies currently reach the excel module transitively
+    // (word→bridge/layout). Decoupling is a known follow-up; this scenario
+    // locks no-pdf / no-csv / no-formula-evaluator.
+    ["modules/pdf/", "modules/csv/", "modules/formula/runtime/", "modules/formula/functions/"]
+  ),
+
+  // -------------------------------------------------------------------------
+  // /csv subpath — namespace API.
+  // -------------------------------------------------------------------------
+  s(
+    "/csv: Csv (no excel/pdf/archive/word)",
+    `${PKG_NAME}/csv`,
+    ["Csv"],
+    ["modules/excel/", "modules/pdf/", "modules/word/"]
+  ),
+
+  // -------------------------------------------------------------------------
+  // /xml subpath — namespace API.
+  // -------------------------------------------------------------------------
+  s("/xml: Xml (only xml)", `${PKG_NAME}/xml`, ["Xml"], allModulesExcept("xml")),
+
+  // -------------------------------------------------------------------------
+  // /markdown subpath — namespace API.
+  // -------------------------------------------------------------------------
+  s(
+    "/markdown: Markdown (only markdown)",
+    `${PKG_NAME}/markdown`,
+    ["Markdown"],
+    allModulesExcept("markdown")
+  ),
+
+  // -------------------------------------------------------------------------
+  // /pdf subpath — namespace API. PDF legitimately needs archive (zlib), and
+  // `Pdf.fromDocx`/`Pdf.fromExcel` legitimately pull word/excel bridges, so
+  // the only hard exclusions are csv + the formula evaluator.
+  // -------------------------------------------------------------------------
+  s(
+    "/pdf: Pdf (no csv/formula-engine; archive+bridges allowed)",
+    `${PKG_NAME}/pdf`,
+    ["Pdf"],
+    [
+      "modules/csv/",
+      "modules/formula/runtime/",
+      "modules/formula/functions/",
+      "modules/formula/integration/"
+    ]
+  ),
+
+  // -------------------------------------------------------------------------
+  // /formula subpath — namespace API. `Formula.tokenize`/`parse` must remain
+  // tree-shakeable from the 433-function evaluator + excel module.
+  // (esbuild/rolldown shake namespace members; rspack is less aggressive.)
+  // -------------------------------------------------------------------------
+  {
+    name: "/formula: Formula (no excel leak)",
+    importFrom: `${PKG_NAME}/formula`,
+    imports: ["Formula"],
+    mustNotInclude: ["modules/excel/", "modules/pdf/", "modules/csv/", "modules/word/"],
+    excludeBundlers: ["rspack"]
+  },
+
+  // -------------------------------------------------------------------------
+  // /archive + /stream — infrastructure modules (intentionally flat exports).
+  // -------------------------------------------------------------------------
   s(
     "/archive: crc32 (minimal)",
     `${PKG_NAME}/archive`,
     ["crc32"],
     [...NOT_EXCEL_PDF_CSV, "modules/archive/zip/", "modules/archive/unzip/", "modules/archive/tar/"]
   ),
-  s(
-    "/archive: compress (minimal)",
-    `${PKG_NAME}/archive`,
-    ["compress"],
-    [...NOT_EXCEL_PDF_CSV, "modules/archive/zip/", "modules/archive/unzip/", "modules/archive/tar/"]
-  ),
-  s("/archive: TarArchive", `${PKG_NAME}/archive`, ["TarArchive"], NOT_EXCEL_PDF_CSV),
-
-  // /csv subpath (Node)
-  s("/csv: formatCsv", `${PKG_NAME}/csv`, ["formatCsv"], allModulesExcept("csv")),
-  s("/csv: parseCsv", `${PKG_NAME}/csv`, ["parseCsv"], allModulesExcept("csv")),
-  s(
-    "/csv: CsvParserStream",
-    `${PKG_NAME}/csv`,
-    ["CsvParserStream"],
-    ["modules/excel/", "modules/pdf/", "modules/archive/"]
-  ),
-  s(
-    "/csv: detectDelimiter (minimal)",
-    `${PKG_NAME}/csv`,
-    ["detectDelimiter"],
-    [...allModulesExcept("csv"), "modules/csv/parse/", "modules/csv/format/"]
-  ),
-
-  // /stream subpath (Node)
   s("/stream: pipeline", `${PKG_NAME}/stream`, ["pipeline"], allModulesExcept("stream")),
-  s(
-    "/stream: createTransform",
-    `${PKG_NAME}/stream`,
-    ["createTransform"],
-    allModulesExcept("stream")
-  ),
-  s(
-    "/stream: ChunkedBuilder",
-    `${PKG_NAME}/stream`,
-    ["ChunkedBuilder"],
-    allModulesExcept("stream")
-  ),
-  s("/stream: collect (minimal)", `${PKG_NAME}/stream`, ["collect"], allModulesExcept("stream")),
 
-  // /xml subpath (Node)
-  s("/xml: xmlEncode", `${PKG_NAME}/xml`, ["xmlEncode"], allModulesExcept("xml")),
-  s("/xml: XmlWriter", `${PKG_NAME}/xml`, ["XmlWriter"], allModulesExcept("xml")),
-  s("/xml: parseXml", `${PKG_NAME}/xml`, ["parseXml"], allModulesExcept("xml")),
-  s("/xml: SaxParser", `${PKG_NAME}/xml`, ["SaxParser"], allModulesExcept("xml")),
-
-  // /pdf subpath (Node)
-  // PDF legitimately depends on archive/compression for zlib/deflate.
-  // `excelToPdf` legitimately references the formula registry glue
-  // (host-registry.ts) so that an app that also imports
-  // `@cj-tech-master/excelts/formula` gets automatic recalc before
-  // render — see the root Workbook scenario for the rationale.
-  s("/pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive")),
+  // -------------------------------------------------------------------------
+  // Browser platform — namespace API on the browser entries.
+  // -------------------------------------------------------------------------
   s(
-    "/pdf: excelToPdf",
-    `${PKG_NAME}/pdf`,
-    ["excelToPdf"],
-    [
-      ...allModulesExcept("pdf", "excel", "archive", "formula"),
-      "modules/formula/syntax/",
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/compile/",
-      "modules/formula/materialize/",
-      "modules/formula/integration/"
-    ]
-  ),
-  s("/pdf: readPdf", `${PKG_NAME}/pdf`, ["readPdf"], allModulesExcept("pdf", "archive")),
-  s("/pdf: PageSizes", `${PKG_NAME}/pdf`, ["PageSizes"], allModulesExcept("pdf")),
-
-  // /formula subpath (Node)
-  //
-  // The functional form must be fully tree-shakeable: importing just
-  // `tokenize` (or any other leaf export) must not pull the evaluator,
-  // function registry, materialiser, the excel module, the engine
-  // installer, or the host glue. The scenarios below lock that
-  // contract in.
-  s(
-    "/formula: tokenize (no engine / excel leak)",
-    `${PKG_NAME}/formula`,
-    ["tokenize"],
-    [
-      ...allModulesExcept("formula"),
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/",
-      "modules/formula/materialize/",
-      "modules/formula/install.js",
-      "modules/formula/host-registry.js",
-      "modules/formula/default-syntax-probe.js"
-    ]
-  ),
-  s(
-    "/formula: parse (no engine / excel leak)",
-    `${PKG_NAME}/formula`,
-    ["parse"],
-    [
-      ...allModulesExcept("formula"),
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/",
-      "modules/formula/materialize/",
-      "modules/formula/install.js",
-      "modules/formula/host-registry.js",
-      "modules/formula/default-syntax-probe.js"
-    ]
-  ),
-  s(
-    "/formula: calculateFormulas (no excel, no installer)",
-    `${PKG_NAME}/formula`,
-    ["calculateFormulas"],
-    [
-      ...allModulesExcept("formula"),
-      "modules/formula/install.js",
-      "modules/formula/host-registry.js",
-      "modules/formula/default-syntax-probe.js"
-    ]
-  ),
-  s(
-    "/formula: installFormulaEngine (pulls full engine, no other modules)",
-    `${PKG_NAME}/formula`,
-    ["installFormulaEngine"],
-    allModulesExcept("formula")
-  ),
-
-  // /word subpath (Node)
-  //
-  // The word module separates builders (document.ts) from IO
-  // (document-io.ts → docx-packager → archive + xml). Importing only
-  // builder helpers must NOT pull archive, xml, or packager code.
-  // NOTE: rspack cannot tree-shake barrel re-exports as aggressively as
-  // esbuild/rolldown, so these scenarios are tested only for esbuild+rolldown.
-  {
-    name: "/word: text+paragraph (no archive/xml leak)",
-    importFrom: `${PKG_NAME}/word`,
-    imports: ["text", "paragraph"],
-    mustNotInclude: [
-      "modules/archive/",
-      "modules/xml/",
-      "modules/word/docx-packager",
-      "modules/word/docx-reader"
-    ],
-    excludeBundlers: ["rspack"]
-  },
-  {
-    name: "/word: Document.create (no archive/xml leak)",
-    importFrom: `${PKG_NAME}/word`,
-    imports: ["Document"],
-    mustNotInclude: [
-      "modules/archive/",
-      "modules/xml/",
-      "modules/word/docx-packager",
-      "modules/word/docx-reader"
-    ],
-    excludeBundlers: ["rspack"]
-  },
-  s(
-    "/word: packageDocx (pulls archive+xml, no pdf/excel)",
-    `${PKG_NAME}/word`,
-    ["packageDocx"],
-    ["modules/pdf/", "modules/excel/", "modules/formula/", "modules/csv/"]
-  ),
-  s(
-    "/word: readDocx (pulls archive+xml, no pdf/excel)",
-    `${PKG_NAME}/word`,
-    ["readDocx"],
-    ["modules/pdf/", "modules/excel/", "modules/formula/", "modules/csv/"]
-  ),
-
-  // /word/excel subpath (Node)
-  s(
-    "/word/excel: excelToDocx (pulls excel, no pdf/markdown-renderer/html-renderer)",
-    `${PKG_NAME}/word/excel`,
-    ["excelToDocx"],
-    ["modules/pdf/", "modules/word/markdown-renderer", "modules/word/html-renderer"]
-  ),
-
-  // /word/markdown subpath (Node)
-  s(
-    "/word/markdown: renderToMarkdown (no pdf/excel/archive)",
-    `${PKG_NAME}/word/markdown`,
-    ["renderToMarkdown"],
-    ["modules/pdf/", "modules/excel/", "modules/archive/"]
-  ),
-
-  // /markdown subpath (Node)
-  s(
-    "/markdown: parseMarkdown",
-    `${PKG_NAME}/markdown`,
-    ["parseMarkdown"],
-    allModulesExcept("markdown")
-  ),
-  s(
-    "/markdown: formatMarkdown",
-    `${PKG_NAME}/markdown`,
-    ["formatMarkdown"],
-    allModulesExcept("markdown")
-  ),
-  s(
-    "/markdown: parseMarkdownAll",
-    `${PKG_NAME}/markdown`,
-    ["parseMarkdownAll"],
-    allModulesExcept("markdown")
-  ),
-
-  // Browser platform
-  s(
-    "browser root: Workbook (no pdf/formula leak)",
-    PKG_NAME,
-    ["Workbook"],
-    // Same 3.9 KB glue exemption as the Node scenario above — see the
-    // comment there for the rationale.
+    "browser /excel: Cell (no pdf/formula-engine)",
+    `${PKG_NAME}/excel`,
+    ["Cell"],
     [
       "modules/pdf/",
-      "modules/formula/syntax/",
       "modules/formula/runtime/",
       "modules/formula/functions/",
-      "modules/formula/compile/",
-      "modules/formula/materialize/",
       "modules/formula/integration/"
     ],
     "browser"
   ),
   s(
-    "browser root: encodeCell",
-    PKG_NAME,
-    ["encodeCell"],
-    [...allModulesExcept("excel"), "modules/excel/workbook", "modules/excel/worksheet"],
-    "browser"
-  ),
-  s("browser root: BaseError", PKG_NAME, ["BaseError"], ALL_MODULES, "browser"),
-  s(
-    "browser /archive: ZipArchive",
-    `${PKG_NAME}/archive`,
-    ["ZipArchive"],
-    NOT_EXCEL_PDF_CSV,
-    "browser"
-  ),
-  s(
-    "browser /csv: formatCsv",
+    "browser /csv: Csv",
     `${PKG_NAME}/csv`,
-    ["formatCsv"],
-    allModulesExcept("csv"),
+    ["Csv"],
+    ["modules/excel/", "modules/pdf/", "modules/word/"],
     "browser"
   ),
+  s("browser /xml: Xml", `${PKG_NAME}/xml`, ["Xml"], allModulesExcept("xml"), "browser"),
   s(
-    "browser /stream: ChunkedBuilder",
-    `${PKG_NAME}/stream`,
-    ["ChunkedBuilder"],
-    allModulesExcept("stream"),
-    "browser"
-  ),
-  s(
-    "browser /xml: xmlEncode",
-    `${PKG_NAME}/xml`,
-    ["xmlEncode"],
-    allModulesExcept("xml"),
-    "browser"
-  ),
-  s("browser /pdf: pdf", `${PKG_NAME}/pdf`, ["pdf"], allModulesExcept("pdf", "archive"), "browser"),
-  s(
-    "browser /formula: tokenize (no engine leak)",
-    `${PKG_NAME}/formula`,
-    ["tokenize"],
-    [
-      ...allModulesExcept("formula"),
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/",
-      "modules/formula/materialize/",
-      "modules/formula/install.js",
-      "modules/formula/host-registry.js",
-      "modules/formula/default-syntax-probe.js"
-    ],
-    "browser"
-  ),
-  s(
-    "browser /formula: calculateFormulas (no installer leak)",
-    `${PKG_NAME}/formula`,
-    ["calculateFormulas"],
-    [
-      ...allModulesExcept("formula"),
-      "modules/formula/install.js",
-      "modules/formula/host-registry.js",
-      "modules/formula/default-syntax-probe.js"
-    ],
-    "browser"
-  ),
-  s(
-    "browser /markdown: parseMarkdown",
+    "browser /markdown: Markdown",
     `${PKG_NAME}/markdown`,
-    ["parseMarkdown"],
+    ["Markdown"],
     allModulesExcept("markdown"),
     "browser"
   )

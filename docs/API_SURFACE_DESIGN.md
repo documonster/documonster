@@ -1,7 +1,8 @@
 # API Surface Design — Subpath Namespace Public Entry
 
 Status: design locked; excel/word/csv/markdown/xml/pdf/formula namespaced;
-root entry removed; per-module IIFE shipped. Remaining: bundle-size tests.
+root entry removed; per-module IIFE shipped; namespace surface unit tests +
+tree-shaking verification (esbuild/rolldown/rspack) gating the build.
 Owner: core team.
 Last updated: 2026-06-17.
 Supersedes the export-surface portion of `FUTURE_ARCHITECTURE.md`.
