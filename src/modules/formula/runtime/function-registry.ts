@@ -79,6 +79,13 @@ export function registerFunction(desc: FunctionDescriptor): void {
  * `stripFunctionPrefix` entirely.
  */
 export function lookupFunction(name: string): FunctionDescriptor | undefined {
+  // Lazily assemble the 433 native functions on first lookup. Initialization
+  // is NOT a module-level side effect (which would conflict with the package's
+  // `sideEffects: false` and force the whole 433-function table into any bundle
+  // that merely references `lookupFunction`). Instead it is driven by the
+  // evaluator's first call — mirroring the chart renderer's "execute on call,
+  // never at import" contract. The `initialized` guard makes repeat calls O(1).
+  ensureRegistryInitialized();
   // Plain names don't start with `_` — skip the prefix-strip call.
   if (name.length === 0 || name.charCodeAt(0) !== 95 /* `_` */) {
     return registryMap.get(name);
@@ -111,10 +118,15 @@ export function defineEager(
 
 /**
  * Initialize the registry with all native function implementations.
+ *
+ * Internal + lazy: invoked by `lookupFunction` on first use, never at module
+ * load. This keeps `function-registry` free of top-level side effects so the
+ * native function table is only pulled into bundles that actually evaluate
+ * formulas (the `Formula.calculate` path), not those that merely tokenize/parse.
  */
 let initialized = false;
 
-export function ensureRegistryInitialized(): void {
+function ensureRegistryInitialized(): void {
   if (initialized) {
     return;
   }
@@ -1367,6 +1379,3 @@ function registerNativeDatabaseFunctions(): void {
   defineEager("DVAR", 3, 3, fnDVAR);
   defineEager("DVARP", 3, 3, fnDVARP);
 }
-
-// Auto-initialize on import
-ensureRegistryInitialized();

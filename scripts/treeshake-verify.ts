@@ -63,6 +63,13 @@ interface Scenario {
    * on-demand chunk, not the entry a consumer pays for upfront.
    */
   lazySplit?: boolean;
+  /**
+   * Optional expression that *uses* the imports, overriding the default
+   * `console.log(<imports>)`. Use to assert member-level tree-shaking — e.g.
+   * `console.log(Formula.tokenize)` must not retain the evaluator/functions
+   * that other `Formula` members reach.
+   */
+  useExpr?: string;
 }
 
 /** Shorthand for creating a scenario */
@@ -203,6 +210,38 @@ const scenarios: Scenario[] = [
   ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"]), // zlib + PDF metadata XML
 
   // ===========================================================================
+  // /formula member-level — the 433-function evaluator must NOT be pulled by
+  // the light syntax-only members. Guards the `function-registry` lazy-init
+  // fix (no top-level `ensureRegistryInitialized()` side effect): a consumer
+  // who only tokenizes/parses must never bundle the evaluator or functions.
+  //
+  // esbuild is excluded: it does not tree-shake individual members off a
+  // re-exported `* as Namespace` object as aggressively as the target bundlers
+  // (rolldown / rspack), so it retains the whole `Formula` member graph. The
+  // contract that matters — proven green on rolldown AND rspack — is that the
+  // SOURCE has no eager coupling forcing the evaluator into a tokenize-only
+  // consumer.
+  // ===========================================================================
+  {
+    name: "/formula: Formula.tokenize (no evaluator/functions)",
+    importFrom: `${PKG_NAME}/formula`,
+    imports: ["Formula"],
+    useExpr: "console.log(Formula.tokenize)",
+    mustNotInclude: ["modules/formula/runtime/", "modules/formula/functions/"],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+  {
+    name: "/formula: Formula.parse (no evaluator/functions)",
+    importFrom: `${PKG_NAME}/formula`,
+    imports: ["Formula"],
+    useExpr: "console.log(Formula.parse)",
+    mustNotInclude: ["modules/formula/runtime/", "modules/formula/functions/"],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+
+  // ===========================================================================
   // Browser platform — ALL namespaces re-verified on the browser entries.
   // ===========================================================================
   ns("excel", "Address", [], "browser"),
@@ -313,7 +352,8 @@ interface ScenarioResult {
 
 function makeEntryCode(scenario: Scenario): string {
   const names = scenario.imports.join(", ");
-  return `import { ${names} } from "${scenario.importFrom}";\nconsole.log(${names});`;
+  const use = scenario.useExpr ?? `console.log(${names})`;
+  return `import { ${names} } from "${scenario.importFrom}";\n${use};`;
 }
 
 function normalizePath(filePath: string): string {

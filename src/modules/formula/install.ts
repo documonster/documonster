@@ -1,29 +1,27 @@
 /**
- * Opt-in engine installer.
+ * Opt-in syntax-probe installer.
  *
- * This file carries the imports that wire a concrete formula engine and
- * a tokenizer+parser probe into the excel host. Keep these imports
- * isolated in a separate module so callers who import only the
- * tokenizer, parser, or the functional `calculateFormulas` API from
- * `./index` never trigger this module — and its evaluator + function
- * registry — at bundle time.
+ * This file carries the imports that wire a concrete tokenizer+parser probe
+ * into the process-global default-syntax-probe slot. Keep these imports
+ * isolated in a separate module so callers who import only the tokenizer,
+ * parser, or the functional `calculateFormulas` API from `./index` never
+ * trigger this module at bundle time.
  *
- * Two process-wide slots are populated:
+ * One process-wide slot is populated:
  *
- * 1. The formula-engine slot (`@formula/host-registry`) — enables
- *    `Workbook.calculateFormulas()` and the PDF bridge's automatic
- *    recalculation.
+ *   The default syntax-probe slot (`./default-syntax-probe`) — enables strict
+ *   classification of defined-name text (formula vs. opaque) during XLSX load.
+ *   Without this, `DefinedNames` preserves unrecognised text verbatim as
+ *   opaque, which is correct for round-trip but cannot evaluate.
  *
- * 2. The default syntax-probe slot (`@excel/default-syntax-probe`) —
- *    enables strict classification of defined-name text (formula vs.
- *    opaque) during XLSX load. Without this, `DefinedNames` preserves
- *    unrecognised text verbatim as opaque, which is correct for
- *    round-trip but cannot evaluate.
- *
- * Both slots accept `null` to uninstall. See `createFormulaSyntaxProbe`
- * for constructing a probe without touching the process-global slot
- * (useful for tests and for per-Workbook injection via
+ * The slot accepts `null` to uninstall. See `createFormulaSyntaxProbe` for
+ * constructing a probe without touching the process-global slot (useful for
+ * tests and for per-Workbook injection via
  * `new Workbook({ formulaSyntaxProbe })`).
+ *
+ * Note: there is NO formula-engine "host registry". `Workbook.calculateFormulas`
+ * and the PDF bridge call the functional `calculateFormulas` API directly —
+ * no install step or global engine slot is involved.
  */
 
 import { setDefaultSyntaxProbe, type SyntaxProbe } from "./default-syntax-probe";
@@ -56,29 +54,26 @@ export function createFormulaSyntaxProbe(): SyntaxProbe {
 }
 
 /**
- * Install the formula engine and the default syntax probe into the
- * excel host.
+ * Install the default syntax probe (backed by the real tokenizer+parser)
+ * into the process-global slot.
  *
- * After calling this once, `Workbook.calculateFormulas()` and the PDF
- * bridge's automatic recalculation run the full 433-function engine
- * instead of throwing / using stale cached values, and every
- * subsequently-loaded workbook's defined-name classification uses the
- * real tokenizer+parser instead of the conservative "opaque" fallback.
+ * After calling this once, every subsequently-loaded workbook's defined-name
+ * classification uses the real tokenizer+parser instead of the conservative
+ * "opaque" fallback. This does NOT wire any formula engine: `calculateFormulas`
+ * already works standalone via the functional API.
  *
- * Safe to call more than once — the registry accepts the last
- * registration.
+ * Safe to call more than once — the slot accepts the last registration.
  */
 export function installFormulaEngine(): void {
   setDefaultSyntaxProbe(createFormulaSyntaxProbe());
 }
 
 /**
- * Uninstall both slots, restoring the cold-start state.
+ * Uninstall the syntax-probe slot, restoring the cold-start state.
  *
- * Mainly useful for tests that need to exercise the "no engine" /
- * "no probe" classification path. In production, calling this is
- * rarely necessary — subsequent `installFormulaEngine()` calls simply
- * overwrite the previous registration.
+ * Mainly useful for tests that need to exercise the "no probe" classification
+ * path. In production, calling this is rarely necessary — subsequent
+ * `installFormulaEngine()` calls simply overwrite the previous registration.
  */
 export function uninstallFormulaEngine(): void {
   setDefaultSyntaxProbe(null);
