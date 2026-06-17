@@ -36,10 +36,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { cellSetFont, cellSetValue } from "@excel/cell";
-import { type ChartRichText, installChartSupport } from "@excel/chart/index";
+import type { ChartRichText } from "@excel/chart/index";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
 import { tableModel } from "@excel/table";
+import { addPivotChartsheet, getChartsheets, getWorksheets } from "@excel/workbook";
 import {
   addConditionalFormatting,
   addFunnelChart,
@@ -60,10 +61,6 @@ import {
   rowSetValues
 } from "@excel/worksheet";
 import { excelToPdf } from "@pdf/excel-bridge";
-
-installChartSupport();
-
-import { addPivotChartsheet, getChartsheets, getWorksheets } from "@excel/workbook";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 mkdirSync(OUT_DIR, { recursive: true });

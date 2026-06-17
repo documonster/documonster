@@ -21,8 +21,7 @@
  */
 
 import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/index";
+import { Chart, Workbook } from "@excel/index";
 import { getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -34,8 +33,6 @@ import {
   type SyntheticFixture
 } from "./helpers/synthetic-fixtures";
 import { bytesEqual, entryText, loadRoundTripDiff } from "./helpers/zip-text";
-
-installChartSupport();
 
 let classicFixtures: SyntheticFixture[];
 let chartExFixtures: SyntheticFixture[];
@@ -134,7 +131,7 @@ describe("Chart mutation round-trip", () => {
       const { before, after } = await loadRoundTripDiff(firstFixture.bytes, wb => {
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length).toBeGreaterThan(0);
-        charts[0].title = "Mutated Title via Round-Trip";
+        Chart.setTitle(charts[0], "Mutated Title via Round-Trip");
       });
 
       expectMarkersAndExtLstPreserved(firstFixture, before, after);
@@ -152,10 +149,10 @@ describe("Chart mutation round-trip", () => {
             return;
           }
           const chart = charts[0];
-          if (!chart.chartModel) {
+          if (!Chart.chartModel(chart)) {
             return;
           }
-          chart.mutate(model => {
+          Chart.mutate(chart, model => {
             // Toggle a benign field that re-renders the structured chart
             // XML without mutating sidecar parts.
             model.chart.autoTitleDeleted = false;
@@ -170,7 +167,8 @@ describe("Chart mutation round-trip", () => {
       const fixture = fixtures.find(f => f.id === "classic-line")!;
       const { before, after } = await loadRoundTripDiff(fixture.bytes, wb => {
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-        chart.mutate(
+        Chart.mutate(
+          chart,
           model => {
             model.chart.autoTitleDeleted = false;
           },
@@ -189,7 +187,7 @@ describe("Chart mutation round-trip", () => {
         await Workbook.loadXlsx(wb, bytes);
         // Touch title each pass so structured renderer must run.
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-        chart.title = `Pass ${i + 1}`;
+        Chart.setTitle(chart, `Pass ${i + 1}`);
         bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
         await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
         const entries = await extractAll(bytes);
@@ -210,10 +208,10 @@ describe("Chart mutation round-trip", () => {
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const chart = charts[0];
-        if (!chart.chartExModel) {
+        if (!Chart.chartExModel(chart)) {
           continue;
         }
-        chart.mutateChartEx(model => {
+        Chart.mutateChartEx(chart, model => {
           // Mutating any structured field invalidates rawXml so the writer
           // must round-trip via the structured renderer; this is the path
           // most likely to drop the marker if the renderer regresses.
@@ -255,7 +253,7 @@ describe("Chart mutation round-trip", () => {
       const wb = Workbook.create();
       await Workbook.loadXlsx(wb, fixture.bytes);
       const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-      chart.title = "LO-mutated title";
+      Chart.setTitle(chart, "LO-mutated title");
       const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
       await expectValidXlsx(out, { label: "mutated-classic-LO" });
       const result = await runLibreOfficeOpenValidationAuto(out, "mutated-classic.xlsx");
@@ -276,10 +274,10 @@ describe("Chart mutation round-trip", () => {
         const wb = Workbook.create();
         await Workbook.loadXlsx(wb, fixture.bytes);
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-        if (!chart?.chartExModel) {
+        if (!Chart.chartExModel(chart)) {
           continue;
         }
-        chart.mutateChartEx(model => {
+        Chart.mutateChartEx(chart, model => {
           const title = model.chartSpace.chart.title;
           if (title) {
             title.overlay = !title.overlay;

@@ -1,3 +1,6 @@
+// Type-only imports for the WorksheetData record shape. These are erased at
+// compile time and never create a runtime dependency.
+import type { AnchorData } from "@excel/anchor";
 /**
  * worksheet-core — the low-level Worksheet container layer.
  *
@@ -41,9 +44,6 @@ import {
   cellSetValue,
   cellType
 } from "@excel/cell";
-// Type-only imports for the WorksheetData record shape. These are erased at
-// compile time and never create a runtime dependency.
-import type { Chart } from "@excel/chart/chart";
 import {
   type ColumnData,
   type ColumnDefn,
@@ -120,6 +120,36 @@ export interface SheetProtection {
 }
 
 /**
+ * The range a chart occupies on a worksheet (resolved anchor form).
+ */
+export interface ChartAnchorRange {
+  /** Top-left anchor (always present) */
+  tl: AnchorData;
+  /** Bottom-right anchor (only for twoCellAnchor) */
+  br?: AnchorData;
+  /** Absolute position in EMU (only for absoluteAnchor) */
+  pos?: { x: number; y: number };
+  /** Extent in EMU (for oneCellAnchor and absoluteAnchor) */
+  ext?: { cx: number; cy: number };
+  /** Anchor behaviour: oneCell, twoCell, or absolute */
+  editAs?: string;
+}
+
+/**
+ * Plain-data chart handle. Carries the owning worksheet, the 1-based classic
+ * `chartNumber` (0 for chartEx) / `chartExNumber` (0 for classic), and the
+ * resolved anchor range. Stored in `WorksheetData._charts`; all chart
+ * operations are free `chart*` functions in the chart module taking this
+ * record as the first argument.
+ */
+export interface ChartHandle {
+  readonly worksheet: WorksheetData;
+  chartNumber: number;
+  chartExNumber: number;
+  range: ChartAnchorRange;
+}
+
+/**
  * Plain-data worksheet record. The full state of a worksheet — no class. All
  * operations are free functions (container ops here, feature ops in
  * `worksheet.ts`).
@@ -144,7 +174,7 @@ export interface WorksheetData {
   autoFilter: AutoFilter | null;
   _media: ImageData[];
   _shapes: ShapeModel[];
-  _charts: Chart[];
+  _charts: ChartHandle[];
   _sparklineGroups: SparklineGroup[];
   sheetProtection: SheetProtection | null;
   tables: { [key: string]: TableData };
@@ -708,7 +738,7 @@ export function rowSplice(r: RowData, start: number, count: number, ...inserts: 
 }
 
 export function rowCommit(r: RowData): void {
-  _commitRow(r.worksheet, r as unknown as never);
+  _commitRow(r.worksheet, r);
 }
 // =============================================================================
 // Row addition / style propagation (worksheet container mutations)
@@ -765,4 +795,19 @@ export function addRows(ws: WorksheetData, value: RowValues[], style: string = "
     rows.push(addRow(ws, row, style));
   });
   return rows;
+}
+
+/**
+ * Look up a table on the worksheet by name. Pure data accessor over the
+ * `tables` record — kept in the core layer (not `worksheet.ts`) so the chart
+ * module can read table ranges without forming a `worksheet → chart →
+ * worksheet` import cycle.
+ */
+export function getTable(ws: WorksheetData, name: string): TableData {
+  return ws.tables[name];
+}
+
+/** All tables defined on the worksheet. See {@link getTable} for the layering rationale. */
+export function getTables(ws: WorksheetData): TableData[] {
+  return Object.values(ws.tables);
 }

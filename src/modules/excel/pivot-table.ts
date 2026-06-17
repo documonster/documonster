@@ -527,16 +527,11 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
   if (!model.sourceSheet) {
     throw new Error("Either sourceSheet or sourceTable must be provided.");
   }
-  // A de-classed worksheet (WorksheetData record) has no methods; wrap it in a
-  // PivotTableSource adapter that delegates to the flat worksheet functions.
-  const src = model.sourceSheet as unknown as { _rows?: unknown };
-  if (
-    src &&
-    typeof src === "object" &&
-    "_rows" in src &&
-    typeof (model.sourceSheet as { getRow?: unknown }).getRow !== "function"
-  ) {
-    const ws = model.sourceSheet as unknown as WorksheetData;
+  // A de-classed worksheet (WorksheetData record) is identified structurally
+  // by its `_rows` field; a pre-built PivotTableSource adapter has none.
+  const sourceSheet = model.sourceSheet;
+  if ("_rows" in sourceSheet) {
+    const ws = sourceSheet;
     return {
       name: getSheetName(ws),
       getRow: (rowNumber: number) => getRow(ws, rowNumber),
@@ -547,7 +542,7 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
       }
     };
   }
-  return model.sourceSheet as PivotTableSource;
+  return sourceSheet;
 }
 
 /** Bounding range of populated cells in a worksheet record (avoids importing the heavy worksheet module). */

@@ -13,10 +13,9 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
-import { Workbook, Worksheet } from "@excel/index";
+import { Chart, Workbook, Worksheet } from "@excel/index";
 import { addChart, getCharts, removeChart } from "@excel/worksheet";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { entryText, loadRoundTrip, type EntryMap } from "./helpers/zip-text";
@@ -53,10 +52,6 @@ async function buildMultiChartWorkbook(count: number): Promise<Uint8Array> {
 function listChartParts(entries: EntryMap): string[] {
   return [...entries.keys()].filter(p => /^xl\/charts\/chart\d+[.]xml$/.test(p)).sort();
 }
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("Chart edge cases", () => {
   describe("removal cleans up package state", () => {
@@ -132,7 +127,7 @@ describe("Chart edge cases", () => {
       // High-level model: 5 charts, original add order preserved.
       const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
       expect(charts.length).toBe(5);
-      const titles = charts.map(c => c.title);
+      const titles = charts.map(c => Chart.title(c));
       expect(titles).toEqual(["Chart #1", "Chart #2", "Chart #3", "Chart #4", "Chart #5"]);
 
       // The drawing XML lists anchors in the same order. Each anchor
@@ -166,7 +161,7 @@ describe("Chart edge cases", () => {
       let bytes = await buildMultiChartWorkbook(5);
       for (let pass = 0; pass < 3; pass++) {
         const { wb } = await loadRoundTrip(bytes);
-        const titles = getCharts(Workbook.getWorksheet(wb, "Data")!).map(c => c.title);
+        const titles = getCharts(Workbook.getWorksheet(wb, "Data")!).map(c => Chart.title(c));
         expect(titles, `pass ${pass + 1}`).toEqual([
           "Chart #1",
           "Chart #2",
@@ -209,16 +204,16 @@ describe("Chart edge cases", () => {
         const wb2 = Workbook.create();
         await Workbook.loadXlsx(wb2, bytes);
         const chart = getCharts(Workbook.getWorksheet(wb2, "Data")!)[0];
-        expect(chart.title, "loaded title").toBe(title);
+        expect(Chart.title(chart), "loaded title").toBe(title);
         // Force structured re-render by touching title with the same value.
-        chart.title = title;
+        Chart.setTitle(chart, title);
         const out = new Uint8Array(await Workbook.toXlsxBuffer(wb2));
         await expectValidXlsx(out);
 
         const wb3 = Workbook.create();
         await Workbook.loadXlsx(wb3, out);
         const reloaded = getCharts(Workbook.getWorksheet(wb3, "Data")!)[0];
-        expect(reloaded.title, "reloaded title after structured rebuild").toBe(title);
+        expect(Chart.title(reloaded), "reloaded title after structured rebuild").toBe(title);
       }
     );
   });

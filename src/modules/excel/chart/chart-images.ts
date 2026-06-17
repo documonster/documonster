@@ -16,10 +16,10 @@
 
 import { type WorkbookData, addWorkbookImage, getImage } from "@excel/workbook-core";
 
-import type { ChartEntry } from "./chart.ts";
 import type {
   AddChartPictureFillImage,
   ChartBlipFill,
+  ChartEntry,
   ChartFill,
   ChartModel,
   ChartPictureFillImageData,

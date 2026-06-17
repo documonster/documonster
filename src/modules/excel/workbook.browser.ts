@@ -10,14 +10,17 @@
  * - streaming: createStreamWriter/createStreamReader for large files
  */
 
-// Chart runtime accessed through the host-registry slot; see
-// `chart-host-registry.ts` and `chart/install.ts`. Keeps chart code
-// out of consumer bundles when they don't import
-// `@cj-tech-master/excelts/chart`.
-import { getChartSupport } from "@excel/chart-host-registry";
-import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
-import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
-import type { AddComboChartOptions, ChartModel } from "@excel/chart/types";
+// Chart runtime is imported statically. The chart modules depend only on the
+// `*-core` data layer (never on this file), so there is no import cycle, and
+// the bundler tree-shakes the whole chart tree out of consumer bundles that
+// never create or serialise a chart.
+import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator";
+import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
+import { buildChartExModel } from "@excel/chart/chart-ex-builder";
+import type { AddChartExOptions, ChartExEntry, ChartExModel } from "@excel/chart/chart-ex-types";
+import { resolvePendingChartImages } from "@excel/chart/chart-images";
+import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
+import type { AddComboChartOptions, ChartEntry, ChartModel } from "@excel/chart/types";
 import {
   chartsheetModel,
   createChartsheet,
@@ -57,8 +60,10 @@ import {
   addChartExStructuredEntry,
   getChartEntry,
   getChartExStructuredEntry,
-  getImage,
-  addWorkbookImage,
+  getWorksheet,
+  getWorksheets,
+  copyChartSidecars,
+  copyChartExSidecars,
   nextChartExNumber,
   nextChartNumber,
   removeChartEntry,
@@ -77,7 +82,6 @@ import {
   getSheetWorkbook,
   setSheetModel
 } from "@excel/worksheet";
-import { RelType } from "@excel/xlsx/rel-type";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { SyntaxProbe } from "@formula/default-syntax-probe";
 
@@ -490,22 +494,6 @@ export function removeWorksheet(wb: WorkbookData, id: number | string): void {
   }
 }
 
-export function getWorksheet(wb: WorkbookData, id?: number | string): Worksheet | undefined {
-  if (id === undefined) {
-    return wb._worksheets.find(Boolean);
-  }
-  if (typeof id === "number") {
-    return wb._worksheets[id];
-  }
-  if (typeof id === "string") {
-    const idLower = id.toLowerCase();
-    return wb._worksheets.find(
-      worksheet => worksheet && getSheetName(worksheet).toLowerCase() === idLower
-    );
-  }
-  return undefined;
-}
-
 export function addChartsheet(
   wb: WorkbookData,
   name: string | undefined,
@@ -536,24 +524,22 @@ export function addChartsheet(
   };
 
   if (isChartExOptions(options.chart)) {
-    const chartSupport = getChartSupport();
     const chartExNumber = nextChartExNumber(wb);
-    const model = chartSupport.buildChartExModel(options.chart);
+    const model = buildChartExModel(options.chart);
     try {
-      chartSupport.fillChartExCaches(model, wb as any);
+      fillChartExCaches(model, wb as any);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
     addChartExStructuredEntry(wb, { chartExNumber, model });
     chartsheet.chartExNumber = chartExNumber;
   } else {
-    const chartSupport = getChartSupport();
     const chartNumber = nextChartNumber(wb);
     const chartModel = isComboChartOptions(options.chart)
-      ? chartSupport.buildComboChartModel(options.chart)
-      : chartSupport.buildChartModel(options.chart);
+      ? buildComboChartModel(options.chart)
+      : buildChartModel(options.chart);
     try {
-      chartSupport.fillChartCaches(chartModel, wb as any);
+      fillChartCaches(chartModel, wb as any);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
@@ -570,7 +556,7 @@ export function addChartsheet(
     // `addChartEntry` so the stored entry carries its resolved
     // `entry.rels` from the start.
     try {
-      chartSupport.resolvePendingChartImages(entry, wb as any, chartNumber);
+      resolvePendingChartImages(entry, wb as any, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload
       // should never take down chart creation — the series keeps
@@ -727,7 +713,6 @@ export function replaceChartsheetChart(
     return false;
   }
   const model = chartsheetModel(wrapper);
-  const chartSupport = getChartSupport();
   // Build the replacement first so a malformed options object throws
   // *before* we remove the existing chart entry. Without this, a
   // failed `buildChartExModel` / `buildChartModel` would leave the
@@ -735,11 +720,11 @@ export function replaceChartsheetChart(
   let newChartExModel: ChartExModel | undefined;
   let newChartModel: ChartModel | undefined;
   if (isChartExOptions(chart)) {
-    newChartExModel = chartSupport.buildChartExModel(chart);
+    newChartExModel = buildChartExModel(chart);
   } else if (isComboChartOptions(chart)) {
-    newChartModel = chartSupport.buildComboChartModel(chart);
+    newChartModel = buildComboChartModel(chart);
   } else {
-    newChartModel = chartSupport.buildChartModel(chart);
+    newChartModel = buildChartModel(chart);
   }
   // Remove existing entries only after the new model builds cleanly.
   if (model.chartNumber) {
@@ -753,7 +738,7 @@ export function replaceChartsheetChart(
   if (newChartExModel) {
     const chartExNumber = nextChartExNumber(wb);
     try {
-      chartSupport.fillChartExCaches(newChartExModel, wb as any);
+      fillChartExCaches(newChartExModel, wb as any);
     } catch {
       // Cache population is best-effort; never let it break chart replacement.
     }
@@ -762,7 +747,7 @@ export function replaceChartsheetChart(
   } else if (newChartModel) {
     const chartNumber = nextChartNumber(wb);
     try {
-      chartSupport.fillChartCaches(newChartModel, wb as any);
+      fillChartCaches(newChartModel, wb as any);
     } catch {
       // Cache population is best-effort; never let it break chart replacement.
     }
@@ -772,7 +757,7 @@ export function replaceChartsheetChart(
     // paths. Previously replacement via `replaceChartsheetChart`
     // silently dropped picture-fill payloads on the floor.
     try {
-      chartSupport.resolvePendingChartImages(entry, wb as any, chartNumber);
+      resolvePendingChartImages(entry, wb as any, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload
       // should never take down chart replacement.
@@ -841,181 +826,6 @@ export function clearThemes(wb: WorkbookData): void {
   wb._themes = undefined;
 }
 
-export function copyChartSidecars(
-  wb: WorkbookData,
-  sourceChartNumber: number,
-  targetChartNumber: number,
-  targetWorkbook: WorkbookData = wb
-): void {
-  const style = wb._chartStyles[sourceChartNumber];
-  if (style) {
-    setChartStyle(targetWorkbook, targetChartNumber, style.slice());
-  }
-  const colors = wb._chartColors[sourceChartNumber];
-  if (colors) {
-    setChartColors(targetWorkbook, targetChartNumber, colors.slice());
-  }
-  // Copy the full chart rels bag (`_chartRels`), not just the
-  // style/colors pair. A classic chart can carry rels to embedded
-  // images (pictureFill), external data links, and `<c:userShapes>`
-  // drawing parts — without copying those the clone ends up with
-  // dangling rIds. Deep-copy each rel so a later mutation on the
-  // source doesn't leak into the clone.
-  //
-  // Rewrite style/colors Targets to the destination chart number —
-  // verbatim copy would leave the rel pointing at the source's
-  // `style{src}.xml`, while the writer emits `style{dst}.xml` and
-  // produces a chart whose .rels references a non-existent file.
-  //
-  // For image rels on a cross-workbook copy (`targetWorkbook !==
-  // this`), re-register each referenced image in the destination
-  // workbook and rewrite the Target to point at the new media
-  // file. Without this, a pictureFill that round-tripped through
-  // `importSheet` pointed at the source workbook's media array —
-  // which the destination package doesn't ship, so Excel shows a
-  // broken image icon.
-  const srcRels = wb._chartRels[sourceChartNumber];
-  if (Array.isArray(srcRels) && srcRels.length > 0) {
-    const crossWorkbook = targetWorkbook !== wb;
-    targetWorkbook._chartRels[targetChartNumber] = srcRels.map(rel => {
-      if (typeof rel !== "object" || rel === null) {
-        return rel;
-      }
-      const cloned = { ...rel } as { Type?: string; Target?: string; [k: string]: unknown };
-      const target = typeof cloned.Target === "string" ? cloned.Target : undefined;
-      if (target) {
-        if (/^style\d+\.xml$/.test(target)) {
-          cloned.Target = `style${targetChartNumber}.xml`;
-        } else if (/^colors\d+\.xml$/.test(target)) {
-          cloned.Target = `colors${targetChartNumber}.xml`;
-        } else if (crossWorkbook && cloned.Type === RelType.Image) {
-          const rewritten = _rewriteCrossWorkbookImageTarget(wb, target, targetWorkbook);
-          if (rewritten !== undefined) {
-            cloned.Target = rewritten;
-          }
-        }
-      }
-      return cloned;
-    });
-  }
-}
-
-export function _rewriteCrossWorkbookImageTarget(
-  wb: WorkbookData,
-  target: string,
-  targetWorkbook: Workbook
-): string | undefined {
-  const match = /\/media\/image(\d+)\.([a-zA-Z0-9]+)$/.exec(target);
-  if (!match) {
-    return undefined;
-  }
-  const sourceMediaIndex = parseInt(match[1], 10) - 1;
-  if (!Number.isFinite(sourceMediaIndex) || sourceMediaIndex < 0) {
-    return undefined;
-  }
-  const medium = getImage(wb, sourceMediaIndex) as
-    | { extension?: string; buffer?: Uint8Array; base64?: string }
-    | undefined;
-  if (!medium) {
-    return undefined;
-  }
-  const ext = medium.extension as "png" | "jpeg" | "gif" | undefined;
-  if (ext !== "png" && ext !== "jpeg" && ext !== "gif") {
-    return undefined;
-  }
-  const payload: { extension: "png" | "jpeg" | "gif"; buffer?: Uint8Array; base64?: string } = {
-    extension: ext
-  };
-  // `instanceof Uint8Array` is realm-sensitive: buffers that crossed
-  // a Worker / iframe / `structuredClone` boundary carry a different
-  // `Uint8Array` prototype and fail the operator even though they
-  // are byte-granular typed arrays. Duck-type via `ArrayBuffer.isView`
-  // + `BYTES_PER_ELEMENT === 1` so cross-workbook copies from a
-  // worker-loaded Workbook preserve the image bytes; otherwise the
-  // copy path silently falls through to `return undefined`, dropping
-  // every image from the chart. Matches `chart-images.ts`'s handling
-  // of the same realm-crossing issue.
-  const buf = medium.buffer as ArrayBufferView | undefined;
-  if (
-    buf &&
-    ArrayBuffer.isView(buf) &&
-    (buf as unknown as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
-  ) {
-    payload.buffer =
-      buf instanceof Uint8Array
-        ? buf.slice()
-        : new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-  } else if (typeof medium.base64 === "string") {
-    payload.base64 = medium.base64;
-  } else {
-    return undefined;
-  }
-  const newId = addWorkbookImage(targetWorkbook, payload);
-  return `../media/image${newId + 1}.${ext}`;
-}
-
-export function copyChartExSidecars(
-  wb: WorkbookData,
-  sourceChartExNumber: number,
-  targetChartExNumber: number,
-  targetWorkbook: WorkbookData = wb
-): void {
-  const rels = wb._chartExRels[sourceChartExNumber];
-  if (rels && rels.length > 0) {
-    // Rewrite `Target` for rels that point at numbered sidecars
-    // (styleEx / colorsEx / userShapes). Those files get different
-    // on-disk numbers on the clone — copying the rel verbatim
-    // leaves it pointing at the source's sidecar, so saving the
-    // package produces a chartEx whose .rels references
-    // `styleEx{src}.xml` while the writer emits `styleEx{dst}.xml`.
-    // Strip the number from the source Target and re-stamp it with
-    // the target's number.
-    //
-    // For image rels on a cross-workbook copy (`targetWorkbook !==
-    // this`), re-register each referenced image in the destination
-    // workbook and rewrite the Target — same logic as classic chart
-    // sidecars. Without this, a ChartEx with embedded images (e.g.
-    // pictureFill or custom geometry) would reference media that
-    // doesn't exist in the destination package.
-    const crossWorkbook = targetWorkbook !== wb;
-    targetWorkbook._chartExRels[targetChartExNumber] = rels.map(r => {
-      if (typeof r !== "object" || r === null) {
-        return r;
-      }
-      const cloned = { ...r };
-      const target: string | undefined =
-        typeof cloned.Target === "string" ? cloned.Target : undefined;
-      if (target) {
-        const styleExMatch = /^styleEx\d+\.xml$/.exec(target);
-        if (styleExMatch) {
-          cloned.Target = `styleEx${targetChartExNumber}.xml`;
-        } else if (/^colorsEx\d+\.xml$/.exec(target)) {
-          cloned.Target = `colorsEx${targetChartExNumber}.xml`;
-        } else if (crossWorkbook && cloned.Type === RelType.Image) {
-          const rewritten = _rewriteCrossWorkbookImageTarget(wb, target, targetWorkbook);
-          if (rewritten !== undefined) {
-            cloned.Target = rewritten;
-          }
-        }
-      }
-      return cloned;
-    });
-  }
-  // ChartEx style / colors sidecars (matching `_chartStyles` /
-  // `_chartColors` for classic charts). Previously only `_chartExRels`
-  // was copied — a cloned chartEx lost its authored chartExStyle and
-  // chartExColors bytes, so the saved package re-derived them from
-  // defaults and the clone looked different from the source.
-  const exStyle = wb._chartExStyles[sourceChartExNumber];
-  if (exStyle) {
-    targetWorkbook._chartExStyles[targetChartExNumber] = exStyle.slice();
-  }
-  const exColors = wb._chartExColors[sourceChartExNumber];
-  if (exColors) {
-    targetWorkbook._chartExColors[targetChartExNumber] = exColors.slice();
-  }
-}
-
 export function _applyChartsheetSidecars(
   wb: WorkbookData,
   chartNumber: number,
@@ -1027,19 +837,18 @@ export function _applyChartsheetSidecars(
   if (!chartOptions.chartStyle && !chartOptions.chartColors) {
     return;
   }
-  const chartSupport = getChartSupport();
   if (chartOptions.chartStyle) {
     setChartStyle(
       wb,
       chartNumber,
-      new TextEncoder().encode(chartSupport.buildChartStyle(chartOptions.chartStyle))
+      new TextEncoder().encode(buildChartStyle(chartOptions.chartStyle))
     );
   }
   if (chartOptions.chartColors) {
     setChartColors(
       wb,
       chartNumber,
-      new TextEncoder().encode(chartSupport.buildChartColors(chartOptions.chartColors))
+      new TextEncoder().encode(buildChartColors(chartOptions.chartColors))
     );
   }
 }
@@ -1213,13 +1022,6 @@ export function getNextId(wb: WorkbookData): number {
     candidate++;
   }
   return candidate;
-}
-
-export function getWorksheets(wb: WorkbookData): Worksheet[] {
-  return wb._worksheets
-    .slice(1)
-    .sort((a, b) => a.orderNo - b.orderNo)
-    .filter(Boolean);
 }
 
 export function getChartsheets(wb: WorkbookData): ChartsheetData[] {
@@ -1476,5 +1278,9 @@ export {
   validateSheetName,
   removeWorksheetEx,
   setChartStyle,
-  setChartColors
+  setChartColors,
+  getWorksheet,
+  getWorksheets,
+  copyChartSidecars,
+  copyChartExSidecars
 } from "@excel/workbook-core";

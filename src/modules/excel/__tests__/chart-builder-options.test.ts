@@ -23,24 +23,19 @@ import {
   parseChartStyle,
   buildChartScene
 } from "@excel/chart";
-import { installChartSupport } from "@excel/chart/install";
 import {
   definedNamesAdd,
   definedNamesAddFormula,
   definedNamesSetModel
 } from "@excel/defined-names";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { getDefinedNames } from "@excel/workbook";
 import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/worksheet";
-import { beforeAll, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import { CATEGORIES, VALUES_B, baseSeries, ctg, pa } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("trendline array", () => {
   it("single trendline option produces one trendline", () => {
@@ -102,7 +97,7 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const scene = buildChartScene(model, { width: 420, height: 260 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
@@ -137,7 +132,7 @@ describe("trendline array", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const scene = buildChartScene(model, { width: 400, height: 300 });
     const scatterSeries = scene.series[0] as {
       trendlines?: Array<{ points: Array<{ x: number; y: number }> }>;
@@ -260,9 +255,9 @@ describe("Chart class convenience methods", () => {
     Cell.setValue(ws, "A1", "data");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(chart.plotArea).toBeDefined();
-    expect(chart.plotArea!.chartTypes).toHaveLength(1);
-    expect(chart.plotArea!.axes.length).toBeGreaterThan(0);
+    expect(Chart.plotArea(chart)).toBeDefined();
+    expect(Chart.plotArea(chart)!.chartTypes).toHaveLength(1);
+    expect(Chart.plotArea(chart)!.axes.length).toBeGreaterThan(0);
   });
 
   it("addSeries adds to first chart type group", () => {
@@ -271,14 +266,14 @@ describe("Chart class convenience methods", () => {
     Cell.setValue(ws, "A1", "data");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(chart.getSeriesCount(0)).toBe(1);
-    chart.addSeries({
+    expect(Chart.getSeriesCount(chart, 0)).toBe(1);
+    Chart.addSeries(chart, {
       index: 1,
       order: 1,
       cat: { numRef: { f: CATEGORIES } },
       val: { numRef: { f: VALUES_B } }
     } as any);
-    expect(chart.getSeriesCount(0)).toBe(2);
+    expect(Chart.getSeriesCount(chart, 0)).toBe(2);
   });
 
   it("removeSeries removes by index", () => {
@@ -287,10 +282,10 @@ describe("Chart class convenience methods", () => {
     Cell.setValue(ws, "A1", "data");
     addChart(ws, { type: "bar", series: [baseSeries("S1"), baseSeries("S2", VALUES_B)] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(chart.getSeriesCount(0)).toBe(2);
-    const removed = chart.removeSeries(0);
+    expect(Chart.getSeriesCount(chart, 0)).toBe(2);
+    const removed = Chart.removeSeries(chart, 0);
     expect(removed).toBeDefined();
-    expect(chart.getSeriesCount(0)).toBe(1);
+    expect(Chart.getSeriesCount(chart, 0)).toBe(1);
   });
 
   it("removeSeries returns undefined for out-of-range index", () => {
@@ -299,8 +294,8 @@ describe("Chart class convenience methods", () => {
     Cell.setValue(ws, "A1", "data");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(chart.removeSeries(5)).toBeUndefined();
-    expect(chart.removeSeries(-1)).toBeUndefined();
+    expect(Chart.removeSeries(chart, 5)).toBeUndefined();
+    expect(Chart.removeSeries(chart, -1)).toBeUndefined();
   });
 
   it("combo chart dataTable in builder", () => {
@@ -482,7 +477,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "bar", series: [baseSeries("Sales")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
 
     expect(series.val.numRef.cache.points).toHaveLength(4);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 100 });
@@ -505,7 +500,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "line", series: [baseSeries("S")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.cat.strRef.cache.points).toHaveLength(4);
     expect(series.cat.strRef.cache.points[0]).toEqual({ index: 0, value: "Jan" });
     expect(series.cat.strRef.cache.points[3]).toEqual({ index: 3, value: "Apr" });
@@ -525,7 +520,7 @@ describe("automatic chart cache population", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S")] }, "C1:J10");
 
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     const numPoints = series.val.numRef.cache.points;
     // pointCount should include total slots
     expect(series.val.numRef.cache.pointCount).toBe(4);
@@ -557,7 +552,7 @@ describe("automatic chart cache population", () => {
       "A1:H10"
     );
     const chart = getCharts(chartWs)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 1 });
   });
@@ -583,7 +578,7 @@ describe("automatic chart cache population", () => {
       "A1:H10"
     );
     const chart = getCharts(chartWs)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(2);
   });
 
@@ -616,7 +611,7 @@ describe("automatic chart cache population", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.xVal.numRef.cache.points).toHaveLength(3);
     expect(series.yVal.numRef.cache.points).toHaveLength(3);
     expect(series.bubbleSize.numRef.cache.points).toHaveLength(3);
@@ -654,7 +649,7 @@ describe("automatic chart cache population", () => {
     Cell.setValue(ws, "B2", false);
     addChart(ws, { type: "bar", series: [baseSeries("S", "Sheet1!$B$1:$B$2")] }, "C1:J10");
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points[0].value).toBe(1);
     expect(series.val.numRef.cache.points[1].value).toBe(0);
   });
@@ -707,7 +702,7 @@ describe("chart cache population — defined names", () => {
     );
 
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toHaveLength(3);
     expect(series.val.numRef.cache.points[0]).toEqual({ index: 0, value: 10 });
     expect(series.val.numRef.cache.points[2]).toEqual({ index: 2, value: 30 });
@@ -732,7 +727,7 @@ describe("chart cache population — defined names", () => {
     );
 
     const chart = getCharts(ws2)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series.val.numRef.cache.points).toEqual([
       { index: 0, value: 111 },
       { index: 1, value: 222 }
@@ -765,7 +760,7 @@ describe("chart cache population — defined names", () => {
       "C1:J10"
     );
     const chart2 = getCharts(ws2)[0];
-    const series2 = chart2.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series2 = Chart.chartModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series2.val.numRef.cache.points).toEqual([
       { index: 0, value: 100 },
       { index: 1, value: 200 }
@@ -781,7 +776,7 @@ describe("chart cache population — defined names", () => {
       "C1:J10"
     );
     const chart1 = getCharts(ws1)[0];
-    const series1 = chart1.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series1 = Chart.chartModel(chart1)!.chart.plotArea.chartTypes[0].series[0] as any;
     expect(series1.val.numRef.cache.points).toEqual([
       { index: 0, value: 1 },
       { index: 1, value: 2 }
@@ -811,7 +806,7 @@ describe("chart cache population — defined names", () => {
       "E1:L10"
     );
     const chart = getCharts(ws)[0];
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     // All four values should be present (order: both ranges concatenated)
     const values = (series.val.numRef.cache.points as Array<{ value: number }>).map(p => p.value);
     expect(values.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
@@ -870,13 +865,13 @@ describe("rich text writing API", () => {
 
   it("chart.title setter accepts plain string", () => {
     const { chart } = makeChart();
-    chart.title = "New Title";
-    expect(chart.title).toBe("New Title");
+    Chart.setTitle(chart, "New Title");
+    expect(Chart.title(chart)).toBe("New Title");
   });
 
   it("chart.title setter accepts structured rich text", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [
@@ -885,9 +880,9 @@ describe("rich text writing API", () => {
           ]
         }
       ]
-    };
-    expect(chart.titleRichText).toBeDefined();
-    const runs = chart.titleRichText!.paragraphs[0].runs!;
+    });
+    expect(Chart.titleRichText(chart)).toBeDefined();
+    const runs = Chart.titleRichText(chart)!.paragraphs[0].runs!;
     expect(runs).toHaveLength(2);
     expect(runs[0].properties?.bold).toBe(true);
     expect(runs[1].properties?.italic).toBe(true);
@@ -895,21 +890,21 @@ describe("rich text writing API", () => {
 
   it("chart.title setter accepts formula reference", () => {
     const { chart } = makeChart();
-    chart.title = { formula: "Sheet1!$A$1" };
-    expect(chart.chartModel!.chart.title!.strRef).toBeDefined();
-    expect(chart.chartModel!.chart.title!.strRef!.formula).toBe("Sheet1!$A$1");
+    Chart.setTitle(chart, { formula: "Sheet1!$A$1" });
+    expect(Chart.chartModel(chart)!.chart.title!.strRef).toBeDefined();
+    expect(Chart.chartModel(chart)!.chart.title!.strRef!.formula).toBe("Sheet1!$A$1");
   });
 
   it("chart.title = undefined clears the title", () => {
     const { chart } = makeChart();
-    chart.title = undefined;
-    expect(chart.chartModel!.chart.title).toBeUndefined();
-    expect(chart.chartModel!.chart.autoTitleDeleted).toBe(true);
+    Chart.setTitle(chart, undefined);
+    expect(Chart.chartModel(chart)!.chart.title).toBeUndefined();
+    expect(Chart.chartModel(chart)!.chart.autoTitleDeleted).toBe(true);
   });
 
   it("chart.title setter preserves first-run formatting when setting a plain string", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [
@@ -920,11 +915,11 @@ describe("rich text writing API", () => {
           ]
         }
       ]
-    };
+    });
     // Now set as plain string
-    chart.title = "Replaced";
-    expect(chart.title).toBe("Replaced");
-    const props = chart.titleRichText!.paragraphs[0].runs![0].properties;
+    Chart.setTitle(chart, "Replaced");
+    expect(Chart.title(chart)).toBe("Replaced");
+    const props = Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties;
     expect(props?.bold).toBe(true);
     expect(props?.italic).toBe(true);
     expect(props?.size).toBe(1600);
@@ -933,33 +928,33 @@ describe("rich text writing API", () => {
 
   it("setTitleRichText convenience method", () => {
     const { chart } = makeChart();
-    chart.setTitleRichText({
+    Chart.setTitleRichText(chart, {
       paragraphs: [{ runs: [{ text: "Hi", properties: { size: 2000 } }] }]
     });
-    expect(chart.titleRichText!.paragraphs[0].runs![0].text).toBe("Hi");
+    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].text).toBe("Hi");
   });
 
   it("rich text supports bodyProperties", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       bodyProperties: { rotation: 900000, anchor: "ctr" },
       paragraphs: [{ runs: [{ text: "Rotated" }] }]
-    };
-    expect(chart.titleRichText!.bodyProperties?.rotation).toBe(900000);
-    expect(chart.titleRichText!.bodyProperties?.anchor).toBe("ctr");
+    });
+    expect(Chart.titleRichText(chart)!.bodyProperties?.rotation).toBe(900000);
+    expect(Chart.titleRichText(chart)!.bodyProperties?.anchor).toBe("ctr");
   });
 
   it("paragraph properties support alignment and indent", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           properties: { alignment: "ctr", indent: 914400, level: 1 },
           runs: [{ text: "Aligned" }]
         }
       ]
-    };
-    const pPr = chart.titleRichText!.paragraphs[0].properties;
+    });
+    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.alignment).toBe("ctr");
     expect(pPr?.indent).toBe(914400);
     expect(pPr?.level).toBe(1);
@@ -967,35 +962,35 @@ describe("rich text writing API", () => {
 
   it("paragraph supports bullets", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           properties: { bullet: { type: "char", character: "•" } },
           runs: [{ text: "Bullet point" }]
         }
       ]
-    };
-    const pPr = chart.titleRichText!.paragraphs[0].properties;
+    });
+    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.bullet).toEqual({ type: "char", character: "•" });
   });
 
   it("paragraph supports line spacing as percentage", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           properties: { lineSpacing: { type: "percentage", value: 150000 } },
           runs: [{ text: "Spaced" }]
         }
       ]
-    };
-    const pPr = chart.titleRichText!.paragraphs[0].properties;
+    });
+    const pPr = Chart.titleRichText(chart)!.paragraphs[0].properties;
     expect(pPr?.lineSpacing).toEqual({ type: "percentage", value: 150000 });
   });
 
   it("run supports strike, baseline, cap, kern, spacing", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [
@@ -1012,8 +1007,8 @@ describe("rich text writing API", () => {
           ]
         }
       ]
-    };
-    const props = chart.titleRichText!.paragraphs[0].runs![0].properties!;
+    });
+    const props = Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties!;
     expect(props.strike).toBe("sngStrike");
     expect(props.baseline).toBe(30000);
     expect(props.cap).toBe("all");
@@ -1023,31 +1018,33 @@ describe("rich text writing API", () => {
 
   it("run supports underline as enum string", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [{ text: "Wavy", properties: { underline: "wavyDbl" } }]
         }
       ]
-    };
-    expect(chart.titleRichText!.paragraphs[0].runs![0].properties?.underline).toBe("wavyDbl");
+    });
+    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(
+      "wavyDbl"
+    );
   });
 
   it("run supports boolean underline for convenience", () => {
     const { chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [{ text: "Underlined", properties: { underline: true } }]
         }
       ]
-    };
-    expect(chart.titleRichText!.paragraphs[0].runs![0].properties?.underline).toBe(true);
+    });
+    expect(Chart.titleRichText(chart)!.paragraphs[0].runs![0].properties?.underline).toBe(true);
   });
 
   it("round-trips rich text through workbook write/read", async () => {
     const { wb, chart } = makeChart();
-    chart.title = {
+    Chart.setTitle(chart, {
       paragraphs: [
         {
           runs: [
@@ -1056,7 +1053,7 @@ describe("rich text writing API", () => {
           ]
         }
       ]
-    };
+    });
 
     const buf = await Workbook.toXlsxBuffer(wb);
     const wb2 = Workbook.create();
@@ -1064,8 +1061,8 @@ describe("rich text writing API", () => {
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // On read, rich text may come back as rawTx — the plain-string title getter
     // should still extract the concatenated text.
-    expect(chart2.title).toContain("Bold");
-    expect(chart2.title).toContain("plain");
+    expect(Chart.title(chart2)).toContain("Bold");
+    expect(Chart.title(chart2)).toContain("plain");
   });
 });
 
@@ -1480,7 +1477,7 @@ describe("effect list and 3D structured", () => {
     );
     const chart = getCharts(ws)[0];
     // Assign effect list to the first series
-    const series = chart.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0].series[0] as any;
     series.spPr = {
       fill: { solid: { srgb: "4472C4" } },
       effectList: {
@@ -1497,7 +1494,7 @@ describe("effect list and 3D structured", () => {
     const wb2 = Workbook.create();
     await Workbook.loadXlsx(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
-    const s = chart2.chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const s = Chart.chartModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
     // After round-trip spPr comes back as _rawXml — parseSpPr extracts it
     const parsed = parseSpPr(s.spPr);
     expect(parsed.fill?.solid?.srgb).toBe("4472C4");
@@ -1556,15 +1553,15 @@ describe("anchor types and chart management", () => {
     Cell.setValue(ws, "B1", 1);
     addChart(ws, { type: "bar", series: [baseSeries("S")], title: "Original" }, "C1:J10");
     const original = getCharts(ws)[0];
-    const clonedNumber = original.clone();
+    const clonedNumber = Chart.clone(original);
     expect(getCharts(ws)).toHaveLength(2);
     expect(clonedNumber).not.toBe(original.chartNumber);
     const cloned = getCharts(ws)[1];
-    expect(cloned.title).toBe("Original");
+    expect(Chart.title(cloned)).toBe("Original");
     // Mutate the clone — original should be unchanged
-    cloned.title = "Modified";
-    expect(original.title).toBe("Original");
-    expect(cloned.title).toBe("Modified");
+    Chart.setTitle(cloned, "Modified");
+    expect(Chart.title(original)).toBe("Original");
+    expect(Chart.title(cloned)).toBe("Modified");
   });
 
   it("Chart.copyTo copies to another worksheet", () => {
@@ -1575,9 +1572,9 @@ describe("anchor types and chart management", () => {
     Cell.setValue(src, "B1", 1);
     addChart(src, { type: "bar", series: [baseSeries("S")], title: "Moved" }, "C1:J10");
     const chart = getCharts(src)[0];
-    chart.copyTo(dst, "A1:H10");
+    Chart.copyTo(chart, dst, "A1:H10");
     expect(getCharts(dst)).toHaveLength(1);
-    expect(getCharts(dst)[0].title).toBe("Moved");
+    expect(Chart.title(getCharts(dst)[0])).toBe("Moved");
     // Original still exists in source
     expect(getCharts(src)).toHaveLength(1);
   });
@@ -1592,7 +1589,7 @@ describe("anchor types and chart management", () => {
     const removed = removeChart(ws, charts[0]);
     expect(removed).toBe(true);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(getCharts(ws)[0].chartTypes[0].type).toBe("line");
+    expect(Chart.chartTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart by index", () => {
@@ -1602,7 +1599,7 @@ describe("anchor types and chart management", () => {
     addChart(ws, { type: "line", series: [baseSeries("S")] }, "K1:R10");
     removeChart(ws, 0);
     expect(getCharts(ws)).toHaveLength(1);
-    expect(getCharts(ws)[0].chartTypes[0].type).toBe("line");
+    expect(Chart.chartTypes(getCharts(ws)[0])[0].type).toBe("line");
   });
 
   it("Worksheet.removeChart returns false for out-of-range", () => {
@@ -1630,15 +1627,15 @@ describe("anchor types and chart management", () => {
       "C1:J10"
     );
     const chart = getCharts(ws)[0];
-    expect(chart.getSeriesCount(0)).toBe(1);
-    expect(chart.getSeriesCount(1)).toBe(1);
-    expect(chart.totalSeriesCount).toBe(2);
-    expect(chart.getSeries(0, 0)).toBeDefined();
-    expect(chart.getSeries(0, 1)).toBeDefined();
+    expect(Chart.getSeriesCount(chart, 0)).toBe(1);
+    expect(Chart.getSeriesCount(chart, 1)).toBe(1);
+    expect(Chart.totalSeriesCount(chart)).toBe(2);
+    expect(Chart.getSeries(chart, 0, 0)).toBeDefined();
+    expect(Chart.getSeries(chart, 0, 1)).toBeDefined();
     // Remove from group 1
-    chart.removeSeries(0, 1);
-    expect(chart.getSeriesCount(1)).toBe(0);
-    expect(chart.getSeriesCount(0)).toBe(1);
+    Chart.removeSeries(chart, 0, 1);
+    expect(Chart.getSeriesCount(chart, 1)).toBe(0);
+    expect(Chart.getSeriesCount(chart, 0)).toBe(1);
   });
 });
 
@@ -1734,7 +1731,7 @@ describe("chart sidecar files", () => {
 
     const dstWb = Workbook.create();
     const dst = Workbook.addWorksheet(dstWb, "Dst");
-    getCharts(src)[0].copyTo(dst, "A1:H10");
+    Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
 
     const buf = await Workbook.toXlsxBuffer(dstWb);
     const entries = await extractAll(new Uint8Array(buf));

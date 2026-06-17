@@ -7,15 +7,12 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/index";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildPivotChartFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, type EntryMap } from "./helpers/zip-text";
-
-installChartSupport();
 
 const PIVOT_OPT_EXT_URI = "{781A3756-C4B2-4CAC-9D66-4F8BD8637D16}";
 

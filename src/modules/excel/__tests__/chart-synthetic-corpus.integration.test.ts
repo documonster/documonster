@@ -14,8 +14,7 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
-import { installChartSupport } from "@excel/chart/install";
-import { Workbook, Worksheet } from "@excel/index";
+import { Chart, Workbook, Worksheet } from "@excel/index";
 import { addChart, addChartEx, getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -31,8 +30,6 @@ import {
   type SyntheticFixture
 } from "./helpers/synthetic-fixtures";
 import { entryText } from "./helpers/zip-text";
-
-installChartSupport();
 
 // Top-level fixture cache. Built once per file via `beforeAll` so the
 // per-fixture matrix tests don't pay the xlsx-serialisation cost N
@@ -144,7 +141,7 @@ describe("Synthetic chart corpus", () => {
         expect(sheet, fixture.id).toBeDefined();
         const charts = getCharts(sheet!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
-        const loadedType = charts[0].chartModel?.chart.plotArea.chartTypes[0].type;
+        const loadedType = Chart.chartModel(charts[0])?.chart.plotArea.chartTypes[0].type;
         expect(loadedType, `${fixture.id} expected ${expectedType}`).toBe(expectedType);
       }
     });
@@ -159,7 +156,7 @@ describe("Synthetic chart corpus", () => {
         await Workbook.loadXlsx(wb, fixture.bytes);
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
-        const plotArea = charts[0].chartExModel?.chartSpace.chart.plotArea;
+        const plotArea = Chart.chartExModel(charts[0])?.chartSpace.chart.plotArea;
         const firstSeries = plotArea?.plotAreaRegion?.series?.[0] ?? plotArea?.series?.[0];
         expect(firstSeries, fixture.id).toBeDefined();
         // Histogram and Pareto normalise to clusteredColumn internally.

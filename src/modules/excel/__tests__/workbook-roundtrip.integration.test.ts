@@ -11,14 +11,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import { installChartSupport } from "@excel/chart/install";
 import { Workbook } from "@excel/index";
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { ZipParser } from "../../archive/unzip/zip-parser";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
-
-installChartSupport();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

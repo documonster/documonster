@@ -1,3 +1,4 @@
+import type { ChartExEntry } from "@excel/chart/chart-ex-types";
 /**
  * workbook-core — the low-level Workbook container layer.
  *
@@ -18,7 +19,7 @@
  *
  * No file below this one imports the heavy `workbook.browser`.
  */
-import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
+import type { ChartEntry } from "@excel/chart/types";
 import type { DefinedNamesData } from "@excel/defined-names";
 import { ImageError, WorksheetNameError } from "@excel/errors";
 import type { PivotTable } from "@excel/pivot-table";
@@ -36,6 +37,8 @@ import type {
   ExternalLinkModel
 } from "@excel/workbook.browser";
 import type { Worksheet } from "@excel/worksheet";
+import { getSheetName } from "@excel/worksheet-core";
+import { RelType } from "@excel/xlsx/rel-type";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { XLSX } from "@excel/xlsx/xlsx.browser";
 
@@ -252,4 +255,221 @@ export function addWorkbookImage(wb: WorkbookData, image: ImageData): number {
   }
 
   return id;
+}
+
+/**
+ * Look up a worksheet by index or name (or the first sheet when `id` is
+ * omitted). Pure data accessor over `wb._worksheets` — kept in the core
+ * layer so the chart module can resolve sheets for cache population without
+ * forming a `workbook → chart → workbook` import cycle.
+ */
+export function getWorksheet(wb: WorkbookData, id?: number | string): Worksheet | undefined {
+  if (id === undefined) {
+    return wb._worksheets.find(Boolean);
+  }
+  if (typeof id === "number") {
+    return wb._worksheets[id];
+  }
+  if (typeof id === "string") {
+    const idLower = id.toLowerCase();
+    return wb._worksheets.find(
+      worksheet => worksheet && getSheetName(worksheet).toLowerCase() === idLower
+    );
+  }
+  return undefined;
+}
+
+/** All worksheets in tab order (excludes the reserved index-0 slot). See {@link getWorksheet}. */
+export function getWorksheets(wb: WorkbookData): Worksheet[] {
+  return wb._worksheets
+    .slice(1)
+    .sort((a, b) => a.orderNo - b.orderNo)
+    .filter(Boolean);
+}
+
+/**
+ * Copy a classic chart's style/colours/rels sidecars from `sourceChartNumber`
+ * to `targetChartNumber` (optionally into a different `targetWorkbook`).
+ *
+ * Pure data operation over the workbook's sidecar records — lives in the core
+ * layer so `chart`'s `copyTo`/`clone` handle ops can use it without a
+ * `workbook → chart → workbook` import cycle.
+ */
+export function copyChartSidecars(
+  wb: WorkbookData,
+  sourceChartNumber: number,
+  targetChartNumber: number,
+  targetWorkbook: WorkbookData = wb
+): void {
+  const style = wb._chartStyles[sourceChartNumber];
+  if (style) {
+    setChartStyle(targetWorkbook, targetChartNumber, style.slice());
+  }
+  const colors = wb._chartColors[sourceChartNumber];
+  if (colors) {
+    setChartColors(targetWorkbook, targetChartNumber, colors.slice());
+  }
+  // Copy the full chart rels bag (`_chartRels`), not just the
+  // style/colors pair. A classic chart can carry rels to embedded
+  // images (pictureFill), external data links, and `<c:userShapes>`
+  // drawing parts — without copying those the clone ends up with
+  // dangling rIds. Deep-copy each rel so a later mutation on the
+  // source doesn't leak into the clone.
+  //
+  // Rewrite style/colors Targets to the destination chart number —
+  // verbatim copy would leave the rel pointing at the source's
+  // `style{src}.xml`, while the writer emits `style{dst}.xml` and
+  // produces a chart whose .rels references a non-existent file.
+  //
+  // For image rels on a cross-workbook copy (`targetWorkbook !==
+  // wb`), re-register each referenced image in the destination
+  // workbook and rewrite the Target to point at the new media
+  // file. Without this, a pictureFill that round-tripped through
+  // `importSheet` pointed at the source workbook's media array —
+  // which the destination package doesn't ship, so Excel shows a
+  // broken image icon.
+  const srcRels = wb._chartRels[sourceChartNumber];
+  if (Array.isArray(srcRels) && srcRels.length > 0) {
+    const crossWorkbook = targetWorkbook !== wb;
+    targetWorkbook._chartRels[targetChartNumber] = srcRels.map(rel => {
+      if (typeof rel !== "object" || rel === null) {
+        return rel;
+      }
+      const cloned = { ...rel } as { Type?: string; Target?: string; [k: string]: unknown };
+      const target = typeof cloned.Target === "string" ? cloned.Target : undefined;
+      if (target) {
+        if (/^style\d+\.xml$/.test(target)) {
+          cloned.Target = `style${targetChartNumber}.xml`;
+        } else if (/^colors\d+\.xml$/.test(target)) {
+          cloned.Target = `colors${targetChartNumber}.xml`;
+        } else if (crossWorkbook && cloned.Type === RelType.Image) {
+          const rewritten = _rewriteCrossWorkbookImageTarget(wb, target, targetWorkbook);
+          if (rewritten !== undefined) {
+            cloned.Target = rewritten;
+          }
+        }
+      }
+      return cloned;
+    });
+  }
+}
+
+export function _rewriteCrossWorkbookImageTarget(
+  wb: WorkbookData,
+  target: string,
+  targetWorkbook: WorkbookData
+): string | undefined {
+  const match = /\/media\/image(\d+)\.([a-zA-Z0-9]+)$/.exec(target);
+  if (!match) {
+    return undefined;
+  }
+  const sourceMediaIndex = parseInt(match[1], 10) - 1;
+  if (!Number.isFinite(sourceMediaIndex) || sourceMediaIndex < 0) {
+    return undefined;
+  }
+  const medium = getImage(wb, sourceMediaIndex) as
+    | { extension?: string; buffer?: Uint8Array; base64?: string }
+    | undefined;
+  if (!medium) {
+    return undefined;
+  }
+  const ext = medium.extension as "png" | "jpeg" | "gif" | undefined;
+  if (ext !== "png" && ext !== "jpeg" && ext !== "gif") {
+    return undefined;
+  }
+  const payload: { extension: "png" | "jpeg" | "gif"; buffer?: Uint8Array; base64?: string } = {
+    extension: ext
+  };
+  // `instanceof Uint8Array` is realm-sensitive: buffers that crossed
+  // a Worker / iframe / `structuredClone` boundary carry a different
+  // `Uint8Array` prototype and fail the operator even though they
+  // are byte-granular typed arrays. Duck-type via `ArrayBuffer.isView`
+  // + `BYTES_PER_ELEMENT === 1` so cross-workbook copies from a
+  // worker-loaded Workbook preserve the image bytes; otherwise the
+  // copy path silently falls through to `return undefined`, dropping
+  // every image from the chart. Matches `chart-images.ts`'s handling
+  // of the same realm-crossing issue.
+  const buf = medium.buffer as ArrayBufferView | undefined;
+  if (
+    buf &&
+    ArrayBuffer.isView(buf) &&
+    (buf as unknown as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+  ) {
+    payload.buffer =
+      buf instanceof Uint8Array
+        ? buf.slice()
+        : new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  } else if (typeof medium.base64 === "string") {
+    payload.base64 = medium.base64;
+  } else {
+    return undefined;
+  }
+  const newId = addWorkbookImage(targetWorkbook, payload);
+  return `../media/image${newId + 1}.${ext}`;
+}
+
+/**
+ * Copy a ChartEx chart's styleEx/colorsEx/rels sidecars. See
+ * {@link copyChartSidecars} for the layering rationale.
+ */
+export function copyChartExSidecars(
+  wb: WorkbookData,
+  sourceChartExNumber: number,
+  targetChartExNumber: number,
+  targetWorkbook: WorkbookData = wb
+): void {
+  const rels = wb._chartExRels[sourceChartExNumber];
+  if (rels && rels.length > 0) {
+    // Rewrite `Target` for rels that point at numbered sidecars
+    // (styleEx / colorsEx / userShapes). Those files get different
+    // on-disk numbers on the clone — copying the rel verbatim
+    // leaves it pointing at the source's sidecar, so saving the
+    // package produces a chartEx whose .rels references
+    // `styleEx{src}.xml` while the writer emits `styleEx{dst}.xml`.
+    // Strip the number from the source Target and re-stamp it with
+    // the target's number.
+    //
+    // For image rels on a cross-workbook copy (`targetWorkbook !==
+    // wb`), re-register each referenced image in the destination
+    // workbook and rewrite the Target — same logic as classic chart
+    // sidecars. Without this, a ChartEx with embedded images (e.g.
+    // pictureFill or custom geometry) would reference media that
+    // doesn't exist in the destination package.
+    const crossWorkbook = targetWorkbook !== wb;
+    targetWorkbook._chartExRels[targetChartExNumber] = rels.map(r => {
+      if (typeof r !== "object" || r === null) {
+        return r;
+      }
+      const cloned = { ...r };
+      const target: string | undefined =
+        typeof cloned.Target === "string" ? cloned.Target : undefined;
+      if (target) {
+        const styleExMatch = /^styleEx\d+\.xml$/.exec(target);
+        if (styleExMatch) {
+          cloned.Target = `styleEx${targetChartExNumber}.xml`;
+        } else if (/^colorsEx\d+\.xml$/.exec(target)) {
+          cloned.Target = `colorsEx${targetChartExNumber}.xml`;
+        } else if (crossWorkbook && cloned.Type === RelType.Image) {
+          const rewritten = _rewriteCrossWorkbookImageTarget(wb, target, targetWorkbook);
+          if (rewritten !== undefined) {
+            cloned.Target = rewritten;
+          }
+        }
+      }
+      return cloned;
+    });
+  }
+  // ChartEx style / colors sidecars (matching `_chartStyles` /
+  // `_chartColors` for classic charts). Previously only `_chartExRels`
+  // was copied — a cloned chartEx lost its authored chartExStyle and
+  // chartExColors bytes, so the saved package re-derived them from
+  // defaults and the clone looked different from the source.
+  const exStyle = wb._chartExStyles[sourceChartExNumber];
+  if (exStyle) {
+    targetWorkbook._chartExStyles[targetChartExNumber] = exStyle.slice();
+  }
+  const exColors = wb._chartExColors[sourceChartExNumber];
+  if (exColors) {
+    targetWorkbook._chartExColors[targetChartExNumber] = exColors.slice();
+  }
 }

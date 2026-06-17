@@ -13,14 +13,18 @@ import {
   cellUnmerge,
   cellView
 } from "@excel/cell";
-// Chart runtime is accessed via the chart-host-registry slot rather
-// than imported directly. See `chart-host-registry.ts` and
-// `chart/install.ts` for the registration protocol. Types are pulled
-// in via `import type` so bundlers emit zero runtime chart code unless
-// the consumer imports `@cj-tech-master/excelts/chart`.
-import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
-import type { ChartSupport } from "@excel/chart-host-registry";
-import type { Chart, ChartAnchorModel } from "@excel/chart/chart";
+// Chart runtime is imported directly (static). The chart modules depend only
+// on the `*-core` data layer (never on this heavy `worksheet.ts`), so the
+// dependency graph stays acyclic: `worksheet → chart → *-core`. A consumer
+// that never references a chart API gets the entire chart implementation
+// tree-shaken out by the bundler — no host registry / install step required.
+import {
+  chartExOptionsFromRows,
+  chartExOptionsFromTable,
+  chartOptionsFromRows,
+  chartOptionsFromTable,
+  seriesFromColumns as chartSeriesFromColumns
+} from "@excel/chart/chart-api";
 import type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
@@ -28,7 +32,11 @@ import type {
   AddChartFromTableOptions,
   SeriesFromColumnsOptions
 } from "@excel/chart/chart-api";
-import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
+import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
+import { buildChartExModel } from "@excel/chart/chart-ex-builder";
+import type { AddChartExOptions } from "@excel/chart/chart-ex-types";
+import { createChart, registerChart, registerChartEx } from "@excel/chart/chart-handle";
+import { applyChartExPreset, applyChartPreset } from "@excel/chart/chart-presets";
 import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/chart-presets";
 import type {
   AddBarChartOptions,
@@ -37,7 +45,8 @@ import type {
   AddComboChartOptions,
   AddPieChartOptions,
   AddScatterChartOptions,
-  AddSurfaceChartOptions
+  AddSurfaceChartOptions,
+  ChartAnchorModel
 } from "@excel/chart/types";
 import {
   type ColumnData,
@@ -128,22 +137,17 @@ import {
 } from "@excel/utils/text-metrics";
 import type { Workbook } from "@excel/workbook";
 import {
-  addChartEntry,
-  addChartExStructuredEntry,
   getDefinedNames,
   getImage,
-  nextChartExNumber,
-  nextChartNumber,
   removeChartEntry,
   removeChartExStructuredEntry,
   removeWorksheetEx,
-  setChartColors,
-  setChartStyle,
   validateSheetName
 } from "@excel/workbook-core";
 import {
   type WorksheetData,
   type SheetProtection,
+  type ChartHandle,
   _copyStyle,
   _setStyleOption,
   columnCreate,
@@ -1027,8 +1031,7 @@ export function addChart(
   options: AddChartOptions,
   range: AddChartRange
 ): number {
-  const chart = getChartSupport();
-  return _registerChart(ws, chart.buildChartModel(options), range, options);
+  return registerChart(ws, buildChartModel(options), range, options);
 }
 
 export function addColumnChart(
@@ -1189,7 +1192,7 @@ export function addPresetChart(
   options: Omit<AddChartOptions, "type"> & Partial<Pick<AddChartOptions, "type">>,
   range: AddChartRange
 ): number {
-  return addChart(ws, getChartSupport().applyChartPreset(preset, options), range);
+  return addChart(ws, applyChartPreset(preset, options), range);
 }
 
 export function addPresetChartEx(
@@ -1198,14 +1201,14 @@ export function addPresetChartEx(
   options: Omit<AddChartExOptions, "type"> & Partial<Pick<AddChartExOptions, "type">>,
   range: AddChartRange
 ): number {
-  return addChartEx(ws, getChartSupport().applyChartExPreset(preset, options), range);
+  return addChartEx(ws, applyChartExPreset(preset, options), range);
 }
 
 export function seriesFromColumns(
   ws: WorksheetData,
   options: SeriesFromColumnsOptions
-): ReturnType<ChartSupport["seriesFromColumns"]> {
-  return getChartSupport().seriesFromColumns(getSheetName(ws), options);
+): ReturnType<typeof chartSeriesFromColumns> {
+  return chartSeriesFromColumns(getSheetName(ws), options);
 }
 
 export function addChartFromTable(
@@ -1214,7 +1217,7 @@ export function addChartFromTable(
   options: AddChartFromTableOptions,
   range: AddChartRange
 ): number {
-  return addChart(ws, getChartSupport().chartOptionsFromTable(ws, table, options), range);
+  return addChart(ws, chartOptionsFromTable(ws, table, options), range);
 }
 
 export function addChartFromRows<T extends Record<string, unknown>>(
@@ -1223,7 +1226,7 @@ export function addChartFromRows<T extends Record<string, unknown>>(
   options: AddChartFromRowsOptions<T>,
   range: AddChartRange
 ): number {
-  return addChart(ws, getChartSupport().chartOptionsFromRows(ws, rows, options), range);
+  return addChart(ws, chartOptionsFromRows(ws, rows, options), range);
 }
 
 export function addColumnChartFromRows<T extends Record<string, unknown>>(
@@ -1234,7 +1237,7 @@ export function addColumnChartFromRows<T extends Record<string, unknown>>(
 ): number {
   return addChart(
     ws,
-    getChartSupport().chartOptionsFromRows(ws, rows, {
+    chartOptionsFromRows(ws, rows, {
       ...options,
       type: "bar",
       barDir: "col"
@@ -1251,7 +1254,7 @@ export function addChartExFromTable(
   },
   range: AddChartRange
 ): number {
-  return addChartEx(ws, getChartSupport().chartExOptionsFromTable(ws, table, options), range);
+  return addChartEx(ws, chartExOptionsFromTable(ws, table, options), range);
 }
 
 export function addChartExFromRows<T extends Record<string, unknown>>(
@@ -1262,7 +1265,7 @@ export function addChartExFromRows<T extends Record<string, unknown>>(
   },
   range: AddChartRange
 ): number {
-  return addChartEx(ws, getChartSupport().chartExOptionsFromRows(ws, rows, options), range);
+  return addChartEx(ws, chartExOptionsFromRows(ws, rows, options), range);
 }
 
 export function addPivotChart(
@@ -1272,12 +1275,7 @@ export function addPivotChart(
   range: AddChartRange
 ): number {
   const pivotChartOptions = withPivotChartSource(pivotTable, options);
-  return _registerChart(
-    ws,
-    getChartSupport().buildChartModel(pivotChartOptions),
-    range,
-    pivotChartOptions
-  );
+  return registerChart(ws, buildChartModel(pivotChartOptions), range, pivotChartOptions);
 }
 
 export function addPivotComboChart(
@@ -1287,12 +1285,7 @@ export function addPivotComboChart(
   range: AddChartRange
 ): number {
   const pivotChartOptions = withPivotChartSource(pivotTable, options);
-  return _registerChart(
-    ws,
-    getChartSupport().buildComboChartModel(pivotChartOptions),
-    range,
-    pivotChartOptions
-  );
+  return registerChart(ws, buildComboChartModel(pivotChartOptions), range, pivotChartOptions);
 }
 
 export function addComboChart(
@@ -1300,7 +1293,7 @@ export function addComboChart(
   options: AddComboChartOptions,
   range: AddChartRange
 ): number {
-  return _registerChart(ws, getChartSupport().buildComboChartModel(options), range, options);
+  return registerChart(ws, buildComboChartModel(options), range, options);
 }
 
 export function addChartEx(
@@ -1308,98 +1301,14 @@ export function addChartEx(
   options: AddChartExOptions,
   range: AddChartRange
 ): number {
-  const model = getChartSupport().buildChartExModel(options);
-  return _registerChartEx(ws, model, range);
+  return registerChartEx(ws, buildChartExModel(options), range);
 }
 
-export function _registerChartEx(
-  ws: WorksheetData,
-  model: ChartExModel,
-  range: AddChartRange
-): number {
-  const chart = getChartSupport();
-  const chartExNumber = nextChartExNumber(ws._workbook);
-  try {
-    // Pass `this` as context worksheet so sheet-scoped defined names on
-    // this sheet take precedence over workbook-scoped names of the same
-    // bare name (matches Excel resolution order).
-    chart.fillChartExCaches(model, ws._workbook, ws);
-  } catch {
-    // Cache population is best-effort; never let it break chart creation.
-  }
-  addChartExStructuredEntry(ws._workbook, { chartExNumber, model });
-  const chartInstance = chart.createChart(ws, { chartExNumber }, range);
-  ws._charts.push(chartInstance);
-  return chartExNumber;
-}
-
-export function _registerChart(
-  ws: WorksheetData,
-  chartModel: any,
-  range: AddChartRange,
-  options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
-): number {
-  const chart = getChartSupport();
-  const chartNumber = nextChartNumber(ws._workbook);
-  // Auto-populate caches so headless consumers see non-empty charts.
-  // Excel itself will recompute on open; this is a best-effort enrichment.
-  // Pass `this` as context worksheet so sheet-scoped defined names on
-  // this sheet take precedence over workbook-scoped names of the same
-  // bare name (matches Excel resolution order).
-  try {
-    chart.fillChartCaches(chartModel, ws._workbook, ws);
-  } catch {
-    // Cache population is best-effort; never let it break chart creation.
-  }
-  const entry = { chartNumber, model: chartModel };
-  // Resolve any staged `pictureFill.image` payloads into real workbook
-  // media entries + chart relationships. Safe to call before
-  // `addChartEntry` so the entry we store already carries the final
-  // `entry.rels` array.
-  try {
-    chart.resolvePendingChartImages(entry, ws._workbook, chartNumber);
-  } catch {
-    // Image resolution is best-effort; a broken image payload should
-    // never take down chart creation — the series keeps its
-    // `pictureOptions`, just without the blipFill.
-  }
-  addChartEntry(ws._workbook, entry);
-  _applyChartSidecars(ws, chartNumber, options);
-  const chartInstance = chart.createChart(ws, { chartNumber }, range);
-  ws._charts.push(chartInstance);
-  return chartNumber;
-}
-
-export function _applyChartSidecars(
-  ws: WorksheetData,
-  chartNumber: number,
-  options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
-): void {
-  if (!options?.chartStyle && !options?.chartColors) {
-    return;
-  }
-  const chart = getChartSupport();
-  if (options?.chartStyle) {
-    setChartStyle(
-      ws._workbook,
-      chartNumber,
-      new TextEncoder().encode(chart.buildChartStyle(options.chartStyle))
-    );
-  }
-  if (options?.chartColors) {
-    setChartColors(
-      ws._workbook,
-      chartNumber,
-      new TextEncoder().encode(chart.buildChartColors(options.chartColors))
-    );
-  }
-}
-
-export function getCharts(ws: WorksheetData): Chart[] {
+export function getCharts(ws: WorksheetData): ChartHandle[] {
   return [...ws._charts];
 }
 
-export function removeChart(ws: WorksheetData, chart: Chart | number): boolean {
+export function removeChart(ws: WorksheetData, chart: ChartHandle | number): boolean {
   const idx = typeof chart === "number" ? chart : ws._charts.indexOf(chart);
   if (idx < 0 || idx >= ws._charts.length) {
     return false;
@@ -1588,19 +1497,11 @@ export function addTable(ws: WorksheetData, model: TableProperties): TableData {
   return table;
 }
 
-export function getTable(ws: WorksheetData, name: string): TableData {
-  return ws.tables[name];
-}
-
 export function removeTable(ws: WorksheetData, name: string): void {
   if (ws.tables[name]) {
     getSheetWorkbook(ws)._tableNames.delete(name.toLowerCase());
   }
   delete ws.tables[name];
-}
-
-export function getTables(ws: WorksheetData): TableData[] {
-  return Object.values(ws.tables);
 }
 
 export function addPivotTable(ws: WorksheetData, model: PivotTableModel): PivotTable {
@@ -2246,7 +2147,31 @@ export function getSheetModel(ws: WorksheetData): WorksheetModel {
     ignoredErrors: ws.ignoredErrors,
     watermark: ws._watermark,
     drawing: ws._drawing,
-    charts: ws._charts.map(c => c.model),
+    charts: ws._charts.map(
+      (c): ChartAnchorModel => ({
+        chartNumber: c.chartNumber,
+        chartExNumber: c.chartExNumber,
+        range: {
+          tl: {
+            nativeCol: c.range.tl.nativeCol,
+            nativeColOff: c.range.tl.nativeColOff,
+            nativeRow: c.range.tl.nativeRow,
+            nativeRowOff: c.range.tl.nativeRowOff
+          },
+          br: c.range.br
+            ? {
+                nativeCol: c.range.br.nativeCol,
+                nativeColOff: c.range.br.nativeColOff,
+                nativeRow: c.range.br.nativeRow,
+                nativeRowOff: c.range.br.nativeRowOff
+              }
+            : undefined,
+          editAs: c.range.editAs,
+          pos: c.range.pos,
+          ext: c.range.ext
+        } as ChartAnchorModel["range"]
+      })
+    ),
     sparklineGroups: ws._sparklineGroups,
     threadedComments: ws.threadedComments
   };
@@ -2375,27 +2300,21 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
   ws.formControls = (value.formControls ?? []).map(fcModel => formCheckboxFromModel(ws, fcModel));
   // Preserve loaded drawing data (charts, etc.)
   ws._drawing = value.drawing;
-  // Restore chart objects from model (explicit charts array) or from drawing anchors.
-  // If chart support is not installed we still preserve the chart data inside
-  // `workbook.charts` entries (the serialiser reads from there), but we leave
-  // `_charts` empty because the `Chart` wrapper class lives in the optional
-  // chart module. Consumers who want to *manipulate* charts must install
-  // chart support; consumers doing pure load-save pass-through don't need to.
-  const chartHost = tryGetChartSupport();
-  if (chartHost && value.charts && value.charts.length > 0) {
+  // Restore chart handles from the model (explicit `charts` array) or from
+  // drawing anchors. `createChart` is imported statically, so this works
+  // unconditionally — pure load-save pass-through still flows through the same
+  // path, and a consumer that never references any chart API gets the chart
+  // implementation tree-shaken out regardless.
+  if (value.charts && value.charts.length > 0) {
     ws._charts = value.charts.map((c: ChartAnchorModel) =>
-      chartHost.createChart(
-        ws,
-        { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber },
-        c.range
-      )
+      createChart(ws, { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber }, c.range)
     );
-  } else if (chartHost && (value.drawing as any)?.anchors) {
+  } else if ((value.drawing as any)?.anchors) {
     // Extract chart anchors from drawing (loaded from XLSX)
     ws._charts = ((value.drawing as any).anchors as any[])
       .filter((a: any) => a.chartNumber || a.chartExNumber)
       .map((a: any) =>
-        chartHost.createChart(
+        createChart(
           ws,
           { chartNumber: a.chartNumber ?? 0, chartExNumber: a.chartExNumber ?? 0 },
           a.range
@@ -2496,6 +2415,8 @@ export {
   getCell,
   getSheetName,
   getSheetWorkbook,
+  getTable,
+  getTables,
   rowGetCell,
   rowGetCellEx,
   rowSetValues,

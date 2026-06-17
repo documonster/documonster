@@ -14,6 +14,7 @@ import type {
   ChartColorsModel,
   ChartLayout,
   ChartLegend,
+  ChartRelEntry,
   ChartRichText,
   ChartStyleModel,
   ChartTextProperties,
@@ -595,4 +596,31 @@ export interface AddChartExSeriesOptions {
      */
     txPr?: ChartTextProperties;
   };
+}
+
+/**
+ * Stored entry for a structured ChartEx (Office 2016+ extended chart).
+ * When a ChartEx is created programmatically via `addChartEx()`, a structured
+ * model is stored here and serialised through the builder/renderer on write.
+ * When a ChartEx is round-tripped, raw bytes are used instead (stored under
+ * `workbook._chartExEntries`). Pure data — stored in
+ * `WorkbookData._chartExStructuredEntries`.
+ */
+export interface ChartExEntry {
+  /** 1-based chartEx number (matches chartEx{N}.xml) */
+  chartExNumber: number;
+  /** Structured model (built from addChartEx options) */
+  model: ChartExModel;
+  /** Original chartEx XML bytes from a loaded workbook, used for clean round-trip passthrough */
+  rawData?: Uint8Array;
+  /** JSON snapshot of `model` taken when `rawData` was parsed */
+  modelSnapshot?: string;
+  /** True once a high-level API mutates the parsed chartEx model */
+  dirty?: boolean;
+  /** When true, simple high-level mutations may patch raw ChartEx XML instead of full re-render. */
+  preferRawPatch?: boolean;
+  /** When true, writing fails instead of re-rendering if raw ChartEx XML cannot be safely patched. */
+  requireRawPatch?: boolean;
+  /** ChartEx rels — preserved for round-trip */
+  rels?: ChartRelEntry[];
 }

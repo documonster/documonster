@@ -1,40 +1,25 @@
 /**
  * Public entry for the excelts chart module.
  *
- * Two complementary usage styles are supported:
+ * **Functional, zero-side-effect, fully tree-shakeable.** Import the chart
+ * builders, renderers, presets and parsers you need:
  *
- * 1. **Functional, zero-side-effect** — tree-shakeable access to
- *    chart builders, renderers, presets and parsers:
- *    ```ts
- *    import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
- *    const model = buildChartModel(options);
- *    const svg   = renderChartSvg(model);
- *    ```
- *    Bundlers drop everything the consumer does not reference.
+ * ```ts
+ * import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
+ * const model = buildChartModel(options);
+ * const svg   = renderChartSvg(model);
+ * ```
  *
- * 2. **Support installation** — enables `worksheet.addChart()`,
- *    `Workbook.writeXlsx(workbook)` chart-cache population, and chart
- *    reconstruction during XLSX load:
- *    ```ts
- *    import { installChartSupport } from "@cj-tech-master/excelts/chart";
- *    installChartSupport();                    // once, at startup
- *    worksheet.addChart(options, "A1:D20");    // now works
- *    ```
- *
- * Chart support is **never installed implicitly** — consumers pay for
- * what they ask for. The package's root `sideEffects: false` contract
- * stays intact, so bundles that only use the functional API include
- * exactly the code paths reachable from the exports they reference.
- *
- * `installChartSupport` lives in a separate module (`./install.ts`) so
- * its host-registry wiring and the full chart builder/renderer pipeline
- * don't get pulled in by consumers who only import one or two
- * functional helpers.
+ * No install / registration step exists. The high-level chart APIs
+ * (`Chart.add`, `worksheet.addChart`, `Workbook.writeXlsx` chart serialisation,
+ * XLSX chart reconstruction on load) import the chart implementation directly
+ * and statically. A consumer that never references any chart API gets the
+ * entire chart implementation tree-shaken out by the bundler — the package's
+ * root `sideEffects: false` contract keeps this guarantee intact.
  */
 
-export { installChartSupport, uninstallChartSupport } from "./install";
-
-export { Chart, buildChartModel } from "./chart";
+export { buildChartModel } from "./chart-handle";
+export type { ChartHandle } from "@excel/worksheet-core";
 export { buildComboChartModel } from "./chart-builder";
 export { fillChartCaches, fillChartExCaches, fillNumRef, fillStrRef } from "./cache-populator";
 export {
@@ -121,10 +106,10 @@ export type {
   AddChartExWaterfallOptions,
   AddChartExBoxWhiskerOptions,
   AddChartExSeriesOptions,
-  ChartExType
+  ChartExType,
+  ChartExEntry
 } from "./chart-ex-types";
-export type { ChartExEntry } from "./chart";
-export type { ChartEntry, ChartAnchorModel } from "./chart";
+export type { ChartEntry, ChartAnchorModel, ChartRelEntry } from "./types";
 export type {
   ChartModel,
   ChartType,

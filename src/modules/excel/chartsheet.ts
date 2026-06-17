@@ -1,10 +1,9 @@
-import { getChartSupport } from "@excel/chart-host-registry";
-import type { Chart } from "@excel/chart/chart";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
+import { createChart } from "@excel/chart/chart-handle";
 import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/types";
 import { getChartEntry, getChartExStructuredEntry, validateSheetName } from "@excel/workbook-core";
 import type { WorkbookData } from "@excel/workbook-core";
-import type { Worksheet } from "@excel/worksheet";
+import type { ChartHandle, WorksheetData } from "@excel/worksheet-core";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
 /**
@@ -184,17 +183,17 @@ export function chartsheetChartExModel(cs: ChartsheetData): ChartExModel | undef
  * error. For anything grid-related, use {@link chartsheetChartModel} /
  * {@link chartsheetChartExModel} directly.
  */
-export function chartsheetChart(cs: ChartsheetData): Chart | undefined {
+export function chartsheetChart(cs: ChartsheetData): ChartHandle | undefined {
   if (!cs._workbook || (!cs._model.chartNumber && !cs._model.chartExNumber)) {
     return undefined;
   }
   const host = createChartsheetChartHost(cs._workbook, cs._model.id, cs._model.name);
-  // The `Chart` constructor types its first argument as `Worksheet`, but
-  // internally it only touches `worksheet.workbook`, `worksheet.id`, and
-  // `worksheet.name` (plus anchor helpers the host stubs). Casting is safe
-  // because the host implements that exact contract and rejects anything else.
-  return getChartSupport().createChart(
-    host as unknown as Worksheet,
+  // `createChart` types its first argument as `WorksheetData`, but internally
+  // it only touches `worksheet._workbook`, `worksheet.id`, and `worksheet.name`
+  // (plus anchor helpers the host stubs). Casting is safe because the host
+  // implements that exact contract and rejects anything else.
+  return createChart(
+    host as unknown as WorksheetData,
     { chartNumber: cs._model.chartNumber, chartExNumber: cs._model.chartExNumber },
     CHARTSHEET_ANCHOR_RANGE
   );

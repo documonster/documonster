@@ -27,7 +27,7 @@ import {
   renderChartSvg,
   seriesFromColumns
 } from "@excel/chart";
-import { installChartSupport } from "@excel/chart/install";
+import { createChart } from "@excel/chart/chart-handle";
 import {
   chartsheetId,
   chartsheetModel,
@@ -36,7 +36,7 @@ import {
   chartsheetWorkbookViewId,
   chartsheetZoomToFit
 } from "@excel/chartsheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { getChartEntry, getWorksheets } from "@excel/workbook";
 import {
   addBarChart,
@@ -51,13 +51,9 @@ import {
   addScatterChart,
   getCharts
 } from "@excel/worksheet";
-import { beforeAll, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 
 const textDecoder = new TextDecoder();
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("Second-round chart bug fixes", () => {
   it("getValueRange: all-negative data does not synthesise a bogus max=1 tick", () => {
@@ -82,8 +78,8 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    fillChartCaches(getCharts(ws)[0].chartModel!, wb, ws);
-    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    fillChartCaches(Chart.chartModel(getCharts(ws)[0])!, wb, ws);
+    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     // With the fix, the value axis spans [-100, 0] — ticks are 0,
     // -20, -40, -60, -80, -100. The bug produced max=1 so the top
     // tick was "1". Grep the SVG for a standalone "1" tick label.
@@ -113,7 +109,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     const barSeries = scene.series.find(s => s.type === "bar");
     expect(barSeries?.type).toBe("bar");
     if (barSeries?.type === "bar") {
@@ -145,7 +141,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     const barSeries = scene.series.filter(s => s.type === "bar");
     for (const series of barSeries) {
       if (series.type === "bar") {
@@ -184,7 +180,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     // Every slice gets a rounded percentage. Sum of authored |v|:
     // 50 + 10 + 30 = 90, so slice percentages are ~56%, 11%, 33%.
     // They should sum to 100 (± rounding).
@@ -221,8 +217,8 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    fillChartCaches(getCharts(ws)[0].chartModel!, wb, ws);
-    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    fillChartCaches(Chart.chartModel(getCharts(ws)[0])!, wb, ws);
+    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     const barSeries = scene.series.find(
       (s): s is Extract<typeof s, { type: "bar" }> => s.type === "bar"
     );
@@ -252,7 +248,7 @@ describe("Second-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartExModel!;
+    const model = Chart.chartExModel(getCharts(ws)[0])!;
     // Must not throw:
     const svg = renderChartExSvg(model, { width: 400, height: 240 });
     expect(svg).toContain("<svg");
@@ -362,7 +358,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(getCharts(ws)[0].chartModel!, { width: 400, height: 240 });
+    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
     // Expect multiple tick labels — one per majorUnit step from 50 down
     // to 0 would give ~6 labels. The bug produced exactly one.
     expect(scene.yLabels.length).toBeGreaterThanOrEqual(3);
@@ -396,11 +392,11 @@ describe("Second-round chart bug fixes", () => {
       "E1:L10"
     );
     const chart = getCharts(ws)[0];
-    chart.updateSeries(0, {
+    Chart.updateSeries(chart, 0, {
       categories: "Sheet1!$A$1:$A$3",
       xValueType: "text"
     });
-    const group = chart.chartModel!.chart.plotArea.chartTypes[0];
+    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: unknown[] }).series[0] as {
       xVal?: { strRef?: unknown; numRef?: unknown };
     };
@@ -440,7 +436,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "E1:L10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const valAx = model.chart.plotArea.axes.find(a => a.axisType === "val") as ValueAxis;
     // Options from the SECOND group should have reached the shared val
     // axis (numFmt, majorUnit). The bug silently dropped them.
@@ -475,8 +471,8 @@ describe("Second-round chart bug fixes", () => {
       "D1:J10"
     );
     const chart = getCharts(ws)[0];
-    chart.updateSeries(0, { lineDash: "dash" });
-    const group = chart.chartModel!.chart.plotArea.chartTypes[0];
+    Chart.updateSeries(chart, 0, { lineDash: "dash" });
+    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: unknown[] }).series[0] as {
       spPr?: { line?: { color?: { srgb?: string }; width?: number; dash?: string } };
     };
@@ -509,7 +505,7 @@ describe("Second-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartExModel!;
+    const model = Chart.chartExModel(getCharts(ws)[0])!;
     // Synthetically inject a formatCode on an existing level, then
     // clear the points so the refill path re-runs and we can confirm
     // the formatCode survives.
@@ -548,7 +544,7 @@ describe("Second-round chart bug fixes", () => {
     const chart = getCharts(ws)[0];
     // Cache cannot be populated because the referenced sheet doesn't
     // exist — `points` stays `[]` and the getter returns `undefined`.
-    expect(chart.title).toBeUndefined();
+    expect(Chart.title(chart)).toBeUndefined();
   });
 
   it("Chart.title auto-populates formula-bound title from cache fill", () => {
@@ -570,7 +566,7 @@ describe("Second-round chart bug fixes", () => {
       "D1:J10"
     );
     const chart = getCharts(ws)[0];
-    expect(chart.title).toBe("Q1 Sales");
+    expect(Chart.title(chart)).toBe("Q1 Sales");
   });
 
   it("parseSpPr: unknown schemeClr token round-trips as schemeClr, not sysClr", () => {
@@ -785,12 +781,12 @@ describe("Third-round chart bug fixes", () => {
     );
     const chart = getCharts(ws)[0];
     // Simulate a loaded chart whose spPr was captured as raw XML.
-    const group = chart.chartModel!.chart.plotArea.chartTypes[0];
+    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: BarSeries[] }).series[0];
     ser.spPr = { _rawXml: '<c:spPr><a:solidFill><a:srgbClr val="000000"/></a:solidFill></c:spPr>' };
     // Patch: update fill to red. The fix clears `_rawXml` so the
     // structured value wins on write.
-    chart.updateSeries(0, { fill: "#FF0000" });
+    Chart.updateSeries(chart, 0, { fill: "#FF0000" });
     expect((ser.spPr as { _rawXml?: string })._rawXml).toBeUndefined();
     expect(ser.spPr?.fill).toBeDefined();
   });
@@ -933,7 +929,7 @@ describe("Third-round chart bug fixes", () => {
         Target: "../drawings/drawing2.xml"
       }
     ];
-    chart.removeUserShapes();
+    Chart.removeUserShapes(chart);
     // Both the entry's rels AND the workbook-level _chartRels must be
     // purged — the writer reads _chartRels first, so cleaning only
     // the entry leaves the stale rel in the output.
@@ -1085,9 +1081,9 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // Fabricate a Chart instance that points at a non-existent chart
     // number — replicates the "no model available" branch without
     // mutating the real workbook state.
-    const orphan = new (await import("@excel/chart/chart")).Chart(ws, { chartNumber: 99999 }, "A1");
+    const orphan = createChart(ws, { chartNumber: 99999 }, "A1");
     expect(chart).toBeDefined();
-    const result = orphan.toPNG();
+    const result = Chart.toPNG(orphan);
     // `result` must be a Promise even on the failure path.
     expect(typeof (result as Promise<unknown>).then).toBe("function");
     await expect(result).rejects.toThrow(/Cannot render chart/);
@@ -1112,7 +1108,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
       "D1:J10"
     );
     const chart = getCharts(ws)[0];
-    const model = chart.chartModel!;
+    const model = Chart.chartModel(chart)!;
     const catCache = (model.chart.plotArea.chartTypes[0] as any).series[0].categoryAxis?.strRef
       ?.cache;
     // strRef.cache is only populated for string-typed category cells;
@@ -1602,7 +1598,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       } as AddChartOptions,
       "D1:J10"
     );
-    return renderChartSvg(getCharts(ws)[0].chartModel!, { width: 640, height: 480 });
+    return renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 640, height: 480 });
   }
 
   it("pie slices don't collapse to the origin when a value is NaN (chart-renderer buildPieSeries)", () => {
@@ -1692,10 +1688,10 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       // unique slot.
       0
     );
-    chart.addSeries(extra);
-    expect(chart.getSeries(0)?.index).toBe(0);
-    expect(chart.getSeries(1)?.index).toBe(1);
-    expect(chart.getSeries(1)?.order).toBe(1);
+    Chart.addSeries(chart, extra);
+    expect(Chart.getSeries(chart, 0)?.index).toBe(0);
+    expect(Chart.getSeries(chart, 1)?.index).toBe(1);
+    expect(Chart.getSeries(chart, 1)?.order).toBe(1);
   });
 
   it("Chartsheet workbookViewId and zoomToFit round-trip through the XML (chartsheet-xform)", async () => {
@@ -2021,14 +2017,14 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // Inject a pictureOptions payload directly on the series — the
     // high-level API doesn't yet surface it, but the xform must
     // still round-trip whatever the model carries.
-    const areaSer = chart.getSeries(0) as { pictureOptions?: unknown };
+    const areaSer = Chart.getSeries(chart, 0) as { pictureOptions?: unknown };
     areaSer.pictureOptions = { pictureFormat: "stack" };
     const buf = await Workbook.toXlsxBuffer(wb);
     const wb2 = Workbook.create();
     await Workbook.loadXlsx(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "S")!;
     const chart2 = getCharts(ws2)[0];
-    const ser2 = chart2.getSeries(0) as { pictureOptions?: { pictureFormat?: string } };
+    const ser2 = Chart.getSeries(chart2, 0) as { pictureOptions?: { pictureFormat?: string } };
     expect(ser2.pictureOptions).toBeDefined();
     expect(ser2.pictureOptions?.pictureFormat).toBe("stack");
   });
@@ -2362,7 +2358,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     const wb2 = Workbook.create();
     await Workbook.loadXlsx(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "S")!)[0];
-    const series = chart2.getSeries(0) as any;
+    const series = Chart.getSeries(chart2, 0) as any;
     // Directly mutate the fill — no call to `setSpPrFill`. Previously
     // this edit was lost.
     series.spPr.fill = { solid: { srgb: "00FF00" } };

@@ -1,7 +1,7 @@
 import { ChartOptionsError } from "@excel/errors";
 import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
-import { getCell, getSheetName, getTable } from "@excel/worksheet";
+import { getCell, getSheetName, getTable } from "@excel/worksheet-core";
 
 import { type CellValueInputType, cellSetValue } from "../cell";
 import { tableModel, type TableData } from "../table";

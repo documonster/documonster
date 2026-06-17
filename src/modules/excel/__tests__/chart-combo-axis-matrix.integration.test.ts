@@ -7,8 +7,7 @@ import { extractAll } from "@archive/unzip/extract";
  * exercise — log-scale value axis, multiple secondary axes, axis-id
  * uniqueness, scatter+line combos, and 3D combo groups.
  */
-import { installChartSupport } from "@excel/chart/install";
-import { Workbook } from "@excel/index";
+import { Chart, Workbook } from "@excel/index";
 import type { WorkbookData } from "@excel/workbook-core";
 import { getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -16,8 +15,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildComboAxisFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, type EntryMap } from "./helpers/zip-text";
-
-installChartSupport();
 
 let comboAxisFixtures: SyntheticFixture[];
 
@@ -89,7 +86,7 @@ describe("Chart combo / axis matrix", () => {
     expect(chartXml).toMatch(/<c:max val="100"\/>/);
 
     const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-    const valueAxis = chart.chartModel?.chart.plotArea.axes.find(a => a.axisType === "val");
+    const valueAxis = Chart.chartModel(chart)?.chart.plotArea.axes.find(a => a.axisType === "val");
     expect(valueAxis, "value axis").toBeDefined();
     expect(valueAxis!.scaling?.logBase).toBe(10);
     expect(valueAxis!.scaling?.min).toBe(1);

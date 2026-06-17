@@ -216,12 +216,9 @@ export type { CellAddress, SheetRange, Origin } from "@excel/utils/address";
 // Worksheet data conversion option types
 export type { SheetToJSONOptions, AddJSONOptions, AddAOAOptions } from "@excel/worksheet";
 
-// Chart programmatic surface lives at the `./chart` subpath so it stays
-// out of bundles that only need to read / write XLSX files. Import
-// `@cj-tech-master/excelts/chart` to use chart APIs. Call
-// `installChartSupport()` once at startup to enable
-// `worksheet.addChart()`, chart-cache population during write, and
-// chart reconstruction during XLSX load.
+// Chart programmatic surface lives at the `./chart` subpath. The high-level
+// chart APIs import the chart implementation statically, so no install step is
+// needed — bundles that never touch a chart API tree-shake it all out.
 
 // Date conversion (Excel serial dates <-> JS Date)
 export { dateToExcel, excelToDate } from "@utils/utils.base";

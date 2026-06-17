@@ -88,9 +88,7 @@ export interface DocxToPdfOptions {
    * to plug in the Excel chart renderer for publication-quality output:
    *
    * ```typescript
-   * import { installChartSupport } from "excelts/chart";
    * import { createWordChartPdfRenderer } from "excelts/pdf";
-   * installChartSupport();
    * const pdfBytes = await docxToPdf(doc, {
    *   chartRenderer: createWordChartPdfRenderer()
    * });
@@ -110,8 +108,7 @@ export interface DocxToPdfOptions {
    * Note: `chartEx` charts (sunburst / treemap / waterfall / funnel /
    * boxWhisker / …) never reach this `Chart`-typed callback because
    * there is no classic `Chart` instance to pass. They are rendered by
-   * the built-in layout-aware renderer instead (full vector output when
-   * `installChartSupport()` has been called).
+   * the built-in layout-aware renderer instead (full vector output).
    */
   readonly chartRenderer?: (
     chart: Chart,

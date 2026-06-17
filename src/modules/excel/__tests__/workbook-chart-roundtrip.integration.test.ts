@@ -24,8 +24,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { extractAll } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
-import { Cell, Workbook } from "@excel/index";
+import { Cell, Chart, Workbook } from "@excel/index";
 import { getWorksheets } from "@excel/workbook";
 import type { WorkbookData } from "@excel/workbook-core";
 import { getCharts, getSheetName } from "@excel/worksheet";
@@ -77,10 +76,6 @@ async function performRoundTrip(): Promise<{
 
   return { inputEntries, outputEntries, outputBytes };
 }
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("Chart Round-Trip Preservation", () => {
   // Load sample buffer once before all tests
@@ -302,13 +297,13 @@ describe("Chart Round-Trip Preservation", () => {
       expect(chart.chartNumber).toBe(1);
 
       // This chart has an auto-generated title (no explicit c:tx), so title is undefined
-      expect(chart.title).toBeUndefined();
+      expect(Chart.title(chart)).toBeUndefined();
 
       // Verify chart model is accessible
-      expect(chart.chartModel).toBeDefined();
-      expect(chart.chartTypes.length).toBeGreaterThan(0);
-      expect(chart.chartTypes[0].type).toBe("bar");
-      expect(chart.axes.length).toBeGreaterThan(0);
+      expect(Chart.chartModel(chart)).toBeDefined();
+      expect(Chart.chartTypes(chart).length).toBeGreaterThan(0);
+      expect(Chart.chartTypes(chart)[0].type).toBe("bar");
+      expect(Chart.axes(chart).length).toBeGreaterThan(0);
     });
 
     it("should read chart title after setting it programmatically", async () => {
@@ -317,8 +312,8 @@ describe("Chart Round-Trip Preservation", () => {
       const chart = getCharts(pivotSheet!)[0];
 
       // Set a title
-      chart.title = "Revenue by Region";
-      expect(chart.title).toBe("Revenue by Region");
+      Chart.setTitle(chart, "Revenue by Region");
+      expect(Chart.title(chart)).toBe("Revenue by Region");
 
       // Round-trip and verify
       const outputBuffer = await Workbook.toXlsxBuffer(workbook);
@@ -326,7 +321,7 @@ describe("Chart Round-Trip Preservation", () => {
       await Workbook.loadXlsx(workbook2, outputBuffer);
 
       const chart2 = getCharts(Workbook.getWorksheet(workbook2, "Pivot")!)[0];
-      expect(chart2.title).toBe("Revenue by Region");
+      expect(Chart.title(chart2)).toBe("Revenue by Region");
     });
 
     it("should preserve cell data in Data sheet", async () => {

@@ -18,10 +18,9 @@ import {
   renderChartSvg
 } from "@excel/chart";
 import { type ChartSceneSeries } from "@excel/chart/index";
-import { installChartSupport } from "@excel/chart/install";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { addChart, addChartEx, addComboChart, getCharts } from "@excel/worksheet";
-import { beforeAll, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import {
   CATEGORIES,
@@ -36,10 +35,6 @@ import {
 } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("buildChartModel — all 16 chart types", () => {
   it("bar chart", () => {
@@ -132,7 +127,7 @@ describe("buildChartModel — all 16 chart types", () => {
     expect(charts.length).toBe(4);
 
     const layoutFor = (idx: number) =>
-      charts[idx].chartExModel!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr;
+      Chart.chartExModel(charts[idx])!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr;
 
     // Histogram
     const histo = layoutFor(0);
@@ -1003,11 +998,11 @@ describe("chart round-trip via addChart API", () => {
 
     expect(chart).toBeDefined();
     expect(chart.chartNumber).toBeGreaterThan(0);
-    expect(chart.title).toBe("Quarterly Results");
-    expect(chart.chartTypes.length).toBe(1);
-    expect(chart.chartTypes[0].type).toBe("bar");
-    expect(chart.getSeriesCount(0)).toBe(2);
-    expect(chart.axes.length).toBe(2);
+    expect(Chart.title(chart)).toBe("Quarterly Results");
+    expect(Chart.chartTypes(chart).length).toBe(1);
+    expect(Chart.chartTypes(chart)[0].type).toBe("bar");
+    expect(Chart.getSeriesCount(chart, 0)).toBe(2);
+    expect(Chart.axes(chart).length).toBe(2);
   });
 
   it("round-trips a line chart with smooth", async () => {
@@ -1017,8 +1012,8 @@ describe("chart round-trip via addChart API", () => {
       title: "Trend Line"
     });
 
-    expect(chart.title).toBe("Trend Line");
-    expect(chart.chartTypes[0].type).toBe("line");
+    expect(Chart.title(chart)).toBe("Trend Line");
+    expect(Chart.chartTypes(chart)[0].type).toBe("line");
   });
 
   it("round-trips a pie chart", async () => {
@@ -1028,9 +1023,9 @@ describe("chart round-trip via addChart API", () => {
       title: "Market Share"
     });
 
-    expect(chart.title).toBe("Market Share");
-    expect(chart.chartTypes[0].type).toBe("pie");
-    expect(chart.axes.length).toBe(0);
+    expect(Chart.title(chart)).toBe("Market Share");
+    expect(Chart.chartTypes(chart)[0].type).toBe("pie");
+    expect(Chart.axes(chart).length).toBe(0);
   });
 
   it("round-trips a scatter chart", async () => {
@@ -1040,8 +1035,8 @@ describe("chart round-trip via addChart API", () => {
       scatterStyle: "lineMarker"
     });
 
-    expect(chart.chartTypes[0].type).toBe("scatter");
-    expect(chart.axes.length).toBe(2);
+    expect(Chart.chartTypes(chart)[0].type).toBe("scatter");
+    expect(Chart.axes(chart).length).toBe(2);
   });
 
   it("round-trips a 3D bar chart with serAx", async () => {
@@ -1051,10 +1046,10 @@ describe("chart round-trip via addChart API", () => {
       title: "3D Chart"
     });
 
-    expect(chart.title).toBe("3D Chart");
-    expect(chart.chartTypes[0].type).toBe("bar3D");
-    expect(chart.axes.length).toBe(3);
-    expect(chart.axes[2].axisType).toBe("ser");
+    expect(Chart.title(chart)).toBe("3D Chart");
+    expect(Chart.chartTypes(chart)[0].type).toBe("bar3D");
+    expect(Chart.axes(chart).length).toBe(3);
+    expect(Chart.axes(chart)[2].axisType).toBe("ser");
   });
 
   it("round-trips a doughnut chart", async () => {
@@ -1064,7 +1059,7 @@ describe("chart round-trip via addChart API", () => {
       holeSize: 60
     });
 
-    expect(chart.chartTypes[0].type).toBe("doughnut");
+    expect(Chart.chartTypes(chart)[0].type).toBe("doughnut");
   });
 
   it("round-trips an area chart", async () => {
@@ -1074,8 +1069,8 @@ describe("chart round-trip via addChart API", () => {
       grouping: "stacked"
     });
 
-    expect(chart.chartTypes[0].type).toBe("area");
-    expect(chart.axes.length).toBe(2);
+    expect(Chart.chartTypes(chart)[0].type).toBe("area");
+    expect(Chart.axes(chart).length).toBe(2);
   });
 
   it("round-trips a radar chart", async () => {
@@ -1085,7 +1080,7 @@ describe("chart round-trip via addChart API", () => {
       radarStyle: "filled"
     });
 
-    expect(chart.chartTypes[0].type).toBe("radar");
+    expect(Chart.chartTypes(chart)[0].type).toBe("radar");
   });
 
   it("round-trips a surface chart", async () => {
@@ -1095,8 +1090,8 @@ describe("chart round-trip via addChart API", () => {
       wireframe: true
     });
 
-    expect(chart.chartTypes[0].type).toBe("surface");
-    expect(chart.axes.length).toBe(3);
+    expect(Chart.chartTypes(chart)[0].type).toBe("surface");
+    expect(Chart.axes(chart).length).toBe(3);
   });
 
   it("round-trips a bubble chart", async () => {
@@ -1106,8 +1101,8 @@ describe("chart round-trip via addChart API", () => {
       bubbleScale: 200
     });
 
-    expect(chart.chartTypes[0].type).toBe("bubble");
-    expect(chart.axes.length).toBe(2);
+    expect(Chart.chartTypes(chart)[0].type).toBe("bubble");
+    expect(Chart.axes(chart).length).toBe(2);
   });
 
   it("round-trips chart with no title (autoTitleDeleted)", async () => {
@@ -1116,7 +1111,7 @@ describe("chart round-trip via addChart API", () => {
       series: [baseSeries("S1")]
     });
 
-    expect(chart.title).toBeUndefined();
+    expect(Chart.title(chart)).toBeUndefined();
   });
 
   it("round-trips chart with axis options", async () => {
@@ -1127,9 +1122,9 @@ describe("chart round-trip via addChart API", () => {
       valueAxis: { title: "Amount", min: 0, max: 50, majorGridlines: true }
     });
 
-    const catAx = chart.categoryAxis;
+    const catAx = Chart.categoryAxis(chart);
     expect(catAx).toBeDefined();
-    const valAx = chart.valueAxis;
+    const valAx = Chart.valueAxis(chart);
     expect(valAx).toBeDefined();
     expect(valAx!.scaling?.min).toBe(0);
     expect(valAx!.scaling?.max).toBe(50);
@@ -1146,7 +1141,7 @@ describe("chart round-trip via addChart API", () => {
       ]
     });
 
-    const series = chart.getSeries(0) as any;
+    const series = Chart.getSeries(chart, 0) as any;
     expect(series).toBeDefined();
     expect(series.dataLabels?.showVal).toBe(true);
   });
@@ -1162,7 +1157,7 @@ describe("chart round-trip via addChart API", () => {
       ]
     });
 
-    const series = chart.getSeries(0) as any;
+    const series = Chart.getSeries(chart, 0) as any;
     expect(series).toBeDefined();
     expect(series.trendlines?.length).toBe(1);
     expect(series.trendlines[0].type).toBe("linear");
@@ -1195,12 +1190,12 @@ describe("combo chart round-trip via addComboChart API", () => {
     await Workbook.loadXlsx(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
-    expect(chart.title).toBe("Combo");
-    expect(chart.chartTypes.length).toBe(2);
-    expect(chart.chartTypes[0].type).toBe("bar");
-    expect(chart.chartTypes[1].type).toBe("line");
+    expect(Chart.title(chart)).toBe("Combo");
+    expect(Chart.chartTypes(chart).length).toBe(2);
+    expect(Chart.chartTypes(chart)[0].type).toBe("bar");
+    expect(Chart.chartTypes(chart)[1].type).toBe("line");
     // Should have 4 axes (primary cat+val, secondary cat+val)
-    expect(chart.axes.length).toBe(4);
+    expect(Chart.axes(chart).length).toBe(4);
   });
 
   it("round-trips combo with 3D group", async () => {
@@ -1224,10 +1219,10 @@ describe("combo chart round-trip via addComboChart API", () => {
     await Workbook.loadXlsx(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
-    expect(chart.title).toBe("3D Combo");
-    expect(chart.chartTypes.length).toBe(2);
+    expect(Chart.title(chart)).toBe("3D Combo");
+    expect(Chart.chartTypes(chart).length).toBe(2);
     // bar3D produces serAx
-    expect(chart.axes.some(a => a.axisType === "ser")).toBe(true);
+    expect(Chart.axes(chart).some(a => a.axisType === "ser")).toBe(true);
   });
 });
 
@@ -1242,13 +1237,13 @@ describe("Chart high-level API", () => {
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "bar", series: [baseSeries("S1")], title: "Original" }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(chart.title).toBe("Original");
+    expect(Chart.title(chart)).toBe("Original");
 
-    chart.title = "Updated";
-    expect(chart.title).toBe("Updated");
+    Chart.setTitle(chart, "Updated");
+    expect(Chart.title(chart)).toBe("Updated");
 
-    chart.title = undefined;
-    expect(chart.title).toBeUndefined();
+    Chart.setTitle(chart, undefined);
+    expect(Chart.title(chart)).toBeUndefined();
   });
 
   it("Chart.legend getter/setter", async () => {
@@ -1258,9 +1253,9 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(chart.legend).toBeDefined();
-    chart.legend = undefined;
-    expect(chart.legend).toBeUndefined();
+    expect(Chart.legend(chart)).toBeDefined();
+    Chart.setLegend(chart, undefined);
+    expect(Chart.legend(chart)).toBeUndefined();
   });
 
   it("Chart.chartTypes returns chart type groups", () => {
@@ -1270,8 +1265,8 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "line", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(chart.chartTypes.length).toBe(1);
-    expect(chart.chartTypes[0].type).toBe("line");
+    expect(Chart.chartTypes(chart).length).toBe(1);
+    expect(Chart.chartTypes(chart)[0].type).toBe("line");
   });
 
   it("Chart.axes returns axis list", () => {
@@ -1281,9 +1276,9 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(chart.axes.length).toBe(2);
-    expect(chart.categoryAxis).toBeDefined();
-    expect(chart.valueAxis).toBeDefined();
+    expect(Chart.axes(chart).length).toBe(2);
+    expect(Chart.categoryAxis(chart)).toBeDefined();
+    expect(Chart.valueAxis(chart)).toBeDefined();
   });
 
   it("Chart.getSeries returns series by index", () => {
@@ -1300,10 +1295,10 @@ describe("Chart high-level API", () => {
     );
     const chart = getCharts(ws)[0];
 
-    expect(chart.getSeriesCount(0)).toBe(2);
-    expect(chart.getSeries(0)).toBeDefined();
-    expect(chart.getSeries(1)).toBeDefined();
-    expect(chart.getSeries(2)).toBeUndefined();
+    expect(Chart.getSeriesCount(chart, 0)).toBe(2);
+    expect(Chart.getSeries(chart, 0)).toBeDefined();
+    expect(Chart.getSeries(chart, 1)).toBeDefined();
+    expect(Chart.getSeries(chart, 2)).toBeUndefined();
   });
 
   it("Chart.spPr getter/setter", () => {
@@ -1313,8 +1308,8 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    chart.spPr = { fill: { solid: { rgb: "FFFFFF" } } } as any;
-    expect(chart.spPr).toBeDefined();
+    Chart.setSpPr(chart, { fill: { solid: { rgb: "FFFFFF" } } } as any);
+    expect(Chart.spPr(chart)).toBeDefined();
   });
 
   it("Chart.chartModel returns undefined for non-existent chart entry", () => {
@@ -1325,8 +1320,8 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
     // chartModel should be defined for a normal chart
-    expect(chart.chartModel).toBeDefined();
-    expect(chart.isChartEx).toBe(false);
+    expect(Chart.chartModel(chart)).toBeDefined();
+    expect(Chart.isChartEx(chart)).toBe(false);
   });
 
   it("getCharts returns all charts on the worksheet", () => {
@@ -1338,8 +1333,8 @@ describe("Chart high-level API", () => {
 
     const charts = getCharts(ws);
     expect(charts.length).toBe(2);
-    expect(charts[0].chartTypes[0].type).toBe("bar");
-    expect(charts[1].chartTypes[0].type).toBe("pie");
+    expect(Chart.chartTypes(charts[0])[0].type).toBe("bar");
+    expect(Chart.chartTypes(charts[1])[0].type).toBe("pie");
   });
 });
 
@@ -1540,10 +1535,10 @@ describe("multiple charts round-trip", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(getCharts(ws2).length).toBe(2);
-    expect(getCharts(ws2)[0].title).toBe("Chart 1");
-    expect(getCharts(ws2)[1].title).toBe("Chart 2");
-    expect(getCharts(ws2)[0].chartTypes[0].type).toBe("bar");
-    expect(getCharts(ws2)[1].chartTypes[0].type).toBe("pie");
+    expect(Chart.title(getCharts(ws2)[0])).toBe("Chart 1");
+    expect(Chart.title(getCharts(ws2)[1])).toBe("Chart 2");
+    expect(Chart.chartTypes(getCharts(ws2)[0])[0].type).toBe("bar");
+    expect(Chart.chartTypes(getCharts(ws2)[1])[0].type).toBe("pie");
   });
 });
 
@@ -1605,7 +1600,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const scene = buildChartScene(model, { width: 600, height: 400 });
     expect(scene.dataTable).toBeDefined();
     const dt = scene.dataTable!;
@@ -1650,7 +1645,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const scene = buildChartScene(model, { width: 500, height: 350 });
     expect(scene.dataTable).toBeDefined();
     expect(scene.xLabels).toEqual([]);
@@ -1676,7 +1671,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     const scene = buildChartScene(model, { width: 640, height: 400 });
     const bar = scene.series.find(
       (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar"
@@ -1709,7 +1704,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = getCharts(ws)[0].chartModel!;
+    const model = Chart.chartModel(getCharts(ws)[0])!;
     expect(model.chart.view3D).toBeUndefined();
     const scene = buildChartScene(model, { width: 500, height: 350 });
     const bar = scene.series.find(
@@ -1743,7 +1738,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(getCharts(ws)[0].chartModel!, {
+    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
       width: 500,
       height: 300
     });
@@ -1778,7 +1773,7 @@ describe("builder chart-level options", () => {
       },
       "C1:J10"
     );
-    const svg = renderChartSvg(getCharts(ws)[0].chartModel!, {
+    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, {
       width: 400,
       height: 260
     });

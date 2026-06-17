@@ -2886,3 +2886,79 @@ export type AddChartRange =
       ext: { cx: number; cy: number };
       editAs?: "absolute";
     };
+
+/**
+ * Relationship entry written to `chart{N}.xml.rels` / `chartEx{N}.xml.rels`.
+ * Kept as a lightweight structural record (not a full rels type) so the
+ * round-trip path works uniformly with what the xform reader/writer emits.
+ */
+export interface ChartRelEntry {
+  /** `rId…` identifier referenced from the chart part XML. */
+  Id: string;
+  /** Relationship type URI (e.g. the user-shapes / style / colours type). */
+  Type: string;
+  /** Target path, relative to the chart part. */
+  Target: string;
+  /** Optional mode for external targets (`"External"`). */
+  TargetMode?: string;
+}
+
+/**
+ * Internal model stored on the Workbook for each classic chart. Contains the
+ * fully-parsed (or programmatically created) chart data plus ancillary
+ * style/colours files. Pure data — stored in `WorkbookData._chartEntries`.
+ */
+export interface ChartEntry {
+  /** 1-based chart number (matches chart{N}.xml) */
+  chartNumber: number;
+  /** Full chart model */
+  model: ChartModel;
+  /** Original chart XML bytes from a loaded workbook, used for clean round-trip passthrough */
+  rawData?: Uint8Array;
+  /** JSON snapshot of `model` taken when `rawData` was parsed */
+  modelSnapshot?: string;
+  /** True once a high-level API mutates the parsed chart model */
+  dirty?: boolean;
+  /** When true, simple high-level mutations may patch raw XML instead of full re-render. */
+  preferRawPatch?: boolean;
+  /** When true, writing fails instead of re-rendering if raw XML cannot be safely patched. */
+  requireRawPatch?: boolean;
+  /** Chart style (styleN.xml) — raw XML for round-trip */
+  style?: ChartStyleModel;
+  /** Chart colors (colorsN.xml) — raw XML for round-trip */
+  colors?: ChartColorsModel;
+  /** Chart rels (chart{N}.xml.rels) — entries for round-trip */
+  rels?: ChartRelEntry[];
+  /**
+   * Raw bytes of the user-shapes drawing part targeted by this chart's
+   * `c:userShapes r:id="…"` reference. OOXML stores annotation shapes
+   * (arrows, callouts, text boxes the user drew on top of the chart)
+   * in a separate `xl/drawings/drawingN.xml` part that uses relative
+   * anchors instead of the regular `xdr:twoCellAnchor` schema. The
+   * full DrawingML subsystem is out of scope for this library, so the
+   * bytes are kept verbatim for round-trip and exposed programmatically
+   * via `Chart.userShapesXml` so callers can inject / replace the
+   * drawing part if they need to.
+   */
+  userShapesXml?: Uint8Array;
+}
+
+/**
+ * Model-shaped chart anchor, as re-hydrated from an XLSX drawing anchor or
+ * produced by `chartAnchorModel`. Pure data (anchor coordinates only).
+ */
+export interface ChartAnchorModel {
+  chartNumber: number;
+  /** 1-based chartEx number (cx:chart). 0 or absent for classic charts. */
+  chartExNumber?: number;
+  range: {
+    tl: AnchorModel;
+    /** Bottom-right (only for twoCellAnchor) */
+    br?: AnchorModel;
+    /** Absolute position in EMU (only for absoluteAnchor) */
+    pos?: { x: number; y: number };
+    /** Extent in EMU (for oneCellAnchor and absoluteAnchor) */
+    ext?: { cx: number; cy: number };
+    editAs?: string;
+  };
+}

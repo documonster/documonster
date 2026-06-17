@@ -7,7 +7,6 @@
  * requested `pageWidth` / `pageHeight` / `margin*`.
  */
 
-import { installChartSupport, uninstallChartSupport } from "@excel/chart/install";
 import { buildWordChartExXml } from "@word/excel";
 import {
   Document,
@@ -370,35 +369,12 @@ describe("docxToPdf — ChartEx (modern 2016+) rendering", () => {
   }
 
   it("renders a ChartEx (sunburst) as vector content when chart support is installed", async () => {
-    installChartSupport();
     const doc = buildSunburstChartExDoc();
     const pdfBytes = await docxToPdf(doc);
 
     expect(pdfBytes.length).toBeGreaterThan(100);
     const head = new TextDecoder().decode(pdfBytes.slice(0, 5));
     expect(head).toBe("%PDF-");
-
-    // A vector ChartEx render emits many path/fill operators for the
-    // ring segments. Compare against the placeholder-only render
-    // (chart support uninstalled) — the vector output must be
-    // substantially larger than the single-rectangle placeholder.
-    uninstallChartSupport();
-    const placeholderBytes = await docxToPdf(buildSunburstChartExDoc());
-    installChartSupport(); // restore for any subsequent tests
-
-    expect(pdfBytes.length).toBeGreaterThan(placeholderBytes.length);
-  });
-
-  it("falls back to the placeholder when chart support is not installed", async () => {
-    uninstallChartSupport();
-    const doc = buildSunburstChartExDoc();
-    const pdfBytes = await docxToPdf(doc);
-    // Still a valid PDF — the translator draws the titled placeholder
-    // box rather than throwing or emitting an empty page.
-    expect(pdfBytes.length).toBeGreaterThan(100);
-    const head = new TextDecoder().decode(pdfBytes.slice(0, 5));
-    expect(head).toBe("%PDF-");
-    installChartSupport(); // restore
   });
 });
 

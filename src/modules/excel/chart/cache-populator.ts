@@ -29,10 +29,10 @@ import type {
 import { definedNamesGetRangesScoped } from "@excel/defined-names";
 import { tableDisplayName, tableModel, tableName } from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
-import type { Workbook } from "@excel/workbook";
-import { getDefinedNames, getWorksheet, getWorksheets } from "@excel/workbook";
-import type { Worksheet } from "@excel/worksheet";
-import { getCell, getSheetName, getTables } from "@excel/worksheet";
+import type { WorkbookData } from "@excel/workbook-core";
+import { getDefinedNames, getWorksheet, getWorksheets } from "@excel/workbook-core";
+import type { WorksheetData } from "@excel/worksheet-core";
+import { getCell, getSheetName, getTables } from "@excel/worksheet-core";
 import { dateToExcel } from "@utils/utils.base";
 
 /**
@@ -50,8 +50,8 @@ import { dateToExcel } from "@utils/utils.base";
  */
 export function fillChartCaches(
   model: ChartModel,
-  workbook: Workbook,
-  contextWorksheet?: Worksheet
+  workbook: WorkbookData,
+  contextWorksheet?: WorksheetData
 ): void {
   const plotArea = model.chart?.plotArea;
   if (!plotArea) {
@@ -126,8 +126,8 @@ function fillClassicTitleCache(title: ChartTitle | undefined, ctx: ResolverConte
 
 export function fillChartExCaches(
   model: ChartExModel,
-  workbook: Workbook,
-  contextWorksheet?: Worksheet
+  workbook: WorkbookData,
+  contextWorksheet?: WorksheetData
 ): void {
   // Defensive guard — parseChartEx emits `chartData.data = []` even for
   // malformed documents, but downstream callers (and unit fixtures) can
@@ -375,9 +375,9 @@ function fillAxisDataSource(src: AxisDataSource, ctx: ResolverContext, date1904?
  */
 export function fillNumRef(
   ref: NumberReference,
-  workbook: Workbook,
+  workbook: WorkbookData,
   date1904?: boolean,
-  contextWorksheet?: Worksheet
+  contextWorksheet?: WorksheetData
 ): void {
   fillNumRefInternal(ref, buildResolverContext(workbook, contextWorksheet), date1904);
 }
@@ -427,8 +427,8 @@ function fillNumRefInternal(ref: NumberReference, ctx: ResolverContext, date1904
  */
 export function fillStrRef(
   ref: StringReference,
-  workbook: Workbook,
-  contextWorksheet?: Worksheet
+  workbook: WorkbookData,
+  contextWorksheet?: WorksheetData
 ): void {
   fillStrRefInternal(ref, buildResolverContext(workbook, contextWorksheet));
 }
@@ -468,8 +468,8 @@ function fillStrRefInternal(ref: StringReference, ctx: ResolverContext): void {
 
 export function fillMultiLvlStrRef(
   ref: MultiLevelStringReference,
-  workbook: Workbook,
-  contextWorksheet?: Worksheet
+  workbook: WorkbookData,
+  contextWorksheet?: WorksheetData
 ): void {
   fillMultiLvlStrRefInternal(ref, buildResolverContext(workbook, contextWorksheet));
 }
@@ -505,12 +505,12 @@ function fillMultiLvlStrRefInternal(ref: MultiLevelStringReference, ctx: Resolve
 // ---------------------------------------------------------------------------
 
 interface ResolvedReference {
-  worksheet: Worksheet;
+  worksheet: WorksheetData;
   cells: Array<{ value: unknown }>;
 }
 
 interface ResolvedReferenceMatrix {
-  worksheet: Worksheet;
+  worksheet: WorksheetData;
   values: unknown[][];
   rowCount: number;
   columnCount: number;
@@ -540,8 +540,8 @@ interface ResolvedReferenceMatrix {
  * expansion ceiling.
  */
 interface ResolverContext {
-  workbook: Workbook;
-  contextWorksheet?: Worksheet;
+  workbook: WorkbookData;
+  contextWorksheet?: WorksheetData;
   localSheetId?: number;
   visitedDefinedNames: Set<string>;
   definedNameDepth: number;
@@ -554,7 +554,10 @@ interface ResolverContext {
  */
 const MAX_DEFINED_NAME_DEPTH = 128;
 
-function buildResolverContext(workbook: Workbook, contextWorksheet?: Worksheet): ResolverContext {
+function buildResolverContext(
+  workbook: WorkbookData,
+  contextWorksheet?: WorksheetData
+): ResolverContext {
   let localSheetId: number | undefined;
   if (contextWorksheet) {
     // OOXML `definedName/@localSheetId` is a 0-based index into the
@@ -616,7 +619,7 @@ function resolveReference(formula: string, ctx: ResolverContext): ResolvedRefere
   // Multi-range support: Excel uses commas or semicolons between sub-refs.
   // Inside quoted sheet names, commas don't count — do a safe split.
   const parts = splitFormulaRanges(formula);
-  let worksheet: Worksheet | undefined;
+  let worksheet: WorksheetData | undefined;
   const cells: Array<{ value: unknown }> = [];
 
   for (const part of parts) {
@@ -734,7 +737,7 @@ function resolveDefinedNameReference(
     // We recursively resolve each part through the full reference pipeline
     // so that nested names, structured refs, and A1 refs all work.
     const aggregated: Array<{ value: unknown }> = [];
-    let firstWorksheet: Worksheet | undefined;
+    let firstWorksheet: WorksheetData | undefined;
     for (const rangeStr of resolution.ranges) {
       if (!rangeStr) {
         continue;
@@ -833,7 +836,7 @@ function findDefinedName(
  * a specific scope. Returns `undefined` when no entry exists at that scope.
  */
 function getDefinedNameRanges(
-  workbook: Workbook,
+  workbook: WorkbookData,
   name: string,
   localSheetId: number | undefined
 ): string[] | undefined {
@@ -951,7 +954,7 @@ function splitSheetPrefix(formula: string): { sheetName: string; remainder: stri
 
 function resolveStructuredReference(
   formula: string,
-  workbook: Workbook
+  workbook: WorkbookData
 ): ResolvedReference | undefined {
   // Excel accepts both bare (`Table1[Col]`) and sheet-qualified
   // (`Sheet1!Table1[Col]`) structured references. Strip the optional sheet
@@ -1112,7 +1115,7 @@ function resolveReferenceMatrix(
     ctx.visitedDefinedNames.add(visitKey);
     ctx.definedNameDepth += 1;
     try {
-      let firstWorksheet: Worksheet | undefined;
+      let firstWorksheet: WorksheetData | undefined;
       const mergedValues: unknown[][] = [];
       let mergedColumnCount = 0;
       for (const rangeStr of named.ranges) {
@@ -1142,7 +1145,7 @@ function resolveReferenceMatrix(
   }
 
   const parts = splitFormulaRanges(formula);
-  let worksheet: Worksheet | undefined;
+  let worksheet: WorksheetData | undefined;
   const rows: unknown[][] = [];
   let columnCount = 0;
 
@@ -1235,7 +1238,7 @@ function splitFormulaRanges(formula: string): string[] {
  * Extract a raw value from a worksheet cell.
  * Avoids forcing creation of empty cells by using the row-level accessor.
  */
-function extractCellValue(ws: Worksheet, row: number, col: number): unknown {
+function extractCellValue(ws: WorksheetData, row: number, col: number): unknown {
   // Worksheet.getCell creates sparse cell slots but does not mutate existing
   // values — safe to call.
   const cell = getCell(ws, row, col);

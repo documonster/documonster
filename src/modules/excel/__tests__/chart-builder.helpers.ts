@@ -22,7 +22,7 @@ import type {
   ChartTypeGroup,
   PlotArea
 } from "@excel/chart";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { addChart, getCharts } from "@excel/worksheet";
 import { expect } from "vitest";
 
@@ -145,7 +145,7 @@ export function makeRootExportRenderedChartModel(): ChartModel {
     },
     "D1:J10"
   );
-  return getCharts(ws)[0].chartModel!;
+  return Chart.chartModel(getCharts(ws)[0])!;
 }
 
 // ---------------------------------------------------------------------------

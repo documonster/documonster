@@ -6,10 +6,9 @@
  * Formula evaluation itself no longer needs any install step: call the
  * `calculateFormulas(workbook)` free function from `@formula/...` directly.
  *
- * Chart support is NOT installed globally — only the chart test files
- * install it locally via `beforeAll(installChartSupport)`. This keeps the
- * non-chart test files from paying the ~30k-line chart module
- * transform/evaluate cost on every run.
+ * Chart support likewise needs no install step — the chart implementation is
+ * imported statically by the high-level chart APIs and tree-shaken out of
+ * builds that never use them.
  */
 
 import { installFormulaEngine } from "@formula/install";

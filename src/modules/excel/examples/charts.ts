@@ -160,8 +160,7 @@ import {
   type RegionMapDataOptions,
   type TopologyLike,
   type NumberReference,
-  type StringReference,
-  installChartSupport
+  type StringReference
 } from "@excel/chart/index";
 import {
   chartsheetName,
@@ -171,7 +170,7 @@ import {
   chartsheetState
 } from "@excel/chartsheet";
 import { definedNamesAdd } from "@excel/defined-names";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Column, Workbook, Worksheet } from "@excel/index";
 import { rowSetFont } from "@excel/row";
 import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
 import {
@@ -221,8 +220,6 @@ import { chartToPdf } from "@pdf/excel-bridge";
 
 import { drawChartExPdf } from "../chart/chart-ex-renderer";
 import { drawChartPdf } from "../chart/chart-renderer";
-
-installChartSupport();
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 const XLSX_PATH = resolve(OUT_DIR, "charts-example.xlsx");
@@ -1426,7 +1423,7 @@ async function main(): Promise<void> {
   );
   // `setStyle(N)` == `setBuiltInStyle(N)` — lightweight `<c:style/>` knob
   // mapped to the 2007/2010 catalogue (1-48).
-  getCharts(styled)[0].setStyle(42);
+  Chart.setStyle(getCharts(styled)[0], 42);
   console.log(`Built-in-style chart is #${styledChartNum}`);
 
   // Modern styleN.xml / colorsN.xml sidecars — full Office 2013+ styling.
@@ -2270,17 +2267,21 @@ async function main(): Promise<void> {
 
   // `chartTypes` — inspect the plot-area groups. Classic charts have one
   // entry per chart-type group; combo charts return one per group.
-  console.log("Editing chart groups:", editing.chartTypes.length, editing.chartTypes[0]?.type);
-  console.log("Initial series count:", editing.getSeriesCount());
+  console.log(
+    "Editing chart groups:",
+    Chart.chartTypes(editing).length,
+    Chart.chartTypes(editing)[0]?.type
+  );
+  console.log("Initial series count:", Chart.getSeriesCount(editing));
 
   // Mutate the title via the setter — triggers a raw-patch.
-  editing.title = "Retitled via setter";
+  Chart.setTitle(editing, "Retitled via setter");
 
   // Pull an existing series, modify it with `updateSeries`.
-  editing.updateSeries(0, { line: "C00000", lineWidth: 2, fill: "C00000" });
+  Chart.updateSeries(editing, 0, { line: "C00000", lineWidth: 2, fill: "C00000" });
 
   // `addSeriesFromOptions` — append a second series after construction.
-  editing.addSeriesFromOptions({
+  Chart.addSeriesFromOptions(editing, {
     name: "Profit",
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$C$2:$C$7",
@@ -2290,15 +2291,15 @@ async function main(): Promise<void> {
 
   // `removeSeries(index)` — drop a series by index (returns the removed
   // object). Here we append a throwaway series then remove it.
-  editing.addSeriesFromOptions({
+  Chart.addSeriesFromOptions(editing, {
     name: "Throwaway",
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$E$2:$E$7"
   });
-  editing.removeSeries(editing.getSeriesCount() - 1);
+  Chart.removeSeries(editing, Chart.getSeriesCount(editing) - 1);
 
   // Low-level `setStyle(N)` toggle — applies one of the 48 built-in styles.
-  editing.setStyle(26);
+  Chart.setStyle(editing, 26);
 
   // `setBuiltInStyle(N)` — xlsxwriter-compatible alias for `setStyle`.
   addChart(
@@ -2311,7 +2312,7 @@ async function main(): Promise<void> {
     },
     "A25:L44"
   );
-  getCharts(edit)[1].setBuiltInStyle(42);
+  Chart.setBuiltInStyle(getCharts(edit)[1], 42);
 
   // Narrow mutation on an already-built chart via `mutate(fn)`. The
   // callback receives the structured `ChartModel`; any fields touched
@@ -2329,7 +2330,8 @@ async function main(): Promise<void> {
     "A47:L66"
   );
   const toMutate = getCharts(edit)[2];
-  toMutate.mutate(
+  Chart.mutate(
+    toMutate,
     model => {
       // Flip the first series into a heavy red dashed line.
       const firstGroup = model.chart.plotArea.chartTypes[0];
@@ -2363,7 +2365,8 @@ async function main(): Promise<void> {
     "A70:L89"
   );
   const exChart = getCharts(edit)[3];
-  exChart.mutateChartEx(
+  Chart.mutateChartEx(
+    exChart,
     model => {
       const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
       if (series) {
@@ -2375,7 +2378,7 @@ async function main(): Promise<void> {
 
   // `removeUserShapes()` — no-op on freshly-built charts (they carry no
   // user shapes); demonstrated here so the code path is exercised.
-  editing.removeUserShapes();
+  Chart.removeUserShapes(editing);
 
   // ---------------------------------------------------------------------------
   // 15. Low-level builders — call `buildChartModel` /
@@ -2600,7 +2603,7 @@ async function main(): Promise<void> {
     "A4:L23"
   );
   const chartFrame = getCharts(advanced)[0];
-  chartFrame.mutate(model => {
+  Chart.mutate(chartFrame, model => {
     model.spPr = {
       fill: {
         gradient: {
@@ -2642,7 +2645,7 @@ async function main(): Promise<void> {
     "A27:L46"
   );
   const withEffects = getCharts(advanced)[1];
-  withEffects.mutate(model => {
+  Chart.mutate(withEffects, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -2704,7 +2707,7 @@ async function main(): Promise<void> {
     "A50:L69"
   );
   const with3D = getCharts(advanced)[2];
-  with3D.mutate(model => {
+  Chart.mutate(with3D, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -2798,7 +2801,7 @@ async function main(): Promise<void> {
     "A96:L115"
   );
   const picOpts = getCharts(advanced)[4];
-  picOpts.mutate(model => {
+  Chart.mutate(picOpts, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     // `pictureOptions` is a bar/area-specific slot (CT_BarSer /
     // CT_AreaSer / CT_Bar3DSer). Narrow to a bar-series model so TS
@@ -2883,8 +2886,8 @@ async function main(): Promise<void> {
   const copyDest = Workbook.addWorksheet(wb, "20b-Copy Destination");
   Worksheet.addRow(copyDest, ["Copies of the chart on the previous sheet"]);
   Cell.setStyle(copyDest, "A1", { font: { bold: true } });
-  const copy1Num = sourceChart.copyTo(copyDest, "A3:L22");
-  const copy2Num = sourceChart.copyTo(copyDest, {
+  const copy1Num = Chart.copyTo(sourceChart, copyDest, "A3:L22");
+  const copy2Num = Chart.copyTo(sourceChart, copyDest, {
     tl: { col: 1, row: 24 },
     ext: { cx: 5 * 914400, cy: 3 * 914400 },
     editAs: "oneCell"
@@ -2892,8 +2895,8 @@ async function main(): Promise<void> {
   console.log(`Copied chart to sheet '${getSheetName(copyDest)}' as #${copy1Num} and #${copy2Num}`);
 
   // Modify the copy without touching the source — prove the clone is detached.
-  getCharts(copyDest)[0].title = "Copy (independent from source)";
-  getCharts(copyDest)[0].updateSeries(0, { fill: "70AD47" });
+  Chart.setTitle(getCharts(copyDest)[0], "Copy (independent from source)");
+  Chart.updateSeries(getCharts(copyDest)[0], 0, { fill: "70AD47" });
 
   // --- 20.2 vendor extensions (`c15:` / `cx14:`) round-trip
   const extSheet = Workbook.addWorksheet(wb, "20c-Vendor Extensions");
@@ -2920,13 +2923,13 @@ async function main(): Promise<void> {
   // In real usage this happens automatically via `parseChart` when
   // reading an Excel-authored file; here we seed it so we can
   // demonstrate the getter.
-  ext.mutate(model => {
+  Chart.mutate(ext, model => {
     model.unknownElements = [
       { name: "c15:pivotSourceOverride", path: "c:chartSpace/c:extLst/c15:pivotSourceOverride" },
       { name: "c16:cachedValueSource", path: "c:chartSpace/c:extLst/c16:cachedValueSource" }
     ];
   });
-  console.log(`Unknown elements on ext chart:`, ext.unknownElements);
+  console.log(`Unknown elements on ext chart:`, Chart.unknownElements(ext));
 
   // --- 20.3 parse an external ChartEx XML string
   const syntheticChartExXml = [
@@ -3187,7 +3190,7 @@ async function main(): Promise<void> {
     },
     "A50:L69"
   );
-  getCharts(rare)[2].mutateChartEx(model => {
+  Chart.mutateChartEx(getCharts(rare)[2], model => {
     const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
     if (series) {
       // Simulate a series whose @layoutId is a vendor extension we
@@ -3212,7 +3215,7 @@ async function main(): Promise<void> {
     },
     "A73:L92"
   );
-  getCharts(rare)[3].mutate(model => {
+  Chart.mutate(getCharts(rare)[3], model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -3602,7 +3605,7 @@ async function main(): Promise<void> {
     strokeColor: "#FFFFFF"
   };
   const regionMapChart = getCharts(topoSheet)[0];
-  const regionMapSvg = regionMapChart.toSVG({
+  const regionMapSvg = Chart.toSVG(regionMapChart, {
     width: 640,
     height: 400,
     regionMap: regionMapOpts
@@ -5184,19 +5187,19 @@ async function main(): Promise<void> {
   for (const ws of previewWorksheets) {
     for (const chart of getCharts(ws)) {
       previewCounter += 1;
-      const title = chart.title ?? `chart-${previewCounter}`;
+      const title = Chart.title(chart) ?? `chart-${previewCounter}`;
       const safe = title.replace(/[^\w\- ]+/g, "_").slice(0, 60);
-      const svg = chart.toSVG({ width: 640, height: 400 });
+      const svg = Chart.toSVG(chart, { width: 640, height: 400 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.svg`), svg, "utf-8");
-      const png = await chart.toPNG({ width: 640, height: 400, scale: 2 });
+      const png = await Chart.toPNG(chart, { width: 640, height: 400, scale: 2 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.png`), png);
 
       // Add a page to the combined PDF. Pick the renderer that matches
       // the chart flavour — classic charts go vector via `drawChartPdf`,
       // ChartEx via `drawChartExPdf`.
       const page = pdfDoc.addPage({ width: 700, height: 500 });
-      const classic = chart.chartModel;
-      const chartEx = chart.chartExModel;
+      const classic = Chart.chartModel(chart);
+      const chartEx = Chart.chartExModel(chart);
       if (classic) {
         drawChartPdf(page, classic, { x: 30, y: 60, width: 640, height: 400 });
       } else if (chartEx) {
@@ -5234,8 +5237,9 @@ async function main(): Promise<void> {
     throw new Error("Expected to read back the gallery worksheet.");
   }
   const first = getCharts(firstSheet)[0];
-  if (first && first.chartModel) {
-    first.mutate(
+  if (first && Chart.chartModel(first)) {
+    Chart.mutate(
+      first,
       model => {
         // Flip the first bar chart's title to something new. The mutate
         // call is tagged with `preferRawPatch`, so when the chart XML

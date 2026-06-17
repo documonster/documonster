@@ -12,7 +12,6 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
 import {
   chartsheetChart,
   chartsheetName,
@@ -23,15 +22,13 @@ import {
   chartsheetZoomScale,
   chartsheetZoomToFit
 } from "@excel/chartsheet";
-import { Workbook } from "@excel/index";
+import { Chart, Workbook } from "@excel/index";
 import { getChartsheets, getWorksheets } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { buildChartsheetFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
 import { entryText, loadRoundTrip } from "./helpers/zip-text";
-
-installChartSupport();
 
 let chartsheetFixtures: SyntheticFixture[];
 
@@ -163,7 +160,7 @@ describe("Chartsheet round-trip", () => {
     const pie = getChartsheets(wb).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     const chart = chartsheetChart(pie);
     expect(chart, "pie chartsheet chart accessor").toBeDefined();
-    chart!.title = "Mutated Pie Title";
+    Chart.setTitle(chart!, "Mutated Pie Title");
 
     const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
     const entries = await extractAll(out);
@@ -177,7 +174,7 @@ describe("Chartsheet round-trip", () => {
     await Workbook.loadXlsx(wb2, out);
     const pie2 = getChartsheets(wb2).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     expect(chartsheetChart(pie2)).toBeDefined();
-    expect(chartsheetChart(pie2)!.title).toBe("Mutated Pie Title");
+    expect(Chart.title(chartsheetChart(pie2)!)).toBe("Mutated Pie Title");
     expect(chartsheetZoomScale(pie2)).toBe(80);
   });
 });

@@ -19,19 +19,25 @@
 import { anchorCol, anchorRow } from "@excel/anchor";
 import { cellCol, cellGetValue, cellHyperlink, cellResult, cellText, cellType } from "@excel/cell";
 import type {
-  Chart,
+  ChartHandle,
   ChartExModel,
   ChartModel,
   ChartPdfDrawingSurface,
   RegionMapDataOptions
 } from "@excel/chart";
-// Chart runtime is accessed through the chart-host-registry slot so
-// `@pkg/pdf` can do excel-to-PDF conversion without statically pulling
-// ~1.2 MB of chart rendering code into every consumer's bundle.
-// Consumers that convert workbooks with charts must call
-// `installChartSupport()` from `@cj-tech-master/excelts/chart` before
-// invoking `excelToPdf()`.
-import { getChartSupport, tryGetChartSupport } from "@excel/chart-host-registry";
+// Chart runtime is imported statically. The chart modules depend only on the
+// excel `*-core` data layer, so excel→PDF conversion pulls in chart rendering
+// only when the bundler can reach it (i.e. when `excelToPdf` is used). No
+// install step is required.
+import { fillChartExCaches } from "@excel/chart/cache-populator";
+import { parseChartEx } from "@excel/chart/chart-ex-parser";
+import {
+  canRenderChartExAsVectorPdf,
+  drawChartExPdf,
+  renderChartExPng
+} from "@excel/chart/chart-ex-renderer";
+import { chartChartExModel, chartChartModel } from "@excel/chart/chart-handle";
+import { drawChartPdf, renderChartPng } from "@excel/chart/chart-renderer";
 import {
   chartsheetChartExModel,
   chartsheetChartModel,
@@ -202,7 +208,7 @@ export interface ChartToPdfOptions {
  * `@cj-tech-master/excelts/pdf` alongside `excelToPdf`.
  */
 export async function chartToPdf(
-  chart: Chart,
+  chart: ChartHandle,
   options: ChartToPdfOptions = {}
 ): Promise<Uint8Array> {
   const width = options.width ?? 520;
@@ -220,23 +226,21 @@ export async function chartToPdf(
   }
   const page = doc.addPage({ width: pageWidth, height: pageHeight });
 
-  const isChartEx = chart.chartExModel !== undefined;
+  const isChartEx = chartChartExModel(chart) !== undefined;
   // ChartEx charts whose every series has a layoutId in
   // VECTOR_PDF_CHART_EX_LAYOUT_IDS take the vector route alongside
   // classic charts. As of the regionMap port this covers every ChartEx
   // layout the builder currently emits. Anything else — or any chart
   // the caller explicitly asks to rasterise via `forceRaster` — falls
   // through to the SVG → PNG → image-XObject pipeline.
-  const chartExModel = chart.chartExModel;
+  const chartExModel = chartChartExModel(chart);
   const chartExVectorable =
-    isChartEx &&
-    chartExModel !== undefined &&
-    getChartSupport().canRenderChartExAsVectorPdf(chartExModel);
+    isChartEx && chartExModel !== undefined && canRenderChartExAsVectorPdf(chartExModel);
   const useRaster = options.forceRaster === true || (isChartEx && !chartExVectorable);
 
   if (!useRaster) {
     if (isChartEx && chartExModel !== undefined) {
-      getChartSupport().drawChartExPdf(
+      drawChartExPdf(
         page,
         chartExModel,
         {
@@ -250,13 +254,13 @@ export async function chartToPdf(
       return doc.build();
     }
     // Vector path for classic charts.
-    const model = chart.chartModel;
+    const model = chartChartModel(chart);
     if (!model) {
       throw new Error(
         "chartToPdf: Chart has neither a classic model nor a ChartEx model to render"
       );
     }
-    getChartSupport().drawChartPdf(page, model, {
+    drawChartPdf(page, model, {
       x: margin,
       y: pageHeight - margin - height,
       width,
@@ -271,8 +275,12 @@ export async function chartToPdf(
   // bump `rasterScale`; anything above 4 rapidly grows the PDF size.
   const scale = options.rasterScale ?? 2;
   const pngBytes = isChartEx
-    ? await getChartSupport().renderChartExPng(chart.chartExModel!, { width, height, scale })
-    : await getChartSupport().renderChartPng(chart.chartModel!, { width, height, scale });
+    ? await renderChartExPng(chartChartExModel(chart)!, {
+        width,
+        height,
+        scale
+      })
+    : await renderChartPng(chartChartModel(chart)!, { width, height, scale });
   page.drawImage({
     data: pngBytes,
     format: "png",
@@ -840,7 +848,7 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
  * other classic chart.
  */
 async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined> {
-  const wsCharts = (ws as any).getCharts?.() as Chart[] | undefined;
+  const wsCharts = (ws as any).getCharts?.() as ChartHandle[] | undefined;
   if (!wsCharts || !Array.isArray(wsCharts) || wsCharts.length === 0) {
     return undefined;
   }
@@ -852,22 +860,18 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
       continue;
     }
 
-    const classicModel = chart.chartModel;
-    const chartExModel = chart.chartExModel;
+    const classicModel = chartChartModel(chart);
+    const chartExModel = chartChartExModel(chart);
 
     if (classicModel) {
       // Classic chart → vector path.
       const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
-        getChartSupport().drawChartPdf(
-          surface as unknown as ChartPdfDrawingSurface,
-          classicModel as ChartModel,
-          {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height
-          }
-        );
+        drawChartPdf(surface as unknown as ChartPdfDrawingSurface, classicModel as ChartModel, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
       };
       charts.push({ range, drawVector });
       continue;
@@ -881,10 +885,10 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
       // from the worksheet, then restore it.
       ensureChartExCachesFilled(chartExModel, ws);
 
-      if (getChartSupport().canRenderChartExAsVectorPdf(chartExModel)) {
+      if (canRenderChartExAsVectorPdf(chartExModel)) {
         // Whitelisted ChartEx layout → vector path.
         const drawVector: PdfSheetChart["drawVector"] = (surface, rect) => {
-          getChartSupport().drawChartExPdf(
+          drawChartExPdf(
             surface as unknown as ChartPdfDrawingSurface,
             chartExModel as ChartExModel,
             { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -894,7 +898,7 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
       } else {
         // Non-whitelisted ChartEx layout → raster path.
         const { widthPx, heightPx } = estimateChartPixelSize(range);
-        const png = await getChartSupport().renderChartExPng(chartExModel, {
+        const png = await renderChartExPng(chartExModel, {
           width: widthPx,
           height: heightPx,
           scale: 2
@@ -1222,7 +1226,7 @@ function resolveSpkColor(c: any): { r: number; g: number; b: number } | undefine
  * `undefined` for charts that ExcelTS could not anchor to any cell
  * (extremely rare — usually indicates a corrupt drawing relationship).
  */
-function chartAnchorRange(chart: Chart): PdfAnchorRange | undefined {
+function chartAnchorRange(chart: ChartHandle): PdfAnchorRange | undefined {
   const r = chart.range;
   if (!r?.tl) {
     return undefined;
@@ -1297,13 +1301,7 @@ function ensureChartExCachesFilled(model: ChartExModel, ws: Worksheet): void {
     }
   }
   try {
-    getChartSupport().fillChartExCaches(
-      model,
-      getSheetWorkbook(ws) as unknown as Parameters<
-        ReturnType<typeof getChartSupport>["fillChartExCaches"]
-      >[1],
-      ws as unknown as Parameters<ReturnType<typeof getChartSupport>["fillChartExCaches"]>[2]
-    );
+    fillChartExCaches(model, getSheetWorkbook(ws), ws);
   } catch {
     // Best-effort — rendering will proceed with whatever data is available.
   }
@@ -1377,37 +1375,29 @@ async function convertChartsheet(cs: ChartsheetData): Promise<PdfChartsheetData>
     const model = classicModel;
     chart = {
       drawVector: (surface, rect) => {
-        getChartSupport().drawChartPdf(
-          surface as unknown as ChartPdfDrawingSurface,
-          model as ChartModel,
-          {
+        drawChartPdf(surface as unknown as ChartPdfDrawingSurface, model as ChartModel, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      }
+    };
+  } else if (chartExModel) {
+    if (canRenderChartExAsVectorPdf(chartExModel)) {
+      const model = chartExModel;
+      chart = {
+        drawVector: (surface, rect) => {
+          drawChartExPdf(surface as unknown as ChartPdfDrawingSurface, model as ChartExModel, {
             x: rect.x,
             y: rect.y,
             width: rect.width,
             height: rect.height
-          }
-        );
-      }
-    };
-  } else if (chartExModel) {
-    if (getChartSupport().canRenderChartExAsVectorPdf(chartExModel)) {
-      const model = chartExModel;
-      chart = {
-        drawVector: (surface, rect) => {
-          getChartSupport().drawChartExPdf(
-            surface as unknown as ChartPdfDrawingSurface,
-            model as ChartExModel,
-            {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height
-            }
-          );
+          });
         }
       };
     } else {
-      const png = await getChartSupport().renderChartExPng(chartExModel, {
+      const png = await renderChartExPng(chartExModel, {
         width: CHARTSHEET_RASTER_PX.width,
         height: CHARTSHEET_RASTER_PX.height,
         scale: 2
@@ -1460,14 +1450,10 @@ async function convertChartsheet(cs: ChartsheetData): Promise<PdfChartsheetData>
  * into Excel's internal ChartModel and renders them using the full
  * Excel chart rendering engine (8000+ lines of vector drawing logic).
  *
- * Requires `installChartSupport()` to have been called.
- *
  * @example
  * ```typescript
- * import { installChartSupport } from "excelts/chart";
  * import { docxToPdf, createWordChartPdfRenderer } from "excelts/pdf";
  *
- * installChartSupport();
  * const pdfBytes = await docxToPdf(doc, {
  *   chartRenderer: createWordChartPdfRenderer()
  * });
@@ -1479,9 +1465,8 @@ export function createWordChartPdfRenderer(): (
   rect: { x: number; y: number; width: number; height: number }
 ) => void {
   return (chart, page, rect) => {
-    const support = getChartSupport();
     const model = wordChartToChartModel(chart);
-    support.drawChartPdf(page, model, rect);
+    drawChartPdf(page, model, rect);
   };
 }
 
@@ -1507,8 +1492,6 @@ export function createWordChartPdfRenderer(): (
  * fallback (inline SVG, then a titled placeholder box) takes over. This
  * keeps "fail soft" behaviour: a chart the engine can't draw still
  * renders *something* rather than a blank slot.
- *
- * Requires `installChartSupport()` to have been called.
  */
 export function createWordLayoutChartPdfRenderer(): (
   chart: LayoutChart,
@@ -1516,20 +1499,12 @@ export function createWordLayoutChartPdfRenderer(): (
   rect: { x: number; y: number; width: number; height: number }
 ) => boolean | void {
   return (layoutChart, page, rect) => {
-    const support = tryGetChartSupport();
-    if (!support) {
-      // Chart support not installed — decline so the Word→PDF
-      // translator falls back to the inline SVG / placeholder. This
-      // mirrors the auto-detect contract in `word-bridge.ts`, where a
-      // missing chart runtime must degrade gracefully rather than throw.
-      return false;
-    }
     const source = layoutChart.source as WordChartContent | WordChartExContent | undefined;
 
     if (layoutChart.chartKind === "chart") {
       // Classic chart: prefer the structured source, fall back to nothing.
       if (source && source.type === "chart") {
-        support.drawChartPdf(page, wordChartToChartModel(source.chart), rect);
+        drawChartPdf(page, wordChartToChartModel(source.chart), rect);
         return;
       }
       return false;
@@ -1540,12 +1515,12 @@ export function createWordLayoutChartPdfRenderer(): (
     if (source && source.type === "chartEx" && source.chartExXml) {
       let model;
       try {
-        model = support.parseChartEx(source.chartExXml);
+        model = parseChartEx(source.chartExXml);
       } catch {
         return false; // Malformed XML — let the fallback path handle it.
       }
-      if (model && support.canRenderChartExAsVectorPdf(model)) {
-        support.drawChartExPdf(page, model, rect, {
+      if (model && canRenderChartExAsVectorPdf(model)) {
+        drawChartExPdf(page, model, rect, {
           title: layoutChart.title
         });
         return;

@@ -200,8 +200,6 @@ describe("Worksheet.addShape", () => {
   });
 
   it("keeps cNvPr ids unique when a shape shares a drawing with a chart", async () => {
-    const { installChartSupport } = await import("@excel/chart/install");
-    installChartSupport();
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "mix");
     Cell.setValue(ws, "A1", 1);

@@ -16,22 +16,17 @@ import {
   buildChartExModel,
   renderChartEx
 } from "@excel/chart";
-import { installChartSupport } from "@excel/chart/install";
 import { chartsheetChart } from "@excel/chartsheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { getChartEntry } from "@excel/workbook";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addChart, addChartEx, getCharts } from "@excel/worksheet";
 import type { WorksheetData } from "@excel/worksheet-core";
-import { beforeAll, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import { VALUES_B, baseSeries, bubbleSeries, ctg, scatterSeries } from "./chart-builder.helpers";
 
 const textDecoder = new TextDecoder();
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("BUG-7+8: parseSpPr handles malformed XML", () => {
   it("parseSpPr handles missing end tag gracefully", () => {
@@ -77,7 +72,8 @@ describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
       },
       "C1:J10"
     );
-    const series = getCharts(ws)[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0]
+      .series[0] as any;
     const serial = series.val.numRef.cache.points[0].value;
     expect(Math.floor(serial)).toBe(61);
   });
@@ -97,9 +93,9 @@ describe("ROBUST-6: _renderTxPr includes rotation", () => {
     const wb2 = Workbook.create();
     await Workbook.loadXlsx(wb2, buf);
     // After round-trip, axis txPr should contain rotation
-    const catAx = getCharts(
-      Workbook.getWorksheet(wb2, "Sheet1")!
-    )[0].chartModel!.chart.plotArea.axes.find(a => a.axisType === "cat")!;
+    const catAx = Chart.chartModel(
+      getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0]
+    )!.chart.plotArea.axes.find(a => a.axisType === "cat")!;
     // txPr comes back as raw XML — check it contains rot="-2700000" (−45° × 60000)
     expect(catAx.txPr?._rawXml || "").toContain("-2700000");
   });
@@ -123,7 +119,8 @@ describe("supplementary edge cases", () => {
       },
       "C1:J10"
     );
-    const series = getCharts(ws)[0].chartModel!.chart.plotArea.chartTypes[0].series[0] as any;
+    const series = Chart.chartModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0]
+      .series[0] as any;
     // null value should produce empty cache points (nothing at index 0)
     expect(series.val.numRef.cache.points).toHaveLength(0);
     expect(series.val.numRef.cache.pointCount).toBe(1);
@@ -204,7 +201,7 @@ describe("supplementary edge cases", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(16);
     for (let i = 0; i < types.length; i++) {
-      expect(getCharts(ws2)[i].chartTypes[0].type).toBe(types[i]);
+      expect(Chart.chartTypes(getCharts(ws2)[i])[0].type).toBe(types[i]);
     }
   });
 });
@@ -642,7 +639,7 @@ describe("Chartsheet.chart worksheet proxy", () => {
     // reads/writes to chart-level properties work through it.
     const chart = chartsheetChart(chartsheet)!;
     expect(chart.chartNumber).toBe(1);
-    expect(chart.chartModel?.chart.plotArea).toBeDefined();
+    expect(Chart.chartModel(chart)?.chart.plotArea).toBeDefined();
   });
 
   it("host proxy rejects grid operations with a helpful error", () => {
@@ -705,7 +702,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = chart.toSVG({ width: 400, height: 200 });
+    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
 
     // The SVG must contain a <defs> block with a <filter> inside.
     expect(svg).toContain("<defs>");
@@ -748,7 +745,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = chart.toSVG({ width: 400, height: 200 });
+    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
     // Exactly one <filter> definition even though two series share it.
     const filterDefs = (svg.match(/<filter id="excelts-fx-/g) ?? []).length;
     expect(filterDefs).toBe(1);
@@ -770,7 +767,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = chart.toSVG({ width: 400, height: 200 });
+    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
     expect(svg).not.toContain("<defs>");
     expect(svg).not.toContain("<filter");
     expect(svg).not.toContain('filter="url');
@@ -816,7 +813,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = chart.toSVG({ width: 400, height: 200 });
+    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
     // Every filter primitive ends up somewhere in the single generated
     // <filter> element.
     expect(svg).toContain("<feGaussianBlur");
@@ -1207,7 +1204,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, getCharts(ws)[0].chartExModel!, {
+    drawChartExPdf(surface, Chart.chartExModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1258,7 +1255,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, getCharts(ws)[0].chartExModel!, {
+    drawChartExPdf(surface, Chart.chartExModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1363,7 +1360,7 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
     };
     drawChartExPdf(
       surface,
-      getCharts(ws)[0].chartExModel!,
+      Chart.chartExModel(getCharts(ws)[0])!,
       { x: 0, y: 0, width: 400, height: 300 },
       { regionMap: { topology, objectName: "countries", match: "id" } }
     );

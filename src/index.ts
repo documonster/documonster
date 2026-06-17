@@ -214,13 +214,10 @@ export type { CellAddress, SheetRange, Origin } from "@excel/utils/address";
 // Worksheet data conversion option types
 export type { SheetToJSONOptions, AddJSONOptions, AddAOAOptions } from "@excel/worksheet";
 
-// Chart programmatic surface (builders, renderers, presets, parsers,
-// install function) lives at the `./chart` subpath so it stays out of
-// bundles that only need to read / write XLSX files. Import
-// `@cj-tech-master/excelts/chart` to use chart APIs — and call
-// `installChartSupport()` once at startup to enable
-// `worksheet.addChart()`, chart-cache population during write, and
-// chart reconstruction during XLSX load.
+// Chart programmatic surface (builders, renderers, presets, parsers) lives at
+// the `./chart` subpath. The high-level chart APIs import the chart
+// implementation statically, so no install step is needed — bundles that never
+// touch a chart API tree-shake the entire chart module out.
 
 // Cell display-text helpers (apply numFmt to produce an Excel-style string)
 export { getCellDisplayText, formatCellValue, isDateDisplayFormat } from "@excel/utils/cell-format";

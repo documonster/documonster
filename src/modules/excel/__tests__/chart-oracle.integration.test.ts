@@ -3,10 +3,9 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { extractAll } from "@archive/unzip/extract";
-import { installChartSupport } from "@excel/chart/install";
 import { Workbook, Worksheet } from "@excel/index";
 import { addChart, addChartEx, addComboChart } from "@excel/worksheet";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   discoverEnterpriseCorpus,
@@ -14,10 +13,6 @@ import {
 } from "./helpers/enterprise-corpus";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runExternalOracle, runOfficeOpenValidation } from "./helpers/external-oracle";
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("optional chart oracle and enterprise corpus harness", () => {
   it("optionally exports chart workbooks through LibreOffice as a visual oracle hook", async () => {
