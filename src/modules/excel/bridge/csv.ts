@@ -14,4 +14,4 @@ export {
   createCsvWriteStream,
   type CsvInput,
   type CsvOptions
-} from "@excel/csv-bridge";
+} from "./csv-bridge";

@@ -1,5 +1,5 @@
+import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
 import { cellGetValue, cellType } from "@excel/cell";
-import { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
 import { ValueType } from "@excel/enums";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { getCell } from "@excel/worksheet";

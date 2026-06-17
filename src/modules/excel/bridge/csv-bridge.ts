@@ -32,7 +32,7 @@ import type { IReadable, IWritable } from "@stream/types";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
 import { DateParser, DateFormatter, type DateFormat } from "@utils/datetime";
 
-import type { CellValue, CellErrorValue } from "./types";
+import type { CellValue, CellErrorValue } from "../types";
 
 // =============================================================================
 // Public CSV option / input types

@@ -13,5 +13,5 @@ export {
   createCsvWriteStream,
   type CsvInput,
   type CsvOptions
-} from "@excel/csv-bridge";
-export { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
+} from "./csv-bridge";
+export { readCsvFile, writeCsvFile } from "./csv-bridge.node";

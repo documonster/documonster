@@ -11,6 +11,7 @@
  *     a `CellRichTextValue` object where a string is promised
  */
 
+import { writeCsv } from "@excel/bridge/csv-bridge";
 import {
   cellGetValue,
   cellHyperlink,
@@ -19,7 +20,6 @@ import {
   cellGetModel,
   cellToString
 } from "@excel/cell";
-import { writeCsv } from "@excel/csv-bridge";
 import { ValueType } from "@excel/enums";
 import { Cell, Workbook } from "@excel/index";
 import { getCell } from "@excel/worksheet";

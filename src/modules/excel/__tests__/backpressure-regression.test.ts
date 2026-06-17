@@ -1,7 +1,7 @@
 import { Writable, PassThrough } from "node:stream";
 
+import { createCsvReadStream, writeCsv } from "@excel/bridge/csv-bridge";
 import { cellSetValue } from "@excel/cell";
-import { createCsvReadStream, writeCsv } from "@excel/csv-bridge";
 import { Workbook, Worksheet } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { rowCommit, rowGetCell } from "@excel/worksheet";

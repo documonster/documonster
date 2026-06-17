@@ -3,6 +3,7 @@ import fs from "fs";
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
 import { testUtils } from "@excel/__tests__/shared";
+import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
 import {
   cellGetValue,
   cellSetValue,
@@ -13,7 +14,6 @@ import {
   cellAddName,
   cellRemoveName
 } from "@excel/cell";
-import { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
 import { definedNamesGetRanges, definedNamesModel } from "@excel/defined-names";
 import { ValueType } from "@excel/enums";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";

@@ -9,4 +9,4 @@ export {
   readMarkdownAll,
   writeMarkdown,
   writeMarkdownBuffer
-} from "@excel/markdown-bridge";
+} from "./markdown-bridge";

@@ -1,5 +1,5 @@
-import { readCsv, writeCsv, writeCsvBuffer } from "@excel/csv-bridge";
-import { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
+import { readCsv, writeCsv, writeCsvBuffer } from "@excel/bridge/csv-bridge";
+import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { getSheetName } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";

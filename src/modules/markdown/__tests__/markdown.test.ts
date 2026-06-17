@@ -8,15 +8,15 @@
  * - parseMarkdownAll: multi-table document parsing
  */
 
-import { cellGetValue, cellSetValue } from "@excel/cell";
-import { Workbook, Worksheet } from "@excel/index";
 import {
   readMarkdown,
   readMarkdownAll,
   writeMarkdown,
   writeMarkdownBuffer
-} from "@excel/markdown-bridge";
-import { readMarkdownFile } from "@excel/markdown-bridge.node";
+} from "@excel/bridge/markdown-bridge";
+import { readMarkdownFile } from "@excel/bridge/markdown-bridge.node";
+import { cellGetValue, cellSetValue } from "@excel/cell";
+import { Workbook, Worksheet } from "@excel/index";
 import type { WorkbookData } from "@excel/workbook-core";
 import { getSheetName, rowGetCell } from "@excel/worksheet";
 import { MarkdownParseError } from "@markdown/errors";

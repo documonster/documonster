@@ -14,19 +14,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { cellGetValue } from "@excel/cell";
-import { Workbook, Worksheet } from "@excel/index";
 import {
   readMarkdown,
   readMarkdownAll,
   writeMarkdown,
   writeMarkdownBuffer
-} from "@excel/markdown-bridge";
+} from "@excel/bridge/markdown-bridge";
 import {
   readMarkdownAllFile,
   readMarkdownFile,
   writeMarkdownFile
-} from "@excel/markdown-bridge.node";
+} from "@excel/bridge/markdown-bridge.node";
+import { cellGetValue } from "@excel/cell";
+import { Workbook, Worksheet } from "@excel/index";
 import { getSheetName, rowGetCell } from "@excel/worksheet";
 
 import { Markdown, MarkdownParseError } from "../index";

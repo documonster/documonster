@@ -102,7 +102,7 @@ export function writeXlsxStream(
   return getXlsxIo(wb).write(stream as never, options);
 }
 
-export type { CsvOptions, CsvInput } from "@excel/csv-bridge";
+export type { CsvOptions, CsvInput } from "@excel/bridge/csv-bridge";
 export type {
   WorkbookModel,
   WorkbookMedia,
