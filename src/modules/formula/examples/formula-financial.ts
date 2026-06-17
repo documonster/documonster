@@ -13,10 +13,6 @@ import { getCell } from "@excel/worksheet";
  * - Depreciation (SLN, DB, DDB, SYD)
  * - Bonds (PRICE, YIELD, DURATION, ACCRINT)
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Finance");
 

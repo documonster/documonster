@@ -15,10 +15,6 @@ import { getCell } from "@excel/worksheet";
  * - Character codes (CHAR, UNICHAR, CODE, UNICODE)
  * - Regex (REGEXTEST, REGEXEXTRACT, REGEXREPLACE)
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Text");
 

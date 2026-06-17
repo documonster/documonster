@@ -13,10 +13,6 @@ import { getCell } from "@excel/worksheet";
  * - SWITCH
  * - CHOOSE
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Logic");
 

@@ -32,7 +32,8 @@ import {
   createDefinedNames,
   definedNamesModel,
   definedNamesSetModel,
-  type DefinedNameModel
+  type DefinedNameModel,
+  type SyntaxProbe
 } from "@excel/defined-names";
 import { withPivotChartSource } from "@excel/pivot-chart";
 import type { PivotTable } from "@excel/pivot-table";
@@ -83,7 +84,6 @@ import {
   setSheetModel
 } from "@excel/worksheet";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
-import type { SyntaxProbe } from "@formula/default-syntax-probe";
 
 // =============================================================================
 // Internal Types

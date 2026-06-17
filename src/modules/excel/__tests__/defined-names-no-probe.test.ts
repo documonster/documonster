@@ -1,45 +1,28 @@
 /**
- * Cold-start classification tests for `DefinedNames`.
+ * Default-probe classification tests for `DefinedNames`.
  *
- * The global test setup installs both the formula engine and the
- * default syntax probe, so the rest of the defined-names suite exercises
- * the strict-probe path. This file temporarily uninstalls both to verify
- * the conservative fallback behaviour documented in
- * `@formula/default-syntax-probe`:
+ * The toolkit has **no install step**: defined-name classification uses the
+ * built-in tokenizer+parser probe (`defaultFormulaSyntaxProbe`) directly. This
+ * suite verifies that classification works out of the box and that an explicit
+ * per-instance probe still overrides the default.
  *
- *   Without a probe, any non-range, non-wrapper text classifies as
- *   **opaque** — we have no evidence it is a parseable formula, so we
- *   preserve `rawText` for round-trip and leave `formulaMap` empty.
- *
- * The previous implementation fell back to "non-empty == formula", which
- * meant the same XLSX produced different internal classification
- * depending on whether `installFormulaEngine()` had been called. This
- * suite locks in the stricter, deterministic behaviour.
- *
- * To keep the rest of the suite working, `installFormulaEngine()` is
- * restored in `afterAll`.
+ * Range text classifies as `reference`; parseable expressions (e.g. `OFFSET`,
+ * `SUM`) as `formula`; unparseable / literal text as `opaque` (preserving
+ * `rawText` for round-trip).
  */
 
-import { createDefinedNames, definedNamesModel, definedNamesSetModel } from "@excel/defined-names";
+import {
+  createDefinedNames,
+  defaultFormulaSyntaxProbe,
+  definedNamesModel,
+  definedNamesSetModel
+} from "@excel/defined-names";
 import { Workbook } from "@excel/index";
 import { getDefinedNames } from "@excel/workbook";
-import {
-  createFormulaSyntaxProbe,
-  installFormulaEngine,
-  uninstallFormulaEngine
-} from "@formula/install";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-describe("DefinedNames — no-probe (cold start) classification", () => {
-  beforeEach(() => {
-    uninstallFormulaEngine();
-  });
-
-  afterAll(() => {
-    installFormulaEngine();
-  });
-
-  it("classifies pure cell reference as reference even without a probe", () => {
+describe("DefinedNames — default-probe classification (no install step)", () => {
+  it("classifies pure cell reference as reference", () => {
     const dn = createDefinedNames();
     definedNamesSetModel(dn, [{ name: "Single", ranges: [], rawText: "Sheet1!$A$1" }]);
 
@@ -48,7 +31,7 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
     expect(dn.opaqueMap["Single"]).toBeUndefined();
   });
 
-  it("classifies comma-separated range union as reference without a probe", () => {
+  it("classifies comma-separated range union as reference", () => {
     const dn = createDefinedNames();
     definedNamesSetModel(dn, [
       { name: "Multi", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }
@@ -59,45 +42,24 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
     expect(dn.opaqueMap["Multi"]).toBeUndefined();
   });
 
-  it("classifies OFFSET(...) as opaque without a probe (not formula)", () => {
-    // With a probe this would be classified as `formula`. Without one,
-    // we have no evidence the expression is parseable so we preserve
-    // the raw text verbatim.
+  it("classifies parseable OFFSET(...) as formula out of the box", () => {
     const dn = createDefinedNames();
     definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
 
-    expect(dn.opaqueMap["Dyn"]).toBeDefined();
-    expect(dn.opaqueMap["Dyn"].rawText).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
-    expect(dn.formulaMap["Dyn"]).toBeUndefined();
-    expect(dn.matrixMap["Dyn"]).toBeUndefined();
+    expect(dn.formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+    expect(dn.opaqueMap["Dyn"]).toBeUndefined();
   });
 
-  it("classifies bare identifier as opaque without a probe", () => {
+  it("classifies unparseable text as opaque (not a formula expression)", () => {
     const dn = createDefinedNames();
-    definedNamesSetModel(dn, [{ name: "Alias", ranges: [], rawText: "AnotherName" }]);
+    definedNamesSetModel(dn, [{ name: "Junk", ranges: [], rawText: "@@bad@@" }]);
 
-    expect(dn.opaqueMap["Alias"]).toBeDefined();
-    expect(dn.opaqueMap["Alias"].rawText).toBe("AnotherName");
-    expect(dn.formulaMap["Alias"]).toBeUndefined();
+    expect(dn.opaqueMap["Junk"]).toBeDefined();
+    expect(dn.opaqueMap["Junk"].rawText).toBe("@@bad@@");
+    expect(dn.formulaMap["Junk"]).toBeUndefined();
   });
 
-  it("classifies #REF! and array/string literals as opaque without a probe", () => {
-    const dn = createDefinedNames();
-    definedNamesSetModel(dn, [
-      { name: "Err", ranges: [], rawText: "#REF!" },
-      { name: "Str", ranges: [], rawText: '"hello"' },
-      { name: "Arr", ranges: [], rawText: "{1,2;3,4}" }
-    ]);
-
-    expect(dn.opaqueMap["Err"]).toBeDefined();
-    expect(dn.opaqueMap["Str"]).toBeDefined();
-    expect(dn.opaqueMap["Arr"]).toBeDefined();
-  });
-
-  it("classifies malformed paren-containing text as opaque without a probe", () => {
-    // With or without a probe, `OFFSET(???` should not land in
-    // `formulaMap`. Previously this was incorrectly classified as
-    // formula by the "non-empty => formula" fallback.
+  it("classifies malformed paren-containing text as opaque", () => {
     const dn = createDefinedNames();
     definedNamesSetModel(dn, [{ name: "Bad", ranges: [], rawText: "OFFSET(???" }]);
 
@@ -105,56 +67,58 @@ describe("DefinedNames — no-probe (cold start) classification", () => {
     expect(dn.formulaMap["Bad"]).toBeUndefined();
   });
 
-  it("opaque classification preserves rawText through model round-trip", () => {
-    // Without a probe, OFFSET(...) is opaque. The rawText must survive
-    // a model→getter round-trip so the underlying XLSX bytes are stable.
+  it("opaque classification preserves rawText through a model round-trip", () => {
     const dn = createDefinedNames();
-    definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
+    definedNamesSetModel(dn, [{ name: "Junk", ranges: [], rawText: "@@bad@@" }]);
 
     const model = definedNamesModel(dn);
-    const entry = model.find(m => m.name === "Dyn");
+    const entry = model.find(m => m.name === "Junk");
     expect(entry).toBeDefined();
     expect(entry!.kind).toBe("opaque");
-    expect(entry!.rawText).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+    expect(entry!.rawText).toBe("@@bad@@");
   });
 
   // ---------------------------------------------------------------------------
-  // Explicit per-instance probe overrides the (absent) default
+  // Explicit per-instance probe overrides the default
   // ---------------------------------------------------------------------------
 
-  it("explicit constructor probe overrides the missing default", () => {
-    const probe = createFormulaSyntaxProbe();
-    const dn = createDefinedNames(probe);
+  it("explicit constructor probe overrides the default", () => {
+    // A probe that rejects everything forces opaque classification even for
+    // parseable text — proving the explicit probe wins over the default.
+    const rejectAll = () => false;
+    const dn = createDefinedNames(rejectAll);
     definedNamesSetModel(dn, [{ name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }]);
 
-    expect(dn.formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
-    expect(dn.opaqueMap["Dyn"]).toBeUndefined();
+    expect(dn.opaqueMap["Dyn"]).toBeDefined();
+    expect(dn.formulaMap["Dyn"]).toBeUndefined();
   });
 
-  it("Workbook({ formulaSyntaxProbe }) option threads through to DefinedNames", async () => {
-    const probe = createFormulaSyntaxProbe();
-    const wb = Workbook.create({ formulaSyntaxProbe: probe });
+  it("the exported defaultFormulaSyntaxProbe reports parseability", () => {
+    expect(defaultFormulaSyntaxProbe("SUM(A1:A3)")).toBe(true);
+    expect(defaultFormulaSyntaxProbe("OFFSET(Sheet1!$A$1,0,0,3,1)")).toBe(true);
+    expect(defaultFormulaSyntaxProbe("OFFSET(???")).toBe(false);
+    expect(defaultFormulaSyntaxProbe("")).toBe(false);
+  });
+
+  it("Workbook({ formulaSyntaxProbe }) option threads through to DefinedNames", () => {
+    const rejectAll = () => false;
+    const wb = Workbook.create({ formulaSyntaxProbe: rejectAll });
+    definedNamesSetModel(getDefinedNames(wb), [
+      { name: "Dyn", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
+    ]);
+
+    // Custom probe rejects, so it stays opaque rather than formula.
+    expect(getDefinedNames(wb).opaqueMap["Dyn"]).toBeDefined();
+    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBeUndefined();
+  });
+
+  it("default probe (no option) classifies SUM(...) as formula", () => {
+    const wb = Workbook.create();
     definedNamesSetModel(getDefinedNames(wb), [
       { name: "Dyn", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
     ]);
 
     expect(getDefinedNames(wb).formulaMap["Dyn"]).toBe("SUM(Sheet1!$A$1:$A$3)");
-  });
-
-  // ---------------------------------------------------------------------------
-  // Default probe resolution is lazy
-  // ---------------------------------------------------------------------------
-
-  it("probe installed after Workbook construction is used at model-set time", () => {
-    const wb = Workbook.create(); // constructed before installFormulaEngine
-    installFormulaEngine(); // install *after* construction
-
-    // Model assignment happens now — should see the newly-installed probe.
-    definedNamesSetModel(getDefinedNames(wb), [
-      { name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
-    ]);
-
-    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
     expect(getDefinedNames(wb).opaqueMap["Dyn"]).toBeUndefined();
   });
 });

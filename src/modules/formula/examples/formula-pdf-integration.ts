@@ -2,11 +2,12 @@
  * Example: Formula + PDF Integration
  *
  * Covers:
- * - `Formula.install()` makes `Pdf.fromExcel()` automatically
- *   recalculate stale formula results before rendering.
- * - Without install, `Pdf.fromExcel()` silently falls back to the cached
- *   results saved in the XLSX (safe default for files last opened in
- *   Excel itself).
+ * - Passing `{ recalculate: Formula.calculate }` to `Pdf.fromExcel()` so it
+ *   recalculates stale formula results before rendering.
+ * - Without it, `Pdf.fromExcel()` silently falls back to the cached results
+ *   saved in the XLSX (safe default for files last opened in Excel itself).
+ *
+ * No install / registration step — `Formula.calculate` is used directly.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -22,9 +23,6 @@ const outDir = path.resolve(
   "../../../../tmp/formula-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
-
-// Enable automatic recalculation inside Pdf.fromExcel().
-Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Invoice");
@@ -49,12 +47,12 @@ for (let r = 2; r <= 4; r++) {
 Cell.setValue(ws, "D5", { formula: "SUM(D2:D4)" });
 Cell.setValue(ws, "C5", "Total");
 
-// `excelToPdf` calls `tryInvokeFormulaEngine(workbook)` internally;
-// because `installFormulaEngine` was called above, subtotals and the
-// grand total are computed fresh right before rendering.
+// Pass `recalculate: Formula.calculate` so subtotals and the grand total are
+// computed fresh right before rendering (no install step involved).
 const pdf = await Pdf.fromExcel(wb, {
   title: "Invoice (live formula results)",
-  showGridLines: true
+  showGridLines: true,
+  recalculate: Formula.calculate
 });
 fs.writeFileSync(path.join(outDir, "formula-pdf-integration.pdf"), pdf);
 console.log("Wrote tmp/formula-examples/formula-pdf-integration.pdf");

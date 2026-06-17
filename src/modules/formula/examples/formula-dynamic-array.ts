@@ -18,10 +18,6 @@ import { findCell, getCell } from "@excel/worksheet";
  * Dynamic arrays write their full rectangle into the sheet. Inspect the
  * `ghost` cells around the source formula to see the spilled values.
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Dynamic");
 

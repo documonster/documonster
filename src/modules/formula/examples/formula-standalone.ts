@@ -5,25 +5,19 @@ import { Cell, Workbook } from "@excel/index";
  * Example: Functional / Standalone API
  *
  * Covers:
- * - `calculateFormulas(workbook)` — functional equivalent of
- *   `Workbook.calculateFormulas()`, works without calling
- *   `Formula.install()` first. This path is fully tree-shakeable:
- *   bundlers ship only the code paths reachable from the exports you
- *   reference.
+ * - `calculateFormulas(workbook)` — the formula engine, used directly with no
+ *   install / registration step. Fully tree-shakeable: bundlers ship only the
+ *   code paths reachable from the exports you reference.
  *
- * - `tokenize` / `parse` — pure syntax inspection. Use these for
- *   linters, formula migration tools, or static analysis that does not
- *   need to evaluate anything.
+ * - `tokenize` / `parse` — pure syntax inspection. Use these for linters,
+ *   formula migration tools, or static analysis that does not evaluate
+ *   anything (they never pull the evaluator in).
  */
 import { Formula } from "../index";
 
 // =============================================================================
-// 1. Functional calculation — zero side effects
+// 1. Functional calculation — zero side effects, no install step
 // =============================================================================
-//
-// Note we DO NOT call `Formula.install()`. The functional
-// `calculateFormulas(workbook)` is self-contained and has no effect on
-// `Workbook.calculateFormulas()` (which would still throw without install).
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Func");

@@ -12,10 +12,6 @@ import { getCell } from "@excel/worksheet";
  * - Complex numbers (COMPLEX, IMSUM, IMABS, IMARGUMENT)
  * - Special functions (ERF, BESSELJ)
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Eng");
 

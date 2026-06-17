@@ -2,7 +2,39 @@ import { rangeAbsoluteShort, rangeCreate, type RangeData } from "@excel/range";
 import type { Address } from "@excel/types";
 import { CellMatrix } from "@excel/utils/cell-matrix";
 import { colCache, type DecodedRange } from "@excel/utils/col-cache";
-import { getDefaultSyntaxProbe, type SyntaxProbe } from "@formula/default-syntax-probe";
+import { parse } from "@formula/syntax/parser";
+import { tokenize } from "@formula/syntax/tokenizer";
+
+/**
+ * A formula-syntax oracle: returns `true` iff `text` parses as a formula
+ * expression. Used to classify defined-name text (formula vs. opaque) when
+ * loading XLSX. Consumers may inject a custom probe via
+ * `createWorkbook({ formulaSyntaxProbe })` / `createDefinedNames(probe)`;
+ * otherwise the built-in {@link defaultFormulaSyntaxProbe} (real
+ * tokenizer + parser) is used — no install / registration step required.
+ */
+export type SyntaxProbe = (text: string) => boolean;
+
+/**
+ * Default formula-syntax probe, backed by the real tokenizer + parser.
+ *
+ * This is reached only from the XLSX-load classification path
+ * (`definedNamesSetModel` → `classifyDefinedName`); a consumer who merely
+ * creates a workbook never calls it, so the tokenizer/parser are tree-shaken
+ * out of `Workbook.create`-only bundles (verified by scripts/treeshake-verify).
+ */
+export function defaultFormulaSyntaxProbe(text: string): boolean {
+  try {
+    const tokens = tokenize(text);
+    if (tokens.length === 0) {
+      return false;
+    }
+    parse(tokens);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const rangeRegexp = /[$](\w+)[$](\d+)(:[$](\w+)[$](\d+))?/;
 
@@ -179,10 +211,10 @@ function hasUnquotedParen(s: string): boolean {
  *
  * **Probe semantics:** `probe` is the formula tokenizer+parser oracle. It
  * is the *only* authority for deciding whether a non-range, non-wrapper
- * string is a formula. When `probe` is `null` (no formula engine
- * installed and no probe injected), any such string is classified as
- * **opaque** — we have no evidence it is a formula, and leaving it
- * opaque preserves round-trip bytes via `rawText`.
+ * string is a formula. When `probe` is `null`, any such string is classified
+ * as **opaque** — we have no evidence it is a formula, and leaving it opaque
+ * preserves round-trip bytes via `rawText`. (In practice `definedNamesSetModel`
+ * always supplies at least the built-in `defaultFormulaSyntaxProbe`.)
  *
  * This function is pure: the classification of a given input depends
  * entirely on (rawText, ranges, probe) and no global state. Two calls
@@ -767,11 +799,10 @@ export function definedNamesSetModel(dn: DefinedNamesData, value: DefinedNameMod
   const opaqueMap = (dn.opaqueMap = {} as Record<string, OpaqueEntry>);
   const nameForKeyMap = (dn.nameForKey = {} as Record<string, string>);
 
-  // Resolve probe lazily: a caller may have constructed the Workbook
-  // before `installFormulaEngine()` but load XLSX data afterwards. We
-  // want whichever probe is registered at *load* time, not construct
-  // time. An explicit per-instance probe always wins when provided.
-  const probe = dn._explicitProbe ?? getDefaultSyntaxProbe();
+  // Resolve the probe: an explicit per-instance probe always wins; otherwise
+  // use the built-in tokenizer+parser probe. No install step is involved — the
+  // probe is reached directly here (only on the XLSX-load path).
+  const probe = dn._explicitProbe ?? defaultFormulaSyntaxProbe;
 
   for (const definedName of value) {
     const sKey = storageKey(definedName.name, definedName.localSheetId);

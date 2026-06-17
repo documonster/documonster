@@ -19,10 +19,6 @@ import { getCell } from "@excel/worksheet";
  * - field: column header (string) or 1-based column index
  * - criteria: range including headers and one or more condition rows
  */
-import { Formula } from "../index";
-
-Formula.install();
-
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "DB");
 

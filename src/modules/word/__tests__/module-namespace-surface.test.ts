@@ -122,7 +122,7 @@ describe("documonster/xml namespace surface", () => {
 
 describe("documonster/formula namespace surface", () => {
   it("Formula namespace exposes calculate/tokenize/parse", () => {
-    for (const m of ["calculate", "tokenize", "parse", "createSyntaxProbe"]) {
+    for (const m of ["calculate", "tokenize", "parse"]) {
       expect(isFn(Formula.Formula, m), `Formula.${m}`).toBe(true);
     }
   });

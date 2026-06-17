@@ -1,16 +1,13 @@
 /**
- * Vitest global setup — installs the default formula syntax probe so the
- * general suite classifies defined-name text (formula vs. opaque) during
- * XLSX load without each test file wiring it up.
+ * Vitest global setup.
  *
- * Formula evaluation itself no longer needs any install step: call the
- * `calculateFormulas(workbook)` free function from `@formula/...` directly.
+ * Nothing to wire up: the toolkit has no install / registration steps.
  *
- * Chart support likewise needs no install step — the chart implementation is
- * imported statically by the high-level chart APIs and tree-shaken out of
- * builds that never use them.
+ * - Defined-name classification (formula vs. opaque) during XLSX load uses the
+ *   built-in tokenizer+parser probe in `@excel/defined-names` directly.
+ * - Formula evaluation: call `Formula.calculate(workbook)` directly.
+ * - Chart support: the chart implementation is imported statically by the
+ *   high-level chart APIs and tree-shaken out of builds that never use it.
  */
 
-import { installFormulaEngine } from "@formula/install";
-
-installFormulaEngine();
+export {};
