@@ -77,196 +77,196 @@ function s(
   return { name, importFrom, imports, mustNotInclude, platform, excludeBundlers };
 }
 
-const scenarios: Scenario[] = [
-  // -------------------------------------------------------------------------
-  // /excel subpath — namespace API. Importing a single namespace must not
-  // pull pdf / formula-engine / csv / archive unless that namespace needs it.
-  // -------------------------------------------------------------------------
-  s(
-    "/excel: Cell (no chart/pdf/formula-engine)",
-    `${PKG_NAME}/excel`,
-    ["Cell"],
-    [
-      "modules/pdf/",
-      "modules/excel/chart/",
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/"
-    ]
-  ),
-  s(
-    "/excel: Workbook (no pdf/formula-engine)",
-    `${PKG_NAME}/excel`,
-    ["Workbook"],
-    // NOTE: `Workbook` currently also pulls the chart renderer, because
-    // `worksheet.ts` statically imports `chart-handle` (createChart /
-    // registerChart) and that module references the SVG/PNG renderers for
-    // `chartToSVG`/`chartToPNG`. Decoupling worksheet↔chart-renderer is a
-    // known follow-up optimisation; this scenario locks the rest of the
-    // contract (no pdf, no formula evaluator).
-    [
-      "modules/pdf/",
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/"
-    ]
-  ),
-  s(
-    "/excel: Chart (no pdf leak; chart builder allowed)",
-    `${PKG_NAME}/excel`,
-    ["Chart"],
-    ["modules/pdf/", "modules/csv/"]
-  ),
-  s(
-    "/excel: Address (minimal, no module trees)",
-    `${PKG_NAME}/excel`,
-    ["Address"],
-    ["modules/pdf/", "modules/excel/chart/", "modules/formula/", "modules/csv/", "modules/word/"]
-  ),
+// =============================================================================
+// Full-coverage namespace matrix
+//
+// Every public domain namespace on every subpath is verified individually,
+// using code-splitting + ENTRY-CHUNK isolation (lazySplit) so the assertion
+// reflects what a consumer eagerly pays for under the real target bundlers
+// (rolldown / rspack). For each namespace we declare the set of LOWER-LAYER
+// modules it is legitimately allowed to reach (per AGENTS.md layer rules);
+// every other module tree must be absent from the entry chunk.
+//
+// `allowed` lists module-path fragments that may legitimately appear. The
+// resulting `mustNotInclude` is "all module trees except self + allowed".
+// =============================================================================
 
-  // -------------------------------------------------------------------------
-  // /word subpath — namespace API. Builders must not pull archive/xml/io.
-  // (rspack tree-shakes barrels less aggressively — esbuild+rolldown only.)
-  // -------------------------------------------------------------------------
-  {
-    name: "/word: Build (no archive / xml parser / io leak)",
-    importFrom: `${PKG_NAME}/word`,
-    imports: ["Build"],
-    // The tiny `xml/encode` util (~3 KB, XML escaping) is an intrinsic
-    // dependency of content-node builders; the heavy xml parser/writer/sax
-    // and the archive packager must stay out.
-    mustNotInclude: [
-      "modules/archive/",
-      "modules/xml/dom",
-      "modules/xml/sax",
-      "modules/xml/writer",
-      "modules/xml/stream-writer",
-      "modules/word/writer/docx-packager",
-      "modules/word/reader/docx-reader"
-    ],
-    excludeBundlers: ["rspack"]
-  },
-  {
-    name: "/word: Document (no archive / xml parser / io leak)",
-    importFrom: `${PKG_NAME}/word`,
-    imports: ["Document"],
-    mustNotInclude: [
-      "modules/archive/",
-      "modules/xml/dom",
-      "modules/xml/sax",
-      "modules/xml/writer",
-      "modules/xml/stream-writer",
-      "modules/word/writer/docx-packager",
-      "modules/word/reader/docx-reader"
-    ],
-    excludeBundlers: ["rspack"]
-  },
-  s(
-    "/word: Io (pulls archive+xml, no pdf/csv/formula-engine)",
-    `${PKG_NAME}/word`,
-    ["Io"],
-    // NOTE: `Io` includes `merge`/`split`/`updateFields`, whose layout +
-    // bridge dependencies currently reach the excel module transitively
-    // (word→bridge/layout). Decoupling is a known follow-up; this scenario
-    // locks no-pdf / no-csv / no-formula-evaluator.
-    ["modules/pdf/", "modules/csv/", "modules/formula/runtime/", "modules/formula/functions/"]
-  ),
+const ALL_MODULE_TREES = [
+  "modules/excel/",
+  "modules/word/",
+  "modules/pdf/",
+  "modules/formula/",
+  "modules/csv/",
+  "modules/markdown/",
+  "modules/xml/",
+  "modules/archive/",
+  "modules/stream/"
+];
 
-  // -------------------------------------------------------------------------
-  // /csv subpath — namespace API.
-  // -------------------------------------------------------------------------
-  s(
-    "/csv: Csv (no excel/pdf/archive/word)",
-    `${PKG_NAME}/csv`,
-    ["Csv"],
-    ["modules/excel/", "modules/pdf/", "modules/word/"]
-  ),
+/** Build a mustNotInclude list = every module tree except `self` and `allowed`. */
+function exclude(self: string, allowed: string[]): string[] {
+  const keep = new Set([`modules/${self}/`, ...allowed]);
+  return ALL_MODULE_TREES.filter(m => !keep.has(m));
+}
 
-  // -------------------------------------------------------------------------
-  // /xml subpath — namespace API.
-  // -------------------------------------------------------------------------
-  s("/xml: Xml (only xml)", `${PKG_NAME}/xml`, ["Xml"], allModulesExcept("xml")),
-
-  // -------------------------------------------------------------------------
-  // /markdown subpath — namespace API.
-  // -------------------------------------------------------------------------
-  s(
-    "/markdown: Markdown (only markdown)",
-    `${PKG_NAME}/markdown`,
-    ["Markdown"],
-    allModulesExcept("markdown")
-  ),
-
-  // -------------------------------------------------------------------------
-  // /pdf subpath — namespace API. PDF legitimately needs archive (zlib). The
-  // cross-module converters (fromExcel/fromDocx/fromChart/wordChartRenderer)
-  // are lazy-loaded via dynamic import(), so importing `Pdf` must NOT
-  // statically pull excel, word, csv, or the formula module — only the core
-  // PDF engine + archive.
-  // -------------------------------------------------------------------------
-  {
-    name: "/pdf: Pdf (entry chunk free of excel/word/csv/formula; converters lazy)",
-    importFrom: `${PKG_NAME}/pdf`,
-    imports: ["Pdf"],
-    mustNotInclude: ["modules/csv/", "modules/word/", "modules/excel/", "modules/formula/"],
+/**
+ * Generate a full-coverage, entry-chunk-isolated scenario for one namespace.
+ * `allowed` = lower-layer module trees this namespace may legitimately pull.
+ */
+function ns(
+  mod: string,
+  nsName: string,
+  allowed: string[],
+  platform?: "browser" | "node",
+  excludeBundlers?: string[]
+): Scenario {
+  const tag = platform === "browser" ? "browser " : "";
+  const allowedNote = allowed.length
+    ? `allows ${allowed.map(a => a.replace("modules/", "").replace(/\/$/, "")).join("+")}`
+    : "isolated";
+  return {
+    name: `${tag}/${mod}: ${nsName} (${allowedNote})`,
+    importFrom: `${PKG_NAME}/${mod}`,
+    imports: [nsName],
+    mustNotInclude: exclude(mod, allowed),
+    platform,
     lazySplit: true,
-    excludeBundlers: ["rolldown", "rspack"]
-  },
+    excludeBundlers
+  };
+}
 
-  // -------------------------------------------------------------------------
-  // /formula subpath — namespace API. `Formula.tokenize`/`parse` must remain
-  // tree-shakeable from the 433-function evaluator + excel module.
-  // (esbuild/rolldown shake namespace members; rspack is less aggressive.)
-  // -------------------------------------------------------------------------
-  {
-    name: "/formula: Formula (no excel leak)",
-    importFrom: `${PKG_NAME}/formula`,
-    imports: ["Formula"],
-    mustNotInclude: ["modules/excel/", "modules/pdf/", "modules/csv/", "modules/word/"],
-    excludeBundlers: ["rspack"]
-  },
+const scenarios: Scenario[] = [
+  // ===========================================================================
+  // /excel subpath — ALL 20 namespaces. Per the layer rules, excel may reach
+  // formula / archive / xml / csv / markdown / stream, but NEVER pdf or word.
+  // Measured legitimate lower-layer reach is encoded per-namespace below.
+  // ===========================================================================
+  ns("excel", "Address", []),
+  ns("excel", "Anchor", []),
+  ns("excel", "Cell", []),
+  ns("excel", "Chart", ["modules/xml/"]), // xml/encode for chart XML
+  ns("excel", "Chartsheet", []),
+  ns("excel", "Column", []),
+  ns("excel", "DataValidation", []),
+  ns("excel", "DefinedNames", ["modules/formula/"]), // named ranges may hold formulas
+  ns("excel", "Form", []),
+  ns("excel", "Image", []),
+  ns("excel", "Note", []),
+  ns("excel", "Pivot", []),
+  ns("excel", "Range", []),
+  ns("excel", "Row", []),
+  ns("excel", "Sparkline", []),
+  // xlsx streaming = zip + xml writer/sax + stream primitives
+  ns("excel", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"]),
+  ns("excel", "Table", []),
+  ns("excel", "Watermark", []),
+  // save xlsx = zip + xml + stream; defined-names pull the formula syntax probe
+  ns("excel", "Workbook", [
+    "modules/archive/",
+    "modules/xml/",
+    "modules/stream/",
+    "modules/formula/"
+  ]),
+  ns("excel", "Worksheet", []),
 
-  // -------------------------------------------------------------------------
-  // /archive + /stream — infrastructure modules (intentionally flat exports).
-  // -------------------------------------------------------------------------
+  // ===========================================================================
+  // /word subpath — ALL 19 namespaces. word may reach formula / archive / xml /
+  // csv / markdown / stream, but NEVER pdf or excel (excel-bridge is lazy).
+  // ===========================================================================
+  ns("word", "Build", ["modules/xml/"]), // xml/encode for content XML
+  ns("word", "Convert", ["modules/archive/", "modules/xml/", "modules/stream/"]), // ODT/docx IO
+  ns("word", "Diff", []),
+  ns("word", "Document", []),
+  ns("word", "Font", []),
+  ns("word", "Glossary", []),
+  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"]), // docx read/write
+  ns("word", "Layout", ["modules/xml/"]), // xml/encode
+  ns("word", "Ole", ["modules/xml/"]), // xml/encode
+  ns("word", "Query", ["modules/xml/"]), // parses docx content (dom/sax)
+  ns("word", "RenderContext", []),
+  ns("word", "Security", []),
+  ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"]),
+  ns("word", "Styles", []),
+  ns("word", "Template", ["modules/xml/"]), // parses template content (dom/sax)
+  ns("word", "Theme", []),
+  ns("word", "Units", []),
+  ns("word", "Validation", []),
+  ns("word", "Vba", []),
+
+  // ===========================================================================
+  // Small modules — single namespace each.
+  // ===========================================================================
+  ns("csv", "Csv", ["modules/stream/"]), // streaming CSV
+  ns("xml", "Xml", []),
+  ns("markdown", "Markdown", []),
+  ns("formula", "Formula", []),
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"]), // zlib + PDF metadata XML
+
+  // ===========================================================================
+  // Browser platform — ALL namespaces re-verified on the browser entries.
+  // ===========================================================================
+  ns("excel", "Address", [], "browser"),
+  ns("excel", "Anchor", [], "browser"),
+  ns("excel", "Cell", [], "browser"),
+  ns("excel", "Chart", ["modules/xml/"], "browser"),
+  ns("excel", "Chartsheet", [], "browser"),
+  ns("excel", "Column", [], "browser"),
+  ns("excel", "DataValidation", [], "browser"),
+  ns("excel", "DefinedNames", ["modules/formula/"], "browser"),
+  ns("excel", "Form", [], "browser"),
+  ns("excel", "Image", [], "browser"),
+  ns("excel", "Note", [], "browser"),
+  ns("excel", "Pivot", [], "browser"),
+  ns("excel", "Range", [], "browser"),
+  ns("excel", "Row", [], "browser"),
+  ns("excel", "Sparkline", [], "browser"),
+  ns("excel", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("excel", "Table", [], "browser"),
+  ns("excel", "Watermark", [], "browser"),
+  ns(
+    "excel",
+    "Workbook",
+    ["modules/archive/", "modules/xml/", "modules/stream/", "modules/formula/"],
+    "browser"
+  ),
+  ns("excel", "Worksheet", [], "browser"),
+
+  ns("word", "Build", ["modules/xml/"], "browser"),
+  ns("word", "Convert", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("word", "Diff", [], "browser"),
+  ns("word", "Document", [], "browser"),
+  ns("word", "Font", [], "browser"),
+  ns("word", "Glossary", [], "browser"),
+  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("word", "Layout", ["modules/xml/"], "browser"),
+  ns("word", "Ole", ["modules/xml/"], "browser"),
+  ns("word", "Query", ["modules/xml/"], "browser"),
+  ns("word", "RenderContext", [], "browser"),
+  ns("word", "Security", [], "browser"),
+  ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("word", "Styles", [], "browser"),
+  ns("word", "Template", ["modules/xml/"], "browser"),
+  ns("word", "Theme", [], "browser"),
+  ns("word", "Units", [], "browser"),
+  ns("word", "Validation", [], "browser"),
+  ns("word", "Vba", [], "browser"),
+
+  ns("csv", "Csv", ["modules/stream/"], "browser"),
+  ns("xml", "Xml", [], "browser"),
+  ns("markdown", "Markdown", [], "browser"),
+  ns("formula", "Formula", [], "browser"),
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], "browser"),
+
+  // ===========================================================================
+  // Infrastructure modules — intentionally flat exports (not namespaced).
+  // ===========================================================================
   s(
     "/archive: crc32 (minimal)",
     `${PKG_NAME}/archive`,
     ["crc32"],
     [...NOT_EXCEL_PDF_CSV, "modules/archive/zip/", "modules/archive/unzip/", "modules/archive/tar/"]
   ),
-  s("/stream: pipeline", `${PKG_NAME}/stream`, ["pipeline"], allModulesExcept("stream")),
-
-  // -------------------------------------------------------------------------
-  // Browser platform — namespace API on the browser entries.
-  // -------------------------------------------------------------------------
-  s(
-    "browser /excel: Cell (no pdf/formula-engine)",
-    `${PKG_NAME}/excel`,
-    ["Cell"],
-    [
-      "modules/pdf/",
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/"
-    ],
-    "browser"
-  ),
-  s(
-    "browser /csv: Csv",
-    `${PKG_NAME}/csv`,
-    ["Csv"],
-    ["modules/excel/", "modules/pdf/", "modules/word/"],
-    "browser"
-  ),
-  s("browser /xml: Xml", `${PKG_NAME}/xml`, ["Xml"], allModulesExcept("xml"), "browser"),
-  s(
-    "browser /markdown: Markdown",
-    `${PKG_NAME}/markdown`,
-    ["Markdown"],
-    allModulesExcept("markdown"),
-    "browser"
-  )
+  s("/stream: pipeline", `${PKG_NAME}/stream`, ["pipeline"], allModulesExcept("stream"))
 ];
 
 // =============================================================================
@@ -470,8 +470,12 @@ async function runRolldown(scenario: Scenario): Promise<ScenarioResult> {
     const contributing: ModuleEntry[] = [];
     let parsedCount = 0;
 
+    // Only inspect the ENTRY chunk. Lazy `import()` targets are emitted as
+    // separate on-demand chunks (rolldown splits them by default), so a
+    // dynamic cross-module boundary must NOT appear in the entry a consumer
+    // pays for upfront. Counting every chunk would defeat that contract.
     for (const chunk of output.output ?? []) {
-      if (chunk.type !== "chunk" || !chunk.modules) {
+      if (chunk.type !== "chunk" || !chunk.isEntry || !chunk.modules) {
         continue;
       }
       for (const [modId, modInfo] of Object.entries(chunk.modules)) {
@@ -501,7 +505,13 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
     const compiler = rspack({
       mode: "production",
       entry: entryFile,
-      output: { path: outDir, filename: "out.mjs", library: { type: "module" } },
+      output: {
+        path: outDir,
+        filename: "out.mjs",
+        chunkFilename: "[name].chunk.mjs",
+        module: true,
+        library: { type: "module" }
+      },
       target: scenario.platform === "browser" ? "web" : "node",
       externals: [/^node:/],
       resolve: {
@@ -512,7 +522,14 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
         symlinks: true
       },
       optimization: { usedExports: true, sideEffects: true, minimize: false, innerGraph: true },
-      stats: { all: false, modules: true, modulesSpace: Infinity }
+      stats: {
+        all: false,
+        modules: true,
+        chunks: true,
+        chunkModules: true,
+        ids: true,
+        modulesSpace: Infinity
+      }
     });
 
     compiler.run((err, stats) => {
@@ -532,13 +549,38 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
 
       const outFile = path.join(outDir, "out.mjs");
       const bundleSize = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-      const jsonStats = stats.toJson({ modules: true, reasons: false });
+      const jsonStats = stats.toJson({ modules: true, chunks: true, reasons: false });
       const contributing: ModuleEntry[] = [];
       let parsedCount = 0;
+
+      // Collect the ids of modules that belong to an INITIAL (entry) chunk.
+      // Lazy `import()` targets land in non-initial chunks, so restricting to
+      // initial chunks reflects what the consumer eagerly pays for.
+      const initialModuleIds = new Set<string | number>();
+      for (const ch of jsonStats.chunks ?? []) {
+        if (!ch.initial) {
+          continue;
+        }
+        for (const m of ch.modules ?? []) {
+          if (m.id != null) {
+            initialModuleIds.add(m.id);
+          }
+          const mn = m.name ?? m.identifier ?? "";
+          if (mn) {
+            initialModuleIds.add(mn);
+          }
+        }
+      }
 
       for (const mod of jsonStats.modules ?? []) {
         const modName: string = mod.name ?? mod.identifier ?? "";
         if (!modName.includes("dist/")) {
+          continue;
+        }
+        // Skip modules that only live in lazy (non-initial) chunks.
+        const inInitial =
+          (mod.id != null && initialModuleIds.has(mod.id)) || initialModuleIds.has(modName);
+        if (!inInitial) {
           continue;
         }
         parsedCount++;
