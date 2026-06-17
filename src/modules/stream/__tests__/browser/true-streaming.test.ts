@@ -5,6 +5,9 @@
  * to verify TRUE streaming behavior.
  */
 
+import { cellSetValue } from "@excel/cell";
+import { rowValues } from "@excel/row";
+import { rowCommit, rowGetCell } from "@excel/worksheet";
 import {
   yieldToEventLoop,
   generateLargeText
@@ -117,7 +120,10 @@ function getBrowserContext() {
         addWorksheet: (name: string) => {
           const worksheet = workbook.addWorksheet(name);
           return {
-            addRow: (data: (string | number)[]) => worksheet.addRow(data),
+            addRow: (data: (string | number)[]) => {
+              const row = worksheet.addRow(data);
+              return { commit: () => rowCommit(row) };
+            },
             commit: () => worksheet.commit()
           };
         },
@@ -135,7 +141,7 @@ function getBrowserContext() {
 
       for await (const worksheet of reader) {
         for await (const row of worksheet) {
-          onRow(worksheet.name, row.number, row.values);
+          onRow(worksheet.name, row.number, rowValues(row));
         }
       }
     }
@@ -347,9 +353,9 @@ describe("Browser-Specific True Streaming", () => {
       for (let i = 0; i < 1000; i++) {
         const row = worksheet.getRow(i + 1);
         for (let c = 1; c <= 9; c++) {
-          row.getCell(c).value = cellValue;
+          cellSetValue(rowGetCell(row, c), cellValue);
         }
-        row.commit();
+        rowCommit(row);
       }
 
       // Yield to let browser GC settle
@@ -361,9 +367,9 @@ describe("Browser-Specific True Streaming", () => {
       for (let i = 1000; i < 5000; i++) {
         const row = worksheet.getRow(i + 1);
         for (let c = 1; c <= 9; c++) {
-          row.getCell(c).value = cellValue;
+          cellSetValue(rowGetCell(row, c), cellValue);
         }
-        row.commit();
+        rowCommit(row);
       }
 
       await new Promise(r => setTimeout(r, 100));
