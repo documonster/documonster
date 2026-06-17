@@ -3,9 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Cell, Workbook } from "@excel/index";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addBackgroundImage, addImage } from "@excel/worksheet";
+import { Cell, Image, Workbook } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,21 +14,21 @@ const ws = Workbook.addWorksheet(wb, "blort");
 
 Cell.setValue(ws, "B2", "Hello, World!");
 
-const imageId = addWorkbookImage(wb, {
+const imageId = Image.add(wb, {
   filename: path.join(exampleDir, "data/image2.png"),
   extension: "png"
 });
-const backgroundId = addWorkbookImage(wb, {
+const backgroundId = Image.add(wb, {
   buffer: fs.readFileSync(path.join(exampleDir, "data/bubbles.jpg")),
   extension: "jpeg"
 });
-addImage(ws, imageId, {
+Image.place(ws, imageId, {
   tl: { col: 1, row: 1 },
   br: { col: 3.5, row: 5.5 }
 });
-addImage(ws, imageId, "B7:E12");
+Image.place(ws, imageId, "B7:E12");
 
-addBackgroundImage(ws, backgroundId);
+Image.setBackground(ws, backgroundId);
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();

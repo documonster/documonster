@@ -1,7 +1,6 @@
 import { Workbook } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
 const workbook = Workbook.create();
-getXlsxIo(workbook)
+Workbook.getXlsxIo(workbook)
   .readFile("./out/template.xlsx")
   .then(stream => {
     const options = {

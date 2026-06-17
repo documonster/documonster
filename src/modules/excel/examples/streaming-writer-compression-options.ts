@@ -1,7 +1,4 @@
-import { cellSetValue } from "@excel/cell";
-import { rowSetFont } from "@excel/row";
-
-import { WorkbookWriter } from "../../../index";
+import { Stream } from "@excel/index";
 
 const filename = process.argv[2];
 console.log(filename);
@@ -12,7 +9,7 @@ const optionsBestCompression = {
     zlib: { level: 9 } // Sets the compression level.
   }
 };
-const wb = new WorkbookWriter(optionsBestCompression);
+const wb = new Stream.WorkbookWriter(optionsBestCompression);
 const ws = wb.addWorksheet("blort");
 
 const style = {
@@ -25,19 +22,19 @@ ws.columns = [
   { header: "C1", width: 30 }
 ];
 
-rowSetFont(ws.getRow(2), {
+Stream.setRowFont(ws.getRow(2), {
   name: "Broadway",
   color: { argb: "FFFF0000" },
   outline: true,
   size: 20
 });
 
-cellSetValue(ws.getCell("A2"), "A2");
-cellSetValue(ws.getCell("B2"), "B2");
-cellSetValue(ws.getCell("C2"), "C2");
-cellSetValue(ws.getCell("A3"), "A3");
-cellSetValue(ws.getCell("B3"), "B3");
-cellSetValue(ws.getCell("C3"), "C3");
+Stream.setCellValue(ws.getCell("A2"), "A2");
+Stream.setCellValue(ws.getCell("B2"), "B2");
+Stream.setCellValue(ws.getCell("C2"), "C2");
+Stream.setCellValue(ws.getCell("A3"), "A3");
+Stream.setCellValue(ws.getCell("B3"), "B3");
+Stream.setCellValue(ws.getCell("C3"), "C3");
 
 wb.commit().then(() => {
   console.log("Done");
@@ -54,7 +51,7 @@ const optionsBestSpeed = {
     zlib: { level: 1 } // Sets the compression level.
   }
 };
-const wb2 = new WorkbookWriter(optionsBestSpeed);
+const wb2 = new Stream.WorkbookWriter(optionsBestSpeed);
 const ws2 = wb2.addWorksheet("blort");
 
 ws2.columns = [
@@ -63,19 +60,19 @@ ws2.columns = [
   { header: "C1", width: 30 }
 ];
 
-rowSetFont(ws2.getRow(2), {
+Stream.setRowFont(ws2.getRow(2), {
   name: "Broadway",
   color: { argb: "FFFF0000" },
   outline: true,
   size: 20
 });
 
-cellSetValue(ws2.getCell("A2"), "A2");
-cellSetValue(ws2.getCell("B2"), "B2");
-cellSetValue(ws2.getCell("C2"), "C2");
-cellSetValue(ws2.getCell("A3"), "A3");
-cellSetValue(ws2.getCell("B3"), "B3");
-cellSetValue(ws2.getCell("C3"), "C3");
+Stream.setCellValue(ws2.getCell("A2"), "A2");
+Stream.setCellValue(ws2.getCell("B2"), "B2");
+Stream.setCellValue(ws2.getCell("C2"), "C2");
+Stream.setCellValue(ws2.getCell("A3"), "A3");
+Stream.setCellValue(ws2.getCell("B3"), "B3");
+Stream.setCellValue(ws2.getCell("C3"), "C3");
 
 wb2.commit().then(() => {
   console.log("Done");
@@ -89,7 +86,7 @@ const options = {
   filename: filename3,
   useStyles: true
 };
-const wb3 = new WorkbookWriter(options);
+const wb3 = new Stream.WorkbookWriter(options);
 const ws3 = wb3.addWorksheet("blort");
 
 ws3.columns = [
@@ -98,19 +95,19 @@ ws3.columns = [
   { header: "C1", width: 30 }
 ];
 
-rowSetFont(ws3.getRow(2), {
+Stream.setRowFont(ws3.getRow(2), {
   name: "Broadway",
   color: { argb: "FFFF0000" },
   outline: true,
   size: 20
 });
 
-cellSetValue(ws3.getCell("A2"), "A2");
-cellSetValue(ws3.getCell("B2"), "B2");
-cellSetValue(ws3.getCell("C2"), "C2");
-cellSetValue(ws3.getCell("A3"), "A3");
-cellSetValue(ws3.getCell("B3"), "B3");
-cellSetValue(ws3.getCell("C3"), "C3");
+Stream.setCellValue(ws3.getCell("A2"), "A2");
+Stream.setCellValue(ws3.getCell("B2"), "B2");
+Stream.setCellValue(ws3.getCell("C2"), "C2");
+Stream.setCellValue(ws3.getCell("A3"), "A3");
+Stream.setCellValue(ws3.getCell("B3"), "B3");
+Stream.setCellValue(ws3.getCell("C3"), "C3");
 
 wb3.commit().then(() => {
   console.log("Done");

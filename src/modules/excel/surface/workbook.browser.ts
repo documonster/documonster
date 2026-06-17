@@ -9,10 +9,17 @@ export {
   createWorkbook as create,
   addWorksheet,
   getWorksheet,
+  getWorksheets,
   removeWorksheet,
   addChartsheet,
+  addPivotChartsheet,
   getChartsheet,
+  getChartsheets,
   removeChartsheet,
+  renameChartsheet,
+  copyChartsheet,
+  replaceChartsheetChart,
+  getDefinedNames,
   eachSheet,
   importSheet,
   protectWorkbook as protect,
@@ -26,7 +33,13 @@ export {
   setWorkbookModel as setModel
 } from "@excel/workbook.browser";
 
-export { toXlsxBuffer, loadXlsx, readXlsxStream, writeXlsxStream } from "@excel/xlsx-io.browser";
+export {
+  toXlsxBuffer,
+  loadXlsx,
+  readXlsxStream,
+  writeXlsxStream,
+  getXlsxIo
+} from "@excel/xlsx-io.browser";
 
 /** A workbook handle (opaque to consumers). */
 export type { WorkbookData as Handle } from "@excel/workbook-core";

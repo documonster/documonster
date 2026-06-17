@@ -38,27 +38,18 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { cellSetNumFmt, cellSetValue } from "@excel/cell";
 import { type AddTrendlineOptions, type ChartRichText } from "@excel/chart/index";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
-import { tableModel } from "@excel/table";
-import { getWorksheets } from "@excel/workbook";
 import {
-  addBoxWhiskerChart,
-  addChart,
-  addConditionalFormatting,
-  addHistogramChart,
-  addParetoChart,
-  addSparklineGroup,
-  addTable,
-  columnSetNumFmt,
-  getCell,
-  getCharts,
-  getColumn,
-  getSparklineGroups,
-  rowSetValues
-} from "@excel/worksheet";
+  Address,
+  Cell,
+  Chart,
+  Column,
+  Row,
+  Sparkline,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
@@ -205,7 +196,7 @@ async function main(): Promise<void> {
     pageSetup: { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
   });
 
-  const samplesTable = addTable(rawSheet, {
+  const samplesTable = Table.add(rawSheet, {
     name: "Samples",
     displayName: "Samples",
     ref: "A1",
@@ -221,13 +212,13 @@ async function main(): Promise<void> {
     rows: samples.map(s => [s.group, s.trial, s.dose, s.response])
   });
 
-  columnSetNumFmt(getColumn(rawSheet, 3), "0.00");
-  columnSetNumFmt(getColumn(rawSheet, 4), "0.00");
+  Column.setStyle(rawSheet, 3, { numFmt: "0.00" });
+  Column.setStyle(rawSheet, 4, { numFmt: "0.00" });
   Column.setWidth(rawSheet, 1, 16);
   Column.setWidth(rawSheet, 4, 14);
 
   // Conditional formatting — 3-colour scale on response.
-  addConditionalFormatting(rawSheet, {
+  Worksheet.addConditionalFormatting(rawSheet, {
     ref: `D2:D${samples.length + 1}`,
     rules: [
       {
@@ -241,7 +232,7 @@ async function main(): Promise<void> {
 
   // Custom-formula conditional formatting: flag rows where response is
   // more than 2 sd above the overall mean.
-  addConditionalFormatting(rawSheet, {
+  Worksheet.addConditionalFormatting(rawSheet, {
     ref: `A2:D${samples.length + 1}`,
     rules: [
       {
@@ -255,7 +246,7 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`Samples table created: ${tableModel(samplesTable).name}`);
+  console.log(`Samples table created: ${Table.model(samplesTable).name}`);
 
   // =========================================================================
   // Sheet 3 — Summary statistics (formulas that query the Samples Table)
@@ -285,14 +276,14 @@ async function main(): Promise<void> {
     "95% CI ±",
     "Corr(d,r)"
   ];
-  rowSetValues(Worksheet.getRow(summary, 2), headers);
-  rowSetFont(Worksheet.getRow(summary, 2), { bold: true, color: { argb: "FFFFFFFF" } });
-  rowSetFill(Worksheet.getRow(summary, 2), {
+  Row.setValues(summary, 2, headers);
+  Row.setFont(summary, 2, { bold: true, color: { argb: "FFFFFFFF" } });
+  Row.setFill(summary, 2, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FF1F3864" }
   });
-  rowSetAlignment(Worksheet.getRow(summary, 2), { horizontal: "center" });
+  Row.setAlignment(summary, 2, { horizontal: "center" });
 
   // Reference the Table via structured references so the formulas stay
   // readable. Response range = Samples[Response] (SUMIFS etc).
@@ -364,7 +355,7 @@ async function main(): Promise<void> {
   });
 
   // Data bars on the Mean column
-  addConditionalFormatting(summary, {
+  Worksheet.addConditionalFormatting(summary, {
     ref: `C3:C${2 + GROUPS.length}`,
     rules: [
       {
@@ -401,7 +392,7 @@ async function main(): Promise<void> {
   // ---- 4.1 Histogram — all responses
   Cell.setValue(dist, "A3", "Histogram of all responses");
   Cell.setStyle(dist, "A3", { font: { bold: true } });
-  addHistogramChart(
+  Chart.addHistogram(
     dist,
     {
       title: "Response distribution (all groups)",
@@ -414,7 +405,7 @@ async function main(): Promise<void> {
   // ---- 4.2 Pareto — same data, with cumulative curve
   Cell.setValue(dist, "G3", "Pareto — frequency + cumulative");
   Cell.setStyle(dist, "G3", { font: { bold: true } });
-  addParetoChart(
+  Chart.addPareto(
     dist,
     {
       title: "Response Pareto",
@@ -427,7 +418,7 @@ async function main(): Promise<void> {
   // ---- 4.3 Box-whisker per group
   Cell.setValue(dist, "A25", "Box-whisker of response by group");
   Cell.setStyle(dist, "A25", { font: { bold: true } });
-  addBoxWhiskerChart(
+  Chart.addBoxWhisker(
     dist,
     {
       title: "Response box-whisker by group",
@@ -458,16 +449,9 @@ async function main(): Promise<void> {
   Cell.setStyle(regr, "A1", { font: { size: 14, bold: true, color: { argb: "FF2F5496" } } });
 
   // Fit-quality table computed via Excel formulas.
-  rowSetValues(Worksheet.getRow(regr, 3), [
-    "Model",
-    "Slope / coef",
-    "Intercept",
-    "R²",
-    "Stderr",
-    "Note"
-  ]);
-  rowSetFont(Worksheet.getRow(regr, 3), { bold: true, color: { argb: "FFFFFFFF" } });
-  rowSetFill(Worksheet.getRow(regr, 3), {
+  Row.setValues(regr, 3, ["Model", "Slope / coef", "Intercept", "R²", "Stderr", "Note"]);
+  Row.setFont(regr, 3, { bold: true, color: { argb: "FFFFFFFF" } });
+  Row.setFill(regr, 3, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FF2F5496" }
@@ -514,7 +498,7 @@ async function main(): Promise<void> {
   Cell.setValue(regr, "A6", "Scatter + 4 simultaneous model fits");
   Cell.setStyle(regr, "A6", { font: { bold: true } });
   const doseRange = `Samples!$C$2:$C$${samples.length + 1}`;
-  addChart(
+  Chart.add(
     regr,
     {
       type: "scatter",
@@ -555,8 +539,8 @@ async function main(): Promise<void> {
   // Per-group regression
   Cell.setValue(regr, "A32", "Per-group slope / intercept / R²");
   Cell.setStyle(regr, "A32", { font: { bold: true } });
-  rowSetValues(Worksheet.getRow(regr, 33), ["Group", "Slope", "Intercept", "R²"]);
-  rowSetFont(Worksheet.getRow(regr, 33), { bold: true });
+  Row.setValues(regr, 33, ["Group", "Slope", "Intercept", "R²"]);
+  Row.setFont(regr, 33, { bold: true });
   GROUPS.forEach((g, i) => {
     const row = 34 + i;
     Cell.setValue(regr, row, 1, g.name);
@@ -596,59 +580,59 @@ async function main(): Promise<void> {
   GROUPS.forEach((g, i) => {
     Cell.setValue(compSheet, 3, 2 + i, g.name);
   });
-  rowSetFont(Worksheet.getRow(compSheet, 3), { bold: true });
+  Row.setFont(compSheet, 3, { bold: true });
 
   metrics.forEach((metric, mi) => {
     const row = 4 + mi;
     Cell.setValue(compSheet, row, 1, metric);
     Cell.setStyle(compSheet, row, 1, { font: { bold: true } });
     GROUPS.forEach((g, gi) => {
-      const cell = getCell(compSheet, row, 2 + gi);
+      const cellAddr = `${Address.encodeCol(2 + gi - 1)}${row}`;
       const group = g.name;
       switch (metric) {
         case "Mean":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=AVERAGEIF(Samples[Group], "${group}", Samples[Response])`,
             result: 0
           });
           break;
         case "Median":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=MEDIAN(IF(Samples[Group]="${group}", Samples[Response]))`,
             result: 0
           });
           break;
         case "StdDev":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=STDEV(IF(Samples[Group]="${group}", Samples[Response]))`,
             result: 0
           });
           break;
         case "Max":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=MAX(IF(Samples[Group]="${group}", Samples[Response]))`,
             result: 0
           });
           break;
         case "Min":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=MIN(IF(Samples[Group]="${group}", Samples[Response]))`,
             result: 0
           });
           break;
         case "Range":
-          cellSetValue(cell, {
+          Cell.setValue(compSheet, cellAddr, {
             formula: `=MAX(IF(Samples[Group]="${group}", Samples[Response]))-MIN(IF(Samples[Group]="${group}", Samples[Response]))`,
             result: 0
           });
           break;
       }
-      cellSetNumFmt(cell, "0.00");
+      Cell.setNumFmt(compSheet, cellAddr, "0.00");
     });
   });
 
   // Radar chart comparing all groups across the metrics.
-  addChart(
+  Chart.add(
     compSheet,
     {
       type: "radar",
@@ -685,7 +669,7 @@ async function main(): Promise<void> {
     });
   });
 
-  addChart(
+  Chart.add(
     compSheet,
     {
       type: "surface3D",
@@ -720,14 +704,14 @@ async function main(): Promise<void> {
   Cell.setValue(trends, "A1", "Running average trajectory per group (10 bins)");
   Cell.setStyle(trends, "A1", { font: { size: 14, bold: true, color: { argb: "FF70AD47" } } });
 
-  rowSetValues(Worksheet.getRow(trends, 2), [
+  Row.setValues(trends, 2, [
     "Group",
     ...Array.from({ length: 10 }, (_, i) => `bin-${i + 1}`),
     "Trend (line)",
     "Trend (column)"
   ]);
-  rowSetFont(Worksheet.getRow(trends, 2), { bold: true });
-  rowSetFill(Worksheet.getRow(trends, 2), {
+  Row.setFont(trends, 2, { bold: true });
+  Row.setFill(trends, 2, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFE2EFDA" }
@@ -748,7 +732,7 @@ async function main(): Promise<void> {
     }
   });
 
-  addSparklineGroup(trends, {
+  Sparkline.add(trends, {
     type: "line",
     markers: true,
     high: true,
@@ -762,7 +746,7 @@ async function main(): Promise<void> {
       cellRef: `M${3 + gi}`
     }))
   });
-  addSparklineGroup(trends, {
+  Sparkline.add(trends, {
     type: "column",
     lineColor: "4472C4",
     sparklines: GROUPS.map((_, gi) => ({
@@ -789,13 +773,13 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets      : ${getWorksheets(wb).length}`);
+  console.log(`  sheets      : ${Workbook.getWorksheets(wb).length}`);
   console.log(`  samples     : ${samples.length} rows across ${GROUPS.length} groups`);
   console.log(
-    `  charts      : ${getWorksheets(wb).reduce((n, ws) => n + getCharts(ws).length, 0)}`
+    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
   );
   console.log(
-    `  sparklines  : ${getWorksheets(wb).reduce((n, ws) => n + getSparklineGroups(ws).length, 0)} groups`
+    `  sparklines  : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
   );
 }
 

@@ -11,10 +11,17 @@ export {
   createWorkbook as create,
   addWorksheet,
   getWorksheet,
+  getWorksheets,
   removeWorksheet,
   addChartsheet,
+  addPivotChartsheet,
   getChartsheet,
+  getChartsheets,
   removeChartsheet,
+  renameChartsheet,
+  copyChartsheet,
+  replaceChartsheetChart,
+  getDefinedNames,
   eachSheet,
   importSheet,
   protectWorkbook as protect,
@@ -36,7 +43,8 @@ export {
   readXlsxStream,
   writeXlsxStream,
   createStreamWriter,
-  createStreamReader
+  createStreamReader,
+  getXlsxIo
 } from "@excel/workbook";
 
 /** A workbook handle (opaque to consumers). */

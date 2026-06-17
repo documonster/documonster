@@ -35,32 +35,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
  */
 import { resolve } from "node:path";
 
-import {
-  cellBorder,
-  cellSetAlignment,
-  cellSetBorder,
-  cellSetFill,
-  cellSetFont,
-  cellSetNumFmt,
-  cellSetValue,
-  cellSetDataValidation
-} from "@excel/cell";
 import { type ChartRichText } from "@excel/chart/index";
-import { definedNamesAdd } from "@excel/defined-names";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
-import { getChartsheets, getDefinedNames, getWorksheets } from "@excel/workbook";
-import {
-  addChart,
-  addComboChart,
-  addConditionalFormatting,
-  addWaterfallChart,
-  getCell,
-  getCharts,
-  protect,
-  rowSetValues
-} from "@excel/worksheet";
-import type { WorksheetData } from "@excel/worksheet-core";
+import { Address, Cell, Chart, Column, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
@@ -87,10 +63,10 @@ async function main(): Promise<void> {
   // Shared styling helpers
   // ---------------------------------------------------------------------------
 
-  const applyHeader = (ws: WorksheetData, range: string, title: string): void => {
+  const applyHeader = (ws: Worksheet.Handle, range: string, title: string): void => {
     Worksheet.merge(ws, range);
-    const cell = getCell(ws, range.split(":")[0]);
-    cellSetValue(cell, {
+    const cellAddr = range.split(":")[0];
+    Cell.setValue(ws, cellAddr, {
       richText: [
         { text: `${title}\n`, font: { size: 18, bold: true, color: { argb: "FF1F3864" } } },
         {
@@ -99,8 +75,8 @@ async function main(): Promise<void> {
         }
       ]
     });
-    cellSetAlignment(cell, { horizontal: "left", vertical: "middle", wrapText: true });
-    cellSetFill(cell, {
+    Cell.setAlignment(ws, cellAddr, { horizontal: "left", vertical: "middle", wrapText: true });
+    Cell.setFill(ws, cellAddr, {
       type: "gradient",
       gradient: "angle",
       degree: 90,
@@ -111,21 +87,20 @@ async function main(): Promise<void> {
     });
   };
 
-  const applyYearHeader = (ws: WorksheetData, row: number): void => {
+  const applyYearHeader = (ws: Worksheet.Handle, row: number): void => {
     Cell.setValue(ws, row, 1, "Line item");
     YEARS.forEach((y, i) => {
       Cell.setValue(ws, row, 2 + i, y);
     });
     Cell.setValue(ws, row, 2 + YEARS.length, "YoY %");
-    const headerRow = Worksheet.getRow(ws, row);
-    rowSetFont(headerRow, { bold: true, color: { argb: "FFFFFFFF" } });
-    rowSetFill(headerRow, {
+    Row.setFont(ws, row, { bold: true, color: { argb: "FFFFFFFF" } });
+    Row.setFill(ws, row, {
       type: "pattern",
       pattern: "solid",
       fgColor: { argb: "FF1F3864" }
     });
-    rowSetAlignment(headerRow, { horizontal: "center" });
-    headerRow.height = 20;
+    Row.setAlignment(ws, row, { horizontal: "center" });
+    Row.setHeight(ws, row, 20);
     Cell.setStyle(ws, row, 1, { alignment: { horizontal: "left", indent: 1 } });
   };
 
@@ -309,55 +284,61 @@ async function main(): Promise<void> {
 
   bodyRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = getCell(income, row, 1);
-    cellSetValue(labelCell, def.label);
+    const labelCellAddr = `${Address.encodeCol(1 - 1)}${row}`;
+    Cell.setValue(income, labelCellAddr, def.label);
     if (def.bold) {
-      cellSetFont(labelCell, { bold: true });
+      Cell.setFont(income, labelCellAddr, { bold: true });
     }
     if (def.indent) {
-      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
+      Cell.setAlignment(income, labelCellAddr, { horizontal: "left", indent: def.indent });
     }
 
     for (let c = 0; c < 3; c++) {
-      const cell = getCell(income, row, 2 + c);
+      const cellAddr = `${Address.encodeCol(2 + c - 1)}${row}`;
       if (def.formula) {
-        cellSetValue(cell, { formula: def.formula[c], result: 0 });
+        Cell.setValue(income, cellAddr, { formula: def.formula[c], result: 0 });
       } else if (def.values) {
-        cellSetValue(cell, def.values[c] as number);
+        Cell.setValue(income, cellAddr, def.values[c] as number);
       }
       if (def.fmt) {
-        cellSetNumFmt(cell, def.fmt);
+        Cell.setNumFmt(income, cellAddr, def.fmt);
       }
       if (def.bold) {
-        cellSetFont(cell, { bold: true });
+        Cell.setFont(income, cellAddr, { bold: true });
       }
       if (def.border === "top" || def.border === "both") {
-        cellSetBorder(cell, {
-          ...cellBorder(cell),
+        Cell.setBorder(income, cellAddr, {
+          ...Cell.getBorder(income, cellAddr),
           top: { style: "thin", color: { argb: "FF1F3864" } }
         });
       }
       if (def.border === "bottom" || def.border === "both") {
-        cellSetBorder(cell, {
-          ...cellBorder(cell),
+        Cell.setBorder(income, cellAddr, {
+          ...Cell.getBorder(income, cellAddr),
           bottom: { style: "double", color: { argb: "FF1F3864" } }
         });
       }
     }
 
     // YoY % column formula — only between year 2 and year 3
-    const yoyCell = getCell(income, row, 5);
+    const yoyCellAddr = `${Address.encodeCol(5 - 1)}${row}`;
     if (def.formula && !def.fmt?.includes("%")) {
-      cellSetValue(yoyCell, { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 });
-      cellSetNumFmt(yoyCell, PERCENT);
+      Cell.setValue(income, yoyCellAddr, {
+        formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
+        result: 0
+      });
+      Cell.setNumFmt(income, yoyCellAddr, PERCENT);
     } else if (def.values && !def.label.includes("margin")) {
-      cellSetValue(yoyCell, { formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`, result: 0 });
-      cellSetNumFmt(yoyCell, PERCENT);
+      Cell.setValue(income, yoyCellAddr, {
+        formula: `=IFERROR((D${row}-C${row})/ABS(C${row}), "")`,
+        result: 0
+      });
+      Cell.setNumFmt(income, yoyCellAddr, PERCENT);
     }
   });
 
   // Conditional formatting — red for negative values in the body
-  addConditionalFormatting(income, {
+  Worksheet.addConditionalFormatting(income, {
     ref: "B5:D16",
     rules: [
       {
@@ -371,7 +352,7 @@ async function main(): Promise<void> {
   });
 
   // Icon-set variance arrows for the YoY column
-  addConditionalFormatting(income, {
+  Worksheet.addConditionalFormatting(income, {
     ref: "E5:E16",
     rules: [
       {
@@ -390,7 +371,7 @@ async function main(): Promise<void> {
 
   // Waterfall chart — profit bridge from FY24 → FY25
   const bridge = Workbook.addWorksheet(wb, "Aggregates", { state: "hidden" });
-  rowSetValues(Worksheet.getRow(bridge, 1), ["Step", "Value"]);
+  Row.setValues(bridge, 1, ["Step", "Value"]);
   Worksheet.addRows(bridge, [
     ["FY24 Revenue", 212000],
     ["Δ Revenue", 30000],
@@ -400,7 +381,7 @@ async function main(): Promise<void> {
     ["Δ Tax", -3000],
     ["FY25 Net", 0]
   ]);
-  addWaterfallChart(
+  Chart.addWaterfall(
     income,
     {
       title: "FY24 → FY25 profit bridge (USD thousands)",
@@ -412,7 +393,7 @@ async function main(): Promise<void> {
   );
 
   // Combo chart — revenue bars + net margin line
-  addComboChart(
+  Chart.addCombo(
     income,
     {
       title: "Revenue vs net margin",
@@ -533,24 +514,24 @@ async function main(): Promise<void> {
 
   balanceRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = getCell(balance, row, 1);
-    cellSetValue(labelCell, def.label);
+    const labelCellAddr = `${Address.encodeCol(1 - 1)}${row}`;
+    Cell.setValue(balance, labelCellAddr, def.label);
     if (def.bold) {
-      cellSetFont(labelCell, { bold: true });
+      Cell.setFont(balance, labelCellAddr, { bold: true });
     }
     if (def.indent) {
-      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
+      Cell.setAlignment(balance, labelCellAddr, { horizontal: "left", indent: def.indent });
     }
     for (let c = 0; c < 3; c++) {
-      const cell = getCell(balance, row, 2 + c);
+      const cellAddr = `${Address.encodeCol(2 + c - 1)}${row}`;
       if (def.formula) {
-        cellSetValue(cell, { formula: def.formula[c], result: 0 });
+        Cell.setValue(balance, cellAddr, { formula: def.formula[c], result: 0 });
       } else if (def.values && def.label !== "") {
-        cellSetValue(cell, def.values[c]);
+        Cell.setValue(balance, cellAddr, def.values[c]);
       }
-      cellSetNumFmt(cell, CURRENCY_THOUSANDS);
+      Cell.setNumFmt(balance, cellAddr, CURRENCY_THOUSANDS);
       if (def.bold) {
-        cellSetFont(cell, { bold: true });
+        Cell.setFont(balance, cellAddr, { bold: true });
       }
     }
     // YoY column
@@ -574,7 +555,7 @@ async function main(): Promise<void> {
     Cell.setStyle(balance, 28, 2 + i, { numFmt: PERCENT });
   });
 
-  definedNamesAdd(getDefinedNames(wb), "'Balance Sheet'!$D$28", "CurrentDebtRatio");
+  DefinedNames.add(Workbook.getDefinedNames(wb), "'Balance Sheet'!$D$28", "CurrentDebtRatio");
 
   // Segment breakdown pie chart
   const segSheet = Workbook.addWorksheet(wb, "Segments", { state: "hidden" });
@@ -586,7 +567,7 @@ async function main(): Promise<void> {
     ["Other", 20000, 2500]
   ]);
 
-  addChart(
+  Chart.add(
     balance,
     {
       type: "pie",
@@ -684,30 +665,30 @@ async function main(): Promise<void> {
   ];
   cfRows.forEach((def, i) => {
     const row = 5 + i;
-    const labelCell = getCell(cashFlow, row, 1);
-    cellSetValue(labelCell, def.label);
+    const labelCellAddr = `${Address.encodeCol(1 - 1)}${row}`;
+    Cell.setValue(cashFlow, labelCellAddr, def.label);
     if (def.bold) {
-      cellSetFont(labelCell, { bold: true });
+      Cell.setFont(cashFlow, labelCellAddr, { bold: true });
     }
     if (def.indent) {
-      cellSetAlignment(labelCell, { horizontal: "left", indent: def.indent });
+      Cell.setAlignment(cashFlow, labelCellAddr, { horizontal: "left", indent: def.indent });
     }
     for (let c = 0; c < 3; c++) {
-      const cell = getCell(cashFlow, row, 2 + c);
+      const cellAddr = `${Address.encodeCol(2 + c - 1)}${row}`;
       if (def.formula) {
-        cellSetValue(cell, { formula: def.formula[c], result: 0 });
+        Cell.setValue(cashFlow, cellAddr, { formula: def.formula[c], result: 0 });
       } else if (def.values && def.label !== "") {
-        cellSetValue(cell, def.values[c]);
+        Cell.setValue(cashFlow, cellAddr, def.values[c]);
       }
-      cellSetNumFmt(cell, CURRENCY_THOUSANDS);
+      Cell.setNumFmt(cashFlow, cellAddr, CURRENCY_THOUSANDS);
       if (def.bold) {
-        cellSetFont(cell, { bold: true });
+        Cell.setFont(cashFlow, cellAddr, { bold: true });
       }
     }
   });
 
   // Conditional formatting — red for negative values
-  addConditionalFormatting(cashFlow, {
+  Worksheet.addConditionalFormatting(cashFlow, {
     ref: "B5:D23",
     rules: [
       {
@@ -737,8 +718,8 @@ async function main(): Promise<void> {
   Cell.setValue(forecast, "C4", "FY26 plan");
   Cell.setValue(forecast, "D4", "FY27 plan");
   Cell.setValue(forecast, "E4", "Commentary");
-  rowSetFont(Worksheet.getRow(forecast, 4), { bold: true, color: { argb: "FFFFFFFF" } });
-  rowSetFill(Worksheet.getRow(forecast, 4), {
+  Row.setFont(forecast, 4, { bold: true, color: { argb: "FFFFFFFF" } });
+  Row.setFill(forecast, 4, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFFFC000" }
@@ -807,7 +788,7 @@ async function main(): Promise<void> {
 
     // Data validation on the FY26/FY27 plan cells
     [3, 4].forEach(c => {
-      cellSetDataValidation(getCell(forecast, row, c), {
+      Cell.setValidation(forecast, `${Address.encodeCol(c - 1)}${row}`, {
         type: "decimal",
         operator: "between",
         formulae: [-0.5, 1.0],
@@ -820,7 +801,7 @@ async function main(): Promise<void> {
   });
 
   // Protect the sheet — only FY26/FY27 assumption cells editable
-  await protect(forecast, "fy25-board-review", {
+  await Worksheet.protect(forecast, "fy25-board-review", {
     selectLockedCells: true,
     selectUnlockedCells: true,
     sort: false,
@@ -929,10 +910,10 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets      : ${getWorksheets(wb).length}`);
-  console.log(`  chartsheets : ${getChartsheets(wb).length}`);
+  console.log(`  sheets      : ${Workbook.getWorksheets(wb).length}`);
+  console.log(`  chartsheets : ${Workbook.getChartsheets(wb).length}`);
   console.log(
-    `  charts      : ${getWorksheets(wb).reduce((n, ws) => n + getCharts(ws).length, 0)}`
+    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
   );
   console.log(`  PDF bytes   : enc=${encryptedPdf.byteLength}, plain=${publicPdf.byteLength}`);
 }

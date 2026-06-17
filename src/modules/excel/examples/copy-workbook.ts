@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Workbook } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
 
 const filenameIn = process.argv[2];
 const filenameOut = process.argv[3];
@@ -11,7 +10,7 @@ const filenameOut = process.argv[3];
 const stopwatch = new HrStopwatch();
 const wb = Workbook.create();
 stopwatch.start();
-getXlsxIo(wb)
+Workbook.getXlsxIo(wb)
   .readFile(filenameIn)
   .then(() => Workbook.writeXlsx(wb, filenameOut))
   .then(() => {

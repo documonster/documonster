@@ -1,3 +1,4 @@
+import type { CellData } from "@excel/cell";
 /**
  * `Row` namespace surface — row-level operations addressed by row number.
  *
@@ -9,13 +10,17 @@ import {
   rowGetValues,
   rowHidden,
   rowOutlineLevel,
+  rowSetAlignment,
+  rowSetBorder,
+  rowSetFill,
+  rowSetFont,
   rowSetHidden,
   rowSetOutlineLevel,
   rowSetStyle,
   rowValues
 } from "@excel/row";
-import type { RowValues, Style } from "@excel/types";
-import { getRow, rowSetValues } from "@excel/worksheet-core";
+import type { Alignment, Borders, Fill, Font, RowValues, Style } from "@excel/types";
+import { getRow, rowCommit, rowEachCell, rowGetCell, rowSetValues } from "@excel/worksheet-core";
 import type { WorksheetData } from "@excel/worksheet-core";
 
 export type Sheet = WorksheetData;
@@ -65,4 +70,36 @@ export function setValues(ws: Sheet, row: number, values: RowValues): void {
 }
 export function values(ws: Sheet, row: number): unknown[] {
   return rowValues(getRow(ws, row));
+}
+
+// --- individual style facets ---
+
+export function setFont(ws: Sheet, row: number, value: Partial<Font> | undefined): void {
+  rowSetFont(getRow(ws, row), value);
+}
+export function setAlignment(ws: Sheet, row: number, value: Partial<Alignment> | undefined): void {
+  rowSetAlignment(getRow(ws, row), value);
+}
+export function setBorder(ws: Sheet, row: number, value: Partial<Borders> | undefined): void {
+  rowSetBorder(getRow(ws, row), value);
+}
+export function setFill(ws: Sheet, row: number, value: Fill | undefined): void {
+  rowSetFill(getRow(ws, row), value);
+}
+
+// --- cell access / iteration / commit ---
+
+export function getCell(ws: Sheet, row: number, col: string | number): CellData {
+  return rowGetCell(getRow(ws, row), col);
+}
+export function eachCell(
+  ws: Sheet,
+  row: number,
+  optOrCallback: { includeEmpty?: boolean } | ((cell: CellData, colNumber: number) => void),
+  maybeCallback?: (cell: CellData, colNumber: number) => void
+): void {
+  rowEachCell(getRow(ws, row), optOrCallback as never, maybeCallback);
+}
+export function commit(ws: Sheet, row: number): void {
+  rowCommit(getRow(ws, row));
 }

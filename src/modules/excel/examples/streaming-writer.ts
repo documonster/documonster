@@ -1,14 +1,11 @@
-import { cellSetValue } from "@excel/cell";
-import { rowSetFont } from "@excel/row";
-
-import { WorkbookWriter } from "../../../index";
+import { Stream } from "@excel/index";
 
 const filename = process.argv[2];
 const styles = {
   filename,
   useStyles: true
 };
-const wb = new WorkbookWriter(styles);
+const wb = new Stream.WorkbookWriter(styles);
 const ws = wb.addWorksheet("blort");
 
 const style = {
@@ -21,19 +18,19 @@ ws.columns = [
   { header: "C1", width: 30 }
 ];
 
-rowSetFont(ws.getRow(2), {
+Stream.setRowFont(ws.getRow(2), {
   name: "Broadway",
   color: { argb: "FFFF0000" },
   outline: true,
   size: 20
 });
 
-cellSetValue(ws.getCell("A2"), "A2");
-cellSetValue(ws.getCell("B2"), "B2");
-cellSetValue(ws.getCell("C2"), "C2");
-cellSetValue(ws.getCell("A3"), "A3");
-cellSetValue(ws.getCell("B3"), "B3");
-cellSetValue(ws.getCell("C3"), "C3");
+Stream.setCellValue(ws.getCell("A2"), "A2");
+Stream.setCellValue(ws.getCell("B2"), "B2");
+Stream.setCellValue(ws.getCell("C2"), "C2");
+Stream.setCellValue(ws.getCell("A3"), "A3");
+Stream.setCellValue(ws.getCell("B3"), "B3");
+Stream.setCellValue(ws.getCell("C3"), "C3");
 
 wb.commit().then(() => {
   console.log("Done");

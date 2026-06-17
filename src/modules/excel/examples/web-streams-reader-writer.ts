@@ -11,10 +11,7 @@
  * - Modern browsers (when bundled)
  */
 
-import { rowValues } from "@excel/row";
-import { rowCommit } from "@excel/worksheet";
-
-import { WorkbookWriter, WorkbookReader } from "../../../index";
+import { Stream } from "@excel/index";
 
 async function main(): Promise<void> {
   // -------------------------------------------------------------------------
@@ -29,16 +26,16 @@ async function main(): Promise<void> {
     }
   });
 
-  const writer = new WorkbookWriter({
+  const writer = new Stream.WorkbookWriter({
     stream: writable,
     useStyles: true,
     useSharedStrings: true
   });
 
   const ws = writer.addWorksheet("Sheet1");
-  rowCommit(ws.addRow(["Name", "Score"]));
-  rowCommit(ws.addRow(["Alice", 98]));
-  rowCommit(ws.addRow(["Bob", 87]));
+  Stream.commitRow(ws.addRow(["Name", "Score"]));
+  Stream.commitRow(ws.addRow(["Alice", 98]));
+  Stream.commitRow(ws.addRow(["Bob", 87]));
   ws.commit();
   await writer.commit();
 
@@ -50,13 +47,13 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
 
   const readable = uint8ArrayToReadableStream(xlsxBytes, 32 * 1024);
-  const reader = new WorkbookReader(readable, { worksheets: "emit" });
+  const reader = new Stream.WorkbookReader(readable, { worksheets: "emit" });
 
   for await (const sheet of reader) {
     console.log("Reading sheet:", sheet.name);
     for await (const row of sheet) {
       // Row.values includes a leading empty slot at index 0 in many sheet models.
-      console.log("Row", row.number, rowValues(row));
+      console.log("Row", row.number, Stream.rowValues(row));
     }
   }
 }

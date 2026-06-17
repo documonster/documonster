@@ -2120,10 +2120,6 @@ export function getMergedRegions(ws: WorksheetData): ReadonlyArray<{
   }));
 }
 
-export function getSparklineGroups2(ws: WorksheetData): SparklineGroup[] {
-  return ws._sparklineGroups;
-}
-
 export function getSheetModel(ws: WorksheetData): WorksheetModel {
   const model: WorksheetModel = {
     id: ws.id,
@@ -2234,10 +2230,6 @@ export function setColumns(ws: WorksheetData, value: ColumnDefn[]): void {
     columns.push(column);
     columnSetDefn(column, defn);
   });
-}
-
-export function setSparklineGroups2(ws: WorksheetData, value: SparklineGroup[]): void {
-  ws._sparklineGroups = value ?? [];
 }
 
 export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {

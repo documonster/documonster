@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Workbook, Worksheet } from "@excel/index";
-import { addTable } from "@excel/worksheet";
+import { Table, Workbook, Worksheet } from "@excel/index";
 
 const [, , filename] = process.argv;
 
@@ -20,7 +19,7 @@ const getRows = () => {
 
 Worksheet.setColumns(ws, [{ key: "date", width: 16 }, { key: "number" }]);
 
-addTable(ws, {
+Table.add(ws, {
   name: "TestTable",
   ref: "A1",
   headerRow: true,

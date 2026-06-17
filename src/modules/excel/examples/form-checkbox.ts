@@ -16,9 +16,7 @@
  *   npx nodemon src/modules/excel/examples/form-checkbox.ts [outputPath]
  */
 
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { rowSetFont } from "@excel/row";
-import { addFormCheckbox } from "@excel/worksheet";
+import { Cell, Column, Form, Row, Workbook, Worksheet } from "@excel/index";
 
 async function main(): Promise<void> {
   const outputPath = process.argv[2] || "src/modules/excel/examples/data/form-checkbox.xlsx";
@@ -41,7 +39,7 @@ async function main(): Promise<void> {
   Cell.setValue(ws, "A6", "Option");
   Cell.setValue(ws, "C6", "Checkbox");
   Cell.setValue(ws, "E6", "Linked Value");
-  rowSetFont(Worksheet.getRow(ws, 6), { bold: true });
+  Row.setFont(ws, 6, { bold: true });
 
   // Data rows
   const options = [
@@ -60,7 +58,7 @@ async function main(): Promise<void> {
 
     // Add form checkbox (placed in column B-C, spanning row height)
     // Range format: "startCell:endCell" - the checkbox will be positioned over this range
-    addFormCheckbox(ws, `B${rowNumber}:C${rowNumber + 1}`, {
+    Form.addCheckbox(ws, `B${rowNumber}:C${rowNumber + 1}`, {
       checked: opt.checked,
       link: opt.linkedCell,
       text: "" // Empty text since we have label in column A
@@ -84,7 +82,7 @@ async function main(): Promise<void> {
 
   // Additional example: Checkbox with text label inside
   Cell.setValue(ws, "A18", "Checkbox with built-in label:");
-  addFormCheckbox(ws, "B18:D19", {
+  Form.addCheckbox(ws, "B18:D19", {
     checked: false,
     text: "I agree to the terms",
     link: "E18"

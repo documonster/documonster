@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Workbook, Worksheet } from "@excel/index";
-import { addTable } from "@excel/worksheet";
+import { Table, Workbook, Worksheet } from "@excel/index";
 
 const [, , filename] = process.argv;
 
@@ -28,7 +27,7 @@ const words = [
   "wabe"
 ];
 
-addTable(ws, {
+Table.add(ws, {
   name: "TestTable",
   ref: "A1",
   headerRow: true,

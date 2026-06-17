@@ -16,10 +16,16 @@ import {
   type FormulaResult,
   type NoteConfig,
   cellAddName,
+  cellAlignment,
+  cellBorder,
+  cellComment,
   cellDataValidation,
   cellDisplayText,
   cellEffectiveType,
+  cellFill,
+  cellFont,
   cellFormula,
+  cellFullAddress,
   cellGetModel,
   cellGetStyle,
   cellGetValue,
@@ -28,17 +34,41 @@ import {
   cellMaster,
   cellNames,
   cellNote,
+  cellNumFmt,
+  cellProtection,
+  cellRemoveAllNames,
   cellRemoveName,
   cellResult,
+  cellSetAlignment,
+  cellSetBorder,
+  cellSetComment,
   cellSetDataValidation,
+  cellSetFill,
+  cellSetFont,
+  cellSetModel,
+  cellSetName,
+  cellSetNames,
   cellSetNote,
+  cellSetNumFmt,
+  cellSetProtection,
+  cellSetResult,
   cellSetStyle,
   cellSetValue,
   cellText,
   cellType
 } from "@excel/cell";
 import type { ValueType } from "@excel/enums";
-import type { DataValidation, Style } from "@excel/types";
+import type { NoteData } from "@excel/note";
+import type {
+  Alignment,
+  Borders,
+  DataValidation,
+  Fill,
+  Font,
+  NumFmt,
+  Protection,
+  Style
+} from "@excel/types";
 import { getCell } from "@excel/worksheet-core";
 import type { WorksheetData } from "@excel/worksheet-core";
 
@@ -155,4 +185,80 @@ export function setValidation(ws: Sheet, addr: Addr, value: DataValidation): voi
 
 export function getModel(ws: Sheet, addr: Addr): CellModel {
   return cellGetModel(getCell(ws, addr));
+}
+export function setModel(ws: Sheet, addr: Addr, model: CellModel): void {
+  cellSetModel(getCell(ws, addr), model);
+}
+
+// --- individual style facets (getters + setters) ---
+
+export function getFont(ws: Sheet, addr: Addr): Partial<Font> | undefined {
+  return cellFont(getCell(ws, addr));
+}
+export function setFont(ws: Sheet, addr: Addr, value: Partial<Font> | undefined): void {
+  cellSetFont(getCell(ws, addr), value);
+}
+export function getNumFmt(ws: Sheet, addr: Addr): string | NumFmt | undefined {
+  return cellNumFmt(getCell(ws, addr));
+}
+export function setNumFmt(ws: Sheet, addr: Addr, value: string | undefined): void {
+  cellSetNumFmt(getCell(ws, addr), value);
+}
+export function getAlignment(ws: Sheet, addr: Addr): Partial<Alignment> | undefined {
+  return cellAlignment(getCell(ws, addr));
+}
+export function setAlignment(ws: Sheet, addr: Addr, value: Partial<Alignment> | undefined): void {
+  cellSetAlignment(getCell(ws, addr), value);
+}
+export function getBorder(ws: Sheet, addr: Addr): Partial<Borders> | undefined {
+  return cellBorder(getCell(ws, addr));
+}
+export function setBorder(ws: Sheet, addr: Addr, value: Partial<Borders> | undefined): void {
+  cellSetBorder(getCell(ws, addr), value);
+}
+export function getFill(ws: Sheet, addr: Addr): Fill | undefined {
+  return cellFill(getCell(ws, addr));
+}
+export function setFill(ws: Sheet, addr: Addr, value: Fill | undefined): void {
+  cellSetFill(getCell(ws, addr), value);
+}
+export function getProtection(ws: Sheet, addr: Addr): Partial<Protection> | undefined {
+  return cellProtection(getCell(ws, addr));
+}
+export function setProtection(ws: Sheet, addr: Addr, value: Partial<Protection> | undefined): void {
+  cellSetProtection(getCell(ws, addr), value);
+}
+
+// --- comment (author-bearing note) ---
+
+export function getComment(ws: Sheet, addr: Addr): NoteData | undefined {
+  return cellComment(getCell(ws, addr));
+}
+export function setComment(
+  ws: Sheet,
+  addr: Addr,
+  comment: NoteData | NoteConfig | undefined
+): void {
+  cellSetComment(getCell(ws, addr), comment);
+}
+
+// --- defined names (set / bulk) ---
+
+export function setName(ws: Sheet, addr: Addr, name: string): void {
+  cellSetName(getCell(ws, addr), name);
+}
+export function setNames(ws: Sheet, addr: Addr, names: string[]): void {
+  cellSetNames(getCell(ws, addr), names);
+}
+export function removeAllNames(ws: Sheet, addr: Addr): void {
+  cellRemoveAllNames(getCell(ws, addr));
+}
+
+// --- formula result / full address ---
+
+export function setResult(ws: Sheet, addr: Addr, value: FormulaResult | undefined): void {
+  cellSetResult(getCell(ws, addr), value);
+}
+export function getFullAddress(ws: Sheet, addr: Addr): ReturnType<typeof cellFullAddress> {
+  return cellFullAddress(getCell(ws, addr));
 }

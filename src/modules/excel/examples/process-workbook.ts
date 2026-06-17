@@ -1,6 +1,4 @@
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
-import { getSheetName } from "@excel/worksheet";
 
 const [, , inputFile, outputFile] = process.argv;
 
@@ -19,13 +17,13 @@ const assert = function (value, failMessage, passMessage) {
 };
 
 // assuming file created by testBookOut
-getXlsxIo(wb)
+Workbook.getXlsxIo(wb)
   .readFile(inputFile)
   .then(() => {
     console.log("Loaded", inputFile);
 
     Workbook.eachSheet(wb, sheet => {
-      console.log(getSheetName(sheet));
+      console.log(Worksheet.getName(sheet));
     });
 
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;

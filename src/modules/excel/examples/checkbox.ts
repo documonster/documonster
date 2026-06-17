@@ -8,8 +8,7 @@
  *   node src/modules/excel/examples/checkbox.ts [outputPath]
  */
 
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
-import { rowSetFont } from "@excel/row";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 async function main(): Promise<void> {
   const outputPath = process.argv[2] || "src/modules/excel/examples/data/checkbox.xlsx";
@@ -21,7 +20,7 @@ async function main(): Promise<void> {
 
   Cell.setValue(ws, "A1", "Task");
   Cell.setValue(ws, "B1", "Done");
-  rowSetFont(Worksheet.getRow(ws, 1), { bold: true });
+  Row.setFont(ws, 1, { bold: true });
 
   const rows: Array<{ task: string; done: boolean; priority: "P0" | "P1" | "P2" }> = [
     { task: "Implement checkbox (Office Online)", done: true, priority: "P0" },

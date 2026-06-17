@@ -1,7 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Workbook } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
-import { getSheetName } from "@excel/worksheet";
+import { Workbook, Worksheet } from "@excel/index";
 
 const filename = process.argv[2];
 const wb = Workbook.create();
@@ -9,7 +7,7 @@ const wb = Workbook.create();
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
-getXlsxIo(wb)
+Workbook.getXlsxIo(wb)
   .readFile(filename)
   .then(() => {
     const micros = stopwatch.microseconds;
@@ -18,7 +16,7 @@ getXlsxIo(wb)
     console.log("Time taken:", micros / 1000000);
 
     Workbook.eachSheet(wb, (sheet, id) => {
-      console.log(id, getSheetName(sheet));
+      console.log(id, Worksheet.getName(sheet));
     });
   })
   .catch(error => {

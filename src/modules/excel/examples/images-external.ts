@@ -39,9 +39,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Cell, Workbook } from "@excel/index";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addImage, addWatermark } from "@excel/worksheet";
+import { Cell, Image, Watermark, Workbook } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,18 +73,18 @@ Cell.setValue(
 );
 
 // (a) A linked picture from a REAL local file — this one displays on this machine.
-const localLinkId = addWorkbookImage(wb, { extension: "png", link: LOCAL_FILE_URL });
-addImage(ws, localLinkId, "B4:E11");
+const localLinkId = Image.add(wb, { extension: "png", link: LOCAL_FILE_URL });
+Image.place(ws, localLinkId, "B4:E11");
 
 // (b) A linked picture from an http(s) URL — valid rel, but Excel won't fetch it.
-const urlImageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
-addImage(ws, urlImageId, "G4:J11");
+const urlImageId = Image.add(wb, { extension: "png", link: REMOTE_URL });
+Image.place(ws, urlImageId, "G4:J11");
 
 // (c) A linked overlay watermark on a second sheet (transparency via opacity).
 const wmSheet = Workbook.addWorksheet(wb, "linked-watermark");
 Cell.setValue(wmSheet, "A1", "This sheet has a linked overlay watermark.");
-const wmImageId = addWorkbookImage(wb, { extension: "png", link: LOCAL_FILE_URL });
-addWatermark(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
+const wmImageId = Image.add(wb, { extension: "png", link: LOCAL_FILE_URL });
+Watermark.add(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 
 // The following would THROW — background and header watermarks must be embedded:
 //   wmSheet.addWatermark({ imageId: wmImageId, mode: "header" });
@@ -109,11 +107,11 @@ try {
 // ---------------------------------------------------------------------------
 const embeddedWb = Workbook.create();
 const embeddedWs = Workbook.addWorksheet(embeddedWb, "embedded");
-const embeddedId = addWorkbookImage(embeddedWb, {
+const embeddedId = Image.add(embeddedWb, {
   buffer: fs.readFileSync(localPng),
   extension: "png"
 });
-addImage(embeddedWs, embeddedId, "B3:E10");
+Image.place(embeddedWs, embeddedId, "B3:E10");
 const embeddedBytes = new Uint8Array(await Workbook.toXlsxBuffer(embeddedWb));
 
 const linkedBytes = fs.statSync(filename).size;

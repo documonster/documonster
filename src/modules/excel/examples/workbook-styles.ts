@@ -1,16 +1,6 @@
-import {
-  cellSetAlignment,
-  cellSetFill,
-  cellSetValue,
-  cellSetDataValidation,
-  cellSetName
-} from "@excel/cell";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Cell, Row, Workbook, Worksheet } from "@excel/index";
-import { rowSetFont, rowSetHidden } from "@excel/row";
-import { getCell, rowGetCell } from "@excel/worksheet";
-
-import type { Fill } from "../../../index";
+import type { Fill } from "@excel/types";
 
 const [, , filename] = process.argv;
 
@@ -282,23 +272,21 @@ Row.setHeight(ws, 11, 40);
 alignments.forEach((alignment, index) => {
   const rowNumber = 11;
   const colNumber = index + 1;
-  const cell = getCell(ws, rowNumber, colNumber);
-  cellSetValue(cell, alignment.text);
-  cellSetAlignment(cell, alignment.alignment);
+  Cell.setValue(ws, rowNumber, colNumber, alignment.text);
+  Cell.setStyle(ws, rowNumber, colNumber, { alignment: alignment.alignment });
 });
 
-const row12 = Worksheet.getRow(ws, 12);
-row12.height = 40;
-cellSetValue(rowGetCell(row12, 1), "Blue White Horizontal Gradient");
-cellSetFill(rowGetCell(row12, 1), fills.blueWhiteHGrad);
-cellSetValue(rowGetCell(row12, 2), "Red Dark Vertical");
-cellSetFill(rowGetCell(row12, 2), fills.redDarkVertical);
-cellSetValue(rowGetCell(row12, 3), "Red Green Dark Trellis");
-cellSetFill(rowGetCell(row12, 3), fills.redGreenDarkTrellis);
-cellSetValue(rowGetCell(row12, 4), "RGB Path Gradient");
-cellSetFill(rowGetCell(row12, 4), fills.rgbPathGrad);
-cellSetValue(rowGetCell(row12, 5), "Solid Green");
-cellSetFill(rowGetCell(row12, 5), fills.solidGreen);
+Row.setHeight(ws, 12, 40);
+Cell.setValue(ws, "A12", "Blue White Horizontal Gradient");
+Cell.setFill(ws, "A12", fills.blueWhiteHGrad);
+Cell.setValue(ws, "B12", "Red Dark Vertical");
+Cell.setFill(ws, "B12", fills.redDarkVertical);
+Cell.setValue(ws, "C12", "Red Green Dark Trellis");
+Cell.setFill(ws, "C12", fills.redGreenDarkTrellis);
+Cell.setValue(ws, "D12", "RGB Path Gradient");
+Cell.setFill(ws, "D12", fills.rgbPathGrad);
+Cell.setValue(ws, "E12", "Solid Green");
+Cell.setFill(ws, "E12", fills.solidGreen);
 
 // testing background and color trickery
 Cell.setValue(ws, "F5", "white");
@@ -315,7 +303,7 @@ Cell.setStyle(ws, "G5", { fill: fills.solidGreen });
 Cell.setStyle(ws, "G6", { fill: fills.solidGreen });
 
 // row and column styles
-rowSetFont(Worksheet.getRow(ws, 13), fonts.arialBlackUI14);
+Row.setFont(ws, 13, fonts.arialBlackUI14);
 Cell.setValue(ws, "H12", "Foo");
 Cell.setValue(ws, "G13", "Foo");
 Cell.setValue(ws, "H13", "Bar");
@@ -323,32 +311,30 @@ Cell.setValue(ws, "I13", "Baz");
 Cell.setValue(ws, "H14", "Baz");
 
 // hidden stuff
-rowSetHidden(Worksheet.getRow(ws, 16), true);
+Row.setHidden(ws, 16, true);
 Cell.setValue(ws, "I15", "You Can't See Me!");
 Cell.setValue(ws, "A16", "You Can't See Me!");
 
-const A18 = getCell(ws, "A18");
-cellSetValue(A18, "Wrap Text - Wrapping Wrapping Wrappity Wrap Wrap Wrap");
-cellSetAlignment(A18, { wrapText: true });
+Cell.setValue(ws, "A18", "Wrap Text - Wrapping Wrapping Wrappity Wrap Wrap Wrap");
+Cell.setAlignment(ws, "A18", { wrapText: true });
 
-const A20 = getCell(ws, "A20");
-cellSetValue(A20, "Wrap Text - Wrapping Wrappity Wrap");
-cellSetAlignment(A20, { shrinkToFit: true });
+Cell.setValue(ws, "A20", "Wrap Text - Wrapping Wrappity Wrap");
+Cell.setAlignment(ws, "A20", { shrinkToFit: true });
 
-cellSetName(getCell(ws, "A2"), "Passe");
-cellSetName(getCell(ws, "B2"), "Passe");
+Cell.setName(ws, "A2", "Passe");
+Cell.setName(ws, "B2", "Passe");
 
-cellSetName(getCell(ws, "E2"), "Greet");
+Cell.setName(ws, "E2", "Greet");
 Cell.setValue(ws, "A22", { formula: "E2" });
 
 Cell.setValue(ws, "A24", "Choose");
 Cell.setValue(ws, "D24", "Hewie");
-cellSetName(getCell(ws, "D24"), "Nephews");
+Cell.setName(ws, "D24", "Nephews");
 Cell.setValue(ws, "E24", "Dewie");
-cellSetName(getCell(ws, "E24"), "Nephews");
+Cell.setName(ws, "E24", "Nephews");
 Cell.setValue(ws, "F24", "Louie");
-cellSetName(getCell(ws, "F24"), "Nephews");
-cellSetDataValidation(getCell(ws, "B24"), {
+Cell.setName(ws, "F24", "Nephews");
+Cell.setValidation(ws, "B24", {
   type: "list",
   allowBlank: true,
   formulae: ["Nephews"]

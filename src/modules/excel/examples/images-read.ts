@@ -1,13 +1,12 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Workbook } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
 
 const filename = process.argv[2];
 
 const wb = Workbook.create();
 const stopwatch = new HrStopwatch();
 stopwatch.start();
-getXlsxIo(wb)
+Workbook.getXlsxIo(wb)
   .readFile(filename)
   .then(() => {
     const micros = stopwatch.microseconds;

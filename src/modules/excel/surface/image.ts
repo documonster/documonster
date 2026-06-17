@@ -15,3 +15,12 @@ export {
   addShape,
   getShapes
 } from "@excel/worksheet";
+export {
+  imageCreate as create,
+  imageModel as model,
+  imageClone as clone,
+  applyImageModel as applyModel
+} from "@excel/image";
+
+/** An image handle. */
+export type { ImageData as Handle } from "@excel/image";

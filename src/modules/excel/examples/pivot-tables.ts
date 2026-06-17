@@ -1,11 +1,8 @@
-import { Column, Workbook, Worksheet } from "@excel/index";
-import { addPivotTable, addTable } from "@excel/worksheet";
-
+import { Column, Pivot, Table, Workbook, Worksheet } from "@excel/index";
 /**
  * Pivot Table Examples — 25 variations showcasing all supported features
  * Usage: npx tsx src/modules/excel/examples/pivot-tables.ts
  */
-import { type PivotTableValue } from "../../../index";
 
 async function main() {
   const workbook = Workbook.create();
@@ -88,7 +85,7 @@ async function main() {
     }
   }
 
-  const table = addTable(dataSheet, {
+  const table = Table.add(dataSheet, {
     name: "SalesData",
     ref: "A1",
     headerRow: true,
@@ -155,7 +152,7 @@ async function main() {
 
   // ---------- 1. Classic: rows + columns + single value + sum ----------
   const s1 = Workbook.addWorksheet(workbook, "1-Classic");
-  addPivotTable(s1, {
+  Pivot.add(s1, {
     sourceTable: table,
     rows: ["Region"],
     columns: ["Category"],
@@ -165,7 +162,7 @@ async function main() {
 
   // ---------- 2. Multi-level row fields + columns + sum ----------
   const s2 = Workbook.addWorksheet(workbook, "2-Multi Row");
-  addPivotTable(s2, {
+  Pivot.add(s2, {
     sourceTable: table,
     rows: ["Region", "City"],
     columns: ["Category"],
@@ -175,7 +172,7 @@ async function main() {
 
   // ---------- 3. Three-level rows, no columns ----------
   const s3 = Workbook.addWorksheet(workbook, "3-Three Rows No Cols");
-  addPivotTable(s3, {
+  Pivot.add(s3, {
     sourceTable: table,
     rows: ["Region", "City", "Category"],
     columns: [],
@@ -185,7 +182,7 @@ async function main() {
 
   // ---------- 4. Count aggregation ----------
   const s4 = Workbook.addWorksheet(workbook, "4-Count");
-  addPivotTable(s4, {
+  Pivot.add(s4, {
     sourceTable: table,
     rows: ["Category", "Product"],
     columns: ["Year"],
@@ -195,7 +192,7 @@ async function main() {
 
   // ---------- 5. Multiple value fields (no columns) ----------
   const s5 = Workbook.addWorksheet(workbook, "5-Multi Values");
-  addPivotTable(s5, {
+  Pivot.add(s5, {
     sourceTable: table,
     rows: ["Region"],
     columns: [],
@@ -205,7 +202,7 @@ async function main() {
 
   // ---------- 6. Single page filter ----------
   const s6 = Workbook.addWorksheet(workbook, "6-Single Filter");
-  addPivotTable(s6, {
+  Pivot.add(s6, {
     sourceTable: table,
     rows: ["Category"],
     columns: ["Quarter"],
@@ -216,7 +213,7 @@ async function main() {
 
   // ---------- 7. Two page filters ----------
   const s7 = Workbook.addWorksheet(workbook, "7-Two Filters");
-  addPivotTable(s7, {
+  Pivot.add(s7, {
     sourceTable: table,
     rows: ["City"],
     columns: ["Channel"],
@@ -227,7 +224,7 @@ async function main() {
 
   // ---------- 8. Three page filters (maximum) ----------
   const s8 = Workbook.addWorksheet(workbook, "8-Three Filters");
-  addPivotTable(s8, {
+  Pivot.add(s8, {
     sourceTable: table,
     rows: ["Product"],
     columns: [],
@@ -238,7 +235,7 @@ async function main() {
 
   // ---------- 9. Numeric field as row (numeric sharedItems) ----------
   const s9 = Workbook.addWorksheet(workbook, "9-Numeric Row");
-  addPivotTable(s9, {
+  Pivot.add(s9, {
     sourceTable: table,
     rows: ["Month"],
     columns: ["Year"],
@@ -248,7 +245,7 @@ async function main() {
 
   // ---------- 10. Same field as row and value (dataField=1) ----------
   const s10 = Workbook.addWorksheet(workbook, "10-Same Row Value");
-  addPivotTable(s10, {
+  Pivot.add(s10, {
     sourceTable: table,
     rows: ["Quantity"],
     columns: [],
@@ -258,7 +255,7 @@ async function main() {
 
   // ---------- 11. Minimal: single row, single value ----------
   const s11 = Workbook.addWorksheet(workbook, "11-Minimal");
-  addPivotTable(s11, {
+  Pivot.add(s11, {
     sourceTable: table,
     rows: ["Year"],
     values: ["Revenue"],
@@ -270,7 +267,7 @@ async function main() {
   Column.setWidth(s12, 1, 40);
   Column.setWidth(s12, 2, 25);
   Column.setWidth(s12, 3, 20);
-  addPivotTable(s12, {
+  Pivot.add(s12, {
     sourceTable: table,
     rows: ["Region", "City"],
     columns: ["Quarter"],
@@ -281,7 +278,7 @@ async function main() {
 
   // ---------- 13. Customer type dimension ----------
   const s13 = Workbook.addWorksheet(workbook, "13-Customer Type");
-  addPivotTable(s13, {
+  Pivot.add(s13, {
     sourceTable: table,
     rows: ["Customer Type"],
     columns: ["Channel"],
@@ -292,7 +289,7 @@ async function main() {
 
   // ---------- 14. Channel x Quarter + multiple page filters ----------
   const s14 = Workbook.addWorksheet(workbook, "14-Channel Quarter");
-  addPivotTable(s14, {
+  Pivot.add(s14, {
     sourceTable: table,
     rows: ["Channel", "Customer Type"],
     columns: ["Quarter"],
@@ -303,7 +300,7 @@ async function main() {
 
   // ---------- 15. sourceSheet (non-Table data source) ----------
   const s15 = Workbook.addWorksheet(workbook, "15-Source Sheet");
-  addPivotTable(s15, {
+  Pivot.add(s15, {
     sourceSheet: dataSheet2,
     rows: ["Department"],
     columns: ["Review Year"],
@@ -313,7 +310,7 @@ async function main() {
 
   // ---------- 16. sourceSheet + count + page filter ----------
   const s16 = Workbook.addWorksheet(workbook, "16-Employee Count");
-  addPivotTable(s16, {
+  Pivot.add(s16, {
     sourceSheet: dataSheet2,
     rows: ["Department", "Level"],
     columns: [],
@@ -324,7 +321,7 @@ async function main() {
 
   // ---------- 17. sourceSheet with multiple values ----------
   const s17 = Workbook.addWorksheet(workbook, "17-Employee Metrics");
-  addPivotTable(s17, {
+  Pivot.add(s17, {
     sourceSheet: dataSheet2,
     rows: ["Department"],
     columns: [],
@@ -334,7 +331,7 @@ async function main() {
 
   // ---------- 18. Four-level row nesting (deepest) ----------
   const s18 = Workbook.addWorksheet(workbook, "18-Four Row Levels");
-  addPivotTable(s18, {
+  Pivot.add(s18, {
     sourceTable: table,
     rows: ["Region", "City", "Category", "Product"],
     columns: [],
@@ -344,7 +341,7 @@ async function main() {
 
   // ---------- 19. Margin as value + channel columns + multiple pages ----------
   const s19 = Workbook.addWorksheet(workbook, "19-Margin Analysis");
-  addPivotTable(s19, {
+  Pivot.add(s19, {
     sourceTable: table,
     rows: ["Category", "Product"],
     columns: ["Channel"],
@@ -355,7 +352,7 @@ async function main() {
 
   // ---------- 20. Full dimensions: 3 rows + 3 values + 2 pages ----------
   const s20 = Workbook.addWorksheet(workbook, "20-Full Dimensions");
-  addPivotTable(s20, {
+  Pivot.add(s20, {
     sourceTable: table,
     rows: ["Category", "Channel", "Customer Type"],
     columns: [],
@@ -366,7 +363,7 @@ async function main() {
 
   // ---------- 21. Average aggregation ----------
   const s21 = Workbook.addWorksheet(workbook, "21-Average");
-  addPivotTable(s21, {
+  Pivot.add(s21, {
     sourceTable: table,
     rows: ["Region"],
     columns: ["Category"],
@@ -376,7 +373,7 @@ async function main() {
 
   // ---------- 22. Max aggregation ----------
   const s22 = Workbook.addWorksheet(workbook, "22-Max");
-  addPivotTable(s22, {
+  Pivot.add(s22, {
     sourceTable: table,
     rows: ["Category", "Product"],
     columns: ["Year"],
@@ -385,13 +382,13 @@ async function main() {
   });
 
   // ---------- 23. Per-value metric overrides ----------
-  const perValueMetrics: PivotTableValue[] = [
+  const perValueMetrics: Pivot.Value[] = [
     { name: "Revenue", metric: "sum" },
     { name: "Quantity", metric: "count" },
     { name: "Margin", metric: "average" }
   ];
   const s23 = Workbook.addWorksheet(workbook, "23-Mixed Metrics");
-  addPivotTable(s23, {
+  Pivot.add(s23, {
     sourceTable: table,
     rows: ["Region", "Category"],
     columns: [],
@@ -401,7 +398,7 @@ async function main() {
 
   // ---------- 24. Per-value overrides + columns + pages ----------
   const s24 = Workbook.addWorksheet(workbook, "24-Mixed Full");
-  addPivotTable(s24, {
+  Pivot.add(s24, {
     sourceTable: table,
     rows: ["Channel", "Customer Type"],
     columns: ["Quarter"],
@@ -417,7 +414,7 @@ async function main() {
 
   // ---------- 25. Multi column fields (sourceSheet with 2 column axes) ----------
   const s25 = Workbook.addWorksheet(workbook, "25-Multi Column Fields");
-  addPivotTable(s25, {
+  Pivot.add(s25, {
     sourceSheet: dataSheet2,
     rows: ["Department", "Level", "Employee"],
     columns: ["Review Year", "Projects"],

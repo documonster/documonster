@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Cell, Workbook } from "@excel/index";
-import { protect } from "@excel/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 
 const [, , filename, password] = process.argv;
 
@@ -12,14 +11,14 @@ async function save() {
   const stopwatch = new HrStopwatch();
 
   stopwatch.start();
-  await protect(ws, password); // default 100000
+  await Worksheet.protect(ws, password); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
   await Workbook.writeXlsx(wb, `${0}-${filename}`);
 
   // options defined but spinCount not
   stopwatch.start();
-  await protect(ws, password, { insertRows: true }); // default 100000
+  await Worksheet.protect(ws, password, { insertRows: true }); // default 100000
   console.log("Protection Time [spinCount default]:", stopwatch.microseconds);
 
   await Workbook.writeXlsx(wb, `${1}-${filename}`);
@@ -30,7 +29,7 @@ async function save() {
     const value = values[index];
 
     stopwatch.start();
-    await protect(ws, password, { spinCount: value ?? undefined });
+    await Worksheet.protect(ws, password, { spinCount: value ?? undefined });
     console.log(`Protection Time [spinCount ${value}]:`, stopwatch.microseconds);
 
     await Workbook.writeXlsx(wb, `${index + 2}-${filename}`);

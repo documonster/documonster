@@ -1,6 +1,4 @@
-import { cellGetValue } from "@excel/cell";
-import { type RowData } from "@excel/row";
-import { rowGetCell } from "@excel/worksheet";
+import { Stream } from "@excel/index";
 
 export class ColumnSum {
   private columns: number[];
@@ -15,9 +13,9 @@ export class ColumnSum {
     }
   }
 
-  add(row: RowData): void {
+  add(row: Stream.RowHandle): void {
     for (const column of this.columns) {
-      this.sums[column] += cellGetValue(rowGetCell(row, column)) as number;
+      this.sums[column] += Stream.getCellValue(Stream.rowCell(row, column)) as number;
     }
     this.count++;
   }

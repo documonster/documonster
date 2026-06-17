@@ -1,14 +1,8 @@
 import fs from "fs";
 
-import { cellSetValue } from "@excel/cell";
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Workbook, Worksheet } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
-import type { WorkbookData } from "@excel/workbook-core";
-import { rowCommit, rowGetCell } from "@excel/worksheet";
+import { Row, Stream, Workbook, Worksheet } from "@excel/index";
 import { delay } from "@utils/utils";
-
-import { WorkbookWriter } from "../../../index";
 
 if (process.argv[2] === "help") {
   console.log("Usage:");
@@ -20,7 +14,7 @@ const resultFilename = process.argv[2];
 const testFilename = process.argv[3];
 const sleepTime = 10000;
 
-const resultBook = new WorkbookWriter({ filename: resultFilename });
+const resultBook = new Stream.WorkbookWriter({ filename: resultFilename });
 const resultSheet = resultBook.addWorksheet("results");
 resultSheet.columns = [
   { header: "Count", key: "count" },
@@ -95,8 +89,8 @@ function execute(options) {
     useStyles: options.style === "styled",
     useSharedStrings: options.str === "shared"
   };
-  const wb = options.workbook === "doc" ? Workbook.create() : new WorkbookWriter(wbOptions);
-  const ws = Workbook.addWorksheet(wb as WorkbookData, "data");
+  const wb = options.workbook === "doc" ? Workbook.create() : new Stream.WorkbookWriter(wbOptions);
+  const ws = Workbook.addWorksheet(wb as Workbook.Handle, "data");
   Worksheet.setColumns(ws, [
     { header: "Col 1", key: "key", width: 25 },
     { header: "Col 2", key: "name", width: 32 },
@@ -113,25 +107,24 @@ function execute(options) {
     }
   ]);
   for (let i = 0; i < options.count; i++) {
-    rowCommit(
-      Worksheet.addRow(ws, {
-        key: i,
-        name: randomName(5),
-        age: randomNum(100),
-        addr1: randomName(16),
-        addr2: randomName(10),
-        num1: randomNum(10000),
-        num2: randomNum(100000),
-        num3: randomNum(1000000)
-      })
-    );
+    const row = Worksheet.addRow(ws, {
+      key: i,
+      name: randomName(5),
+      age: randomNum(100),
+      addr1: randomName(16),
+      addr2: randomName(10),
+      num1: randomNum(10000),
+      num2: randomNum(100000),
+      num3: randomNum(1000000)
+    });
+    Row.commit(ws, row.number);
   }
   if (options.workbook === "doc") {
     console.log("Writing doc");
-    return getXlsxIo(wb as WorkbookData).writeFile(testFilename);
+    return Workbook.getXlsxIo(wb as Workbook.Handle).writeFile(testFilename);
   }
   console.log("Committing Writer");
-  return (wb as WorkbookWriter).commit();
+  return (wb as Stream.WorkbookWriter).commit();
 }
 
 function runTest(options) {
@@ -171,7 +164,7 @@ function runTests(options) {
     return promise.then(() => {
       const testResult = reduceResults(results);
       const key = options.workbook[0] + options.style[0] + options.str[0];
-      cellSetValue(rowGetCell(resultSheet.lastRow!, key), testResult);
+      Stream.setCellValue(Stream.rowCell(resultSheet.lastRow!, key), testResult);
     });
   };
 }
@@ -180,7 +173,7 @@ let mainPromise = Promise.resolve();
 // var mainPromise = execute(125, 'stream', 'plain', 'own');
 counts.forEach(count => {
   mainPromise = mainPromise.then(() => {
-    cellSetValue(rowGetCell(resultSheet.addRow([]), "count"), count);
+    Stream.setCellValue(Stream.rowCell(resultSheet.addRow([]), "count"), count);
   });
   workbooks.forEach(workbook => {
     styles.forEach(style => {
@@ -197,7 +190,7 @@ counts.forEach(count => {
     });
   });
   mainPromise = mainPromise.then(() => {
-    rowCommit(resultSheet.lastRow!);
+    Stream.commitRow(resultSheet.lastRow!);
   });
 });
 

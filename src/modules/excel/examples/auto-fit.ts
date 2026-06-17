@@ -1,6 +1,4 @@
-import { cellFont } from "@excel/cell";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
-import { rowSetFont, rowSetHidden } from "@excel/row";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 /**
  * Auto-Fit Example: Demonstrates autoFitColumns() and autoFitRows()
  *
@@ -9,7 +7,6 @@ import { rowSetFont, rowSetHidden } from "@excel/row";
  * 2. auto-fit-fonts.xlsx      — Different fonts and sizes
  * 3. auto-fit-advanced.xlsx   — Wrap text, multi-line, rich text, merged cells, indent
  */
-import { columnSetNumFmt, getCell, getColumn } from "@excel/worksheet";
 
 const outDir = "out";
 
@@ -23,7 +20,7 @@ async function generateBasic() {
   // Header row (bold)
   const headers = ["ID", "Name", "Description", "Amount", "Date", "Active"];
   const headerRow = Worksheet.addRow(ws, headers);
-  rowSetFont(headerRow, { bold: true });
+  Row.setFont(ws, headerRow.number, { bold: true });
 
   // Data rows
   Worksheet.addRow(ws, [1, "Alice", "Software Engineer", 95000.5, new Date(2024, 0, 15), true]);
@@ -47,9 +44,9 @@ async function generateBasic() {
   Worksheet.addRow(ws, [5, "Eve", "Intern", 45000, new Date(2024, 8, 1), false]);
 
   // Apply number format to Amount column
-  columnSetNumFmt(getColumn(ws, "D"), "#,##0.00");
+  Column.setStyle(ws, "D", { numFmt: "#,##0.00" });
   // Apply date format
-  columnSetNumFmt(getColumn(ws, "E"), "yyyy-mm-dd");
+  Column.setStyle(ws, "E", { numFmt: "yyyy-mm-dd" });
 
   // Auto-fit all columns then all rows
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
@@ -101,7 +98,7 @@ async function generateFonts() {
   for (let i = 2; i <= 10; i++) {
     Cell.setValue(ws, `B${i}`, 1234567.89);
     Cell.setStyle(ws, `B${i}`, { numFmt: "#,##0.00" });
-    Cell.setStyle(ws, `B${i}`, { font: cellFont(getCell(ws, `A${i}`)) });
+    Cell.setStyle(ws, `B${i}`, { font: Cell.getFont(ws, `A${i}`) });
   }
 
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
@@ -177,7 +174,7 @@ async function generateAdvanced() {
     "VERY LONG TEXT THAT IS HIDDEN AND SHOULD NOT AFFECT COLUMN WIDTH AT ALL"
   );
   Cell.setValue(ws, "C8", "This row is hidden");
-  rowSetHidden(Worksheet.getRow(ws, 8), true);
+  Row.setHidden(ws, 8, true);
 
   // Row 9: Large font
   Cell.setValue(ws, "A9", "Large Font");

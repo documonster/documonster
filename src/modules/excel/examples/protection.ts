@@ -1,6 +1,5 @@
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Cell, Workbook } from "@excel/index";
-import { protect } from "@excel/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 
 const [, , filename, password] = process.argv;
 
@@ -19,7 +18,7 @@ async function save() {
   const stopwatch = new HrStopwatch();
   stopwatch.start();
 
-  await protect(ws, password);
+  await Worksheet.protect(ws, password);
   console.log("Protection Time:", stopwatch.microseconds);
 
   stopwatch.start();

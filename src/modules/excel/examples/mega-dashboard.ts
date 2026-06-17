@@ -35,51 +35,25 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
-  cellSetAlignment,
-  cellSetBorder,
-  cellSetFill,
-  cellSetFont,
-  cellSetNumFmt,
-  cellSetValue,
-  cellSetDataValidation
-} from "@excel/cell";
-import {
   type AddChartSeriesOptions,
   type ChartRichText,
   type ChartStyleModel,
   type ChartColorsModel
 } from "@excel/chart/index";
-import { definedNamesAdd } from "@excel/defined-names";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { rowSetAlignment, rowSetFill, rowSetFont } from "@excel/row";
-import { tableModel } from "@excel/table";
-import { getChartsheets, getDefinedNames, getWorksheets } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
 import {
-  addBoxWhiskerChart,
-  addChart,
-  addComboChart,
-  addConditionalFormatting,
-  addFunnelChart,
-  addHistogramChart,
-  addImage,
-  addPivotTable,
-  addRegionMapChart,
-  addSparklineGroup,
-  addSunburstChart,
-  addTable,
-  addTreemapChart,
-  addWaterfallChart,
-  columnSetNumFmt,
-  getCell,
-  getCharts,
-  getColumn,
-  getLastRow,
-  getSheetName,
-  getSparklineGroups,
-  protect,
-  rowSetValues
-} from "@excel/worksheet";
+  Address,
+  Cell,
+  Chart,
+  Column,
+  DefinedNames,
+  Image,
+  Pivot,
+  Row,
+  Sparkline,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { chartToPdf, excelToPdf } from "@pdf/excel-bridge";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
@@ -285,7 +259,7 @@ async function main(): Promise<void> {
   wb.modified = new Date();
 
   // Register a shared image we can refer to later.
-  const logoId = addWorkbookImage(wb, { buffer: solidPng(240, 80, 0x2f5496), extension: "png" });
+  const logoId = Image.add(wb, { buffer: solidPng(240, 80, 0x2f5496), extension: "png" });
 
   const rows = generateSalesData();
   console.log(`Generated ${rows.length} sales rows`);
@@ -322,8 +296,8 @@ async function main(): Promise<void> {
   // Top banner — merged cells with rich-text heading + logo area
   Worksheet.merge(dashboard, "A1:N1");
   Row.setHeight(dashboard, 1, 48);
-  const banner = getCell(dashboard, "A1");
-  cellSetValue(banner, {
+  const bannerAddr = "A1";
+  Cell.setValue(dashboard, bannerAddr, {
     richText: [
       { text: "▦  ", font: { size: 20, bold: true, color: { argb: "FF2F5496" } } },
       { text: "ExcelTS ", font: { size: 20, bold: true, color: { argb: "FF1F3864" } } },
@@ -331,8 +305,8 @@ async function main(): Promise<void> {
       { text: "FY23–FY25", font: { size: 14, italic: true, color: { argb: "FF7F7F7F" } } }
     ]
   });
-  cellSetAlignment(banner, { horizontal: "left", vertical: "middle", indent: 1 });
-  cellSetFill(banner, {
+  Cell.setAlignment(dashboard, bannerAddr, { horizontal: "left", vertical: "middle", indent: 1 });
+  Cell.setFill(dashboard, bannerAddr, {
     type: "gradient",
     gradient: "angle",
     degree: 90,
@@ -343,16 +317,17 @@ async function main(): Promise<void> {
   });
 
   // Embed logo in top-right corner (one-cell anchor).
-  addImage(dashboard, logoId, { tl: { col: 11, row: 0 }, ext: { width: 240, height: 64 } });
+  Image.place(dashboard, logoId, { tl: { col: 11, row: 0 }, ext: { width: 240, height: 64 } });
 
   Worksheet.merge(dashboard, "A2:N2");
-  const subtitle = getCell(dashboard, "A2");
-  cellSetValue(
-    subtitle,
+  const subtitleAddr = "A2";
+  Cell.setValue(
+    dashboard,
+    subtitleAddr,
     "Interactive KPI dashboard with sparklines, pivot summaries and drill-through links."
   );
-  cellSetFont(subtitle, { size: 11, italic: true, color: { argb: "FF595959" } });
-  cellSetAlignment(subtitle, { horizontal: "left", indent: 1 });
+  Cell.setFont(dashboard, subtitleAddr, { size: 11, italic: true, color: { argb: "FF595959" } });
+  Cell.setAlignment(dashboard, subtitleAddr, { horizontal: "left", indent: 1 });
 
   // KPI row — 4 big numbers with inline sparklines alongside each.
   const kpiHeaders = ["Revenue", "Profit", "Units Sold", "Avg Margin"];
@@ -367,29 +342,33 @@ async function main(): Promise<void> {
   const kpiRow = 5;
   kpiHeaders.forEach((label, i) => {
     const col = 1 + i * 3;
-    const labelCell = getCell(dashboard, kpiRow, col);
-    cellSetValue(labelCell, label);
-    cellSetFont(labelCell, { size: 11, bold: true, color: { argb: "FF595959" } });
-    cellSetAlignment(labelCell, { horizontal: "left", indent: 1 });
+    const labelCellAddr = `${Address.encodeCol(col - 1)}${kpiRow}`;
+    Cell.setValue(dashboard, labelCellAddr, label);
+    Cell.setFont(dashboard, labelCellAddr, { size: 11, bold: true, color: { argb: "FF595959" } });
+    Cell.setAlignment(dashboard, labelCellAddr, { horizontal: "left", indent: 1 });
 
-    const numCell = getCell(dashboard, kpiRow + 1, col);
-    cellSetValue(numCell, kpiValues[i]);
-    cellSetFont(numCell, { size: 20, bold: true, color: { argb: "FF2F5496" } });
-    cellSetNumFmt(numCell, i === 3 ? "0.0%" : i === 2 ? "#,##0" : "$#,##0");
-    cellSetAlignment(numCell, { horizontal: "left", indent: 1 });
+    const numCellAddr = `${Address.encodeCol(col - 1)}${kpiRow + 1}`;
+    Cell.setValue(dashboard, numCellAddr, kpiValues[i]);
+    Cell.setFont(dashboard, numCellAddr, { size: 20, bold: true, color: { argb: "FF2F5496" } });
+    Cell.setNumFmt(dashboard, numCellAddr, i === 3 ? "0.0%" : i === 2 ? "#,##0" : "$#,##0");
+    Cell.setAlignment(dashboard, numCellAddr, { horizontal: "left", indent: 1 });
 
     // Border + subtle fill per KPI box
     const box = { style: "thin" as const, color: { argb: "FFBFBFBF" } };
     for (let dr = 0; dr < 3; dr++) {
       for (let dc = 0; dc < 3; dc++) {
-        const c = getCell(dashboard, kpiRow + dr, col + dc);
-        cellSetBorder(c, {
+        const cAddr = `${Address.encodeCol(col + dc - 1)}${kpiRow + dr}`;
+        Cell.setBorder(dashboard, cAddr, {
           top: dr === 0 ? box : undefined,
           bottom: dr === 2 ? box : undefined,
           left: dc === 0 ? box : undefined,
           right: dc === 2 ? box : undefined
         });
-        cellSetFill(c, { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F9FF" } });
+        Cell.setFill(dashboard, cAddr, {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF2F9FF" }
+        });
       }
     }
   });
@@ -419,7 +398,7 @@ async function main(): Promise<void> {
     }
   });
 
-  const salesTable = addTable(sales, {
+  const salesTable = Table.add(sales, {
     name: "SalesData",
     ref: "A1",
     displayName: "SalesData",
@@ -458,19 +437,19 @@ async function main(): Promise<void> {
     ])
   });
 
-  columnSetNumFmt(getColumn(sales, 1), "yyyy-mm-dd");
-  columnSetNumFmt(getColumn(sales, 9), "$#,##0.00");
-  columnSetNumFmt(getColumn(sales, 10), "$#,##0.00");
-  columnSetNumFmt(getColumn(sales, 11), "$#,##0.00");
-  columnSetNumFmt(getColumn(sales, 12), "$#,##0.00");
-  columnSetNumFmt(getColumn(sales, 13), "0.0%");
+  Column.setStyle(sales, 1, { numFmt: "yyyy-mm-dd" });
+  Column.setStyle(sales, 9, { numFmt: "$#,##0.00" });
+  Column.setStyle(sales, 10, { numFmt: "$#,##0.00" });
+  Column.setStyle(sales, 11, { numFmt: "$#,##0.00" });
+  Column.setStyle(sales, 12, { numFmt: "$#,##0.00" });
+  Column.setStyle(sales, 13, { numFmt: "0.0%" });
   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].forEach(col => {
     Column.setWidth(sales, col, col === 1 ? 12 : col === 5 ? 18 : 13);
   });
 
   // Add conditional formatting to the Revenue column — data bar that lives
   // inside the cells of the Table.
-  addConditionalFormatting(sales, {
+  Worksheet.addConditionalFormatting(sales, {
     ref: `J2:J${rows.length + 1}`,
     rules: [
       {
@@ -483,7 +462,7 @@ async function main(): Promise<void> {
   });
 
   // Colour-scale on margin.
-  addConditionalFormatting(sales, {
+  Worksheet.addConditionalFormatting(sales, {
     ref: `M2:M${rows.length + 1}`,
     rules: [
       {
@@ -496,7 +475,7 @@ async function main(): Promise<void> {
   });
 
   // 3-icon arrows on Profit.
-  addConditionalFormatting(sales, {
+  Worksheet.addConditionalFormatting(sales, {
     ref: `L2:L${rows.length + 1}`,
     rules: [
       {
@@ -513,7 +492,7 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`SalesData table: ${tableModel(salesTable).name} — ${rows.length} rows`);
+  console.log(`SalesData table: ${Table.model(salesTable).name} — ${rows.length} rows`);
 
   // =========================================================================
   // Sheet 3 — Pivot summaries (3 pivot tables on one sheet)
@@ -530,7 +509,7 @@ async function main(): Promise<void> {
   Cell.setStyle(pivots, "A1", { alignment: { horizontal: "left", indent: 1 } });
 
   // Pivot 1 — Region × Year revenue
-  const p1Anchor = addPivotTable(pivots, {
+  const p1Anchor = Pivot.add(pivots, {
     sourceTable: salesTable,
     rows: ["Region"],
     columns: ["Year"],
@@ -539,7 +518,7 @@ async function main(): Promise<void> {
   });
 
   // Pivot 2 — Product × Quarter units
-  const p2Anchor = addPivotTable(pivots, {
+  const p2Anchor = Pivot.add(pivots, {
     sourceTable: salesTable,
     rows: ["Product"],
     columns: ["Quarter"],
@@ -548,7 +527,7 @@ async function main(): Promise<void> {
   });
 
   // Pivot 3 — Channel × Region margin average, with page filter on Year.
-  const p3Anchor = addPivotTable(pivots, {
+  const p3Anchor = Pivot.add(pivots, {
     sourceTable: salesTable,
     rows: ["Channel", "Product"],
     columns: ["Region"],
@@ -606,7 +585,7 @@ async function main(): Promise<void> {
   // --- by year
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Year", "Revenue", "Profit", "Units"]);
-  const yearStartRow = getLastRow(aggSheet)!.number;
+  const yearStartRow = Worksheet.lastRow(aggSheet)!.number;
   const byYear = aggSumBy("Year");
   for (const year of [2023, 2024, 2025]) {
     const v = byYear.get(year)!;
@@ -615,7 +594,7 @@ async function main(): Promise<void> {
   // --- by quarter (per year)
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Year", "Quarter", "Revenue", "Profit", "Units"]);
-  const quarterStartRow = getLastRow(aggSheet)!.number;
+  const quarterStartRow = Worksheet.lastRow(aggSheet)!.number;
   for (const year of [2023, 2024, 2025]) {
     for (const q of QUARTERS) {
       const bucket = rows
@@ -635,7 +614,7 @@ async function main(): Promise<void> {
   // --- by product
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Product", "Revenue", "Profit", "Units"]);
-  const productStartRow = getLastRow(aggSheet)!.number;
+  const productStartRow = Worksheet.lastRow(aggSheet)!.number;
   const byProduct = aggSumBy("Product");
   for (const product of PRODUCTS) {
     const v = byProduct.get(product)!;
@@ -644,7 +623,7 @@ async function main(): Promise<void> {
   // --- by country
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Country", "Revenue"]);
-  const countryStartRow = getLastRow(aggSheet)!.number;
+  const countryStartRow = Worksheet.lastRow(aggSheet)!.number;
   const byCountry = aggSumBy("Country");
   const countriesList = Array.from(byCountry.keys());
   for (const country of countriesList) {
@@ -653,7 +632,7 @@ async function main(): Promise<void> {
   // --- by channel
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Channel", "Revenue", "Profit"]);
-  const channelStartRow = getLastRow(aggSheet)!.number;
+  const channelStartRow = Worksheet.lastRow(aggSheet)!.number;
   const byChannel = aggSumBy("Channel");
   for (const channel of CHANNELS) {
     const v = byChannel.get(channel)!;
@@ -667,7 +646,7 @@ async function main(): Promise<void> {
   // ---- Chart 1: Revenue by region (column) ----
   Cell.setValue(charts, "A3", "1 — Revenue by region");
   Cell.setStyle(charts, "A3", { font: { bold: true } });
-  addChart(
+  Chart.add(
     charts,
     {
       type: "bar",
@@ -692,7 +671,7 @@ async function main(): Promise<void> {
   // ---- Chart 2: Profit trend by quarter × year (combo) ----
   Cell.setValue(charts, "I3", "2 — Revenue bars + Profit line (combo)");
   Cell.setStyle(charts, "I3", { font: { bold: true } });
-  addComboChart(
+  Chart.addCombo(
     charts,
     {
       title: "Revenue vs Profit by quarter",
@@ -745,7 +724,7 @@ async function main(): Promise<void> {
   // ---- Chart 3: Product revenue share (doughnut) ----
   Cell.setValue(charts, "A24", "3 — Product revenue share");
   Cell.setStyle(charts, "A24", { font: { bold: true } });
-  addChart(
+  Chart.add(
     charts,
     {
       type: "doughnut",
@@ -777,7 +756,7 @@ async function main(): Promise<void> {
   // ---- Chart 4: Channel contribution (stacked bar) ----
   Cell.setValue(charts, "I24", "4 — Channel contribution");
   Cell.setStyle(charts, "I24", { font: { bold: true } });
-  addChart(
+  Chart.add(
     charts,
     {
       type: "bar",
@@ -803,7 +782,7 @@ async function main(): Promise<void> {
   // ---- Chart 5: Revenue trend line with markers + trendline ----
   Cell.setValue(charts, "A45", "5 — Yearly revenue trend with linear trendline");
   Cell.setStyle(charts, "A45", { font: { bold: true } });
-  addChart(
+  Chart.add(
     charts,
     {
       type: "line",
@@ -835,7 +814,7 @@ async function main(): Promise<void> {
   // ---- Chart 6: Region map (ChartEx) ----
   Cell.setValue(charts, "I45", "6 — Revenue by country (ChartEx regionMap)");
   Cell.setStyle(charts, "I45", { font: { bold: true } });
-  addRegionMapChart(
+  Chart.addRegionMap(
     charts,
     {
       title: "Revenue by country",
@@ -854,7 +833,7 @@ async function main(): Promise<void> {
   // ---- Chart 7: Waterfall for profit bridge ----
   Cell.setValue(charts, "A66", "7 — Profit bridge (waterfall)");
   Cell.setStyle(charts, "A66", { font: { bold: true } });
-  addWaterfallChart(
+  Chart.addWaterfall(
     charts,
     {
       title: "Quarterly profit bridge (2025)",
@@ -874,7 +853,7 @@ async function main(): Promise<void> {
   // ---- Chart 8: Treemap for country revenue ----
   Cell.setValue(charts, "I66", "8 — Country revenue treemap");
   Cell.setStyle(charts, "I66", { font: { bold: true } });
-  addTreemapChart(
+  Chart.addTreemap(
     charts,
     {
       title: "Country revenue (treemap)",
@@ -896,9 +875,9 @@ async function main(): Promise<void> {
   // Need raw margins — materialise them in the Aggregates sheet.
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Margin"]);
-  const marginHeaderRow = getLastRow(aggSheet)!.number;
+  const marginHeaderRow = Worksheet.lastRow(aggSheet)!.number;
   rows.forEach(r => Worksheet.addRow(aggSheet, [r.Margin]));
-  addHistogramChart(
+  Chart.addHistogram(
     charts,
     {
       title: "Distribution of order margin",
@@ -916,7 +895,7 @@ async function main(): Promise<void> {
   // ---- Chart 10: Box-whisker of margins by region ----
   Cell.setValue(charts, "I87", "10 — Margin by region (box-whisker)");
   Cell.setStyle(charts, "I87", { font: { bold: true } });
-  addBoxWhiskerChart(
+  Chart.addBoxWhisker(
     charts,
     {
       title: "Margin distribution by region",
@@ -941,7 +920,7 @@ async function main(): Promise<void> {
   // ---- Chart 11: Funnel of units sold by product ----
   Cell.setValue(charts, "A108", "11 — Sales funnel by product");
   Cell.setStyle(charts, "A108", { font: { bold: true } });
-  addFunnelChart(
+  Chart.addFunnel(
     charts,
     {
       title: "Units sold — product funnel",
@@ -959,14 +938,14 @@ async function main(): Promise<void> {
   // small two-column block.
   Worksheet.addRow(aggSheet, []);
   Worksheet.addRow(aggSheet, ["Region", "Country", "Revenue"]);
-  const sunburstHeaderRow = getLastRow(aggSheet)!.number;
+  const sunburstHeaderRow = Worksheet.lastRow(aggSheet)!.number;
   for (const region of REGIONS) {
     for (const country of COUNTRIES[region]) {
       Worksheet.addRow(aggSheet, [region, country, byCountry.get(country)!.Revenue]);
     }
   }
-  const sunburstCount = getLastRow(aggSheet)!.number - sunburstHeaderRow;
-  addSunburstChart(
+  const sunburstCount = Worksheet.lastRow(aggSheet)!.number - sunburstHeaderRow;
+  Chart.addSunburst(
     charts,
     {
       title: "Revenue by region → country",
@@ -1010,10 +989,10 @@ async function main(): Promise<void> {
     "Units trend",
     "Margin win/loss"
   ];
-  rowSetValues(Worksheet.getRow(kpiSheet, 2), kpiHeader);
-  rowSetFont(Worksheet.getRow(kpiSheet, 2), { bold: true });
-  rowSetAlignment(Worksheet.getRow(kpiSheet, 2), { horizontal: "center" });
-  rowSetFill(Worksheet.getRow(kpiSheet, 2), {
+  Row.setValues(kpiSheet, 2, kpiHeader);
+  Row.setFont(kpiSheet, 2, { bold: true });
+  Row.setAlignment(kpiSheet, 2, { horizontal: "center" });
+  Row.setFill(kpiSheet, 2, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFFFF2CC" }
@@ -1029,16 +1008,16 @@ async function main(): Promise<void> {
         const v = rows
           .filter(r => r.Product === product && r.Year === year && r.Quarter === q)
           .reduce((s, r) => s + r.Revenue, 0);
-        const cell = getCell(kpiSheet, row, col);
-        cellSetValue(cell, v);
-        cellSetNumFmt(cell, "$#,##0");
+        const cellAddr = `${Address.encodeCol(col - 1)}${row}`;
+        Cell.setValue(kpiSheet, cellAddr, v);
+        Cell.setNumFmt(kpiSheet, cellAddr, "$#,##0");
         col += 1;
       }
     }
   });
 
   // Revenue sparkline (line) for each product across 12 quarters
-  addSparklineGroup(kpiSheet, {
+  Sparkline.add(kpiSheet, {
     type: "line",
     markers: true,
     high: true,
@@ -1054,7 +1033,7 @@ async function main(): Promise<void> {
   });
 
   // Units sparkline (column) referencing the same ranges
-  addSparklineGroup(kpiSheet, {
+  Sparkline.add(kpiSheet, {
     type: "column",
     negative: true,
     lineColor: "ED7D31",
@@ -1066,8 +1045,9 @@ async function main(): Promise<void> {
 
   // Win/loss sparkline using quarter-over-quarter delta
   const deltaSheet = Workbook.addWorksheet(wb, "Aggregates-Deltas", { state: "hidden" });
-  rowSetValues(
-    Worksheet.getRow(deltaSheet, 1),
+  Row.setValues(
+    deltaSheet,
+    1,
     PRODUCTS.map((_, i) => `delta-${i}`)
   );
   PRODUCTS.forEach((product, pIdx) => {
@@ -1087,7 +1067,7 @@ async function main(): Promise<void> {
     });
   });
 
-  addSparklineGroup(kpiSheet, {
+  Sparkline.add(kpiSheet, {
     type: "stacked",
     negative: true,
     lineColor: "70AD47",
@@ -1114,8 +1094,8 @@ async function main(): Promise<void> {
     { header: "Value", key: "value", width: 20 },
     { header: "Notes", key: "notes", width: 40 }
   ]);
-  rowSetFont(Worksheet.getRow(forecast, 1), { bold: true });
-  rowSetFill(Worksheet.getRow(forecast, 1), {
+  Row.setFont(forecast, 1, { bold: true });
+  Row.setFill(forecast, 1, {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: "FFFCE4D6" }
@@ -1132,8 +1112,8 @@ async function main(): Promise<void> {
   formRows.forEach(r => Worksheet.addRow(forecast, r));
 
   // List validation (names referencing Excel defined name)
-  definedNamesAdd(getDefinedNames(wb), "Aggregates!$A$2:$A$4", "Regions");
-  cellSetDataValidation(getCell(forecast, "B2"), {
+  DefinedNames.add(Workbook.getDefinedNames(wb), "Aggregates!$A$2:$A$4", "Regions");
+  Cell.setValidation(forecast, "B2", {
     type: "list",
     allowBlank: true,
     formulae: ["=Regions"],
@@ -1145,7 +1125,7 @@ async function main(): Promise<void> {
     showInputMessage: true
   });
 
-  cellSetDataValidation(getCell(forecast, "B3"), {
+  Cell.setValidation(forecast, "B3", {
     type: "whole",
     operator: "between",
     allowBlank: false,
@@ -1155,7 +1135,7 @@ async function main(): Promise<void> {
     showErrorMessage: true
   });
 
-  cellSetDataValidation(getCell(forecast, "B4"), {
+  Cell.setValidation(forecast, "B4", {
     type: "decimal",
     operator: "between",
     formulae: [0, 0.5],
@@ -1165,7 +1145,7 @@ async function main(): Promise<void> {
   });
   Cell.setStyle(forecast, "B4", { numFmt: "0.0%" });
 
-  cellSetDataValidation(getCell(forecast, "B5"), {
+  Cell.setValidation(forecast, "B5", {
     type: "date",
     operator: "between",
     formulae: [new Date(), new Date(Date.now() + 30 * 86400000)],
@@ -1175,7 +1155,7 @@ async function main(): Promise<void> {
   });
   Cell.setStyle(forecast, "B5", { numFmt: "yyyy-mm-dd" });
 
-  cellSetDataValidation(getCell(forecast, "B6"), {
+  Cell.setValidation(forecast, "B6", {
     type: "textLength",
     operator: "equal",
     formulae: [6],
@@ -1184,7 +1164,7 @@ async function main(): Promise<void> {
     showErrorMessage: true
   });
 
-  cellSetDataValidation(getCell(forecast, "B7"), {
+  Cell.setValidation(forecast, "B7", {
     type: "list",
     formulae: ['"Low,Medium,High"'],
     allowBlank: false
@@ -1194,7 +1174,7 @@ async function main(): Promise<void> {
   for (let r = 2; r <= 7; r++) {
     Cell.setStyle(forecast, r, 2, { protection: { locked: false } });
   }
-  await protect(forecast, "forecast-password", {
+  await Worksheet.protect(forecast, "forecast-password", {
     selectLockedCells: true,
     selectUnlockedCells: true,
     sort: false,
@@ -1266,13 +1246,13 @@ async function main(): Promise<void> {
 
   links.forEach((link, i) => {
     const row = 3 + i;
-    const cell = getCell(index, row, 2);
-    cellSetValue(cell, {
+    const cellAddr = `${Address.encodeCol(2 - 1)}${row}`;
+    Cell.setValue(index, cellAddr, {
       text: link.label,
       hyperlink: `#'${link.sheet}'!${link.ref}`,
       tooltip: `Jump to ${link.sheet}`
     });
-    cellSetFont(cell, { color: { argb: "FF0563C1" }, underline: true, size: 12 });
+    Cell.setFont(index, cellAddr, { color: { argb: "FF0563C1" }, underline: true, size: 12 });
     Cell.setValue(index, row, 3, link.desc);
     Cell.setStyle(index, row, 3, { font: { size: 11, color: { argb: "FF595959" } } });
   });
@@ -1316,7 +1296,7 @@ async function main(): Promise<void> {
       width: 30000,
       height: 18000,
       firstSheet: 0,
-      activeTab: getWorksheets(wb).findIndex(ws => getSheetName(ws) === "Index"),
+      activeTab: Workbook.getWorksheets(wb).findIndex(ws => Worksheet.getName(ws) === "Index"),
       visibility: "visible"
     }
   ];
@@ -1394,8 +1374,16 @@ async function main(): Promise<void> {
   // Workbook-level defined names — `add(location, name)`.
   // =========================================================================
 
-  definedNamesAdd(getDefinedNames(wb), `'SalesData'!$J$2:$J$${rows.length + 1}`, "TotalRevenue");
-  definedNamesAdd(getDefinedNames(wb), `'SalesData'!$L$2:$L$${rows.length + 1}`, "TotalProfit");
+  DefinedNames.add(
+    Workbook.getDefinedNames(wb),
+    `'SalesData'!$J$2:$J$${rows.length + 1}`,
+    "TotalRevenue"
+  );
+  DefinedNames.add(
+    Workbook.getDefinedNames(wb),
+    `'SalesData'!$L$2:$L$${rows.length + 1}`,
+    "TotalProfit"
+  );
 
   // =========================================================================
   // Write XLSX + PDF
@@ -1416,7 +1404,7 @@ async function main(): Promise<void> {
   console.log(`PDF → ${PDF_PATH}`);
 
   // Also emit a standalone PDF of the first chart on the Charts sheet.
-  const firstChart = getCharts(charts)[0];
+  const firstChart = Chart.get(charts)[0];
   const chartPdf = await chartToPdf(firstChart, {
     title: "Revenue by region",
     width: 640,
@@ -1428,17 +1416,17 @@ async function main(): Promise<void> {
   // Summary
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  worksheets  : ${getWorksheets(wb).length}`);
-  console.log(`  chartsheets : ${getChartsheets(wb).length}`);
+  console.log(`  worksheets  : ${Workbook.getWorksheets(wb).length}`);
+  console.log(`  chartsheets : ${Workbook.getChartsheets(wb).length}`);
   console.log(
-    `  charts      : ${getWorksheets(wb).reduce((n, ws) => n + getCharts(ws).length, 0)}`
+    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
   );
   console.log(
-    `  sparklines  : ${getWorksheets(wb).reduce((n, ws) => n + getSparklineGroups(ws).length, 0)} groups`
+    `  sparklines  : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
   );
   console.log(`  sales rows  : ${rows.length}`);
-  console.log(`  tables      : 1 Excel table (${tableModel(salesTable).name})`);
-  console.log(`  pivots      : 3 pivot tables on '${getSheetName(pivots)}'`);
+  console.log(`  tables      : 1 Excel table (${Table.model(salesTable).name})`);
+  console.log(`  pivots      : 3 pivot tables on '${Worksheet.getName(pivots)}'`);
   console.log(`  images      : 1 shared image`);
 }
 

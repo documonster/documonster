@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { rowCommit } from "@excel/worksheet";
-
 /**
  * Using WorkbookWriter (streaming) for large data
  *
  * WorkbookWriter writes data to disk incrementally, reducing peak memory use
  */
-import { WorkbookWriter } from "../../../index";
+import { Stream } from "@excel/index";
 
 async function main() {
   console.time("xlsx");
@@ -22,7 +20,7 @@ async function main() {
   const outDir = path.resolve(process.cwd(), "out");
   fs.mkdirSync(outDir, { recursive: true });
 
-  const book = new WorkbookWriter({
+  const book = new Stream.WorkbookWriter({
     filename: path.join(outDir, "streaming-writer-large-benchmark.xlsx"),
     useStyles: false,
     useSharedStrings: false,
@@ -40,14 +38,14 @@ async function main() {
   }
 
   // Write header
-  rowCommit(sheet.addRow(keys));
+  Stream.commitRow(sheet.addRow(keys));
 
   // Write data rows
   console.timeLog("xlsx", "Starting to write rows...");
 
   for (let i = 0; i < ROW_COUNT; i++) {
     const row = keys.map(() => Math.random().toString());
-    rowCommit(sheet.addRow(row));
+    Stream.commitRow(sheet.addRow(row));
 
     // Progress indicator every 100k rows
     if ((i + 1) % 100000 === 0) {
