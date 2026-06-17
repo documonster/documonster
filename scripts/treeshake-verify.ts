@@ -238,6 +238,28 @@ const scenarios: Scenario[] = [
   },
 
   // ===========================================================================
+  // /pdf member-level — `Pdf.create` must NOT bundle the Type3 Unicode glyph
+  // tables (~700 KB of math/arrow/dingbat vector glyphs). They are loaded
+  // lazily via dynamic import() inside FontManager, only when a document
+  // actually contains non-WinAnsi characters. A plain-text PDF never pays.
+  // ===========================================================================
+  {
+    name: "/pdf: Pdf.create (no Type3 glyph tables)",
+    importFrom: `${PKG_NAME}/pdf`,
+    imports: ["Pdf"],
+    useExpr: "console.log(Pdf.create)",
+    mustNotInclude: [
+      "pdf/font/type3-glyphs-quality.js",
+      "pdf/font/type3-glyphs-fill.js",
+      "pdf/font/type3-glyphs-extended.js",
+      "pdf/font/type3-glyphs.js",
+      "pdf/font/type3-font.js"
+    ],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+
+  // ===========================================================================
   // /formula member-level — the 433-function evaluator must NOT be pulled by
   // the light syntax-only members. Guards the `function-registry` lazy-init
   // fix (no top-level `ensureRegistryInitialized()` side effect): a consumer

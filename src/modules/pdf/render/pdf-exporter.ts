@@ -185,7 +185,7 @@ async function finishExport(
     }
   }
 
-  const fontObjectMap = fontManager.writeFontResources(writer);
+  const fontObjectMap = await fontManager.writeFontResources(writer);
   const { pageObjNums, sheetFirstPage, pagesTreeObjNum } = await renderAllPages(
     allPages,
     fontManager,

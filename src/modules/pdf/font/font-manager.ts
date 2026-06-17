@@ -29,7 +29,7 @@ import {
   getLineHeight as getType1LineHeight
 } from "./metrics";
 import type { TtfFont } from "./ttf-parser";
-import { writeType3Fonts, type Type3FontResult } from "./type3-font";
+import type { Type3FontResult } from "./type3-font";
 
 // =============================================================================
 // Font Name Mapping (Type1 fallback)
@@ -479,8 +479,13 @@ export class FontManager {
   /**
    * Write all font resource objects to the PDF.
    * Returns a map from resource name → object number.
+   *
+   * `async` because Type3 fallback fonts (the ~hundreds-of-KB Unicode glyph
+   * tables) are loaded lazily via dynamic `import()` — only documents that
+   * actually contain non-WinAnsi characters pay for them. A plain text PDF
+   * never bundles the glyph tables (verified by scripts/treeshake-verify).
    */
-  writeFontResources(writer: PdfWriter): Map<string, number> {
+  async writeFontResources(writer: PdfWriter): Promise<Map<string, number>> {
     const fontObjectMap = new Map<string, number>();
 
     // Write standard Type1 fonts
@@ -508,8 +513,11 @@ export class FontManager {
       this._embeddedResult = embedded;
     }
 
-    // Write Type3 fallback fonts (only when no embedded font)
+    // Write Type3 fallback fonts (only when no embedded font). The Type3
+    // implementation + Unicode glyph tables are loaded on demand so they stay
+    // out of bundles that never render non-WinAnsi characters.
     if (!this.embeddedFont && this.type3CodePoints.size > 0) {
+      const { writeType3Fonts } = await import("./type3-font");
       this._type3Result = writeType3Fonts(writer, this.type3CodePoints);
       for (const [resourceName, objNum] of this._type3Result.fontObjects) {
         fontObjectMap.set(resourceName, objNum);

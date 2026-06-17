@@ -501,7 +501,7 @@ export class PdfEditor {
   /** @internal Full rebuild implementation, extracted for try/finally cleanup. */
   private async _buildFullSave(writer: PdfWriter): Promise<Uint8Array> {
     // Write font resources for any overlay content
-    const fontObjectMap = this._fontManager.writeFontResources(writer);
+    const fontObjectMap = await this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     const pagesTreeObjNum = writer.allocObject();
@@ -946,7 +946,7 @@ export class PdfEditor {
 
     if (hasOverlays) {
       // Write font resources via the writer (to serialize font objects)
-      const fontObjectMap = this._fontManager.writeFontResources(writer);
+      const fontObjectMap = await this._fontManager.writeFontResources(writer);
 
       // Remap all writer-allocated objects (fonts + their dependencies like
       // CID font descriptors, ToUnicode CMaps, etc.) into the incremental

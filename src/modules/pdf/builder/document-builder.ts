@@ -1400,7 +1400,7 @@ export class PdfDocumentBuilder {
     }
 
     // Write font resources
-    const fontObjectMap = this._fontManager.writeFontResources(writer);
+    const fontObjectMap = await this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     // Build each page
