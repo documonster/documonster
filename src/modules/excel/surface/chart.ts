@@ -60,8 +60,6 @@ export {
   chartAnchorModel as anchorModel,
   chartTitle as title,
   chartSetTitle as setTitle,
-  chartToSVG as toSVG,
-  chartToPNG as toPNG,
   chartMutate as mutate,
   chartMutateChartEx as mutateChartEx,
   chartSetStyle as setStyle,
@@ -95,3 +93,8 @@ export {
   chartCopyTo as copyTo,
   chartClone as clone
 } from "@excel/chart/chart-handle";
+
+// Rendering ops live in a separate leaf module so the heavy SVG/PNG renderers
+// stay off the chart creation path (worksheet → chart-handle). Only consumers
+// that actually render pay for the renderers.
+export { chartToSVG as toSVG, chartToPNG as toPNG } from "@excel/chart/chart-render-ops";

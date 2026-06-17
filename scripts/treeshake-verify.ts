@@ -210,6 +210,34 @@ const scenarios: Scenario[] = [
   ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"]), // zlib + PDF metadata XML
 
   // ===========================================================================
+  // /excel member-level — chart CREATE path must NOT pull the SVG/PNG renderers
+  // (chart-renderer.js / chart-ex-renderer.js, ~550 KB combined). Guards the
+  // chart-handle → chart-render-ops split: `Chart.add` (create) and
+  // `Workbook.create` must render-free; only `Chart.toSVG`/`toPNG` pull the
+  // renderers. Verified on rspack (file-level DCE) — without the split, rspack
+  // dragged the renderers into every `Chart.add` consumer via the shared
+  // chart-handle module.
+  // ===========================================================================
+  {
+    name: "/excel: Chart.add (create path, no renderers)",
+    importFrom: `${PKG_NAME}/excel`,
+    imports: ["Chart"],
+    useExpr: "console.log(Chart.add)",
+    mustNotInclude: ["chart/chart-renderer.js", "chart/chart-ex-renderer.js"],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+  {
+    name: "/excel: Workbook.create (no renderers)",
+    importFrom: `${PKG_NAME}/excel`,
+    imports: ["Workbook"],
+    useExpr: "console.log(Workbook.create())",
+    mustNotInclude: ["chart/chart-renderer.js", "chart/chart-ex-renderer.js"],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+
+  // ===========================================================================
   // /formula member-level — the 433-function evaluator must NOT be pulled by
   // the light syntax-only members. Guards the `function-registry` lazy-init
   // fix (no top-level `ensureRegistryInitialized()` side effect): a consumer
@@ -361,6 +389,59 @@ function normalizePath(filePath: string): string {
   return idx >= 0 ? filePath.substring(idx) : filePath;
 }
 
+/**
+ * Extract the dist modules whose code actually survives into an emitted
+ * bundle, by scanning the per-module path markers every supported bundler
+ * leaves in **un-minified** output:
+ *
+ *   esbuild   `// dist/esm/modules/excel/cell.js`
+ *   rolldown  `//#region dist/esm/modules/excel/cell.js`
+ *   rspack    `// CONCATENATED MODULE: ./dist/esm/modules/excel/cell.js`
+ *
+ * This is the ground-truth tree-shaking signal: a module that the bundler
+ * eliminated via DCE leaves NO marker. (Parsed-module stats / metafile inputs
+ * list modules that entered the graph but may have been dropped from output —
+ * using them as the contract produces false positives. Verified: a marker
+ * appears iff the module's function bodies appear in the bundle.)
+ *
+ * `bytes` is the rendered length of that module's slice (best-effort, for
+ * reporting only); presence/absence is what the contract checks.
+ */
+const MODULE_MARKER_RE =
+  /(?:\/\/#region\s+|\/\/\s+CONCATENATED MODULE:\s+\.?\/?|\/\/\s+)(dist\/esm\/[^\s*]+\.js)/g;
+
+function extractContributingFromBundle(bundleText: string): ModuleEntry[] {
+  const seen = new Map<string, number>();
+  let m: RegExpExecArray | null;
+  MODULE_MARKER_RE.lastIndex = 0;
+  while ((m = MODULE_MARKER_RE.exec(bundleText)) !== null) {
+    const p = normalizePath(m[1]);
+    // Approximate the module slice length: distance to the next marker.
+    const start = m.index;
+    MODULE_MARKER_RE.lastIndex = start + m[0].length;
+    const next = MODULE_MARKER_RE.exec(bundleText);
+    const end = next ? next.index : bundleText.length;
+    MODULE_MARKER_RE.lastIndex = next ? next.index : bundleText.length;
+    seen.set(p, (seen.get(p) ?? 0) + (end - start));
+  }
+  return [...seen].map(([p, bytes]) => ({ path: p, bytes }));
+}
+
+/** Read every emitted JS/MJS file in a directory and concatenate. */
+function readEmittedBundle(dir: string, onlyFile?: string): string {
+  if (onlyFile) {
+    const fp = path.join(dir, onlyFile);
+    return fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : "";
+  }
+  let text = "";
+  for (const name of fs.readdirSync(dir)) {
+    if (name.endsWith(".mjs") || name.endsWith(".js")) {
+      text += fs.readFileSync(path.join(dir, name), "utf-8") + "\n";
+    }
+  }
+  return text;
+}
+
 function checkViolations(
   contributing: ModuleEntry[],
   mustNotInclude: string[]
@@ -422,8 +503,8 @@ function runEsbuild(scenario: Scenario): ScenarioResult {
 
   try {
     if (scenario.lazySplit) {
-      // Code-split build: the entry chunk must be free of the excluded
-      // modules; lazy `import()` targets land in separate on-demand chunks.
+      // Code-split build: the ENTRY chunk must be free of the excluded modules;
+      // lazy `import()` targets land in separate on-demand chunks.
       const outDir = path.join(TMP_DIR, `esbuild-${slug}-split`);
       const result = buildSync({
         entryPoints: [entryFile],
@@ -445,44 +526,40 @@ function runEsbuild(scenario: Scenario): ScenarioResult {
       if (!entryOut) {
         return makeError(scenario.name, "esbuild", "entry chunk not found");
       }
-      const [entryKey, entryMeta] = entryOut;
-      const contributing: ModuleEntry[] = [];
-      for (const [fp, info] of Object.entries(entryMeta.inputs)) {
-        if (fp.includes("dist/") && info.bytesInOutput > 0) {
-          contributing.push({ path: normalizePath(fp), bytes: info.bytesInOutput });
-        }
-      }
-      const parsedCount = Object.keys(entryMeta.inputs).filter(m => m.includes("dist/")).length;
-      return makeResult(scenario, "esbuild", fs.statSync(entryKey).size, contributing, parsedCount);
+      const [entryKey] = entryOut;
+      const bundleText = readEmittedBundle(outDir, path.basename(entryKey));
+      const contributing = extractContributingFromBundle(bundleText);
+      return makeResult(
+        scenario,
+        "esbuild",
+        fs.statSync(entryKey).size,
+        contributing,
+        contributing.length
+      );
     }
 
     const outFile = path.join(TMP_DIR, `esbuild-${slug}.out.mjs`);
-    const result = buildSync({
+    buildSync({
       entryPoints: [entryFile],
       bundle: true,
       format: "esm",
       platform: scenario.platform === "browser" ? "browser" : "node",
       outfile: outFile,
-      metafile: true,
       treeShaking: true,
       minify: false,
       write: true,
       external: ["node:*"]
     });
 
-    const meta = result.metafile!;
-    const outKey = Object.keys(meta.outputs).find(k => k.endsWith(".mjs"))!;
-    const outMeta = meta.outputs[outKey];
-
-    const contributing: ModuleEntry[] = [];
-    for (const [fp, info] of Object.entries(outMeta.inputs)) {
-      if (fp.includes("dist/") && info.bytesInOutput > 0) {
-        contributing.push({ path: normalizePath(fp), bytes: info.bytesInOutput });
-      }
-    }
-
-    const parsedCount = Object.keys(meta.inputs).filter(m => m.includes("dist/")).length;
-    return makeResult(scenario, "esbuild", fs.statSync(outFile).size, contributing, parsedCount);
+    const bundleText = fs.readFileSync(outFile, "utf-8");
+    const contributing = extractContributingFromBundle(bundleText);
+    return makeResult(
+      scenario,
+      "esbuild",
+      fs.statSync(outFile).size,
+      contributing,
+      contributing.length
+    );
   } catch (err: any) {
     return makeError(scenario.name, "esbuild", err.message);
   }
@@ -493,7 +570,7 @@ async function runRolldown(scenario: Scenario): Promise<ScenarioResult> {
   const outDir = path.join(TMP_DIR, `rolldown-${slug}-out`);
 
   try {
-    const output = await rolldownBuild({
+    await rolldownBuild({
       input: entryFile,
       platform: scenario.platform === "browser" ? "browser" : "node",
       resolve: {
@@ -502,36 +579,18 @@ async function runRolldown(scenario: Scenario): Promise<ScenarioResult> {
       },
       treeshake: true,
       external: [/^node:/],
-      output: { dir: outDir, format: "esm", entryFileNames: "out.mjs" }
+      output: { dir: outDir, format: "esm", entryFileNames: "out.mjs", minify: false }
     });
 
+    // Only inspect the ENTRY chunk (out.mjs). Lazy `import()` targets are
+    // emitted as separate on-demand chunks, so a dynamic cross-module boundary
+    // must NOT appear in the entry a consumer pays for upfront.
     const outFile = path.join(outDir, "out.mjs");
     const bundleSize = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-    const contributing: ModuleEntry[] = [];
-    let parsedCount = 0;
+    const bundleText = readEmittedBundle(outDir, "out.mjs");
+    const contributing = extractContributingFromBundle(bundleText);
 
-    // Only inspect the ENTRY chunk. Lazy `import()` targets are emitted as
-    // separate on-demand chunks (rolldown splits them by default), so a
-    // dynamic cross-module boundary must NOT appear in the entry a consumer
-    // pays for upfront. Counting every chunk would defeat that contract.
-    for (const chunk of output.output ?? []) {
-      if (chunk.type !== "chunk" || !chunk.isEntry || !chunk.modules) {
-        continue;
-      }
-      for (const [modId, modInfo] of Object.entries(chunk.modules)) {
-        if (!modId.includes("dist/")) {
-          continue;
-        }
-        parsedCount++;
-        const info = modInfo as { renderedLength?: number; code?: string };
-        const len = info.renderedLength ?? info.code?.length ?? 0;
-        if (len > 0) {
-          contributing.push({ path: normalizePath(modId), bytes: len });
-        }
-      }
-    }
-
-    return makeResult(scenario, "rolldown", bundleSize, contributing, parsedCount);
+    return makeResult(scenario, "rolldown", bundleSize, contributing, contributing.length);
   } catch (err: any) {
     return makeError(scenario.name, "rolldown", err.message);
   }
@@ -587,51 +646,19 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
         return;
       }
 
+      // The emitted entry chunk is `out.mjs`. Lazy `import()` targets are
+      // emitted as separate `*.chunk.mjs` files (rspack splits async deps), so
+      // reading only `out.mjs` reflects what the consumer eagerly pays for.
+      // Module-path markers in the un-minified output are the ground truth for
+      // what survived DCE (stats.modules lists graph members, which over-counts
+      // modules rspack later eliminated from the bundle).
       const outFile = path.join(outDir, "out.mjs");
       const bundleSize = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-      const jsonStats = stats.toJson({ modules: true, chunks: true, reasons: false });
-      const contributing: ModuleEntry[] = [];
-      let parsedCount = 0;
-
-      // Collect the ids of modules that belong to an INITIAL (entry) chunk.
-      // Lazy `import()` targets land in non-initial chunks, so restricting to
-      // initial chunks reflects what the consumer eagerly pays for.
-      const initialModuleIds = new Set<string | number>();
-      for (const ch of jsonStats.chunks ?? []) {
-        if (!ch.initial) {
-          continue;
-        }
-        for (const m of ch.modules ?? []) {
-          if (m.id != null) {
-            initialModuleIds.add(m.id);
-          }
-          const mn = m.name ?? m.identifier ?? "";
-          if (mn) {
-            initialModuleIds.add(mn);
-          }
-        }
-      }
-
-      for (const mod of jsonStats.modules ?? []) {
-        const modName: string = mod.name ?? mod.identifier ?? "";
-        if (!modName.includes("dist/")) {
-          continue;
-        }
-        // Skip modules that only live in lazy (non-initial) chunks.
-        const inInitial =
-          (mod.id != null && initialModuleIds.has(mod.id)) || initialModuleIds.has(modName);
-        if (!inInitial) {
-          continue;
-        }
-        parsedCount++;
-        const size = mod.size ?? 0;
-        if (size > 0) {
-          contributing.push({ path: normalizePath(modName), bytes: size });
-        }
-      }
+      const bundleText = readEmittedBundle(outDir, "out.mjs");
+      const contributing = extractContributingFromBundle(bundleText);
 
       close().then(() =>
-        resolve(makeResult(scenario, "rspack", bundleSize, contributing, parsedCount))
+        resolve(makeResult(scenario, "rspack", bundleSize, contributing, contributing.length))
       );
     });
   });

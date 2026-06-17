@@ -7,7 +7,6 @@
  */
 
 import { anchorCreate, anchorModel, type AnchorData, type AnchorModel } from "@excel/anchor";
-import { renderChartExPng, renderChartExSvg } from "@excel/chart/chart-ex-renderer";
 import type { ChartExModel } from "@excel/chart/chart-ex-types";
 import type {
   AddChartOptions,
@@ -51,7 +50,6 @@ import {
   buildChartSeriesForType
 } from "./chart-builder";
 import { resolvePendingChartImages } from "./chart-images";
-import { renderChartPng, renderChartSvg, type ChartRenderOptions } from "./chart-renderer";
 import { buildChartColors, buildChartStyle } from "./chart-sidecar";
 import { parseTxPr } from "./shape-properties";
 
@@ -552,70 +550,10 @@ export function chartRemoveUserShapes(c: ChartHandle): void {
 }
 
 /**
- * Render this chart as a **zero-dependency deterministic preview** SVG.
- *
- * The output is suitable for thumbnails, email attachments,
- * server-side report generation, CI smoke tests, and README images.
- * It is **not** an Excel-pixel-perfect compositor — text layout,
- * font metrics, and 3D projection are approximated for a stable
- * preview rather than reproduced from Excel's internal renderer.
- *
- * For production-grade rendering (Excel-identical layout, real 3D
- * for non-bar types, exact font hinting), round-trip the `.xlsx`
- * through headless LibreOffice (`soffice --convert-to pdf`) — the
- * byte-preserving round-trip + `templateMode: "strict"` guarantees
- * in this library make that a safe handoff.
- *
- * See `src/modules/excel/README.md` → "Rendering scope" for the
- * complete boundary list.
+ * Chart rendering (`chartToSVG` / `chartToPNG`) lives in `chart-render-ops.ts`
+ * so the heavy SVG/PNG renderers stay off the chart *creation* path that
+ * `worksheet.ts` / `Workbook` statically reach. Import from there to render.
  */
-export function chartToSVG(c: ChartHandle, options: ChartRenderOptions = {}): string {
-  const model = chartChartModel(c);
-  if (model) {
-    return renderChartSvg(model, options);
-  }
-  const chartEx = chartChartExModel(c);
-  if (chartEx) {
-    _chartRefreshChartExCaches(c);
-    return renderChartExSvg(chartEx, options);
-  }
-  throw new ChartOptionsError("Cannot render chart because no chart model is available.");
-}
-
-/**
- * Render this chart as a **zero-dependency deterministic preview** PNG.
- *
- * Browsers use a `<canvas>` pipeline; Node.js uses the built-in
- * `BasicRasterCanvas` rasteriser (a pure-JS SVG-subset rasteriser —
- * no native canvas dependency). DrawingML effect filters
- * (shadow/glow/soft-edge/blur/reflection) round-trip through XML and
- * emit as SVG `<filter>`, but the Node PNG rasteriser silently drops
- * them; the browser canvas path renders them natively.
- *
- * See {@link toSVG} for the full scope-boundary note. For pixel-perfect
- * output, convert through LibreOffice.
- */
-export async function chartToPNG(
-  c: ChartHandle,
-  options: ChartRenderOptions = {}
-): Promise<Uint8Array> {
-  // `async` makes the "no model" branch reject the returned promise
-  // instead of throwing synchronously. The previous non-async form
-  // violated its `Promise<Uint8Array>` contract by throwing on the
-  // hot path — a caller using `.then().catch()` (e.g. a background
-  // job runner) would see an uncaught synchronous exception rather
-  // than a rejected promise.
-  const model = chartChartModel(c);
-  if (model) {
-    return renderChartPng(model, options);
-  }
-  const chartEx = chartChartExModel(c);
-  if (chartEx) {
-    _chartRefreshChartExCaches(c);
-    return renderChartExPng(chartEx, options);
-  }
-  throw new ChartOptionsError("Cannot render chart because no chart model is available.");
-}
 
 /** Get the chart title text. Returns undefined if no title. */
 export function chartTitle(c: ChartHandle): string | undefined {
@@ -1441,7 +1379,7 @@ function _chartRefreshCaches(c: ChartHandle): void {
  * renderer still needs the data. We temporarily clear the flag,
  * fill, then restore it so the writer behaviour is unaffected.
  */
-function _chartRefreshChartExCaches(c: ChartHandle): void {
+export function _chartRefreshChartExCaches(c: ChartHandle): void {
   const model = chartChartExModel(c);
   if (!model) {
     return;
