@@ -3,40 +3,40 @@
  * conversion, and digital signatures.
  *
  * `import { Pdf } from "documonster/pdf"` →
- *   `Pdf.create(rows)`, `Pdf.fromExcel(wb)`, `Pdf.fromDocx(doc)`,
- *   `Pdf.read(bytes)`, `new Pdf.Builder()`, `new Pdf.Editor()`,
- *   `Pdf.sign(...)`, `Pdf.verifySignature(...)`.
+ *   `Pdf.create(rows)`, `Pdf.read(bytes)`, `new Pdf.Builder()`,
+ *   `new Pdf.Editor()`, `Pdf.sign(...)`, `Pdf.verifySignature(...)`,
+ *   `await Pdf.fromExcel(wb)`, `await Pdf.fromDocx(doc)`.
  *
- * Single flat namespace (pdf is one cohesive engine). Cross-module
- * converters live here as `from<Source>` verbs (the pdf module is the
- * upper layer that depends on excel/word). Re-exported via `export * as Pdf`.
+ * The cross-module converters (`fromExcel`/`fromDocx`/`fromChart`/
+ * `wordChartRenderer`) are **lazily loaded** via dynamic `import()`: they
+ * statically pull the excel / word object models, so wiring them as plain
+ * re-exports would force every `Pdf.create` consumer to bundle excel+word
+ * (~hundreds of KB). The dynamic boundary keeps the core PDF engine
+ * tree-shakeable — a consumer who never calls a converter never bundles the
+ * source module. (Verified by scripts/treeshake-verify.ts.)
  */
+import type { Workbook } from "@excel/workbook.browser";
+import type { ChartHandle } from "@excel/worksheet-core";
+import type { Chart as WordChart, DocxDocument } from "@word/types";
 
-// Writing
+import { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "../builder/document-builder";
+import type { ChartToPdfOptions } from "../excel-bridge";
+import type { PdfExportOptions } from "../types";
+import type { DocxToPdfOptions } from "../word-bridge";
+
+// --- Writing (core engine, statically linked) ---
 export { pdf as create } from "../pdf";
 
-// Conversion bridges (cross-module → target namespace, per API design)
-export {
-  excelToPdf as fromExcel,
-  chartToPdf as fromChart,
-  createWordChartPdfRenderer
-} from "../excel-bridge";
-export { docxToPdf as fromDocx } from "../word-bridge";
-
-// Reading
+// --- Reading ---
 export { readPdf as read } from "../reader/pdf-reader";
 
-// Building
-export {
-  PdfDocumentBuilder as Builder,
-  PdfPageBuilder as PageBuilder,
-  parseSvgPath
-} from "../builder/document-builder";
+// --- Building (imported above; re-exported under namespace-friendly names) ---
+export { PdfDocumentBuilder as Builder, PdfPageBuilder as PageBuilder, parseSvgPath };
 
-// Editing
+// --- Editing ---
 export { PdfEditor as Editor, PdfEditorPage as EditorPage } from "../builder/pdf-editor";
 
-// Digital signatures
+// --- Digital signatures ---
 export {
   verifyPdfSignature as verifySignature,
   signPdf as sign,
@@ -44,5 +44,46 @@ export {
   asn1Parse
 } from "../core/digital-signature";
 
-// Page-size presets
+// --- Page-size presets ---
 export { PageSizes } from "../types";
+
+// --- Cross-module converters (lazy: pull excel / word only when called) ---
+
+/** Convert an Excel workbook to a PDF. Dynamically loads the excel bridge. */
+export async function fromExcel(
+  workbook: Workbook,
+  options?: PdfExportOptions
+): Promise<Uint8Array> {
+  const { excelToPdf } = await import("../excel-bridge");
+  return excelToPdf(workbook, options);
+}
+
+/** Render a single chart handle to a PDF. Dynamically loads the excel bridge. */
+export async function fromChart(
+  chart: ChartHandle,
+  options?: ChartToPdfOptions
+): Promise<Uint8Array> {
+  const { chartToPdf } = await import("../excel-bridge");
+  return chartToPdf(chart, options);
+}
+
+/** Convert a DOCX document to a PDF. Dynamically loads the word bridge. */
+export async function fromDocx(doc: DocxDocument, options?: DocxToPdfOptions): Promise<Uint8Array> {
+  const { docxToPdf } = await import("../word-bridge");
+  return docxToPdf(doc, options);
+}
+
+/**
+ * Build the Word-chart → PDF renderer callback for `docxToPdf`'s
+ * `chartRenderer` option. Dynamically loads the excel bridge (chart engine).
+ */
+export async function wordChartRenderer(): Promise<
+  (
+    chart: WordChart,
+    page: PdfPageBuilder,
+    rect: { x: number; y: number; width: number; height: number }
+  ) => void
+> {
+  const { createWordChartPdfRenderer } = await import("../excel-bridge");
+  return createWordChartPdfRenderer();
+}

@@ -56,6 +56,13 @@ interface Scenario {
   platform?: "browser" | "node";
   /** Bundlers to skip for this scenario (known tool limitations). */
   excludeBundlers?: string[];
+  /**
+   * When true, bundle with code-splitting and assert only against the ENTRY
+   * chunk. Use for namespaces with lazy `import()` boundaries (e.g. `Pdf`'s
+   * cross-module converters): the heavy dependency must live in a separate
+   * on-demand chunk, not the entry a consumer pays for upfront.
+   */
+  lazySplit?: boolean;
 }
 
 /** Shorthand for creating a scenario */
@@ -191,21 +198,20 @@ const scenarios: Scenario[] = [
   ),
 
   // -------------------------------------------------------------------------
-  // /pdf subpath — namespace API. PDF legitimately needs archive (zlib), and
-  // `Pdf.fromDocx`/`Pdf.fromExcel` legitimately pull word/excel bridges, so
-  // the only hard exclusions are csv + the formula evaluator.
+  // /pdf subpath — namespace API. PDF legitimately needs archive (zlib). The
+  // cross-module converters (fromExcel/fromDocx/fromChart/wordChartRenderer)
+  // are lazy-loaded via dynamic import(), so importing `Pdf` must NOT
+  // statically pull excel, word, csv, or the formula module — only the core
+  // PDF engine + archive.
   // -------------------------------------------------------------------------
-  s(
-    "/pdf: Pdf (no csv/formula-engine; archive+bridges allowed)",
-    `${PKG_NAME}/pdf`,
-    ["Pdf"],
-    [
-      "modules/csv/",
-      "modules/formula/runtime/",
-      "modules/formula/functions/",
-      "modules/formula/integration/"
-    ]
-  ),
+  {
+    name: "/pdf: Pdf (entry chunk free of excel/word/csv/formula; converters lazy)",
+    importFrom: `${PKG_NAME}/pdf`,
+    imports: ["Pdf"],
+    mustNotInclude: ["modules/csv/", "modules/word/", "modules/excel/", "modules/formula/"],
+    lazySplit: true,
+    excludeBundlers: ["rolldown", "rspack"]
+  },
 
   // -------------------------------------------------------------------------
   // /formula subpath — namespace API. `Formula.tokenize`/`parse` must remain
@@ -373,9 +379,44 @@ function writeEntry(bundler: string, scenario: Scenario): { entryFile: string; s
 
 function runEsbuild(scenario: Scenario): ScenarioResult {
   const { entryFile, slug } = writeEntry("esbuild", scenario);
-  const outFile = path.join(TMP_DIR, `esbuild-${slug}.out.mjs`);
 
   try {
+    if (scenario.lazySplit) {
+      // Code-split build: the entry chunk must be free of the excluded
+      // modules; lazy `import()` targets land in separate on-demand chunks.
+      const outDir = path.join(TMP_DIR, `esbuild-${slug}-split`);
+      const result = buildSync({
+        entryPoints: [entryFile],
+        bundle: true,
+        format: "esm",
+        platform: scenario.platform === "browser" ? "browser" : "node",
+        outdir: outDir,
+        metafile: true,
+        treeShaking: true,
+        splitting: true,
+        minify: false,
+        write: true,
+        external: ["node:*"]
+      });
+      const meta = result.metafile!;
+      const entryOut = Object.entries(meta.outputs).find(([, o]) =>
+        (o.entryPoint ?? "").includes(path.basename(entryFile))
+      );
+      if (!entryOut) {
+        return makeError(scenario.name, "esbuild", "entry chunk not found");
+      }
+      const [entryKey, entryMeta] = entryOut;
+      const contributing: ModuleEntry[] = [];
+      for (const [fp, info] of Object.entries(entryMeta.inputs)) {
+        if (fp.includes("dist/") && info.bytesInOutput > 0) {
+          contributing.push({ path: normalizePath(fp), bytes: info.bytesInOutput });
+        }
+      }
+      const parsedCount = Object.keys(entryMeta.inputs).filter(m => m.includes("dist/")).length;
+      return makeResult(scenario, "esbuild", fs.statSync(entryKey).size, contributing, parsedCount);
+    }
+
+    const outFile = path.join(TMP_DIR, `esbuild-${slug}.out.mjs`);
     const result = buildSync({
       entryPoints: [entryFile],
       bundle: true,
