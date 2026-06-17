@@ -15,19 +15,7 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import {
-  Document,
-  packageDocx,
-  readDocx,
-  table,
-  row,
-  cell,
-  paragraph,
-  text,
-  textParagraph,
-  insertedRun,
-  deletedRun
-} from "@word/index";
+import { Document, Build, Io } from "@word/index";
 import type { Table, Paragraph, SectionProperties, RunProperties } from "@word/index";
 import { parseXml, findChild, findChildren } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
@@ -60,20 +48,27 @@ async function getDocumentXml(bytes: Uint8Array): Promise<XmlElement> {
 describe("Advanced Tables - Nested Tables", () => {
   it("should roundtrip a table with a nested table in a cell", async () => {
     // Inner table: 2x2
-    const innerTable = table(
-      [row([cell("Inner A1"), cell("Inner A2")]), row([cell("Inner B1"), cell("Inner B2")])],
+    const innerTable = Build.table(
+      [
+        Build.row([Build.cell("Inner A1"), Build.cell("Inner A2")]),
+        Build.row([Build.cell("Inner B1"), Build.cell("Inner B2")])
+      ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
     );
 
     // Outer table: 2x2, cell (0,1) contains the nested table
-    const outerTable = table(
+    const outerTable = Build.table(
       [
-        row([
-          cell("Outer A1"),
-          cell([textParagraph("Before nested"), innerTable, textParagraph("After nested")])
+        Build.row([
+          Build.cell("Outer A1"),
+          Build.cell([
+            Build.textParagraph("Before nested"),
+            innerTable,
+            Build.textParagraph("After nested")
+          ])
         ]),
-        row([cell("Outer B1"), cell("Outer B2")])
+        Build.row([Build.cell("Outer B1"), Build.cell("Outer B2")])
       ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
@@ -83,8 +78,8 @@ describe("Advanced Tables - Nested Tables", () => {
     Document.addTableElement(h, outerTable);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     // Verify outer table
     const outerTbl = parsed.body[0] as Table;
@@ -105,14 +100,14 @@ describe("Advanced Tables - Nested Tables", () => {
   });
 
   it("should preserve nested table column widths", async () => {
-    const innerTable = table(
-      [row([cell("A"), cell("B"), cell("C")])],
+    const innerTable = Build.table(
+      [Build.row([Build.cell("A"), Build.cell("B"), Build.cell("C")])],
       { width: { value: 3000, type: "dxa" } },
       [1000, 1000, 1000]
     );
 
-    const outerTable = table(
-      [row([cell([innerTable, textParagraph("")])])],
+    const outerTable = Build.table(
+      [Build.row([Build.cell([innerTable, Build.textParagraph("")])])],
       { width: { value: 5000, type: "pct" } },
       [5000]
     );
@@ -121,8 +116,8 @@ describe("Advanced Tables - Nested Tables", () => {
     Document.addTableElement(h, outerTable);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const outerTbl = parsed.body[0] as Table;
     const nestedTbl = outerTbl.rows[0].cells[0].content.find(c => c.type === "table") as Table;
@@ -137,13 +132,13 @@ describe("Advanced Tables - Nested Tables", () => {
 
 describe("Advanced Tables - Merged Cells", () => {
   it("should roundtrip horizontal merge (gridSpan)", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([
-          cell("Spans 2 columns", { gridSpan: 2, width: { value: 4000, type: "dxa" } }),
-          cell("Normal")
+        Build.row([
+          Build.cell("Spans 2 columns", { gridSpan: 2, width: { value: 4000, type: "dxa" } }),
+          Build.cell("Normal")
         ]),
-        row([cell("A"), cell("B"), cell("C")])
+        Build.row([Build.cell("A"), Build.cell("B"), Build.cell("C")])
       ],
       { width: { value: 5000, type: "pct" } },
       [2000, 2000, 2000]
@@ -153,8 +148,8 @@ describe("Advanced Tables - Merged Cells", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].cells[0].properties?.gridSpan).toBe(2);
@@ -162,11 +157,14 @@ describe("Advanced Tables - Merged Cells", () => {
   });
 
   it("should roundtrip vertical merge (vMerge restart/continue)", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Merge start", { verticalMerge: "restart" }), cell("Row 1 Col 2")]),
-        row([cell("", { verticalMerge: "continue" }), cell("Row 2 Col 2")]),
-        row([cell("Row 3 Col 1"), cell("Row 3 Col 2")])
+        Build.row([
+          Build.cell("Merge start", { verticalMerge: "restart" }),
+          Build.cell("Row 1 Col 2")
+        ]),
+        Build.row([Build.cell("", { verticalMerge: "continue" }), Build.cell("Row 2 Col 2")]),
+        Build.row([Build.cell("Row 3 Col 1"), Build.cell("Row 3 Col 2")])
       ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
@@ -176,8 +174,8 @@ describe("Advanced Tables - Merged Cells", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].cells[0].properties?.verticalMerge).toBe("restart");
@@ -187,11 +185,17 @@ describe("Advanced Tables - Merged Cells", () => {
   });
 
   it("should roundtrip combined horizontal and vertical merge", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Span 2x2", { gridSpan: 2, verticalMerge: "restart" }), cell("Col 3")]),
-        row([cell("", { gridSpan: 2, verticalMerge: "continue" }), cell("Col 3 R2")]),
-        row([cell("A"), cell("B"), cell("C")])
+        Build.row([
+          Build.cell("Span 2x2", { gridSpan: 2, verticalMerge: "restart" }),
+          Build.cell("Col 3")
+        ]),
+        Build.row([
+          Build.cell("", { gridSpan: 2, verticalMerge: "continue" }),
+          Build.cell("Col 3 R2")
+        ]),
+        Build.row([Build.cell("A"), Build.cell("B"), Build.cell("C")])
       ],
       { width: { value: 5000, type: "pct" } },
       [1500, 1500, 1500]
@@ -201,8 +205,8 @@ describe("Advanced Tables - Merged Cells", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     const cell00 = parsedTbl.rows[0].cells[0].properties!;
@@ -230,8 +234,11 @@ describe("Advanced Tables - Table Properties", () => {
       insideV: { style: "single" as const, size: 4, color: "00FFFF" }
     };
 
-    const tbl = table(
-      [row([cell("A"), cell("B")]), row([cell("C"), cell("D")])],
+    const tbl = Build.table(
+      [
+        Build.row([Build.cell("A"), Build.cell("B")]),
+        Build.row([Build.cell("C"), Build.cell("D")])
+      ],
       { width: { value: 5000, type: "pct" }, borders },
       [2500, 2500]
     );
@@ -240,8 +247,8 @@ describe("Advanced Tables - Table Properties", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     const parsedBorders = parsedTbl.properties!.borders!;
@@ -259,11 +266,11 @@ describe("Advanced Tables - Table Properties", () => {
   });
 
   it("should roundtrip cell shading (background color)", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([
-          cell("Red bg", { shading: { fill: "FF0000", pattern: "clear", color: "auto" } }),
-          cell("Green bg", { shading: { fill: "00FF00", pattern: "clear", color: "auto" } })
+        Build.row([
+          Build.cell("Red bg", { shading: { fill: "FF0000", pattern: "clear", color: "auto" } }),
+          Build.cell("Green bg", { shading: { fill: "00FF00", pattern: "clear", color: "auto" } })
         ])
       ],
       { width: { value: 5000, type: "pct" } },
@@ -274,8 +281,8 @@ describe("Advanced Tables - Table Properties", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].cells[0].properties?.shading?.fill).toBe("FF0000");
@@ -283,14 +290,18 @@ describe("Advanced Tables - Table Properties", () => {
   });
 
   it("should roundtrip table width (fixed dxa)", async () => {
-    const tbl = table([row([cell("A")])], { width: { value: 7200, type: "dxa" } }, [7200]);
+    const tbl = Build.table(
+      [Build.row([Build.cell("A")])],
+      { width: { value: 7200, type: "dxa" } },
+      [7200]
+    );
 
     const h = Document.create();
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.properties?.width?.value).toBe(7200);
@@ -298,14 +309,18 @@ describe("Advanced Tables - Table Properties", () => {
   });
 
   it("should roundtrip table width (percentage pct)", async () => {
-    const tbl = table([row([cell("A")])], { width: { value: 5000, type: "pct" } }, [5000]);
+    const tbl = Build.table(
+      [Build.row([Build.cell("A")])],
+      { width: { value: 5000, type: "pct" } },
+      [5000]
+    );
 
     const h = Document.create();
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.properties?.width?.value).toBe(5000);
@@ -313,8 +328,8 @@ describe("Advanced Tables - Table Properties", () => {
   });
 
   it("should roundtrip row height (exact)", async () => {
-    const tbl = table(
-      [row([cell("Fixed height")], { height: { value: 720, rule: "exact" } })],
+    const tbl = Build.table(
+      [Build.row([Build.cell("Fixed height")], { height: { value: 720, rule: "exact" } })],
       { width: { value: 5000, type: "pct" } },
       [5000]
     );
@@ -323,8 +338,8 @@ describe("Advanced Tables - Table Properties", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].properties?.height?.value).toBe(720);
@@ -332,8 +347,8 @@ describe("Advanced Tables - Table Properties", () => {
   });
 
   it("should roundtrip row height (atLeast)", async () => {
-    const tbl = table(
-      [row([cell("Min height")], { height: { value: 360, rule: "atLeast" } })],
+    const tbl = Build.table(
+      [Build.row([Build.cell("Min height")], { height: { value: 360, rule: "atLeast" } })],
       { width: { value: 5000, type: "pct" } },
       [5000]
     );
@@ -342,8 +357,8 @@ describe("Advanced Tables - Table Properties", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].properties?.height?.value).toBe(360);
@@ -357,10 +372,10 @@ describe("Advanced Tables - Table Properties", () => {
 
 describe("Advanced Tables - Header Row", () => {
   it("should roundtrip tblHeader property", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Header 1"), cell("Header 2")], { tableHeader: true }),
-        row([cell("Data 1"), cell("Data 2")])
+        Build.row([Build.cell("Header 1"), Build.cell("Header 2")], { tableHeader: true }),
+        Build.row([Build.cell("Data 1"), Build.cell("Data 2")])
       ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
@@ -370,8 +385,8 @@ describe("Advanced Tables - Header Row", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].properties?.tableHeader).toBe(true);
@@ -380,11 +395,11 @@ describe("Advanced Tables - Header Row", () => {
   });
 
   it("should roundtrip multiple header rows", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Header Row 1")], { tableHeader: true }),
-        row([cell("Header Row 2")], { tableHeader: true }),
-        row([cell("Data Row")])
+        Build.row([Build.cell("Header Row 1")], { tableHeader: true }),
+        Build.row([Build.cell("Header Row 2")], { tableHeader: true }),
+        Build.row([Build.cell("Data Row")])
       ],
       { width: { value: 5000, type: "pct" } },
       [5000]
@@ -394,8 +409,8 @@ describe("Advanced Tables - Header Row", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     expect(parsedTbl.rows[0].properties?.tableHeader).toBe(true);
@@ -410,8 +425,11 @@ describe("Advanced Tables - Header Row", () => {
 
 describe("Advanced Tables - XML Compliance", () => {
   it("should produce correct w:tblGrid/w:gridCol count", async () => {
-    const tbl = table(
-      [row([cell("A"), cell("B"), cell("C")]), row([cell("D"), cell("E"), cell("F")])],
+    const tbl = Build.table(
+      [
+        Build.row([Build.cell("A"), Build.cell("B"), Build.cell("C")]),
+        Build.row([Build.cell("D"), Build.cell("E"), Build.cell("F")])
+      ],
       { width: { value: 5000, type: "pct" } },
       [1000, 2000, 3000]
     );
@@ -420,7 +438,7 @@ describe("Advanced Tables - XML Compliance", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     // Navigate: w:document > w:body > w:tbl > w:tblGrid
@@ -436,8 +454,11 @@ describe("Advanced Tables - XML Compliance", () => {
   });
 
   it("should produce correct w:gridSpan in merged cells", async () => {
-    const tbl = table(
-      [row([cell("Merged", { gridSpan: 3 })]), row([cell("A"), cell("B"), cell("C")])],
+    const tbl = Build.table(
+      [
+        Build.row([Build.cell("Merged", { gridSpan: 3 })]),
+        Build.row([Build.cell("A"), Build.cell("B"), Build.cell("C")])
+      ],
       { width: { value: 5000, type: "pct" } },
       [1000, 1000, 1000]
     );
@@ -446,7 +467,7 @@ describe("Advanced Tables - XML Compliance", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -463,10 +484,10 @@ describe("Advanced Tables - XML Compliance", () => {
   });
 
   it("should produce correct w:vMerge markers", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Start", { verticalMerge: "restart" }), cell("Normal")]),
-        row([cell("", { verticalMerge: "continue" }), cell("Normal 2")])
+        Build.row([Build.cell("Start", { verticalMerge: "restart" }), Build.cell("Normal")]),
+        Build.row([Build.cell("", { verticalMerge: "continue" }), Build.cell("Normal 2")])
       ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
@@ -476,7 +497,7 @@ describe("Advanced Tables - XML Compliance", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -504,10 +525,10 @@ describe("Advanced Tables - XML Compliance", () => {
 
 describe("Track Changes - Table Row Revisions", () => {
   it("should roundtrip inserted row revision", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Existing row")]),
-        row([cell("Inserted row")], {
+        Build.row([Build.cell("Existing row")]),
+        Build.row([Build.cell("Inserted row")], {
           inserted: {
             revision: { id: 10, author: "Alice", date: "2024-01-15T10:00:00Z" }
           }
@@ -521,8 +542,8 @@ describe("Track Changes - Table Row Revisions", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     const insertedRow = parsedTbl.rows[1];
@@ -533,10 +554,10 @@ describe("Track Changes - Table Row Revisions", () => {
   });
 
   it("should roundtrip deleted row revision", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Normal row")]),
-        row([cell("Deleted row")], {
+        Build.row([Build.cell("Normal row")]),
+        Build.row([Build.cell("Deleted row")], {
           deleted: {
             revision: { id: 20, author: "Bob", date: "2024-02-20T14:30:00Z" }
           }
@@ -550,8 +571,8 @@ describe("Track Changes - Table Row Revisions", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const parsedTbl = parsed.body[0] as Table;
     const deletedRow = parsedTbl.rows[1];
@@ -562,12 +583,12 @@ describe("Track Changes - Table Row Revisions", () => {
   });
 
   it("should produce correct XML for row ins/del", async () => {
-    const tbl = table(
+    const tbl = Build.table(
       [
-        row([cell("Inserted")], {
+        Build.row([Build.cell("Inserted")], {
           inserted: { revision: { id: 5, author: "Author1" } }
         }),
-        row([cell("Deleted")], {
+        Build.row([Build.cell("Deleted")], {
           deleted: { revision: { id: 6, author: "Author2", date: "2024-03-01T00:00:00Z" } }
         })
       ],
@@ -579,7 +600,7 @@ describe("Track Changes - Table Row Revisions", () => {
     Document.addTableElement(h, tbl);
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -623,12 +644,12 @@ describe("Track Changes - Section Property Change", () => {
     // Add a paragraph with section properties embedded
     Document.addParagraphElement(
       h,
-      paragraph([text("Section change test")], { sectionProperties: sectProps })
+      Build.paragraph([Build.text("Section change test")], { sectionProperties: sectProps })
     );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     // The section properties can appear either as paragraph section properties or last sectPr
     // Find the paragraph with section properties
@@ -663,10 +684,13 @@ describe("Track Changes - Section Property Change", () => {
     };
 
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("test")], { sectionProperties: sectProps }));
+    Document.addParagraphElement(
+      h,
+      Build.paragraph([Build.text("test")], { sectionProperties: sectProps })
+    );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -706,12 +730,14 @@ describe("Track Changes - Run Property Change", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ content: [{ type: "text", text: "Formatted text" }], properties: runProps }])
+      Build.paragraph([
+        { content: [{ type: "text", text: "Formatted text" }], properties: runProps }
+      ])
     );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;
     // Find a run with propertyChange
@@ -744,11 +770,11 @@ describe("Track Changes - Run Property Change", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ content: [{ type: "text", text: "Styled" }], properties: runProps }])
+      Build.paragraph([{ content: [{ type: "text", text: "Styled" }], properties: runProps }])
     );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const root = await getDocumentXml(bytes);
 
     const body = findChild(root, "w:body")!;
@@ -776,9 +802,9 @@ describe("Track Changes - Run Property Change", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([
-        text("Original "),
-        insertedRun(
+      Build.paragraph([
+        Build.text("Original "),
+        Build.insertedRun(
           { content: [{ type: "text", text: "inserted text" }] },
           { id: 1, author: "User1", date: "2024-01-01T00:00:00Z" }
         )
@@ -786,8 +812,8 @@ describe("Track Changes - Run Property Change", () => {
     );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;
     const insChild = para.children.find(c => "type" in c && c.type === "insertedRun");
@@ -798,9 +824,9 @@ describe("Track Changes - Run Property Change", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([
-        text("Keep this "),
-        deletedRun(
+      Build.paragraph([
+        Build.text("Keep this "),
+        Build.deletedRun(
           { content: [{ type: "text", text: "deleted text" }] },
           { id: 2, author: "User2", date: "2024-02-01T00:00:00Z" }
         )
@@ -808,8 +834,8 @@ describe("Track Changes - Run Property Change", () => {
     );
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body[0] as Paragraph;
     const delChild = para.children.find(c => "type" in c && c.type === "deletedRun");

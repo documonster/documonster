@@ -8,18 +8,8 @@
  */
 
 import { buildWordChartExXml } from "@word/excel";
-import {
-  Document,
-  layoutDocumentFull,
-  packageDocx,
-  paragraph,
-  text,
-  readDocx,
-  table,
-  row,
-  cell,
-  type DocxDocument
-} from "@word/index";
+import { Document, Build, Io, Layout } from "@word/index";
+import type { DocxDocument } from "@word/index";
 import { describe, it, expect } from "vitest";
 
 import { docxToPdf } from "../word-bridge";
@@ -27,10 +17,10 @@ import { docxToPdf } from "../word-bridge";
 describe("docxToPdf — layout-driven smoke test", () => {
   it("produces a valid PDF for a paragraph-only document", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("hello world")]));
-    const docBytes = await packageDocx(Document.build(h));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("hello world")]));
+    const docBytes = await Io.package(Document.build(h));
 
-    const doc = await readDocx(docBytes);
+    const doc = await Io.read(docBytes);
 
     const pdfBytes = await docxToPdf(doc);
     expect(pdfBytes.length).toBeGreaterThan(100);
@@ -42,17 +32,20 @@ describe("docxToPdf — layout-driven smoke test", () => {
 
   it("handles a document with a paragraph + table without throwing", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("intro")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("intro")]));
 
-    const t = table(
-      [row([cell("A1"), cell("A2")]), row([cell("B1"), cell("B2")])],
+    const t = Build.table(
+      [
+        Build.row([Build.cell("A1"), Build.cell("A2")]),
+        Build.row([Build.cell("B1"), Build.cell("B2")])
+      ],
       { width: { value: 5000, type: "pct" } },
       [2500, 2500]
     );
     Document.addTableElement(h, t);
-    const docBytes = await packageDocx(Document.build(h));
+    const docBytes = await Io.package(Document.build(h));
 
-    const doc = await readDocx(docBytes);
+    const doc = await Io.read(docBytes);
 
     const pdfBytes = await docxToPdf(doc);
     expect(pdfBytes.length).toBeGreaterThan(200);
@@ -62,26 +55,26 @@ describe("docxToPdf — layout-driven smoke test", () => {
 describe("docxToPdf — option fidelity", () => {
   async function buildSimpleDoc(): Promise<{ doc: DocxDocument }> {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("page geometry probe")]));
-    const docBytes = await packageDocx(Document.build(h));
-    return { doc: await readDocx(docBytes) };
+    Document.addParagraphElement(h, Build.paragraph([Build.text("page geometry probe")]));
+    const docBytes = await Io.package(Document.build(h));
+    return { doc: await Io.read(docBytes) };
   }
 
   it("forwards pageWidth / pageHeight overrides into the layout engine", async () => {
     const { doc } = await buildSimpleDoc();
-    const layoutOverridden = layoutDocumentFull(doc, {
+    const layoutOverridden = Layout.documentFull(doc, {
       pageGeometry: { pageWidth: 400, pageHeight: 500 }
     });
     expect(layoutOverridden.pages[0].geometry.width).toBe(400);
     expect(layoutOverridden.pages[0].geometry.height).toBe(500);
 
-    const layoutDefault = layoutDocumentFull(doc);
+    const layoutDefault = Layout.documentFull(doc);
     expect(layoutDefault.pages[0].geometry.width).not.toBe(400);
   });
 
   it("forwards margin overrides into the layout engine", async () => {
     const { doc } = await buildSimpleDoc();
-    const layout = layoutDocumentFull(doc, {
+    const layout = Layout.documentFull(doc, {
       pageGeometry: {
         marginTop: 10,
         marginBottom: 20,
@@ -127,12 +120,12 @@ describe("docxToPdf — header / footer margin fidelity", () => {
    */
   async function buildDocWithHeaderFooter(): Promise<DocxDocument> {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("body text")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("body text")]));
     const built = Document.build(h);
     // Inject a header and footer part + section references by hand so
     // we exercise the real layout-header / layout-footer code paths.
-    const headerPara = paragraph([text("PAGE HEADER")]);
-    const footerPara = paragraph([text("PAGE FOOTER")]);
+    const headerPara = Build.paragraph([Build.text("PAGE HEADER")]);
+    const footerPara = Build.paragraph([Build.text("PAGE FOOTER")]);
     const withChrome: DocxDocument = {
       ...built,
       headers: new Map([["rIdH", { content: { children: [headerPara] } }]]),
@@ -148,7 +141,7 @@ describe("docxToPdf — header / footer margin fidelity", () => {
 
   it("forwards headerMargin / footerMargin into the layout engine geometry", async () => {
     const doc = await buildDocWithHeaderFooter();
-    const layout = layoutDocumentFull(doc, {
+    const layout = Layout.documentFull(doc, {
       pageGeometry: { headerMargin: 20, footerMargin: 50 }
     });
     const g = layout.pages[0].geometry;
@@ -158,8 +151,8 @@ describe("docxToPdf — header / footer margin fidelity", () => {
 
   it("positions the header band at the requested headerMargin offset", async () => {
     const doc = await buildDocWithHeaderFooter();
-    const tight = layoutDocumentFull(doc, { pageGeometry: { headerMargin: 10 } });
-    const loose = layoutDocumentFull(doc, { pageGeometry: { headerMargin: 100 } });
+    const tight = Layout.documentFull(doc, { pageGeometry: { headerMargin: 10 } });
+    const loose = Layout.documentFull(doc, { pageGeometry: { headerMargin: 100 } });
     const tightHeader = tight.pages[0].header?.[0];
     const looseHeader = loose.pages[0].header?.[0];
     expect(tightHeader).toBeDefined();
@@ -174,10 +167,10 @@ describe("docxToPdf — header / footer margin fidelity", () => {
   it("positions the footer band relative to the requested footerMargin", async () => {
     const doc = await buildDocWithHeaderFooter();
     const pageHeight = 792;
-    const small = layoutDocumentFull(doc, {
+    const small = Layout.documentFull(doc, {
       pageGeometry: { pageHeight, footerMargin: 30 }
     });
-    const large = layoutDocumentFull(doc, {
+    const large = Layout.documentFull(doc, {
       pageGeometry: { pageHeight, footerMargin: 120 }
     });
     const smallFooter = small.pages[0].footer?.[0];
@@ -208,9 +201,9 @@ describe("docxToPdf — chart rendering fallback", () => {
       chart: { type: "bar" as const, title: "Quarterly Revenue", series: [] }
     };
     Document.addContent(h, chartItem);
-    const docBytes = await packageDocx(Document.build(h));
+    const docBytes = await Io.package(Document.build(h));
 
-    const doc = await readDocx(docBytes);
+    const doc = await Io.read(docBytes);
 
     let invoked = 0;
     let rectSeen: { x: number; y: number; width: number; height: number } | null = null;
@@ -232,7 +225,7 @@ describe("docxToPdf — chart rendering fallback", () => {
     // body. Compare against an empty document to assert the chart
     // slot didn't simply disappear into a smaller-than-empty file.
     const empty = await docxToPdf(
-      await readDocx(await packageDocx(Document.build(Document.create())))
+      await Io.read(await Io.package(Document.build(Document.create())))
     );
     expect(declined.length).toBeGreaterThan(empty.length);
   });
@@ -243,9 +236,9 @@ describe("docxToPdf — chart rendering fallback", () => {
       type: "chart" as const,
       chart: { type: "bar" as const, title: "Q1 Sales", series: [] }
     });
-    const docBytes = await packageDocx(Document.build(h));
+    const docBytes = await Io.package(Document.build(h));
 
-    const doc = await readDocx(docBytes);
+    const doc = await Io.read(docBytes);
 
     let invoked = 0;
     await docxToPdf(doc, {
@@ -380,8 +373,8 @@ describe("docxToPdf — ChartEx (modern 2016+) rendering", () => {
 
 describe("docxToPdf — flow layout fidelity", () => {
   // Collect every positioned text run across all pages, in order.
-  function allTextRuns(doc: DocxDocument, opts?: Parameters<typeof layoutDocumentFull>[1]) {
-    const layout = layoutDocumentFull(doc, opts);
+  function allTextRuns(doc: DocxDocument, opts?: Parameters<typeof Layout.documentFull>[1]) {
+    const layout = Layout.documentFull(doc, opts);
     const runs: { text: string; x: number; y: number; bold?: boolean }[] = [];
     for (const page of layout.pages) {
       for (const c of page.content as readonly { type: string }[]) {
@@ -450,10 +443,13 @@ describe("docxToPdf — flow layout fidelity", () => {
     // Helvetica-Bold than Helvetica; "WWWW" happens to be equal-width.)
     const boldDoc = Document.create();
     Document.useDefaultStyles(boldDoc);
-    Document.addParagraphElement(boldDoc, paragraph([text("bold", { bold: true }), text("|")]));
+    Document.addParagraphElement(
+      boldDoc,
+      Build.paragraph([Build.text("bold", { bold: true }), Build.text("|")])
+    );
     const plainDoc = Document.create();
     Document.useDefaultStyles(plainDoc);
-    Document.addParagraphElement(plainDoc, paragraph([text("bold"), text("|")]));
+    Document.addParagraphElement(plainDoc, Build.paragraph([Build.text("bold"), Build.text("|")]));
 
     const boldPipe = allTextRuns(Document.build(boldDoc)).find(r => r.text === "|");
     const plainPipe = allTextRuns(Document.build(plainDoc)).find(r => r.text === "|");
@@ -474,7 +470,7 @@ describe("docxToPdf — flow layout fidelity", () => {
       ],
       { headerRow: true, borders: true }
     );
-    const layout = layoutDocumentFull(Document.build(h));
+    const layout = Layout.documentFull(Document.build(h));
     let cellsWithBorders = 0;
     for (const page of layout.pages) {
       for (const c of page.content as readonly { type: string }[]) {
@@ -519,12 +515,12 @@ describe("docxToPdf — flow layout fidelity", () => {
     expect(numId).toBeDefined();
 
     // Add a table whose cell paragraph reuses that bullet numbering.
-    const cellPara = paragraph([text("InCell")], {
+    const cellPara = Build.paragraph([Build.text("InCell")], {
       numbering: { numId: numId!, level: 0 }
     });
-    Document.addTableElement(h, table([row([cell([cellPara])])]));
+    Document.addTableElement(h, Build.table([Build.row([Build.cell([cellPara])])]));
 
-    const layout = layoutDocumentFull(Document.build(h));
+    const layout = Layout.documentFull(Document.build(h));
     let bulletInCell = false;
     const visit = (items: readonly { type: string }[]): void => {
       for (const c of items) {

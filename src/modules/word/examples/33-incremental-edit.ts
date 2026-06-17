@@ -20,16 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  bold,
-  toBuffer,
-  listDocxParts,
-  readDocxPart,
-  editDocxIncremental
-} from "../index";
+import { Document, Build, Io } from "../index";
 import type { BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -46,17 +37,17 @@ Document.useDefaultStyles(seed);
 Document.addHeading(seed, "Original title", 1);
 Document.addParagraph(seed, "First paragraph.");
 Document.addParagraph(seed, "Second paragraph.");
-Document.setHeader(seed, "default", { children: [textParagraph("Header v1")] });
-Document.setFooter(seed, "default", { children: [textParagraph("Footer v1")] });
+Document.setHeader(seed, "default", { children: [Build.textParagraph("Header v1")] });
+Document.setFooter(seed, "default", { children: [Build.textParagraph("Footer v1")] });
 Document.setCoreProperties(seed, { title: "Original", creator: "OpenCode" });
-const baseBytes = await toBuffer(Document.build(seed));
+const baseBytes = await Io.toBuffer(Document.build(seed));
 fs.writeFileSync(path.join(outDir, "00-base.docx"), baseBytes);
 console.log(`  base.docx: ${baseBytes.length} bytes`);
 
 // ---------------------------------------------------------------------------
 // 2. listDocxParts — peek at the package without parsing
 // ---------------------------------------------------------------------------
-const parts = await listDocxParts(baseBytes);
+const parts = await Io.listDocxParts(baseBytes);
 console.log(`  ${parts.length} parts:`);
 for (const p of parts) {
   console.log(`    · ${p}`);
@@ -65,38 +56,38 @@ for (const p of parts) {
 // ---------------------------------------------------------------------------
 // 3. readDocxPart — read one part's bytes
 // ---------------------------------------------------------------------------
-const docXmlBytes = await readDocxPart(baseBytes, "word/document.xml");
+const docXmlBytes = await Io.readDocxPart(baseBytes, "word/document.xml");
 console.log(`  word/document.xml: ${docXmlBytes?.length ?? 0} bytes`);
-const headerBytes = await readDocxPart(baseBytes, "word/header1.xml");
+const headerBytes = await Io.readDocxPart(baseBytes, "word/header1.xml");
 console.log(`  word/header1.xml:  ${headerBytes?.length ?? 0} bytes`);
-const missing = await readDocxPart(baseBytes, "word/no-such-part.xml");
+const missing = await Io.readDocxPart(baseBytes, "word/no-such-part.xml");
 console.log(`  no-such-part:      ${missing === undefined ? "undefined ✓" : "unexpected"}`);
 
 // ---------------------------------------------------------------------------
 // 4. Edit body in place — fastest path
 // ---------------------------------------------------------------------------
 const newBody: BodyContent[] = [
-  paragraph([bold("Edited title — body replaced")], { style: "Heading1" }),
-  textParagraph("Brand-new first paragraph."),
-  textParagraph("Brand-new second paragraph.")
+  Build.paragraph([Build.bold("Edited title — body replaced")], { style: "Heading1" }),
+  Build.textParagraph("Brand-new first paragraph."),
+  Build.textParagraph("Brand-new second paragraph.")
 ];
-const edited1 = await editDocxIncremental(baseBytes, [{ type: "replaceBody", body: newBody }]);
+const edited1 = await Io.editDocxIncremental(baseBytes, [{ type: "replaceBody", body: newBody }]);
 fs.writeFileSync(path.join(outDir, "01-replaced-body.docx"), edited1);
 console.log(`  → 01-replaced-body.docx (${edited1.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // 5. Replace header & footer simultaneously
 // ---------------------------------------------------------------------------
-const edited2 = await editDocxIncremental(baseBytes, [
+const edited2 = await Io.editDocxIncremental(baseBytes, [
   {
     type: "replaceHeader",
     path: "word/header1.xml",
-    children: [textParagraph("Header v2 — incrementally edited")]
+    children: [Build.textParagraph("Header v2 — incrementally edited")]
   },
   {
     type: "replaceFooter",
     path: "word/footer1.xml",
-    children: [textParagraph("Footer v2 — incrementally edited")]
+    children: [Build.textParagraph("Footer v2 — incrementally edited")]
   }
 ]);
 fs.writeFileSync(path.join(outDir, "02-replaced-header-footer.docx"), edited2);
@@ -115,7 +106,7 @@ const newCoreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <dc:creator>Patched creator</dc:creator>
   <cp:lastModifiedBy>Patched modifier</cp:lastModifiedBy>
 </cp:coreProperties>`;
-const edited3 = await editDocxIncremental(baseBytes, [
+const edited3 = await Io.editDocxIncremental(baseBytes, [
   { type: "replacePartText", path: "docProps/core.xml", text: newCoreXml }
 ]);
 fs.writeFileSync(path.join(outDir, "03-replaced-core-props.docx"), edited3);
@@ -124,12 +115,12 @@ console.log(`  → 03-replaced-core-props.docx (${edited3.length} bytes)`);
 // ---------------------------------------------------------------------------
 // 7. Combine multiple edits in one round-trip
 // ---------------------------------------------------------------------------
-const edited4 = await editDocxIncremental(baseBytes, [
+const edited4 = await Io.editDocxIncremental(baseBytes, [
   { type: "replaceBody", body: newBody },
   {
     type: "replaceHeader",
     path: "word/header1.xml",
-    children: [textParagraph("Combined edit header")]
+    children: [Build.textParagraph("Combined edit header")]
   },
   { type: "replacePartText", path: "docProps/core.xml", text: newCoreXml }
 ]);
@@ -151,7 +142,7 @@ const newSettingsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:zoom w:percent="125"/>
 </w:settings>`;
-const edited5 = await editDocxIncremental(baseBytes, [
+const edited5 = await Io.editDocxIncremental(baseBytes, [
   {
     type: "replacePartText",
     path: "word/settings.xml",
@@ -162,5 +153,5 @@ fs.writeFileSync(path.join(outDir, "05-replaced-settings.docx"), edited5);
 console.log(`  → 05-replaced-settings.docx (${edited5.length} bytes)`);
 
 // Edge case: list every part to confirm no new file types were added
-const after = await listDocxParts(edited5);
+const after = await Io.listDocxParts(edited5);
 console.log(`  parts after edit: ${after.length}`);

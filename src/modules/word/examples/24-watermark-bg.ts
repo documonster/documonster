@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, paragraph, text, ptToHalfPoint, cmToTwips, toBuffer } from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { DocumentTheme, Watermark } from "../index";
 
 const outDir = path.resolve(
@@ -37,13 +37,16 @@ fs.mkdirSync(outDir, { recursive: true });
     type: "text",
     text: "CONFIDENTIAL",
     color: "C0C0C0",
-    fontSize: ptToHalfPoint(72),
+    fontSize: Units.ptToHalfPoint(72),
     rotation: -45,
     semiTransparent: true,
     font: "Arial"
   };
   Document.setWatermark(d, wm);
-  fs.writeFileSync(path.join(outDir, "01-text-watermark.docx"), await toBuffer(Document.build(d)));
+  fs.writeFileSync(
+    path.join(outDir, "01-text-watermark.docx"),
+    await Io.toBuffer(Document.build(d))
+  );
   console.log("  → 01-text-watermark.docx");
 }
 
@@ -111,7 +114,7 @@ fs.mkdirSync(outDir, { recursive: true });
   };
   // We use the public addImage path which assigns a stable rId then strip
   // the inserted body paragraph: only the image part survives in the package.
-  const imgInfo = Document.addImage(d, logoPng, "png", cmToTwips(5), cmToTwips(2), {
+  const imgInfo = Document.addImage(d, logoPng, "png", Units.cmToTwips(5), Units.cmToTwips(2), {
     altText: "Watermark logo",
     name: "WatermarkSource"
   });
@@ -128,7 +131,10 @@ fs.mkdirSync(outDir, { recursive: true });
     heightPt: 120
   };
   Document.setWatermark(d, wm);
-  fs.writeFileSync(path.join(outDir, "02-image-watermark.docx"), await toBuffer(Document.build(d)));
+  fs.writeFileSync(
+    path.join(outDir, "02-image-watermark.docx"),
+    await Io.toBuffer(Document.build(d))
+  );
   console.log("  → 02-image-watermark.docx");
 }
 
@@ -141,7 +147,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addHeading(d, "Page background", 1);
   Document.addParagraph(d, "The page is pale blue.");
   Document.setBackground(d, { color: "DEEBF7" });
-  fs.writeFileSync(path.join(outDir, "03-bg-color.docx"), await toBuffer(Document.build(d)));
+  fs.writeFileSync(path.join(outDir, "03-bg-color.docx"), await Io.toBuffer(Document.build(d)));
   console.log("  → 03-bg-color.docx");
 }
 
@@ -159,18 +165,18 @@ fs.mkdirSync(outDir, { recursive: true });
   );
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Accent1 (red)  ", {
+    Build.paragraph([
+      Build.text("Accent1 (red)  ", {
         color: { val: "auto", themeColor: "accent1" },
         bold: true,
         size: 36
       }),
-      text("Accent2 (orange)  ", {
+      Build.text("Accent2 (orange)  ", {
         color: { val: "auto", themeColor: "accent2" },
         bold: true,
         size: 36
       }),
-      text("Accent3 (yellow)", {
+      Build.text("Accent3 (yellow)", {
         color: { val: "auto", themeColor: "accent3" },
         bold: true,
         size: 36
@@ -179,18 +185,18 @@ fs.mkdirSync(outDir, { recursive: true });
   );
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Accent4 (green)  ", {
+    Build.paragraph([
+      Build.text("Accent4 (green)  ", {
         color: { val: "auto", themeColor: "accent4" },
         bold: true,
         size: 36
       }),
-      text("Accent5 (blue)  ", {
+      Build.text("Accent5 (blue)  ", {
         color: { val: "auto", themeColor: "accent5" },
         bold: true,
         size: 36
       }),
-      text("Accent6 (purple)", {
+      Build.text("Accent6 (purple)", {
         color: { val: "auto", themeColor: "accent6" },
         bold: true,
         size: 36
@@ -228,7 +234,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // Theme is attached via the build()-state mutator surface
   const built = Document.build(d);
   const themed = { ...built, theme };
-  fs.writeFileSync(path.join(outDir, "04-custom-theme.docx"), await toBuffer(themed));
+  fs.writeFileSync(path.join(outDir, "04-custom-theme.docx"), await Io.toBuffer(themed));
   console.log("  → 04-custom-theme.docx");
 }
 
@@ -245,10 +251,10 @@ fs.mkdirSync(outDir, { recursive: true });
     type: "text",
     text: "DRAFT",
     color: "FFCC00",
-    fontSize: ptToHalfPoint(96),
+    fontSize: Units.ptToHalfPoint(96),
     rotation: -30,
     semiTransparent: true
   });
-  fs.writeFileSync(path.join(outDir, "05-combined.docx"), await toBuffer(Document.build(d)));
+  fs.writeFileSync(path.join(outDir, "05-combined.docx"), await Io.toBuffer(Document.build(d)));
   console.log("  → 05-combined.docx");
 }

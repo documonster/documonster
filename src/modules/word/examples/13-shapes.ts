@@ -18,26 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  textParagraph,
-  paragraph,
-  text,
-  bold,
-  createShape,
-  createRect,
-  createRoundRect,
-  createEllipse,
-  createLine,
-  createArrow,
-  createCallout,
-  createFlowchartShape,
-  createStar,
-  drawingShape,
-  cmToEmu,
-  cmToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -56,15 +37,19 @@ Document.addHeading(doc, "Word — Drawing shapes & text boxes", 1);
 Document.addHeading(doc, "1. Basic shapes (solid fill)", 2);
 Document.addContent(
   doc,
-  createRect(cmToEmu(6), cmToEmu(2), { fill: { type: "solid", color: "4472C4" } })
+  Build.createRect(Units.cmToEmu(6), Units.cmToEmu(2), { fill: { type: "solid", color: "4472C4" } })
 );
 Document.addContent(
   doc,
-  createRoundRect(cmToEmu(6), cmToEmu(2), { fill: { type: "solid", color: "70AD47" } })
+  Build.createRoundRect(Units.cmToEmu(6), Units.cmToEmu(2), {
+    fill: { type: "solid", color: "70AD47" }
+  })
 );
 Document.addContent(
   doc,
-  createEllipse(cmToEmu(4), cmToEmu(4), { fill: { type: "solid", color: "ED7D31" } })
+  Build.createEllipse(Units.cmToEmu(4), Units.cmToEmu(4), {
+    fill: { type: "solid", color: "ED7D31" }
+  })
 );
 
 // ---------------------------------------------------------------------------
@@ -73,7 +58,7 @@ Document.addContent(
 Document.addHeading(doc, "2. Gradient / pattern fills", 2);
 Document.addContent(
   doc,
-  createRect(cmToEmu(6), cmToEmu(2), {
+  Build.createRect(Units.cmToEmu(6), Units.cmToEmu(2), {
     fill: {
       type: "gradient",
       angle: 5400000, // 90° in 1/60_000ths
@@ -86,7 +71,7 @@ Document.addContent(
 );
 Document.addContent(
   doc,
-  createRect(cmToEmu(6), cmToEmu(2), {
+  Build.createRect(Units.cmToEmu(6), Units.cmToEmu(2), {
     fill: {
       type: "pattern",
       preset: "ltUpDiag",
@@ -102,14 +87,14 @@ Document.addContent(
 Document.addHeading(doc, "3. Outline & lines", 2);
 Document.addContent(
   doc,
-  createRect(cmToEmu(6), cmToEmu(2), {
+  Build.createRect(Units.cmToEmu(6), Units.cmToEmu(2), {
     fill: { type: "none" },
-    outline: { color: "C00000", width: cmToEmu(0.1), dash: "dash" }
+    outline: { color: "C00000", width: Units.cmToEmu(0.1), dash: "dash" }
   })
 );
-Document.addContent(doc, createLine(cmToEmu(8), 0));
-Document.addContent(doc, createArrow("right", cmToEmu(4), cmToEmu(1)));
-Document.addContent(doc, createArrow("up", cmToEmu(2), cmToEmu(4)));
+Document.addContent(doc, Build.createLine(Units.cmToEmu(8), 0));
+Document.addContent(doc, Build.createArrow("right", Units.cmToEmu(4), Units.cmToEmu(1)));
+Document.addContent(doc, Build.createArrow("up", Units.cmToEmu(2), Units.cmToEmu(4)));
 
 // ---------------------------------------------------------------------------
 // 4. Stars, callouts, flowchart shapes
@@ -117,18 +102,20 @@ Document.addContent(doc, createArrow("up", cmToEmu(2), cmToEmu(4)));
 Document.addHeading(doc, "4. Stars, callouts, flowchart", 2);
 Document.addContent(
   doc,
-  createStar(5, cmToEmu(4), cmToEmu(4), { fill: { type: "solid", color: "FFD700" } })
-);
-Document.addContent(
-  doc,
-  createCallout("rect", cmToEmu(6), cmToEmu(3), {
-    fill: { type: "solid", color: "FFFFCC" },
-    textBody: { paragraphs: [textParagraph("Speech bubble")] }
+  Build.createStar(5, Units.cmToEmu(4), Units.cmToEmu(4), {
+    fill: { type: "solid", color: "FFD700" }
   })
 );
 Document.addContent(
   doc,
-  createFlowchartShape("decision", cmToEmu(5), cmToEmu(3), {
+  Build.createCallout("rect", Units.cmToEmu(6), Units.cmToEmu(3), {
+    fill: { type: "solid", color: "FFFFCC" },
+    textBody: { paragraphs: [Build.textParagraph("Speech bubble")] }
+  })
+);
+Document.addContent(
+  doc,
+  Build.createFlowchartShape("decision", Units.cmToEmu(5), Units.cmToEmu(3), {
     fill: { type: "solid", color: "F4B084" }
   })
 );
@@ -139,7 +126,7 @@ Document.addContent(
 Document.addHeading(doc, "5. Effects", 2);
 Document.addContent(
   doc,
-  createRect(cmToEmu(8), cmToEmu(3), {
+  Build.createRect(Units.cmToEmu(8), Units.cmToEmu(3), {
     fill: { type: "solid", color: "4472C4" },
     effects: {
       shadow: {
@@ -155,7 +142,7 @@ Document.addContent(
 );
 Document.addContent(
   doc,
-  createEllipse(cmToEmu(5), cmToEmu(5), {
+  Build.createEllipse(Units.cmToEmu(5), Units.cmToEmu(5), {
     fill: {
       type: "gradient",
       stops: [
@@ -171,10 +158,10 @@ Document.addContent(
 );
 Document.addContent(
   doc,
-  createShape({
+  Build.createShape({
     shapeType: "roundRect",
-    width: cmToEmu(10),
-    height: cmToEmu(4),
+    width: Units.cmToEmu(10),
+    height: Units.cmToEmu(4),
     fill: { type: "solid", color: "70AD47" },
     effects: {
       softEdges: 63500,
@@ -192,14 +179,14 @@ Document.addContent(
 Document.addHeading(doc, "6. Rotation & flip", 2);
 Document.addContent(
   doc,
-  createRect(cmToEmu(6), cmToEmu(2), {
+  Build.createRect(Units.cmToEmu(6), Units.cmToEmu(2), {
     fill: { type: "solid", color: "1F4E79" },
     rotation: 30 * 60_000
   })
 );
 Document.addContent(
   doc,
-  createArrow("right", cmToEmu(4), cmToEmu(1), {
+  Build.createArrow("right", Units.cmToEmu(4), Units.cmToEmu(1), {
     flipH: true,
     fill: { type: "solid", color: "C00000" }
   })
@@ -211,14 +198,14 @@ Document.addContent(
 Document.addHeading(doc, "7. Shape with text body", 2);
 Document.addContent(
   doc,
-  createRoundRect(cmToEmu(10), cmToEmu(4), {
+  Build.createRoundRect(Units.cmToEmu(10), Units.cmToEmu(4), {
     fill: { type: "solid", color: "DEEBF7" },
-    outline: { color: "1F4E79", width: cmToEmu(0.06) },
+    outline: { color: "1F4E79", width: Units.cmToEmu(0.06) },
     textBody: {
       anchor: "ctr",
       paragraphs: [
-        paragraph([bold("Notice:")], { alignment: "center" }),
-        paragraph([text("Multi-line text inside a shape.")], { alignment: "center" })
+        Build.paragraph([Build.bold("Notice:")], { alignment: "center" }),
+        Build.paragraph([Build.text("Multi-line text inside a shape.")], { alignment: "center" })
       ]
     }
   })
@@ -231,10 +218,10 @@ Document.addHeading(doc, "8. Text box", 2);
 Document.addTextBox(
   doc,
   [
-    paragraph([bold("Sidebar")], { alignment: "center" }),
-    textParagraph("A simple text box with a stroke and fill.")
+    Build.paragraph([Build.bold("Sidebar")], { alignment: "center" }),
+    Build.textParagraph("A simple text box with a stroke and fill.")
   ],
-  { width: cmToTwips(8), height: cmToTwips(4), stroke: true, fill: true }
+  { width: Units.cmToTwips(8), height: Units.cmToTwips(4), stroke: true, fill: true }
 );
 
 // ---------------------------------------------------------------------------
@@ -245,19 +232,23 @@ Document.addHeading(doc, "Edge cases", 2);
 // Tiny shape
 Document.addContent(
   doc,
-  createRect(cmToEmu(0.2), cmToEmu(0.2), { fill: { type: "solid", color: "C00000" } })
+  Build.createRect(Units.cmToEmu(0.2), Units.cmToEmu(0.2), {
+    fill: { type: "solid", color: "C00000" }
+  })
 );
 
 // Huge shape (page-wide)
 Document.addContent(
   doc,
-  createRect(cmToEmu(16), cmToEmu(0.5), { fill: { type: "solid", color: "1F4E79" } })
+  Build.createRect(Units.cmToEmu(16), Units.cmToEmu(0.5), {
+    fill: { type: "solid", color: "1F4E79" }
+  })
 );
 
 // Invisible shape (no fill, no outline) — still produces valid drawing XML
 Document.addContent(
   doc,
-  createRect(cmToEmu(4), cmToEmu(2), {
+  Build.createRect(Units.cmToEmu(4), Units.cmToEmu(2), {
     fill: { type: "none" },
     outline: { noLine: true }
   })
@@ -272,28 +263,28 @@ Document.addContent(
 Document.addHeading(doc, "9. Raw drawingShape builder", 2);
 Document.addContent(
   doc,
-  drawingShape({
+  Build.drawingShape({
     shapeType: "wave",
-    width: cmToEmu(8),
-    height: cmToEmu(2),
+    width: Units.cmToEmu(8),
+    height: Units.cmToEmu(2),
     fillColor: "F4B084",
     outlineColor: "1F4E79",
-    outlineWidth: cmToEmu(0.06),
+    outlineWidth: Units.cmToEmu(0.06),
     altText: "wave shape via raw builder"
   })
 );
 Document.addContent(
   doc,
-  drawingShape({
+  Build.drawingShape({
     shapeType: "leftBracket",
-    width: cmToEmu(2),
-    height: cmToEmu(4),
+    width: Units.cmToEmu(2),
+    height: Units.cmToEmu(4),
     noFill: true,
     outlineColor: "C00000",
-    outlineWidth: cmToEmu(0.1)
+    outlineWidth: Units.cmToEmu(0.1)
   })
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "13-shapes.docx"), buf);
 console.log(`  → 13-shapes.docx (${buf.length} bytes)`);

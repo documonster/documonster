@@ -13,53 +13,15 @@ import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
 import {
-  // Units
-  inchesToTwips,
-  twipsToInches,
-  ptToTwips,
-  inchesToEmu,
-  cmToEmu,
-  pxToEmu,
-  ptToHalfPoint,
-  ptToEighthPoint,
-  lineMultiplierToSpacing,
-  percentToTablePct,
-
-  // Builder
   Document,
-  text,
-  bold,
-  italic,
-  pageBreak,
-  lineBreak,
-  tab,
-  field,
-  paragraph,
-  textParagraph,
-  heading,
-  hyperlink,
-  bookmarkStart,
-  bookmarkEnd,
-  border,
-  gridBorders,
-  simpleTable,
-
-  // Drawing shape
-  drawingShape,
-
-  // Mail merge
-  mailMerge,
-
-  // Packager & Reader
-  packageDocx,
-  readDocx,
-  toBuffer,
-
-  // Errors
   DocxError,
-  DocxParseError,
   DocxMissingPartError,
-  isDocxError
+  DocxParseError,
+  isDocxError,
+  Build,
+  Io,
+  Query,
+  Units
 } from "../index";
 import { fillTemplate, TemplateError } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Table } from "../types";
@@ -94,41 +56,41 @@ import { renderStyles } from "../writer/styles-writer";
 
 describe("DOCX Unit Conversions", () => {
   it("should convert inches to twips", () => {
-    expect(inchesToTwips(1)).toBe(1440);
-    expect(inchesToTwips(0.5)).toBe(720);
-    expect(twipsToInches(1440)).toBe(1);
+    expect(Units.inchesToTwips(1)).toBe(1440);
+    expect(Units.inchesToTwips(0.5)).toBe(720);
+    expect(Units.twipsToInches(1440)).toBe(1);
   });
 
   it("should convert pt to twips", () => {
-    expect(ptToTwips(12)).toBe(240);
-    expect(ptToTwips(1)).toBe(20);
+    expect(Units.ptToTwips(12)).toBe(240);
+    expect(Units.ptToTwips(1)).toBe(20);
   });
 
   it("should convert to EMU", () => {
-    expect(inchesToEmu(1)).toBe(914400);
-    expect(cmToEmu(1)).toBe(360000);
-    expect(pxToEmu(1)).toBe(9525);
+    expect(Units.inchesToEmu(1)).toBe(914400);
+    expect(Units.cmToEmu(1)).toBe(360000);
+    expect(Units.pxToEmu(1)).toBe(9525);
   });
 
   it("should convert pt to half-point", () => {
-    expect(ptToHalfPoint(12)).toBe(24);
-    expect(ptToHalfPoint(11)).toBe(22);
+    expect(Units.ptToHalfPoint(12)).toBe(24);
+    expect(Units.ptToHalfPoint(11)).toBe(22);
   });
 
   it("should convert pt to eighth-point", () => {
-    expect(ptToEighthPoint(0.5)).toBe(4);
-    expect(ptToEighthPoint(1)).toBe(8);
+    expect(Units.ptToEighthPoint(0.5)).toBe(4);
+    expect(Units.ptToEighthPoint(1)).toBe(8);
   });
 
   it("should convert line spacing multipliers", () => {
-    expect(lineMultiplierToSpacing(1)).toBe(240);
-    expect(lineMultiplierToSpacing(1.5)).toBe(360);
-    expect(lineMultiplierToSpacing(2)).toBe(480);
+    expect(Units.lineMultiplierToSpacing(1)).toBe(240);
+    expect(Units.lineMultiplierToSpacing(1.5)).toBe(360);
+    expect(Units.lineMultiplierToSpacing(2)).toBe(480);
   });
 
   it("should convert table percent", () => {
-    expect(percentToTablePct(100)).toBe(5000);
-    expect(percentToTablePct(50)).toBe(2500);
+    expect(Units.percentToTablePct(100)).toBe(5000);
+    expect(Units.percentToTablePct(50)).toBe(2500);
   });
 });
 
@@ -138,67 +100,67 @@ describe("DOCX Unit Conversions", () => {
 
 describe("DOCX Builder Helpers", () => {
   it("should create a text run", () => {
-    const run = text("hello");
+    const run = Build.text("hello");
     expect(run.content).toHaveLength(1);
     expect(run.content[0]).toEqual({ type: "text", text: "hello" });
   });
 
   it("should create a bold run", () => {
-    const run = bold("bold text");
+    const run = Build.bold("bold text");
     expect(run.properties?.bold).toBe(true);
     expect(run.content[0]).toEqual({ type: "text", text: "bold text" });
   });
 
   it("should create an italic run", () => {
-    const run = italic("italic text");
+    const run = Build.italic("italic text");
     expect(run.properties?.italic).toBe(true);
   });
 
   it("should create page break", () => {
-    const run = pageBreak();
+    const run = Build.pageBreak();
     expect(run.content[0]).toEqual({ type: "break", breakType: "page" });
   });
 
   it("should create line break", () => {
-    const run = lineBreak();
+    const run = Build.lineBreak();
     expect(run.content[0]).toEqual({ type: "break" });
   });
 
   it("should create tab", () => {
-    const run = tab();
+    const run = Build.tab();
     expect(run.content[0]).toEqual({ type: "tab" });
   });
 
   it("should create field", () => {
-    const run = field(" PAGE ", "1");
+    const run = Build.field(" PAGE ", "1");
     expect(run.content[0]).toEqual({ type: "field", instruction: " PAGE ", cachedValue: "1" });
   });
 
   it("should create a paragraph", () => {
-    const p = paragraph([text("hello")], { alignment: "center" });
+    const p = Build.paragraph([Build.text("hello")], { alignment: "center" });
     expect(p.type).toBe("paragraph");
     expect(p.properties?.alignment).toBe("center");
     expect(p.children).toHaveLength(1);
   });
 
   it("should create a text paragraph", () => {
-    const p = textParagraph("hello world", { alignment: "center" });
+    const p = Build.textParagraph("hello world", { alignment: "center" });
     expect(p.type).toBe("paragraph");
     expect(p.properties?.alignment).toBe("center");
   });
 
   it("should create a heading", () => {
-    const h = heading("Title", 1);
+    const h = Build.heading("Title", 1);
     expect(h.properties?.style).toBe("Heading1");
   });
 
   it("should create a hyperlink", () => {
-    const link = hyperlink("Click me", { rId: "rId1" });
+    const link = Build.hyperlink("Click me", { rId: "rId1" });
     expect((link as any).type).toBe("hyperlink");
   });
 
   it("should style an unvisited hyperlink with the Hyperlink character style", () => {
-    const link = hyperlink("Click me", { url: "https://example.com" }) as any;
+    const link = Build.hyperlink("Click me", { url: "https://example.com" }) as any;
     const rPr = link.children[0].properties;
     expect(rPr.style).toBe("Hyperlink");
     expect(rPr.color).toBe("0563C1");
@@ -206,7 +168,7 @@ describe("DOCX Builder Helpers", () => {
   });
 
   it("should style a visited (history) hyperlink with the FollowedHyperlink style", () => {
-    const link = hyperlink("seen", { url: "https://example.com", history: true }) as any;
+    const link = Build.hyperlink("seen", { url: "https://example.com", history: true }) as any;
     const rPr = link.children[0].properties;
     expect(rPr.style).toBe("FollowedHyperlink");
     expect(rPr.color).toBe("954F72");
@@ -214,7 +176,7 @@ describe("DOCX Builder Helpers", () => {
   });
 
   it("should let explicit properties override the default hyperlink styling", () => {
-    const link = hyperlink("custom", {
+    const link = Build.hyperlink("custom", {
       url: "https://example.com",
       properties: { color: "FF0000" }
     }) as any;
@@ -240,7 +202,7 @@ describe("DOCX Builder Helpers", () => {
         type: "table",
         styleId: "Banded",
         name: "Banded",
-        tableProperties: { rowBandSize: 1, borders: gridBorders(4, "BFBFBF") },
+        tableProperties: { rowBandSize: 1, borders: Build.gridBorders(4, "BFBFBF") },
         tableStyleConditions: [
           {
             type: "evenRowBanding",
@@ -257,28 +219,28 @@ describe("DOCX Builder Helpers", () => {
   });
 
   it("should create bookmarks", () => {
-    const start = bookmarkStart(0, "test");
-    const end = bookmarkEnd(0);
+    const start = Build.bookmarkStart(0, "test");
+    const end = Build.bookmarkEnd(0);
     expect((start as any).type).toBe("bookmarkStart");
     expect((end as any).type).toBe("bookmarkEnd");
   });
 
   it("should create borders", () => {
-    const b = border("single", 4, "000000");
+    const b = Build.border("single", 4, "000000");
     expect(b.style).toBe("single");
     expect(b.size).toBe(4);
     expect(b.color).toBe("000000");
   });
 
   it("should create grid borders", () => {
-    const gb = gridBorders();
+    const gb = Build.gridBorders();
     expect(gb.top).toBeDefined();
     expect(gb.insideH).toBeDefined();
     expect(gb.insideV).toBeDefined();
   });
 
   it("should create a simple table", () => {
-    const t = simpleTable([
+    const t = Build.simpleTable([
       ["Name", "Age"],
       ["Alice", "30"]
     ]);
@@ -295,7 +257,7 @@ describe("DOCX Builder Helpers", () => {
 describe("DOCX XML Writers", () => {
   it("should render a minimal document", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Hello World")],
+      body: [Build.textParagraph("Hello World")],
       sectionProperties: {
         pageSize: { width: 12240, height: 15840 },
         margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
@@ -320,7 +282,7 @@ describe("DOCX XML Writers", () => {
   it("should render paragraph properties", () => {
     const doc: DocxDocument = {
       body: [
-        textParagraph("centered", {
+        Build.textParagraph("centered", {
           alignment: "center",
           spacing: { before: 240, after: 120, line: 360, lineRule: "auto" }
         })
@@ -340,8 +302,8 @@ describe("DOCX XML Writers", () => {
   it("should render run properties", () => {
     const doc: DocxDocument = {
       body: [
-        paragraph([
-          text("formatted", {
+        Build.paragraph([
+          Build.text("formatted", {
             bold: true,
             italic: true,
             underline: "single",
@@ -368,7 +330,7 @@ describe("DOCX XML Writers", () => {
   it("should render tables", () => {
     const doc: DocxDocument = {
       body: [
-        simpleTable([
+        Build.simpleTable([
           ["A", "B"],
           ["C", "D"]
         ])
@@ -488,7 +450,7 @@ describe("DOCX XML Writers", () => {
 
   it("should render footnotes", () => {
     const writer = new XmlWriter();
-    renderFootnotes(writer, [{ id: 1, content: [textParagraph("Footnote text")] }]);
+    renderFootnotes(writer, [{ id: 1, content: [Build.textParagraph("Footnote text")] }]);
     const xml = writer.xml;
 
     expect(xml).toContain("<w:footnotes");
@@ -499,7 +461,7 @@ describe("DOCX XML Writers", () => {
 
   it("should render endnotes", () => {
     const writer = new XmlWriter();
-    renderEndnotes(writer, [{ id: 1, content: [textParagraph("Endnote text")] }]);
+    renderEndnotes(writer, [{ id: 1, content: [Build.textParagraph("Endnote text")] }]);
     const xml = writer.xml;
 
     expect(xml).toContain("<w:endnotes");
@@ -508,7 +470,7 @@ describe("DOCX XML Writers", () => {
 
   it("should render header", () => {
     const writer = new XmlWriter();
-    renderHeader(writer, { children: [textParagraph("Header text")] });
+    renderHeader(writer, { children: [Build.textParagraph("Header text")] });
     const xml = writer.xml;
 
     expect(xml).toContain("<w:hdr");
@@ -517,7 +479,7 @@ describe("DOCX XML Writers", () => {
 
   it("should render footer", () => {
     const writer = new XmlWriter();
-    renderFooter(writer, { children: [textParagraph("Footer text")] });
+    renderFooter(writer, { children: [Build.textParagraph("Footer text")] });
     const xml = writer.xml;
 
     expect(xml).toContain("<w:ftr");
@@ -747,8 +709,8 @@ describe("Document namespace", () => {
 
   it("should set headers and footers", () => {
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("Header")] });
-    Document.setFooter(h, "default", { children: [textParagraph("Footer")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("Header")] });
+    Document.setFooter(h, "default", { children: [Build.textParagraph("Footer")] });
     const doc = Document.build(h);
 
     expect(doc.headers?.size).toBe(1);
@@ -776,7 +738,7 @@ describe("DOCX Roundtrip", () => {
     Document.setCoreProperties(h, { title: "Test Document", creator: "Test" });
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
+    const bytes = await Io.package(original);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
 
@@ -784,7 +746,7 @@ describe("DOCX Roundtrip", () => {
     expect(bytes[0]).toBe(0x50); // P
     expect(bytes[1]).toBe(0x4b); // K
 
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     expect(parsed.body.length).toBeGreaterThan(0);
     expect(parsed.coreProperties?.title).toBe("Test Document");
     expect(parsed.coreProperties?.creator).toBe("Test");
@@ -794,12 +756,14 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([text("Normal "), bold("Bold "), italic("Italic")], { alignment: "center" })
+      Build.paragraph([Build.text("Normal "), Build.bold("Bold "), Build.italic("Italic")], {
+        alignment: "center"
+      })
     );
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     const firstPara = parsed.body[0] as Paragraph;
     expect(firstPara.type).toBe("paragraph");
@@ -817,8 +781,8 @@ describe("DOCX Roundtrip", () => {
     ]);
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     const tbl = parsed.body[0] as Table;
     expect(tbl.type).toBe("table");
@@ -831,8 +795,8 @@ describe("DOCX Roundtrip", () => {
     Document.addNumberedList(h, ["First", "Second", "Third"]);
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.abstractNumberings).toBeDefined();
     expect(parsed.numberingInstances).toBeDefined();
@@ -848,8 +812,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.styles).toBeDefined();
     expect(parsed.styles!.length).toBeGreaterThan(0);
@@ -862,8 +826,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Text with footnote");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.footnotes).toBeDefined();
     expect(parsed.footnotes!).toHaveLength(1);
@@ -876,8 +840,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Text with endnote");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.endnotes).toBeDefined();
     expect(parsed.endnotes!).toHaveLength(1);
@@ -885,8 +849,8 @@ describe("DOCX Roundtrip", () => {
 
   it("should roundtrip headers and footers", async () => {
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("My Header")] });
-    Document.setFooter(h, "default", { children: [textParagraph("My Footer")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("My Header")] });
+    Document.setFooter(h, "default", { children: [Build.textParagraph("My Footer")] });
     Document.setSectionProperties(h, {
       headers: [{ type: "default", rId: "" }],
       footers: [{ type: "default", rId: "" }]
@@ -894,8 +858,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Body text");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.headers).toBeDefined();
     expect(parsed.footers).toBeDefined();
@@ -907,8 +871,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.settings?.zoom).toBe(120);
     expect(parsed.settings?.defaultTabStop).toBe(720);
@@ -919,8 +883,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.fonts).toBeDefined();
     expect(parsed.fonts!.length).toBeGreaterThan(0);
@@ -944,8 +908,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.coreProperties?.title).toBe("My Title");
     expect(parsed.coreProperties?.subject).toBe("My Subject");
@@ -959,8 +923,8 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const original = Document.build(h);
 
-    const bytes = await packageDocx(original);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(original);
+    const parsed = await Io.read(bytes);
 
     expect(parsed.appProperties?.application).toBe("TestApp");
   });
@@ -975,7 +939,13 @@ describe("DOCX Roundtrip", () => {
     Document.addHeading(h, "Section 1.1", 2);
     Document.addParagraphElement(
       h,
-      paragraph([text("This has "), bold("bold"), text(" and "), italic("italic"), text(" text.")])
+      Build.paragraph([
+        Build.text("This has "),
+        Build.bold("bold"),
+        Build.text(" and "),
+        Build.italic("italic"),
+        Build.text(" text.")
+      ])
     );
     Document.addBulletList(h, ["Bullet 1", "Bullet 2", "Bullet 3"]);
     Document.addNumberedList(h, ["Step 1", "Step 2"]);
@@ -992,13 +962,13 @@ describe("DOCX Roundtrip", () => {
     Document.addEndnote(h, "A test endnote.");
 
     const doc = Document.build(h);
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
 
     expect(bytes.length).toBeGreaterThan(0);
     expect(bytes[0]).toBe(0x50); // P
     expect(bytes[1]).toBe(0x4b); // K
 
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     expect(parsed.body.length).toBeGreaterThan(5);
     expect(parsed.styles!.length).toBeGreaterThan(0);
     expect(parsed.abstractNumberings).toBeDefined();
@@ -1011,15 +981,15 @@ describe("DOCX Roundtrip", () => {
     Document.addParagraph(h, "Test");
     const doc = Document.build(h);
 
-    const bytes1 = await packageDocx(doc);
-    const parsed = await readDocx(bytes1);
+    const bytes1 = await Io.package(doc);
+    const parsed = await Io.read(bytes1);
 
     // Re-package the parsed document
-    const bytes2 = await packageDocx(parsed);
+    const bytes2 = await Io.package(parsed);
     expect(bytes2.length).toBeGreaterThan(0);
 
     // Read again
-    const parsed2 = await readDocx(bytes2);
+    const parsed2 = await Io.read(bytes2);
     expect(parsed2.body.length).toBe(parsed.body.length);
   });
 });
@@ -1032,7 +1002,7 @@ describe("Document.toBuffer()", () => {
   it("should generate DOCX bytes directly", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello");
-    const bytes = await toBuffer(Document.build(h));
+    const bytes = await Io.toBuffer(Document.build(h));
 
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes[0]).toBe(0x50);
@@ -1043,11 +1013,11 @@ describe("Document.toBuffer()", () => {
     const longText = "A".repeat(10000);
     const h1 = Document.create();
     Document.addParagraph(h1, longText);
-    const bytesLow = await toBuffer(Document.build(h1), 1);
+    const bytesLow = await Io.toBuffer(Document.build(h1), 1);
 
     const h2 = Document.create();
     Document.addParagraph(h2, longText);
-    const bytesHigh = await toBuffer(Document.build(h2), 9);
+    const bytesHigh = await Io.toBuffer(Document.build(h2), 9);
 
     // Higher compression should produce smaller output
     expect(bytesHigh.length).toBeLessThanOrEqual(bytesLow.length);
@@ -1060,7 +1030,7 @@ describe("Document.toBuffer()", () => {
 
 describe("drawingShape()", () => {
   it("should create a basic rect shape", () => {
-    const shape = drawingShape({
+    const shape = Build.drawingShape({
       shapeType: "rect",
       width: 914400,
       height: 457200,
@@ -1078,8 +1048,8 @@ describe("drawingShape()", () => {
   });
 
   it("should create a shape with text content", () => {
-    const para = paragraph([text("Inside shape")]);
-    const shape = drawingShape({
+    const para = Build.paragraph([Build.text("Inside shape")]);
+    const shape = Build.drawingShape({
       shapeType: "roundRect",
       width: 1000000,
       height: 500000,
@@ -1101,7 +1071,7 @@ describe("drawingShape()", () => {
     Document.addParagraph(h, "Before shape");
     Document.addContent(
       h,
-      drawingShape({
+      Build.drawingShape({
         shapeType: "ellipse",
         width: 914400,
         height: 914400,
@@ -1112,8 +1082,8 @@ describe("drawingShape()", () => {
     Document.addParagraph(h, "After shape");
     const doc = Document.build(h);
 
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
 
     const shapes = parsed.body.filter(b => b.type === "drawingShape");
     expect(shapes.length).toBe(1);
@@ -1128,11 +1098,11 @@ describe("drawingShape()", () => {
 describe("mailMerge()", () => {
   it("should replace MERGEFIELD with data values", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD FirstName ")]));
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD LastName ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD FirstName ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD LastName ")]));
     const doc = Document.build(h);
 
-    const count = mailMerge(doc, {
+    const count = Query.mailMerge(doc, {
       FirstName: "John",
       LastName: "Doe"
     });
@@ -1146,10 +1116,10 @@ describe("mailMerge()", () => {
 
   it("should leave unmatched fields by default", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD Unknown ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
     const doc = Document.build(h);
 
-    const count = mailMerge(doc, { Other: "value" });
+    const count = Query.mailMerge(doc, { Other: "value" });
     expect(count).toBe(0);
     const para = doc.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1158,10 +1128,10 @@ describe("mailMerge()", () => {
 
   it("should remove unmatched fields when removeUnmatched is true", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD Unknown ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
     const doc = Document.build(h);
 
-    const count = mailMerge(doc, {}, { removeUnmatched: true });
+    const count = Query.mailMerge(doc, {}, { removeUnmatched: true });
     expect(count).toBe(1);
     const para = doc.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1171,10 +1141,10 @@ describe("mailMerge()", () => {
 
   it("should handle quoted field names", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([field(' MERGEFIELD "Full Name" ')]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(' MERGEFIELD "Full Name" ')]));
     const doc = Document.build(h);
 
-    const count = mailMerge(doc, { "Full Name": "Jane Smith" });
+    const count = Query.mailMerge(doc, { "Full Name": "Jane Smith" });
     expect(count).toBe(1);
     const para = doc.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1182,17 +1152,17 @@ describe("mailMerge()", () => {
   });
 
   it("should merge fields in tables", () => {
-    const tbl = simpleTable([["placeholder1", "placeholder2"]]);
+    const tbl = Build.simpleTable([["placeholder1", "placeholder2"]]);
     // Manually inject field content into table cells
     const cell0 = tbl.rows[0].cells[0] as any;
     const cell1 = tbl.rows[0].cells[1] as any;
-    cell0.content = [paragraph([field(" MERGEFIELD City ")])];
-    cell1.content = [paragraph([field(" MERGEFIELD State ")])];
+    cell0.content = [Build.paragraph([Build.field(" MERGEFIELD City ")])];
+    cell1.content = [Build.paragraph([Build.field(" MERGEFIELD State ")])];
 
     const h = Document.create();
     Document.addContent(h, tbl);
     const doc = Document.build(h);
-    const count = mailMerge(doc, { City: "NYC", State: "NY" });
+    const count = Query.mailMerge(doc, { City: "NYC", State: "NY" });
     expect(count).toBe(2);
   });
 
@@ -1202,12 +1172,12 @@ describe("mailMerge()", () => {
     // mail merges with attacker-controlled headers could pull function
     // references out of Object.prototype and inject them into the doc.
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD __proto__ ")]));
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD toString ")]));
-    Document.addParagraphElement(h, paragraph([field(" MERGEFIELD constructor ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD __proto__ ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD toString ")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD constructor ")]));
     const doc = Document.build(h);
 
-    const count = mailMerge(doc, {}); // empty data — none of the prototype keys are own
+    const count = Query.mailMerge(doc, {}); // empty data — none of the prototype keys are own
     expect(count).toBe(0);
     // All three fields must remain unsubstituted.
     for (let i = 0; i < 3; i++) {
@@ -1234,8 +1204,8 @@ describe("Opaque parts round-trip", () => {
       }
     ];
 
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
 
     expect(parsed.opaqueParts).toBeDefined();
     const chartPart = parsed.opaqueParts?.find(p => p.path === "word/charts/chart1.xml");
@@ -1260,14 +1230,14 @@ describe("Round-trip: hyperlink history/tgtFrame", () => {
               url: "https://example.com",
               history: true,
               tgtFrame: "_blank",
-              children: [text("Click me")]
+              children: [Build.text("Click me")]
             }
           ]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const link = para.children[0] as any;
     expect(link.type).toBe("hyperlink");
@@ -1289,8 +1259,8 @@ describe("Round-trip: bookmark colFirst/colLast", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const bm = para.children[0] as any;
     expect(bm.colFirst).toBe(0);
@@ -1312,8 +1282,8 @@ describe("Round-trip: floating image layoutInCell/allowOverlap/simplePos", () =>
       allowOverlap: false
     } as any);
     Document.addParagraph(h, "Doc with floating image");
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     // Find floating image in body
     const fi = parsed.body.find(b => b.type === "floatingImage") as any;
     expect(fi).toBeDefined();
@@ -1324,7 +1294,7 @@ describe("Round-trip: floating image layoutInCell/allowOverlap/simplePos", () =>
 
 describe("Round-trip: table tl2br/tr2bl diagonal borders + caption/description", () => {
   it("should preserve diagonal borders and accessibility metadata", async () => {
-    const redBorder = border("single", 8, "FF0000");
+    const redBorder = Build.border("single", 8, "FF0000");
     const doc: DocxDocument = {
       body: [
         {
@@ -1343,7 +1313,7 @@ describe("Round-trip: table tl2br/tr2bl diagonal borders + caption/description",
                       tr2bl: redBorder
                     }
                   },
-                  content: [textParagraph("cell")]
+                  content: [Build.textParagraph("cell")]
                 }
               ]
             }
@@ -1351,8 +1321,8 @@ describe("Round-trip: table tl2br/tr2bl diagonal borders + caption/description",
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.caption).toBe("Sales data");
     expect(tbl.properties?.description).toBe("Sales by quarter");
@@ -1375,14 +1345,14 @@ describe("Round-trip: table row gridBefore/gridAfter + cnfStyle", () => {
                 gridAfter: 2,
                 cnfStyle: "100000000000"
               },
-              cells: [{ content: [textParagraph("c")] }]
+              cells: [{ content: [Build.textParagraph("c")] }]
             }
           ]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.rows[0].properties?.gridBefore).toBe(1);
     expect(tbl.rows[0].properties?.gridAfter).toBe(2);
@@ -1408,8 +1378,8 @@ describe("Round-trip: Run fitText and complexScript", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
     expect(run.properties.fitText.val).toBe(2000);
@@ -1432,8 +1402,8 @@ describe("Round-trip: Section bidi", () => {
         rtlGutter: true
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.bidi).toBe(true);
     expect(parsed.sectionProperties?.rtlGutter).toBe(true);
   });
@@ -1447,8 +1417,8 @@ describe("Round-trip: Settings characterSpacingControl", () => {
         characterSpacingControl: "compressPunctuation"
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.settings?.characterSpacingControl).toBe("compressPunctuation");
   });
 });
@@ -1469,8 +1439,8 @@ describe("Round-trip: Style customStyle/hidden/locked", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const s = parsed.styles?.find(st => st.styleId === "MyCustom");
     expect(s).toBeDefined();
     expect(s?.customStyle).toBe(true);
@@ -1482,7 +1452,9 @@ describe("Round-trip: Style customStyle/hidden/locked", () => {
 
 describe("Round-trip: Math mathPreSubSuperScript", () => {
   it("should preserve m:sPre structure", async () => {
-    const { mathRun, mathPreSubSuperScript: mathPre } = await import("../index");
+    const __wmod = await import("../index");
+    const mathRun = __wmod.Build.mathRun;
+    const mathPre = __wmod.Build.mathPreSubSuperScript;
     const doc: DocxDocument = {
       body: [
         {
@@ -1491,8 +1463,8 @@ describe("Round-trip: Math mathPreSubSuperScript", () => {
         } as any
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const math = parsed.body[0] as any;
     const content = math.content[0];
     expect(content.type).toBe("mathPreSubSuperScript");
@@ -1540,8 +1512,8 @@ describe("Round-trip: Numbering LevelOverride full levelDef", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const inst = parsed.numberingInstances?.[0];
     expect(inst).toBeDefined();
     const ov = inst?.overrides?.[0];
@@ -1570,8 +1542,8 @@ describe("Round-trip: Paragraph-level track changes", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.paragraphInsertion?.author).toBe("User1");
     expect(para.properties?.paragraphInsertion?.id).toBe(1);
@@ -1595,12 +1567,12 @@ describe("Round-trip: SDT dataBinding + new appearance", () => {
             },
             richText: true
           },
-          content: [textParagraph("John Doe")]
+          content: [Build.textParagraph("John Doe")]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const sdt = parsed.body[0] as any;
     expect(sdt.type).toBe("sdt");
     expect(sdt.properties.dataBinding.xpath).toContain("customer");
@@ -1625,8 +1597,8 @@ describe("Round-trip: East Asian paragraph properties", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.kinsoku).toBe(true);
     expect(para.properties?.topLinePunctuation).toBe(true);
@@ -1636,7 +1608,8 @@ describe("Round-trip: East Asian paragraph properties", () => {
 
 describe("Round-trip: Positional tab (ptab)", () => {
   it("should preserve ptab element", async () => {
-    const { positionalTab } = await import("../index");
+    const __wmod = await import("../index");
+    const positionalTab = __wmod.Build.positionalTab;
     const pt = positionalTab({
       alignment: "center",
       relativeTo: "indent",
@@ -1650,8 +1623,8 @@ describe("Round-trip: Positional tab (ptab)", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
     const ptab = run.content[0];
@@ -1664,7 +1637,8 @@ describe("Round-trip: Positional tab (ptab)", () => {
 
 describe("Round-trip: Ruby text", () => {
   it("should preserve ruby annotations", async () => {
-    const { ruby: rubyFn } = await import("../index");
+    const __wmod = await import("../index");
+    const rubyFn = __wmod.Build.ruby;
     const doc: DocxDocument = {
       body: [
         {
@@ -1673,8 +1647,8 @@ describe("Round-trip: Ruby text", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
     const rubyContent = run.content[0];
@@ -1717,8 +1691,8 @@ describe("Round-trip: Theme color scheme + font scheme", () => {
         }
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.theme?.colorScheme.colors.accent1).toBe("FF0000");
     expect(parsed.theme?.colorScheme.colors.hlink).toBe("AA0000");
     expect(parsed.theme?.fontScheme.majorFont).toBe("Georgia");
@@ -1753,8 +1727,8 @@ describe("Round-trip: numPicBullet picture bullet", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.numPicBullets?.[0]?.id).toBe(0);
     expect(parsed.abstractNumberings?.[0]?.levels[0]?.picBulletId).toBe(0);
   });
@@ -1776,8 +1750,8 @@ describe("Round-trip: Settings compat flags + compatSettings", () => {
         compatFlags: [{ name: "useFELayout" }, { name: "doNotExpandShiftReturn" }]
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.settings?.compatibilityMode).toBe(15);
     const overrideCs = parsed.settings?.compatSettings?.find(
       cs => cs.name === "overrideTableStyleFontSizeAndJustification"
@@ -1802,7 +1776,7 @@ describe("Round-trip: Settings compat flags + compatSettings", () => {
         ]
       }
     };
-    const buffer = await packageDocx(doc);
+    const buffer = await Io.package(doc);
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/settings.xml")!.data);
     const matches = xml.match(/w:name="compatibilityMode"/g) ?? [];
     expect(matches.length).toBe(1);
@@ -1821,8 +1795,8 @@ describe("Round-trip: trackRevisions setting", () => {
       body: [{ type: "paragraph", children: [{ content: [] } as any] }],
       settings: { trackRevisions: true }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.settings?.trackRevisions).toBe(true);
   });
 });
@@ -1845,8 +1819,8 @@ describe("Round-trip: numbering with only numId (no level)", () => {
       ],
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.numbering?.level).toBe(0);
   });
@@ -1854,7 +1828,8 @@ describe("Round-trip: numbering with only numId (no level)", () => {
 
 describe("Round-trip: TOC instruction options", () => {
   it("should preserve TOC field switches through round-trip", async () => {
-    const { tocField } = await import("../index");
+    const __wmod = await import("../index");
+    const tocField = __wmod.Build.tocField;
     const doc: DocxDocument = {
       body: [
         {
@@ -1870,8 +1845,8 @@ describe("Round-trip: TOC instruction options", () => {
         } as any
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const toc = parsed.body.find(b => b.type === "tableOfContents") as any;
     expect(toc).toBeDefined();
     expect(toc.headingStyleRange).toBe("1-3");
@@ -1895,8 +1870,8 @@ describe("Round-trip: cnfStyle on paragraph", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.cnfStyle).toBe("100000000000");
   });
@@ -1933,8 +1908,8 @@ describe("Round-trip: commentsExtended (done/parentId)", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const c1 = parsed.comments?.find(c => c.id === 1);
     const c2 = parsed.comments?.find(c => c.id === 2);
     expect(c1?.done).toBe(true);
@@ -1967,7 +1942,7 @@ describe("Round-trip: table propertyChange (tblPrChange/trPrChange/tcPrChange)",
                       revision: { id: 7, author: "Carl" }
                     }
                   },
-                  content: [textParagraph("c")]
+                  content: [Build.textParagraph("c")]
                 }
               ]
             }
@@ -1975,8 +1950,8 @@ describe("Round-trip: table propertyChange (tblPrChange/trPrChange/tcPrChange)",
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.propertyChange?.revision.id).toBe(5);
     expect(tbl.rows[0].properties?.propertyChange?.revision.id).toBe(6);
@@ -1997,13 +1972,13 @@ describe("Round-trip: cellIns/cellDel/cellMerge revisions", () => {
                   properties: {
                     inserted: { revision: { id: 1, author: "A" } }
                   },
-                  content: [textParagraph("a")]
+                  content: [Build.textParagraph("a")]
                 },
                 {
                   properties: {
                     deleted: { revision: { id: 2, author: "B" } }
                   },
-                  content: [textParagraph("b")]
+                  content: [Build.textParagraph("b")]
                 },
                 {
                   properties: {
@@ -2012,7 +1987,7 @@ describe("Round-trip: cellIns/cellDel/cellMerge revisions", () => {
                       revision: { id: 3, author: "C" }
                     }
                   },
-                  content: [textParagraph("c")]
+                  content: [Build.textParagraph("c")]
                 }
               ]
             }
@@ -2020,8 +1995,8 @@ describe("Round-trip: cellIns/cellDel/cellMerge revisions", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.rows[0].cells[0].properties?.inserted?.revision.id).toBe(1);
     expect(tbl.rows[0].cells[1].properties?.deleted?.revision.id).toBe(2);
@@ -2043,14 +2018,14 @@ describe("Round-trip: tblPrEx (row-level table property exception)", () => {
                   indent: 100
                 }
               },
-              cells: [{ content: [textParagraph("cell")] }]
+              cells: [{ content: [Build.textParagraph("cell")] }]
             }
           ]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const row = (parsed.body[0] as Table).rows[0];
     expect(row.properties?.tblPrEx?.alignment).toBe("center");
     expect(row.properties?.tblPrEx?.indent).toBe(100);
@@ -2076,8 +2051,8 @@ describe("Round-trip: extended Settings (rsids/decimalSymbol/listSeparator)", ()
         }
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.settings?.rsids?.rsidRoot).toBe("00123456");
     expect(parsed.settings?.rsids?.rsid?.length).toBe(2);
     expect(parsed.settings?.decimalSymbol).toBe(",");
@@ -2111,8 +2086,8 @@ describe("Round-trip: altChunk (embedded HTML)", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const alt = parsed.body.find(b => b.type === "altChunk") as any;
     expect(alt).toBeDefined();
     expect(alt.contentType).toBe("text/html");
@@ -2132,8 +2107,8 @@ describe("Round-trip: WebSettings", () => {
         doNotSaveAsSingleFile: true
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.webSettings?.allowPng).toBe(true);
     expect(parsed.webSettings?.relyOnVml).toBe(true);
     expect(parsed.webSettings?.optimizeForBrowser?.target).toBe("IE 6");
@@ -2151,8 +2126,8 @@ describe("Round-trip: Thumbnail", () => {
       body: [{ type: "paragraph", children: [{ content: [] } as any] }],
       thumbnail: { contentType: "image/jpeg", data: jpegData }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.thumbnail).toBeDefined();
     expect(parsed.thumbnail?.contentType).toBe("image/jpeg");
     expect(parsed.thumbnail?.data.length).toBe(jpegData.length);
@@ -2171,8 +2146,8 @@ describe("Round-trip: People (w15:people)", () => {
         { author: "Bob Jones" }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.people?.length).toBe(2);
     expect(parsed.people?.[0].author).toBe("Alice Smith");
     expect(parsed.people?.[0].presenceInfo?.userId).toBe("alice@example.com");
@@ -2181,7 +2156,11 @@ describe("Round-trip: People (w15:people)", () => {
 
 describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
   it("should preserve phantom / group character / border box", async () => {
-    const { mathRun, mathPhantom, mathGroupChar, mathBorderBox } = await import("../index");
+    const __wmod = await import("../index");
+    const mathRun = __wmod.Build.mathRun;
+    const mathPhantom = __wmod.Build.mathPhantom;
+    const mathGroupChar = __wmod.Build.mathGroupChar;
+    const mathBorderBox = __wmod.Build.mathBorderBox;
     const doc: DocxDocument = {
       body: [
         {
@@ -2194,8 +2173,8 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
         } as any
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const math = parsed.body[0] as any;
     const [phant, group, border] = math.content;
     expect(phant.type).toBe("mathPhantom");
@@ -2210,7 +2189,9 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
   });
 
   it("should preserve an explicit phantom show=false (invisible placeholder)", async () => {
-    const { mathRun, mathPhantom } = await import("../index");
+    const __wmod = await import("../index");
+    const mathRun = __wmod.Build.mathRun;
+    const mathPhantom = __wmod.Build.mathPhantom;
     const doc: DocxDocument = {
       body: [
         {
@@ -2219,7 +2200,7 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
         } as any
       ]
     };
-    const buffer = await packageDocx(doc);
+    const buffer = await Io.package(doc);
     // The XML must carry <m:show m:val="0"/> — omitting it leaves the base
     // visible in Word, which defeats the "occupies space but invisible" intent.
     const { extractAll } = await import("@archive/unzip/extract");
@@ -2228,7 +2209,7 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
     );
     expect(docXml).toContain('<m:show m:val="0"/>');
 
-    const parsed = await readDocx(buffer);
+    const parsed = await Io.read(buffer);
     const phant = (parsed.body[0] as any).content[0];
     expect(phant.type).toBe("mathPhantom");
     expect(phant.show).toBe(false);
@@ -2248,8 +2229,8 @@ describe("Round-trip: Paragraph paraId/textId", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.paraId).toBe("12345678");
     expect(para.textId).toBe("87654321");
@@ -2263,17 +2244,17 @@ describe("Round-trip: Footnote/endnote type (continuationNotice)", () => {
       footnotes: [
         {
           id: 1,
-          content: [textParagraph("Regular footnote content")]
+          content: [Build.textParagraph("Regular footnote content")]
         },
         {
           id: 2,
           type: "continuationNotice",
-          content: [textParagraph("(continued...)")]
+          content: [Build.textParagraph("(continued...)")]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.footnotes?.length).toBe(2);
     const cn = parsed.footnotes?.find(f => f.type === "continuationNotice");
     expect(cn).toBeDefined();
@@ -2304,8 +2285,8 @@ describe("Regression: pPrChange self-reference does not crash", () => {
       ]
     };
     // Should NOT crash
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBe(1);
   });
 });
@@ -2317,14 +2298,14 @@ describe("Regression: rel.target path normalization", () => {
     const doc: DocxDocument = {
       body: [{ type: "paragraph", children: [{ content: [] } as any] }],
       headers: new Map([
-        ["rId10", { content: { children: [textParagraph("Head")] }, rId: "rId10" }]
+        ["rId10", { content: { children: [Build.textParagraph("Head")] }, rId: "rId10" }]
       ]),
       sectionProperties: {
         headers: [{ type: "default", rId: "rId10" }]
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.headers).toBeDefined();
     expect(parsed.headers!.size).toBeGreaterThan(0);
   });
@@ -2364,8 +2345,8 @@ describe("Regression: smartTag/customXml/dir wrappers flatten children", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     // Text should preserve
     const runs = para.children.filter((c): c is any => "content" in c);
@@ -2432,9 +2413,9 @@ describe("Regression: collectImageRids recurses into nested tables/SDTs", () => 
       ]
     } as any);
     Document.addParagraph(h, "body");
-    const buffer = await toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(Document.build(h));
     // Just verify it round-trips without errors
-    const parsed = await readDocx(buffer);
+    const parsed = await Io.read(buffer);
     expect(parsed.images?.length ?? 0).toBeGreaterThan(0);
   });
 });
@@ -2455,12 +2436,12 @@ describe("Regression: TableLook explicit false values preserved", () => {
               noVBand: true
             }
           },
-          rows: [{ cells: [{ content: [textParagraph("c")] }] }]
+          rows: [{ cells: [{ content: [Build.textParagraph("c")] }] }]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.look?.firstRow).toBe(true);
     expect(tbl.properties?.look?.lastRow).toBe(false);
@@ -2479,8 +2460,8 @@ describe("Regression: pageSize.orientation=portrait preserved", () => {
         pageSize: { width: 12240, height: 15840, orientation: "portrait" }
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.pageSize?.orientation).toBe("portrait");
   });
 });
@@ -2500,12 +2481,12 @@ describe("Regression: TableFloat.overlap round-trip", () => {
               overlap: "never"
             }
           },
-          rows: [{ cells: [{ content: [textParagraph("c")] }] }]
+          rows: [{ cells: [{ content: [Build.textParagraph("c")] }] }]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.float?.overlap).toBe("never");
   });
@@ -2524,8 +2505,8 @@ describe("Regression: lineRule defaults to 'auto' when line is set", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.spacing?.line).toBe(276);
     // After round-trip, lineRule should default to "auto"
@@ -2544,8 +2525,8 @@ describe("Regression: opaquePart content type inference", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     // The opaque part should be round-tripped
     const part = parsed.opaqueParts?.find(p => p.path === "word/customXml/item99.xml");
     expect(part).toBeDefined();
@@ -2564,12 +2545,12 @@ describe("Regression: TableLook val-only bitmask still read correctly", () => {
           properties: {
             look: { firstRow: true, lastRow: true, noHBand: true }
           },
-          rows: [{ cells: [{ content: [textParagraph("c")] }] }]
+          rows: [{ cells: [{ content: [Build.textParagraph("c")] }] }]
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.look?.firstRow).toBe(true);
     expect(tbl.properties?.look?.lastRow).toBe(true);
@@ -2584,10 +2565,10 @@ describe("Regression: TableLook val-only bitmask still read correctly", () => {
 describe("Error paths: readDocx", () => {
   it("throws DocxParseError on non-ZIP input", async () => {
     const bogus = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
-    await expect(readDocx(bogus)).rejects.toThrow();
+    await expect(Io.read(bogus)).rejects.toThrow();
     // And should be a DocxError variant
     try {
-      await readDocx(bogus);
+      await Io.read(bogus);
     } catch (e) {
       expect(e).toBeInstanceOf(DocxError);
     }
@@ -2600,7 +2581,7 @@ describe("Error paths: readDocx", () => {
     ar.add("[Content_Types].xml", new TextEncoder().encode('<?xml version="1.0"?><Types/>'));
     const bytes = await ar.bytes();
     try {
-      await readDocx(bytes);
+      await Io.read(bytes);
       throw new Error("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(DocxMissingPartError);
@@ -2608,16 +2589,16 @@ describe("Error paths: readDocx", () => {
   });
 
   it("handles empty Uint8Array gracefully", async () => {
-    await expect(readDocx(new Uint8Array())).rejects.toThrow();
+    await expect(Io.read(new Uint8Array())).rejects.toThrow();
   });
 
   it("recovers when optional numbering.xml is missing", async () => {
     // A valid minimal DOCX without numbering part
     const h = Document.create();
     Document.addParagraph(h, "Hello");
-    const buffer = await toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(Document.build(h));
     // Should parse without error
-    const parsed = await readDocx(buffer);
+    const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBeGreaterThan(0);
     expect(parsed.abstractNumberings).toBeUndefined();
     expect(parsed.numberingInstances).toBeUndefined();
@@ -2642,8 +2623,8 @@ describe("attrInt: NaN safety", () => {
     // Build and parse a doc — non-numeric IDs in bookmarks shouldn't crash
     const h = Document.create();
     Document.addParagraph(h, "hello");
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBe(1);
   });
 });
@@ -2654,7 +2635,8 @@ describe("attrInt: NaN safety", () => {
 
 describe("Query API", () => {
   it("getHeadings: extracts outline from style 'Heading1'...'HeadingN'", async () => {
-    const { getHeadings } = await import("../index");
+    const __wmod = await import("../index");
+    const getHeadings = __wmod.Query.getHeadings;
     const doc: DocxDocument = {
       body: [
         {
@@ -2686,7 +2668,8 @@ describe("Query API", () => {
   });
 
   it("findBookmark: locates bookmark by name", async () => {
-    const { findBookmark } = await import("../index");
+    const __wmod = await import("../index");
+    const findBookmark = __wmod.Query.findBookmark;
     const doc: DocxDocument = {
       body: [
         {
@@ -2706,13 +2689,17 @@ describe("Query API", () => {
   });
 
   it("findBookmark: returns undefined for missing name", async () => {
-    const { findBookmark } = await import("../index");
+    const __wmod = await import("../index");
+    const findBookmark = __wmod.Query.findBookmark;
     const doc: DocxDocument = { body: [] };
     expect(findBookmark(doc, "nothing")).toBeUndefined();
   });
 
   it("paragraphCount / countWords / tableCount", async () => {
-    const { paragraphCount, countWords, tableCount } = await import("../index");
+    const __wmod = await import("../index");
+    const paragraphCount = __wmod.Query.paragraphCount;
+    const countWords = __wmod.Query.countWords;
+    const tableCount = __wmod.Query.tableCount;
     const doc: DocxDocument = {
       body: [
         {
@@ -2748,12 +2735,13 @@ describe("Query API", () => {
   });
 
   it("findComment: locates comment by id", async () => {
-    const { findComment } = await import("../index");
+    const __wmod = await import("../index");
+    const findComment = __wmod.Query.findComment;
     const doc: DocxDocument = {
       body: [],
       comments: [
-        { id: 1, author: "Alice", content: [textParagraph("first")] },
-        { id: 2, author: "Bob", content: [textParagraph("second")] }
+        { id: 1, author: "Alice", content: [Build.textParagraph("first")] },
+        { id: 2, author: "Bob", content: [Build.textParagraph("second")] }
       ]
     };
     expect(findComment(doc, 2)?.author).toBe("Bob");
@@ -2761,7 +2749,10 @@ describe("Query API", () => {
   });
 
   it("listImages / listTables / listHyperlinks", async () => {
-    const { listImages, listTables, listHyperlinks } = await import("../index");
+    const __wmod = await import("../index");
+    const listImages = __wmod.Query.listImages;
+    const listTables = __wmod.Query.listTables;
+    const listHyperlinks = __wmod.Query.listHyperlinks;
     const doc: DocxDocument = {
       body: [
         {
@@ -2776,7 +2767,7 @@ describe("Query API", () => {
         },
         {
           type: "table",
-          rows: [{ cells: [{ content: [textParagraph("a")] }] }]
+          rows: [{ cells: [{ content: [Build.textParagraph("a")] }] }]
         }
       ]
     };
@@ -2802,8 +2793,8 @@ describe("Packager idempotency", () => {
       ],
       watermark: { type: "text", text: "DRAFT" }
     };
-    const buf1 = await packageDocx(doc);
-    const buf2 = await packageDocx(doc);
+    const buf1 = await Io.package(doc);
+    const buf2 = await Io.package(doc);
     // Both should succeed without modifying doc
     expect(buf1.length).toBeGreaterThan(0);
     expect(buf2.length).toBeGreaterThan(0);
@@ -3048,7 +3039,7 @@ describe("useDefaultStyles: built-in latent styles", () => {
     const { extractAll } = await import("@archive/unzip/extract");
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const buffer = await packageDocx(Document.build(h));
+    const buffer = await Io.package(Document.build(h));
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/styles.xml")!.data);
     expect(xml).toContain('w:styleId="Header"');
     expect(xml).toContain('w:styleId="HeaderChar"');
@@ -3062,14 +3053,14 @@ describe("Paragraph bidi (RTL)", () => {
     const { extractAll } = await import("@archive/unzip/extract");
     const h = Document.create();
     Document.useDefaultStyles(h);
-    Document.addParagraphElement(h, paragraph([text("اَلْعَرَبِيَّةُ")], { bidi: true }));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("اَلْعَرَبِيَّةُ")], { bidi: true }));
     Document.addParagraphElement(
       h,
-      paragraph([text("Heading in RTL")], { style: "Heading1", bidi: true })
+      Build.paragraph([Build.text("Heading in RTL")], { style: "Heading1", bidi: true })
     );
-    Document.addParagraphElement(h, paragraph([text("ltr fallback")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("ltr fallback")]));
 
-    const buffer = await packageDocx(Document.build(h));
+    const buffer = await Io.package(Document.build(h));
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
 
     // Both bidi paragraphs must serialize <w:bidi/> inside their pPr; the
@@ -3084,9 +3075,9 @@ describe("Paragraph bidi (RTL)", () => {
 
   it("should round-trip paragraph bidi through readDocx", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([text("RTL")], { bidi: true }));
-    const buffer = await packageDocx(Document.build(h));
-    const parsed = await readDocx(buffer);
+    Document.addParagraphElement(h, Build.paragraph([Build.text("RTL")], { bidi: true }));
+    const buffer = await Io.package(Document.build(h));
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.bidi).toBe(true);
   });
@@ -3104,7 +3095,10 @@ describe("Hyperlink-style cross-reference fields", () => {
   // therefore stay pure (no hidden styling injection) and the example uses
   // the explicit <w:hyperlink> wrapper.
   it("should NOT inject any visual styling into refField / pageRefField / noteRefField runs", async () => {
-    const { refField, pageRefField, noteRefField } = await import("../index");
+    const __wmod = await import("../index");
+    const refField = __wmod.Build.refField;
+    const pageRefField = __wmod.Build.pageRefField;
+    const noteRefField = __wmod.Build.noteRefField;
     const ref = refField("intro", { hyperlink: true, cachedValue: "Introduction" });
     const pref = pageRefField("intro", { hyperlink: true, cachedValue: "1" });
     const noteRef = noteRefField("fn1", { hyperlink: true, cachedValue: "1" });
@@ -3116,7 +3110,10 @@ describe("Hyperlink-style cross-reference fields", () => {
   });
 
   it("should emit \\h flag in the instruction text when hyperlink: true", async () => {
-    const { refField, pageRefField, noteRefField } = await import("../index");
+    const __wmod = await import("../index");
+    const refField = __wmod.Build.refField;
+    const pageRefField = __wmod.Build.pageRefField;
+    const noteRefField = __wmod.Build.noteRefField;
     const ref = refField("intro", { hyperlink: true, cachedValue: "x" });
     const pref = pageRefField("intro", { hyperlink: true, cachedValue: "x" });
     const noteRef = noteRefField("fn1", { hyperlink: true, cachedValue: "x" });

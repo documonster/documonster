@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, paragraph, textParagraph, text, bold, italic, symbol, toBuffer } from "../index";
+import { Document, Build, Io } from "../index";
 import type {
   AbstractNumbering,
   NumberingInstance,
@@ -48,9 +48,9 @@ Document.addNumberedList(doc, ["Step one", "Step two", "Step three"]);
 
 // Rich-formatted items (mix of runs)
 Document.addBulletList(doc, [
-  [text("Plain bullet item")],
-  [bold("Bold-prefix"), text(" with normal continuation")],
-  [italic("Italic"), text(" + "), text("colored", { color: "C00000" })]
+  [Build.text("Plain bullet item")],
+  [Build.bold("Bold-prefix"), Build.text(" with normal continuation")],
+  [Build.italic("Italic"), Build.text(" + "), Build.text("colored", { color: "C00000" })]
 ] as (string | ParagraphChild[])[]);
 
 // ---------------------------------------------------------------------------
@@ -104,14 +104,14 @@ const merged = {
   numberingInstances: [...(docModel.numberingInstances ?? []), legalInstance],
   body: [
     ...docModel.body,
-    textParagraph("Article one — overview.", {
+    Build.textParagraph("Article one — overview.", {
       numbering: { numId: legalNumId, level: 0 }
     }),
-    textParagraph("First definition.", { numbering: { numId: legalNumId, level: 1 } }),
-    textParagraph("Second definition.", { numbering: { numId: legalNumId, level: 1 } }),
-    textParagraph("A footnote.", { numbering: { numId: legalNumId, level: 2 } }),
-    textParagraph("Article two — scope.", { numbering: { numId: legalNumId, level: 0 } }),
-    textParagraph("Sub-clause.", { numbering: { numId: legalNumId, level: 1 } })
+    Build.textParagraph("First definition.", { numbering: { numId: legalNumId, level: 1 } }),
+    Build.textParagraph("Second definition.", { numbering: { numId: legalNumId, level: 1 } }),
+    Build.textParagraph("A footnote.", { numbering: { numId: legalNumId, level: 2 } }),
+    Build.textParagraph("Article two — scope.", { numbering: { numId: legalNumId, level: 0 } }),
+    Build.textParagraph("Sub-clause.", { numbering: { numId: legalNumId, level: 1 } })
   ]
 };
 
@@ -158,13 +158,13 @@ const merged2 = {
   ],
   body: [
     ...merged.body,
-    textParagraph("Roman / Letter / Decimal:", { style: "Heading2" }),
-    textParagraph("Introduction", { numbering: { numId: romanNumId, level: 0 } }),
-    textParagraph("First sub-section", { numbering: { numId: romanNumId, level: 1 } }),
-    textParagraph("First note", { numbering: { numId: romanNumId, level: 2 } }),
-    textParagraph("Second note", { numbering: { numId: romanNumId, level: 2 } }),
-    textParagraph("Second sub-section", { numbering: { numId: romanNumId, level: 1 } }),
-    textParagraph("Methodology", { numbering: { numId: romanNumId, level: 0 } })
+    Build.textParagraph("Roman / Letter / Decimal:", { style: "Heading2" }),
+    Build.textParagraph("Introduction", { numbering: { numId: romanNumId, level: 0 } }),
+    Build.textParagraph("First sub-section", { numbering: { numId: romanNumId, level: 1 } }),
+    Build.textParagraph("First note", { numbering: { numId: romanNumId, level: 2 } }),
+    Build.textParagraph("Second note", { numbering: { numId: romanNumId, level: 2 } }),
+    Build.textParagraph("Second sub-section", { numbering: { numId: romanNumId, level: 1 } }),
+    Build.textParagraph("Methodology", { numbering: { numId: romanNumId, level: 0 } })
   ]
 };
 
@@ -181,15 +181,15 @@ const merged3 = {
   numberingInstances: [...(merged2.numberingInstances ?? []), restartInstance],
   body: [
     ...merged2.body,
-    textParagraph("4. Restart vs continue", { style: "Heading2" }),
-    textParagraph("First (continuous): item 1", { numbering: { numId: 1, level: 0 } }),
-    textParagraph("First (continuous): item 2", { numbering: { numId: 1, level: 0 } }),
-    textParagraph("— heading interrupts —", { style: "Heading3" }),
-    textParagraph("First (continuous): item 3", { numbering: { numId: 1, level: 0 } }),
-    textParagraph("Second (restart): item 1", {
+    Build.textParagraph("4. Restart vs continue", { style: "Heading2" }),
+    Build.textParagraph("First (continuous): item 1", { numbering: { numId: 1, level: 0 } }),
+    Build.textParagraph("First (continuous): item 2", { numbering: { numId: 1, level: 0 } }),
+    Build.textParagraph("— heading interrupts —", { style: "Heading3" }),
+    Build.textParagraph("First (continuous): item 3", { numbering: { numId: 1, level: 0 } }),
+    Build.textParagraph("Second (restart): item 1", {
       numbering: { numId: restartInstance.numId, level: 0 }
     }),
-    textParagraph("Second (restart): item 2", {
+    Build.textParagraph("Second (restart): item 2", {
       numbering: { numId: restartInstance.numId, level: 0 }
     })
   ]
@@ -202,11 +202,11 @@ const merged4 = {
   ...merged3,
   body: [
     ...merged3.body,
-    textParagraph("5. Task list (visual)", { style: "Heading2" }),
-    paragraph([symbol("Wingdings", "F0FE"), text("  Buy groceries")]),
-    paragraph([symbol("Wingdings", "F0FE"), text("  Reply to e-mails")]),
-    paragraph([symbol("Wingdings", "F0FC"), text("  Take out trash (done)")]),
-    paragraph([symbol("Wingdings", "F0FE"), text("  Walk the dog")])
+    Build.textParagraph("5. Task list (visual)", { style: "Heading2" }),
+    Build.paragraph([Build.symbol("Wingdings", "F0FE"), Build.text("  Buy groceries")]),
+    Build.paragraph([Build.symbol("Wingdings", "F0FE"), Build.text("  Reply to e-mails")]),
+    Build.paragraph([Build.symbol("Wingdings", "F0FC"), Build.text("  Take out trash (done)")]),
+    Build.paragraph([Build.symbol("Wingdings", "F0FE"), Build.text("  Walk the dog")])
   ]
 };
 
@@ -240,13 +240,13 @@ const final = {
   ],
   body: [
     ...merged4.body,
-    textParagraph("6. Deep nesting (level 0..8)", { style: "Heading2" }),
+    Build.textParagraph("6. Deep nesting (level 0..8)", { style: "Heading2" }),
     ...Array.from({ length: 9 }, (_, lvl) =>
-      textParagraph(`Depth ${lvl}`, { numbering: { numId: deepNumId, level: lvl } })
+      Build.textParagraph(`Depth ${lvl}`, { numbering: { numId: deepNumId, level: lvl } })
     )
   ]
 };
 
-const buf = await toBuffer(final);
+const buf = await Io.toBuffer(final);
 fs.writeFileSync(path.join(outDir, "05-lists.docx"), buf);
 console.log(`  → 05-lists.docx (${buf.length} bytes)`);

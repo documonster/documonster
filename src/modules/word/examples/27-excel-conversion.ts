@@ -28,7 +28,7 @@ import {
   renderWordChartSvg,
   wordChartToChartModel
 } from "../excel";
-import { Document, toBuffer, readDocx } from "../index";
+import { Document, Io } from "../index";
 import type { Chart } from "../types";
 
 const outDir = path.resolve(
@@ -88,7 +88,7 @@ Worksheet.addRow(ws3, ["secret", 42]);
 // 2. Convert — default: every visible sheet, headings included
 // ---------------------------------------------------------------------------
 const docModel = excelToDocx(wb);
-fs.writeFileSync(path.join(outDir, "01-default.docx"), await toBuffer(docModel));
+fs.writeFileSync(path.join(outDir, "01-default.docx"), await Io.toBuffer(docModel));
 console.log(`  → 01-default.docx (${docModel.body.length} body items)`);
 
 // ---------------------------------------------------------------------------
@@ -100,14 +100,14 @@ const docModel2 = excelToDocx(wb, {
   includeTitlePage: true,
   includeBorders: false
 });
-fs.writeFileSync(path.join(outDir, "02-sales-only.docx"), await toBuffer(docModel2));
+fs.writeFileSync(path.join(outDir, "02-sales-only.docx"), await Io.toBuffer(docModel2));
 console.log(`  → 02-sales-only.docx`);
 
 // ---------------------------------------------------------------------------
 // 4. Cap rows and columns — useful for previewing huge workbooks
 // ---------------------------------------------------------------------------
 const docModel3 = excelToDocx(wb, { maxRows: 3, maxColumns: 3 });
-fs.writeFileSync(path.join(outDir, "03-capped.docx"), await toBuffer(docModel3));
+fs.writeFileSync(path.join(outDir, "03-capped.docx"), await Io.toBuffer(docModel3));
 console.log(`  → 03-capped.docx`);
 
 // ---------------------------------------------------------------------------
@@ -138,9 +138,9 @@ Document.addTable(
   { headerRow: true, borders: true }
 );
 
-const wordBuf = await toBuffer(Document.build(wordDoc));
+const wordBuf = await Io.toBuffer(Document.build(wordDoc));
 fs.writeFileSync(path.join(outDir, "04-source.docx"), wordBuf);
-const reread = await readDocx(wordBuf);
+const reread = await Io.read(wordBuf);
 
 const tables = extractTablesToExcel(reread);
 console.log(`  extracted ${tables.length} tables from DOCX:`);

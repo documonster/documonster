@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { splitDocument } from "../index";
+import { Io } from "../index";
 import type { DocxDocument, Paragraph, Run, BodyContent, SectionProperties } from "../types";
 
 function textRun(t: string): Run {
@@ -37,7 +37,7 @@ describe("splitDocument", () => {
   describe("by section", () => {
     it("returns single document if no section breaks", () => {
       const doc = createDoc([para("a"), para("b"), para("c")]);
-      const result = splitDocument(doc);
+      const result = Io.split(doc);
       expect(result).toHaveLength(1);
       expect(result[0].body).toEqual(doc.body);
     });
@@ -51,7 +51,7 @@ describe("splitDocument", () => {
         para("section 2 more")
       ]);
 
-      const result = splitDocument(doc, { by: "section" });
+      const result = Io.split(doc, { by: "section" });
       expect(result).toHaveLength(2);
       // First segment includes the section-break paragraph
       expect(result[0].body.length).toBe(2);
@@ -71,7 +71,7 @@ describe("splitDocument", () => {
         para("c")
       ]);
 
-      const result = splitDocument(doc, { by: "section" });
+      const result = Io.split(doc, { by: "section" });
       expect(result).toHaveLength(3);
     });
 
@@ -91,7 +91,7 @@ describe("splitDocument", () => {
         para("section 2 text")
       ]);
 
-      const result = splitDocument(doc, { by: "section" });
+      const result = Io.split(doc, { by: "section" });
       expect(result).toHaveLength(2);
 
       // Part 1's last paragraph must no longer carry a paragraph-level sectPr.
@@ -117,7 +117,7 @@ describe("splitDocument", () => {
       };
 
       const doc = createDoc([para("page 1"), breakPara, para("page 2")]);
-      const result = splitDocument(doc, { by: "pageBreak" });
+      const result = Io.split(doc, { by: "pageBreak" });
 
       expect(result).toHaveLength(2);
     });
@@ -132,7 +132,7 @@ describe("splitDocument", () => {
         children: [{ content: [{ type: "break", breakType: "page" }] } as Run]
       };
       const doc = createDoc([para("page 1"), breakOnlyPara, para("page 2")]);
-      const result = splitDocument(doc, { by: "pageBreak" });
+      const result = Io.split(doc, { by: "pageBreak" });
 
       expect(result).toHaveLength(2);
       // Part 1 keeps only "page 1"; the empty break paragraph is gone.
@@ -157,7 +157,7 @@ describe("splitDocument", () => {
         ]
       };
       const doc = createDoc([para("head"), mixedPara, para("next")]);
-      const result = splitDocument(doc, { by: "pageBreak" });
+      const result = Io.split(doc, { by: "pageBreak" });
 
       expect(result).toHaveLength(2);
       // Part 1 keeps both paragraphs; the trailing break is removed but "tail text" stays.
@@ -173,7 +173,7 @@ describe("splitDocument", () => {
         para("third")
       ]);
       // pageBreakBefore is treated as a "split after" marker on the paragraph it's on
-      const result = splitDocument(doc, { by: "pageBreak" });
+      const result = Io.split(doc, { by: "pageBreak" });
       expect(result.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -188,7 +188,7 @@ describe("splitDocument", () => {
         para("ch2 content")
       ]);
 
-      const result = splitDocument(doc, { by: "heading", headingLevel: 1 });
+      const result = Io.split(doc, { by: "heading", headingLevel: 1 });
       expect(result).toHaveLength(3);
       expect(paraText(result[0].body[0] as Paragraph)).toBe("intro");
       expect(paraText(result[1].body[0] as Paragraph)).toBe("Chapter 1");
@@ -203,7 +203,7 @@ describe("splitDocument", () => {
         para("Section B", { style: "Heading2" })
       ]);
 
-      const result = splitDocument(doc, { by: "heading", headingLevel: 2 });
+      const result = Io.split(doc, { by: "heading", headingLevel: 2 });
       expect(result).toHaveLength(3);
     });
 
@@ -211,7 +211,7 @@ describe("splitDocument", () => {
       const doc = createDoc([para("a"), para("Heading 2", { style: "Heading2" }), para("b")]);
 
       // Splitting on h1 should not find any matches
-      const result = splitDocument(doc, { by: "heading", headingLevel: 1 });
+      const result = Io.split(doc, { by: "heading", headingLevel: 1 });
       expect(result).toHaveLength(1);
     });
 
@@ -225,7 +225,7 @@ describe("splitDocument", () => {
         para("Chapter 2", { outlineLevel: 0 })
       ]);
 
-      const result = splitDocument(doc, { by: "heading", headingLevel: 1 });
+      const result = Io.split(doc, { by: "heading", headingLevel: 1 });
       expect(result).toHaveLength(3);
       expect(paraText(result[1].body[0] as Paragraph)).toBe("Chapter 1");
       expect(paraText(result[2].body[0] as Paragraph)).toBe("Chapter 2");
@@ -242,7 +242,7 @@ describe("splitDocument", () => {
       ]);
       (doc as any).styles = styles;
 
-      const result = splitDocument(doc);
+      const result = Io.split(doc);
       for (const split of result) {
         expect(split.styles).toEqual(styles);
       }
@@ -257,7 +257,7 @@ describe("splitDocument", () => {
       ]);
       (doc as any).styles = styles;
 
-      const result = splitDocument(doc, { preserveSharedParts: false });
+      const result = Io.split(doc, { preserveSharedParts: false });
       for (const split of result) {
         expect(split.styles).toBeUndefined();
       }
@@ -266,7 +266,7 @@ describe("splitDocument", () => {
 
   it("returns at least one document for empty body", () => {
     const doc = createDoc([]);
-    const result = splitDocument(doc);
+    const result = Io.split(doc);
     expect(result).toHaveLength(1);
   });
 });

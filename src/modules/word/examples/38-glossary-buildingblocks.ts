@@ -18,20 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  toBuffer,
-  createBuildingBlock,
-  createGlossaryDocument,
-  findBuildingBlock,
-  listBuildingBlocks,
-  getAutoTextEntries,
-  getQuickParts
-} from "../index";
+import { Document, Build, Glossary, Io } from "../index";
 import type { BuildingBlock, BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -43,55 +30,55 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 // 1. Build several building blocks
 // ---------------------------------------------------------------------------
-const greeting = createBuildingBlock(
+const greeting = Glossary.createBlock(
   "FormalGreeting",
   "autoText",
-  [textParagraph("Dear Sir/Madam,")],
+  [Build.textParagraph("Dear Sir/Madam,")],
   { category: "Letters", description: "Formal opening for a letter" }
 );
-const signoff = createBuildingBlock(
+const signoff = Glossary.createBlock(
   "SignOff",
   "autoText",
-  [textParagraph("Yours faithfully,"), textParagraph("(Signature)")],
+  [Build.textParagraph("Yours faithfully,"), Build.textParagraph("(Signature)")],
   { category: "Letters", description: "Closing for a formal letter" }
 );
-const disclaimer = createBuildingBlock(
+const disclaimer = Glossary.createBlock(
   "Disclaimer",
   "quickParts",
-  [paragraph([bold("Disclaimer: "), text("This document is provided as-is.")])],
+  [Build.paragraph([Build.bold("Disclaimer: "), Build.text("This document is provided as-is.")])],
   { category: "Legal" }
 );
-const cover = createBuildingBlock(
+const cover = Glossary.createBlock(
   "TitleCover",
   "coverPages",
-  [paragraph([text("REPORT TITLE")], { style: "Heading1" })],
+  [Build.paragraph([Build.text("REPORT TITLE")], { style: "Heading1" })],
   { category: "Reports" }
 );
 
 // ---------------------------------------------------------------------------
 // 2. Compose into a glossary document and query
 // ---------------------------------------------------------------------------
-const glossary = createGlossaryDocument([greeting, signoff, disclaimer, cover]);
+const glossary = Glossary.createDocument([greeting, signoff, disclaimer, cover]);
 
 console.log(
-  `  AutoText:     ${getAutoTextEntries(glossary)
+  `  AutoText:     ${Glossary.autoTextEntries(glossary)
     .map(b => b.name)
     .join(", ")}`
 );
 console.log(
-  `  Quick Parts:  ${getQuickParts(glossary)
+  `  Quick Parts:  ${Glossary.quickParts(glossary)
     .map(b => b.name)
     .join(", ")}`
 );
 console.log(
-  `  Cover pages:  ${listBuildingBlocks(glossary, "coverPages")
+  `  Cover pages:  ${Glossary.listBlocks(glossary, "coverPages")
     .map(b => b.name)
     .join(", ")}`
 );
 
-const found = findBuildingBlock(glossary, "Disclaimer");
+const found = Glossary.findBlock(glossary, "Disclaimer");
 console.log(`  findBuildingBlock("Disclaimer"): ${found?.gallery} / ${found?.category}`);
-const notFound = findBuildingBlock(glossary, "DoesNotExist");
+const notFound = Glossary.findBlock(glossary, "DoesNotExist");
 console.log(`  findBuildingBlock("DoesNotExist"): ${notFound}`);
 
 // ---------------------------------------------------------------------------
@@ -117,17 +104,17 @@ insertBlock(disclaimer);
 // content. The packager registers the glossaryDocument relationship + content
 // type automatically.
 const builtDoc = { ...Document.build(d), glossary };
-const buf = await toBuffer(builtDoc);
+const buf = await Io.toBuffer(builtDoc);
 fs.writeFileSync(path.join(outDir, "01-letter-from-blocks.docx"), buf);
 console.log(`  → 01-letter-from-blocks.docx (${buf.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // 4. Edge case: building block with rich nested content
 // ---------------------------------------------------------------------------
-const richBlock = createBuildingBlock("RichSnippet", "quickParts", [
-  paragraph([bold("Rich snippet:")], { style: "Heading2" }),
-  textParagraph("First line of the snippet."),
-  textParagraph("Second line.")
+const richBlock = Glossary.createBlock("RichSnippet", "quickParts", [
+  Build.paragraph([Build.bold("Rich snippet:")], { style: "Heading2" }),
+  Build.textParagraph("First line of the snippet."),
+  Build.textParagraph("Second line.")
 ]);
 console.log(
   `  rich block has ${richBlock.content.length} content blocks, GUID=${(richBlock.guid ?? "(none)").slice(0, 8)}…`

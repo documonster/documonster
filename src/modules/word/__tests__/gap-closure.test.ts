@@ -9,35 +9,7 @@ import { describe, it, expect } from "vitest";
 
 import { htmlToDocxBody } from "../convert/html/html-import";
 import { renderToMarkdown } from "../convert/markdown/markdown-renderer";
-import {
-  Document,
-  textParagraph,
-  paragraph,
-  text,
-  formTextField,
-  formCheckboxField,
-  formDropdownField,
-  searchText,
-  replaceText,
-  extractText,
-  mergeDocuments,
-  resolveStyle,
-  getCompatibilityMode,
-  setCompatibilityMode,
-  diffDocuments,
-  acceptAllRevisions,
-  rejectAllRevisions,
-  packageDocx,
-  readDocx,
-  toBuffer,
-  compileTemplate,
-  patchTemplate,
-  patchDocument,
-  chart,
-  heading,
-  fillTemplateEnhanced,
-  listTemplateTags
-} from "../index";
+import { Document, Build, Diff, Io, Query, Template } from "../index";
 import { readCfb } from "../security/cfb-reader";
 import { isEncryptedDocx } from "../security/encryption";
 import type { DocxDocument, Paragraph, Table, Run, BodyContent } from "../types";
@@ -50,28 +22,28 @@ describe("extractText: table cells", () => {
   it("should extract text from table cells", () => {
     const doc: DocxDocument = {
       body: [
-        textParagraph("Before table"),
+        Build.textParagraph("Before table"),
         {
           type: "table",
           rows: [
             {
               cells: [
-                { content: [textParagraph("Cell A1")] },
-                { content: [textParagraph("Cell B1")] }
+                { content: [Build.textParagraph("Cell A1")] },
+                { content: [Build.textParagraph("Cell B1")] }
               ]
             },
             {
               cells: [
-                { content: [textParagraph("Cell A2")] },
-                { content: [textParagraph("Cell B2")] }
+                { content: [Build.textParagraph("Cell A2")] },
+                { content: [Build.textParagraph("Cell B2")] }
               ]
             }
           ]
         },
-        textParagraph("After table")
+        Build.textParagraph("After table")
       ]
     };
-    const result = extractText(doc);
+    const result = Query.extractText(doc);
     expect(result).toContain("Before table");
     expect(result).toContain("Cell A1");
     expect(result).toContain("Cell B1");
@@ -92,12 +64,12 @@ describe("extractText: table cells", () => {
               cells: [
                 {
                   content: [
-                    textParagraph("Outer"),
+                    Build.textParagraph("Outer"),
                     {
                       type: "table",
                       rows: [
                         {
-                          cells: [{ content: [textParagraph("Inner")] }]
+                          cells: [{ content: [Build.textParagraph("Inner")] }]
                         }
                       ]
                     }
@@ -109,7 +81,7 @@ describe("extractText: table cells", () => {
         }
       ]
     };
-    const result = extractText(doc);
+    const result = Query.extractText(doc);
     expect(result).toContain("Outer");
     expect(result).toContain("Inner");
   });
@@ -128,17 +100,17 @@ describe("replaceText: enhanced features", () => {
           rows: [
             {
               cells: [
-                { content: [textParagraph("Hello World")] },
-                { content: [textParagraph("Foo Bar")] }
+                { content: [Build.textParagraph("Hello World")] },
+                { content: [Build.textParagraph("Foo Bar")] }
               ]
             }
           ]
         }
       ]
     };
-    const count = replaceText(doc, "Hello", "Goodbye");
+    const count = Query.replaceText(doc, "Hello", "Goodbye");
     expect(count).toBe(1);
-    const text = extractText(doc);
+    const text = Query.extractText(doc);
     expect(text).toContain("Goodbye World");
   });
 
@@ -152,30 +124,30 @@ describe("replaceText: enhanced features", () => {
       ]
     };
     const doc: DocxDocument = { body: [para] };
-    const count = replaceText(doc, "Hello", "Hi");
+    const count = Query.replaceText(doc, "Hello", "Hi");
     expect(count).toBe(1);
     // The replacement should distribute text across runs (format preservation)
-    const fullText = extractText(doc);
+    const fullText = Query.extractText(doc);
     expect(fullText).toContain("Hi");
     expect(fullText).toContain("World");
   });
 
   it("should replace in headers/footers", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Body text")],
+      body: [Build.textParagraph("Body text")],
       headers: new Map([
         [
           "rId1",
           {
             rId: "rId1",
             content: {
-              children: [textParagraph("Header: {{company}}")] as any
+              children: [Build.textParagraph("Header: {{company}}")] as any
             }
           }
         ]
       ])
     };
-    const count = replaceText(doc, "{{company}}", "Acme Corp");
+    const count = Query.replaceText(doc, "{{company}}", "Acme Corp");
     expect(count).toBe(1);
   });
 });
@@ -188,27 +160,27 @@ describe("searchText: enhanced features", () => {
   it("should find text inside tables", () => {
     const doc: DocxDocument = {
       body: [
-        textParagraph("First paragraph"),
+        Build.textParagraph("First paragraph"),
         {
           type: "table",
           rows: [
             {
-              cells: [{ content: [textParagraph("Needle in table")] }]
+              cells: [{ content: [Build.textParagraph("Needle in table")] }]
             }
           ]
         }
       ]
     };
-    const results = searchText(doc, "Needle");
+    const results = Query.searchText(doc, "Needle");
     expect(results.length).toBe(1);
     expect(results[0].match).toBe("Needle");
   });
 
   it("should search with regex", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Price is $123.45"), textParagraph("Another price $67.89")]
+      body: [Build.textParagraph("Price is $123.45"), Build.textParagraph("Another price $67.89")]
     };
-    const results = searchText(doc, /\$\d+\.\d+/);
+    const results = Query.searchText(doc, /\$\d+\.\d+/);
     expect(results.length).toBe(2);
     expect(results[0].match).toBe("$123.45");
     expect(results[1].match).toBe("$67.89");
@@ -225,7 +197,7 @@ describe("Chart reader", () => {
     Document.addParagraph(h, "Before chart");
     Document.addContent(
       h,
-      chart({
+      Build.chart({
         type: "bar",
         title: "Sales Report",
         series: [{ name: "Q1", categories: ["Jan", "Feb", "Mar"], values: [10, 20, 30] }],
@@ -233,8 +205,8 @@ describe("Chart reader", () => {
       })
     );
     Document.addParagraph(h, "After chart");
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
 
     // Should find a chart content item
     const charts = parsed.body.filter(b => b.type === "chart");
@@ -252,7 +224,7 @@ describe("Chart reader", () => {
     const h = Document.create();
     Document.addContent(
       h,
-      chart({
+      Build.chart({
         type: "pie",
         series: [
           {
@@ -264,8 +236,8 @@ describe("Chart reader", () => {
         ]
       })
     );
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     const charts = parsed.body.filter(b => b.type === "chart");
     expect(charts.length).toBe(1);
     expect((charts[0] as any).chart.type).toBe("pie");
@@ -281,8 +253,8 @@ describe("Form field builders", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([
-        formTextField({
+      Build.paragraph([
+        Build.formTextField({
           name: "FirstName",
           default: "John",
           maxLength: 50,
@@ -290,8 +262,8 @@ describe("Form field builders", () => {
         })
       ])
     );
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     // Find the field in the run content
     let foundField = false;
@@ -316,10 +288,10 @@ describe("Form field builders", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([formCheckboxField({ name: "Agree", checked: true })])
+      Build.paragraph([Build.formCheckboxField({ name: "Agree", checked: true })])
     );
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     let foundField = false;
     for (const child of para.children) {
@@ -342,16 +314,16 @@ describe("Form field builders", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([
-        formDropdownField({
+      Build.paragraph([
+        Build.formDropdownField({
           name: "Country",
           entries: ["USA", "Canada", "UK"],
           default: 1
         })
       ])
     );
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     let foundField = false;
     for (const child of para.children) {
@@ -378,35 +350,35 @@ describe("Form field builders", () => {
 describe("mergeDocuments", () => {
   it("should merge multiple documents", () => {
     const doc1: DocxDocument = {
-      body: [textParagraph("Doc 1 content")],
+      body: [Build.textParagraph("Doc 1 content")],
       styles: [{ type: "paragraph", styleId: "Heading1", name: "heading 1" }]
     };
     const doc2: DocxDocument = {
-      body: [textParagraph("Doc 2 content")],
+      body: [Build.textParagraph("Doc 2 content")],
       styles: [{ type: "paragraph", styleId: "Heading2", name: "heading 2" }]
     };
-    const merged = mergeDocuments([doc1, doc2]);
-    const text = extractText(merged);
+    const merged = Io.merge([doc1, doc2]);
+    const text = Query.extractText(merged);
     expect(text).toContain("Doc 1 content");
     expect(text).toContain("Doc 2 content");
     expect(merged.styles!.length).toBe(2);
   });
 
   it("should handle single document", () => {
-    const doc: DocxDocument = { body: [textParagraph("Only one")] };
-    const result = mergeDocuments([doc]);
+    const doc: DocxDocument = { body: [Build.textParagraph("Only one")] };
+    const result = Io.merge([doc]);
     expect(result).toBe(doc); // Should return same reference
   });
 
   it("should handle empty array", () => {
-    const result = mergeDocuments([]);
+    const result = Io.merge([]);
     expect(result.body).toEqual([]);
   });
 
   it("should mark section breaks on the preceding paragraph (no stray empty paragraph)", () => {
-    const doc1: DocxDocument = { body: [textParagraph("A")] };
-    const doc2: DocxDocument = { body: [textParagraph("B")] };
-    const merged = mergeDocuments([doc1, doc2], { sectionBreak: "continuous" });
+    const doc1: DocxDocument = { body: [Build.textParagraph("A")] };
+    const doc2: DocxDocument = { body: [Build.textParagraph("B")] };
+    const merged = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
     // A section break is carried by the sectPr of the LAST paragraph of the
     // preceding section — not by an extra empty paragraph (which would render
     // as a stray blank line / blank page in Word). So the body stays at 2
@@ -456,7 +428,7 @@ describe("resolveStyle", () => {
       }
     };
     const para = doc.body[0] as Paragraph;
-    const resolved = resolveStyle(doc, para);
+    const resolved = Query.resolveStyle(doc, para);
 
     expect(resolved.chain).toEqual(["Heading1", "Normal"]);
     // Heading1 overrides Normal's alignment
@@ -469,13 +441,13 @@ describe("resolveStyle", () => {
 
   it("should handle paragraph without style", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Plain text")],
+      body: [Build.textParagraph("Plain text")],
       docDefaults: {
         runProperties: { size: 24 }
       }
     };
     const para = doc.body[0] as Paragraph;
-    const resolved = resolveStyle(doc, para);
+    const resolved = Query.resolveStyle(doc, para);
     expect(resolved.chain).toEqual([]);
     expect((resolved.runProperties as any).size).toBe(24);
   });
@@ -488,7 +460,7 @@ describe("resolveStyle", () => {
 describe("Compatibility mode", () => {
   it("should get default mode (15) when no settings", () => {
     const doc: DocxDocument = { body: [] };
-    expect(getCompatibilityMode(doc)).toBe(15);
+    expect(Query.getCompatibilityMode(doc)).toBe(15);
   });
 
   it("should get mode from settings", () => {
@@ -500,15 +472,15 @@ describe("Compatibility mode", () => {
         ]
       }
     };
-    expect(getCompatibilityMode(doc)).toBe(14);
+    expect(Query.getCompatibilityMode(doc)).toBe(14);
   });
 
   it("should set compatibility mode", () => {
     const doc: DocxDocument = { body: [] };
-    setCompatibilityMode(doc, 12);
-    expect(getCompatibilityMode(doc)).toBe(12);
-    setCompatibilityMode(doc, 15);
-    expect(getCompatibilityMode(doc)).toBe(15);
+    Query.setCompatibilityMode(doc, 12);
+    expect(Query.getCompatibilityMode(doc)).toBe(12);
+    Query.setCompatibilityMode(doc, 15);
+    expect(Query.getCompatibilityMode(doc)).toBe(15);
   });
 });
 
@@ -521,28 +493,28 @@ describe("compileTemplate / patchTemplate", () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello {{name}}!");
     Document.addParagraph(h, "Your role is {{role}}.");
-    const templateBuf = await toBuffer(Document.build(h));
+    const templateBuf = await Io.toBuffer(Document.build(h));
 
     // Compile once
-    const compiled = await compileTemplate(templateBuf);
+    const compiled = await Io.compileTemplate(templateBuf);
 
     // Patch multiple times
-    const result1 = await patchTemplate(compiled, [
+    const result1 = await Io.patchTemplate(compiled, [
       { placeholder: "{{name}}", content: { type: "text", text: "Alice" } },
       { placeholder: "{{role}}", content: { type: "text", text: "Engineer" } }
     ]);
-    const result2 = await patchTemplate(compiled, [
+    const result2 = await Io.patchTemplate(compiled, [
       { placeholder: "{{name}}", content: { type: "text", text: "Bob" } },
       { placeholder: "{{role}}", content: { type: "text", text: "Designer" } }
     ]);
 
     // Verify both results
-    const parsed1 = await readDocx(result1);
-    const parsed2 = await readDocx(result2);
-    expect(extractText(parsed1)).toContain("Alice");
-    expect(extractText(parsed1)).toContain("Engineer");
-    expect(extractText(parsed2)).toContain("Bob");
-    expect(extractText(parsed2)).toContain("Designer");
+    const parsed1 = await Io.read(result1);
+    const parsed2 = await Io.read(result2);
+    expect(Query.extractText(parsed1)).toContain("Alice");
+    expect(Query.extractText(parsed1)).toContain("Engineer");
+    expect(Query.extractText(parsed2)).toContain("Bob");
+    expect(Query.extractText(parsed2)).toContain("Designer");
   });
 });
 
@@ -612,7 +584,7 @@ describe("htmlToDocxBody", () => {
   it("should decode HTML entities", () => {
     const blocks = htmlToDocxBody("<p>&lt;html&gt; &amp; &quot;quotes&quot;</p>");
     expect(blocks.length).toBe(1);
-    const text = extractText({ body: blocks });
+    const text = Query.extractText({ body: blocks });
     expect(text).toContain('<html> & "quotes"');
   });
 });
@@ -666,8 +638,18 @@ describe("renderToMarkdown", () => {
         {
           type: "table",
           rows: [
-            { cells: [{ content: [textParagraph("A")] }, { content: [textParagraph("B")] }] },
-            { cells: [{ content: [textParagraph("1")] }, { content: [textParagraph("2")] }] }
+            {
+              cells: [
+                { content: [Build.textParagraph("A")] },
+                { content: [Build.textParagraph("B")] }
+              ]
+            },
+            {
+              cells: [
+                { content: [Build.textParagraph("1")] },
+                { content: [Build.textParagraph("2")] }
+              ]
+            }
           ]
         }
       ]
@@ -706,34 +688,42 @@ describe("renderToMarkdown", () => {
 
 describe("diffDocuments", () => {
   it("should detect unchanged documents", () => {
-    const doc1: DocxDocument = { body: [textParagraph("Hello"), textParagraph("World")] };
-    const doc2: DocxDocument = { body: [textParagraph("Hello"), textParagraph("World")] };
-    const result = diffDocuments(doc1, doc2);
+    const doc1: DocxDocument = {
+      body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
+    };
+    const doc2: DocxDocument = {
+      body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
+    };
+    const result = Diff.documents(doc1, doc2);
     expect(result.summary.unchanged).toBe(2);
     expect(result.summary.added).toBe(0);
     expect(result.summary.deleted).toBe(0);
   });
 
   it("should detect added paragraphs", () => {
-    const doc1: DocxDocument = { body: [textParagraph("Hello")] };
-    const doc2: DocxDocument = { body: [textParagraph("Hello"), textParagraph("World")] };
-    const result = diffDocuments(doc1, doc2);
+    const doc1: DocxDocument = { body: [Build.textParagraph("Hello")] };
+    const doc2: DocxDocument = {
+      body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
+    };
+    const result = Diff.documents(doc1, doc2);
     expect(result.summary.added).toBe(1);
     expect(result.entries.some(e => e.type === "added" && e.newText === "World")).toBe(true);
   });
 
   it("should detect deleted paragraphs", () => {
-    const doc1: DocxDocument = { body: [textParagraph("Hello"), textParagraph("World")] };
-    const doc2: DocxDocument = { body: [textParagraph("Hello")] };
-    const result = diffDocuments(doc1, doc2);
+    const doc1: DocxDocument = {
+      body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
+    };
+    const doc2: DocxDocument = { body: [Build.textParagraph("Hello")] };
+    const result = Diff.documents(doc1, doc2);
     expect(result.summary.deleted).toBe(1);
     expect(result.entries.some(e => e.type === "deleted" && e.oldText === "World")).toBe(true);
   });
 
   it("should detect modifications", () => {
-    const doc1: DocxDocument = { body: [textParagraph("Hello World")] };
-    const doc2: DocxDocument = { body: [textParagraph("Hello Earth")] };
-    const result = diffDocuments(doc1, doc2);
+    const doc1: DocxDocument = { body: [Build.textParagraph("Hello World")] };
+    const doc2: DocxDocument = { body: [Build.textParagraph("Hello Earth")] };
+    const result = Diff.documents(doc1, doc2);
     // Lightly-edited single paragraph → one modification, not delete+add.
     expect(result.summary.modified).toBe(1);
     expect(result.summary.added).toBe(0);
@@ -747,21 +737,21 @@ describe("diffDocuments", () => {
     // recognise the edits.
     const doc1: DocxDocument = {
       body: [
-        textParagraph("Recipe"),
-        textParagraph("Step 1: Mix dry ingredients."),
-        textParagraph("Step 2: Add eggs."),
-        textParagraph("Step 3: Bake at 180°C for 25 minutes.")
+        Build.textParagraph("Recipe"),
+        Build.textParagraph("Step 1: Mix dry ingredients."),
+        Build.textParagraph("Step 2: Add eggs."),
+        Build.textParagraph("Step 3: Bake at 180°C for 25 minutes.")
       ]
     };
     const doc2: DocxDocument = {
       body: [
-        textParagraph("Recipe (revised)"),
-        textParagraph("Step 1: Mix dry ingredients in a large bowl."),
-        textParagraph("Step 3: Bake at 200°C for 30 minutes."),
-        textParagraph("Step 4: Cool before slicing.")
+        Build.textParagraph("Recipe (revised)"),
+        Build.textParagraph("Step 1: Mix dry ingredients in a large bowl."),
+        Build.textParagraph("Step 3: Bake at 200°C for 30 minutes."),
+        Build.textParagraph("Step 4: Cool before slicing.")
       ]
     };
-    const result = diffDocuments(doc1, doc2);
+    const result = Diff.documents(doc1, doc2);
 
     expect(result.summary.modified).toBe(3);
     expect(result.summary.deleted).toBe(1);
@@ -786,9 +776,9 @@ describe("diffDocuments", () => {
   });
 
   it("should not pair completely unrelated paragraphs as modified", () => {
-    const doc1: DocxDocument = { body: [textParagraph("The quick brown fox")] };
-    const doc2: DocxDocument = { body: [textParagraph("Lorem ipsum dolor amet")] };
-    const result = diffDocuments(doc1, doc2);
+    const doc1: DocxDocument = { body: [Build.textParagraph("The quick brown fox")] };
+    const doc2: DocxDocument = { body: [Build.textParagraph("Lorem ipsum dolor amet")] };
+    const result = Diff.documents(doc1, doc2);
     // No shared words → not a modification, but a delete + an add.
     expect(result.summary.modified).toBe(0);
     expect(result.summary.deleted).toBe(1);
@@ -829,9 +819,9 @@ describe("Full round-trip: new features", () => {
       ["C", "D"]
     ]);
     Document.addHeading(h, "Heading 1", 1);
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
-    const text = extractText(parsed);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
+    const text = Query.extractText(parsed);
     expect(text).toContain("Top-level paragraph");
     expect(text).toContain("A");
     expect(text).toContain("B");
@@ -841,32 +831,32 @@ describe("Full round-trip: new features", () => {
   it("should round-trip search/replace in table", async () => {
     const h = Document.create();
     Document.addTable(h, [["Hello World", "Foo"]]);
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
 
-    const searchResults = searchText(parsed, "Hello");
+    const searchResults = Query.searchText(parsed, "Hello");
     expect(searchResults.length).toBeGreaterThanOrEqual(1);
 
-    const count = replaceText(parsed, "Hello", "Goodbye");
+    const count = Query.replaceText(parsed, "Hello", "Goodbye");
     expect(count).toBe(1);
-    expect(extractText(parsed)).toContain("Goodbye World");
+    expect(Query.extractText(parsed)).toContain("Goodbye World");
   });
 
   it("should merge and repackage successfully", async () => {
     const h1 = Document.create();
     Document.addParagraph(h1, "Document One");
-    const buf1 = await toBuffer(Document.build(h1));
-    const doc1 = await readDocx(buf1);
+    const buf1 = await Io.toBuffer(Document.build(h1));
+    const doc1 = await Io.read(buf1);
 
     const h2 = Document.create();
     Document.addParagraph(h2, "Document Two");
-    const buf2 = await toBuffer(Document.build(h2));
-    const doc2 = await readDocx(buf2);
+    const buf2 = await Io.toBuffer(Document.build(h2));
+    const doc2 = await Io.read(buf2);
 
-    const merged = mergeDocuments([doc1, doc2]);
-    const mergedBuf = await packageDocx(merged);
-    const reParsed = await readDocx(mergedBuf);
-    const text = extractText(reParsed);
+    const merged = Io.merge([doc1, doc2]);
+    const mergedBuf = await Io.package(merged);
+    const reParsed = await Io.read(mergedBuf);
+    const text = Query.extractText(reParsed);
     expect(text).toContain("Document One");
     expect(text).toContain("Document Two");
   });
@@ -899,9 +889,9 @@ describe("Track Changes: accept/reject", () => {
         }
       ]
     };
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThanOrEqual(2);
-    const result = extractText(doc);
+    const result = Query.extractText(doc);
     expect(result).toContain("Hello ");
     expect(result).toContain("beautiful ");
     expect(result).not.toContain("ugly ");
@@ -930,9 +920,9 @@ describe("Track Changes: accept/reject", () => {
         }
       ]
     };
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThanOrEqual(2);
-    const result = extractText(doc);
+    const result = Query.extractText(doc);
     expect(result).toContain("Hello ");
     expect(result).not.toContain("beautiful ");
     expect(result).toContain("ugly ");
@@ -947,12 +937,15 @@ describe("Track Changes: accept/reject", () => {
 describe("heading builder: mixed formatting", () => {
   it("should accept array of runs for mixed formatting", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, heading([text("Normal "), text("Bold", { bold: true })], 1));
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    Document.addParagraphElement(
+      h,
+      Build.heading([Build.text("Normal "), Build.text("Bold", { bold: true })], 1)
+    );
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.style).toBe("Heading1");
-    const fullText = extractText(parsed);
+    const fullText = Query.extractText(parsed);
     expect(fullText).toContain("Normal ");
     expect(fullText).toContain("Bold");
   });
@@ -966,14 +959,14 @@ describe("patchDocument: header/footer full support", () => {
   it("should patch text in headers", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Body with {{name}}");
-    Document.setHeader(h, "default", { children: [textParagraph("Header: {{name}}")] });
-    const templateBuf = await toBuffer(Document.build(h));
+    Document.setHeader(h, "default", { children: [Build.textParagraph("Header: {{name}}")] });
+    const templateBuf = await Io.toBuffer(Document.build(h));
 
-    const result = await patchDocument(templateBuf, [
+    const result = await Io.patchDocument(templateBuf, [
       { placeholder: "{{name}}", content: { type: "text", text: "Acme Inc" } }
     ]);
-    const parsed = await readDocx(result);
-    const bodyText = extractText(parsed);
+    const parsed = await Io.read(result);
+    const bodyText = Query.extractText(parsed);
     expect(bodyText).toContain("Acme Inc");
   });
 });
@@ -993,8 +986,8 @@ describe("replaceText: surrogate pair safety", () => {
       ]
     };
     const doc: DocxDocument = { body: [para] };
-    replaceText(doc, "Hello 🌍 World", "Goodbye 🌎 Earth");
-    const result = extractText(doc);
+    Query.replaceText(doc, "Hello 🌍 World", "Goodbye 🌎 Earth");
+    const result = Query.extractText(doc);
     expect(result).toContain("Goodbye");
     expect(result).toContain("Earth");
     // Should not have broken the emoji
@@ -1016,8 +1009,8 @@ describe("docType and VBA round-trip", () => {
       docType: "macroEnabledDocument",
       vbaProject: new Uint8Array([0x01, 0x02, 0x03, 0x04])
     };
-    const buffer = await toBuffer(macroDoc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(macroDoc);
+    const parsed = await Io.read(buffer);
     expect(parsed.docType).toBe("macroEnabledDocument");
     expect(parsed.vbaProject).toBeDefined();
     expect(parsed.vbaProject![0]).toBe(0x01);
@@ -1029,16 +1022,16 @@ describe("docType and VBA round-trip", () => {
     Document.addParagraph(h, "Template doc");
     const doc = Document.build(h);
     const templateDoc: DocxDocument = { ...doc, docType: "template" };
-    const buffer = await toBuffer(templateDoc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(templateDoc);
+    const parsed = await Io.read(buffer);
     expect(parsed.docType).toBe("template");
   });
 
   it("should not set docType for standard document", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Normal doc");
-    const buffer = await toBuffer(Document.build(h));
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(Document.build(h));
+    const parsed = await Io.read(buffer);
     expect(parsed.docType).toBeUndefined();
   });
 });
@@ -1069,8 +1062,8 @@ describe("Opaque XML preservation", () => {
       ...doc,
       body: [paraWithOpaque]
     };
-    const buffer = await toBuffer(testDoc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(testDoc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as Run;
     // The opaque content should be preserved
@@ -1093,8 +1086,8 @@ describe("Opaque XML preservation", () => {
       ...doc,
       body: [paraWithOpaque]
     };
-    const buffer = await toBuffer(testDoc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.toBuffer(testDoc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const opaqueChildren = para.children.filter(
       c => "type" in c && c.type === "opaqueParagraphChild"
@@ -1112,19 +1105,19 @@ describe("Template engine: listTemplateTags", () => {
   it("should discover all template tags in a document", () => {
     const doc: DocxDocument = {
       body: [
-        textParagraph("Hello {{name}}!"),
-        textParagraph("{{#if active}}"),
-        textParagraph("Active user"),
-        textParagraph("{{/if}}"),
-        textParagraph("{{#each items}}"),
-        textParagraph("Item: {{.label}}"),
-        textParagraph("{{/each}}"),
-        textParagraph("{{%logo}}"),
-        textParagraph("{{&formatted}}"),
-        textParagraph("{{>extra}}")
+        Build.textParagraph("Hello {{name}}!"),
+        Build.textParagraph("{{#if active}}"),
+        Build.textParagraph("Active user"),
+        Build.textParagraph("{{/if}}"),
+        Build.textParagraph("{{#each items}}"),
+        Build.textParagraph("Item: {{.label}}"),
+        Build.textParagraph("{{/each}}"),
+        Build.textParagraph("{{%logo}}"),
+        Build.textParagraph("{{&formatted}}"),
+        Build.textParagraph("{{>extra}}")
       ]
     };
-    const tags = listTemplateTags(doc);
+    const tags = Template.listTemplateTags(doc);
     expect(tags.length).toBe(9);
     expect(tags[0].type).toBe("variable");
     expect(tags[0].expression).toBe("name");
@@ -1143,10 +1136,10 @@ describe("Template engine: listTemplateTags", () => {
 describe("Template engine: fillTemplateEnhanced", () => {
   it("should replace image placeholder with inline image", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("{{%logo}}")]
+      body: [Build.textParagraph("{{%logo}}")]
     };
     const imgData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header stub
-    const result = fillTemplateEnhanced(doc, {
+    const result = Template.fillTemplateEnhanced(doc, {
       logo: {
         image: { data: imgData, fileName: "logo.png", mediaType: "png" },
         width: 914400,
@@ -1164,13 +1157,13 @@ describe("Template engine: fillTemplateEnhanced", () => {
 
   it("should replace richText placeholder with formatted runs", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("{{&formatted}}")]
+      body: [Build.textParagraph("{{&formatted}}")]
     };
     const richRuns: Run[] = [
       { properties: { bold: true }, content: [{ type: "text", text: "Bold" }] },
       { content: [{ type: "text", text: " and normal" }] }
     ];
-    const result = fillTemplateEnhanced(doc, { formatted: richRuns }) as DocxDocument;
+    const result = Template.fillTemplateEnhanced(doc, { formatted: richRuns }) as DocxDocument;
     const para = result.body[0] as Paragraph;
     expect(para.children.length).toBe(2);
     expect(((para.children[0] as Run).properties as any)?.bold).toBe(true);
@@ -1178,15 +1171,19 @@ describe("Template engine: fillTemplateEnhanced", () => {
 
   it("should replace subDocument placeholder with body blocks", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Before"), textParagraph("{{>extra}}"), textParagraph("After")]
+      body: [
+        Build.textParagraph("Before"),
+        Build.textParagraph("{{>extra}}"),
+        Build.textParagraph("After")
+      ]
     };
     const subContent: BodyContent[] = [
-      textParagraph("Sub paragraph 1"),
-      textParagraph("Sub paragraph 2")
+      Build.textParagraph("Sub paragraph 1"),
+      Build.textParagraph("Sub paragraph 2")
     ];
-    const result = fillTemplateEnhanced(doc, { extra: subContent }) as DocxDocument;
+    const result = Template.fillTemplateEnhanced(doc, { extra: subContent }) as DocxDocument;
     expect(result.body.length).toBe(4); // Before + 2 sub + After
-    expect(extractText(result)).toContain("Sub paragraph 1");
-    expect(extractText(result)).toContain("Sub paragraph 2");
+    expect(Query.extractText(result)).toContain("Sub paragraph 1");
+    expect(Query.extractText(result)).toContain("Sub paragraph 2");
   });
 });

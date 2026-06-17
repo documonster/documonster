@@ -22,22 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  italic,
-  hyperlink,
-  toBuffer,
-  walkDocument,
-  walkBlocks,
-  collectParagraphs,
-  collectRuns,
-  collectTables,
-  mapDocument
-} from "../index";
+import { Document, Build, Convert, Io, Query } from "../index";
 import type { DocxDocument, DocxTransformer, DocxVisitor, BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -57,14 +42,14 @@ function makeDoc(): DocxDocument {
   Document.addParagraph(d, "Body paragraph 1.");
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Body paragraph 2 with "),
-      bold("bold"),
-      text(", "),
-      italic("italic"),
-      text(", and "),
-      hyperlink("a link", { url: "https://example.com" }),
-      text(".")
+    Build.paragraph([
+      Build.text("Body paragraph 2 with "),
+      Build.bold("bold"),
+      Build.text(", "),
+      Build.italic("italic"),
+      Build.text(", and "),
+      Build.hyperlink("a link", { url: "https://example.com" }),
+      Build.text(".")
     ])
   );
   Document.addTable(
@@ -80,15 +65,15 @@ function makeDoc(): DocxDocument {
   const fnId = Document.addFootnote(d, "Footnote text");
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Cite"),
+    Build.paragraph([
+      Build.text("Cite"),
       { properties: { vertAlign: "superscript" }, content: [{ type: "footnoteRef", id: fnId }] }
     ])
   );
 
   // Header
-  Document.setHeader(d, "default", { children: [textParagraph("Header line")] });
-  Document.setFooter(d, "default", { children: [textParagraph("Footer line")] });
+  Document.setHeader(d, "default", { children: [Build.textParagraph("Header line")] });
+  Document.setFooter(d, "default", { children: [Build.textParagraph("Footer line")] });
 
   return Document.build(d);
 }
@@ -98,12 +83,12 @@ const doc = makeDoc();
 // ---------------------------------------------------------------------------
 // 1. Convenience collectors
 // ---------------------------------------------------------------------------
-console.log(`  collectParagraphs(): ${collectParagraphs(doc).length}`);
-console.log(`  collectRuns():       ${collectRuns(doc).length}`);
-console.log(`  collectTables():     ${collectTables(doc).length}`);
+console.log(`  collectParagraphs(): ${Query.collectParagraphs(doc).length}`);
+console.log(`  collectRuns():       ${Query.collectRuns(doc).length}`);
+console.log(`  collectTables():     ${Query.collectTables(doc).length}`);
 
 // Without headers/footers/notes
-const bodyOnlyParas = collectParagraphs(doc, {
+const bodyOnlyParas = Query.collectParagraphs(doc, {
   includeHeaders: false,
   includeFooters: false,
   includeFootnotes: false
@@ -137,7 +122,7 @@ const visitor: DocxVisitor = {
     }
   }
 };
-walkDocument(doc, visitor, {
+Query.walkDocument(doc, visitor, {
   includeHeaders: true,
   includeFooters: true,
   includeFootnotes: true
@@ -148,7 +133,7 @@ console.log(`  visitor counts: ${JSON.stringify(counts)}`);
 // 3. "stop" — abort early
 // ---------------------------------------------------------------------------
 let visitedBeforeStop = 0;
-walkDocument(doc, {
+Query.walkDocument(doc, {
   enterParagraph() {
     visitedBeforeStop++;
     if (visitedBeforeStop >= 2) {
@@ -162,9 +147,13 @@ console.log(`  paragraphs visited before stop: ${visitedBeforeStop}`);
 // ---------------------------------------------------------------------------
 // 4. walkBlocks on a sub-tree (no document context required)
 // ---------------------------------------------------------------------------
-const fragment: BodyContent[] = [textParagraph("a"), textParagraph("b"), textParagraph("c")];
+const fragment: BodyContent[] = [
+  Build.textParagraph("a"),
+  Build.textParagraph("b"),
+  Build.textParagraph("c")
+];
 let visited = 0;
-walkBlocks(fragment, {
+Query.walkBlocks(fragment, {
   enterParagraph() {
     visited++;
   }
@@ -189,10 +178,10 @@ const transformer: DocxTransformer = {
     return null;
   }
 };
-const transformed = mapDocument(doc, transformer);
+const transformed = Convert.mapDocument(doc, transformer);
 
 // Verify: input was not mutated
-const originalParas = collectParagraphs(doc, { includeFootnotes: false });
+const originalParas = Query.collectParagraphs(doc, { includeFootnotes: false });
 const originalText = originalParas.map(p =>
   p.children
     .map(c =>
@@ -207,7 +196,7 @@ const originalText = originalParas.map(p =>
 );
 console.log(`  pristine input still has lowercase: ${originalText.some(t => /[a-z]/.test(t))}`);
 
-const transformedBuf = await toBuffer(transformed);
+const transformedBuf = await Io.toBuffer(transformed);
 fs.writeFileSync(path.join(outDir, "01-uppercased-no-tables.docx"), transformedBuf);
 console.log(`  → 01-uppercased-no-tables.docx (${transformedBuf.length} bytes)`);
 
@@ -228,9 +217,9 @@ const expander: DocxTransformer = {
       if (txt.startsWith("EXPAND:")) {
         // Replace this paragraph with three new ones
         return [
-          textParagraph(`A — ${txt.slice(7)}`),
-          textParagraph(`B — ${txt.slice(7)}`),
-          textParagraph(`C — ${txt.slice(7)}`)
+          Build.textParagraph(`A — ${txt.slice(7)}`),
+          Build.textParagraph(`B — ${txt.slice(7)}`),
+          Build.textParagraph(`C — ${txt.slice(7)}`)
         ];
       }
     }
@@ -242,19 +231,19 @@ Document.useDefaultStyles(seed);
 Document.addParagraph(seed, "Plain");
 Document.addParagraph(seed, "EXPAND:hello");
 Document.addParagraph(seed, "Plain again");
-const expanded = mapDocument(Document.build(seed), expander);
+const expanded = Convert.mapDocument(Document.build(seed), expander);
 console.log(`  expander: 3 → ${expanded.body.length} body items`);
-fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await toBuffer(expanded));
+fs.writeFileSync(path.join(outDir, "02-expanded.docx"), await Io.toBuffer(expanded));
 console.log(`  → 02-expanded.docx`);
 
 // ---------------------------------------------------------------------------
 // 7. Edge case: removing every paragraph still produces a valid empty doc
 // ---------------------------------------------------------------------------
-const emptied = mapDocument(doc, {
+const emptied = Convert.mapDocument(doc, {
   transformBodyContent() {
     return null;
   }
 });
 console.log(`  emptied body length: ${emptied.body.length}`);
-fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await toBuffer(emptied));
+fs.writeFileSync(path.join(outDir, "03-empty-after-map.docx"), await Io.toBuffer(emptied));
 console.log(`  → 03-empty-after-map.docx`);

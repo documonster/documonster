@@ -19,19 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  text,
-  paragraph,
-  toBuffer,
-  shapeText,
-  detectScript,
-  detectDirection,
-  createHyphenator,
-  hyphenateWord,
-  hyphenateText,
-  ENGLISH_US_PATTERNS
-} from "../index";
+import { Document, Build, Font, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -54,7 +42,7 @@ const samples: { name: string; value: string }[] = [
 console.log("  Script / direction detection:");
 for (const { name, value } of samples) {
   console.log(
-    `    ${name.padEnd(18)} script=${detectScript(value).padEnd(8)} dir=${detectDirection(value)}`
+    `    ${name.padEnd(18)} script=${Font.detectScript(value).padEnd(8)} dir=${Font.detectDirection(value)}`
   );
 }
 
@@ -62,7 +50,7 @@ for (const { name, value } of samples) {
 // 2. shapeText — visual-order clusters with Arabic joining
 // ---------------------------------------------------------------------------
 console.log("\n  Shape Arabic mixed with Latin:");
-const arabicShaped = shapeText("Order طلب 42", { direction: "ltr" });
+const arabicShaped = Font.shapeText("Order طلب 42", { direction: "ltr" });
 for (const c of arabicShaped) {
   console.log(
     `    chars=${JSON.stringify(c.chars)} visual=${JSON.stringify(c.visual)} script=${c.script} dir=${c.direction}`
@@ -71,7 +59,7 @@ for (const c of arabicShaped) {
 
 // Same with rtl base direction — the visual reordering changes
 console.log("\n  Same string, rtl base direction:");
-const arabicShapedRtl = shapeText("Order طلب 42", { direction: "rtl" });
+const arabicShapedRtl = Font.shapeText("Order طلب 42", { direction: "rtl" });
 for (const c of arabicShapedRtl) {
   console.log(`    chars=${JSON.stringify(c.chars)} visual=${JSON.stringify(c.visual)}`);
 }
@@ -79,7 +67,7 @@ for (const c of arabicShapedRtl) {
 // ---------------------------------------------------------------------------
 // 3. Hyphenation
 // ---------------------------------------------------------------------------
-const hyph = createHyphenator(ENGLISH_US_PATTERNS, { minLeft: 2, minRight: 3 });
+const hyph = Font.createHyphenator(Font.ENGLISH_US_PATTERNS, { minLeft: 2, minRight: 3 });
 
 console.log("\n  Hyphenation points:");
 const words = [
@@ -98,14 +86,14 @@ for (const w of words) {
 console.log("\n  hyphenateWord (default soft hyphen):");
 for (const w of words) {
   // Print with visible "·" instead of soft hyphen so the result is readable
-  const result = hyphenateWord(w, hyph).replace(/\u00AD/g, "·");
+  const result = Font.hyphenateWord(w, hyph).replace(/\u00AD/g, "·");
   console.log(`    ${w.padEnd(28)} → ${result}`);
 }
 
 console.log("\n  hyphenateText paragraph:");
 const sample =
   "The international association of professional consultants demonstrated extraordinary intelligence.";
-const hyphenated = hyphenateText(sample, hyph);
+const hyphenated = Font.hyphenateText(sample, hyph);
 console.log(`    visible: ${hyphenated.replace(/\u00AD/g, "·")}`);
 
 // ---------------------------------------------------------------------------
@@ -115,10 +103,10 @@ console.log(`    visible: ${hyphenated.replace(/\u00AD/g, "·")}`);
 const doc = Document.create();
 Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Hyphenated paragraph (with soft hyphens)", 1);
-Document.addParagraphElement(doc, paragraph([text(hyphenated)]));
+Document.addParagraphElement(doc, Build.paragraph([Build.text(hyphenated)]));
 Document.addHeading(doc, "Same paragraph without hyphenation", 2);
-Document.addParagraphElement(doc, paragraph([text(sample)]));
+Document.addParagraphElement(doc, Build.paragraph([Build.text(sample)]));
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "36-shaping.docx"), buf);
 console.log(`\n  → 36-shaping.docx (${buf.length} bytes)`);

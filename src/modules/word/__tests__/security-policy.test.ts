@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Document, packageDocx, readDocx, STRICT_SECURITY_POLICY } from "../index";
+import { Document, Io, Security } from "../index";
 import type { Hyperlink, Paragraph, Run } from "../types";
 
 describe("WordSecurityPolicy: allowExternalTargets", () => {
@@ -25,9 +25,9 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
 
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     const link = (parsed.body[0] as Paragraph).children.find(
       (c): c is Hyperlink => "type" in c && c.type === "hyperlink"
     )!;
@@ -46,9 +46,9 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
 
-    const parsed = await readDocx(bytes, { securityPolicy: STRICT_SECURITY_POLICY });
+    const parsed = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
     const link = (parsed.body[0] as Paragraph).children.find(
       (c): c is Hyperlink => "type" in c && c.type === "hyperlink"
     );
@@ -73,12 +73,12 @@ describe("WordSecurityPolicy: preserveVbaProject", () => {
       docType: "macroEnabledDocument" as const,
       vbaProject: new Uint8Array([0x01, 0x02, 0x03])
     };
-    const bytes = await packageDocx(docm);
+    const bytes = await Io.package(docm);
 
-    const strict = await readDocx(bytes, { securityPolicy: STRICT_SECURITY_POLICY });
+    const strict = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
     expect(strict.vbaProject).toBeUndefined();
 
-    const lenient = await readDocx(bytes);
+    const lenient = await Io.read(bytes);
     expect(lenient.vbaProject).toBeDefined();
   });
 });

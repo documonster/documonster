@@ -16,16 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { docxToPdf } from "../../pdf";
-import {
-  Document,
-  paragraph,
-  text,
-  bold,
-  toBuffer,
-  readDocx,
-  cmToEmu,
-  ptToHalfPoint
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -43,13 +34,13 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addParagraph(d, "Plain paragraph rendered through the PDF flow renderer.");
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Mixed run: "),
-      bold("bold"),
-      text(", "),
-      text("colored", { color: "C00000" }),
-      text(", "),
-      text("LARGE", { size: ptToHalfPoint(18) })
+    Build.paragraph([
+      Build.text("Mixed run: "),
+      Build.bold("bold"),
+      Build.text(", "),
+      Build.text("colored", { color: "C00000" }),
+      Build.text(", "),
+      Build.text("LARGE", { size: Units.ptToHalfPoint(18) })
     ])
   );
   Document.addBulletList(d, ["First", "Second", "Third"]);
@@ -73,7 +64,7 @@ fs.mkdirSync(outDir, { recursive: true });
     0x00, 0x00, 0x03, 0x00, 0x01, 0x5b, 0x6e, 0x5e, 0x49, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82
   ]);
-  Document.addImage(d, tinyPng, "png", cmToEmu(1.5), cmToEmu(1.5), { altText: "logo" });
+  Document.addImage(d, tinyPng, "png", Units.cmToEmu(1.5), Units.cmToEmu(1.5), { altText: "logo" });
 
   const pdfBytes = await docxToPdf(Document.build(d));
   fs.writeFileSync(path.join(outDir, "01-basic.pdf"), pdfBytes);
@@ -113,10 +104,10 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "From file", 1);
   Document.addParagraph(d, "This document was first written to disk and then re-read.");
-  const buf = await toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "03-source.docx"), buf);
 
-  const reread = await readDocx(buf);
+  const reread = await Io.read(buf);
   const pdfBytes = await docxToPdf(reread);
   fs.writeFileSync(path.join(outDir, "03-from-file.pdf"), pdfBytes);
   console.log(`  → 03-from-file.pdf (${pdfBytes.length} bytes)`);
@@ -145,8 +136,8 @@ fs.mkdirSync(outDir, { recursive: true });
         }
       ],
       legend: "b",
-      width: cmToEmu(12),
-      height: cmToEmu(7)
+      width: Units.cmToEmu(12),
+      height: Units.cmToEmu(7)
     }
   });
 

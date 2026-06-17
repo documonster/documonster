@@ -22,17 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  structuredDocumentTag,
-  checkBox,
-  resolveDataBindings,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Query } from "../index";
 import type { CustomXmlPart } from "../index";
 
 const outDir = path.resolve(
@@ -52,7 +42,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // Plain-text control
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("Click here to enter your name")], {
+    Build.structuredDocumentTag([Build.textParagraph("Click here to enter your name")], {
       tag: "name",
       alias: "Customer Name",
       plainText: true,
@@ -64,8 +54,8 @@ fs.mkdirSync(outDir, { recursive: true });
   // Rich-text control
   Document.addContent(
     doc,
-    structuredDocumentTag(
-      [paragraph([bold("Notes "), text("(rich text — bold/italic allowed)")])],
+    Build.structuredDocumentTag(
+      [Build.paragraph([Build.bold("Notes "), Build.text("(rich text — bold/italic allowed)")])],
       { tag: "notes", alias: "Notes", richText: true, appearance: "boundingBox" }
     )
   );
@@ -73,7 +63,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // Date picker
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("YYYY-MM-DD")], {
+    Build.structuredDocumentTag([Build.textParagraph("YYYY-MM-DD")], {
       tag: "deadline",
       alias: "Deadline",
       date: { dateFormat: "yyyy-MM-dd", lid: "en-US", storeMappedDataAs: "dateTime" }
@@ -83,7 +73,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // Dropdown list
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("Choose a department")], {
+    Build.structuredDocumentTag([Build.textParagraph("Choose a department")], {
       tag: "dept",
       alias: "Department",
       dropdownList: [
@@ -97,7 +87,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // Combo box (free-text + suggestions)
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("Type or pick a status")], {
+    Build.structuredDocumentTag([Build.textParagraph("Type or pick a status")], {
       tag: "status",
       alias: "Status",
       comboBox: [
@@ -112,7 +102,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // showing ☒ / ☐; the SDT properties carry the boolean state.
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("☒")], {
+    Build.structuredDocumentTag([Build.textParagraph("☒")], {
       tag: "shipped",
       alias: "Shipped",
       checkbox: { checked: true }
@@ -120,7 +110,7 @@ fs.mkdirSync(outDir, { recursive: true });
   );
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("☐")], {
+    Build.structuredDocumentTag([Build.textParagraph("☐")], {
       tag: "received",
       alias: "Received",
       checkbox: { checked: false }
@@ -132,11 +122,11 @@ fs.mkdirSync(outDir, { recursive: true });
   // very simple, non-bound check states such as inline lists. Defaults to
   // ☒/☐ glyphs from MS Gothic; pass custom glyphs via {checkedState,
   // uncheckedState} for ✓/✗ or any other character.
-  Document.addContent(doc, checkBox({ checked: true }));
-  Document.addContent(doc, checkBox({ checked: false }));
+  Document.addContent(doc, Build.checkBox({ checked: true }));
+  Document.addContent(doc, Build.checkBox({ checked: false }));
   Document.addContent(
     doc,
-    checkBox({
+    Build.checkBox({
       checked: true,
       checkedState: { value: "✓", font: "Arial" },
       uncheckedState: { value: "✗", font: "Arial" }
@@ -146,15 +136,15 @@ fs.mkdirSync(outDir, { recursive: true });
   // Repeating section: a placeholder for an arbitrary number of "Item" rows.
   // We seed it with one example item (the inner SDT must be a block-level
   // child of the outer SDT — both are wrapped via structuredDocumentTag).
-  const itemTemplate = structuredDocumentTag([textParagraph("• Item placeholder")], {
+  const itemTemplate = Build.structuredDocumentTag([Build.textParagraph("• Item placeholder")], {
     tag: "item",
     alias: "Item",
     repeatingSectionItem: true
   });
   Document.addContent(
     doc,
-    structuredDocumentTag(
-      [itemTemplate as unknown as Parameters<typeof structuredDocumentTag>[0][0]],
+    Build.structuredDocumentTag(
+      [itemTemplate as unknown as Parameters<typeof Build.structuredDocumentTag>[0][0]],
       {
         tag: "items",
         alias: "Items",
@@ -166,17 +156,20 @@ fs.mkdirSync(outDir, { recursive: true });
   // Group SDT — read-only wrapper around a paragraph
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("This text is grouped (read-only) inside an SDT.")], {
-      tag: "readonly",
-      alias: "Read-only block",
-      group: true,
-      lockContent: true,
-      lockSdt: true
-    })
+    Build.structuredDocumentTag(
+      [Build.textParagraph("This text is grouped (read-only) inside an SDT.")],
+      {
+        tag: "readonly",
+        alias: "Read-only block",
+        group: true,
+        lockContent: true,
+        lockSdt: true
+      }
+    )
   );
 
   const built = Document.build(doc);
-  const buf = await toBuffer(built);
+  const buf = await Io.toBuffer(built);
   fs.writeFileSync(path.join(outDir, "17-sdt.docx"), buf);
   console.log(`  → 17-sdt.docx (${buf.length} bytes)`);
 }
@@ -195,7 +188,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("[Customer]")], {
+    Build.structuredDocumentTag([Build.textParagraph("[Customer]")], {
       tag: "customer",
       alias: "Customer",
       dataBinding: { xpath: "/invoice/customer", storeItemId: guid }
@@ -203,7 +196,7 @@ fs.mkdirSync(outDir, { recursive: true });
   );
   Document.addContent(
     doc,
-    structuredDocumentTag([textParagraph("[Total]")], {
+    Build.structuredDocumentTag([Build.textParagraph("[Total]")], {
       tag: "total",
       alias: "Total",
       dataBinding: { xpath: "/invoice/total", storeItemId: guid }
@@ -224,14 +217,14 @@ fs.mkdirSync(outDir, { recursive: true });
   const final = { ...built, customXmlParts: [customXml] };
 
   // First save: bindings present but unresolved (Word resolves them on open)
-  const buf1 = await toBuffer(final);
+  const buf1 = await Io.toBuffer(final);
   fs.writeFileSync(path.join(outDir, "17-sdt-bound.docx"), buf1);
   console.log(`  → 17-sdt-bound.docx (${buf1.length} bytes)`);
 
   // Resolve bindings ahead of time and save again — useful for tools
   // that don't know how to update bindings on open.
-  const resolved = resolveDataBindings(final);
-  const buf2 = await toBuffer(resolved);
+  const resolved = Query.resolveDataBindings(final);
+  const buf2 = await Io.toBuffer(resolved);
   fs.writeFileSync(path.join(outDir, "17-sdt-resolved.docx"), buf2);
   console.log(`  → 17-sdt-resolved.docx (${buf2.length} bytes)`);
 }

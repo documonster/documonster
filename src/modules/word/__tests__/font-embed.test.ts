@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 
 import { deobfuscateFont } from "../font/font-obfuscation";
-import { embedFont, embedFontFamily, addEmbeddedFonts, Document } from "../index";
+import { Document, Font } from "../index";
 import type { DocxDocument } from "../types";
 
 // A minimal fake TTF font (starts with 0x00 0x01 0x00 0x00 magic)
@@ -27,7 +27,7 @@ describe("Font embedding", () => {
   describe("embedFont with obfuscation", () => {
     it("produces ODTTF output", () => {
       const original = createFakeTtfData();
-      const result = embedFont({
+      const result = Font.embed({
         name: "TestFont",
         data: original,
         style: "regular",
@@ -65,7 +65,7 @@ describe("Font embedding", () => {
 
   describe("embedFont without obfuscation", () => {
     it("produces unobfuscated font output", () => {
-      const result = embedFont({
+      const result = Font.embed({
         name: "PlainFont",
         data: createFakeTtfData(),
         style: "bold",
@@ -84,7 +84,7 @@ describe("Font embedding", () => {
 
   describe("embedFontFamily with multiple variants", () => {
     it("embeds regular and bold variants", () => {
-      const results = embedFontFamily("FamilyFont", {
+      const results = Font.embedFamily("FamilyFont", {
         regular: createFakeTtfData(80),
         bold: createFakeTtfData(90)
       });
@@ -103,13 +103,13 @@ describe("Font embedding", () => {
   describe("addEmbeddedFonts", () => {
     it("adds fonts to document model", () => {
       const doc = Document.build(Document.create());
-      const result = embedFont({
+      const result = Font.embed({
         name: "NewFont",
         data: createFakeTtfData(),
         style: "regular"
       });
 
-      const updated = addEmbeddedFonts(doc, [result]);
+      const updated = Font.addEmbedded(doc, [result]);
       expect(updated.fonts).toBeDefined();
       expect(updated.fonts!.some(f => f.name === "NewFont")).toBe(true);
       expect(updated.embeddedFonts).toBeDefined();
@@ -123,13 +123,13 @@ describe("Font embedding", () => {
         sectionProperties: {}
       } as any;
 
-      const result = embedFont({
+      const result = Font.embed({
         name: "NewFont",
         data: createFakeTtfData(),
         style: "italic"
       });
 
-      const updated = addEmbeddedFonts(doc, [result]);
+      const updated = Font.addEmbedded(doc, [result]);
       expect(updated.fonts!.length).toBe(2);
     });
   });

@@ -16,22 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  bold,
-  pageBreak,
-  pageNumberField,
-  totalPagesField,
-  tcField,
-  indexEntryField,
-  indexField,
-  noteRefField,
-  updateFields,
-  updateTableOfContents,
-  toBuffer
-} from "../index";
+import { Document, Build, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -51,69 +36,77 @@ Document.addTableOfContents(d, {
   headingStyleRange: "1-3",
   hyperlink: true,
   cachedParagraphs: [
-    paragraph([text("Chapter 1\t1")]),
-    paragraph([text("Chapter 2\t2")]),
-    paragraph([text("Index\t3")])
+    Build.paragraph([Build.text("Chapter 1\t1")]),
+    Build.paragraph([Build.text("Chapter 2\t2")]),
+    Build.paragraph([Build.text("Index\t3")])
   ]
 });
-Document.addParagraphElement(d, paragraph([pageBreak()]));
+Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
 
 // Chapter 1 with TC marker for fine-grained TOC entry control
 Document.addHeading(d, "Chapter 1 — Introduction", 1);
 Document.addParagraphElement(
   d,
-  paragraph([
-    tcField("Special: An overlooked first principle", { level: 2 }),
-    text("This chapter introduces a "),
-    text("widget", { color: "0070C0" }),
-    indexEntryField("widget"),
-    text(" — a unit of inventory.")
+  Build.paragraph([
+    Build.tcField("Special: An overlooked first principle", { level: 2 }),
+    Build.text("This chapter introduces a "),
+    Build.text("widget", { color: "0070C0" }),
+    Build.indexEntryField("widget"),
+    Build.text(" — a unit of inventory.")
   ])
 );
 const fnId = Document.addFootnote(d, "An older spelling: 'widgit'.");
 Document.addParagraphElement(
   d,
-  paragraph([
-    text("See also "),
+  Build.paragraph([
+    Build.text("See also "),
     {
       properties: { vertAlign: "superscript" },
       content: [{ type: "footnoteRef", id: fnId }]
     },
-    text(" for historical context.")
+    Build.text(" for historical context.")
   ])
 );
-Document.addParagraphElement(d, paragraph([pageBreak()]));
+Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
 
 // Chapter 2 with another XE
 Document.addHeading(d, "Chapter 2 — Components", 1);
 Document.addParagraphElement(
   d,
-  paragraph([
-    text("Each "),
-    text("gadget", { color: "0070C0" }),
-    indexEntryField("gadget"),
-    text(" is composed of multiple "),
-    text("widgets", { color: "0070C0" }),
-    indexEntryField("widget"),
-    text(".")
+  Build.paragraph([
+    Build.text("Each "),
+    Build.text("gadget", { color: "0070C0" }),
+    Build.indexEntryField("gadget"),
+    Build.text(" is composed of multiple "),
+    Build.text("widgets", { color: "0070C0" }),
+    Build.indexEntryField("widget"),
+    Build.text(".")
   ])
 );
 
 // NOTEREF cross-reference back to the footnote
 Document.addParagraphElement(
   d,
-  paragraph([text("Cross-reference back to the earlier footnote: "), noteRefField("widgit-note")])
+  Build.paragraph([
+    Build.text("Cross-reference back to the earlier footnote: "),
+    Build.noteRefField("widgit-note")
+  ])
 );
-Document.addParagraphElement(d, paragraph([pageBreak()]));
+Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
 
 // Index page
 Document.addHeading(d, "Index", 1);
-Document.addParagraphElement(d, paragraph([indexField({ columns: 2 })]));
+Document.addParagraphElement(d, Build.paragraph([Build.indexField({ columns: 2 })]));
 
 // Page X of Y in body so we can see updateFields populate the cachedValue
 Document.addParagraphElement(
   d,
-  paragraph([bold("Page "), pageNumberField(), text(" of "), totalPagesField()])
+  Build.paragraph([
+    Build.bold("Page "),
+    Build.pageNumberField(),
+    Build.text(" of "),
+    Build.totalPagesField()
+  ])
 );
 
 const built = Document.build(d);
@@ -121,21 +114,21 @@ const built = Document.build(d);
 // ---------------------------------------------------------------------------
 // 2. Save raw (cachedValues are placeholders)
 // ---------------------------------------------------------------------------
-fs.writeFileSync(path.join(outDir, "01-raw.docx"), await toBuffer(built));
+fs.writeFileSync(path.join(outDir, "01-raw.docx"), await Io.toBuffer(built));
 console.log(`  → 01-raw.docx`);
 
 // ---------------------------------------------------------------------------
 // 3. updateFields — compute all field cached values via a layout pass
 // ---------------------------------------------------------------------------
-const updated = updateFields(built);
-fs.writeFileSync(path.join(outDir, "02-updated.docx"), await toBuffer(updated));
+const updated = Io.updateFields(built);
+fs.writeFileSync(path.join(outDir, "02-updated.docx"), await Io.toBuffer(updated));
 console.log(`  → 02-updated.docx (every field cached value computed)`);
 
 // ---------------------------------------------------------------------------
 // 4. updateTableOfContents — only refresh the TOC entries
 // ---------------------------------------------------------------------------
-const tocOnly = updateTableOfContents(built);
-fs.writeFileSync(path.join(outDir, "03-toc-refreshed.docx"), await toBuffer(tocOnly));
+const tocOnly = Io.updateTableOfContents(built);
+fs.writeFileSync(path.join(outDir, "03-toc-refreshed.docx"), await Io.toBuffer(tocOnly));
 console.log(`  → 03-toc-refreshed.docx`);
 
 // ---------------------------------------------------------------------------

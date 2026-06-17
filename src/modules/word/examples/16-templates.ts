@@ -18,25 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  text,
-  bold,
-  italic,
-  fillTemplate,
-  fillTemplateEnhanced,
-  fillTemplateFromSource,
-  listTemplateTags,
-  patchDocument,
-  JsonDataSource,
-  XmlDataSource,
-  CsvDataSource,
-  cmToEmu,
-  toBuffer,
-  readDocx,
-  TemplateError,
-  isTemplateChart
-} from "../index";
+import { Document, Build, Io, Template, Units } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -102,7 +84,7 @@ function buildTemplate(): DocxDocument {
   // listTemplateTags requires the template to use simple {{...}}; placeholders
   // with leading '%' / '!' / '?' are still tags, so the listing helps when
   // designing the data shape.
-  const tags = listTemplateTags(tpl);
+  const tags = Template.listTemplateTags(tpl);
   console.log(
     `  detected ${tags.length} template tags, types: ${[...new Set(tags.map(t => t.type))].join(", ")}`
   );
@@ -117,7 +99,7 @@ function buildTemplate(): DocxDocument {
   const tax = +(subtotal * 0.1).toFixed(2);
   const grandTotal = +(subtotal + tax).toFixed(2);
 
-  const filled = fillTemplate(
+  const filled = Template.fillTemplate(
     tpl,
     {
       customer: { name: "Acme Corp" },
@@ -136,7 +118,7 @@ function buildTemplate(): DocxDocument {
     { strict: false }
   );
 
-  const buf = await toBuffer(filled);
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "01-fillTemplate.docx"), buf);
   console.log(`  → 01-fillTemplate.docx (${buf.length} bytes)`);
 }
@@ -147,7 +129,7 @@ function buildTemplate(): DocxDocument {
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
-  const result = fillTemplateEnhanced(
+  const result = Template.fillTemplateEnhanced(
     tpl,
     {
       customer: { name: "Sparse Co." },
@@ -157,16 +139,20 @@ function buildTemplate(): DocxDocument {
       // data["logo"] (not data["%logo"]).
       logo: {
         image: { data: redPng, fileName: "enh-logo.png", mediaType: "png" },
-        width: cmToEmu(2),
-        height: cmToEmu(2)
+        width: Units.cmToEmu(2),
+        height: Units.cmToEmu(2)
       },
-      greeting: [bold("Dear customer, "), italic("thank you "), text("for your business.")]
+      greeting: [
+        Build.bold("Dear customer, "),
+        Build.italic("thank you "),
+        Build.text("for your business.")
+      ]
       // intentionally missing many tags — non-strict mode keeps going
     },
     { strict: false }
   );
 
-  const buf = await toBuffer(result);
+  const buf = await Io.toBuffer(result);
   fs.writeFileSync(path.join(outDir, "02-enhanced.docx"), buf);
   console.log(`  → 02-enhanced.docx (${buf.length} bytes)`);
 }
@@ -179,12 +165,12 @@ function buildTemplate(): DocxDocument {
   Document.useDefaultStyles(d);
   Document.addHeading(d, "Hello <% who %>", 1);
   Document.addParagraph(d, "Today is <% date %>.");
-  const filled = fillTemplate(
+  const filled = Template.fillTemplate(
     Document.build(d),
     { who: "World", date: "Friday" },
     { delimiters: ["<%", "%>"] }
   );
-  const buf = await toBuffer(filled);
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "03-custom-delimiters.docx"), buf);
   console.log(`  → 03-custom-delimiters.docx (${buf.length} bytes)`);
 }
@@ -194,7 +180,7 @@ function buildTemplate(): DocxDocument {
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
-  const json = new JsonDataSource({
+  const json = new Template.JsonDataSource({
     customer: { name: "JSON Co." },
     date: "json-date",
     project: "from JSON",
@@ -204,15 +190,15 @@ function buildTemplate(): DocxDocument {
     tax: 1,
     grandTotal: 11
   });
-  const filled = fillTemplateFromSource(tpl, json, { strict: false });
-  const buf = await toBuffer(filled);
+  const filled = Template.fillTemplateFromSource(tpl, json, { strict: false });
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "04-json-source.docx"), buf);
   console.log(`  → 04-json-source.docx (${buf.length} bytes)`);
 }
 
 {
   const tpl = buildTemplate();
-  const xml = new XmlDataSource(`<?xml version="1.0"?>
+  const xml = new Template.XmlDataSource(`<?xml version="1.0"?>
     <root>
       <customer><name>XML Co.</name></customer>
       <date>xml-date</date>
@@ -222,8 +208,8 @@ function buildTemplate(): DocxDocument {
       <tax>2</tax>
       <grandTotal>22</grandTotal>
     </root>`);
-  const filled = fillTemplateFromSource(tpl, xml, { strict: false });
-  const buf = await toBuffer(filled);
+  const filled = Template.fillTemplateFromSource(tpl, xml, { strict: false });
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "05-xml-source.docx"), buf);
   console.log(`  → 05-xml-source.docx (${buf.length} bytes)`);
 }
@@ -231,12 +217,15 @@ function buildTemplate(): DocxDocument {
 {
   // CSV gives an array under a key (default "rows", here "items" via rowsKey);
   // useful for #each loops.
-  const csvSource = new CsvDataSource("name,qty,price,total\nWidget,2,12.5,25\nGadget,5,4,20\n", {
-    rowsKey: "items"
-  });
+  const csvSource = new Template.CsvDataSource(
+    "name,qty,price,total\nWidget,2,12.5,25\nGadget,5,4,20\n",
+    {
+      rowsKey: "items"
+    }
+  );
   const data = csvSource.getData();
   const tpl = buildTemplate();
-  const filled = fillTemplate(
+  const filled = Template.fillTemplate(
     tpl,
     {
       customer: { name: "CSV Co." },
@@ -250,7 +239,7 @@ function buildTemplate(): DocxDocument {
     },
     { strict: false }
   );
-  const buf = await toBuffer(filled);
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "06-csv-source.docx"), buf);
   console.log(`  → 06-csv-source.docx (${buf.length} bytes)`);
 }
@@ -274,15 +263,15 @@ function buildTemplate(): DocxDocument {
   Document.addParagraph(d, "Date: {{date}}");
   Document.addParagraph(d, "Project: {{project}}");
   const tpl = Document.build(d);
-  const tplBuf = await toBuffer(tpl);
+  const tplBuf = await Io.toBuffer(tpl);
   // Round-trip: read it back, then patch with named placeholders that
   // happen to match the {{...}} tokens. patchDocument doesn't understand
   // template syntax — we treat each `{{tag}}` as a literal string. This
   // demonstrates that the same .docx is a valid input to both workflows.
-  const round = await readDocx(tplBuf);
+  const round = await Io.read(tplBuf);
   void round; // unused; kept to demonstrate readDocx works on the template
 
-  const out = await patchDocument(tplBuf, [
+  const out = await Io.patchDocument(tplBuf, [
     { placeholder: "{{customer.name}}", content: { type: "text", text: "Patch Co." } },
     { placeholder: "{{date}}", content: { type: "text", text: "patch-date" } },
     { placeholder: "{{project}}", content: { type: "text", text: "patched project" } }
@@ -307,7 +296,7 @@ function buildTemplate(): DocxDocument {
   Document.addParagraph(d, "{{/each}}");
   Document.addParagraph(d, "{{/each}}");
 
-  const filled = fillTemplate(Document.build(d), {
+  const filled = Template.fillTemplate(Document.build(d), {
     regions: [
       {
         name: "North",
@@ -325,7 +314,7 @@ function buildTemplate(): DocxDocument {
       }
     ]
   });
-  const buf = await toBuffer(filled);
+  const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "08-nested-each.docx"), buf);
   console.log(`  → 08-nested-each.docx (${buf.length} bytes)`);
 }
@@ -336,10 +325,10 @@ function buildTemplate(): DocxDocument {
 {
   const tpl = buildTemplate();
   try {
-    fillTemplate(tpl, { customer: { name: "Strict Co." } /* most fields missing */ });
+    Template.fillTemplate(tpl, { customer: { name: "Strict Co." } /* most fields missing */ });
     console.log("  ERROR: expected TemplateError to be thrown in strict mode");
   } catch (err) {
-    if (err instanceof TemplateError) {
+    if (err instanceof Template.TemplateError) {
       console.log(
         `  TemplateError caught: placeholder=${JSON.stringify(err.placeholder)}, location=${err.location}, tagName=${err.tagName ?? "(none)"}`
       );
@@ -362,6 +351,8 @@ function buildTemplate(): DocxDocument {
     "plain string"
   ];
   for (const c of candidates) {
-    console.log(`  isTemplateChart(${JSON.stringify(c).slice(0, 50)}…) → ${isTemplateChart(c)}`);
+    console.log(
+      `  isTemplateChart(${JSON.stringify(c).slice(0, 50)}…) → ${Template.isTemplateChart(c)}`
+    );
   }
 }

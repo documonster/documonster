@@ -351,31 +351,6 @@ export {
 } from "./errors";
 
 // --- Stable API ---
-/** @stability stable */
-export {
-  inchesToTwips,
-  twipsToInches,
-  cmToTwips,
-  twipsToCm,
-  ptToTwips,
-  twipsToPt,
-  mmToTwips,
-  inchesToEmu,
-  emuToInches,
-  cmToEmu,
-  emuToCm,
-  ptToEmu,
-  pxToEmu,
-  emuToPx,
-  ptToHalfPoint,
-  halfPointToPt,
-  ptToEighthPoint,
-  eighthPointToPt,
-  lineMultiplierToSpacing,
-  spacingToLineMultiplier,
-  percentToTablePct,
-  tablePctToPercent
-} from "./units";
 
 // --- Stable API ---
 /** @stability stable */
@@ -383,171 +358,42 @@ export * as Document from "./builder/document-handle";
 /** @stability stable */
 export type { DocumentHandle } from "./builder/document-handle";
 
-/** @stability stable — Run / Field / Math / shape / chart / SDT builders */
-export {
-  // Run helpers
-  text,
-  bold,
-  italic,
-  underline,
-  strikethrough,
-  pageBreak,
-  lineBreak,
-  columnBreak,
-  tab,
-  positionalTab,
-  ruby,
-  carriageReturn,
-  noBreakHyphen,
-  softHyphen,
-  field,
-  pageNumberField,
-  totalPagesField,
-  sectionPagesField,
-  sectionField,
-  dateField,
-  sequenceField,
-  timeField,
-  authorField,
-  titleField,
-  subjectField,
-  keywordsField,
-  fileNameField,
-  fileSizeField,
-  styleRefField,
-  refField,
-  pageRefField,
-  noteRefField,
-  hyperlinkField,
-  quoteField,
-  tocField,
-  tcField,
-  indexEntryField,
-  indexField,
-  ifField,
-  includeTextField,
-  includePictureField,
-  formTextField,
-  formCheckboxField,
-  formDropdownField,
-  // CheckBox helper
-  checkBox,
-  // Math helpers
-  mathBlock,
-  mathRun,
-  mathFraction,
-  mathSqrt,
-  mathRoot,
-  mathSum,
-  mathIntegral,
-  mathProduct,
-  mathSuperScript,
-  mathSubScript,
-  mathSubSuperScript,
-  mathPreSubSuperScript,
-  mathPhantom,
-  mathGroupChar,
-  mathBorderBox,
-  mathDelimiter,
-  mathNary,
-  mathFunction,
-  mathLimit,
-  mathMatrix,
-  mathAccent,
-  mathBar,
-  mathBox,
-  mathEquationArray,
-  // Symbol helper
-  symbol,
-  // Floating image helper
-  floatingImage,
-  // Drawing shape helper
-  drawingShape,
-  // Chart helper
-  chart,
-  // SDT helper
-  structuredDocumentTag
-} from "./builder/run-builders";
+// =============================================================================
+// Domain namespaces — public value API (tree-shaken via `export * as`).
+// Functions live in `surface/*.ts`; the shared data-model types stay exported
+// flat from `./types` above. Mirrors the excel module's surface structure.
+// =============================================================================
+export * as Build from "./surface/build";
+export * as Units from "./surface/units";
+export * as Theme from "./surface/theme";
+export * as Query from "./surface/query";
+export * as Io from "./surface/io";
+export * as Template from "./surface/template";
+export * as Convert from "./surface/convert";
+export * as Font from "./surface/font";
+export * as Layout from "./surface/layout";
+export * as Security from "./surface/security";
+export * as Ole from "./surface/ole";
+export * as Vba from "./surface/vba";
+export * as Glossary from "./surface/glossary";
+export * as Styles from "./surface/styles";
+export * as Diff from "./surface/diff";
+export * as Validation from "./surface/validation";
+export * as Streaming from "./surface/streaming";
+export * as RenderContext from "./surface/render-context";
 
-/** @stability stable — paragraph / hyperlink / comment / track-changes builders */
-export {
-  paragraph,
-  textParagraph,
-  heading,
-  hyperlink,
-  bookmarkStart,
-  bookmarkEnd,
-  commentRangeStart,
-  commentRangeEnd,
-  commentReference,
-  insertedRun,
-  deletedRun,
-  movedFromRun,
-  movedToRun,
-  moveFromRangeStart,
-  moveFromRangeEnd,
-  moveToRangeStart,
-  moveToRangeEnd
-} from "./builder/paragraph-builders";
-
-/** @stability stable — table builders */
-export { border, gridBorders, cell, row, table, simpleTable } from "./builder/table-builders";
-
-/** @stability stable — theme color resolution */
-export { resolveThemeColor } from "./core/color-utils";
-
-/** @stability stable — search / queries */
-export {
-  paragraphCount,
-  countWords,
-  getHeadings,
-  findBookmark,
-  findComment,
-  listImages,
-  listTables,
-  listHyperlinks,
-  listSections,
-  tableCount,
-  extractText,
-  searchText
-} from "./query/search";
 /** @stability stable */
 export type { SearchResult, DocumentHeading, DocumentSection } from "./query/search";
 
 /** @stability stable */
-export { replaceText } from "./query/replace";
-
-/** @stability stable */
-export { mailMerge } from "./query/mail-merge";
-
-/** @stability stable */
-export { mergeDocuments } from "./query/merge";
-/** @stability stable */
 export type { MergeOptions } from "./query/merge";
 
-/** @stability stable */
-export { splitDocument } from "./query/split";
 /** @stability stable */
 export type { SplitOptions } from "./query/split";
 
 /** @stability stable */
-export {
-  acceptAllRevisions,
-  rejectAllRevisions,
-  listRevisions,
-  acceptRevision,
-  rejectRevision
-} from "./query/revisions";
-/** @stability stable */
 export type { RevisionEntry } from "./query/revisions";
 
-/** @stability stable */
-export {
-  resolveStyle,
-  resolveRunStyle,
-  resolveNumberingLevel,
-  resolveTableStyle
-} from "./query/style-resolve";
 /** @stability stable */
 export type {
   StyleResolveContext,
@@ -557,15 +403,8 @@ export type {
 } from "./query/style-resolve";
 
 /** @stability stable */
-export { getCompatibilityMode, setCompatibilityMode } from "./query/compat";
-/** @stability stable */
 export type { CompatibilityMode } from "./query/compat";
 
-/** @stability stable */
-export { resolveDataBindings } from "./query/data-binding";
-
-/** @stability stable */
-export { extractFormFields, fillFormFields } from "./query/form-fields";
 /** @stability stable */
 export type { FormFieldEntry } from "./query/form-fields";
 
@@ -574,42 +413,16 @@ export type { PatchContent, PatchOperation, PatchOptions, CompiledTemplate } fro
 
 // Incremental edit API (low-level efficient editing)
 export type { IncrementalEdit, IncrementalEditOptions } from "./incremental-edit";
-export { editDocxIncremental, listDocxParts, readDocxPart } from "./incremental-edit";
 
 // --- Stable API ---
-/** @stability stable */
-export { packageDocx } from "./writer/docx-packager";
 
-/** @stability stable */
-export { readDocx } from "./reader/docx-reader";
 /** @stability stable */
 export type { ReadDocxOptions } from "./reader/docx-reader";
 
-/** @stability stable */
-export {
-  toBuffer,
-  toBase64,
-  patchDocument,
-  compileTemplate,
-  patchTemplate,
-  fillTemplateFromBuffer,
-  toFlatOpcFromDoc
-} from "./document-io";
-
 // --- Experimental API ---
-/** @stability experimental */
-export { diffDocuments } from "./advanced/diff";
 /** @stability experimental */
 export type { DiffChangeType, DiffEntry, DiffSummary, DiffResult } from "./advanced/diff";
 
-/** @stability experimental */
-export {
-  fillTemplate,
-  fillTemplateEnhanced,
-  listTemplateTags,
-  isTemplateChart,
-  TemplateError
-} from "./template/template-engine";
 /** @stability experimental */
 export type {
   TemplateOptions,
@@ -623,18 +436,12 @@ export type {
 
 // --- Stable API ---
 /** @stability stable */
-export { parseFlatOpc, isFlatOpc, toFlatOpc } from "./convert/flat-opc";
-/** @stability stable */
 export type { FlatOpcPart } from "./convert/flat-opc";
 
 // --- Experimental API ---
 /** @stability experimental */
-export { StreamingDocxWriter, createDocxStream } from "./writer/streaming-writer";
-/** @stability experimental */
 export type { StreamingDocxOptions, StreamingProgressCallback } from "./writer/streaming-writer";
 
-/** @stability experimental */
-export { validateDocument } from "./advanced/validation";
 /** @stability experimental */
 export type {
   ValidationSeverity,
@@ -645,19 +452,9 @@ export type {
 
 // Font embedding
 /** @stability stable */
-export { embedFont, embedFontFamily, addEmbeddedFonts, subsetFont } from "./font/font-embed";
-/** @stability stable */
 export type { FontEmbedStyle, EmbedFontOptions, EmbedFontResult } from "./font/font-embed";
 
 // --- Experimental API ---
-/** @stability experimental */
-export {
-  extractOleObjects,
-  hasOleObjects,
-  getOleObjectData,
-  createOleEmbedding,
-  addOleObject
-} from "./advanced/ole-objects";
 /** @stability experimental */
 export type {
   OleObject,
@@ -668,26 +465,9 @@ export type {
 } from "./advanced/ole-objects";
 
 /** @stability experimental */
-export {
-  createBuildingBlock,
-  createGlossaryDocument,
-  findBuildingBlock,
-  listBuildingBlocks,
-  getAutoTextEntries,
-  getQuickParts
-} from "./advanced/glossary";
-/** @stability experimental */
 export type { BuildingBlockGallery, BuildingBlock, GlossaryDocument } from "./advanced/glossary";
 
 // Document protection
-/** @stability stable */
-export {
-  protectDocument,
-  unprotectDocument,
-  isDocumentProtected,
-  getProtectionState,
-  verifyProtectionPassword
-} from "./security/document-protection";
 /** @stability stable */
 export type {
   ProtectionEditType,
@@ -697,14 +477,6 @@ export type {
 } from "./security/document-protection";
 
 // Style mapping DSL
-/** @stability stable */
-export {
-  parseStyleMap,
-  createStyleMap,
-  mergeStyleMaps,
-  matchStyleMap,
-  DEFAULT_STYLE_MAP
-} from "./advanced/style-map";
 /** @stability stable */
 export type {
   MappingSourceType,
@@ -717,46 +489,16 @@ export type {
 
 // --- Experimental API ---
 /** @stability experimental */
-export {
-  hasVbaProject,
-  getVbaProjectInfo,
-  getVbaProjectData,
-  addVbaProject,
-  removeVbaProject,
-  listVbaParts
-} from "./advanced/vba-project";
-/** @stability experimental */
 export type { VbaProjectInfo } from "./advanced/vba-project";
 
 /** @stability experimental */
-export { layoutDocument } from "./layout/layout";
-/** @stability experimental */
 export type { LayoutResult, LayoutOptions } from "./layout/layout";
-/** @stability experimental */
-export { layoutDocumentFull } from "./layout/layout-full";
 /** @stability experimental */
 export type { FullLayoutOptions, PageGeometryOverride } from "./layout/layout-full";
 
 /** @stability experimental */
-export { updateFields, updateTableOfContents } from "./advanced/field-engine";
-/** @stability experimental */
 export type { FieldUpdateOptions } from "./advanced/field-engine";
 
-/** @stability experimental */
-export { ommlToMathML, mathMLToOmml } from "./advanced/math-convert";
-
-/** @stability experimental */
-export {
-  createShape,
-  createRect,
-  createRoundRect,
-  createEllipse,
-  createLine,
-  createArrow,
-  createFlowchartShape,
-  createCallout,
-  createStar
-} from "./advanced/drawing-shapes";
 /** @stability experimental */
 export type {
   StandardShapeType,
@@ -781,42 +523,16 @@ export type {
   CreateShapeOptions
 } from "./advanced/drawing-shapes";
 
-/** @stability experimental — Text shaping for complex scripts */
-export { shapeText, detectScript, detectDirection } from "./font/text-shaping";
 export type { ScriptType, BiDiDirection, ShapedCluster, ShapingOptions } from "./font/text-shaping";
 
-/** @stability experimental — Hyphenation engine */
-export {
-  createHyphenator,
-  hyphenateWord,
-  hyphenateText,
-  ENGLISH_US_PATTERNS
-} from "./font/hyphenation";
 export type { HyphenationOptions, HyphenationPatterns } from "./font/hyphenation";
 
-/** @stability experimental — Format-based search */
-export { searchByFormat, countByFormat, getUsedFormats } from "./query/format-search";
 export type { FormatCriteria, FormatSearchResult } from "./query/format-search";
 
-/** @stability experimental — ODT (OpenDocument Text) read/write */
-export { readOdt, writeOdt } from "./convert/odt/odt";
-
-/** @stability experimental — Page rendering to SVG */
-export { renderPageToSvg, renderDocumentToSvg, renderPageFromLayout } from "./layout/render-page";
 export type { RenderOptions } from "./layout/render-page";
 
-/** @stability experimental — Template data source abstraction */
-export {
-  JsonDataSource,
-  XmlDataSource,
-  CsvDataSource,
-  CompositeDataSource,
-  fillTemplateFromSource
-} from "./template/template-datasource";
 export type { DataSource } from "./template/template-datasource";
 
-/** @stability experimental — Chart data binding for templates */
-export { bindChartData } from "./template/template-chart";
 export type { ChartBinding, ChartSeriesData, ChartTemplateData } from "./template/template-chart";
 
 // NOTE: renderToMarkdown, renderToHtml, htmlToDocx, excelToDocx, markdownToDocx are NOT exported
@@ -827,44 +543,23 @@ export type { ChartBinding, ChartSeriesData, ChartTemplateData } from "./templat
 //   import { docxToPdf }        from "excelts/pdf"
 
 // --- Stable API ---
-/** @stability stable — DOCX encryption */
-export { encryptDocx } from "./security/encryption";
 export type { EncryptOptions } from "./security/encryption";
 
 // --- Security Policy ---
 /** @stability experimental */
 export type { WordSecurityPolicy } from "./security/policy";
-/** @stability experimental */
-export {
-  DEFAULT_SECURITY_POLICY,
-  STRICT_SECURITY_POLICY,
-  resolveSecurityPolicy
-} from "./security/policy";
 
 // --- Render Context (experimental) ---
 /** @stability experimental */
 export type { WordRenderContext, IdGenerators } from "./writer/render-context";
-/** @stability experimental */
-export { createRenderContext, createIdGenerators } from "./writer/render-context";
 
 // --- Document Transformer (experimental) ---
 /** @stability experimental */
 export type { DocxTransformer, MapOptions } from "./core/mapper";
 
-/** @stability experimental */
-export { mapDocument } from "./core/mapper";
-
 // --- Document Walker (experimental) ---
 /** @stability experimental */
 export type { DocxVisitor, WalkPath, WalkOptions, VisitAction } from "./core/walker";
-/** @stability experimental */
-export {
-  walkDocument,
-  walkBlocks,
-  collectParagraphs,
-  collectRuns,
-  collectTables
-} from "./core/walker";
 
 // --- Layout Model (experimental) ---
 /** @stability experimental */
@@ -905,10 +600,6 @@ export type {
   ConversionAsset,
   ResolvedFormatting
 } from "./convert/conversion-ir";
-/** @stability experimental */
-export { createConversionContext } from "./convert/conversion-ir";
-/** @stability experimental */
-export { docxToSemantic } from "./convert/docx-to-semantic";
 /** @stability experimental */
 export type { DocxToSemanticOptions } from "./convert/docx-to-semantic";
 

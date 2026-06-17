@@ -27,7 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderToHtml, htmlToDocx } from "../html";
-import { Document, toBuffer, readDocx } from "../index";
+import { Document, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -172,14 +172,14 @@ const finalDoc = {
     { numId: 2, abstractNumId: 2 }
   ]
 };
-const docxBytes = await toBuffer(finalDoc);
+const docxBytes = await Io.toBuffer(finalDoc);
 fs.writeFileSync(path.join(outDir, "25-html-imported.docx"), docxBytes);
 console.log(`  → 25-html-imported.docx (${docxBytes.length} bytes)`);
 
 // ---------------------------------------------------------------------------
 // 2. DOCX → HTML (round-trip)
 // ---------------------------------------------------------------------------
-const reread = await readDocx(docxBytes);
+const reread = await Io.read(docxBytes);
 const htmlOut = renderToHtml(reread, {
   fullDocument: true,
   includeStyles: true,

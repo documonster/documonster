@@ -4,21 +4,13 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  Document,
-  editDocxIncremental,
-  listDocxParts,
-  packageDocx,
-  readDocx,
-  readDocxPart,
-  textParagraph
-} from "../index";
+import { Document, Build, Io } from "../index";
 import type { Paragraph, Run } from "../types";
 
 async function buildDocxBuffer(text: string): Promise<Uint8Array> {
   const doc = Document.create();
-  Document.addContent(doc, textParagraph(text));
-  return packageDocx(Document.build(doc));
+  Document.addContent(doc, Build.textParagraph(text));
+  return Io.package(Document.build(doc));
 }
 
 function paraText(p: Paragraph): string {
@@ -38,7 +30,7 @@ function paraText(p: Paragraph): string {
 describe("listDocxParts", () => {
   it("lists all parts in a DOCX", async () => {
     const buffer = await buildDocxBuffer("test");
-    const parts = await listDocxParts(buffer);
+    const parts = await Io.listDocxParts(buffer);
 
     expect(parts.length).toBeGreaterThan(0);
     expect(parts).toContain("[Content_Types].xml");
@@ -50,7 +42,7 @@ describe("listDocxParts", () => {
 describe("readDocxPart", () => {
   it("reads document.xml content", async () => {
     const buffer = await buildDocxBuffer("hello world");
-    const data = await readDocxPart(buffer, "word/document.xml");
+    const data = await Io.readDocxPart(buffer, "word/document.xml");
     expect(data).toBeDefined();
     const xml = new TextDecoder().decode(data!);
     expect(xml).toContain("<?xml");
@@ -59,13 +51,13 @@ describe("readDocxPart", () => {
 
   it("returns undefined for missing part", async () => {
     const buffer = await buildDocxBuffer("test");
-    const data = await readDocxPart(buffer, "word/no-such-part.xml");
+    const data = await Io.readDocxPart(buffer, "word/no-such-part.xml");
     expect(data).toBeUndefined();
   });
 
   it("reads [Content_Types].xml", async () => {
     const buffer = await buildDocxBuffer("test");
-    const data = await readDocxPart(buffer, "[Content_Types].xml");
+    const data = await Io.readDocxPart(buffer, "[Content_Types].xml");
     expect(data).toBeDefined();
   });
 });
@@ -79,7 +71,7 @@ describe("editDocxIncremental", () => {
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 </Types>`;
-    const edited = await editDocxIncremental(buffer, [
+    const edited = await Io.editDocxIncremental(buffer, [
       {
         type: "replacePart",
         path: "[Content_Types].xml",
@@ -88,7 +80,7 @@ describe("editDocxIncremental", () => {
     ]);
 
     expect(edited).toBeInstanceOf(Uint8Array);
-    const ct = await readDocxPart(edited, "[Content_Types].xml");
+    const ct = await Io.readDocxPart(edited, "[Content_Types].xml");
     expect(new TextDecoder().decode(ct!)).toBe(newXml);
   });
 
@@ -97,46 +89,46 @@ describe("editDocxIncremental", () => {
     // Replace content types - use a minimal valid XML
     const newXml =
       '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>';
-    const edited = await editDocxIncremental(buffer, [
+    const edited = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "[Content_Types].xml", text: newXml }
     ]);
 
-    const ct = await readDocxPart(edited, "[Content_Types].xml");
+    const ct = await Io.readDocxPart(edited, "[Content_Types].xml");
     expect(new TextDecoder().decode(ct!)).toBe(newXml);
   });
 
   it("deletes a part", async () => {
     const buffer = await buildDocxBuffer("test");
-    const partsBefore = await listDocxParts(buffer);
+    const partsBefore = await Io.listDocxParts(buffer);
 
     // Add a part first by editing, then delete it
-    const withExtra = await editDocxIncremental(buffer, [
+    const withExtra = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "extra.txt", text: "hello" }
     ]);
 
-    const withExtraParts = await listDocxParts(withExtra);
+    const withExtraParts = await Io.listDocxParts(withExtra);
     expect(withExtraParts).toContain("extra.txt");
 
-    const deleted = await editDocxIncremental(withExtra, [
+    const deleted = await Io.editDocxIncremental(withExtra, [
       { type: "deletePart", path: "extra.txt" }
     ]);
 
-    const finalParts = await listDocxParts(deleted);
+    const finalParts = await Io.listDocxParts(deleted);
     expect(finalParts).not.toContain("extra.txt");
     expect(finalParts.length).toBe(partsBefore.length);
   });
 
   it("preserves unchanged parts", async () => {
     const buffer = await buildDocxBuffer("preserve me");
-    const stylesXmlBefore = await readDocxPart(buffer, "word/styles.xml");
-    const ctBefore = await readDocxPart(buffer, "[Content_Types].xml");
+    const stylesXmlBefore = await Io.readDocxPart(buffer, "word/styles.xml");
+    const ctBefore = await Io.readDocxPart(buffer, "[Content_Types].xml");
 
-    const edited = await editDocxIncremental(buffer, [
+    const edited = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "extra.txt", text: "new" }
     ]);
 
-    const stylesAfter = await readDocxPart(edited, "word/styles.xml");
-    const ctAfter = await readDocxPart(edited, "[Content_Types].xml");
+    const stylesAfter = await Io.readDocxPart(edited, "word/styles.xml");
+    const ctAfter = await Io.readDocxPart(edited, "[Content_Types].xml");
 
     if (stylesXmlBefore && stylesAfter) {
       expect(new TextDecoder().decode(stylesAfter)).toBe(new TextDecoder().decode(stylesXmlBefore));
@@ -154,11 +146,11 @@ describe("editDocxIncremental", () => {
       children: [{ content: [{ type: "text", text: "REPLACED CONTENT" }] } as Run]
     };
 
-    const edited = await editDocxIncremental(buffer, [{ type: "replaceBody", body: [newPara] }]);
+    const edited = await Io.editDocxIncremental(buffer, [{ type: "replaceBody", body: [newPara] }]);
 
     expect(edited).toBeInstanceOf(Uint8Array);
     // Verify by reading back
-    const parsed = await readDocx(edited);
+    const parsed = await Io.read(edited);
     let foundReplaced = false;
     let foundOriginal = false;
     for (const block of parsed.body) {
@@ -178,7 +170,7 @@ describe("editDocxIncremental", () => {
 
   it("supports compression level option", async () => {
     const buffer = await buildDocxBuffer("compress me");
-    const edited = await editDocxIncremental(
+    const edited = await Io.editDocxIncremental(
       buffer,
       [{ type: "replacePartText", path: "extra.txt", text: "x" }],
       { compressionLevel: 9 }
@@ -188,14 +180,14 @@ describe("editDocxIncremental", () => {
 
   it("applies multiple edits in order", async () => {
     const buffer = await buildDocxBuffer("test");
-    const edited = await editDocxIncremental(buffer, [
+    const edited = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "first.txt", text: "1" },
       { type: "replacePartText", path: "second.txt", text: "2" },
       { type: "replacePartText", path: "first.txt", text: "1-updated" }
     ]);
 
-    const first = await readDocxPart(edited, "first.txt");
-    const second = await readDocxPart(edited, "second.txt");
+    const first = await Io.readDocxPart(edited, "first.txt");
+    const second = await Io.readDocxPart(edited, "second.txt");
 
     expect(new TextDecoder().decode(first!)).toBe("1-updated");
     expect(new TextDecoder().decode(second!)).toBe("2");
@@ -208,7 +200,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     // Inject a placeholder header so we have a header part to replace.
     const seedHeader =
       '<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:hdr>';
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/header1.xml", text: seedHeader }
     ]);
 
@@ -216,11 +208,11 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
       type: "paragraph",
       children: [{ content: [{ type: "text", text: "Header replaced" }] } as Run]
     };
-    const edited = await editDocxIncremental(seeded, [
+    const edited = await Io.editDocxIncremental(seeded, [
       { type: "replaceHeader", path: "word/header1.xml", children: [newPara] }
     ]);
 
-    const headerXml = await readDocxPart(edited, "word/header1.xml");
+    const headerXml = await Io.readDocxPart(edited, "word/header1.xml");
     expect(headerXml).toBeDefined();
     const decoded = new TextDecoder().decode(headerXml!);
     expect(decoded).toContain("<w:hdr");
@@ -231,7 +223,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     const buffer = await buildDocxBuffer("body");
     const seedFooter =
       '<?xml version="1.0"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:ftr>';
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/footer1.xml", text: seedFooter }
     ]);
 
@@ -239,11 +231,11 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
       type: "paragraph",
       children: [{ content: [{ type: "text", text: "Footer replaced" }] } as Run]
     };
-    const edited = await editDocxIncremental(seeded, [
+    const edited = await Io.editDocxIncremental(seeded, [
       { type: "replaceFooter", path: "word/footer1.xml", children: [newPara] }
     ]);
 
-    const footerXml = await readDocxPart(edited, "word/footer1.xml");
+    const footerXml = await Io.readDocxPart(edited, "word/footer1.xml");
     expect(footerXml).toBeDefined();
     const decoded = new TextDecoder().decode(footerXml!);
     expect(decoded).toContain("<w:ftr");
@@ -254,7 +246,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     const buffer = await buildDocxBuffer("body");
     const seed =
       '<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:hdr>';
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/header1.xml", text: seed }
     ]);
 
@@ -275,7 +267,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     };
 
     await expect(
-      editDocxIncremental(seeded, [
+      Io.editDocxIncremental(seeded, [
         { type: "replaceHeader", path: "word/header1.xml", children: [paraWithImage] }
       ])
     ).rejects.toThrow(/inline image/);
@@ -285,7 +277,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     const buffer = await buildDocxBuffer("body");
     const seed =
       '<?xml version="1.0"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p/></w:ftr>';
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/footer1.xml", text: seed }
     ]);
 
@@ -301,7 +293,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     };
 
     await expect(
-      editDocxIncremental(seeded, [
+      Io.editDocxIncremental(seeded, [
         { type: "replaceFooter", path: "word/footer1.xml", children: [paraWithLink] }
       ])
     ).rejects.toThrow(/hyperlink/);
@@ -326,7 +318,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
     };
 
     await expect(
-      editDocxIncremental(buffer, [{ type: "replaceBody", body: [paraWithImage] }])
+      Io.editDocxIncremental(buffer, [{ type: "replaceBody", body: [paraWithImage] }])
     ).rejects.toThrow(/inline image/);
   });
 });
@@ -342,7 +334,7 @@ describe("editDocxIncremental — replaceHeader / replaceFooter", () => {
 
 describe("editDocxIncremental — replaceBody scanner robustness", () => {
   async function bodyXmlOf(buf: Uint8Array): Promise<string> {
-    const part = await readDocxPart(buf, "word/document.xml");
+    const part = await Io.readDocxPart(buf, "word/document.xml");
     return new TextDecoder().decode(part!);
   }
 
@@ -351,7 +343,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
     const original = await bodyXmlOf(buffer);
     // Inject a comment containing fake body tags BEFORE the real <w:body>.
     const stitched = original.replace("<w:body", "<!-- <w:body><w:p/></w:body> --><w:body");
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/document.xml", text: stitched }
     ]);
 
@@ -359,7 +351,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
       type: "paragraph",
       children: [{ content: [{ type: "text", text: "POST-COMMENT" }] } as Run]
     };
-    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+    const edited = await Io.editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
 
     // The decoy comment must survive untouched (proof we didn't pick the
     // fake closing tag inside the comment) and the real body must contain
@@ -374,7 +366,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
     const buffer = await buildDocxBuffer("hello");
     const original = await bodyXmlOf(buffer);
     const stitched = original.replace("<w:body", "<![CDATA[ </w:body> ]]><w:body");
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/document.xml", text: stitched }
     ]);
 
@@ -382,7 +374,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
       type: "paragraph",
       children: [{ content: [{ type: "text", text: "POST-CDATA" }] } as Run]
     };
-    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+    const edited = await Io.editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
 
     const after = await bodyXmlOf(edited);
     expect(after).toContain("<![CDATA[ </w:body> ]]>");
@@ -394,7 +386,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
     const buffer = await buildDocxBuffer("hello");
     const original = await bodyXmlOf(buffer);
     const stitched = original.replace("<w:body", "<?fake <w:body><w:p/></w:body> ?><w:body");
-    const seeded = await editDocxIncremental(buffer, [
+    const seeded = await Io.editDocxIncremental(buffer, [
       { type: "replacePartText", path: "word/document.xml", text: stitched }
     ]);
 
@@ -402,7 +394,7 @@ describe("editDocxIncremental — replaceBody scanner robustness", () => {
       type: "paragraph",
       children: [{ content: [{ type: "text", text: "POST-PI" }] } as Run]
     };
-    const edited = await editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
+    const edited = await Io.editDocxIncremental(seeded, [{ type: "replaceBody", body: [newPara] }]);
 
     const after = await bodyXmlOf(edited);
     expect(after).toContain("<?fake <w:body><w:p/></w:body> ?>");

@@ -21,34 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  pageBreak,
-  pageNumberField,
-  totalPagesField,
-  sectionPagesField,
-  sectionField,
-  dateField,
-  timeField,
-  authorField,
-  titleField,
-  subjectField,
-  keywordsField,
-  fileNameField,
-  fileSizeField,
-  styleRefField,
-  sequenceField,
-  ifField,
-  quoteField,
-  includeTextField,
-  includePictureField,
-  tocField,
-  toBuffer
-} from "../index";
+import { Document, Build, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -80,13 +53,13 @@ Document.addTableOfContents(doc, {
   // these entries when the user runs "Update Field". The exact text doesn't
   // need to match the heading text — it's just a placeholder.
   cachedParagraphs: [
-    textParagraph("1. Introduction\t1"),
-    textParagraph("2. Property fields\t2"),
-    textParagraph("3. Sequence captions\t3"),
-    textParagraph("4. Computed fields\t4")
+    Build.textParagraph("1. Introduction\t1"),
+    Build.textParagraph("2. Property fields\t2"),
+    Build.textParagraph("3. Sequence captions\t3"),
+    Build.textParagraph("4. Computed fields\t4")
   ]
 });
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 1b. tocField() run-helper — same TOC field, but as a Run inside a paragraph
@@ -95,9 +68,9 @@ Document.addParagraphElement(doc, paragraph([pageBreak()]));
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    bold("Inline TOC field: "),
-    tocField({
+  Build.paragraph([
+    Build.bold("Inline TOC field: "),
+    Build.tocField({
       headingLevels: "1-2",
       hyperlink: true,
       tabLeader: ".",
@@ -105,7 +78,7 @@ Document.addParagraphElement(
     })
   ])
 );
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 2. Heading content so the TOC has something to point at
@@ -114,19 +87,19 @@ Document.addHeading(doc, "1. Introduction", 1);
 Document.addParagraph(doc, "This document exercises every field helper.");
 Document.addParagraphElement(
   doc,
-  paragraph([
-    bold("Page count: "),
-    pageNumberField(),
-    text(" of "),
-    totalPagesField(),
-    text("  (section "),
-    sectionField(),
-    text("/page within section: "),
-    sectionPagesField(),
-    text(")")
+  Build.paragraph([
+    Build.bold("Page count: "),
+    Build.pageNumberField(),
+    Build.text(" of "),
+    Build.totalPagesField(),
+    Build.text("  (section "),
+    Build.sectionField(),
+    Build.text("/page within section: "),
+    Build.sectionPagesField(),
+    Build.text(")")
   ])
 );
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 3. Property fields
@@ -134,31 +107,36 @@ Document.addParagraphElement(doc, paragraph([pageBreak()]));
 Document.addHeading(doc, "2. Property fields", 1);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Author: "),
-    authorField(),
-    text(" | Title: "),
-    titleField(),
-    text(" | Subject: "),
-    subjectField()
+  Build.paragraph([
+    Build.text("Author: "),
+    Build.authorField(),
+    Build.text(" | Title: "),
+    Build.titleField(),
+    Build.text(" | Subject: "),
+    Build.subjectField()
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Keywords: "),
-    keywordsField(),
-    text(" | Filename: "),
-    fileNameField(),
-    text(" | Size: "),
-    fileSizeField()
+  Build.paragraph([
+    Build.text("Keywords: "),
+    Build.keywordsField(),
+    Build.text(" | Filename: "),
+    Build.fileNameField(),
+    Build.text(" | Size: "),
+    Build.fileSizeField()
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([text("Generated on: "), dateField("yyyy-MM-dd"), text("  at "), timeField("HH:mm")])
+  Build.paragraph([
+    Build.text("Generated on: "),
+    Build.dateField("yyyy-MM-dd"),
+    Build.text("  at "),
+    Build.timeField("HH:mm")
+  ])
 );
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 4. Sequence captions (Figure 1, Figure 2, …)
@@ -166,24 +144,40 @@ Document.addParagraphElement(doc, paragraph([pageBreak()]));
 Document.addHeading(doc, "3. Sequence captions", 1);
 Document.addParagraphElement(
   doc,
-  paragraph([bold("Figure "), sequenceField("Figure"), text(" — first figure")])
+  Build.paragraph([
+    Build.bold("Figure "),
+    Build.sequenceField("Figure"),
+    Build.text(" — first figure")
+  ])
 );
 Document.addParagraph(doc, "[figure 1 placeholder]");
 Document.addParagraphElement(
   doc,
-  paragraph([bold("Figure "), sequenceField("Figure"), text(" — second figure")])
+  Build.paragraph([
+    Build.bold("Figure "),
+    Build.sequenceField("Figure"),
+    Build.text(" — second figure")
+  ])
 );
 Document.addParagraph(doc, "[figure 2 placeholder]");
 
 Document.addParagraphElement(
   doc,
-  paragraph([bold("Table "), sequenceField("Table"), text(" — first table")])
+  Build.paragraph([
+    Build.bold("Table "),
+    Build.sequenceField("Table"),
+    Build.text(" — first table")
+  ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([bold("Table "), sequenceField("Table"), text(" — second table")])
+  Build.paragraph([
+    Build.bold("Table "),
+    Build.sequenceField("Table"),
+    Build.text(" — second table")
+  ])
 );
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 5. Computed fields — IF, QUOTE, STYLEREF
@@ -191,25 +185,28 @@ Document.addParagraphElement(doc, paragraph([pageBreak()]));
 Document.addHeading(doc, "4. Computed fields", 1);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("IF field — branches on a condition: "),
+  Build.paragraph([
+    Build.text("IF field — branches on a condition: "),
     // Note: nested fields inside IF (e.g. NUMPAGES) require a nested-field
     // syntax that's only recognised by Word during interactive editing. We
     // demonstrate a simple literal comparison here so the cached value the
     // writer emits is always meaningful when opened in Word for the first
     // time.
-    ifField('"a" = "a"', "(true branch shown)", "(false branch shown)", "(true branch shown)")
+    Build.ifField('"a" = "a"', "(true branch shown)", "(false branch shown)", "(true branch shown)")
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([text("QUOTE field — literal text: "), quoteField("hello world", "hello world")])
+  Build.paragraph([
+    Build.text("QUOTE field — literal text: "),
+    Build.quoteField("hello world", "hello world")
+  ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("STYLEREF — most recent Heading 1 above this run: "),
-    styleRefField("Heading1", { cachedValue: "(updates when fields refresh)" })
+  Build.paragraph([
+    Build.text("STYLEREF — most recent Heading 1 above this run: "),
+    Build.styleRefField("Heading1", { cachedValue: "(updates when fields refresh)" })
   ])
 );
 
@@ -219,19 +216,19 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Included text from another file: "),
-    includeTextField("./fragments/intro.docx", { cachedValue: "(cached: included intro)" })
+  Build.paragraph([
+    Build.text("Included text from another file: "),
+    Build.includeTextField("./fragments/intro.docx", { cachedValue: "(cached: included intro)" })
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Linked picture: "),
-    includePictureField("./images/logo.png", "(cached: external logo)")
+  Build.paragraph([
+    Build.text("Linked picture: "),
+    Build.includePictureField("./images/logo.png", "(cached: external logo)")
   ])
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "10-toc-fields.docx"), buf);
 console.log(`  → 10-toc-fields.docx (${buf.length} bytes)`);

@@ -4,18 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  patchDocument,
-  compileTemplate,
-  patchTemplate,
-  toBuffer,
-  toBase64,
-  fillTemplateFromBuffer,
-  textParagraph,
-  packageDocx,
-  readDocx,
-  Document
-} from "../index";
+import { Document, Build, Io } from "../index";
 import { applyPatchesToDocument } from "../patcher";
 import type {
   DocxDocument,
@@ -38,14 +27,14 @@ function makePara(text: string): Paragraph {
 // Create a minimal DOCX buffer for testing
 async function createTestDocx(content: string): Promise<Uint8Array> {
   const doc = Document.create();
-  Document.addContent(doc, textParagraph(content));
-  return packageDocx(Document.build(doc));
+  Document.addContent(doc, Build.textParagraph(content));
+  return Io.package(Document.build(doc));
 }
 
 describe("patchDocument", () => {
   it("replaces text placeholder", async () => {
     const buffer = await createTestDocx("Hello {{name}}!");
-    const result = await patchDocument(buffer, [
+    const result = await Io.patchDocument(buffer, [
       { placeholder: "{{name}}", content: { type: "text", text: "World" } }
     ]);
 
@@ -53,7 +42,7 @@ describe("patchDocument", () => {
     expect(result.length).toBeGreaterThan(0);
 
     // Verify by reading back
-    const doc = await readDocx(result);
+    const doc = await Io.read(result);
     let found = false;
     for (const block of doc.body) {
       if (block.type === "paragraph") {
@@ -74,16 +63,16 @@ describe("patchDocument", () => {
   it("handles multiple patches in separate paragraphs", async () => {
     // patchDocument processes one placeholder per paragraph, so use separate paragraphs
     const doc = Document.create();
-    Document.addContent(doc, textParagraph("{{first}}"));
-    Document.addContent(doc, textParagraph("{{last}}"));
-    const buffer = await packageDocx(Document.build(doc));
+    Document.addContent(doc, Build.textParagraph("{{first}}"));
+    Document.addContent(doc, Build.textParagraph("{{last}}"));
+    const buffer = await Io.package(Document.build(doc));
 
-    const result = await patchDocument(buffer, [
+    const result = await Io.patchDocument(buffer, [
       { placeholder: "{{first}}", content: { type: "text", text: "John" } },
       { placeholder: "{{last}}", content: { type: "text", text: "Doe" } }
     ]);
 
-    const parsed = await readDocx(result);
+    const parsed = await Io.read(result);
     let text = "";
     for (const block of parsed.body) {
       if (block.type === "paragraph") {
@@ -104,12 +93,12 @@ describe("patchDocument", () => {
 
   it("handles multiple text patches in same paragraph", async () => {
     const buffer = await createTestDocx("{{first}} {{last}}");
-    const result = await patchDocument(buffer, [
+    const result = await Io.patchDocument(buffer, [
       { placeholder: "{{first}}", content: { type: "text", text: "Jane" } },
       { placeholder: "{{last}}", content: { type: "text", text: "Smith" } }
     ]);
 
-    const parsed = await readDocx(result);
+    const parsed = await Io.read(result);
     let text = "";
     for (const block of parsed.body) {
       if (block.type === "paragraph") {
@@ -130,12 +119,12 @@ describe("patchDocument", () => {
 
   it("returns valid DOCX when no patches match", async () => {
     const buffer = await createTestDocx("No placeholders here");
-    const result = await patchDocument(buffer, [
+    const result = await Io.patchDocument(buffer, [
       { placeholder: "{{missing}}", content: { type: "text", text: "nope" } }
     ]);
 
     expect(result).toBeInstanceOf(Uint8Array);
-    const doc = await readDocx(result);
+    const doc = await Io.read(result);
     expect(doc.body.length).toBeGreaterThan(0);
   });
 });
@@ -143,12 +132,12 @@ describe("patchDocument", () => {
 describe("compileTemplate / patchTemplate", () => {
   it("compiles a template and patches it multiple times", async () => {
     const buffer = await createTestDocx("Dear {{name}},");
-    const template = await compileTemplate(buffer);
+    const template = await Io.compileTemplate(buffer);
 
-    const result1 = await patchTemplate(template, [
+    const result1 = await Io.patchTemplate(template, [
       { placeholder: "{{name}}", content: { type: "text", text: "Alice" } }
     ]);
-    const result2 = await patchTemplate(template, [
+    const result2 = await Io.patchTemplate(template, [
       { placeholder: "{{name}}", content: { type: "text", text: "Bob" } }
     ]);
 
@@ -156,26 +145,26 @@ describe("compileTemplate / patchTemplate", () => {
     expect(result2).toBeInstanceOf(Uint8Array);
 
     // Both should produce valid DOCX
-    const doc1 = await readDocx(result1);
-    const doc2 = await readDocx(result2);
+    const doc1 = await Io.read(result1);
+    const doc2 = await Io.read(result2);
     expect(doc1.body.length).toBeGreaterThan(0);
     expect(doc2.body.length).toBeGreaterThan(0);
   });
 
   it("does not mutate the template between patches", async () => {
     const buffer = await createTestDocx("Value: {{val}}");
-    const template = await compileTemplate(buffer);
+    const template = await Io.compileTemplate(buffer);
 
-    await patchTemplate(template, [
+    await Io.patchTemplate(template, [
       { placeholder: "{{val}}", content: { type: "text", text: "first" } }
     ]);
 
     // Second patch should still find the placeholder
-    const result = await patchTemplate(template, [
+    const result = await Io.patchTemplate(template, [
       { placeholder: "{{val}}", content: { type: "text", text: "second" } }
     ]);
 
-    const doc = await readDocx(result);
+    const doc = await Io.read(result);
     let text = "";
     for (const block of doc.body) {
       if (block.type === "paragraph") {
@@ -198,8 +187,8 @@ describe("compileTemplate / patchTemplate", () => {
 describe("toBuffer / toBase64", () => {
   it("toBuffer produces valid bytes", async () => {
     const doc = Document.create();
-    Document.addContent(doc, textParagraph("Test"));
-    const result = await toBuffer(Document.build(doc));
+    Document.addContent(doc, Build.textParagraph("Test"));
+    const result = await Io.toBuffer(Document.build(doc));
     expect(result).toBeInstanceOf(Uint8Array);
     // ZIP magic number
     expect(result[0]).toBe(0x50);
@@ -208,8 +197,8 @@ describe("toBuffer / toBase64", () => {
 
   it("toBase64 produces valid base64 string", async () => {
     const doc = Document.create();
-    Document.addContent(doc, textParagraph("Test"));
-    const result = await toBase64(Document.build(doc));
+    Document.addContent(doc, Build.textParagraph("Test"));
+    const result = await Io.toBase64(Document.build(doc));
     expect(typeof result).toBe("string");
     // Should be valid base64
     expect(() => atob(result)).not.toThrow();
@@ -219,10 +208,10 @@ describe("toBuffer / toBase64", () => {
 describe("fillTemplateFromBuffer", () => {
   it("fills template variables", async () => {
     const buffer = await createTestDocx("Name: {{name}}");
-    const result = await fillTemplateFromBuffer(buffer, { name: "Test User" });
+    const result = await Io.fillTemplateFromBuffer(buffer, { name: "Test User" });
 
     expect(result).toBeInstanceOf(Uint8Array);
-    const doc = await readDocx(result);
+    const doc = await Io.read(result);
     let text = "";
     for (const block of doc.body) {
       if (block.type === "paragraph") {

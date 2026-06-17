@@ -4,28 +4,28 @@
 
 import { describe, it, expect } from "vitest";
 
-import { isFlatOpc, toFlatOpc, parseFlatOpc, toFlatOpcFromDoc, Document } from "../index";
+import { Document, Convert, Io } from "../index";
 
 describe("Flat OPC", () => {
   describe("isFlatOpc", () => {
     it("returns true for valid Flat OPC XML", () => {
       const xml = `<?xml version="1.0" encoding="UTF-8"?><pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage"></pkg:package>`;
-      expect(isFlatOpc(xml)).toBe(true);
+      expect(Convert.isFlatOpc(xml)).toBe(true);
     });
 
     it("returns true for Uint8Array with Flat OPC content", () => {
       const xml = `<?xml version="1.0"?><pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage"></pkg:package>`;
       const bytes = new TextEncoder().encode(xml);
-      expect(isFlatOpc(bytes)).toBe(true);
+      expect(Convert.isFlatOpc(bytes)).toBe(true);
     });
 
     it("returns false for ZIP file (starts with PK)", () => {
       const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
-      expect(isFlatOpc(zip)).toBe(false);
+      expect(Convert.isFlatOpc(zip)).toBe(false);
     });
 
     it("returns false for plain text", () => {
-      expect(isFlatOpc("Hello world, this is plain text.")).toBe(false);
+      expect(Convert.isFlatOpc("Hello world, this is plain text.")).toBe(false);
     });
   });
 
@@ -47,11 +47,11 @@ describe("Flat OPC", () => {
         )
       );
 
-      const flatOpc = toFlatOpc(entries);
+      const flatOpc = Convert.toFlatOpc(entries);
       expect(typeof flatOpc).toBe("string");
       expect(flatOpc).toContain("pkg:package");
 
-      const parsed = parseFlatOpc(flatOpc);
+      const parsed = Convert.parseFlatOpc(flatOpc);
       expect(parsed.has("word/document.xml")).toBe(true);
 
       const docXml = new TextDecoder().decode(parsed.get("word/document.xml")!);
@@ -65,7 +65,7 @@ describe("Flat OPC", () => {
       Document.addParagraph(doc, "Test content");
       const built = Document.build(doc);
 
-      const flatOpc = await toFlatOpcFromDoc(built);
+      const flatOpc = await Io.toFlatOpcFromDoc(built);
       expect(typeof flatOpc).toBe("string");
       expect(flatOpc).toContain("pkg:package");
       expect(flatOpc).toContain("word/document.xml");

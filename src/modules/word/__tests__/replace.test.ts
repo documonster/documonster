@@ -4,13 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  acceptAllRevisions,
-  fillTemplate,
-  listRevisions,
-  rejectAllRevisions,
-  replaceText
-} from "../index";
+import { Query, Template } from "../index";
 import type { DocxDocument, Paragraph, Run } from "../types";
 
 // Helper to create a minimal document
@@ -50,21 +44,21 @@ function extractText(doc: DocxDocument): string {
 describe("replaceText", () => {
   it("replaces simple text in a single run", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("Hello World")] }]);
-    const count = replaceText(doc, "World", "Earth");
+    const count = Query.replaceText(doc, "World", "Earth");
     expect(count).toBe(1);
     expect(extractText(doc)).toBe("Hello Earth");
   });
 
   it("replaces multiple occurrences", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("foo bar foo baz foo")] }]);
-    const count = replaceText(doc, "foo", "x");
+    const count = Query.replaceText(doc, "foo", "x");
     expect(count).toBe(3);
     expect(extractText(doc)).toBe("x bar x baz x");
   });
 
   it("returns 0 when no match found", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("Hello World")] }]);
-    const count = replaceText(doc, "xyz", "abc");
+    const count = Query.replaceText(doc, "xyz", "abc");
     expect(count).toBe(0);
     expect(extractText(doc)).toBe("Hello World");
   });
@@ -76,21 +70,21 @@ describe("replaceText", () => {
         children: [textRun("Hel"), textRun("lo Wor"), textRun("ld")]
       }
     ]);
-    const count = replaceText(doc, "Hello World", "Hi Earth");
+    const count = Query.replaceText(doc, "Hello World", "Hi Earth");
     expect(count).toBe(1);
     expect(extractText(doc)).toBe("Hi Earth");
   });
 
   it("supports regex replacement", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("Date: 2024-01-15")] }]);
-    const count = replaceText(doc, /\d{4}-\d{2}-\d{2}/, "REDACTED");
+    const count = Query.replaceText(doc, /\d{4}-\d{2}-\d{2}/, "REDACTED");
     expect(count).toBe(1);
     expect(extractText(doc)).toBe("Date: REDACTED");
   });
 
   it("supports regex with global flag", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("a1 b2 c3")] }]);
-    const count = replaceText(doc, /\d/g, "X");
+    const count = Query.replaceText(doc, /\d/g, "X");
     expect(count).toBeGreaterThanOrEqual(1);
     expect(extractText(doc)).toBe("aX bX cX");
   });
@@ -100,7 +94,7 @@ describe("replaceText", () => {
       { type: "paragraph", children: [textRun("Hello World")] },
       { type: "paragraph", children: [textRun("Hello Again")] }
     ]);
-    const count = replaceText(doc, "Hello", "Hi");
+    const count = Query.replaceText(doc, "Hello", "Hi");
     expect(count).toBe(2);
     expect(extractText(doc)).toBe("Hi World\nHi Again");
   });
@@ -118,7 +112,7 @@ describe("replaceText", () => {
         }
       ]
     ]);
-    const count = replaceText(doc, "{{name}}", "John");
+    const count = Query.replaceText(doc, "{{name}}", "John");
     expect(count).toBe(1);
   });
 
@@ -135,7 +129,7 @@ describe("replaceText", () => {
         }
       ]
     ]);
-    const count = replaceText(doc, "{{page}}", "1");
+    const count = Query.replaceText(doc, "{{page}}", "1");
     expect(count).toBe(1);
   });
 
@@ -154,26 +148,26 @@ describe("replaceText", () => {
         ]
       } as any
     ]);
-    const count = replaceText(doc, "old", "new");
+    const count = Query.replaceText(doc, "old", "new");
     expect(count).toBe(1);
   });
 
   it("handles empty document gracefully", () => {
     const doc = createDoc([]);
-    const count = replaceText(doc, "foo", "bar");
+    const count = Query.replaceText(doc, "foo", "bar");
     expect(count).toBe(0);
   });
 
   it("handles empty string search", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("Hello")] }]);
     // Empty string should match nothing or handle gracefully
-    const count = replaceText(doc, "", "x");
+    const count = Query.replaceText(doc, "", "x");
     expect(count).toBe(0);
   });
 
   it("replaces with empty string (deletion)", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("Hello World")] }]);
-    const count = replaceText(doc, " World", "");
+    const count = Query.replaceText(doc, " World", "");
     expect(count).toBe(1);
     expect(extractText(doc)).toBe("Hello");
   });
@@ -185,21 +179,21 @@ describe("replaceText", () => {
     // regex must still replace every match (mirroring the string-mode behavior) and
     // the returned count must equal the number of replacements actually performed.
     const doc = createDoc([{ type: "paragraph", children: [textRun("a1 b2 c3 d4")] }]);
-    const count = replaceText(doc, /\d/, "X");
+    const count = Query.replaceText(doc, /\d/, "X");
     expect(count).toBe(4);
     expect(extractText(doc)).toBe("aX bX cX dX");
   });
 
   it("regex with global flag returns the exact number of matches", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("aaa bbb aaa")] }]);
-    const count = replaceText(doc, /aaa/g, "X");
+    const count = Query.replaceText(doc, /aaa/g, "X");
     expect(count).toBe(2);
     expect(extractText(doc)).toBe("X bbb X");
   });
 
   it("regex with capture groups expands $1 in replacement", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("v1.0 and v2.5 and v3.10")] }]);
-    const count = replaceText(doc, /v(\d+)\.(\d+)/g, "$1-$2");
+    const count = Query.replaceText(doc, /v(\d+)\.(\d+)/g, "$1-$2");
     expect(count).toBe(3);
     expect(extractText(doc)).toBe("1-0 and 2-5 and 3-10");
   });
@@ -212,7 +206,7 @@ describe("replaceText", () => {
         children: [textRun("foo "), textRun("ba"), textRun("r baz")]
       }
     ]);
-    const count = replaceText(doc, /foo|bar/g, "X");
+    const count = Query.replaceText(doc, /foo|bar/g, "X");
     expect(count).toBe(2);
     expect(extractText(doc)).toBe("X X baz");
   });
@@ -232,7 +226,7 @@ describe("replaceText", () => {
         ] as unknown as Paragraph["children"]
       }
     ]);
-    const count = replaceText(doc, /inserted|moved/g, "Z");
+    const count = Query.replaceText(doc, /inserted|moved/g, "Z");
     expect(count).toBe(2);
     // Inner run text was rewritten in place.
     expect((insRun.content[0] as { text: string }).text).toBe("Z ");
@@ -250,7 +244,7 @@ describe("replaceText", () => {
     } as unknown as Paragraph; // structurally typed as BodyContent for the helper
     const doc = createDoc([sdt as any]);
 
-    const count = replaceText(doc, "placeholder", "VALUE");
+    const count = Query.replaceText(doc, "placeholder", "VALUE");
     expect(count).toBe(1);
     expect((innerRun.content[0] as { text: string }).text).toBe("VALUE");
   });
@@ -265,7 +259,7 @@ describe("replaceText", () => {
     } as unknown as Paragraph;
     const doc = createDoc([sdt as any]);
 
-    const count = replaceText(doc, "foobar", "QUUX");
+    const count = Query.replaceText(doc, "foobar", "QUUX");
     expect(count).toBe(1);
     // Replacement lands in the first run; remaining run gets emptied.
     const combined =
@@ -299,7 +293,7 @@ describe("revisions inside hyperlinks (regression)", () => {
     } as unknown as Paragraph;
     const doc = createDoc([para as any]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     // Inner run was unwrapped — hyperlink now contains a Run directly.
     const newPara = doc.body[0] as any;
@@ -326,7 +320,7 @@ describe("revisions inside hyperlinks (regression)", () => {
       ]
     } as unknown as Paragraph;
     const doc = createDoc([para as any]);
-    const list = listRevisions(doc);
+    const list = Query.listRevisions(doc);
     expect(list.some(r => r.id === 99 && r.type === "delete")).toBe(true);
   });
 
@@ -349,7 +343,7 @@ describe("revisions inside hyperlinks (regression)", () => {
       ]
     } as unknown as Paragraph;
     const doc = createDoc([para as any]);
-    rejectAllRevisions(doc);
+    Query.rejectAllRevisions(doc);
     const newPara = doc.body[0] as any;
     const hl = newPara.children[0];
     expect(hl.children[0]).toBe(restored);
@@ -372,7 +366,7 @@ describe("template engine prototype pollution guard", () => {
       { type: "paragraph", children: [textRun("{{/each}}")] } as any
     ]);
     const items = JSON.parse('[{"__proto__":{"injected":"OOPS"},"name":"a"}]');
-    fillTemplate(doc, { items }, { strict: false });
+    Template.fillTemplate(doc, { items }, { strict: false });
     let allText = "";
     for (const block of doc.body) {
       if ((block as any).type === "paragraph") {
@@ -399,7 +393,7 @@ describe("template engine prototype pollution guard", () => {
     // strict:false so that an unresolved placeholder doesn't throw —
     // we want the resolver to *return undefined*, not synthesise a
     // value from Object.prototype.
-    fillTemplate(doc, {}, { strict: false });
+    Template.fillTemplate(doc, {}, { strict: false });
     let allText = "";
     for (const block of doc.body) {
       if ((block as any).type === "paragraph") {

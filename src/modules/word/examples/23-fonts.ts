@@ -24,16 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { obfuscateFont, deobfuscateFont, generateFontKey } from "../crypto";
-import {
-  Document,
-  paragraph,
-  text,
-  embedFont,
-  embedFontFamily,
-  addEmbeddedFonts,
-  subsetFont,
-  toBuffer
-} from "../index";
+import { Document, Build, Font, Io } from "../index";
 import type { FontDef } from "../index";
 
 const outDir = path.resolve(
@@ -65,20 +56,20 @@ function fakeTtf(size = 200): Uint8Array {
   Document.addParagraph(doc, "The text below uses fonts embedded inside the .docx.");
   Document.addParagraphElement(
     doc,
-    paragraph([text("Hello in Custom font.", { font: "MyCustom" })])
+    Build.paragraph([Build.text("Hello in Custom font.", { font: "MyCustom" })])
   );
   Document.addParagraphElement(
     doc,
-    paragraph([
-      text("Regular ", { font: "FamilyA" }),
-      text("Bold ", { font: "FamilyA", bold: true }),
-      text("Italic ", { font: "FamilyA", italic: true }),
-      text("BoldItalic", { font: "FamilyA", bold: true, italic: true })
+    Build.paragraph([
+      Build.text("Regular ", { font: "FamilyA" }),
+      Build.text("Bold ", { font: "FamilyA", bold: true }),
+      Build.text("Italic ", { font: "FamilyA", italic: true }),
+      Build.text("BoldItalic", { font: "FamilyA", bold: true, italic: true })
     ])
   );
 
   // Single font
-  const single = embedFont({
+  const single = Font.embed({
     name: "MyCustom",
     data: fakeTtf(),
     style: "regular",
@@ -88,7 +79,7 @@ function fakeTtf(size = 200): Uint8Array {
   });
 
   // Whole family in one call
-  const family = embedFontFamily("FamilyA", {
+  const family = Font.embedFamily("FamilyA", {
     regular: fakeTtf(180),
     bold: fakeTtf(190),
     italic: fakeTtf(195),
@@ -97,8 +88,8 @@ function fakeTtf(size = 200): Uint8Array {
 
   // Merge into the model
   const built = Document.build(doc);
-  const withFonts = addEmbeddedFonts(built, [single, ...family]);
-  const buf = await toBuffer(withFonts);
+  const withFonts = Font.addEmbedded(built, [single, ...family]);
+  const buf = await Io.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-embedded.docx"), buf);
   console.log(`  → 23-fonts-embedded.docx (${buf.length} bytes)`);
 }
@@ -111,13 +102,16 @@ function fakeTtf(size = 200): Uint8Array {
   Document.useDefaultStyles(doc);
   Document.addHeading(doc, "Subset demo", 1);
   const visibleText = "Hello, world!";
-  Document.addParagraphElement(doc, paragraph([text(visibleText, { font: "Subsetted" })]));
+  Document.addParagraphElement(
+    doc,
+    Build.paragraph([Build.text(visibleText, { font: "Subsetted" })])
+  );
 
   const fullData = fakeTtf(400);
-  const trimmed = subsetFont(fullData, visibleText);
+  const trimmed = Font.subset(fullData, visibleText);
   console.log(`  full size: ${fullData.length} bytes, subsetted size: ${trimmed.length} bytes`);
 
-  const single = embedFont({
+  const single = Font.embed({
     name: "Subsetted",
     data: trimmed,
     style: "regular",
@@ -125,8 +119,8 @@ function fakeTtf(size = 200): Uint8Array {
   });
 
   const built = Document.build(doc);
-  const withFonts = addEmbeddedFonts(built, [single]);
-  const buf = await toBuffer(withFonts);
+  const withFonts = Font.addEmbedded(built, [single]);
+  const buf = await Io.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-subset.docx"), buf);
   console.log(`  → 23-fonts-subset.docx (${buf.length} bytes)`);
 }
@@ -151,10 +145,10 @@ function fakeTtf(size = 200): Uint8Array {
   Document.addFont(doc, fontDef);
   Document.addParagraphElement(
     doc,
-    paragraph([text("Sample monospace text.", { font: "CustomMono" })])
+    Build.paragraph([Build.text("Sample monospace text.", { font: "CustomMono" })])
   );
 
-  const buf = await toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(Document.build(doc));
   fs.writeFileSync(path.join(outDir, "23-fonts-reference-only.docx"), buf);
   console.log(`  → 23-fonts-reference-only.docx (${buf.length} bytes)`);
 }

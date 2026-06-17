@@ -14,18 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  pageBreak,
-  mergeDocuments,
-  splitDocument,
-  diffDocuments,
-  toBuffer
-} from "../index";
+import { Document, Build, Diff, Io } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -60,18 +49,18 @@ const ch3 = makeChapter("Chapter 3 — Resolution", ["The hero prevails.", "Curt
 // ---------------------------------------------------------------------------
 // 1. Merge
 // ---------------------------------------------------------------------------
-const merged = mergeDocuments([ch1, ch2, ch3], { sectionBreak: "nextPage" });
-const mergedBuf = await toBuffer(merged);
+const merged = Io.merge([ch1, ch2, ch3], { sectionBreak: "nextPage" });
+const mergedBuf = await Io.toBuffer(merged);
 fs.writeFileSync(path.join(outDir, "01-merged.docx"), mergedBuf);
 console.log(`  → 01-merged.docx (${mergedBuf.length} bytes)`);
 
 // Edge: merge a single document
-const oneMerged = mergeDocuments([ch1]);
-fs.writeFileSync(path.join(outDir, "01-single-merged.docx"), await toBuffer(oneMerged));
+const oneMerged = Io.merge([ch1]);
+fs.writeFileSync(path.join(outDir, "01-single-merged.docx"), await Io.toBuffer(oneMerged));
 
 // Edge: empty merge — invalid, requires at least one doc; we guard:
 try {
-  mergeDocuments([] as unknown as DocxDocument[]);
+  Io.merge([] as unknown as DocxDocument[]);
 } catch (err) {
   console.log(`  empty merge correctly rejected: ${(err as Error).message}`);
 }
@@ -79,10 +68,10 @@ try {
 // ---------------------------------------------------------------------------
 // 2. Split — by section
 // ---------------------------------------------------------------------------
-const splits = splitDocument(merged, { by: "section" });
+const splits = Io.split(merged, { by: "section" });
 console.log(`  splitDocument(by:"section") produced ${splits.length} parts`);
 for (const [i, part] of splits.entries()) {
-  const buf = await toBuffer(part);
+  const buf = await Io.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `02-split-${i + 1}.docx`), buf);
 }
 
@@ -90,14 +79,14 @@ for (const [i, part] of splits.entries()) {
 const pageDoc = Document.create();
 Document.useDefaultStyles(pageDoc);
 Document.addParagraph(pageDoc, "Page A content.");
-Document.addParagraphElement(pageDoc, paragraph([pageBreak()]));
+Document.addParagraphElement(pageDoc, Build.paragraph([Build.pageBreak()]));
 Document.addParagraph(pageDoc, "Page B content.");
-Document.addParagraphElement(pageDoc, paragraph([pageBreak()]));
+Document.addParagraphElement(pageDoc, Build.paragraph([Build.pageBreak()]));
 Document.addParagraph(pageDoc, "Page C content.");
-const pageSplits = splitDocument(Document.build(pageDoc), { by: "pageBreak" });
+const pageSplits = Io.split(Document.build(pageDoc), { by: "pageBreak" });
 console.log(`  splitDocument(by:"pageBreak") produced ${pageSplits.length} parts`);
 for (const [i, part] of pageSplits.entries()) {
-  const buf = await toBuffer(part);
+  const buf = await Io.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `03-pages-${i + 1}.docx`), buf);
 }
 
@@ -110,13 +99,13 @@ Document.addHeading(headingDoc, "Second topic", 1);
 Document.addParagraph(headingDoc, "Second topic body.");
 Document.addHeading(headingDoc, "Third topic", 1);
 Document.addParagraph(headingDoc, "Third topic body.");
-const headingSplits = splitDocument(Document.build(headingDoc), {
+const headingSplits = Io.split(Document.build(headingDoc), {
   by: "heading",
   headingLevel: 1
 });
 console.log(`  splitDocument(by:"heading", level:1) produced ${headingSplits.length} parts`);
 for (const [i, part] of headingSplits.entries()) {
-  const buf = await toBuffer(part);
+  const buf = await Io.toBuffer(part);
   fs.writeFileSync(path.join(outDir, `04-heading-${i + 1}.docx`), buf);
 }
 
@@ -124,7 +113,7 @@ for (const [i, part] of headingSplits.entries()) {
 const tinyDoc = Document.create();
 Document.useDefaultStyles(tinyDoc);
 Document.addParagraph(tinyDoc, "single paragraph");
-const tinySplits = splitDocument(Document.build(tinyDoc), { by: "heading" });
+const tinySplits = Io.split(Document.build(tinyDoc), { by: "heading" });
 console.log(`  splitDocument(no boundary) → ${tinySplits.length} part(s)`);
 
 // ---------------------------------------------------------------------------
@@ -150,7 +139,7 @@ const newDoc = (() => {
   return Document.build(d);
 })();
 
-const diff = diffDocuments(oldDoc, newDoc);
+const diff = Diff.documents(oldDoc, newDoc);
 console.log(
   `  diffDocuments summary: +${diff.summary.added}  -${diff.summary.deleted}  ~${diff.summary.modified}`
 );
@@ -159,7 +148,7 @@ for (const change of diff.entries.slice(0, 10)) {
 }
 
 // Edge: identical docs
-const identical = diffDocuments(oldDoc, oldDoc);
+const identical = Diff.documents(oldDoc, oldDoc);
 console.log(
   `  diffDocuments identical: +${identical.summary.added}  -${identical.summary.deleted}  ~${identical.summary.modified}`
 );
@@ -170,24 +159,24 @@ Document.useDefaultStyles(redline);
 Document.addHeading(redline, "Diff summary", 1);
 Document.addParagraphElement(
   redline,
-  paragraph([
-    text(`Added: ${diff.summary.added}, `),
-    text(`Deleted: ${diff.summary.deleted}, `),
-    text(`Modified: ${diff.summary.modified}`)
+  Build.paragraph([
+    Build.text(`Added: ${diff.summary.added}, `),
+    Build.text(`Deleted: ${diff.summary.deleted}, `),
+    Build.text(`Modified: ${diff.summary.modified}`)
   ])
 );
 Document.addHeading(redline, "Old → New paragraphs", 2);
 for (const change of diff.entries) {
   Document.addParagraphElement(
     redline,
-    paragraph([bold(`[${change.type}] `), text(JSON.stringify(change))])
+    Build.paragraph([Build.bold(`[${change.type}] `), Build.text(JSON.stringify(change))])
   );
 }
 fs.writeFileSync(
   path.join(outDir, "05-diff-summary.docx"),
-  await toBuffer(Document.build(redline))
+  await Io.toBuffer(Document.build(redline))
 );
 console.log(`  → 05-diff-summary.docx`);
 
 // Quiet linter
-void textParagraph;
+void Build.textParagraph;

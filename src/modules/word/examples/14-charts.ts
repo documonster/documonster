@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, chart, cmToEmu, toBuffer } from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { ChartSeries } from "../index";
 
 const outDir = path.resolve(
@@ -41,12 +41,12 @@ const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
 Document.addHeading(doc, "1. Clustered column chart", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "column",
     title: "Quarterly revenue by region",
     legend: "b",
-    width: cmToEmu(15),
-    height: cmToEmu(8),
+    width: Units.cmToEmu(15),
+    height: Units.cmToEmu(8),
     categoryAxis: { title: "Quarter" },
     valueAxis: { title: "Revenue ($M)", min: 0 },
     series: [
@@ -79,12 +79,12 @@ Document.addContent(
 Document.addHeading(doc, "2. Stacked column", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "columnStacked",
     title: "Stacked revenue",
     legend: "r",
-    width: cmToEmu(15),
-    height: cmToEmu(8),
+    width: Units.cmToEmu(15),
+    height: Units.cmToEmu(8),
     series: [
       { name: "North", categories: QUARTERS, values: [1.2, 1.5, 1.8, 2.1], color: "4472C4" },
       { name: "South", categories: QUARTERS, values: [0.9, 1.1, 1.3, 1.5], color: "ED7D31" },
@@ -99,12 +99,12 @@ Document.addContent(
 Document.addHeading(doc, "3. Line chart with trendline", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "lineMarked",
     title: "Stock price (with linear trendline)",
     legend: "b",
-    width: cmToEmu(15),
-    height: cmToEmu(8),
+    width: Units.cmToEmu(15),
+    height: Units.cmToEmu(8),
     series: [
       {
         name: "AAPL",
@@ -130,11 +130,16 @@ const pieSeries: ChartSeries = {
 };
 Document.addContent(
   doc,
-  chart({ type: "pie", title: "Browser share", legend: "r", series: [pieSeries] })
+  Build.chart({ type: "pie", title: "Browser share", legend: "r", series: [pieSeries] })
 );
 Document.addContent(
   doc,
-  chart({ type: "doughnut", title: "Browser share (doughnut)", legend: "r", series: [pieSeries] })
+  Build.chart({
+    type: "doughnut",
+    title: "Browser share (doughnut)",
+    legend: "r",
+    series: [pieSeries]
+  })
 );
 
 // ---------------------------------------------------------------------------
@@ -143,7 +148,7 @@ Document.addContent(
 Document.addHeading(doc, "5. Area chart", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "area",
     title: "Cumulative downloads",
     legend: "b",
@@ -164,7 +169,7 @@ Document.addContent(
 Document.addHeading(doc, "6. Scatter plots", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "scatter",
     title: "Price vs sqft",
     legend: "none",
@@ -182,7 +187,7 @@ Document.addContent(
 );
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "scatterSmooth",
     title: "Smooth-line scatter",
     legend: "none",
@@ -203,7 +208,7 @@ Document.addContent(
 Document.addHeading(doc, "7. Bar chart", 2);
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "bar",
     title: "Defects by component",
     legend: "none",
@@ -227,7 +232,7 @@ Document.addHeading(doc, "Edge cases", 2);
 // Single category
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "column",
     title: "Single category",
     series: [{ name: "x", categories: ["only"], values: [42], color: "4472C4" }]
@@ -237,7 +242,7 @@ Document.addContent(
 // Negative values
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "column",
     title: "P&L (with negatives)",
     series: [{ name: "P/L", categories: QUARTERS, values: [120, -45, 30, -10], color: "C00000" }]
@@ -247,7 +252,7 @@ Document.addContent(
 // Many categories (12 months)
 Document.addContent(
   doc,
-  chart({
+  Build.chart({
     type: "line",
     title: "Monthly active users (12 categories)",
     series: [
@@ -274,6 +279,6 @@ Document.addContent(
   })
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "14-charts.docx"), buf);
 console.log(`  → 14-charts.docx (${buf.length} bytes)`);

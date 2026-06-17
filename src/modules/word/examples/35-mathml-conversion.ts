@@ -14,24 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  ruby,
-  mathBlock,
-  mathRun,
-  mathFraction,
-  mathSqrt,
-  mathSum,
-  mathSuperScript,
-  mathPhantom,
-  mathDelimiter,
-  mathMatrix,
-  ommlToMathML,
-  mathMLToOmml,
-  toBuffer
-} from "../index";
+import { Document, Build, Convert, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -48,7 +31,10 @@ Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Math extras", 1);
 Document.addContent(
   doc,
-  mathBlock([mathRun("a + b = "), mathFraction([mathRun("c")], [mathRun("d")])])
+  Build.mathBlock([
+    Build.mathRun("a + b = "),
+    Build.mathFraction([Build.mathRun("c")], [Build.mathRun("d")])
+  ])
 );
 
 // ---------------------------------------------------------------------------
@@ -61,10 +47,13 @@ Document.addContent(
 Document.addHeading(doc, "Phantom (invisible spacing)", 2);
 Document.addContent(
   doc,
-  mathBlock([
-    mathRun("|x| = "),
-    mathPhantom([mathRun("placeholder same width")], { show: false, transparent: true }),
-    mathRun(" (visible result)")
+  Build.mathBlock([
+    Build.mathRun("|x| = "),
+    Build.mathPhantom([Build.mathRun("placeholder same width")], {
+      show: false,
+      transparent: true
+    }),
+    Build.mathRun(" (visible result)")
   ])
 );
 
@@ -74,13 +63,13 @@ Document.addContent(
 Document.addHeading(doc, "Ruby (phonetic guide)", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Japanese: "),
-    ruby("漢字", "かんじ", { align: "center", language: "ja-JP" }),
-    text("、"),
-    ruby("日本語", "にほんご", { align: "center", language: "ja-JP" }),
-    text(" — Chinese pinyin: "),
-    ruby("中文", "zhōngwén", { align: "center", language: "zh-CN" })
+  Build.paragraph([
+    Build.text("Japanese: "),
+    Build.ruby("漢字", "かんじ", { align: "center", language: "ja-JP" }),
+    Build.text("、"),
+    Build.ruby("日本語", "にほんご", { align: "center", language: "ja-JP" }),
+    Build.text(" — Chinese pinyin: "),
+    Build.ruby("中文", "zhōngwén", { align: "center", language: "zh-CN" })
   ])
 );
 
@@ -88,7 +77,7 @@ Document.addParagraphElement(
 // 4. Save the doc & extract its math blocks for MathML conversion
 // ---------------------------------------------------------------------------
 const built = Document.build(doc);
-const buf = await toBuffer(built);
+const buf = await Io.toBuffer(built);
 fs.writeFileSync(path.join(outDir, "35-math-extras.docx"), buf);
 console.log(`  → 35-math-extras.docx (${buf.length} bytes)`);
 
@@ -99,7 +88,7 @@ const mathBlocks = built.body.filter(b => "type" in b && b.type === "math");
 console.log(`  ${mathBlocks.length} math blocks found`);
 mathBlocks.forEach((block, i) => {
   if ("content" in block) {
-    const mathml = ommlToMathML(block.content);
+    const mathml = Convert.ommlToMathML(block.content);
     fs.writeFileSync(path.join(outDir, `block-${i + 1}.mathml`), mathml);
     console.log(`    block ${i + 1}: ${mathml.length} chars (block-${i + 1}.mathml)`);
   }
@@ -117,13 +106,13 @@ const mathmlInput = `<math xmlns="http://www.w3.org/1998/Math/MathML">
     <msup><mi>x</mi><mn>2</mn></msup>
   </mrow>
 </math>`;
-const omml = mathMLToOmml(mathmlInput);
+const omml = Convert.mathMLToOmml(mathmlInput);
 console.log(`  mathMLToOmml: ${omml.length} OMML node(s)`);
 const docFromMathml = Document.create();
 Document.useDefaultStyles(docFromMathml);
 Document.addHeading(docFromMathml, "Imported from MathML", 1);
 Document.addMath(docFromMathml, omml);
-const buf2 = await toBuffer(Document.build(docFromMathml));
+const buf2 = await Io.toBuffer(Document.build(docFromMathml));
 fs.writeFileSync(path.join(outDir, "imported-from-mathml.docx"), buf2);
 console.log(`  → imported-from-mathml.docx (${buf2.length} bytes)`);
 
@@ -131,27 +120,32 @@ console.log(`  → imported-from-mathml.docx (${buf2.length} bytes)`);
 // 7. Build a more complex expression to see it survive both directions
 // ---------------------------------------------------------------------------
 const complex = [
-  mathSum(
-    [mathFraction([mathSuperScript([mathRun("k")], [mathRun("2")])], [mathRun("k!")])],
-    [mathRun("k=0")],
-    [mathRun("∞")]
-  ),
-  mathRun(" = "),
-  mathDelimiter(
+  Build.mathSum(
     [
-      [mathSqrt([mathRun("1 + π")])],
+      Build.mathFraction(
+        [Build.mathSuperScript([Build.mathRun("k")], [Build.mathRun("2")])],
+        [Build.mathRun("k!")]
+      )
+    ],
+    [Build.mathRun("k=0")],
+    [Build.mathRun("∞")]
+  ),
+  Build.mathRun(" = "),
+  Build.mathDelimiter(
+    [
+      [Build.mathSqrt([Build.mathRun("1 + π")])],
       [
-        mathMatrix([
-          [[mathRun("1")], [mathRun("0")]],
-          [[mathRun("0")], [mathRun("1")]]
+        Build.mathMatrix([
+          [[Build.mathRun("1")], [Build.mathRun("0")]],
+          [[Build.mathRun("0")], [Build.mathRun("1")]]
         ])
       ]
     ],
     { beginChar: "(", endChar: ")", separatorChar: "|" }
   )
 ];
-const complexMl = ommlToMathML(complex);
-const roundTrip = mathMLToOmml(complexMl);
+const complexMl = Convert.ommlToMathML(complex);
+const roundTrip = Convert.mathMLToOmml(complexMl);
 fs.writeFileSync(path.join(outDir, "complex.mathml"), complexMl);
 console.log(
   `  complex round-trip: original=${complex.length} nodes → MathML=${complexMl.length} chars → OMML=${roundTrip.length} nodes`

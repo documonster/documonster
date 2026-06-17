@@ -21,17 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  toBuffer,
-  readDocx,
-  DEFAULT_SECURITY_POLICY,
-  STRICT_SECURITY_POLICY,
-  resolveSecurityPolicy,
-  createRenderContext,
-  createIdGenerators,
-  isDocxError
-} from "../index";
+import { Document, isDocxError, Io, RenderContext, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -49,18 +39,18 @@ const log = (s: string): void => {
 // 1. Show the two preset policies
 // ---------------------------------------------------------------------------
 log(`  DEFAULT_SECURITY_POLICY:`);
-for (const [k, v] of Object.entries(DEFAULT_SECURITY_POLICY)) {
+for (const [k, v] of Object.entries(Security.DEFAULT_SECURITY_POLICY)) {
   log(`    ${k.padEnd(24)} = ${v}`);
 }
 log(`\n  STRICT_SECURITY_POLICY:`);
-for (const [k, v] of Object.entries(STRICT_SECURITY_POLICY)) {
+for (const [k, v] of Object.entries(Security.STRICT_SECURITY_POLICY)) {
   log(`    ${k.padEnd(24)} = ${v}`);
 }
 
 // ---------------------------------------------------------------------------
 // 2. resolveSecurityPolicy fills in missing fields
 // ---------------------------------------------------------------------------
-const partial = resolveSecurityPolicy({ maxPackageSize: 1024 * 1024 }); // 1 MB cap
+const partial = Security.resolveSecurityPolicy({ maxPackageSize: 1024 * 1024 }); // 1 MB cap
 log(
   `\n  resolveSecurityPolicy({ maxPackageSize: 1MB }) merged with defaults: maxPackageSize=${partial.maxPackageSize}, preserveVbaProject=${partial.preserveVbaProject}, allowExternalTargets=${partial.allowExternalTargets}`
 );
@@ -71,21 +61,21 @@ log(
 const d = Document.create();
 Document.useDefaultStyles(d);
 Document.addParagraph(d, "Tiny doc");
-const bytes = await toBuffer(Document.build(d));
+const bytes = await Io.toBuffer(Document.build(d));
 fs.writeFileSync(path.join(outDir, "46-policy.docx"), bytes);
 
 // Default policy: succeeds
-const defaultRead = await readDocx(bytes, { securityPolicy: DEFAULT_SECURITY_POLICY });
+const defaultRead = await Io.read(bytes, { securityPolicy: Security.DEFAULT_SECURITY_POLICY });
 log(`\n  readDocx(DEFAULT) body length: ${defaultRead.body.length}`);
 
 // Strict policy: still succeeds for this benign file
-const strictRead = await readDocx(bytes, { securityPolicy: STRICT_SECURITY_POLICY });
+const strictRead = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
 log(`  readDocx(STRICT)  body length: ${strictRead.body.length}`);
 
 // Custom policy with a comically tight cap forces a rejection
-const tightPolicy = resolveSecurityPolicy({ maxPackageSize: 100 });
+const tightPolicy = Security.resolveSecurityPolicy({ maxPackageSize: 100 });
 try {
-  await readDocx(bytes, { securityPolicy: tightPolicy });
+  await Io.read(bytes, { securityPolicy: tightPolicy });
   log(`  ERROR: expected size-cap to throw`);
 } catch (err) {
   if (isDocxError(err)) {
@@ -98,7 +88,7 @@ try {
 // ---------------------------------------------------------------------------
 // 4. createIdGenerators — incrementing counters with optional seed
 // ---------------------------------------------------------------------------
-const ids = createIdGenerators({ drawingId: 100, sdtId: 50 });
+const ids = RenderContext.createIds({ drawingId: 100, sdtId: 50 });
 log(
   `\n  createIdGenerators(drawing=100, sdt=50): drawing=${ids.nextDrawingId()}, sdt=${ids.nextSdtId()}, bookmark=${ids.nextBookmarkId()}, docPr=${ids.nextDocPrId()}, chart=${ids.nextChartId()}, image=${ids.nextImagePartId()}`
 );
@@ -110,9 +100,9 @@ log(
 // 5. createRenderContext — usually used internally; exposed for advanced
 //    callers that build auxiliary parts manually.
 // ---------------------------------------------------------------------------
-const ctx = createRenderContext({
+const ctx = RenderContext.create({
   partName: "/word/custom.xml",
-  securityPolicy: STRICT_SECURITY_POLICY,
+  securityPolicy: Security.STRICT_SECURITY_POLICY,
   ids
 });
 log(

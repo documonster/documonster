@@ -18,43 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  tab,
-  pageBreak,
-  lineBreak,
-  positionalTab,
-  noBreakHyphen,
-  softHyphen,
-  carriageReturn,
-  heading,
-  toBuffer,
-  // Inverse unit conversions — useful when round-tripping values out of OOXML
-  twipsToInches,
-  twipsToCm,
-  twipsToPt,
-  emuToInches,
-  emuToCm,
-  emuToPx,
-  halfPointToPt,
-  eighthPointToPt,
-  spacingToLineMultiplier,
-  tablePctToPercent,
-  inchesToTwips,
-  cmToTwips,
-  ptToTwips,
-  inchesToEmu,
-  cmToEmu,
-  pxToEmu,
-  ptToEmu,
-  ptToHalfPoint,
-  ptToEighthPoint,
-  lineMultiplierToSpacing,
-  percentToTablePct,
-  mmToTwips
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -69,7 +33,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // implicit empty paragraph).
 // ---------------------------------------------------------------------------
 const emptyDoc = Document.create();
-const emptyBuf = await toBuffer(Document.build(emptyDoc));
+const emptyBuf = await Io.toBuffer(Document.build(emptyDoc));
 fs.writeFileSync(path.join(outDir, "01-basics-empty.docx"), emptyBuf);
 console.log(`  → 01-basics-empty.docx (${emptyBuf.length} bytes)`);
 
@@ -96,51 +60,54 @@ for (const lvl of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
 // fully-formed Paragraph object you can compose, store or transform before
 // inserting. Useful when generating headings programmatically.
 for (const lvl of [1, 2, 3] as const) {
-  Document.addParagraphElement(doc, heading(`Built via heading() — level ${lvl}`, lvl));
+  Document.addParagraphElement(doc, Build.heading(`Built via heading() — level ${lvl}`, lvl));
 }
 
 // Tabs and positional tabs
 Document.addHeading(doc, "Tabs & breaks", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Left"),
-    tab(),
-    text("Center"),
-    tab(),
-    text("Right (with regular tabs — relies on default tab stops).")
+  Build.paragraph([
+    Build.text("Left"),
+    Build.tab(),
+    Build.text("Center"),
+    Build.tab(),
+    Build.text("Right (with regular tabs — relies on default tab stops).")
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Positional tab → "),
-    positionalTab({ alignment: "right", relativeTo: "margin", leader: "dot" }),
-    text("end")
+  Build.paragraph([
+    Build.text("Positional tab → "),
+    Build.positionalTab({ alignment: "right", relativeTo: "margin", leader: "dot" }),
+    Build.text("end")
   ])
 );
 
 // Line break vs paragraph break
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Line one"),
-    lineBreak(),
-    text("Line two (same paragraph, soft return)"),
-    lineBreak(),
-    text("Line three")
+  Build.paragraph([
+    Build.text("Line one"),
+    Build.lineBreak(),
+    Build.text("Line two (same paragraph, soft return)"),
+    Build.lineBreak(),
+    Build.text("Line three")
   ])
 );
 
 // Carriage return (treated like a line break by Word)
 Document.addParagraphElement(
   doc,
-  paragraph([text("CR before:"), carriageReturn(), text("CR after.")])
+  Build.paragraph([Build.text("CR before:"), Build.carriageReturn(), Build.text("CR after.")])
 );
 
 // Page break inside a run
 Document.addParagraph(doc, "Below this paragraph a page break is inserted.");
-Document.addParagraphElement(doc, paragraph([pageBreak(), text("This is on a new page.")]));
+Document.addParagraphElement(
+  doc,
+  Build.paragraph([Build.pageBreak(), Build.text("This is on a new page.")])
+);
 
 // ---------------------------------------------------------------------------
 // Edge cases — special chars, Unicode
@@ -171,7 +138,7 @@ Document.addParagraph(doc, "Emoji: 😀 🚀 🇨🇳 🇺🇸 🧑‍💻 (ZWJ 
 // RTL paragraph (set bidi flag so layout engines treat it accordingly)
 Document.addParagraphElement(
   doc,
-  paragraph([text("هذا نص عربي RTL مع كلمة latin بداخلها.")], { bidi: true })
+  Build.paragraph([Build.text("هذا نص عربي RTL مع كلمة latin بداخلها.")], { bidi: true })
 );
 
 // Long single paragraph (5,000 chars) — exercises the writer's text node sizing
@@ -181,14 +148,14 @@ Document.addParagraph(doc, `Long paragraph (${long.length} chars): ${long}`);
 // noBreakHyphen / softHyphen
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("part-one"),
-    noBreakHyphen(),
-    text("part-two; soft\u00ADhyphenated word built explicitly: super"),
-    softHyphen(),
-    text("califragilistic"),
-    softHyphen(),
-    text("expialidocious.")
+  Build.paragraph([
+    Build.text("part-one"),
+    Build.noBreakHyphen(),
+    Build.text("part-two; soft\u00ADhyphenated word built explicitly: super"),
+    Build.softHyphen(),
+    Build.text("califragilistic"),
+    Build.softHyphen(),
+    Build.text("expialidocious.")
   ])
 );
 
@@ -208,28 +175,28 @@ Document.addParagraph(doc, "Control char dropped: [\u0007] bell, [\u0001] SOH.")
 // ---------------------------------------------------------------------------
 {
   const checks: [string, number, number][] = [
-    ["inchesToTwips(2) == 2880", inchesToTwips(2), 2880],
-    ["twipsToInches(2880) == 2", twipsToInches(2880), 2],
-    ["cmToTwips(2.54) ≈ inchesToTwips(1)", cmToTwips(2.54), inchesToTwips(1)],
-    ["twipsToCm(1440) ≈ 2.54", Number(twipsToCm(1440).toFixed(2)), 2.54],
-    ["ptToTwips(12) == 240", ptToTwips(12), 240],
-    ["twipsToPt(240) == 12", twipsToPt(240), 12],
-    ["mmToTwips(254) == cmToTwips(25.4)", mmToTwips(254), cmToTwips(25.4)],
-    ["inchesToEmu(1) == 914400", inchesToEmu(1), 914_400],
-    ["emuToInches(914400) == 1", emuToInches(914_400), 1],
-    ["cmToEmu(2.54) == inchesToEmu(1)", cmToEmu(2.54), inchesToEmu(1)],
-    ["emuToCm(914400) ≈ 2.54", Number(emuToCm(914_400).toFixed(2)), 2.54],
-    ["ptToEmu(72) == inchesToEmu(1)", ptToEmu(72), inchesToEmu(1)],
-    ["pxToEmu(96) == inchesToEmu(1)", pxToEmu(96), inchesToEmu(1)],
-    ["emuToPx(914400) == 96", emuToPx(914_400), 96],
-    ["ptToHalfPoint(12) == 24", ptToHalfPoint(12), 24],
-    ["halfPointToPt(24) == 12", halfPointToPt(24), 12],
-    ["ptToEighthPoint(1.5) == 12", ptToEighthPoint(1.5), 12],
-    ["eighthPointToPt(12) == 1.5", eighthPointToPt(12), 1.5],
-    ["lineMultiplierToSpacing(1.5) == 360", lineMultiplierToSpacing(1.5), 360],
-    ["spacingToLineMultiplier(360) == 1.5", spacingToLineMultiplier(360), 1.5],
-    ["percentToTablePct(75) == 3750", percentToTablePct(75), 3750],
-    ["tablePctToPercent(3750) == 75", tablePctToPercent(3750), 75]
+    ["inchesToTwips(2) == 2880", Units.inchesToTwips(2), 2880],
+    ["twipsToInches(2880) == 2", Units.twipsToInches(2880), 2],
+    ["cmToTwips(2.54) ≈ inchesToTwips(1)", Units.cmToTwips(2.54), Units.inchesToTwips(1)],
+    ["twipsToCm(1440) ≈ 2.54", Number(Units.twipsToCm(1440).toFixed(2)), 2.54],
+    ["ptToTwips(12) == 240", Units.ptToTwips(12), 240],
+    ["twipsToPt(240) == 12", Units.twipsToPt(240), 12],
+    ["mmToTwips(254) == cmToTwips(25.4)", Units.mmToTwips(254), Units.cmToTwips(25.4)],
+    ["inchesToEmu(1) == 914400", Units.inchesToEmu(1), 914_400],
+    ["emuToInches(914400) == 1", Units.emuToInches(914_400), 1],
+    ["cmToEmu(2.54) == inchesToEmu(1)", Units.cmToEmu(2.54), Units.inchesToEmu(1)],
+    ["emuToCm(914400) ≈ 2.54", Number(Units.emuToCm(914_400).toFixed(2)), 2.54],
+    ["ptToEmu(72) == inchesToEmu(1)", Units.ptToEmu(72), Units.inchesToEmu(1)],
+    ["pxToEmu(96) == inchesToEmu(1)", Units.pxToEmu(96), Units.inchesToEmu(1)],
+    ["emuToPx(914400) == 96", Units.emuToPx(914_400), 96],
+    ["ptToHalfPoint(12) == 24", Units.ptToHalfPoint(12), 24],
+    ["halfPointToPt(24) == 12", Units.halfPointToPt(24), 12],
+    ["ptToEighthPoint(1.5) == 12", Units.ptToEighthPoint(1.5), 12],
+    ["eighthPointToPt(12) == 1.5", Units.eighthPointToPt(12), 1.5],
+    ["lineMultiplierToSpacing(1.5) == 360", Units.lineMultiplierToSpacing(1.5), 360],
+    ["spacingToLineMultiplier(360) == 1.5", Units.spacingToLineMultiplier(360), 1.5],
+    ["percentToTablePct(75) == 3750", Units.percentToTablePct(75), 3750],
+    ["tablePctToPercent(3750) == 75", Units.tablePctToPercent(3750), 75]
   ];
   for (const [name, got, want] of checks) {
     if (Math.abs(got - want) > 0.01) {
@@ -242,6 +209,6 @@ Document.addParagraph(doc, "Control char dropped: [\u0007] bell, [\u0001] SOH.")
 // ---------------------------------------------------------------------------
 // Build & write
 // ---------------------------------------------------------------------------
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "01-basics.docx"), buf);
 console.log(`  → 01-basics.docx (${buf.length} bytes)`);

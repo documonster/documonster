@@ -9,7 +9,7 @@ import {
   markdownToDocxBody,
   type MarkdownImageData
 } from "../convert/markdown/markdown-import";
-import { toBuffer } from "../index";
+import { Io } from "../index";
 import type { BodyContent, Hyperlink, InlineImageContent, Paragraph, Run, Table } from "../types";
 
 /** Convenience: return just the body content array. */
@@ -358,7 +358,7 @@ describe("markdownToDocxBody", () => {
 
       // End-to-end: the document packages without error and the packager emits
       // both the SVG part and an auto-named PNG fallback part.
-      const buf = await toBuffer(doc);
+      const buf = await Io.toBuffer(doc);
       const archive = new TextDecoder("latin1").decode(buf);
       expect(archive).toContain("image1.svg");
       expect(archive).toContain("image1_fallback.png");
@@ -372,7 +372,7 @@ describe("markdownToDocxBody", () => {
       expect(doc.images).toHaveLength(1);
       expect(doc.images![0].fallbackData).toBeUndefined();
       // Still packages successfully (packager synthesizes a placeholder PNG).
-      const buf = await toBuffer(doc);
+      const buf = await Io.toBuffer(doc);
       expect(buf.length).toBeGreaterThan(0);
     });
   });

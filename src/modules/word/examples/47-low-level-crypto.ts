@@ -29,7 +29,7 @@ import {
   deriveEncryptionKey
 } from "../crypto";
 import type { CfbEntry } from "../crypto";
-import { Document, toBuffer, encryptDocx } from "../index";
+import { Document, Io, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -80,7 +80,7 @@ for (const e of decoded) {
 //    stream inside the CFB envelope; we synthesise one with encryptDocx then
 //    locate its EncryptionInfo stream and parse it.
 // ---------------------------------------------------------------------------
-const plain = await toBuffer(
+const plain = await Io.toBuffer(
   (() => {
     const dd = Document.create();
     Document.useDefaultStyles(dd);
@@ -89,7 +89,7 @@ const plain = await toBuffer(
   })()
 );
 const password = "knock-knock";
-const encrypted = await encryptDocx(plain, password, {
+const encrypted = await Security.encrypt(plain, password, {
   keyBits: 256,
   hashAlgorithm: "SHA512",
   spinCount: 50_000

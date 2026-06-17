@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { acceptAllRevisions, rejectAllRevisions } from "../index";
+import { Query } from "../index";
 import type {
   DocxDocument,
   Paragraph,
@@ -64,7 +64,7 @@ describe("acceptAllRevisions", () => {
       } as Paragraph
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).toContain("inserted text");
   });
@@ -82,7 +82,7 @@ describe("acceptAllRevisions", () => {
       } as Paragraph
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).not.toContain("deleted text");
     expect(extractText(doc)).toContain("before ");
@@ -99,7 +99,7 @@ describe("acceptAllRevisions", () => {
       { type: "paragraph", children: [movedTo as ParagraphChild] } as Paragraph
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).toContain("moved text");
   });
@@ -114,14 +114,14 @@ describe("acceptAllRevisions", () => {
       { type: "paragraph", children: [movedFrom as ParagraphChild] } as Paragraph
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).not.toContain("original position");
   });
 
   it("returns 0 for document without revisions", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("plain text")] }]);
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBe(0);
   });
 
@@ -140,7 +140,7 @@ describe("acceptAllRevisions", () => {
       { type: "paragraph", children: [ins as ParagraphChild, del as ParagraphChild] } as Paragraph
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).toContain("new");
     expect(extractText(doc)).not.toContain("old");
@@ -167,7 +167,7 @@ describe("acceptAllRevisions", () => {
       } as any
     ]);
 
-    const count = acceptAllRevisions(doc);
+    const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
   });
 });
@@ -186,7 +186,7 @@ describe("rejectAllRevisions", () => {
       } as Paragraph
     ]);
 
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).not.toContain("inserted text");
     expect(extractText(doc)).toContain("before ");
@@ -202,7 +202,7 @@ describe("rejectAllRevisions", () => {
       { type: "paragraph", children: [deletedRun as ParagraphChild] } as Paragraph
     ]);
 
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).toContain("restored text");
   });
@@ -217,7 +217,7 @@ describe("rejectAllRevisions", () => {
       { type: "paragraph", children: [movedFrom as ParagraphChild] } as Paragraph
     ]);
 
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).toContain("original");
   });
@@ -232,14 +232,14 @@ describe("rejectAllRevisions", () => {
       { type: "paragraph", children: [movedTo as ParagraphChild] } as Paragraph
     ]);
 
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThan(0);
     expect(extractText(doc)).not.toContain("moved here");
   });
 
   it("returns 0 for document without revisions", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("plain text")] }]);
-    const count = rejectAllRevisions(doc);
+    const count = Query.rejectAllRevisions(doc);
     expect(count).toBe(0);
   });
 });

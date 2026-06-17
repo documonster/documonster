@@ -14,23 +14,7 @@ import { createZip } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 import { STRICT_TO_TRANSITIONAL_REL, STRICT_TO_TRANSITIONAL_NS } from "../constants";
-import {
-  Document,
-  textParagraph,
-  paragraph,
-  formTextField,
-  formCheckboxField,
-  formDropdownField,
-  readDocx,
-  toBuffer,
-  resolveDataBindings,
-  extractFormFields,
-  fillFormFields,
-  createShape,
-  createRect,
-  subsetFont,
-  embedFont
-} from "../index";
+import { Document, Build, Font, Io, Query } from "../index";
 import type { DocxDocument, Paragraph, Run, StructuredDocumentTag as SdtType } from "../types";
 
 // =============================================================================
@@ -111,10 +95,10 @@ describe("OOXML Strict: reader normalization", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Hello Strict");
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
+    const buffer = await Io.toBuffer(model);
 
     // The reader should work with standard documents (regression)
-    const result = await readDocx(buffer);
+    const result = await Io.read(buffer);
     expect(result.body.length).toBeGreaterThan(0);
     const firstPara = result.body[0] as Paragraph;
     expect(firstPara.type).toBe("paragraph");
@@ -125,8 +109,8 @@ describe("OOXML Strict: reader normalization", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Discovery test");
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
-    const result = await readDocx(buffer);
+    const buffer = await Io.toBuffer(model);
+    const result = await Io.read(buffer);
     expect(result.body.length).toBeGreaterThan(0);
   });
 
@@ -182,7 +166,7 @@ describe("OOXML Strict: reader normalization", () => {
     ]);
 
     // The reader should successfully parse this Strict-format document
-    const result = await readDocx(zipBuffer);
+    const result = await Io.read(zipBuffer);
 
     expect(result.body.length).toBe(2);
     const para1 = result.body[0] as Paragraph;
@@ -251,7 +235,7 @@ describe("OOXML Strict: reader normalization", () => {
       { name: "word/media/image1.png", data: png1x1 }
     ]);
 
-    const result = await readDocx(zipBuffer);
+    const result = await Io.read(zipBuffer);
     expect(result.body.length).toBe(1);
     // Image should be found despite Strict rel type
     expect(result.images).toBeDefined();
@@ -266,7 +250,7 @@ describe("OOXML Strict: reader normalization", () => {
 
 describe("DrawingML effects: reflection, softEdges, 3D", () => {
   it("should serialize reflection effect", () => {
-    const shape = createShape({
+    const shape = Build.createShape({
       shapeType: "rect",
       width: 1000000,
       height: 500000,
@@ -291,7 +275,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize soft edges effect", () => {
-    const shape = createShape({
+    const shape = Build.createShape({
       shapeType: "roundRect",
       width: 2000000,
       height: 1000000,
@@ -303,7 +287,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize 3D effect with camera and bevel", () => {
-    const shape = createShape({
+    const shape = Build.createShape({
       shapeType: "rect",
       width: 3000000,
       height: 2000000,
@@ -332,7 +316,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize combined effects", () => {
-    const shape = createShape({
+    const shape = Build.createShape({
       shapeType: "ellipse",
       width: 1500000,
       height: 1500000,
@@ -361,7 +345,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should serialize glow with transparency", () => {
-    const shape = createShape({
+    const shape = Build.createShape({
       shapeType: "rect",
       width: 1000000,
       height: 1000000,
@@ -375,7 +359,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
   });
 
   it("should produce round-trip stable shapes with effects", async () => {
-    const shape = createRect(2000000, 1000000, {
+    const shape = Build.createRect(2000000, 1000000, {
       fill: { type: "solid", color: "4472C4" },
       effects: {
         shadow: {
@@ -400,8 +384,8 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
     Document.addContent(doc, shape);
     Document.addParagraph(doc, "After shape");
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
-    const result = await readDocx(buffer);
+    const buffer = await Io.toBuffer(model);
+    const result = await Io.read(buffer);
     // Document should be parseable (at least paragraphs survive)
     expect(result.body.length).toBeGreaterThanOrEqual(2);
   });
@@ -411,7 +395,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
     // emitted bare DrawingML fragments directly under w:body. Now the writer
     // always renders the full drawing wrapper and inserts the advanced
     // properties (effect list, gradient, scene3d) as children of wps:spPr.
-    const shape = createRect(2000000, 1000000, {
+    const shape = Build.createRect(2000000, 1000000, {
       fill: {
         type: "gradient",
         stops: [
@@ -427,7 +411,7 @@ describe("DrawingML effects: reflection, softEdges, 3D", () => {
 
     const doc = Document.create();
     Document.addContent(doc, shape);
-    const buffer = await toBuffer(Document.build(doc));
+    const buffer = await Io.toBuffer(Document.build(doc));
 
     const { unzip } = await import("@archive/read-archive");
     const reader = unzip(buffer);
@@ -511,27 +495,27 @@ describe("Font subsetting", () => {
     otfData[1] = 0x54; // T
     otfData[2] = 0x54; // T
     otfData[3] = 0x4f; // O
-    const result = subsetFont(otfData, "Hello");
+    const result = Font.subset(otfData, "Hello");
     expect(result).toBe(otfData); // Same reference = no subsetting attempted
   });
 
   it("should return original data when tables are missing", () => {
     const ttf = createMinimalTtf();
     // No valid tables — subsetter should fail gracefully
-    const result = subsetFont(ttf, "ABC");
+    const result = Font.subset(ttf, "ABC");
     // Should return original since it can't parse properly
     expect(result).toEqual(ttf);
   });
 
   it("should accept empty characters string gracefully", () => {
     const ttf = createMinimalTtf();
-    const result = subsetFont(ttf, "");
+    const result = Font.subset(ttf, "");
     expect(result).toEqual(ttf);
   });
 
   it("should integrate with embedFont when usedCharacters is provided", () => {
     const ttf = createMinimalTtf();
-    const result = embedFont({
+    const result = Font.embed({
       name: "TestFont",
       data: ttf,
       style: "regular",
@@ -561,7 +545,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{12345678-1234-1234-1234-123456789ABC}"
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -573,7 +557,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
       ]
     };
 
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     const sdt = result.body[0] as SdtType;
     expect(sdt.type).toBe("sdt");
     const para = sdt.content[0] as Paragraph;
@@ -592,7 +576,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
             }
           },
-          content: [textParagraph("old")]
+          content: [Build.textParagraph("old")]
         }
       ]
     };
@@ -601,7 +585,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
       ["{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}", "<data><value>Override Value</value></data>"]
     ]);
 
-    const result = resolveDataBindings(doc, overrideData);
+    const result = Query.resolveDataBindings(doc, overrideData);
     const sdt = result.body[0] as SdtType;
     const para = sdt.content[0] as Paragraph;
     const run = para.children[0] as Run;
@@ -619,7 +603,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{11111111-2222-3333-4444-555555555555}"
             }
           },
-          content: [textParagraph("should disappear")]
+          content: [Build.textParagraph("should disappear")]
         }
       ],
       customXmlParts: [
@@ -631,7 +615,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
       ]
     };
 
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     // SDT should be replaced with empty paragraph (conditional removal)
     const first = result.body[0] as Paragraph;
     expect(first.type).toBe("paragraph");
@@ -654,7 +638,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               prefixMappings: 'xmlns:ns0="http://example.com"'
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -666,7 +650,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
       ]
     };
 
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     const sdt = result.body[0] as SdtType;
     const para = sdt.content[0] as Paragraph;
     const run = para.children[0] as Run;
@@ -679,12 +663,12 @@ describe("OpenDoPE: resolveDataBindings", () => {
         {
           type: "sdt",
           properties: { alias: "NoBinding" },
-          content: [textParagraph("keep me")]
+          content: [Build.textParagraph("keep me")]
         }
       ]
     };
 
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     const sdt = result.body[0] as SdtType;
     expect(sdt.type).toBe("sdt");
     expect((sdt.properties as any).alias).toBe("NoBinding");
@@ -692,9 +676,9 @@ describe("OpenDoPE: resolveDataBindings", () => {
 
   it("should return document unchanged when no CustomXML parts exist", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("Hello")]
+      body: [Build.textParagraph("Hello")]
     };
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     expect(result).toBe(doc); // Same reference = unchanged
   });
 
@@ -716,7 +700,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{AAAA0000-0000-0000-0000-000000000001}"
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -727,7 +711,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
         }
       ]
     };
-    const result1 = resolveDataBindings(doc1);
+    const result1 = Query.resolveDataBindings(doc1);
     const sdt1 = result1.body[0] as SdtType;
     const para1 = sdt1.content[0] as Paragraph;
     const run1 = para1.children[0] as Run;
@@ -744,7 +728,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{AAAA0000-0000-0000-0000-000000000001}"
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -755,7 +739,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
         }
       ]
     };
-    const result2 = resolveDataBindings(doc2);
+    const result2 = Query.resolveDataBindings(doc2);
     const sdt2 = result2.body[0] as SdtType;
     const para2 = sdt2.content[0] as Paragraph;
     const run2 = para2.children[0] as Run;
@@ -775,7 +759,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{BBBB0000-0000-0000-0000-000000000002}"
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -786,7 +770,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
         }
       ]
     };
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     const sdt = result.body[0] as SdtType;
     const para = sdt.content[0] as Paragraph;
     const run = para.children[0] as Run;
@@ -809,7 +793,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
               storeItemId: "{CCCC0000-0000-0000-0000-000000000003}"
             }
           },
-          content: [textParagraph("placeholder")]
+          content: [Build.textParagraph("placeholder")]
         }
       ],
       customXmlParts: [
@@ -820,7 +804,7 @@ describe("OpenDoPE: resolveDataBindings", () => {
         }
       ]
     };
-    const result = resolveDataBindings(doc);
+    const result = Query.resolveDataBindings(doc);
     const sdt = result.body[0] as SdtType;
     const para = sdt.content[0] as Paragraph;
     const run = para.children[0] as Run;
@@ -837,16 +821,16 @@ describe("Form fields: extractFormFields", () => {
     const doc = Document.create();
     Document.addParagraphElement(
       doc,
-      paragraph([formTextField({ name: "FullName", default: "Jane Doe" })])
+      Build.paragraph([Build.formTextField({ name: "FullName", default: "Jane Doe" })])
     );
     Document.addParagraphElement(
       doc,
-      paragraph([formCheckboxField({ name: "Agree", checked: true })])
+      Build.paragraph([Build.formCheckboxField({ name: "Agree", checked: true })])
     );
     Document.addParagraphElement(
       doc,
-      paragraph([
-        formDropdownField({
+      Build.paragraph([
+        Build.formDropdownField({
           name: "Country",
           entries: ["US", "UK", "JP"],
           default: 1
@@ -855,7 +839,7 @@ describe("Form fields: extractFormFields", () => {
     );
     const model = Document.build(doc);
 
-    const fields = extractFormFields(model);
+    const fields = Query.extractFormFields(model);
     expect(fields.length).toBe(3);
 
     expect(fields[0].name).toBe("FullName");
@@ -884,7 +868,11 @@ describe("Form fields: extractFormFields", () => {
             {
               cells: [
                 {
-                  content: [paragraph([formTextField({ name: "InTable", default: "TableValue" })])]
+                  content: [
+                    Build.paragraph([
+                      Build.formTextField({ name: "InTable", default: "TableValue" })
+                    ])
+                  ]
                 }
               ]
             }
@@ -893,7 +881,7 @@ describe("Form fields: extractFormFields", () => {
       ]
     };
 
-    const fields = extractFormFields(model);
+    const fields = Query.extractFormFields(model);
     expect(fields.length).toBe(1);
     expect(fields[0].name).toBe("InTable");
     expect(fields[0].value).toBe("TableValue");
@@ -903,13 +891,16 @@ describe("Form fields: extractFormFields", () => {
 describe("Form fields: fillFormFields", () => {
   it("should fill text form field values", () => {
     const doc = Document.create();
-    Document.addParagraphElement(doc, paragraph([formTextField({ name: "Name", default: "old" })]));
+    Document.addParagraphElement(
+      doc,
+      Build.paragraph([Build.formTextField({ name: "Name", default: "old" })])
+    );
     const model = Document.build(doc);
 
     const values = new Map<string, string | boolean | number>([["Name", "New Value"]]);
-    const filled = fillFormFields(model, values);
+    const filled = Query.fillFormFields(model, values);
 
-    const fields = extractFormFields(filled);
+    const fields = Query.extractFormFields(filled);
     expect(fields[0].value).toBe("New Value");
   });
 
@@ -917,14 +908,14 @@ describe("Form fields: fillFormFields", () => {
     const doc = Document.create();
     Document.addParagraphElement(
       doc,
-      paragraph([formCheckboxField({ name: "Accept", checked: false })])
+      Build.paragraph([Build.formCheckboxField({ name: "Accept", checked: false })])
     );
     const model = Document.build(doc);
 
     const values = new Map<string, string | boolean | number>([["Accept", true]]);
-    const filled = fillFormFields(model, values);
+    const filled = Query.fillFormFields(model, values);
 
-    const fields = extractFormFields(filled);
+    const fields = Query.extractFormFields(filled);
     expect(fields[0].value).toBe(true);
   });
 
@@ -932,14 +923,14 @@ describe("Form fields: fillFormFields", () => {
     const doc = Document.create();
     Document.addParagraphElement(
       doc,
-      paragraph([formTextField({ name: "Keep", default: "original" })])
+      Build.paragraph([Build.formTextField({ name: "Keep", default: "original" })])
     );
     const model = Document.build(doc);
 
     const values = new Map<string, string | boolean | number>([["Other", "ignored"]]);
-    const filled = fillFormFields(model, values);
+    const filled = Query.fillFormFields(model, values);
 
-    const fields = extractFormFields(filled);
+    const fields = Query.extractFormFields(filled);
     expect(fields[0].value).toBe("original");
   });
 
@@ -952,7 +943,7 @@ describe("Form fields: fillFormFields", () => {
             {
               cells: [
                 {
-                  content: [paragraph([formTextField({ name: "Cell1", default: "" })])]
+                  content: [Build.paragraph([Build.formTextField({ name: "Cell1", default: "" })])]
                 }
               ]
             }
@@ -962,8 +953,8 @@ describe("Form fields: fillFormFields", () => {
     };
 
     const values = new Map<string, string | boolean | number>([["Cell1", "Filled!"]]);
-    const filled = fillFormFields(model, values);
-    const fields = extractFormFields(filled);
+    const filled = Query.fillFormFields(model, values);
+    const fields = Query.extractFormFields(filled);
     expect(fields[0].value).toBe("Filled!");
   });
 });
@@ -979,14 +970,14 @@ describe("SmartArt: round-trip via opaqueParts", () => {
     Document.addParagraph(doc, "Before shape");
     Document.addContent(
       doc,
-      createRect(2000000, 1000000, { fill: { type: "solid", color: "FF0000" } })
+      Build.createRect(2000000, 1000000, { fill: { type: "solid", color: "FF0000" } })
     );
     Document.addParagraph(doc, "After shape");
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
+    const buffer = await Io.toBuffer(model);
 
     // Read it back - shape content should survive
-    const result = await readDocx(buffer);
+    const result = await Io.read(buffer);
     expect(result.body.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -996,10 +987,10 @@ describe("SmartArt: round-trip via opaqueParts", () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Simple doc");
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
+    const buffer = await Io.toBuffer(model);
 
     // Read back - well-formed docs shouldn't have opaque parts
-    const result = await readDocx(buffer);
+    const result = await Io.read(buffer);
     // A clean document shouldn't have opaque parts
     expect(result.opaqueParts ?? []).toHaveLength(0);
   });
@@ -1021,7 +1012,7 @@ describe("Integration: new features round-trip", () => {
               storeItemId: "{12345678-ABCD-1234-5678-ABCDEF123456}"
             }
           },
-          content: [textParagraph("Bound Value")]
+          content: [Build.textParagraph("Bound Value")]
         }
       ],
       customXmlParts: [
@@ -1033,8 +1024,8 @@ describe("Integration: new features round-trip", () => {
       ]
     };
 
-    const buffer = await toBuffer(doc);
-    const result = await readDocx(buffer);
+    const buffer = await Io.toBuffer(doc);
+    const result = await Io.read(buffer);
 
     // SDT should preserve its data binding
     const sdt = result.body[0] as SdtType;
@@ -1054,23 +1045,27 @@ describe("Integration: new features round-trip", () => {
     const doc = Document.create();
     Document.addParagraphElement(
       doc,
-      paragraph([formTextField({ name: "FirstName", default: "Alice" })])
+      Build.paragraph([Build.formTextField({ name: "FirstName", default: "Alice" })])
     );
     Document.addParagraphElement(
       doc,
-      paragraph([formCheckboxField({ name: "Premium", checked: true })])
+      Build.paragraph([Build.formCheckboxField({ name: "Premium", checked: true })])
     );
     Document.addParagraphElement(
       doc,
-      paragraph([
-        formDropdownField({ name: "Plan", entries: ["Basic", "Pro", "Enterprise"], default: 2 })
+      Build.paragraph([
+        Build.formDropdownField({
+          name: "Plan",
+          entries: ["Basic", "Pro", "Enterprise"],
+          default: 2
+        })
       ])
     );
     const model = Document.build(doc);
-    const buffer = await toBuffer(model);
+    const buffer = await Io.toBuffer(model);
 
-    const result = await readDocx(buffer);
-    const fields = extractFormFields(result);
+    const result = await Io.read(buffer);
+    const fields = Query.extractFormFields(result);
 
     expect(fields.length).toBe(3);
     expect(fields[0].name).toBe("FirstName");
@@ -1087,11 +1082,15 @@ describe("Integration: new features round-trip", () => {
     Document.useDefaultStyles(doc);
     Document.addParagraphElement(
       doc,
-      paragraph([
-        formDropdownField({ name: "Country", entries: ["", "Australia", "Canada"], default: 0 })
+      Build.paragraph([
+        Build.formDropdownField({
+          name: "Country",
+          entries: ["", "Australia", "Canada"],
+          default: 0
+        })
       ])
     );
-    const buffer = await toBuffer(Document.build(doc));
+    const buffer = await Io.toBuffer(Document.build(doc));
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
 
     // The empty entry must become a single space, never an empty value, so

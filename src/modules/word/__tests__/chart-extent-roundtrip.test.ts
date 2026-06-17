@@ -13,7 +13,7 @@
  * actually specified.
  */
 
-import { Document, packageDocx, readDocx, chart as chartBuilder } from "@word/index";
+import { Document, Build, Io } from "@word/index";
 import type { ChartContent } from "@word/index";
 import { describe, it, expect } from "vitest";
 
@@ -25,7 +25,7 @@ describe("chart drawing extent round-trip", () => {
     const heightEmu = 3 * 914_400;
 
     const h = Document.create();
-    const ch = chartBuilder({
+    const ch = Build.chart({
       type: "bar",
       series: [
         {
@@ -40,8 +40,8 @@ describe("chart drawing extent round-trip", () => {
     });
     Document.addContent(h, ch);
 
-    const bytes = await packageDocx(Document.build(h));
-    const reread = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const reread = await Io.read(bytes);
 
     const reChart = reread.body.find(b => b.type === "chart") as ChartContent | undefined;
     expect(reChart).toBeDefined();
@@ -54,7 +54,7 @@ describe("chart drawing extent round-trip", () => {
     // a width must NOT magically gain one after a round-trip — that
     // would mean we silently injected a default at read time, which
     // would mask author intent on the next round-trip.
-    const ch = chartBuilder({ type: "bar", series: [] });
+    const ch = Build.chart({ type: "bar", series: [] });
     expect(ch.chart.width).toBeUndefined();
     expect(ch.chart.height).toBeUndefined();
   });

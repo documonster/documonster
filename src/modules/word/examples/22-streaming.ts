@@ -17,14 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  StreamingDocxWriter,
-  createDocxStream,
-  textParagraph,
-  paragraph,
-  bold,
-  cmToTwips
-} from "../index";
+import { Build, Streaming, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -37,12 +30,17 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 {
   const t0 = performance.now();
-  const stream = createDocxStream({
+  const stream = Streaming.createDocxStream({
     compressionLevel: 6,
     chunkSize: 500,
     sectionProperties: {
-      pageSize: { width: cmToTwips(21), height: cmToTwips(29.7) },
-      margins: { top: cmToTwips(2), bottom: cmToTwips(2), left: cmToTwips(2), right: cmToTwips(2) }
+      pageSize: { width: Units.cmToTwips(21), height: Units.cmToTwips(29.7) },
+      margins: {
+        top: Units.cmToTwips(2),
+        bottom: Units.cmToTwips(2),
+        left: Units.cmToTwips(2),
+        right: Units.cmToTwips(2)
+      }
     },
     styles: [
       { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true },
@@ -73,7 +71,7 @@ fs.mkdirSync(outDir, { recursive: true });
   });
 
   // Title
-  stream.add(paragraph([bold("Streamed Report")], { style: "Heading1" }));
+  stream.add(Build.paragraph([Build.bold("Streamed Report")], { style: "Heading1" }));
 
   let lastProgress = 0;
   for (let i = 1; i <= 5000; i++) {
@@ -86,7 +84,7 @@ fs.mkdirSync(outDir, { recursive: true });
   }
 
   // A trailing element of a non-paragraph type (a TOC entry placeholder)
-  stream.add(textParagraph("End of report.", { style: "Heading2" }));
+  stream.add(Build.textParagraph("End of report.", { style: "Heading2" }));
 
   const buf = await stream.finalize();
   const t1 = performance.now();
@@ -100,7 +98,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // 2. Empty stream — finalize immediately
 // ---------------------------------------------------------------------------
 {
-  const stream = createDocxStream();
+  const stream = Streaming.createDocxStream();
   const buf = await stream.finalize();
   fs.writeFileSync(path.join(outDir, "22-streaming-empty.docx"), buf);
   console.log(`  → 22-streaming-empty.docx (${buf.length} bytes)`);
@@ -110,7 +108,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // 3. addMany convenience: pre-batched elements
 // ---------------------------------------------------------------------------
 {
-  const stream = createDocxStream();
+  const stream = Streaming.createDocxStream();
   stream.addMany(
     Array.from({ length: 100 }, (_, i) => ({
       type: "paragraph",
@@ -133,7 +131,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 {
   let progressEvents = 0;
-  const writer = new StreamingDocxWriter({
+  const writer = new Streaming.StreamingDocxWriter({
     chunkSize: 250,
     coreProperties: { title: "Direct StreamingDocxWriter demo", creator: "OpenCode" }
   }).onProgress(({ elementsWritten, phase }) => {

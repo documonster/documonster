@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { listRevisions, acceptRevision, rejectRevision } from "../index";
+import { Query } from "../index";
 import type {
   DocxDocument,
   Paragraph,
@@ -45,7 +45,7 @@ function extractText(doc: DocxDocument): string {
 describe("listRevisions", () => {
   it("returns empty array for document without revisions", () => {
     const doc = createDoc([{ type: "paragraph", children: [textRun("plain")] }]);
-    expect(listRevisions(doc)).toEqual([]);
+    expect(Query.listRevisions(doc)).toEqual([]);
   });
 
   it("lists insertion revisions", () => {
@@ -55,7 +55,7 @@ describe("listRevisions", () => {
       revision: { author: "Alice", id: 1, date: "2024-01-01" }
     };
     const doc = createDoc([{ type: "paragraph", children: [ins as ParagraphChild] } as Paragraph]);
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(1);
     expect(revs[0]).toEqual({
       id: 1,
@@ -72,7 +72,7 @@ describe("listRevisions", () => {
       revision: { author: "Bob", id: 2 }
     };
     const doc = createDoc([{ type: "paragraph", children: [del as ParagraphChild] } as Paragraph]);
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(1);
     expect(revs[0].type).toBe("delete");
     expect(revs[0].id).toBe(2);
@@ -93,7 +93,7 @@ describe("listRevisions", () => {
     const doc = createDoc([
       { type: "paragraph", children: [mf as ParagraphChild, mt as ParagraphChild] } as Paragraph
     ]);
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(2);
     expect(revs.map(r => r.type).sort()).toEqual(["moveFrom", "moveTo"]);
   });
@@ -115,7 +115,7 @@ describe("listRevisions", () => {
         children: [ins1 as ParagraphChild, ins2 as ParagraphChild]
       } as Paragraph
     ]);
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(1);
   });
 
@@ -134,7 +134,7 @@ describe("listRevisions", () => {
       { type: "paragraph", children: [ins as ParagraphChild] } as Paragraph,
       { type: "paragraph", children: [del as ParagraphChild] } as Paragraph
     ]);
-    expect(listRevisions(doc)).toHaveLength(2);
+    expect(Query.listRevisions(doc)).toHaveLength(2);
   });
 });
 
@@ -157,12 +157,12 @@ describe("acceptRevision", () => {
       } as Paragraph
     ]);
 
-    const ok = acceptRevision(doc, 1);
+    const ok = Query.acceptRevision(doc, 1);
     expect(ok).toBe(true);
     // After accepting id=1, "first" should be a plain run; id=2 still as InsertedRun
     expect(extractText(doc)).toContain("first");
     // The second insert should remain pending
-    const remaining = listRevisions(doc);
+    const remaining = Query.listRevisions(doc);
     expect(remaining).toHaveLength(1);
     expect(remaining[0].id).toBe(2);
   });
@@ -180,7 +180,7 @@ describe("acceptRevision", () => {
       } as Paragraph
     ]);
 
-    const ok = acceptRevision(doc, 5);
+    const ok = Query.acceptRevision(doc, 5);
     expect(ok).toBe(true);
     expect(extractText(doc)).toBe("kept ");
   });
@@ -193,7 +193,7 @@ describe("acceptRevision", () => {
     };
     const doc = createDoc([{ type: "paragraph", children: [ins as ParagraphChild] } as Paragraph]);
 
-    expect(acceptRevision(doc, 999)).toBe(false);
+    expect(Query.acceptRevision(doc, 999)).toBe(false);
   });
 });
 
@@ -211,7 +211,7 @@ describe("rejectRevision", () => {
       } as Paragraph
     ]);
 
-    const ok = rejectRevision(doc, 1);
+    const ok = Query.rejectRevision(doc, 1);
     expect(ok).toBe(true);
     expect(extractText(doc)).toBe("base ");
   });
@@ -224,7 +224,7 @@ describe("rejectRevision", () => {
     };
     const doc = createDoc([{ type: "paragraph", children: [del as ParagraphChild] } as Paragraph]);
 
-    const ok = rejectRevision(doc, 7);
+    const ok = Query.rejectRevision(doc, 7);
     expect(ok).toBe(true);
     expect(extractText(doc)).toBe("restore");
   });
@@ -237,7 +237,7 @@ describe("rejectRevision", () => {
     };
     const doc = createDoc([{ type: "paragraph", children: [mf as ParagraphChild] } as Paragraph]);
 
-    rejectRevision(doc, 10);
+    Query.rejectRevision(doc, 10);
     expect(extractText(doc)).toBe("original");
   });
 
@@ -249,7 +249,7 @@ describe("rejectRevision", () => {
     };
     const doc = createDoc([{ type: "paragraph", children: [mt as ParagraphChild] } as Paragraph]);
 
-    rejectRevision(doc, 11);
+    Query.rejectRevision(doc, 11);
     expect(extractText(doc)).not.toContain("moved");
   });
 });
@@ -267,7 +267,7 @@ describe("listRevisions / accept / reject — coverage of notes & comments", () 
         { id: 1, content: [{ type: "paragraph", children: [ins as ParagraphChild] } as Paragraph] }
       ]
     } as unknown as DocxDocument;
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(1);
     expect(revs[0].id).toBe(50);
     expect(revs[0].author).toBe("FN");
@@ -289,7 +289,7 @@ describe("listRevisions / accept / reject — coverage of notes & comments", () 
         }
       ]
     } as unknown as DocxDocument;
-    const revs = listRevisions(doc);
+    const revs = Query.listRevisions(doc);
     expect(revs).toHaveLength(1);
     expect(revs[0].id).toBe(51);
   });
@@ -305,7 +305,7 @@ describe("listRevisions / accept / reject — coverage of notes & comments", () 
       body: [{ type: "paragraph", children: [textRun("body")] } as Paragraph],
       footnotes: [{ id: 1, content: [fnPara] }]
     } as unknown as DocxDocument;
-    const found = acceptRevision(doc, 52);
+    const found = Query.acceptRevision(doc, 52);
     expect(found).toBe(true);
     // After accept on a deletion the run is gone
     expect(fnPara.children).toHaveLength(0);
@@ -322,7 +322,7 @@ describe("listRevisions / accept / reject — coverage of notes & comments", () 
       body: [{ type: "paragraph", children: [textRun("b")] } as Paragraph],
       comments: [{ id: 1, author: "X", content: [cmtPara] }]
     } as unknown as DocxDocument;
-    const found = rejectRevision(doc, 53);
+    const found = Query.rejectRevision(doc, 53);
     expect(found).toBe(true);
     // Reject on an insertion removes the run
     expect(cmtPara.children).toHaveLength(0);

@@ -17,18 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  Document,
-  packageDocx,
-  readDocx,
-  text,
-  paragraph,
-  hyperlink,
-  bookmarkStart,
-  bookmarkEnd,
-  insertedRun,
-  deletedRun
-} from "../index";
+import { Document, Build, Io } from "../index";
 import type {
   AbstractNumbering,
   BodyContent,
@@ -73,11 +62,15 @@ describe("OOXML coverage — bookmarks", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([bookmarkStart(1, "intro"), text("Introduction text."), bookmarkEnd(1)])
+      Build.paragraph([
+        Build.bookmarkStart(1, "intro"),
+        Build.text("Introduction text."),
+        Build.bookmarkEnd(1)
+      ])
     );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const starts = collectChildrenByType(para, "bookmarkStart") as BookmarkStart[];
@@ -92,13 +85,16 @@ describe("OOXML coverage — bookmarks", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([bookmarkStart(7, "section"), text("First sentence.")])
+      Build.paragraph([Build.bookmarkStart(7, "section"), Build.text("First sentence.")])
     );
-    Document.addParagraphElement(h, paragraph([text("Middle paragraph.")]));
-    Document.addParagraphElement(h, paragraph([text("Last sentence."), bookmarkEnd(7)]));
+    Document.addParagraphElement(h, Build.paragraph([Build.text("Middle paragraph.")]));
+    Document.addParagraphElement(
+      h,
+      Build.paragraph([Build.text("Last sentence."), Build.bookmarkEnd(7)])
+    );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     let starts = 0;
     let ends = 0;
@@ -134,16 +130,16 @@ describe("OOXML coverage — track changes", () => {
     const delRun: Run = { content: [{ type: "text", text: "removed " }] };
     Document.addParagraphElement(
       h,
-      paragraph([
-        text("Body: "),
-        insertedRun(insRun, insRev),
-        deletedRun(delRun, delRev),
-        text(".")
+      Build.paragraph([
+        Build.text("Body: "),
+        Build.insertedRun(insRun, insRev),
+        Build.deletedRun(delRun, delRev),
+        Build.text(".")
       ])
     );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const ins = collectChildrenByType(para, "insertedRun") as InsertedRun[];
@@ -163,10 +159,13 @@ describe("OOXML coverage — track changes", () => {
 describe("OOXML coverage — hyperlinks", () => {
   it("preserves anchor-only hyperlink (no url)", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, paragraph([hyperlink("Go to intro", { anchor: "intro" })]));
+    Document.addParagraphElement(
+      h,
+      Build.paragraph([Build.hyperlink("Go to intro", { anchor: "intro" })])
+    );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const links = collectChildrenByType(para, "hyperlink") as Hyperlink[];
@@ -179,8 +178,8 @@ describe("OOXML coverage — hyperlinks", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([
-        hyperlink("link", {
+      Build.paragraph([
+        Build.hyperlink("link", {
           url: "https://example.com",
           tooltip: "Example site",
           docLocation: "section1"
@@ -188,8 +187,8 @@ describe("OOXML coverage — hyperlinks", () => {
       ])
     );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const link = collectChildrenByType(para, "hyperlink")[0] as Hyperlink;
@@ -225,10 +224,10 @@ describe("OOXML coverage — RunProperties", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ properties: props, content: [{ type: "text", text: "fancy" }] }])
+      Build.paragraph([{ properties: props, content: [{ type: "text", text: "fancy" }] }])
     );
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const run = findFirstRun(para)!;
@@ -262,10 +261,10 @@ describe("OOXML coverage — RunProperties", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ properties: props, content: [{ type: "text", text: "multi-script" }] }])
+      Build.paragraph([{ properties: props, content: [{ type: "text", text: "multi-script" }] }])
     );
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const r = findFirstRun(para)!.properties!;
@@ -287,10 +286,10 @@ describe("OOXML coverage — RunProperties", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ properties: props, content: [{ type: "text", text: "漢字" }] }])
+      Build.paragraph([{ properties: props, content: [{ type: "text", text: "漢字" }] }])
     );
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const r = findFirstRun(para)!.properties!;
@@ -308,10 +307,10 @@ describe("OOXML coverage — RunProperties", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ properties: props, content: [{ type: "text", text: "縦書き" }] }])
+      Build.paragraph([{ properties: props, content: [{ type: "text", text: "縦書き" }] }])
     );
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const r = findFirstRun(para)!.properties!;
@@ -332,12 +331,12 @@ describe("OOXML coverage — RunProperties", () => {
     const h = Document.create();
     Document.addParagraphElement(
       h,
-      paragraph([{ properties: props, content: [{ type: "text", text: "x" }] }])
+      Build.paragraph([{ properties: props, content: [{ type: "text", text: "x" }] }])
     );
     // Writer: serialises whatever the model carries (round-trip preservation).
     // Reader: validates the attribute value.
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const r = findFirstRun(para)!.properties!;
     expect(r.eastAsianLayout?.combine).toBe(true);
@@ -358,12 +357,12 @@ describe("OOXML coverage — SDT properties", () => {
         showingPlaceholder: true,
         placeholder: "DefaultPlaceholders"
       },
-      content: [paragraph([text("Acme Inc.")])]
+      content: [Build.paragraph([Build.text("Acme Inc.")])]
     };
     const h = Document.create();
     Document.addContent(h, sdt);
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const sdtBack = parsed.body.find(b => b.type === "sdt");
     expect(sdtBack).toBeDefined();
@@ -390,12 +389,12 @@ describe("OOXML coverage — SDT properties", () => {
           prefixMappings: 'xmlns:ns0="http://example.com/ns"'
         }
       },
-      content: [paragraph([text("Bound")])]
+      content: [Build.paragraph([Build.text("Bound")])]
     };
     const h = Document.create();
     Document.addContent(h, sdt);
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const sdtBack = parsed.body.find(b => b.type === "sdt");
     if (!sdtBack || sdtBack.type !== "sdt") {
@@ -420,12 +419,12 @@ describe("OOXML coverage — SDT properties", () => {
       const sdt: StructuredDocumentTag = {
         type: "sdt",
         properties: { id: 1, [variant]: true } as never,
-        content: [paragraph([text(variant)])]
+        content: [Build.paragraph([Build.text(variant)])]
       };
       const h = Document.create();
       Document.addContent(h, sdt);
-      const bytes = await packageDocx(Document.build(h));
-      const parsed = await readDocx(bytes);
+      const bytes = await Io.package(Document.build(h));
+      const parsed = await Io.read(bytes);
       const sdtBack = parsed.body.find(b => b.type === "sdt");
       if (!sdtBack || sdtBack.type !== "sdt") {
         throw new Error("expected sdt");
@@ -453,8 +452,8 @@ describe("OOXML coverage — paragraph properties", () => {
       children: [{ content: [{ type: "text", text: "indented" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const back = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const p = back.properties!;
 
@@ -484,8 +483,8 @@ describe("OOXML coverage — paragraph properties", () => {
       children: [{ content: [{ type: "text", text: "x" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const p = (parsed.body.find(b => b.type === "paragraph") as Paragraph).properties!;
     expect(p.keepNext).toBe(true);
     expect(p.keepLines).toBe(true);
@@ -542,8 +541,8 @@ describe("OOXML coverage — numbering", () => {
       children: [{ content: [{ type: "text", text: "Second" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     expect(parsed.abstractNumberings?.length).toBe(1);
     expect(parsed.abstractNumberings?.[0].levels.length).toBe(2);
@@ -598,8 +597,8 @@ describe("OOXML coverage — styles inheritance", () => {
       children: [{ content: [{ type: "text", text: "Title" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const back = parsed.styles ?? [];
     const heading = back.find(s => s.styleId === "Heading1");
     expect(heading).toBeDefined();
@@ -628,8 +627,8 @@ describe("OOXML coverage — math (OMML)", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const block = parsed.body.find(b => b.type === "math");
     expect(block).toBeDefined();
     if (!block || block.type !== "math") {
@@ -650,11 +649,11 @@ describe("OOXML coverage — math (OMML)", () => {
       type: "math",
       content: [{ type: "mathRun", text: "x = 1" }]
     });
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     // Round-trip through readDocx must yield a body-level math block (the
     // reader unwraps the <w:p>-wrapped oMathPara back into a flat math
     // block) — this guarantees both sides agree on the shape.
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     const mathBlocks = parsed.body.filter(b => b.type === "math");
     expect(mathBlocks.length).toBe(1);
   });
@@ -667,9 +666,9 @@ describe("OOXML coverage — math (OMML)", () => {
     // either throw or yield a different shape.
     const h = Document.create();
     Document.addContent(h, { type: "math", content: [] });
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     // The package must be readable
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     // Body level should contain no math block (empty math is dropped) and
     // no <m:oMath> XML. We assert both.
     expect(parsed.body.filter(b => b.type === "math").length).toBe(0);
@@ -686,8 +685,8 @@ describe("OOXML coverage — paraId / textId on paragraph", () => {
       children: [{ content: [{ type: "text", text: "marked" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const p = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     expect(p.paraId).toBe("12345678");
     expect(p.textId).toBe("87654321");
@@ -740,8 +739,8 @@ describe("OOXML coverage — tables (advanced)", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const table = parsed.body.find(b => b.type === "table");
     if (!table || table.type !== "table") {
       throw new Error("expected table");
@@ -778,8 +777,8 @@ describe("OOXML coverage — tables (advanced)", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const table = parsed.body.find(b => b.type === "table");
     if (!table || table.type !== "table") {
       throw new Error("expected table");
@@ -809,8 +808,8 @@ describe("OOXML coverage — section properties", () => {
     };
     state.sectionProperties = spec;
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const sp = parsed.sectionProperties!;
     expect(sp.columns?.count).toBe(2);
     expect(sp.columns?.space).toBe(720);
@@ -857,8 +856,8 @@ describe("OOXML coverage — break types in run content", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const paras = parsed.body.filter(b => b.type === "paragraph") as Paragraph[];
 
     const breakTypes: Array<string | undefined> = [];
@@ -894,8 +893,8 @@ describe("OOXML coverage — symbol content", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let foundSymbol = false;
     for (const c of para.children) {
@@ -922,8 +921,8 @@ describe("OOXML coverage — paragraph mark run properties (rPr inside pPr)", ()
       children: [{ content: [{ type: "text", text: "mark me" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const p = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const markPr = p.properties?.markRunProperties;
     expect(markPr).toBeDefined();
@@ -947,8 +946,8 @@ describe("OOXML coverage — color spec with theme reference", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let run: Run | undefined;
     for (const c of para.children) {
@@ -981,8 +980,8 @@ describe("OOXML coverage — image alt text", () => {
       altText: "An accessibility-friendly description"
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     let foundAlt: string | undefined;
     for (const block of parsed.body) {
@@ -1015,8 +1014,8 @@ describe("OOXML coverage — text whitespace preservation", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const texts: string[] = [];
     for (const c of para.children) {
@@ -1039,8 +1038,8 @@ describe("OOXML coverage — XML special characters", () => {
     const sample = `< > & " ' <tag attr="val"> & end`;
     const h = Document.create();
     Document.addParagraph(h, sample);
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let backText = "";
     for (const c of para.children) {
@@ -1059,8 +1058,8 @@ describe("OOXML coverage — XML special characters", () => {
     const sample = "Hello 你好 🌍 𠮷 — тест";
     const h = Document.create();
     Document.addParagraph(h, sample);
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let backText = "";
     for (const c of para.children) {
@@ -1092,8 +1091,8 @@ describe("OOXML coverage — endnote round-trip", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     expect(parsed.endnotes?.some(e => e.id === enId)).toBe(true);
     let foundRef = false;
@@ -1127,8 +1126,8 @@ describe("OOXML coverage — language tagging", () => {
         }
       ]
     });
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let lang: { val?: string; eastAsia?: string; bidi?: string } | undefined;
     for (const c of para.children) {
@@ -1156,8 +1155,8 @@ describe("OOXML coverage — fields", () => {
         }
       ]
     });
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let foundField = false;
     for (const c of para.children) {
@@ -1188,8 +1187,8 @@ describe("OOXML coverage — fields", () => {
         }
       ]
     });
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let cached: string | undefined;
     for (const c of para.children) {
@@ -1212,8 +1211,8 @@ describe("OOXML coverage — table of contents", () => {
     Document.addHeading(h, "Section A", 1);
     Document.addHeading(h, "Sub-section", 2);
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     const toc = parsed.body.find(b => b.type === "tableOfContents");
     expect(toc).toBeDefined();
@@ -1254,8 +1253,8 @@ describe("OOXML coverage — numbering format variants", () => {
       children: [{ content: [{ type: "text", text: "First (I.)" }] }]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     expect(parsed.abstractNumberings?.[0].levels[0].format).toBe("upperRoman");
   });
 });
@@ -1276,8 +1275,8 @@ describe("OOXML coverage — page borders", () => {
       }
     };
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const pb = parsed.sectionProperties?.pageBorders;
     expect(pb).toBeDefined();
     expect(pb?.top?.style).toBe("single");
@@ -1321,8 +1320,8 @@ describe("OOXML coverage — image transforms", () => {
       ]
     };
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     let img: { rotation?: number; flipHorizontal?: boolean; flipVertical?: boolean } | undefined;
     for (const block of parsed.body) {
       if (block.type !== "paragraph") {
@@ -1365,8 +1364,8 @@ describe("OOXML coverage — image transforms", () => {
       ]
     };
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     let img: { srcRect?: { l?: number; t?: number; r?: number; b?: number } } | undefined;
     for (const block of parsed.body) {
       if (block.type !== "paragraph") {
@@ -1407,8 +1406,8 @@ describe("OOXML coverage — bookmarks with column attrs", () => {
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     let bm: BookmarkStart | undefined;
     for (const c of para.children) {
@@ -1442,8 +1441,8 @@ describe("OOXML coverage — soft hyphen / no-break hyphen / carriage return", (
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const para = parsed.body.find(b => b.type === "paragraph") as Paragraph;
     const types: string[] = [];
     for (const c of para.children) {
@@ -1471,8 +1470,8 @@ describe("OOXML coverage — section break types in section properties", () => {
         margins: { top: 1440, bottom: 1440, left: 1440, right: 1440 },
         breakType: bt
       };
-      const bytes = await packageDocx(Document.build(h));
-      const parsed = await readDocx(bytes);
+      const bytes = await Io.package(Document.build(h));
+      const parsed = await Io.read(bytes);
       expect(parsed.sectionProperties?.breakType).toBe(bt);
     }
   });
@@ -1492,8 +1491,8 @@ describe("OOXML coverage — DocDefaults", () => {
       }
     };
     Document.addParagraph(h, "default-styled");
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     const dd = parsed.docDefaults!;
     expect(dd).toBeDefined();
     expect(dd.runProperties?.size).toBe(22);
@@ -1525,8 +1524,8 @@ describe("OOXML coverage — customXml parts", () => {
       ]
     };
 
-    const bytes = await packageDocx(docModel);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(docModel);
+    const parsed = await Io.read(bytes);
     expect(parsed.customXmlParts?.length).toBe(1);
     const part = parsed.customXmlParts![0]!;
     expect(part.itemId.toUpperCase()).toBe("ABCDEF12-3456-7890-ABCD-EF1234567890");
@@ -1546,8 +1545,8 @@ describe("OOXML coverage — settings", () => {
     };
     Document.addParagraph(h, "x");
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
     expect(parsed.settings?.defaultTabStop).toBe(720);
     expect(parsed.settings?.zoom).toBe(125);
   });
