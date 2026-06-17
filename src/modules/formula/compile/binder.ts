@@ -11,6 +11,7 @@
  * The binder operates on snapshot data only — no live workbook objects.
  */
 
+import { FormulaError } from "../errors";
 import type { DefinedNameSnapshot, WorkbookSnapshot } from "../integration/workbook-snapshot";
 import { resolveDefinedName as resolveDefinedNameFromSnapshot } from "../integration/workbook-snapshot";
 import type { AstNode, CellRefNode, RangeRefNode } from "../syntax/ast";
@@ -181,7 +182,7 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
  * discriminated-union variant. At runtime, this path is unreachable.
  */
 function assertNever(x: never): never {
-  throw new Error(`unexpected AST node: ${JSON.stringify(x)}`);
+  throw new FormulaError(`unexpected AST node: ${JSON.stringify(x)}`);
 }
 
 // ============================================================================

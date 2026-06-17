@@ -24,6 +24,7 @@ import {
   buildTableGeometry,
   resolveStructuredRefColumns
 } from "../compile/structured-ref-utils";
+import { FormulaError } from "../errors";
 import type { WorkbookSnapshot } from "../integration/workbook-snapshot";
 import {
   snapshotCellKey,
@@ -216,7 +217,7 @@ export interface EvalContext {
  * unreachable; if a new variant is added without a case, compilation fails.
  */
 function assertNever(x: never): never {
-  throw new Error(`unexpected variant: ${JSON.stringify(x)}`);
+  throw new FormulaError(`unexpected variant: ${JSON.stringify(x)}`);
 }
 
 /**

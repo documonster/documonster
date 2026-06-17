@@ -21,6 +21,9 @@
 // never pulls in the evaluator.
 export * as Formula from "./surface/formula";
 
+// Errors — extend BaseError, consistent with every other module's errors.ts.
+export { FormulaError, FormulaParseError } from "./errors";
+
 // Structural types callers may need to describe their host workbook.
 export type {
   CellErrorValueLike,
