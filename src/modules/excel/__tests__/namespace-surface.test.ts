@@ -12,31 +12,49 @@ import { describe, it, expect } from "vitest";
 
 describe("documonster/excel namespace surface", () => {
   it("exposes exactly the expected domain namespaces", () => {
-    const names = Object.keys(Excel).sort();
-    expect(names).toEqual(
-      [
-        "Address",
-        "Anchor",
-        "Cell",
-        "Chart",
-        "Chartsheet",
-        "Column",
-        "DataValidation",
-        "DefinedNames",
-        "Form",
-        "Image",
-        "Note",
-        "Pivot",
-        "Range",
-        "Row",
-        "Sparkline",
-        "Stream",
-        "Table",
-        "Watermark",
-        "Workbook",
-        "Worksheet"
-      ].sort()
-    );
+    const NAMESPACES = [
+      "Address",
+      "Anchor",
+      "Cell",
+      "Chart",
+      "Chartsheet",
+      "Column",
+      "DataValidation",
+      "DefinedNames",
+      "Form",
+      "Image",
+      "Note",
+      "Pivot",
+      "Range",
+      "Row",
+      "Sparkline",
+      "Stream",
+      "Table",
+      "Watermark",
+      "Workbook",
+      "Worksheet"
+    ];
+    // Object exports (namespaces) — must be exactly these 20.
+    const namespaceKeys = Object.keys(Excel)
+      .filter(k => typeof (Excel as Record<string, unknown>)[k] === "object")
+      .sort();
+    expect(namespaceKeys).toEqual([...NAMESPACES].sort());
+  });
+
+  it("exposes error classes consistently with other modules", () => {
+    // excel, like word/csv/markdown/xml/pdf/stream, exports its BaseError
+    // subclasses + guard from the package entry for instanceof checks.
+    const e = Excel as Record<string, unknown>;
+    for (const name of [
+      "ExcelError",
+      "isExcelError",
+      "WorksheetNameError",
+      "InvalidAddressError",
+      "ChartOptionsError",
+      "ColumnOutOfBoundsError"
+    ]) {
+      expect(typeof e[name], name).toBe("function");
+    }
   });
 
   it("Workbook namespace exposes core lifecycle members as functions", () => {
