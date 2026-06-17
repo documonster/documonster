@@ -14,9 +14,9 @@ import { getCell } from "@excel/worksheet";
  * - Correlation & regression (CORREL, COVAR, SLOPE, INTERCEPT, LINEST)
  * - Distributions (NORM.DIST, NORM.INV, T.TEST, CHISQ.TEST)
  */
-import { installFormulaEngine } from "../index";
+import { Formula } from "../index";
 
-installFormulaEngine();
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Stats");

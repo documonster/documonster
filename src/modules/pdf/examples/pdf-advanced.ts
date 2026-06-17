@@ -24,7 +24,7 @@ import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { rowAddPageBreak, rowSetAlignment, rowSetFill, rowSetFont, rowSetHidden } from "@excel/row";
 import { columnSetNumFmt, getColumn } from "@excel/worksheet";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -73,7 +73,7 @@ columnSetNumFmt(getColumn(ws1, "price"), "$#,##0.00");
 // Repeat row 1 on every page
 ws1.pageSetup.printTitlesRow = "1:1";
 
-const pdf1 = await excelToPdf(wb1, {
+const pdf1 = await Pdf.fromExcel(wb1, {
   showGridLines: true,
   showPageNumbers: true,
   showSheetNames: true,
@@ -105,7 +105,7 @@ rowAddPageBreak(Worksheet.getRow(ws2, 20));
 // Print area: only columns A-C, rows 1-30
 ws2.pageSetup.printArea = "A1:C30";
 
-const pdf2 = await excelToPdf(wb2, {
+const pdf2 = await Pdf.fromExcel(wb2, {
   showGridLines: true,
   showPageNumbers: true
 });
@@ -130,7 +130,7 @@ for (let r = 2; r <= 30; r++) {
   }
 }
 
-const pdf3 = await excelToPdf(wb3, {
+const pdf3 = await Pdf.fromExcel(wb3, {
   fitToPage: false, // Don't shrink — let it paginate horizontally
   showGridLines: true,
   showPageNumbers: true,
@@ -154,7 +154,7 @@ Column.setHidden(ws4, 2, true);
 rowSetHidden(Worksheet.getRow(ws4, 3), true);
 rowSetHidden(Worksheet.getRow(ws4, 7), true);
 
-const pdf4 = await excelToPdf(wb4, { showGridLines: true });
+const pdf4 = await Pdf.fromExcel(wb4, { showGridLines: true });
 fs.writeFileSync(path.join(outDir, "advanced-hidden.pdf"), pdf4);
 console.log("4. advanced-hidden.pdf — hidden column B, hidden rows 3 and 7");
 
@@ -171,7 +171,7 @@ Cell.setValue(ws5, "A4", "User password: (none — opens without password)");
 Cell.setValue(ws5, "A6", "Permissions: print=yes, copy=no, modify=no");
 Column.setWidth(ws5, 1, 50);
 
-const pdf5 = await excelToPdf(wb5, {
+const pdf5 = await Pdf.fromExcel(wb5, {
   encryption: {
     ownerPassword: "owner123",
     // No userPassword — document opens without a password
@@ -198,7 +198,7 @@ Cell.setValue(ws6, "A1", "You need a password to open this PDF.");
 Cell.setValue(ws6, "A2", 'User password: "hello"');
 Column.setWidth(ws6, 1, 40);
 
-const pdf6 = await excelToPdf(wb6, {
+const pdf6 = await Pdf.fromExcel(wb6, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "hello"
@@ -236,7 +236,7 @@ Cell.setStyle(wsSmall, "A1", { font: { bold: true, size: 16 } });
 wsSmall.pageSetup.paperSize = 11; // A5
 
 // Export — each sheet gets its own page setup; bookmarks are auto-generated
-const pdf7 = await excelToPdf(wb7, {
+const pdf7 = await Pdf.fromExcel(wb7, {
   showSheetNames: true,
   showPageNumbers: true
 });
@@ -282,7 +282,7 @@ Cell.setStyle(ws8, "A3", {
 Cell.setValue(ws8, "A4", "Semi-transparent text");
 Cell.setStyle(ws8, "A4", { font: { color: { argb: "80FF0000" }, size: 14, bold: true } });
 
-const pdf8 = await excelToPdf(wb8, { showGridLines: true });
+const pdf8 = await Pdf.fromExcel(wb8, { showGridLines: true });
 fs.writeFileSync(path.join(outDir, "advanced-transparency.pdf"), pdf8);
 console.log("8. advanced-transparency.pdf — alpha fills and text");
 
@@ -298,7 +298,7 @@ for (let r = 1; r <= 5; r++) {
   }
 }
 
-const pdf9 = await excelToPdf(wb9, {
+const pdf9 = await Pdf.fromExcel(wb9, {
   showGridLines: true,
   gridLineColor: "FF3366CC" // blue grid lines
 });
@@ -322,7 +322,7 @@ ws10.pageSetup.margins = {
   footer: 0.3
 };
 
-const pdf10 = await excelToPdf(wb10, { showPageNumbers: true });
+const pdf10 = await Pdf.fromExcel(wb10, { showPageNumbers: true });
 fs.writeFileSync(path.join(outDir, "advanced-ws-margins.pdf"), pdf10);
 console.log("10. advanced-ws-margins.pdf — worksheet pageSetup margins");
 

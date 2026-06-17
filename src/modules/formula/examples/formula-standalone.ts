@@ -7,7 +7,7 @@ import { Cell, Workbook } from "@excel/index";
  * Covers:
  * - `calculateFormulas(workbook)` — functional equivalent of
  *   `Workbook.calculateFormulas()`, works without calling
- *   `installFormulaEngine()` first. This path is fully tree-shakeable:
+ *   `Formula.install()` first. This path is fully tree-shakeable:
  *   bundlers ship only the code paths reachable from the exports you
  *   reference.
  *
@@ -15,13 +15,13 @@ import { Cell, Workbook } from "@excel/index";
  *   linters, formula migration tools, or static analysis that does not
  *   need to evaluate anything.
  */
-import { parse, tokenize } from "../index";
+import { Formula } from "../index";
 
 // =============================================================================
 // 1. Functional calculation — zero side effects
 // =============================================================================
 //
-// Note we DO NOT call `installFormulaEngine()`. The functional
+// Note we DO NOT call `Formula.install()`. The functional
 // `calculateFormulas(workbook)` is self-contained and has no effect on
 // `Workbook.calculateFormulas()` (which would still throw without install).
 
@@ -45,7 +45,7 @@ console.log("  B3 =", Cell.getResult(ws, "B3")); // 30
 // 2. Syntax inspection — tokenize + parse
 // =============================================================================
 
-const tokens = tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
+const tokens = Formula.tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
 console.log("\ntokenize():");
 for (const tok of tokens) {
   console.log(`  ${tok.type} ${"value" in tok ? JSON.stringify(tok.value) : ""}`);
@@ -53,7 +53,7 @@ for (const tok of tokens) {
 
 // Structural check — can the parser handle it?
 try {
-  const ast = parse(tokens);
+  const ast = Formula.parse(tokens);
   console.log("\nparse():", ast.type, "root node — syntactically valid");
 } catch (err) {
   console.log("\nparse() failed:", (err as Error).message);
@@ -61,7 +61,7 @@ try {
 
 // A deliberately malformed formula
 try {
-  parse(tokenize("SUM(A1:"));
+  Formula.parse(Formula.tokenize("SUM(A1:"));
   console.log("unexpected success");
 } catch (err) {
   console.log("Bad formula rejected as expected:", (err as Error).message);

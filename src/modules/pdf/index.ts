@@ -42,48 +42,14 @@
  */
 
 // =============================================================================
-// Public API — Writing
+// Public API — the `Pdf` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-/** Standalone PDF generation — accepts plain arrays, sheet objects, or workbooks. */
-export { pdf } from "./pdf";
+export * as Pdf from "./surface/pdf";
 
-/** Excel-to-PDF conversion — accepts an Excel Workbook instance. */
-export {
-  excelToPdf,
-  chartToPdf,
-  createWordChartPdfRenderer,
-  type ChartToPdfOptions
-} from "./excel-bridge";
-
-/** Word-to-PDF conversion — accepts a DocxDocument. */
-export { docxToPdf } from "./word-bridge";
+// Conversion option types (the converter functions live on `Pdf.*`).
+export type { ChartToPdfOptions } from "./excel-bridge";
 export type { DocxToPdfOptions } from "./word-bridge";
-
-// =============================================================================
-// Public API — Reading
-// =============================================================================
-
-/** Read a PDF file and extract text, images, and metadata. */
-export { readPdf } from "./reader/pdf-reader";
-
-// =============================================================================
-// Public API — Building (free-form content)
-// =============================================================================
-
-/** Build PDFs with free text positioning, vector drawing, and images. */
-export { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "./builder/document-builder";
-
-/** Edit existing PDFs: overlay content, fill forms, copy/merge pages. */
-export { PdfEditor, PdfEditorPage } from "./builder/pdf-editor";
-
-/** Digital signatures — verify and sign PDF documents. */
-export {
-  verifyPdfSignature,
-  signPdf,
-  buildSignatureDictPlaceholder,
-  asn1Parse
-} from "./core/digital-signature";
 
 // =============================================================================
 // Types — Writing
@@ -103,8 +69,6 @@ export type {
   PdfImageWatermark,
   PdfWatermarkFilter
 } from "./types";
-
-export { PageSizes } from "./types";
 
 // =============================================================================
 // Types — Reading

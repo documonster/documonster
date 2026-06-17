@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { Cell, Workbook, Worksheet } from "@excel/index";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 import { PdfStructureError } from "../errors";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
@@ -527,7 +527,7 @@ Cell.setValue(ws2, "B1", 4);
 Cell.setValue(ws2, "A2", "Total Value");
 Cell.setValue(ws2, "B2", 76827.16);
 
-const excelPdfBytes = await excelToPdf(wb, {
+const excelPdfBytes = await Pdf.fromExcel(wb, {
   title: "Inventory Report",
   author: "Warehouse System",
   orientation: "landscape"

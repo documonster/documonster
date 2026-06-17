@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -369,7 +369,7 @@ Cell.setStyle(wsData, "B12", { alignment: { wrapText: true } });
 // Export
 // =============================================================================
 
-const pdf = await excelToPdf(wb, {
+const pdf = await Pdf.fromExcel(wb, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,

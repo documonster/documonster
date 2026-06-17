@@ -12,9 +12,9 @@ import { getCell } from "@excel/worksheet";
  * - Complex numbers (COMPLEX, IMSUM, IMABS, IMARGUMENT)
  * - Special functions (ERF, BESSELJ)
  */
-import { installFormulaEngine } from "../index";
+import { Formula } from "../index";
 
-installFormulaEngine();
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Eng");

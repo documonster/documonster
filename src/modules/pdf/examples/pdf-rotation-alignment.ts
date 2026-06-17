@@ -17,7 +17,7 @@ import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/cell";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { getCell } from "@excel/worksheet";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -107,7 +107,7 @@ addSection("textRotation=45 tests", 13, 14, 15, 60, 45, i => `Test ${i + 1}`);
   await Workbook.writeXlsx(wb, path.join(outDir, "pdf-rotation-alignment.xlsx"));
   console.log("Generated pdf-rotation-alignment.xlsx");
 
-  const pdfBytes = await excelToPdf(wb, { showGridLines: true, showSheetNames: true });
+  const pdfBytes = await Pdf.fromExcel(wb, { showGridLines: true, showSheetNames: true });
   fs.writeFileSync(path.join(outDir, "pdf-rotation-alignment.pdf"), pdfBytes);
   console.log(`Generated pdf-rotation-alignment.pdf (${pdfBytes.length} bytes)`);
 })();

@@ -2,7 +2,7 @@
  * Example: PDF Export with Images
  *
  * Demonstrates embedding JPEG and PNG images via:
- * 1. excelToPdf() — Excel workbook with images → PDF
+ * 1. Pdf.fromExcel() — Excel workbook with images → PDF
  * 2. pdf() — Standalone PDF with images (no Excel)
  *
  * Run: npx tsx src/modules/pdf/examples/pdf-images.ts
@@ -16,7 +16,7 @@ import { Cell, Workbook, Worksheet } from "@excel/index";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addImage } from "@excel/worksheet";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(
@@ -62,7 +62,7 @@ if (hasJpeg) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-jpeg.pdf"),
-    await excelToPdf(wb, { showGridLines: true })
+    await Pdf.fromExcel(wb, { showGridLines: true })
   );
   console.log("A1. excel-images-jpeg.pdf — table with embedded JPEG");
 } else {
@@ -90,7 +90,7 @@ if (hasPng) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-png.pdf"),
-    await excelToPdf(wb, { showGridLines: true })
+    await Pdf.fromExcel(wb, { showGridLines: true })
   );
   console.log("A2. excel-images-png.pdf — PNG with alpha transparency");
 } else {
@@ -124,7 +124,7 @@ if (hasJpeg && hasPng) {
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-multi.pdf"),
-    await excelToPdf(wb, {
+    await Pdf.fromExcel(wb, {
       showGridLines: true,
       showPageNumbers: true,
       title: "Multi-Image Report"

@@ -16,9 +16,9 @@ import { getCell } from "@excel/worksheet";
  * - ROW / COLUMN / ADDRESS (positional metadata)
  * - ROWS / COLUMNS (dimension of a range)
  */
-import { installFormulaEngine } from "../index";
+import { Formula } from "../index";
 
-installFormulaEngine();
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Lookup");

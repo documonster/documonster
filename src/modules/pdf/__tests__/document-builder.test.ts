@@ -10,26 +10,17 @@ import {
   serializeResourceDict
 } from "../builder/resource-merger";
 import type { PdfResourceDict } from "../builder/resource-merger";
-import {
-  PdfDocumentBuilder,
-  PdfEditor,
-  readPdf,
-  pdf,
-  parseSvgPath,
-  verifyPdfSignature,
-  buildSignatureDictPlaceholder,
-  asn1Parse
-} from "../index";
+import { Pdf } from "../index";
 import { generateTestCertificate } from "./test-certificate";
 import { buildTtfWithCmap } from "./ttf-test-utils";
 
 // =============================================================================
-// PdfDocumentBuilder — Free Text & Vector Drawing
+// Pdf.Builder — Free Text & Vector Drawing
 // =============================================================================
 
 describe("PdfDocumentBuilder", () => {
   it("should create a blank PDF with one page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage();
 
     const bytes = await doc.build();
@@ -41,44 +32,44 @@ describe("PdfDocumentBuilder", () => {
     expect(header).toBe("%PDF-2.0");
 
     // Should be readable
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should create a PDF with custom page size", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage({ width: 612, height: 792 }); // US Letter
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages[0].width).toBe(612);
     expect(result.pages[0].height).toBe(792);
   });
 
   it("should create a PDF with multiple pages", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage();
     doc.addPage();
     doc.addPage();
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(3);
   });
 
   it("should draw text at specific coordinates", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawText("Hello World", { x: 72, y: 750, fontSize: 24 });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.text).toContain("Hello World");
   });
 
   it("should draw text with different fonts", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawText("Normal text", { x: 72, y: 750 });
@@ -86,14 +77,14 @@ describe("PdfDocumentBuilder", () => {
     page.drawText("Italic text", { x: 72, y: 690, italic: true });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.text).toContain("Normal text");
     expect(result.text).toContain("Bold text");
     expect(result.text).toContain("Italic text");
   });
 
   it("should draw text with word-wrap", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     const longText =
@@ -101,13 +92,13 @@ describe("PdfDocumentBuilder", () => {
     page.drawText(longText, { x: 72, y: 750, fontSize: 12, maxWidth: 200 });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     // Text should be present (may be split across lines)
     expect(result.text).toContain("This is a long");
   });
 
   it("should measure text width", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     const width = page.measureText("Hello", { fontSize: 12 });
@@ -120,7 +111,7 @@ describe("PdfDocumentBuilder", () => {
   });
 
   it("should draw a rectangle", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawRect({
@@ -137,12 +128,12 @@ describe("PdfDocumentBuilder", () => {
     expect(bytes.length).toBeGreaterThan(0);
 
     // Verify it's a valid PDF
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a rounded rectangle", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawRect({
@@ -155,12 +146,12 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a circle", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawCircle({
@@ -172,12 +163,12 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw an ellipse", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawEllipse({
@@ -189,12 +180,12 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a line", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawLine({
@@ -207,12 +198,12 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a dashed line", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawLine({
@@ -226,12 +217,12 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a complex path", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     // Draw a triangle
@@ -250,12 +241,12 @@ describe("PdfDocumentBuilder", () => {
     );
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a path with Bezier curves", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawPath(
@@ -267,12 +258,12 @@ describe("PdfDocumentBuilder", () => {
     );
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should draw a simple SVG document", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     page.drawSvg({
@@ -284,7 +275,7 @@ describe("PdfDocumentBuilder", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
     expect(result.text).toContain("SVG Text");
   });
@@ -293,7 +284,7 @@ describe("PdfDocumentBuilder", () => {
     // Smoke-check that non-opaque fills actually flow through to the
     // generated PDF bytes. Before this change `drawRect` ignored
     // `fill.a` entirely, so the output looked identical to opaque.
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.drawRect({ x: 100, y: 100, width: 200, height: 100, fill: { r: 1, g: 0, b: 0, a: 0.35 } });
     const bytes = await doc.build();
@@ -308,7 +299,7 @@ describe("PdfDocumentBuilder", () => {
   });
 
   it("honours rgba() and fill-opacity in drawSvg", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     // First rect uses rgba(); second uses fill-opacity. Both should
     // resolve to the same alpha and share a single /ExtGState entry
@@ -333,7 +324,7 @@ describe("PdfDocumentBuilder", () => {
   });
 
   it("drawText rotation uses a text matrix that includes cos/sin", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.drawText("Rotated", { x: 200, y: 400, fontSize: 18, rotation: 45 });
     const bytes = await doc.build();
@@ -348,7 +339,7 @@ describe("PdfDocumentBuilder", () => {
     // Round-trip: ask PdfPageBuilder to centre the text, then read the
     // content stream for the resulting x. It must equal `x - width/2`
     // computed from the same `measureText` the font manager uses.
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     const measured = page.measureText("Centred", { fontSize: 18 });
     page.drawText("Centred", { x: 300, y: 400, fontSize: 18, anchor: "middle" });
@@ -367,7 +358,7 @@ describe("PdfDocumentBuilder", () => {
     // rotation + maxWidth must rotate each wrapped line (not silently drop
     // the rotation). At 90° the text matrix becomes `0 1 -1 0`, and lines
     // step along the rotated line-advance direction (local -y → page +x).
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage({ width: 400, height: 400 });
     page.drawText("hello world foo", {
       x: 100,
@@ -398,7 +389,7 @@ describe("PdfDocumentBuilder", () => {
     const ttf = buildTtfWithCmap([{ start: 0x20, end: 0x7a, delta: 1 - 0x20 }], 91, {
       familyName: "AnchorWrapFont"
     });
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.embedFont(ttf);
     const page = doc.addPage({ width: 400, height: 400 });
     page.drawText("aaaa bb cccccc", {
@@ -425,7 +416,7 @@ describe("PdfDocumentBuilder", () => {
 
   it("onWarning fires for unknown font family names", async () => {
     const warnings: string[] = [];
-    const doc = new PdfDocumentBuilder().onWarning(msg => warnings.push(msg));
+    const doc = new Pdf.Builder().onWarning(msg => warnings.push(msg));
     const page = doc.addPage();
     // "SimSun" is not in FONT_FAMILY_MAP, so resolveFont records it as
     // unknown. Use only ASCII text so Type3 / auto-embed paths stay
@@ -444,9 +435,7 @@ describe("PdfDocumentBuilder", () => {
     // have a CJK font installed, others not). With auto-discovery off
     // a CJK string triggers the no-coverage warning every time.
     const warnings: string[] = [];
-    const doc = new PdfDocumentBuilder()
-      .disableFontAutoDiscovery()
-      .onWarning(msg => warnings.push(msg));
+    const doc = new Pdf.Builder().disableFontAutoDiscovery().onWarning(msg => warnings.push(msg));
     const page = doc.addPage();
     page.drawText("中文测试", { x: 72, y: 700, fontSize: 12 });
     await doc.build();
@@ -464,7 +453,7 @@ describe("PdfDocumentBuilder", () => {
     // a real font file — parseTtf will reject it, but the warning
     // suppression check runs before parseTtf.
     const warnings: string[] = [];
-    const doc = new PdfDocumentBuilder().onWarning(msg => warnings.push(msg));
+    const doc = new Pdf.Builder().onWarning(msg => warnings.push(msg));
     const page = doc.addPage();
     page.drawText("Hello", { x: 72, y: 700, fontSize: 12, fontFamily: "SimSun" });
     // Don't actually embed (parseTtf would fail on invalid bytes);
@@ -496,7 +485,7 @@ describe("PdfDocumentBuilder", () => {
       61
     );
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.embedFont(ttf);
     const page = doc.addPage({ width: 400, height: 200 });
     page.drawText("DOCX \u2192 PDF", { x: 40, y: 150, fontSize: 16 });
@@ -534,7 +523,7 @@ describe("PdfDocumentBuilder", () => {
       familyName: "AsciiOnly"
     });
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     // Draw before embedFont so resolveFont returns a Type1 resource name.
     page.drawText("HELLO", { x: 40, y: 150, fontSize: 16 });
@@ -553,7 +542,7 @@ describe("PdfDocumentBuilder", () => {
     // type3-glyphs.ts) must render via a Type3 font, not collapse to a
     // space. The deferred encoder splits the run into Type1 (WinAnsi) and
     // Type3 sub-runs at build time.
-    const doc = new PdfDocumentBuilder().disableFontAutoDiscovery();
+    const doc = new Pdf.Builder().disableFontAutoDiscovery();
     const page = doc.addPage({ width: 400, height: 200 });
     page.drawText("A \u2192 B", { x: 40, y: 150, fontSize: 16 });
     const bytes = await doc.build();
@@ -569,7 +558,7 @@ describe("PdfDocumentBuilder", () => {
     // Deferred text fragments must keep their exact draw-order slot relative
     // to eagerly-emitted graphics operators. Draw rect → text → rect and
     // assert the operators appear in that order in the content stream.
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage({ width: 400, height: 200 });
     page.drawRect({ x: 10, y: 10, width: 20, height: 20 });
     page.drawText("MIDDLE", { x: 40, y: 100, fontSize: 12 });
@@ -597,7 +586,7 @@ describe("PdfDocumentBuilder", () => {
       familyName: "WideFont"
     });
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.embedFont(ttf);
     const page = doc.addPage({ width: 400, height: 200 });
     page.drawText("A", { x: 100, y: 150, fontSize: 10, anchor: "end" });
@@ -624,7 +613,7 @@ describe("PdfDocumentBuilder", () => {
       familyName: "WideFont2"
     });
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.embedFont(ttf);
     const page = doc.addPage({ width: 400, height: 200 });
     page.drawText("AAA AAA", { x: 20, y: 150, fontSize: 10, maxWidth: 50 });
@@ -641,18 +630,18 @@ describe("PdfDocumentBuilder", () => {
   });
 
   it("should set document metadata", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setMetadata({ title: "Test Doc", author: "Test Author" });
     doc.addPage();
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.metadata.title).toBe("Test Doc");
     expect(result.metadata.author).toBe("Test Author");
   });
 
   it("should support encryption", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setEncryption({
       ownerPassword: "owner123",
       userPassword: "user123"
@@ -663,15 +652,15 @@ describe("PdfDocumentBuilder", () => {
     const bytes = await doc.build();
 
     // Should fail without password
-    await expect(readPdf(bytes)).rejects.toThrow();
+    await expect(Pdf.read(bytes)).rejects.toThrow();
 
     // Should succeed with password
-    const result = await readPdf(bytes, { password: "user123" });
+    const result = await Pdf.read(bytes, { password: "user123" });
     expect(result.text).toContain("Secret content");
   });
 
   it("should combine text and shapes on the same page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     // Draw a background rect
@@ -685,13 +674,13 @@ describe("PdfDocumentBuilder", () => {
     page.drawLine({ x1: 50, y1: 695, x2: 550, y2: 695, color: { r: 0, g: 0, b: 0.5 } });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.text).toContain("Title");
     expect(result.text).toContain("Subtitle");
   });
 
   it("should expose raw content stream", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     // Use the raw content stream for custom operations
@@ -703,7 +692,7 @@ describe("PdfDocumentBuilder", () => {
     stream.restore();
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 });
@@ -714,7 +703,7 @@ describe("PdfDocumentBuilder", () => {
 
 describe("PdfDocumentBuilder — Bookmarks", () => {
   it("should produce PDF with outline bookmarks", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const p1 = doc.addPage();
     p1.drawText("Chapter 1", { x: 72, y: 750, fontSize: 20 });
     const p2 = doc.addPage();
@@ -734,12 +723,12 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
     expect(pdfStr).toContain("Chapter 2");
 
     // Should still be readable
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(2);
   });
 
   it("should support nested bookmarks", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Part I", { x: 72, y: 750 });
     doc.addPage().drawText("Chapter 1.1", { x: 72, y: 750 });
     doc.addPage().drawText("Chapter 1.2", { x: 72, y: 750 });
@@ -760,12 +749,12 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
     expect(pdfStr).toContain("/First");
     expect(pdfStr).toContain("/Last");
 
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(3);
   });
 
   it("should throw for invalid parent index", () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage();
 
     expect(() => doc.addBookmark("Child", 0, 5)).toThrow(RangeError);
@@ -773,7 +762,7 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
   });
 
   it("should roundtrip bookmarks through builder and reader", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Page 1", { x: 72, y: 750 });
     doc.addPage().drawText("Page 2", { x: 72, y: 750 });
     doc.addPage().drawText("Page 3", { x: 72, y: 750 });
@@ -785,7 +774,7 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
     doc.addBookmark("End", 2);
 
     const pdfBytes = await doc.build();
-    const result = await readPdf(pdfBytes);
+    const result = await Pdf.read(pdfBytes);
 
     expect(result.bookmarks.length).toBe(3); // Intro, Main, End
     expect(result.bookmarks[0].title).toBe("Intro");
@@ -800,7 +789,7 @@ describe("PdfDocumentBuilder — Bookmarks", () => {
 
 describe("PdfDocumentBuilder — Table of Contents", () => {
   it("should generate a TOC page with entry text", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Introduction", { x: 72, y: 750 });
     doc.addPage().drawText("Chapter 1", { x: 72, y: 750 });
     doc.addPage().drawText("Conclusion", { x: 72, y: 750 });
@@ -814,7 +803,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
     expect(tocPage.width).toBeGreaterThan(0);
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
 
     // The TOC page is the 4th page (added after the 3 content pages)
     expect(result.pages.length).toBe(4);
@@ -828,7 +817,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
   });
 
   it("should accept custom TOC options", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Section A", { x: 72, y: 750 });
     doc.addPage().drawText("Section B", { x: 72, y: 750 });
 
@@ -842,7 +831,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
 
     const tocText = result.pages[2].text;
     expect(tocText).toContain("Contents");
@@ -851,7 +840,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
   });
 
   it("should include link annotations on the TOC page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Page 1", { x: 72, y: 750 });
     doc.addPage().drawText("Page 2", { x: 72, y: 750 });
 
@@ -867,12 +856,12 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
     expect(pdfStr).toContain("/Subtype /Link");
     expect(pdfStr).toContain("/Dest");
 
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(3);
   });
 
   it("should render nested bookmarks with indentation in TOC", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Part I", { x: 72, y: 750 });
     doc.addPage().drawText("Ch 1", { x: 72, y: 750 });
     doc.addPage().drawText("Ch 2", { x: 72, y: 750 });
@@ -884,7 +873,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
     doc.generateTableOfContents();
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
 
     const tocText = result.pages[3].text;
     expect(tocText).toContain("Part I");
@@ -893,7 +882,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
   });
 
   it("should generate multi-page TOC when entries overflow", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
 
     // Create 60 pages with bookmarks — enough to overflow a single TOC page
     for (let i = 0; i < 60; i++) {
@@ -904,7 +893,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
     doc.generateTableOfContents();
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
 
     // Should have more than 61 pages (60 content + at least 2 TOC pages)
     expect(result.pages.length).toBeGreaterThan(61);
@@ -929,7 +918,7 @@ describe("PdfDocumentBuilder — Table of Contents", () => {
 
 describe("PdfDocumentBuilder — PDF/A-1b", () => {
   it("should produce a PDF with XMP containing pdfaid:part and pdfaid:conformance", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setPdfACompliance("1b");
     doc.setMetadata({ title: "Test PDF/A", author: "Test Author" });
     doc.addPage().drawText("PDF/A content", { x: 72, y: 750 });
@@ -950,7 +939,7 @@ describe("PdfDocumentBuilder — PDF/A-1b", () => {
   });
 
   it("should produce a PDF with /OutputIntents", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setPdfACompliance();
     doc.addPage();
 
@@ -963,7 +952,7 @@ describe("PdfDocumentBuilder — PDF/A-1b", () => {
   });
 
   it("should produce a PDF with /MarkInfo", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setPdfACompliance();
     doc.addPage();
 
@@ -975,7 +964,7 @@ describe("PdfDocumentBuilder — PDF/A-1b", () => {
   });
 
   it("should contain /Metadata reference in the catalog", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setPdfACompliance();
     doc.addPage();
 
@@ -989,33 +978,33 @@ describe("PdfDocumentBuilder — PDF/A-1b", () => {
   });
 
   it("should produce valid PDF readable by readPdf", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setPdfACompliance("1b");
     doc.setMetadata({ title: "Readable PDF/A" });
     doc.addPage().drawText("Hello PDF/A", { x: 72, y: 750 });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
     expect(result.text).toContain("Hello PDF/A");
   });
 });
 
 // =============================================================================
-// PdfEditor — Modify Existing PDF
+// Pdf.Editor — Modify Existing PDF
 // =============================================================================
 
 describe("PdfEditor", () => {
   it("should load an existing PDF", async () => {
-    const pdfBytes = await pdf([["Hello", "World"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Hello", "World"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     expect(editor.pageCount).toBeGreaterThan(0);
   });
 
   it("should overlay text on an existing page", async () => {
-    const pdfBytes = await pdf([["Original"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Original"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     editor.getPage(0).drawText("Overlay", {
       x: 200,
@@ -1025,13 +1014,13 @@ describe("PdfEditor", () => {
     });
 
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.text).toContain("Overlay");
   });
 
   it("should overlay shapes on an existing page", async () => {
-    const pdfBytes = await pdf([["Data"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Data"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     editor.getPage(0).drawRect({
       x: 72,
@@ -1048,29 +1037,29 @@ describe("PdfEditor", () => {
   });
 
   it("should add new pages to an existing PDF", async () => {
-    const pdfBytes = await pdf([["Page 1"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Page 1"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     const newPage = editor.addPage();
     newPage.drawText("Page 2", { x: 72, y: 750, fontSize: 20 });
 
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.pages.length).toBe(2);
     expect(readResult.pages[1].text).toContain("Page 2");
   });
 
   it("should throw for invalid page index", async () => {
-    const pdfBytes = await pdf([["Test"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Test"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     expect(() => editor.getPage(-1)).toThrow();
     expect(() => editor.getPage(100)).toThrow();
   });
 
   it("should get page dimensions", async () => {
-    const pdfBytes = await pdf([["Test"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Test"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     const page = editor.getPage(0);
     expect(page.width).toBeGreaterThan(0);
@@ -1102,7 +1091,7 @@ describe("PdfEditor", () => {
     ].join("\n");
 
     const pdfBytes = new TextEncoder().encode(src);
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     const fields = editor.getFormFields();
     expect(fields.length).toBe(1);
@@ -1111,21 +1100,21 @@ describe("PdfEditor", () => {
   });
 
   it("should copy pages from another PDF", async () => {
-    const sourcePdf = await pdf([["Source Page 1"], ["Source Row 2"]]);
-    const targetPdf = await pdf([["Target Page 1"]]);
+    const sourcePdf = await Pdf.create([["Source Page 1"], ["Source Row 2"]]);
+    const targetPdf = await Pdf.create([["Target Page 1"]]);
 
-    const editor = PdfEditor.load(targetPdf);
+    const editor = Pdf.Editor.load(targetPdf);
     editor.copyPagesFrom(sourcePdf);
 
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
 
     // Should have 2 pages: original + copied
     expect(readResult.pages.length).toBe(2);
   });
 
   it("should copy specific pages from another PDF", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const p1 = doc.addPage();
     p1.drawText("Page A", { x: 72, y: 750 });
     const p2 = doc.addPage();
@@ -1134,18 +1123,18 @@ describe("PdfEditor", () => {
     p3.drawText("Page C", { x: 72, y: 750 });
     const sourcePdf = await doc.build();
 
-    const targetPdf = await pdf([["Target"]]);
-    const editor = PdfEditor.load(targetPdf);
+    const targetPdf = await Pdf.create([["Target"]]);
+    const editor = Pdf.Editor.load(targetPdf);
     editor.copyPagesFrom(sourcePdf, [0, 2]); // Copy pages A and C
 
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.pages.length).toBe(3); // 1 original + 2 copied
   });
 
   it("should preserve original page content when overlaying", async () => {
-    const pdfBytes = await pdf([["Original Content"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Original Content"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
 
     editor.getPage(0).drawText("Overlay Text", {
       x: 200,
@@ -1155,7 +1144,7 @@ describe("PdfEditor", () => {
     });
 
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     // Both original and overlay text must be present
     expect(readResult.text).toContain("Original Content");
     expect(readResult.text).toContain("Overlay Text");
@@ -1184,7 +1173,7 @@ describe("PdfEditor", () => {
     ].join("\n");
     const pdfBytes = new TextEncoder().encode(src);
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     const result = await editor.save();
 
     // The saved PDF should contain /Rotate 90 in the page dict
@@ -1193,16 +1182,16 @@ describe("PdfEditor", () => {
   });
 
   it("should preserve original metadata after save", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.setMetadata({ title: "My Title", author: "My Author" });
     doc.addPage().drawText("Hello", { x: 72, y: 750 });
     const pdfBytes = await doc.build();
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.getPage(0).drawText("Extra", { x: 72, y: 700 });
     const result = await editor.save();
 
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.metadata.title).toBe("My Title");
     expect(readResult.metadata.author).toBe("My Author");
   });
@@ -1232,7 +1221,7 @@ describe("PdfEditor", () => {
     ].join("\n");
     const pdfBytes = new TextEncoder().encode(src);
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.setFormField("username", "new_value");
     const result = await editor.save();
 
@@ -1264,8 +1253,8 @@ describe("PdfEditor", () => {
     ].join("\n");
     const sourcePdf = new TextEncoder().encode(src);
 
-    const targetPdf = await pdf([["Target"]]);
-    const editor = PdfEditor.load(targetPdf);
+    const targetPdf = await Pdf.create([["Target"]]);
+    const editor = Pdf.Editor.load(targetPdf);
     editor.copyPagesFrom(sourcePdf);
 
     const result = await editor.save();
@@ -1275,7 +1264,7 @@ describe("PdfEditor", () => {
   });
 
   it("should produce valid PDF with drawImage in builder", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     // Minimal valid JPEG: SOI + SOF0 + EOI
@@ -1301,21 +1290,21 @@ describe("PdfEditor", () => {
     expect(bytes).toBeInstanceOf(Uint8Array);
 
     // Should be readable
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
   });
 
   it("should remove a page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Page 1", { x: 72, y: 750 });
     doc.addPage().drawText("Page 2", { x: 72, y: 750 });
     doc.addPage().drawText("Page 3", { x: 72, y: 750 });
     const pdfBytes = await doc.build();
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.removePage(1); // remove Page 2
     const result = await editor.save();
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
 
     expect(readResult.pages.length).toBe(2);
     expect(readResult.pages[0].text).toContain("Page 1");
@@ -1323,11 +1312,11 @@ describe("PdfEditor", () => {
   });
 
   it("should rotate a page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Rotated", { x: 72, y: 750 });
     const pdfBytes = await doc.build();
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.rotatePage(0, 90);
     const result = await editor.save();
 
@@ -1336,56 +1325,56 @@ describe("PdfEditor", () => {
   });
 
   it("should split pages into separate PDFs", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Page A", { x: 72, y: 750 });
     doc.addPage().drawText("Page B", { x: 72, y: 750 });
     doc.addPage().drawText("Page C", { x: 72, y: 750 });
     const pdfBytes = await doc.build();
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     const pages = await editor.splitPages();
 
     expect(pages.length).toBe(3);
 
     // Each should be a valid single-page PDF
     for (let i = 0; i < pages.length; i++) {
-      const result = await readPdf(pages[i]);
+      const result = await Pdf.read(pages[i]);
       expect(result.pages.length).toBe(1);
     }
 
-    const resultA = await readPdf(pages[0]);
+    const resultA = await Pdf.read(pages[0]);
     expect(resultA.text).toContain("Page A");
-    const resultC = await readPdf(pages[2]);
+    const resultC = await Pdf.read(pages[2]);
     expect(resultC.text).toContain("Page C");
   });
 
   it("should split specific pages", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Page A", { x: 72, y: 750 });
     doc.addPage().drawText("Page B", { x: 72, y: 750 });
     doc.addPage().drawText("Page C", { x: 72, y: 750 });
     const pdfBytes = await doc.build();
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     const pages = await editor.splitPages([0, 2]); // Only A and C
 
     expect(pages.length).toBe(2);
-    const resultA = await readPdf(pages[0]);
+    const resultA = await Pdf.read(pages[0]);
     expect(resultA.text).toContain("Page A");
-    const resultC = await readPdf(pages[1]);
+    const resultC = await Pdf.read(pages[1]);
     expect(resultC.text).toContain("Page C");
   });
 
   it("should throw for invalid removePage index", async () => {
-    const pdfBytes = await pdf([["Test"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Test"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
     expect(() => editor.removePage(-1)).toThrow();
     expect(() => editor.removePage(100)).toThrow();
   });
 
   it("should throw for invalid rotatePage degrees", async () => {
-    const pdfBytes = await pdf([["Test"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Test"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
     expect(() => editor.rotatePage(0, 45)).toThrow();
   });
 
@@ -1395,8 +1384,8 @@ describe("PdfEditor", () => {
     // PdfColor.a < 1) referenced an undefined resource. This test
     // verifies the overlay resource dict now contains the /GS####
     // entry the content stream references.
-    const pdfBytes = await pdf([["Base"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Base"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.getPage(0).drawRect({
       x: 50,
       y: 300,
@@ -1415,8 +1404,8 @@ describe("PdfEditor", () => {
   it("serialises /ExtGState on newly-added pages (PdfEditor.addPage)", async () => {
     // Same guarantee for the `_newPages` code path — pages created via
     // `editor.addPage()` (as opposed to existing pages being overlaid).
-    const pdfBytes = await pdf([["Base"]]);
-    const editor = PdfEditor.load(pdfBytes);
+    const pdfBytes = await Pdf.create([["Base"]]);
+    const editor = Pdf.Editor.load(pdfBytes);
     const addedPage = editor.addPage();
     addedPage.drawRect({
       x: 72,
@@ -1439,7 +1428,7 @@ describe("PdfEditor", () => {
 
 describe("PdfContentStream — Vector Drawing", () => {
   it("should produce correct Bezier curve operator", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     const stream = page.getContentStream();
@@ -1452,7 +1441,7 @@ describe("PdfContentStream — Vector Drawing", () => {
   });
 
   it("should produce a valid circle path", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     const stream = page.getContentStream();
@@ -1469,7 +1458,7 @@ describe("PdfContentStream — Vector Drawing", () => {
   });
 
   it("should produce a valid rounded rectangle path", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
 
     const stream = page.getContentStream();
@@ -1517,7 +1506,7 @@ describe("Form Field Appearance Streams", () => {
     ].join("\n");
     const pdfBytes = new TextEncoder().encode(src);
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.setFormField("city", "Springfield");
     const result = await editor.save();
 
@@ -1558,7 +1547,7 @@ describe("Form Field Appearance Streams", () => {
     ].join("\n");
     const pdfBytes = new TextEncoder().encode(src);
 
-    const editor = PdfEditor.load(pdfBytes);
+    const editor = Pdf.Editor.load(pdfBytes);
     editor.setFormField("email", "test@example.com");
     const result = await editor.save();
 
@@ -1738,13 +1727,13 @@ describe("Resource Dict Merger", () => {
 });
 
 // =============================================================================
-// PdfEditor — Incremental Save
+// Pdf.Editor — Incremental Save
 // =============================================================================
 
 describe("PdfEditor — saveIncremental", () => {
   it("should start with the original bytes when overlaying text", async () => {
-    const originalPdf = await pdf([["Original Content"]]);
-    const editor = PdfEditor.load(originalPdf);
+    const originalPdf = await Pdf.create([["Original Content"]]);
+    const editor = Pdf.Editor.load(originalPdf);
 
     editor.getPage(0).drawText("Overlay", {
       x: 200,
@@ -1761,7 +1750,7 @@ describe("PdfEditor — saveIncremental", () => {
     expect(prefix).toEqual(originalPdf);
 
     // The result should be a readable PDF with both original and overlay content
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.text).toContain("Original Content");
     expect(readResult.text).toContain("Overlay");
   });
@@ -1773,8 +1762,8 @@ describe("PdfEditor — saveIncremental", () => {
     // writeFontResources would call encodeText prematurely and throw
     // "subset mapping not available". Drawing non-WinAnsi text through an
     // embedded font exercises exactly that path.
-    const originalPdf = await pdf([["Original Content"]]);
-    const editor = PdfEditor.load(originalPdf);
+    const originalPdf = await Pdf.create([["Original Content"]]);
+    const editor = Pdf.Editor.load(originalPdf);
 
     const ttf = buildTtfWithCmap(
       [
@@ -1818,7 +1807,7 @@ describe("PdfEditor — saveIncremental", () => {
     ].join("\n");
     const originalPdf = new TextEncoder().encode(src);
 
-    const editor = PdfEditor.load(originalPdf);
+    const editor = Pdf.Editor.load(originalPdf);
     editor.setFormField("username", "new_value");
     const result = await editor.saveIncremental();
 
@@ -1833,8 +1822,8 @@ describe("PdfEditor — saveIncremental", () => {
   });
 
   it("should fall back to full rebuild when pages are added", async () => {
-    const originalPdf = await pdf([["Page 1"]]);
-    const editor = PdfEditor.load(originalPdf);
+    const originalPdf = await Pdf.create([["Page 1"]]);
+    const editor = Pdf.Editor.load(originalPdf);
 
     // Add a new page — this is a structural change
     const newPage = editor.addPage();
@@ -1844,31 +1833,31 @@ describe("PdfEditor — saveIncremental", () => {
 
     // Since structural changes are present, this should NOT start with original bytes
     // (it falls back to full rebuild which re-creates the entire PDF)
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.pages.length).toBe(2);
     expect(readResult.pages[1].text).toContain("Page 2");
   });
 
   it("should fall back to full rebuild when pages are removed", async () => {
-    const doc = new (await import("../index")).PdfDocumentBuilder();
+    const doc = new (await import("../index")).Pdf.Builder();
     doc.addPage().drawText("Page 1", { x: 72, y: 750 });
     doc.addPage().drawText("Page 2", { x: 72, y: 750 });
     const originalPdf = await doc.build();
 
-    const editor = PdfEditor.load(originalPdf);
+    const editor = Pdf.Editor.load(originalPdf);
     editor.removePage(1);
 
     const result = await editor.saveIncremental();
 
     // Falls back to full rebuild — result should be a valid 1-page PDF
-    const readResult = await readPdf(result);
+    const readResult = await Pdf.read(result);
     expect(readResult.pages.length).toBe(1);
     expect(readResult.pages[0].text).toContain("Page 1");
   });
 
   it("should return original bytes when no changes are made", async () => {
-    const originalPdf = await pdf([["Unchanged"]]);
-    const editor = PdfEditor.load(originalPdf);
+    const originalPdf = await Pdf.create([["Unchanged"]]);
+    const editor = Pdf.Editor.load(originalPdf);
 
     const result = await editor.saveIncremental();
 
@@ -1877,8 +1866,8 @@ describe("PdfEditor — saveIncremental", () => {
   });
 
   it("should not leak state between consecutive save calls", async () => {
-    const originalPdf = await pdf([["State Test"]]);
-    const editor = PdfEditor.load(originalPdf);
+    const originalPdf = await Pdf.create([["State Test"]]);
+    const editor = Pdf.Editor.load(originalPdf);
 
     // First: incremental save with no changes (early return path)
     const result1 = await editor.saveIncremental();
@@ -1887,12 +1876,12 @@ describe("PdfEditor — saveIncremental", () => {
     // Second: add overlay and do full save — should work correctly
     editor.getPage(0).drawText("Added", { x: 200, y: 400 });
     const result2 = await editor.save();
-    const readResult = await readPdf(result2);
+    const readResult = await Pdf.read(result2);
     expect(readResult.text).toContain("State Test");
     expect(readResult.text).toContain("Added");
 
     // Third: incremental save after full save — should not crash
-    const editor2 = PdfEditor.load(result2);
+    const editor2 = Pdf.Editor.load(result2);
     const result3 = await editor2.saveIncremental();
     expect(result3.length).toBeGreaterThan(0);
   });
@@ -1904,7 +1893,7 @@ describe("PdfEditor — saveIncremental", () => {
 
 describe("Annotation Creation", () => {
   it("should create a PDF with a Highlight annotation", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.drawText("Highlighted text", { x: 72, y: 750, fontSize: 14 });
     page.addAnnotation({
@@ -1915,7 +1904,7 @@ describe("Annotation Creation", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.pages.length).toBe(1);
 
     // Check that the annotation appears in the PDF structure
@@ -1925,7 +1914,7 @@ describe("Annotation Creation", () => {
   });
 
   it("should create Text (sticky note) annotation", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addAnnotation({
       type: "Text",
@@ -1944,7 +1933,7 @@ describe("Annotation Creation", () => {
   });
 
   it("should create FreeText annotation", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addAnnotation({
       type: "FreeText",
@@ -1961,7 +1950,7 @@ describe("Annotation Creation", () => {
   });
 
   it("should create Stamp annotation", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addAnnotation({
       type: "Stamp",
@@ -1977,7 +1966,7 @@ describe("Annotation Creation", () => {
   });
 
   it("should create Underline and StrikeOut annotations", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addAnnotation({
       type: "Underline",
@@ -1995,11 +1984,11 @@ describe("Annotation Creation", () => {
   });
 
   it("should add annotations via PdfEditorPage", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Hello", { x: 72, y: 750, fontSize: 12 });
     const original = await doc.build();
 
-    const editor = PdfEditor.load(original);
+    const editor = Pdf.Editor.load(original);
     editor.getPage(0).addAnnotation({
       type: "Highlight",
       rect: [72, 745, 150, 760],
@@ -2017,7 +2006,7 @@ describe("Annotation Creation", () => {
 
 describe("Form Field Creation", () => {
   it("should create a text field", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.drawText("Name:", { x: 72, y: 750, fontSize: 12 });
     page.addFormField({
@@ -2028,7 +2017,7 @@ describe("Form Field Creation", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     expect(result.formFields.length).toBeGreaterThanOrEqual(1);
     const nameField = result.formFields.find(f => f.name === "fullName");
     expect(nameField).toBeDefined();
@@ -2037,7 +2026,7 @@ describe("Form Field Creation", () => {
   });
 
   it("should create a checkbox field", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addFormField({
       type: "checkbox",
@@ -2047,14 +2036,14 @@ describe("Form Field Creation", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     const checkField = result.formFields.find(f => f.name === "agree");
     expect(checkField).toBeDefined();
     expect(checkField!.type).toBe("checkbox");
   });
 
   it("should create a dropdown field with options", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addFormField({
       type: "dropdown",
@@ -2065,7 +2054,7 @@ describe("Form Field Creation", () => {
     });
 
     const bytes = await doc.build();
-    const result = await readPdf(bytes);
+    const result = await Pdf.read(bytes);
     const dropField = result.formFields.find(f => f.name === "country");
     expect(dropField).toBeDefined();
     expect(dropField!.type).toBe("dropdown");
@@ -2074,7 +2063,7 @@ describe("Form Field Creation", () => {
   });
 
   it("should create a radio button group", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     page.addFormField({
       type: "radio",
@@ -2093,11 +2082,11 @@ describe("Form Field Creation", () => {
   });
 
   it("should create form fields on editor pages", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Form", { x: 72, y: 750, fontSize: 12 });
     const original = await doc.build();
 
-    const editor = PdfEditor.load(original);
+    const editor = Pdf.Editor.load(original);
     editor.getPage(0).addFormField({
       type: "text",
       name: "editorField",
@@ -2117,7 +2106,7 @@ describe("Form Field Creation", () => {
 
 describe("SVG Path Parser", () => {
   it("should parse M L Z commands", () => {
-    const ops = parseSvgPath("M10 20 L30 40 Z");
+    const ops = Pdf.parseSvgPath("M10 20 L30 40 Z");
     expect(ops).toEqual([
       { op: "move", x: 10, y: 20 },
       { op: "line", x: 30, y: 40 },
@@ -2126,7 +2115,7 @@ describe("SVG Path Parser", () => {
   });
 
   it("should parse relative m l z commands", () => {
-    const ops = parseSvgPath("m10 20 l20 20 z");
+    const ops = Pdf.parseSvgPath("m10 20 l20 20 z");
     expect(ops).toEqual([
       { op: "move", x: 10, y: 20 },
       { op: "line", x: 30, y: 40 },
@@ -2135,7 +2124,7 @@ describe("SVG Path Parser", () => {
   });
 
   it("should parse H and V commands", () => {
-    const ops = parseSvgPath("M0 0 H100 V50");
+    const ops = Pdf.parseSvgPath("M0 0 H100 V50");
     expect(ops).toEqual([
       { op: "move", x: 0, y: 0 },
       { op: "line", x: 100, y: 0 },
@@ -2144,7 +2133,7 @@ describe("SVG Path Parser", () => {
   });
 
   it("should parse C (cubic bezier) command", () => {
-    const ops = parseSvgPath("M0 0 C10 20 30 40 50 60");
+    const ops = Pdf.parseSvgPath("M0 0 C10 20 30 40 50 60");
     expect(ops.length).toBe(2);
     expect(ops[0]).toEqual({ op: "move", x: 0, y: 0 });
     expect(ops[1].op).toBe("curve");
@@ -2157,13 +2146,13 @@ describe("SVG Path Parser", () => {
   });
 
   it("should parse Q (quadratic bezier) as cubic", () => {
-    const ops = parseSvgPath("M0 0 Q50 100 100 0");
+    const ops = Pdf.parseSvgPath("M0 0 Q50 100 100 0");
     expect(ops.length).toBe(2);
     expect(ops[1].op).toBe("curve");
   });
 
   it("should parse A (arc) as curves", () => {
-    const ops = parseSvgPath("M0 0 A25 25 0 0 1 50 0");
+    const ops = Pdf.parseSvgPath("M0 0 A25 25 0 0 1 50 0");
     expect(ops.length).toBeGreaterThanOrEqual(2);
     // Arc should be approximated as one or more curves
     expect(ops[0]).toEqual({ op: "move", x: 0, y: 0 });
@@ -2171,7 +2160,7 @@ describe("SVG Path Parser", () => {
   });
 
   it("should handle implicit repeated commands", () => {
-    const ops = parseSvgPath("M0 0 10 20 30 40");
+    const ops = Pdf.parseSvgPath("M0 0 10 20 30 40");
     // After M, implicit L
     expect(ops).toEqual([
       { op: "move", x: 0, y: 0 },
@@ -2181,12 +2170,12 @@ describe("SVG Path Parser", () => {
   });
 
   it("should handle empty path", () => {
-    expect(parseSvgPath("")).toEqual([]);
-    expect(parseSvgPath("   ")).toEqual([]);
+    expect(Pdf.parseSvgPath("")).toEqual([]);
+    expect(Pdf.parseSvgPath("   ")).toEqual([]);
   });
 
   it("should draw SVG path on a page", async () => {
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     const page = doc.addPage();
     // Simple triangle
     page.drawSvgPath("M100 100 L200 100 L150 200 Z", {
@@ -2200,19 +2189,19 @@ describe("SVG Path Parser", () => {
   });
 
   it("should parse S (smooth cubic) command", () => {
-    const ops = parseSvgPath("M0 0 C10 20 30 40 50 60 S70 80 90 100");
+    const ops = Pdf.parseSvgPath("M0 0 C10 20 30 40 50 60 S70 80 90 100");
     expect(ops.length).toBe(3);
     expect(ops[2].op).toBe("curve");
   });
 
   it("should parse T (smooth quadratic) command", () => {
-    const ops = parseSvgPath("M0 0 Q25 50 50 0 T100 0");
+    const ops = Pdf.parseSvgPath("M0 0 Q25 50 50 0 T100 0");
     expect(ops.length).toBe(3);
     expect(ops[2].op).toBe("curve");
   });
 
   it("should handle arc with zero radius as line", () => {
-    const ops = parseSvgPath("M0 0 A0 0 0 0 1 50 50");
+    const ops = Pdf.parseSvgPath("M0 0 A0 0 0 0 1 50 50");
     expect(ops.length).toBe(2);
     expect(ops[1]).toEqual({ op: "line", x: 50, y: 50 });
   });
@@ -2226,7 +2215,7 @@ describe("ASN.1 Parser", () => {
   it("should parse a simple SEQUENCE with INTEGER", () => {
     // SEQUENCE { INTEGER 42 }
     const data = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x2a]);
-    const node = asn1Parse(data);
+    const node = Pdf.asn1Parse(data);
     expect(node.tag).toBe(0x30);
     expect(node.children.length).toBe(1);
     expect(node.children[0].tag).toBe(0x02);
@@ -2236,7 +2225,7 @@ describe("ASN.1 Parser", () => {
   it("should parse nested SEQUENCE", () => {
     // SEQUENCE { SEQUENCE { NULL } }
     const data = new Uint8Array([0x30, 0x04, 0x30, 0x02, 0x05, 0x00]);
-    const node = asn1Parse(data);
+    const node = Pdf.asn1Parse(data);
     expect(node.children.length).toBe(1);
     expect(node.children[0].tag).toBe(0x30);
     expect(node.children[0].children.length).toBe(1);
@@ -2250,7 +2239,7 @@ describe("ASN.1 Parser", () => {
 
 describe("Digital Signature", () => {
   it("should build signature dict placeholder with correct structure", () => {
-    const { dictString, placeholder } = buildSignatureDictPlaceholder({
+    const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
       name: "Test Signer",
       reason: "Testing"
     });
@@ -2268,7 +2257,7 @@ describe("Digital Signature", () => {
 
   it("should handle verifyPdfSignature with invalid data gracefully", async () => {
     const fakePdf = new Uint8Array(100);
-    const result = await verifyPdfSignature(fakePdf, "00", [0, 10, 20, 80]);
+    const result = await Pdf.verifySignature(fakePdf, "00", [0, 10, 20, 80]);
     expect(result.valid).toBe(false);
     expect(result.reason).toBeDefined();
   });
@@ -2276,7 +2265,7 @@ describe("Digital Signature", () => {
   it("should sign+verify roundtrip with PdfDocumentBuilder", async () => {
     const { certificate, privateKey } = await generateTestCertificate("TestBuilder");
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Signed doc", { x: 72, y: 750, fontSize: 14 });
     doc.sign({ certificate, privateKey, name: "Test Signer", reason: "Testing" });
     const signed = await doc.build();
@@ -2288,7 +2277,7 @@ describe("Digital Signature", () => {
     expect(contentsMatch).not.toBeNull();
     expect(brMatch).not.toBeNull();
 
-    const result = await verifyPdfSignature(signed, contentsMatch![1], [
+    const result = await Pdf.verifySignature(signed, contentsMatch![1], [
       parseInt(brMatch![1]),
       parseInt(brMatch![2]),
       parseInt(brMatch![3]),
@@ -2302,12 +2291,12 @@ describe("Digital Signature", () => {
     const { certificate, privateKey } = await generateTestCertificate("TestEditor");
 
     // Create unsigned PDF
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Unsigned", { x: 72, y: 750, fontSize: 14 });
     const unsigned = await doc.build();
 
     // Sign via editor
-    const editor = PdfEditor.load(unsigned);
+    const editor = Pdf.Editor.load(unsigned);
     const signed = await editor.sign({ certificate, privateKey, name: "Editor Signer" });
 
     // Verify
@@ -2317,7 +2306,7 @@ describe("Digital Signature", () => {
     expect(contentsMatch).not.toBeNull();
     expect(brMatch).not.toBeNull();
 
-    const result = await verifyPdfSignature(signed, contentsMatch![1], [
+    const result = await Pdf.verifySignature(signed, contentsMatch![1], [
       parseInt(brMatch![1]),
       parseInt(brMatch![2]),
       parseInt(brMatch![3]),
@@ -2330,7 +2319,7 @@ describe("Digital Signature", () => {
   it("should detect tampering after signing", async () => {
     const { certificate, privateKey } = await generateTestCertificate("TamperTest");
 
-    const doc = new PdfDocumentBuilder();
+    const doc = new Pdf.Builder();
     doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 14 });
     doc.sign({ certificate, privateKey });
     const signed = await doc.build();
@@ -2349,7 +2338,7 @@ describe("Digital Signature", () => {
       parseInt(brMatch[4])
     ];
 
-    const result = await verifyPdfSignature(tampered, contentsMatch[1], byteRange);
+    const result = await Pdf.verifySignature(tampered, contentsMatch[1], byteRange);
     expect(result.valid).toBe(false);
     expect(result.reason).toContain("digest mismatch");
   });
@@ -2377,7 +2366,7 @@ describe("SVG Path T command regression", () => {
     // Q50,100 means control point at (50,100). After reaching (100,0),
     // T150,0 reflects control to (150,-100). The c2 control point Y
     // should use qy=-100, not qx=150.
-    const ops = parseSvgPath("M0 0 Q50 100 100 0 T200 0");
+    const ops = Pdf.parseSvgPath("M0 0 Q50 100 100 0 T200 0");
     expect(ops.length).toBe(3);
 
     // The third op (from T) should be a curve

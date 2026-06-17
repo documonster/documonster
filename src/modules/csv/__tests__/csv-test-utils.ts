@@ -5,7 +5,7 @@
  * Provides consistent test data generation, assertions, and helpers.
  */
 
-import { parseCsv, formatCsv } from "@csv/index";
+import { Csv } from "@csv/index";
 import type { CsvParseResult } from "@csv/index";
 
 // =============================================================================
@@ -159,8 +159,8 @@ export function assertCsvEqual(actual: string, expected: string): void {
  * Assert that parsing and formatting a CSV produces the same result (roundtrip)
  */
 export function assertCsvRoundtrip(csv: string, options?: { delimiter?: string }): void {
-  const parsed = parseCsv(csv, { delimiter: options?.delimiter }) as string[][];
-  const formatted = formatCsv(parsed, {
+  const parsed = Csv.parse(csv, { delimiter: options?.delimiter }) as string[][];
+  const formatted = Csv.format(parsed, {
     delimiter: options?.delimiter,
     trailingNewline: false
   });

@@ -9,7 +9,7 @@
  * - Performance boundaries
  */
 
-import { parseCsv, parseCsvRows, formatCsv } from "@csv/index";
+import { Csv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import { describe, it, expect } from "vitest";
 
@@ -30,7 +30,7 @@ describe("wide data", () => {
     const values = Array.from({ length: cols }, (_, i) => `val${i}`);
     const csv = headers.join(",") + "\n" + values.join(",");
 
-    const result = parseCsv(csv, { headers: true }) as { rows: Record<string, string>[] };
+    const result = Csv.parse(csv, { headers: true }) as { rows: Record<string, string>[] };
 
     expect(result.rows).toHaveLength(1);
     expect(Object.keys(result.rows[0])).toHaveLength(cols);
@@ -40,7 +40,7 @@ describe("wide data", () => {
 
   it("parses 1000 columns", () => {
     const csv = generateEdgeCaseCsv("wide");
-    const result = parseCsv(csv, { headers: true }) as { rows: Record<string, string>[] };
+    const result = Csv.parse(csv, { headers: true }) as { rows: Record<string, string>[] };
 
     expect(result.rows).toHaveLength(1);
     expect(Object.keys(result.rows[0])).toHaveLength(1000);
@@ -58,8 +58,8 @@ describe("wide data", () => {
   it("formats 500 columns", () => {
     const cols = 500;
     const data = [Array.from({ length: cols }, (_, i) => `val${i}`)];
-    const result = formatCsv(data, { trailingNewline: false });
-    const parsed = parseCsv(result) as string[][];
+    const result = Csv.format(data, { trailingNewline: false });
+    const parsed = Csv.parse(result) as string[][];
 
     expect(parsed[0]).toHaveLength(cols);
     expect(parsed[0][0]).toBe("val0");
@@ -73,7 +73,7 @@ describe("wide data", () => {
 describe("deep data", () => {
   it("parses 1000 rows", () => {
     const csv = generateLargeCsv(1000, 3);
-    const result = parseCsv(csv) as string[][];
+    const result = Csv.parse(csv) as string[][];
 
     expect(result).toHaveLength(1001); // 1 header + 1000 data rows
   });
@@ -100,7 +100,7 @@ describe("deep data", () => {
 
   it("respects maxRows limit", () => {
     const csv = generateLargeCsv(10000, 3);
-    const result = parseCsv(csv, { maxRows: 100 }) as string[][];
+    const result = Csv.parse(csv, { maxRows: 100 }) as string[][];
 
     expect(result).toHaveLength(100);
   });
@@ -114,11 +114,11 @@ describe("deep data", () => {
     expect(rows.length).toBeLessThanOrEqual(502); // header + ~500 remaining
   });
 
-  it("iterates with parseCsvRows and early exit", async () => {
+  it("iterates with Csv.parseRows and early exit", async () => {
     const csv = generateLargeCsv(5000, 3);
     let count = 0;
 
-    for await (const _row of parseCsvRows(csv)) {
+    for await (const _row of Csv.parseRows(csv)) {
       count++;
       if (count >= 1000) {
         break;
@@ -136,14 +136,14 @@ describe("large fields", () => {
   it("parses 10KB field", () => {
     const largeContent = "x".repeat(10 * 1024);
     const csv = `name,content\ntest,"${largeContent}"`;
-    const result = parseCsv(csv, { headers: true }) as { rows: Record<string, string>[] };
+    const result = Csv.parse(csv, { headers: true }) as { rows: Record<string, string>[] };
 
     expect(result.rows[0].content).toHaveLength(10 * 1024);
   });
 
   it("parses 100KB field", () => {
     const csv = generateEdgeCaseCsv("large-field");
-    const result = parseCsv(csv, { headers: true }) as { rows: Record<string, string>[] };
+    const result = Csv.parse(csv, { headers: true }) as { rows: Record<string, string>[] };
 
     expect(result.rows[0].content.length).toBeGreaterThanOrEqual(100 * 1024);
   });
@@ -151,7 +151,7 @@ describe("large fields", () => {
   it("parses field with 1000 embedded newlines", () => {
     const lines = Array.from({ length: 1000 }, (_, i) => `line${i}`).join("\n");
     const csv = `content\n"${lines}"`;
-    const result = parseCsv(csv, { headers: true }) as { rows: Record<string, string>[] };
+    const result = Csv.parse(csv, { headers: true }) as { rows: Record<string, string>[] };
 
     expect(result.rows[0].content.split("\n")).toHaveLength(1000);
   });
@@ -168,8 +168,8 @@ describe("large fields", () => {
   it("formats large field with newlines", () => {
     const largeContent = "content\nwith\nnewlines".repeat(1000);
     const data = [["test", largeContent]];
-    const result = formatCsv(data, { trailingNewline: false });
-    const parsed = parseCsv(result) as string[][];
+    const result = Csv.format(data, { trailingNewline: false });
+    const parsed = Csv.parse(result) as string[][];
 
     expect(parsed[0][1]).toBe(largeContent);
   });
@@ -181,7 +181,7 @@ describe("large fields", () => {
 describe("performance", () => {
   it("parses 1000x10 within 500ms", async () => {
     const csv = generateLargeCsv(1000, 10);
-    const { ms } = await measureTime(() => parseCsv(csv));
+    const { ms } = await measureTime(() => Csv.parse(csv));
 
     // Should complete within 500ms (very generous for CI environments)
     expect(ms).toBeLessThan(500);
@@ -193,7 +193,7 @@ describe("performance", () => {
       data.push(Array.from({ length: 10 }, (_, j) => `val${i}_${j}`));
     }
 
-    const { ms } = await measureTime(() => formatCsv(data));
+    const { ms } = await measureTime(() => Csv.format(data));
 
     expect(ms).toBeLessThan(500);
   });
@@ -202,14 +202,14 @@ describe("performance", () => {
     const csv = generateLargeCsv(10000, 5);
 
     let streamCount = 0;
-    for await (const _row of parseCsvRows(csv)) {
+    for await (const _row of Csv.parseRows(csv)) {
       streamCount++;
       if (streamCount >= 100) {
         break;
       }
     }
 
-    const batchResult = parseCsv(csv) as string[][];
+    const batchResult = Csv.parse(csv) as string[][];
 
     expect(streamCount).toBe(100);
     expect(batchResult.length).toBeGreaterThan(10000);
@@ -220,7 +220,7 @@ describe("performance", () => {
     // Modify to ensure no quotes
     const simpleData = csv.replace(/"/g, "");
 
-    const { ms } = await measureTime(() => parseCsv(simpleData, { fastMode: true }));
+    const { ms } = await measureTime(() => Csv.parse(simpleData, { fastMode: true }));
 
     expect(ms).toBeLessThan(500);
   });
@@ -235,7 +235,7 @@ describe("memory", () => {
 
     // Parse multiple times
     for (let i = 0; i < 100; i++) {
-      parseCsv(csv);
+      Csv.parse(csv);
     }
 
     // If we got here without OOM, test passes

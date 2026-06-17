@@ -18,9 +18,9 @@ import { getCell } from "@excel/worksheet";
  * engine works with those serials; set `cell.numFmt` when reading back if
  * you need a formatted display.
  */
-import { installFormulaEngine } from "../index";
+import { Formula } from "../index";
 
-installFormulaEngine();
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Dates");

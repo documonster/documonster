@@ -29,7 +29,7 @@ import {
 } from "@excel/markdown-bridge.node";
 import { getSheetName, rowGetCell } from "@excel/worksheet";
 
-import { parseMarkdown, formatMarkdown, MarkdownParseError } from "../index";
+import { Markdown, MarkdownParseError } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -49,7 +49,7 @@ const rows: string[][] = [
   ["Bob", "x > y", "D:\\Data"]
 ];
 
-const markdown1 = formatMarkdown(headers, rows, {
+const markdown1 = Markdown.format(headers, rows, {
   columns: [
     { header: "Name", alignment: "left" },
     { header: "Formula", alignment: "center" },
@@ -59,8 +59,8 @@ const markdown1 = formatMarkdown(headers, rows, {
 console.log("Formatted:");
 console.log(markdown1);
 
-const parsed = parseMarkdown(markdown1);
-const markdown2 = formatMarkdown(parsed.headers, parsed.rows, {
+const parsed = Markdown.parse(markdown1);
+const markdown2 = Markdown.format(parsed.headers, parsed.rows, {
   columns: parsed.headers.map((h, i) => ({
     header: h,
     alignment: parsed.alignments[i]
@@ -203,7 +203,7 @@ console.log();
 console.log("=== 7. Error Handling ===\n");
 
 try {
-  parseMarkdown("no table here");
+  Markdown.parse("no table here");
 } catch (e) {
   if (e instanceof MarkdownParseError) {
     console.log("MarkdownParseError:", e.message);

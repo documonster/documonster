@@ -2,9 +2,9 @@
  * Example: Formula + PDF Integration
  *
  * Covers:
- * - `installFormulaEngine()` makes `excelToPdf()` automatically
+ * - `Formula.install()` makes `Pdf.fromExcel()` automatically
  *   recalculate stale formula results before rendering.
- * - Without install, `excelToPdf()` silently falls back to the cached
+ * - Without install, `Pdf.fromExcel()` silently falls back to the cached
  *   results saved in the XLSX (safe default for files last opened in
  *   Excel itself).
  */
@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 
 import { Cell, Workbook, Worksheet } from "@excel/index";
 
-import { excelToPdf } from "../../../index";
-import { installFormulaEngine } from "../index";
+import { Pdf } from "../../../index";
+import { Formula } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,8 +23,8 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
-// Enable automatic recalculation inside excelToPdf().
-installFormulaEngine();
+// Enable automatic recalculation inside Pdf.fromExcel().
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Invoice");
@@ -52,7 +52,7 @@ Cell.setValue(ws, "C5", "Total");
 // `excelToPdf` calls `tryInvokeFormulaEngine(workbook)` internally;
 // because `installFormulaEngine` was called above, subtotals and the
 // grand total are computed fresh right before rendering.
-const pdf = await excelToPdf(wb, {
+const pdf = await Pdf.fromExcel(wb, {
   title: "Invoice (live formula results)",
   showGridLines: true
 });

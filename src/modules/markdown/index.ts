@@ -31,14 +31,10 @@ export type {
 } from "./types";
 
 // =============================================================================
-// Core Functions
+// Core Functions — `Markdown` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-// Parser
-export { parseMarkdown, parseMarkdownAll } from "./parse/index";
-
-// Formatter
-export { formatMarkdown } from "./format/index";
+export * as Markdown from "./surface/markdown";
 
 // =============================================================================
 // Errors

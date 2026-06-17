@@ -14,10 +14,10 @@ import { getCell } from "@excel/worksheet";
  * - Matrix math (MMULT, MDETERM, MINVERSE, TRANSPOSE)
  * - Modular arithmetic (MOD, QUOTIENT)
  */
-import { installFormulaEngine } from "../index";
+import { Formula } from "../index";
 
 // One-time install so `workbook.calculateFormulas()` wires to the engine.
-installFormulaEngine();
+Formula.install();
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Math");

@@ -4,7 +4,7 @@
  * Covers:
  *   1. Sign a new PDF with PdfDocumentBuilder.sign()
  *   2. Sign an existing PDF with PdfEditor.sign()
- *   3. Verify a signature with verifyPdfSignature()
+ *   3. Verify a signature with Pdf.verifySignature()
  *   4. Tamper detection — modified PDF fails verification
  *
  * Run: npx tsx src/modules/pdf/examples/pdf-signatures.ts
@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generateTestCertificate } from "../__tests__/test-certificate";
-import { PdfDocumentBuilder, PdfEditor, readPdf, verifyPdfSignature } from "../index";
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,7 +33,7 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
 {
   console.log("1. Sign a new PDF with PdfDocumentBuilder:");
 
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   doc.setMetadata({ title: "Signed Agreement", author: "excelts" });
 
   const page = doc.addPage();
@@ -77,7 +77,7 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
   console.log("\n2. Sign an existing PDF with PdfEditor:");
 
   // First, create an unsigned PDF
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
   page.drawText("Invoice #12345", { x: 72, y: 750, fontSize: 20, bold: true });
   page.drawText("Amount: $1,500.00", { x: 72, y: 720, fontSize: 14 });
@@ -87,7 +87,7 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
   console.log(`   Unsigned: 02-unsigned.pdf (${unsignedPdf.length} bytes)`);
 
   // Load and sign — one method call
-  const editor = PdfEditor.load(unsignedPdf);
+  const editor = Pdf.Editor.load(unsignedPdf);
   const signedPdf = await editor.sign({
     certificate,
     privateKey,
@@ -109,7 +109,7 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
 {
   console.log("\n3. Tamper detection:");
 
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   doc.addPage().drawText("Tamper test", { x: 72, y: 750, fontSize: 16 });
   doc.sign({ certificate, privateKey, name: "Security Test" });
   const signedPdf = await doc.build();
@@ -133,12 +133,12 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
 {
   console.log("\n4. Read signed PDF to confirm signature field:");
 
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   doc.addPage().drawText("Document with signature field", { x: 72, y: 750, fontSize: 14 });
   doc.sign({ certificate, privateKey, name: "Reader Test" });
   const signedPdf = await doc.build();
 
-  const result = await readPdf(signedPdf);
+  const result = await Pdf.read(signedPdf);
   const sigField = result.formFields.find(f => f.type === "signature");
   console.log(`   Form fields: ${result.formFields.length}`);
   console.log(`   Signature field found: ${sigField !== undefined}`);
@@ -166,7 +166,7 @@ async function verifyFromPdf(pdf: Uint8Array) {
     return { valid: false, coversWholeFile: false, digestAlgorithm: "", reason: "No /ByteRange" };
   }
 
-  return verifyPdfSignature(pdf, contentsMatch[1], [
+  return Pdf.verifySignature(pdf, contentsMatch[1], [
     parseInt(brMatch[1]),
     parseInt(brMatch[2]),
     parseInt(brMatch[3]),

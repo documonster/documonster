@@ -26,7 +26,7 @@ import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { rowSetFill, rowSetFont } from "@excel/row";
 import { rowGetCell } from "@excel/worksheet";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(
@@ -233,7 +233,7 @@ Cell.setValue(wsMixed, "A4", "Normal cell after styled empty row");
 // Export: multi-sheet workbook
 // =============================================================================
 
-const mainPdf = await excelToPdf(wb, {
+const mainPdf = await Pdf.fromExcel(wb, {
   showGridLines: true,
   showSheetNames: true,
   title: "PDF Edge Cases",
@@ -254,7 +254,7 @@ for (let c = 1; c <= 20; c++) {
   Cell.setStyle(wsFit, 1, c, { font: { bold: true } });
   Cell.setValue(wsFit, 2, c, c * 100);
 }
-const fitPdf = await excelToPdf(wbFit, {
+const fitPdf = await Pdf.fromExcel(wbFit, {
   showGridLines: true,
   fitToPage: true,
   title: "Fit To Page: 20 Columns"

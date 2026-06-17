@@ -256,16 +256,8 @@ export {
 // PDF Export
 // =============================================================================
 
-export {
-  pdf,
-  excelToPdf,
-  PageSizes,
-  PdfError,
-  PdfRenderError,
-  PdfFontError,
-  PdfStructureError,
-  isPdfError
-} from "@pdf/index";
+export { Pdf } from "@pdf/index";
+export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/index";
 export type {
   PdfExportOptions,
   PdfPageSize,

@@ -31,7 +31,7 @@ import { getWorksheets } from "@excel/workbook";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addImage } from "@excel/worksheet";
 
-import { excelToPdf } from "../../../index";
+import { Pdf } from "../../../index";
 import { PdfStructureError } from "../errors";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
@@ -508,7 +508,7 @@ log(
 
 log("\nSTEP 2: Export encrypted PDF (landscape, images, full metadata)\n");
 
-const pdfBytes = await excelToPdf(wb, {
+const pdfBytes = await Pdf.fromExcel(wb, {
   title: "ACME Corp \u2014 Annual Report 2025",
   author: "CFO Office / Ren\u00e9 M\u00fcller",
   subject: "Confidential financial & operational report with 6 departments",

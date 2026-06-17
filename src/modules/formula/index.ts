@@ -23,22 +23,10 @@
  * consumers. See `scripts/treeshake-verify.ts` for the bundler contracts.
  */
 
-// Functional API — the sole formula-evaluation entry point. Useful for
-// server-side recalculation of cached XLSX files loaded via the excel module.
-export { calculateFormulas } from "./integration/calculate-formulas";
-
-// Low-level syntax surface — for tooling, static analysers and callers
-// that want to pre-validate formulas without evaluating them.
-export { tokenize } from "./syntax/tokenizer";
-export { parse } from "./syntax/parser";
-
-// Syntax-probe installer — isolated module so its parser imports don't
-// leak into functional-only consumers. `createFormulaSyntaxProbe` is
-// exported for callers that want a standalone probe (e.g. per-Workbook
-// injection via `new Workbook({ formulaSyntaxProbe })`) without touching
-// process-global state. `uninstallFormulaEngine` is exported for symmetry
-// and for test suites that exercise the cold-start classification path.
-export { createFormulaSyntaxProbe, installFormulaEngine, uninstallFormulaEngine } from "./install";
+// Public value API — the `Formula` domain namespace. Tree-shaken per-member
+// on rolldown / rspack; a consumer that references only `Formula.tokenize`
+// never pulls in the evaluator.
+export * as Formula from "./surface/formula";
 
 // Re-export the probe type so consumers can type variables holding
 // probes or constructing options objects that accept one.

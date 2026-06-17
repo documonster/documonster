@@ -12,8 +12,8 @@
  * - Formatting arrays and objects to CSV
  * - Custom quoting, type transforms, formula escaping
  * - Streaming: CsvParserStream and CsvFormatterStream
- * - Data generation with csvGenerate
- * - Utility functions: detectDelimiter, detectLinebreak, stripBom
+ * - Data generation with Csv.generate
+ * - Utility functions: Csv.detectDelimiter, Csv.detectLinebreak, Csv.stripBom
  * - Number formatting with decimal separators
  */
 import fs from "node:fs";
@@ -22,19 +22,7 @@ import { Readable, pipeline } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import {
-  parseCsv,
-  parseCsvAsync,
-  formatCsv,
-  createCsvParserStream,
-  createCsvFormatterStream,
-  csvGenerate,
-  detectDelimiter,
-  detectLinebreak,
-  stripBom,
-  formatNumberForCsv,
-  parseNumberFromCsv
-} from "../index";
+import { Csv } from "../index";
 
 const pipelineAsync = promisify(pipeline);
 const outDir = path.resolve(
@@ -52,7 +40,7 @@ Alice,30,New York
 Bob,25,London
 Carol,35,Tokyo`;
 
-const rows1 = parseCsv(csv1);
+const rows1 = Csv.parse(csv1);
 console.log("=== 1. Basic Parsing (arrays) ===");
 console.log(rows1);
 // [["Name","Age","City"], ["Alice","30","New York"], ...]
@@ -61,7 +49,7 @@ console.log(rows1);
 // 2. Parsing with headers — object output
 // =============================================================================
 
-const result2 = parseCsv(csv1, { headers: true });
+const result2 = Csv.parse(csv1, { headers: true });
 console.log("\n=== 2. Object Output (headers: true) ===");
 console.log(result2.rows);
 // [{ Name: "Alice", Age: "30", City: "New York" }, ...]
@@ -72,16 +60,16 @@ console.log("Meta:", result2.meta);
 // =============================================================================
 
 const tsv = `Name\tAge\tCity\nAlice\t30\tNew York`;
-const rows3 = parseCsv(tsv, { delimiter: "\t" });
+const rows3 = Csv.parse(tsv, { delimiter: "\t" });
 console.log("\n=== 3. TSV Parsing ===");
 console.log(rows3);
 
 // Auto-detect delimiter
 const semicolonCsv = `Name;Age;City\nAlice;30;New York`;
-const detected = detectDelimiter(semicolonCsv);
+const detected = Csv.detectDelimiter(semicolonCsv);
 console.log("Detected delimiter:", JSON.stringify(detected));
 
-const rows3b = parseCsv(semicolonCsv, { delimiter: detected });
+const rows3b = Csv.parse(semicolonCsv, { delimiter: detected });
 console.log(rows3b);
 
 // =============================================================================
@@ -93,7 +81,7 @@ Alice,98.5,true,2023-01-15
 Bob,87,false,2022-06-30
 Carol,92.3,true,2024-03-01`;
 
-const result4 = parseCsv(csv4, {
+const result4 = Csv.parse(csv4, {
   headers: true,
   dynamicTyping: true
 });
@@ -102,7 +90,7 @@ console.log(result4.rows);
 // Values are now number/boolean instead of strings
 
 // Selective dynamic typing — only specific columns
-const result4b = parseCsv(csv4, {
+const result4b = Csv.parse(csv4, {
   headers: true,
   dynamicTyping: { Score: true, Active: true }
 });
@@ -115,7 +103,7 @@ console.log("Selective:", result4b.rows[0]);
 const csv5 = `first name,last name,first name
 Alice,Smith,Bob`;
 
-const result5 = parseCsv(csv5, {
+const result5 = Csv.parse(csv5, {
   headers: h => h.map(name => name.trim().replace(/\s+/g, "_").toLowerCase())
 });
 console.log("\n=== 5. Header Transforms ===");
@@ -133,7 +121,7 @@ Bob,42
 Carol,78
 Dave,31`;
 
-const result6 = parseCsv(csv6, {
+const result6 = Csv.parse(csv6, {
   headers: true,
   dynamicTyping: true,
   rowTransform: row => {
@@ -160,7 +148,7 @@ const csv7 = `A,B,C
 4,5
 6,7,8,9`;
 
-const result7 = parseCsv(csv7, {
+const result7 = Csv.parse(csv7, {
   headers: true,
   columnMismatch: { less: "pad", more: "truncate" }
 });
@@ -178,7 +166,7 @@ Bob,"Multi
 line value"
 Carol,"Value with, commas"`;
 
-const result8 = parseCsv(csv8, { headers: true });
+const result8 = Csv.parse(csv8, { headers: true });
 console.log("\n=== 8. Quoting and Escaping ===");
 console.log(result8.rows);
 
@@ -187,12 +175,12 @@ console.log(result8.rows);
 // =============================================================================
 
 const bomCsv = "\uFEFFName,Age\nAlice,30";
-const stripped = stripBom(bomCsv);
+const stripped = Csv.stripBom(bomCsv);
 console.log("\n=== 9. BOM Handling ===");
 console.log("Has BOM:", bomCsv.charCodeAt(0) === 0xfeff);
 console.log("After strip:", stripped.substring(0, 4));
 
-const linebreak = detectLinebreak("a\r\nb\r\nc");
+const linebreak = Csv.detectLinebreak("a\r\nb\r\nc");
 console.log("Detected linebreak:", JSON.stringify(linebreak));
 
 // =============================================================================
@@ -205,7 +193,7 @@ const data10 = [
   ["Bob", 25, "London"]
 ];
 
-const csvOut10 = formatCsv(data10);
+const csvOut10 = Csv.format(data10);
 console.log("\n=== 10. Format Arrays ===");
 console.log(csvOut10);
 
@@ -221,7 +209,7 @@ const data11 = [
   { name: "Carol", score: 92.3, active: true }
 ];
 
-const csvOut11 = formatCsv(data11, {
+const csvOut11 = Csv.format(data11, {
   headers: true,
   columns: ["name", "score", "active"]
 });
@@ -234,7 +222,7 @@ fs.writeFileSync(path.join(outDir, "formatted-objects.csv"), csvOut11);
 // 12. Format options — delimiter, quoting, BOM, newline
 // =============================================================================
 
-const csvOut12 = formatCsv(data11, {
+const csvOut12 = Csv.format(data11, {
   headers: true,
   delimiter: ";",
   quote: "'",
@@ -256,7 +244,7 @@ const data13 = [
   { formula: "+cmd|'/C calc'!Z0", value: "Malicious" }
 ];
 
-const csvOut13 = formatCsv(data13, { headers: true, escapeFormulae: true });
+const csvOut13 = Csv.format(data13, { headers: true, escapeFormulae: true });
 console.log("\n=== 13. Formula Escaping ===");
 console.log(csvOut13);
 
@@ -270,7 +258,7 @@ const data14 = [
 ];
 
 // Quote only specific columns by name
-const csvOut14 = formatCsv(data14, {
+const csvOut14 = Csv.format(data14, {
   headers: true,
   quoteColumns: { name: true, city: true, score: false }
 });
@@ -288,7 +276,7 @@ Alice,30,New York
 Bob,25,London
 Carol,35,Tokyo`;
 
-const parserStream = createCsvParserStream({ headers: true });
+const parserStream = Csv.createParserStream({ headers: true });
 const rows15: Record<string, string>[] = [];
 
 parserStream.on("data", (row: Record<string, string>) => rows15.push(row));
@@ -308,7 +296,7 @@ console.log("First row:", rows15[0]);
 console.log("\n=== 16. Streaming Formatter ===");
 
 const outputPath = path.join(outDir, "streamed-output.csv");
-const formatterStream = createCsvFormatterStream({
+const formatterStream = Csv.createFormatterStream({
   headers: true,
   columns: ["id", "name", "value"]
 });
@@ -330,7 +318,7 @@ console.log("Written:", outputPath);
 
 console.log("\n=== 17. Data Generation ===");
 
-const generated = csvGenerate({
+const generated = Csv.generate({
   columns: [
     { name: "id", type: "int", min: 1, max: 10000 },
     { name: "name", type: "name" },
@@ -359,7 +347,7 @@ console.log("\n=== 18. Async Parsing ===");
 const csvFile = path.join(outDir, "generated.csv");
 const fileStream = fs.createReadStream(csvFile, { encoding: "utf-8" });
 
-const result18 = await parseCsvAsync(fileStream, { headers: true });
+const result18 = await Csv.parseAsync(fileStream, { headers: true });
 console.log("Async parsed rows:", result18.rows.length);
 console.log("Fields:", result18.meta.fields?.slice(0, 3));
 
@@ -370,15 +358,15 @@ console.log("Fields:", result18.meta.fields?.slice(0, 3));
 console.log("\n=== 19. Number Formatting ===");
 
 // European format (comma as decimal separator)
-const eurFormatted = formatNumberForCsv(1234.56, ",");
+const eurFormatted = Csv.formatNumber(1234.56, ",");
 console.log("European:", eurFormatted); // "1234,56"
 
 // Parse back
-const eurParsed = parseNumberFromCsv("1234,56", ",");
+const eurParsed = Csv.parseNumber("1234,56", ",");
 console.log("Parsed:", eurParsed); // 1234.56
 
 // US format (period as decimal separator) — default
-const usFormatted = formatNumberForCsv(1234.56, ".");
+const usFormatted = Csv.formatNumber(1234.56, ".");
 console.log("US:", usFormatted); // "1234.56"
 
 // =============================================================================
@@ -393,14 +381,14 @@ Alice,95
 # Another comment
 Bob,87`;
 
-const result20 = parseCsv(csv20, {
+const result20 = Csv.parse(csv20, {
   headers: true,
   comment: "#"
 });
 console.log("Rows (comments skipped):", result20.rows);
 
 // Parse with record info
-const result20b = parseCsv("a,b\n1,2\n3,4", { info: true });
+const result20b = Csv.parse("a,b\n1,2\n3,4", { info: true });
 console.log("With info:", result20b.rows[0]);
 
 console.log("\n=== CSV Examples Complete ===");

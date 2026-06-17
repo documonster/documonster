@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { docxToPdf } from "../../pdf";
+import { Pdf } from "../../pdf";
 import { Document, Build, Io, Units } from "../index";
 
 const outDir = path.resolve(
@@ -66,7 +66,7 @@ fs.mkdirSync(outDir, { recursive: true });
   ]);
   Document.addImage(d, tinyPng, "png", Units.cmToEmu(1.5), Units.cmToEmu(1.5), { altText: "logo" });
 
-  const pdfBytes = await docxToPdf(Document.build(d));
+  const pdfBytes = await Pdf.fromDocx(Document.build(d));
   fs.writeFileSync(path.join(outDir, "01-basic.pdf"), pdfBytes);
   console.log(`  → 01-basic.pdf (${pdfBytes.length} bytes)`);
 }
@@ -81,7 +81,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addParagraph(d, "This PDF is rendered onto an A5 page (148 × 210 mm).");
   Document.addParagraph(d, "Lorem ipsum… ".repeat(80));
 
-  const pdfBytes = await docxToPdf(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
     // A5 portrait: 148mm × 210mm = 419.5 × 595.3 points
     pageWidth: 419.5,
     pageHeight: 595.3,
@@ -108,7 +108,7 @@ fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "03-source.docx"), buf);
 
   const reread = await Io.read(buf);
-  const pdfBytes = await docxToPdf(reread);
+  const pdfBytes = await Pdf.fromDocx(reread);
   fs.writeFileSync(path.join(outDir, "03-from-file.pdf"), pdfBytes);
   console.log(`  → 03-from-file.pdf (${pdfBytes.length} bytes)`);
 }
@@ -141,7 +141,7 @@ fs.mkdirSync(outDir, { recursive: true });
     }
   });
 
-  const pdfBytes = await docxToPdf(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
     chartRenderer: (chart, page, rect) => {
       // Draw a coloured filled rectangle then a label so the output is
       // visibly different from the default chart renderer.

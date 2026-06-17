@@ -133,11 +133,23 @@ INTERNAL  (not in "exports"; reachable only via package-internal alias)
 
 ### Depth rule: every module gets a namespace; sub-namespaces by complexity
 
-**Every public module is exposed through a namespace — no exceptions, no bare
-flat exports**, even for single-purpose modules. This is a deliberate
-consistency decision: a uniform `Ns.method` mental model across all modules,
-and clean IIFE globals (`Documonster.Csv.parse`). Within a module, depth
-follows complexity (never exceed two levels total):
+**Every public _domain_ module is exposed through a namespace — no bare flat
+exports.** This is a deliberate consistency decision: a uniform `Ns.method`
+mental model across modules, and clean IIFE globals (`Documonster.Csv.parse`).
+
+**Exception — infrastructure/primitive modules stay flat.** `stream` (Node
+stream primitives: `Transform`, `PassThrough`, `Readable`, `pipeline`, … — a
+`node:stream` polyfill) and `archive` (`crc32`, `Zip`, `Tar`, `ZipDeflate`
+primitives) are NOT domain APIs. They are foundational primitives imported by
+20+ internal cross-module files as the equivalent of `node:stream` /
+`node:zlib`. Forcing `Stream.Transform` / `Archive.crc32` would be high-churn
+and semantically wrong (a primitive class is not a domain operation). These
+modules keep flat exports.
+
+Domain (namespaced): excel, word, csv, markdown, xml, pdf, formula, chart.
+Infrastructure (flat): stream, archive.
+
+Within a domain module, depth follows complexity (never exceed two levels):
 
 - **Multi-domain module** (Excel: cells, charts, pivots, sparklines are
   genuinely different concerns) → several namespaces, each one level:

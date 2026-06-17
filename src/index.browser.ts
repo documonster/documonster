@@ -254,16 +254,8 @@ export {
 // PDF Export (Browser-compatible, zero external dependencies)
 // =============================================================================
 
-export {
-  pdf,
-  excelToPdf,
-  PageSizes,
-  PdfError,
-  PdfRenderError,
-  PdfFontError,
-  PdfStructureError,
-  isPdfError
-} from "@pdf/index";
+export { Pdf } from "@pdf/index";
+export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/index";
 export type {
   PdfExportOptions,
   PdfPageSize,
