@@ -15,6 +15,44 @@ import {
 } from "@excel/worksheet-core";
 import { range, toSortedArray } from "@utils/utils";
 
+import {
+  type CacheField,
+  type DataField,
+  METRIC_DISPLAY_NAMES,
+  type ParsedCacheDefinition,
+  type ParsedCacheRecords,
+  type PivotError,
+  pivotError,
+  isPivotError,
+  formatPivotError,
+  type PivotTableChartFormat,
+  type PivotTableSubtotal,
+  type RecordValue,
+  type SharedItemValue,
+  VALID_SUBTOTALS
+} from "./pivot-table-types";
+
+// Re-export the pure OOXML data types/constants that were relocated to
+// pivot-table-types.ts, preserving backward compatibility for existing
+// `import { X } from "@excel/pivot-table"` call sites (worksheet.ts,
+// surface/pivot.ts, etc.).
+export {
+  type CacheField,
+  type DataField,
+  METRIC_DISPLAY_NAMES,
+  type ParsedCacheDefinition,
+  type ParsedCacheRecords,
+  type PivotError,
+  pivotError,
+  isPivotError,
+  formatPivotError,
+  type PivotTableChartFormat,
+  type PivotTableSubtotal,
+  type RecordValue,
+  type SharedItemValue,
+  VALID_SUBTOTALS
+};
+
 /**
  * Interface representing the source data abstraction for pivot tables.
  * This allows both Worksheet and Table to be used as pivot table data sources.
@@ -169,132 +207,6 @@ export interface PivotTableModel {
   ref?: string;
 }
 
-/** Allowed element types within CacheField.sharedItems */
-export type SharedItemValue = string | number | boolean | Date | PivotErrorValue | null;
-
-/**
- * Wrapper for OOXML error values in sharedItems (e.g. `<e v="REF!"/>`).
- * Distinguishes error strings from regular strings so they roundtrip as `<e>` not `<s>`.
- */
-export class PivotErrorValue {
-  /** The error code without the leading '#' (e.g. "REF!", "VALUE!", "N/A") */
-  readonly code: string;
-  constructor(code: string) {
-    this.code = code;
-  }
-  /** Returns the display form with '#' prefix, e.g. "#REF!" */
-  toString(): string {
-    return `#${this.code}`;
-  }
-}
-
-/**
- * Represents a cache field in a pivot table.
- * Cache fields store unique values from source columns for row/column grouping.
- */
-export interface CacheField {
-  /** Name of the field (column header from source) */
-  name: string;
-  /** Unique values for row/column fields, null for value fields */
-  sharedItems: SharedItemValue[] | null;
-  /** Whether the field contains numeric values (raw attribute string for roundtrip: "0" or "1") */
-  containsNumber?: string;
-  /** Whether the field contains only integer values (raw attribute string for roundtrip: "0" or "1") */
-  containsInteger?: string;
-  /** Minimum value for numeric fields */
-  minValue?: number;
-  /** Maximum value for numeric fields */
-  maxValue?: number;
-  /** Number format ID (preserved on roundtrip, defaults to "0") */
-  numFmtId?: string;
-  // ----- Loaded sharedItems attribute preservation (roundtrip fidelity) -----
-  /** Original containsSemiMixedTypes attribute from loaded file */
-  containsSemiMixedTypes?: string;
-  /** Original containsNonDate attribute from loaded file */
-  containsNonDate?: string;
-  /** Original containsString attribute from loaded file */
-  containsString?: string;
-  /** Original containsBlank attribute from loaded file */
-  containsBlank?: string;
-  /** Original containsDate attribute from loaded file */
-  containsDate?: string;
-  /** Original containsMixedTypes attribute from loaded file */
-  containsMixedTypes?: string;
-  /** Flag indicating this cache field was loaded from file */
-  isLoaded?: boolean;
-  /** Preserved <fieldGroup> raw XML for roundtrip (loaded models only) */
-  fieldGroupXml?: string;
-  /** Bag of additional cacheField attributes not individually modeled (for roundtrip preservation) */
-  extraAttrs?: Record<string, string>;
-}
-
-/** Aggregation function types for pivot table data fields */
-export type PivotTableSubtotal =
-  | "sum"
-  | "count"
-  | "average"
-  | "max"
-  | "min"
-  | "product"
-  | "countNums"
-  | "stdDev"
-  | "stdDevP"
-  | "var"
-  | "varP";
-
-/** Map from PivotTableSubtotal to its Excel display name prefix */
-export const METRIC_DISPLAY_NAMES: Readonly<Record<PivotTableSubtotal, string>> = {
-  sum: "Sum",
-  count: "Count",
-  average: "Average",
-  max: "Max",
-  min: "Min",
-  product: "Product",
-  countNums: "Count Numbers",
-  stdDev: "StdDev",
-  stdDevP: "StdDevP",
-  var: "Var",
-  varP: "VarP"
-};
-
-/** Set of all valid PivotTableSubtotal values (for runtime validation) */
-export const VALID_SUBTOTALS: ReadonlySet<string> = new Set<string>(
-  Object.keys(METRIC_DISPLAY_NAMES)
-);
-
-/**
- * Data field configuration for pivot table aggregation.
- * Defines how values are aggregated in the pivot table.
- */
-export interface DataField {
-  /** Display name for the data field (e.g., "Sum of Sales") */
-  name: string;
-  /** Index of the source field in cacheFields */
-  fld: number;
-  /** Base field index for calculated fields */
-  baseField?: number;
-  /** Base item index for calculated fields */
-  baseItem?: number;
-  /** Aggregation function (default: 'sum') */
-  subtotal?: PivotTableSubtotal;
-  /** Number format ID (preserved on roundtrip for currency/date formatting) */
-  numFmtId?: number;
-}
-
-/**
- * A pivot table chart format entry used by pivot charts.
- */
-export interface PivotTableChartFormat {
-  /** Chart index within the pivot chart formatting collection. */
-  chart: number;
-  /** Format ID referenced by c:pivotSource/c:fmtId. */
-  format: number;
-  /** Whether this format applies to a series. */
-  series?: boolean;
-  /** Preserved or generated pivotArea XML. */
-  pivotAreaXml?: string;
-}
-
 /**
  * Internal pivot table representation used by the library.
  * This is the processed model after calling makePivotTable().
@@ -350,66 +262,6 @@ export interface PivotTable {
   chartFormats?: PivotTableChartFormat[];
   /** Structured pivot chart metadata attached by addPivotChart/addPivotChartsheet. */
   pivotChartOptions?: PivotChartOptions;
-}
-
-/**
- * Parsed cache definition from loaded pivot table files.
- */
-export interface ParsedCacheDefinition {
-  sourceRef?: string;
-  sourceSheet?: string;
-  /** Source table name (name style - references a named Table) */
-  sourceTableName?: string;
-  /** Cache source type (default "worksheet") */
-  cacheSourceType?: string;
-  cacheFields: CacheField[];
-  recordCount?: number;
-  rId?: string;
-  /** Additional attributes to preserve */
-  refreshOnLoad?: string;
-  createdVersion?: string;
-  refreshedVersion?: string;
-  minRefreshableVersion?: string;
-  isLoaded?: boolean;
-  // ----- BUG-26: Additional root attributes -----
-  backgroundQuery?: string;
-  supportSubquery?: string;
-  supportAdvancedDrill?: string;
-  /** Bag of additional root attributes not individually modeled (for roundtrip) */
-  extraRootAttrs?: Record<string, string>;
-  // ----- BUG-28: worksheetSource extra attributes -----
-  /** worksheetSource r:id attribute (for external connections) */
-  worksheetSourceRId?: string;
-  // ----- BUG-29: cache definition extLst raw XML -----
-  extLstXml?: string;
-  // ----- R6-BugA: catch-all unknown child elements raw XML -----
-  /** Preserved unknown child elements XML for roundtrip (e.g. calculatedItems, cacheHierarchies) */
-  unknownElementsXml?: string;
-  // ----- R8-B9: non-worksheet cacheSource children raw XML -----
-  /** Preserved raw XML for non-worksheetSource children inside <cacheSource> (e.g. <consolidation>) */
-  cacheSourceXml?: string;
-}
-
-/** Allowed element types within cache record values */
-export type RecordValue =
-  | { type: "x"; value: number }
-  | { type: "n"; value: number }
-  | { type: "s"; value: string }
-  | { type: "b"; value: boolean }
-  | { type: "m" }
-  | { type: "d"; value: Date }
-  | { type: "e"; value: string };
-
-/**
- * Parsed cache records from loaded pivot table files.
- */
-export interface ParsedCacheRecords {
-  records: RecordValue[][];
-  count: number;
-  isLoaded?: boolean;
-  // R8-B11: Preserved original root element attributes for roundtrip
-  /** Extra root attributes beyond xmlns/xmlns:r/count (for roundtrip preservation) */
-  extraRootAttrs?: Record<string, string>;
 }
 
 /**
@@ -809,7 +661,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
  * - CellCheckboxValue ({checkbox:bool}) → boolean
  * - Other objects → String(v)
  */
-function unwrapCellValue(v: unknown): string | number | boolean | Date | PivotErrorValue | null {
+function unwrapCellValue(v: unknown): string | number | boolean | Date | PivotError | null {
   if (v === null || v === undefined) {
     return null;
   }
@@ -820,14 +672,14 @@ function unwrapCellValue(v: unknown): string | number | boolean | Date | PivotEr
   if (v instanceof Date) {
     return v;
   }
-  if (v instanceof PivotErrorValue) {
+  if (isPivotError(v)) {
     return v;
   }
   const obj = v as Record<string, unknown>;
-  // CellErrorValue: { error: "#REF!" } → PivotErrorValue with code "REF!" (strip leading #)
+  // CellErrorValue: { error: "#REF!" } → PivotError with code "REF!" (strip leading #)
   if (typeof obj.error === "string") {
     const errorStr = obj.error as string;
-    return new PivotErrorValue(errorStr.startsWith("#") ? errorStr.slice(1) : errorStr);
+    return pivotError(errorStr.startsWith("#") ? errorStr.slice(1) : errorStr);
   }
   // CellFormulaValue / CellArrayFormulaValue / CellSharedFormulaValue: { formula/sharedFormula, result }
   if ("formula" in obj || "sharedFormula" in obj) {
@@ -876,17 +728,17 @@ function makeCacheFields(
     // because Set treats each null as the same key but undefined as a separate key,
     // and we need null in sharedItems so renderCellNew can find it via indexOf.
     const uniqueValues = new Set<SharedItemValue>();
-    // R8-B12: PivotErrorValue uses reference equality in Set, so track error strings
-    // separately to avoid duplicates (e.g., two PivotErrorValue("#REF!") instances).
-    const seenErrors = new Map<string, PivotErrorValue>();
+    // R8-B12: track error codes separately to avoid duplicates (e.g., two
+    // pivotError("#REF!") values).
+    const seenErrors = new Map<string, PivotError>();
     let hasNull = false;
     for (let i = DATA_START_INDEX; i < columnValues.length; i++) {
       // R8-B2: Unwrap complex cell values (formula results, rich text, errors, etc.)
       const v = unwrapCellValue(columnValues[i]);
       if (v === null || (typeof v === "number" && isNaN(v))) {
         hasNull = true;
-      } else if (v instanceof PivotErrorValue) {
-        // R8-B12: Deduplicate PivotErrorValue by error string
+      } else if (isPivotError(v)) {
+        // R8-B12: Deduplicate pivot errors by error code
         if (!seenErrors.has(v.code)) {
           seenErrors.set(v.code, v);
           uniqueValues.add(v);

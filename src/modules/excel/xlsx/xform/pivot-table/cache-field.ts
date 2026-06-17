@@ -1,5 +1,5 @@
-import type { CacheField as CacheFieldType, SharedItemValue } from "@excel/pivot-table";
-import { PivotErrorValue } from "@excel/pivot-table";
+import type { CacheField as CacheFieldType, SharedItemValue } from "@excel/pivot-table-types";
+import { isPivotError } from "@excel/pivot-table-types";
 import { xmlEncode } from "@xml/encode";
 
 /**
@@ -94,7 +94,7 @@ function renderCacheField(cf: CacheFieldType): string {
   for (const item of cf.sharedItems) {
     if (item === null) {
       hasNull = true;
-    } else if (item instanceof PivotErrorValue) {
+    } else if (isPivotError(item)) {
       hasError = true;
     } else if (typeof item === "string") {
       hasString = true;
@@ -178,7 +178,7 @@ function renderSharedItemElements(sharedItems: SharedItemValue[]): string {
   for (const item of sharedItems) {
     if (item === null) {
       itemXmls.push("<m />");
-    } else if (item instanceof PivotErrorValue) {
+    } else if (isPivotError(item)) {
       itemXmls.push(`<e v="${xmlEncode(item.code)}" />`);
     } else if (typeof item === "number") {
       if (Number.isFinite(item)) {

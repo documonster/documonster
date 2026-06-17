@@ -1,4 +1,4 @@
-import { PivotErrorValue } from "@excel/pivot-table";
+import { pivotError } from "@excel/pivot-table";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { describe, it, expect } from "vitest";
 
@@ -428,7 +428,7 @@ describe("CacheField", () => {
       it("should render PivotErrorValue as <e> elements, not <s>", () => {
         const xml = renderCacheField({
           name: "ErrorField",
-          sharedItems: [new PivotErrorValue("REF!"), new PivotErrorValue("VALUE!")]
+          sharedItems: [pivotError("REF!"), pivotError("VALUE!")]
         });
 
         expect(xml).toContain('<e v="REF!" />');
@@ -445,7 +445,7 @@ describe("CacheField", () => {
       it("should render mixed error and string with containsMixedTypes", () => {
         const xml = renderCacheField({
           name: "MixedErrors",
-          sharedItems: ["valid", new PivotErrorValue("N/A"), "also valid"]
+          sharedItems: ["valid", pivotError("N/A"), "also valid"]
         });
 
         expect(xml).toContain('<s v="valid" />');
@@ -459,7 +459,7 @@ describe("CacheField", () => {
         // Unlikely in practice but should be safe
         const xml = renderCacheField({
           name: "SpecialError",
-          sharedItems: [new PivotErrorValue("A&B")]
+          sharedItems: [pivotError("A&B")]
         });
 
         expect(xml).toContain('<e v="A&amp;B" />');
@@ -468,7 +468,7 @@ describe("CacheField", () => {
       it("should handle mixed error, string, number, and null", () => {
         const xml = renderCacheField({
           name: "AllTypes",
-          sharedItems: ["text", 42, new PivotErrorValue("DIV/0!"), null]
+          sharedItems: ["text", 42, pivotError("DIV/0!"), null]
         });
 
         expect(xml).toContain('<s v="text" />');

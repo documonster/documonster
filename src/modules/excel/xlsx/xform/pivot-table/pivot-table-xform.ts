@@ -4,8 +4,8 @@ import type {
   PivotTableChartFormat,
   PivotTableSubtotal,
   SharedItemValue
-} from "@excel/pivot-table";
-import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/pivot-table";
+} from "@excel/pivot-table-types";
+import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/pivot-table-types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {

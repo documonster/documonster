@@ -1,12 +1,12 @@
 import { PivotTableError } from "@excel/errors";
-import type {
-  PivotTableSource,
-  RecordValue,
-  ParsedCacheRecords,
-  CacheField,
-  SharedItemValue
-} from "@excel/pivot-table";
-import { PivotErrorValue } from "@excel/pivot-table";
+import type { PivotTableSource } from "@excel/pivot-table";
+import {
+  isPivotError,
+  type RecordValue,
+  type ParsedCacheRecords,
+  type CacheField,
+  type SharedItemValue
+} from "@excel/pivot-table-types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { parseOoxmlDate } from "@utils/utils";
@@ -188,7 +188,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
 
     // no shared items — render inline by type
     if (sharedItems === null) {
-      if (value instanceof PivotErrorValue) {
+      if (isPivotError(value)) {
         return `<e v="${xmlEncode(value.code)}" />`;
       }
       if (typeof value === "boolean") {
@@ -377,10 +377,10 @@ function findSharedItemIndex(sharedItems: SharedItemValue[], value: unknown): nu
     }
     return -1;
   }
-  if (value instanceof PivotErrorValue) {
+  if (isPivotError(value)) {
     for (let i = 0; i < sharedItems.length; i++) {
       const item = sharedItems[i];
-      if (item instanceof PivotErrorValue && item.code === value.code) {
+      if (isPivotError(item) && item.code === value.code) {
         return i;
       }
     }

@@ -1,5 +1,4 @@
-import type { ParsedCacheRecords, CacheField } from "@excel/pivot-table";
-import { PivotErrorValue } from "@excel/pivot-table";
+import { pivotError, type ParsedCacheRecords, type CacheField } from "@excel/pivot-table";
 import { PivotCacheRecordsXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-records-xform";
 import { describe, it, expect } from "vitest";
 
@@ -454,7 +453,7 @@ describe("PivotCacheRecordsXform", () => {
     });
 
     it("should render PivotErrorValue as <e>", () => {
-      const err = new PivotErrorValue("VALUE!");
+      const err = pivotError("VALUE!");
       const { source, cacheFields } = createSource(["Result"], [[err]]);
 
       const xform = new PivotCacheRecordsXform();
