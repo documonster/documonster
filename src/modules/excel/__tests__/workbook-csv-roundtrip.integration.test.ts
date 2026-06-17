@@ -1,11 +1,10 @@
 import { cellGetValue, cellType } from "@excel/cell";
 import { readCsvFile, writeCsvFile } from "@excel/csv-bridge.node";
+import { ValueType } from "@excel/enums";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { getCell } from "@excel/worksheet";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
-
-import { ValueType } from "../../../index";
 
 describe("Workbook", () => {
   describe("CSV", () => {

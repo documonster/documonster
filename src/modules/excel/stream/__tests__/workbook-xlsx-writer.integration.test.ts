@@ -7,6 +7,7 @@ import { cellSetNote, cellSetValue, cellGetValue, cellName, cellSetName } from "
 import { columnAlignment, columnFont } from "@excel/column";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { rowFont, rowSetFont } from "@excel/row";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { getImage } from "@excel/workbook";
 import {
   getBackgroundImageId,
@@ -18,8 +19,6 @@ import {
 } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter } from "../../../../index";
 
 const streamTestDataPath = makeTestDataPath(import.meta.url, "./data");
 

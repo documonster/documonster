@@ -16,7 +16,7 @@ import { Cell, Workbook, Worksheet } from "@excel/index";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addImage } from "@excel/worksheet";
 
-import { Pdf } from "../../../index";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(

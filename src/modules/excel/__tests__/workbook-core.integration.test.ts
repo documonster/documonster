@@ -23,6 +23,7 @@ import {
   getWorksheets,
   setWorkbookModel
 } from "@excel/workbook";
+import type { CsvOptions } from "@excel/workbook";
 import { addWorkbookImage } from "@excel/workbook-core";
 import {
   addImage,
@@ -35,7 +36,6 @@ import {
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
-import { type CsvOptions } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const excelTestDataPath = makeTestDataPath(import.meta.url, "./data");

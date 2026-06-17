@@ -18,7 +18,7 @@ import { Workbook, Worksheet } from "@excel/index";
 import { getWorksheets } from "@excel/workbook";
 import { columnSetNumFmt, getColumn } from "@excel/worksheet";
 
-import { Pdf } from "../../../index";
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
-import { Pdf } from "../../../index";
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

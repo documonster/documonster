@@ -1,12 +1,11 @@
 import { cellSetValue } from "@excel/cell";
 import { Cell, Workbook } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { getDefaultFont, getWorksheets } from "@excel/workbook";
 import type { WorkbookData } from "@excel/workbook-core";
 import { rowCommit, rowGetCell } from "@excel/worksheet";
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter } from "../../../index";
 
 // =============================================================================
 // Helpers

@@ -11,9 +11,8 @@ let WorkbookWriter: any;
 let WorkbookReader: any;
 
 beforeAll(async () => {
-  const excelModule = await import("../../../../index.browser");
-  WorkbookWriter = excelModule.WorkbookWriter;
-  WorkbookReader = excelModule.WorkbookReader;
+  WorkbookWriter = (await import("@excel/stream/workbook-writer.browser")).WorkbookWriter;
+  WorkbookReader = (await import("@excel/stream/workbook-reader.browser")).WorkbookReader;
 });
 
 function getBrowserContext() {

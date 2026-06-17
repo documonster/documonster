@@ -4,6 +4,7 @@ import {
   definedNamesAddFormula,
   definedNamesGetRanges
 } from "@excel/defined-names";
+import { ValueType } from "@excel/enums";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { rowFont, rowNumFmt, rowSetFont, rowSetNumFmt, rowValues } from "@excel/row";
 import {
@@ -22,8 +23,6 @@ import {
 import { addWorkbookImage } from "@excel/workbook-core";
 import { getSheetName, setSheetName } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { ValueType } from "../../../index";
 
 // =============================================================================
 // Tests

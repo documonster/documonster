@@ -19,9 +19,8 @@ let ZipParser: any;
 
 beforeAll(async () => {
   // Dynamic imports for Node.js environment
-  const excelModule = await import("../../../index");
-  WorkbookWriter = excelModule.WorkbookWriter;
-  WorkbookReader = excelModule.WorkbookReader;
+  WorkbookWriter = (await import("@excel/stream/workbook-writer")).WorkbookWriter;
+  WorkbookReader = (await import("@excel/stream/workbook-reader")).WorkbookReader;
 
   const zipModule = await import("@archive/zip/stream");
   StreamingZip = zipModule.StreamingZip;

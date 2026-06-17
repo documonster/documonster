@@ -31,8 +31,8 @@ import { getWorksheets } from "@excel/workbook";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addImage } from "@excel/worksheet";
 
-import { Pdf } from "../../../index";
 import { PdfStructureError } from "../errors";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
 

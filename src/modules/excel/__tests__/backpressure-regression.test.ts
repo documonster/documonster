@@ -3,6 +3,7 @@ import { Writable, PassThrough } from "node:stream";
 import { cellSetValue } from "@excel/cell";
 import { createCsvReadStream, writeCsv } from "@excel/csv-bridge";
 import { Workbook, Worksheet } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Backpressure regression tests for streaming xlsx writers.
@@ -15,8 +16,6 @@ import { rowCommit, rowGetCell } from "@excel/worksheet";
  *   3. Workbook.writeCsv(stream) honors backpressure (formatter.write false → drain).
  */
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter } from "../../../index";
 
 /**
  * Build a sink that completes each write asynchronously after yielding the

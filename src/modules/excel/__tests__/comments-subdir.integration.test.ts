@@ -9,11 +9,10 @@
 import { ZipArchive } from "@archive/zip";
 import { cellNote, cellComment, cellSetComment } from "@excel/cell";
 import { Cell, Workbook } from "@excel/index";
-import { noteModel } from "@excel/note";
+import { noteCreate, noteModel } from "@excel/note";
 import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { noteCreate } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 // =============================================================================

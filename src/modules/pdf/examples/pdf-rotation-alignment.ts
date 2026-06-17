@@ -17,7 +17,7 @@ import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/cell";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { getCell } from "@excel/worksheet";
 
-import { Pdf } from "../../../index";
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

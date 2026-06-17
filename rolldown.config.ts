@@ -13,15 +13,34 @@ const banner = `/*!
  * Released under the ${pkg.license} License
  */`;
 
-// Common config shared by both builds
-// Browser version now has NO Node.js polyfills - pure browser code
+// One IIFE bundle per public module. Each exposes its module namespace under
+// a shared `Documonster` global (e.g. `Documonster.Excel.Workbook.create()`),
+// so CDN consumers load only the script(s) they need — there is no
+// whole-family bundle. Browser version has NO Node.js polyfills.
+//
+// `input` points at each module's browser entry when it has one, else its
+// Node entry (pure modules resolve identically in the browser). The
+// `preferBrowserFilesPlugin` swaps `*.browser.ts` variants at bundle time.
+interface ModuleBundle {
+  /** Global namespace member under `Documonster`. */
+  global: string;
+  /** Bundle file basename (without extension). */
+  file: string;
+  /** Entry module. */
+  input: string;
+}
 
-const commonConfig = {
-  input: "./src/index.browser.ts",
-  platform: "browser" as const,
-  tsconfig: "./tsconfig.json",
-  plugins: [preferBrowserFilesPlugin()]
-};
+const MODULES: ModuleBundle[] = [
+  { global: "Excel", file: "excel", input: "./src/modules/excel/index.browser.ts" },
+  { global: "Word", file: "word", input: "./src/modules/word/index.browser.ts" },
+  { global: "Pdf", file: "pdf", input: "./src/modules/pdf/index.ts" },
+  { global: "Csv", file: "csv", input: "./src/modules/csv/index.ts" },
+  { global: "Markdown", file: "markdown", input: "./src/modules/markdown/index.ts" },
+  { global: "Xml", file: "xml", input: "./src/modules/xml/index.ts" },
+  { global: "Formula", file: "formula", input: "./src/modules/formula/index.ts" },
+  { global: "Archive", file: "archive", input: "./src/modules/archive/index.browser.ts" },
+  { global: "Stream", file: "stream", input: "./src/modules/stream/index.browser.ts" }
+];
 
 const copyLicensePlugin = {
   name: "copy-license",
@@ -34,45 +53,59 @@ const copyLicensePlugin = {
   }
 };
 
-const analyzePlugins =
-  process.env.ANALYZE === "true"
-    ? [
-        visualizer({
-          filename: "./dist/stats.html",
-          open: false,
-          gzipSize: true,
-          brotliSize: true,
-          template: "treemap"
-        })
-      ]
-    : [];
+const analyze = process.env.ANALYZE === "true";
 
-export default defineConfig([
-  {
-    ...commonConfig,
-    output: {
-      dir: "./dist/iife",
-      format: "iife",
-      name: "ExcelTS",
-      sourcemap: true,
-      banner,
-      exports: "named",
-      entryFileNames: "excelts.iife.js"
-    },
-    plugins: [...commonConfig.plugins, copyLicensePlugin, ...analyzePlugins]
-  },
-  {
-    ...commonConfig,
-    output: {
-      dir: "./dist/iife",
-      format: "iife",
-      name: "ExcelTS",
-      sourcemap: false,
-      banner,
-      exports: "named",
-      minify: true,
-      entryFileNames: "excelts.iife.min.js"
-    },
-    plugins: [...commonConfig.plugins, copyLicensePlugin]
-  }
-]);
+const common = (input: string) => ({
+  input,
+  platform: "browser" as const,
+  tsconfig: "./tsconfig.json",
+  plugins: [preferBrowserFilesPlugin()]
+});
+
+export default defineConfig(
+  MODULES.flatMap(({ global, file, input }, i) => {
+    const analyzePlugins =
+      analyze && i === 0
+        ? [
+            visualizer({
+              filename: "./dist/stats.html",
+              open: false,
+              gzipSize: true,
+              brotliSize: true,
+              template: "treemap"
+            })
+          ]
+        : [];
+    return [
+      {
+        ...common(input),
+        output: {
+          dir: "./dist/iife",
+          format: "iife" as const,
+          name: `Documonster.${global}`,
+          extend: true,
+          sourcemap: true,
+          banner,
+          exports: "named" as const,
+          entryFileNames: `documonster.${file}.iife.js`
+        },
+        plugins: [...common(input).plugins, copyLicensePlugin, ...analyzePlugins]
+      },
+      {
+        ...common(input),
+        output: {
+          dir: "./dist/iife",
+          format: "iife" as const,
+          name: `Documonster.${global}`,
+          extend: true,
+          sourcemap: false,
+          banner,
+          exports: "named" as const,
+          minify: true,
+          entryFileNames: `documonster.${file}.iife.min.js`
+        },
+        plugins: [...common(input).plugins, copyLicensePlugin]
+      }
+    ];
+  })
+);

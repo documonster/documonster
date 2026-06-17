@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 
 import { cellSetValue } from "@excel/cell";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Memory bounds verification for WorkbookWriter under a paced sink.
@@ -23,8 +24,6 @@ import { rowCommit, rowGetCell } from "@excel/worksheet";
  * directory is built — is covered.
  */
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter } from "../../../index";
 
 describe("WorkbookWriter memory bounds", () => {
   it("100k rows × 10 cols × 200B does not blow up", async () => {

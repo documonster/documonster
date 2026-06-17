@@ -26,7 +26,7 @@ import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { rowSetFill, rowSetFont } from "@excel/row";
 import { rowGetCell } from "@excel/worksheet";
 
-import { Pdf } from "../../../index";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(

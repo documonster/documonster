@@ -20,11 +20,11 @@ import {
   cellToString
 } from "@excel/cell";
 import { writeCsv } from "@excel/csv-bridge";
+import { ValueType } from "@excel/enums";
 import { Cell, Workbook } from "@excel/index";
 import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
-import { ValueType } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 describe("Hyperlink + RichText round-trip (issue #142)", () => {

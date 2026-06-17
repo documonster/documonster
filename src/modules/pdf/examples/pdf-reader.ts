@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 
 import { Cell, Workbook, Worksheet } from "@excel/index";
 
-import { Pdf } from "../../../index";
 import { PdfStructureError } from "../errors";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
 

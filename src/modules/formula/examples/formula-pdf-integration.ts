@@ -13,8 +13,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Pdf } from "@pdf/index";
 
-import { Pdf } from "../../../index";
 import { Formula } from "../index";
 
 const outDir = path.resolve(

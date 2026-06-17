@@ -3,8 +3,9 @@ import { getCell, rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
   it("should read a workbook from ReadableStream<Uint8Array>", async () => {
-    const excelModule = await import("../../../../index.browser");
-    const { createWorkbook, addWorksheet, toXlsxBuffer, WorkbookReader } = excelModule as any;
+    const { createWorkbook, addWorksheet } = await import("@excel/workbook.browser");
+    const { toXlsxBuffer } = await import("@excel/xlsx-io.browser");
+    const { WorkbookReader } = await import("@excel/stream/workbook-reader.browser");
 
     const wb = createWorkbook();
     const ws = addWorksheet(wb, "Sheet1");

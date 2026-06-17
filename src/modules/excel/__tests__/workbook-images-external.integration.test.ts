@@ -2,6 +2,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { anchorCol, anchorRow } from "@excel/anchor";
 import { cellSetValue } from "@excel/cell";
 import { Cell, Workbook } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { getImage } from "@excel/workbook";
 import { addWorkbookImage } from "@excel/workbook-core";
 import {
@@ -14,7 +15,6 @@ import {
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
 
-import { WorkbookWriter } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { entryText } from "./helpers/zip-text";
 

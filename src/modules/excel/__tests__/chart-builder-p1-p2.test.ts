@@ -94,12 +94,12 @@ import {
   addWaterfallChart,
   getCharts
 } from "@excel/worksheet";
-import { describe, it, expect } from "vitest";
-
 import {
   validateXmlName as rootValidateXmlName,
   xmlEncodeAttr as rootXmlEncodeAttr
-} from "../../../index";
+} from "@xml/encode";
+import { describe, it, expect } from "vitest";
+
 import {
   CATEGORIES,
   VALUES_A,

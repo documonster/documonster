@@ -1,12 +1,11 @@
 import { ZipArchive } from "@archive/zip";
 import { cellFill, cellFont, cellGetValue, cellHyperlink, cellText } from "@excel/cell";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { getWorksheets } from "@excel/workbook";
 import { addConditionalFormatting, getCell, getSheetName, rowGetCell } from "@excel/worksheet";
 import { PassThrough } from "@stream";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookReader } from "../../../index";
 
 // =============================================================================
 // Helpers

@@ -1,11 +1,11 @@
 import { cellFont, cellGetValue, cellNumFmt, cellSetValue } from "@excel/cell";
+import { ExcelStreamStateError } from "@excel/errors";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { type RowData } from "@excel/row";
+import { WorkbookReader } from "@excel/stream/workbook-reader";
 import type { WorkbookData } from "@excel/workbook-core";
 import { rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookReader, ExcelStreamStateError } from "../../../index";
 
 // =============================================================================
 // Helpers

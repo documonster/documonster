@@ -18,10 +18,10 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, Workbook } from "@excel/index";
+import type { ThreadedComment } from "@excel/types";
 import { getPersons } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
-import { type ThreadedComment } from "../../../index";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 const decoder = new TextDecoder();

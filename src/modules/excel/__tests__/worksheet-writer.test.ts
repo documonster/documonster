@@ -2,13 +2,12 @@ import { cellGetValue, cellSetValue } from "@excel/cell";
 import { ExcelStreamStateError } from "@excel/errors";
 import { Worksheet } from "@excel/index";
 import { rowAddPageBreak, rowCellCount } from "@excel/row";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { StreamBuf } from "@excel/utils/stream-buf";
 import { rowCommit, rowGetCell, getCell, getColumn } from "@excel/worksheet";
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter } from "../../../index";
 
 // =============================================================================
 // Helpers

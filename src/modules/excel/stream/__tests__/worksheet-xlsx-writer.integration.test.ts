@@ -18,6 +18,7 @@ import {
   cellType
 } from "@excel/cell";
 import { columnHeaders } from "@excel/column";
+import { ValueType } from "@excel/enums";
 import { Cell, Workbook } from "@excel/index";
 import {
   rowAddPageBreak,
@@ -28,6 +29,7 @@ import {
   rowSetNumFmt,
   rowValues
 } from "@excel/row";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import type { CellFormulaValue } from "@excel/types";
 import {
   columnSetAlignment,
@@ -44,8 +46,6 @@ import {
 } from "@excel/worksheet";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
-
-import { WorkbookWriter, ValueType } from "../../../../index";
 
 const CONCATENATE_HELLO_WORLD = 'CONCATENATE("Hello", ", ", "World!")';
 
