@@ -2306,7 +2306,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // Driving a raw-patchable ChartEx edit through the pipeline
     // should now preserve `spPr` / `txPr` / `legendEntry` / `align`
     // because the raw writer delegates to `renderChartExLegendXml`.
-    const { renderChartExLegendXml: internal } = await import("@excel/chart/chart-ex-renderer");
+    const { renderChartExLegendXml: internal } = await import("@excel/chart/chart-ex-serialize");
     // The exported function is the shared writer the raw path uses.
     // Call it directly to verify full coverage.
     const legendModel = {

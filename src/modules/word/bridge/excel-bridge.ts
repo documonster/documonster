@@ -28,7 +28,7 @@ import {
   cellType
 } from "@excel/cell";
 import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import { renderChartEx } from "@excel/chart/chart-ex-renderer";
+import { renderChartEx } from "@excel/chart/chart-ex-serialize";
 import type { AddChartExOptions, ChartExModel, ChartExType } from "@excel/chart/chart-ex-types";
 import { renderChartSvg } from "@excel/chart/chart-renderer";
 import type {

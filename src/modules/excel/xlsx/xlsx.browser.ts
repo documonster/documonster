@@ -17,7 +17,7 @@ import {
   renderChartEx,
   renderChartExLegendXml,
   rewriteChartExDataRefsToDefinedNames
-} from "@excel/chart/chart-ex-renderer";
+} from "@excel/chart/chart-ex-serialize";
 import type { ChartExEntry } from "@excel/chart/chart-ex-types";
 // Chart serialisation / deserialisation imports the chart implementation
 // statically. The chart modules depend only on the `*-core` data layer, so

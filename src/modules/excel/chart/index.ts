@@ -33,11 +33,11 @@ export { parseChartEx } from "./chart-ex-parser";
 export {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
-  renderChartEx,
   renderChartExPng,
   renderChartExSvg,
   VECTOR_PDF_CHART_EX_LAYOUT_IDS
 } from "./chart-ex-renderer";
+export { renderChartEx } from "./chart-ex-serialize";
 export {
   applyChartExPreset,
   applyChartPreset,
