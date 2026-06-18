@@ -480,7 +480,7 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
     // drawing part path at emission time.
     //
     // CRITICAL: use `RelType.ChartUserShapes` (the canonical
-    // `chartUserShapes`, plural, ECMA-376 / Open XML SDK URI). An
+    // `chartUserShapes`, plural, ECMA-376 URI). An
     // earlier version hardcoded the singular `chartUserShape` here,
     // which drifted from `RelType.ChartUserShapes` used by the xlsx
     // writer (see `xlsx.browser.ts`). The writer couldn't recognise

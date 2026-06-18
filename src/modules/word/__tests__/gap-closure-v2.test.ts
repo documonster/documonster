@@ -1,7 +1,7 @@
 /**
  * DOCX Module - Gap Closure V2 Tests
  *
- * Tests for all new features added to close gaps with docx4j / Open XML SDK:
+ * Tests for all new features added to broaden OOXML feature coverage:
  * 1. OOXML Strict format support (namespace normalization)
  * 2. DrawingML effects (reflection, soft edges, 3D)
  * 3. Font subsetting

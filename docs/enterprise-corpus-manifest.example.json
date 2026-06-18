@@ -18,7 +18,7 @@
     },
     {
       "path": "wps/kpi-waterfall.xlsx",
-      "source": "WPS Office 2024 / Kingsoft",
+      "source": "WPS Office 2024",
       "tags": ["chartEx", "waterfall", "wps-origin"],
       "expectChartEx": true,
       "openValidation": true
