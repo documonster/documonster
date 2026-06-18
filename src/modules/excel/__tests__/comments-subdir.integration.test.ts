@@ -3,7 +3,7 @@
  *
  * Verifies that documonster correctly reads comments from xlsx files using
  * the subdirectory layout (xl/comments/comment1.xml) with absolute rel
- * targets, as produced by tools like openpyxl.
+ * targets, as produced by some third-party tools.
  */
 
 import { ZipArchive } from "@archive/zip";
@@ -154,7 +154,7 @@ describe("Comments subdirectory layout", () => {
   });
 
   it("reads legacy comment body written as a bare <t> (no <r> run)", async () => {
-    // openpyxl/LibreOffice store the comment body as <text><t>...</t></text>
+    // Some tools store the comment body as <text><t>...</t></text>
     // with no <r> run wrapper. Rewrite our generated comments file to that
     // shape and verify the body survives the read.
     const flatBuffer = await buildCommentsXlsx();

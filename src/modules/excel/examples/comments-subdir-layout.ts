@@ -3,7 +3,7 @@
  *
  * Demonstrates that documonster can read comments from xlsx files that use
  * the subdirectory layout (xl/comments/comment1.xml) produced by tools
- * like openpyxl, in addition to the standard flat layout (xl/comments1.xml).
+ * used by some third-party tools, in addition to the standard flat layout (xl/comments1.xml).
  *
  * This example:
  * 1. Creates a workbook with comments (with authors) and writes it
@@ -64,7 +64,7 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
-// Step 3: Re-pack into subdirectory layout (simulating openpyxl output)
+// Step 3: Re-pack into subdirectory layout (simulating third-party output)
 // ---------------------------------------------------------------------------
 console.log("\nStep 3: Re-packing into subdirectory layout...");
 

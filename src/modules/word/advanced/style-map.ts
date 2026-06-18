@@ -2,8 +2,8 @@
  * DOCX Module - Style Mapping DSL
  *
  * A domain-specific language for customizing how DOCX elements are
- * mapped to HTML output during conversion. Inspired by mammoth.js's
- * style mapping approach but designed for this project's architecture.
+ * mapped to HTML output during conversion. A style-mapping approach
+ * designed for this project's architecture.
  *
  * The DSL allows users to define rules that control the HTML output
  * for specific Word styles, without modifying the core renderer.

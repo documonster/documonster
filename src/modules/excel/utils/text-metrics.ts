@@ -9,21 +9,18 @@ import { ValueType } from "@excel/enums";
  * 1. **Calibri 11pt**: Use pre-computed bitmap pixel widths (exact match with Excel)
  * 2. **Known fonts at any size**: Use FUnit advance widths with the formula:
  *    `pixelWidth = ROUND(advanceFU / unitsPerEm * ROUND(fontSize / 72 * 96))`
- * 3. **Unknown fonts**: Fall back to excelize-style category-average factors
+ * 3. **Unknown fonts**: Fall back to category-average width factors
  *
- * **Height calculation** uses the ClosedXML-verified formula:
+ * **Height calculation** uses an independently verified formula:
  *    `lineHeight = (unitsPerEm + usWinDescent) / unitsPerEm * fontSizePx`
  *
- * **Unit conversions** follow the ECMA-376 spec as verified by ClosedXML:
+ * **Unit conversions** follow the ECMA-376 spec:
  * - Column width in XLSX = `TRUNC(pixelWidth / MDW * 256) / 256`
  * - MDW = max digit width in pixels (Calibri 11pt: 7)
  * - Pixel Padding (PP) = `2 * CEIL(MDW / 4) + 1`
  *
  * ## Key References
- * - ClosedXML wiki Cell Dimensions
  * - ECMA-376 §18.3.1.13 (col width)
- * - rust_xlsxwriter utility.rs (Calibri 11pt pixel table)
- * - excelize col.go (factor-based calculation)
  */
 import type { Font, Alignment, NumFmt, RichText } from "@excel/types";
 import { getCellDisplayText } from "@excel/utils/cell-format";
@@ -209,7 +206,7 @@ function measureLineWithGlyphs(
 
 /**
  * Tier 3: Factor-based width measurement for unknown fonts.
- * Uses excelize-style category averages (lowercase, uppercase, wide).
+ * Uses category averages (lowercase, uppercase, wide).
  */
 function measureLineWithFactors(line: string, resolved: ResolvedFont): number {
   const factors = getFontWidthFactors(resolved.name);
@@ -294,7 +291,7 @@ export function measureRichTextWidthPx(richText: RichText[], defaultFont?: Parti
 }
 
 // =============================================================================
-// Unit Conversions (ClosedXML-verified formulas)
+// Unit Conversions (ECMA-376 formulas)
 // =============================================================================
 
 /**
@@ -404,7 +401,7 @@ export function calculateAutoFitWidth(
     return 0;
   }
 
-  // ClosedXML padding formula:
+  // Padding formula:
   // oneSidePadding = CEIL(textWidth * 0.03 + mdw / 4)
   // totalWidth = textWidth + 2 * oneSidePadding + 1 (gridline)
   const oneSidePadding = Math.ceil(textWidthPx * 0.03 + mdw / 4);
@@ -432,7 +429,7 @@ export function calculateAutoFitWidth(
 /**
  * Calculate the line height in pixels for a font.
  *
- * Uses the ClosedXML-verified formula:
+ * Uses the formula:
  *   lineHeight = (unitsPerEm + usWinDescent) / unitsPerEm * fontSizePx
  *
  * This matches Excel's actual row height calculation.

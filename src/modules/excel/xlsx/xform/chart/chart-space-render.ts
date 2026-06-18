@@ -773,7 +773,7 @@ export function renderPieChart(xml: XmlSink, g: PieChartGroup): void {
  * entire `drawing1.xml` part on open with "Removed Part: Drawing
  * shape".
  *
- * xlsxwriter hides this by forcibly nulling `labels["position"]`
+ * Some writers hide this by forcibly nulling `labels["position"]`
  * whenever the user-supplied position equals the chart's default
  * ("best_fit" for pie/doughnut). That only masks the bug when the
  * caller doesn't override the default; non-default positions still

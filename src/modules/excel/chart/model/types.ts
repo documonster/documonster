@@ -1731,8 +1731,8 @@ export interface PivotFormat {
  * `http://schemas.microsoft.com/office/drawing/2007/8/2/chart`).
  *
  * Written as `c:chartSpace/c:extLst/c:ext/c14:pivotOptions`, so Excel
- * recognises the metadata on load; prior versions of documonster wrote this
- * data under a private `excelts:` namespace that Excel silently discarded.
+ * recognises the metadata on load; prior versions wrote this data under a
+ * private `documonster:` namespace that Excel silently discarded.
  *
  * All `dropZone*` fields are boolean flags controlling whether the
  * corresponding family of PivotTable fields gets drop-zone controls on

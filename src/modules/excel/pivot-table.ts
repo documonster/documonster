@@ -265,8 +265,8 @@ export interface PivotTable {
 }
 
 /**
- * Data rows start at index 2 in ExcelJS sparse arrays:
- * index 0 = empty (ExcelJS convention), index 1 = header row.
+ * Data rows start at index 2 in the 1-based sparse row arrays:
+ * index 0 = empty (1-based array convention), index 1 = header row.
  */
 const DATA_START_INDEX = 2;
 

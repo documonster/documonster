@@ -544,7 +544,7 @@ describe("XLSX", () => {
   });
 
   // ===========================================================================
-  // Internal Hyperlinks (exceljs/exceljs#3027)
+  // Internal Hyperlinks
   // ===========================================================================
 
   describe("internal hyperlinks", () => {
@@ -648,7 +648,7 @@ describe("XLSX", () => {
   });
 
   // ===========================================================================
-  // Data Bar Conditional Formatting (exceljs/exceljs#3015)
+  // Data Bar Conditional Formatting
   // ===========================================================================
 
   describe("data bar conditional formatting", () => {
@@ -743,7 +743,7 @@ describe("XLSX", () => {
   });
 
   // ===========================================================================
-  // Dynamic Array Formulas (exceljs/exceljs#2910)
+  // Dynamic Array Formulas
   // ===========================================================================
 
   describe("dynamic array formulas", () => {

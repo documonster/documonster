@@ -841,7 +841,7 @@ export function chartMutateChartEx(
  *
  * Writes `<c:style val="N"/>` on the classic chart (`chartN.xml`).
  * Valid values are 1–48, matching the legacy Excel 2007/2010 style
- * catalogue and `xlsxwriter`'s `set_style(N)`. This is the lightweight
+ * catalogue. This is the lightweight
  * option — it does **not** emit a `styleN.xml` / `colorsN.xml` sidecar;
  * for modern Office-2013-era styling use {@link setChartStyle} instead.
  *
@@ -871,8 +871,8 @@ export function chartSetStyle(c: ChartHandle, style: number): ChartHandle {
 }
 
 /**
- * Alias for {@link setStyle} that matches the `xlsxwriter` terminology
- * used by Python/Rust users migrating their chart code. Equivalent in
+ * Alias for {@link setStyle} using the built-in-style naming
+ * convention. Equivalent in
  * every way — both write the same `<c:style val>` attribute.
  */
 export function chartSetBuiltInStyle(c: ChartHandle, style: number): ChartHandle {

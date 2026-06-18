@@ -164,7 +164,7 @@ describe("DataValidationsXform", () => {
 
   describe("optimisation with double-digit rows", () => {
     it("should merge C5:C15 into a single validation range", () => {
-      // This is the exact scenario from exceljs#2820:
+      // This is the exact data-validation edge case:
       // With localeCompare, "C10" < "C2" (string comparison),
       // which broke the downward expansion and produced overlapping ranges.
       const validation = { type: "list", formulae: ["Yes,No"] };

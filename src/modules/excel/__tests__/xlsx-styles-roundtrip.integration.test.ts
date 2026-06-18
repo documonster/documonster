@@ -98,7 +98,7 @@ describe("xlsx styles roundtrip", () => {
     });
   });
 
-  // Regression test for https://github.com/exceljs/exceljs/issues/2600
+  // Regression test for a style-roundtrip edge case
   // This tests that styled cells retain their style after roundtrip
   it("styled cells retain style after roundtrip", async () => {
     const filename = getUniqueTestFilePath(import.meta.url);

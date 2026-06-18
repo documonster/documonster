@@ -747,7 +747,7 @@ ws.addChart(
 ```typescript
 // Legacy 2007/2010 built-in style (1..48). Emits `<c:style val="N"/>`.
 chart.setStyle(42);
-chart.setBuiltInStyle(42); // alias matching xlsxwriter terminology
+chart.setBuiltInStyle(42); // alias for the built-in style index
 
 // Modern Office 2013+ sidecar — full styleN.xml + colorsN.xml. Applied
 // via `addChart` options or copied in later via the chart entry.
@@ -802,7 +802,7 @@ if (chartExModel) {
 }
 ```
 
-Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel/Aspose pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
+Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel-pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
 
 ### Template Preservation
 
@@ -854,7 +854,7 @@ DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
 DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# Proprietary Office/Aspose-style CLI validation hook. The command must accept
+# Proprietary Office CLI validation hook. The command must accept
 # {input} and {outDir} placeholders via DOCUMONSTER_OFFICE_OPEN_ARGS.
 DOCUMONSTER_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
 DOCUMONSTER_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
@@ -892,9 +892,9 @@ An optional `manifest.json` in the corpus directory can mark expected structures
 }
 ```
 
-Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. Documonster itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
+Excel and WPS can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. Documonster itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
 
-### Compatibility Matrix
+### Capability Matrix
 
 #### High-level capability map
 
@@ -978,7 +978,7 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 **regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `chartToPdf` will pass the same `regionMap` option through to `drawChartExPdf`. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
 
-**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, matching the semantics of xlsxwriter's `chart.set_style(N)`. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
+**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
 
 **3D rendering boundaries (non-goals):** Beyond the axonometric box used for `bar3D`, we intentionally do **not** render:
 
@@ -1001,22 +1001,10 @@ Use `chartToPdf(chart, options)` from `documonster/pdf` — it picks the path au
 **Testing scope boundaries (what this library does _not_ test):**
 
 - **No pixel-level visual diff.** Preview output is tested through SVG-structure assertions and PNG header/signature hashes — a true RMS/SSIM pixel diff would require bundling a PNG decoder and a diff algorithm, and the preview is explicitly not pixel-perfect anyway (see the rendering notes above). If your workflow needs pixel parity with Excel, run `chartToPdf(chart)` through LibreOffice's headless PDF export and compare there.
-- **No in-tree Excel/WPS/Aspose-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by Documonster itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape and `scripts/compatibility-report.ts` (`pnpm compatibility:report`) for the report generator.
+- **No in-tree Office-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by Documonster itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape.
 - **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `DOCUMONSTER_OFFICE_OPEN_VALIDATION` + `DOCUMONSTER_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
 
-Compared with ExcelJS, Documonster has native chart creation and editing. Compared with xlsx-populate, Documonster adds structured chart APIs while still preserving template XML where safe. Compared with XlsxWriter/openpyxl/excelize, Documonster adds TypeScript/browser support, ChartEx, pivot chart metadata, chartsheets, and preview renderers.
-
-### Migrating from another library
-
-Full API mapping tables are in dedicated docs, one per library:
-
-- **[`docs/FROM_EXCELJS.md`](../../../docs/FROM_EXCELJS.md)** — ExcelJS had no native chart creation API; this guide shows how to convert "export template unchanged" and "hand-edited chart XML" flows into structured `addChart` / `mutate` calls, plus the preview-render helpers ExcelJS lacks. Now covers chartsheet, pivot chart, user shapes, ChartEx, `unknownElements`, data table, and a migration checklist.
-- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — XlsxWriter (Python) is the reference for ergonomic chart options; Documonster models its option shapes after XlsxWriter's with additions for reading, editing, ChartEx, and preview rendering. 6 end-to-end translation examples.
-- **[`docs/FROM_OPENPYXL.md`](../../../docs/FROM_OPENPYXL.md)** — openpyxl (Python) uses class-based chart construction (`BarChart()`, `Reference()`); this guide translates 6 example workflows into Documonster' options-object style and covers loaded-chart editing, which openpyxl does unreliably.
-- **[`docs/FROM_EXCELIZE.md`](../../../docs/FROM_EXCELIZE.md)** — excelize (Go) has a JSON-ish chart API close in spirit to Documonster; this guide covers the `Chart{...}` → `addChart({...})` translation, per-point colours, combo charts, and the modern ChartEx types excelize cannot author.
-- **[`docs/FROM_POI.md`](../../../docs/FROM_POI.md)** — Apache POI (Java) is the deepest open-source chart library before Documonster; this guide maps `XSSFChart` / `XDDFChartData` / `CTPlotArea` / `XDDFDataSourcesFactory` onto Documonster' options objects, with ChartEx authoring as the main capability expansion.
-- **Compatibility matrix:** [`docs/COMPATIBILITY.md`](../../../docs/COMPATIBILITY.md) — per-type support grid + cross-cutting features + side-by-side comparison against ExcelJS / SheetJS / xlsxwriter / openpyxl / excelize / POI / EPPlus / ClosedXML / Aspose.Cells.
-- Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
+Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
 
 ## PDF Export
 

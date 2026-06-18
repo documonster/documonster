@@ -84,7 +84,7 @@ class CommentXform extends BaseXform<CommentModel> {
         this.parser.parseOpen(node);
         return true;
       case "t":
-        // Legacy comments (e.g. produced by openpyxl/LibreOffice) may store the
+        // Legacy comments (e.g. produced by other tools) may store the
         // body as a bare <t> directly under <text> with no <r> run wrapper.
         // This is valid for the CT_Rst type, so treat it like a run without font.
         this.parser = this.textXform;
@@ -109,7 +109,7 @@ class CommentXform extends BaseXform<CommentModel> {
           // <r> run: model is already a { font?, text } run.
           this.model!.note.texts.push(this.parser.model);
         } else {
-          // Bare <t> body (e.g. openpyxl/LibreOffice): wrap the plain string
+          // Bare <t> body (e.g. from other tools): wrap the plain string
           // as a single run without font, mirroring a <r><t> run.
           this.model!.note.texts.push({ text: this.parser.model });
         }

@@ -1099,7 +1099,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("Chart.setStyle(n) writes <c:style val=N/> and survives round-trip", async () => {
-    // High-level setter equivalent to xlsxwriter's Chart.set_style(N).
+    // High-level setter for the built-in chart style index.
     // Confirms both: (a) the API validates the range 1..48, (b) the
     // resulting XML carries <c:style val="N"/> on a fresh chart, and
     // (c) a subsequent round-trip preserves it on the model.

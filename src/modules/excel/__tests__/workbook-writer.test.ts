@@ -301,7 +301,7 @@ describe("WorkbookWriter", () => {
   });
 
   // ===========================================================================
-  // Data Bar Conditional Formatting (exceljs/exceljs#3015)
+  // Data Bar Conditional Formatting
   // ===========================================================================
 
   describe("data bar conditional formatting via streaming writer", () => {
@@ -405,7 +405,7 @@ describe("WorkbookWriter", () => {
   });
 
   // ===========================================================================
-  // Dynamic Array Formulas via streaming writer (exceljs#2910)
+  // Dynamic Array Formulas via streaming writer
   // ===========================================================================
 
   describe("dynamic array formulas via streaming writer", () => {

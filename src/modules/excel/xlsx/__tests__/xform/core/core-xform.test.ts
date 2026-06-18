@@ -99,7 +99,7 @@ const expectations: any[] = [
     preparedModel: {},
     xml: readFileSync(join(__dirname, "./data/core.06.xml")).toString().replace(/\r\n/g, "\n"),
     parsedModel: {
-      creator: "Apache POI",
+      creator: "Test Creator",
       created: new Date("2018-05-08T14:56:50Z")
     },
     tests: ["parse"]

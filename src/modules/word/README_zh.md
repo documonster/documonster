@@ -455,26 +455,3 @@ const pdf = await docxToPdf(doc, {
 | 数字签名         | 🔍 检测与元数据提取（不签名/不验证）          |
 | 浏览器           | ✅（同一个 `documonster/word` 导入）          |
 | Node.js 22+      | ✅                                            |
-
-## 从 `docx`（npm）迁移
-
-| docx（npm）                         | documonster/word                                         |
-| ----------------------------------- | -------------------------------------------------------- |
-| `new Document()`                    | `Document.create()`                                      |
-| `new Paragraph({ text })`           | `textParagraph(text)`                                    |
-| `new TextRun({ bold: true, text })` | `bold(text)`                                             |
-| `new Table({ rows })`               | `table(rows)`                                            |
-| `Packer.toBuffer(doc)`              | `toBuffer(doc)`                                          |
-| ❌ 无读取功能                       | `readDocx(buffer)`                                       |
-| ❌ 无修改功能                       | `replaceText(doc, old, new)`                             |
-| ❌ 无模板功能                       | `fillTemplate(doc, data)`                                |
-| ❌ 无表单功能                       | `extractFormFields(doc)` / `fillFormFields(doc, values)` |
-
-## 从 `mammoth.js` 迁移
-
-| mammoth.js                         | documonster/word                                     |
-| ---------------------------------- | ---------------------------------------------------- |
-| `mammoth.convertToHtml(input)`     | `readDocx(buf)` → `renderToHtml(doc)`                |
-| `mammoth.convertToMarkdown(input)` | `readDocx(buf)` → `renderToMarkdown(doc)`            |
-| 样式映射                           | `parseStyleMap(rules)` / `matchStyleMap(style, map)` |
-| ❌ 无写入功能                      | 完整读/写/修改                                       |

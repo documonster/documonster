@@ -21,9 +21,9 @@ import { describe, it, expect } from "vitest";
 // =============================================================================
 
 describe("Font Data - Calibri 11pt Bitmap", () => {
-  it("matches rust_xlsxwriter/ClosedXML pixel widths for all A-Z", () => {
-    // These values are verified against both ClosedXML (SkiaSharp) and
-    // rust_xlsxwriter (empirically measured from Excel)
+  it("matches reference pixel widths for all A-Z", () => {
+    // These values are verified against independently measured reference
+    // pixel widths (empirically measured from Excel)
     const expected: Record<string, number> = {
       A: 9,
       B: 8,
@@ -58,7 +58,7 @@ describe("Font Data - Calibri 11pt Bitmap", () => {
     }
   });
 
-  it("matches rust_xlsxwriter/ClosedXML pixel widths for all a-z", () => {
+  it("matches reference pixel widths for all a-z", () => {
     const expected: Record<string, number> = {
       a: 7,
       b: 8,

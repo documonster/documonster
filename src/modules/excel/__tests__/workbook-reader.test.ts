@@ -443,7 +443,7 @@ describe("WorkbookReader", () => {
   });
 
   // ===========================================================================
-  // Worksheet Name Resolution (GitHub exceljs/exceljs#3025)
+  // Worksheet Name Resolution
   // ===========================================================================
 
   describe("worksheet name resolution", () => {
@@ -477,7 +477,7 @@ describe("WorkbookReader", () => {
         Cell.setValue(Workbook.addWorksheet(wb, "Third Sheet"), "A1", 3);
       });
 
-      // This is the exact scenario from exceljs/exceljs#3025:
+      // This is the exact worksheet-name-resolution scenario:
       // When sharedStrings is NOT "cache", the hasPrerequisites check
       // may pass before workbook.xml is parsed, causing worksheet names
       // to be default ("Sheet1", "Sheet2", ...) instead of the actual names.
@@ -575,7 +575,7 @@ describe("WorkbookReader", () => {
   });
 
   // ===========================================================================
-  // Dynamic Array Formulas via streaming reader (exceljs#2910)
+  // Dynamic Array Formulas via streaming reader
   // ===========================================================================
 
   describe("dynamic array formulas via streaming reader", () => {

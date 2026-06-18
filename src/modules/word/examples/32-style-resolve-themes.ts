@@ -11,7 +11,7 @@
  *     row/col position.
  *   - resolveThemeColor: convert a theme color spec into a literal hex.
  *   - parseStyleMap / createStyleMap / mergeStyleMaps / matchStyleMap +
- *     DEFAULT_STYLE_MAP — the mammoth-style mapping DSL used by HTML/MD
+ *     DEFAULT_STYLE_MAP — the style-mapping DSL used by HTML/MD
  *     converters.
  *
  * Output: tmp/word-examples/32-styles/...
@@ -245,7 +245,7 @@ console.log(`  resolveThemeColor(undefined):              ${Theme.resolveColor(u
 // ---------------------------------------------------------------------------
 const userMap = Styles.parse(
   `
-  // mammoth-style DSL
+  // style-mapping DSL
   p[style-name='Lead'] => p.lead
   p[style-name='Heading 1'] => h1.title
   r[style-name='Strong'] => strong.attention

@@ -7,7 +7,7 @@
  *
  * **Tier 1 (Bitmap-accurate):** Calibri 11pt pixel widths, verified against
  * Excel's actual bitmap metrics (EBDT table). These values match
- * ClosedXML and rust_xlsxwriter measurements exactly.
+ * independently measured reference values exactly.
  *
  * **Tier 2 (FUnit-accurate):** Per-character advance widths in font design units
  * (FUnits) extracted from TTF hmtx tables for Calibri and 8 other common fonts.
@@ -17,13 +17,10 @@
  * (where bitmap metrics differ from outline).
  *
  * **Tier 3 (Factor-based):** For ~230 other fonts, per-category average width
- * factors (lowercase, uppercase, wide) from excelize's experimentally-tuned table.
+ * factors (lowercase, uppercase, wide) from an experimentally-tuned table.
  *
  * ## Key References
  *
- * - ClosedXML Cell Dimensions wiki: https://github.com/closedxml/closedxml/wiki/Cell-Dimensions
- * - rust_xlsxwriter utility.rs pixel_width()
- * - excelize templates.go supportedFontWidthFactors
  * - ECMA-376 §18.3.1.13 (col element, width attribute)
  */
 
@@ -33,8 +30,7 @@
 
 // These values are the EXACT pixel widths Excel uses for Calibri Regular 11pt
 // at 96 DPI. They come from bitmap metrics (EBDT/EBLC tables) and are verified
-// against both ClosedXML's SkiaSharp measurements and rust_xlsxwriter's
-// empirically-measured values. Every A-Z a-z character matches.
+// against independently measured reference values. Every A-Z a-z character matches.
 //
 // At 11pt, ppem = ROUND(11/72*96) = 15, and Calibri uses embedded bitmaps at
 // this ppem. The bitmap-derived MDW is 7, whereas the outline formula gives 8.
@@ -572,12 +568,12 @@ registerFont("tahoma", TAHOMA_REGULAR);
 registerFont("trebuchet ms", TREBUCHET_REGULAR);
 
 // =============================================================================
-// Tier 3: Font Width Factors (from excelize)
+// Tier 3: Font Width Factors
 // =============================================================================
 
 // For fonts without FUnit data, use per-category average width factors.
 // Format: [lowercaseFactor, uppercaseFactor, wideFactor]
-// From excelize's experimentally-tuned supportedFontWidthFactors table.
+// From an experimentally-tuned per-font width-factor table.
 
 // prettier-ignore
 const FONT_WIDTH_FACTORS: Record<string, [number, number, number]> = {
@@ -752,7 +748,7 @@ export function getFontWidthFactors(fontName: string): [number, number, number] 
 
 /**
  * Check if a code point is an East Asian wide/fullwidth character.
- * This replaces golang.org/x/text/width from excelize.
+ * This replaces an external Unicode width table.
  */
 export function isWideCharacter(codePoint: number): boolean {
   // CJK Unified Ideographs

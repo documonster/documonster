@@ -673,8 +673,8 @@ compatibility layer, ship a migration aid so adoption is tractable:
 2. **Optional codemod** (`ts-morph`) for the mechanical 80%: `new X()` →
    `X.create()` and method→namespace-function rewrites. Not required for 1.0,
    but the mapping table makes it straightforward to add later.
-3. The existing `docs/FROM_*.md` (FROM_EXCELJS, FROM_OPENPYXL, …) competitor
-   migration guides stay and get updated to the namespace API.
+3. Keep the migration story focused on the documonster API itself
+   (old→new mapping), without competitor-comparison guides.
 
 Without this, a renamed package with a 100%-incompatible API gets no adoption.
 The migration guide is part of the 1.0 deliverable, not an afterthought.

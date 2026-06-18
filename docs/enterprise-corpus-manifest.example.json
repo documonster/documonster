@@ -24,8 +24,8 @@
       "openValidation": true
     },
     {
-      "path": "aspose/exported-boxplot.xlsx",
-      "source": "Aspose.Cells for Java 24.8",
+      "path": "third-party/exported-boxplot.xlsx",
+      "source": "Third-party library export",
       "tags": ["chartEx", "boxWhisker"],
       "expectChartEx": true
     },

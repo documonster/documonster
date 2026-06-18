@@ -565,7 +565,7 @@ try {
 
 ### What changed
 
-The `sheet-utils` module (standalone utility functions ported from SheetJS) has been removed. All functionality is now available as native methods on `Worksheet` and `Workbook`, providing a more idiomatic API.
+The `sheet-utils` module (standalone utility functions) has been removed. All functionality is now available as native methods on `Worksheet` and `Workbook`, providing a more idiomatic API.
 
 The following exports have been removed from the main entry point:
 

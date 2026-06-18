@@ -2261,7 +2261,7 @@ async function main(): Promise<void> {
   // Low-level `setStyle(N)` toggle — applies one of the 48 built-in styles.
   Chart.setStyle(editing, 26);
 
-  // `setBuiltInStyle(N)` — xlsxwriter-compatible alias for `setStyle`.
+  // `setBuiltInStyle(N)` — alias for `setStyle`.
   Chart.add(
     edit,
     {

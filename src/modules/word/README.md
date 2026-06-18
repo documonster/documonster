@@ -457,26 +457,3 @@ transparently normalized to their Transitional equivalents — no user action re
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
 | Browser                | ✅ (same `documonster/word` import)                            |
 | Node.js 22+            | ✅                                                             |
-
-## Migration from `docx` (npm)
-
-| docx (npm)                          | documonster/word                                         |
-| ----------------------------------- | -------------------------------------------------------- |
-| `new Document()`                    | `Document.create()`                                      |
-| `new Paragraph({ text })`           | `textParagraph(text)`                                    |
-| `new TextRun({ bold: true, text })` | `bold(text)`                                             |
-| `new Table({ rows })`               | `table(rows)`                                            |
-| `Packer.toBuffer(doc)`              | `toBuffer(doc)`                                          |
-| ❌ No reader                        | `readDocx(buffer)`                                       |
-| ❌ No modify                        | `replaceText(doc, old, new)`                             |
-| ❌ No template                      | `fillTemplate(doc, data)`                                |
-| ❌ No forms                         | `extractFormFields(doc)` / `fillFormFields(doc, values)` |
-
-## Migration from `mammoth.js`
-
-| mammoth.js                         | documonster/word                                     |
-| ---------------------------------- | ---------------------------------------------------- |
-| `mammoth.convertToHtml(input)`     | `readDocx(buf)` → `renderToHtml(doc)`                |
-| `mammoth.convertToMarkdown(input)` | `readDocx(buf)` → `renderToMarkdown(doc)`            |
-| Style maps                         | `parseStyleMap(rules)` / `matchStyleMap(style, map)` |
-| ❌ No writing                      | Full read/write/modify                               |
