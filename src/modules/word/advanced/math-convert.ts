@@ -453,7 +453,7 @@ function convertMMLElement(el: MMLElement): MathContent | MathContent[] | undefi
       return convertMTableToOmml(el);
     }
     case "mfenced": {
-      // mfenced is a deprecated MathML element but still widely used
+      // mfenced is an older MathML element that is still widely used
       const open = el.attrs["open"] ?? "(";
       const close = el.attrs["close"] ?? ")";
       const separators = el.attrs["separators"] ?? ",";
